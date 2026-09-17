@@ -35,6 +35,7 @@ from menhir.snapshot.protocol import (
     ERR_MANIFEST_CASE_COLLISION,
     ERR_MANIFEST_DUPLICATE_PATH,
     ERR_PATH_ABSOLUTE,
+    ERR_PATH_BACKSLASH,
     ERR_PATH_CONTROL_CHAR,
     ERR_PATH_DRIVE,
     ERR_PATH_EMPTY_SEGMENT,
@@ -43,7 +44,7 @@ from menhir.snapshot.protocol import (
     ERR_PATH_TRAVERSAL,
 )
 
-__all__ = ["CORPUS", "HostileArchive"]
+__all__ = ["CORPUS", "HostileArchive", "expected_codes"]
 
 
 @dataclass(frozen=True)
@@ -89,9 +90,11 @@ def _zip_verbatim_name(name: str) -> bytes:
     bytes on the wire verbatim -- confirmed by asserting against the raw archive bytes, not the
     reader's view of them.
 
-    Worth stating precisely, because the first version of this docstring got it wrong: the
-    round-trip loss is on READ, not write. The archive does contain the backslash; Python's reader
-    rewrites it. See `test_python_rewrites_a_backslash_entry_into_a_traversal`.
+    Worth stating precisely, because two earlier drafts of this docstring were wrong. The archive
+    does contain the backslash. What varies is the READ, and it varies BY PLATFORM: Python's reader
+    maps the stored separator through `os.sep`, so the name survives intact on Linux and is
+    rewritten to "/" on Windows. The first draft blamed the write; the second called the rewrite
+    universal, and CI -- which is Linux -- disproved it. See `expected_codes`.
     """
     info = zipfile.ZipInfo("placeholder")
     info.filename = name
@@ -127,19 +130,10 @@ CORPUS: tuple[HostileArchive, ...] = (
     HostileArchive(
         "backslash",
         "traverse on Windows using a separator POSIX treats as an ordinary filename character",
-        # NOT `ERR_PATH_BACKSLASH`, and the reason is a finding this corpus produced.
-        # The archive genuinely stores `..\..\secret` -- verified against the raw bytes in
-        # `test_python_rewrites_a_backslash_entry_into_a_traversal`. Python's ZIP READER rewrites
-        # the separator, so an extractor calling `namelist()` is handed `../../secret` and never
-        # sees a backslash at all.
-        #
-        # The outcome is safe: the rewrite turns one refused attack into another refused attack.
-        # But it means `ERR_PATH_BACKSLASH` cannot fire on an archive entry read through Python,
-        # so that rule defends the MANIFEST (read as JSON, verbatim) and not the archive -- and
-        # this case's safety currently rests on a stdlib implementation detail rather than on our
-        # own check. P3 should re-derive entry names from the raw central directory if it wants
-        # the backslash rule to mean anything for archives.
-        ERR_PATH_TRAVERSAL,
+        # The refusal CODE for these bytes depends on the platform, which is the finding.
+        # See `expected_codes()`. This is the Linux answer, i.e. the one that holds where Menhir
+        # runs, and the rule we actually own.
+        ERR_PATH_BACKSLASH,
         "..\\..\\secret",
         lambda: _zip_verbatim_name("..\\..\\secret"),
     ),
@@ -204,6 +198,33 @@ CORPUS: tuple[HostileArchive, ...] = (
         lambda: _zip([(f"f{i:05d}.txt", b"x") for i in range(5000)]),
     ),
 )
+
+def expected_codes(case: HostileArchive) -> frozenset[str]:
+    """The refusals that count as correct for `case`, which is not always one code.
+
+    Only the backslash case differs, and the reason is worth stating exactly, because the first
+    version of this corpus got it wrong twice.
+
+    The archive genuinely stores ``..\\..\\secret`` -- asserted against the raw bytes, not the
+    reader's view. What happens next depends on the platform, because Python's ZIP reader maps the
+    stored separator through ``os.sep``:
+
+    * **On Linux** (where Menhir runs) the backslash survives, and `normalize_bundle_path` refuses
+      it as ``snapshot.path.backslash``. The rule we own fires. This is the good case.
+    * **On Windows** (a developer's machine) the reader rewrites it to ``/``, so the name arrives
+      as ``../../secret`` and is refused as a traversal instead.
+
+    Both are refusals, so the bundle is rejected either way and nothing is unsafe. What the corpus
+    must not do is claim one code universally: an earlier draft asserted the Windows behaviour and
+    CI -- which is Linux -- proved it wrong. The honest statement is that the same hostile bytes
+    are refused for different stated reasons on different platforms, and an extractor that wants a
+    platform-independent answer must read names from the central directory itself rather than
+    through `namelist()`.
+    """
+    if case.name == "backslash":
+        return frozenset({ERR_PATH_BACKSLASH, ERR_PATH_TRAVERSAL})
+    return frozenset({case.expected_code})
+
 
 #: Entries whose refusal is carried by a path, so the frozen contract already covers them.
 PATH_CARRIED = tuple(case for case in CORPUS if case.offending_path is not None)

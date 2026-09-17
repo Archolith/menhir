@@ -23,7 +23,12 @@ import pytest
 
 from menhir.snapshot import protocol
 from menhir.snapshot.protocol import BundlePathError, normalize_bundle_path
-from tests.snapshot.hostile_corpus import CORPUS, NEEDS_EXTRACTOR, PATH_CARRIED
+from tests.snapshot.hostile_corpus import (
+    CORPUS,
+    NEEDS_EXTRACTOR,
+    PATH_CARRIED,
+    expected_codes,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -48,9 +53,10 @@ def test_a_hostile_entry_name_is_refused_when_read_back_from_a_real_archive(case
         for name in stored:
             normalize_bundle_path(name)
 
-    assert excinfo.value.code == case.expected_code, (
+    allowed = expected_codes(case)
+    assert excinfo.value.code in allowed, (
         f"{case.name} ({case.attack}) was refused as {excinfo.value.code}, "
-        f"expected {case.expected_code}"
+        f"expected one of {sorted(allowed)}"
     )
 
 
@@ -67,7 +73,7 @@ def test_a_refusal_never_echoes_the_hostile_path(case) -> None:
         for name in stored:
             normalize_bundle_path(name)
 
-    assert str(excinfo.value) == case.expected_code
+    assert str(excinfo.value) in expected_codes(case)
     assert case.offending_path is not None
     assert case.offending_path not in str(excinfo.value)
 
@@ -107,30 +113,50 @@ def test_an_extractor_bound_attack_is_well_formed_and_names_a_real_code(case) ->
         assert len(stored) >= 1000
 
 
-def test_python_rewrites_a_backslash_entry_into_a_traversal() -> None:
-    """A finding this corpus produced, pinned so P3 cannot be designed against the wrong belief.
+def test_the_backslash_refusal_depends_on_the_platform_reading_it() -> None:
+    """A finding this corpus produced, corrected twice, pinned so P3 is not designed on a guess.
 
-    The archive really does store `..\\..\\secret` -- asserted here against the RAW BYTES, not the
-    reader's view. Python's ZIP reader rewrites the separator, so `namelist()` yields
-    `../../secret` and an extractor built on it never sees a backslash.
+    The archive really does store a backslash-separated name -- asserted against the RAW BYTES, not
+    the reader's view of them. What happens on the way back out depends on the platform, because
+    Python's ZIP reader maps the stored separator through `os.sep`:
 
-    The outcome happens to be safe: one refused attack becomes another refused attack. The reason
-    to pin it is that `ERR_PATH_BACKSLASH` therefore cannot fire for an archive entry read this
-    way. That rule defends the manifest, which is JSON read verbatim, and NOT the archive -- so
-    this case's safety rests on a stdlib detail rather than on a check we own. If P3 wants the
-    backslash rule to mean anything for archives, it must read names from the central directory
-    itself.
+    * Linux keeps the backslash, so `normalize_bundle_path` refuses it as `path.backslash` -- the
+      rule we own, on the platform Menhir runs on.
+    * Windows rewrites it to "/", so the name arrives as a traversal and is refused as one.
+
+    Either way the bundle is rejected, so nothing is unsafe. The reason to pin it is that the same
+    hostile bytes produce DIFFERENT stated reasons on different machines, which means an extractor
+    wanting a platform-independent answer must read names from the central directory itself rather
+    than through `namelist()`.
+
+    An earlier version of this test asserted the Windows behaviour as universal and CI disproved
+    it. That is why this asserts the relationship rather than one outcome.
     """
     case = next(c for c in CORPUS if c.name == "backslash")
     blob = case.build()
 
-    assert b"..\\..\\secret" in blob, "the attack is not present on the wire; the corpus is wrong"
+    backslashed = "..\\..\\secret"
+    assert backslashed.encode() in blob, (
+        "the attack is not present on the wire; the corpus is wrong"
+    )
     assert b"../../secret" not in blob
 
-    assert _names(blob) == ["../../secret"], (
-        "Python no longer rewrites the separator on read. That is a behaviour change: revisit "
-        "whether ERR_PATH_BACKSLASH should now be the expected refusal for this case."
-    )
+    (stored,) = _names(blob)
+    if "\\" in stored:
+        assert stored == backslashed
+        assert _refusal_code(stored) == protocol.ERR_PATH_BACKSLASH
+    else:
+        assert stored == "../../secret"
+        assert _refusal_code(stored) == protocol.ERR_PATH_TRAVERSAL
+
+
+def _refusal_code(name: str) -> str:
+    """Return the refusal code for `name`, or fail the test if it is not refused at all."""
+    try:
+        normalize_bundle_path(name)
+    except BundlePathError as exc:
+        return exc.code
+    raise AssertionError(f"{name!r} was not refused")
 
 
 def test_every_path_carried_attack_is_refused_and_the_rest_are_declared_pending() -> None:
