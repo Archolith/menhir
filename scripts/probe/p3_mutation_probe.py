@@ -31,12 +31,21 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+#: The whole snapshot surface. The first run covered only the P3 modules and found twenty gaps in
+#: five files, which is the argument for pointing it at the rest: `receive.py` is the durable
+#: upload state machine with the most branches and the most adversarial input, and its tests were
+#: written before this technique had shown what it catches.
 TARGETS = [
     "archive_plan.py",
     "extraction_lease.py",
     "extraction_writer.py",
     "extract_worker.py",
     "shadow_scan.py",
+    "receive.py",
+    "bundler.py",
+    "policy.py",
+    "upload_client.py",
+    "protocol.py",
 ]
 
 _FLIP = {
@@ -185,6 +194,13 @@ def main(argv: list[str] | None = None) -> int:
         print("\n  Survivors are lines no test is holding:")
         for m in survivors:
             print(f"    {m.module}:{m.line}  {m.kind}  {m.detail}")
+
+    if any(m.module == "upload_client.py" for m in survivors):
+        print(
+            "\n  NOTE: `upload_client.py` is exercised by `tests/remote_sim`, which needs Docker\n"
+            "  and is NOT in the suite this probe runs. Its survivors mean 'not covered by the\n"
+            "  offline suite', which is worth knowing and is NOT the same as 'untested anywhere'."
+        )
 
     dirty = subprocess.run(
         ["git", "status", "--porcelain", "src/menhir/snapshot"],
