@@ -135,7 +135,7 @@ def _replace_raise(tree: ast.AST, target: ast.Raise) -> None:
                         return
 
 
-def _run_suite(repo: Path) -> bool:
+def _run_suite(repo: Path, suite: list[str]) -> bool:
     """True when the suite passes, i.e. the mutation SURVIVED."""
     result = subprocess.run(
         [
@@ -146,7 +146,7 @@ def _run_suite(repo: Path) -> bool:
             "no:cacheprovider",
             "-x",
             "-q",
-            "tests/snapshot",
+            *suite,
         ],
         cwd=str(repo),
         capture_output=True,
@@ -161,6 +161,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--limit", type=int, default=0, help="Stop after N mutations.")
     parser.add_argument("--module", default="", help="Only mutate this file.")
+    parser.add_argument(
+        "--suite",
+        default="tests/snapshot",
+        help="The detecting suite. Point it at the Docker lane to check a module whose tests live "
+        "there, e.g. --suite 'tests/remote_sim --run-remote-sim'.",
+    )
     args = parser.parse_args(argv)
 
     repo = Path(__file__).resolve().parents[2]
@@ -208,7 +214,7 @@ def main(argv: list[str] | None = None) -> int:
                 path.write_bytes(original)
                 continue
             try:
-                survived = _run_suite(repo)
+                survived = _run_suite(repo, args.suite.split())
             finally:
                 # Restored here, always. A mutated module left in the tree would be the worst
                 # possible outcome of a tool whose entire job is to break things on purpose.
@@ -235,7 +241,10 @@ def main(argv: list[str] | None = None) -> int:
         for m in survivors:
             print(f"    {m.module}:{m.line}  {m.kind}  {m.detail}")
 
-    if any(m.module == "upload_client.py" for m in survivors):
+    if (
+        any(m.module == "upload_client.py" for m in survivors)
+        and "remote_sim" not in args.suite
+    ):
         print(
             "\n  NOTE: `upload_client.py` is exercised by `tests/remote_sim`, which needs Docker\n"
             "  and is NOT in the suite this probe runs. Its survivors mean 'not covered by the\n"

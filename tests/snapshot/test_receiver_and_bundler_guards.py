@@ -357,3 +357,31 @@ def test_a_total_one_byte_over_the_limit_stops_the_bundle(tmp_path: Path) -> Non
         build_plan(root, runner=runner, limits=limits)
 
     assert "total limit" in str(excinfo.value).lower()
+
+
+# --- policy.py: the per-file boundary --------------------------------------------------------------
+
+
+def test_the_policy_includes_a_file_exactly_at_the_per_file_limit() -> None:
+    """The last survivor in `policy.py`, and the same shape as all the others.
+
+    Existing policy tests use a file far over the limit, so `>` and `>=` behave identically. A file
+    of exactly the limit must be INCLUDED -- tightening the comparison would start omitting files
+    at a size that is explicitly allowed, and the omission would be declared rather than loud, so
+    nobody would notice until a snapshot was quietly missing something.
+    """
+    from menhir.snapshot.policy import Decision, SelectionPolicy
+
+    policy = SelectionPolicy(max_file_bytes=64)
+
+    assert policy.classify("src/a.py", 64).decision is Decision.INCLUDE
+
+
+def test_the_policy_omits_a_file_one_byte_over_the_per_file_limit() -> None:
+    from menhir.snapshot.policy import Decision, SelectionPolicy
+
+    policy = SelectionPolicy(max_file_bytes=64)
+
+    verdict = policy.classify("src/a.py", 65)
+
+    assert verdict.decision is Decision.OMIT
