@@ -39,6 +39,7 @@ from menhir.snapshot.view_root import ROOT_COMPLETE, read_root
 
 __all__ = [
     "CANONICAL_VIEW_CONSTRAINTS",
+    "ERR_VIEW_ALREADY_CURRENT",
     "ERR_VIEW_DEGRADED",
     "ERR_VIEW_NO_PREVIOUS",
     "ERR_VIEW_ROOT_UNPUBLISHABLE",
@@ -55,6 +56,7 @@ ERR_VIEW_SUPERSEDED = "snapshot.view.superseded"
 ERR_VIEW_DEGRADED = "snapshot.view.degraded"
 ERR_VIEW_NO_PREVIOUS = "snapshot.view.no_previous"
 ERR_VIEW_ROOT_UNPUBLISHABLE = "snapshot.view.root_unpublishable"
+ERR_VIEW_ALREADY_CURRENT = "snapshot.view.already_current"
 
 #: Real DDL, shipped with the module so a test can apply the SAME constraint the bootstrap does.
 #: A test that creates its own copy proves nothing about the one production runs.
@@ -164,6 +166,7 @@ def publish_root(
             "ON CREATE SET v.generation = 0, v.degraded = false "
             "WITH v, r WHERE coalesce(v.generation, 0) = $expected "
             "AND coalesce(v.degraded, false) = false "
+            "AND coalesce(v.current_root, '') <> r.root_id "
             "SET v.previous_root = v.current_root, "
             "    v.current_root = r.root_id, "
             "    v.generation = coalesce(v.generation, 0) + 1 "
@@ -200,6 +203,14 @@ def publish_root(
     if current is not None and current.degraded:
         raise ViewError(
             ERR_VIEW_DEGRADED, "this view is degraded and cannot be promoted into"
+        )
+    if current is not None and current.current_root == root_id:
+        # A retry whose first attempt actually succeeded. Publishing again would set
+        # `previous_root` and `current_root` to the SAME root and silently destroy the one
+        # generation of undo the gate depends on -- so it is refused here and read as success by
+        # `promotion.promote_snapshot`, which is the only caller that can know it retried.
+        raise ViewError(
+            ERR_VIEW_ALREADY_CURRENT, "this root is already the view's current root"
         )
     raise ViewError(
         ERR_VIEW_SUPERSEDED, "this view moved on while the promotion was being built"
