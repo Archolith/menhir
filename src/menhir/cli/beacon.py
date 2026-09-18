@@ -21,9 +21,8 @@ beacon_app = typer.Typer(
 
 def _reader() -> Any:
     """Connect to the configured graph and build the structure read surface."""
-    from menhir.env_file import load_menhir_env
-
     from menhir.config.settings_model import MemorySettings
+    from menhir.env_file import load_menhir_env
     from menhir.infrastructure.neo4j import Neo4jRepository
     from menhir.infrastructure.structure_queries import StructureGraphWriter
 
@@ -40,14 +39,27 @@ def _reader() -> Any:
 
 @beacon_app.command()
 def generate(
-    project: Annotated[str, typer.Argument(help="Indexed project name in Menhir's graph.")],
-    repo: Annotated[str, typer.Option(help="Absolute repository root for the project.")],
-    beacon_python: Annotated[
-        str, typer.Option(help="Python interpreter with Beacon 0.1.0 installed (kept out of Menhir's env).")
+    project: Annotated[
+        str, typer.Argument(help="Indexed project name in Menhir's graph.")
     ],
-    refresh: Annotated[bool, typer.Option("--refresh", help="Refresh an existing generated manifest.")] = False,
+    repo: Annotated[
+        str, typer.Option(help="Absolute repository root for the project.")
+    ],
+    beacon_python: Annotated[
+        str,
+        typer.Option(
+            help="Python interpreter with a Beacon installed whose CLI supports build+validate (kept out of Menhir's env)."
+        ),
+    ],
+    refresh: Annotated[
+        bool, typer.Option("--refresh", help="Refresh an existing generated manifest.")
+    ] = False,
     expected_sha256: Annotated[
-        str, typer.Option("--expected-sha256", help="Digest of the existing generated manifest (refresh only).")
+        str,
+        typer.Option(
+            "--expected-sha256",
+            help="Digest of the existing generated manifest (refresh only).",
+        ),
     ] = "",
 ) -> None:
     """Generate or refresh beacon.generated.yaml from Menhir-held project knowledge."""

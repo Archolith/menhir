@@ -1,3 +1,30 @@
+## 2026-09-18 - Beacon generation switched to Beacon-owned build (issue #120 ownership switch)
+
+Menhir no longer maps Beacon manifest fields. The bespoke raw-manifest construction in
+`beacon_generation.py` (identity block, structure concept, doc selection, guidance block) is
+deleted; Menhir now supplies only what it owns and Beacon generates:
+
+- `beacon_evidence.py` (new) - dumps the versioned `beacon-menhir-evidence` v1.0 document from
+  the structure read surface (identity, documents, files, structure counts, scan fingerprint),
+  fail-closed on any index defect, deterministic for a frozen graph state. This is the single
+  boundary Beacon's `MenhirSourceAdapter` consumes.
+- `beacon_compat.py` (rewritten) - the compatibility gate is now the supported **build
+  contract** (`beacon build` + `beacon validate` present in the target interpreter), replacing
+  the brittle `beacon.__version__ == "0.1.0"` equality check that refused every post-0.1
+  implementation. The boundary runs the real Beacon CLI with fixed argv; generation streams
+  the manifest bytes from `beacon build --out -` so Menhir keeps publication ownership
+  unchanged (`beacon_publication.py`: prefix, lock, atomic replace, CAS refresh).
+- `beacon_generation.py` (rewritten) - evidence dump -> `beacon build` -> guarded publication.
+  Same public surface (`generate_beacon`, `GenerationOutcome`, refresh/`expected_sha256`
+  semantics); unknown facts stay absent because Beacon's projection never invents fields.
+- `tests/test_beacon_generation.py` rewritten for the new flow; `tests/test_beacon_evidence.py`
+  (graph-side fail-closed gates) and `tests/test_beacon_e2e6.py` (full Menhir MVP E2E-6:
+  Beacon-owned generation, validate/inspect, stdio overview/onboarding/concept queries,
+  claims-to-evidence tracing, deterministic rebuild, changed-fact isolation, serves without
+  Menhir) added. CI installs Beacon from the `v03/build-pipeline` branch and drops the
+  version-equality assert.
+- Requires a Beacon whose CLI supports build+validate (PR Archolith/beacon#10, stacked on #9).
+
 ## 2026-09-17 - the shadow scan: structural parity, and the copy does not survive it
 
 The last P3 piece, and the only one that produces a result rather than a refusal. Its correctness
