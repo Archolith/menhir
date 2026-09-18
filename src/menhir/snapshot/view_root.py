@@ -65,6 +65,7 @@ __all__ = [
     "ROOT_ABANDONED",
     "ROOT_BUILDING",
     "ROOT_COMPLETE",
+    "SNAPSHOT_NODE_LABEL",
     "VIEW_ROOT_CONSTRAINTS",
     "VIEW_ROOT_PROPERTY",
     "RootError",
@@ -98,6 +99,17 @@ DEFAULT_ROOT_LEASE_SECONDS = 900
 #: silently delete nothing and the graph would grow a root per promotion forever.
 VIEW_ROOT_PROPERTY = "view_root"
 
+#: The label every structure node written under a root carries -- and deliberately NOT `Entity`,
+#: which is what every local scan read and prune matches. Sharing that label would let a local scan
+#: of a same-named project MERGE onto a snapshot node, and let its stale-role prune delete rows a
+#: remote snapshot owns. The separation is structural, so it also holds for queries nobody has
+#: written yet.
+#:
+#: Half of a contract with `snapshot_structure`: the writer applies this label and this property,
+#: and :func:`purge_root` reclaims by both. A writer that used a different label would leave nodes
+#: no purge could ever find.
+SNAPSHOT_NODE_LABEL = "SnapshotEntity"
+
 #: Rows per purge statement. A purge is the one operation here with unbounded size, and a single
 #: DETACH DELETE over a large project is a long lock held against every reader.
 PURGE_BATCH = 1000
@@ -105,6 +117,12 @@ PURGE_BATCH = 1000
 #: Real DDL, shipped with the module so a test applies the SAME constraint the bootstrap does.
 VIEW_ROOT_CONSTRAINTS = [
     "CREATE CONSTRAINT view_root_id IF NOT EXISTS FOR (r:ViewRoot) REQUIRE r.root_id IS UNIQUE",
+    # Both the purge and every edge lookup during a write find nodes by (root, path). Without
+    # these, a purge is a full scan of the graph and a write is quadratic in the project's size.
+    f"CREATE INDEX snapshot_entity_root IF NOT EXISTS "
+    f"FOR (n:{SNAPSHOT_NODE_LABEL}) ON (n.{VIEW_ROOT_PROPERTY})",
+    f"CREATE INDEX snapshot_entity_root_path IF NOT EXISTS "
+    f"FOR (n:{SNAPSHOT_NODE_LABEL}) ON (n.{VIEW_ROOT_PROPERTY}, n.structure_path)",
 ]
 
 
@@ -351,7 +369,7 @@ def purge_root(neo4j: Any, *, root_id: str, batch: int = PURGE_BATCH) -> int:
     while True:
         rows = list(
             neo4j.execute(
-                f"MATCH (n) WHERE n.{VIEW_ROOT_PROPERTY} = $root "
+                f"MATCH (n:{SNAPSHOT_NODE_LABEL}) WHERE n.{VIEW_ROOT_PROPERTY} = $root "
                 "WITH n LIMIT $batch DETACH DELETE n RETURN count(*) AS deleted",
                 {"root": root_id, "batch": int(batch)},
             )

@@ -83,7 +83,7 @@ def repo():
         r.execute(
             "MATCH (r:ViewRoot) WHERE r.project_id STARTS WITH 'p4-test-' DETACH DELETE r", {}
         )
-        r.execute("MATCH (n:P4TestContent) DETACH DELETE n", {})
+        r.execute("MATCH (n:SnapshotEntity) DETACH DELETE n", {})
         driver.close()
 
 
@@ -469,14 +469,14 @@ def test_a_sweeper_cannot_read_the_view_while_a_publish_holds_the_root_lock(repo
 
 def _write_content(repo, root_id: str, count: int) -> None:
     repo.execute(
-        f"UNWIND range(1, $n) AS i CREATE (:P4TestContent {{{VIEW_ROOT_PROPERTY}: $root, i: i}})",
+        f"UNWIND range(1, $n) AS i CREATE (:SnapshotEntity {{{VIEW_ROOT_PROPERTY}: $root, i: i}})",
         {"n": count, "root": root_id},
     )
 
 
 def _content_count(repo, root_id: str) -> int:
     rows = repo.execute(
-        f"MATCH (n:P4TestContent) WHERE n.{VIEW_ROOT_PROPERTY} = $root RETURN count(n) AS c",
+        f"MATCH (n:SnapshotEntity) WHERE n.{VIEW_ROOT_PROPERTY} = $root RETURN count(n) AS c",
         {"root": root_id},
     )
     return int(rows[0]["c"])
@@ -527,7 +527,7 @@ def test_a_purge_that_died_halfway_is_finished_by_the_next_sweep(repo, pid) -> N
 
     # A purge that managed one batch and then died.
     repo.execute(
-        f"MATCH (n:P4TestContent) WHERE n.{VIEW_ROOT_PROPERTY} = $root "
+        f"MATCH (n:SnapshotEntity) WHERE n.{VIEW_ROOT_PROPERTY} = $root "
         "WITH n LIMIT 4 DETACH DELETE n",
         {"root": doomed.root_id},
     )

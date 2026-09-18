@@ -79,7 +79,7 @@ def repo():
         r.execute(
             "MATCH (r:ViewRoot) WHERE r.project_id STARTS WITH 'p4-test-' DETACH DELETE r", {}
         )
-        r.execute("MATCH (n:P4TestContent) DETACH DELETE n", {})
+        r.execute("MATCH (n:SnapshotEntity) DETACH DELETE n", {})
         driver.close()
 
 
@@ -103,7 +103,7 @@ def _writer(calls: list | None = None, fail_with: BaseException | None = None):
 def _content(repo, count: int = 3):
     def _write(rid: str, renew_lease) -> None:
         repo.execute(
-            f"UNWIND range(1, $n) AS i CREATE (:P4TestContent {{{VIEW_ROOT_PROPERTY}: $root}})",
+            f"UNWIND range(1, $n) AS i CREATE (:SnapshotEntity {{{VIEW_ROOT_PROPERTY}: $root}})",
             {"n": count, "root": rid},
         )
 
@@ -451,7 +451,7 @@ def test_a_file_removed_from_the_project_leaves_the_graph_without_any_prune(repo
 
     def _count(root_id: str) -> int:
         rows = repo.execute(
-            f"MATCH (n:P4TestContent) WHERE n.{VIEW_ROOT_PROPERTY} = $root RETURN count(n) AS c",
+            f"MATCH (n:SnapshotEntity) WHERE n.{VIEW_ROOT_PROPERTY} = $root RETURN count(n) AS c",
             {"root": root_id},
         )
         return int(rows[0]["c"])
