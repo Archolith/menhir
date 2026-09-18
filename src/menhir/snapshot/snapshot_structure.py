@@ -18,16 +18,27 @@ must not break.
 
 ## Why the label is different, and why that is the safety property
 
-**Every local read and prune matches `(n:Entity ...)`.** If snapshot nodes carried that label they
-would be reachable by `MERGE (n:Entity {structure_project, structure_path})` -- so a local scan of
-a project with the same display name could mutate them -- and deletable by
-`_delete_stale_role_entities_multi`, which removes `:Entity` rows for paths the local scan did not
-see. A remote snapshot would then be pruned by an unrelated local scan, which is #99's failure with
-a new cause.
+**Every local read and prune in `structure_queries` matches the plain structure-entity label.** If
+snapshot nodes carried it they would be reachable by that module's merge on
+`(structure_project, structure_path)` -- so a local scan of a project with the same display name
+could mutate them -- and deletable by `_delete_stale_role_entities_multi`, which removes rows for
+paths the local scan did not see. A remote snapshot would then be pruned by an unrelated local
+scan, which is #99's failure with a new cause.
 
 So snapshot nodes carry `:SnapshotEntity` and never `:Entity`. The separation is structural rather
 than a filter someone has to remember to write: no query matching `:Entity` can reach these nodes,
 including every query that has not been written yet.
+
+## Why these nodes carry no `group_id`
+
+CF-215 requires every writer of the plain structure-entity label to stamp `group_id`, because that
+property carries the tenant namespace those nodes are recalled under. Snapshot nodes are not
+recalled by any of those queries -- they are scoped by `(view_root, project_id)` and reachable only
+through a published view -- so stamping a namespace here would be inventing a second, weaker
+tenancy key beside the one P5 is going to define. P5 adds a structural namespace key for every
+structural entity and is where these acquire one; until then the absence is deliberate, and it
+fails closed, since a tenancy filter looking for a `group_id` finds no snapshot node rather than
+the wrong one.
 
 Nothing here reads, writes or imports `project_scanner` or `structure_queries`. The scan result is
 an input, produced by the SAME `ProjectScanner` the local path uses so a snapshot and a local scan
