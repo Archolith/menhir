@@ -35,10 +35,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from menhir.snapshot.view_root import ROOT_COMPLETE, read_root
+
 __all__ = [
     "CANONICAL_VIEW_CONSTRAINTS",
     "ERR_VIEW_DEGRADED",
     "ERR_VIEW_NO_PREVIOUS",
+    "ERR_VIEW_ROOT_UNPUBLISHABLE",
     "ERR_VIEW_SUPERSEDED",
     "ViewError",
     "ViewPointer",
@@ -51,6 +54,7 @@ __all__ = [
 ERR_VIEW_SUPERSEDED = "snapshot.view.superseded"
 ERR_VIEW_DEGRADED = "snapshot.view.degraded"
 ERR_VIEW_NO_PREVIOUS = "snapshot.view.no_previous"
+ERR_VIEW_ROOT_UNPUBLISHABLE = "snapshot.view.root_unpublishable"
 
 #: Real DDL, shipped with the module so a test can apply the SAME constraint the bootstrap does.
 #: A test that creates its own copy proves nothing about the one production runs.
@@ -129,9 +133,20 @@ def publish_root(
 ) -> ViewPointer:
     """Make `root_id` the view's current root, or refuse.
 
-    ONE statement. The generation check, the degraded check and the pointer move happen together,
-    so a transfer or a competing promotion cannot land between the decision and the act -- the
-    failure `admit_structure_writer` exists to prevent, in a different costume.
+    ONE statement. The ROOT checks, the generation check, the degraded check and the pointer move
+    happen together, so a transfer, a competing promotion or a sweep cannot land between the
+    decision and the act -- the failure `admit_structure_writer` exists to prevent, in a different
+    costume.
+
+    **Four things are checked about the root, and the first version of this function checked none
+    of them.** A CAS on the generation proves the view has not moved; it proves nothing about what
+    is being published into it. Without these, a caller could publish a root still being written
+    (readers see half a snapshot as complete), a root belonging to another project or view (a
+    cross-project read), or a root a sweep has already retired and begun deleting.
+
+    `SET r.publish_probe` takes the write lock on the root BEFORE its state is read, so the sweeper
+    cannot retire it between the read and the flip. `view_root.retire_root` locks the root first
+    too, and in the same order, so the two serialise rather than deadlock.
 
     A caller that loses gets `ERR_VIEW_SUPERSEDED` and must NOT re-read and retry: the generation
     it would read back belongs to the winner, and publishing against it would overwrite a
@@ -139,12 +154,18 @@ def publish_root(
     """
     rows = list(
         neo4j.execute(
+            "MATCH (r:ViewRoot {root_id: $root}) "
+            "SET r.publish_probe = timestamp() "
+            "WITH r "
+            "WHERE r.project_id = $pid AND r.view_key = $vk "
+            "  AND r.state = $complete "
+            "  AND coalesce(r.lease_expires_at, 0) > timestamp() "
             "MERGE (v:CanonicalView {project_id: $pid, view_key: $vk}) "
             "ON CREATE SET v.generation = 0, v.degraded = false "
-            "WITH v WHERE coalesce(v.generation, 0) = $expected "
+            "WITH v, r WHERE coalesce(v.generation, 0) = $expected "
             "AND coalesce(v.degraded, false) = false "
             "SET v.previous_root = v.current_root, "
-            "    v.current_root = $root, "
+            "    v.current_root = r.root_id, "
             "    v.generation = coalesce(v.generation, 0) + 1 "
             f"{_RETURN}",
             {
@@ -152,13 +173,29 @@ def publish_root(
                 "vk": view_key,
                 "root": root_id,
                 "expected": expected_generation,
+                "complete": ROOT_COMPLETE,
             },
         )
     )
     if rows:
         return _pointer(rows[0], project_id, view_key)
 
-    # No row means the guard did not match. Re-read ONLY to report which reason -- never to retry.
+    # No row means a guard did not match. Re-read ONLY to report which reason -- never to retry.
+    # The root is diagnosed first: "this view moved on" would be an actively misleading answer for
+    # a caller whose real mistake was publishing something unfinished.
+    root = read_root(neo4j, root_id=root_id)
+    if root is None or root.project_id != project_id or root.view_key != view_key:
+        raise ViewError(
+            ERR_VIEW_ROOT_UNPUBLISHABLE,
+            "that root does not exist, or does not belong to this project and view",
+        )
+    if root.state != ROOT_COMPLETE or not root.lease_live:
+        raise ViewError(
+            ERR_VIEW_ROOT_UNPUBLISHABLE,
+            f"that root is {root.state.lower()} with a "
+            f"{'live' if root.lease_live else 'expired'} lease; only a complete, still-leased "
+            "root may be published",
+        )
     current = read_view(neo4j, project_id=project_id, view_key=view_key)
     if current is not None and current.degraded:
         raise ViewError(
