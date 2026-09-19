@@ -117,13 +117,35 @@ Specifically:
      one that says no.
    - Anyone who needs a longer window needs an explicit export before promoting, not a deeper
      retention setting. Worth stating in the operator docs when P4 ships.
-2. **Does a degraded view refuse reads, or serve with a warning?** The parent plan says
-   "degraded-view blocking" in the gate and "reads carry a warning" in the invariants. Those are
-   different products: one stops a caller, the other trusts them to notice.
-3. **Is promotion operator-only for the whole pilot, or does trusted CI promote?** Open decision 5
-   in the parent plan. It decides whether the first graph write can happen unattended.
-4. **The omission behaviour (threat 4).** Flagged and characterised by test today; it must be
-   settled before the first write, because the failure is silent data loss rather than an error.
+2. ~~Does a degraded view refuse reads, or serve with a warning?~~ **NOT OPEN — the parent plan
+   already decides it, and this document was wrong to call it a contradiction.** Line 738: a
+   degraded view is fail-closed, meaning *reads carry a warning*, uploads may still become
+   immutable candidates but cannot be promoted into that view, and repair is an explicit operator
+   action. Invariant 10 adds that failed compensation blocks further commits.
+
+   "Degraded-view blocking" in the gate never meant blocking READS; it means blocking
+   PROMOTIONS. The two statements agree and I read a conflict into them.
+
+3. ~~Is promotion operator-only for the whole pilot?~~ **NOT OPEN for P4.** Line 639 specifies
+   operator-only access for both pilot projects. The parent plan's open decision 5 — trusted CI
+   versus explicit maintainer publish — is about the eventual canonical policy, not this phase.
+4. ~~The omission behaviour (threat 4).~~ **DECIDED 2026-09-17: refuse the bundle.** A manifest
+   whose own declarations do not parse is one the server cannot reason about, so it fails at
+   upload, before any graph write.
+
+   The reason it has to be strict is in how deletion is signalled: **the manifest carries a
+   deletion COUNT, not the deleted paths** — those stay client-side in `BundlePlan.deleted`. So
+   the server infers deletion from absence, and a dropped omission is indistinguishable from a
+   deleted file. Leniency here is not "ignore a bad field", it is "prune a file the client
+   explicitly said it was keeping".
+
+   Cost accepted: a client bug blocks syncing until it is fixed. That is the point — the
+   alternative fails silently and takes data with it.
+
+   **This is a change to `protocol.py`, which is P0-frozen.** It is additive in the sense that no
+   existing code changes meaning, but a bundle that parsed yesterday may be refused tomorrow, so
+   it lands with the P4 work rather than as a drive-by. `test_a_malformed_omission_is_silently_dropped_which_is_worth_knowing`
+   characterises today's behaviour and is where the change registers.
 
 ## Build order, and why the backup restore now earns its place
 
