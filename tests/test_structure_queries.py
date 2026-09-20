@@ -484,6 +484,40 @@ class TestStructureGraphWriter:
         writer = StructureGraphWriter(neo4j=neo4j)
         assert writer.get_scan_fingerprint("myproj") == "abc123"
 
+    def test_beacon_evidence_guard_uses_project_identity_writer_state(self):
+        neo4j = MagicMock()
+        neo4j.execute.return_value = [{
+            "root_path": "/srv/project",
+            "scan_fingerprint": "fp-1",
+            "files_discovered": 5,
+            "files_eligible": 4,
+            "files_indexed": 4,
+            "partial_index": False,
+            "project_id": "project-id-1",
+            "identity_known": True,
+            "active_writers": ["writer-live"],
+            "writer_revision": "writer-prior",
+        }]
+        writer = StructureGraphWriter(neo4j=neo4j)
+
+        guard = writer.get_beacon_evidence_guard("myproj")
+
+        assert guard == {
+            "project_known": True,
+            "root_path": "/srv/project",
+            "scan_fingerprint": "fp-1",
+            "files_discovered": 5,
+            "files_eligible": 4,
+            "files_indexed": 4,
+            "partial_index": False,
+            "project_id": "project-id-1",
+            "identity_known": True,
+            "active_writers": ("writer-live",),
+            "writer_revision": "writer-prior",
+        }
+        query = neo4j.execute.call_args.args[0]
+        assert "active_writers" in query and "last_structure_writer_id" in query
+
     def test_idempotent_merge(self):
         """Running write_project twice should use MERGE (not CREATE)."""
         neo4j = RecordingNeo4j()

@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from menhir.infrastructure.project_scanner import ProjectScanner
+from menhir.services import beacon_generation as generation_module
 from menhir.services.beacon_compat import BeaconCompatError, beacon_python_is_usable
 from menhir.services.beacon_generation import BeaconGenerationError, generate_beacon
 from tests.test_beacon_evidence import _reader
@@ -81,6 +82,7 @@ def test_generate_creates_valid_artifact(beacon_python: str, tmp_path: Path) -> 
     # evidence-backed description must both be present, mapped by Beacon.
     assert b"beacon_version: '0.1'" in payload or b'beacon_version: "0.1"' in payload
     assert b"Fixture project for the evidence dump." in payload
+    assert b"status: experimental" in payload
     # The scan fingerprint is persisted as a citation in the artifact.
     assert expected_fingerprint.encode() in payload
     # A generated manifest always ends with exactly one trailing newline.
@@ -137,6 +139,64 @@ def test_refresh_requires_expected_sha256(beacon_python: str, tmp_path: Path) ->
             beacon_python=beacon_python,
             refresh=True,
         )
+
+
+def test_source_edit_during_beacon_build_refuses_publication(
+    beacon_python: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _fixture_repo(tmp_path)
+    reader = _reader(root=str(repo))
+    first = generate_beacon(reader, "fixture", repo, beacon_python=beacon_python)
+    target = repo / "beacon.generated.yaml"
+    original = target.read_bytes()
+    real_build = generation_module.build_manifest_via_beacon
+
+    def build_then_edit(*args, **kwargs):
+        payload = real_build(*args, **kwargs)
+        (repo / "README.md").write_text("# Edited during Beacon build\n", encoding="utf-8")
+        return payload
+
+    monkeypatch.setattr(generation_module, "build_manifest_via_beacon", build_then_edit)
+    with pytest.raises(BeaconGenerationError, match="stale"):
+        generate_beacon(
+            reader,
+            "fixture",
+            repo,
+            beacon_python=beacon_python,
+            refresh=True,
+            expected_sha256=first.sha256,
+        )
+    assert target.read_bytes() == original
+
+
+def test_reingest_during_beacon_build_refuses_publication(
+    beacon_python: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _fixture_repo(tmp_path)
+    reader = _reader(root=str(repo))
+    first = generate_beacon(reader, "fixture", repo, beacon_python=beacon_python)
+    target = repo / "beacon.generated.yaml"
+    original = target.read_bytes()
+    real_build = generation_module.build_manifest_via_beacon
+
+    def build_then_reingest(*args, **kwargs):
+        payload = real_build(*args, **kwargs)
+        reader._guard_state["writer_revision"] = "writer-2"
+        return payload
+
+    monkeypatch.setattr(
+        generation_module, "build_manifest_via_beacon", build_then_reingest
+    )
+    with pytest.raises(BeaconGenerationError, match="structure changed"):
+        generate_beacon(
+            reader,
+            "fixture",
+            repo,
+            beacon_python=beacon_python,
+            refresh=True,
+            expected_sha256=first.sha256,
+        )
+    assert target.read_bytes() == original
 
 
 def test_changed_source_fact_changes_only_its_claim(

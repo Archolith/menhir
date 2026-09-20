@@ -101,6 +101,12 @@ recorded root matches the requested repository, a scan fingerprint, an indexed p
 description, and at least one indexed canonical document. It never invents purpose, commands,
 guardrails, or concepts to fill schema fields.
 
+Generated evidence is labeled `experimental`, not `current`. Menhir bookends its graph reads with
+the structure-writer revision and rechecks both graph and filesystem immediately before publication,
+but arbitrary repository editors do not share that lock. The artifact is therefore a verified
+point-in-time projection of its cited scan fingerprint, not a claim that the checkout remains current
+after publication.
+
 - The output is always the sidecar `beacon.generated.yaml`, never a hand-authored `beacon.yaml`.
 - Initial generation refuses an existing output. Refresh requires `--refresh` plus
   `--expected-sha256` matching the existing generated file; foreign or hand-edited outputs are refused.

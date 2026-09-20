@@ -33,7 +33,8 @@ from menhir.services.beacon_compat import (
 from menhir.services.beacon_evidence import (
     BeaconEvidenceError,
     BeaconEvidenceProjectReader,
-    dump_evidence,
+    capture_evidence,
+    require_evidence_guard,
     write_evidence_document,
 )
 from menhir.services.beacon_publication import (
@@ -85,7 +86,7 @@ def generate_beacon(
         )
     beacon_python_is_usable(beacon_python)
     try:
-        evidence = dump_evidence(reader, project, repo_root)
+        evidence, evidence_guard = capture_evidence(reader, project, repo_root)
     except BeaconEvidenceError as exc:
         raise BeaconGenerationError(str(exc)) from exc
 
@@ -108,9 +109,15 @@ def generate_beacon(
 
     try:
         digest = publish_manifest(
-            repo_root, payload, validate=validate, expected_sha256=expected_sha256
+            repo_root,
+            payload,
+            validate=validate,
+            before_publish=lambda: require_evidence_guard(
+                reader, project, repo_root, evidence_guard
+            ),
+            expected_sha256=expected_sha256,
         )
-    except PublicationError as exc:
+    except (BeaconEvidenceError, PublicationError) as exc:
         raise BeaconGenerationError(str(exc)) from exc
     target = repo_root / "beacon.generated.yaml"
     created = expected_sha256 is None

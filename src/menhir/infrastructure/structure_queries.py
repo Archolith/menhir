@@ -607,6 +607,49 @@ class StructureGraphWriter:
             return str(rows[0]["root_path"])
         return None
 
+    def get_beacon_evidence_guard(self, project_name: str) -> dict[str, Any]:
+        """Return the project facts and writer revision that fence one evidence read.
+
+        Every production structure writer registers on ``ProjectIdentity.active_writers`` and
+        stamps ``last_structure_writer_id`` when it releases. Reading this row before and after
+        Beacon's independent graph queries therefore detects a writer active at either boundary
+        or one that completed entirely between them.
+        """
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Entity {structure_project: $name, structure_role: 'project'})
+            OPTIONAL MATCH (p:ProjectIdentity {project_id: n.structure_project_id})
+            RETURN n.root_path AS root_path,
+                   n.scan_fingerprint AS scan_fingerprint,
+                   n.files_discovered AS files_discovered,
+                   n.files_eligible AS files_eligible,
+                   n.files_indexed AS files_indexed,
+                   n.partial_index AS partial_index,
+                   n.structure_project_id AS project_id,
+                   p IS NOT NULL AS identity_known,
+                   coalesce(p.active_writers, []) AS active_writers,
+                   coalesce(p.last_structure_writer_id, '') AS writer_revision
+            LIMIT 1
+            """,
+            {"name": project_name},
+        )
+        if not rows:
+            return {"project_known": False}
+        row = rows[0]
+        return {
+            "project_known": True,
+            "root_path": str(row.get("root_path") or ""),
+            "scan_fingerprint": str(row.get("scan_fingerprint") or ""),
+            "files_discovered": row.get("files_discovered"),
+            "files_eligible": row.get("files_eligible"),
+            "files_indexed": row.get("files_indexed"),
+            "partial_index": bool(row.get("partial_index")),
+            "project_id": str(row.get("project_id") or ""),
+            "identity_known": bool(row.get("identity_known")),
+            "active_writers": tuple(str(item) for item in row.get("active_writers") or []),
+            "writer_revision": str(row.get("writer_revision") or ""),
+        }
+
     def _owner_arms(
         self, alias: str, project_id: str | None
     ) -> tuple[str, ...]:

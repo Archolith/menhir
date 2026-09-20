@@ -40,12 +40,23 @@ def _reader(
             if root is not None and Path(root).is_dir()
             else "unavailable-current-fingerprint"
         )
+    resolved_coverage = coverage or {"known": True, "partial_index": False}
+    guard_state = {
+        "project_known": root is not None,
+        "root_path": root or "",
+        "scan_fingerprint": fingerprint,
+        "files_discovered": 3,
+        "files_eligible": 3,
+        "files_indexed": 3 if resolved_coverage.get("known") else None,
+        "partial_index": bool(resolved_coverage.get("partial_index")),
+        "project_id": "project-id-1",
+        "identity_known": True,
+        "active_writers": (),
+        "writer_revision": "writer-1",
+    }
     return SimpleNamespace(
-        get_project_root_path=lambda p: root,
-        get_project_coverage=lambda p: (
-            coverage or {"known": True, "partial_index": False}
-        ),
-        get_scan_fingerprint=lambda p: fingerprint,
+        _guard_state=guard_state,
+        get_beacon_evidence_guard=lambda p: dict(guard_state),
         query_overview=lambda p: (
             overview
             or {
@@ -93,7 +104,7 @@ def test_dump_shape_and_determinism(tmp_path: Path) -> None:
         "description": "Fixture project for the evidence dump.",
         "primary_language": "python",
         "root": str(tmp_path),
-        "status": "current",
+        "status": "experimental",
         "scan_fingerprint": ProjectScanner().scan(tmp_path).scan_fingerprint,
     }
     assert first["documents"][0]["path"] == "README.md"  # priority ordering
@@ -173,6 +184,33 @@ def test_stale_fingerprint_fails_closed(tmp_path: Path) -> None:
             "fixture",
             tmp_path,
         )
+
+
+def test_active_structure_writer_fails_closed(tmp_path: Path) -> None:
+    reader = _reader(root=str(tmp_path))
+    reader._guard_state["active_writers"] = ("writer-2",)
+    with pytest.raises(BeaconEvidenceError, match="being updated"):
+        dump_evidence(reader, "fixture", tmp_path)
+
+
+def test_missing_structure_identity_fails_closed(tmp_path: Path) -> None:
+    reader = _reader(root=str(tmp_path))
+    reader._guard_state["identity_known"] = False
+    with pytest.raises(BeaconEvidenceError, match="no fenced structure identity"):
+        dump_evidence(reader, "fixture", tmp_path)
+
+
+def test_writer_revision_change_during_graph_reads_fails_closed(tmp_path: Path) -> None:
+    reader = _reader(root=str(tmp_path))
+    query_documents = reader.query_documents
+
+    def interleaved_documents(*args, **kwargs):
+        reader._guard_state["writer_revision"] = "writer-2"
+        return query_documents(*args, **kwargs)
+
+    reader.query_documents = interleaved_documents
+    with pytest.raises(BeaconEvidenceError, match="changed while evidence was read"):
+        dump_evidence(reader, "fixture", tmp_path)
 
 
 def test_missing_description_fails_closed(tmp_path: Path) -> None:

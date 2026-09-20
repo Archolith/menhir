@@ -98,6 +98,7 @@ class _FakeNeo4j:
                 node["active_writers"] = [
                     w for w in node.get("active_writers", []) if not w.startswith(prefix)
                 ]
+                node["last_structure_writer_id"] = params["writer_id"]
             return []
         if "RETURN coalesce(f.frozen, false) AS frozen" in cypher:
             return [{"frozen": self.frozen, "reason": self.reason, "writers": list(self.writers)}]
@@ -123,6 +124,7 @@ def test_releasing_removes_exactly_one_writer(neo4j):
     release_structure_writer(neo4j, a)
     active = fence_status(neo4j)["active"]
     assert len(active) == 1 and active[0]["label"] == "b"
+    assert neo4j.identities[CLAIM.project_id]["last_structure_writer_id"] == a.writer_id
 
 
 @pytest.mark.unit
