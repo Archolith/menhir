@@ -54,6 +54,50 @@ for field in sys.argv[2:]:
 PYEOF
 }
 
+# Freshness thresholds. The scaffold contract is the authority the nightly
+# audit already enforces; read it so the two cannot disagree, and fall back to
+# the values it ships with when it is unreadable (this command also runs
+# without root in some hands). Prints: <backup> <drill> <desktop> <source>.
+backup_policy() {
+    python3 - <<'PYEOF'
+import json
+defaults = {
+    "vps_backup_max_age_hours": 24,
+    "restore_drill_max_age_hours": 168,
+    "desktop_archive_max_age_hours": 24,
+}
+source = "contract"
+try:
+    with open("/etc/menhir/scaffold-contract.json", encoding="utf-8") as handle:
+        policy = json.load(handle).get("backup_policy") or {}
+except Exception:
+    policy, source = {}, "defaults"
+values = []
+for key, fallback in defaults.items():
+    value = policy.get(key)
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        value, source = fallback, "defaults" if source == "contract" and key in policy else source
+    values.append(str(value))
+print(" ".join(values) + " " + source)
+PYEOF
+}
+
+age_hours() { # iso_timestamp -> whole hours since then, or empty if unusable
+    python3 - "$1" <<'PYEOF'
+import datetime as dt, sys
+raw = (sys.argv[1] if len(sys.argv) > 1 else "").strip()
+if not raw:
+    raise SystemExit(0)
+try:
+    value = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+except ValueError:
+    raise SystemExit(0)
+if value.tzinfo is None:
+    value = value.replace(tzinfo=dt.timezone.utc)
+print(int((dt.datetime.now(dt.timezone.utc) - value).total_seconds() // 3600))
+PYEOF
+}
+
 receipt_value() { # fixed_receipt_path dotted_field  -> bare value or empty
     python3 - "$@" <<'PYEOF'
 import json, sys
@@ -99,12 +143,34 @@ fi
 # The coherence check. Having a backup, a rehearsal and an off-host copy is not
 # the same as having them for the SAME generation: backing up A, rehearsing B
 # and copying C off-host yields three partial answers and no recoverable state.
+#
+# Coherence is not enough either: three receipts that agree can all be old, and
+# they then describe a host that was recoverable when they were written. The
+# ages are reported unconditionally and downgrade an otherwise-complete chain
+# to STALE, so the one-line verdict cannot outlive the evidence behind it.
 echo
 echo "recoverability:"
 backup_gen="$(receipt_value "${BACKUP_RECEIPT}" generation)"
 rehearsal_gen="$(receipt_value "${REHEARSAL_RECEIPT}" generation)"
 desktop_gen="$(receipt_value "${DESKTOP_RECEIPT}" generation)"
 neo4j_check="$(receipt_value "${REHEARSAL_RECEIPT}" neo4j_check)"
+
+IFS=' ' read -r backup_limit drill_limit desktop_limit policy_source < <(backup_policy)
+backup_age="$(age_hours "$(receipt_value "${BACKUP_RECEIPT}" checked_utc)")"
+rehearsal_age="$(age_hours "$(receipt_value "${REHEARSAL_RECEIPT}" checked_utc)")"
+desktop_age="$(age_hours "$(receipt_value "${DESKTOP_RECEIPT}" archived_utc)")"
+
+stale=""
+note_age() { # label age limit
+    if [ -z "$2" ]; then
+        stale="${stale}${stale:+; }$1 timestamp is missing or unreadable"
+    elif [ "$2" -gt "$3" ]; then
+        stale="${stale}${stale:+; }$1 is ${2}h old (limit ${3}h)"
+    fi
+}
+note_age backup "${backup_age}" "${backup_limit}"
+note_age rehearsal "${rehearsal_age}" "${drill_limit}"
+note_age "off-host copy" "${desktop_age}" "${desktop_limit}"
 
 if [ -z "${backup_gen}" ]; then
     echo "  NO — no backup receipt"
@@ -114,9 +180,13 @@ elif [ "${neo4j_check}" != "ok" ]; then
     echo "  PARTIAL — rehearsal for ${rehearsal_gen} reported neo4j_check=${neo4j_check:-missing}"
 elif [ "${backup_gen}" != "${desktop_gen}" ]; then
     echo "  ON-HOST ONLY — ${backup_gen} rehearsed ok but off-host copy is ${desktop_gen:-none}"
+elif [ -n "${stale}" ]; then
+    echo "  STALE — ${backup_gen} is backed up, rehearsed and copied off-host, but ${stale}"
 else
     echo "  YES — ${backup_gen} is backed up, rehearsed (neo4j_check=ok), and copied off-host"
 fi
+echo "  freshness: backup ${backup_age:-?}h, rehearsal ${rehearsal_age:-?}h, off-host ${desktop_age:-?}h" \
+     "(limits ${backup_limit}/${drill_limit}/${desktop_limit}h from ${policy_source})"
 
 echo
 echo "scheduled nightly backup (${SCHEDULED_LAST_RUN##*/}):"
