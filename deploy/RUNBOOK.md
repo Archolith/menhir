@@ -130,9 +130,11 @@ sudo -n cat /var/lib/menhir-production/release-run.json     # maintenance journa
 The scaffold (contract, `menhir_scaffold.py`, audit units, the nightly backup
 wrapper and its units) is installed by its own transactional installer, not by a
 release. The desktop updater is `scripts\menhir-scaffold.ps1 -Mode Install
--PrivilegedSudo -SourceRoot <menhir checkout>` — but it hides the installer's
-failure message. When it fails, or always, use the direct path, which is what
-every scaffold install since 14 used: build the bundle (the 12 files in
+-PrivilegedSudo -SourceRoot <menhir checkout>`. It used to throw away the
+installer's failure message and report only an exit code; since 2026-09-20 it
+echoes the output and quotes the tail in the error, but no scaffold install has
+run through it since that change. The direct path below is what every scaffold
+install since 14 actually used: build the bundle (the 12 files in
 `Get-ScaffoldSourceMap` plus a `bundle-manifest.json` of their sha256s), scp it
 to `/home/thron/.menhir-scaffold-upload/scaffold-<32hex>`, then on the host
 
