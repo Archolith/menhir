@@ -58,6 +58,7 @@ from typing import Any
 
 __all__ = [
     "DEFAULT_ROOT_LEASE_SECONDS",
+    "DEFAULT_SWEEP_LIMIT",
     "ERR_ROOT_NOT_BUILDING",
     "ERR_ROOT_NOT_RETIRED",
     "ERR_ROOT_UNKNOWN",
@@ -70,6 +71,7 @@ __all__ = [
     "VIEW_ROOT_PROPERTY",
     "RootError",
     "RootRecord",
+    "SweepReport",
     "begin_root",
     "complete_root",
     "find_publishable_root",
@@ -78,6 +80,7 @@ __all__ = [
     "read_root",
     "renew_root",
     "retire_root",
+    "sweep_view_roots",
 ]
 
 ROOT_BUILDING = "BUILDING"
@@ -113,6 +116,9 @@ SNAPSHOT_NODE_LABEL = "SnapshotEntity"
 #: Rows per purge statement. A purge is the one operation here with unbounded size, and a single
 #: DETACH DELETE over a large project is a long lock held against every reader.
 PURGE_BATCH = 1000
+
+#: Roots examined per sweep pass. Maintenance should finish and run again, not run forever.
+DEFAULT_SWEEP_LIMIT = 50
 
 #: Real DDL, shipped with the module so a test applies the SAME constraint the bootstrap does.
 VIEW_ROOT_CONSTRAINTS = [
@@ -378,3 +384,80 @@ def purge_root(neo4j: Any, *, root_id: str, batch: int = PURGE_BATCH) -> int:
         removed += deleted
         if deleted == 0:
             return removed
+
+
+@dataclass(frozen=True)
+class SweepReport:
+    """What one sweep pass did. Counts only -- no root ids, no paths, no content."""
+
+    examined: int
+    retired: int
+    purged_roots: int
+    purged_nodes: int
+
+
+def sweep_view_roots(
+    neo4j: Any, *, project_id: str | None = None, limit: int = DEFAULT_SWEEP_LIMIT
+) -> SweepReport:
+    """Reclaim roots that can never be published again. Returns what it did.
+
+    **Without this, a failed promotion leaks a whole project structure permanently.** Every root a
+    build abandons stays in the graph with nothing referencing it, and the retention decision --
+    bounded at roughly two structures per project -- quietly stops being true.
+
+    The candidate query is a HINT and is deliberately not the authorization. It takes no lock and
+    can be stale by the time each root is handled, so the decision is re-made inside
+    :func:`retire_root`, which holds the root's write lock across the read that authorises it. That
+    is the same reserve-then-verify shape the upload receiver uses, and the reason a stale hint here
+    is harmless rather than destructive.
+
+    Already-ABANDONED roots are candidates too, so a purge interrupted halfway is finished by the
+    next pass rather than leaving nodes nothing will ever look at again.
+
+    Bounded by `limit`: a sweep is maintenance, and one that tries to delete every orphan in a
+    single pass holds locks for as long as that takes.
+    """
+    rows = neo4j.execute(
+        "MATCH (r:ViewRoot) "
+        "WHERE ($pid IS NULL OR r.project_id = $pid) "
+        "  AND (r.state = $abandoned OR coalesce(r.lease_expires_at, 0) <= timestamp()) "
+        "RETURN r.root_id AS root_id "
+        "ORDER BY coalesce(r.retired_at, r.lease_expires_at, 0) "
+        "LIMIT $limit",
+        {"pid": project_id, "abandoned": ROOT_ABANDONED, "limit": int(limit)},
+    )
+
+    examined = retired = purged_roots = purged_nodes = 0
+    for row in rows:
+        root_id = str(row.get("root_id"))
+        examined += 1
+        record = read_root(neo4j, root_id=root_id)
+        if record is None:
+            continue
+        if record.state != ROOT_ABANDONED:
+            if not retire_root(neo4j, root_id=root_id):
+                # Still leased, or still referenced by the view. Both are ordinary: the hint was
+                # taken before the lock, and the guard is what decides.
+                #
+                # Honouring the refusal here is about the REPORT, not about safety -- a negative
+                # control proved that. Safety is enforced twice below this line: `retire_root`
+                # refuses a referenced root, and `purge_root` refuses one that is not retired. A
+                # sweep that ignored the refusal would still destroy nothing; it would just claim
+                # to have retired a root it did not, which is how a leak hides behind a green
+                # dashboard.
+                continue
+            retired += 1
+        try:
+            removed = purge_root(neo4j, root_id=root_id)
+        except RootError:
+            # Raced another sweeper between the read and the purge. Its pass will finish the work.
+            continue
+        purged_roots += 1
+        purged_nodes += removed
+
+    return SweepReport(
+        examined=examined,
+        retired=retired,
+        purged_roots=purged_roots,
+        purged_nodes=purged_nodes,
+    )
