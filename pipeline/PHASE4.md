@@ -81,6 +81,32 @@ Verdicts: **DELETE** (no reader in installed code, no rollback value),
 | D6 | `/home/thron/marker_inventory.py` | One-off inventory script; the result is `pipeline/MARKERS.md`. | DELETE |
 | D7 | `/home/thron/apply_modes.py` | Used by every release install this session (applies manifest modes after scp). Belongs in the repo, not in a home dir. | KEEP for now; move into `pipeline/` in Phase 5 |
 
+### E. Added 2026-09-19: source checkouts under `/srv/yawn/projects` (yawn.deploy handoff item D)
+
+> **Executed 2026-09-20 05:03 CEST** after operator approval: both removed
+> (161 MB). Post-checks: `check-drift.sh` clean (12 repos), `verify-artifacts`
+> exit 0 / 40 OK, yawn vhosts and `memory.ctharvey.me/readyz` unchanged.
+>
+> **Corroborated 2026-09-20 ~04:20-04:45 CEST (read-only, independent Opus
+> subagent): E1 INERT, E2 INERT.** Beyond the requester's search it checked
+> systemd drop-ins and transient units (`systemctl cat` of every menhir-*/yawn-*
+> unit), `/etc/profile*`, root and thron rc files, `~/.local/bin`, `.pth` /
+> egg-link / `direct_url.json`, symlinks targeting either path, all user
+> crontabs, sudoers.d, cloudflared config, docker binds / working_dir labels /
+> image history for every image, `/proc/*/{cwd,exe,fd,maps,cmdline,environ}`,
+> `lsof +D`, mounts, 30 days of journal, and relatime atimes (no reader in 7
+> days other than the two audits; `yawn.vps/.venv/bin/uvicorn` last touched
+> 2026-09-13 02:19). The four E2 files match `b1191b8` on full sha256. The
+> only pattern hits are the empty `/etc/yawn-vps/` directory named by
+> `verify-artifacts` / `menhir_schema.py` / the release-18 installer (the
+> retired gateway's artifact paths, independent of the checkout), the GitHub
+> URL in `menhir_schema.py:211`, and SSH key comments.
+
+| # | Path | Size | Dated | Evidence | Verdict |
+|---|---|---|---|---|---|
+| E1 | `/srv/yawn/projects/menhir/` (root-owned git checkout, HTTPS remote) | 42 MB | 2026-08-30 | Detached at `0479a3c` = `origin/main`, working tree clean, nothing untracked. Not in `yawn.deploy/releases.json`. Releases install from digest-bound bundles under `/srv/menhir/`; `grep -rIl projects/menhir` over systemd, cron, sudoers, `/usr/local/{bin,sbin}`, `/srv/menhir`, `yawn.deploy`, `/var/lib/menhir-production`, `~thron/.config` finds nothing; no crontab entry; no docker mount. | DELETE |
+| E2 | `/srv/yawn/projects/yawn.vps/` (root-owned git checkout, remote = `/tmp/menhir-bootstrap-yawn-vps-9264.bundle`) | 119 MB | 2026-09-13 | The bootstrap clone for the Menhir OAuth operations gateway (retired in 0.2.0-16; `/etc/yawn-vps/` empty). Detached at `234fd26`; the four modified files (`menhir_server.py`, `vps/core.py`, `vps/menhir_capabilities.py`, `vps/menhir_tools.py`) are byte-identical (sha256) to yawn.vps commit `b1191b8` "make Menhir gateway read-only", which is on GitHub `origin/master` and was itself superseded by `3f7c5dc` removing the gateway sources. Nothing untracked. Same reference search as E1: nothing. The desktop `projects/yawn/yawn.vps` repo and the vps MCP are unaffected. | DELETE |
+
 ## Not candidates
 
 `/srv/menhir/production/state/` (1.6 GB: the live Neo4j, OAuth and telemetry
