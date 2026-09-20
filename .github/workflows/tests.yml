@@ -224,13 +224,14 @@ jobs:
 
   # PR #126's acceptance test is intentionally provider-backed: it proves the stock
   # backend and stock stdio bridge can enrich, recall, correct, survive restart, and
-  # report a provider failure. Keep it in its own required job so the graph-only marker
-  # expression above cannot silently exclude the acceptance gate.
+  # report a provider failure. CI supplies a deterministic local OpenAI-compatible
+  # provider, so this gate requires no repository secret. Keep it in its own required
+  # job so the graph-only marker expression above cannot silently exclude it.
   tracked-write-stdio-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      MENHIR_E2E_DETERMINISTIC_PROVIDER: "1"
       MENHIR_TEST_NEO4J_URI: bolt://localhost:7688
       MENHIR_TEST_NEO4J_USER: neo4j
       MENHIR_TEST_NEO4J_PASSWORD: testpassword
@@ -266,11 +267,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ./menhir pytest pytest-asyncio pytest-timeout
-
-      # The test has a local skip guard for developer machines. CI must fail instead
-      # of reporting green when the credential required by this acceptance lane is absent.
-      - name: Require acceptance provider credential
-        run: test -n "$OPENAI_API_KEY"
 
       - name: Verify test Neo4j is reachable
         working-directory: menhir

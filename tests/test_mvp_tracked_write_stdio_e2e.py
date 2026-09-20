@@ -1,13 +1,15 @@
 """Black-box local-stdio acceptance coverage for the #118 MVP contract.
 
 The test deliberately starts Menhir through its documented package entry point and
-talks to a separate ``python -m menhir.mcp.server`` child over MCP stdio.  Direct
-graph access is used only for the duplicate-write safety assertion and cleanup; all
-user-visible behavior is exercised through MCP.
+talks to a separate ``python -m menhir.mcp.server`` child over MCP stdio. Direct
+graph access is limited to resolved-episode identity, duplicate-write safety, and
+cleanup; all user-visible behavior is exercised through MCP. CI uses a deterministic
+OpenAI-compatible provider, while local runs may use a real provider environment.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -51,6 +53,22 @@ _PROVIDER_KEYS = {
     "GRAPHITI_EPISODE_MAX_ESTIMATED_TOKENS",
     "GRAPHITI_REQUEST_MAX_ESTIMATED_TOKENS",
 }
+
+_DETERMINISTIC_PROVIDER_FLAG = "MENHIR_E2E_DETERMINISTIC_PROVIDER"
+
+
+def _local_provider_environment(base_url: str) -> dict[str, str]:
+    return {
+        "LLM_CHAT_PROVIDER": "local",
+        "GRAPHITI_LLM_PROVIDER": "local",
+        "GRAPHITI_EMBED_PROVIDER": "local",
+        "GRAPHITI_RERANKER_PROVIDER": "local",
+        "LOCAL_LLM_BASE_URL": base_url,
+        "LOCAL_LLM_EMBED_BASE_URL": base_url,
+        "LOCAL_LLM_API_KEY": "test-only",
+        "LOCAL_LLM_CHAT_MODEL": "deterministic-chat",
+        "LOCAL_LLM_EMBED_MODEL": "text-embedding-3-small",
+    }
 
 
 def _free_port() -> int:
@@ -298,6 +316,240 @@ class _FailingProviderHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class _DeterministicProviderHandler(BaseHTTPRequestHandler):
+    """Small OpenAI-compatible provider for the required CI acceptance lane."""
+
+    def do_GET(self) -> None:
+        if self.path.rstrip("/") == "/v1/models":
+            self._json(
+                200,
+                {
+                    "object": "list",
+                    "data": [
+                        {"id": "deterministic-chat", "object": "model"},
+                        {"id": "text-embedding-3-small", "object": "model"},
+                    ],
+                },
+            )
+            return
+        self._json(404, {"error": {"message": "not found"}})
+
+    def do_POST(self) -> None:
+        payload = self._request_json()
+        if self.path.rstrip("/") == "/v1/embeddings":
+            values = payload.get("input", [])
+            inputs = values if isinstance(values, list) else [values]
+            self._json(
+                200,
+                {
+                    "object": "list",
+                    "model": payload.get("model") or "text-embedding-3-small",
+                    "data": [
+                        {
+                            "object": "embedding",
+                            "index": index,
+                            "embedding": self._embedding(str(value)),
+                        }
+                        for index, value in enumerate(inputs)
+                    ],
+                    "usage": {"prompt_tokens": 1, "total_tokens": 1},
+                },
+            )
+            return
+        if self.path.rstrip("/") != "/v1/chat/completions":
+            self._json(404, {"error": {"message": "not found"}})
+            return
+
+        messages = payload.get("messages") or []
+        prompt = "\n".join(str(message.get("content") or "") for message in messages)
+        response_format = payload.get("response_format") or {}
+        schema = response_format.get("json_schema") or {}
+        schema_name = str(schema.get("name") or "")
+        if payload.get("logprobs"):
+            self._json(200, self._chat_response("True", with_logprobs=True))
+            return
+
+        structured = self._structured_response(schema_name, prompt, schema.get("schema") or {})
+        self._json(200, self._chat_response(json.dumps(structured)))
+
+    @staticmethod
+    def _embedding(value: str) -> list[float]:
+        # Non-zero and deterministic. A shared anchor keeps this tiny acceptance corpus
+        # mutually searchable; hashed token slots retain stable query-specific variation.
+        vector = [0.0] * 1536
+        vector[0] = 1.0
+        for token in re.findall(r"[a-z0-9]+", value.lower()):
+            digest = hashlib.sha256(token.encode("utf-8")).digest()
+            vector[1 + int.from_bytes(digest[:2], "big") % 1535] += 0.05
+        return vector
+
+    @staticmethod
+    def _facts(prompt: str) -> tuple[str, list[dict[str, Any]]]:
+        correction = "750 dollars now" in prompt
+        threshold = (
+            "The Atlas Lantern refund approval threshold is 750 dollars now; "
+            "500 dollars is the historical value."
+            if correction
+            else "The Atlas Lantern refund approval threshold is 500 dollars."
+        )
+        edges = [
+            {
+                "source_entity_name": "Atlas Lantern service",
+                "target_entity_name": "Stripe",
+                "relation_type": "USES",
+                "fact": "The Atlas Lantern service uses Stripe.",
+                "episode_indices": [0],
+            },
+            {
+                "source_entity_name": "Atlas Lantern service",
+                "target_entity_name": "refund approval threshold",
+                "relation_type": "HAS_REFUND_APPROVAL_THRESHOLD",
+                "fact": threshold,
+                "episode_indices": [0],
+            },
+        ]
+        return threshold, edges
+
+    @classmethod
+    def _structured_response(
+        cls, schema_name: str, prompt: str, schema: dict[str, Any]
+    ) -> dict[str, Any]:
+        threshold, edges = cls._facts(prompt)
+        entities = [
+            {"name": "Atlas Lantern service", "entity_type_id": 0},
+            {"name": "Stripe", "entity_type_id": 0},
+            {"name": "refund approval threshold", "entity_type_id": 0},
+        ]
+        if schema_name in {"CombinedExtraction", "PatchedCombinedExtraction"}:
+            return {"extracted_entities": entities, "edges": edges}
+        if schema_name == "ExtractedEntities":
+            return {
+                "extracted_entities": [
+                    {**entity, "episode_indices": [0]} for entity in entities
+                ]
+            }
+        if schema_name == "ExtractedEdges":
+            return {
+                "edges": [
+                    {**edge, "valid_at": None, "invalid_at": None}
+                    for edge in edges
+                ]
+            }
+        if schema_name == "BatchEdgeTimestamps":
+            return {
+                "timestamps": [
+                    {"valid_at": None, "invalid_at": None} for _edge in edges
+                ]
+            }
+        if schema_name == "EdgeTimestamps":
+            return {"valid_at": None, "invalid_at": None}
+        if schema_name == "NodeResolutions":
+            return {"entity_resolutions": []}
+        if schema_name == "EdgeDuplicate":
+            return {
+                "duplicate_facts": [],
+                "contradicted_facts": [0] if "750 dollars now" in prompt else [],
+            }
+        if schema_name == "SummarizedEntities":
+            return {
+                "summaries": [
+                    {
+                        "name": entity["name"],
+                        "summary": (
+                            threshold
+                            if entity["name"] != "Stripe"
+                            else "Stripe is used by the Atlas Lantern service."
+                        ),
+                    }
+                    for entity in entities
+                ]
+            }
+        if schema_name in {"Summary", "EntitySummary"}:
+            return {"summary": threshold}
+        return cls._schema_defaults(schema)
+
+    @classmethod
+    def _schema_defaults(
+        cls, schema: dict[str, Any], root: dict[str, Any] | None = None
+    ) -> Any:
+        root = root or schema
+        if "$ref" in schema:
+            target: Any = root
+            for part in str(schema["$ref"]).removeprefix("#/").split("/"):
+                target = target[part]
+            return cls._schema_defaults(target, root)
+        if "anyOf" in schema:
+            non_null = [item for item in schema["anyOf"] if item.get("type") != "null"]
+            return cls._schema_defaults(non_null[0], root) if non_null else None
+        schema_type = schema.get("type")
+        if schema_type == "object" or "properties" in schema:
+            return {
+                name: cls._schema_defaults(field, root)
+                for name, field in (schema.get("properties") or {}).items()
+            }
+        if schema_type == "array":
+            return []
+        if schema_type == "integer":
+            return 0
+        if schema_type == "number":
+            return 0.0
+        if schema_type == "boolean":
+            return False
+        if schema_type == "null":
+            return None
+        return ""
+
+    @staticmethod
+    def _chat_response(content: str, *, with_logprobs: bool = False) -> dict[str, Any]:
+        choice: dict[str, Any] = {
+            "index": 0,
+            "message": {"role": "assistant", "content": content},
+            "finish_reason": "stop",
+            "logprobs": None,
+        }
+        if with_logprobs:
+            choice["logprobs"] = {
+                "content": [
+                    {
+                        "token": "True",
+                        "logprob": -0.01,
+                        "bytes": None,
+                        "top_logprobs": [
+                            {"token": "True", "logprob": -0.01, "bytes": None},
+                            {"token": "False", "logprob": -4.6, "bytes": None},
+                        ],
+                    }
+                ]
+            }
+        return {
+            "id": "chatcmpl-deterministic",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": "deterministic-chat",
+            "choices": [choice],
+            "usage": {
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+            },
+        }
+
+    def _request_json(self) -> dict[str, Any]:
+        length = int(self.headers.get("Content-Length") or 0)
+        return json.loads(self.rfile.read(length).decode("utf-8"))
+
+    def log_message(self, _format: str, *_args: object) -> None:
+        return
+
+    def _json(self, status: int, payload: dict[str, Any]) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
 @contextmanager
 def _failing_provider() -> Iterator[str]:
     server = ThreadingHTTPServer(("127.0.0.1", 0), _FailingProviderHandler)
@@ -311,13 +563,37 @@ def _failing_provider() -> Iterator[str]:
         thread.join(timeout=10)
 
 
+@contextmanager
+def _deterministic_provider() -> Iterator[str]:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _DeterministicProviderHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/v1"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=10)
+
+
+@pytest.fixture
+def tracked_write_provider_environment() -> Iterator[dict[str, str]]:
+    repo_root = Path(__file__).resolve().parents[1]
+    if os.environ.get(_DETERMINISTIC_PROVIDER_FLAG, "").strip() == "1":
+        with _deterministic_provider() as base_url:
+            yield _local_provider_environment(base_url)
+        return
+    yield _provider_environment(repo_root)
+
+
 @pytest.mark.asyncio
 async def test_tracked_write_stdio_workflow_survives_restart_and_reports_failure(
     test_neo4j_repo: Any,
     tmp_path: Path,
+    tracked_write_provider_environment: dict[str, str],
 ) -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    provider_env = _provider_environment(repo_root)
+    provider_env = tracked_write_provider_environment
     process_env = _base_process_environment(repo_root, tmp_path, provider_env)
     namespace = f"mvp-118-{uuid4().hex}"
     reader_id = f"reader-{uuid4().hex}"
@@ -596,8 +872,6 @@ async def test_tracked_write_stdio_workflow_survives_restart_and_reports_failure
             {
                 "LLM_CHAT_PROVIDER": "local",
                 "GRAPHITI_LLM_PROVIDER": "local",
-                "GRAPHITI_EMBED_PROVIDER": "openai",
-                "GRAPHITI_RERANKER_PROVIDER": "openai",
                 "LOCAL_LLM_BASE_URL": failing_base_url,
                 "LOCAL_LLM_API_KEY": "test-only",
                 "LOCAL_LLM_CHAT_MODEL": "forced-failure",
