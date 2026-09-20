@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from menhir.infrastructure.project_scanner import ProjectScanner
 from menhir.services.beacon_evidence import (
     BeaconEvidenceError,
     dump_evidence,
@@ -21,15 +22,24 @@ from menhir.services.beacon_evidence import (
 )
 
 
+_CURRENT_FINGERPRINT = object()
+
+
 def _reader(
     *,
     root: str | None,
     coverage: dict | None = None,
-    fingerprint: str | None = "fp-1",
+    fingerprint: str | None | object = _CURRENT_FINGERPRINT,
     overview: dict | None = None,
     documents: list[dict] | None = None,
     files: list[dict] | None = None,
 ) -> SimpleNamespace:
+    if fingerprint is _CURRENT_FINGERPRINT:
+        fingerprint = (
+            ProjectScanner().scan(root).scan_fingerprint
+            if root is not None and Path(root).is_dir()
+            else "unavailable-current-fingerprint"
+        )
     return SimpleNamespace(
         get_project_root_path=lambda p: root,
         get_project_coverage=lambda p: (
@@ -51,14 +61,14 @@ def _reader(
             documents
             or [
                 {
-                    "structure_path": "README.md",
-                    "title": "Read Me",
-                    "document_type": "generic",
+                    "path": "README.md",
+                    "name": "Read Me",
+                    "doc_type": "generic",
                 },
                 {
-                    "structure_path": "docs/architecture.md",
-                    "title": "Architecture",
-                    "document_type": "generic",
+                    "path": "docs/architecture.md",
+                    "name": "Architecture",
+                    "doc_type": "generic",
                 },
             ]
         ),
@@ -84,7 +94,7 @@ def test_dump_shape_and_determinism(tmp_path: Path) -> None:
         "primary_language": "python",
         "root": str(tmp_path),
         "status": "current",
-        "scan_fingerprint": "fp-1",
+        "scan_fingerprint": ProjectScanner().scan(tmp_path).scan_fingerprint,
     }
     assert first["documents"][0]["path"] == "README.md"  # priority ordering
     assert [f["path"] for f in first["files"]] == [
@@ -92,6 +102,30 @@ def test_dump_shape_and_determinism(tmp_path: Path) -> None:
         "src/core.py",
     ]  # entrypoints first
     assert first["structure"] == {"entities": {"file": 3}, "edges": {"IMPORTS": 2}}
+
+
+def test_document_type_uses_structure_reader_shape(tmp_path: Path) -> None:
+    evidence = dump_evidence(
+        _reader(
+            root=str(tmp_path),
+            documents=[
+                {
+                    "path": "docs/reference.md",
+                    "name": "Reference",
+                    "doc_type": "reference_article",
+                }
+            ],
+        ),
+        "fixture",
+        tmp_path,
+    )
+    assert evidence["documents"] == [
+        {
+            "path": "docs/reference.md",
+            "title": "Reference",
+            "document_type": "reference_article",
+        }
+    ]
 
 
 def test_written_document_is_deterministic_json(tmp_path: Path) -> None:
@@ -129,6 +163,15 @@ def test_missing_fingerprint_fails_closed(tmp_path: Path) -> None:
     with pytest.raises(BeaconEvidenceError, match="fingerprint"):
         dump_evidence(
             _reader(root=str(tmp_path), fingerprint=None), "fixture", tmp_path
+        )
+
+
+def test_stale_fingerprint_fails_closed(tmp_path: Path) -> None:
+    with pytest.raises(BeaconEvidenceError, match="stale"):
+        dump_evidence(
+            _reader(root=str(tmp_path), fingerprint="stale-fingerprint"),
+            "fixture",
+            tmp_path,
         )
 
 

@@ -23,6 +23,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Protocol
 
+from menhir.infrastructure.project_scanner import ProjectScanner
+
 __all__ = [
     "BeaconEvidenceError",
     "BeaconEvidenceProjectReader",
@@ -90,7 +92,13 @@ def _require_intact_index(
         raise BeaconEvidenceError(
             f"project has no scan fingerprint; re-ingest first: {project}"
         )
-    return str(fingerprint)
+    stored_fingerprint = str(fingerprint)
+    current_fingerprint = ProjectScanner().scan(repo_root).scan_fingerprint
+    if stored_fingerprint != current_fingerprint:
+        raise BeaconEvidenceError(
+            f"project index is stale for the current checkout; re-ingest first: {project}"
+        )
+    return stored_fingerprint
 
 
 def _document_rank(path: str) -> tuple[int, str]:
@@ -118,7 +126,7 @@ def dump_evidence(
             {
                 "path": path,
                 "title": str(row.get("title") or row.get("name") or ""),
-                "document_type": str(row.get("document_type") or "generic"),
+                "document_type": str(row.get("doc_type") or "generic"),
             }
         )
     documents.sort(key=lambda d: _document_rank(d["path"]))

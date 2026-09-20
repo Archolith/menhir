@@ -20,7 +20,6 @@ import asyncio
 import hashlib
 import json
 import os
-import re
 import subprocess
 import uuid
 from pathlib import Path
@@ -34,15 +33,10 @@ from menhir.core.backend_shared import _drain_background_errors
 from menhir.domain.project_id_file import mint_identity
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.structure_queries import StructureGraphWriter
-from menhir.services.beacon_generation import generate_beacon
+from menhir.services.beacon_generation import BeaconGenerationError, generate_beacon
 from menhir.services.project_ingest import execute_project_ingest
 
 pytestmark = [pytest.mark.online]
-
-#: The generated artifact's own name: generation writes it into the scanned
-#: repository, so the NEXT scan legitimately indexes it. The refresh-phase
-#: comparison normalizes that self-reference explicitly.
-ARTIFACT_NAME = "beacon.generated.yaml"
 
 #: Distinctive fixture sentences. The orientation sentence becomes the indexed
 #: project description (the scanner reads .agent/README.md first); the
@@ -346,11 +340,24 @@ async def test_e2e6_beacon_owned_generation_and_consumption(
     assert manifest.read_bytes() == first_bytes
     assert outcome.sha256 == hashlib.sha256(first_bytes).hexdigest()
 
-    # 11. change one indexed source fact, re-ingest through the real path,
-    # refresh: only the expected claims change.
+    # 11. A source edit without re-ingest makes the graph stale. Generation
+    # refuses before Beacon/publication runs and preserves the existing bytes.
     (repo / ".agent" / "README.md").write_text(
         f"# Conduit\n\n{ORIENTATION_CHANGED}\n", encoding="utf-8"
     )
+    before_stale_attempt = manifest.read_bytes()
+    with pytest.raises(BeaconGenerationError, match="stale"):
+        generate_beacon(
+            reader,
+            project,
+            repo,
+            beacon_python=beacon_python,
+            refresh=True,
+            expected_sha256=hashlib.sha256(before_stale_attempt).hexdigest(),
+        )
+    assert manifest.read_bytes() == before_stale_attempt
+
+    # 12. First complete ingest -> refresh cycle after the source edit.
     await _ingest_and_await_write(
         provider,
         root=repo,
@@ -377,23 +384,15 @@ async def test_e2e6_beacon_owned_generation_and_consumption(
 
     # Normalized semantic comparison (issue #120 refresh contract): the only
     # allowed knowledge delta is the orientation claim and the scan
-    # fingerprint Beacon cites alongside it. Two self-referential effects are
-    # explicitly normalized rather than broadly ignored: the aggregate
-    # entity/edge tallies Beacon renders into the scan summary (the repo now
-    # also contains the generated artifact itself), and the generated
-    # artifact's own entry in the indexed file list.
+    # fingerprint Beacon cites alongside it.
     def _normalize(value):
         if isinstance(value, str):
             for token in (ORIENTATION, ORIENTATION_CHANGED):
                 value = value.replace(token, "<orientation>")
             for token in (first_fingerprint, second_fingerprint):
                 value = value.replace(token, "<fingerprint>")
-            if "Indexed repository structure as of the latest Menhir scan" in value:
-                value = re.sub(r"\d+", "<n>", value)
             return value
         if isinstance(value, dict):
-            if ARTIFACT_NAME in map(str, value.values()):
-                return "<artifact self-entry>"
             return {key: _normalize(item) for key, item in value.items()}
         if isinstance(value, list):
             return [_normalize(item) for item in value]
@@ -408,5 +407,28 @@ async def test_e2e6_beacon_owned_generation_and_consumption(
     assert ORIENTATION_CHANGED in joined_after
     assert ORIENTATION not in joined_after
 
-    # 12. Menhir's application ingest fed the graph; the artifact validated,
+    # 13. Second complete ingest -> refresh cycle with no source change. The
+    # generated artifact's replaced mtime must not perturb the scan, so both
+    # the graph fingerprint and manifest bytes converge to a fixed point.
+    await _ingest_and_await_write(
+        provider,
+        root=repo,
+        project=project,
+        session_id=f"{project}-convergence",
+        force=True,
+    )
+    third_fingerprint = adapter.get_scan_fingerprint(project)
+    assert third_fingerprint == second_fingerprint
+    converged = generate_beacon(
+        reader,
+        project,
+        repo,
+        beacon_python=beacon_python,
+        refresh=True,
+        expected_sha256=hashlib.sha256(after_bytes).hexdigest(),
+    )
+    assert manifest.read_bytes() == after_bytes
+    assert converged.sha256 == hashlib.sha256(after_bytes).hexdigest()
+
+    # 14. Menhir's application ingest fed the graph; the artifact validated,
     # inspected, and served through Beacon alone.

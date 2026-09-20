@@ -171,7 +171,23 @@ _MAX_FILE_BYTES = 2 * 1024 * 1024  # 2 MB — skip files larger than this to avo
 # fingerprint so a rules change invalidates every stored fingerprint and forces a re-scan --
 # otherwise the path+mtime fingerprint is unchanged, ingest skips as "unchanged", and existing
 # graphs keep their truncated state forever.
-SCANNER_SCHEMA_VERSION = 6  # v6: A0 agent-orientation docs join the eligible set
+SCANNER_SCHEMA_VERSION = 7  # v7: Beacon-generated root artifacts are scan-invisible
+
+# Beacon publication and evidence scratch files live at the repository root. They are
+# outputs/coordination state derived from a scan, never project source. Letting them back into
+# discovery makes the scan fingerprint self-referential: every refresh changes an mtime, which
+# forces another ingest and another refresh forever. The prefixes are deliberately root-only so
+# a legitimate nested file with the same basename remains visible.
+_BEACON_ROOT_FILES = {"beacon.generated.yaml", ".beacon.generated.lock"}
+_BEACON_ROOT_PREFIXES = (".beacon.generated.", ".beacon-evidence-")
+
+
+def _is_beacon_root_artifact(relative_path: str) -> bool:
+    """Return whether *relative_path* is Beacon-owned generated/scratch state."""
+    return "/" not in relative_path and (
+        relative_path in _BEACON_ROOT_FILES
+        or relative_path.startswith(_BEACON_ROOT_PREFIXES)
+    )
 
 # --- Eligibility: an ordered deny-list. First match wins. ---------------------------------
 # Step 2 (preserve) runs BEFORE step 3 (extension exclusions) so that structural manifests are
@@ -281,6 +297,8 @@ class ProjectScanner:
                     continue
                 full = os.path.join(dirpath, fname)
                 rel = os.path.relpath(full, root).replace("\\", "/")
+                if _is_beacon_root_artifact(rel):
+                    continue
                 if _matches_gitignore(full, root, gitignore_patterns):
                     continue
                 all_rel_paths.append(rel)

@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from menhir.infrastructure.project_scanner import ProjectScanner
 from menhir.services.beacon_compat import BeaconCompatError, beacon_python_is_usable
 from menhir.services.beacon_generation import BeaconGenerationError, generate_beacon
 from tests.test_beacon_evidence import _reader
@@ -69,6 +70,7 @@ def test_contract_gate_rejects_interpreter_without_beacon() -> None:
 def test_generate_creates_valid_artifact(beacon_python: str, tmp_path: Path) -> None:
     repo = _fixture_repo(tmp_path)
     reader = _reader(root=str(repo))
+    expected_fingerprint = ProjectScanner().scan(repo).scan_fingerprint
     outcome = generate_beacon(reader, "fixture", repo, beacon_python=beacon_python)
     assert outcome.created is True
     assert outcome.output_path == repo / "beacon.generated.yaml"
@@ -80,7 +82,7 @@ def test_generate_creates_valid_artifact(beacon_python: str, tmp_path: Path) -> 
     assert b"beacon_version: '0.1'" in payload or b'beacon_version: "0.1"' in payload
     assert b"Fixture project for the evidence dump." in payload
     # The scan fingerprint is persisted as a citation in the artifact.
-    assert b"fp-1" in payload
+    assert expected_fingerprint.encode() in payload
     # A generated manifest always ends with exactly one trailing newline.
     assert payload.endswith(b"\n") and not payload.endswith(b"\n\n")
 

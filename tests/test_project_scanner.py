@@ -184,6 +184,24 @@ class TestProjectScanner:
         r2 = scanner.scan(root)
         assert r1.scan_fingerprint != r2.scan_fingerprint
 
+    def test_beacon_generated_and_scratch_files_do_not_change_scan(self, tmp_path):
+        root = _make_python_project(tmp_path)
+        scanner = ProjectScanner()
+        baseline = scanner.scan(root)
+
+        excluded = {
+            "beacon.generated.yaml",
+            ".beacon.generated.lock",
+            ".beacon.generated.abc123.tmp",
+            ".beacon-evidence-abc123.json",
+        }
+        for name in excluded:
+            _write(root, name, f"scratch for {name}")
+
+        after = scanner.scan(root)
+        assert after.scan_fingerprint == baseline.scan_fingerprint
+        assert {entry.rel_path for entry in after.files}.isdisjoint(excluded)
+
     def test_scan_name_override(self, tmp_path):
         root = _make_python_project(tmp_path)
         result = ProjectScanner().scan(root, name="custom-name")
