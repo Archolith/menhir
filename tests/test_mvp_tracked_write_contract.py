@@ -15,6 +15,7 @@ import pytest
 from menhir.mcp import formatters
 
 track = importlib.import_module("menhir.mcp.tools.ingest.add_memory_and_track")
+context_tool = importlib.import_module("menhir.mcp.tools.recall.build_context")
 pytestmark = pytest.mark.unit
 
 
@@ -40,6 +41,51 @@ def _guidance(output: str) -> str:
     matches = [line for line in output.splitlines() if line.startswith("guidance:")]
     assert len(matches) == 1
     return matches[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("requested_session_id", "expected_session_id"),
+    [(None, "local-mvp-session"), ("explicit-session", "explicit-session")],
+)
+async def test_build_context_uses_the_write_session_unless_explicitly_overridden(
+    monkeypatch: pytest.MonkeyPatch,
+    requested_session_id: str | None,
+    expected_session_id: str,
+) -> None:
+    backend = SimpleNamespace(
+        build_context=AsyncMock(
+            return_value={
+                "context": "memory",
+                "memory_count": 1,
+                "token_estimate": 1,
+                "truncated": False,
+            }
+        )
+    )
+    monkeypatch.setattr(
+        context_tool.BuildContextTool, "get_backend", lambda _self: backend
+    )
+    monkeypatch.setattr(
+        context_tool,
+        "get_mcp_session",
+        lambda: SimpleNamespace(session_id="local-mvp-session"),
+    )
+
+    await context_tool.BuildContextTool().endpoint(
+        query="tracked fact",
+        session_id=requested_session_id,
+        namespace="billing",
+    )
+
+    backend.build_context.assert_awaited_once_with(
+        "tracked fact",
+        max_tokens=2000,
+        preset="knowledge",
+        session_id=expected_session_id,
+        include_scores=False,
+        namespace="billing",
+    )
 
 
 @pytest.mark.parametrize("state", ["PENDING", "ENRICHING", "QUEUED", "UNKNOWN", "", "NEW_STATE"])

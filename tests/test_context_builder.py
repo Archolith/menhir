@@ -296,7 +296,10 @@ async def test_context_includes_fresh_session_scoped_memories() -> None:
     service = _build_service(_recall_result([]))
 
     await service.build_context(
-        "fresh tracked write", namespace="billing", preset=QueryPreset.RECENT
+        "fresh tracked write",
+        namespace="billing",
+        preset=QueryPreset.RECENT,
+        session_id="session-a",
     )
 
     service.recall_service.recall.assert_awaited_once_with(
@@ -304,6 +307,7 @@ async def test_context_includes_fresh_session_scoped_memories() -> None:
         preset=QueryPreset.RECENT,
         namespace="billing",
         include_session=True,
+        session_id="session-a",
         include_invalidated=True,
     )
 

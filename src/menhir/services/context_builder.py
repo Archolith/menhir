@@ -253,6 +253,7 @@ class ContextBuilderService:
             # initially produce SESSION-scoped nodes, so excluding that scope makes a
             # write visible to recall_memories but immediately disappear from context.
             query, preset=preset, namespace=namespace, include_session=True,
+            session_id=session_id,
             include_invalidated=True,
         )
         memories = list(recall_result.results)

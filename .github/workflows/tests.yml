@@ -221,3 +221,71 @@ jobs:
           MENHIR_TEST_NEO4J_PASSWORD: testpassword
           MENHIR_TEST_NEO4J_DATABASE: neo4j
         run: pytest -m "online and not needs_llm" --run-online -v -rs
+
+  # PR #126's acceptance test is intentionally provider-backed: it proves the stock
+  # backend and stock stdio bridge can enrich, recall, correct, survive restart, and
+  # report a provider failure. Keep it in its own required job so the graph-only marker
+  # expression above cannot silently exclude the acceptance gate.
+  tracked-write-stdio-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      MENHIR_TEST_NEO4J_URI: bolt://localhost:7688
+      MENHIR_TEST_NEO4J_USER: neo4j
+      MENHIR_TEST_NEO4J_PASSWORD: testpassword
+      MENHIR_TEST_NEO4J_DATABASE: neo4j
+    services:
+      neo4j:
+        image: neo4j:5-community
+        env:
+          NEO4J_AUTH: neo4j/testpassword
+          NEO4J_PLUGINS: '["apoc"]'
+          NEO4J_server_memory_heap_max__size: 512m
+        ports:
+          - 7688:7687
+        options: >-
+          --health-cmd "wget -qO- http://localhost:7474 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout menhir
+        uses: actions/checkout@v4
+        with:
+          path: menhir
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: menhir/pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ./menhir pytest pytest-asyncio pytest-timeout
+
+      # The test has a local skip guard for developer machines. CI must fail instead
+      # of reporting green when the credential required by this acceptance lane is absent.
+      - name: Require acceptance provider credential
+        run: test -n "$OPENAI_API_KEY"
+
+      - name: Verify test Neo4j is reachable
+        working-directory: menhir
+        run: |
+          python - <<'PY'
+          from neo4j import GraphDatabase
+          drv = GraphDatabase.driver("bolt://localhost:7688", auth=("neo4j", "testpassword"))
+          drv.verify_connectivity()
+          with drv.session() as s:
+              print("neo4j ok:", s.run("RETURN 1 AS ok").single()["ok"])
+          drv.close()
+          PY
+
+      - name: Run tracked-write stdio acceptance E2E
+        working-directory: menhir
+        run: >-
+          pytest tests/test_mvp_tracked_write_stdio_e2e.py
+          --run-online -v -rs

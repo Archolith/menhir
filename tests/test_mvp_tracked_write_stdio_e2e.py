@@ -398,6 +398,16 @@ async def test_tracked_write_stdio_workflow_survives_restart_and_reports_failure
             assert correction_episode != original_episode
             assert "status: READY" in corrected
 
+            original_resolution = test_neo4j_repo.execute(
+                "MATCH (e:Episodic {uuid: $uuid}) "
+                "RETURN e.resolved_episode_uuid AS resolved_uuid",
+                params={"uuid": original_episode},
+            )
+            assert original_resolution and original_resolution[0]["resolved_uuid"]
+            original_resolved_episode = str(
+                original_resolution[0]["resolved_uuid"]
+            )
+
             direct = _tool_json(
                 await client.call_tool(
                     "recall_memories",
@@ -438,7 +448,31 @@ async def test_tracked_write_stdio_workflow_survives_restart_and_reports_failure
                     timeout=180,
                 )
             )
-            assert "500" in json.dumps(history).lower()
+            history_receipts: dict[str, dict[str, Any]] = {}
+            for item in history["items"]:
+                item_provenance = _tool_json(
+                    await _proxy_call(
+                        client,
+                        "get_provenance",
+                        {
+                            "node_uuid": item["uuid"],
+                            "namespace": namespace,
+                            "content_chars": 1000,
+                        },
+                    )
+                )
+                if item_provenance["ok"]:
+                    history_receipts.update(
+                        {
+                            str(episode["uuid"]): episode
+                            for episode in item_provenance["episodes"]
+                        }
+                    )
+            assert original_resolved_episode in history_receipts
+            assert (
+                str(history_receipts[original_resolved_episode]["content"])
+                == original
+            )
 
             context = _tool_text(
                 await client.call_tool(
@@ -533,14 +567,25 @@ async def test_tracked_write_stdio_workflow_survives_restart_and_reports_failure
             )
             assert "750" in json.dumps(persisted).lower()
 
-    duplicate_rows = test_neo4j_repo.execute(
-        "MATCH (e:Episodic) WHERE e.uuid IN $ids "
-        "RETURN e.uuid AS uuid, count(e) AS copies ORDER BY uuid",
-        params={"ids": [original_episode, correction_episode]},
+    accepted_roots = test_neo4j_repo.execute(
+        "MATCH (e:Episodic) "
+        "WHERE coalesce(e.namespace, 'default') = $namespace "
+        "AND e.source = $source AND e.content IN $contents "
+        "AND e.processing_state IS NOT NULL "
+        "RETURN e.content AS content, collect(e.uuid) AS uuids, count(e) AS copies "
+        "ORDER BY content",
+        params={
+            "namespace": namespace,
+            "source": "stdio-e2e",
+            "contents": [original, correction],
+        },
     )
-    assert {row["uuid"]: row["copies"] for row in duplicate_rows} == {
-        original_episode: 1,
-        correction_episode: 1,
+    assert {
+        row["content"]: (row["copies"], set(row["uuids"]))
+        for row in accepted_roots
+    } == {
+        original: (1, {original_episode}),
+        correction: (1, {correction_episode}),
     }
 
     # A deterministic provider refusal proves FAILED is distinct from acceptance and
