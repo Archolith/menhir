@@ -292,6 +292,24 @@ def _build_service(recall_result: RecallResult) -> ContextBuilderService:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_context_includes_fresh_session_scoped_memories() -> None:
+    service = _build_service(_recall_result([]))
+
+    await service.build_context(
+        "fresh tracked write", namespace="billing", preset=QueryPreset.RECENT
+    )
+
+    service.recall_service.recall.assert_awaited_once_with(
+        "fresh tracked write",
+        preset=QueryPreset.RECENT,
+        namespace="billing",
+        include_session=True,
+        include_invalidated=True,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_context_renders_source_time_for_each_memory() -> None:
     older = replace(
         _mem("ratio-6", "French press ratio", "Use 6 oz of water.", 0.9),
