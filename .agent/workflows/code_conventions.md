@@ -53,7 +53,9 @@ logger.info("Connecting to neo4j at %s", uri)
   - `unit` for fast local checks
   - `online` for tests that need live Neo4j/LLM
   - `smoke` for fast baseline checks
-- Use `pytest -m unit` for routine local loops.
+- Follow `run_and_test.md`. Prefer explicit affected test files/node ids for routine loops; many
+  offline tests are unmarked, so `pytest -m unit` is a broad convenience lane, not complete
+  verification and not the default after every edit.
 
 ## File Layout Preference
 

@@ -18,6 +18,8 @@ Start with one file:
 - install, post-install setup, Git/client hooks -> `../docs/post-install.md`
 - writing default instructions for agents that use Menhir -> `../docs/agent-usage.md`
 - debugging, incidents, queue problems -> `tasks-debugging.md`
+- choosing focused tests, escalating verification, or deciding whether a full run is warranted
+  -> `workflows/run_and_test.md`
 - memory-review program: open fixes, hotfix status, decisions -> `memory-review-tracker.md`
 - ingest, enrichment, stamping -> `tasks-ingest.md`
 - **about to write a script?** -> `scripts-index.md` — READ THIS FIRST. Every durable instrument in
@@ -53,7 +55,8 @@ Start with one file:
 Use `concept-ids.md` only when you need an exact concept id or owner doc.
 Use `concept-ids.yaml` only when you need the full registry.
 Use `concept-tree-design.md` only when editing the tree/document structure itself.
-Use `maintenance.md` for maintenance, changelog, and git policy.
+Use `maintenance.md` for maintenance, changelog, git policy, and closeout receipts. Use
+`workflows/run_and_test.md` for test selection and CI/full-suite ownership.
 Use `verified-current-findings-main-2026-07-10.md` (reconciled against `main`) for the current
 verified bug and hardening list. The older `verified-current-findings.md` is superseded
 (frontier-baselined) and carries a banner pointing to the reconciled ledger.

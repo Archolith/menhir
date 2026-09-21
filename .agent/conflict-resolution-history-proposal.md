@@ -401,5 +401,7 @@ After `resolve_conflict_group` returns, the caller writes suppression rows for t
 3. `lifecycle_service.py` — add `settings` param, import singleton, wire recording after resolve, wire pair check in scan
 4. `core/bootstrap.py` — pass `settings` to `LifecycleService`
 5. `config/settings.py` — `conflict_cooldown_days` setting
-6. `tests/test_conflict_history.py` — full test suite for new behavior
-7. Run full suite
+6. `tests/test_conflict_history.py` — direct regression suite for the new behavior
+7. Run the focused conflict/lifecycle/settings/bootstrap tests selected under
+   `workflows/run_and_test.md`; require exact-SHA full CI before merge instead of a routine local
+   full-suite run

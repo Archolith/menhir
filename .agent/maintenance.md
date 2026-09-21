@@ -19,6 +19,18 @@ Project maintenance rules for `menhir`.
 - Logging layout, request-id behavior, or API error-envelope changes -> update `workflows/logging-and-troubleshooting.md`
 - Any change to project intent or phase gates -> update `memory-design.md` and/or `memory-roadmap.md`
 
+## Verification Closeout
+
+- Follow `workflows/run_and_test.md`; do not run the complete suite locally after every change.
+- During implementation, run direct regression tests and the smallest credible affected set. At
+  closeout, broaden to affected callers/contracts and matching static checks.
+- The structural `affected_tests` result is advisory. Confirm it from source/tests, and never treat
+  an empty result as proof that no tests are needed.
+- Full offline and supported graph-backed integration coverage belongs to required CI on the exact
+  reviewed SHA. Local full runs are exceptional and require a recorded reason.
+- Closeout notes must list changed surfaces, selection basis, exact commands/results, unrun lanes,
+  exact-SHA CI state, and residual risk. Documentation-only work must state why pytest was not run.
+
 ## Changelog
 
 - Always add a CHANGELOG entry when finishing a session with meaningful changes.
