@@ -94,6 +94,34 @@ def beacon_python() -> str:
     return str(interpreter)
 
 
+def test_cli_reader_uses_canonical_structure_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise the real lazy adapter import without opening a database connection."""
+    from menhir.cli.beacon import _reader as cli_reader
+    from menhir.config.settings_model import MemorySettings
+    from menhir.infrastructure.structure_queries import StructureGraphWriter
+
+    settings = SimpleNamespace(
+        neo4j_uri="bolt://127.0.0.1:7689",
+        neo4j_user="neo4j",
+        neo4j_password="fixture-only",
+        neo4j_database="neo4j",
+    )
+    monkeypatch.setattr("menhir.env_file.load_menhir_env", lambda: None)
+    monkeypatch.setattr(MemorySettings, "from_env", staticmethod(lambda: settings))
+    reader, repository = cli_reader()
+    try:
+        assert isinstance(reader, StructureGraphWriter)
+        assert reader.neo4j is repository
+        assert repository.uri == settings.neo4j_uri
+        for method in (
+            "get_project_root_path", "get_project_coverage", "get_scan_fingerprint",
+            "query_overview", "query_files", "query_documents",
+        ):
+            assert callable(getattr(reader, method))
+    finally:
+        repository.close()
+
+
 def test_unindexed_project_fails_closed(tmp_path: Path) -> None:
     with pytest.raises(BeaconGenerationError, match="not indexed"):
         build_raw_manifest(_reader(root=None), "fixture", tmp_path)
