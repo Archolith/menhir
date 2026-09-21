@@ -90,9 +90,13 @@ class GetProvenanceTool(BaseJsonTool):
                 return text[:cap] + "…"
             return text
 
+        # `episode_id` is the receipt a caller was handed by add_memory / add_memory_and_track;
+        # `uuid` is the Graphiti-minted node that carries the MENTIONS edge (#92). Callers
+        # match provenance to their own writes on `episode_id`, never on `uuid`.
         episodes = [
             {
                 "uuid": ep.get("uuid"),
+                "episode_id": ep.get("episode_id"),
                 "source": ep.get("source"),
                 "created_at": ep.get("created_at"),
                 "content": _clip(ep.get("content")),

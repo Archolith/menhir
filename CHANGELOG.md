@@ -1,3 +1,26 @@
+## 2026-09-21 - a tracked-write receipt can be traced to its enriched episode (#92)
+
+Every write leaves two `:Episodic` nodes: Menhir's receipt (the `episode_id` a caller is handed;
+carries `processing_*`) and the node Graphiti mints inside `add_episode` (carries the MENTIONS
+edges). That is by construction -- Menhir cannot pass a uuid into Graphiti -- and it is not double
+LLM cost. What it broke was traceability: `get_provenance` named only the Graphiti twin, so an
+agent holding its receipt could not match provenance to its own write. E2E-2 reproduced it.
+
+**The link already existed, one-way, and nobody surfaced it.** `mark_episode_ready` has recorded
+the Graphiti uuid on the receipt as `resolved_episode_uuid` since the anchor design; the entity
+count on `POST /api/memory` already resolved through it. So the change is exposure, not schema:
+
+- `get_provenance` lists `episode_id` (the receipt) beside `uuid` (the twin) for every episode,
+  resolved by a reverse lookup on `resolved_episode_uuid` in `fetch_node_receipts`. Null for
+  episodes enriched before the anchor recorded it -- honest, not hidden.
+- `get_enrichment_status` reports `enriched_episode_uuid` so the pair is reachable from the
+  receipt side too. Either id gets you the other.
+- No new relationship, no migration, no backfill; the index for the lookup was already declared.
+- The issue's RCA attributes the twin to the evidence projection (`turn_evidence_uuid`). The
+  reproduction had none; the twin on the `add_memory_and_track` path is Graphiti's own node.
+- E2E-2 is re-selected in the `stdio-e2e` job and `provenance_reachable_from_receipt` now asserts
+  the structured field, not a substring. An online test proves the Cypher against a real graph.
+
 ## 2026-09-21 - a backend refusal is an answer, not a crash (#132)
 
 `delete_namespace` refused correctly past its `max_nodes` cap, but MCP callers saw
@@ -228,30 +251,3 @@ reason -- "what is this server allowed to do?" should have one answer every call
 `test_the_mode_is_off_unless_it_is_explicitly_staging` asserted that `receive` did NOT enable the
 tools. That was the phase's behaviour, not a safety property, so it was rewritten to pin the
 property that still holds: anything not naming a mode resolves to OFF.
-
-## 2026-09-16 - a crash between an upload's two writes returned a 500
-
-P2B's second inherited counterexample. Every write in the receiver is two steps -- `begin` writes
-the record then creates the blob, `put_chunk` writes the blob then updates the record, `abort`
-writes the record then drops the blob -- and a crash in any of those windows leaves durable state
-no caller ever produced. Four tests force each window directly instead of hoping a killed container
-lands there.
-
-Three of the four passed, which is worth recording: unrecorded bytes are correctly reported missing
-and the resend is an ordinary first delivery (the write ordering in `put_chunk` is the safe one); a
-half-written record with only a temp file is reclaimed as garbage rather than resumed; and an abort
-that died before dropping its bytes still frees them at the retention boundary.
-
-The fourth failed. A record whose blob never existed -- a crash between `begin`'s record write and
-its blob creation -- made `put_chunk` raise an uncaught `FileNotFoundError`, which reaches the
-client as a 500. From the caller, an upload id that produces a 500 is indistinguishable from the
-server being broken.
-
-- New stable code `snapshot.upload.staged_bytes_lost`, and the upload is marked FAILED durably, so
-  `status` tells the truth and later chunks are refused by the state check rather than re-running
-  the same path.
-- **The blob is not recreated.** That looks like recovery and is corruption whenever `received` is
-  non-empty: those indices would become zero-filled while the record still claims them, and the
-  upload would SEAL over a bundle whose chunk digests were never re-checked.
-- The guard covers the write as well as the open, deliberately. A partly-written chunk leaves the
-  blob in a state no digest in the record describes -- the same disagreement by a different route.

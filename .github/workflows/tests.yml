@@ -290,17 +290,19 @@ jobs:
           drv.close()
           PY
 
-      # One lane is deselected because it reproduces an OPEN product defect, not a
-      # regression. It fails on a recorded finding while every other criterion in it
-      # passes, so running it here would pin the job red and destroy its signal.
-      # Re-select it when its issue closes:
+      # Every lane runs. Two were deselected while they reproduced OPEN product defects
+      # (a lane that fails on a recorded finding pins the job red and destroys its
+      # signal); each was re-selected with its fix and now asserts the fixed behaviour:
       #
-      #   test_e2e_02_memory_lifecycle  -> #92, provenance unreachable from the
-      #                                    tracked-write receipt (9/10 criteria pass)
+      #   test_e2e_08_isolation         -> #132, the cap refusal arrived as a 500; its
+      #                                    capped_scan criterion requires the documented
+      #                                    JSON error.
+      #   test_e2e_02_memory_lifecycle  -> #92, provenance was unreachable from the
+      #                                    tracked-write receipt; provenance_reachable_
+      #                                    from_receipt requires get_provenance to carry
+      #                                    the receipt as episode_id.
       #
-      # test_e2e_08_isolation was deselected for #132 (cap refusal arrived as a 500) and
-      # re-selected with its fix; its capped_scan criterion now requires the documented
-      # JSON error, so a regression there fails this job instead of hiding.
+      # If a lane must be deselected again, name the issue here and in the lane.
       - name: Run the stdio E2E campaign
         working-directory: menhir
         env:
@@ -311,8 +313,7 @@ jobs:
           # checkout, and the first green run uploaded an empty artifact without saying so.
           MENHIR_E2E_WORK_ROOT: ${{ github.workspace }}/menhir/.e2e-work
         run: |
-          pytest tests/e2e -v -rs \
-            --deselect tests/e2e/test_e2e_02_memory_lifecycle.py::test_e2e_02_memory_lifecycle
+          pytest tests/e2e -v -rs
 
       # result.json is what Gate C actually asks for: which acceptance criteria were
       # proven, not merely whether pytest was green. Kept on failure too -- that is when

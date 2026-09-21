@@ -243,16 +243,13 @@ async def test_e2e_02_memory_lifecycle(
         # So the entity the correction produced is looked up first, and the contract under
         # test is the real one: from a thing recall can return, the source episode is
         # reachable. A recall answer whose origin cannot be traced is unauditable.
-        # TWO :Episodic nodes exist per write -- one with group_id=None and one carrying
-        # the namespace -- and only the namespaced one has MENTIONS. The uuid in the
-        # tracked-write receipt is the UNNAMESPACED one, which MENTIONS nothing. This is
-        # issue #92's shape ("two :Episodic nodes per ingest"), and Gate B lists #92 as a
-        # dispose-or-fix item.
-        #
-        # The consequence for an agent is traceability: it holds the receipt's
-        # episode_id, and provenance for the entities that write produced names a
-        # different uuid, so the two cannot be matched. That is recorded below as its own
-        # observation rather than being hidden by looking the enriched node up directly.
+        # TWO :Episodic nodes exist per write -- Menhir's receipt (group_id=None, the
+        # episode_id in the tracked-write receipt) and the Graphiti-minted twin (namespaced)
+        # that carries the MENTIONS edges. That is #92's shape and it is by construction:
+        # Graphiti mints its own node and Menhir cannot pass a uuid in. What #92 fixed is
+        # traceability: the receipt records the twin as resolved_episode_uuid, and
+        # get_provenance surfaces the receipt as `episode_id` on each episode it lists. An
+        # agent holding a receipt matches on that field, never on the twin's uuid.
         receipt_episode_mentions = graph_query(
             e2e_config,
             "MATCH (e:Episodic {uuid: $uuid})-[:MENTIONS]->(n) RETURN count(n) AS mentioned",
@@ -282,7 +279,18 @@ async def test_e2e_02_memory_lifecycle(
             )
         )
         names_an_episode = enriched_episode in provenance
-        names_the_receipt = correction_episode in provenance
+        # Structured, not a substring: the receipt must be the `episode_id` of the entry
+        # whose `uuid` is the enriched twin. A bare `correction_episode in provenance`
+        # would also pass if the receipt showed up anywhere else in the payload.
+        names_the_receipt = False
+        try:
+            listed = json.loads(provenance).get("episodes") or []
+        except (ValueError, AttributeError):
+            listed = []
+        for entry in listed:
+            if entry.get("uuid") == enriched_episode:
+                names_the_receipt = entry.get("episode_id") == correction_episode
+                break
         lane_evidence.record(
             "provenance_points_to_source_episode",
             passed=names_an_episode,
@@ -309,15 +317,11 @@ async def test_e2e_02_memory_lifecycle(
                 "provenance_names_receipt_episode": names_the_receipt,
             },
         )
-        if not names_the_receipt:
-            deferred_failures.append(
-                "provenance is not reachable from the tracked-write receipt: the receipt "
-                f"returned episode_id={correction_episode} (MENTIONS {receipt_mentions} "
-                f"nodes, group_id null) while provenance names {enriched_episode}. Two "
-                ":Episodic nodes exist per write and only the namespaced one is enriched, "
-                "so an agent holding a receipt cannot match it against provenance. "
-                "Issue #92's shape; Gate B lists #92 as dispose-or-fix."
-            )
+        assert names_the_receipt, (
+            "provenance is not reachable from the tracked-write receipt (#92): the receipt "
+            f"returned episode_id={correction_episode} while provenance lists the enriched "
+            f"twin {enriched_episode} without that episode_id:\n{provenance[:600]}"
+        )
         lane_evidence.attach(
             "provenance.json",
             json.dumps({"node": node_uuid, "episode": correction_episode, "text": provenance}, indent=2),
