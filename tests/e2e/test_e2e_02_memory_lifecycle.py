@@ -154,8 +154,31 @@ async def test_e2e_02_memory_lifecycle(
         assert "500" in paraphrase, paraphrase[:600]
 
         context = _text(await client.call_tool("build_context", {"query": "Atlas Lantern refunds", "namespace": namespace}))
-        lane_evidence.record("build_context_from_memory", passed="500" in context, detail=context[:400])
-        assert "500" in context, context[:600]
+        context_has_fact = "500" in context
+        lane_evidence.record("build_context_from_memory", passed=context_has_fact, detail=context[:400])
+
+        # REPRODUCED ON main, 2026-09-21: recall_memories returns the fact and
+        # build_context returns "nothing relevant found" for the same namespace and the
+        # same write. This is #118's remaining product gap, not a lane defect, and the
+        # fix is unmerged on `mvp-118-stdio-e2e`:
+        #
+        #   context_builder.py  - pass include_session=True and session_id into recall
+        #   build_context.py    - default session_id to the MCP session's id
+        #
+        # Its own comment states the mechanism: "Fresh tracked writes initially produce
+        # SESSION-scoped nodes, so excluding that scope makes a write visible to
+        # recall_memories but immediately disappear from context."
+        #
+        # Deferred rather than failing here so correction-currentness, provenance and
+        # restart are still exercised by the same run. The lane still fails.
+        deferred_failures: list[str] = []
+        if not context_has_fact:
+            deferred_failures.append(
+                "build_context_from_memory: recall_memories returned the stored fact but "
+                "build_context found nothing for the same namespace and query. #118's "
+                "SESSION-scope gap; fix unmerged on mvp-118-stdio-e2e "
+                f"(context_builder.py, build_context.py).\n{context[:300]}"
+            )
 
         # --- correction: current vs historical --------------------------------------
         corrected = _text(
@@ -196,17 +219,37 @@ async def test_e2e_02_memory_lifecycle(
         # So the entity the correction produced is looked up first, and the contract under
         # test is the real one: from a thing recall can return, the source episode is
         # reachable. A recall answer whose origin cannot be traced is unauditable.
-        extracted = graph_query(
+        # TWO :Episodic nodes exist per write -- one with group_id=None and one carrying
+        # the namespace -- and only the namespaced one has MENTIONS. The uuid in the
+        # tracked-write receipt is the UNNAMESPACED one, which MENTIONS nothing. This is
+        # issue #92's shape ("two :Episodic nodes per ingest"), and Gate B lists #92 as a
+        # dispose-or-fix item.
+        #
+        # The consequence for an agent is traceability: it holds the receipt's
+        # episode_id, and provenance for the entities that write produced names a
+        # different uuid, so the two cannot be matched. That is recorded below as its own
+        # observation rather than being hidden by looking the enriched node up directly.
+        receipt_episode_mentions = graph_query(
             e2e_config,
-            "MATCH (e:Episodic {uuid: $uuid})-[:MENTIONS]->(n) "
-            "RETURN n.uuid AS uuid, n.name AS name LIMIT 1",
+            "MATCH (e:Episodic {uuid: $uuid})-[:MENTIONS]->(n) RETURN count(n) AS mentioned",
             uuid=correction_episode,
         )
+        receipt_mentions = receipt_episode_mentions[0]["mentioned"] if receipt_episode_mentions else 0
+
+        # Provenance is asked of a node an agent could actually reach: an entity in this
+        # namespace. That is the documented use -- "pass a node_uuid from a recall result".
+        extracted = graph_query(
+            e2e_config,
+            "MATCH (e:Episodic)-[:MENTIONS]->(n) WHERE e.group_id = $group "
+            "RETURN n.uuid AS uuid, n.name AS name, e.uuid AS episode LIMIT 1",
+            group=namespace,
+        )
         assert extracted, (
-            f"correction episode {correction_episode} MENTIONS nothing, so there is no "
-            "node whose provenance could point back to it"
+            f"no MENTIONS edge exists in namespace {namespace} at all, so enrichment "
+            "produced nothing and there is no node whose provenance could be asked"
         )
         node_uuid = extracted[0]["uuid"]
+        enriched_episode = extracted[0]["episode"]
 
         provenance = _text(
             await client.call_tool(
@@ -214,15 +257,34 @@ async def test_e2e_02_memory_lifecycle(
                 {"name": "get_provenance", "arguments": {"node_uuid": node_uuid, "namespace": namespace}},
             )
         )
+        names_an_episode = enriched_episode in provenance
+        names_the_receipt = correction_episode in provenance
         lane_evidence.record(
             "provenance_points_to_source_episode",
-            passed=correction_episode in provenance,
-            detail={"node": node_uuid, "name": extracted[0].get("name"), "body": provenance[:400]},
+            passed=names_an_episode,
+            detail={
+                "node": node_uuid,
+                "name": extracted[0].get("name"),
+                "enriched_episode": enriched_episode,
+                "receipt_episode": correction_episode,
+                "receipt_episode_mentions": receipt_mentions,
+                "provenance_names_receipt_episode": names_the_receipt,
+                "body": provenance[:400],
+            },
         )
-        assert correction_episode in provenance, (
-            f"provenance for node {node_uuid} does not name its source episode "
-            f"{correction_episode}: {provenance[:600]}"
+        assert names_an_episode, (
+            f"provenance for node {node_uuid} does not name the episode that MENTIONS "
+            f"it ({enriched_episode}): {provenance[:600]}"
         )
+        if not names_the_receipt:
+            deferred_failures.append(
+                "provenance is not reachable from the tracked-write receipt: the receipt "
+                f"returned episode_id={correction_episode} (MENTIONS {receipt_mentions} "
+                f"nodes, group_id null) while provenance names {enriched_episode}. Two "
+                ":Episodic nodes exist per write and only the namespaced one is enriched, "
+                "so an agent holding a receipt cannot match it against provenance. "
+                "Issue #92's shape; Gate B lists #92 as dispose-or-fix."
+            )
         lane_evidence.attach(
             "provenance.json",
             json.dumps({"node": node_uuid, "episode": correction_episode, "text": provenance}, indent=2),
@@ -240,5 +302,12 @@ async def test_e2e_02_memory_lifecycle(
         )
         lane_evidence.record("restart_then_recall_again", passed="750" in persisted, detail=persisted[:400])
         assert "750" in persisted, persisted[:600]
+
+    if deferred_failures:
+        lane_evidence.close(status="FAIL")
+        raise AssertionError(
+            f"E2E-2 reproduced {len(deferred_failures)} failure(s):\n\n"
+            + "\n\n".join(deferred_failures)
+        )
 
     lane_evidence.close(status="PASS")
