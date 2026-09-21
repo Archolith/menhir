@@ -31,6 +31,7 @@ from tests.e2e._harness.features import (
     combos_from_environment,
     validate_registry,
 )
+from tests.e2e._harness.artifact_corpus import build_artifact_corpus
 from tests.e2e._harness.fixture_repo import build_fixture_repo
 from tests.e2e._harness.providers import (
     deterministic_provider,
@@ -142,6 +143,19 @@ def e2e_fixture_repo(e2e_config: E2EConfig):
     """The generated fixture project used by E2E-3, E2E-6 and E2E-8."""
 
     return build_fixture_repo(e2e_config.fixtures_dir / "shop")
+
+
+@pytest.fixture(scope="session")
+def e2e_artifact_corpus(e2e_config: E2EConfig):
+    """The generated WorkArtifact corpus used by E2E-4.
+
+    Session-scoped, and E2E-4 mutates it: the stable-UUID criterion moves a document with
+    ``git mv``. That is safe only because E2E-4 is the single consumer. A second lane
+    taking this fixture must not assume the corpus is still in its built state -- rebuild
+    into a distinct directory instead.
+    """
+
+    return build_artifact_corpus(e2e_config.fixtures_dir / "artifact-corpus")
 
 
 @pytest.fixture

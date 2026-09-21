@@ -48,9 +48,15 @@ from tests.e2e._harness.client import stdio_session
 from tests.e2e._harness.config import E2EConfig
 from tests.e2e._harness.evidence import LaneEvidence
 from tests.e2e._harness.features import FeatureCombo
+from tests.e2e._harness.artifact_corpus import (
+    EXPECTED_ARTIFACTS,
+    MALFORMED_PATH,
+    build_artifact_corpus,
+    write_malformed_document,
+)
 from tests.e2e._harness.fixture_repo import UNINDEXED_PATH
 from tests.e2e._harness.pending import declare_pending
-from tests.e2e._harness.stack import graph_query
+from tests.e2e._harness.stack import graph_query, run_menhir_cli
 
 pytestmark = [pytest.mark.e2e, pytest.mark.timeout(3000)]
 
@@ -64,10 +70,9 @@ ISOLATION_CRITERIA = [
 
 PROVIDER_CRITERIA = ["provider_failure_does_not_silently_pass"]
 
-DEFERRED_CRITERIA = [
-    "malformed_artifact_metadata_fails_without_corruption",
-    "invalid_beacon_input_does_not_clobber_manifest",
-]
+CORPUS_CRITERIA = ["malformed_artifact_metadata_fails_without_corruption"]
+
+DEFERRED_CRITERIA = ["invalid_beacon_input_does_not_clobber_manifest"]
 
 EPISODE_ID = re.compile(r"episode_id[=:]\s*([0-9a-f-]{36})")
 
@@ -430,8 +435,132 @@ async def test_e2e_08_provider_failure_is_not_silent(
     lane_evidence.close(status="PASS")
 
 
+async def test_e2e_08_malformed_artifact_metadata(
+    e2e_config: E2EConfig,
+    e2e_installed,
+    running_stack,
+    feature_combo: FeatureCombo,
+    feature_env: dict[str, str],
+    lane_evidence: LaneEvidence,
+) -> None:
+    """A document with invalid declared metadata is refused, and refused in isolation.
+
+    Two separate properties, and the second is the one that matters. Rejecting the bad
+    document is table stakes. What an adversarial case is really asking is whether one
+    malformed record can take the corpus down with it -- the reconciler's own parser
+    documents that ``errors`` is populated rather than raised so that "one malformed
+    record must not stop the rest", and this is where that claim is tested rather than
+    read.
+
+    So the corpus is reconciled WITH the bad document present, and every good document
+    must still register. A run that refuses the corpus wholesale would satisfy a naive
+    "was it rejected?" assertion while being exactly the outage this guards against.
+
+    Its own corpus, not the session fixture: E2E-4 moves a file in that one, and a lane
+    that depended on another lane's mutations would pass or fail on ordering.
+    """
+
+    lane_evidence.record_stack(features=feature_combo.label, provider="none")
+    corpus = build_artifact_corpus(
+        e2e_config.fixtures_dir / f"artifact-corpus-malformed-{uuid4().hex[:8]}",
+        repository=f"malformed-fixture-{uuid4().hex[:8]}",
+    )
+    write_malformed_document(corpus)
+    lane_evidence.record_stack(**corpus.as_evidence())
+
+    def _audit() -> dict:
+        result = run_menhir_cli(
+            e2e_config,
+            "artifacts", "audit",
+            "--repository", corpus.repository,
+            "--repo", str(corpus.path),
+            "--json",
+            feature_env=feature_env,
+        )
+        assert result.returncode == 0, (
+            f"audit exited {result.returncode} | stdout: {result.stdout[-1500:]} "
+            f"| stderr: {result.stderr[-1500:]}"
+        )
+        return json.loads(result.stdout)
+
+    audit = _audit()
+    lane_evidence.attach("malformed-audit.json", json.dumps(audit, indent=2))
+
+    by_path = {
+        (a.get("path") or "").replace("\\", "/"): a for a in audit.get("actions", [])
+    }
+    bad = by_path.get(MALFORMED_PATH)
+    assert bad is not None, f"{MALFORMED_PATH} is absent from the ledger entirely"
+
+    # CONFLICT is deliberately outside SAFE_ACTION_KINDS: a conflict is a report, never a
+    # mutation. So the kind is the assertion -- anything else means apply would write it.
+    is_conflict = bad.get("kind") == "CONFLICT"
+    names_the_reason = bad.get("conflict_kind") == "INVALID_DECLARED_METADATA"
+    detail = " ".join(bad.get("detail") or [])
+    # All three authoring mistakes, reported separately. A parser that stopped at the
+    # first would leave the author fixing one error per round trip.
+    lists_every_error = all(
+        token in detail
+        for token in ("invalid_artifact_uuid", "unknown_artifact_type", "derived_key_declared")
+    )
+    lane_evidence.record(
+        "malformed_artifact_metadata_fails_without_corruption",
+        passed=is_conflict and names_the_reason and lists_every_error,
+        detail={"action": bad, "all_errors_listed": lists_every_error},
+    )
+    assert is_conflict, f"malformed metadata produced a {bad.get('kind')} action, not a CONFLICT"
+    assert names_the_reason, bad
+    assert lists_every_error, f"not every authoring error was reported: {detail!r}"
+
+    # --- and the rest of the corpus still reconciles ---------------------------------
+    applied = run_menhir_cli(
+        e2e_config,
+        "artifacts", "reconcile",
+        "--repository", corpus.repository,
+        "--repo", str(corpus.path),
+        "--apply",
+        "--plan-digest", audit["plan_digest"],
+        "--allow-new-repository",
+        "--json",
+        feature_env=feature_env,
+    )
+    assert applied.returncode == 0, (
+        "a single malformed document made the whole reconcile fail "
+        f"(exit {applied.returncode}): {(applied.stdout + applied.stderr)[-2000:]}"
+    )
+
+    after = _audit()
+    registered = {
+        path: a.get("artifact_uuid")
+        for path, a in {
+            (x.get("path") or "").replace("\\", "/"): x for x in after.get("actions", [])
+        }.items()
+    }
+    good_registered = [p for p in EXPECTED_ARTIFACTS if registered.get(p)]
+    uncorrupted = len(good_registered) == len(EXPECTED_ARTIFACTS)
+    still_refused = not registered.get(MALFORMED_PATH)
+    lane_evidence.record(
+        "malformed_artifact_metadata_fails_without_corruption",
+        passed=is_conflict and names_the_reason and lists_every_error and uncorrupted and still_refused,
+        detail={
+            "good_documents_registered": sorted(good_registered),
+            "expected_good": sorted(EXPECTED_ARTIFACTS),
+            "malformed_still_unregistered": still_refused,
+        },
+    )
+    assert uncorrupted, (
+        "the malformed document blocked registration of "
+        f"{sorted(set(EXPECTED_ARTIFACTS) - set(good_registered))}"
+    )
+    assert still_refused, (
+        f"{MALFORMED_PATH} was registered despite its metadata being rejected"
+    )
+
+    lane_evidence.close(status="PASS")
+
+
 async def test_e2e_08_deferred_criteria(lane_evidence: LaneEvidence, feature_combo: FeatureCombo) -> None:
-    """The two E2E-8 criteria whose prerequisites belong to other lanes.
+    """The E2E-8 criterion whose prerequisite belongs to another lane.
 
     Kept as a declared-pending test rather than deleted: Gate C counts checklist items,
     and a criterion that stops appearing in the evidence tree is indistinguishable from
@@ -442,10 +571,8 @@ async def test_e2e_08_deferred_criteria(lane_evidence: LaneEvidence, feature_com
         lane_evidence,
         DEFERRED_CRITERIA,
         note=(
-            "malformed_artifact_metadata_fails_without_corruption needs the fixture "
-            "artifact corpus E2E-4 is blocked on; invalid_beacon_input_does_not_clobber_"
-            "manifest needs the Beacon interpreter E2E-6 is blocked on "
-            "(MENHIR_E2E_BEACON_PYTHON). Both are adversarial variants of those lanes' "
-            "happy paths and should be written with them, not before them."
+            "invalid_beacon_input_does_not_clobber_manifest needs the Beacon interpreter "
+            "E2E-6 is blocked on (MENHIR_E2E_BEACON_PYTHON). It is the adversarial "
+            "variant of that lane's happy path and should be written with it, not before."
         ),
     )

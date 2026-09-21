@@ -14,17 +14,17 @@ criteria; it does not redefine them.
 | E2E-1 | cold install, `initialize`, `tools/list`, schemas, shutdown | **implemented** |
 | E2E-2 | memory lifecycle (carries #118's remaining acceptance) | **implemented** |
 | E2E-3 | integrated coding workflow | **implemented** |
-| E2E-4 | WorkArtifact lifecycle | scaffolded, needs fixture corpus |
+| E2E-4 | WorkArtifact lifecycle | **implemented** |
 | E2E-5 | TODO lifecycle | **implemented** |
 | E2E-6 | Beacon generation and consumption | scaffolded, policy pinned |
 | E2E-7 | restart and interrupted work | **implemented** |
-| E2E-8 | isolation and adversarial (carries #88's regression pin) | **6 of 8 criteria** |
+| E2E-8 | isolation and adversarial (carries #88's regression pin) | **7 of 8 criteria** |
 
-E2E-8 is three tests rather than one. A lane declares a single provider, and its criteria
+E2E-8 is four tests rather than one. A lane declares a single provider, and its criteria
 need opposite ones: the #88 isolation pin needs a provider that succeeds (entities must be
 written before they can land in the wrong silo), while "provider failure does not silently
-pass" needs one that reliably fails. Its two remaining criteria are adversarial variants of
-E2E-4's and E2E-6's happy paths, and are declared pending against those prerequisites.
+pass" needs one that reliably fails. Its one remaining criterion is the adversarial variant of E2E-6's happy path, and is
+declared pending against that prerequisite.
 
 A scaffolded lane is **not** a silent skip. `_harness/pending.py` writes a full evidence
 directory recording every acceptance criterion as unproven, then skips — so
@@ -113,6 +113,15 @@ states reachable without a model. `failing` exists because E2E-8 requires that p
 failure does not silently pass, and that is only testable against something that
 reliably fails.
 
+## The operator CLI
+
+E2E-4 is the one lane that drives both surfaces. `audit_artifact_corpus` is read-only by
+design -- its own docstring sends the caller to `menhir artifacts reconcile --apply` to
+write anything -- so a lane asserting only the MCP half would leave the registration path,
+the half that writes, untested. `_harness/stack.py:run_menhir_cli` runs the installed
+`menhir` under the same allow-listed environment and state directory as every other child,
+so the CLI cannot reach a graph the campaign did not choose either.
+
 ## Feature matrix
 
 Any registered feature can be toggled on or off in any combination, and the active
@@ -198,9 +207,6 @@ what the server returned.
 
 ## Known gaps
 
-- **E2E-4 needs a committed fixture artifact corpus.** Its stable-UUID criterion (move an
-  artifact file, run reconcile, identity survives) is the one with teeth, and it cannot be
-  written against a corpus that does not exist yet.
 - **E2E-6 needs a Beacon interpreter** (`MENHIR_E2E_BEACON_PYTHON`). The overwrite and CAS
   refresh policy is already pinned in the lane's docstring, so what is missing is the
   second venv, not the decision.

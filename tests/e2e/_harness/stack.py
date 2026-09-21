@@ -35,6 +35,7 @@ __all__ = [
     "InstalledMenhir",
     "build_wheel",
     "graph_query",
+    "run_menhir_cli",
     "install_into_venv",
     "reset_graph",
     "start_backend",
@@ -187,6 +188,35 @@ def reset_graph(config: E2EConfig) -> None:
                     break
     finally:
         driver.close()
+
+
+def run_menhir_cli(
+    config: E2EConfig,
+    *args: str,
+    feature_env: dict[str, str] | None = None,
+    timeout: int = 600,
+) -> subprocess.CompletedProcess[str]:
+    """Run the installed ``menhir`` CLI under the harness environment.
+
+    Some acceptance criteria only exist on the operator CLI -- artifact reconciliation
+    writes through `menhir artifacts reconcile --apply`, and the MCP surface is read-only
+    by design. A lane that asserted only the MCP half would leave the writing half
+    untested.
+
+    cwd is the harness state directory for the same reason every other child's is:
+    ``resolve_env_file`` falls back to ``./.env``, and a CLI invoked from inside a
+    checkout would read the developer's env file and reach a graph this campaign never
+    chose.
+    """
+
+    return subprocess.run(
+        [str(config.venv_script("menhir")), *args],
+        cwd=str(config.state_dir),
+        env=child_environment(config, **(feature_env or {})),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
 
 
 def graph_query(config: E2EConfig, cypher: str, **params: object) -> list[dict]:
