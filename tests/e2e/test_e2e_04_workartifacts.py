@@ -211,6 +211,10 @@ async def test_e2e_04_workartifacts(
                 "call_tool", {"name": "get_artifact", "arguments": {"artifact_uuid": plan_uuid}}
             )
         )
+        # `[PLAN] <title>` is the detail view's first line. Taken from the response
+        # rather than restated here so a fixture edit cannot leave the lane asserting a
+        # title the corpus no longer has.
+        plan_title = detail.splitlines()[0].split("] ", 1)[-1].strip()
         listed = f"uuid={plan_uuid}" in listing
         typed = "[PLAN]" in detail and "status=PROPOSED" in detail
         # The embodiment is what ties the graph record back to a file on disk. An
@@ -236,18 +240,42 @@ async def test_e2e_04_workartifacts(
         )
         # It holds its type's initial status because nothing readable said otherwise --
         # and that fact must be stated, or PROPOSED reads as a declaration nobody made.
+        #
+        # REPRODUCED DEFECT, 2026-09-21. `says_unmapped` is false on a real run.
+        # `create_artifact` accepts `status_unresolved_reason` and its docstring states
+        # the exact purpose ("an artifact sitting in its initial state because nobody
+        # could read its header is distinguishable from one that genuinely is in that
+        # state"); `get_artifact` and `list_artifacts` both render it. But the reconcile
+        # registration path at work_artifact_repository.py:983 never passes it, and
+        # artifact_reconciliation.py:1528 discards the computed reason into `_reason`.
+        # The field is wired end to end except for the one write that fills it.
+        #
+        # The assertion is DEFERRED to the end of the lane rather than dropped or
+        # softened: Gate C says a failing negative test is a release-blocking issue with
+        # a reproduced failure, not something to retry. Deferring keeps the lane failing
+        # while letting the remaining criteria be exercised in the same expensive run.
         holds_initial = "status=PROPOSED" in unclear
         says_unmapped = "status unmapped" in unclear
         lane_evidence.record(
             "unparseable_status_registers_unresolved_not_coerced",
             passed=holds_initial and says_unmapped,
-            detail={"holds_initial_status": holds_initial, "declares_unresolved": says_unmapped},
+            detail={
+                "holds_initial_status": holds_initial,
+                "declares_unresolved": says_unmapped,
+                "body": unclear[:400],
+            },
         )
         assert holds_initial, unclear[:600]
-        assert says_unmapped, (
-            "a document whose Status header could not be read was registered as PROPOSED "
-            f"with no indication that nobody declared it:\n{unclear[:600]}"
-        )
+        deferred_failures: list[str] = []
+        if not says_unmapped:
+            deferred_failures.append(
+                "unparseable_status_registers_unresolved_not_coerced: a document whose "
+                "Status header could not be read was registered as PROPOSED with no "
+                "indication that nobody declared it. status_unresolved_reason is never "
+                "written by the reconcile registration path "
+                "(work_artifact_repository.py:983; the reason is discarded at "
+                f"artifact_reconciliation.py:1528).\n{unclear[:400]}"
+            )
 
         # --- relationships --------------------------------------------------------------
         linked = _text(
@@ -365,8 +393,12 @@ async def test_e2e_04_workartifacts(
         # Both halves or neither. An edge pointing at an artifact still marked REVIEWED,
         # or a SUPERSEDED artifact with no record of what replaced it, are each a state
         # the graph is documented never to hold.
+        #
+        # `get_artifact_relationships` renders `target_title or target_uuid`, so a titled
+        # artifact never shows its uuid here. Asserting on the uuid failed against a
+        # correctly recorded edge; the title is what the surface actually emits.
         moved_to_superseded = "status=SUPERSEDED" in old_after
-        edge_recorded = plan_uuid in relations
+        edge_recorded = f"SUPERSEDES: {plan_title}" in relations
         lane_evidence.record(
             "supersede_direction_and_status",
             passed=moved_to_superseded and edge_recorded,
@@ -439,32 +471,65 @@ async def test_e2e_04_workartifacts(
         for token in ("error", "unavailable", "does not exist", "no such", "cannot")
     )
     # #104's shape: a tree the scanner could not read, reported as parity. If the command
-    # succeeds it must NOT claim the corpus is fine -- a clean ledger over an absent
-    # directory is the confident wrong answer that authorizes deletions.
+    # succeeds it must NOT claim the corpus is fine -- and "fine" includes the inverse
+    # answer, "every source you have is gone", which is what an empty scan of an absent
+    # directory produces.
     claimed_clean = False
+    mass_unresolved = 0
+    payload: dict = {}
     if unreadable.returncode == 0 and unreadable.stdout.strip():
         try:
             payload = json.loads(unreadable.stdout)
         except json.JSONDecodeError:
             payload = {}
         claimed_clean = payload.get("actions") == [] and bool(payload.get("plan_digest"))
+        mass_unresolved = sum(
+            1 for a in payload.get("actions", []) if a.get("kind") == "MARK_SOURCE_UNRESOLVED"
+        )
+
+    # REPRODUCED DEFECT, 2026-09-21, verified live against an absent directory:
+    # exit 0, a valid plan_digest, entries=0, and every known source reported
+    # MARK_SOURCE_UNRESOLVED with reason source_not_observed_in_corpus_scan. The only
+    # signals that the tree was never read are `evidence_base_valid: false` and a null
+    # `observed_commit`, neither surfaced as an error.
+    #
+    # MARK_SOURCE_UNRESOLVED is in SAFE_ACTION_KINDS, so the emitted digest is applyable:
+    # `reconcile --apply` over a mistyped or unmounted path would mark real sources
+    # unresolved. This is issue #104's shape reaching the artifact corpus.
+    authorizes_mass_unresolve = mass_unresolved > 0 and bool(payload.get("plan_digest"))
     lane_evidence.record(
         "unreadable_corpus_path_is_error_not_clean_parity",
-        passed=errored and not claimed_clean,
+        passed=(errored and not claimed_clean and not authorizes_mass_unresolve),
         detail={
             "returncode": unreadable.returncode,
             "claimed_clean_parity": claimed_clean,
-            "output": (unreadable.stdout + unreadable.stderr)[:600],
+            "mark_source_unresolved_actions": mass_unresolved,
+            "plan_digest": payload.get("plan_digest"),
+            "evidence_base_valid": payload.get("evidence_base_valid"),
+            "observed_commit": payload.get("observed_commit"),
+            "counts": payload.get("counts"),
         },
     )
     assert not claimed_clean, (
         "auditing an absent repository reported clean parity with an empty ledger -- the "
         "#104 failure: a completeness answer derived from a tree the server never saw"
     )
-    assert errored, (
-        f"auditing an absent repository neither failed nor said anything was wrong:\n"
-        f"{(unreadable.stdout + unreadable.stderr)[:600]}"
-    )
+    if authorizes_mass_unresolve:
+        deferred_failures.append(
+            "unreadable_corpus_path_is_error_not_clean_parity: auditing an ABSENT "
+            f"repository exited {unreadable.returncode} and emitted an applyable ledger "
+            f"marking {mass_unresolved} source(s) MARK_SOURCE_UNRESOLVED "
+            f"(plan_digest={payload.get('plan_digest')}, entries=0, "
+            f"evidence_base_valid={payload.get('evidence_base_valid')}). That kind is in "
+            "SAFE_ACTION_KINDS, so applying this digest would degrade real records "
+            "because a directory was not there. Issue #104's shape."
+        )
+    elif not errored:
+        deferred_failures.append(
+            "unreadable_corpus_path_is_error_not_clean_parity: auditing an absent "
+            "repository neither failed nor said anything was wrong:\n"
+            f"{(unreadable.stdout + unreadable.stderr)[:400]}"
+        )
 
     # --- restart ---------------------------------------------------------------------------
     async with stdio_session(
@@ -487,7 +552,7 @@ async def test_e2e_04_workartifacts(
             )
         )
         status_survived = "status=SUPERSEDED" in plan_after
-        relationships_survived = plan_uuid in relations_after
+        relationships_survived = f"SUPERSEDES: {plan_title}" in relations_after
         source_survived = MOVE_DESTINATION.rsplit("/", 1)[-1] in moved_after.replace("\\", "/")
         lane_evidence.record(
             "restart_preserves_relationships_status_source",
@@ -503,6 +568,14 @@ async def test_e2e_04_workartifacts(
         assert source_survived, (
             f"after restart the moved artifact does not carry its new locator "
             f"({MOVE_DESTINATION}):\n{moved_after[:600]}"
+        )
+
+    if deferred_failures:
+        lane_evidence.close(status="FAIL")
+        raise AssertionError(
+            "E2E-4 reproduced "
+            f"{len(deferred_failures)} release-blocking failure(s):\n\n"
+            + "\n\n".join(deferred_failures)
         )
 
     lane_evidence.close(status="PASS")
