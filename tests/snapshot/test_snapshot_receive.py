@@ -25,6 +25,7 @@ from menhir.snapshot.receive import (
     ERR_CHUNK_LENGTH,
     ERR_DISK_BUDGET,
     ERR_NOT_FOUND,
+    ERR_PROJECT_IDENTITY,
     ERR_SIZE,
     ERR_STAGING_LOST,
     ERR_TOO_MANY_PER_PRINCIPAL,
@@ -293,6 +294,53 @@ def test_a_project_is_capped_across_principals(tmp_path: Path, clock: FakeClock)
     assert excinfo.value.code == ERR_TOO_MANY_PER_PROJECT
 
 
+def test_only_a_server_registered_project_identity_can_be_reused(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    receiver = StagingReceiver(tmp_path / "s", limits=_LIMITS, clock=clock)
+    first = _begin(receiver, principal="alice", project="display-a", size=8)
+    _chunk(receiver, first, 0, b"12345678")
+    receiver.ensure_project_identity(upload_id=first.upload_id, principal="alice")
+    reused = receiver.begin(
+        principal="bob",
+        project_key="renamed-display",
+        project_id=first.project_id,
+        declared_bytes=8,
+    )
+
+    assert reused.project_id == first.project_id
+    with pytest.raises(ReceiveError) as excinfo:
+        receiver.begin(
+            principal="alice",
+            project_key="display-a",
+            project_id="project-" + ("f" * 32),
+            declared_bytes=8,
+        )
+    assert excinfo.value.code == ERR_PROJECT_IDENTITY
+
+
+def test_a_principal_reservation_bound_includes_sealed_bytes(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    receiver = StagingReceiver(
+        tmp_path / "s",
+        limits=_LIMITS,
+        clock=clock,
+        quotas=StagingQuotas(
+            max_receiving_per_principal=10,
+            max_reserved_bytes_per_principal=16,
+        ),
+    )
+    first = _begin(receiver, size=16)
+    _chunk(receiver, first, 0, b"01234567")
+    assert _chunk(receiver, first, 1, b"89abcdef").state is UploadState.SEALED
+
+    with pytest.raises(ReceiveError) as excinfo:
+        _begin(receiver, size=1)
+
+    assert excinfo.value.code == ERR_DISK_BUDGET
+
+
 def test_aborting_releases_the_quota_slot(receiver: StagingReceiver) -> None:
     first = _begin(receiver)
     _begin(receiver)
@@ -434,8 +482,9 @@ def test_no_record_or_error_carries_content(receiver: StagingReceiver) -> None:
     assert base64.b64encode(secret[:8]).decode() not in serialized
     assert set(stored) == {
         "upload_id", "principal", "project_key", "state", "declared_bytes", "chunk_bytes",
-        "total_chunks", "created_at", "updated_at", "received", "received_bytes", "failure_code",
-    }
+            "project_id", "snapshot_id", "total_chunks", "created_at", "updated_at",
+            "received", "received_bytes", "failure_code", "result",
+        }
 
 
 def test_a_refusal_message_never_echoes_the_payload(receiver: StagingReceiver) -> None:

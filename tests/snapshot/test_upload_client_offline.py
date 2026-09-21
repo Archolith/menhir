@@ -17,6 +17,7 @@ error page, or a different service entirely, these are the paths that run.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Self
 
 import pytest
@@ -140,3 +141,68 @@ def test_a_well_formed_reply_is_returned(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert payload["upload_id"] == "abc"
     assert payload["chunk_bytes"] == 1024
+
+
+def test_upload_explicitly_commits_and_returns_the_terminal_server_receipt(
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / "bundle.zip"
+    archive.write_bytes(b"abcdefgh")
+    uploader = _uploader()
+    calls: list[str] = []
+
+    def call(tool: str, arguments: dict, **_kwargs):
+        calls.append(tool)
+        if tool == "begin_project_snapshot":
+            return {
+                "upload_id": "abc",
+                "chunk_bytes": 4,
+                "total_chunks": 2,
+                "commit_required": True,
+            }
+        if tool == "get_project_snapshot_status":
+            return {"state": "SEALED"}
+        if tool == "commit_project_snapshot":
+            return {
+                "state": "READY",
+                "project_id": "project-1",
+                "snapshot_id": "snapshot-1",
+                "result": {"stage": "published", "generation": 2},
+            }
+        return {"state": "RECEIVING"}
+
+    uploader._call = call  # type: ignore[method-assign]
+    result = uploader.upload(archive, project_key="project")
+
+    assert calls == [
+        "begin_project_snapshot",
+        "put_project_snapshot_chunk",
+        "put_project_snapshot_chunk",
+        "get_project_snapshot_status",
+        "commit_project_snapshot",
+    ]
+    assert result.state == "READY"
+    assert result.result == {"stage": "published", "generation": 2}
+
+
+def test_precommit_server_is_refused_before_source_bytes_are_sent(tmp_path: Path) -> None:
+    archive = tmp_path / "bundle.zip"
+    archive.write_bytes(b"abcdefgh")
+    uploader = _uploader()
+    calls: list[str] = []
+
+    def call(tool: str, arguments: dict, **_kwargs):
+        calls.append(tool)
+        if tool == "begin_project_snapshot":
+            return {"upload_id": "old", "chunk_bytes": 4, "total_chunks": 2}
+        if tool == "abort_project_snapshot":
+            return {"state": "ABORTED"}
+        raise AssertionError(f"unexpected tool call: {tool}")
+
+    uploader._call = call  # type: ignore[method-assign]
+
+    with pytest.raises(SnapshotUploadError) as excinfo:
+        uploader.upload(archive, project_key="project")
+
+    assert excinfo.value.code == "sync.server.commit_unavailable"
+    assert calls == ["begin_project_snapshot", "abort_project_snapshot"]

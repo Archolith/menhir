@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Awaitable, Callable
 from uuid import uuid4
 
+from menhir.config.snapshot_mode import snapshot_receive_mode
 from menhir.infrastructure.telemetry import record_failure_event, record_mcp_event
 from menhir.services.scheduler_lease import SchedulerLeaseStore, _utc_now_iso
 from menhir.services.scheduler_protocols import (
@@ -36,6 +37,7 @@ from menhir.services.scheduler_tasks import (
     consolidate_personal_memory,
     sync_experience_counters,
     sync_verifiers_job,
+    sweep_snapshot_view_roots,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,6 +87,8 @@ class MaintenanceScheduler:
     conflict_review_unresolved_limit: int = 50
     structure_watcher_interval_s: float = 1800.0
     structure_watcher_enabled: bool = True
+    snapshot_root_sweep_interval_s: float = 300.0
+    snapshot_root_sweep_enabled: bool = True
     experience_counter_interval_s: float = 3600.0
     experience_counter_enabled: bool = True
     experience_embed: Callable[[str], "list[float] | None"] | None = None
@@ -177,6 +181,10 @@ class MaintenanceScheduler:
         }
         if self.structure_watcher_enabled:
             self._jobs["refresh_structure_graphs"] = _JobState(interval_s=self.structure_watcher_interval_s)
+        if self.snapshot_root_sweep_enabled and snapshot_receive_mode().writes_graph:
+            self._jobs["sweep_snapshot_view_roots"] = _JobState(
+                interval_s=self.snapshot_root_sweep_interval_s
+            )
         if self.experience_counter_enabled:
             self._jobs["sync_experience_counters"] = _JobState(interval_s=self.experience_counter_interval_s)
         if self.verifier_sync_enabled and self.verifier_repo is not None:
@@ -567,6 +575,12 @@ class MaintenanceScheduler:
                     await self._run_job(job, "scheduler_review_unresolved_conflicts", self._make_review_unresolved_conflicts())
             elif name == "refresh_structure_graphs":
                 await self._run_job(job, "scheduler_refresh_structure_graphs", self._make_refresh_structure_graphs())
+            elif name == "sweep_snapshot_view_roots":
+                await self._run_job(
+                    job,
+                    "scheduler_sweep_snapshot_view_roots",
+                    self._make_sweep_snapshot_view_roots(),
+                )
             elif name == "sync_experience_counters":
                 await self._run_job(job, "scheduler_sync_experience_counters", self._make_sync_experience_counters())
             elif name == "sync_verifiers":
@@ -801,6 +815,9 @@ class MaintenanceScheduler:
 
     def _make_refresh_structure_graphs(self) -> Awaitable[dict[str, object]]:
         return refresh_structure_graphs(self.graph_adapter)
+
+    def _make_sweep_snapshot_view_roots(self) -> Awaitable[dict[str, object]]:
+        return sweep_snapshot_view_roots(self.graph_adapter)
 
     def _make_sync_experience_counters(self) -> Awaitable[dict[str, object]]:
         return sync_experience_counters(self.graph_adapter, embed=self.experience_embed)

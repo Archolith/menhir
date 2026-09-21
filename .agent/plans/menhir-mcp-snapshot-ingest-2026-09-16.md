@@ -9,6 +9,11 @@ artifact_status: IMPLEMENTING
 
 ## Execution status (2026-09-16)
 
+**Update 2026-09-20:** P2B, P3, and P4 are now connected to runtime by
+`menhir-snapshot-wiring-to-working-sync-2026-09-20.md`. Explicit commit drives RECEIVE, SHADOW,
+and WRITE; canonical snapshot reads, attributed publication, durable promotion recovery, scheduled
+fair cleanup, and truthful CLI receipts are implemented. P5-P7 remain outside that wiring plan.
+
 **P0 code half: DONE. P1: DONE. P2A: DONE — measurement run and gate closed (owner sign-off
 2026-09-16). P2B durable receiver: UNBLOCKED, not started.**
 

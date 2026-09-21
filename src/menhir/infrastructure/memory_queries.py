@@ -719,6 +719,7 @@ class MemoryQueryRepository:
         )
         return bool(rows and int(rows[0].get("nodes_updated", 0)) > 0)
 
+
     def promote_memory(self, node_uuid: str) -> bool:
         """Promote a PERSISTENT memory to PROMOTED: operator-curated, verified ground truth (SSOT-08).
 

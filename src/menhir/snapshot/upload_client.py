@@ -63,10 +63,13 @@ class UploadOutcome:
     total_chunks: int
     sent_chunks: int
     bytes_sent: int
+    project_id: str
+    snapshot_id: str
+    result: dict[str, Any]
 
 
 class SnapshotUploader:
-    """Drives begin -> chunk* -> status against one remote Menhir."""
+    """Drives begin -> chunk* -> sealed status -> explicit commit against remote Menhir."""
 
     def __init__(
         self,
@@ -83,7 +86,9 @@ class SnapshotUploader:
 
     # -- transport ------------------------------------------------------------------------------
 
-    def _call(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    def _call(
+        self, tool: str, arguments: dict[str, Any], *, timeout_s: float | None = None
+    ) -> dict[str, Any]:
         body = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -102,7 +107,9 @@ class SnapshotUploader:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
+            with urllib.request.urlopen(
+                request, timeout=self.timeout_s if timeout_s is None else timeout_s
+            ) as response:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             raise SnapshotUploadError(
@@ -156,6 +163,7 @@ class SnapshotUploader:
         archive: Path,
         *,
         project_key: str,
+        project_id: str | None = None,
         chunk_bytes: int | None = None,
         progress: Callable[[int, int], None] | None = None,
     ) -> UploadOutcome:
@@ -168,7 +176,12 @@ class SnapshotUploader:
         try:
             begun = self._call(
                 "begin_project_snapshot",
-                {"project_key": project_key, "declared_bytes": size, "chunk_bytes": chunk_bytes},
+                {
+                    "project_key": project_key,
+                    "project_id": project_id,
+                    "declared_bytes": size,
+                    "chunk_bytes": chunk_bytes,
+                },
             )
         except SnapshotUploadError as exc:
             # The server REFUSES a chunk size above its ceiling rather than clamping it, so a
@@ -179,7 +192,12 @@ class SnapshotUploader:
                 raise
             begun = self._call(
                 "begin_project_snapshot",
-                {"project_key": project_key, "declared_bytes": size, "chunk_bytes": None},
+                {
+                    "project_key": project_key,
+                    "project_id": project_id,
+                    "declared_bytes": size,
+                    "chunk_bytes": None,
+                },
             )
         upload_id = str(begun.get("upload_id") or "")
         negotiated = int(begun.get("chunk_bytes") or 0)
@@ -187,6 +205,16 @@ class SnapshotUploader:
         if not upload_id or negotiated <= 0:
             raise SnapshotUploadError(
                 "sync.server.unreadable_reply", "the server did not return a usable chunk plan"
+            )
+        if begun.get("commit_required") is not True:
+            try:
+                self._call("abort_project_snapshot", {"upload_id": upload_id})
+            except SnapshotUploadError:
+                pass
+            raise SnapshotUploadError(
+                "sync.server.commit_unavailable",
+                "the server does not advertise explicit snapshot commit support; no source bytes "
+                "were sent. Upgrade the remote Menhir before syncing.",
             )
 
         sent = 0
@@ -224,7 +252,15 @@ class SnapshotUploader:
                 pass
             raise
 
-        final = self._call("get_project_snapshot_status", {"upload_id": upload_id})
+        staged = self._call("get_project_snapshot_status", {"upload_id": upload_id})
+        if str(staged.get("state") or "") != "SEALED":
+            raise SnapshotUploadError(
+                "sync.server.incomplete_upload",
+                "the server did not seal the upload after accepting its chunks",
+            )
+        final = self._call(
+            "commit_project_snapshot", {"upload_id": upload_id}, timeout_s=900.0
+        )
         return UploadOutcome(
             upload_id=upload_id,
             state=str(final.get("state") or "UNKNOWN"),
@@ -232,6 +268,9 @@ class SnapshotUploader:
             total_chunks=total_chunks,
             sent_chunks=sent,
             bytes_sent=bytes_sent,
+            project_id=str(final.get("project_id") or ""),
+            snapshot_id=str(final.get("snapshot_id") or ""),
+            result=dict(final.get("result") or {}),
         )
 
 

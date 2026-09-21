@@ -40,6 +40,7 @@ from menhir.snapshot.view_root import ROOT_COMPLETE, read_root
 __all__ = [
     "CANONICAL_VIEW_CONSTRAINTS",
     "ERR_VIEW_ALREADY_CURRENT",
+    "ERR_VIEW_ACTOR_REQUIRED",
     "ERR_VIEW_DEGRADED",
     "ERR_VIEW_NO_PREVIOUS",
     "ERR_VIEW_ROOT_UNPUBLISHABLE",
@@ -57,6 +58,7 @@ ERR_VIEW_DEGRADED = "snapshot.view.degraded"
 ERR_VIEW_NO_PREVIOUS = "snapshot.view.no_previous"
 ERR_VIEW_ROOT_UNPUBLISHABLE = "snapshot.view.root_unpublishable"
 ERR_VIEW_ALREADY_CURRENT = "snapshot.view.already_current"
+ERR_VIEW_ACTOR_REQUIRED = "snapshot.view.actor_required"
 
 #: Real DDL, shipped with the module so a test can apply the SAME constraint the bootstrap does.
 #: A test that creates its own copy proves nothing about the one production runs.
@@ -88,6 +90,9 @@ class ViewPointer:
     previous_root: str | None
     degraded: bool
     degraded_reason: str = ""
+    display_name: str = ""
+    last_promoted_by: str = ""
+    degraded_by: str = ""
 
 
 def _pointer(row: Any, project_id: str, view_key: str) -> ViewPointer:
@@ -99,6 +104,9 @@ def _pointer(row: Any, project_id: str, view_key: str) -> ViewPointer:
         previous_root=row.get("previous_root"),
         degraded=bool(row.get("degraded") or False),
         degraded_reason=str(row.get("degraded_reason") or ""),
+        display_name=str(row.get("display_name") or ""),
+        last_promoted_by=str(row.get("last_promoted_by") or ""),
+        degraded_by=str(row.get("degraded_by") or ""),
     )
 
 
@@ -106,6 +114,9 @@ _RETURN = (
     "RETURN v.generation AS generation, v.current_root AS current_root, "
     "v.previous_root AS previous_root, coalesce(v.degraded, false) AS degraded, "
     "coalesce(v.degraded_reason, '') AS degraded_reason"
+    ", coalesce(v.display_name, '') AS display_name, "
+    "coalesce(v.last_promoted_by, '') AS last_promoted_by, "
+    "coalesce(v.degraded_by, '') AS degraded_by"
 )
 
 
@@ -132,6 +143,8 @@ def publish_root(
     view_key: str,
     root_id: str,
     expected_generation: int,
+    actor: str,
+    display_name: str = "",
 ) -> ViewPointer:
     """Make `root_id` the view's current root, or refuse.
 
@@ -154,6 +167,8 @@ def publish_root(
     it would read back belongs to the winner, and publishing against it would overwrite a
     promotion that legitimately happened.
     """
+    if not actor.strip():
+        raise ViewError(ERR_VIEW_ACTOR_REQUIRED, "an authenticated promotion actor is required")
     rows = list(
         neo4j.execute(
             "MATCH (r:ViewRoot {root_id: $root}) "
@@ -166,10 +181,14 @@ def publish_root(
             "ON CREATE SET v.generation = 0, v.degraded = false "
             "WITH v, r WHERE coalesce(v.generation, 0) = $expected "
             "AND coalesce(v.degraded, false) = false "
+            "AND trim($actor) <> '' "
             "AND coalesce(v.current_root, '') <> r.root_id "
             "SET v.previous_root = v.current_root, "
             "    v.current_root = r.root_id, "
-            "    v.generation = coalesce(v.generation, 0) + 1 "
+            "    v.generation = coalesce(v.generation, 0) + 1, "
+            "    v.display_name = CASE WHEN trim($display_name) = '' "
+            "      THEN coalesce(v.display_name, $pid) ELSE $display_name END, "
+            "    v.last_promoted_by = $actor, v.last_promoted_at = timestamp() "
             f"{_RETURN}",
             {
                 "pid": project_id,
@@ -177,6 +196,8 @@ def publish_root(
                 "root": root_id,
                 "expected": expected_generation,
                 "complete": ROOT_COMPLETE,
+                "actor": actor.strip(),
+                "display_name": display_name.strip(),
             },
         )
     )
@@ -218,7 +239,7 @@ def publish_root(
 
 
 def restore_previous(
-    neo4j: Any, *, project_id: str, view_key: str, expected_generation: int
+    neo4j: Any, *, project_id: str, view_key: str, expected_generation: int, actor: str
 ) -> ViewPointer:
     """Flip back to `previous_root`, or refuse.
 
@@ -229,15 +250,24 @@ def restore_previous(
     never-promoted-twice case and the already-restored case, and refusing is the whole point:
     restoring a generation the operator did not mean would be worse than telling them no.
     """
+    if not actor.strip():
+        raise ViewError(ERR_VIEW_ACTOR_REQUIRED, "an authenticated restore actor is required")
     rows = list(
         neo4j.execute(
             "MATCH (v:CanonicalView {project_id: $pid, view_key: $vk}) "
             "WHERE coalesce(v.generation, 0) = $expected AND v.previous_root IS NOT NULL "
+            "AND trim($actor) <> '' "
             "SET v.current_root = v.previous_root, "
             "    v.previous_root = NULL, "
-            "    v.generation = coalesce(v.generation, 0) + 1 "
+            "    v.generation = coalesce(v.generation, 0) + 1, "
+            "    v.last_restored_by = $actor, v.last_restored_at = timestamp() "
             f"{_RETURN}",
-            {"pid": project_id, "vk": view_key, "expected": expected_generation},
+            {
+                "pid": project_id,
+                "vk": view_key,
+                "expected": expected_generation,
+                "actor": actor.strip(),
+            },
         )
     )
     if rows:
@@ -253,22 +283,53 @@ def restore_previous(
 
 
 def mark_degraded(
-    neo4j: Any, *, project_id: str, view_key: str, reason: str
+    neo4j: Any,
+    *,
+    project_id: str,
+    view_key: str,
+    reason: str,
+    actor: str,
+    expected_generation: int | None = None,
+    expected_root: str | None = None,
 ) -> ViewPointer:
     """Record durably that this view cannot be trusted, and block promotion into it.
 
-    Deliberately NOT conditional on a generation. A view is marked degraded when compensation has
-    already failed, which means the state is one no code path intended -- refusing to record that
-    because the generation moved would leave the fault invisible, which is the opposite of what
-    this is for.
+    Ordinary compensation deliberately leaves the optional guards unset: its failure means the
+    state is one no code path intended and must be recorded. A background reconciler supplies both
+    guards because another legitimate promotion can race its stale read; in that case degrading
+    the newer view would manufacture a fault rather than record one.
     """
+    if not actor.strip():
+        raise ViewError(ERR_VIEW_ACTOR_REQUIRED, "an authenticated degradation actor is required")
+    guarded = expected_generation is not None or expected_root is not None
+    match = (
+        "MATCH (v:CanonicalView {project_id: $pid, view_key: $vk}) "
+        if guarded
+        else "MERGE (v:CanonicalView {project_id: $pid, view_key: $vk}) "
+        "ON CREATE SET v.generation = 0 "
+    )
     rows = list(
         neo4j.execute(
-            "MERGE (v:CanonicalView {project_id: $pid, view_key: $vk}) "
-            "ON CREATE SET v.generation = 0 "
-            "SET v.degraded = true, v.degraded_reason = $reason "
+            match + "WITH v WHERE trim($actor) <> '' "
+            "AND ($expected IS NULL OR coalesce(v.generation, 0) = $expected) "
+            "AND ($root IS NULL OR v.current_root = $root) "
+            "SET v.degraded = true, v.degraded_reason = $reason, "
+            "v.degraded_by = $actor, v.degraded_at = timestamp() "
             f"{_RETURN}",
-            {"pid": project_id, "vk": view_key, "reason": reason},
+            {
+                "pid": project_id,
+                "vk": view_key,
+                "reason": reason,
+                "actor": actor.strip(),
+                "expected": expected_generation,
+                "root": expected_root,
+            },
         )
     )
+    if not rows:
+        if not actor.strip():
+            raise ViewError(
+                ERR_VIEW_ACTOR_REQUIRED, "an authenticated degradation actor is required"
+            )
+        raise ViewError(ERR_VIEW_SUPERSEDED, "this view moved on before degradation")
     return _pointer(rows[0], project_id, view_key)

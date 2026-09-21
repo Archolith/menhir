@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from typing import Any
 
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
@@ -22,6 +23,47 @@ STRUCT_STALE_ADVISORY = (
     "elsewhere (e.g. a branch merged into another checkout). Verify the path before "
     "relying on this, or re-run ingest_project if the project moved."
 )
+
+SNAPSHOT_STATUS_KEY = "__snapshot_status__"
+SNAPSHOT_WARNING_LIMIT = 240
+
+
+def _unwrap_snapshot_result(result: Any) -> tuple[Any, dict[str, Any] | None]:
+    """Return legacy data plus optional snapshot status from the adapter envelope."""
+    if not isinstance(result, dict) or SNAPSHOT_STATUS_KEY not in result:
+        return result, None
+    status = result.get(SNAPSHOT_STATUS_KEY)
+    if not isinstance(status, dict) or "data" not in result:
+        return result, None
+    return result["data"], status
+
+
+class _SnapshotUnwrappingBackend:
+    """Keep snapshot-envelope handling out of all individual renderer branches."""
+
+    def __init__(self, backend: Any) -> None:
+        self._backend = backend
+        self.snapshot_status: dict[str, Any] | None = None
+
+    async def query_structure(self, *args: Any, **kwargs: Any) -> Any:
+        result = await self._backend.query_structure(*args, **kwargs)
+        data, status = _unwrap_snapshot_result(result)
+        if status is not None:
+            self.snapshot_status = status
+        return data
+
+
+def _snapshot_banner(status: dict[str, Any]) -> str:
+    state = "DEGRADED" if bool(status.get("degraded")) else "READY"
+    line = (
+        f"[SNAPSHOT id={status.get('snapshot_id', '')} "
+        f"view={status.get('view_key', '')} generation={int(status.get('generation') or 0)} "
+        f"status={state}]"
+    )
+    if state == "DEGRADED":
+        warning = str(status.get("warning") or "Snapshot view is degraded.")
+        line += f"\n[SNAPSHOT WARNING] {warning[:SNAPSHOT_WARNING_LIMIT]}"
+    return line
 
 
 def _root_status(entry: dict) -> str:
@@ -199,6 +241,7 @@ class QueryStructureTool(BaseTextTool):
 
         projects = await backend.query_structure("", "projects")
         known_projects = {str(p.get("name", "")) for p in projects}
+        known_projects.update(str(p.get("project_id", "")) for p in projects)
         if project not in known_projects:
             return _format_unknown_project(project, projects)
 
@@ -222,12 +265,15 @@ class QueryStructureTool(BaseTextTool):
             else ""
         )
 
+        snapshot_backend = _SnapshotUnwrappingBackend(backend)
         try:
             text = await self._dispatch(
-                query_type, project, path, backend, namespace, neg=neg
+                query_type, project, path, snapshot_backend, namespace, neg=neg
             )
         except ValueError as e:
             return f"Error: {e}"
+        if snapshot_backend.snapshot_status is not None:
+            return _snapshot_banner(snapshot_backend.snapshot_status) + "\n" + text
         return stale_banner + text if stale_banner else text
 
     async def _dispatch(

@@ -515,6 +515,14 @@ The system has a working ingestion pipeline:
      - `symbols` — list all classes/functions/methods in a file or directory (uses `:Symbol` nodes)
      - `context` — combined view: file summary + symbols + import graph for one file
      - `documents` — list document entities for a project, with optional path prefix filter
+   - **remote snapshot lane**: `menhir sync` uploads a manifest-bound archive, then calls an
+     explicit commit tool. `RECEIVE` stops at durable receipt; `SHADOW` runs isolated extraction
+     and the shared scanner, deleting materialized bytes afterward; `WRITE` builds an invisible
+     `ViewRoot`, records a durable promotion attempt, and atomically advances `CanonicalView`.
+   - published snapshot structure is stored as `:SnapshotEntity`, never `:Entity`, and every read
+     is scoped by `(project_id, view_root)`. A published canonical view wins over local structure;
+     absent one, the legacy local path is unchanged. WRITE-mode maintenance reconciles interrupted
+     promotions and fairly reclaims expired unreferenced roots.
 
 8. **Direct TODO graph**
    - `:Todo` nodes are stored directly in Neo4j as operator-managed durable work items

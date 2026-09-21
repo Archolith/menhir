@@ -5,6 +5,7 @@ Plan: `.agent/plans/menhir-mcp-snapshot-ingest-2026-09-16.md` (P1 gate: inspect-
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -12,6 +13,8 @@ import pytest
 from typer.testing import CliRunner
 
 from menhir.cli import app
+from menhir.cli.sync import _write_remote_project_id
+from menhir.snapshot.upload_client import SnapshotUploadError, UploadOutcome
 
 pytestmark = pytest.mark.unit
 
@@ -130,6 +133,102 @@ def test_upload_with_a_non_operator_key_names_the_tier(
     assert result.exit_code == 2
     assert "MENHIR_OPERATOR_KEY" in result.output
     assert "operator-tier" in result.output
+
+
+def test_successful_sync_reports_the_terminal_server_stage(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MENHIR_BACKEND_URL", "https://example.invalid")
+    monkeypatch.setenv("MENHIR_OPERATOR_KEY", "operator-key")
+    seen_project_ids: list[str | None] = []
+
+    class _Uploader:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def upload(self, *_args, **kwargs) -> UploadOutcome:
+            seen_project_ids.append(kwargs.get("project_id"))
+            return UploadOutcome(
+                upload_id="upload-1",
+                state="READY",
+                chunk_bytes=1024,
+                total_chunks=1,
+                sent_chunks=1,
+                bytes_sent=100,
+                project_id="project-" + ("1" * 32),
+                snapshot_id="snapshot-1",
+                result={"stage": "published", "generation": 2},
+            )
+
+    monkeypatch.setattr("menhir.cli.sync.SnapshotUploader", _Uploader)
+
+    result = runner.invoke(app, ["sync", str(repo)])
+
+    assert result.exit_code == 0, result.output
+    assert "server stage    published" in result.output
+    assert "project id      project-" + ("1" * 32) in result.output
+    assert "published the snapshot" in result.output
+    receipts = list((repo / ".menhir" / "sources").glob("*.json"))
+    assert len(receipts) == 1
+    assert json.loads(receipts[0].read_text(encoding="utf-8"))["project_id"] == (
+        "project-" + ("1" * 32)
+    )
+
+    again = runner.invoke(app, ["sync", str(repo)])
+    assert again.exit_code == 0, again.output
+    assert seen_project_ids == [None, "project-" + ("1" * 32)]
+
+
+def test_receipt_write_failure_is_reported_after_server_commit(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MENHIR_BACKEND_URL", "https://example.invalid")
+    monkeypatch.setenv("MENHIR_OPERATOR_KEY", "operator-key")
+
+    class _Uploader:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def upload(self, *_args, **_kwargs) -> UploadOutcome:
+            return UploadOutcome(
+                upload_id="upload-1",
+                state="READY",
+                chunk_bytes=1024,
+                total_chunks=1,
+                sent_chunks=1,
+                bytes_sent=100,
+                project_id="project-" + ("1" * 32),
+                snapshot_id="snapshot-1",
+                result={"stage": "published"},
+            )
+
+    monkeypatch.setattr("menhir.cli.sync.SnapshotUploader", _Uploader)
+    monkeypatch.setattr(
+        "menhir.cli.sync.os.link", lambda *_args: (_ for _ in ()).throw(OSError("disk"))
+    )
+
+    result = runner.invoke(app, ["sync", str(repo)])
+
+    assert result.exit_code == 1
+    assert "sync completed, but the local identity receipt failed" in result.output
+    assert "sync.identity.receipt_write_failed" in result.output
+    receipt_dir = repo / ".menhir" / "sources"
+    assert not list(receipt_dir.glob("*.json"))
+
+
+def test_receipt_directory_creation_error_uses_the_stable_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        Path, "mkdir", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk"))
+    )
+
+    with pytest.raises(SnapshotUploadError) as excinfo:
+        _write_remote_project_id(
+            tmp_path, "https://example.invalid", "project-" + ("1" * 32)
+        )
+
+    assert excinfo.value.code == "sync.identity.receipt_write_failed"
 
 
 def test_a_secret_refusal_blocks_the_upload_before_any_network_call(

@@ -216,6 +216,7 @@ def test_the_upload_client_sends_a_real_bundle(
     )
 
     assert outcome.state == "SEALED"
+    assert outcome.result["stage"] == "received"
     assert outcome.sent_chunks == outcome.total_chunks
     assert outcome.bytes_sent == archive.stat().st_size
     assert seen and seen[-1][0] == outcome.sent_chunks
@@ -243,6 +244,7 @@ def test_the_client_chunks_to_the_servers_size_not_its_own(
     )
 
     assert outcome.state == "SEALED", "the server's chunk plan was not followed"
+    assert outcome.result["stage"] == "received"
     assert outcome.chunk_bytes <= 2 * 1024 * 1024, "the server granted more than its own ceiling"
     assert outcome.bytes_sent == archive.stat().st_size
 
@@ -282,7 +284,5 @@ def test_menhir_sync_uploads_from_the_command_line(
 
     assert result.exit_code == 0, result.output
     assert "SEALED" in result.output
-    assert "Nothing has been extracted" in result.output, (
-        "the CLI must say the snapshot is inert; a user who reads 'uploaded' and assumes it was "
-        "indexed has been misled about what this phase does"
-    )
+    assert "server stage    received" in result.output
+    assert "without opening it (receive mode)" in result.output

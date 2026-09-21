@@ -32,11 +32,17 @@ This index routes the current execution owners listed below exactly once.
 
 | Document | Implemented | Remaining owner work |
 |---|---|---|
-| [`menhir-mcp-snapshot-ingest-2026-09-16.md`](menhir-mcp-snapshot-ingest-2026-09-16.md) | P0 code half and P1: wire contract, selection policy, bundler, `menhir sync --check`, 118 tests. | P0's transport measurement, which gates P2; then P2-P6. Every `SnapshotLimits` value is provisional until an owner sets it (open decision 1). |
+| [`menhir-mcp-snapshot-ingest-2026-09-16.md`](menhir-mcp-snapshot-ingest-2026-09-16.md) | P0-P4 plus working runtime wiring: bundle/receive, isolated extraction and shadow scan, canonical publication/read, durable recovery, and scheduled cleanup. | P5-P7: tenancy/identity evolution and scale work deliberately excluded from the single-company wiring plan. |
 | [`menhir-artifact-semantic-model.md`](menhir-artifact-semantic-model.md) | WorkArtifact model, migration, relationships, open questions, and MCP surface. | `CurrentPlanView`. |
 | [`menhir-compositional-scalar-identity-2026-08-05.md`](menhir-compositional-scalar-identity-2026-08-05.md) | Phases 1–4 and bounded panels. | Preregistered larger-population evidence and any promotion decision. |
 | [`menhir-deterministic-first-event-scalar-2026-07-30.md`](menhir-deterministic-first-event-scalar-2026-07-30.md) | Phase 1/2A and bounded smoke. | Population gates, frozen evaluation, and class-level promotion decisions. |
 | [`typed-recall-packet-prototype.md`](typed-recall-packet-prototype.md) | Scalar/event inspection packet. | Admitted intent-state integration after the Intent State View exists. |
+
+## Recently implemented
+
+| Document | Outcome |
+|---|---|
+| [`menhir-snapshot-wiring-to-working-sync-2026-09-20.md`](menhir-snapshot-wiring-to-working-sync-2026-09-20.md) | Wired explicit commit through RECEIVE/SHADOW/WRITE, canonical snapshot reads, attributed publication, durable recovery, fair scheduled cleanup, and truthful CLI terminal reporting. |
 
 ## Owner decision required
 

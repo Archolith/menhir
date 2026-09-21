@@ -415,17 +415,32 @@ def sweep_view_roots(
     next pass rather than leaving nodes nothing will ever look at again.
 
     Bounded by `limit`: a sweep is maintenance, and one that tries to delete every orphan in a
-    single pass holds locks for as long as that takes.
+    single pass holds locks for as long as that takes. A deployment-wide pass considers only the
+    oldest candidate from each project before applying that bound, so one noisy project cannot
+    consume every slot. A project-scoped pass keeps the original oldest-first limit semantics.
     """
-    rows = neo4j.execute(
-        "MATCH (r:ViewRoot) "
-        "WHERE ($pid IS NULL OR r.project_id = $pid) "
-        "  AND (r.state = $abandoned OR coalesce(r.lease_expires_at, 0) <= timestamp()) "
-        "RETURN r.root_id AS root_id "
-        "ORDER BY coalesce(r.retired_at, r.lease_expires_at, 0) "
-        "LIMIT $limit",
-        {"pid": project_id, "abandoned": ROOT_ABANDONED, "limit": int(limit)},
-    )
+    if project_id is None:
+        rows = neo4j.execute(
+            "MATCH (r:ViewRoot) "
+            "WHERE r.state = $abandoned OR coalesce(r.lease_expires_at, 0) <= timestamp() "
+            "WITH r.project_id AS project_id, r "
+            "ORDER BY project_id, coalesce(r.retired_at, r.lease_expires_at, 0), r.root_id "
+            "WITH project_id, head(collect(r)) AS r "
+            "RETURN r.root_id AS root_id "
+            "ORDER BY coalesce(r.retired_at, r.lease_expires_at, 0), project_id, r.root_id "
+            "LIMIT $limit",
+            {"abandoned": ROOT_ABANDONED, "limit": int(limit)},
+        )
+    else:
+        rows = neo4j.execute(
+            "MATCH (r:ViewRoot) "
+            "WHERE r.project_id = $pid "
+            "  AND (r.state = $abandoned OR coalesce(r.lease_expires_at, 0) <= timestamp()) "
+            "RETURN r.root_id AS root_id "
+            "ORDER BY coalesce(r.retired_at, r.lease_expires_at, 0) "
+            "LIMIT $limit",
+            {"pid": project_id, "abandoned": ROOT_ABANDONED, "limit": int(limit)},
+        )
 
     examined = retired = purged_roots = purged_nodes = 0
     for row in rows:

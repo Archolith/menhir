@@ -41,7 +41,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-__all__ = ["ShadowReport", "fingerprint_scan", "shadow_scan"]
+__all__ = ["ShadowReport", "fingerprint_scan", "scan_snapshot", "shadow_scan"]
 
 #: Domain separator, so a structure fingerprint can never collide with any other sha256 this
 #: system compares -- the same reason `compute_tree_digest` has one.
@@ -119,12 +119,25 @@ def shadow_scan(
     a question without keeping the answer's materials: a root that outlives its report is an
     unattributed copy of someone's repository sitting on a disk.
     """
+    _scan, report = scan_snapshot(root, scanner=scanner, delete_root=delete_root)
+    return report
+
+
+def scan_snapshot(
+    root: Path, *, scanner: Any = None, delete_root: bool = False
+) -> tuple[Any, ShadowReport]:
+    """Return the real scan plus its bounded report.
+
+    WRITE mode needs the same scan object that shadow mode fingerprints. Returning both prevents
+    the coordinator from scanning twice and opening a mutation window between parity evidence and
+    graph materialisation. The public shadow helper still deletes by default.
+    """
     from menhir.infrastructure.project_scanner import ProjectScanner
 
     root = Path(root)
     try:
         scan = (scanner or ProjectScanner()).scan(root)
-        return ShadowReport(
+        report = ShadowReport(
             fingerprint=fingerprint_scan(scan),
             file_count=len(scan.files),
             directory_count=len(scan.directories),
@@ -135,6 +148,7 @@ def shadow_scan(
             files_eligible=scan.files_eligible,
             files_indexed=scan.files_indexed,
         )
+        return scan, report
     finally:
         if delete_root:
             shutil.rmtree(root, ignore_errors=True)

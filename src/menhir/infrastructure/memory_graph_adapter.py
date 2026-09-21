@@ -79,6 +79,7 @@ class MemoryGraphAdapter:
         from menhir.infrastructure.work_artifact_repository import WorkArtifactRepository
         from menhir.infrastructure.personal_memory_queries import PersonalMemoryRepository
         from menhir.infrastructure.turn_evidence_repository import TurnEvidenceRepository
+        from menhir.snapshot.view_queries import SnapshotStructureViewReader
 
         self._memory_queries = MemoryQueryRepository(self.neo4j)
         self._episodes = EpisodeRepository(self.neo4j)
@@ -96,6 +97,7 @@ class MemoryGraphAdapter:
         self._views = ViewRepository(self.neo4j)
         self._personal_memory = PersonalMemoryRepository(self.neo4j)
         self._turn_evidence = TurnEvidenceRepository(self.neo4j)
+        self._snapshot_structure = SnapshotStructureViewReader(self.neo4j)
         from menhir.infrastructure.tool_event_repository import ToolEventRepository
         self._tool_events = ToolEventRepository(self.neo4j)
         from menhir.infrastructure.typed_assertion_repository import TypedAssertionRepository
@@ -1385,9 +1387,24 @@ class MemoryGraphAdapter:
             # now-refused-but-existing method must be indistinguishable from a typo, or the error
             # itself enumerates the private surface.
             raise ValueError(f"Unknown structure query type: {query_type}")
+        # A durable server-issued project id is authoritative. A display name is only an alias:
+        # when a same-named local project exists, treating that alias as identity would let an
+        # unrelated remote snapshot silently answer the local project's query.
+        snapshot = self._snapshot_structure.query(
+            project, query_type, allow_display_name=False, **kwargs
+        )
+        if snapshot is not None:
+            return snapshot
         method = getattr(self._structure, f"query_{query_type}", None)
         if method is None:
             raise ValueError(f"Unknown structure query type: {query_type}")
+        local_names = {
+            str(row.get("name") or "") for row in self._structure.list_projects()
+        }
+        if project not in local_names:
+            snapshot = self._snapshot_structure.query(project, query_type, **kwargs)
+            if snapshot is not None:
+                return snapshot
         return method(project, **kwargs)
 
     def query_documents(
@@ -1412,8 +1429,18 @@ class MemoryGraphAdapter:
         """Get documents linked to episodes via RELATES_TO."""
         return self._structure.get_linked_documents(episode_uuids)
 
-    def list_structure_projects(self) -> list[dict[str, str]]:
-        return self._structure.list_projects()
+    def list_structure_projects(self) -> list[dict[str, Any]]:
+        local = self._structure.list_projects()
+        snapshots = self._snapshot_structure.list_projects()
+        snapshot_ids = {str(row.get("project_id") or "") for row in snapshots}
+        # Names are presentation, not identity. Keep same-named local and snapshot projects
+        # visible; callers can select the snapshot unambiguously by its project_id.
+        return [
+            row
+            for row in local
+            if not row.get("project_id")
+            or str(row.get("project_id")) not in snapshot_ids
+        ] + snapshots
 
     def list_orphan_structure_projects(self) -> list[dict[str, Any]]:
         return self._structure.list_orphan_structure_projects()

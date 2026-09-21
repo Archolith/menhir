@@ -126,6 +126,7 @@ def test_a_root_still_being_written_cannot_be_published(repo, pid) -> None:
             view_key=VIEW,
             root_id=building.root_id,
             expected_generation=0,
+            actor="test:operator",
         )
 
     assert excinfo.value.code == ERR_VIEW_ROOT_UNPUBLISHABLE
@@ -144,7 +145,8 @@ def test_a_root_from_another_project_cannot_be_published_into_this_view(repo, pi
 
     with pytest.raises(ViewError) as excinfo:
         publish_root(
-            repo, project_id=pid, view_key=VIEW, root_id=foreign.root_id, expected_generation=0
+            repo, project_id=pid, view_key=VIEW, root_id=foreign.root_id,
+            expected_generation=0, actor="test:operator",
         )
 
     assert excinfo.value.code == ERR_VIEW_ROOT_UNPUBLISHABLE
@@ -157,7 +159,8 @@ def test_a_root_built_for_another_view_of_the_same_project_cannot_be_published(r
 
     with pytest.raises(ViewError) as excinfo:
         publish_root(
-            repo, project_id=pid, view_key=VIEW, root_id=other_view.root_id, expected_generation=0
+            repo, project_id=pid, view_key=VIEW, root_id=other_view.root_id,
+            expected_generation=0, actor="test:operator",
         )
 
     assert excinfo.value.code == ERR_VIEW_ROOT_UNPUBLISHABLE
@@ -167,7 +170,8 @@ def test_a_root_that_does_not_exist_cannot_be_published(repo, pid) -> None:
     """A root id from a previous run, a typo, or a retry after a purge."""
     with pytest.raises(ViewError) as excinfo:
         publish_root(
-            repo, project_id=pid, view_key=VIEW, root_id="vr-nonexistent", expected_generation=0
+            repo, project_id=pid, view_key=VIEW, root_id="vr-nonexistent",
+            expected_generation=0, actor="test:operator",
         )
 
     assert excinfo.value.code == ERR_VIEW_ROOT_UNPUBLISHABLE
@@ -211,7 +215,8 @@ def test_a_complete_root_whose_lease_expired_cannot_be_published(repo, pid) -> N
 
     with pytest.raises(ViewError) as excinfo:
         publish_root(
-            repo, project_id=pid, view_key=VIEW, root_id=finished.root_id, expected_generation=0
+            repo, project_id=pid, view_key=VIEW, root_id=finished.root_id,
+            expected_generation=0, actor="test:operator",
         )
 
     assert excinfo.value.code == ERR_VIEW_ROOT_UNPUBLISHABLE
@@ -263,7 +268,10 @@ def test_the_sweeper_will_not_retire_the_current_root(repo, pid) -> None:
     between a routine sweep and deleting the structure every reader is using.
     """
     root = _complete_root(repo, pid)
-    publish_root(repo, project_id=pid, view_key=VIEW, root_id=root.root_id, expected_generation=0)
+    publish_root(
+        repo, project_id=pid, view_key=VIEW, root_id=root.root_id, expected_generation=0,
+        actor="test:operator",
+    )
     repo.execute(
         "MATCH (r:ViewRoot {root_id: $root}) SET r.lease_expires_at = 0", {"root": root.root_id}
     )
@@ -276,8 +284,14 @@ def test_the_sweeper_will_not_retire_the_previous_root(repo, pid) -> None:
     """`previous` is the gate's escape hatch. A sweep that reclaims it removes the only undo."""
     first = _complete_root(repo, pid, snapshot_id="snap-1")
     second = _complete_root(repo, pid, snapshot_id="snap-2")
-    publish_root(repo, project_id=pid, view_key=VIEW, root_id=first.root_id, expected_generation=0)
-    publish_root(repo, project_id=pid, view_key=VIEW, root_id=second.root_id, expected_generation=1)
+    publish_root(
+        repo, project_id=pid, view_key=VIEW, root_id=first.root_id, expected_generation=0,
+        actor="test:operator",
+    )
+    publish_root(
+        repo, project_id=pid, view_key=VIEW, root_id=second.root_id, expected_generation=1,
+        actor="test:operator",
+    )
     repo.execute(
         "MATCH (r:ViewRoot {root_id: $root}) SET r.lease_expires_at = 0", {"root": first.root_id}
     )
@@ -301,6 +315,7 @@ def test_a_root_demoted_past_previous_becomes_reclaimable(repo, pid) -> None:
             view_key=VIEW,
             root_id=root.root_id,
             expected_generation=generation,
+            actor="test:operator",
         )
     repo.execute(
         "MATCH (r:ViewRoot {root_id: $root}) SET r.lease_expires_at = 0", {"root": roots[0].root_id}
@@ -314,12 +329,17 @@ def test_a_root_unreferenced_after_a_restore_becomes_reclaimable(repo, pid) -> N
     """Restoring drops `previous`, which is the other way a root stops being referenced."""
     good = _complete_root(repo, pid, snapshot_id="snap-good")
     bad = _complete_root(repo, pid, snapshot_id="snap-bad")
-    publish_root(repo, project_id=pid, view_key=VIEW, root_id=good.root_id, expected_generation=0)
+    publish_root(
+        repo, project_id=pid, view_key=VIEW, root_id=good.root_id, expected_generation=0,
+        actor="test:operator",
+    )
     published = publish_root(
-        repo, project_id=pid, view_key=VIEW, root_id=bad.root_id, expected_generation=1
+        repo, project_id=pid, view_key=VIEW, root_id=bad.root_id, expected_generation=1,
+        actor="test:operator",
     )
     restore_previous(
-        repo, project_id=pid, view_key=VIEW, expected_generation=published.generation
+        repo, project_id=pid, view_key=VIEW, expected_generation=published.generation,
+        actor="test:operator",
     )
     repo.execute(
         "MATCH (r:ViewRoot {root_id: $root}) SET r.lease_expires_at = 0", {"root": bad.root_id}
@@ -385,6 +405,7 @@ def test_a_publish_cannot_read_the_root_while_a_sweeper_holds_its_lock(repo, pid
                 view_key=VIEW,
                 root_id=root.root_id,
                 expected_generation=0,
+                actor="test:operator",
             )
         )
         thread.join(timeout=2.0)
@@ -421,7 +442,8 @@ def test_a_sweeper_cannot_read_the_view_while_a_publish_holds_the_root_lock(repo
     # node that is already there, which takes no lock, and that is the real window.
     established = _complete_root(repo, pid, snapshot_id="snap-established")
     publish_root(
-        repo, project_id=pid, view_key=VIEW, root_id=established.root_id, expected_generation=0
+        repo, project_id=pid, view_key=VIEW, root_id=established.root_id,
+        expected_generation=0, actor="test:operator",
     )
 
     root = _complete_root(repo, pid, snapshot_id="snap-incoming")

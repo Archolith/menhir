@@ -335,6 +335,21 @@ Common distinguishing fields:
 
 Structural entities use the same `Entity` label and several shared fields (`uuid`, `scope`, `source`, `created_at`, `last_accessed`) but are not treated as normal semantic recall results.
 
+### Nodes: SnapshotEntity, ViewRoot, CanonicalView, SnapshotPromotionAttempt
+
+Remote structure snapshots use a separate `:SnapshotEntity` label so local `:Entity` merge and
+prune paths cannot mutate them. Each snapshot entity carries `project_id`, `view_root`,
+`structure_path`, and `structure_role`; relationship reads scope both endpoints to the same root.
+
+`ViewRoot` records one immutable snapshot build and its lease/state. `CanonicalView` identifies the
+published root by `(project_id, view_key)`, retains exactly one previous root, records generation,
+display name, degradation status, and the authenticated actor that last promoted or degraded it.
+`SnapshotPromotionAttempt` durably brackets the pointer flip (`PREPARED`, `PUBLISHED`,
+`COMPENSATING`, then terminal) so scheduled recovery can restore or degrade an interrupted view.
+The first accepted sync receives a random server-owned `project_id`. `menhir sync` stores it in a
+server-specific `.menhir/sources/<server-hash>.json` receipt (excluded from bundles); later upload
+begins may reuse only an id whose registration exists on that server.
+
 Legacy compatibility: a small pre-`structure_role` corpus still exists in production. A row is
 treated as structural on bootstrap read paths when its source contains `project-scan` and its
 trimmed content begins with the deterministic `Directory:`, `File:`, or `Project:` scan shape.

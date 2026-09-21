@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 
 def _make_tool(backend: MagicMock):
     from menhir.mcp.tools.recall.query_structure import QueryStructureTool
@@ -188,3 +190,148 @@ def test_files_negative_is_qualified_when_partial() -> None:
     out = _run(_backend(partial, []), query_type="files", project="p1")
 
     assert "not evidence of absence" in out
+
+
+def _snapshot(data, *, degraded=False, warning=""):
+    return {
+        "__snapshot_status__": {
+            "project_id": "project-1",
+            "view_key": "canonical",
+            "snapshot_id": "snap-1",
+            "generation": 4,
+            "degraded": degraded,
+            "warning": warning,
+        },
+        "data": data,
+    }
+
+
+@pytest.mark.parametrize(
+    ("query_type", "path", "data", "legacy_text"),
+    [
+        (
+            "overview",
+            "",
+            {
+                "project": "p1",
+                "stack": "python",
+                "description": "snapshot",
+                "entities": {},
+                "edges": {},
+                "coverage": {"known": True, "partial_index": False},
+                "contains_repos": [],
+            },
+            "Project: p1",
+        ),
+        ("files", "", [{"path": "a.py", "role": "file", "description": ""}], "a.py"),
+        ("imports", "a.py", {"imports": [], "imported_by": []}, "Import graph for a.py"),
+        ("tests", "", [{"test": "test_a.py", "source": "a.py"}], "test_a.py"),
+        ("endpoints", "", [{"name": "tool", "description": "d"}], "tool"),
+        ("dependencies", "", ["neo4j"], "neo4j"),
+        ("cross_refs", "", [], "No cross-project references"),
+        (
+            "blast_radius",
+            "a.py",
+            {
+                "changed": ["a.py"],
+                "directly_affected": [],
+                "transitively_affected": [],
+                "affected_tests": [],
+                "cross_project_refs": [],
+                "related_memories": [],
+                "function_callers": [],
+                "unindexed_paths": [],
+                "coverage": {"known": True, "partial_index": False},
+            },
+            "Blast radius for p1",
+        ),
+        (
+            "affected_tests",
+            "a.py",
+            {
+                "changed_files": ["a.py"],
+                "affected_source_files": [],
+                "test_files": ["test_a.py"],
+                "test_command": "pytest test_a.py",
+                "unindexed_paths": [],
+                "coverage": {"known": True, "partial_index": False},
+            },
+            "pytest test_a.py",
+        ),
+        ("symbols", "a.py", {"symbols": [], "truncated": False}, "No symbols found"),
+        (
+            "context",
+            "a.py",
+            {
+                "path": "a.py",
+                "summary": "A",
+                "symbols": [],
+                "truncated": False,
+                "imports": [],
+                "imported_by": [],
+                "tested_by": [],
+            },
+            "Context for a.py",
+        ),
+    ],
+)
+def test_snapshot_envelope_is_centrally_unwrapped_for_every_renderer(
+    query_type, path, data, legacy_text
+) -> None:
+    backend = MagicMock()
+
+    async def fake(project, requested, params=None):
+        if requested == "projects":
+            return _projects()
+        return _snapshot(data)
+
+    backend.query_structure = AsyncMock(side_effect=fake)
+
+    out = _run(backend, query_type=query_type, project="p1", path=path)
+
+    assert out.splitlines()[0] == (
+        "[SNAPSHOT id=snap-1 view=canonical generation=4 status=READY]"
+    )
+    assert legacy_text in out
+
+
+def test_snapshot_only_project_bypasses_local_unknown_project_message() -> None:
+    backend = MagicMock()
+
+    async def fake(project, requested, params=None):
+        if requested == "projects":
+            return [{"name": "snapshot-only", "project_id": "project-1"}]
+        return _snapshot([{"path": "a.py", "role": "file", "description": ""}])
+
+    backend.query_structure = AsyncMock(side_effect=fake)
+
+    out = _run(backend, query_type="files", project="snapshot-only")
+
+    assert out.startswith("[SNAPSHOT id=snap-1")
+    assert "not ingested" not in out
+    assert "a.py" in out
+
+
+def test_degraded_snapshot_header_and_warning_are_bounded() -> None:
+    backend = MagicMock()
+
+    async def fake(project, requested, params=None):
+        if requested == "projects":
+            return _projects()
+        return _snapshot([], degraded=True, warning="x" * 500)
+
+    backend.query_structure = AsyncMock(side_effect=fake)
+
+    out = _run(backend, query_type="cross_refs", project="p1")
+    lines = out.splitlines()
+
+    assert lines[0] == "[SNAPSHOT id=snap-1 view=canonical generation=4 status=DEGRADED]"
+    assert lines[1] == "[SNAPSHOT WARNING] " + ("x" * 240)
+
+
+def test_plain_backend_output_remains_byte_identical() -> None:
+    backend = _backend(_projects(), ["neo4j"])
+
+    out = _run(backend, query_type="dependencies", project="p1")
+
+    assert out == "Dependencies for p1 (1): neo4j"
