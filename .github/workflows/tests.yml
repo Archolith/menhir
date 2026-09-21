@@ -306,6 +306,10 @@ jobs:
         env:
           MENHIR_E2E: "1"
           MENHIR_E2E_NEO4J_URI: bolt://127.0.0.1:7690
+          # Pinned so the evidence upload below can find it. Left unset, the campaign
+          # writes under pytest's basetemp (/tmp/pytest-of-runner/...), outside the
+          # checkout, and the first green run uploaded an empty artifact without saying so.
+          MENHIR_E2E_WORK_ROOT: ${{ github.workspace }}/menhir/.e2e-work
         run: |
           pytest tests/e2e -v -rs \
             --deselect tests/e2e/test_e2e_02_memory_lifecycle.py::test_e2e_02_memory_lifecycle \
@@ -319,6 +323,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: stdio-e2e-evidence
-          path: menhir/**/evidence/**
-          if-no-files-found: ignore
+          path: menhir/.e2e-work/evidence/**
+          # error, not ignore: every lane writes result.json even when it skips or
+          # crashes, so a run with no evidence is a run that did not happen.
+          if-no-files-found: error
           retention-days: 14

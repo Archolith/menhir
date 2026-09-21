@@ -90,3 +90,6 @@ VariationsSafeSeedV2
 VariationsSeedV2
 first_party_sets.db
 first_party_sets.db-journal
+
+# tests/e2e campaign scratch (venv, wheel, fixtures, evidence) when MENHIR_E2E_WORK_ROOT points here
+.e2e-work/
