@@ -216,10 +216,9 @@ def fresh_graph(e2e_config: E2EConfig) -> None:
 def provider_kind(request: pytest.FixtureRequest) -> str:
     """The provider a lane declared, as a string rather than a boolean.
 
-    ``running_stack`` needs the KIND, not merely whether one exists. A lane using the
-    `failing` provider wants a backend whose model calls fail -- demanding
-    enrichment_ready there deadlocks startup on exactly the condition under test, which
-    is what happened to E2E-8's provider-failure lane.
+    ``running_stack`` needs the KIND so a lane with no provider is not held to
+    enrichment_ready (it never can be), while every lane WITH one is -- including
+    `failing`, whose provider passes preflight and fails at the call.
     """
 
     marker = request.node.get_closest_marker("provider")
@@ -301,10 +300,11 @@ def running_stack(
         e2e_installed,
         log_path=lane_evidence.backend_log_path,
         feature_env={**feature_env, **provider_env},
-        # Only providers that are SUPPOSED to work. `failing` answers 400 to every
-        # call by design, so enrichment can never become ready and requiring it would
-        # block the lane on the very condition it exists to exercise.
-        require_enrichment=provider_kind in {"deterministic", "real"},
+        # Every provider, `failing` included: it passes preflight and refuses at the
+        # call, so the backend comes up READY and the worker genuinely attempts the
+        # episode. A degraded backend under `failing` would mean the fake broke
+        # preflight again -- and the lane would pass without the pipeline ever trying.
+        require_enrichment=provider_kind != "none",
     )
     lane_evidence.record_stack(provider=provider_kind)
     lane_evidence.record_stack(backend_ready=backend.ready_payload)

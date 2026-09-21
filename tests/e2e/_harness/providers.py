@@ -132,9 +132,29 @@ def real_provider_environment(repo_root: Path) -> dict[str, str]:
 
 
 class FailingProviderHandler(BaseHTTPRequestHandler):
+    """Passes startup preflight, then refuses every completion and embedding.
+
+    GET /v1/models lists the SAME model names ``local_provider_environment`` configures. It
+    used to list ``forced-failure``, which the backend's preflight rejected ("does not list
+    required model(s)"), so the backend started ``degraded_queue_only`` with enrichment OFF:
+    the write under test sat PENDING with attempts=0 for the whole 360s wait, and the lane
+    passed because "not READY" was trivially true. That proved nothing about a failing
+    provider -- and cost six minutes per CI run. Failing at the call, not at preflight, is
+    what makes the pipeline actually try.
+    """
+
     def do_GET(self) -> None:
         if self.path.rstrip("/") == "/v1/models":
-            self._json(200, {"object": "list", "data": [{"id": "forced-failure"}]})
+            self._json(
+                200,
+                {
+                    "object": "list",
+                    "data": [
+                        {"id": "deterministic-chat", "object": "model"},
+                        {"id": "text-embedding-3-small", "object": "model"},
+                    ],
+                },
+            )
             return
         self._json(404, {"error": {"message": "not found"}})
 

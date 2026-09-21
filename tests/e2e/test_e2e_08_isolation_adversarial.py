@@ -404,7 +404,10 @@ async def test_e2e_08_provider_failure_is_not_silent(
                     "arguments": {
                         "text": "The Kestrel ledger reconciles nightly against the bank feed.",
                         "namespace": namespace,
-                        "timeout_s": 180.0,
+                        # Returns as soon as the episode is terminal. With a provider that
+                        # answers 400, FAILED arrives in seconds; the budget is a ceiling,
+                        # not the expected duration.
+                        "timeout_s": 120.0,
                     },
                 },
             )
@@ -421,7 +424,7 @@ async def test_e2e_08_provider_failure_is_not_silent(
                     "arguments": {
                         "episode_uuid": episode,
                         "wait": True,
-                        "timeout_s": 180.0,
+                        "timeout_s": 120.0,
                         "namespace": namespace,
                     },
                 },
@@ -430,6 +433,11 @@ async def test_e2e_08_provider_failure_is_not_silent(
         lane_evidence.attach("failing-provider-status.txt", status)
 
         claims_ready = "status: READY" in status
+        attempts_match = re.search(r"^attempts:\s*(\d+)", status, re.M)
+        attempts = int(attempts_match.group(1)) if attempts_match else 0
+        error_match = re.search(r"^error:\s*(.+)$", status, re.M)
+        error_text = (error_match.group(1) if error_match else "").strip()
+        reported_failure = "status: FAILED" in status and error_text not in ("", "(none)")
         mentions = graph_query(
             e2e_config,
             "MATCH (e:Episodic {uuid: $uuid})-[:MENTIONS]->(n) RETURN count(n) AS mentioned",
@@ -437,18 +445,33 @@ async def test_e2e_08_provider_failure_is_not_silent(
         )
         mentioned = mentions[0]["mentioned"] if mentions else 0
 
-        # Either the episode does not claim READY, or it claims READY and genuinely has
-        # extracted content -- which under a provider that answers 400 to everything
-        # would itself be a finding worth reading the transcript for.
-        not_silent = (not claims_ready) or mentioned > 0
+        # Three things, and the first two are what make the third mean anything: the
+        # pipeline TRIED (attempts >= 1 -- a backend that never picked the write up
+        # would also be "not READY"), it recorded WHY (a real error, not "(none)"), and
+        # it did not claim READY without extracted content. An earlier version checked
+        # only the last and passed for 360s on an episode that was never attempted.
+        tried = attempts >= 1
+        not_silent = tried and reported_failure and not (claims_ready and mentioned == 0)
         lane_evidence.record(
             "provider_failure_does_not_silently_pass",
             passed=not_silent,
-            detail={"claims_ready": claims_ready, "mentions": mentioned, "status": status[:400]},
+            detail={
+                "claims_ready": claims_ready,
+                "attempts": attempts,
+                "error": error_text[:200],
+                "reported_failure": reported_failure,
+                "mentions": mentioned,
+                "status": status[:400],
+            },
+        )
+        assert tried, (
+            f"episode {episode} was never attempted (attempts=0) under the failing "
+            f"provider -- the backend did not enrich at all, so nothing was proven:\n"
+            f"{status[:800]}"
         )
         assert not_silent, (
-            f"every provider call returned 400 yet episode {episode} reports READY with "
-            f"no extracted entities -- enrichment failure is being reported as success:\n"
+            f"every provider call returned 400 yet episode {episode} did not end FAILED "
+            f"with a recorded error -- enrichment failure is not being reported:\n"
             f"{status[:800]}"
         )
 
