@@ -550,6 +550,10 @@ Episode Text
 
 Concept id: `runtime.canonical_self`
 
+Governing decision: [ADR 0010](adr/0010-deterministic-canonical-self-identity.md). The identity
+contract is accepted; production activation and historical fork consolidation remain separate
+owner decisions.
+
 Menhir defines exactly one authoritative human-self target per **logical** namespace. In
 `enforce`, only an exact node declaration may reach that target; ordinary semantic retrieval and
 the dedup LLM are fenced away from it. The default `off` mode preserves the legacy resolver.

@@ -1,11 +1,14 @@
 ## 2026-09-21 - established architecture decisions become first-class ADRs
 
-- Added ADRs 0003–0008 for the shipped Event → Fold → View boundary, single runtime owner and
+- Added ADRs 0003–0010 for the shipped Event → Fold → View boundary, single runtime owner and
   backend-first access, core-enforced namespace isolation, recoverable cross-store sagas,
-  evidence-gated default-off activation, and identity/embodiment/locator separation.
+  evidence-gated default-off activation, identity/embodiment/locator separation, source-bound
+  admission authority, and deterministic canonical self identity.
 - The records distinguish implementation evidence from decision scope: namespace pins remain
   defense-in-depth rather than hostile multitenancy, empirical feature gates do not delay known
-  safety/correctness fixes, and projection kinds are not forced into one physical node shape.
+  safety/correctness fixes, projection kinds are not forced into one physical node shape, and
+  admission rollout, authority vocabularies, canonical-self activation, and historical fork
+  consolidation remain explicit owner decisions.
 - Added `.agent/adr/README.md`, routed it from `.agent/README.md`, and linked each decision from its
   live architecture/data-model/activation owner document; no runtime behavior changed.
 

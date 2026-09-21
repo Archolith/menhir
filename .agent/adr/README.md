@@ -12,6 +12,8 @@ Accepted Menhir architecture decisions, in sequence:
 | [0006](0006-recoverable-sagas-for-cross-store-mutations.md) | Accepted retrospectively | Journal cross-store mutation intent before side effects and reconcile interrupted work. |
 | [0007](0007-evidence-gated-default-off-feature-activation.md) | Accepted | Activate high-impact features only after evidence and an explicit owner decision. |
 | [0008](0008-separate-identity-embodiment-and-locator.md) | Accepted retrospectively | Keep semantic identity separate from embodiments, locators, and declarations. |
+| [0009](0009-source-bound-admission-authority.md) | Accepted core contract; adoption open | Cap claims by exact source grants and domain-owned authority semantics. |
+| [0010](0010-deterministic-canonical-self-identity.md) | Accepted target; activation open | Give each logical namespace one evidence-bound deterministic human identity. |
 
 ADRs record durable decisions and their tradeoffs. Live operational shape remains in
 [`../architecture.md`](../architecture.md), exact graph/storage contracts in
