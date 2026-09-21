@@ -1,0 +1,280 @@
+"""Bring up and tear down the three-process E2E stack.
+
+The campaign's topology is not a single server, and the plan's wording ("launch Menhir
+the way a real local MCP client does") resolves to three processes:
+
+    disposable Neo4j            provisioned here, reset between lanes
+      |
+    `menhir serve`              the runtime owner; the stdio bridge refuses to start
+      |                         without it (mcp/lifecycle.py:62)
+      |
+    `python -m menhir.mcp.server`   the stdio bridge a stock MCP client spawns
+
+Both Menhir processes run from a **non-editable install inside a dedicated venv**, which
+is what makes E2E-1's "install from the candidate package, not an editable checkout"
+meaningful. Running them from the checkout would also test packaging by accident and
+pass when packaging is broken.
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+
+from tests.e2e._harness.config import E2EConfig, assert_not_production, child_environment
+
+__all__ = [
+    "BackendProcess",
+    "InstalledMenhir",
+    "build_wheel",
+    "install_into_venv",
+    "reset_graph",
+    "start_backend",
+]
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+@dataclass(frozen=True)
+class InstalledMenhir:
+    """A built-and-installed Menhir, with the identity evidence the RC freeze needs."""
+
+    venv_python: Path
+    wheel_path: Path
+    wheel_sha256: str
+    version: str
+
+    def as_evidence(self) -> dict[str, str]:
+        return {
+            "wheel": self.wheel_path.name,
+            "wheel_sha256": self.wheel_sha256,
+            "version": self.version,
+            "interpreter": str(self.venv_python),
+        }
+
+
+def build_wheel(destination: Path) -> Path:
+    """Build a wheel from the working tree into ``destination``.
+
+    Gate D freezes a package hash, so the campaign must test *a wheel*, not a checkout.
+    The tree should be clean when this runs; the caller records the commit alongside.
+    """
+
+    destination.mkdir(parents=True, exist_ok=True)
+    for stale in destination.glob("*.whl"):
+        stale.unlink()
+
+    subprocess.run(
+        [sys.executable, "-m", "build", "--wheel", "--outdir", str(destination), str(REPO_ROOT)],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=900,
+    )
+    wheels = sorted(destination.glob("*.whl"))
+    if len(wheels) != 1:
+        raise RuntimeError(f"expected exactly one wheel in {destination}, found {wheels}")
+    return wheels[0]
+
+
+def install_into_venv(config: E2EConfig, wheel: Path) -> InstalledMenhir:
+    """Create a clean venv and install the wheel into it, non-editable.
+
+    ``--no-cache-dir`` is not merely hygiene: a cached editable or a previously built
+    artifact of the same version would make "cold install" a lie.
+    """
+
+    import hashlib
+
+    if config.venv_dir.exists():
+        shutil.rmtree(config.venv_dir)
+    subprocess.run(
+        [sys.executable, "-m", "venv", str(config.venv_dir)],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+    python = config.venv_python()
+    subprocess.run(
+        [str(python), "-m", "pip", "install", "--upgrade", "pip", "--no-cache-dir", "-q"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    subprocess.run(
+        [str(python), "-m", "pip", "install", "--no-cache-dir", "-q", str(wheel)],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=1800,
+    )
+
+    digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    version = subprocess.run(
+        [str(python), "-c", "import menhir, sys; sys.stdout.write(getattr(menhir, '__version__', 'unknown'))"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    ).stdout.strip()
+
+    _assert_not_running_from_checkout(python)
+    return InstalledMenhir(venv_python=python, wheel_path=wheel, wheel_sha256=digest, version=version)
+
+
+def _assert_not_running_from_checkout(python: Path) -> None:
+    """Prove the venv imports the INSTALLED menhir, not the source checkout.
+
+    Without this, a stray ``PYTHONPATH``, a ``.pth`` left by an earlier editable
+    install, or simply running with cwd inside the repo silently turns the whole
+    campaign back into a source-tree run -- and E2E-1 would report a passing cold
+    install that never happened.
+    """
+
+    resolved = subprocess.run(
+        [str(python), "-c", "import menhir, sys; sys.stdout.write(menhir.__file__)"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    ).stdout.strip()
+
+    location = Path(resolved).resolve()
+    checkout_src = (REPO_ROOT / "src").resolve()
+    if checkout_src in location.parents:
+        raise RuntimeError(
+            f"venv imports menhir from the source checkout ({location}), not the "
+            f"installed wheel. E2E-1 cannot claim a non-editable install."
+        )
+    if "site-packages" not in location.parts:
+        raise RuntimeError(f"menhir resolved outside site-packages: {location}")
+
+
+def reset_graph(config: E2EConfig) -> None:
+    """Delete every node in the disposable graph.
+
+    Each lane starts from a fresh graph, per the plan's "disposable state directory,
+    fresh graph". The production fence is re-checked here rather than trusted from
+    session setup, because this function is the one that destroys data.
+    """
+
+    assert_not_production(config.neo4j_uri, what="graph reset target")
+
+    from neo4j import GraphDatabase
+
+    driver = GraphDatabase.driver(
+        config.neo4j_uri, auth=(config.neo4j_user, config.neo4j_password)
+    )
+    try:
+        with driver.session(database=config.neo4j_database) as session:
+            # Batched so a large leftover graph cannot blow the transaction budget.
+            while True:
+                summary = session.run(
+                    "MATCH (n) WITH n LIMIT 10000 DETACH DELETE n RETURN count(n) AS deleted"
+                ).single()
+                if not summary or summary["deleted"] == 0:
+                    break
+    finally:
+        driver.close()
+
+
+@dataclass
+class BackendProcess:
+    """A running ``menhir serve``, with its captured output."""
+
+    process: subprocess.Popen[str]
+    log_path: Path
+    url: str
+
+    def is_alive(self) -> bool:
+        return self.process.poll() is None
+
+    def terminate(self) -> str:
+        """Stop the backend and return whatever it wrote.
+
+        Graceful first: E2E-1 asserts "graceful shutdown leaves no corrupt state", so a
+        kill as the default would make that assertion untestable.
+        """
+
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=30)
+        try:
+            return self.log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+
+
+def start_backend(
+    config: E2EConfig,
+    installed: InstalledMenhir,
+    *,
+    log_path: Path,
+    feature_env: dict[str, str] | None = None,
+) -> BackendProcess:
+    """Start ``menhir serve`` from the installed package and wait for ``/api/ready``.
+
+    The cwd is the harness state directory, never the checkout: ``resolve_env_file``
+    falls back to ``./.env``, so a child started inside the repo would read the
+    developer's env file even though ``ENV_FILE`` is set to ours.
+
+    ``feature_env`` is the lane's feature combination. It must be passed here AND to the
+    stdio bridge: the backend owns the runtime (workers, retrieval, lifecycle) while the
+    bridge is a separate process with its own settings resolution, so applying the combo
+    to only one of them would leave the campaign reporting a configuration that was
+    never fully in effect.
+    """
+
+    config.state_dir.mkdir(parents=True, exist_ok=True)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = log_path.open("w", encoding="utf-8")
+
+    process = subprocess.Popen(
+        [str(installed.venv_python), "-m", "menhir.main", "serve"],
+        cwd=str(config.state_dir),
+        env=child_environment(config, **(feature_env or {})),
+        stdout=handle,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    backend = BackendProcess(process=process, log_path=log_path, url=config.backend_url)
+
+    deadline = time.monotonic() + config.backend_ready_timeout
+    last_error = "never probed"
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            handle.flush()
+            raise RuntimeError(
+                f"`menhir serve` exited with code {process.returncode} before becoming "
+                f"ready. Log:\n{log_path.read_text(encoding='utf-8', errors='replace')}"
+            )
+        try:
+            with urllib.request.urlopen(f"{backend.url}/api/ready", timeout=5) as response:
+                if response.status == 200:
+                    payload = json.loads(response.read().decode("utf-8"))
+                    if payload.get("status") in {"ready", "ok"}:
+                        return backend
+                    last_error = f"not ready yet: {payload}"
+        except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+            last_error = repr(exc)
+        time.sleep(1.0)
+
+    backend.terminate()
+    raise TimeoutError(
+        f"`menhir serve` did not report ready within {config.backend_ready_timeout}s "
+        f"({last_error}). Log:\n{log_path.read_text(encoding='utf-8', errors='replace')}"
+    )
