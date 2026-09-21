@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from menhir.domain.bootstrap_scope import bootstrap_selection
+from menhir.domain.recall_visibility import (
+    default_recent_context_visible,
+    session_scope_visible,
+)
 from menhir.domain.structural_memory import is_structural_memory_row
 from menhir.mcp.formatters import _compact_memory_item, _normalize_reader_id
 from menhir.mcp.lifecycle import _has_recent_flagged_bootstrap_read
 from menhir.mcp.tools.base import BaseJsonTool
 from menhir.mcp.contracts import ToolScope
+from menhir.mcp.service_access import get_mcp_session
 
 
 async def recall_context_memories(
@@ -105,6 +110,7 @@ class RecallContextMemoriesTool(BaseJsonTool):
                 }
             )
         query_text = (query or "").strip()
+        effective_session_id = get_mcp_session().session_id
         relevant_rows: list[dict[str, object]] = []
         if query_text:
             try:
@@ -113,6 +119,7 @@ class RecallContextMemoriesTool(BaseJsonTool):
                     preset=preset,
                     limit=limit,
                     include_session=True,
+                    session_id=effective_session_id,
                     wait_for_pending=True,
                     namespace=namespace or None,
                 )
@@ -156,6 +163,8 @@ class RecallContextMemoriesTool(BaseJsonTool):
                 or bool(row.get("user_flagged", False))
                 or uuid in seen_uuids
                 or is_structural_memory_row(row)
+                or not session_scope_visible(row, effective_session_id)
+                or not default_recent_context_visible(row)
             ):
                 continue
             non_flagged_recent.append(row)

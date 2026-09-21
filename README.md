@@ -298,7 +298,10 @@ the enrichment queue, and the maintenance scheduler.
 | Stdio bridge | `python -m menhir.mcp.server` | Trusted local bridge to a running backend |
 
 The stdio bridge does not create a second runtime. Set `MENHIR_BACKEND_URL` to the
-running HTTP backend before launching it.
+running HTTP backend before launching it. If a client restarts that bridge while continuing the
+same logical conversation, also set `MENHIR_MCP_SESSION_ID` to a stable ID unique to that
+conversation. Do not reuse it across independent windows or conversations; SESSION-scoped recall
+uses it as an isolation boundary. When omitted, each bridge process gets a fresh session UUID.
 
 ## Quick start
 

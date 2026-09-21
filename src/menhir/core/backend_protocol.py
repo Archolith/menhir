@@ -140,6 +140,7 @@ class MemoryBackend(Protocol):
         file_context: str | None = None,
         file_context_project: str | None = None,
         namespace: str | None = None,
+        session_id: str | None = None,
         include_invalidated: bool = False,
         trace: bool = False,
     ) -> dict[str, Any]:

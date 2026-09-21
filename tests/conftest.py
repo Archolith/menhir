@@ -1085,15 +1085,21 @@ class StubMemoryGraphAdapter:
         return True
 
     def fetch_relevant_pending_episodes(
-        self, query: str, limit: int = 3, *, namespace: str | None = None
+        self,
+        query: str,
+        limit: int = 3,
+        *,
+        namespace: str | None = None,
+        session_id: str | None = None,
     ) -> list[dict[str, object]]:
-        # `namespace` mirrors the real adapter signature (tenant scoping, CF-104). This stub
-        # serves canned rows for recall-wiring tests and does not model the filter; the
-        # predicate itself is covered by tests/test_pending_episode_namespace_isolation.py.
+        # The namespace predicate is covered by the repository query-shape test. This stub
+        # models the session boundary added to the recall wait path.
         token = (query or "").strip().lower()
         rows = []
         for row in self.pending_episode_rows.values():
             if row.get("processing_state") not in {ProcessingState.PENDING, ProcessingState.ENRICHING}:
+                continue
+            if session_id is not None and row.get("session_id") != session_id:
                 continue
             content = str(row.get("content") or "").lower()
             name = str(row.get("name") or "").lower()

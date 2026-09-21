@@ -27,11 +27,14 @@ class _RecordingNeo4j:
         self.executed_params.append(params)
         tokens = [str(t).lower() for t in params.get("tokens") or []]
         namespace = params.get("namespace")
+        session_id = params.get("session_id")
         out: list[dict[str, object]] = []
         for row in self.rows:
             if str(row.get("processing_state") or "") not in {"PENDING", "ENRICHING"}:
                 continue
             if namespace is not None and row.get("namespace") != namespace:
+                continue
+            if session_id is not None and row.get("session_id") != session_id:
                 continue
             content = str(row.get("content") or "").lower()
             name = str(row.get("name") or "").lower()
@@ -41,12 +44,15 @@ class _RecordingNeo4j:
         return out
 
 
-def _pending_episode(uuid: str, namespace: str, content: str) -> dict[str, object]:
+def _pending_episode(
+    uuid: str, namespace: str, content: str, *, session_id: str = "session-a"
+) -> dict[str, object]:
     return {
         "uuid": uuid,
         "name": f"{uuid} memory",
         "content": content,
         "namespace": namespace,
+        "session_id": session_id,
         "scope": "SESSION",
         "type": "EPISODIC",
         "processing_state": "PENDING",
@@ -69,6 +75,29 @@ def test_pending_episode_fetch_isolates_foreign_namespace() -> None:
     cypher = repo.neo4j.executed_queries[-1]
     assert "($namespace IS NULL OR n.namespace = $namespace)" in cypher
     assert repo.neo4j.executed_params[-1]["namespace"] == "tenant-a"
+
+
+def test_pending_episode_fetch_isolates_foreign_session() -> None:
+    repo = EpisodeLifecycleRepository()
+    repo.neo4j = _RecordingNeo4j(
+        [
+            _pending_episode(
+                "ep-a", "tenant-a", "ZEPHYR launch planned", session_id="session-a"
+            ),
+            _pending_episode(
+                "ep-b", "tenant-a", "ZEPHYR launch planned", session_id="session-b"
+            ),
+        ]
+    )
+
+    rows = repo.fetch_relevant_pending_episodes(
+        "zephyr", namespace="tenant-a", session_id="session-b"
+    )
+
+    assert [row["uuid"] for row in rows] == ["ep-b"]
+    cypher = repo.neo4j.executed_queries[-1]
+    assert "($session_id IS NULL OR n.session_id = $session_id)" in cypher
+    assert repo.neo4j.executed_params[-1]["session_id"] == "session-b"
 
 
 def test_pending_episode_fetch_omitted_namespace_preserves_global_behavior() -> None:

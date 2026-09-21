@@ -314,7 +314,11 @@ class Client:
 
     async def recall(self, query: str, **kw: Any):
         return await self.stack.recall_service.recall(
-            query, namespace=self.namespace, include_session=True, **kw
+            query,
+            namespace=self.namespace,
+            include_session=True,
+            session_id=self.session_id,
+            **kw,
         )
 
     async def await_enrichment(self, timeout_s: float = 240.0) -> dict[str, str]:

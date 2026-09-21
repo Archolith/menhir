@@ -919,7 +919,12 @@ class EpisodeLifecycleRepository:
         return rows[0] if rows else None
 
     def fetch_relevant_pending_episodes(
-        self, query: str, limit: int = 3, *, namespace: str | None = None
+        self,
+        query: str,
+        limit: int = 3,
+        *,
+        namespace: str | None = None,
+        session_id: str | None = None,
     ) -> list[dict[str, Any]]:
         tokens = [token.lower() for token in _PENDING_EPISODE_TOKEN_PATTERN.findall(query or "")]
         if not tokens:
@@ -936,6 +941,7 @@ class EpisodeLifecycleRepository:
             .where(
                 "n.processing_state IN ['PENDING', 'ENRICHING']",
                 "($namespace IS NULL OR n.namespace = $namespace)",
+                "($session_id IS NULL OR n.session_id = $session_id)",
                 "ANY(token IN $tokens"
                 " WHERE toLower(coalesce(n.content, '')) CONTAINS token"
                 " OR toLower(coalesce(n.name, '')) CONTAINS token)",
@@ -948,6 +954,7 @@ class EpisodeLifecycleRepository:
                 "n.content AS content",
                 "n.summary AS summary",
                 "n.resolved_episode_uuid AS resolved_episode_uuid",
+                "n.session_id AS session_id",
             )
             .order_by("coalesce(n.processing_started_at, n.queued_at, n.created_at) ASC, n.uuid")
             .limit()
@@ -955,7 +962,12 @@ class EpisodeLifecycleRepository:
         )
         return self.neo4j.execute(
             cypher,
-            params={"tokens": tokens, "limit": safe_limit, "namespace": namespace},
+            params={
+                "tokens": tokens,
+                "limit": safe_limit,
+                "namespace": namespace,
+                "session_id": session_id,
+            },
         )
 
     def fetch_linked_entity_uuids_for_episode(self, episode_uuid: str) -> list[str]:

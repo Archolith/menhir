@@ -324,6 +324,7 @@ class StubRecallService:
         file_context=None,
         file_context_project=None,
         namespace=None,
+        session_id=None,
         include_invalidated=False,
         include_superseded=False,
         trace=False,
@@ -779,6 +780,67 @@ def test_read_flagged_then_recall_context_flow(stubbed_mcp_state):
     assert context_payload["recent_count"] == 1
     assert context_payload["recent"][0]["tag"] == "recent"
     assert context_payload["recent"][0]["name"] == "Daily focus"
+
+
+def test_recall_context_recent_lane_excludes_foreign_session(stubbed_mcp_state):
+    _, graph_adapter, _ = stubbed_mcp_state
+    original_recent = graph_adapter.fetch_recent_memories
+
+    def _recent_with_two_sessions(limit: int = 10):
+        base = original_recent(limit=limit)
+        return [
+            dict(
+                base[0],
+                uuid="123e4567-e89b-12d3-a456-426614174121",
+                name="My fresh session memory",
+                scope="SESSION",
+                session_id="session-123",
+                user_flagged=False,
+            ),
+            dict(
+                base[0],
+                uuid="123e4567-e89b-12d3-a456-426614174122",
+                name="Foreign fresh session memory",
+                scope="SESSION",
+                session_id="session-other",
+                user_flagged=False,
+            ),
+            dict(
+                base[0],
+                uuid="123e4567-e89b-12d3-a456-426614174123",
+                name="My superseded session memory",
+                scope="SESSION",
+                session_id="session-123",
+                has_invalidated_facts=True,
+                user_flagged=False,
+            ),
+            dict(
+                base[0],
+                uuid="123e4567-e89b-12d3-a456-426614174124",
+                name="My raw episode",
+                labels=["Episodic"],
+                type="EPISODIC",
+                scope="SESSION",
+                session_id="session-123",
+                user_flagged=False,
+            ),
+        ]
+
+    graph_adapter.fetch_recent_memories = _recent_with_two_sessions  # type: ignore[method-assign]
+
+    asyncio.run(read_flagged_memories(reader_id="bot-a", limit=10))
+    result = asyncio.run(
+        recall_context_memories(
+            reader_id="bot-a",
+            query="",
+            recent_limit=5,
+        )
+    )
+
+    payload = _parse_json_text(result)
+    assert [row["name"] for row in payload["recent"]] == [
+        "My fresh session memory"
+    ]
 
 
 def test_recall_context_includes_similarity_for_relevant_hits(stubbed_mcp_state):

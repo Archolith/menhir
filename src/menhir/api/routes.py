@@ -13,6 +13,10 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from menhir.core.backend_impl import _drain_background_errors
 from menhir.domain.bootstrap_scope import bootstrap_selection
 from menhir.domain.recall import InvalidQueryPresetError
+from menhir.domain.recall_visibility import (
+    default_recent_context_visible,
+    session_scope_visible,
+)
 from menhir.domain.session import new_session
 from menhir.domain.structural_memory import is_structural_memory_row
 from menhir.mcp.service_access import get_request_session
@@ -304,10 +308,19 @@ async def bootstrap_context(
         limit=body.recent_limit * 3,
         namespace=resolved_namespace,
     )
+    bound_session = get_request_session()
+    effective_session_id = (
+        bound_session.session_id
+        if bound_session is not None
+        else (request.headers.get("x-menhir-session-id") or "").strip() or None
+    )
     recent = [
         row
         for row in recent_rows
-        if not bool(row.get("user_flagged")) and not is_structural_memory_row(row)
+        if not bool(row.get("user_flagged"))
+        and not is_structural_memory_row(row)
+        and session_scope_visible(row, effective_session_id)
+        and default_recent_context_visible(row)
     ][: body.recent_limit]
     return {
         "reader_id": normalized_reader,

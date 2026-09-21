@@ -230,6 +230,7 @@ class RecallSupportMixin:
         timeout_s: float,
         *,
         namespace: str | None = None,
+        session_id: str,
     ) -> tuple[list[dict[str, object]], list[str]]:
         """Wait for in-flight episodes to finish; return (visible_pending_rows, entity_uuids).
 
@@ -245,6 +246,7 @@ class RecallSupportMixin:
             query,
             limit=3,
             namespace=namespace,
+            session_id=session_id,
         )
         if not pending_candidates:
             return [], []

@@ -186,7 +186,9 @@ class _ShuffledAdapter(_CountingAdapter):
         return {u: list(self.linked.get(u, [])) for u in reversed(episode_uuids)}
 
     # --- the rest of what `_wait_for_pending_episodes` touches ---
-    def fetch_relevant_pending_episodes(self, query, limit=3, namespace=None):
+    def fetch_relevant_pending_episodes(
+        self, query, limit=3, namespace=None, session_id=None
+    ):
         return [{"uuid": u, "processing_state": "READY"} for u in ("ep1", "ep2", "ep3")]
 
     def fetch_episode_processing(self, uuid):
@@ -216,7 +218,7 @@ async def test_the_batched_episode_lookup_preserves_the_serial_loops_entity_orde
     support.ingest_service = object()
 
     _visible, entity_uuids = await support._wait_for_pending_episodes(
-        "q", limit=3, timeout_s=0.0
+        "q", limit=3, timeout_s=0.0, session_id="session-a"
     )
 
     assert entity_uuids == ["x", "shared", "y", "z"]

@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from menhir.api.auth import BearerAuthMiddleware
 from menhir.api.routes import router
 from menhir.config.settings import MemorySettings
+from menhir.core.request_context import bind_request_session, reset_request_session
 from menhir.core.backend_impl import (
     BackendClient,
     _push_background_error,
@@ -25,6 +26,7 @@ from menhir.core.backend_impl import (
     drain_client_warnings,
 )
 from menhir.domain.recall import InvalidQueryPresetError
+from menhir.domain.session import new_session
 
 
 def _build_fake_runtime_ctx(backend_overrides: dict | None = None):
@@ -234,10 +236,18 @@ class TestBackendRoundTrip:
     @pytest.mark.asyncio
     async def test_recall(self, backend_client):
         bc, ctx = backend_client
-        result = await bc.recall("test query", preset="knowledge", limit=5)
+        token = bind_request_session(
+            new_session("request-user", session_id="request-session")
+        )
+        try:
+            result = await bc.recall("test query", preset="knowledge", limit=5)
+        finally:
+            reset_request_session(token)
         assert result["query"] == "test"
         assert result["results"] == []
         ctx.built.recall_service.recall.assert_awaited_once()
+        _, kwargs = ctx.built.recall_service.recall.call_args
+        assert kwargs["session_id"] == "request-session"
 
     @pytest.mark.unit
     @pytest.mark.asyncio

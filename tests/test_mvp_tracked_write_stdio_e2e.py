@@ -410,6 +410,52 @@ class _DeterministicProviderHandler(BaseHTTPRequestHandler):
         ]
         return threshold, edges
 
+    @staticmethod
+    def _tagged_json(prompt: str, tag: str) -> list[dict[str, Any]]:
+        start_marker = f"<{tag}>"
+        end_marker = f"</{tag}>"
+        start = prompt.find(start_marker)
+        end = prompt.find(end_marker, start + len(start_marker))
+        if start < 0 or end < 0:
+            return []
+        raw = prompt[start + len(start_marker) : end].strip()
+        try:
+            value = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+        return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+    @classmethod
+    def _node_resolutions(cls, prompt: str) -> dict[str, Any]:
+        """Resolve exact-name entities onto existing candidates.
+
+        The second-session acceptance write intentionally repeats the same real-world entities.
+        Returning actual resolutions here exercises Graphiti's production reuse path instead of
+        letting its missing-resolution fallback mint unrelated nodes.
+        """
+
+        extracted = cls._tagged_json(prompt, "ENTITIES")
+        existing = cls._tagged_json(prompt, "EXISTING ENTITIES")
+        candidate_by_name = {
+            str(candidate.get("name") or "").strip().casefold(): int(
+                candidate.get("candidate_id", -1)
+            )
+            for candidate in existing
+            if str(candidate.get("name") or "").strip()
+        }
+        return {
+            "entity_resolutions": [
+                {
+                    "id": int(entity.get("id", index)),
+                    "name": str(entity.get("name") or ""),
+                    "duplicate_candidate_id": candidate_by_name.get(
+                        str(entity.get("name") or "").strip().casefold(), -1
+                    ),
+                }
+                for index, entity in enumerate(extracted)
+            ]
+        }
+
     @classmethod
     def _structured_response(
         cls, schema_name: str, prompt: str, schema: dict[str, Any]
@@ -444,7 +490,7 @@ class _DeterministicProviderHandler(BaseHTTPRequestHandler):
         if schema_name == "EdgeTimestamps":
             return {"valid_at": None, "invalid_at": None}
         if schema_name == "NodeResolutions":
-            return {"entity_resolutions": []}
+            return cls._node_resolutions(prompt)
         if schema_name == "EdgeDuplicate":
             return {
                 "duplicate_facts": [],
@@ -595,6 +641,9 @@ async def test_tracked_write_stdio_workflow_survives_restart_and_reports_failure
     repo_root = Path(__file__).resolve().parents[1]
     provider_env = tracked_write_provider_environment
     process_env = _base_process_environment(repo_root, tmp_path, provider_env)
+    session_a = f"mvp-118-session-a-{uuid4().hex}"
+    session_b = f"mvp-118-session-b-{uuid4().hex}"
+    process_env["MENHIR_MCP_SESSION_ID"] = session_a
     namespace = f"mvp-118-{uuid4().hex}"
     reader_id = f"reader-{uuid4().hex}"
     original = (
@@ -603,6 +652,10 @@ async def test_tracked_write_stdio_workflow_survives_restart_and_reports_failure
     )
     correction = (
         "Correction: the Atlas Lantern refund approval threshold is 750 dollars now; "
+        "500 dollars is the historical value."
+    )
+    second_session_confirmation = (
+        "Session B confirms that the Atlas Lantern refund approval threshold is 750 dollars now; "
         "500 dollars is the historical value."
     )
 
@@ -698,6 +751,7 @@ async def test_tracked_write_stdio_workflow_survives_restart_and_reports_failure
             direct_text = json.dumps(direct).lower()
             assert direct["count"] > 0
             assert "750" in direct_text
+            assert original.lower() not in direct_text
 
             paraphrase = _tool_json(
                 await client.call_tool(
@@ -710,7 +764,9 @@ async def test_tracked_write_stdio_workflow_survives_restart_and_reports_failure
                     timeout=180,
                 )
             )
-            assert "750" in json.dumps(paraphrase).lower()
+            paraphrase_text = json.dumps(paraphrase).lower()
+            assert "750" in paraphrase_text
+            assert original.lower() not in paraphrase_text
 
             history = _tool_json(
                 await client.call_tool(
@@ -762,6 +818,7 @@ async def test_tracked_write_stdio_workflow_survives_restart_and_reports_failure
                 )
             )
             assert "750" in context
+            assert original not in context
 
             await client.call_tool(
                 "read_flagged_memories",
@@ -781,7 +838,9 @@ async def test_tracked_write_stdio_workflow_survives_restart_and_reports_failure
                 )
             )
             assert startup_context["bootstrap_verified"] is True
-            assert "750" in json.dumps(startup_context).lower()
+            startup_context_text = json.dumps(startup_context).lower()
+            assert "750" in startup_context_text
+            assert original.lower() not in startup_context_text
 
             current_item = next(
                 item for item in direct["items"] if "750" in json.dumps(item)
@@ -808,6 +867,73 @@ async def test_tracked_write_stdio_workflow_survives_restart_and_reports_failure
             resolved_episode = str(resolution[0]["resolved_uuid"])
             assert resolved_episode in receipts
             assert "750" in str(receipts[resolved_episode]["content"])
+
+        # A second stdio bridge represents another logical session. Its write must resolve onto
+        # session A's existing entities, retain both source episodes as MENTIONS provenance, and
+        # remain visible to session B even though the reused Entity keeps A's scalar owner stamp.
+        session_b_env = dict(backend_env)
+        session_b_env["MENHIR_MCP_SESSION_ID"] = session_b
+        session_b_transport = _stdio_transport(
+            repo_root, tmp_path, session_b_env, base_url, "success-session-b"
+        )
+        async with Client(session_b_transport, timeout=360) as session_b_client:
+            session_b_write = _tool_text(
+                await _proxy_call(
+                    session_b_client,
+                    "add_memory_and_track",
+                    {
+                        "text": second_session_confirmation,
+                        "source": "stdio-e2e",
+                        "namespace": namespace,
+                        "timeout_s": 240,
+                        "poll_interval_s": 1,
+                    },
+                )
+            )
+            session_b_episode = _episode_id(session_b_write)
+            assert "status: READY" in session_b_write
+
+            session_b_resolution = test_neo4j_repo.execute(
+                "MATCH (e:Episodic {uuid: $uuid}) "
+                "RETURN e.resolved_episode_uuid AS resolved_uuid",
+                params={"uuid": session_b_episode},
+            )
+            assert session_b_resolution and session_b_resolution[0]["resolved_uuid"]
+            session_b_resolved_episode = str(
+                session_b_resolution[0]["resolved_uuid"]
+            )
+            shared_entities = test_neo4j_repo.execute(
+                "MATCH (a:Episodic {uuid: $session_a_episode})-[:MENTIONS]->(n:Entity) "
+                "MATCH (b:Episodic {uuid: $session_b_episode})-[:MENTIONS]->(n) "
+                "RETURN n.uuid AS uuid, n.session_id AS owner_session_id",
+                params={
+                    "session_a_episode": resolved_episode,
+                    "session_b_episode": session_b_resolved_episode,
+                },
+            )
+            assert shared_entities, "deterministic provider did not resolve shared entities"
+            assert any(
+                str(row["owner_session_id"] or "") == session_a
+                for row in shared_entities
+            )
+
+            session_b_recall = _tool_json(
+                await session_b_client.call_tool(
+                    "recall_memories",
+                    {
+                        "query": "current Atlas Lantern refund approval threshold",
+                        "namespace": namespace,
+                        "limit": 8,
+                    },
+                    timeout=180,
+                )
+            )
+            shared_uuids = {str(row["uuid"]) for row in shared_entities}
+            recalled_uuids = {
+                str(item["uuid"]) for item in session_b_recall["items"]
+            }
+            assert shared_uuids & recalled_uuids
+            assert "750" in json.dumps(session_b_recall).lower()
 
     # The process really stops and a fresh backend + fresh stdio bridge must recover
     # both status and recall from the durable graph.

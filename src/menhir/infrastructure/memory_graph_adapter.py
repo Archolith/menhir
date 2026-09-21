@@ -610,10 +610,15 @@ class MemoryGraphAdapter:
         return self._episodes.fetch_episode_processing(episode_uuid)
 
     def fetch_relevant_pending_episodes(
-        self, query: str, limit: int = 3, *, namespace: str | None = None
+        self,
+        query: str,
+        limit: int = 3,
+        *,
+        namespace: str | None = None,
+        session_id: str | None = None,
     ) -> list[dict[str, Any]]:
         return self._episodes.fetch_relevant_pending_episodes(
-            query, limit, namespace=namespace
+            query, limit, namespace=namespace, session_id=session_id
         )
 
     def fetch_linked_entity_uuids_for_episode(self, episode_uuid: str) -> list[str]:

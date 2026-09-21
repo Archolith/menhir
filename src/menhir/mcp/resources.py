@@ -474,6 +474,7 @@ class MemoriesBySearchResource(BaseJsonResource):
             preset=QueryPreset.KNOWLEDGE,
             limit=5,
             include_session=True,
+            session_id=get_mcp_session().session_id,
             wait_for_pending=True,
             namespace=self.pinned_namespace(),
         )

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from menhir.mcp.formatters import _compact_scored_item
-from menhir.mcp.service_access import get_request_session
+from menhir.mcp.service_access import get_mcp_session, get_request_session
 from menhir.mcp.tools.base import BaseJsonTool
 from menhir.mcp.contracts import ToolScope
 
@@ -94,12 +94,14 @@ class RecallMemoriesTool(BaseJsonTool):
             Ranked memory results with scores and explainability breakdown.
         """
         backend = self.get_backend()
+        effective_session_id = get_mcp_session().session_id
         try:
             result = await backend.recall(
                 query,
                 preset=preset,
                 limit=limit,
                 include_session=True,
+                session_id=effective_session_id,
                 wait_for_pending=True,
                 file_context=file_context or None,
                 file_context_project=file_context_project or None,

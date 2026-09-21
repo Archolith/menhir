@@ -102,7 +102,11 @@ async def test_recall_returns_scored_results_for_ingested_episode() -> None:
         ingest_result = await built.ingest_service.ingest_episode(episode, session, "recall-live-test")
         assert ingest_result.status is IngestStatus.INGESTED
 
-        result = await built.recall_service.recall("AI assistant Anthropic", include_session=True)
+        result = await built.recall_service.recall(
+            "AI assistant Anthropic",
+            include_session=True,
+            session_id=session.session_id,
+        )
 
         assert isinstance(result, RecallResult)
         assert len(result.results) > 0
@@ -130,7 +134,11 @@ async def test_recall_explainability_contains_all_components() -> None:
         await prepare_memory_runtime(built)
         await built.ingest_service.ingest_episode(episode, session, "recall-live-test")
 
-        result = await built.recall_service.recall("graph memory AI agents", include_session=True)
+        result = await built.recall_service.recall(
+            "graph memory AI agents",
+            include_session=True,
+            session_id=session.session_id,
+        )
 
         assert len(result.results) > 0
         r = result.results[0]
@@ -165,7 +173,11 @@ async def test_recall_updates_last_accessed_on_retrieval() -> None:
         await prepare_memory_runtime(built)
         await built.ingest_service.ingest_episode(episode, session, "recall-live-test")
 
-        result = await built.recall_service.recall("memory freshness lifecycle", include_session=True)
+        result = await built.recall_service.recall(
+            "memory freshness lifecycle",
+            include_session=True,
+            session_id=session.session_id,
+        )
 
         assert result.nodes_touched > 0
     finally:
@@ -192,7 +204,10 @@ async def test_recall_with_different_presets() -> None:
 
         for preset in QueryPreset:
             result = await built.recall_service.recall(
-                "retrieval scoring presets", preset=preset, include_session=True
+                "retrieval scoring presets",
+                preset=preset,
+                include_session=True,
+                session_id=session.session_id,
             )
             assert isinstance(result, RecallResult)
             assert result.preset == preset.value
@@ -200,4 +215,3 @@ async def test_recall_with_different_presets() -> None:
         _cleanup_session_data(built, session.session_id)
         await built.graphiti_client.close()
         built.neo4j.close()
-

@@ -31,7 +31,9 @@ class _Service:
         self.pending_result = pending_result if pending_result is not None else ([], [])
         self.fallback_rows = None
 
-    async def _wait_for_pending_episodes(self, query, limit, timeout_s, *, namespace=None):
+    async def _wait_for_pending_episodes(
+        self, query, limit, timeout_s, *, namespace=None, session_id
+    ):
         if self.pending_raises is not None:
             raise self.pending_raises
         return self.pending_result
@@ -47,7 +49,13 @@ async def test_programming_error_propagates_out_of_run_recall():
     NOT be swallowed into a degraded recall."""
     service = _Service(pending_raises=TypeError("stale stub signature"))
     with pytest.raises(TypeError, match="stale stub signature"):
-        await run_recall(service, "some query", wait_for_pending=True)
+        await run_recall(
+            service,
+            "some query",
+            wait_for_pending=True,
+            include_session=True,
+            session_id="session-a",
+        )
 
 
 @pytest.mark.asyncio
@@ -56,7 +64,13 @@ async def test_infrastructure_failure_still_degrades(caplog):
     and returns a normal result, logging the continue message."""
     service = _Service(pending_raises=RuntimeError("graph timeout"))
     with caplog.at_level(logging.WARNING, logger="menhir.services.recall_pipeline"):
-        result = await run_recall(service, "some query", wait_for_pending=True)
+        result = await run_recall(
+            service,
+            "some query",
+            wait_for_pending=True,
+            include_session=True,
+            session_id="session-a",
+        )
     assert isinstance(result, RecallResult)
     assert result.results == []
     assert "continuing with normal recall" in caplog.text
@@ -67,6 +81,12 @@ async def test_no_exception_pending_rows_still_used():
     """POSITIVE CONTROL: when no error is raised, pending rows returned normally are still used."""
     pending_row = {"uuid": "ep-1", "processing_state": "PENDING", "content": "x"}
     service = _Service(pending_result=([pending_row], ["ep-1"]))
-    result = await run_recall(service, "some query", wait_for_pending=True)
+    result = await run_recall(
+        service,
+        "some query",
+        wait_for_pending=True,
+        include_session=True,
+        session_id="session-a",
+    )
     assert isinstance(result, RecallResult)
     assert service.fallback_rows == [pending_row]

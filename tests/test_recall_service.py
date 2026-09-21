@@ -57,6 +57,16 @@ def test_projection_recall_eligibility_requires_explicit_true() -> None:
     assert _projection_is_recall_eligible({"recall_eligible": 1}) is False
 
 
+@pytest.mark.unit
+def test_candidate_metadata_hydrates_session_membership_from_episode_provenance() -> None:
+    from menhir.infrastructure.cypher import ENTITY_METADATA_FIELDS
+
+    assert (
+        "[(epi:Episodic)-[:MENTIONS]->(n) | epi.session_id] "
+        "AS provenance_session_ids"
+    ) in ENTITY_METADATA_FIELDS
+
+
 def _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter, **overrides):
     """Configure stubs with default search results and metadata."""
     scope = overrides.get("scope", "PERSISTENT")
@@ -126,7 +136,7 @@ async def test_recall_filters_session_nodes_by_default(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_recall_includes_session_nodes_when_requested(
+async def test_recall_fails_closed_when_session_visibility_has_no_session_id(
     stub_graphiti_client, stub_memory_graph_adapter
 ) -> None:
     _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter, scope="SESSION")
@@ -134,7 +144,26 @@ async def test_recall_includes_session_nodes_when_requested(
 
     result = await svc.recall("test query", include_session=True)
 
-    assert len(result.results) == 2
+    assert result.results == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_recall_includes_session_nodes_for_matching_episode_provenance(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    _setup_search_and_metadata(
+        stub_graphiti_client, stub_memory_graph_adapter, scope="SESSION"
+    )
+    for metadata in stub_memory_graph_adapter.candidate_metadata:
+        metadata["provenance_session_ids"] = ["session-a"]
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+
+    result = await svc.recall(
+        "test query", include_session=True, session_id="session-a"
+    )
+
+    assert [memory.uuid for memory in result.results] == ["entity-1", "entity-2"]
 
 
 @pytest.mark.unit
@@ -165,6 +194,59 @@ async def test_recall_session_id_excludes_other_and_unstamped_session_nodes(
     )
 
     assert [memory.uuid for memory in result.results] == ["entity-1"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_recall_reused_entity_is_visible_to_each_provenance_session(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    _setup_search_and_metadata(
+        stub_graphiti_client, stub_memory_graph_adapter, scope="SESSION"
+    )
+    stub_memory_graph_adapter.candidate_metadata[0].update(
+        {
+            "session_id": "session-a",
+            "provenance_session_ids": ["session-a", "session-b"],
+        }
+    )
+    stub_memory_graph_adapter.candidate_metadata[1].update(
+        {
+            "session_id": "session-a",
+            "provenance_session_ids": ["session-a"],
+        }
+    )
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+
+    result = await svc.recall(
+        "test query", include_session=True, session_id="session-b"
+    )
+
+    assert [memory.uuid for memory in result.results] == ["entity-1"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_recall_does_not_use_scalar_owner_when_provenance_disagrees(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    _setup_search_and_metadata(
+        stub_graphiti_client, stub_memory_graph_adapter, scope="SESSION"
+    )
+    for metadata in stub_memory_graph_adapter.candidate_metadata:
+        metadata.update(
+            {
+                "session_id": "stale-scalar-owner",
+                "provenance_session_ids": ["actual-session"],
+            }
+        )
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+
+    result = await svc.recall(
+        "test query", include_session=True, session_id="stale-scalar-owner"
+    )
+
+    assert result.results == []
 
 
 @pytest.mark.unit
@@ -656,6 +738,7 @@ async def test_recall_waits_for_relevant_pending_episode(
         "name": "pending memory",
         "content": "test query pending memory",
         "scope": "SESSION",
+        "session_id": "session-a",
         "processing_state": "PENDING",
     }
 
@@ -674,7 +757,12 @@ async def test_recall_waits_for_relevant_pending_episode(
         ingest_service=StubIngestService(),
     )
 
-    await svc.recall("test query", wait_for_pending=True)
+    await svc.recall(
+        "test query",
+        wait_for_pending=True,
+        include_session=True,
+        session_id="session-a",
+    )
 
     assert svc.ingest_service.waits == ["pending-1"]
 
@@ -690,6 +778,7 @@ async def test_recall_ignores_unrelated_pending_episode(
         "name": "different memory",
         "content": "unrelated content",
         "scope": "SESSION",
+        "session_id": "session-a",
         "processing_state": "PENDING",
     }
 
@@ -707,7 +796,12 @@ async def test_recall_ignores_unrelated_pending_episode(
         ingest_service=StubIngestService(),
     )
 
-    await svc.recall("test query", wait_for_pending=True)
+    await svc.recall(
+        "test query",
+        wait_for_pending=True,
+        include_session=True,
+        session_id="session-a",
+    )
 
     assert svc.ingest_service.waits == []
 
@@ -723,6 +817,7 @@ async def test_recall_returns_pending_fallback_when_wait_times_out(
         "name": "pending memory",
         "content": "remember this pending fact",
         "scope": "SESSION",
+        "session_id": "session-a",
         "processing_state": "PENDING",
     }
 
@@ -744,6 +839,7 @@ async def test_recall_returns_pending_fallback_when_wait_times_out(
         "pending fact",
         wait_for_pending=True,
         include_session=True,
+        session_id="session-a",
         pending_wait_timeout_s=0.01,
     )
 
@@ -763,6 +859,7 @@ async def test_recall_prepends_pending_fallback_even_when_search_has_results(
         "name": "pending memory",
         "content": "miso lantern bridge",
         "scope": "SESSION",
+        "session_id": "session-a",
         "processing_state": "PENDING",
     }
 
@@ -781,6 +878,7 @@ async def test_recall_prepends_pending_fallback_even_when_search_has_results(
         "miso lantern",
         wait_for_pending=True,
         include_session=True,
+        session_id="session-a",
         limit=3,
         pending_wait_timeout_s=0.01,
     )
@@ -800,6 +898,7 @@ async def test_recall_merges_linked_entities_from_just_ready_pending_episode(
         "name": "pending memory",
         "content": "miso lantern bridge",
         "scope": "SESSION",
+        "session_id": "session-a",
         "processing_state": "PENDING",
         "resolved_episode_uuid": "resolved-episode-1",
         "linked_entity_uuids": ["entity-pending"],
@@ -808,6 +907,7 @@ async def test_recall_merges_linked_entities_from_just_ready_pending_episode(
     # an entry keyed by that UUID with the linked entity list.
     stub_memory_graph_adapter.pending_episode_rows["resolved-episode-1"] = {
         "uuid": "resolved-episode-1",
+        "session_id": "session-a",
         "linked_entity_uuids": ["entity-pending"],
     }
     stub_memory_graph_adapter.candidate_metadata.append(
@@ -815,6 +915,8 @@ async def test_recall_merges_linked_entities_from_just_ready_pending_episode(
             "uuid": "entity-pending",
             "name": "Canary Memory",
             "scope": "SESSION",
+            "session_id": "session-a",
+            "provenance_session_ids": ["session-a"],
             "type": "SEMANTIC",
             "content": "miso lantern bridge canary memory",
             "summary": None,
@@ -843,6 +945,7 @@ async def test_recall_merges_linked_entities_from_just_ready_pending_episode(
         "miso lantern",
         wait_for_pending=True,
         include_session=True,
+        session_id="session-a",
         limit=3,
     )
 

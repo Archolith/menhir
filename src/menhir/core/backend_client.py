@@ -86,6 +86,19 @@ class BackendClient(BackendClientOpsMixin, MemoryBackend):
         client_name = (self._settings.mcp_client_name or "").strip()
         if client_name:
             headers["x-menhir-client-name"] = client_name
+        # In backend-client mode the MCP process and API runtime are separate processes. Relay
+        # the request-scoped identity so RuntimeProvider can enforce SESSION visibility against
+        # the actual caller instead of the backend process's unrelated startup session.
+        from menhir.core.request_context import get_request_session
+
+        request_session = get_request_session()
+        if request_session is not None:
+            request_session_id = str(getattr(request_session, "session_id", "") or "").strip()
+            request_user_id = str(getattr(request_session, "user_id", "") or "").strip()
+            if request_session_id:
+                headers["x-menhir-session-id"] = request_session_id
+            if request_user_id and not user_id:
+                headers["x-menhir-user-id"] = request_user_id
         return headers
 
     async def aclose(self) -> None:

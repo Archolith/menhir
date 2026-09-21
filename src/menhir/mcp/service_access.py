@@ -517,9 +517,18 @@ def get_mcp_session(settings: MemorySettings | None = None) -> MemorySession:
         raise RuntimeError("menhir runtime is not ready")
 
     global _client_session
-    if _client_session is None or _client_session.user_id != settings.mcp_client_user_id:
+    configured_session_id = str(getattr(settings, "mcp_session_id", "") or "").strip()
+    if (
+        _client_session is None
+        or _client_session.user_id != settings.mcp_client_user_id
+        or (
+            configured_session_id
+            and _client_session.session_id != configured_session_id
+        )
+    ):
         _client_session = _cached_session_for(
             settings.mcp_client_user_id,
+            session_id=configured_session_id or None,
             client_id=settings.mcp_client_id,
             client_name=settings.mcp_client_name or settings.mcp_client_user_id,
         )

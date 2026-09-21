@@ -52,6 +52,14 @@ def test_artifact_reconcile_repository_is_explicit_env_setting(
 
 
 @pytest.mark.unit
+def test_mcp_session_id_is_explicit_env_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MENHIR_MCP_SESSION_ID", "conversation-123")
+    assert MemorySettings.from_env().mcp_session_id == "conversation-123"
+
+
+@pytest.mark.unit
 def test_benchmark_mode_defaults_off() -> None:
     """Benchmark mode is off by default so normal runs keep background work."""
     assert MemorySettings().benchmark_mode is False

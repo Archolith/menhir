@@ -99,6 +99,7 @@ class BackendClientOpsMixin:
         file_context: str | None = None,
         file_context_project: str | None = None,
         namespace: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         return await self._request(
             "recall",
@@ -113,6 +114,7 @@ class BackendClientOpsMixin:
                 "file_context": file_context,
                 "file_context_project": file_context_project,
                 "namespace": namespace,
+                "session_id": session_id,
                 "trace": trace,
             },
         )

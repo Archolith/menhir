@@ -931,8 +931,11 @@ def test_normal_context_recall_returns_context_unchanged(
 
     from menhir.cli import hook as hook_module
 
+    received: dict[str, object] = {}
+
     class _FastBuilder:
         async def build_context(self, *args, **kwargs):
+            received.update(kwargs)
             return types.SimpleNamespace(context="- [0.9] recalled context block")
 
     monkeypatch.setattr(hook_module, "CONTEXT_TIMEOUT_S", 0.5)
@@ -940,7 +943,11 @@ def test_normal_context_recall_returns_context_unchanged(
         "menhir.cli.bootstrap.build_hook_services",
         lambda settings=None: _fake_svc(_FastBuilder()),
     )
-    monkeypatch.setattr(sys, "stdin", _FakeStdin("{}"))
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        _FakeStdin(json.dumps({"session_id": "prompt-session"})),
+    )
 
     hook_module._run_prompt_impl(
         query="a sufficiently long prompt that triggers recall",
@@ -951,6 +958,49 @@ def test_normal_context_recall_returns_context_unchanged(
 
     captured = capsys.readouterr()
     assert "recalled context block" in captured.out
+    assert received["session_id"] == "prompt-session"
+
+
+@pytest.mark.unit
+def test_postcompact_context_recall_forwards_session_id(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    import sys
+    import types
+
+    from menhir.cli import hook as hook_module
+
+    received: dict[str, object] = {}
+
+    class _FastBuilder:
+        async def build_context(self, *args, **kwargs):
+            received.update(kwargs)
+            return types.SimpleNamespace(context="- restored compacted context")
+
+    monkeypatch.setattr(hook_module, "CONTEXT_TIMEOUT_S", 0.5)
+    monkeypatch.setattr(
+        "menhir.cli.bootstrap.build_hook_services",
+        lambda settings=None: _fake_svc(_FastBuilder()),
+    )
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        _FakeStdin(
+            json.dumps(
+                {
+                    "session_id": "compact-session",
+                    "source": "compact",
+                    "compact_summary": "a sufficiently detailed compact summary",
+                }
+            )
+        ),
+    )
+
+    hook_module._run_postcompact_impl(max_tokens=500)
+
+    captured = capsys.readouterr()
+    assert "restored compacted context" in captured.out
+    assert received["session_id"] == "compact-session"
 
 
 @pytest.mark.unit

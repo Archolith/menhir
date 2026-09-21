@@ -287,6 +287,10 @@ MEMORY_RETURN_FIELDS = (
     "n.user_flagged AS user_flagged",
     "n.bootstrap_scope AS bootstrap_scope",
     "n.session_id AS session_id",
+    "[(epi:Episodic)-[:MENTIONS]->(n) | epi.session_id] AS provenance_session_ids",
+    "COUNT { MATCH (n)-[fact:RELATES_TO]-() "
+    "WHERE fact.invalid_at IS NOT NULL OR fact.expired_at IS NOT NULL } > 0 "
+    "AS has_invalidated_facts",
     "n.user_id AS user_id",
     "n.created_at AS created_at",
     "n.last_accessed AS last_accessed",
@@ -315,8 +319,13 @@ ENTITY_METADATA_FIELDS = (
     "n.user_flagged AS user_flagged",
     "n.bootstrap_scope AS bootstrap_scope",
     # SESSION visibility is caller-relative. The recall boundary needs this owner stamp
-    # alongside scope so it can reject otherwise relevant nodes from another session.
+    # alongside scope as a compatibility fallback for legacy entities that predate durable
+    # episode provenance.
     "n.session_id AS session_id",
+    # An entity may be resolved from episodes in more than one session. MENTIONS is already the
+    # durable provenance ledger for that reuse, so derive visibility membership from it rather
+    # than trying to maintain a second mutable owner list on the entity.
+    "[(epi:Episodic)-[:MENTIONS]->(n) | epi.session_id] AS provenance_session_ids",
     "coalesce(toInteger(n.rehydration_count), 0) AS rehydration_count",
     "n.conflict_group_id AS conflict_group_id",
     "n.conflict_status AS conflict_status",

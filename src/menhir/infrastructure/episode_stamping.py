@@ -100,6 +100,9 @@ class EpisodeStampingRepository:
                 " THEN toFloat(n.source_confidence)"
                 " ELSE coalesce(toFloat(n.source_confidence), $source_confidence) END",
                 "n.user_flagged = coalesce(n.user_flagged, false)",
+                # This is the original/primary attribution, not the complete visibility set.
+                # Reused entities keep it stable; recall derives multi-session membership from
+                # every source episode's durable MENTIONS provenance.
                 "n.session_id = CASE WHEN locked THEN n.session_id"
                 " ELSE coalesce(n.session_id, $session_id) END",
                 "n.user_id = CASE WHEN locked THEN n.user_id"

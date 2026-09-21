@@ -536,6 +536,10 @@ class MemorySettings:
     # Backend-first MCP client mode
     backend_url: str = ""
     mcp_client_user_id: str = "claude-code"
+    # Optional logical conversation identity for backend-client stdio processes.  Supplying this
+    # lets a restarted bridge resume the same SESSION visibility boundary; leaving it blank keeps
+    # the existing process-local UUID behavior and prevents different windows sharing a client ID.
+    mcp_session_id: str = ""
     mcp_client_id: str = ""
     mcp_client_name: str = "claude-code"
 
@@ -1102,6 +1106,7 @@ class MemorySettings:
             ),
             backend_url=_getenv("MENHIR_BACKEND_URL", default=cls.backend_url),
             mcp_client_user_id=_getenv("MENHIR_MCP_CLIENT_USER_ID", default=cls.mcp_client_user_id),
+            mcp_session_id=_getenv("MENHIR_MCP_SESSION_ID", default=cls.mcp_session_id),
             mcp_client_id=_getenv("MENHIR_CLIENT_ID", default=cls.mcp_client_id),
             mcp_client_name=_getenv("MENHIR_CLIENT_NAME", default=cls.mcp_client_name),
             # Conflict suppression

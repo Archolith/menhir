@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from menhir.services.ingest_service import IngestService
 
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
+from menhir.domain.recall_visibility import session_scope_visible
 from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FAMILY
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
 from menhir.domain.self_identity import self_uuid_for_namespace
@@ -130,12 +131,19 @@ async def run_recall(
     # --- Pending episode wait ---
     visible_pending_rows: list[dict[str, object]] = []
     pending_entity_uuids: list[str] = []
-    if wait_for_pending:
+    effective_session_id = str(session_id or "").strip()
+    # Pending episodes are SESSION-scoped by definition. Do not query that lane unless the
+    # caller both opted in and supplied an identity that the repository can enforce.
+    if wait_for_pending and include_session and effective_session_id:
         _t = perf_counter()
         try:
             visible_pending_rows, pending_entity_uuids = (
                 await service._wait_for_pending_episodes(
-                    query, limit, pending_wait_timeout_s, namespace=namespace
+                    query,
+                    limit,
+                    pending_wait_timeout_s,
+                    namespace=namespace,
+                    session_id=effective_session_id,
                 )
             )
         except _PROGRAMMING_ERRORS:
@@ -584,10 +592,14 @@ async def run_recall(
         if scope == NodeScope.SESSION:
             if not include_session:
                 continue
-            # When the caller identifies a session, SESSION scope is an ownership
-            # boundary, not a broad opt-in to every fresh node in the namespace.
-            # Missing owner stamps fail closed for an identified caller.
-            if session_id is not None and str(meta.get("session_id") or "") != session_id:
+            # SESSION scope is a caller-relative visibility boundary. A broad opt-in with no
+            # caller identity must never expose every fresh node in the namespace.
+            if not effective_session_id:
+                continue
+            # MENTIONS provenance is authoritative for reused entities. The scalar owner is
+            # retained as a legacy fallback so pre-provenance SESSION rows remain visible to
+            # their original session while still failing closed for every other caller.
+            if not session_scope_visible(meta, effective_session_id):
                 continue
         # Materialized Views have a fail-closed context contract. Historical/debug inspection uses
         # direct getters and operator listings; ``include_superseded`` must not turn ordinary recall
