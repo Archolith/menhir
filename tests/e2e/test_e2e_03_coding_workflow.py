@@ -181,7 +181,7 @@ async def test_e2e_03_coding_workflow(
         # formatter says "Graph write running in background" while still opening
         # "Scanned <project>:", so the receipt cannot distinguish the two. Wait for
         # the read surface an agent would query.
-        await wait_for_project_indexed(client, project)
+        await wait_for_project_indexed(client, project, symbol_path=SUBJECT)
 
         # --- files, symbols, context -------------------------------------------------
         files = _text(

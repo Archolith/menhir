@@ -193,7 +193,11 @@ async def stdio_session(
 
 
 async def wait_for_project_indexed(
-    client: "RecordingClient", project: str, *, timeout: float = 120.0
+    client: "RecordingClient",
+    project: str,
+    *,
+    symbol_path: str | None = None,
+    timeout: float = 180.0,
 ) -> str:
     """Block until ``project`` is answerable by ``query_structure``, or raise.
 
@@ -214,18 +218,36 @@ async def wait_for_project_indexed(
 
     import time as _time
 
+    async def _probe(query_type: str, path: str = "") -> str:
+        args = {"query_type": query_type, "project": project}
+        if path:
+            args["path"] = path
+        result = await client.call_tool("query_structure", args)
+        content = getattr(result, "content", None) or []
+        return "\n".join(getattr(item, "text", "") or "" for item in content)
+
+    #: The formatter's own empty-result wordings. A still-writing project and a genuinely
+    #: empty one read identically, which is why this wait is bounded and raises rather
+    #: than returning quietly on timeout.
+    pending = ("is not ingested", "No files found", "No symbols found")
+
     deadline = _time.monotonic() + timeout
     last = ""
     while _time.monotonic() < deadline:
-        result = await client.call_tool(
-            "query_structure", {"query_type": "files", "project": project}
-        )
-        content = getattr(result, "content", None) or []
-        last = "\n".join(getattr(item, "text", "") or "" for item in content)
-        if "is not ingested" not in last and "No files found" not in last:
+        last = await _probe("files")
+        ready = not any(marker in last for marker in pending)
+        if ready and symbol_path:
+            # Files land before symbols. CI got past the files probe and then failed on
+            # "No symbols found for src/shop/storage.py" -- the background write is
+            # incremental, so the first stage appearing proves only that it started.
+            symbols = await _probe("symbols", symbol_path)
+            if any(marker in symbols for marker in pending):
+                last, ready = symbols, False
+        if ready:
             return last
         await _asyncio.sleep(1.0)
     raise AssertionError(
-        f"project {project!r} never became answerable within {timeout}s after "
-        f"ingest_project returned. Last response:\n{last[:600]}"
+        f"project {project!r} never became fully answerable within {timeout}s after "
+        f"ingest_project returned (symbol_path={symbol_path!r}). "
+        f"Last response:\n{last[:600]}"
     )
