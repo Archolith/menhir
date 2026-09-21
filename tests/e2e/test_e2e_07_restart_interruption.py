@@ -242,12 +242,21 @@ async def test_e2e_07_restart_interruption(
                 # product ships the operator path for it: force_release_enrichment_lease.
                 # Exercising it is the honest test; waiting fifteen minutes for a timer
                 # would prove only that the clock works.
+                # Matched by the RECEIPT uuid as well as by namespace. The two :Episodic
+                # twins per write split their properties: the namespaced twin carries the
+                # MENTIONS, the receipt's twin (group_id null) carries processing_state
+                # and the lease. A first version of this query matched on group_id only,
+                # got two rows with state=null, released nothing, and stamped
+                # recovered_via anyway -- CI evidence showed an empty force-release.txt
+                # next to an episode still ENRICHING at 75% with 6 entities written.
                 lease = graph_query(
                     e2e_config,
-                    "MATCH (e:Episodic) WHERE e.group_id = $group "
-                    "RETURN e.uuid AS uuid, e.processing_state AS state, "
+                    "MATCH (e:Episodic) WHERE e.uuid = $uuid OR e.group_id = $group "
+                    "RETURN e.uuid AS uuid, e.group_id AS group_id, "
+                    "       e.processing_state AS state, "
                     "       toString(e.processing_lease_expires_at) AS lease_expires, "
                     "       e.processing_owner AS owner",
+                    uuid=episode,
                     group=namespace,
                 )
                 lane_evidence.attach(
@@ -261,9 +270,10 @@ async def test_e2e_07_restart_interruption(
                     stuck_state=state, lease_rows=lease, lease_held_after_kill=held_by_dead_owner
                 )
 
-                # Release every in-flight twin in the namespace: the receipt's uuid names
-                # the unenriched projection (#92), and the worker holds the lease on the
-                # namespaced one.
+                # Release every row still in flight, whichever twin holds it. The
+                # namespace argument follows the row's own group_id: the receipt twin has
+                # none, and pinning a namespace the node does not carry would make the
+                # ownership guard refuse the very release being tested.
                 releases = []
                 for row in lease:
                     if (row.get("state") or "").upper() not in IN_FLIGHT_STATES:
@@ -277,13 +287,21 @@ async def test_e2e_07_restart_interruption(
                                     "arguments": {
                                         "episode_uuid": row["uuid"],
                                         "requeue": True,
-                                        "namespace": namespace,
+                                        "namespace": row.get("group_id") or "",
                                     },
                                 },
                             )
                         )
                     )
                 lane_evidence.attach("force-release.txt", "\n---\n".join(releases))
+                # Only claim the recovery path if a release was actually issued. The
+                # earlier unconditional stamp is how an empty force-release.txt shipped
+                # under a manifest saying the lease had been released.
+                assert releases, (
+                    f"episode stayed {state!r} after restart but no row was in flight to "
+                    f"release -- the lease query is looking at the wrong node:\n"
+                    f"{json.dumps(lease, indent=2, default=str)[:800]}"
+                )
                 recovered_via = "force_release_enrichment_lease"
 
                 state, status_body = await _poll_until_terminal(POST_RELEASE_SETTLE_S)
