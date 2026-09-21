@@ -216,6 +216,20 @@ class E2EConfig:
                 "the campaign cannot drive the running production backend."
             )
 
+    @property
+    def absent_env_file(self) -> Path:
+        """A path that must never exist, for lanes that want no env file at all.
+
+        The #118 stdio harness pointed ``ENV_FILE`` at an intentionally absent path
+        rather than at a written one. That is the stronger guarantee where a lane needs
+        nothing from a file: ``resolve_env_file`` returns it, ``load_menhir_env`` finds
+        no file, and nothing is loaded. The written file remains the default because
+        most lanes do want the graph settings in it; this is here for the ones that
+        want to prove behavior with no file present.
+        """
+
+        return self.work_root / "intentionally-absent.env"
+
     def write_env_file(self) -> Path:
         """Write the harness-owned env file the children read via ``ENV_FILE``.
 
@@ -273,6 +287,19 @@ def child_environment(config: E2EConfig, **extra: str) -> dict[str, str]:
             "MENHIR_AUTH_MODE": "none",
             "PYTHONUNBUFFERED": "1",
             "PYTHONIOENCODING": "utf-8",
+            # Blanked rather than omitted, from the #118 stdio harness. The allow-list
+            # already keeps the operator's keys out, but an empty value is a positive
+            # statement that this child has no credential, so a code path that reads one
+            # and silently behaves differently cannot pick up a stale export.
+            "MENHIR_AGENT_KEY": "",
+            "MENHIR_READONLY_KEY": "",
+            "MENHIR_OPERATOR_KEY": "",
+            "MENHIR_API_KEY": "",
+            # Also from that harness: benchmark mode keeps the run off shared
+            # rate-limited paths, and `observe` stops saga reconciliation from acting on
+            # a graph the lane is about to assert against.
+            "MENHIR_BENCHMARK_MODE": "1",
+            "MENHIR_SAGA_RECONCILE_STARTUP_MODE": "observe",
         }
     )
     # `extra` carries the per-lane feature combination and anything a lane pins

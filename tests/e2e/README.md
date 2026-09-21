@@ -12,7 +12,7 @@ criteria; it does not redefine them.
 | Lane | Subject | State |
 | --- | --- | --- |
 | E2E-1 | cold install, `initialize`, `tools/list`, schemas, shutdown | **implemented** |
-| E2E-2 | memory lifecycle (carries #118's remaining acceptance) | scaffolded |
+| E2E-2 | memory lifecycle (carries #118's remaining acceptance) | **implemented** |
 | E2E-3 | integrated coding workflow | scaffolded, fixture repo builds |
 | E2E-4 | WorkArtifact lifecycle | scaffolded, needs fixture corpus |
 | E2E-5 | TODO lifecycle | scaffolded |
@@ -61,6 +61,27 @@ Port `7689` is deliberately **not** `7688`: that is the unit suite's instance, a
 lane resetting it mid-run would corrupt a parallel `pytest --run-online` into failures
 that look like product defects. Port `8100` is refused outright — it is the documented
 default for the operator's own `menhir serve`.
+
+## Providers
+
+Enrichment lanes need a model to reach READY. Rather than a real one, the campaign
+carries two fake OpenAI-compatible servers in `_harness/providers.py`, ported from
+`mvp-118-stdio-e2e` where they were built and proved for #118:
+
+```python
+@pytest.mark.provider("deterministic")   # answers every Graphiti extraction schema
+@pytest.mark.provider("failing")         # refuses every completion, for E2E-8
+@pytest.mark.provider("real")            # a live model, skips when no key is configured
+```
+
+The default is **no provider**: a lane that does not declare one gets no credentials and
+no endpoint, so an unintended live call fails loudly instead of quietly spending budget.
+
+The deterministic handler is why E2E-2 can assert on real enrichment output — READY
+status, recall by wording and paraphrase, correction currentness — rather than only the
+states reachable without a model. `failing` exists because E2E-8 requires that provider
+failure does not silently pass, and that is only testable against something that
+reliably fails.
 
 ## Feature matrix
 
@@ -147,11 +168,7 @@ what the server returned.
 
 ## Known gaps
 
-- **Lanes 2–8 are scaffolds.** Criteria are enumerated; assertions are not written.
-- **E2E-2 needs a provider decision.** Enrichment needs a real LLM/embedder to reach
-  READY. `child_environment` withholds provider credentials by default so an accidental
-  live call fails loudly instead of spending budget. The lane must either receive them
-  deliberately or assert only the states reachable without one — and record which.
+- **Lanes 3–8 are scaffolds.** Criteria are enumerated; assertions are not written.
 - **E2E-4 needs a committed fixture artifact corpus.**
 - **E2E-6 needs a Beacon interpreter** (`MENHIR_E2E_BEACON_PYTHON`).
 - **E2E-3 may be reading the wrong path.** The snapshot read path landing in the working

@@ -18,6 +18,7 @@ stack up costs a wheel build and a venv install.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,12 @@ from tests.e2e._harness.features import (
     validate_registry,
 )
 from tests.e2e._harness.fixture_repo import build_fixture_repo
+from tests.e2e._harness.providers import (
+    deterministic_provider,
+    failing_provider,
+    local_provider_environment,
+    real_provider_environment,
+)
 from tests.e2e._harness.stack import REPO_ROOT, build_wheel, install_into_venv, reset_graph, start_backend
 
 _ENABLE_VAR = "MENHIR_E2E"
@@ -42,6 +49,12 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "e2e: black-box stdio end-to-end lane (Phase C/F). Requires MENHIR_E2E=1, a "
         "disposable Neo4j, Docker, and a wheel build; skipped otherwise.",
+    )
+    config.addinivalue_line(
+        "markers",
+        "provider(kind): model provider for the lane -- none (default), deterministic, "
+        "failing, or real. Anything but none starts a fake OpenAI-compatible server "
+        "and points the child processes at it.",
     )
 
 
@@ -171,6 +184,44 @@ def fresh_graph(e2e_config: E2EConfig) -> None:
 
 
 @pytest.fixture
+def provider_env(request: pytest.FixtureRequest) -> Iterator[dict[str, str]]:
+    """Provider environment for the lane, selected by ``@pytest.mark.provider(...)``.
+
+    ``"deterministic"`` is what makes enrichment lanes runnable at all. Reaching
+    READY needs a model; a real one costs money, needs a key, and makes the lane
+    irreproducible. The fake answers every Graphiti extraction schema, so E2E-2 can
+    assert on real enrichment output rather than only the states reachable without a
+    provider.
+
+    ``"failing"`` refuses every completion, which is the only way to prove E2E-8's
+    "provider failure does not silently pass" -- without it, an outage and a pass are
+    indistinguishable.
+
+    The default is no provider at all, and deliberately so: a lane that does not
+    declare one gets no credentials and no endpoint, so an unintended live call fails
+    loudly instead of quietly spending budget.
+    """
+
+    marker = request.node.get_closest_marker("provider")
+    kind = (marker.args[0] if marker and marker.args else "none").strip().lower()
+
+    if kind == "none":
+        yield {}
+    elif kind == "deterministic":
+        with deterministic_provider() as base_url:
+            yield local_provider_environment(base_url)
+    elif kind == "failing":
+        with failing_provider() as base_url:
+            yield local_provider_environment(base_url)
+    elif kind == "real":
+        yield real_provider_environment(REPO_ROOT)
+    else:
+        raise ValueError(
+            f"unknown provider kind {kind!r}; use none, deterministic, failing or real"
+        )
+
+
+@pytest.fixture
 def feature_env(feature_combo: FeatureCombo) -> dict[str, str]:
     """The child-process environment for this lane's feature combination.
 
@@ -188,6 +239,7 @@ def running_stack(
     fresh_graph,
     lane_evidence: LaneEvidence,
     feature_env: dict[str, str],
+    provider_env: dict[str, str],
 ):
     """A started backend, torn down after the lane, with its log captured as evidence.
 
@@ -200,8 +252,9 @@ def running_stack(
         e2e_config,
         e2e_installed,
         log_path=lane_evidence.backend_log_path,
-        feature_env=feature_env,
+        feature_env={**feature_env, **provider_env},
     )
+    lane_evidence.record_stack(provider=bool(provider_env))
     lane_evidence.record_stack(**e2e_installed.as_evidence())
     try:
         yield backend

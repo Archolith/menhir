@@ -34,12 +34,11 @@ from __future__ import annotations
 
 import hashlib
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from tests.e2e._harness.config import E2EConfig, child_environment
+from tests.e2e._harness.config import E2EConfig
 from tests.e2e._harness.evidence import LaneEvidence
 from tests.e2e._harness.features import FeatureCombo
 from tests.e2e._harness.pending import declare_pending
@@ -106,6 +105,7 @@ async def test_e2e_06_beacon_generation_and_consumption(
         encoding="utf-8",
     )
     hand_authored_digest = hashlib.sha256(hand_authored.read_bytes()).hexdigest()
+    lane_evidence.record_stack(hand_authored_digest=hand_authored_digest)
 
     # TODO(#120 evidence): the fixture project must be ingested through the MCP surface
     # before generation -- `menhir beacon generate` reads Menhir-held project knowledge,
