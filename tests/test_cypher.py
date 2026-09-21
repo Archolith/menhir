@@ -837,6 +837,7 @@ class TestFieldConstants:
         assert "edge_count" in names
         assert "freshness" in names
         assert "rehydration_count" in names
+        assert "session_id" in names
 
     def test_episode_claim_has_owner_and_lease(self):
         names = {f.split(" AS ")[-1] for f in EPISODE_CLAIM_FIELDS}
