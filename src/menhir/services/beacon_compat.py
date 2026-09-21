@@ -18,13 +18,16 @@ longer inspected.
 
 from __future__ import annotations
 
+import os
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 
 __all__ = [
     "BeaconCompatError",
     "beacon_python_is_usable",
     "build_manifest_via_beacon",
+    "child_environment",
     "validate_manifest_file",
 ]
 
@@ -36,8 +39,51 @@ _REQUIRED_COMMANDS = ("build", "validate")
 _SUBPROCESS_TIMEOUT_SECONDS = 120
 
 
+#: Environment variables a Beacon child (and the git it runs) may inherit. Everything else is
+#: dropped: Menhir's process holds NEO4J_PASSWORD, provider API keys, and auth tokens loaded by
+#: ``load_menhir_env``, and a caller-chosen ``--beacon-python`` must never see them (PR #125 F3).
+#: Process plumbing only -- executable lookup, the Windows runtime, home/config lookup for git,
+#: temp space, and locale.
+_ALLOWED_ENV = frozenset(
+    {
+        "PATH",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "SYSTEMDRIVE",
+        "WINDIR",
+        "COMSPEC",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "HOME",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "LANG",
+        "LANGUAGE",
+    }
+)
+#: Interpreter behaviour switches that cannot redirect imports. PYTHONPATH, PYTHONHOME,
+#: PYTHONSTARTUP and friends are deliberately NOT forwarded: they would splice Menhir's import
+#: path into Beacon's isolated interpreter, which is the dependency clash the separate venv exists
+#: to prevent. No BEACON_* variable is forwarded because Menhir sets none; the child's behaviour
+#: is fully determined by the fixed argv.
+_ALLOWED_PYTHON_ENV = frozenset({"PYTHONUTF8", "PYTHONIOENCODING", "PYTHONDONTWRITEBYTECODE"})
+
+
 class BeaconCompatError(RuntimeError):
     """Raised when the Beacon compatibility boundary fails or is unavailable."""
+
+
+def child_environment(parent: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Return the minimal allowlisted environment for a Beacon (or git) child process."""
+    source = os.environ if parent is None else parent
+    env: dict[str, str] = {}
+    for key, value in source.items():
+        upper = key.upper()
+        if upper in _ALLOWED_ENV or upper in _ALLOWED_PYTHON_ENV or upper.startswith("LC_"):
+            env[key] = value
+    return env
 
 
 def _run(beacon_python: str, args: list[str], *, cwd: Path | None, timeout: int) -> str:
@@ -48,6 +94,7 @@ def _run(beacon_python: str, args: list[str], *, cwd: Path | None, timeout: int)
             check=False,
             timeout=timeout,
             cwd=str(cwd) if cwd else None,
+            env=child_environment(),
         )
     except FileNotFoundError as exc:
         raise BeaconCompatError(
