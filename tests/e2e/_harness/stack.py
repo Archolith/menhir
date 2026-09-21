@@ -381,6 +381,9 @@ def start_backend(
 
     config.state_dir.mkdir(parents=True, exist_ok=True)
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    # A fresh port per backend. See `E2EConfig.reserve_backend_port`: reusing one makes
+    # every backend after the first exit 3 on Linux.
+    config.reserve_backend_port()
     handle = log_path.open("w", encoding="utf-8")
 
     process = subprocess.Popen(
