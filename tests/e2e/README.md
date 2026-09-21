@@ -13,12 +13,18 @@ criteria; it does not redefine them.
 | --- | --- | --- |
 | E2E-1 | cold install, `initialize`, `tools/list`, schemas, shutdown | **implemented** |
 | E2E-2 | memory lifecycle (carries #118's remaining acceptance) | **implemented** |
-| E2E-3 | integrated coding workflow | scaffolded, fixture repo builds |
+| E2E-3 | integrated coding workflow | **implemented** |
 | E2E-4 | WorkArtifact lifecycle | scaffolded, needs fixture corpus |
-| E2E-5 | TODO lifecycle | scaffolded |
+| E2E-5 | TODO lifecycle | **implemented** |
 | E2E-6 | Beacon generation and consumption | scaffolded, policy pinned |
-| E2E-7 | restart and interrupted work | scaffolded |
-| E2E-8 | isolation and adversarial (carries #88's regression pin) | scaffolded |
+| E2E-7 | restart and interrupted work | **implemented** |
+| E2E-8 | isolation and adversarial (carries #88's regression pin) | **6 of 8 criteria** |
+
+E2E-8 is three tests rather than one. A lane declares a single provider, and its criteria
+need opposite ones: the #88 isolation pin needs a provider that succeeds (entities must be
+written before they can land in the wrong silo), while "provider failure does not silently
+pass" needs one that reliably fails. Its two remaining criteria are adversarial variants of
+E2E-4's and E2E-6's happy paths, and are declared pending against those prerequisites.
 
 A scaffolded lane is **not** a silent skip. `_harness/pending.py` writes a full evidence
 directory recording every acceptance criterion as unproven, then skips — so
@@ -37,6 +43,30 @@ MENHIR_E2E=1 pytest tests/e2e/test_e2e_01_cold_install.py -v
 
 Prerequisites: Docker, a disposable Neo4j, and `build` installed. Each is checked, and a
 missing one produces a skip that names it rather than a confusing failure.
+
+### Per release
+
+This is the suite to run against a release candidate. The RC run differs from a development
+run in one way that matters:
+
+```bash
+MENHIR_E2E=1 MENHIR_E2E_STRICT=1 pytest tests/e2e -v
+```
+
+`MENHIR_E2E_STRICT=1` aborts on a dirty working tree. Without it the campaign will build a
+wheel from uncommitted changes and record a commit hash that does not describe what was
+tested -- which makes the evidence worse than useless, because it still looks authoritative.
+
+Afterwards, read `result.json` rather than the pytest summary. The gate asks which
+acceptance criteria were proven, and a green run with pending lanes is not the same answer
+as a green run without them:
+
+```bash
+cat evidence/<run_id>/*/result.json   | jq -r '.lane + ": " + .status + " — " + (.criteria_unproven | join(", "))'
+```
+
+No lane currently asks for a live model, so a full campaign run spends nothing and needs no
+API key.
 
 ### Opt-in is an env var, not `--run-e2e`
 
@@ -168,10 +198,14 @@ what the server returned.
 
 ## Known gaps
 
-- **Lanes 3–8 are scaffolds.** Criteria are enumerated; assertions are not written.
-- **E2E-4 needs a committed fixture artifact corpus.**
-- **E2E-6 needs a Beacon interpreter** (`MENHIR_E2E_BEACON_PYTHON`).
-- **E2E-3 may be reading the wrong path.** The snapshot read path landing in the working
-  tree makes a published canonical view win over local structure for the same project.
-  The lane carries a `no_published_snapshot_view_in_effect` criterion for exactly this,
-  and it must be asserted, not assumed.
+- **E2E-4 needs a committed fixture artifact corpus.** Its stable-UUID criterion (move an
+  artifact file, run reconcile, identity survives) is the one with teeth, and it cannot be
+  written against a corpus that does not exist yet.
+- **E2E-6 needs a Beacon interpreter** (`MENHIR_E2E_BEACON_PYTHON`). The overwrite and CAS
+  refresh policy is already pinned in the lane's docstring, so what is missing is the
+  second venv, not the decision.
+- **No lane has been run end to end.** Every lane collects, skips cleanly without the
+  opt-in, and asserts against tool signatures and output formats read from the source.
+  That is not the same as having passed. Expect the first real run to surface format
+  mismatches; treat an early failure as the harness finding its footing rather than as a
+  product defect, until the transcript says otherwise.

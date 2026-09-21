@@ -34,6 +34,7 @@ __all__ = [
     "BackendProcess",
     "InstalledMenhir",
     "build_wheel",
+    "graph_query",
     "install_into_venv",
     "reset_graph",
     "start_backend",
@@ -188,6 +189,37 @@ def reset_graph(config: E2EConfig) -> None:
         driver.close()
 
 
+def graph_query(config: E2EConfig, cypher: str, **params: object) -> list[dict]:
+    """Run one read-only Cypher statement against the disposable graph.
+
+    Some criteria are about a durable fact that no MCP surface reports -- whether a
+    :CanonicalView exists, whether a MENTIONS edge crosses a group boundary. Asserting
+    those through a formatted tool response would be asserting the formatter. The
+    statement is checked for write clauses first: this helper exists to observe the
+    graph a lane just exercised, and a lane that mutated it here would be grading its
+    own answer.
+    """
+
+    forbidden = ("CREATE", "MERGE", "DELETE", "SET ", "REMOVE", "DROP", "DETACH")
+    upper = cypher.upper()
+    for clause in forbidden:
+        if clause in upper:
+            raise ValueError(f"graph_query is read-only; refusing statement containing {clause!r}")
+
+    assert_not_production(config.neo4j_uri, what="graph read target")
+
+    from neo4j import GraphDatabase
+
+    driver = GraphDatabase.driver(
+        config.neo4j_uri, auth=(config.neo4j_user, config.neo4j_password)
+    )
+    try:
+        with driver.session(database=config.neo4j_database) as session:
+            return [dict(record) for record in session.run(cypher, **params)]
+    finally:
+        driver.close()
+
+
 @dataclass
 class BackendProcess:
     """A running ``menhir serve``, with its captured output."""
@@ -213,6 +245,27 @@ class BackendProcess:
             except subprocess.TimeoutExpired:
                 self.process.kill()
                 self.process.wait(timeout=30)
+        try:
+            return self.log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+
+    def kill(self) -> str:
+        """Stop the backend the way a crash does, with no shutdown path taken.
+
+        E2E-7 needs the ungraceful stop specifically. ``terminate()`` gives the process a
+        chance to flush, drain and mark work FAILED, which is exactly the behaviour under
+        test -- using it here would prove the recovery path works when the process was
+        allowed to prepare for it, which is not the scenario that produces a false READY.
+
+        On Windows ``SIGKILL`` does not exist; ``Popen.kill`` maps to TerminateProcess,
+        which is likewise unblockable and uncatchable, so the lane gets the same
+        no-cleanup guarantee on both platforms.
+        """
+
+        if self.process.poll() is None:
+            self.process.kill()
+            self.process.wait(timeout=30)
         try:
             return self.log_path.read_text(encoding="utf-8", errors="replace")
         except OSError:

@@ -35,6 +35,7 @@ from tests.e2e._harness.client import stdio_session
 from tests.e2e._harness.config import E2EConfig
 from tests.e2e._harness.evidence import LaneEvidence
 from tests.e2e._harness.features import FeatureCombo
+from tests.e2e._harness.stack import graph_query
 
 pytestmark = [pytest.mark.e2e, pytest.mark.timeout(2400), pytest.mark.provider("deterministic")]
 
@@ -113,7 +114,15 @@ async def test_e2e_02_memory_lifecycle(
                 "call_tool",
                 {
                     "name": "get_enrichment_status",
-                    "arguments": {"episode_id": original_episode, "namespace": namespace},
+                    # The tool's parameter is `episode_uuid`; the RESPONSE labels it
+                    # `episode_id:`. Passing the label back as the argument name is
+                    # rejected, so the two spellings are deliberately not unified here.
+                    "arguments": {
+                        "episode_uuid": original_episode,
+                        "wait": True,
+                        "timeout_s": 180.0,
+                        "namespace": namespace,
+                    },
                 },
             )
         )
@@ -179,19 +188,45 @@ async def test_e2e_02_memory_lifecycle(
         assert current_wins, f"correction did not become current: {after[:600]}"
 
         # --- provenance --------------------------------------------------------------
+        # `get_provenance` expands a NODE into the episodes that MENTIONS it -- its
+        # parameter is `node_uuid`, not an episode id. Handing it the episode would ask
+        # "which episodes mention this episode", which has no receipts and would make the
+        # assertion below fail for a reason unrelated to provenance being correct.
+        #
+        # So the entity the correction produced is looked up first, and the contract under
+        # test is the real one: from a thing recall can return, the source episode is
+        # reachable. A recall answer whose origin cannot be traced is unauditable.
+        extracted = graph_query(
+            e2e_config,
+            "MATCH (e:Episodic {uuid: $uuid})-[:MENTIONS]->(n) "
+            "RETURN n.uuid AS uuid, n.name AS name LIMIT 1",
+            uuid=correction_episode,
+        )
+        assert extracted, (
+            f"correction episode {correction_episode} MENTIONS nothing, so there is no "
+            "node whose provenance could point back to it"
+        )
+        node_uuid = extracted[0]["uuid"]
+
         provenance = _text(
             await client.call_tool(
                 "call_tool",
-                {"name": "get_provenance", "arguments": {"episode_id": correction_episode, "namespace": namespace}},
+                {"name": "get_provenance", "arguments": {"node_uuid": node_uuid, "namespace": namespace}},
             )
         )
         lane_evidence.record(
             "provenance_points_to_source_episode",
             passed=correction_episode in provenance,
-            detail=provenance[:400],
+            detail={"node": node_uuid, "name": extracted[0].get("name"), "body": provenance[:400]},
         )
-        assert correction_episode in provenance, provenance[:600]
-        lane_evidence.attach("provenance.json", json.dumps({"episode": correction_episode, "text": provenance}, indent=2))
+        assert correction_episode in provenance, (
+            f"provenance for node {node_uuid} does not name its source episode "
+            f"{correction_episode}: {provenance[:600]}"
+        )
+        lane_evidence.attach(
+            "provenance.json",
+            json.dumps({"node": node_uuid, "episode": correction_episode, "text": provenance}, indent=2),
+        )
 
     # --- restart: the bridge reconnects to the same backend and the graph persists ---
     async with stdio_session(
