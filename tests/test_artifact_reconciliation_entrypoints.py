@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 from menhir.cli.artifacts import artifacts_app
 from menhir.core.runtime import _run_startup_artifact_reconcile
 from menhir.mcp.tools.ops.audit_artifact_corpus import audit_artifact_corpus
+from menhir.services.artifact_reconciliation_service import CorpusRootUnavailableError
 
 
 @pytest.mark.unit
@@ -20,6 +21,25 @@ def test_graph_backed_cli_commands_require_repository(command: str) -> None:
     result = CliRunner().invoke(artifacts_app, [command, "--repo", "."])
     assert result.exit_code == 2
     assert "repository" in result.output.lower()
+
+
+@pytest.mark.unit
+def test_audit_cli_emits_no_digest_for_an_unavailable_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Service:
+        def audit(self, *_args, **_kwargs):
+            raise CorpusRootUnavailableError("corpus root is unavailable: missing")
+
+    monkeypatch.setattr("menhir.cli.artifacts._service", lambda: _Service())
+    result = CliRunner().invoke(
+        artifacts_app,
+        ["audit", "--repository", "t", "--repo", "missing", "--json"],
+    )
+
+    assert result.exit_code == 3
+    assert "corpus_root_unavailable" in result.output
+    assert "plan_digest" not in result.output
 
 
 @pytest.mark.unit

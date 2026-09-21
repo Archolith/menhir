@@ -249,7 +249,8 @@ class ContextBuilderService:
         # invalidated candidates; it only prevents a recalled older fact from losing the
         # happened-at stamp needed to compare it with a later fact.
         recall_result: RecallResult = await self.recall_service.recall(
-            query, preset=preset, namespace=namespace,
+            query, preset=preset, namespace=namespace, include_session=True,
+            session_id=session_id,
             include_invalidated=True,
         )
         memories = list(recall_result.results)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from menhir.domain.recall import InvalidQueryPresetError, format_query_preset_values
-from menhir.mcp.service_access import get_request_session
+from menhir.mcp.service_access import get_mcp_session, get_request_session
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -90,12 +90,13 @@ class BuildContextTool(BaseTextTool):
     ) -> str:
         """Build a token-budget-limited context string from recalled memories."""
         backend = self.get_backend()
+        effective_session_id = session_id or get_mcp_session().session_id
         try:
             result = await backend.build_context(
                 query,
                 max_tokens=max_tokens,
                 preset=preset,
-                session_id=session_id,
+                session_id=effective_session_id,
                 include_scores=include_scores,
                 namespace=namespace or None,
             )

@@ -123,11 +123,22 @@ def audit(
         print(f"graph unavailable: {exc}")
         raise typer.Exit(EXIT_UNAVAILABLE) from exc
 
-    report = service.audit(
-        Path(repo),
-        repository=repository,
-        from_commit=from_commit or None,
+    from menhir.services.artifact_reconciliation_service import (
+        CorpusRootUnavailableError,
     )
+
+    try:
+        report = service.audit(
+            Path(repo),
+            repository=repository,
+            from_commit=from_commit or None,
+        )
+    except CorpusRootUnavailableError as exc:
+        if as_json:
+            _emit({"error": "corpus_root_unavailable", "detail": str(exc)})
+        else:
+            print(f"audit unavailable: {exc}")
+        raise typer.Exit(EXIT_UNAVAILABLE) from exc
     if as_json:
         _emit(report.as_dict())
         return

@@ -12,6 +12,7 @@ can only ever be applied to the state it was approved against.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,6 +76,29 @@ class SourceRepository(Protocol):
     def artifact_reconciliation_preflight(self) -> dict[str, int]: ...
 
     def activate_artifact_reconciliation_schema(self) -> dict[str, Any]: ...
+
+
+class CorpusRootUnavailableError(ValueError):
+    """The requested corpus root could not be safely observed."""
+
+
+def _require_readable_corpus_root(repo_root: str | Path) -> Path:
+    try:
+        root = Path(repo_root).resolve(strict=True)
+    except OSError as exc:
+        raise CorpusRootUnavailableError(
+            f"corpus root is unavailable: {repo_root}"
+        ) from exc
+    if not root.is_dir():
+        raise CorpusRootUnavailableError(f"corpus root is not a directory: {root}")
+    try:
+        with os.scandir(root) as entries:
+            next(entries, None)
+    except OSError as exc:
+        raise CorpusRootUnavailableError(
+            f"corpus root is unreadable: {root}"
+        ) from exc
+    return root
 
 
 @dataclass(frozen=True)
@@ -176,8 +200,8 @@ class ArtifactReconciliationService:
         omitting it from any one of them would leave the audit reporting another silo's
         artifacts as conflicts or contradictions in the caller's own corpus.
         """
-        root = Path(repo_root).resolve()
         name = self._require_repository(repository)
+        root = _require_readable_corpus_root(repo_root)
         cursor_commit = self._repo.get_artifact_reconciliation_cursor(repository=name)
         evidence_from_commit = from_commit or cursor_commit
         evidence = (
@@ -510,6 +534,7 @@ class ArtifactReconciliationService:
                 observation=observation,
                 status=action.status,
                 status_raw=action.raw_status_header,
+                status_unresolved_reason=action.status_unresolved_reason,
                 artifact_uuid=action.artifact_uuid,
                 structure_project=action.repository,
             )

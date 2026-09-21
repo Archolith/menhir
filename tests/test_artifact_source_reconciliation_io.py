@@ -37,6 +37,7 @@ from menhir.infrastructure.schema import ARTIFACT_RECONCILIATION_REQUIRED_CONSTR
 from menhir.infrastructure.work_artifact_repository import WorkArtifactRepository
 from menhir.services.artifact_reconciliation_service import (
     ArtifactReconciliationService,
+    CorpusRootUnavailableError,
 )
 
 
@@ -789,6 +790,16 @@ def test_graph_backed_audit_requires_explicit_repository_identity(
 
 
 @pytest.mark.unit
+def test_audit_refuses_an_absent_root_before_reading_the_graph(tmp_path: Path) -> None:
+    repo = _RecordingRepo()
+    with pytest.raises(CorpusRootUnavailableError, match="corpus root is unavailable"):
+        ArtifactReconciliationService(repo).audit(
+            tmp_path / "missing", repository="t"
+        )
+    assert repo.calls == []
+
+
+@pytest.mark.unit
 def test_apply_with_the_wrong_digest_writes_nothing(tmp_path: Path) -> None:
     _write(tmp_path, ".agent/plans/a.md", "# A\n")
     repo = _RecordingRepo()
@@ -837,6 +848,30 @@ def test_explicit_first_repository_registration_can_apply(tmp_path: Path) -> Non
         "cursor",
         "register",
     ]
+
+
+@pytest.mark.unit
+def test_registration_persists_an_unrecognized_status_reason(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        ".agent/plans/a.md",
+        "# A\n\nStatus: Marinating pending further thought\n",
+    )
+    service = ArtifactReconciliationService(_RecordingRepo())
+    digest = service.audit(tmp_path, repository="t").plan_digest
+
+    repo = _RecordingRepo()
+    result = ArtifactReconciliationService(repo).apply(
+        tmp_path,
+        expected_digest=digest,
+        repository="t",
+        allow_new_repository=True,
+    )
+
+    assert result.ok
+    registration = next(kwargs for name, kwargs in repo.calls if name == "register")
+    assert registration["status_raw"] == "Marinating pending further thought"
+    assert registration["status_unresolved_reason"] == "unrecognized_status"
 
 
 @pytest.mark.unit

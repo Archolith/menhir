@@ -48,6 +48,7 @@ CRITERIA = [
     "build_context_from_memory",
     "correction_current_vs_historical",
     "provenance_points_to_source_episode",
+    "provenance_reachable_from_receipt",
     "restart_then_recall_again",
 ]
 
@@ -275,6 +276,15 @@ async def test_e2e_02_memory_lifecycle(
         assert names_an_episode, (
             f"provenance for node {node_uuid} does not name the episode that MENTIONS "
             f"it ({enriched_episode}): {provenance[:600]}"
+        )
+        lane_evidence.record(
+            "provenance_reachable_from_receipt",
+            passed=names_the_receipt,
+            detail={
+                "receipt_episode": correction_episode,
+                "receipt_episode_mentions": receipt_mentions,
+                "provenance_names_receipt_episode": names_the_receipt,
+            },
         )
         if not names_the_receipt:
             deferred_failures.append(
