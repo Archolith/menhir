@@ -62,7 +62,18 @@ TERMINAL_STATES = {"READY", "FAILED"}
 
 #: States the product documents as recoverable, i.e. something is still expected to move
 #: them. They are acceptable transiently and unacceptable as a final answer.
-IN_FLIGHT_STATES = {"PENDING", "QUEUED", "PROCESSING", "RETRY", "UNKNOWN"}
+#:
+#: ENRICHING is taken from `domain/models.py:38`, not guessed. It was missing from an
+#: earlier version of this set, so a perfectly ordinary in-flight episode was reported as
+#: an unrecognized state -- the diagnostic was wrong even though the verdict was right.
+IN_FLIGHT_STATES = {"PENDING", "QUEUED", "ENRICHING", "PROCESSING", "RETRY", "UNKNOWN"}
+
+#: How long to let the restarted backend finish work the kill interrupted.
+#:
+#: Generous on purpose. The local Windows run settled inside 300s; the CI runner did not,
+#: and "still ENRICHING at the deadline" cannot distinguish a stalled episode from a slow
+#: one. Failing on the short window would have reported a stall that was not there.
+SETTLE_TIMEOUT_S = 600.0
 
 MEMORY = (
     "The Kestrel billing reconciler retries failed charges three times before parking "
@@ -189,7 +200,7 @@ async def test_e2e_07_restart_interruption(
             # Poll to a terminal state rather than reading once: an in-flight state is
             # acceptable transiently and unacceptable as the final answer, and only
             # waiting distinguishes the two.
-            deadline = time.monotonic() + 300
+            deadline = time.monotonic() + SETTLE_TIMEOUT_S
             state = "UNPARSEABLE"
             status_body = ""
             while time.monotonic() < deadline:

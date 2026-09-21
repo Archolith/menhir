@@ -238,7 +238,10 @@ jobs:
   # credentials at all, so an unintended live call fails loudly rather than spending money.
   stdio-e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Generous: E2E-7 kills a backend mid-enrichment and waits up to 10 minutes for the
+    # restarted one to settle the interrupted episode, and the runner is slower than a
+    # workstation. A tight cap here would fail the job for being slow rather than wrong.
+    timeout-minutes: 45
     services:
       neo4j:
         image: neo4j:5-community
