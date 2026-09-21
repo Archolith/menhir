@@ -41,6 +41,8 @@ from dotenv import dotenv_values
 
 __all__ = [
     "DETERMINISTIC_PROVIDER_FLAG",
+    "REFUND_CORRECTED_AMOUNT",
+    "REFUND_ORIGINAL_AMOUNT",
     "DeterministicProviderHandler",
     "FailingProviderHandler",
     "deterministic_provider",
@@ -50,6 +52,18 @@ __all__ = [
 ]
 
 DETERMINISTIC_PROVIDER_FLAG = "MENHIR_E2E_DETERMINISTIC_PROVIDER"
+
+#: The refund amounts the canned extraction answers with. E2E-2's corpus MUST use these
+#: exact values: this provider does not read the episode, it replays a fixed fact, so a
+#: lane that changed its own wording would be asserting against the fake's unchanged
+#: answer. They live here, beside the responses, and the lane imports them -- single
+#: sourced so the two cannot drift apart.
+#:
+#: Deliberately not 500. E2E-2 previously used 500 and asserted `"500" in context`; when
+#: build_context faulted, the tool returned "500 Internal Server Error", the substring
+#: matched the HTTP status code, and a crashed endpoint was recorded as a pass.
+REFUND_ORIGINAL_AMOUNT = "1275"
+REFUND_CORRECTED_AMOUNT = "3840"
 
 #: Provider variables carried through to a child when a lane uses a live model.
 _PROVIDER_KEYS = {
@@ -217,12 +231,13 @@ class DeterministicProviderHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _facts(prompt: str) -> tuple[str, list[dict[str, Any]]]:
-        correction = "750 dollars now" in prompt
+        correction = f"{REFUND_CORRECTED_AMOUNT} dollars now" in prompt
         threshold = (
-            "The Atlas Lantern refund approval threshold is 750 dollars now; "
-            "500 dollars is the historical value."
+            f"The Atlas Lantern refund approval threshold is {REFUND_CORRECTED_AMOUNT} "
+            f"dollars now; {REFUND_ORIGINAL_AMOUNT} dollars is the historical value."
             if correction
-            else "The Atlas Lantern refund approval threshold is 500 dollars."
+            else f"The Atlas Lantern refund approval threshold is "
+            f"{REFUND_ORIGINAL_AMOUNT} dollars."
         )
         edges = [
             {
@@ -280,7 +295,7 @@ class DeterministicProviderHandler(BaseHTTPRequestHandler):
         if schema_name == "EdgeDuplicate":
             return {
                 "duplicate_facts": [],
-                "contradicted_facts": [0] if "750 dollars now" in prompt else [],
+                "contradicted_facts": [0] if f"{REFUND_CORRECTED_AMOUNT} dollars now" in prompt else [],
             }
         if schema_name == "SummarizedEntities":
             return {

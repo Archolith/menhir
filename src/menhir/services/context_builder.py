@@ -249,6 +249,9 @@ class ContextBuilderService:
         # invalidated candidates; it only prevents a recalled older fact from losing the
         # happened-at stamp needed to compare it with a later fact.
         recall_result: RecallResult = await self.recall_service.recall(
+            # build_context is an ordinary agent recall surface.  Fresh tracked writes
+            # initially produce SESSION-scoped nodes, so excluding that scope makes a
+            # write visible to recall_memories but immediately disappear from context.
             query, preset=preset, namespace=namespace, include_session=True,
             session_id=session_id,
             include_invalidated=True,

@@ -35,6 +35,10 @@ from tests.e2e._harness.client import stdio_session
 from tests.e2e._harness.config import E2EConfig
 from tests.e2e._harness.evidence import LaneEvidence
 from tests.e2e._harness.features import FeatureCombo
+from tests.e2e._harness.providers import (
+    REFUND_CORRECTED_AMOUNT,
+    REFUND_ORIGINAL_AMOUNT,
+)
 from tests.e2e._harness.stack import graph_query
 
 pytestmark = [pytest.mark.e2e, pytest.mark.timeout(2400), pytest.mark.provider("deterministic")]
@@ -54,8 +58,26 @@ CRITERIA = [
 
 EPISODE_ID = re.compile(r"episode_id:\s*([0-9a-f-]{36})")
 
-ORIGINAL = "The Atlas Lantern service uses Stripe. Its refund approval threshold is 500 dollars."
-CORRECTION = "Correction: the Atlas Lantern refund approval threshold is 750 dollars now."
+#: The amounts are deliberately NOT 500. An earlier version used 500/750 and asserted
+#: `"500" in context`; when build_context faulted, the tool returned "500 Internal Server
+#: Error" and the substring matched the HTTP status code, recording a crashed endpoint as
+#: a pass. `assert_no_backend_fault` is the durable guard, but a sentinel that cannot
+#: collide with transport text is the cheap second layer.
+ORIGINAL = (
+    "The Atlas Lantern service uses Stripe. Its refund approval threshold is "
+    f"{REFUND_ORIGINAL_AMOUNT} dollars."
+)
+CORRECTION = (
+    "Correction: the Atlas Lantern refund approval threshold is "
+    f"{REFUND_CORRECTED_AMOUNT} dollars now."
+)
+
+#: Imported, never restated. The deterministic provider replays a fixed fact rather than
+#: reading the episode, so the corpus below and the fake's answer must be the same
+#: numbers; a local copy here would let them drift and the lane would assert against a
+#: fact nothing produced.
+ORIGINAL_AMOUNT = REFUND_ORIGINAL_AMOUNT
+CORRECTED_AMOUNT = REFUND_CORRECTED_AMOUNT
 
 
 def _text(result: object) -> str:
@@ -142,8 +164,8 @@ async def test_e2e_02_memory_lifecycle(
                 {"query": "Atlas Lantern refund approval threshold", "namespace": namespace},
             )
         )
-        lane_evidence.record("recall_by_direct_wording", passed="500" in direct, detail=direct[:400])
-        assert "500" in direct, direct[:600]
+        lane_evidence.record("recall_by_direct_wording", passed=ORIGINAL_AMOUNT in direct, detail=direct[:400])
+        assert ORIGINAL_AMOUNT in direct, direct[:600]
 
         paraphrase = _text(
             await client.call_tool(
@@ -151,11 +173,11 @@ async def test_e2e_02_memory_lifecycle(
                 {"query": "how much can Atlas Lantern refund without escalating?", "namespace": namespace},
             )
         )
-        lane_evidence.record("recall_by_paraphrase", passed="500" in paraphrase, detail=paraphrase[:400])
-        assert "500" in paraphrase, paraphrase[:600]
+        lane_evidence.record("recall_by_paraphrase", passed=ORIGINAL_AMOUNT in paraphrase, detail=paraphrase[:400])
+        assert ORIGINAL_AMOUNT in paraphrase, paraphrase[:600]
 
         context = _text(await client.call_tool("build_context", {"query": "Atlas Lantern refunds", "namespace": namespace}))
-        context_has_fact = "500" in context
+        context_has_fact = ORIGINAL_AMOUNT in context
         lane_evidence.record("build_context_from_memory", passed=context_has_fact, detail=context[:400])
 
         # REPRODUCED ON main, 2026-09-21: recall_memories returns the fact and
@@ -202,12 +224,12 @@ async def test_e2e_02_memory_lifecycle(
                 {"query": "Atlas Lantern refund approval threshold", "namespace": namespace},
             )
         )
-        current_wins = "750" in after
-        history_kept = "500" in after
+        current_wins = CORRECTED_AMOUNT in after
+        history_kept = ORIGINAL_AMOUNT in after
         lane_evidence.record(
             "correction_current_vs_historical",
             passed=current_wins,
-            detail={"current_750": current_wins, "historical_500_present": history_kept},
+            detail={"current_amount_present": current_wins, "historical_amount_present": history_kept},
         )
         assert current_wins, f"correction did not become current: {after[:600]}"
 
@@ -310,8 +332,8 @@ async def test_e2e_02_memory_lifecycle(
                 {"query": "Atlas Lantern refund approval threshold", "namespace": namespace},
             )
         )
-        lane_evidence.record("restart_then_recall_again", passed="750" in persisted, detail=persisted[:400])
-        assert "750" in persisted, persisted[:600]
+        lane_evidence.record("restart_then_recall_again", passed=CORRECTED_AMOUNT in persisted, detail=persisted[:400])
+        assert CORRECTED_AMOUNT in persisted, persisted[:600]
 
     if deferred_failures:
         lane_evidence.close(status="FAIL")

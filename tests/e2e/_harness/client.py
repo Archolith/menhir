@@ -65,7 +65,13 @@ class RecordingClient:
         )
         return result
 
-    async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        allow_fault: bool = False,
+    ) -> Any:
         payload = {"method": "tools/call", "tool": name, "arguments": arguments or {}}
         self._append("request", payload)
         result = await self._session.call_tool(name, arguments or {})
@@ -78,7 +84,48 @@ class RecordingClient:
                 "content": _summarize(result),
             },
         )
+        if not allow_fault:
+            assert_no_backend_fault(result, tool=name)
         return result
+
+
+#: Text that means the BACKEND faulted, as distinct from a tool refusing on purpose.
+#: A refusal ("Refused: ...", "Cannot answer ...") is a designed answer several lanes
+#: assert on; these are not.
+_BACKEND_FAULT_MARKERS = (
+    "Error: HTTPStatusError",
+    "Internal Server Error",
+    "Traceback (most recent call last)",
+    "got an unexpected keyword argument",
+)
+
+
+def assert_no_backend_fault(result: Any, *, tool: str) -> None:
+    """Fail the lane when a tool response carries a backend fault rather than an answer.
+
+    THIS EXISTS BECAUSE A FAULT ONCE READ AS A PASS. E2E-2 asserted ``"500" in context``
+    against a fixture whose refund threshold was 500 dollars. ``build_context`` was
+    raising ``TypeError`` server-side, and the tool returned::
+
+        Error: HTTPStatusError: Server error '500 Internal Server Error' for url ...
+
+    The substring matched the HTTP status code, the criterion recorded PASS, and a
+    crashed endpoint was reported as a working one. A short numeric sentinel is not a
+    safe assertion target, but the durable fix is not "choose better sentinels" -- it is
+    that a fault must never reach an assertion at all.
+
+    Checked centrally in ``call_tool`` so no lane can forget it. A lane that genuinely
+    expects a fault passes ``allow_fault=True`` and says so at the call site.
+    """
+
+    content = getattr(result, "content", None) or []
+    text = "\n".join(getattr(item, "text", "") or "" for item in content)
+    for marker in _BACKEND_FAULT_MARKERS:
+        if marker in text:
+            raise AssertionError(
+                f"backend fault from tool {tool!r} -- the response is an error, not an "
+                f"answer, and no assertion on it would be meaningful:\n{text[:800]}"
+            )
 
 
 def _summarize(result: Any) -> Any:
