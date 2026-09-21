@@ -111,6 +111,12 @@ async def test_e2e_07_restart_interruption(
                         "path": str(e2e_fixture_repo.path),
                         "name": project,
                         "namespace": namespace,
+                        # CF-257: the fixture carries no identity file on its first scan.
+                        # The re-ingest later in this lane deliberately omits this -- by
+                        # then the identity file exists, and an explicit action there
+                        # would mint a NEW id and prune the first scan's files, which is
+                        # the opposite of the idempotency being asserted.
+                        "identity_action": "new",
                     },
                 },
             )
@@ -160,11 +166,15 @@ async def test_e2e_07_restart_interruption(
     assert queued_pending, f"episode was not pending at kill time: {queued[:400]}"
 
     # --- restart -----------------------------------------------------------------------
+    # The restarted backend must be able to enrich, same as the killed one. Accepting a
+    # degraded replacement would let the lane conclude "the episode never recovered"
+    # when the truth is that nothing was left running to recover it.
     restarted = start_backend(
         e2e_config,
         e2e_installed,
         log_path=lane_evidence.directory / "backend-after-restart.log",
         feature_env=child_env,
+        require_enrichment=True,
     )
     try:
         async with stdio_session(

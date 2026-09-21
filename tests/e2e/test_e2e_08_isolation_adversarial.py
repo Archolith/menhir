@@ -54,7 +54,7 @@ from tests.e2e._harness.artifact_corpus import (
     build_artifact_corpus,
     write_malformed_document,
 )
-from tests.e2e._harness.fixture_repo import UNINDEXED_PATH
+from tests.e2e._harness.fixture_repo import UNINDEXED_PATH, build_fixture_repo
 from tests.e2e._harness.pending import declare_pending
 from tests.e2e._harness.stack import graph_query, run_menhir_cli
 
@@ -172,25 +172,36 @@ async def test_e2e_08_isolation(
         )
 
         # --- same filenames, two projects ---------------------------------------------
-        # The fixture is ingested twice under two names. Every path is identical, which
-        # is the condition under which a path-keyed graph collapses two projects into one.
-        for project, namespace in ((proj_a, ns_a), (proj_b, ns_b)):
+        # TWO DIRECTORIES, not one ingested twice. CF-257 writes the resolved identity to
+        # a file inside the directory, so a second scan of the same path resolves to the
+        # SAME project -- and forcing a new identity there prunes the first scan's files.
+        # Either way one directory can only ever be one project, so re-scanning it would
+        # not have tested cross-project linking at all.
+        #
+        # A second built copy gives two genuinely distinct projects whose every relative
+        # path is identical, which is the condition under which a path-keyed graph
+        # collapses them into one.
+        twin = build_fixture_repo(e2e_config.fixtures_dir / f"shop-twin-{suffix}")
+        lane_evidence.record_stack(twin_fixture=str(twin.path))
+        for project, namespace, root in (
+            (proj_a, ns_a, e2e_fixture_repo.path),
+            (proj_b, ns_b, twin.path),
+        ):
             ingested = _text(
                 await client.call_tool(
                     "call_tool",
                     {
                         "name": "ingest_project",
                         "arguments": {
-                            "path": str(e2e_fixture_repo.path),
+                            "path": str(root),
                             "name": project,
                             "namespace": namespace,
-                            "force": True,
-                            "force_identity": True,
+                            "identity_action": "new",
                         },
                     },
                 )
             )
-            assert ingested.startswith("Scanned ") or "NOT SCANNED" in ingested, ingested[:400]
+            assert ingested.startswith("Scanned "), ingested[:400]
 
         radius_a = _text(
             await client.call_tool(

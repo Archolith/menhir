@@ -73,13 +73,20 @@ def build_wheel(destination: Path) -> Path:
     for stale in destination.glob("*.whl"):
         stale.unlink()
 
-    subprocess.run(
+    result = subprocess.run(
         [sys.executable, "-m", "build", "--wheel", "--outdir", str(destination), str(REPO_ROOT)],
-        check=True,
         capture_output=True,
         text=True,
         timeout=900,
     )
+    if result.returncode != 0:
+        # `check=True` here raised a CalledProcessError carrying only the exit code, and
+        # the caller turns that into a skip. A build failure then reported nothing about
+        # why the build failed, which is the one thing the reader needs.
+        raise RuntimeError(
+            f"`python -m build` exited {result.returncode}. "
+            f"stdout: {result.stdout[-3000:]} | stderr: {result.stderr[-3000:]}"
+        )
     wheels = sorted(destination.glob("*.whl"))
     if len(wheels) != 1:
         raise RuntimeError(f"expected exactly one wheel in {destination}, found {wheels}")
@@ -257,6 +264,10 @@ class BackendProcess:
     process: subprocess.Popen[str]
     log_path: Path
     url: str
+    #: The ``/api/ready`` body that was accepted. Recorded as evidence: "degraded" with
+    #: no provider is a legitimate configuration for some lanes and a silent
+    #: misconfiguration for others, and only the capability flags tell them apart.
+    ready_payload: dict | None = None
 
     def is_alive(self) -> bool:
         return self.process.poll() is None
@@ -308,6 +319,7 @@ def start_backend(
     *,
     log_path: Path,
     feature_env: dict[str, str] | None = None,
+    require_enrichment: bool = False,
 ) -> BackendProcess:
     """Start ``menhir serve`` from the installed package and wait for ``/api/ready``.
 
@@ -320,6 +332,23 @@ def start_backend(
     bridge is a separate process with its own settings resolution, so applying the combo
     to only one of them would leave the campaign reporting a configuration that was
     never fully in effect.
+
+    WHAT "READY" MEANS HERE
+    -----------------------
+    ``/api/ready`` reports ``status: "ready"`` only when ``enrichment_ready`` is true,
+    which requires a reachable model. Lanes that deliberately declare no provider --
+    E2E-4 and E2E-5 -- therefore never see it: the backend comes up
+    ``degraded / degraded_queue_only``, with ``neo4j_ready`` and ``queue_writes_ready``
+    true and the LLM capabilities false. That is the configuration those lanes intend,
+    not a failure, and waiting for ``ready`` deadlocks them.
+
+    But accepting ``degraded`` unconditionally would be worse than the deadlock. A lane
+    that DID ask for a provider comes up degraded when the provider failed to wire up,
+    and the lane would then run against a backend that cannot enrich and report "the
+    episode never reached READY" as a product defect. So the caller states what it
+    needs: ``require_enrichment`` is true exactly when a provider was requested, and a
+    degraded backend is accepted only when the capabilities the lane depends on are
+    present.
     """
 
     config.state_dir.mkdir(parents=True, exist_ok=True)
@@ -349,15 +378,57 @@ def start_backend(
             with urllib.request.urlopen(f"{backend.url}/api/ready", timeout=5) as response:
                 if response.status == 200:
                     payload = json.loads(response.read().decode("utf-8"))
-                    if payload.get("status") in {"ready", "ok"}:
+                    accepted, why = _readiness_verdict(payload, require_enrichment)
+                    if accepted:
+                        backend.ready_payload = payload
                         return backend
-                    last_error = f"not ready yet: {payload}"
+                    last_error = why
         except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
             last_error = repr(exc)
         time.sleep(1.0)
 
     backend.terminate()
     raise TimeoutError(
-        f"`menhir serve` did not report ready within {config.backend_ready_timeout}s "
-        f"({last_error}). Log:\n{log_path.read_text(encoding='utf-8', errors='replace')}"
+        f"`menhir serve` did not become usable within {config.backend_ready_timeout}s "
+        f"(require_enrichment={require_enrichment}; {last_error}).\n"
+        f"Log:\n{log_path.read_text(encoding='utf-8', errors='replace')[-4000:]}"
     )
+
+
+#: Capabilities every lane needs regardless of provider: a graph to write to, and a
+#: backend willing to accept writes. Without these there is nothing to test.
+_BASELINE_CAPABILITIES = ("neo4j_ready", "queue_writes_ready")
+
+
+def _readiness_verdict(payload: dict, require_enrichment: bool) -> tuple[bool, str]:
+    """Decide whether this ``/api/ready`` payload is usable, and say why if not.
+
+    Returns ``(accepted, reason)``. The reason is carried into the timeout message so a
+    failure names the missing capability rather than dumping the payload and leaving the
+    reader to work out which field mattered.
+    """
+
+    status = str(payload.get("status") or "")
+    capabilities = payload.get("capabilities") or {}
+
+    if status == "starting":
+        return False, "still starting (runtime not initialized)"
+
+    missing = [name for name in _BASELINE_CAPABILITIES if not capabilities.get(name)]
+    if missing:
+        return False, f"missing baseline capabilities {missing}; failures={payload.get('failures')}"
+
+    if require_enrichment and not capabilities.get("enrichment_ready"):
+        # The provider the lane asked for did not come up. Failing here, rather than
+        # letting the lane run, is what keeps a harness misconfiguration from being
+        # written into the evidence as a product defect.
+        return False, (
+            "a provider was requested but enrichment_ready is false; "
+            f"failures={payload.get('failures')} auth={payload.get('provider_auth_failure')}"
+        )
+
+    if status in {"ready", "ok"}:
+        return True, "ready"
+    if status == "degraded":
+        return True, "degraded but sufficient for this lane"
+    return False, f"unrecognized status {status!r}"

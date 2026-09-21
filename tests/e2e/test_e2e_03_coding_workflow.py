@@ -158,6 +158,9 @@ async def test_e2e_03_coding_workflow(
                         "path": str(e2e_fixture_repo.path),
                         "name": project,
                         "namespace": namespace,
+                        # CF-257: no identity file and no candidate is NEEDS_DECISION,
+                        # not an automatic scan. The fixture is genuinely new.
+                        "identity_action": "new",
                     },
                 },
             )

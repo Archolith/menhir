@@ -60,7 +60,18 @@ TODO_TEXT = (
     "tests to cover the batch boundary."
 )
 ANCHORED_REF = "src/shop/storage.py:12"
-UNRESOLVABLE_REF = "src/shop/never_indexed.py:3"
+
+#: Prose, not a path. A location is "resolved" when the author's free text NORMALIZES
+#: into a project and path -- `todo_location.py` is a parser, and every
+#: ``unresolved_reason`` it emits (`not_a_path`, `path_escapes_root`,
+#: `absolute_path_outside_workspace`) is a parsing failure.
+#:
+#: An earlier version of this lane used a well-formed path to a file the fixture never
+#: contains and expected it to come back unresolved. That was wrong about the contract:
+#: the path parses fine, and a todo location records where the author pointed rather
+#: than asserting the file exists. Whether the target is indexed is `query_structure`'s
+#: question, and E2E-3 asks it there.
+UNRESOLVABLE_REF = "think about the refund logic sometime"
 
 
 def _text(result: object) -> str:
@@ -101,6 +112,12 @@ async def test_e2e_05_todos(
                         "path": str(e2e_fixture_repo.path),
                         "name": project,
                         "namespace": namespace,
+                        # CF-257: a directory with no identity file and no candidate is
+                        # NEEDS_DECISION, not an automatic scan -- a moved repo, a new
+                        # machine and a fresh clone are indistinguishable at that point.
+                        # A generated fixture is genuinely new, so the lane says so
+                        # rather than leaving the guard to guess.
+                        "identity_action": "new",
                     },
                 },
             )
@@ -157,22 +174,29 @@ async def test_e2e_05_todos(
         has_code_ref = f"code_ref: {ANCHORED_REF}" in full
         has_status = "status=open" in full
         has_namespace = f"namespace: {namespace}" in full
-        resolved_file = "linked file: " in full
+        # `get_todo` renders a resolved anchor as `location: <project>:<path>` from the
+        # TodoLocation rows, and an unresolved one as `location: (unresolved: <reason>)`.
+        # The separate `linked file:` line comes from the older linked_file_path field,
+        # which this path does not populate -- asserting on it looked right and passed
+        # vacuously for the unresolvable case below, because the string never appears at
+        # all. The project name in the line is what proves the anchor resolved against
+        # the project this lane ingested rather than some other one.
+        resolved_location = f"location: {project}:" in full.replace("\\", "/")
         lane_evidence.record(
             "location_and_project_metadata",
-            passed=has_code_ref and has_status and has_namespace and resolved_file,
+            passed=has_code_ref and has_status and has_namespace and resolved_location,
             detail={
                 "code_ref": has_code_ref,
                 "status_open": has_status,
                 "namespace": has_namespace,
-                "linked_file_resolved": resolved_file,
+                "location_resolved_to_project": resolved_location,
             },
         )
         assert has_code_ref, full[:600]
         assert has_namespace, full[:600]
-        assert resolved_file, (
-            "code_ref names a file the fixture ingest wrote, so add_todo's REFERENCES_FILE "
-            f"edge should have resolved:\n{full[:600]}"
+        assert resolved_location, (
+            f"code_ref names a file the fixture ingest wrote into project {project}, so "
+            f"the todo's location should have resolved against it:\n{full[:600]}"
         )
 
         # A path the graph has never held must come back marked, never silently bare.
@@ -194,16 +218,30 @@ async def test_e2e_05_todos(
             )
         )
         ref_kept = f"code_ref: {UNRESOLVABLE_REF}" in orphan
-        not_falsely_linked = "linked file: " not in orphan
+        # The anchor must be present AND marked unresolved. Two distinct failures are
+        # being excluded: silently dropping the location line, which leaves an
+        # unanchorable todo indistinguishable from an unanchored one; and fabricating a
+        # path out of prose, which `todo_location.py` states it never does.
+        says_unresolved = "location: (unresolved:" in orphan
+        not_falsely_resolved = f"location: {project}:" not in orphan.replace("\\", "/")
         lane_evidence.record(
             "unresolvable_location_is_marked_not_dropped",
-            passed=ref_kept and not_falsely_linked,
-            detail={"code_ref_retained": ref_kept, "no_false_link": not_falsely_linked, "body": orphan[:400]},
+            passed=ref_kept and says_unresolved and not_falsely_resolved,
+            detail={
+                "code_ref_retained": ref_kept,
+                "marked_unresolved": says_unresolved,
+                "not_falsely_resolved": not_falsely_resolved,
+                "body": orphan[:400],
+            },
         )
         assert ref_kept, orphan[:600]
-        assert not_falsely_linked, (
-            "a code_ref pointing at an unindexed path reported a linked file; the anchor "
-            f"resolved to something the graph should not hold:\n{orphan[:600]}"
+        assert not_falsely_resolved, (
+            "a code_ref pointing at an unindexed path resolved to a real project "
+            f"location; the graph claimed a file it does not hold:\n{orphan[:600]}"
+        )
+        assert says_unresolved, (
+            "a code_ref pointing at an unindexed path produced no unresolved marker, so "
+            f"an unanchorable todo is indistinguishable from an unanchored one:\n{orphan[:600]}"
         )
 
         # --- close ------------------------------------------------------------------

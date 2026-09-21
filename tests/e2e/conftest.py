@@ -262,13 +262,19 @@ def running_stack(
     would report results for whichever combination happened to start first.
     """
 
+    # A lane that asked for a provider must get a backend that can actually enrich.
+    # Without this the backend comes up `degraded / degraded_queue_only` whenever the
+    # provider failed to wire up, the lane runs anyway, and "the episode never reached
+    # READY" lands in the evidence as a product defect instead of a harness fault.
     backend = start_backend(
         e2e_config,
         e2e_installed,
         log_path=lane_evidence.backend_log_path,
         feature_env={**feature_env, **provider_env},
+        require_enrichment=bool(provider_env),
     )
     lane_evidence.record_stack(provider=bool(provider_env))
+    lane_evidence.record_stack(backend_ready=backend.ready_payload)
     lane_evidence.record_stack(**e2e_installed.as_evidence())
     try:
         yield backend
