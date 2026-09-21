@@ -291,6 +291,55 @@ async def test_e2e_07_restart_interruption(
             lane_evidence.attach("episode-status-after-restart.txt", status_body)
             lane_evidence.record_stack(recovered_via=recovered_via)
 
+            # no_false_ready: the label must be backed by the graph.
+            #
+            # Counted on the NAMESPACED episode, not the receipt's uuid. Every write
+            # produces two :Episodic nodes -- one with group_id null and one carrying the
+            # namespace -- and only the namespaced one is enriched; the receipt returns
+            # the other. Counting the receipt's twin reports zero for a perfectly healthy
+            # write and turns #92's duplication into a false "enrichment lied" verdict.
+            #
+            # These two records were briefly absent: a patch that rewrote the polling
+            # loop replaced everything up to the next section header, and the lane went
+            # green in CI with 3 of 5 criteria recorded. The evidence count is what
+            # exposed it, which is the reason result.json lists criteria by name.
+            mentions = graph_query(
+                e2e_config,
+                "MATCH (e:Episodic)-[:MENTIONS]->(n) WHERE e.group_id = $group "
+                "RETURN count(n) AS mentioned",
+                group=namespace,
+            )
+            mentioned = mentions[0]["mentioned"] if mentions else 0
+            claims_ready = state == "READY"
+            backed_by_graph = mentioned > 0
+            no_false_ready = (not claims_ready) or backed_by_graph
+            lane_evidence.record(
+                "no_false_ready_after_restart",
+                passed=no_false_ready,
+                detail={"state": state, "mentions": mentioned, "recovered_via": recovered_via},
+            )
+            assert no_false_ready, (
+                f"episode {episode} reports READY after an ungraceful kill but MENTIONS "
+                f"nothing -- a completion claim with no extracted content:\n{status_body[:800]}"
+            )
+
+            resolved = state in TERMINAL_STATES
+            lane_evidence.record(
+                "eventual_ready_or_explicit_failed_or_documented_recoverable",
+                passed=resolved,
+                detail={
+                    "final_state": state,
+                    "terminal": resolved,
+                    "recovered_via": recovered_via,
+                    "known_in_flight": state in IN_FLIGHT_STATES,
+                },
+            )
+            assert resolved, (
+                f"episode {episode} never reached READY or FAILED after restart, even "
+                f"after {recovered_via}; it is stuck in {state!r}, which is progress "
+                f"being reported where there is none:\n{status_body[:800]}"
+            )
+
             # --- what must have survived ------------------------------------------------
             todo_after = _text(
                 await client.call_tool(

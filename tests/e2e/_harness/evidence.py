@@ -145,6 +145,7 @@ class LaneEvidence:
         """Write manifest.json and result.json. ``status`` is PASS / FAIL / SKIPPED."""
 
         self.manifest["duration_seconds"] = round(time.monotonic() - self._started, 3)
+        self.manifest["status"] = status
         (self.directory / "manifest.json").write_text(
             json.dumps(self.manifest, indent=2, default=str), encoding="utf-8"
         )

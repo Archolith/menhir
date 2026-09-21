@@ -183,6 +183,21 @@ def lane_evidence(request: pytest.FixtureRequest, e2e_config: E2EConfig, e2e_run
         # A lane that raised before closing still leaves evidence; an empty directory
         # would be indistinguishable from a lane that never ran.
         evidence.close(status="INCOMPLETE")
+        return
+
+    # A PASS must have recorded every criterion the lane declares. E2E-7 once went green
+    # in CI with 3 of its 5 criteria recorded, because a patch had cut the two headline
+    # assertions out of the lane body -- and nothing noticed until a human compared the
+    # evidence count to the declaration. Lanes with several tests per module keep their
+    # criteria in per-test lists rather than a module CRITERIA, and are exempt here.
+    declared = getattr(request.module, "CRITERIA", None)
+    if declared and evidence.manifest.get("status") == "PASS":
+        missing = sorted(set(declared) - set(evidence.criteria))
+        if missing:
+            pytest.fail(
+                f"{lane} closed PASS but never recorded {len(missing)} declared "
+                f"criteria: {missing}. A pass that skips a criterion is not a pass."
+            )
 
 
 @pytest.fixture
