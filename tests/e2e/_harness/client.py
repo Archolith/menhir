@@ -16,6 +16,7 @@ running backend through ``MENHIR_BACKEND_URL``.
 
 from __future__ import annotations
 
+import asyncio as _asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -27,7 +28,7 @@ from mcp.client.stdio import stdio_client
 from tests.e2e._harness.config import E2EConfig, child_environment
 from tests.e2e._harness.evidence import LaneEvidence
 
-__all__ = ["RecordingClient", "stdio_session"]
+__all__ = ["RecordingClient", "stdio_session", "wait_for_project_indexed"]
 
 
 class RecordingClient:
@@ -189,3 +190,64 @@ async def stdio_session(
                 client = RecordingClient(session, evidence)
                 await client.initialize()
                 yield client
+
+
+async def wait_for_project_indexed(
+    client: "RecordingClient",
+    project: str,
+    *,
+    symbol_path: str | None = None,
+    timeout: float = 180.0,
+) -> str:
+    """Block until ``project`` is answerable by ``query_structure``, or raise.
+
+    ``ingest_project`` does not guarantee the graph write has landed when it returns.
+    Its own formatter says so::
+
+        "Graph write running in background - check server log for completion."
+
+    and that string still begins "Scanned <project>:", so a lane checking the receipt
+    cannot tell a completed scan from a queued one. Querying immediately then answers
+    "Project '<name>' is not ingested in the structural graph" -- which is a race, not a
+    defect, and it presented as an intermittent local failure and a hard CI failure on
+    the slower runner.
+
+    Polling the read surface is the honest wait: the lane proceeds exactly when the data
+    an agent would query is actually there.
+    """
+
+    import time as _time
+
+    async def _probe(query_type: str, path: str = "") -> str:
+        args = {"query_type": query_type, "project": project}
+        if path:
+            args["path"] = path
+        result = await client.call_tool("query_structure", args)
+        content = getattr(result, "content", None) or []
+        return "\n".join(getattr(item, "text", "") or "" for item in content)
+
+    #: The formatter's own empty-result wordings. A still-writing project and a genuinely
+    #: empty one read identically, which is why this wait is bounded and raises rather
+    #: than returning quietly on timeout.
+    pending = ("is not ingested", "No files found", "No symbols found")
+
+    deadline = _time.monotonic() + timeout
+    last = ""
+    while _time.monotonic() < deadline:
+        last = await _probe("files")
+        ready = not any(marker in last for marker in pending)
+        if ready and symbol_path:
+            # Files land before symbols. CI got past the files probe and then failed on
+            # "No symbols found for src/shop/storage.py" -- the background write is
+            # incremental, so the first stage appearing proves only that it started.
+            symbols = await _probe("symbols", symbol_path)
+            if any(marker in symbols for marker in pending):
+                last, ready = symbols, False
+        if ready:
+            return last
+        await _asyncio.sleep(1.0)
+    raise AssertionError(
+        f"project {project!r} never became fully answerable within {timeout}s after "
+        f"ingest_project returned (symbol_path={symbol_path!r}). "
+        f"Last response:\n{last[:600]}"
+    )

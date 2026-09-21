@@ -183,6 +183,21 @@ def lane_evidence(request: pytest.FixtureRequest, e2e_config: E2EConfig, e2e_run
         # A lane that raised before closing still leaves evidence; an empty directory
         # would be indistinguishable from a lane that never ran.
         evidence.close(status="INCOMPLETE")
+        return
+
+    # A PASS must have recorded every criterion the lane declares. E2E-7 once went green
+    # in CI with 3 of its 5 criteria recorded, because a patch had cut the two headline
+    # assertions out of the lane body -- and nothing noticed until a human compared the
+    # evidence count to the declaration. Lanes with several tests per module keep their
+    # criteria in per-test lists rather than a module CRITERIA, and are exempt here.
+    declared = getattr(request.module, "CRITERIA", None)
+    if declared and evidence.manifest.get("status") == "PASS":
+        missing = sorted(set(declared) - set(evidence.criteria))
+        if missing:
+            pytest.fail(
+                f"{lane} closed PASS but never recorded {len(missing)} declared "
+                f"criteria: {missing}. A pass that skips a criterion is not a pass."
+            )
 
 
 @pytest.fixture
@@ -195,6 +210,20 @@ def fresh_graph(e2e_config: E2EConfig) -> None:
         reset_graph(e2e_config)
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"disposable Neo4j at {e2e_config.neo4j_uri} unreachable: {exc}")
+
+
+@pytest.fixture
+def provider_kind(request: pytest.FixtureRequest) -> str:
+    """The provider a lane declared, as a string rather than a boolean.
+
+    ``running_stack`` needs the KIND, not merely whether one exists. A lane using the
+    `failing` provider wants a backend whose model calls fail -- demanding
+    enrichment_ready there deadlocks startup on exactly the condition under test, which
+    is what happened to E2E-8's provider-failure lane.
+    """
+
+    marker = request.node.get_closest_marker("provider")
+    return (marker.args[0] if marker and marker.args else "none").strip().lower()
 
 
 @pytest.fixture
@@ -254,6 +283,7 @@ def running_stack(
     lane_evidence: LaneEvidence,
     feature_env: dict[str, str],
     provider_env: dict[str, str],
+    provider_kind: str,
 ):
     """A started backend, torn down after the lane, with its log captured as evidence.
 
@@ -271,9 +301,12 @@ def running_stack(
         e2e_installed,
         log_path=lane_evidence.backend_log_path,
         feature_env={**feature_env, **provider_env},
-        require_enrichment=bool(provider_env),
+        # Only providers that are SUPPOSED to work. `failing` answers 400 to every
+        # call by design, so enrichment can never become ready and requiring it would
+        # block the lane on the very condition it exists to exercise.
+        require_enrichment=provider_kind in {"deterministic", "real"},
     )
-    lane_evidence.record_stack(provider=bool(provider_env))
+    lane_evidence.record_stack(provider=provider_kind)
     lane_evidence.record_stack(backend_ready=backend.ready_payload)
     lane_evidence.record_stack(**e2e_installed.as_evidence())
     try:

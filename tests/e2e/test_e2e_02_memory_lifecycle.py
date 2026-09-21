@@ -33,6 +33,7 @@ import pytest
 
 from tests.e2e._harness.client import stdio_session
 from tests.e2e._harness.config import E2EConfig
+from tests.e2e._harness.deferred import raise_deferred
 from tests.e2e._harness.evidence import LaneEvidence
 from tests.e2e._harness.features import FeatureCombo
 from tests.e2e._harness.providers import (
@@ -337,9 +338,6 @@ async def test_e2e_02_memory_lifecycle(
 
     if deferred_failures:
         lane_evidence.close(status="FAIL")
-        raise AssertionError(
-            f"E2E-2 reproduced {len(deferred_failures)} failure(s):\n\n"
-            + "\n\n".join(deferred_failures)
-        )
+        raise_deferred("E2E-2", deferred_failures)
 
     lane_evidence.close(status="PASS")

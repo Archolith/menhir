@@ -48,6 +48,7 @@ from tests.e2e._harness.artifact_corpus import (
 )
 from tests.e2e._harness.client import stdio_session
 from tests.e2e._harness.config import E2EConfig
+from tests.e2e._harness.deferred import raise_deferred
 from tests.e2e._harness.evidence import LaneEvidence
 from tests.e2e._harness.features import FeatureCombo
 from tests.e2e._harness.stack import run_menhir_cli
@@ -572,10 +573,6 @@ async def test_e2e_04_workartifacts(
 
     if deferred_failures:
         lane_evidence.close(status="FAIL")
-        raise AssertionError(
-            "E2E-4 reproduced "
-            f"{len(deferred_failures)} release-blocking failure(s):\n\n"
-            + "\n\n".join(deferred_failures)
-        )
+        raise_deferred("E2E-4", deferred_failures)
 
     lane_evidence.close(status="PASS")

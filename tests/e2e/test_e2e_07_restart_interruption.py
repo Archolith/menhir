@@ -31,13 +31,14 @@ was allowed to prepare for it, which is not the scenario that produces a false R
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from uuid import uuid4
 
 import pytest
 
-from tests.e2e._harness.client import stdio_session
+from tests.e2e._harness.client import stdio_session, wait_for_project_indexed
 from tests.e2e._harness.config import E2EConfig
 from tests.e2e._harness.evidence import LaneEvidence
 from tests.e2e._harness.features import FeatureCombo
@@ -62,7 +63,20 @@ TERMINAL_STATES = {"READY", "FAILED"}
 
 #: States the product documents as recoverable, i.e. something is still expected to move
 #: them. They are acceptable transiently and unacceptable as a final answer.
-IN_FLIGHT_STATES = {"PENDING", "QUEUED", "PROCESSING", "RETRY", "UNKNOWN"}
+#:
+#: ENRICHING is taken from `domain/models.py:38`, not guessed. It was missing from an
+#: earlier version of this set, so a perfectly ordinary in-flight episode was reported as
+#: an unrecognized state -- the diagnostic was wrong even though the verdict was right.
+IN_FLIGHT_STATES = {"PENDING", "QUEUED", "ENRICHING", "PROCESSING", "RETRY", "UNKNOWN"}
+
+#: How long the restarted backend gets to settle the interrupted episode UNAIDED. Short:
+#: if the kill beat the claim the episode is PENDING and picks up in seconds; if it did
+#: not, the dead owner's 900s lease blocks recovery and no amount of waiting short of
+#: that helps. Past this, the lane exercises the documented operator recovery instead.
+INITIAL_SETTLE_S = 90.0
+
+#: After force_release_enrichment_lease requeues it, the episode must actually finish.
+POST_RELEASE_SETTLE_S = 240.0
 
 MEMORY = (
     "The Kestrel billing reconciler retries failed charges three times before parking "
@@ -123,6 +137,12 @@ async def test_e2e_07_restart_interruption(
         )
         assert ingest.startswith("Scanned "), ingest[:400]
 
+        # ingest_project can return before the graph write lands -- its own
+        # formatter says "Graph write running in background" while still opening
+        # "Scanned <project>:", so the receipt cannot distinguish the two. Wait for
+        # the read surface an agent would query.
+        await wait_for_project_indexed(client, project)
+
         todo_receipt = _text(
             await client.call_tool(
                 "add_todo",
@@ -180,37 +200,132 @@ async def test_e2e_07_restart_interruption(
         async with stdio_session(
             e2e_config, e2e_installed.venv_python, lane_evidence, feature_env=child_env
         ) as client:
-            # Poll to a terminal state rather than reading once: an in-flight state is
-            # acceptable transiently and unacceptable as the final answer, and only
-            # waiting distinguishes the two.
-            deadline = time.monotonic() + 300
-            state = "UNPARSEABLE"
-            status_body = ""
-            while time.monotonic() < deadline:
-                status_body = _text(
-                    await client.call_tool(
-                        "call_tool",
-                        {
-                            "name": "get_enrichment_status",
-                            "arguments": {
-                                "episode_uuid": episode,
-                                "wait": True,
-                                "timeout_s": 60.0,
-                                "namespace": namespace,
+            async def _poll_until_terminal(budget_s: float) -> tuple[str, str]:
+                """Poll get_enrichment_status until READY/FAILED or the budget runs out."""
+                deadline = time.monotonic() + budget_s
+                state, body = "UNPARSEABLE", ""
+                while time.monotonic() < deadline:
+                    body = _text(
+                        await client.call_tool(
+                            "call_tool",
+                            {
+                                "name": "get_enrichment_status",
+                                "arguments": {
+                                    "episode_uuid": episode,
+                                    "wait": True,
+                                    "timeout_s": 30.0,
+                                    "namespace": namespace,
+                                },
                             },
-                        },
+                        )
                     )
+                    state = _state(body)
+                    if state in TERMINAL_STATES:
+                        break
+                return state, body
+
+            # First, a short chance to settle on its own. If the kill landed before the
+            # episode was claimed, it is still PENDING and the restarted worker just
+            # picks it up.
+            state, status_body = await _poll_until_terminal(INITIAL_SETTLE_S)
+            recovered_via = "self"
+
+            if state not in TERMINAL_STATES:
+                # The kill landed AFTER the claim. The dead process still holds the
+                # lease, and the product does not reclaim a held lease until it expires:
+                # `_enrichment_lease_seconds` is 900, and `reset_stale_enriching_episodes`
+                # only touches rows whose processing_lease_expires_at is in the past. CI
+                # showed exactly this -- ENRICHING for the full ten-minute window -- and
+                # the local run never did, because there the kill beat the claim.
+                #
+                # That is the criterion's "documented recoverable" outcome, and the
+                # product ships the operator path for it: force_release_enrichment_lease.
+                # Exercising it is the honest test; waiting fifteen minutes for a timer
+                # would prove only that the clock works.
+                # Matched by the RECEIPT uuid as well as by namespace. The two :Episodic
+                # twins per write split their properties: the namespaced twin carries the
+                # MENTIONS, the receipt's twin (group_id null) carries processing_state
+                # and the lease. A first version of this query matched on group_id only,
+                # got two rows with state=null, released nothing, and stamped
+                # recovered_via anyway -- CI evidence showed an empty force-release.txt
+                # next to an episode still ENRICHING at 75% with 6 entities written.
+                lease = graph_query(
+                    e2e_config,
+                    "MATCH (e:Episodic) WHERE e.uuid = $uuid OR e.group_id = $group "
+                    "RETURN e.uuid AS uuid, e.group_id AS group_id, "
+                    "       e.processing_state AS state, "
+                    "       toString(e.processing_lease_expires_at) AS lease_expires, "
+                    "       e.processing_owner AS owner",
+                    uuid=episode,
+                    group=namespace,
                 )
-                state = _state(status_body)
-                if state in TERMINAL_STATES:
-                    break
+                lane_evidence.attach(
+                    "lease-before-release.json", json.dumps(lease, indent=2, default=str)
+                )
+                held_by_dead_owner = any(
+                    (row.get("state") or "").upper() in IN_FLIGHT_STATES and row.get("lease_expires")
+                    for row in lease
+                )
+                lane_evidence.record_stack(
+                    stuck_state=state, lease_rows=lease, lease_held_after_kill=held_by_dead_owner
+                )
+
+                # Release every row still in flight, whichever twin holds it. The
+                # namespace argument follows the row's own group_id: the receipt twin has
+                # none, and pinning a namespace the node does not carry would make the
+                # ownership guard refuse the very release being tested.
+                releases = []
+                for row in lease:
+                    if (row.get("state") or "").upper() not in IN_FLIGHT_STATES:
+                        continue
+                    releases.append(
+                        _text(
+                            await client.call_tool(
+                                "call_tool",
+                                {
+                                    "name": "force_release_enrichment_lease",
+                                    "arguments": {
+                                        "episode_uuid": row["uuid"],
+                                        "requeue": True,
+                                        "namespace": row.get("group_id") or "",
+                                    },
+                                },
+                            )
+                        )
+                    )
+                lane_evidence.attach("force-release.txt", "\n---\n".join(releases))
+                # Only claim the recovery path if a release was actually issued. The
+                # earlier unconditional stamp is how an empty force-release.txt shipped
+                # under a manifest saying the lease had been released.
+                assert releases, (
+                    f"episode stayed {state!r} after restart but no row was in flight to "
+                    f"release -- the lease query is looking at the wrong node:\n"
+                    f"{json.dumps(lease, indent=2, default=str)[:800]}"
+                )
+                recovered_via = "force_release_enrichment_lease"
+
+                state, status_body = await _poll_until_terminal(POST_RELEASE_SETTLE_S)
+
             lane_evidence.attach("episode-status-after-restart.txt", status_body)
+            lane_evidence.record_stack(recovered_via=recovered_via)
 
             # no_false_ready: the label must be backed by the graph.
+            #
+            # Counted on the NAMESPACED episode, not the receipt's uuid. Every write
+            # produces two :Episodic nodes -- one with group_id null and one carrying the
+            # namespace -- and only the namespaced one is enriched; the receipt returns
+            # the other. Counting the receipt's twin reports zero for a perfectly healthy
+            # write and turns #92's duplication into a false "enrichment lied" verdict.
+            #
+            # These two records were briefly absent: a patch that rewrote the polling
+            # loop replaced everything up to the next section header, and the lane went
+            # green in CI with 3 of 5 criteria recorded. The evidence count is what
+            # exposed it, which is the reason result.json lists criteria by name.
             mentions = graph_query(
                 e2e_config,
-                "MATCH (e:Episodic {uuid: $uuid})-[:MENTIONS]->(n) RETURN count(n) AS mentioned",
-                uuid=episode,
+                "MATCH (e:Episodic)-[:MENTIONS]->(n) WHERE e.group_id = $group "
+                "RETURN count(n) AS mentioned",
+                group=namespace,
             )
             mentioned = mentions[0]["mentioned"] if mentions else 0
             claims_ready = state == "READY"
@@ -219,7 +334,7 @@ async def test_e2e_07_restart_interruption(
             lane_evidence.record(
                 "no_false_ready_after_restart",
                 passed=no_false_ready,
-                detail={"state": state, "mentions": mentioned},
+                detail={"state": state, "mentions": mentioned, "recovered_via": recovered_via},
             )
             assert no_false_ready, (
                 f"episode {episode} reports READY after an ungraceful kill but MENTIONS "
@@ -233,13 +348,14 @@ async def test_e2e_07_restart_interruption(
                 detail={
                     "final_state": state,
                     "terminal": resolved,
+                    "recovered_via": recovered_via,
                     "known_in_flight": state in IN_FLIGHT_STATES,
                 },
             )
             assert resolved, (
-                f"episode {episode} never reached READY or FAILED after restart; it is "
-                f"stuck in {state!r}, which is progress being reported where there is "
-                f"none:\n{status_body[:800]}"
+                f"episode {episode} never reached READY or FAILED after restart, even "
+                f"after {recovered_via}; it is stuck in {state!r}, which is progress "
+                f"being reported where there is none:\n{status_body[:800]}"
             )
 
             # --- what must have survived ------------------------------------------------

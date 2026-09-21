@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -264,6 +265,8 @@ class BackendProcess:
     process: subprocess.Popen[str]
     log_path: Path
     url: str
+    host: str = "127.0.0.1"
+    port: int = 0
     #: The ``/api/ready`` body that was accepted. Recorded as evidence: "degraded" with
     #: no provider is a legitimate configuration for some lanes and a silent
     #: misconfiguration for others, and only the capability flags tell them apart.
@@ -286,10 +289,34 @@ class BackendProcess:
             except subprocess.TimeoutExpired:
                 self.process.kill()
                 self.process.wait(timeout=30)
+        self.wait_port_released()
         try:
             return self.log_path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             return ""
+
+    def wait_port_released(self, timeout: float = 30.0) -> bool:
+        """Block until nothing is listening on the backend port, or the timeout elapses.
+
+        A dead process is not the same as a free port. `menhir serve` refuses to start
+        when its port is already bound -- "already in use; another server owns it,
+        exiting (code 3)" -- and the campaign starts a fresh backend PER LANE, so lane N+1
+        was binding while lane N's socket was still winding down.
+
+        This never reproduced on Windows and failed every run on Linux, which is the
+        shape of a socket-teardown timing difference rather than a defect in either lane.
+        Waiting here rather than sleeping in the caller keeps the guarantee attached to
+        the thing that owns the port.
+        """
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.settimeout(1.0)
+                if probe.connect_ex((self.host, self.port)) != 0:
+                    return True
+            time.sleep(0.25)
+        return False
 
     def kill(self) -> str:
         """Stop the backend the way a crash does, with no shutdown path taken.
@@ -307,6 +334,7 @@ class BackendProcess:
         if self.process.poll() is None:
             self.process.kill()
             self.process.wait(timeout=30)
+        self.wait_port_released()
         try:
             return self.log_path.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -353,6 +381,9 @@ def start_backend(
 
     config.state_dir.mkdir(parents=True, exist_ok=True)
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    # A fresh port per backend. See `E2EConfig.reserve_backend_port`: reusing one makes
+    # every backend after the first exit 3 on Linux.
+    config.reserve_backend_port()
     handle = log_path.open("w", encoding="utf-8")
 
     process = subprocess.Popen(
@@ -363,7 +394,13 @@ def start_backend(
         stderr=subprocess.STDOUT,
         text=True,
     )
-    backend = BackendProcess(process=process, log_path=log_path, url=config.backend_url)
+    backend = BackendProcess(
+        process=process,
+        log_path=log_path,
+        url=config.backend_url,
+        host=config.backend_host,
+        port=config.backend_port,
+    )
 
     deadline = time.monotonic() + config.backend_ready_timeout
     last_error = "never probed"

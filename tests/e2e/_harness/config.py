@@ -167,6 +167,50 @@ class E2EConfig:
     #: Seconds to wait for `menhir serve` to answer /api/ready before failing the lane.
     backend_ready_timeout: float = 120.0
 
+    def reserve_backend_port(self) -> int:
+        """Claim a fresh free port for the next backend, and rewrite the env file.
+
+        WHY A NEW PORT EVERY TIME, rather than reusing one.
+
+        `menhir serve` probes with a plain ``bind()`` and no ``SO_REUSEADDR``
+        (cli/__init__.py:520). On Linux the accepted HTTP sockets from the previous
+        backend sit in TIME_WAIT after it stops, and that is enough to make the probe
+        fail with EADDRINUSE even though nothing is listening -- so the next backend
+        exits 3, "already in use; another server owns it". Windows rebinds happily, which
+        is why every local run passed and every CI run failed.
+
+        Waiting it out is not an option: TIME_WAIT is 60s by default, per lane, and a
+        connect-probe cannot even observe the state. A fresh port sidesteps it entirely,
+        and also covers E2E-7's in-lane restart, where the killed backend leaves the same
+        residue.
+
+        The port is written back through ``object.__setattr__`` because this dataclass is
+        frozen -- deliberately, so nothing else mutates configuration mid-run. This is the
+        one value that must change per backend, and it changes here rather than by
+        unfreezing the whole record.
+        """
+
+        import socket as _socket
+
+        port = 0
+        for _ in range(10):
+            with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as probe:
+                probe.bind((self.backend_host, 0))
+                port = probe.getsockname()[1]
+            # The 8100 fence is not relaxed just because the port was chosen by the OS:
+            # it is the documented default for the operator's own `menhir serve`, and
+            # the campaign must never drive that.
+            if port != 8100:
+                break
+        else:
+            raise RuntimeError("could not reserve a backend port outside the 8100 fence")
+        object.__setattr__(self, "backend_port", port)
+        # MENHIR_API_PORT lives in the env file as well as in `child_environment`, so a
+        # stale file would point the backend at the old port while the harness probed the
+        # new one.
+        self.write_env_file()
+        return port
+
     @property
     def backend_url(self) -> str:
         return f"http://{self.backend_host}:{self.backend_port}"
