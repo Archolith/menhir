@@ -19,6 +19,11 @@ recorded on this boundary.
   exceptions by default, so an in-process round-trip test could never see the 500 uvicorn
   sends. The regression tests use a `raise_app_exceptions=False` transport and were confirmed
   to fail on the pre-fix code; one runs the real `DeleteNamespaceTool` against the HTTP client.
+- **The named REST routes had the same hole, one layer up.** `POST /memory/{uuid}/flag` had no
+  mapping at all, so the structural-node refusal hit the catch-all and became 500 "An
+  unexpected server error occurred". An app-level `ValueError -> 400` handler now sits next to
+  the existing `PermissionError -> 403` one, so no route can be the one that forgot; a genuine
+  fault still gets the 500 and keeps its traceback, and a test pins both.
 - E2E-8 is re-selected in the `stdio-e2e` CI job. Its `capped_scan` criterion now requires the
   documented JSON error rather than tolerating the 500, so a regression fails the job.
 

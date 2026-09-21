@@ -767,3 +767,48 @@ class TestMemoryWaitEntitiesLinked:
     def test_failed_or_unwaited_has_no_count(self, client, fake_runtime_ctx):
         data = client.post("/api/memory", json={"episode": "x"}).json()
         assert data["entities_linked"] is None
+
+
+class TestBackendRefusalsOnNamedRoutes:
+    """#132, REST surface. A backend ValueError is a refusal with a message the caller needs;
+    without the app-level handler the catch-all answered 500 "An unexpected server error
+    occurred" on every route that did not hand-roll its own mapping."""
+
+    @pytest.fixture
+    def app_client(self, fake_backend, fake_runtime_ctx):
+        from menhir.api.server_support import register_exception_handlers
+
+        app = FastAPI()
+        register_exception_handlers(app)
+        app.include_router(router)
+        app.state.runtime_ctx = fake_runtime_ctx
+        with patch.object(api_routes, "_get_backend", return_value=fake_backend):
+            # raise_server_exceptions=False: behave like uvicorn and return the 500 the
+            # catch-all produces, instead of re-raising into the test.
+            yield TestClient(app, raise_server_exceptions=False)
+
+    def test_flag_structural_refusal_is_400_with_the_message(self, app_client, fake_backend):
+        fake_backend.flag_memory = AsyncMock(
+            side_effect=ValueError(
+                "Cannot flag structural graph node (role=file). Flag semantic memories only."
+            )
+        )
+        resp = app_client.post("/api/memory/some-uuid/flag")
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["code"] == "bad_request"
+        assert "Cannot flag structural graph node (role=file)" in body["detail"]
+
+    def test_unflag_ownership_refusal_is_403_with_the_message(self, app_client, fake_backend):
+        fake_backend.unflag_memory = AsyncMock(
+            side_effect=PermissionError("Refused: memory some-uuid belongs to another namespace.")
+        )
+        resp = app_client.post("/api/memory/some-uuid/unflag")
+        assert resp.status_code == 403
+        assert "belongs to another namespace" in resp.json()["detail"]
+
+    def test_a_real_fault_is_still_a_500_without_its_message(self, app_client, fake_backend):
+        fake_backend.flag_memory = AsyncMock(side_effect=RuntimeError("neo4j connection reset"))
+        resp = app_client.post("/api/memory/some-uuid/flag")
+        assert resp.status_code == 500
+        assert "neo4j" not in resp.text
