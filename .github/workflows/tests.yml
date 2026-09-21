@@ -290,17 +290,17 @@ jobs:
           drv.close()
           PY
 
-      # Two lanes are deselected because they reproduce OPEN product defects, not
-      # regressions. Both fail on a recorded finding while every other criterion in them
-      # passes, so running them here would pin the job red and destroy its signal.
-      # Re-select each one as its issue closes:
+      # One lane is deselected because it reproduces an OPEN product defect, not a
+      # regression. It fails on a recorded finding while every other criterion in it
+      # passes, so running it here would pin the job red and destroy its signal.
+      # Re-select it when its issue closes:
       #
       #   test_e2e_02_memory_lifecycle  -> #92, provenance unreachable from the
       #                                    tracked-write receipt (9/10 criteria pass)
-      #   test_e2e_08_isolation         -> delete_namespace's cap refusal crosses the HTTP
-      #                                    boundary as a 500 instead of the documented JSON
-      #                                    error (5/5 criteria pass; the safety property
-      #                                    holds, the operator guidance is lost)
+      #
+      # test_e2e_08_isolation was deselected for #132 (cap refusal arrived as a 500) and
+      # re-selected with its fix; its capped_scan criterion now requires the documented
+      # JSON error, so a regression there fails this job instead of hiding.
       - name: Run the stdio E2E campaign
         working-directory: menhir
         env:
@@ -312,8 +312,7 @@ jobs:
           MENHIR_E2E_WORK_ROOT: ${{ github.workspace }}/menhir/.e2e-work
         run: |
           pytest tests/e2e -v -rs \
-            --deselect tests/e2e/test_e2e_02_memory_lifecycle.py::test_e2e_02_memory_lifecycle \
-            --deselect tests/e2e/test_e2e_08_isolation_adversarial.py::test_e2e_08_isolation
+            --deselect tests/e2e/test_e2e_02_memory_lifecycle.py::test_e2e_02_memory_lifecycle
 
       # result.json is what Gate C actually asks for: which acceptance criteria were
       # proven, not merely whether pytest was green. Kept on failure too -- that is when

@@ -62,6 +62,7 @@ def _build_fake_runtime_ctx(backend_overrides: dict | None = None):
             fetch_episode_processing=MagicMock(return_value=None),
             list_episode_processing=MagicMock(return_value=[]),
             get_scan_fingerprint=MagicMock(return_value="fp-1234"),
+            count_namespace=MagicMock(return_value=5),
         ),
         graphiti_client=SimpleNamespace(
             circuit_breaker_snapshots=MagicMock(return_value={
@@ -125,6 +126,21 @@ def backend_client(server_app):
     """BackendClient wired to the test server via httpx transport."""
     app, ctx = server_app
     transport = httpx.ASGITransport(app=app)
+    client = httpx.AsyncClient(transport=transport, base_url="http://testserver")
+    return BackendClient("http://testserver", client=client), ctx
+
+
+@pytest.fixture
+def backend_client_like_uvicorn(server_app):
+    """Same wiring, but an unhandled server exception becomes a 500 RESPONSE.
+
+    ``ASGITransport`` re-raises app exceptions by default, which is exactly the in-process
+    behaviour #132 hides behind: a backend ValueError would reach the client as a ValueError
+    whether or not the dispatch mapped it. Real uvicorn answers 500 instead. Tests that
+    assert on what crosses the HTTP boundary must use this fixture.
+    """
+    app, ctx = server_app
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     client = httpx.AsyncClient(transport=transport, base_url="http://testserver")
     return BackendClient("http://testserver", client=client), ctx
 
@@ -332,24 +348,71 @@ class TestBackendRoundTrip:
         with pytest.raises(Exception):
             await bc._request("not_a_real_method", {})
 
+    # #132. The three tests below run against the REAL /api/internal/backend dispatch over
+    # ASGI. The in-process fake backend is why 299 unit tests never saw the refusal turn
+    # into a 500: the tools' `except ValueError` only ever ran in-process. Verified to
+    # fail on the pre-fix code with the uvicorn-like transport.
+
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_fetch_memory_by_uuid_returns_none(self, backend_client):
-        bc, ctx = backend_client
+    async def test_delete_namespace_cap_refusal_is_a_value_error_over_http(self, backend_client_like_uvicorn):
+        bc, ctx = backend_client_like_uvicorn
+        ctx.built.graph_adapter.count_namespace.return_value = 5
+
+        with pytest.raises(ValueError, match=r"exceeding the safety limit of 1.*force=true"):
+            await bc.delete_namespace("scratch", max_nodes=1, force=False)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_delete_namespace_pin_refusal_is_a_permission_error_over_http(self, backend_client_like_uvicorn):
+        bc, ctx = backend_client_like_uvicorn
+        with patch(
+            "menhir.core.backend_runtime_data_ops.pinned_namespace", return_value="mine"
+        ):
+            with pytest.raises(PermissionError, match=r"pinned to namespace 'mine'"):
+                await bc.delete_namespace("theirs", max_nodes=1, force=False)
+
+        ctx.built.graph_adapter.count_namespace.assert_not_called()
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_delete_namespace_tool_returns_documented_json_error_over_http(self, backend_client_like_uvicorn):
+        """The MCP tool, not just the client: the refusal must come back as the tool's
+        documented `{"error": ..., "namespace": ...}` payload with the force/dry_run guidance."""
+        import json
+
+        from menhir.mcp.tools.ops.delete_namespace import DeleteNamespaceTool
+
+        bc, ctx = backend_client_like_uvicorn
+        ctx.built.graph_adapter.count_namespace.return_value = 5
+        tool = DeleteNamespaceTool()
+
+        with patch.object(DeleteNamespaceTool, "get_backend", return_value=bc):
+            rendered = await tool.endpoint("scratch", max_nodes=1, force=False, dry_run=False)
+
+        payload = json.loads(rendered)
+        assert payload["namespace"] == "scratch"
+        assert "force=true" in payload["error"] and "dry_run=true" in payload["error"]
+        assert "500" not in rendered and "HTTPStatusError" not in rendered
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_fetch_memory_by_uuid_returns_none(self, backend_client_like_uvicorn):
+        bc, ctx = backend_client_like_uvicorn
         result = await bc.fetch_memory_by_uuid("nonexistent")
         assert result is None
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_fetch_episode_processing_returns_none(self, backend_client):
-        bc, ctx = backend_client
+    async def test_fetch_episode_processing_returns_none(self, backend_client_like_uvicorn):
+        bc, ctx = backend_client_like_uvicorn
         result = await bc.fetch_episode_processing("ep-000")
         assert result is None
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_list_episode_processing_empty(self, backend_client):
-        bc, ctx = backend_client
+    async def test_list_episode_processing_empty(self, backend_client_like_uvicorn):
+        bc, ctx = backend_client_like_uvicorn
         result = await bc.list_episode_processing(states=["PENDING"], limit=10)
         assert result == []
 
