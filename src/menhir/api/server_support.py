@@ -264,6 +264,36 @@ def register_exception_handlers(app: FastAPI) -> None:
             request_id=request_id,
         )
 
+    @app.exception_handler(ValueError)
+    async def _value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
+        """Map a backend refusal to 400 instead of letting it read as a crash (#132).
+
+        The backend raises `ValueError` to refuse a request on its merits -- flagging a
+        structural node, a malformed bootstrap_scope, deleting past the namespace cap. Four
+        routes in `routes.py` already map that to 400 by hand and the rest did not, so
+        `POST /memory/{uuid}/flag` answered 500 "An unexpected server error occurred" for a
+        refusal whose message was the whole point. Same shape as the `PermissionError`
+        handler above: one mapping at the boundary, so no route can be the one that forgot.
+
+        Logged at WARNING, not as an exception: a refusal is not a fault, and the catch-all
+        below keeps the traceback for everything that is.
+        """
+        request_id = request_id_for_request(request)
+        logger.warning(
+            "Refused request: %s %s request_id=%s -- %s",
+            request.method,
+            request.url.path,
+            request_id,
+            exc,
+        )
+        return error_response(
+            status_code=400,
+            error="BadRequest",
+            detail=str(exc) or "Bad Request",
+            code="bad_request",
+            request_id=request_id,
+        )
+
     @app.exception_handler(Exception)
     async def _unhandled_exception_handler(
         request: Request, exc: Exception

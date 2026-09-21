@@ -580,12 +580,20 @@ validate_destination_parents() {
             }
         fi
     done < "$install_plan"
+    # Walk the destination's own ancestors. The previous form hard-coded
+    # /srv, /srv/yawn, /srv/yawn/releases, which happens to be right for the
+    # only retired route the authority names today and silently checks the
+    # wrong directories for a retired path anywhere else.
     for destination in "${retired_caddy_routes[@]}"; do
-        for current in /srv /srv/yawn /srv/yawn/releases; do
+        current="${destination%/*}"
+        while [ -n "$current" ]; do
             [ ! -L "$current" ] || {
                 echo "retired Menhir route parent is a symlink: $current" >&2
                 return 1
             }
+            [ "$current" != "/" ] || break
+            current="${current%/*}"
+            [ -n "$current" ] || current="/"
         done
     done
     for destination in "${retired_units[@]}"; do

@@ -628,6 +628,7 @@ class ReconciliationAction:
     title: str | None = None
     status: str | None = None
     raw_status_header: str | None = None
+    status_unresolved_reason: str | None = None
     conflict_kind: str | None = None
     reason: str | None = None
     detail: tuple[str, ...] = ()
@@ -662,6 +663,7 @@ class ReconciliationAction:
             "title": self.title,
             "status": self.status,
             "raw_status_header": self.raw_status_header,
+            "status_unresolved_reason": self.status_unresolved_reason,
             "conflict_kind": self.conflict_kind,
             "reason": self.reason,
             "detail": list(self.detail),
@@ -1521,11 +1523,14 @@ def _plan_registrations(state: _PlanState) -> None:
 
         status = entry.declared_status
         raw_status = entry.raw_status_header
+        status_unresolved_reason = None
         if status is None:
             # A prose `Status:` header is authored intent in the legacy corpus,
             # so it is transcribed; anything unmappable lands in the type's
             # initial state and keeps the raw header for a human to read.
-            status, _reason = status_from_header(raw_status, artifact_type)
+            status, status_unresolved_reason = status_from_header(
+                raw_status, artifact_type
+            )
         state.claim(
             ReconciliationAction(
                 kind=ActionKind.REGISTER_ARTIFACT,
@@ -1543,6 +1548,7 @@ def _plan_registrations(state: _PlanState) -> None:
                 title=entry.title,
                 status=status or INITIAL_STATUS[artifact_type],
                 raw_status_header=raw_status,
+                status_unresolved_reason=status_unresolved_reason,
                 reason="new_source_in_typed_route",
             ),
             entry=entry,

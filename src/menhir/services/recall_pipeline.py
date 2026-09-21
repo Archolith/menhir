@@ -107,6 +107,7 @@ async def run_recall(
     candidate_k: int = 50,
     context_node_ids: list[str] | None = None,
     include_session: bool = False,
+    session_id: str | None = None,
     include_superseded: bool = False,
     wait_for_pending: bool = False,
     pending_wait_timeout_s: float = 3.0,
@@ -580,8 +581,14 @@ async def run_recall(
             continue
         if freshness == FreshnessState.GONE:
             continue
-        if scope == NodeScope.SESSION and not include_session:
-            continue
+        if scope == NodeScope.SESSION:
+            if not include_session:
+                continue
+            # When the caller identifies a session, SESSION scope is an ownership
+            # boundary, not a broad opt-in to every fresh node in the namespace.
+            # Missing owner stamps fail closed for an identified caller.
+            if session_id is not None and str(meta.get("session_id") or "") != session_id:
+                continue
         # Materialized Views have a fail-closed context contract. Historical/debug inspection uses
         # direct getters and operator listings; ``include_superseded`` must not turn ordinary recall
         # into an inspection API. Missing lifecycle stamps, OPERATOR audience, retirement, or a

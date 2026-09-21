@@ -59,9 +59,13 @@ SCAFFOLD_DRILL_KEYS = {
     "schema", "kind", "generation", "backup_receipt_sha256",
     "checked_utc", "recorded_utc", "method",
 }
+# A restore drill is proof that a backup was actually loaded and checked. The
+# retired "backup-generation-..." method proved nothing of the kind: it restamped
+# the backup receipt's own checked_utc, and the audit admits any method in this
+# set on generation and age alone, so it could satisfy the restore-drill
+# requirement with no restore. Only a real rehearsal counts.
 SCAFFOLD_DRILL_METHODS = {
     "release-rehearsal-clean-load-and-consistency-check",
-    "backup-generation-clean-load-and-consistency-check",
 }
 MAINTENANCE_STAGES = {
     "start", "backup", "staged", "rehearsal", "candidate", "accepted",
@@ -1032,15 +1036,6 @@ def seed_drill() -> dict[str, Any]:
     )
 
 
-def record_backup_drill() -> dict[str, Any]:
-    require_root()
-    require_safe_root_file(BACKUP_RECEIPT, "VPS backup receipt")
-    backup = strict_load(BACKUP_RECEIPT)
-    return write_drill_receipt(
-        backup, backup.get("checked_utc"), "backup-generation-clean-load-and-consistency-check",
-    )
-
-
 def abandon_maintenance(contract_path: Path, receipt_path: Path, reason: str) -> dict[str, Any]:
     require_root()
     if not SAFE_REASON.fullmatch(reason):
@@ -1128,7 +1123,6 @@ def parser() -> argparse.ArgumentParser:
     verify.add_argument("--app-only", action="store_true")
     commands.add_parser("status")
     commands.add_parser("seed-drill")
-    commands.add_parser("record-backup-drill")
     abandon = commands.add_parser("abandon-maintenance")
     abandon.add_argument("--reason", required=True)
     for name in (
@@ -1164,8 +1158,6 @@ def main(argv: list[str]) -> int:
             }
         elif args.command == "seed-drill":
             value = seed_drill()
-        elif args.command == "record-backup-drill":
-            value = record_backup_drill()
         elif args.command == "begin-maintenance":
             value = begin_maintenance(binding_from_arguments(args))
         elif args.command == "hold-maintenance":

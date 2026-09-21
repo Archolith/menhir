@@ -1000,3 +1000,4 @@ def test_an_unmappable_header_lands_in_the_initial_state_and_keeps_the_raw_text(
     action = only(report, ActionKind.REGISTER_ARTIFACT)
     assert action.status == ArtifactStatus.PROPOSED
     assert action.raw_status_header == "mostly done-ish"
+    assert action.status_unresolved_reason == "unrecognized_status"

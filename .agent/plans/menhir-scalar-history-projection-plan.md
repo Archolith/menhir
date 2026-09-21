@@ -572,7 +572,8 @@ Implementation is complete only when:
 - replay is LLM-free, idempotent, namespace-safe, and receipt-bearing;
 - correction, expiry, deletion, merge, and unmerge tests pass;
 - the dashboard makes provenance and time semantics inspectable;
-- all focused and full test suites pass;
+- all focused risk-selected tests pass locally, and required full offline/graph-backed CI is green
+  on the exact candidate SHA under `../workflows/run_and_test.md`;
 - a fresh candidate-only 78-item run completes on one immutable Menhir/bench commit pair with a
   run-local telemetry database and 78 unique successful manifest rows;
 - the final score and failures are reported as measured, without substituting an older or mixed-code

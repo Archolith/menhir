@@ -486,6 +486,10 @@ def _format_episode_status(
             f"llm_tasks_total: {int(row.get('processing_llm_tasks_total') or 0)}",
             f"attempts: {int(row.get('processing_attempts') or 0)}",
             f"error: {row.get('processing_error') or '(none)'}",
+            # The Graphiti-minted node that carries this write's MENTIONS edges (#92). The
+            # episode_id above is Menhir's receipt; get_provenance names both, and this is
+            # the value that matches its `uuid`. "(pending)" until enrichment completes.
+            f"enriched_episode_uuid: {row.get('resolved_episode_uuid') or '(pending)'}",
             f"timed_out: {timed_out}",
             f"updates: {len(history)}",
         ]

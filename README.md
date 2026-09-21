@@ -729,6 +729,11 @@ weights for different recall tasks.
 The default pytest run covers the offline suite. Tests marked `online` skip unless
 `--run-online` is present.
 
+For normal contributor work, do not run the complete suite after every change. Select direct and
+affected tests, broaden according to risk, and let required CI run the full offline plus supported
+graph-backed lanes on the exact reviewed commit. The authoritative selection, escalation, and
+reporting policy is [`.agent/workflows/run_and_test.md`](.agent/workflows/run_and_test.md).
+
 ```bash
 pytest
 pytest -m unit

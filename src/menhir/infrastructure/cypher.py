@@ -314,6 +314,9 @@ ENTITY_METADATA_FIELDS = (
     "n.freshness AS freshness",
     "n.user_flagged AS user_flagged",
     "n.bootstrap_scope AS bootstrap_scope",
+    # SESSION visibility is caller-relative. The recall boundary needs this owner stamp
+    # alongside scope so it can reject otherwise relevant nodes from another session.
+    "n.session_id AS session_id",
     "coalesce(toInteger(n.rehydration_count), 0) AS rehydration_count",
     "n.conflict_group_id AS conflict_group_id",
     "n.conflict_status AS conflict_status",

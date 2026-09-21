@@ -941,3 +941,44 @@ def test_supersede_artifact_routes_to_work_artifacts_not_shadowed_by_l4() -> Non
     assert repo.calls == [("new-uuid", "old-uuid")]
     assert isinstance(result, dict)
     assert result["applied"] is True
+
+
+@pytest.mark.unit
+def test_register_work_artifact_carries_the_unresolved_reason_to_the_write() -> None:
+    """The reconcile->register hop must not drop `status_unresolved_reason`.
+
+    This is the hop that was broken: the reconciliation service passed the reason,
+    `register_work_artifact` did not accept it, and every REGISTER_ARTIFACT apply
+    raised TypeError. It went unnoticed because the service-level tests use a fake
+    repository declared as `register_work_artifact(self, **kwargs)`, which accepts
+    any keyword and asserts only that one was passed -- so the fake and the real
+    signature were free to diverge.
+
+    Asserting on the CREATE parameters rather than on the call is deliberate: the
+    reason existing on the method signature proves nothing if it stops there, and
+    every read surface (`get_artifact`, `list_artifacts`) is gated on the property
+    actually being stored.
+    """
+    from menhir.domain.artifact_reconciliation import SourceObservation
+
+    neo4j = _StubNeo4j()
+    repo = WorkArtifactRepository(neo4j)
+
+    repo.register_work_artifact(
+        artifact_type=ArtifactType.PLAN,
+        title="Investigate order id opacity",
+        repository="fixture",
+        path=".agent/plans/unclear.md",
+        medium="markdown",
+        observation=SourceObservation(integrity="sha256:abc", observed_commit="deadbeef"),
+        status=None,
+        status_raw="Marinating pending further thought",
+        status_unresolved_reason="unrecognized_status",
+    )
+
+    create = next(
+        call for call in neo4j.calls if "CREATE (a:WorkArtifact" in call["query"]
+    )
+    assert create["params"]["status"] == ArtifactStatus.PROPOSED
+    assert create["params"]["status_raw"] == "Marinating pending further thought"
+    assert create["params"]["status_unresolved_reason"] == "unrecognized_status"

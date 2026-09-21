@@ -139,6 +139,36 @@ async def test_recall_includes_session_nodes_when_requested(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_recall_session_id_excludes_other_and_unstamped_session_nodes(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    _setup_search_and_metadata(
+        stub_graphiti_client, stub_memory_graph_adapter, scope="SESSION"
+    )
+    stub_graphiti_client.search_scored_results.append(
+        ("entity-3", "Unstamped Entity", 0.55)
+    )
+    stub_memory_graph_adapter.candidate_metadata[0]["session_id"] = "session-a"
+    stub_memory_graph_adapter.candidate_metadata[1]["session_id"] = "session-b"
+    stub_memory_graph_adapter.candidate_metadata.append(
+        {
+            **stub_memory_graph_adapter.candidate_metadata[0],
+            "uuid": "entity-3",
+            "name": "Unstamped Entity",
+            "session_id": None,
+        }
+    )
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+
+    result = await svc.recall(
+        "test query", include_session=True, session_id="session-a"
+    )
+
+    assert [memory.uuid for memory in result.results] == ["entity-1"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_recall_excludes_gone_nodes(
     stub_graphiti_client, stub_memory_graph_adapter
 ) -> None:

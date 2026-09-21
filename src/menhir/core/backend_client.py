@@ -106,13 +106,21 @@ class BackendClient(BackendClientOpsMixin, MemoryBackend):
             json=payload or {},
             headers=self._default_headers(),
         )
-        if response.status_code in (400, 422):
+        if response.status_code in (400, 403, 422):
             try:
                 detail = response.json().get("detail")
             except Exception:
                 detail = None
             if isinstance(detail, str) and detail.startswith("Invalid preset "):
                 raise InvalidQueryPresetError(detail)
+            # #132. backend_invoke maps a backend ValueError to 400 and PermissionError to
+            # 403 with the message as `detail`. Re-raise them as the same exception types the
+            # in-process backend would have raised, so a tool's `except ValueError` sees the
+            # refusal in HTTP mode too instead of an opaque HTTPStatusError.
+            if isinstance(detail, str) and response.status_code == 400:
+                raise ValueError(detail)
+            if isinstance(detail, str) and response.status_code == 403:
+                raise PermissionError(detail)
         response.raise_for_status()
         # x-yawn-bg-warnings is the deprecated spelling, still read so a new client
         # keeps working against a server that has not been upgraded yet.

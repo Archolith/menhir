@@ -51,7 +51,7 @@ Heuristic line classification, then hand-verified for every row marked defect.
 | `rehearsal-receipt.json` (rewritten by the nightly wrapper for each generation since `5649ae9`; `stage-generation.sh` refuses receipts older than 1 h, so only the wrapper can rehearse a nightly generation) | `restore-generation.sh:295,339` | `candidate-deploy.sh:17`, `lib.sh:296,644`, `release-run.sh:128`, scaffold status (must bind current backup generation) | latest-wins |
 | `desktop-archive-receipt.json` | `menhir-backup-archive.ps1` on the desktop | `promote.sh:56`, `worker:149`, `release-run.sh:88`, scaffold | latest-wins |
 | `scaffold-receipt.json` | scaffold `capture` | scaffold `verify`/`status` | latest-wins |
-| `scaffold-restore-drill-receipt.json` | scaffold `seed-drill` / `record-backup-drill` | scaffold `status` | latest-wins |
+| `scaffold-restore-drill-receipt.json` | scaffold `seed-drill` | scaffold `status` | latest-wins |
 | `durable-live-census.json` | `backup-generation.sh:128` via `validate_durable_inventory.py --live` | (binding checked at backup time) | latest-wins |
 | `scheduled-backup-last-run.json`, `scheduled-backup-failure.json` | `/usr/local/sbin/menhir-scheduled-backup` (scaffold-installed 2026-09-13, nightly via `menhir-backup.timer`) | `backup-status` (release 0.2.0-15, `yawn.vps@bc4f29e`) | latest-wins; failure marker is `rm`'d on success |
 | `maintenance-history/` (1) | scaffold `_archive_completed_maintenance` | — | history |

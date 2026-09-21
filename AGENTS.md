@@ -25,9 +25,12 @@ These instructions apply to the entire repository.
 
 ## Verification
 
-- Run only tests relevant to the changed modules on the maintainer machine. Start with
-  `query_structure(query_type="affected_tests")`, add direct contract/regression tests for every changed
-  deployment boundary, and run the matching lint/static checks.
+- Follow `.agent/workflows/run_and_test.md`; it is the authoritative risk-based test and reporting policy.
+- Run the smallest credible tests for the changed behavior on the maintainer machine. Use
+  `query_structure(query_type="affected_tests")` as one selection input, then confirm it from callers,
+  contracts, and existing tests because an empty or stale structural mapping is not evidence that no test
+  is needed. Add direct contract/regression tests for every changed deployment boundary and run matching
+  lint/static checks on changed paths.
 - Do not run the complete repository suite locally as a routine implementation or deployment step. Push the
   reviewed commit and let required CI run the complete suite on that exact SHA. Production publication or
   promotion must remain blocked until all required CI checks for that SHA are green.

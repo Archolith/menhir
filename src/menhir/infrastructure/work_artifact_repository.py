@@ -935,6 +935,7 @@ class WorkArtifactRepository:
         namespace: str | None = None,
         status: str | None = None,
         status_raw: str | None = None,
+        status_unresolved_reason: str | None = None,
         artifact_uuid: str | None = None,
         structure_project: str | None = None,
     ) -> dict[str, Any]:
@@ -943,6 +944,11 @@ class WorkArtifactRepository:
         Idempotent on both keys that could already identify it: a declared UUID
         already in the graph, and a locator already claimed. Re-running a
         reconcile must not mint a second identity for a document that has one.
+
+        ``status_unresolved_reason`` is carried through to ``create_artifact``
+        rather than dropped here. This is the only path reconciliation uses to
+        register a document, so a reason lost at this hop is a reason that never
+        reaches the graph, and every read surface is gated on it being stored.
         """
         if artifact_uuid:
             existing = self.neo4j.execute(
@@ -992,6 +998,7 @@ class WorkArtifactRepository:
             namespace=namespace,
             status=status,
             status_raw=status_raw,
+            status_unresolved_reason=status_unresolved_reason,
             structure_project=structure_project,
             artifact_uuid=artifact_uuid,
         )

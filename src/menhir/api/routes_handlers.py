@@ -330,6 +330,15 @@ async def backend_invoke_impl(
         result = await method(**call_kwargs)
     except InvalidQueryPresetError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PermissionError as exc:
+        # #132. A backend refusal is an answer, not a crash. The named REST routes already map
+        # these; this dispatch is what the MCP tools actually use, and without the mapping the
+        # tools' `except ValueError` never runs in HTTP mode -- delete_namespace's cap refusal
+        # reached agents as an opaque 500 with the force/dry_run guidance lost. BackendClient
+        # turns 403/400 back into PermissionError/ValueError so both modes behave alike.
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception:
         # NEVER log the body. It carries caller content -- raw episode text via
         # queue_episode, and whatever else a client submits -- and this path runs at

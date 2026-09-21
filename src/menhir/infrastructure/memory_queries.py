@@ -529,16 +529,36 @@ class MemoryQueryRepository:
     def fetch_node_receipts(self, node_uuid: str) -> dict[str, object] | None:
         """Receipts for one node (the "show me the sources" read): the source episodes that
         ``MENTIONS`` it, its first-class ``SUPPORTED_BY`` :Evidence, and its ``ANCHORED_TO``
-        structural paths. Pattern comprehensions keep the three signals independent (no cartesian
-        blow-up). Returns None when no node has that uuid."""
+        structural paths. Returns None when no node has that uuid.
+
+        Each episode also carries ``episode_id``: the uuid of Menhir's receipt node for that
+        write (#92). The node that MENTIONS an entity is the one Graphiti mints inside
+        ``add_episode``; the ``episode_id`` a caller was handed names Menhir's own anchor, which
+        records the Graphiti uuid as ``resolved_episode_uuid`` when enrichment completes. Without
+        the reverse lookup here, provenance names a uuid the caller has never seen and cannot
+        match to its receipt. ``episode_id`` is null for episodes enriched before the anchor
+        recorded it, or by a path that does not.
+
+        The receipt lookup runs once per mentioning episode and is re-aggregated before the
+        evidence/anchor comprehensions, so the three signals stay independent (no cartesian
+        blow-up). ``episodic_resolved_episode_uuid_idx`` backs the lookup; without it this is a
+        label scan per episode."""
         query = """
             MATCH (n:Entity {uuid: $uuid})
+            OPTIONAL MATCH (epi:Episodic)-[:MENTIONS]->(n)
+            OPTIONAL MATCH (receipt:Episodic)
+              WHERE epi IS NOT NULL AND receipt.resolved_episode_uuid = epi.uuid
+            WITH n,
+                 [ e IN collect(
+                     CASE WHEN epi IS NULL THEN null ELSE
+                       {uuid: epi.uuid, source: epi.source, content: epi.content,
+                        created_at: epi.created_at, episode_id: receipt.uuid}
+                     END
+                   ) WHERE e IS NOT NULL ] AS episodes
             RETURN n.uuid AS uuid,
                    n.name AS name,
                    n.view_kind AS view_kind,
-                   [ (epi:Episodic)-[:MENTIONS]->(n)
-                     | {uuid: epi.uuid, source: epi.source, content: epi.content,
-                        created_at: epi.created_at} ] AS episodes,
+                   episodes,
                    [ (n)-[supported_by]->(ev:Evidence)
                      WHERE type(supported_by) = $supported_by_type
                      | {kind: ev[$evidence_kind_key], ref: ev[$evidence_ref_key]} ] AS evidence,

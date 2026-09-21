@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -279,3 +280,31 @@ def test_artifact_serves_without_menhir(beacon_python: str, tmp_path: Path) -> N
     )
     assert exported.returncode == 0, exported.stderr.decode("utf-8", errors="replace")
     assert b'"beacon_snapshot_version":"1.0"' in exported.stdout
+
+
+def test_cli_reader_uses_canonical_structure_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise the real lazy adapter import without opening a database connection."""
+    from menhir.cli.beacon import _reader as cli_reader
+    from menhir.config.settings_model import MemorySettings
+    from menhir.infrastructure.structure_queries import StructureGraphWriter
+
+    settings = SimpleNamespace(
+        neo4j_uri="bolt://127.0.0.1:7689",
+        neo4j_user="neo4j",
+        neo4j_password="fixture-only",
+        neo4j_database="neo4j",
+    )
+    monkeypatch.setattr("menhir.env_file.load_menhir_env", lambda: None)
+    monkeypatch.setattr(MemorySettings, "from_env", staticmethod(lambda: settings))
+    reader, repository = cli_reader()
+    try:
+        assert isinstance(reader, StructureGraphWriter)
+        assert reader.neo4j is repository
+        assert repository.uri == settings.neo4j_uri
+        for method in (
+            "get_project_root_path", "get_project_coverage", "get_scan_fingerprint",
+            "query_overview", "query_files", "query_documents", "get_beacon_evidence_guard",
+        ):
+            assert callable(getattr(reader, method))
+    finally:
+        repository.close()

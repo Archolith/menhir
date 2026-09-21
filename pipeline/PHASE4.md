@@ -13,7 +13,8 @@
 > rehearsed, copied off-host) made it 6; `verify-artifacts` 0; audit green;
 > recoverability YES.
 >
-> Found by the corroborator, **not removed** (uncorroborated as deletions):
+> (Resolved 2026-09-20: see section F.) Found by the corroborator, **not
+> removed** at the time (uncorroborated as deletions):
 > `/home/thron/menhir-0.2.0-13.tar` (417 MB image tarball, Sep 7) and four
 > Sep-7 one-off scripts there; `/srv/menhir/production/bin/__pycache__/`
 > (bytecode of the retired `verify_python_runtime.py` and a stale
@@ -80,6 +81,58 @@ Verdicts: **DELETE** (no reader in installed code, no rollback value),
 | D5 | `/home/thron/.menhir-backup-export/` | Staging used by `scripts/menhir-backup-archive.ps1` every night. | KEEP |
 | D6 | `/home/thron/marker_inventory.py` | One-off inventory script; the result is `pipeline/MARKERS.md`. | DELETE |
 | D7 | `/home/thron/apply_modes.py` | Used by every release install this session (applies manifest modes after scp). Belongs in the repo, not in a home dir. | KEEP for now; move into `pipeline/` in Phase 5 |
+
+### E. Added 2026-09-19: source checkouts under `/srv/yawn/projects` (yawn.deploy handoff item D)
+
+> **Executed 2026-09-20 05:03 CEST** after operator approval: both removed
+> (161 MB). Post-checks: `check-drift.sh` clean (12 repos), `verify-artifacts`
+> exit 0 / 40 OK, yawn vhosts and `memory.ctharvey.me/readyz` unchanged.
+>
+> **Corroborated 2026-09-20 ~04:20-04:45 CEST (read-only, independent Opus
+> subagent): E1 INERT, E2 INERT.** Beyond the requester's search it checked
+> systemd drop-ins and transient units (`systemctl cat` of every menhir-*/yawn-*
+> unit), `/etc/profile*`, root and thron rc files, `~/.local/bin`, `.pth` /
+> egg-link / `direct_url.json`, symlinks targeting either path, all user
+> crontabs, sudoers.d, cloudflared config, docker binds / working_dir labels /
+> image history for every image, `/proc/*/{cwd,exe,fd,maps,cmdline,environ}`,
+> `lsof +D`, mounts, 30 days of journal, and relatime atimes (no reader in 7
+> days other than the two audits; `yawn.vps/.venv/bin/uvicorn` last touched
+> 2026-09-13 02:19). The four E2 files match `b1191b8` on full sha256. The
+> only pattern hits are the empty `/etc/yawn-vps/` directory named by
+> `verify-artifacts` / `menhir_schema.py` / the release-18 installer (the
+> retired gateway's artifact paths, independent of the checkout), the GitHub
+> URL in `menhir_schema.py:211`, and SSH key comments.
+
+| # | Path | Size | Dated | Evidence | Verdict |
+|---|---|---|---|---|---|
+| E1 | `/srv/yawn/projects/menhir/` (root-owned git checkout, HTTPS remote) | 42 MB | 2026-08-30 | Detached at `0479a3c` = `origin/main`, working tree clean, nothing untracked. Not in `yawn.deploy/releases.json`. Releases install from digest-bound bundles under `/srv/menhir/`; `grep -rIl projects/menhir` over systemd, cron, sudoers, `/usr/local/{bin,sbin}`, `/srv/menhir`, `yawn.deploy`, `/var/lib/menhir-production`, `~thron/.config` finds nothing; no crontab entry; no docker mount. | DELETE |
+| E2 | `/srv/yawn/projects/yawn.vps/` (root-owned git checkout, remote = `/tmp/menhir-bootstrap-yawn-vps-9264.bundle`) | 119 MB | 2026-09-13 | The bootstrap clone for the Menhir OAuth operations gateway (retired in 0.2.0-16; `/etc/yawn-vps/` empty). Detached at `234fd26`; the four modified files (`menhir_server.py`, `vps/core.py`, `vps/menhir_capabilities.py`, `vps/menhir_tools.py`) are byte-identical (sha256) to yawn.vps commit `b1191b8` "make Menhir gateway read-only", which is on GitHub `origin/master` and was itself superseded by `3f7c5dc` removing the gateway sources. Nothing untracked. Same reference search as E1: nothing. The desktop `projects/yawn/yawn.vps` repo and the vps MCP are unaffected. | DELETE |
+
+### F. Added 2026-09-20: the leftovers named in the banner above
+
+| # | Path | Size | Dated | Evidence | Verdict |
+|---|---|---|---|---|---|
+| F1 | `/home/thron/menhir-0.2.0-13.tar` + `inspect-menhir-graphiti-indexes.sh`, `inspect-menhir-prior-releases.sh`, `recover-menhir-release10.py`, `validate-menhir-install-backup.py` | 417 MB + 29 KB | 2026-09-07 | The tar is a `docker save` of `ghcr.io/archolith/menhir:0.2.0-13` (manifest `RepoTags`), which is in the local image store and running as `menhir-prod-app`. The scripts are release-10 recovery one-offs, in no repository; nothing under systemd, cron, sudoers, `/srv/menhir` or `/usr/local` names any of the five. Safety copy of the four scripts: `Documents\Codex\2026-09-06\inve\work\host-scripts-20260907\`. | DELETE |
+| F2 | `/srv/menhir/production/bin/__pycache__/` (`verify_python_runtime.cpython-312.pyc` Sep 13, `menhir_schema.cpython-312.pyc` Sep 7) | 80 KB | 2026-09-13 | `verify_python_runtime.py` is in the verifier's retired set (source absent), so its pyc is orphaned; the `menhir_schema` pyc predates the installed `.py`. Neither `installed-artifacts.json` nor `verify-artifacts` mentions `__pycache__`; Python regenerates on demand. | DELETE |
+| F3 | `/srv/menhir/backups/.neo4j-conf.50ra9gsj/` (one 60 B `neo4j.conf`) | 4 KB | 2026-09-01 | `mktemp -d "${BACKUP_ROOT}/.neo4j-conf.XXXXXXXX"` at `backup-generation.sh:267` (`rm -rf` at :278, no EXIT trap). Leaked by the manual r8 bootstrap run at 00:49 on Sep 1 that aborted on a ghcr token fetch failure (journal), not by the nightly. Receipts live in `/var/lib/menhir-production/`; none names it. | DELETE |
+| F4 | `/usr/local/sbin/menhir-backup-upload` | 32 KB | 2026-08-30 | Contabo S3 Object-Lock upload wrapper. Its prerequisites do not exist (`/etc/menhir/backup-upload.conf`, `/root/.aws`, `backup-upload-receipt.json`); in neither the 40 required nor the 20 retired artifacts; no reference from `bin/`, scaffold, `/usr/local/*`, units, sudoers, cron, receipts, or the nightly wrapper (which calls `menhir-backup-local`); zero "upload" lines in `menhir-backup.service` journal since Aug 25. Off-host copies are pulled by the desktop (`menhir-backup-archive.ps1`), not pushed. | DELETE; follow-up: add to the authority's retired set so the verifier asserts absence |
+| F5 | `/home/thron/__pycache__/` (root-owned: `recover-menhir-release10.cpython-312.pyc`, `menhir-verify-python-runtime-r8.cpython-312.pyc`) | 40 KB | 2026-09-07 | Found by the corroborator; bytecode of the F1 one-offs, root-owned because they ran under sudo. | DELETE |
+
+> **Executed 2026-09-20 05:20 CEST** after operator approval: F1-F5 removed
+> (417 MB). Post-checks: `verify-artifacts` exit 0 / 40 OK, scaffold `static:
+> ok` / runtime healthy / public ready / maintenance complete, `backup-status`
+> unchanged, `readyz` 200. Nothing from the banner above remains; F4's
+> follow-up (add `menhir-backup-upload` to the retired set) is still open.
+>
+> **Corroborated 2026-09-20 (read-only, independent Opus subagent): F1-F4 SAFE
+> TO DELETE, F5 added.** Corrections adopted: F1's tarball is manifest digest
+> `20a91cb6…` while the container is pinned to index digest `c228117f…` — same
+> layers, same `Created`, so the tarball is a redundant copy of the image the
+> host already has (and ghcr still serves the tag); the container image is in
+> use and not dangling, so thron's weekly `docker image prune -f` cannot remove
+> it. F2 `menhir_schema` pyc will reappear after the next `same_host_fence.py`
+> run (`import menhir_schema`), harmless. F3 provenance and receipt location
+> corrected above.
 
 ## Not candidates
 

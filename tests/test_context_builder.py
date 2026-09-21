@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import math
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -24,6 +25,7 @@ from menhir.services.context_builder import (
     _is_structurally_dense,
     estimate_tokens,
 )
+from menhir.mcp.tools.recall.build_context import BuildContextTool
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +290,49 @@ def _build_service(recall_result: RecallResult) -> ContextBuilderService:
     mock_recall = AsyncMock()
     mock_recall.recall = AsyncMock(return_value=recall_result)
     return ContextBuilderService(recall_service=mock_recall)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_context_includes_fresh_session_scoped_memories() -> None:
+    service = _build_service(_recall_result([]))
+
+    await service.build_context(
+        "fresh tracked write",
+        namespace="billing",
+        preset=QueryPreset.RECENT,
+        session_id="session-a",
+    )
+
+    service.recall_service.recall.assert_awaited_once_with(
+        "fresh tracked write",
+        preset=QueryPreset.RECENT,
+        namespace="billing",
+        include_session=True,
+        session_id="session-a",
+        include_invalidated=True,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_mcp_build_context_defaults_to_the_active_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = MagicMock()
+    backend.build_context = AsyncMock(
+        return_value={"context": "", "memory_count": 0, "token_estimate": 0}
+    )
+    tool = BuildContextTool()
+    tool.get_backend = MagicMock(return_value=backend)
+    monkeypatch.setattr(
+        "menhir.mcp.tools.recall.build_context.get_mcp_session",
+        lambda: SimpleNamespace(session_id="session-a"),
+    )
+
+    await tool.endpoint(query="fresh tracked write")
+
+    assert backend.build_context.await_args.kwargs["session_id"] == "session-a"
 
 
 @pytest.mark.unit

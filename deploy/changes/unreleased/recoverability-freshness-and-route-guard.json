@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "id": "recoverability-freshness-and-route-guard",
+  "category": "fixed",
+  "deployment_class": "maintenance",
+  "summary": "backup-status downgrades a coherent but stale backup chain to STALE, and the installer derives its retired-route parent guard from the destination.",
+  "details": "Two carried low-severity review findings. backup-status compared the generation named by the backup, rehearsal and off-host receipts but never their age, so three receipts that agreed while all being weeks old still printed 'YES' as the one-line recoverability verdict an operator reads during an incident. It now resolves vps_backup_max_age_hours, restore_drill_max_age_hours and desktop_archive_max_age_hours from /etc/menhir/scaffold-contract.json, the same authority the nightly scaffold audit enforces, so the two cannot disagree; when that file is unreadable it falls back to the values the contract ships with (24/168/24) and says which source it used. The three ages are now printed unconditionally, and an otherwise-complete chain whose backup, rehearsal or off-host copy exceeds its limit reports STALE instead of YES. The earlier rungs (NO, PARTIAL, ON-HOST ONLY) are unchanged. release-install.sh verified that /srv, /srv/yawn and /srv/yawn/releases were not symlinks before removing a retired Caddy route, a fixed list that is correct only because the authority currently names a single retired route beneath that path; a retired path anywhere else would have had its real parents unchecked. It now walks the ancestors of each retired destination. No artifact is added or retired, the authority and its rendered files are unchanged, and no runtime, ingress, secret or privilege boundary moves.",
+  "operator_impact": "backup-status may now report STALE where it previously reported YES; that is the same evidence, read correctly, and is resolved by a fresh backup, rehearsal and off-host copy. No operator action is required by the install itself.",
+  "repositories": {
+    "menhir": [
+      "b8895b12301be24e75d9765b5775cf2feb199b30"
+    ]
+  },
+  "security_scopes": [
+    "backup-restore-and-rollback",
+    "host-privilege-and-command-wrappers"
+  ],
+  "breaking": false
+}
