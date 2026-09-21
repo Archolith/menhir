@@ -47,6 +47,10 @@ _MAX_FILES = 256
 #: Priority documents always surface first when capping.
 _PRIORITY_DOCS = ("README.md", ".agent/README.md")
 
+#: The documented default ``document_type`` (``ingest_document``'s default), used for any
+#: indexed document whose type was never recorded.
+_DEFAULT_DOCUMENT_TYPE = "generic"
+
 
 class BeaconEvidenceError(ValueError):
     """Raised when required source evidence for the evidence dump is unavailable."""
@@ -135,6 +139,19 @@ def _require_filesystem_match(guard: BeaconEvidenceGuard, project: str, repo_roo
         )
 
 
+def _document_type(raw: object) -> str:
+    """Return the indexed document type, or the documented default when it is unset.
+
+    Scanner-indexed documents carry no ``document_type``. A reader that stringified the unset
+    value handed over ``"None"``, which is truthy, so a plain ``or`` fallback let Beacon publish
+    ``role: None`` (PR #125 F1). ``None``, blank, and the literal ``"None"`` all mean "unset".
+    """
+    value = "" if raw is None else str(raw).strip()
+    if not value or value == "None":
+        return _DEFAULT_DOCUMENT_TYPE
+    return value
+
+
 def _document_rank(path: str) -> tuple[int, str]:
     return (0 if path in _PRIORITY_DOCS else 1, path)
 
@@ -161,7 +178,7 @@ def capture_evidence(
             {
                 "path": path,
                 "title": str(row.get("title") or row.get("name") or ""),
-                "document_type": str(row.get("doc_type") or "generic"),
+                "document_type": _document_type(row.get("doc_type")),
             }
         )
     documents.sort(key=lambda d: _document_rank(d["path"]))

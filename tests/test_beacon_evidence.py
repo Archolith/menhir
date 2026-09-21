@@ -139,6 +139,22 @@ def test_document_type_uses_structure_reader_shape(tmp_path: Path) -> None:
     ]
 
 
+@pytest.mark.parametrize("unset", [None, "None", "", "  "])
+def test_unset_document_type_becomes_documented_default(tmp_path: Path, unset) -> None:
+    """PR #125 F1: an unset type (or its stringified "None") must never reach Beacon as a role."""
+    row = {"path": ".agent/architecture.md", "name": "architecture.md", "doc_type": unset}
+    evidence = dump_evidence(
+        _reader(root=str(tmp_path), documents=[row]), "fixture", tmp_path
+    )
+    assert evidence["documents"] == [
+        {
+            "path": ".agent/architecture.md",
+            "title": "architecture.md",
+            "document_type": "generic",
+        }
+    ]
+
+
 def test_written_document_is_deterministic_json(tmp_path: Path) -> None:
     reader = _reader(root=str(tmp_path))
     document = dump_evidence(reader, "fixture", tmp_path)

@@ -258,6 +258,12 @@ async def test_e2e6_beacon_owned_generation_and_consumption(
     manifest = repo / "beacon.generated.yaml"
     assert outcome.created and manifest.is_file()
     first_bytes = manifest.read_bytes()
+    # The .agent docs are scanner-written and carry no document_type; they must publish the
+    # documented default role, never the stringified None (PR #125 F1).
+    canonical_roles = [
+        doc["role"] for doc in yaml.safe_load(first_bytes.decode("utf-8"))["canonical_docs"]
+    ]
+    assert canonical_roles and set(canonical_roles) == {"generic"}, canonical_roles
 
     # 3. beacon validate: zero validation errors.
     validated = _run_beacon(beacon_python, ["validate", str(manifest)], repo)

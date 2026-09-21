@@ -38,6 +38,18 @@ def _normalize_structure_path(path: str) -> str:
     return p.lstrip("/").rstrip("/")
 
 
+def _set_properties(record: dict[str, Any], keys: tuple[str, ...]) -> dict[str, str]:
+    """Return the optional node properties that are actually set, as strings.
+
+    Neo4j returns an unset property as a PRESENT key whose value is ``None``, so
+    ``str(record.get(key, default))`` yields the truthy string ``"None"`` and defeats every
+    downstream ``or default`` fallback. Scanner-indexed documents carry no ``document_type``,
+    which is how generated Beacon manifests came to publish ``role: None`` (PR #125 F1). An unset
+    property is therefore omitted, never stringified; readers apply their own documented default.
+    """
+    return {key: str(record[key]) for key in keys if record.get(key) is not None}
+
+
 #: The source label every node written by the project scanner carries.
 STRUCTURE_SOURCE = "project-scan"
 
@@ -1054,9 +1066,7 @@ class StructureGraphWriter:
             {
                 "name": str(r["name"]),
                 "path": str(r["path"]),
-                "description": str(r.get("description", "")),
-                "root_path": str(r.get("root_path", "")),
-                "doc_type": str(r.get("doc_type", "generic")),
+                **_set_properties(r, ("description", "root_path", "doc_type")),
             }
             for r in rows
         ]
@@ -1123,8 +1133,7 @@ class StructureGraphWriter:
         return [
             {
                 "name": str(r["name"]),
-                "root_path": str(r.get("root_path", "")),
-                "doc_type": str(r.get("doc_type", "generic")),
+                **_set_properties(r, ("root_path", "doc_type")),
             }
             for r in rows
         ]

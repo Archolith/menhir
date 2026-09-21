@@ -18,6 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from menhir.infrastructure.project_scanner import ProjectScanner
 from menhir.services import beacon_generation as generation_module
@@ -88,6 +89,38 @@ def test_generate_creates_valid_artifact(beacon_python: str, tmp_path: Path) -> 
     assert expected_fingerprint.encode() in payload
     # A generated manifest always ends with exactly one trailing newline.
     assert payload.endswith(b"\n") and not payload.endswith(b"\n\n")
+
+
+def test_scanner_indexed_documents_never_publish_role_none(
+    beacon_python: str, tmp_path: Path
+) -> None:
+    """PR #125 F1, end to end through the real reader and the real Beacon.
+
+    Scanner-written document nodes have no ``document_type`` property; the graph returns it as
+    None. The reader used to hand over the string ``"None"`` and Beacon published ``role: None``.
+    """
+    from unittest.mock import MagicMock
+
+    from menhir.infrastructure.structure_queries import StructureGraphWriter
+
+    repo = _fixture_repo(tmp_path)
+    neo4j = MagicMock()
+    neo4j.execute.return_value = [
+        {"name": "README.md", "path": "README.md", "description": None,
+         "root_path": None, "doc_type": None},
+        {"name": "architecture.md", "path": "docs/architecture.md", "description": None,
+         "root_path": None, "doc_type": None},
+    ]
+    reader = _reader(root=str(repo))
+    reader.query_documents = StructureGraphWriter(neo4j=neo4j).query_documents
+
+    outcome = generate_beacon(reader, "fixture", repo, beacon_python=beacon_python)
+
+    manifest = yaml.safe_load(outcome.output_path.read_text(encoding="utf-8"))
+    docs = manifest["canonical_docs"]
+    assert {d["path"] for d in docs} == {"README.md", "docs/architecture.md"}
+    assert [d["role"] for d in docs] == ["generic", "generic"]
+    assert b"role: None" not in outcome.output_path.read_bytes()
 
 
 def test_generate_refuses_existing_output(beacon_python: str, tmp_path: Path) -> None:

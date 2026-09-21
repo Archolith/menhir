@@ -667,6 +667,49 @@ class TestQueryDocuments:
         assert len(match_calls) == 1
         assert match_calls[0][1]["prefix"] == "/some/dir"
 
+    def test_unset_properties_are_omitted_not_stringified(self):
+        """PR #125 F1: a scanner-indexed document has no document_type property.
+
+        Neo4j returns the unset property as a present key with value None. Stringifying it gave
+        the truthy "None", which every downstream `or "generic"` fallback let through, so
+        generated Beacon manifests published `role: None`.
+        """
+        neo4j = MagicMock()
+        neo4j.execute.return_value = [
+            {
+                "name": "architecture.md",
+                "path": ".agent/architecture.md",
+                "description": None,
+                "root_path": None,
+                "doc_type": None,
+            }
+        ]
+        writer = StructureGraphWriter(neo4j=neo4j)
+
+        [row] = writer.query_documents("p")
+
+        assert row == {"name": "architecture.md", "path": ".agent/architecture.md"}
+        assert "None" not in row.values()
+
+    def test_set_document_type_is_returned(self):
+        neo4j = MagicMock()
+        neo4j.execute.return_value = [
+            {
+                "name": "ref.md",
+                "path": "/abs/ref.md",
+                "description": "excerpt",
+                "root_path": "/abs/ref.md",
+                "doc_type": "reference_article",
+            }
+        ]
+        writer = StructureGraphWriter(neo4j=neo4j)
+
+        [row] = writer.query_documents("p")
+
+        assert row["doc_type"] == "reference_article"
+        assert row["root_path"] == "/abs/ref.md"
+        assert row["description"] == "excerpt"
+
 
 class TestIncrementalDiffAndHeat:
     """Tests for per-file mtime incremental diff and heat tracking."""
