@@ -279,18 +279,19 @@ async def test_e2e_02_memory_lifecycle(
             )
         )
         names_an_episode = enriched_episode in provenance
-        # Structured, not a substring: the receipt must be the `episode_id` of the entry
-        # whose `uuid` is the enriched twin. A bare `correction_episode in provenance`
-        # would also pass if the receipt showed up anywhere else in the payload.
-        names_the_receipt = False
+        # Structured, not a substring: some listed episode must carry the correction's
+        # receipt as its `episode_id`. Keyed on the receipt, not on `enriched_episode`:
+        # that uuid came from a LIMIT 1 over every MENTIONS edge in the namespace and can
+        # be the ORIGINAL write's twin, which correctly carries the original's receipt --
+        # CI run 35647560921 failed on exactly that pairing while the payload was right.
         try:
             listed = json.loads(provenance).get("episodes") or []
         except (ValueError, AttributeError):
             listed = []
-        for entry in listed:
-            if entry.get("uuid") == enriched_episode:
-                names_the_receipt = entry.get("episode_id") == correction_episode
-                break
+        receipt_entry = next(
+            (e for e in listed if e.get("episode_id") == correction_episode), None
+        )
+        names_the_receipt = receipt_entry is not None
         lane_evidence.record(
             "provenance_points_to_source_episode",
             passed=names_an_episode,
@@ -315,12 +316,13 @@ async def test_e2e_02_memory_lifecycle(
                 "receipt_episode": correction_episode,
                 "receipt_episode_mentions": receipt_mentions,
                 "provenance_names_receipt_episode": names_the_receipt,
+                "enriched_twin_for_receipt": (receipt_entry or {}).get("uuid"),
             },
         )
         assert names_the_receipt, (
             "provenance is not reachable from the tracked-write receipt (#92): the receipt "
-            f"returned episode_id={correction_episode} while provenance lists the enriched "
-            f"twin {enriched_episode} without that episode_id:\n{provenance[:600]}"
+            f"returned episode_id={correction_episode} and no listed episode carries it as "
+            f"episode_id:\n{provenance[:600]}"
         )
         lane_evidence.attach(
             "provenance.json",
