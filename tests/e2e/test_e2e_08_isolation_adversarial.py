@@ -44,7 +44,7 @@ from uuid import uuid4
 
 import pytest
 
-from tests.e2e._harness.client import stdio_session
+from tests.e2e._harness.client import stdio_session, wait_for_project_indexed
 from tests.e2e._harness.config import E2EConfig
 from tests.e2e._harness.deferred import raise_deferred
 from tests.e2e._harness.evidence import LaneEvidence
@@ -204,6 +204,7 @@ async def test_e2e_08_isolation(
                 )
             )
             assert ingested.startswith("Scanned "), ingested[:400]
+            await wait_for_project_indexed(client, project)
 
         radius_a = _text(
             await client.call_tool(

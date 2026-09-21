@@ -16,6 +16,7 @@ running backend through ``MENHIR_BACKEND_URL``.
 
 from __future__ import annotations
 
+import asyncio as _asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -27,7 +28,7 @@ from mcp.client.stdio import stdio_client
 from tests.e2e._harness.config import E2EConfig, child_environment
 from tests.e2e._harness.evidence import LaneEvidence
 
-__all__ = ["RecordingClient", "stdio_session"]
+__all__ = ["RecordingClient", "stdio_session", "wait_for_project_indexed"]
 
 
 class RecordingClient:
@@ -189,3 +190,42 @@ async def stdio_session(
                 client = RecordingClient(session, evidence)
                 await client.initialize()
                 yield client
+
+
+async def wait_for_project_indexed(
+    client: "RecordingClient", project: str, *, timeout: float = 120.0
+) -> str:
+    """Block until ``project`` is answerable by ``query_structure``, or raise.
+
+    ``ingest_project`` does not guarantee the graph write has landed when it returns.
+    Its own formatter says so::
+
+        "Graph write running in background - check server log for completion."
+
+    and that string still begins "Scanned <project>:", so a lane checking the receipt
+    cannot tell a completed scan from a queued one. Querying immediately then answers
+    "Project '<name>' is not ingested in the structural graph" -- which is a race, not a
+    defect, and it presented as an intermittent local failure and a hard CI failure on
+    the slower runner.
+
+    Polling the read surface is the honest wait: the lane proceeds exactly when the data
+    an agent would query is actually there.
+    """
+
+    import time as _time
+
+    deadline = _time.monotonic() + timeout
+    last = ""
+    while _time.monotonic() < deadline:
+        result = await client.call_tool(
+            "query_structure", {"query_type": "files", "project": project}
+        )
+        content = getattr(result, "content", None) or []
+        last = "\n".join(getattr(item, "text", "") or "" for item in content)
+        if "is not ingested" not in last and "No files found" not in last:
+            return last
+        await _asyncio.sleep(1.0)
+    raise AssertionError(
+        f"project {project!r} never became answerable within {timeout}s after "
+        f"ingest_project returned. Last response:\n{last[:600]}"
+    )

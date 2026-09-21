@@ -37,7 +37,7 @@ from uuid import uuid4
 
 import pytest
 
-from tests.e2e._harness.client import stdio_session
+from tests.e2e._harness.client import stdio_session, wait_for_project_indexed
 from tests.e2e._harness.config import E2EConfig
 from tests.e2e._harness.evidence import LaneEvidence
 from tests.e2e._harness.features import FeatureCombo
@@ -122,6 +122,12 @@ async def test_e2e_07_restart_interruption(
             )
         )
         assert ingest.startswith("Scanned "), ingest[:400]
+
+        # ingest_project can return before the graph write lands -- its own
+        # formatter says "Graph write running in background" while still opening
+        # "Scanned <project>:", so the receipt cannot distinguish the two. Wait for
+        # the read surface an agent would query.
+        await wait_for_project_indexed(client, project)
 
         todo_receipt = _text(
             await client.call_tool(
