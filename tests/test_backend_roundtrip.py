@@ -397,6 +397,42 @@ class TestBackendRoundTrip:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
+    async def test_flag_memory_tool_reports_structural_refusal_over_http(self, backend_client_like_uvicorn):
+        """flag_memory shares the #132 pattern: memory_queries.flag_memory raises ValueError
+        for a structural node, and the tool's `except ValueError` renders "Cannot flag: ...".
+        Over HTTP that used to be a 500."""
+        from menhir.mcp.tools.ingest.flag_memory import FlagMemoryTool
+
+        bc, ctx = backend_client_like_uvicorn
+        ctx.built.graph_adapter.flag_memory.side_effect = ValueError(
+            "Cannot flag structural graph node (role=file). Flag semantic memories only."
+        )
+
+        with patch.object(FlagMemoryTool, "get_backend", return_value=bc):
+            rendered = await FlagMemoryTool().endpoint("node-uuid-1")
+
+        assert rendered.startswith("Cannot flag: Cannot flag structural graph node (role=file)")
+        assert "HTTPStatusError" not in rendered
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_unflag_memory_ownership_refusal_is_a_permission_error_over_http(self, backend_client_like_uvicorn):
+        """unflag_memory has no ValueError on its backend path (its `except ValueError` is
+        inert in both modes); what it CAN raise is the ownership PermissionError, which must
+        cross the boundary as a PermissionError rather than a 500."""
+        bc, ctx = backend_client_like_uvicorn
+
+        async def refuse(**kwargs):
+            raise PermissionError("Refused: memory node-uuid-1 belongs to another namespace.")
+
+        with patch("menhir.core.backend_runtime_data_ops.require_own_object", side_effect=refuse):
+            with pytest.raises(PermissionError, match="belongs to another namespace"):
+                await bc.unflag_memory("node-uuid-1")
+
+        ctx.built.graph_adapter.unflag_memory.assert_not_called()
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
     async def test_fetch_memory_by_uuid_returns_none(self, backend_client_like_uvicorn):
         bc, ctx = backend_client_like_uvicorn
         result = await bc.fetch_memory_by_uuid("nonexistent")
