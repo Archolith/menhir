@@ -46,6 +46,7 @@ import pytest
 
 from tests.e2e._harness.client import stdio_session
 from tests.e2e._harness.config import E2EConfig
+from tests.e2e._harness.deferred import raise_deferred
 from tests.e2e._harness.evidence import LaneEvidence
 from tests.e2e._harness.features import FeatureCombo
 from tests.e2e._harness.artifact_corpus import (
@@ -103,6 +104,7 @@ async def test_e2e_08_isolation(
     lane_evidence: LaneEvidence,
 ) -> None:
     lane_evidence.record_stack(features=feature_combo.label, provider="deterministic")
+    deferred_failures: list[str] = []
     suffix = uuid4().hex[:10]
     ns_a, ns_b = f"e2e8a-{suffix}", f"e2e8b-{suffix}"
     proj_a, proj_b = f"alpha-{suffix}", f"beta-{suffix}"
@@ -324,6 +326,16 @@ async def test_e2e_08_isolation(
             "exceeded and the refusal would not be exercised"
         )
 
+        # allow_fault: the refusal currently arrives as an HTTP 500, not as the tool's
+        # documented JSON error. The ValueError is raised server-side in
+        # backend_runtime_data_ops.delete_namespace, crosses the /api/internal/backend
+        # boundary as a 500, and the MCP tool's `except ValueError` never sees it -- so
+        # an agent gets an opaque error instead of "pass force=true, or dry_run=true to
+        # inspect the count first". The guard would otherwise stop the lane here, which
+        # is why the exemption is explicit and narrow.
+        #
+        # The SAFETY property is unaffected and is what this criterion is really about:
+        # the cap refused before deleting, and the node count below proves it.
         capped = _text(
             await client.call_tool(
                 "call_tool",
@@ -331,6 +343,7 @@ async def test_e2e_08_isolation(
                     "name": "delete_namespace",
                     "arguments": {"namespace": ns_a, "max_nodes": 1, "force": False},
                 },
+                allow_fault=True,
             )
         )
         after = graph_query(
@@ -341,7 +354,10 @@ async def test_e2e_08_isolation(
         nodes_after = after[0]["nodes"] if after else 0
         # The bug this guards against is a gate that reports a refusal after the delete
         # has already run. Only the node count can tell those apart.
-        reported_refusal = '"error"' in capped
+        # Either shape counts as "it refused": the documented JSON error, or the 500 the
+        # ValueError currently becomes. What must NOT happen is a success response.
+        reported_refusal = '"error"' in capped or "500 Internal Server Error" in capped
+        documented_refusal = '"error"' in capped and "force" in capped
         nothing_deleted = nodes_after == nodes_before
         lane_evidence.record(
             "capped_scan_does_not_authorize_destructive_prune",
@@ -350,13 +366,28 @@ async def test_e2e_08_isolation(
                 "response": capped[:400],
                 "nodes_before": nodes_before,
                 "nodes_after": nodes_after,
+                "refusal_is_documented_json": documented_refusal,
             },
         )
+        if not documented_refusal:
+            deferred_failures.append(
+                "capped_scan_does_not_authorize_destructive_prune: the cap refused and "
+                "nothing was deleted, so the safety property holds -- but the refusal "
+                "reached the agent as an HTTP 500 rather than the tool's documented JSON "
+                "error. The ValueError raised in backend_runtime_data_ops.delete_namespace "
+                "crosses the /api/internal/backend boundary as a 500, so the MCP tool's "
+                "`except ValueError` never runs and the caller loses the guidance to pass "
+                f"force=true or dry_run=true. Response: {capped[:300]}"
+            )
         assert reported_refusal, f"delete_namespace did not refuse past its cap: {capped[:600]}"
         assert nothing_deleted, (
             f"delete_namespace reported a refusal but the graph lost "
             f"{nodes_before - nodes_after} nodes; the cap is checked after the delete"
         )
+
+    if deferred_failures:
+        lane_evidence.close(status="FAIL")
+        raise_deferred("E2E-8", deferred_failures)
 
     lane_evidence.close(status="PASS")
 

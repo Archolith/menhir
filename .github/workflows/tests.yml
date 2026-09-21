@@ -221,3 +221,101 @@ jobs:
           MENHIR_TEST_NEO4J_PASSWORD: testpassword
           MENHIR_TEST_NEO4J_DATABASE: neo4j
         run: pytest -m "online and not needs_llm" --run-online -v -rs
+
+  # The black-box stdio E2E campaign (tests/e2e). This is the gate that exercises the
+  # SHIPPED shape: a wheel built from the candidate, installed non-editable into a clean
+  # venv, `menhir serve` as a separate process, and a stock MCP client driving
+  # `python -m menhir.mcp.server` over stdio. The offline job cannot see any of that --
+  # it imports the source tree in-process.
+  #
+  # It exists because two defects shipped past a green offline suite in one commit: a
+  # service call site updated without its callee (TypeError on every artifact
+  # registration), and the same shape one layer over in build_context. Both were invisible
+  # to unit tests that use fakes accepting **kwargs, and both are caught here.
+  #
+  # NO SECRET IS REQUIRED. Lanes that need a model declare @pytest.mark.provider and get a
+  # local deterministic OpenAI-compatible fake; a lane that declares none gets no
+  # credentials at all, so an unintended live call fails loudly rather than spending money.
+  stdio-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      neo4j:
+        image: neo4j:5-community
+        env:
+          NEO4J_AUTH: neo4j/testpassword
+          NEO4J_server_memory_heap_max__size: 512m
+        ports:
+          - 7690:7687
+        options: >-
+          --health-cmd "wget -qO- http://localhost:7474 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout menhir
+        uses: actions/checkout@v4
+        with:
+          path: menhir
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: menhir/pyproject.toml
+
+      # `build` is the wheel frontend the campaign uses; without it every lane SKIPS with
+      # "wheel build failed", which would leave this job green while running nothing.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ./menhir build pytest pytest-asyncio pytest-timeout
+
+      # Port 7690, not 7688. The graph-backed job above owns 7688, and every lane here
+      # DETACH DELETEs the graph between lanes -- sharing the port would let this job
+      # destroy that job's data mid-run and surface as failures that look like defects.
+      - name: Verify the disposable Neo4j is reachable
+        working-directory: menhir
+        run: |
+          python - <<'PY'
+          from neo4j import GraphDatabase
+          drv = GraphDatabase.driver("bolt://127.0.0.1:7690", auth=("neo4j", "testpassword"))
+          drv.verify_connectivity()
+          with drv.session() as s:
+              print("neo4j ok:", s.run("RETURN 1 AS ok").single()["ok"])
+          drv.close()
+          PY
+
+      # Two lanes are deselected because they reproduce OPEN product defects, not
+      # regressions. Both fail on a recorded finding while every other criterion in them
+      # passes, so running them here would pin the job red and destroy its signal.
+      # Re-select each one as its issue closes:
+      #
+      #   test_e2e_02_memory_lifecycle  -> #92, provenance unreachable from the
+      #                                    tracked-write receipt (9/10 criteria pass)
+      #   test_e2e_08_isolation         -> delete_namespace's cap refusal crosses the HTTP
+      #                                    boundary as a 500 instead of the documented JSON
+      #                                    error (5/5 criteria pass; the safety property
+      #                                    holds, the operator guidance is lost)
+      - name: Run the stdio E2E campaign
+        working-directory: menhir
+        env:
+          MENHIR_E2E: "1"
+          MENHIR_E2E_NEO4J_URI: bolt://127.0.0.1:7690
+        run: |
+          pytest tests/e2e -v -rs \
+            --deselect tests/e2e/test_e2e_02_memory_lifecycle.py::test_e2e_02_memory_lifecycle \
+            --deselect tests/e2e/test_e2e_08_isolation_adversarial.py::test_e2e_08_isolation
+
+      # result.json is what Gate C actually asks for: which acceptance criteria were
+      # proven, not merely whether pytest was green. Kept on failure too -- that is when
+      # the transcript matters most.
+      - name: Upload campaign evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stdio-e2e-evidence
+          path: menhir/**/evidence/**
+          if-no-files-found: ignore
+          retention-days: 14

@@ -207,10 +207,17 @@ async def test_e2e_07_restart_interruption(
             lane_evidence.attach("episode-status-after-restart.txt", status_body)
 
             # no_false_ready: the label must be backed by the graph.
+            #
+            # Counted on the NAMESPACED episode, not the receipt's uuid. Every write
+            # produces two :Episodic nodes -- one with group_id null and one carrying the
+            # namespace -- and only the namespaced one is enriched; the receipt returns
+            # the other. Counting the receipt's twin reports zero for a perfectly healthy
+            # write and turns #92's duplication into a false "enrichment lied" verdict.
             mentions = graph_query(
                 e2e_config,
-                "MATCH (e:Episodic {uuid: $uuid})-[:MENTIONS]->(n) RETURN count(n) AS mentioned",
-                uuid=episode,
+                "MATCH (e:Episodic)-[:MENTIONS]->(n) WHERE e.group_id = $group "
+                "RETURN count(n) AS mentioned",
+                group=namespace,
             )
             mentioned = mentions[0]["mentioned"] if mentions else 0
             claims_ready = state == "READY"

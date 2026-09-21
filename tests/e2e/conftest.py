@@ -198,6 +198,20 @@ def fresh_graph(e2e_config: E2EConfig) -> None:
 
 
 @pytest.fixture
+def provider_kind(request: pytest.FixtureRequest) -> str:
+    """The provider a lane declared, as a string rather than a boolean.
+
+    ``running_stack`` needs the KIND, not merely whether one exists. A lane using the
+    `failing` provider wants a backend whose model calls fail -- demanding
+    enrichment_ready there deadlocks startup on exactly the condition under test, which
+    is what happened to E2E-8's provider-failure lane.
+    """
+
+    marker = request.node.get_closest_marker("provider")
+    return (marker.args[0] if marker and marker.args else "none").strip().lower()
+
+
+@pytest.fixture
 def provider_env(request: pytest.FixtureRequest) -> Iterator[dict[str, str]]:
     """Provider environment for the lane, selected by ``@pytest.mark.provider(...)``.
 
@@ -254,6 +268,7 @@ def running_stack(
     lane_evidence: LaneEvidence,
     feature_env: dict[str, str],
     provider_env: dict[str, str],
+    provider_kind: str,
 ):
     """A started backend, torn down after the lane, with its log captured as evidence.
 
@@ -271,9 +286,12 @@ def running_stack(
         e2e_installed,
         log_path=lane_evidence.backend_log_path,
         feature_env={**feature_env, **provider_env},
-        require_enrichment=bool(provider_env),
+        # Only providers that are SUPPOSED to work. `failing` answers 400 to every
+        # call by design, so enrichment can never become ready and requiring it would
+        # block the lane on the very condition it exists to exercise.
+        require_enrichment=provider_kind in {"deterministic", "real"},
     )
-    lane_evidence.record_stack(provider=bool(provider_env))
+    lane_evidence.record_stack(provider=provider_kind)
     lane_evidence.record_stack(backend_ready=backend.ready_payload)
     lane_evidence.record_stack(**e2e_installed.as_evidence())
     try:
