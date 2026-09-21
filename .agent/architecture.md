@@ -34,6 +34,8 @@ recall/ingest service with the following core loop:
 
 Concept id: `runtime.projections`
 
+Decision record: [ADR 0003](adr/0003-event-fold-view-projection-boundary.md).
+
 The durable write-side boundary is:
 
 ```text
@@ -85,6 +87,11 @@ Concept id: `runtime.stack`
 ## Active Ops Direction
 
 Concept id: `runtime.ops`
+
+Runtime ownership and backend access are recorded in
+[ADR 0004](adr/0004-single-runtime-owner-and-backend-first-access.md). Configured namespace
+isolation across those surfaces is recorded in
+[ADR 0005](adr/0005-core-enforced-namespace-isolation.md).
 
 Deferred enrichment now runs behind a persistent backend runtime, with MCP stdio acting as a client surface.
 
