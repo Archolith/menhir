@@ -474,10 +474,20 @@ class MemoryGraphAdapter:
         )
 
     def mark_episode_failed(
-        self, episode_uuid: str, error: str, *, worker_id: str | None = None
+        self,
+        episode_uuid: str,
+        error: str,
+        *,
+        worker_id: str | None = None,
+        transient_requeue: bool = False,
+        claim_started_at: object | None = None,
     ) -> bool:
         return self._episodes.mark_episode_failed(
-            episode_uuid, error, worker_id=worker_id
+            episode_uuid,
+            error,
+            worker_id=worker_id,
+            transient_requeue=transient_requeue,
+            claim_started_at=claim_started_at,
         )
 
     def mark_episode_pending(
@@ -486,16 +496,16 @@ class MemoryGraphAdapter:
         *,
         retry_after_s: float = 0.0,
         worker_id: str | None = None,
+        transient_requeue: bool = False,
+        claim_started_at: object | None = None,
     ) -> bool:
         return self._episodes.mark_episode_pending(
             episode_uuid,
             retry_after_s=retry_after_s,
             worker_id=worker_id,
+            transient_requeue=transient_requeue,
+            claim_started_at=claim_started_at,
         )
-
-    def count_transient_requeue(self, episode_uuid: str) -> bool:
-        """Refund one claim's attempt and bump the transient counter (#79/#70)."""
-        return self._episodes.count_transient_requeue(episode_uuid)
 
     def fail_transient_exhausted_pending_episodes(
         self, *, transient_max: int = TRANSIENT_RETRY_CAP

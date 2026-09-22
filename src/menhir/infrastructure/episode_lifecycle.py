@@ -402,34 +402,6 @@ class EpisodeLifecycleRepository:
         )
         return [str(row["uuid"]) for row in rows if row.get("uuid")]
 
-    def count_transient_requeue(self, episode_uuid: str) -> bool:
-        """Refund one claim's attempt and record the transient requeue (#79/#70).
-
-        Called by the worker immediately after it has requeued (or failed) a row it owned,
-        so no lease guard is needed — the caller already proved ownership. Refunding keeps
-        `processing_attempts` a count of GENUINE processing failures; the transient churn
-        rides `transient_retries` and is capped by `TRANSIENT_RETRY_CAP`.
-        """
-        query = (
-            Cypher()
-            .match("(n:Episodic)")
-            .where("n.uuid = $episode_uuid")
-            .set(
-                (
-                    "n.transient_retries = coalesce(toInteger(n.transient_retries), 0) + 1",
-                    # CASE, not greatest(): Neo4j Cypher has no greatest() function, and the
-                    # bad first cut made every refund raise (v0.2.1, caught in wrapup review).
-                    "n.processing_attempts = CASE"
-                    " WHEN coalesce(toInteger(n.processing_attempts), 0) > 0"
-                    " THEN toInteger(n.processing_attempts) - 1 ELSE 0 END",
-                )
-            )
-            .return_raw("count(n) AS updated")
-            .build()
-        )
-        rows = self.neo4j.execute(query, params={"episode_uuid": episode_uuid})
-        return bool(rows and int(rows[0].get("updated", 0)) > 0)
-
     def fail_transient_exhausted_pending_episodes(
         self, *, transient_max: int = TRANSIENT_RETRY_CAP
     ) -> int:
@@ -707,6 +679,7 @@ class EpisodeLifecycleRepository:
                 "subject_turns[0].turn_id AS turn_evidence_uuid",
                 "n.processing_attempts AS processing_attempts",
                 "n.processing_owner AS processing_owner",
+                "n.processing_started_at AS processing_started_at",
                 "n.processing_lease_expires_at AS processing_lease_expires_at",
             )
             .build()
@@ -804,17 +777,41 @@ class EpisodeLifecycleRepository:
         )
         return bool(rows and int(rows[0].get("updated", 0)) > 0)
 
-    def mark_episode_failed(self, episode_uuid: str, error: str, *, worker_id: str | None = None) -> bool:
+    def mark_episode_failed(
+        self,
+        episode_uuid: str,
+        error: str,
+        *,
+        worker_id: str | None = None,
+        transient_requeue: bool = False,
+        claim_started_at: object | None = None,
+    ) -> bool:
+        # Neo4j temporal equality includes timezone identity: a stored `Z` value round-trips
+        # through the Python driver as `[UTC]` and compares unequal despite naming one instant.
+        # Epoch seconds + nanoseconds preserve full instant precision for the claim fence.
         query = (
             Cypher()
             .match("(n:Episodic)")
             .where(
                 "n.uuid = $episode_uuid",
-                "($worker_id IS NULL OR (n.processing_state = 'ENRICHING'"
-                " AND n.processing_owner = $worker_id))",
+                "(($worker_id IS NULL AND NOT $transient_requeue)"
+                " OR (n.processing_state = 'ENRICHING' AND n.processing_owner = $worker_id"
+                " AND (NOT $transient_requeue OR ($claim_started_at IS NOT NULL"
+                " AND n.processing_started_at IS NOT NULL"
+                " AND n.processing_started_at.epochSeconds"
+                " = datetime($claim_started_at).epochSeconds"
+                " AND n.processing_started_at.nanosecond"
+                " = datetime($claim_started_at).nanosecond))))",
             )
             .set(
                 (
+                    "n.transient_retries = CASE WHEN $transient_requeue"
+                    " THEN coalesce(toInteger(n.transient_retries), 0) + 1"
+                    " ELSE n.transient_retries END",
+                    "n.processing_attempts = CASE WHEN NOT $transient_requeue"
+                    " THEN n.processing_attempts"
+                    " WHEN coalesce(toInteger(n.processing_attempts), 0) > 0"
+                    " THEN toInteger(n.processing_attempts) - 1 ELSE 0 END",
                     "n.processing_state = 'FAILED'",
                     "n.processing_stage = 'failed'",
                     "n.processing_substage = 'failed'",
@@ -842,6 +839,8 @@ class EpisodeLifecycleRepository:
                 "episode_uuid": episode_uuid,
                 "error": error,
                 "worker_id": worker_id,
+                "transient_requeue": transient_requeue,
+                "claim_started_at": claim_started_at,
             },
         )
         return bool(rows and int(rows[0].get("updated", 0)) > 0)
@@ -852,6 +851,8 @@ class EpisodeLifecycleRepository:
         *,
         retry_after_s: float = 0.0,
         worker_id: str | None = None,
+        transient_requeue: bool = False,
+        claim_started_at: object | None = None,
     ) -> bool:
         retry_clause = (
             f"n.retry_after = datetime() + duration({{seconds: {int(max(0, retry_after_s))}}})"
@@ -863,11 +864,24 @@ class EpisodeLifecycleRepository:
             .match("(n:Episodic)")
             .where(
                 "n.uuid = $episode_uuid",
-                "($worker_id IS NULL OR (n.processing_state = 'ENRICHING'"
-                " AND n.processing_owner = $worker_id))",
+                "(($worker_id IS NULL AND NOT $transient_requeue)"
+                " OR (n.processing_state = 'ENRICHING' AND n.processing_owner = $worker_id"
+                " AND (NOT $transient_requeue OR ($claim_started_at IS NOT NULL"
+                " AND n.processing_started_at IS NOT NULL"
+                " AND n.processing_started_at.epochSeconds"
+                " = datetime($claim_started_at).epochSeconds"
+                " AND n.processing_started_at.nanosecond"
+                " = datetime($claim_started_at).nanosecond))))",
             )
             .set(
                 (
+                    "n.transient_retries = CASE WHEN $transient_requeue"
+                    " THEN coalesce(toInteger(n.transient_retries), 0) + 1"
+                    " ELSE n.transient_retries END",
+                    "n.processing_attempts = CASE WHEN NOT $transient_requeue"
+                    " THEN n.processing_attempts"
+                    " WHEN coalesce(toInteger(n.processing_attempts), 0) > 0"
+                    " THEN toInteger(n.processing_attempts) - 1 ELSE 0 END",
                     "n.processing_state = 'PENDING'",
                     "n.processing_stage = 'queued'",
                     "n.processing_substage = 'circuit_breaker_requeue'",
@@ -891,6 +905,8 @@ class EpisodeLifecycleRepository:
             params={
                 "episode_uuid": episode_uuid,
                 "worker_id": worker_id,
+                "transient_requeue": transient_requeue,
+                "claim_started_at": claim_started_at,
             },
         )
         return bool(rows and int(rows[0].get("updated", 0)) > 0)

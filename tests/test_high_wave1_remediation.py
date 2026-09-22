@@ -592,7 +592,14 @@ def _transient_failure_ctx(adapter, episode_uuid: str = "ep-79"):
         graph_adapter=adapter,
         episode_uuid=episode_uuid,
         worker_id="worker-79",
-        claimed={"source": "test", "session_id": "s-79", "user_id": "u-79"},
+        claimed={
+            "source": "test",
+            "session_id": "s-79",
+            "user_id": "u-79",
+            "processing_started_at": adapter.pending_episode_rows[episode_uuid].get(
+                "processing_started_at"
+            ),
+        },
         started=perf_counter(),
         processing_attempts=1,
         get_queue_depth=lambda: 0,
@@ -648,6 +655,120 @@ class _RequeueIngest:
 
 
 @pytest.mark.unit
+def test_stale_transient_refund_does_not_decrement_a_new_workers_claim() -> None:
+    """Worker A cannot refund worker B after B claims A's failed episode."""
+    from tests.conftest import StubMemoryGraphAdapter
+
+    adapter = StubMemoryGraphAdapter()
+    _seed_claimed_episode(adapter, episode_uuid="ep-refund-race")
+    old_claim_started_at = adapter.pending_episode_rows["ep-refund-race"][
+        "processing_started_at"
+    ]
+
+    assert adapter.mark_episode_failed(
+        "ep-refund-race", "connection refused 503", worker_id="worker-79"
+    )
+    claimed_by_b = adapter.claim_pending_episode(
+        "ep-refund-race",
+        max_attempts=3,
+        worker_id="worker-B",
+        lease_seconds=900,
+    )
+    assert claimed_by_b is not None
+    assert claimed_by_b["processing_attempts"] == 2
+
+    # This is worker A's delayed refund from the old split failure/refund sequence.
+    # Refund now lives inside the claim-fenced transition, so A cannot touch B's claim.
+    assert not adapter.mark_episode_failed(
+        "ep-refund-race",
+        "connection refused 503",
+        worker_id="worker-79",
+        transient_requeue=True,
+        claim_started_at=old_claim_started_at,
+    )
+
+    row = adapter.pending_episode_rows["ep-refund-race"]
+    assert row["processing_owner"] == "worker-B"
+    assert row["processing_state"] == "ENRICHING"
+    assert row["processing_attempts"] == 2
+    assert int(row.get("transient_retries") or 0) == 0
+
+
+@pytest.mark.unit
+def test_stale_transient_refund_does_not_decrement_same_workers_new_claim() -> None:
+    """The claim incarnation, not only the service-wide worker ID, fences refunds."""
+    from tests.conftest import StubMemoryGraphAdapter
+
+    adapter = StubMemoryGraphAdapter()
+    _seed_claimed_episode(adapter, episode_uuid="ep-refund-aba")
+    first_claim_started_at = adapter.pending_episode_rows["ep-refund-aba"][
+        "processing_started_at"
+    ]
+
+    assert adapter.mark_episode_failed(
+        "ep-refund-aba", "connection refused 503", worker_id="worker-79"
+    )
+    second_claim = adapter.claim_pending_episode(
+        "ep-refund-aba",
+        max_attempts=3,
+        worker_id="worker-79",
+        lease_seconds=900,
+    )
+    assert second_claim is not None
+    assert second_claim["processing_started_at"] != first_claim_started_at
+
+    assert not adapter.mark_episode_failed(
+        "ep-refund-aba",
+        "connection refused 503",
+        worker_id="worker-79",
+        transient_requeue=True,
+        claim_started_at=first_claim_started_at,
+    )
+
+    row = adapter.pending_episode_rows["ep-refund-aba"]
+    assert row["processing_state"] == "ENRICHING"
+    assert row["processing_owner"] == "worker-79"
+    assert row["processing_started_at"] == second_claim["processing_started_at"]
+    assert row["processing_attempts"] == 2
+    assert int(row.get("transient_retries") or 0) == 0
+
+
+@pytest.mark.unit
+def test_atomic_transient_refund_is_idempotent_and_requires_an_owner() -> None:
+    from tests.conftest import StubMemoryGraphAdapter
+
+    adapter = StubMemoryGraphAdapter()
+    _seed_claimed_episode(adapter, episode_uuid="ep-refund-idempotent")
+    claim_started_at = adapter.pending_episode_rows["ep-refund-idempotent"][
+        "processing_started_at"
+    ]
+
+    assert adapter.mark_episode_pending(
+        "ep-refund-idempotent",
+        worker_id="worker-79",
+        transient_requeue=True,
+        claim_started_at=claim_started_at,
+    )
+    row = adapter.pending_episode_rows["ep-refund-idempotent"]
+    assert row["processing_attempts"] == 0
+    assert row["transient_retries"] == 1
+
+    assert not adapter.mark_episode_pending(
+        "ep-refund-idempotent",
+        worker_id="worker-79",
+        transient_requeue=True,
+        claim_started_at=claim_started_at,
+    )
+    assert not adapter.mark_episode_pending(
+        "ep-refund-idempotent",
+        transient_requeue=True,
+        claim_started_at=claim_started_at,
+    )
+    assert row["processing_attempts"] == 0
+    assert row["transient_retries"] == 1
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_three_retryable_failures_leave_the_episode_claimable_not_parked() -> None:
     """An outage that ends must never park an episode by itself (#79/#70-2)."""
@@ -660,9 +781,9 @@ async def test_three_retryable_failures_leave_the_episode_claimable_not_parked()
 
     adapter = StubMemoryGraphAdapter()
     _seed_claimed_episode(adapter)
-    ctx = _transient_failure_ctx(adapter)
 
     for _ in range(3):
+        ctx = _transient_failure_ctx(adapter)
         await handle_enrichment_failure(ctx, RuntimeError("connection refused 503"))
         # Simulate the scheduler requeueing the retryable FAILED row.
         adapter.pending_episode_rows["ep-79"]["processing_state"] = "PENDING"
@@ -760,16 +881,20 @@ async def test_circuit_open_requeues_do_not_consume_attempts_and_cap_still_parks
         source_confidence=0.9,
     )
 
-    # The worker's circuit-open path, once per claim: claim, requeue to PENDING,
-    # then refund that claim's attempt.
+    # The worker's circuit-open path, once per claim: atomically requeue and refund
+    # the claim whose incarnation token was returned by the claim operation.
     for _ in range(3):
-        assert adapter.claim_pending_episode(
+        claimed = adapter.claim_pending_episode(
             "ep-79", max_attempts=3, worker_id="worker-79", lease_seconds=900
-        ) is not None
-        assert adapter.mark_episode_pending(
-            "ep-79", retry_after_s=30.0, worker_id="worker-79"
         )
-        assert adapter.count_transient_requeue("ep-79")
+        assert claimed is not None
+        assert adapter.mark_episode_pending(
+            "ep-79",
+            retry_after_s=30.0,
+            worker_id="worker-79",
+            transient_requeue=True,
+            claim_started_at=claimed["processing_started_at"],
+        )
 
     row = adapter.pending_episode_rows["ep-79"]
     assert row["processing_state"] == "PENDING"

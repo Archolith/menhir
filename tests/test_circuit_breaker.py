@@ -218,6 +218,7 @@ async def test_ingest_service_requeues_on_circuit_open():
         "source_confidence": 0.9,
         "processing_state": "ENRICHING",
         "processing_owner": "worker-1",
+        "processing_started_at": "claim-1",
         "processing_attempts": 1,
         "processing_stage": "claiming",
         "processing_substage": "lease_acquired",
@@ -252,7 +253,11 @@ async def test_ingest_service_requeues_on_circuit_open():
         await svc._process_pending_episode("ep-123")
 
     mock_graph_adapter.mark_episode_pending.assert_called_once_with(
-        "ep-123", retry_after_s=30.0, worker_id=svc._worker_id,
+        "ep-123",
+        retry_after_s=30.0,
+        worker_id=svc._worker_id,
+        transient_requeue=True,
+        claim_started_at="claim-1",
     )
 
 

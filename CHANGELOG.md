@@ -1,3 +1,20 @@
+## 2026-09-22 - transient refunds belong to one claim, not merely one episode
+
+A retryable failure used to transition the episode and refund its attempt in two separate
+writes. Another worker could claim between those writes, after which the stale refund decremented
+the new worker's attempt count. The refund now occurs in the same Cypher mutation as the FAILED or
+PENDING transition and is fenced by ENRICHING state, owner, and the claim's existing
+`processing_started_at` incarnation. The incarnation fence also closes the same-service ABA case,
+where multiple worker loops share one service-level owner ID.
+
+- Removed the UUID-only `count_transient_requeue` follow-up mutation and its helper.
+- Missing owners or claim incarnations fail closed; duplicate refunds are no-ops; NULL attempts
+  clamp to zero.
+- Deterministic regressions cover different-worker and same-worker interleavings, idempotence,
+  normal retry survival, exhaustion, and the generated Cypher contract for both terminal paths.
+- Real-Neo4j coverage includes successful PENDING and FAILED refunds, different-worker and
+  same-worker stale calls, absent owners, duplicate calls, NULL attempts, and exhaustion.
+
 ## 2026-09-22 - a JWKS-fetch 503 now says why, and which request
 
 Production returned one `503 Unable to fetch OAuth JWKS` on 2026-09-22 02:31:32 UTC. The app
@@ -253,18 +270,4 @@ monotonic for the life of the project.
   zero semantic diff, and wrong-digest no-clobber. 17/17 pass locally; full offline and
   graph-backed CI on the exact SHA remain release gates. Live-Neo4j ingest→generate E2E-6
   and Beacon stdio tool-query acceptance are NOT RUN and stay with the MVP release lane.
-- Keep the newest ten dated entries per `.agent/maintenance.md`; older entries remain in Git history.
-
-## 2026-09-16 - local MVP tracked-write receipts and observation guidance
-
-- `src/menhir/mcp/formatters.py`: status/watch observations direct continuation to the
-  existing episode; remove duplicate-write advice and unsupported completion/retry promises.
-- `src/menhir/mcp/tools/ingest/add_memory_and_track.py`: clarify that the tool queues a
-  new write; preserve its accepted receipt when subsequent collection or formatting fails,
-  without exposing raw exception text. Optional queue diagnostics cannot hide an observed
-  episode status. Cancellation and existing write/auth arguments remain unchanged.
-- `docs/agent-usage.md`, `docs/templates/AGENTS.menhir.md`: document the #118 owner decision,
-  actual tool options, restricted-client behavior, and the separate TEMPORAL direct-write path.
-- `tests/test_mvp_tracked_write_contract.py`: 31 focused formatter and bound-endpoint
-  regression cases. Live stdio E2E-2 and exact-commit repository CI remain release gates.
 - Keep the newest ten dated entries per `.agent/maintenance.md`; older entries remain in Git history.
