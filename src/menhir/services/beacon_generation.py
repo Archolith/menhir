@@ -60,6 +60,8 @@ class GenerationOutcome:
     sha256: str
     created: bool
     scan_fingerprint: str
+    #: HEAD commit the manifest's git citation was fenced against; None outside a git repo.
+    git_head: str | None = None
 
 
 def generate_beacon(
@@ -126,4 +128,5 @@ def generate_beacon(
         sha256=digest,
         created=created,
         scan_fingerprint=str(evidence["project"]["scan_fingerprint"]),
+        git_head=evidence_guard.git.head or None,
     )

@@ -83,3 +83,4 @@ def generate(
     typer.echo(f"{verb} {outcome.output_path}")
     typer.echo(f"sha256: {outcome.sha256}")
     typer.echo(f"scan_fingerprint: {outcome.scan_fingerprint}")
+    typer.echo(f"git_head: {outcome.git_head or 'none'}")

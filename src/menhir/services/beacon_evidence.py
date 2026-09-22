@@ -14,25 +14,39 @@ sort orders, capped sections, no timestamps). The scan fingerprint doubles
 as the citation value Beacon records. Evidence is explicitly point-in-time:
 Menhir rejects observed filesystem/graph drift but cannot lock arbitrary
 repository editors through the later publication side effect.
+
+Git state is part of that point in time. Menhir passes ``--repo`` so Beacon
+can cross-check the indexed root, and that also runs Beacon's git tier: the
+manifest cites ``git HEAD <sha>`` and takes ``project.repository`` from the
+``origin`` remote. The scan fingerprint excludes ``.git``, so an empty commit
+changes the manifest without changing the fingerprint (PR #125 F2). The
+guard therefore also captures whether the root is a git repository, its HEAD,
+and a digest of its origin URL, and publication is refused if any of them
+moved since capture, exactly like a scan change.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
 from menhir.infrastructure.project_scanner import ProjectScanner
+from menhir.services.beacon_compat import child_environment
 
 __all__ = [
     "BeaconEvidenceError",
     "BeaconEvidenceGuard",
     "BeaconEvidenceProjectReader",
+    "RepositoryGitState",
     "capture_evidence",
     "dump_evidence",
+    "read_git_state",
     "require_evidence_guard",
     "write_evidence_document",
 ]
@@ -52,13 +66,31 @@ _PRIORITY_DOCS = ("README.md", ".agent/README.md")
 _DEFAULT_DOCUMENT_TYPE = "generic"
 
 
+_GIT_TIMEOUT_SECONDS = 30
+
+
 class BeaconEvidenceError(ValueError):
     """Raised when required source evidence for the evidence dump is unavailable."""
 
 
 @dataclass(frozen=True)
+class RepositoryGitState:
+    """The git facts Beacon's git tier projects into the manifest.
+
+    Mirrors Beacon's own availability rule (a ``.git`` directory or file at the root).
+    ``head`` is the HEAD commit (``""`` when not a repository, or while HEAD is unborn), and
+    ``origin_digest`` is a SHA-256 of the raw ``origin`` URL, so a credential-bearing URL is
+    compared without being held.
+    """
+
+    is_repository: bool
+    head: str = ""
+    origin_digest: str = ""
+
+
+@dataclass(frozen=True)
 class BeaconEvidenceGuard:
-    """Graph/filesystem version proving one point-in-time evidence capture."""
+    """Graph/filesystem/git version proving one point-in-time evidence capture."""
 
     root_path: str
     scan_fingerprint: str
@@ -68,6 +100,7 @@ class BeaconEvidenceGuard:
     partial_index: bool
     project_id: str
     writer_revision: str
+    git: RepositoryGitState
 
 
 class BeaconEvidenceProjectReader(Protocol):
@@ -86,10 +119,49 @@ class BeaconEvidenceProjectReader(Protocol):
     ) -> list[dict[str, str]]: ...
 
 
+def _git_output(repo_root: Path, *args: str) -> str | None:
+    """Run one fixed, read-only git query at the root; ``None`` when it fails."""
+    try:
+        completed = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
+            ["git", "--no-optional-locks", *args],
+            cwd=str(repo_root),
+            capture_output=True,
+            check=False,
+            timeout=_GIT_TIMEOUT_SECONDS,
+            env={**child_environment(), "GIT_TERMINAL_PROMPT": "0"},
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.decode("utf-8", errors="replace").strip()
+
+
+def read_git_state(repo_root: Path) -> RepositoryGitState:
+    """Capture the repository git state Beacon's build will read at *repo_root*."""
+    dot_git = repo_root / ".git"
+    if not (dot_git.is_dir() or dot_git.is_file()):
+        return RepositoryGitState(is_repository=False)
+    head = _git_output(repo_root, "rev-parse", "--verify", "HEAD") or ""
+    origin = _git_output(repo_root, "remote", "get-url", "origin") or ""
+    return RepositoryGitState(
+        is_repository=True,
+        head=head,
+        origin_digest=hashlib.sha256(origin.encode("utf-8")).hexdigest() if origin else "",
+    )
+
+
 def _read_guard(
-    reader: BeaconEvidenceProjectReader, project: str, repo_root: Path
+    reader: BeaconEvidenceProjectReader,
+    project: str,
+    repo_root: Path,
+    git: RepositoryGitState,
 ) -> BeaconEvidenceGuard:
-    """Read and validate the authoritative graph-side evidence fence."""
+    """Read and validate the authoritative graph-side evidence fence.
+
+    *git* is the repository state captured alongside it. Graph reads never change it, so two
+    guards compare equal only when both the graph fence and the captured git state match.
+    """
     raw = reader.get_beacon_evidence_guard(project)
     if not raw.get("project_known"):
         raise BeaconEvidenceError(f"project is not indexed (no root path): {project}")
@@ -128,14 +200,26 @@ def _read_guard(
         partial_index=bool(raw.get("partial_index")),
         project_id=str(raw.get("project_id") or ""),
         writer_revision=str(raw.get("writer_revision") or ""),
+        git=git,
     )
 
 
 def _require_filesystem_match(guard: BeaconEvidenceGuard, project: str, repo_root: Path) -> None:
+    """Refuse unless the checkout still matches the guard: scan fingerprint AND git state.
+
+    This is the "is the output still current" comparison. The fingerprint excludes ``.git``,
+    so a HEAD move (for example an empty commit) or an origin change is checked separately:
+    both change the manifest Beacon builds.
+    """
     current_fingerprint = ProjectScanner().scan(repo_root).scan_fingerprint
     if guard.scan_fingerprint != current_fingerprint:
         raise BeaconEvidenceError(
             f"project index is stale for the current checkout; re-ingest first: {project}"
+        )
+    if read_git_state(repo_root) != guard.git:
+        raise BeaconEvidenceError(
+            "repository git state (HEAD or origin) changed since evidence capture; "
+            f"retry generation: {project}"
         )
 
 
@@ -159,8 +243,8 @@ def _document_rank(path: str) -> tuple[int, str]:
 def capture_evidence(
     reader: BeaconEvidenceProjectReader, project: str, repo_root: Path
 ) -> tuple[dict[str, Any], BeaconEvidenceGuard]:
-    """Build evidence and return the graph/filesystem version that fenced its reads."""
-    guard = _read_guard(reader, project, repo_root)
+    """Build evidence and return the graph/filesystem/git version that fenced its reads."""
+    guard = _read_guard(reader, project, repo_root, read_git_state(repo_root))
     _require_filesystem_match(guard, project, repo_root)
     overview = reader.query_overview(project)
     description = str(overview.get("description") or "").strip()
@@ -206,7 +290,7 @@ def capture_evidence(
         str(k): int(v) for k, v in sorted((overview.get("edges") or {}).items()) if v
     }
 
-    after = _read_guard(reader, project, repo_root)
+    after = _read_guard(reader, project, repo_root, guard.git)
     if after != guard:
         raise BeaconEvidenceError(
             f"project structure changed while evidence was read; retry generation: {project}"
@@ -245,14 +329,14 @@ def require_evidence_guard(
     repo_root: Path,
     expected: BeaconEvidenceGuard,
 ) -> None:
-    """Refuse unless graph and filesystem still match a captured evidence version."""
-    before = _read_guard(reader, project, repo_root)
+    """Refuse unless graph, filesystem, and git state still match a captured evidence version."""
+    before = _read_guard(reader, project, repo_root, expected.git)
     if before != expected:
         raise BeaconEvidenceError(
             f"project structure changed after evidence capture; retry generation: {project}"
         )
     _require_filesystem_match(expected, project, repo_root)
-    after = _read_guard(reader, project, repo_root)
+    after = _read_guard(reader, project, repo_root, expected.git)
     if after != expected:
         raise BeaconEvidenceError(
             f"project structure changed during final freshness check; retry generation: {project}"

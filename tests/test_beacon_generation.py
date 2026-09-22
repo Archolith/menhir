@@ -24,7 +24,7 @@ from menhir.infrastructure.project_scanner import ProjectScanner
 from menhir.services import beacon_generation as generation_module
 from menhir.services.beacon_compat import BeaconCompatError, beacon_python_is_usable
 from menhir.services.beacon_generation import BeaconGenerationError, generate_beacon
-from tests.test_beacon_evidence import _reader
+from tests.test_beacon_evidence import _reader, git, git_repo
 
 
 def _fixture_repo(tmp_path: Path) -> Path:
@@ -313,6 +313,95 @@ def test_artifact_serves_without_menhir(beacon_python: str, tmp_path: Path) -> N
     )
     assert exported.returncode == 0, exported.stderr.decode("utf-8", errors="replace")
     assert b'"beacon_snapshot_version":"1.0"' in exported.stdout
+
+
+# ---------------------------------------------------------------------------
+# Git tier (PR #125 F2): `beacon build --repo` reads HEAD and origin into the manifest.
+# ---------------------------------------------------------------------------
+
+
+def test_git_repository_manifest_cites_the_fenced_head(
+    beacon_python: str, tmp_path: Path
+) -> None:
+    repo = git_repo(_fixture_repo(tmp_path))
+    head = git(repo, "rev-parse", "HEAD")
+
+    outcome = generate_beacon(
+        _reader(root=str(repo)), "fixture", repo, beacon_python=beacon_python
+    )
+
+    assert outcome.git_head == head
+    assert f"git HEAD {head[:12]}".encode() in outcome.output_path.read_bytes()
+
+
+@pytest.mark.parametrize("moment", ["before_build", "after_build"])
+def test_head_move_around_beacon_build_refuses_publication(
+    beacon_python: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, moment: str
+) -> None:
+    """An empty commit changes the manifest's HEAD citation but not the scan fingerprint.
+
+    Before the fix, both interleavings published: a commit before the build produced a manifest
+    citing a HEAD that never co-existed with the captured evidence.
+    """
+    repo = git_repo(_fixture_repo(tmp_path))
+    reader = _reader(root=str(repo))
+    first = generate_beacon(reader, "fixture", repo, beacon_python=beacon_python)
+    target = repo / "beacon.generated.yaml"
+    original = target.read_bytes()
+    fingerprint = ProjectScanner().scan(repo).scan_fingerprint
+    real_build = generation_module.build_manifest_via_beacon
+
+    def commit_around_build(*args, **kwargs):
+        if moment == "before_build":
+            git(repo, "commit", "-q", "--allow-empty", "-m", "moved during generation")
+        payload = real_build(*args, **kwargs)
+        if moment == "after_build":
+            git(repo, "commit", "-q", "--allow-empty", "-m", "moved during generation")
+        return payload
+
+    monkeypatch.setattr(generation_module, "build_manifest_via_beacon", commit_around_build)
+    with pytest.raises(BeaconGenerationError, match="git state"):
+        generate_beacon(
+            reader,
+            "fixture",
+            repo,
+            beacon_python=beacon_python,
+            refresh=True,
+            expected_sha256=first.sha256,
+        )
+    assert ProjectScanner().scan(repo).scan_fingerprint == fingerprint
+    assert target.read_bytes() == original
+
+
+def test_refresh_after_head_move_changes_only_the_head_citation(
+    beacon_python: str, tmp_path: Path
+) -> None:
+    """With the index current and HEAD moved, a refresh republishes and only HEAD changes."""
+    repo = git_repo(_fixture_repo(tmp_path))
+    reader = _reader(root=str(repo))
+    first = generate_beacon(reader, "fixture", repo, beacon_python=beacon_python)
+    before = first.output_path.read_text(encoding="utf-8").splitlines()
+    old_head = first.git_head
+
+    git(repo, "commit", "-q", "--allow-empty", "-m", "empty")
+    refreshed = generate_beacon(
+        reader,
+        "fixture",
+        repo,
+        beacon_python=beacon_python,
+        refresh=True,
+        expected_sha256=first.sha256,
+    )
+    after = refreshed.output_path.read_text(encoding="utf-8").splitlines()
+
+    assert refreshed.git_head == git(repo, "rev-parse", "HEAD") != old_head
+    assert refreshed.sha256 != first.sha256
+    changed = [(a, b) for a, b in zip(before, after) if a != b]
+    assert len(before) == len(after)
+    assert changed == [
+        (a, a.replace(old_head[:12], refreshed.git_head[:12])) for a, _ in changed
+    ]
+    assert all(old_head[:12] in a for a, _ in changed)
 
 
 def test_cli_reader_uses_canonical_structure_adapter(monkeypatch: pytest.MonkeyPatch) -> None:

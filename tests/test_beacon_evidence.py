@@ -9,6 +9,7 @@ before any Beacon contact.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,7 +18,9 @@ import pytest
 from menhir.infrastructure.project_scanner import ProjectScanner
 from menhir.services.beacon_evidence import (
     BeaconEvidenceError,
+    capture_evidence,
     dump_evidence,
+    require_evidence_guard,
     write_evidence_document,
 )
 
@@ -233,3 +236,98 @@ def test_missing_description_fails_closed(tmp_path: Path) -> None:
     empty = _reader(root=str(tmp_path), overview={"description": "", "stack": ""})
     with pytest.raises(BeaconEvidenceError, match="description"):
         dump_evidence(empty, "fixture", tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Git state (PR #125 F2). Beacon's git tier cites HEAD and origin in the manifest, and the scan
+# fingerprint excludes .git, so the guard must carry git state itself.
+# ---------------------------------------------------------------------------
+
+
+def git(repo: Path, *args: str) -> str:
+    """Run git in a disposable fixture repository with a fixed, hook-free identity."""
+    completed = subprocess.run(  # nosec B603 B607 - fixed argv, local fixture only
+        [
+            "git", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
+            "-c", "commit.gpgsign=false", "-c", "core.hooksPath=", *args,
+        ],
+        cwd=str(repo),
+        capture_output=True,
+        check=True,
+    )
+    return completed.stdout.decode("utf-8").strip()
+
+
+def git_repo(repo: Path) -> Path:
+    """Turn *repo* into a real git repository with one commit of its current tree."""
+    git(repo, "init", "-q")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "fixture: initial")
+    return repo
+
+
+def test_git_state_mirrors_beacon_availability(tmp_path: Path) -> None:
+    from menhir.services.beacon_evidence import RepositoryGitState, read_git_state
+
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert read_git_state(plain) == RepositoryGitState(is_repository=False)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("# r\n", encoding="utf-8")
+    git_repo(repo)
+    state = read_git_state(repo)
+    assert state.is_repository is True
+    assert state.head == git(repo, "rev-parse", "HEAD")
+    assert state.origin_digest == ""
+
+    git(repo, "remote", "add", "origin", "https://user:s3cr3t@example.invalid/o/r.git")
+    with_origin = read_git_state(repo)
+    assert with_origin.origin_digest and "s3cr3t" not in repr(with_origin)
+
+
+def test_head_move_after_capture_is_not_current(tmp_path: Path) -> None:
+    """An empty commit leaves the scan fingerprint unchanged but moves the manifest's HEAD."""
+    (tmp_path / "README.md").write_text("# fixture\n", encoding="utf-8")
+    git_repo(tmp_path)
+    reader = _reader(root=str(tmp_path))
+    _, guard = capture_evidence(reader, "fixture", tmp_path)
+    fingerprint = ProjectScanner().scan(tmp_path).scan_fingerprint
+
+    git(tmp_path, "commit", "-q", "--allow-empty", "-m", "empty")
+
+    assert ProjectScanner().scan(tmp_path).scan_fingerprint == fingerprint
+    with pytest.raises(BeaconEvidenceError, match="git state"):
+        require_evidence_guard(reader, "fixture", tmp_path, guard)
+
+
+def test_origin_change_after_capture_is_not_current(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text("# fixture\n", encoding="utf-8")
+    git_repo(tmp_path)
+    reader = _reader(root=str(tmp_path))
+    _, guard = capture_evidence(reader, "fixture", tmp_path)
+
+    git(tmp_path, "remote", "add", "origin", "https://example.invalid/o/r.git")
+
+    with pytest.raises(BeaconEvidenceError, match="git state"):
+        require_evidence_guard(reader, "fixture", tmp_path, guard)
+
+
+def test_becoming_a_git_repository_after_capture_is_not_current(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text("# fixture\n", encoding="utf-8")
+    reader = _reader(root=str(tmp_path))
+    _, guard = capture_evidence(reader, "fixture", tmp_path)
+
+    git_repo(tmp_path)
+
+    with pytest.raises(BeaconEvidenceError, match="git state"):
+        require_evidence_guard(reader, "fixture", tmp_path, guard)
+
+
+def test_unchanged_git_state_stays_current(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text("# fixture\n", encoding="utf-8")
+    git_repo(tmp_path)
+    reader = _reader(root=str(tmp_path))
+    _, guard = capture_evidence(reader, "fixture", tmp_path)
+    require_evidence_guard(reader, "fixture", tmp_path, guard)
