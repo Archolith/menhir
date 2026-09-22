@@ -1,3 +1,18 @@
+## 2026-09-22 - conflict resolution stays inside the caller's namespace
+
+`resolve_conflict` previously scoped its initial group lookup but dropped the namespace before
+the authoritative graph mutation. A legacy mixed-namespace conflict group could therefore turn
+an allowed same-namespace lookup into a cross-namespace read, mutation, and response.
+
+- The namespace now crosses the MCP, backend, runtime, adapter, and repository boundaries.
+- Every resolution action scopes its member reads, final node writes, and edge bridging;
+  unscoped internal scheduler calls retain their existing global behavior.
+- Scoped reads use Menhir's canonical tenant predicate, including both `default` and the legacy
+  empty spelling of that same silo.
+- The post-resolution readback is scoped too, so foreign members cannot appear in the response.
+- Focused regressions cover all three actions on a mixed legacy group and reject a foreign UUID
+  before any partial mutation. This is a containment fix only; it adds no conflict features.
+
 ## 2026-09-22 - transient refunds belong to one claim, not merely one episode
 
 A retryable failure used to transition the episode and refund its attempt in two separate

@@ -93,12 +93,10 @@ class ResolveConflictTool(BaseJsonTool):
             keep = (keep_uuid or "").strip() or None
             remove = (remove_uuid or "").strip() or None
 
-            # CF-33 step 4: ownership-at-load, and it needs no separate guard. The group is
-            # found through the same `list_conflict_groups` read the namespace filter now
-            # bounds, so a group outside the caller's silo simply is not in `rows` and lands on
-            # the existing not-found path below. Scoping the GROUP scopes its members too:
-            # groups are namespace-homogeneous by construction (see `list_conflict_groups`),
-            # which is what makes this one predicate sufficient for keep_uuid/remove_uuid.
+            # CF-33 step 4: ownership-at-load keeps a foreign group on the not-found path.
+            # The same scope must also reach the final mutation and readback. Current writers
+            # create homogeneous groups, but legacy data can contain a mixed group; a scoped
+            # lookup alone must never authorize mutation or disclosure of its foreign members.
             scope = {"namespace": namespace} if namespace else {}
             rows = await backend.list_conflict_groups(
                 status=None, limit=_CONFLICT_LOOKUP_LIMIT, **scope
@@ -136,6 +134,7 @@ class ResolveConflictTool(BaseJsonTool):
                     action=normalized_action,
                     resolution_status="resolved",
                     allow_promoted_removal=allow_promoted_removal,
+                    **scope,
                 )
                 # Record suppression for all member pairs (keep_both = blanket)
                 result_uuids = result.get("member_uuids") or []
@@ -149,7 +148,9 @@ class ResolveConflictTool(BaseJsonTool):
                         "keep_both",
                         "user",
                     )
-                refreshed_rows = await backend.list_conflict_groups(status=None, limit=_CONFLICT_LOOKUP_LIMIT)
+                refreshed_rows = await backend.list_conflict_groups(
+                    status=None, limit=_CONFLICT_LOOKUP_LIMIT, **scope
+                )
                 refreshed = next(
                     (row for row in refreshed_rows if str(row.get("group_id") or "") == normalized_group),
                     None,
@@ -224,6 +225,7 @@ class ResolveConflictTool(BaseJsonTool):
                 remove_uuid=remove,
                 resolution_status="resolved",
                 allow_promoted_removal=allow_promoted_removal,
+                **scope,
             )
             # Record suppression for the keep/remove pair(s)
             for removed in result.get("removed_uuids") or []:
@@ -236,7 +238,9 @@ class ResolveConflictTool(BaseJsonTool):
                     normalized_action,
                     "user",
                 )
-            refreshed_rows = await backend.list_conflict_groups(status=None, limit=_CONFLICT_LOOKUP_LIMIT)
+            refreshed_rows = await backend.list_conflict_groups(
+                status=None, limit=_CONFLICT_LOOKUP_LIMIT, **scope
+            )
             refreshed = next(
                 (row for row in refreshed_rows if str(row.get("group_id") or "") == normalized_group),
                 None,

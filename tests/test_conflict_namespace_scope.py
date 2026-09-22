@@ -10,12 +10,12 @@ predicate of any kind, so they were live cross-silo paths independent of any pin
   * `run_llm_conflict_review`          -- operator tier, promoted/cleared groups in every silo
   * `scan_for_conflicts`               -- operator tier, wrote `conflict_group_id` across every silo
 
-The load-bearing fact that makes namespace filtering SOUND rather than merely narrower:
-conflict groups are namespace-homogeneous by construction. `set_conflict` is the only writer
-of `conflict_group_id`, and its only caller searches for pair candidates with
+Current conflict groups are namespace-homogeneous by construction. `set_conflict` is the only
+writer of `conflict_group_id`, and its only caller searches for pair candidates with
 `group_ids=namespace_to_group_ids(node.namespace)`, so a pair can only form inside one silo.
-The group-merge branch preserves that inductively. `test_pairing_is_namespace_scoped_at_the_only_writer`
-pins that premise, because every filtering decision here rests on it.
+The group-merge branch preserves that inductively. Legacy data can still contain a mixed group,
+so mutating paths independently scope their final reads and writes rather than trusting that
+construction invariant as an authorization boundary.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import asyncio
 import inspect
 import json
 import uuid as uuidlib
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
@@ -33,6 +33,7 @@ from menhir.mcp.contracts import ToolScope
 CONFLICT_TOOLS = (
     "list_conflicts",
     "requeue_conflicts_for_llm_review",
+    "resolve_conflict",
     "run_llm_conflict_review",
     "scan_for_conflicts",
 )
@@ -133,16 +134,86 @@ def test_requeue_forwards_the_namespace_to_the_mutating_call() -> None:
     )
 
 
+@pytest.mark.unit
+def test_resolve_forwards_namespace_to_lookup_mutation_and_readback() -> None:
+    from menhir.mcp.tools.conflict.resolve_conflict import ResolveConflictTool
+
+    group = {
+        "group_id": "grp-mixed",
+        "members": [
+            {"uuid": "tenant-a-1", "status": "unresolved"},
+            {"uuid": "tenant-a-2", "status": "unresolved"},
+        ],
+    }
+    backend = MagicMock()
+    backend.list_conflict_groups = AsyncMock(side_effect=[[group], []])
+    backend.resolve_conflict_group = AsyncMock(return_value={
+        "member_uuids": ["tenant-a-1", "tenant-a-2"],
+        "resolved": 2,
+        "removed_uuids": [],
+        "bridged_edges": 0,
+    })
+    backend.record_conflict_resolution = AsyncMock(return_value=None)
+    tool = _stub_tool(ResolveConflictTool, backend)
+
+    raw = asyncio.run(tool.endpoint(
+        group_id="grp-mixed",
+        action="keep_both",
+        namespace="tenant_a",
+    ))
+
+    assert json.loads(raw)["group_cleared"] is True
+    backend.resolve_conflict_group.assert_awaited_once_with(
+        "grp-mixed",
+        action="keep_both",
+        resolution_status="resolved",
+        allow_promoted_removal=False,
+        namespace="tenant_a",
+    )
+    assert backend.list_conflict_groups.await_args_list == [
+        call(status=None, limit=5000, namespace="tenant_a"),
+        call(status=None, limit=5000, namespace="tenant_a"),
+    ]
+
+
+@pytest.mark.unit
+def test_resolve_rejects_a_uuid_hidden_by_namespace_before_mutation() -> None:
+    from menhir.mcp.tools.conflict.resolve_conflict import ResolveConflictTool
+
+    backend = MagicMock()
+    backend.list_conflict_groups = AsyncMock(return_value=[{
+        "group_id": "grp-mixed",
+        "members": [
+            {"uuid": "tenant-a-1", "status": "unresolved"},
+            {"uuid": "tenant-a-2", "status": "unresolved"},
+        ],
+    }])
+    backend.resolve_conflict_group = AsyncMock()
+    tool = _stub_tool(ResolveConflictTool, backend)
+
+    raw = asyncio.run(tool.endpoint(
+        group_id="grp-mixed",
+        action="replace",
+        keep_uuid="tenant-a-1",
+        remove_uuid="tenant-b-1",
+        namespace="tenant_a",
+    ))
+
+    assert "is not a member" in json.loads(raw)["error"]["message"]
+    backend.resolve_conflict_group.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # The premise every filtering decision rests on
 # ---------------------------------------------------------------------------
 
 @pytest.mark.unit
 def test_pairing_is_namespace_scoped_at_the_only_writer() -> None:
-    """If this ever stops holding, filtering by namespace silently changes from "show the
-    caller their groups" to "show the caller PART of a group", and `resolve_conflict` would
-    then act on members the caller cannot see. The whole design here depends on it, so it is
-    pinned at the source rather than assumed."""
+    """Current writers must not create new mixed groups.
+
+    Mutations still carry their own namespace predicate because legacy or manually repaired data
+    can violate this construction rule; defense in depth keeps that data from becoming a bypass.
+    """
     from menhir.services.lifecycle_consolidation import LifecycleConsolidationMixin
 
     source = inspect.getsource(LifecycleConsolidationMixin._check_contradictions_batch)
@@ -228,21 +299,31 @@ def test_live_no_namespace_still_returns_every_silo(test_neo4j_repo) -> None:
 
 @pytest.mark.online
 def test_live_legacy_nodes_without_the_property_read_as_default(test_neo4j_repo) -> None:
-    """Nodes predating namespace stamping have no `namespace` property at all. `coalesce(...,
-    'default')` is what puts them in the default silo instead of making them invisible to every
-    filtered read -- the same convention the rest of the query layer uses."""
+    """Missing, empty, and canonical namespace stamps all denote the default silo."""
     from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 
     test_neo4j_repo.execute(
         """
-        CREATE (a:Entity {uuid: 'legacy-a', name: 'a', summary: 'legacy',
+        CREATE (a:Entity {uuid: 'legacy-missing', name: 'missing', summary: 'legacy',
                           conflict_group_id: 'grp-legacy', conflict_status: 'unresolved',
                           conflict_created_at: datetime()})
+        CREATE (b:Entity {uuid: 'legacy-empty', name: 'empty', summary: 'legacy', namespace: '',
+                          conflict_group_id: 'grp-legacy', conflict_status: 'unresolved',
+                          conflict_created_at: datetime()})
+        CREATE (c:Entity {uuid: 'legacy-default', name: 'default', summary: 'legacy',
+                          namespace: 'default', conflict_group_id: 'grp-legacy',
+                          conflict_status: 'unresolved', conflict_created_at: datetime()})
         """
     )
     adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
 
-    assert len(adapter.list_conflict_groups(status="unresolved", namespace="default")) == 1
+    rows = adapter.list_conflict_groups(status="unresolved", namespace="default")
+    assert len(rows) == 1
+    assert {member["uuid"] for member in rows[0]["members"]} == {
+        "legacy-missing",
+        "legacy-empty",
+        "legacy-default",
+    }
     assert adapter.list_conflict_groups(status="unresolved", namespace="tenant_a") == []
 
 
@@ -278,6 +359,151 @@ def test_live_requeue_writes_only_inside_the_callers_silo(test_neo4j_repo) -> No
     by_uuid = {r["uuid"]: r["status"] for r in rows}
     assert by_uuid["mixed-a"] == "pending_llm_review"
     assert by_uuid["mixed-b"] == "unresolved", "a foreign silo's node was mutated"
+
+
+def _seed_mixed_resolution_group(repo) -> None:
+    repo.execute(
+        """
+        CREATE (a1:Entity {uuid: 'mixed-a-1', name: 'a1', content: 'tenant a current',
+                           namespace: 'tenant_a', scope: 'PERSISTENT', freshness: 'ACTIVE',
+                           conflict_group_id: 'grp-mixed-resolve', conflict_status: 'unresolved',
+                           conflict_created_at: datetime()})
+        CREATE (a2:Entity {uuid: 'mixed-a-2', name: 'a2', content: 'tenant a replacement',
+                           namespace: 'tenant_a', scope: 'PERSISTENT', freshness: 'ACTIVE',
+                           conflict_group_id: 'grp-mixed-resolve', conflict_status: 'unresolved',
+                           conflict_created_at: datetime()})
+        CREATE (b:Entity {uuid: 'mixed-b-1', name: 'b', content: 'tenant b private',
+                          namespace: 'tenant_b', scope: 'PERSISTENT', freshness: 'ACTIVE',
+                          conflict_group_id: 'grp-mixed-resolve', conflict_status: 'unresolved',
+                          conflict_created_at: datetime()})
+        """
+    )
+
+
+@pytest.mark.online
+@pytest.mark.parametrize("action", ["keep_both", "replace", "discard_new"])
+def test_live_resolve_conflict_mutates_only_the_callers_half_of_a_mixed_group(
+    test_neo4j_repo,
+    action: str,
+) -> None:
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    _seed_mixed_resolution_group(test_neo4j_repo)
+    adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
+    kwargs = {"namespace": "tenant_a"}
+    if action != "keep_both":
+        kwargs.update(keep_uuid="mixed-a-1", remove_uuid="mixed-a-2")
+
+    result = adapter.resolve_conflict_group("grp-mixed-resolve", action, **kwargs)
+
+    rows = test_neo4j_repo.execute(
+        """
+        MATCH (n:Entity)
+        WHERE n.uuid IN ['mixed-a-1', 'mixed-a-2', 'mixed-b-1']
+        RETURN n.uuid AS uuid, n.namespace AS namespace, n.conflict_group_id AS group_id,
+               n.conflict_status AS status, n.freshness AS freshness
+        ORDER BY n.uuid
+        """
+    )
+    by_uuid = {row["uuid"]: row for row in rows}
+    assert result["member_uuids"] == ["mixed-a-1", "mixed-a-2"]
+    assert by_uuid["mixed-b-1"] == {
+        "uuid": "mixed-b-1",
+        "namespace": "tenant_b",
+        "group_id": "grp-mixed-resolve",
+        "status": "unresolved",
+        "freshness": "ACTIVE",
+    }
+    assert by_uuid["mixed-a-1"]["group_id"] is None
+    assert by_uuid["mixed-a-1"]["status"] == "resolved"
+    assert by_uuid["mixed-a-2"]["group_id"] is None
+    assert by_uuid["mixed-a-2"]["status"] == "resolved"
+    if action == "keep_both":
+        assert by_uuid["mixed-a-2"]["freshness"] == "ACTIVE"
+    else:
+        assert by_uuid["mixed-a-2"]["freshness"] == "GONE"
+
+
+@pytest.mark.online
+def test_live_resolve_conflict_rejects_a_foreign_uuid_without_partial_mutation(test_neo4j_repo) -> None:
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    _seed_mixed_resolution_group(test_neo4j_repo)
+    adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
+    before = test_neo4j_repo.execute(
+        """
+        MATCH (n:Entity)
+        WHERE n.uuid IN ['mixed-a-1', 'mixed-a-2', 'mixed-b-1']
+        RETURN n.uuid AS uuid, n.content AS content, n.conflict_group_id AS group_id,
+               n.conflict_status AS status, n.freshness AS freshness
+        ORDER BY n.uuid
+        """
+    )
+
+    with pytest.raises(ValueError, match="mixed-b-1.*is not a member"):
+        adapter.resolve_conflict_group(
+            "grp-mixed-resolve",
+            "replace",
+            keep_uuid="mixed-a-1",
+            remove_uuid="mixed-b-1",
+            namespace="tenant_a",
+        )
+
+    after = test_neo4j_repo.execute(
+        """
+        MATCH (n:Entity)
+        WHERE n.uuid IN ['mixed-a-1', 'mixed-a-2', 'mixed-b-1']
+        RETURN n.uuid AS uuid, n.content AS content, n.conflict_group_id AS group_id,
+               n.conflict_status AS status, n.freshness AS freshness
+        ORDER BY n.uuid
+        """
+    )
+    assert after == before
+
+
+@pytest.mark.online
+def test_live_resolve_conflict_bridges_only_same_namespace_neighbors(test_neo4j_repo) -> None:
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    _seed_mixed_resolution_group(test_neo4j_repo)
+    test_neo4j_repo.execute(
+        """
+        MATCH (removed:Entity {uuid: 'mixed-a-2'})
+        CREATE (a1:Entity {uuid: 'neighbor-a-1', name: 'a1', namespace: 'tenant_a',
+                           scope: 'PERSISTENT', freshness: 'ACTIVE'})
+        CREATE (a2:Entity {uuid: 'neighbor-a-2', name: 'a2', namespace: 'tenant_a',
+                           scope: 'PERSISTENT', freshness: 'ACTIVE'})
+        CREATE (b:Entity {uuid: 'neighbor-b-1', name: 'b1', namespace: 'tenant_b',
+                          scope: 'PERSISTENT', freshness: 'ACTIVE'})
+        CREATE (removed)-[:RELATES_TO]->(a1)
+        CREATE (removed)-[:RELATES_TO]->(a2)
+        CREATE (removed)-[:RELATES_TO]->(b)
+        """
+    )
+    adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
+
+    adapter.resolve_conflict_group(
+        "grp-mixed-resolve",
+        "replace",
+        keep_uuid="mixed-a-1",
+        remove_uuid="mixed-a-2",
+        namespace="tenant_a",
+    )
+
+    rows = test_neo4j_repo.execute(
+        """
+        MATCH (a:Entity)-[r:RELATES_TO {bridged_from: 'mixed-a-2'}]->(b:Entity)
+        RETURN a.uuid AS a, b.uuid AS b, a.namespace AS a_namespace,
+               b.namespace AS b_namespace
+        ORDER BY a, b
+        """
+    )
+    assert rows == [{
+        "a": "neighbor-a-1",
+        "b": "neighbor-a-2",
+        "a_namespace": "tenant_a",
+        "b_namespace": "tenant_a",
+    }]
 
 
 @pytest.mark.online

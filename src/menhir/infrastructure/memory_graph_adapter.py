@@ -1199,11 +1199,27 @@ class MemoryGraphAdapter:
     ) -> list[dict[str, Any]]:
         return self._consolidation.list_conflict_pairs(status=status, limit=limit)
 
-    def bridge_edges_for_node(self, node_uuid: str) -> int:
-        return self._consolidation.bridge_edges_for_node(node_uuid)
+    def bridge_edges_for_node(
+        self,
+        node_uuid: str,
+        *,
+        namespace: str | None = None,
+    ) -> int:
+        return self._consolidation.bridge_edges_for_node(
+            node_uuid,
+            namespace=namespace,
+        )
 
-    def bridge_edges_for_nodes(self, node_uuids: list[str]) -> int:
-        return self._consolidation.bridge_edges_for_nodes(node_uuids)
+    def bridge_edges_for_nodes(
+        self,
+        node_uuids: list[str],
+        *,
+        namespace: str | None = None,
+    ) -> int:
+        return self._consolidation.bridge_edges_for_nodes(
+            node_uuids,
+            namespace=namespace,
+        )
 
     def resolve_conflict_group(
         self,
@@ -1214,6 +1230,7 @@ class MemoryGraphAdapter:
         remove_uuid: str | None = None,
         resolution_status: str = "resolved",
         allow_promoted_removal: bool = False,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         return self._consolidation.resolve_conflict_group(
             conflict_group_id,
@@ -1222,6 +1239,7 @@ class MemoryGraphAdapter:
             remove_uuid=remove_uuid,
             resolution_status=resolution_status,
             allow_promoted_removal=allow_promoted_removal,
+            namespace=namespace,
         )
 
     # -------------------------------------------------------------------------

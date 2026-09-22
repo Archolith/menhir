@@ -63,6 +63,15 @@ def _build_fake_runtime_ctx(backend_overrides: dict | None = None):
             list_episode_processing=MagicMock(return_value=[]),
             get_scan_fingerprint=MagicMock(return_value="fp-1234"),
             count_namespace=MagicMock(return_value=5),
+            resolve_conflict_group=MagicMock(return_value={
+                "action": "replace",
+                "group_id": "group-1",
+                "resolved": 2,
+                "removed_uuid": "remove-1",
+                "removed_uuids": ["remove-1"],
+                "bridged_edges": 0,
+                "member_uuids": ["keep-1", "remove-1"],
+            }),
         ),
         graphiti_client=SimpleNamespace(
             circuit_breaker_snapshots=MagicMock(return_value={
@@ -245,6 +254,31 @@ class TestBackendRoundTrip:
         result = await bc.get_scan_fingerprint("cth.mcp.memory")
         assert result == "fp-1234"
         ctx.built.graph_adapter.get_scan_fingerprint.assert_called_once_with("cth.mcp.memory")
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_resolve_conflict_group_forwards_namespace_across_http(self, backend_client):
+        bc, ctx = backend_client
+
+        result = await bc.resolve_conflict_group(
+            "group-1",
+            action="replace",
+            resolution_status="resolved",
+            keep_uuid="keep-1",
+            remove_uuid="remove-1",
+            namespace="tenant_a",
+        )
+
+        assert result["removed_uuids"] == ["remove-1"]
+        ctx.built.graph_adapter.resolve_conflict_group.assert_called_once_with(
+            "group-1",
+            "replace",
+            keep_uuid="keep-1",
+            remove_uuid="remove-1",
+            resolution_status="resolved",
+            allow_promoted_removal=False,
+            namespace="tenant_a",
+        )
 
     @pytest.mark.unit
     @pytest.mark.asyncio

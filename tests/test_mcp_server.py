@@ -265,17 +265,37 @@ class StubGraphAdapter:
         self, *, status: str | None = "unresolved", limit: int = 25,
         namespace: str | None = None,
     ):
-        rows = self.conflict_groups
-        if status is not None:
-            filtered: list[dict[str, object]] = []
-            for row in rows:
-                members = row.get("members")
-                if not isinstance(members, list):
-                    continue
-                if any(str(member.get("status") or "") == status for member in members if isinstance(member, dict)):
-                    filtered.append(row)
-            rows = filtered
+        rows: list[dict[str, object]] = []
+        for row in self.conflict_groups:
+            members = row.get("members")
+            if not isinstance(members, list):
+                continue
+            scoped_members = [
+                member
+                for member in members
+                if isinstance(member, dict)
+                and self._member_in_namespace(member, namespace)
+            ]
+            if status is not None:
+                scoped_members = [
+                    member
+                    for member in scoped_members
+                    if str(member.get("status") or "") == status
+                ]
+            if scoped_members:
+                rows.append({**row, "members": scoped_members})
         return rows[:limit]
+
+    @staticmethod
+    def _member_in_namespace(
+        member: dict[str, object], namespace: str | None
+    ) -> bool:
+        if namespace is None:
+            return True
+        raw_namespace = str(member.get("namespace") or "")
+        if namespace == "default":
+            return raw_namespace in {"", "default"}
+        return raw_namespace == namespace
 
     def resolve_conflict_group(
         self,
@@ -286,6 +306,7 @@ class StubGraphAdapter:
         remove_uuid: str | None = None,
         resolution_status: str = "resolved",
         allow_promoted_removal: bool = False,
+        namespace: str | None = None,
     ) -> dict[str, object]:
         self.conflict_resolve_calls.append(
             {
@@ -295,18 +316,52 @@ class StubGraphAdapter:
                 "remove_uuid": remove_uuid,
                 "resolution_status": resolution_status,
                 "allow_promoted_removal": allow_promoted_removal,
+                "namespace": namespace,
             }
         )
-        self.conflict_groups = [
-            row for row in self.conflict_groups if str(row.get("group_id") or "") != conflict_group_id
+        target = next(
+            (
+                row
+                for row in self.conflict_groups
+                if str(row.get("group_id") or "") == conflict_group_id
+            ),
+            None,
+        )
+        members = target.get("members") if target is not None else []
+        scoped_members = [
+            member
+            for member in members
+            if isinstance(member, dict)
+            and self._member_in_namespace(member, namespace)
+        ] if isinstance(members, list) else []
+        member_uuids = [
+            str(member.get("uuid") or "")
+            for member in scoped_members
+            if member.get("uuid")
         ]
-        removed = [remove_uuid] if remove_uuid else [
-            "123e4567-e89b-12d3-a456-426614174112"
-        ]
+        removed = [] if action == "keep_both" else (
+            [remove_uuid]
+            if remove_uuid
+            else [uuid for uuid in member_uuids if uuid != keep_uuid]
+        )
+        remaining_members = [
+            member
+            for member in members
+            if not (
+                isinstance(member, dict)
+                and self._member_in_namespace(member, namespace)
+            )
+        ] if isinstance(members, list) else []
+        if target is not None:
+            if remaining_members:
+                target["members"] = remaining_members
+            else:
+                self.conflict_groups.remove(target)
         return {
             "action": action,
             "group_id": conflict_group_id,
-            "resolved": 1,
+            "member_uuids": member_uuids,
+            "resolved": len(scoped_members),
             "removed_uuid": removed[0] if removed else None,
             "removed_uuids": removed,
             "bridged_edges": len(removed),
@@ -1177,6 +1232,43 @@ def test_resolve_conflict_keep_one_without_remove_uuid_reports_confirmation(stub
 
     assert payload["confirmation"] == "Removed 1 node(s) as non-keep members of group."
     assert payload["group_cleared"] is True
+
+
+def test_resolve_conflict_keeps_foreign_members_of_legacy_mixed_group(stubbed_mcp_state):
+    _, graph_adapter, _ = stubbed_mcp_state
+    members = graph_adapter.conflict_groups[0]["members"]
+    assert isinstance(members, list)
+    for member in members:
+        member["namespace"] = "tenant_a"
+    members.append(
+        {
+            "uuid": "123e4567-e89b-12d3-a456-426614174113",
+            "name": "Foreign fact",
+            "content": "Foreign tenant secret",
+            "status": "unresolved",
+            "scope": "PERSISTENT",
+            "namespace": "tenant_b",
+            "node_created_at": "2026-03-10T11:45:00Z",
+        }
+    )
+
+    payload = _parse_json_text(asyncio.run(
+        resolve_conflict(
+            group_id="group-1",
+            action="keep_both",
+            namespace="tenant_a",
+        )
+    ))
+
+    assert payload["resolved"] == 2
+    assert payload["group_cleared"] is True
+    assert graph_adapter.conflict_resolve_calls[0]["namespace"] == "tenant_a"
+    foreign = graph_adapter.list_conflict_groups(
+        status="unresolved", namespace="tenant_b"
+    )
+    assert [member["uuid"] for member in foreign[0]["members"]] == [
+        "123e4567-e89b-12d3-a456-426614174113"
+    ]
 
 
 @pytest.mark.asyncio

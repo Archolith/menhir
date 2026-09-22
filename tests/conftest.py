@@ -1388,6 +1388,7 @@ class StubMemoryGraphAdapter:
         remove_uuid: str | None = None,
         resolution_status: str = "resolved",
         allow_promoted_removal: bool = False,
+        namespace: str | None = None,
     ) -> dict[str, object]:
         _VALID_ACTIONS = {"keep_both", "replace", "discard_new"}
         if action not in _VALID_ACTIONS:
@@ -1489,10 +1490,20 @@ class StubMemoryGraphAdapter:
             requeued += 1
         return requeued
 
-    def bridge_edges_for_node(self, node_uuid: str) -> int:
+    def bridge_edges_for_node(
+        self,
+        node_uuid: str,
+        *,
+        namespace: str | None = None,
+    ) -> int:
         return 1
 
-    def bridge_edges_for_nodes(self, node_uuids: list[str]) -> int:
+    def bridge_edges_for_nodes(
+        self,
+        node_uuids: list[str],
+        *,
+        namespace: str | None = None,
+    ) -> int:
         return len(node_uuids)
 
     def count_pending_episodes(self, session_id: str | None = None) -> int:
