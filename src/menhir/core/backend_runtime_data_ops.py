@@ -652,6 +652,7 @@ class RuntimeProviderDataOpsMixin:
                 await self._off_loop(
                     self.built.graph_adapter.refresh_indexed_binding,
                     project_name,
+                    scan.scan_fingerprint,
                     scan.indexed_commit,
                     scan.indexed_repository,
                     scan.indexed_dirty,

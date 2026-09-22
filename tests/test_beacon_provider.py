@@ -81,9 +81,17 @@ def test_non_git_directory_has_no_binding(tmp_path: Path) -> None:
     assert read_git_binding(plain) is None
 
 
-def test_origin_credentials_are_never_recorded(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://user:secret@git.example.com/org/shop.git",
+        "https://git.example.com/org/shop.git?access_token=secret",
+        "https://git.example.com/org/shop.git#secret",
+    ],
+)
+def test_origin_credentials_are_never_recorded(tmp_path: Path, origin: str) -> None:
     root = _repo(tmp_path)
-    _git(root, "remote", "add", "origin", "https://user:secret@git.example.com/org/shop.git")
+    _git(root, "remote", "add", "origin", origin)
     binding = read_git_binding(root)
     assert binding is not None
     assert binding[1] == "https://git.example.com/org/shop.git"
@@ -101,6 +109,23 @@ def test_scan_carries_the_binding_across_the_upload_boundary(tmp_path: Path) -> 
         scan.indexed_repository,
         scan.indexed_dirty,
     )
+
+
+def test_an_edit_after_the_walk_is_still_caught(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The closing binding read comes after the scan's LAST file read (imports, symbols)."""
+    import menhir.infrastructure.project_scanner as scanner_module
+
+    root = _repo(tmp_path)
+    original = scanner_module._detect_cross_project_refs
+
+    def edit_then_detect(*args: Any, **kwargs: Any) -> Any:
+        (root / "src" / "app.py").write_text("print('late edit')\n", encoding="utf-8")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(scanner_module, "_detect_cross_project_refs", edit_then_detect)
+    assert ProjectScanner().scan(root, "shop").indexed_dirty is True
 
 
 def test_scan_of_a_dirty_checkout_is_marked_dirty(tmp_path: Path) -> None:
@@ -134,8 +159,9 @@ def test_watcher_refreshes_the_binding_when_files_are_unchanged(tmp_path: Path) 
             return fingerprint
 
         def refresh_indexed_binding(
-            self, name: str, commit: str, repository: str, dirty: bool
+            self, name: str, fp: str, commit: str, repository: str, dirty: bool
         ) -> bool:
+            assert fp == fingerprint  # the refresh is conditional on the fingerprint it read
             self.refreshed.append((name, commit, repository, dirty))
             return True
 
@@ -150,23 +176,55 @@ def test_watcher_refreshes_the_binding_when_files_are_unchanged(tmp_path: Path) 
     assert adapter.wrote is False
 
 
-def test_refresh_writes_nothing_when_the_binding_is_unchanged() -> None:
+class _ProjectNode:
+    """A stateful stand-in for the one project node, applying the refresh's WHERE/SET."""
+
+    def __init__(self, **props: Any) -> None:
+        self.props = props
+
+    def execute(self, query: str, params: dict[str, Any]) -> list[dict[str, int]]:
+        p = self.props
+        differs = (
+            p.get("indexed_commit", "") != params["commit"]
+            or p.get("indexed_repository", "") != params["repository"]
+            or p.get("indexed_dirty") is None
+            or p.get("indexed_dirty") != params["dirty"]
+        )
+        assert "n.scan_fingerprint = $fingerprint" in query
+        if p.get("scan_fingerprint") == params["fingerprint"] and differs:
+            p.update(
+                indexed_commit=params["commit"],
+                indexed_repository=params["repository"],
+                indexed_dirty=params["dirty"],
+            )
+            return [{"updated": 1}]
+        return [{"updated": 0}]
+
+
+def _writer(node: _ProjectNode) -> Any:
     from menhir.infrastructure.structure_queries import StructureGraphWriter
 
-    class Neo4j:
-        def __init__(self) -> None:
-            self.calls: list[tuple[str, dict[str, Any]]] = []
+    return StructureGraphWriter(node)  # type: ignore[arg-type]
 
-        def execute(self, query: str, params: dict[str, Any]) -> list[dict[str, int]]:
-            self.calls.append((query, params))
-            return [{"updated": 0}]
 
-    neo4j = Neo4j()
-    wrote = StructureGraphWriter(neo4j).refresh_indexed_binding("shop", COMMIT, "", False)  # type: ignore[arg-type]
-    assert wrote is False
-    query, params = neo4j.calls[0]
-    assert "WHERE coalesce(n.indexed_commit, '') <> $commit" in query
-    assert params == {"name": "shop", "commit": COMMIT, "repository": "", "dirty": False}
+def test_refresh_moves_the_binding_to_the_new_commit() -> None:
+    node = _ProjectNode(scan_fingerprint="fp", indexed_commit=COMMIT, indexed_dirty=False)
+    assert _writer(node).refresh_indexed_binding("shop", "fp", "b" * 40, "", False) is True
+    assert node.props["indexed_commit"] == "b" * 40
+
+
+def test_refresh_writes_nothing_when_the_binding_is_unchanged() -> None:
+    node = _ProjectNode(
+        scan_fingerprint="fp", indexed_commit=COMMIT, indexed_repository="", indexed_dirty=False
+    )
+    assert _writer(node).refresh_indexed_binding("shop", "fp", COMMIT, "", False) is False
+
+
+def test_a_stale_skip_cannot_rebind_another_scans_content() -> None:
+    """A full re-scan replaced the fingerprint after the skip read it: no write."""
+    node = _ProjectNode(scan_fingerprint="fp-new", indexed_commit="c" * 40, indexed_dirty=False)
+    assert _writer(node).refresh_indexed_binding("shop", "fp-old", "b" * 40, "", False) is False
+    assert node.props["indexed_commit"] == "c" * 40
 
 
 # ---------------------------------------------------------------------------
@@ -215,8 +273,12 @@ class Reader:
             return [{"path": "src/app.py", "role": "entrypoint", "description": ""}]
         raise AssertionError(query_type)
 
-    def query_documents(self, project: str, **_kwargs: Any) -> list[dict[str, str]]:
-        return [{"structure_path": "README.md", "title": "Shop", "doc_type": None}]
+    def query_documents(self, project: str, **_kwargs: Any) -> list[dict[str, Any]]:
+        return [
+            {"structure_path": "README.md", "title": "Shop", "doc_type": None},
+            # Written by ingest_document, outside any scan: never served under the binding.
+            {"path": "doc:notes", "title": "Notes", "source": "document-ingest"},
+        ]
 
 
 def test_builder_serves_bound_evidence_without_status() -> None:
@@ -232,7 +294,7 @@ def test_builder_serves_bound_evidence_without_status() -> None:
     assert "status" not in evidence["project"]
     assert "root" not in evidence["project"]
     assert evidence["project"]["description"] == "A small shop."
-    assert evidence["documents"][0]["path"] == "README.md"
+    assert [d["path"] for d in evidence["documents"]] == ["README.md"]
     assert evidence["files"][0]["path"] == "src/app.py"
 
 

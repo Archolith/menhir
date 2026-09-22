@@ -1340,9 +1340,11 @@ class MemoryGraphAdapter:
         return self._structure.get_beacon_evidence_guard_by_id(project_id)
 
     def refresh_indexed_binding(
-        self, project_name: str, commit: str, repository: str, dirty: bool
+        self, project_name: str, fingerprint: str, commit: str, repository: str, dirty: bool
     ) -> bool:
-        return self._structure.refresh_indexed_binding(project_name, commit, repository, dirty)
+        return self._structure.refresh_indexed_binding(
+            project_name, fingerprint, commit, repository, dirty
+        )
 
     def get_project_root_path(self, project_name: str) -> str | None:
         return self._structure.get_project_root_path(project_name)

@@ -836,6 +836,7 @@ async def refresh_structure_graphs(
                 await asyncio.to_thread(
                     refresh,
                     name,
+                    scan.scan_fingerprint,
                     scan.indexed_commit,
                     scan.indexed_repository,
                     scan.indexed_dirty,

@@ -378,14 +378,6 @@ class ProjectScanner:
             files_indexed=files_indexed,
             nested_repos=sorted(nested_repos, key=lambda r: r.rel_path),
         )
-        # Read the binding on both sides of the walk: a commit or edit landing mid-scan means
-        # the fingerprint and the commit may not describe the same content.
-        binding_after = _read_git_binding(root)
-        if binding_after is not None:
-            commit, repository, dirty = binding_after
-            result.indexed_commit = commit
-            result.indexed_repository = repository
-            result.indexed_dirty = dirty or binding_before != binding_after
 
         # Parse imports, test edges, endpoints, cross-project refs
         result.imports = _parse_imports(root, file_entries, stack)
@@ -425,6 +417,14 @@ class ProjectScanner:
                     )
                 )
 
+        # Read the binding on both sides of every filesystem read above: a commit or edit
+        # landing mid-scan means the fingerprint and the commit may not describe one content.
+        binding_after = _read_git_binding(root)
+        if binding_after is not None:
+            commit, repository, dirty = binding_after
+            result.indexed_commit = commit
+            result.indexed_repository = repository
+            result.indexed_dirty = dirty or binding_before != binding_after
         return result
 
 

@@ -345,6 +345,8 @@ def capture_evidence(
 #: The evidence version Menhir serves as a Beacon memory provider (plan Phase 3A).
 PROVIDER_EVIDENCE_VERSION = "1.1"
 PROVIDER_NAME = "menhir"
+#: `source` stamped by StructureGraphWriter.write_document (ingest_document).
+_DOCUMENT_INGEST_SOURCE = "document-ingest"
 
 
 class ProviderEvidenceReader(Protocol):
@@ -406,6 +408,10 @@ def build_provider_evidence(reader: ProviderEvidenceReader, project_id: str) -> 
 
     documents: list[dict[str, str]] = []
     for row in reader.query_documents(name):
+        # Only documents the bound scan produced: an ingest_document node is written outside
+        # any scan, so the indexed commit says nothing about it.
+        if row.get("source") == _DOCUMENT_INGEST_SOURCE:
+            continue
         path = str(row.get("structure_path") or row.get("path") or "")
         if not path:
             continue

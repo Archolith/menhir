@@ -49,11 +49,14 @@ def _git(root: Path, *args: str) -> str | None:
 
 
 def _without_credentials(url: str) -> str:
-    """Drop userinfo from a URL origin; scp-style ``git@host:path`` is left as is."""
+    """Drop userinfo, query and fragment from a URL origin (credentials travel in all three).
+
+    scp-style ``git@host:path`` has no scheme and is left as is.
+    """
     parts = urlsplit(url)
-    if not parts.scheme or "@" not in parts.netloc:
+    if not parts.scheme:
         return url
-    host = parts.netloc.rsplit("@", 1)[1]
+    host = parts.netloc.rsplit("@", 1)[-1]
     return urlunsplit((parts.scheme, host, parts.path, "", ""))
 
 

@@ -751,26 +751,36 @@ class StructureGraphWriter:
         }
 
     def refresh_indexed_binding(
-        self, project_name: str, commit: str, repository: str, dirty: bool
+        self, project_name: str, fingerprint: str, commit: str, repository: str, dirty: bool
     ) -> bool:
         """Update only the evidence binding when an unchanged scan was skipped.
 
         The fingerprint excludes ``.git``, so a new commit with identical files skips the full
         write; the indexed content is then valid for the new commit and only the binding moves.
-        Writes nothing when the stored binding already matches. Returns True when it wrote.
+        Writes nothing when the stored binding already matches, or when a full re-scan replaced
+        the fingerprint since the skip decision read it (compare-and-set on the fingerprint, so
+        a stale skip can never pair its binding with another scan's content). Returns True when
+        it wrote.
         """
         rows = self.neo4j.execute(
             """
             MATCH (n:Entity {structure_project: $name, structure_role: 'project'})
-            WHERE coalesce(n.indexed_commit, '') <> $commit
+            WHERE n.scan_fingerprint = $fingerprint
+              AND (coalesce(n.indexed_commit, '') <> $commit
                OR coalesce(n.indexed_repository, '') <> $repository
-               OR n.indexed_dirty IS NULL OR n.indexed_dirty <> $dirty
+               OR n.indexed_dirty IS NULL OR n.indexed_dirty <> $dirty)
             SET n.indexed_commit = $commit,
                 n.indexed_repository = $repository,
                 n.indexed_dirty = $dirty
             RETURN count(n) AS updated
             """,
-            {"name": project_name, "commit": commit, "repository": repository, "dirty": dirty},
+            {
+                "name": project_name,
+                "fingerprint": fingerprint,
+                "commit": commit,
+                "repository": repository,
+                "dirty": dirty,
+            },
         )
         return bool(rows and rows[0].get("updated"))
 
@@ -1183,7 +1193,7 @@ class StructureGraphWriter:
             WHERE {where_clause}
             RETURN n.name AS name, n.structure_path AS path,
                    n.content AS description, n.root_path AS root_path,
-                   n.document_type AS doc_type
+                   n.document_type AS doc_type, n.source AS source
             ORDER BY n.name
             """,
             params,
@@ -1192,7 +1202,7 @@ class StructureGraphWriter:
             {
                 "name": str(r["name"]),
                 "path": str(r["path"]),
-                **_set_properties(r, ("description", "root_path", "doc_type")),
+                **_set_properties(r, ("description", "root_path", "doc_type", "source")),
             }
             for r in rows
         ]
