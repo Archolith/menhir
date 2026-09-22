@@ -1095,7 +1095,81 @@ class TestTruncatedScanNeverPrunesFiles:
             for q, params in neo.calls
             if "structure_role: $role" in q and "DETACH DELETE" in q
         }
-        assert role_prunes == {"endpoint", "dependency"}
+        assert role_prunes == {"endpoint", "dependency", "document"}
+
+    def test_complete_scan_prunes_scanner_documents_but_never_ingested_ones(self):
+        """PR #125 F5: the `document` role the scanner writes for `.agent` orientation docs
+        was never pruned, so a deleted `.agent/architecture.md` lived in the graph forever."""
+        from menhir.infrastructure.project_scanner import FileEntry
+
+        writer, neo = self._writer()
+        scan = _make_scan(
+            files=[
+                FileEntry(rel_path="a.py", role="file", description=""),
+                FileEntry(rel_path=".agent/README.md", role="document", description=""),
+            ],
+            files_discovered=2,
+            files_eligible=2,
+            files_indexed=2,
+        )
+        assert scan.partial_index is False
+
+        writer.write_project(scan, session_id="s", user_id="u")
+
+        doc_prunes = [
+            (q, params)
+            for q, params in neo.calls
+            if "structure_role: $role" in q
+            and "DETACH DELETE" in q
+            and params.get("role") == "document"
+        ]
+        assert len(doc_prunes) >= 1
+        for q, params in doc_prunes:
+            assert params["keep"] == [".agent/README.md"]
+            # Only the scanner's own documents: ingest_document rows carry
+            # source='document-ingest' and must survive every rescan.
+            assert "n.source = $source" in q
+            assert params["source"] == "project-scan"
+
+    def test_complete_scan_with_no_documents_prunes_every_scanner_document(self):
+        """Zero must be expressible: a project that removed its whole `.agent` set."""
+        from menhir.infrastructure.project_scanner import FileEntry
+
+        writer, neo = self._writer()
+        scan = _make_scan(
+            files=[FileEntry(rel_path="a.py", role="file", description="")],
+            files_discovered=1,
+            files_eligible=1,
+            files_indexed=1,
+        )
+
+        writer.write_project(scan, session_id="s", user_id="u")
+
+        doc_prunes = [
+            params
+            for q, params in neo.calls
+            if "structure_role: $role" in q and params.get("role") == "document"
+        ]
+        assert doc_prunes and all(p["keep"] == [] for p in doc_prunes)
+
+    def test_partial_scan_never_prunes_scanner_documents(self):
+        from menhir.infrastructure.project_scanner import FileEntry
+
+        writer, neo = self._writer()
+        scan = _make_scan(
+            files=[FileEntry(rel_path=".agent/README.md", role="document", description="")],
+            files_discovered=100,
+            files_eligible=100,
+            files_indexed=1,
+        )
+        assert scan.partial_index is True
+
+        writer.write_project(scan, session_id="s", user_id="u")
+
+        assert not [
+            q for q, params in neo.calls
+            if "DETACH DELETE" in q and params.get("role") == "document"
+        ]
 
     def test_contains_repo_edges_are_pruned_to_the_current_scan(self):
         """The umbrella's own edge must go when a sub-repo leaves; the child project stays."""

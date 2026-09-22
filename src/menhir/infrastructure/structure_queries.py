@@ -319,6 +319,32 @@ class StructureGraphWriter:
                 scan.files_eligible,
             )
 
+        # 3c. Prune scanner-written `document` entities the scan no longer sees (PR #125 F5).
+        #
+        # The A0 orientation docs (`.agent/README.md`, `.agent/architecture.md`, ...) are
+        # written through the same batch MERGE as files but carry the `document` role, which
+        # the multi-role file prune above deliberately excludes: `ingest_document` writes the
+        # same role with absolute-path keys and `source = 'document-ingest'`, and those are
+        # not the scan's to delete. Restricting to `source = 'project-scan'` makes this the
+        # scanner pruning only what the scanner wrote. Same capacity rule: a truncated scan is
+        # not evidence of absence. An empty keep-list on a complete scan means the project has
+        # no orientation docs any more, and every stale one goes -- the single-role prune's
+        # documented semantics, shared with endpoints and dependencies.
+        if not scan.partial_index:
+            stale_docs = self._delete_stale_role_entities(
+                scan.name,
+                "document",
+                [f.rel_path for f in scan.files if f.role == "document"],
+                project_id,
+                source=STRUCTURE_SOURCE,
+            )
+            if stale_docs:
+                logger.info(
+                    "Pruned %d stale scanner document entities for project=%s",
+                    stale_docs,
+                    scan.name,
+                )
+
         # 4. Dependency entities (batched)
         dep_rows = [
             {
@@ -766,7 +792,7 @@ class StructureGraphWriter:
 
     def _delete_stale_role_entities(
         self, project_name: str, role: str, keep_paths: list[str],
-        project_id: str | None = None,
+        project_id: str | None = None, *, source: str | None = None,
     ) -> int:
         """Delete entities of *role* whose `structure_path` is absent from the current scan.
 
@@ -775,14 +801,20 @@ class StructureGraphWriter:
         complete scan, "found none" is a real answer and the only way to represent a project
         that stopped exposing anything. Guarding on emptiness instead made zero permanently
         unreachable -- see the archolith endpoint accumulation in `write_project` step 5b.
+
+        *source* narrows the prune to entities with that `source` label. The `document` role is
+        shared by scanner-written orientation docs (`project-scan`, repo-relative paths) and
+        `ingest_document` docs (`document-ingest`, absolute-path keys); only the former are the
+        scan's to prune.
         """
+        source_clause = " AND n.source = $source" if source is not None else ""
         deleted = 0
         for owner in self._owner_arms("n", project_id):
             rows = self.neo4j.execute(
                 f"""
                 MATCH (n:Entity {{structure_role: $role}})
                 WHERE {owner}
-                  AND NOT n.structure_path IN $keep
+                  AND NOT n.structure_path IN $keep{source_clause}
                 DETACH DELETE n
                 RETURN count(*) AS deleted
                 """,
@@ -790,6 +822,7 @@ class StructureGraphWriter:
                     **self._owner_params(project_name, project_id),
                     "role": role,
                     "keep": keep_paths,
+                    **({"source": source} if source is not None else {}),
                 },
             )
             deleted += int(rows[0].get("deleted", 0)) if rows else 0
