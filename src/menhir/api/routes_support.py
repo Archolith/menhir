@@ -18,7 +18,7 @@ from menhir.mcp.service_access import (
     get_request_session,
     get_request_tier,
 )
-from menhir.services.enrichment_steps import MAX_DIFF_CHARS
+from menhir.services.ingest_limits import MAX_DIFF_CHARS, MAX_EPISODE_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -318,13 +318,6 @@ class ContextResponse(BaseModel):
     memory_count: int
     truncated: bool
     preset: str
-
-
-#: Hard API bound on a single episode body. Matches the default enrichment preflight:
-#: estimate_episode_tokens() counts ~4 chars per token and
-#: graphiti_episode_max_estimated_tokens defaults to 12000, so anything accepted here is
-#: never rejected downstream on episode size alone.
-MAX_EPISODE_CHARS = 48_000
 
 
 class MemoryRequest(BaseModel):

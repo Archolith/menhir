@@ -369,33 +369,32 @@ class TestIngest:
         fake_backend.queue_episode.assert_awaited_once()
         assert fake_backend.queue_episode.await_args.kwargs["user_id"] == "remote-api"
 
-    def test_ingest_rejects_episode_over_hard_char_bound(self, client, fake_backend):
-        # 48_000 chars matches the default enrichment preflight (12000 tokens * ~4 chars).
-        resp = client.post("/api/memory", json={"episode": "x" * 48_001})
-        assert resp.status_code == 422
-        fake_backend.queue_episode.assert_not_awaited()
-
-    def test_ingest_accepts_episode_at_hard_char_bound(self, client, fake_backend):
-        resp = client.post("/api/memory", json={"episode": "x" * 48_000})
-        assert resp.status_code == 200
-        fake_backend.queue_episode.assert_awaited_once()
+    @pytest.mark.parametrize(
+        ("size", "expected_status"),
+        [(47_999, 200), (48_000, 200), (48_001, 422)],
+    )
+    def test_ingest_enforces_episode_hard_char_bound(
+        self, client, fake_backend, size, expected_status
+    ):
+        resp = client.post("/api/memory", json={"episode": "x" * size})
+        assert resp.status_code == expected_status
+        assert fake_backend.queue_episode.await_count == (1 if expected_status == 200 else 0)
 
     def test_ingest_rejects_empty_episode(self, client, fake_backend):
         resp = client.post("/api/memory", json={"episode": ""})
         assert resp.status_code == 422
         fake_backend.queue_episode.assert_not_awaited()
 
-    def test_ingest_rejects_diff_over_hard_char_bound(self, client, fake_backend):
-        # diff shares the episode bound's source: the compose path truncates at
-        # MAX_DIFF_CHARS (50_000), so the API refuses anything larger outright.
-        resp = client.post("/api/memory", json={"episode": "x", "diff": "d" * 50_001})
-        assert resp.status_code == 422
-        fake_backend.queue_episode.assert_not_awaited()
-
-    def test_ingest_accepts_diff_at_hard_char_bound(self, client, fake_backend):
-        resp = client.post("/api/memory", json={"episode": "x", "diff": "d" * 50_000})
-        assert resp.status_code == 200
-        fake_backend.queue_episode.assert_awaited_once()
+    @pytest.mark.parametrize(
+        ("size", "expected_status"),
+        [(49_999, 200), (50_000, 200), (50_001, 422)],
+    )
+    def test_ingest_enforces_diff_hard_char_bound(
+        self, client, fake_backend, size, expected_status
+    ):
+        resp = client.post("/api/memory", json={"episode": "x", "diff": "d" * size})
+        assert resp.status_code == expected_status
+        assert fake_backend.queue_episode.await_count == (1 if expected_status == 200 else 0)
 
     def test_ingest_with_explicit_session(self, client, fake_backend):
         resp = client.post(

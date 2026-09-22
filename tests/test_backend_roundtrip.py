@@ -25,6 +25,8 @@ from menhir.core.backend_impl import (
     drain_client_warnings,
 )
 from menhir.domain.recall import InvalidQueryPresetError
+from menhir.services.ingest_intake import IngestIntakeMixin
+from menhir.services.ingest_limits import MAX_DIFF_CHARS, MAX_EPISODE_CHARS
 
 
 def _build_fake_runtime_ctx(backend_overrides: dict | None = None):
@@ -155,6 +157,40 @@ def backend_client_like_uvicorn(server_app):
 
 
 class TestBackendRoundTrip:
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("text", "diff", "message"),
+        [
+            (
+                "x" * (MAX_EPISODE_CHARS + 1),
+                None,
+                f"Memory text exceeds the {MAX_EPISODE_CHARS}-character limit.",
+            ),
+            (
+                "x",
+                "d" * (MAX_DIFF_CHARS + 1),
+                f"Memory diff exceeds the {MAX_DIFF_CHARS}-character limit.",
+            ),
+        ],
+        ids=["text-over-limit", "diff-over-limit"],
+    )
+    async def test_queue_episode_bounds_survive_http_backend_round_trip(
+        self, backend_client_like_uvicorn, text, diff, message
+    ):
+        bc, ctx = backend_client_like_uvicorn
+        # The real intake mixin has no collaborators here. If validation is not the first
+        # operation, the request reaches missing graph/queue state and this test fails as a 500.
+        ctx.built.ingest_service = IngestIntakeMixin()
+
+        with pytest.raises(ValueError, match=f"^{message}$"):
+            await bc.queue_episode(
+                text,
+                user_id="bounds-user",
+                session_id="bounds-session",
+                diff=diff,
+            )
+
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_flag_memory(self, backend_client):

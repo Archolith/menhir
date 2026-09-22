@@ -1,3 +1,15 @@
+## 2026-09-22 - memory write bounds now apply before every supported ingest side effect
+
+The REST memory route already rejected episode text above 48,000 characters and diffs above
+50,000, but both MCP queued-write tools could bypass those request-model checks and persist an
+oversized pending episode before enrichment rejected or truncated it. The existing bounds now
+live at the shared ingest boundary and run before evidence reads, persistence, provenance,
+worker startup, or queue insertion. The MCP `add_memory` TEMPORAL direct-write branch applies
+the same text limit before its graph write. REST keeps its existing 422 behavior; backend and
+MCP callers receive the existing bounded validation-error path. Boundary tests cover limit - 1,
+limit, and limit + 1 for both fields and assert rejected writes leave no episode, queue, or
+evidence/provenance effects.
+
 ## 2026-09-22 - conflict resolution stays inside the caller's namespace
 
 `resolve_conflict` previously scoped its initial group lookup but dropped the namespace before
@@ -232,57 +244,3 @@ does not tell you.
 
 Still to come in P3: the subprocess wrapper this writer will run inside (decision 1), and the
 shadow scan.
-
-## 2026-09-17 - the extraction lease, written counterexamples first
-
-P3 decision 4: the lease binds snapshot, owner and generation, never a project name alone. The
-failures were written before the implementation -- the order that found both P2B bugs -- and it
-found one here too.
-
-- **The generation is the mechanism.** A claim is an exclusive file create (`O_CREAT|O_EXCL`) of
-  `<generation>.json`, so two workers that both read "the last lease expired" both compute the same
-  next generation and the filesystem lets exactly one win. A real compare-and-swap, because reading
-  state and then writing it is the check-then-act the P2B quota bug was.
-- **Supersession is judged before expiry.** The store is the authority on time, not the holder, so
-  a worker that was paused or has a wrong clock is refused for the right reason instead of
-  concluding from its own expiry that it is fine.
-- **A stale holder cannot release the current holder's lease.** The dangerous one: expiry is
-  obvious and everyone implements it, whereas a release keyed on the project name hands the next
-  holder's lease to whoever crashed last, mid-extraction.
-- **A crashed holder does not block the project.** An abandoned lease expires; there is no lock to
-  be left held. That is the argument against a lock file, asserted rather than argued.
-- **No process identity is recorded**, and a test asserts the field cannot be added quietly. A PID
-  is reused, and a PID in another namespace is a different process -- "the holder must be dead by
-  now" is an inference dressed as a fact.
-
-The bug the counterexamples found: `release` first deleted the lease file, so the store saw no
-history and the next claim reused generation 1. A generation that can be reused is not a version --
-a stale lease from the previous turn would match the new one on generation, leaving only the owner
-field between it and authority. Release now leaves an expired tombstone, keeping generations
-monotonic for the life of the project.
-
-## 2026-09-17 - Beacon generation from indexed project knowledge (#120)
-
-- `src/menhir/services/beacon_generation.py`: conservative source-grounded manifest
-  generation from StructureQueries evidence — intact-index/root-match/coverage/
-  fingerprint gating, indexed description and canonical documents only, no synthesized
-  purpose/commands/guardrails, fail closed on missing evidence.
-- `src/menhir/services/beacon_compat.py`: version-pinned subprocess boundary to a
-  separately installed Beacon 0.1.0 interpreter (framework dependency isolation); the
-  raw manifest is parsed and validated by Beacon's own loader/validator before any
-  bytes are published. No schema logic is copied into Menhir.
-- `src/menhir/services/beacon_publication.py`: staged, digest-gated publication to the
-  fixed sidecar `beacon.generated.yaml`; refuses overwriting initial outputs, foreign
-  or hand-edited artifacts, symlinked paths, and concurrent writers (advisory lock);
-  validates staged candidates before atomic replace; preserves mtime on zero diff.
-- `src/menhir/cli/beacon.py` (+ registration): `menhir beacon generate PROJECT --repo
-  --beacon-python [--refresh --expected-sha256]` local operator command.
-- `docs/agent-usage.md`: command, sidecar/refresh policy, dependency isolation, and
-  validation workflow.
-- `tests/test_beacon_publication.py` (7) and `tests/test_beacon_generation.py` (10):
-  publication safety, fail-closed evidence gating, real-Beacon round trips through the
-  actual parser/validator, `beacon validate` CLI acceptance, deterministic refresh with
-  zero semantic diff, and wrong-digest no-clobber. 17/17 pass locally; full offline and
-  graph-backed CI on the exact SHA remain release gates. Live-Neo4j ingest→generate E2E-6
-  and Beacon stdio tool-query acceptance are NOT RUN and stay with the MVP release lane.
-- Keep the newest ten dated entries per `.agent/maintenance.md`; older entries remain in Git history.

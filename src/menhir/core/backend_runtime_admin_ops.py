@@ -615,6 +615,9 @@ class RuntimeProviderAdminOpsMixin:
         namespace: str | None = None,
         turn_evidence_uuid: str | None = None,
     ) -> dict[str, Any]:
+        from menhir.services.ingest_limits import validate_memory_payload
+
+        validate_memory_payload(content)
         kwargs: dict[str, Any] = {
             "content": content,
             "target_date": target_date,

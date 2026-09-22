@@ -56,6 +56,7 @@ from menhir.services.enrichment_failures import (
     is_graphiti_output_parse_error,
 )
 from menhir.services.ingest_gate import IngestGate
+from menhir.services.ingest_limits import MAX_DIFF_CHARS
 from menhir.services.shadow_context_composition import (
     build_shadow_trace,
     run_shadow_composition_with_timeout,
@@ -175,12 +176,6 @@ def propagate_user_flag(
                 node_uuid,
                 episode_uuid,
             )
-
-
-# Maximum diff size (in characters) appended to episode bodies.
-# Larger diffs are truncated to avoid exceeding Neo4j string property limits
-# and inflating LLM token usage during enrichment.
-MAX_DIFF_CHARS = 50_000
 
 
 def compose_episode_body(claimed: dict[str, object]) -> str:
