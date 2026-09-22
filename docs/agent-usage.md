@@ -120,7 +120,7 @@ after it republishes even though the scan fingerprint is unchanged.
   `--expected-sha256` matching the existing generated file; foreign or hand-edited outputs are refused.
 - The Beacon package lives in a separate interpreter (`--beacon-python`) because Menhir and Beacon
   require incompatible `archolith-mcp-framework` versions. Install the same contract revision CI
-  uses: `pip install "git+https://github.com/Archolith/beacon.git@cccc50018ca188b0b2daebfea6347f02a5bba256"`.
+  uses: `pip install "git+https://github.com/Archolith/beacon.git@1cc3352b90004f3b76f1c5ed49ee4235c606a52f"`.
   That revision provides `beacon build --menhir-evidence`; the PyPI `0.1.0` package does not.
   Menhir never imports Beacon directly; every artifact is serialized and validated by Beacon's own
   parser and validator before publication.
