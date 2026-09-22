@@ -405,6 +405,37 @@ def test_refresh_after_head_move_changes_only_the_head_citation(
     assert all(old_head[:12] in a for a, _ in changed)
 
 
+def test_status_labelling_matches_the_documented_contract(
+    beacon_python: str, tmp_path: Path
+) -> None:
+    """PR #125 F8: docs/agent-usage.md says the project is `experimental` and that Beacon
+    hard-codes `current` on the structure concept, its sources, and canonical docs. Pin the
+    manifest to exactly that claim so the doc is corrected when Beacon changes."""
+    repo = _fixture_repo(tmp_path)
+    outcome = generate_beacon(
+        _reader(root=str(repo)), "fixture", repo, beacon_python=beacon_python
+    )
+    manifest = yaml.safe_load(outcome.output_path.read_text(encoding="utf-8"))
+
+    assert manifest["project"]["status"] == "experimental"
+    other_statuses = {
+        ("concept", c["status"]) for c in manifest["core_concepts"]
+    } | {
+        ("source", s["status"]) for c in manifest["core_concepts"] for s in c.get("sources", [])
+    } | {
+        ("canonical_doc", d["status"]) for d in manifest["canonical_docs"]
+    }
+    assert other_statuses, "the fixture must produce at least one concept and doc"
+    assert {status for _, status in other_statuses} == {"current"}, (
+        "Beacon now labels concepts/docs differently; update the labelling paragraph in "
+        f"docs/agent-usage.md to match: {sorted(other_statuses)}"
+    )
+    doc = (Path(__file__).resolve().parents[1] / "docs" / "agent-usage.md").read_text(
+        encoding="utf-8"
+    )
+    assert "hard-codes `status: current` on the structure concept" in " ".join(doc.split())
+
+
 def test_cli_reader_uses_canonical_structure_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
     """Exercise the real lazy adapter import without opening a database connection."""
     from menhir.cli.beacon import _reader as cli_reader

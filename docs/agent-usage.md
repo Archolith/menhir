@@ -103,11 +103,17 @@ guardrails, or concepts to fill schema fields. The description must come from
 `.agent/README.md` or `CLAUDE.md`: a repository with neither is refused (the `"<stack> project"`
 placeholder the overview shows for such projects is display text, not indexed purpose).
 
-Generated evidence is labeled `experimental`, not `current`. Menhir bookends its graph reads with
-the structure-writer revision and rechecks both graph and filesystem immediately before publication,
-but arbitrary repository editors do not share that lock. The artifact is therefore a verified
-point-in-time projection of its cited scan fingerprint, not a claim that the checkout remains current
-after publication.
+The evidence document Menhir hands to Beacon labels the project `experimental`, not `current`,
+and Beacon carries that through to the manifest's `project.status`. That is the only status the
+evidence contract lets Menhir set: Beacon's projection (at the pinned revision) hard-codes
+`status: current` on the structure concept, its sources, and every canonical doc. Read those as
+"current as of the cited scan fingerprint and git HEAD", not as a claim about the checkout now.
+Menhir bookends its graph reads with the structure-writer revision and rechecks the graph, the
+filesystem, and the repository's git HEAD/origin immediately before publication, but arbitrary
+repository editors do not share that lock. The artifact is therefore a verified point-in-time
+projection of its cited scan fingerprint and HEAD, not a claim that the checkout remains current
+after publication. An empty commit is a change: it moves the HEAD the manifest cites, so a refresh
+after it republishes even though the scan fingerprint is unchanged.
 
 - The output is always the sidecar `beacon.generated.yaml`, never a hand-authored `beacon.yaml`.
 - Initial generation refuses an existing output. Refresh requires `--refresh` plus
