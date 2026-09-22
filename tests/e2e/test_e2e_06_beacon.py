@@ -32,7 +32,7 @@ switch Menhir dumps an evidence document and Beacon's own pipeline builds the ma
 Install the exact revision CI pins (``.github/workflows/tests.yml``, the same one the
 online E2E-6 in ``tests/test_beacon_e2e6.py`` runs against)::
 
-    pip install "git+https://github.com/Archolith/beacon.git@447abd00a08b3082188da63f342ffdeff7a2dd5e"
+    pip install "git+https://github.com/Archolith/beacon.git@cccc50018ca188b0b2daebfea6347f02a5bba256"
 
 The PyPI ``archolith-beacon 0.1.0`` does NOT satisfy the contract (no ``build``), and the
 compat gate refuses it. Without a usable interpreter the Beacon-side criteria cannot run,

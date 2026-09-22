@@ -98,7 +98,7 @@ deleted; Menhir now supplies only what it owns and Beacon generates:
   Beacon-owned generation, validate/inspect, stdio overview/onboarding/concept queries,
   claims-to-evidence tracing, deterministic rebuild, changed-fact isolation, serves without
   Menhir) added. CI installs Beacon into an isolated venv pinned to the exact commit
-  `447abd00a08b3082188da63f342ffdeff7a2dd5e` (not a moving branch) and drops the
+  `cccc50018ca188b0b2daebfea6347f02a5bba256` (not a moving branch) and drops the
   version-equality assert.
 - Requires a Beacon whose CLI supports build+validate (PR Archolith/beacon#10, stacked on #9).
 

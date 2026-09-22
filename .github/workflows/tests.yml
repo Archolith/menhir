@@ -136,7 +136,7 @@ jobs:
       - name: Install isolated Beacon integration dependency
         run: |
           python -m venv "$RUNNER_TEMP/beacon-env"
-          "$RUNNER_TEMP/beacon-env/bin/python" -m pip install "git+https://github.com/Archolith/beacon.git@447abd00a08b3082188da63f342ffdeff7a2dd5e"
+          "$RUNNER_TEMP/beacon-env/bin/python" -m pip install "git+https://github.com/Archolith/beacon.git@cccc50018ca188b0b2daebfea6347f02a5bba256"
                   echo "MENHIR_TEST_BEACON_PYTHON=$RUNNER_TEMP/beacon-env/bin/python" >> "$GITHUB_ENV"
 
       - name: Run offline tests
@@ -193,7 +193,7 @@ jobs:
       - name: Install isolated Beacon integration dependency
         run: |
           python -m venv "$RUNNER_TEMP/beacon-env"
-          "$RUNNER_TEMP/beacon-env/bin/python" -m pip install "git+https://github.com/Archolith/beacon.git@447abd00a08b3082188da63f342ffdeff7a2dd5e"
+          "$RUNNER_TEMP/beacon-env/bin/python" -m pip install "git+https://github.com/Archolith/beacon.git@cccc50018ca188b0b2daebfea6347f02a5bba256"
                   echo "MENHIR_TEST_BEACON_PYTHON=$RUNNER_TEMP/beacon-env/bin/python" >> "$GITHUB_ENV"
 
       # A missing test Neo4j makes `test_neo4j_repo` SKIP, not fail -- so a broken service
