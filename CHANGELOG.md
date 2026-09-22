@@ -1,3 +1,24 @@
+## 2026-09-22 - Menhir serves Beacon memory evidence as a read-only provider
+
+Beacon now owns all beacon work and defines a backend-neutral memory-provider contract (Beacon
+`7a94fb0`). This is Menhir's side of it (plan Phase 3A); nothing here writes into a project.
+
+- The project scan records the git binding it describes: indexed commit, origin URL (credentials
+  stripped) and a dirty flag, read before and after the walk. It crosses the upload boundary and
+  is written in the same project-node write as the scan fingerprint.
+- Both fingerprint-skip paths (ingest, structure watcher) refresh only the binding when the files
+  are unchanged but the commit moved, and write nothing when it is already current.
+- `build_provider_evidence` reads the graph only and returns `beacon-memory-evidence-1.1`. It
+  refuses an unknown or ambiguous id, a partial or in-progress index, an index taken without git
+  or from a dirty checkout, and a re-index during the read. It sets no `project.status` (Menhir
+  does not judge maturity).
+- MCP tool `get_beacon_evidence(project_id)`: readonly tier, `menhir:read`, read-only, GLOBAL
+  like the structure graph it reads. Added to the agent allow-list and every production client;
+  `deploy/client-policy.production.json` digest is now
+  `04abc7bdf5d59d31e497dcefb9d431c06cf6cb0f34d395469391fabd77fbb0aa` -- a release must ship it.
+- `menhir beacon generate` is unchanged; Phase 3B removes it after Beacon's lane passes against
+  this provider.
+
 ## 2026-09-21 - a tracked-write receipt can be traced to its enriched episode (#92)
 
 Every write leaves two `:Episodic` nodes: Menhir's receipt (the `episode_id` a caller is handed;
@@ -249,32 +270,3 @@ monotonic for the life of the project.
 - `tests/test_mvp_tracked_write_contract.py`: 31 focused formatter and bound-endpoint
   regression cases. Live stdio E2E-2 and exact-commit repository CI remain release gates.
 - Keep the newest ten dated entries per `.agent/maintenance.md`; older entries remain in Git history.
-
-## 2026-09-16 - `menhir sync` actually uploads
-
-The command refused every unqualified run with "the upload path is not implemented yet, and its
-chunk and quota limits have to be measured first". Both halves of that became false earlier today,
-so the refusal was the stalest thing in the CLI.
-
-`menhir sync` now builds the plan, writes the deterministic bundle to a temporary file, and sends
-it through `SnapshotUploader`. `--check` is unchanged and still local-only.
-
-- **A refusal stops a send structurally.** The blocked check runs before the upload branch rather
-  than inside it, so while a secret-risk path stands there is no code path that reaches the
-  network. Asserted without `--check`, against a fully configured remote, by making any attempt to
-  construct an uploader fail the test outright -- every other refusal test runs in `--check`, where
-  nothing could be sent anyway and the assertion proves less than it appears to.
-- **Missing configuration names the setting**, not the symptom. No `MENHIR_BACKEND_URL` says so and
-  offers `--check`; a non-operator key says the tools are operator-tier, because the server's own
-  refusal talks about permissions and sends the caller looking for a broken server instead of a
-  wrong key.
-- The bundle goes to a temp file rather than memory: the pilot quota admits 64 MiB compressed and
-  the uploader streams a chunk at a time, so the client is the only place bundle size would matter.
-- A SEALED upload prints that **nothing was extracted or written to the graph**. A user who reads
-  "uploaded" and assumes it was indexed has been misled about what this phase does.
-- An upload that ends in any other state exits non-zero. Every chunk being accepted while the
-  upload is not whole is not a transport failure, and must not read like success -- the server
-  holds a partial upload until the inactivity TTL.
-
-Driven end to end by `tests/remote_sim`: the real command, reading the environment a user sets,
-against a server that cannot see the repository it is receiving.

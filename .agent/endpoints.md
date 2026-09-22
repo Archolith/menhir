@@ -252,6 +252,19 @@ Return a compact debug bundle for one episode by combining the live queue row wi
 - Use this when `watch_enrichment` is too coarse and you need to know whether a job was claimed, queued, failed, or released without scraping logs.
 - Recent failure rows may now include `graphiti_invalid_output` for malformed JSON/schema output and `graphiti_preflight_rejected` for oversized memories blocked before Graphiti was called.
 
+### `get_beacon_evidence`
+Concept id: `mcp.tool.get_beacon_evidence`
+Required tier: `readonly`
+
+Menhir as a Beacon memory provider. Returns a `beacon-memory-evidence-1.1` document for one
+indexed project, read from the structure graph only (no filesystem, no git, no writes). Its
+`binding` names the repository and the git commit the project was indexed from, so Beacon can
+refuse to publish it against any other checkout.
+- **`project_id`** (str): The project's stable Menhir id (`structure_project_id`).
+- Returns the evidence as JSON text. Errors (nothing served) when the id is unknown or
+  ambiguous, the index is partial or being written, the project was indexed without git or
+  from a checkout with uncommitted changes, or it was re-indexed during the read.
+
 ### `get_provenance`
 Concept id: `mcp.tool.get_provenance`
 Required tier: `readonly`

@@ -44,6 +44,7 @@ EXPECTED_TOOL_NAMES = frozenset({
     "get_episode_trace",
     "get_memory_stats",
     "get_provenance",
+    "get_beacon_evidence",
     "get_todo",
     "ingest_document",
     "ingest_project",

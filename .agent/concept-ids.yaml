@@ -227,6 +227,9 @@ mcp:
   mcp.tool.get_provenance:
     owner: endpoints.md
     meaning: Show a node's source episodes and evidence anchors
+  mcp.tool.get_beacon_evidence:
+    owner: endpoints.md
+    meaning: Serve Beacon memory evidence bound to the indexed commit
   mcp.tool.scan_for_conflicts:
     owner: endpoints.md
     meaning: Scan for contradiction candidates
