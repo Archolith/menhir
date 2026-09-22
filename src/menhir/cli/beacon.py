@@ -18,6 +18,16 @@ beacon_app = typer.Typer(
     no_args_is_help=True,
 )
 
+#: Exit code for an expected refusal: a stale or incomplete index ("re-ingest first"), a
+#: freshness or CAS refusal, an unusable --beacon-python, a Beacon build/validate failure, or
+#: a filesystem error while staging. These are operator outcomes, not crashes, so they print
+#: one line and exit with a stable code. Anything else still propagates as a traceback.
+EXIT_REFUSED = 2
+
+#: Beacon's stderr is embedded in BeaconCompatError messages verbatim; cap what one refusal
+#: line can carry so a chatty child cannot flood the terminal.
+_MAX_MESSAGE_CHARS = 4096
+
 
 def _reader() -> Any:
     """Connect to the configured graph and build the structure read surface."""
@@ -63,7 +73,8 @@ def generate(
     ] = "",
 ) -> None:
     """Generate or refresh beacon.generated.yaml from Menhir-held project knowledge."""
-    from menhir.services.beacon_generation import generate_beacon
+    from menhir.services.beacon_compat import BeaconCompatError
+    from menhir.services.beacon_generation import BeaconGenerationError, generate_beacon
 
     repo_root = Path(repo).resolve()
     reader, neo4j = _reader()
@@ -76,6 +87,12 @@ def generate(
             refresh=refresh,
             expected_sha256=expected_sha256 or None,
         )
+    except (BeaconGenerationError, BeaconCompatError, OSError) as exc:
+        message = " ".join(str(exc).split()) or exc.__class__.__name__
+        if len(message) > _MAX_MESSAGE_CHARS:
+            message = message[:_MAX_MESSAGE_CHARS] + " [truncated]"
+        typer.echo(f"beacon generate refused: {message}", err=True)
+        raise typer.Exit(EXIT_REFUSED) from None
     finally:
         neo4j.close()
 
