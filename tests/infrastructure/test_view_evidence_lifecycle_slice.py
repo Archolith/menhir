@@ -105,7 +105,8 @@ def test_other_automatic_lifecycle_mutations_apply_live_fact_retention_guard() -
     repo.promote_to_persistent(["evidence-1"])
     repo.set_demote_ttl(["evidence-1"], 7)
 
-    assert len(neo4j.calls) == 7
+    # TTL admission and mutation are one guarded statement, so there is no race window.
+    assert len(neo4j.calls) == 6
     for query, _params in neo4j.calls:
         _assert_live_fact_retention_guard(query)
 

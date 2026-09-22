@@ -99,6 +99,12 @@ async def test_process_pending_episode_extracts_and_stamps(
     assert len(adapter.stamp_calls) == 1
     assert adapter.stamp_calls[0]["session_id"] == "session-1"
     assert adapter.stamp_calls[0]["source"] == "unit-test"
+    assert adapter.retention_source_calls == [{
+        "source_episode_uuid": "pending-extract",
+        "entity_uuids": ["entity-1"],
+        "namespace": "default",
+    }]
+    assert adapter.flagged_nodes == []
     assert adapter.calls == 0
 
 
@@ -1260,6 +1266,11 @@ async def test_process_pending_episode_reconciles_existing_graphiti_completion_b
     assert adapter.pending_episode_rows[episode_uuid]["resolved_episode_uuid"] == "episode-existing-1"
     assert adapter.stamp_calls[-1]["node_uuids"] == ["episode-existing-1", "entity-1"]
     assert adapter.stamp_calls[-1]["edge_uuids"] == ["edge-1"]
+    assert adapter.retention_source_calls[-1] == {
+        "source_episode_uuid": "pending-reconcile",
+        "entity_uuids": ["entity-1"],
+        "namespace": "default",
+    }
 
 
 @pytest.mark.unit
@@ -2576,6 +2587,9 @@ async def test_maintenance_scheduler_reconciles_silent_completed_failed_episode(
             )
             return FakeStamp()
 
+        def record_retention_sources(self, **_: object) -> int:
+            return 1
+
         def mark_episode_ready(
             self,
             episode_uuid: str,
@@ -2808,6 +2822,9 @@ async def test_maintenance_scheduler_reconciliation_skips_when_row_is_no_longer_
                 }
             )
             return FakeStamp()
+
+        def record_retention_sources(self, **_: object) -> int:
+            return 1
 
         def mark_episode_ready(
             self,

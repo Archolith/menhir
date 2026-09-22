@@ -295,6 +295,7 @@ class StubMemoryGraphAdapter:
     calls: int = 0
     result: PhaseOneSchemaResult = field(default_factory=_default_schema_result)
     stamp_calls: list[dict[str, object]] = field(default_factory=list)
+    retention_source_calls: list[dict[str, object]] = field(default_factory=list)
     stamp_result: PolicyStampResult = field(
         default_factory=lambda: PolicyStampResult(nodes_touched=2, edges_touched=2)
     )
@@ -357,6 +358,22 @@ class StubMemoryGraphAdapter:
             }
         )
         return self.stamp_result
+
+    def record_retention_sources(
+        self,
+        *,
+        source_episode_uuid: str,
+        entity_uuids: list[str],
+        namespace: str | None = None,
+    ) -> int:
+        self.retention_source_calls.append(
+            {
+                "source_episode_uuid": source_episode_uuid,
+                "entity_uuids": list(entity_uuids),
+                "namespace": namespace,
+            }
+        )
+        return len(set(entity_uuids))
 
     def scalar_view_has_user_foundation(self, *, view_uuid: str, namespace=None) -> bool:
         # G14 slice 3: default = no declarant-user foundation reachable (the governance-safe advisory
@@ -1236,7 +1253,11 @@ class StubMemoryGraphAdapter:
         }
 
     def delete_entities_returning_uuids(
-        self, node_uuids: list[str], *, require_scope: str | None = None
+        self,
+        node_uuids: list[str],
+        *,
+        require_scope: str | None = None,
+        protect_retention: bool = False,
     ) -> list[str]:
         """Return the uuids ACTUALLY deleted, mirroring the real scope filter.
 

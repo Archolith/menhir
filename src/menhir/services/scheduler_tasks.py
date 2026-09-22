@@ -25,7 +25,7 @@ from menhir.services.enrichment_failures import (
     is_budget_refusal,
     is_session_window_refusal,
 )
-from menhir.services.enrichment_steps import propagate_user_flag
+from menhir.services.enrichment_steps import record_retention_sources
 from menhir.services.event_consolidation import (
     EventConsolidationConfig,
     run_event_consolidation,
@@ -278,12 +278,12 @@ async def retry_process_candidate(
                 namespace=str(row.get("namespace") or "default"),
                 **stamp_kwargs,
             )
-            if bool(row.get("user_flagged", False)):
-                propagate_user_flag(
-                    graph_adapter,
-                    entity_uuids,
-                    episode_uuid=episode_uuid,
-                )
+            record_retention_sources(
+                graph_adapter,
+                entity_uuids,
+                source_episode_uuid=episode_uuid,
+                namespace=str(row.get("namespace") or "default"),
+            )
             if await asyncio.to_thread(
                 graph_adapter.mark_episode_ready,
                 episode_uuid,

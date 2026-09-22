@@ -65,6 +65,15 @@ class SchedulerGraphAdapter(Protocol):
     ) -> PolicyStampResult:
         ...
 
+    def record_retention_sources(
+        self,
+        *,
+        source_episode_uuid: str,
+        entity_uuids: list[str],
+        namespace: str | None = None,
+    ) -> int:
+        ...
+
     def mark_episode_ready(
         self,
         episode_uuid: str,
