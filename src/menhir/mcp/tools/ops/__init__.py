@@ -30,6 +30,7 @@ from .supersede_artifact import SupersedeArtifactTool
 from .relocate_artifact_source import RelocateArtifactSourceTool
 from .transition_artifact import TransitionArtifactTool
 from .get_memory_stats import GetMemoryStatsTool
+from .get_beacon_evidence import GetBeaconEvidenceTool
 from .get_provenance import GetProvenanceTool
 from .list_enrichment_queue import ListEnrichmentQueueTool
 from .list_todos import ListTodosTool
@@ -50,6 +51,7 @@ OPS_TOOLS = [
     ForceReleaseEnrichmentLeaseTool,
     GetEpisodeTraceTool,
     GetProvenanceTool,
+    GetBeaconEvidenceTool,
     ForceSchedulerTakeoverTool,
     PauseSchedulerTool,
     ResumeSchedulerTool,

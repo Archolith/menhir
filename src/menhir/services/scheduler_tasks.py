@@ -830,6 +830,16 @@ async def refresh_structure_graphs(
 
         stored_fp = await asyncio.to_thread(graph_adapter.get_scan_fingerprint, name)
         if stored_fp and stored_fp == scan.scan_fingerprint:
+            # Same files, possibly a new commit: keep the evidence binding current.
+            refresh = getattr(graph_adapter, "refresh_indexed_binding", None)
+            if refresh is not None:
+                await asyncio.to_thread(
+                    refresh,
+                    name,
+                    scan.indexed_commit,
+                    scan.indexed_repository,
+                    scan.indexed_dirty,
+                )
             skipped += 1
             continue
 

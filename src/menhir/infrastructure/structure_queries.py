@@ -220,6 +220,11 @@ class StructureGraphWriter:
                 "files_eligible": scan.files_eligible,
                 "files_indexed": scan.files_indexed,
                 "partial_index": scan.partial_index,
+                # Beacon evidence binding: written with the fingerprint so the two always
+                # describe the same scan (see refresh_indexed_binding for the skip paths).
+                "indexed_commit": getattr(scan, "indexed_commit", "") or "",
+                "indexed_repository": getattr(scan, "indexed_repository", "") or "",
+                "indexed_dirty": bool(getattr(scan, "indexed_dirty", False)),
             },
         )
         entity_count += 1
@@ -693,6 +698,81 @@ class StructureGraphWriter:
             "active_writers": tuple(str(item) for item in row.get("active_writers") or []),
             "writer_revision": str(row.get("writer_revision") or ""),
         }
+
+    def get_beacon_evidence_guard_by_id(self, project_id: str) -> dict[str, Any]:
+        """The evidence fence for one project, looked up by its stable identity.
+
+        Same fields as :meth:`get_beacon_evidence_guard` plus the project name and the stored
+        evidence binding. Refuses to guess when the id matches more than one project node.
+        """
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Entity {structure_project_id: $project_id, structure_role: 'project'})
+            OPTIONAL MATCH (p:ProjectIdentity {project_id: n.structure_project_id})
+            RETURN n.structure_project AS name,
+                   n.root_path AS root_path,
+                   n.scan_fingerprint AS scan_fingerprint,
+                   n.files_discovered AS files_discovered,
+                   n.files_eligible AS files_eligible,
+                   n.files_indexed AS files_indexed,
+                   n.partial_index AS partial_index,
+                   n.indexed_commit AS indexed_commit,
+                   n.indexed_repository AS indexed_repository,
+                   n.indexed_dirty AS indexed_dirty,
+                   p IS NOT NULL AS identity_known,
+                   coalesce(p.active_writers, []) AS active_writers,
+                   coalesce(p.last_structure_writer_id, '') AS writer_revision
+            LIMIT 2
+            """,
+            {"project_id": project_id},
+        )
+        if not rows:
+            return {"project_known": False}
+        if len(rows) > 1:
+            return {"project_known": True, "ambiguous": True}
+        row = rows[0]
+        return {
+            "project_known": True,
+            "ambiguous": False,
+            "name": str(row.get("name") or ""),
+            "root_path": str(row.get("root_path") or ""),
+            "scan_fingerprint": str(row.get("scan_fingerprint") or ""),
+            "files_discovered": row.get("files_discovered"),
+            "files_eligible": row.get("files_eligible"),
+            "files_indexed": row.get("files_indexed"),
+            "partial_index": bool(row.get("partial_index")),
+            "indexed_commit": str(row.get("indexed_commit") or ""),
+            "indexed_repository": str(row.get("indexed_repository") or ""),
+            # None = indexed before the binding was recorded; treated as unknown, not clean.
+            "indexed_dirty": row.get("indexed_dirty"),
+            "identity_known": bool(row.get("identity_known")),
+            "active_writers": tuple(str(item) for item in row.get("active_writers") or []),
+            "writer_revision": str(row.get("writer_revision") or ""),
+        }
+
+    def refresh_indexed_binding(
+        self, project_name: str, commit: str, repository: str, dirty: bool
+    ) -> bool:
+        """Update only the evidence binding when an unchanged scan was skipped.
+
+        The fingerprint excludes ``.git``, so a new commit with identical files skips the full
+        write; the indexed content is then valid for the new commit and only the binding moves.
+        Writes nothing when the stored binding already matches. Returns True when it wrote.
+        """
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Entity {structure_project: $name, structure_role: 'project'})
+            WHERE coalesce(n.indexed_commit, '') <> $commit
+               OR coalesce(n.indexed_repository, '') <> $repository
+               OR n.indexed_dirty IS NULL OR n.indexed_dirty <> $dirty
+            SET n.indexed_commit = $commit,
+                n.indexed_repository = $repository,
+                n.indexed_dirty = $dirty
+            RETURN count(n) AS updated
+            """,
+            {"name": project_name, "commit": commit, "repository": repository, "dirty": dirty},
+        )
+        return bool(rows and rows[0].get("updated"))
 
     def _owner_arms(
         self, alias: str, project_id: str | None
