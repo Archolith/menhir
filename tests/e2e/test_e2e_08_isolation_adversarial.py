@@ -602,20 +602,131 @@ async def test_e2e_08_malformed_artifact_metadata(
     lane_evidence.close(status="PASS")
 
 
-async def test_e2e_08_deferred_criteria(lane_evidence: LaneEvidence, feature_combo: FeatureCombo) -> None:
-    """The E2E-8 criterion whose prerequisite belongs to another lane.
+async def test_e2e_08_malformed_hand_authored_beacon_is_not_clobbered(
+    e2e_config: E2EConfig,
+    e2e_installed,
+    running_stack,
+    feature_combo: FeatureCombo,
+    feature_env: dict[str, str],
+    lane_evidence: LaneEvidence,
+) -> None:
+    """A malformed hand-authored ``beacon.yaml`` must neither block generation nor be touched.
 
-    Kept as a declared-pending test rather than deleted: Gate C counts checklist items,
-    and a criterion that stops appearing in the evidence tree is indistinguishable from
-    one that was met.
+    E2E-6 proves the sidecar policy against a VALID hand-authored manifest. The adversarial
+    question is what happens when the file a careless implementation would overwrite is
+    garbage: an implementation that "helpfully" repairs or replaces it, or one that reads it
+    and aborts, both fail here. Generation must go to the sidecar, the garbage must be
+    byte-identical afterwards, and Beacon's own tooling must accept the sidecar while
+    (correctly) refusing the garbage -- proving the two files were never conflated.
     """
 
-    declare_pending(
-        lane_evidence,
-        DEFERRED_CRITERIA,
-        note=(
-            "invalid_beacon_input_does_not_clobber_manifest needs the Beacon interpreter "
-            "E2E-6 is blocked on (MENHIR_E2E_BEACON_PYTHON). It is the adversarial "
-            "variant of that lane's happy path and should be written with it, not before."
-        ),
+    import hashlib
+    import os
+    import subprocess
+    from pathlib import Path
+
+    raw = os.getenv("MENHIR_E2E_BEACON_PYTHON", "").strip()
+    beacon_python = Path(raw) if raw and Path(raw).exists() else None
+    if beacon_python is None:
+        declare_pending(
+            lane_evidence,
+            DEFERRED_CRITERIA,
+            note="MENHIR_E2E_BEACON_PYTHON is unset or missing; the Beacon-side half cannot run.",
+        )
+
+    lane_evidence.record_stack(features=feature_combo.label, beacon_python=str(beacon_python))
+    fixture = build_fixture_repo(e2e_config.fixtures_dir / "shop-beacon-malformed")
+    repo = Path(fixture.path)
+    # `.agent/README.md`: the one file that is both a canonical document for the
+    # scanner (Beacon v2 A0) and the grounded description source the generator needs.
+    (repo / ".agent").mkdir(exist_ok=True)
+    (repo / ".agent" / "README.md").write_text(
+        "# shop\n\nThe shop service answers order lookups through one HTTP endpoint.\n",
+        encoding="utf-8",
     )
+    malformed = repo / "beacon.yaml"
+    malformed_bytes = b"beacon_version: [unclosed\nproject:\n  name: \x00\n\t- not: yaml\n"
+    malformed.write_bytes(malformed_bytes)
+    malformed_digest = hashlib.sha256(malformed_bytes).hexdigest()
+    sidecar = repo / "beacon.generated.yaml"
+
+    suffix = uuid4().hex[:8]
+    project = f"shop-malformed-{suffix}"
+    namespace = f"e2e8m-{suffix}"
+    child_env = {**feature_env, "MENHIR_NAMESPACE": namespace}
+
+    async with stdio_session(
+        e2e_config, e2e_installed.venv_python, lane_evidence, feature_env=child_env
+    ) as client:
+        ingest = _text(
+            await client.call_tool(
+                "call_tool",
+                {
+                    "name": "ingest_project",
+                    "arguments": {
+                        "path": str(repo),
+                        "name": project,
+                        "namespace": namespace,
+                        "identity_action": "new",
+                    },
+                },
+            )
+        )
+        assert ingest.startswith(f"Scanned {project}"), ingest[:600]
+        await wait_for_project_indexed(client, project, symbol_path="src/shop/api.py")
+
+    generated = run_menhir_cli(
+        e2e_config,
+        "beacon",
+        "generate",
+        project,
+        "--repo",
+        str(repo),
+        "--beacon-python",
+        str(beacon_python),
+        feature_env=child_env,
+    )
+    lane_evidence.attach("generate.txt", generated.stdout + "\n--- stderr ---\n" + generated.stderr)
+    generated_ok = generated.returncode == 0 and sidecar.is_file()
+    untouched = malformed.read_bytes() == malformed_bytes
+
+    def _beacon(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # nosec B603 - fixed argv, harness-owned interpreter
+            [str(beacon_python), "-m", "beacon", *args],
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+
+    sidecar_valid = _beacon("validate", str(sidecar)) if generated_ok else None
+    garbage_check = _beacon("validate", str(malformed))
+    lane_evidence.attach(
+        "validate.txt",
+        f"--- sidecar ---\n{(sidecar_valid.stdout + sidecar_valid.stderr) if sidecar_valid else '(not generated)'}"
+        f"\n--- malformed ---\n{garbage_check.stdout}{garbage_check.stderr}",
+    )
+    sidecar_accepted = bool(sidecar_valid) and sidecar_valid.returncode == 0 and "0 errors" in sidecar_valid.stdout
+    garbage_refused = garbage_check.returncode != 0
+
+    passed = generated_ok and untouched and sidecar_accepted and garbage_refused
+    lane_evidence.record(
+        "invalid_beacon_input_does_not_clobber_manifest",
+        passed=passed,
+        detail={
+            "generate_exit": generated.returncode,
+            "sidecar_written": sidecar.is_file(),
+            "malformed_untouched": untouched,
+            "malformed_digest": malformed_digest,
+            "sidecar_validate_exit": sidecar_valid.returncode if sidecar_valid else None,
+            "malformed_validate_exit": garbage_check.returncode,
+        },
+    )
+    assert generated_ok, (
+        f"generation was blocked by a malformed hand-authored manifest it must never read "
+        f"(exit {generated.returncode}): {generated.stderr[:600]}"
+    )
+    assert untouched, "the malformed hand-authored beacon.yaml was modified"
+    assert sidecar_accepted, (sidecar_valid.stdout + sidecar_valid.stderr)[:600]
+    assert garbage_refused, "beacon validate accepted the malformed manifest"
+    lane_evidence.close(status="PASS")
