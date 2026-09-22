@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from menhir.domain.namespace import stamped_namespace
+from menhir.domain.namespace import stamped_namespace, tenant_scope_cypher, tenant_scope_params
+from menhir.domain.retention import RETENTION_SOURCE_RELATIONSHIP, same_tenant_cypher
+from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.infrastructure.cypher import Cypher
 from menhir.infrastructure.schema import EDGE_LABELS
 
@@ -27,6 +29,43 @@ class EpisodeStampingRepository:
     """Post-ingest stamping and live processing metadata updates."""
 
     neo4j: Any
+
+    def record_retention_sources(
+        self,
+        *,
+        source_episode_uuid: str,
+        entity_uuids: list[str],
+        namespace: str | None = None,
+    ) -> int:
+        """Idempotently record which source episode produced each semantic entity.
+
+        The relationship records provenance, not a copied protection bit. Protection is derived
+        later from the source episode's current ``user_flagged`` value. Both endpoints must be in
+        the requested tenant and in the same canonical tenant; missing endpoints create nothing.
+        """
+
+        unique_entity_uuids = [uuid for uuid in dict.fromkeys(entity_uuids) if uuid]
+        if not source_episode_uuid or not unique_entity_uuids:
+            return 0
+        rows = self.neo4j.execute(
+            f"""
+            MATCH (source:Episodic {{uuid: $source_episode_uuid}})
+            WHERE {tenant_scope_cypher("source")}
+            UNWIND $entity_uuids AS entity_uuid
+            MATCH (entity:Entity {{uuid: entity_uuid}})
+            WHERE {tenant_scope_cypher("entity")}
+              AND {same_tenant_cypher("source", "entity")}
+              AND {non_structural_memory_cypher("entity")}
+            MERGE (source)-[retention:{RETENTION_SOURCE_RELATIONSHIP}]->(entity)
+            RETURN count(retention) AS linked
+            """,
+            params={
+                "source_episode_uuid": source_episode_uuid,
+                "entity_uuids": unique_entity_uuids,
+                **tenant_scope_params(namespace),
+            },
+        )
+        return int(rows[0].get("linked", 0)) if rows else 0
 
     def stamp_ingest_metadata(
         self,

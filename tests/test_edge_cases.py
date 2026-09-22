@@ -720,68 +720,48 @@ class TestEpisodePreflight:
         assert result is None
 
 
-class TestPropagateUserFlag:
-    """propagate_user_flag is the single source of truth for flag propagation:
-    it flags semantic nodes and skips structural ones without aborting the caller
-    (regression: the guard was duplicated across three sites and one dedup-onto-
-    structural node used to abort a flagged episode's enrichment)."""
+class TestRecordRetentionSources:
+    """Source provenance is recorded without copying mutable flag state."""
 
-    def test_skips_structural_nodes_and_flags_the_rest(self):
-        from menhir.services.enrichment_steps import propagate_user_flag
+    def test_delegates_one_bounded_provenance_write(self):
+        from menhir.services.enrichment_steps import record_retention_sources
 
-        flagged: list[str] = []
+        calls: list[dict[str, object]] = []
 
         class FakeAdapter:
-            def flag_memory(self, uuid: str) -> bool:
-                if uuid == "structural":
-                    raise ValueError(
-                        "Cannot flag structural graph node (role=directory). "
-                        "Flag semantic memories only."
-                    )
-                flagged.append(uuid)
-                return True
+            def record_retention_sources(self, **kwargs: object) -> int:
+                calls.append(dict(kwargs))
+                return 2
 
-        # Must not raise even though the middle node is structural.
-        propagate_user_flag(
-            FakeAdapter(), ["sem-1", "structural", "sem-2"], episode_uuid="ep-1"
+        record_retention_sources(
+            FakeAdapter(), ["sem-1", "sem-2"],
+            source_episode_uuid="resolved-ep-1", namespace="project-a",
         )
-        assert flagged == ["sem-1", "sem-2"]
+        assert calls == [{
+            "source_episode_uuid": "resolved-ep-1",
+            "entity_uuids": ["sem-1", "sem-2"],
+            "namespace": "project-a",
+        }]
 
     def test_empty_list_is_noop(self):
-        from menhir.services.enrichment_steps import propagate_user_flag
+        from menhir.services.enrichment_steps import record_retention_sources
 
         class FakeAdapter:
-            def flag_memory(self, uuid: str) -> bool:  # pragma: no cover
-                raise AssertionError("flag_memory should not be called for empty input")
+            def record_retention_sources(self, **kwargs: object) -> int:
+                assert kwargs["entity_uuids"] == []
+                return 0
 
-        propagate_user_flag(FakeAdapter(), [], episode_uuid="ep-1")
+        record_retention_sources(
+            FakeAdapter(), [], source_episode_uuid="ep-1", namespace="default"
+        )
 
     def test_never_forwards_bootstrap_scope(self):
-        """Retention propagates; startup selection does not.
-
-        A flagged episode's bootstrap_scope must not reach its extracted entities --
-        the bootstrap read requires user_flagged AND an allowed scope, so forwarding
-        it put shared hub entities into startup context.
-        """
+        """Source provenance has no bootstrap-scope channel."""
         import inspect
 
-        from menhir.services.enrichment_steps import propagate_user_flag
+        from menhir.services.enrichment_steps import record_retention_sources
 
-        calls: list[tuple[str, dict]] = []
-
-        class FakeAdapter:
-            def flag_memory(self, uuid: str, **kwargs: object) -> bool:
-                calls.append((uuid, dict(kwargs)))
-                return True
-
-        propagate_user_flag(FakeAdapter(), ["sem-1", "sem-2"], episode_uuid="ep-1")
-
-        assert [uuid for uuid, _ in calls] == ["sem-1", "sem-2"]
-        assert all(kwargs == {} for _, kwargs in calls), (
-            f"propagation passed kwargs to flag_memory: {calls}"
-        )
-        # The parameter is gone, so a caller cannot reintroduce forwarding silently.
-        assert "bootstrap_scope" not in inspect.signature(propagate_user_flag).parameters
+        assert "bootstrap_scope" not in inspect.signature(record_retention_sources).parameters
 
 
 # ===========================================================================

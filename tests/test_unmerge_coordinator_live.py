@@ -94,6 +94,8 @@ def pair(live_repo):
         CREATE (epa:Episodic {uuid:$ep_a, name:'absorbed episode', test_tag:$t})
         CREATE (eps)-[:MENTIONS]->(s)
         CREATE (epa)-[:MENTIONS {conf:0.7}]->(a)
+        CREATE (eps)-[:RETENTION_SOURCE]->(s)
+        CREATE (epa)-[:RETENTION_SOURCE]->(a)
         CREATE (a)-[:RELATES_TO {weight:0.9, kind:'first'}]->(p)
         CREATE (a)-[:RELATES_TO {weight:0.3, kind:'parallel'}]->(p)
         CREATE (p)-[:RELATES_TO {weight:0.5, kind:'incoming'}]->(a)
@@ -134,6 +136,14 @@ def test_merge_then_unmerge_restores_exactly(merger, unmerger, live_repo, pair):
     merged = merger.merge(survivor_uuid=pair["s"], absorbed_uuid=pair["a"], similarity=0.97)
     assert merged["merged"] == 1
     merge_op = merged["op_id"]
+    transferred = live_repo.execute(
+        """
+        MATCH (source:Episodic)-[:RETENTION_SOURCE]->(s:Entity {uuid:$survivor})
+        RETURN collect(source.uuid) AS sources
+        """,
+        params={"survivor": pair["s"]},
+    )[0]["sources"]
+    assert set(transferred) == {pair["ep_s"], pair["ep_a"]}
 
     res = unmerger.unmerge(merge_op)
     assert res["restored"] == 1, res
@@ -294,7 +304,7 @@ def test_dry_run_reports_without_mutating(merger, unmerger, live_repo, pair):
 
     assert res["restored"] == 0 and res["reason"] == "DRY_RUN"
     assert res["would_restore"]["out_relationships"] == 2  # two parallel RELATES_TO
-    assert res["would_restore"]["in_relationships"] == 2    # peer -> a, and episode MENTIONS -> a
+    assert res["would_restore"]["in_relationships"] == 3    # peer, MENTIONS, RETENTION_SOURCE
     assert live_repo.execute(
         "MATCH (n:Entity {uuid:$u}) RETURN count(n) AS c", params={"u": pair["a"]}
     )[0]["c"] == 0, "a dry run must not restore anything"

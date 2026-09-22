@@ -686,6 +686,19 @@ class MemoryGraphAdapter:
             belief_branch=belief_branch,
         )
 
+    def record_retention_sources(
+        self,
+        *,
+        source_episode_uuid: str,
+        entity_uuids: list[str],
+        namespace: str | None = None,
+    ) -> int:
+        return self._episodes.record_retention_sources(
+            source_episode_uuid=source_episode_uuid,
+            entity_uuids=entity_uuids,
+            namespace=namespace,
+        )
+
     def count_namespace(self, group_id: str, *, namespace: str | None = None) -> int:
         """Count nodes in the given graphiti group partition, without deleting anything.
 
@@ -2254,10 +2267,16 @@ class MemoryGraphAdapter:
         return self._correlation.capture_node_state(uuid)
 
     def delete_entities_returning_uuids(
-        self, node_uuids: list[str], *, require_scope: str | None = None
+        self,
+        node_uuids: list[str],
+        *,
+        require_scope: str | None = None,
+        protect_retention: bool = False,
     ) -> list[str]:
         return self._consolidation.delete_entities_returning_uuids(
-            node_uuids, require_scope=require_scope
+            node_uuids,
+            require_scope=require_scope,
+            protect_retention=protect_retention,
         )
 
     def newly_unreferenced_evidence(self, node_uuids: list[str]) -> list[str]:

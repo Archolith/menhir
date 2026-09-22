@@ -193,6 +193,9 @@ class UnmergeCoordinator:
                     "out_relationships": len(plan["out_rels"]),
                     "in_relationships": len(plan["in_rels"]),
                     "rebound_episodes_to_remove": plan["rebound_episodes"],
+                    "rebound_retention_sources_to_remove": plan[
+                        "rebound_retention_sources"
+                    ],
                     "survivor_properties_restored": plan["survivor_properties"],
                 },
             }
@@ -253,6 +256,21 @@ class UnmergeCoordinator:
             if r["type"] == "MENTIONS" and r["direction"] == "in" and r.get("peer_uuid")
         }
         rebound = sorted(absorbed_eps - survivor_eps)
+        absorbed_retention_sources = {
+            r["peer_uuid"] for r in rels
+            if r["type"] == "RETENTION_SOURCE"
+            and r["direction"] == "in"
+            and r.get("peer_uuid")
+        }
+        survivor_retention_sources = {
+            r["peer_uuid"] for r in survivor["relationships"]
+            if r["type"] == "RETENTION_SOURCE"
+            and r["direction"] == "in"
+            and r.get("peer_uuid")
+        }
+        rebound_retention_sources = sorted(
+            absorbed_retention_sources - survivor_retention_sources
+        )
 
         return {
             "absorbed_labels": absorbed["labels"],
@@ -261,6 +279,7 @@ class UnmergeCoordinator:
             "in_rels": in_rels,
             "survivor_properties": md.restorable_survivor_properties(survivor["properties"]),
             "rebound_episodes": rebound,
+            "rebound_retention_sources": rebound_retention_sources,
         }
 
     def _classify_replay(self, request: dict[str, Any]) -> tuple[str, dict[str, Any]]:

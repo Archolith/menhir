@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from menhir.domain.recall import adjacency_edge_pattern
+from menhir.domain.retention import destructive_retention_allowed_cypher
 from menhir.infrastructure.cypher import Cypher, non_derived_view_cypher
 from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S, Neo4jRepository
 
@@ -38,6 +39,15 @@ def automatic_lifecycle_protection_cypher(variable: str = "n") -> str:
         "WHERE coalesce(retaining_view.is_view, false) "
         "AND coalesce(retaining_view.view_current, retaining_view.qs_current, true) "
         "AND NOT coalesce(retaining_view.retired, false) }"
+    )
+
+
+def harmful_automatic_mutation_allowed_cypher(variable: str = "n") -> str:
+    """Guard destructive automation without changing beneficial lifecycle behavior."""
+
+    return (
+        f"{automatic_lifecycle_protection_cypher(variable)} "
+        f"AND {destructive_retention_allowed_cypher(variable)}"
     )
 
 
@@ -207,8 +217,7 @@ class ConsolidationRepository:
             .match("(n:Entity)")
             .where("n.scope = 'PERSISTENT'",
                    "n.freshness = $freshness",
-                   "coalesce(n.user_flagged, false) = false",
-                   automatic_lifecycle_protection_cypher("n"),
+                   harmful_automatic_mutation_allowed_cypher("n"),
                    "coalesce(n.last_accessed, n.created_at) < datetime() - duration({days: $min_days_since_accessed})",
                    "coalesce(toInteger(n.edge_count), 0) < $max_edge_count")
             .where_if(max_sharpness is not None, "n.sharpness IS NOT NULL AND toFloat(n.sharpness) < $max_sharpness")
@@ -246,7 +255,7 @@ class ConsolidationRepository:
         query = (Cypher()
             .match("(n:Entity {uuid: $node_uuid})")
             .where("n.scope = 'PERSISTENT'", "n.freshness = 'ACTIVE'",
-                   automatic_lifecycle_protection_cypher("n"))
+                   harmful_automatic_mutation_allowed_cypher("n"))
             .set(("n.original_content = coalesce(n.original_content, n.content)",
                   "n.content = $compressed_summary",
                   "n.freshness = 'COMPRESSED'"))
@@ -328,7 +337,9 @@ class ConsolidationRepository:
             WITH n, coalesce(edges_bridged, 0) AS edges_bridged
             DETACH DELETE n
             RETURN edges_bridged AS edges_bridged, 1 AS deleted
-            """.replace("__NON_DERIVED_VIEW__", automatic_lifecycle_protection_cypher("n"))
+            """.replace(
+                "__NON_DERIVED_VIEW__", harmful_automatic_mutation_allowed_cypher("n")
+            )
         rows = self.neo4j.execute(
             query,
             params={"node_uuid": node_uuid},
@@ -443,7 +454,7 @@ class ConsolidationRepository:
         query = (Cypher()
             .match("(n:Entity)")
             .where("n.uuid IN $uuids", "n.scope = 'SESSION'",
-                   automatic_lifecycle_protection_cypher("n"))
+                   harmful_automatic_mutation_allowed_cypher("n"))
             .detach_delete("n")
             .return_raw("count(n) AS deleted")
             .build())
@@ -451,7 +462,11 @@ class ConsolidationRepository:
         return int(rows[0].get("deleted", 0)) if rows else 0
 
     def delete_entities_returning_uuids(
-        self, node_uuids: list[str], *, require_scope: str | None = None
+        self,
+        node_uuids: list[str],
+        *,
+        require_scope: str | None = None,
+        protect_retention: bool = False,
     ) -> list[str]:
         """DETACH DELETE the given Entity nodes and return the uuids ACTUALLY deleted (plan Phase 6).
 
@@ -467,11 +482,16 @@ class ConsolidationRepository:
         params: dict[str, Any] = {"uuids": node_uuids}
         if require_scope:
             params["scope"] = require_scope
+        protection = (
+            harmful_automatic_mutation_allowed_cypher("n")
+            if protect_retention
+            else automatic_lifecycle_protection_cypher("n")
+        )
         rows = self.neo4j.execute(
             f"""
             MATCH (n:Entity)
             WHERE n.uuid IN $uuids {scope_clause}
-              AND {automatic_lifecycle_protection_cypher("n")}
+              AND {protection}
             WITH collect(n) AS doomed, collect(n.uuid) AS deleted_uuids
             FOREACH (d IN doomed | DETACH DELETE d)
             RETURN deleted_uuids
@@ -517,31 +537,17 @@ class ConsolidationRepository:
         if not node_uuids:
             return 0
 
-        # Count nodes in the set that currently have NO ttl_expires (newly demoted).
-        pre_count_rows = self.neo4j.execute(
-            """
-            MATCH (n:Entity)
-            WHERE n.uuid IN $uuids AND n.scope = 'SESSION' AND n.ttl_expires IS NULL
-              AND __AUTOMATIC_LIFECYCLE_PROTECTION__
-            RETURN count(n) AS newly_demoted_count
-            """.replace(
-                "__AUTOMATIC_LIFECYCLE_PROTECTION__",
-                automatic_lifecycle_protection_cypher("n"),
-            ),
-            params={"uuids": node_uuids},
-        )
-        newly_demoted_count = int(pre_count_rows[0].get("newly_demoted_count", 0)) if pre_count_rows else 0
-
-        # Apply coalesce: only set if not already set.
+        # Decide and mutate in one statement so a source flag added after candidate discovery
+        # cannot race the TTL write.
         query = (Cypher()
             .match("(n:Entity)")
-            .where("n.uuid IN $uuids", "n.scope = 'SESSION'",
-                   automatic_lifecycle_protection_cypher("n"))
-            .set("n.ttl_expires = coalesce(n.ttl_expires, datetime() + duration({days: $days}))")
-            .return_raw("count(n) AS updated")
+            .where("n.uuid IN $uuids", "n.scope = 'SESSION'", "n.ttl_expires IS NULL",
+                   harmful_automatic_mutation_allowed_cypher("n"))
+            .set("n.ttl_expires = datetime() + duration({days: $days})")
+            .return_raw("count(n) AS newly_demoted_count")
             .build())
-        self.neo4j.execute(query, params={"uuids": node_uuids, "days": ttl_days})
-        return newly_demoted_count
+        rows = self.neo4j.execute(query, params={"uuids": node_uuids, "days": ttl_days})
+        return int(rows[0].get("newly_demoted_count", 0)) if rows else 0
 
     def fetch_ttl_expired_session_uuids(
         self,
@@ -561,7 +567,7 @@ class ConsolidationRepository:
             .where("n.scope = 'SESSION'",
                    "n.ttl_expires IS NOT NULL",
                    "n.ttl_expires < datetime()",
-                   automatic_lifecycle_protection_cypher("n"))
+                   harmful_automatic_mutation_allowed_cypher("n"))
             .where_if(session_id is not None, "n.session_id = $session_id")
             .return_raw("""n.uuid AS uuid,
        n.name AS name,
