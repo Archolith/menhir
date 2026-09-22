@@ -126,6 +126,17 @@ after it republishes even though the scan fingerprint is unchanged.
   parser and validator before publication.
 - The published manifest passes `beacon validate` with zero errors and serves through Beacon's stdio
   server (`BEACON_MANIFEST_PATH=<path> beacon`).
+- The Beacon child runs with a minimal allowlisted environment (PATH, the OS runtime, home, temp,
+  locale, `PYTHONUTF8`-class switches). Menhir's own secrets (`NEO4J_PASSWORD`, API keys, auth
+  tokens) never reach `--beacon-python` or the git it spawns.
+- Expected refusals (`re-ingest first`, freshness or CAS refusals, an unusable interpreter, a
+  Beacon build/validate failure) print one `beacon generate refused: ...` line and exit with
+  code 2; a traceback means an unexpected error.
+- **First ingest after upgrading to scanner schema 7 is a full re-scan** of every project: the
+  schema version is part of the scan fingerprint, so stored fingerprints are invalidated. That
+  re-scan indexes the `.agent` orientation docs as `document` entities (and prunes them again
+  when the files are removed), so overview entity counts change once per project. Generation
+  refuses until that re-ingest has happened (`re-ingest first`).
 
 ## Failure behavior
 

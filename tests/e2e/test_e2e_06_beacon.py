@@ -25,9 +25,18 @@ drift before the freeze:
 BEACON IS A SEPARATE INTERPRETER
 --------------------------------
 ``--beacon-python`` exists so Beacon's dependencies stay out of Menhir's environment.
-The lane therefore needs a second venv with Beacon 0.1.0 installed, pointed at by
-``MENHIR_E2E_BEACON_PYTHON``. Without it the Beacon-side criteria cannot run, and the
-lane says so rather than quietly asserting less.
+The lane therefore needs a second venv, pointed at by ``MENHIR_E2E_BEACON_PYTHON``, whose
+Beacon satisfies the **build contract** (``beacon build --menhir-evidence`` and
+``beacon validate``), not any particular product version: since the 2026-09-18 ownership
+switch Menhir dumps an evidence document and Beacon's own pipeline builds the manifest.
+Install the exact revision CI pins (``.github/workflows/tests.yml``, the same one the
+online E2E-6 in ``tests/test_beacon_e2e6.py`` runs against)::
+
+    pip install "git+https://github.com/Archolith/beacon.git@447abd00a08b3082188da63f342ffdeff7a2dd5e"
+
+The PyPI ``archolith-beacon 0.1.0`` does NOT satisfy the contract (no ``build``), and the
+compat gate refuses it. Without a usable interpreter the Beacon-side criteria cannot run,
+and the lane says so rather than quietly asserting less.
 """
 
 from __future__ import annotations
@@ -91,8 +100,9 @@ async def test_e2e_06_beacon_generation_and_consumption(
             CRITERIA,
             note=(
                 "MENHIR_E2E_BEACON_PYTHON is unset or missing. `menhir beacon generate` "
-                "requires a separate interpreter with Beacon 0.1.0 installed; without it "
-                "no Beacon-side criterion can be proven."
+                "requires a separate interpreter whose Beacon supports build+validate "
+                "(the SHA pinned in .github/workflows/tests.yml); without it no "
+                "Beacon-side criterion can be proven."
             ),
         )
 

@@ -68,7 +68,31 @@ deleted; Menhir now supplies only what it owns and Beacon generates:
   unchanged (`beacon_publication.py`: prefix, lock, atomic replace, CAS refresh).
 - `beacon_generation.py` (rewritten) - evidence dump -> `beacon build` -> guarded publication.
   Same public surface (`generate_beacon`, `GenerationOutcome`, refresh/`expected_sha256`
-  semantics); unknown facts stay absent because Beacon's projection never invents fields.
+  semantics) plus `GenerationOutcome.git_head`. Menhir refuses rather than invents: a project
+  whose scanner read no description (no `.agent/README.md` or `CLAUDE.md`) is refused instead
+  of publishing the `"<stack> project"` overview placeholder as its purpose; the raw scanner
+  value is now persisted on the project node as `indexed_description` for that check.
+- Freshness now covers git state. `beacon build --repo` runs Beacon's git tier, so the manifest
+  cites `git HEAD <sha>` and the `origin` URL; the scan fingerprint excludes `.git`. The
+  evidence guard captures is-a-repo/HEAD/origin alongside the graph fence and rechecks them
+  under the publication lock, so a HEAD move between capture and publish is refused like a
+  scan change and an empty commit counts as a change for refresh. Only `project.status` is
+  `experimental`; Beacon hard-codes `current` on concepts and canonical docs
+  (`docs/agent-usage.md` says so).
+- The Beacon child runs with an allowlisted environment (PATH, Windows runtime, home, temp,
+  locale, `PYTHONUTF8`-class switches only): `NEO4J_PASSWORD`, API keys and auth tokens loaded
+  by `load_menhir_env` no longer reach `--beacon-python` or the git it spawns.
+- Scanner-indexed documents publish `document_type`/`role` `generic` instead of the stringified
+  `None` (`query_documents` omits unset properties rather than stringifying them).
+- `menhir beacon generate` prints expected refusals (stale index, freshness/CAS, unusable
+  interpreter, Beacon failure, filesystem error) as one `beacon generate refused: ...` line
+  and exits 2; unexpected errors still propagate.
+- **Operational note: scanner schema 5 -> 7.** The version is part of the scan fingerprint, so
+  every stored fingerprint is invalidated and the next ingest of every project performs a full
+  re-scan. That re-scan adds `document` entities for the `.agent` orientation set (`README.md`,
+  `architecture.md`, and the rest of the A0 list) and stamps `indexed_description`, so overview
+  entity counts change once per project. Scanner-written `document` entities are now pruned on
+  rescan when the file is gone (`ingest_document` documents are untouched).
 - `tests/test_beacon_generation.py` rewritten for the new flow; `tests/test_beacon_evidence.py`
   (graph-side fail-closed gates) and `tests/test_beacon_e2e6.py` (full Menhir MVP E2E-6:
   Beacon-owned generation, validate/inspect, stdio overview/onboarding/concept queries,
