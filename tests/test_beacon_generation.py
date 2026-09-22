@@ -245,6 +245,7 @@ def test_changed_source_fact_changes_only_its_claim(
         root=str(repo),
         overview={
             "description": "A changed evidence dump description.",
+            "indexed_description": "A changed evidence dump description.",
             "stack": "python",
             "entities": {"file": 3},
             "edges": {"IMPORTS": 2},

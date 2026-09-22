@@ -207,6 +207,12 @@ class StructureGraphWriter:
                 "scan_fingerprint": scan.scan_fingerprint,
                 "stack": scan.stack,
                 "root_path": scan.root_path,
+                # The description exactly as the scanner read it from .agent/README.md or
+                # CLAUDE.md -- empty when neither exists. `content` above substitutes a
+                # display placeholder ("python project") for readability; consumers that must
+                # not present an invented purpose as indexed fact (Beacon generation) read
+                # this property instead (PR #125 F4).
+                "indexed_description": scan.description or "",
                 # Coverage accounting. `partial_index` is persisted (not just derived) so a
                 # reader that only fetches the project node can tell whether a negative
                 # structural answer is trustworthy.
@@ -935,10 +941,11 @@ class StructureGraphWriter:
             }
             CALL {
                 OPTIONAL MATCH (n:Entity {structure_project: $p, structure_role: 'project'})
-                RETURN n.content AS description, n.stack AS stack
+                RETURN n.content AS description, n.stack AS stack,
+                       n.indexed_description AS indexed_description
                 LIMIT 1
             }
-            RETURN raw_entities, raw_edges, description, stack
+            RETURN raw_entities, raw_edges, description, stack, indexed_description
             """,
             {"p": project},
         )
@@ -961,9 +968,15 @@ class StructureGraphWriter:
                 counts[str(name)] = counts.get(str(name), 0) + int(item.get("cnt") or 0)
             return counts
 
+        indexed_description = row.get("indexed_description")
         return {
             "project": project,
             "description": row.get("description") or "",
+            # None when the project node predates the property (or is absent): the reader
+            # cannot tell an empty scanner result from an unrecorded one, so it says so.
+            "indexed_description": (
+                None if indexed_description is None else str(indexed_description)
+            ),
             "stack": row.get("stack") or "",
             "entities": _tally(row.get("raw_entities"), "role"),
             "edges": _tally(row.get("raw_edges"), "rel"),

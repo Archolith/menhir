@@ -99,7 +99,9 @@ separate MVP retention work; this workflow does not certify them.
 Generation is conservative and fails closed: it requires an intact, complete index whose
 recorded root matches the requested repository, a scan fingerprint, an indexed project
 description, and at least one indexed canonical document. It never invents purpose, commands,
-guardrails, or concepts to fill schema fields.
+guardrails, or concepts to fill schema fields. The description must come from
+`.agent/README.md` or `CLAUDE.md`: a repository with neither is refused (the `"<stack> project"`
+placeholder the overview shows for such projects is display text, not indexed purpose).
 
 Generated evidence is labeled `experimental`, not `current`. Menhir bookends its graph reads with
 the structure-writer revision and rechecks both graph and filesystem immediately before publication,

@@ -114,6 +114,43 @@ class TestStructureGraphWriter:
         assert first_params["sp"] == "test-project"
         assert first_params["spath"] == "."
 
+    def test_project_entity_persists_the_raw_scanned_description(self):
+        """PR #125 F4: `content` carries a display placeholder when the scanner read no
+        description; the raw value is persisted separately so Beacon generation can refuse
+        instead of publishing "python project" as the project's purpose."""
+        neo4j = RecordingNeo4j()
+        writer = StructureGraphWriter(neo4j=neo4j)
+
+        writer.write_project(_make_scan(description=""), session_id="s1", user_id="u1")
+
+        _, params = next((q, p) for q, p in neo4j.calls if "MERGE" in q)
+        assert params["content"] == "python project"
+        assert params["extra"]["indexed_description"] == ""
+
+        neo4j = RecordingNeo4j()
+        StructureGraphWriter(neo4j=neo4j).write_project(
+            _make_scan(description="Grounded text"), session_id="s1", user_id="u1"
+        )
+        _, params = next((q, p) for q, p in neo4j.calls if "MERGE" in q)
+        assert params["content"] == "Grounded text"
+        assert params["extra"]["indexed_description"] == "Grounded text"
+
+    def test_overview_distinguishes_unrecorded_from_empty_indexed_description(self):
+        def overview_for(indexed_description):
+            neo4j = MagicMock()
+            neo4j.execute.side_effect = [
+                [{"raw_entities": [], "raw_edges": [], "description": "python project",
+                  "stack": "python", "indexed_description": indexed_description}],
+                [],  # get_project_coverage
+                [],  # query_contained_repos
+            ]
+            return StructureGraphWriter(neo4j=neo4j).query_overview("p")
+
+        assert overview_for(None)["indexed_description"] is None
+        assert overview_for("")["indexed_description"] == ""
+        assert overview_for("Grounded")["indexed_description"] == "Grounded"
+        assert overview_for(None)["description"] == "python project"
+
     def test_directory_entities_batched(self):
         neo4j = RecordingNeo4j()
         writer = StructureGraphWriter(neo4j=neo4j)

@@ -355,6 +355,15 @@ class TestDescriptionParsing:
         result = ProjectScanner().scan(root)
         assert "agent description" in result.description.lower()
 
+    def test_no_orientation_doc_means_no_description(self, tmp_path):
+        """A root README.md is not a description source: the scanner reports "" so writers and
+        Beacon generation can tell a grounded description from a placeholder (PR #125 F4)."""
+        root = tmp_path / "proj"
+        root.mkdir()
+        _write(root, "pyproject.toml", "[project]\nname='p'\n")
+        _write(root, "README.md", "# Proj\n\nA root readme.\n")
+        assert ProjectScanner().scan(root).description == ""
+
     def test_utf8_description_is_not_mojibake_under_any_locale(self, tmp_path):
         """UTF-8 docs must decode as UTF-8, not as the platform's locale codec.
 

@@ -64,6 +64,7 @@ def _reader(
             overview
             or {
                 "description": "Fixture project for the evidence dump.",
+                "indexed_description": "Fixture project for the evidence dump.",
                 "stack": "python",
                 "entities": {"file": 3},
                 "edges": {"IMPORTS": 2},
@@ -233,9 +234,33 @@ def test_writer_revision_change_during_graph_reads_fails_closed(tmp_path: Path) 
 
 
 def test_missing_description_fails_closed(tmp_path: Path) -> None:
-    empty = _reader(root=str(tmp_path), overview={"description": "", "stack": ""})
-    with pytest.raises(BeaconEvidenceError, match="description"):
+    empty = _reader(
+        root=str(tmp_path),
+        overview={"description": "", "indexed_description": "", "stack": ""},
+    )
+    with pytest.raises(BeaconEvidenceError, match="refusing to invent"):
         dump_evidence(empty, "fixture", tmp_path)
+
+
+def test_placeholder_description_is_never_published(tmp_path: Path) -> None:
+    """PR #125 F4: a repo with neither .agent/README.md nor CLAUDE.md is indexed with the
+    display placeholder "<stack> project"; the evidence must refuse rather than present it
+    as the project's purpose."""
+    synthesized = _reader(
+        root=str(tmp_path),
+        overview={"description": "python project", "indexed_description": "", "stack": "python"},
+    )
+    with pytest.raises(BeaconEvidenceError, match="refusing to invent"):
+        dump_evidence(synthesized, "fixture", tmp_path)
+
+
+def test_project_indexed_before_descriptions_were_recorded_fails_closed(tmp_path: Path) -> None:
+    legacy = _reader(
+        root=str(tmp_path),
+        overview={"description": "python project", "indexed_description": None, "stack": "python"},
+    )
+    with pytest.raises(BeaconEvidenceError, match="re-ingest first"):
+        dump_evidence(legacy, "fixture", tmp_path)
 
 
 # ---------------------------------------------------------------------------

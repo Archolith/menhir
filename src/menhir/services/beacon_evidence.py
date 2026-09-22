@@ -223,6 +223,34 @@ def _require_filesystem_match(guard: BeaconEvidenceGuard, project: str, repo_roo
         )
 
 
+def _grounded_description(overview: dict[str, Any], project: str) -> str:
+    """Return the description the scanner actually read, or refuse.
+
+    The overview's ``description`` is display text: when neither ``.agent/README.md`` nor
+    ``CLAUDE.md`` exists the writer stores a ``"<stack> project"`` placeholder there, so it can
+    never be empty for a scanned project. Beacon's evidence schema requires a non-empty
+    ``project.description`` and publishes it as the project's purpose, so an ungrounded value
+    cannot be omitted either -- it is refused (PR #125 F4). ``indexed_description`` is the raw
+    scanner value; ``None`` means the project node predates the property.
+    """
+    if "indexed_description" not in overview:
+        raise BeaconEvidenceError(
+            f"no indexed project description available; refusing to invent one: {project}"
+        )
+    raw = overview.get("indexed_description")
+    if raw is None:
+        raise BeaconEvidenceError(
+            f"project was indexed before descriptions were recorded; re-ingest first: {project}"
+        )
+    description = str(raw).strip()
+    if not description:
+        raise BeaconEvidenceError(
+            "no indexed project description (.agent/README.md or CLAUDE.md is missing); "
+            f"refusing to invent one: {project}"
+        )
+    return description
+
+
 def _document_type(raw: object) -> str:
     """Return the indexed document type, or the documented default when it is unset.
 
@@ -247,11 +275,7 @@ def capture_evidence(
     guard = _read_guard(reader, project, repo_root, read_git_state(repo_root))
     _require_filesystem_match(guard, project, repo_root)
     overview = reader.query_overview(project)
-    description = str(overview.get("description") or "").strip()
-    if not description:
-        raise BeaconEvidenceError(
-            f"no indexed project description available; refusing to invent one: {project}"
-        )
+    description = _grounded_description(overview, project)
 
     documents: list[dict[str, str]] = []
     for row in reader.query_documents(project):
