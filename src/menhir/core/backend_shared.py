@@ -126,6 +126,10 @@ def _project_scan_from_dict(payload: dict[str, Any]) -> ProjectScanResult:
         ),
         # Coverage counts must survive this boundary or `partial_index` is silently lost on
         # the remote path and consumers fall back to reporting absence as fact.
+        # Beacon evidence binding: must cross the upload boundary or remote ingests store none.
+        indexed_commit=str(payload.get("indexed_commit") or ""),
+        indexed_repository=str(payload.get("indexed_repository") or ""),
+        indexed_dirty=bool(payload.get("indexed_dirty")),
         files_discovered=int(payload.get("files_discovered") or 0),
         files_eligible=int(payload.get("files_eligible") or 0),
         files_indexed=int(payload.get("files_indexed") or 0),

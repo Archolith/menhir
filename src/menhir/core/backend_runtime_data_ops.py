@@ -648,6 +648,15 @@ class RuntimeProviderDataOpsMixin:
                 self.built.graph_adapter.get_scan_fingerprint, project_name
             )
             if stored_fp and stored_fp == scan.scan_fingerprint:
+                # Same files, possibly a new commit: keep the evidence binding current.
+                await self._off_loop(
+                    self.built.graph_adapter.refresh_indexed_binding,
+                    project_name,
+                    scan.scan_fingerprint,
+                    scan.indexed_commit,
+                    scan.indexed_repository,
+                    scan.indexed_dirty,
+                )
                 return {"counts": {}, "narrative": "", "skipped": True}
             _log.debug(
                 "Fingerprint mismatch: project=%s stored=%s computed=%s",
@@ -981,6 +990,20 @@ class RuntimeProviderDataOpsMixin:
             return _to_jsonable(
                 await self._off_loop(self.built.graph_adapter.list_orphan_structure_projects)
             )
+        if query_type == "beacon_evidence":
+            # `project` is the stable project id. Refusals come back as {"error": ...} so the
+            # MCP tool can report them without an exception crossing the transport.
+            from menhir.services.beacon_evidence import (
+                BeaconEvidenceError,
+                build_provider_evidence,
+            )
+
+            try:
+                return await self._off_loop(
+                    build_provider_evidence, self.built.graph_adapter, project
+                )
+            except BeaconEvidenceError as exc:
+                return {"error": str(exc)}
         if query_type == "documents":
             # params: optional path_filter (via "path"), document_type (via "doc_type")
             path_filter = params.get("path", "") if params else ""

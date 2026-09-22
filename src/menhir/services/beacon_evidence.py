@@ -40,6 +40,8 @@ from menhir.infrastructure.project_scanner import ProjectScanner
 from menhir.services.beacon_compat import child_environment
 
 __all__ = [
+    "PROVIDER_EVIDENCE_VERSION",
+    "build_provider_evidence",
     "BeaconEvidenceError",
     "BeaconEvidenceGuard",
     "BeaconEvidenceProjectReader",
@@ -338,6 +340,132 @@ def capture_evidence(
         "structure": {"entities": entities, "edges": edges},
     }
     return document, guard
+
+
+#: The evidence version Menhir serves as a Beacon memory provider (plan Phase 3A).
+PROVIDER_EVIDENCE_VERSION = "1.1"
+PROVIDER_NAME = "menhir"
+#: `source` stamped by StructureGraphWriter.write_document (ingest_document).
+_DOCUMENT_INGEST_SOURCE = "document-ingest"
+
+
+class ProviderEvidenceReader(Protocol):
+    """What the provider builder reads; the graph adapter satisfies it."""
+
+    def get_beacon_evidence_guard_by_id(self, project_id: str) -> dict[str, Any]: ...
+
+    def query_structure(self, project: str, query_type: str, **kwargs: Any) -> Any: ...
+
+    def query_documents(
+        self, project: str, path_filter: str = "", document_type: str | None = None
+    ) -> list[dict[str, str]]: ...
+
+
+def _provider_guard(reader: ProviderEvidenceReader, project_id: str) -> dict[str, Any]:
+    raw = reader.get_beacon_evidence_guard_by_id(project_id)
+    if not raw.get("project_known"):
+        raise BeaconEvidenceError(f"no indexed project has id {project_id}")
+    if raw.get("ambiguous"):
+        raise BeaconEvidenceError(f"more than one indexed project has id {project_id}")
+    if raw.get("files_indexed") is None:
+        raise BeaconEvidenceError("project coverage is unknown; re-ingest first")
+    if raw.get("partial_index"):
+        raise BeaconEvidenceError("project index is partial; complete an ingest first")
+    if not raw.get("scan_fingerprint"):
+        raise BeaconEvidenceError("project has no scan fingerprint; re-ingest first")
+    if not raw.get("identity_known"):
+        raise BeaconEvidenceError("project has no fenced structure identity; re-ingest first")
+    if raw.get("active_writers"):
+        raise BeaconEvidenceError("project structure is being updated; retry")
+    if not raw.get("indexed_commit"):
+        raise BeaconEvidenceError(
+            "project was not indexed from a git checkout, or before commits were recorded; "
+            "re-ingest from the repository"
+        )
+    if raw.get("indexed_dirty") is not False:
+        raise BeaconEvidenceError(
+            "project was indexed from a checkout with uncommitted changes; "
+            "commit and re-ingest so the evidence describes a commit"
+        )
+    return raw
+
+
+def build_provider_evidence(reader: ProviderEvidenceReader, project_id: str) -> dict[str, Any]:
+    """Return ``beacon-memory-evidence-1.1`` for one indexed project, read from the graph only.
+
+    Menhir as a Beacon memory provider: no filesystem path is read, no git command runs, and
+    nothing is written. The binding (repository, indexed commit) was recorded by the scan that
+    produced the fingerprint, and only a clean checkout's scan is served. The fence is read
+    before and after the content queries; any writer or binding change in between refuses.
+    """
+    project_id = project_id.strip()
+    if not project_id:
+        raise BeaconEvidenceError("project_id is required")
+    before = _provider_guard(reader, project_id)
+    name = before["name"]
+    overview = reader.query_structure(name, "overview")
+    description = _grounded_description(overview, name)
+
+    documents: list[dict[str, str]] = []
+    for row in reader.query_documents(name):
+        # Only documents the bound scan produced: an ingest_document node is written outside
+        # any scan, so the indexed commit says nothing about it.
+        if row.get("source") == _DOCUMENT_INGEST_SOURCE:
+            continue
+        path = str(row.get("structure_path") or row.get("path") or "")
+        if not path:
+            continue
+        documents.append(
+            {
+                "path": path,
+                "title": str(row.get("title") or row.get("name") or ""),
+                "document_type": _document_type(row.get("doc_type")),
+            }
+        )
+    documents.sort(key=lambda d: _document_rank(d["path"]))
+
+    files: list[dict[str, str]] = []
+    for row in reader.query_structure(name, "files"):
+        path = str(row.get("path") or "")
+        if path:
+            files.append(
+                {
+                    "path": path,
+                    "role": str(row.get("role") or ""),
+                    "description": str(row.get("description") or ""),
+                }
+            )
+    files.sort(key=lambda f: (0 if f["role"] == "entrypoint" else 1, f["path"]))
+
+    after = _provider_guard(reader, project_id)
+    fence_keys = ("scan_fingerprint", "writer_revision", "indexed_commit", "indexed_repository")
+    if any(before[key] != after[key] for key in fence_keys):
+        raise BeaconEvidenceError("project was re-indexed while evidence was read; retry")
+
+    entities = {str(k): int(v) for k, v in sorted((overview.get("entities") or {}).items()) if v}
+    edges = {str(k): int(v) for k, v in sorted((overview.get("edges") or {}).items()) if v}
+    project: dict[str, Any] = {
+        "name": name,
+        "description": description,
+        "scan_fingerprint": before["scan_fingerprint"],
+    }
+    stack = str(overview.get("stack") or "")
+    if stack:
+        project["primary_language"] = stack
+    # No project.status: Menhir indexes code, it does not judge maturity (plan A1).
+    return {
+        "evidence_version": PROVIDER_EVIDENCE_VERSION,
+        "binding": {
+            "provider": PROVIDER_NAME,
+            "project_id": project_id,
+            "repository": before["indexed_repository"],
+            "indexed_commit": before["indexed_commit"],
+        },
+        "project": project,
+        "documents": documents[:_MAX_DOCUMENTS],
+        "files": files[:_MAX_FILES],
+        "structure": {"entities": entities, "edges": edges},
+    }
 
 
 def dump_evidence(

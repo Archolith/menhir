@@ -257,7 +257,7 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "a6c7cd4f061010415c9f68b66bb79b808eca49b8ed5df51495ff18de312a865c",
+        "client_policy_digest": "04abc7bdf5d59d31e497dcefb9d431c06cf6cb0f34d395469391fabd77fbb0aa",
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -329,7 +329,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     path = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
-    digest = "a6c7cd4f061010415c9f68b66bb79b808eca49b8ed5df51495ff18de312a865c"
+    digest = "04abc7bdf5d59d31e497dcefb9d431c06cf6cb0f34d395469391fabd77fbb0aa"
 
     from menhir.mcp.tools import ALL_TOOLS
 
@@ -477,6 +477,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
             "build_context",
             "close_stale_todos",
             "close_todo",
+            "get_beacon_evidence",
             "get_todo",
             "list_todos",
             "query_structure",

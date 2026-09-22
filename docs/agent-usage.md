@@ -92,6 +92,25 @@ a time-bound memory directly and bypasses graph enrichment. Do not require a que
 an enrichment `READY` transition for that path. Retention/flag semantics remain governed by the
 separate MVP retention work; this workflow does not certify them.
 
+## Menhir as a Beacon memory provider
+
+Beacon builds beacons; Menhir answers what it has indexed. The read-only MCP tool
+`get_beacon_evidence(project_id)` returns a `beacon-memory-evidence-1.1` document for one
+indexed project, bound to the repository and git commit it was indexed from. Beacon calls it:
+
+```bash
+beacon build --repo . --memory https://memory.example.com/mcp-http --memory-project <project_id>
+```
+
+`project_id` is the project's stable Menhir id (`structure_project_id`). Menhir serves evidence
+only from a complete index of a clean checkout: index after committing, or the tool refuses
+("indexed from a checkout with uncommitted changes"). A new commit with no file changes keeps the
+index and moves only the recorded commit. The tool reads the graph only -- no filesystem, git or
+writes -- and is available to readonly, agent and operator clients.
+
+The older `menhir beacon generate` path below is kept until Beacon's end-to-end lane runs
+against this provider (plan Phase 3B removes it).
+
 ## Beacon generation (issue #120)
 
 `menhir beacon generate PROJECT --repo ABSOLUTE_ROOT --beacon-python PATH` generates

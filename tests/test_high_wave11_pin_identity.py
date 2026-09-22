@@ -89,6 +89,10 @@ def test_cf33_the_global_list_is_small_and_reviewable() -> None:
     global_tools = sorted(t.name for t in ALL_TOOLS if getattr(t, "scope", None) == ToolScope.GLOBAL)
     assert global_tools == [
         "force_scheduler_takeover",
+        # Added 2026-09-22 (Beacon memory provider, plan Phase 3A). It reads the structure
+        # graph, which is keyed by project, not by memory namespace: the same facts
+        # query_structure already serves to readonly callers. No tenant memory is read.
+        "get_beacon_evidence",
         "get_client_context",
         # REMOVED 2026-08-21 by owner ruling: `get_memory_stats` is now NAMESPACED. It was the
         # one GLOBAL entry carrying tenant data -- the Graph section summed node counts across

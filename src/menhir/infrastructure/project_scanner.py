@@ -12,6 +12,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 from menhir.domain.utils import symbol_structure_path
+from menhir.infrastructure.git_binding import read_git_binding as _read_git_binding
 from menhir.infrastructure.text_io import read_text_utf8
 
 logger = logging.getLogger(__name__)
@@ -123,6 +124,13 @@ class ProjectScanResult:
     files_eligible: int = 0
     files_indexed: int = 0
     nested_repos: list[NestedRepo] = field(default_factory=list)
+    # The git commit this scan describes, for Beacon's evidence binding. `indexed_dirty` is True
+    # when the working tree had uncommitted changes (or HEAD moved during the scan): then the
+    # indexed content is not that commit and the binding must not be served. Empty/False when
+    # the root is not a git repository.
+    indexed_commit: str = ""
+    indexed_repository: str = ""
+    indexed_dirty: bool = False
 
     @property
     def partial_index(self) -> bool:
@@ -245,6 +253,7 @@ class ProjectScanner:
 
         project_name = name or root.name
         gitignore_patterns = _load_gitignore(root)
+        binding_before = _read_git_binding(root)
 
         # Walk and collect
         all_rel_paths: list[str] = []
@@ -408,6 +417,14 @@ class ProjectScanner:
                     )
                 )
 
+        # Read the binding on both sides of every filesystem read above: a commit or edit
+        # landing mid-scan means the fingerprint and the commit may not describe one content.
+        binding_after = _read_git_binding(root)
+        if binding_after is not None:
+            commit, repository, dirty = binding_after
+            result.indexed_commit = commit
+            result.indexed_repository = repository
+            result.indexed_dirty = dirty or binding_before != binding_after
         return result
 
 
