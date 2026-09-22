@@ -50,6 +50,58 @@ recorded on this boundary.
 - E2E-8 is re-selected in the `stdio-e2e` CI job. Its `capped_scan` criterion now requires the
   documented JSON error rather than tolerating the 500, so a regression fails the job.
 
+## 2026-09-18 - Beacon generation switched to Beacon-owned build (issue #120 ownership switch)
+
+Menhir no longer maps Beacon manifest fields. The bespoke raw-manifest construction in
+`beacon_generation.py` (identity block, structure concept, doc selection, guidance block) is
+deleted; Menhir now supplies only what it owns and Beacon generates:
+
+- `beacon_evidence.py` (new) - dumps the versioned `beacon-menhir-evidence` v1.0 document from
+  the structure read surface (identity, documents, files, structure counts, scan fingerprint),
+  fail-closed on any index defect, deterministic for a frozen graph state. This is the single
+  boundary Beacon's `MenhirSourceAdapter` consumes.
+- `beacon_compat.py` (rewritten) - the compatibility gate is now the supported **build
+  contract** (`beacon build` + `beacon validate` present in the target interpreter), replacing
+  the brittle `beacon.__version__ == "0.1.0"` equality check that refused every post-0.1
+  implementation. The boundary runs the real Beacon CLI with fixed argv; generation streams
+  the manifest bytes from `beacon build --out -` so Menhir keeps publication ownership
+  unchanged (`beacon_publication.py`: prefix, lock, atomic replace, CAS refresh).
+- `beacon_generation.py` (rewritten) - evidence dump -> `beacon build` -> guarded publication.
+  Same public surface (`generate_beacon`, `GenerationOutcome`, refresh/`expected_sha256`
+  semantics) plus `GenerationOutcome.git_head`. Menhir refuses rather than invents: a project
+  whose scanner read no description (no `.agent/README.md` or `CLAUDE.md`) is refused instead
+  of publishing the `"<stack> project"` overview placeholder as its purpose; the raw scanner
+  value is now persisted on the project node as `indexed_description` for that check.
+- Freshness now covers git state. `beacon build --repo` runs Beacon's git tier, so the manifest
+  cites `git HEAD <sha>` and the `origin` URL; the scan fingerprint excludes `.git`. The
+  evidence guard captures is-a-repo/HEAD/origin alongside the graph fence and rechecks them
+  under the publication lock, so a HEAD move between capture and publish is refused like a
+  scan change and an empty commit counts as a change for refresh. Only `project.status` is
+  `experimental`; Beacon hard-codes `current` on concepts and canonical docs
+  (`docs/agent-usage.md` says so).
+- The Beacon child runs with an allowlisted environment (PATH, Windows runtime, home, temp,
+  locale, `PYTHONUTF8`-class switches only): `NEO4J_PASSWORD`, API keys and auth tokens loaded
+  by `load_menhir_env` no longer reach `--beacon-python` or the git it spawns.
+- Scanner-indexed documents publish `document_type`/`role` `generic` instead of the stringified
+  `None` (`query_documents` omits unset properties rather than stringifying them).
+- `menhir beacon generate` prints expected refusals (stale index, freshness/CAS, unusable
+  interpreter, Beacon failure, filesystem error) as one `beacon generate refused: ...` line
+  and exits 2; unexpected errors still propagate.
+- **Operational note: scanner schema 5 -> 7.** The version is part of the scan fingerprint, so
+  every stored fingerprint is invalidated and the next ingest of every project performs a full
+  re-scan. That re-scan adds `document` entities for the `.agent` orientation set (`README.md`,
+  `architecture.md`, and the rest of the A0 list) and stamps `indexed_description`, so overview
+  entity counts change once per project. Scanner-written `document` entities are now pruned on
+  rescan when the file is gone (`ingest_document` documents are untouched).
+- `tests/test_beacon_generation.py` rewritten for the new flow; `tests/test_beacon_evidence.py`
+  (graph-side fail-closed gates) and `tests/test_beacon_e2e6.py` (full Menhir MVP E2E-6:
+  Beacon-owned generation, validate/inspect, stdio overview/onboarding/concept queries,
+  claims-to-evidence tracing, deterministic rebuild, changed-fact isolation, serves without
+  Menhir) added. CI installs Beacon into an isolated venv pinned to the exact commit
+  `1cc3352b90004f3b76f1c5ed49ee4235c606a52f` (not a moving branch) and drops the
+  version-equality assert.
+- Requires a Beacon whose CLI supports build+validate (PR Archolith/beacon#10, stacked on #9).
+
 ## 2026-09-17 - the shadow scan: structural parity, and the copy does not survive it
 
 The last P3 piece, and the only one that produces a result rather than a refusal. Its correctness
@@ -226,28 +278,3 @@ it through `SnapshotUploader`. `--check` is unchanged and still local-only.
 
 Driven end to end by `tests/remote_sim`: the real command, reading the environment a user sets,
 against a server that cannot see the repository it is receiving.
-
-## 2026-09-16 - the snapshot receive mode is declared once instead of compared everywhere
-
-P2A read `MENHIR_SNAPSHOT_RECEIVE_MODE` with `os.getenv` inside the tool module and compared it to
-a string literal. Correct for one phase with one surface, and it does not survive three more modes:
-`shadow` extracts an archive and scans it, `write` also reaches the graph, and a string compared in
-each place that cares is how `receive` ends up extracting something.
-
-`menhir.config.snapshot_mode` now declares the ladder once, beside `auth_mode` and for the same
-reason -- "what is this server allowed to do?" should have one answer every caller reads.
-
-- `SnapshotReceiveMode` exposes `accepts_uploads`, `extracts_archives` and `writes_graph`, so
-  callers ask for the capability rather than comparing to a name. `mode == WRITE` in an extraction
-  guard is correct until `shadow` exists and silently wrong afterwards.
-- `extracts_archives` and `writes_graph` have no implementation -- P3 and P4 own those -- but are
-  pinned by test now, because the guards that will consult them get written against this contract.
-- **Unknown values resolve to OFF and do not raise.** A typo must not enable a receive surface, and
-  a snapshot mode nobody set is not a reason to refuse to boot.
-- P2A's `staging` still resolves, to `receive`. Silently becoming OFF after an upgrade would look
-  like the tools vanishing with nothing obviously wrong in the config. The remote-sim stack now
-  names `receive` so the alias is not the only thing exercised.
-
-`test_the_mode_is_off_unless_it_is_explicitly_staging` asserted that `receive` did NOT enable the
-tools. That was the phase's behaviour, not a safety property, so it was rewritten to pin the
-property that still holds: anything not naming a mode resolves to OFF.

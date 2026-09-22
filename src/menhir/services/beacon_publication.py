@@ -112,6 +112,7 @@ def publish_manifest(
     payload: bytes,
     *,
     validate: Callable[[Path], None],
+    before_publish: Callable[[], None] | None = None,
     expected_sha256: str | None = None,
 ) -> str:
     """Publish ``payload`` as ``root/beacon.generated.yaml``; return its sha256."""
@@ -149,6 +150,11 @@ def publish_manifest(
 
         if Path(stage_path).read_bytes() != payload:
             raise PublicationError("staged candidate changed after validation")
+
+        # The caller's source/version guard belongs here: after expensive validation, while the
+        # publication lock is held, and immediately before the target-side compare-and-swap.
+        if before_publish is not None:
+            before_publish()
 
         # Validation may have been slow: re-inspect the target before mutating it.
         current = _inspect_target(target)

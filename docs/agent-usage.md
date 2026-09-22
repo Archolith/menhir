@@ -99,17 +99,44 @@ separate MVP retention work; this workflow does not certify them.
 Generation is conservative and fails closed: it requires an intact, complete index whose
 recorded root matches the requested repository, a scan fingerprint, an indexed project
 description, and at least one indexed canonical document. It never invents purpose, commands,
-guardrails, or concepts to fill schema fields.
+guardrails, or concepts to fill schema fields. The description must come from
+`.agent/README.md` or `CLAUDE.md`: a repository with neither is refused (the `"<stack> project"`
+placeholder the overview shows for such projects is display text, not indexed purpose).
+
+The evidence document Menhir hands to Beacon labels the project `experimental`, not `current`,
+and Beacon carries that through to the manifest's `project.status`. That is the only status the
+evidence contract lets Menhir set: Beacon's projection (at the pinned revision) hard-codes
+`status: current` on the structure concept, its sources, and every canonical doc. Read those as
+"current as of the cited scan fingerprint and git HEAD", not as a claim about the checkout now.
+Menhir bookends its graph reads with the structure-writer revision and rechecks the graph, the
+filesystem, and the repository's git HEAD/origin immediately before publication, but arbitrary
+repository editors do not share that lock. The artifact is therefore a verified point-in-time
+projection of its cited scan fingerprint and HEAD, not a claim that the checkout remains current
+after publication. An empty commit is a change: it moves the HEAD the manifest cites, so a refresh
+after it republishes even though the scan fingerprint is unchanged.
 
 - The output is always the sidecar `beacon.generated.yaml`, never a hand-authored `beacon.yaml`.
 - Initial generation refuses an existing output. Refresh requires `--refresh` plus
   `--expected-sha256` matching the existing generated file; foreign or hand-edited outputs are refused.
-- The Beacon package lives in a separate interpreter (`--beacon-python`, currently pinned to Beacon
-  0.1.0) because Menhir and Beacon require incompatible `archolith-mcp-framework` versions.
+- The Beacon package lives in a separate interpreter (`--beacon-python`) because Menhir and Beacon
+  require incompatible `archolith-mcp-framework` versions. Install the same contract revision CI
+  uses: `pip install "git+https://github.com/Archolith/beacon.git@1cc3352b90004f3b76f1c5ed49ee4235c606a52f"`.
+  That revision provides `beacon build --menhir-evidence`; the PyPI `0.1.0` package does not.
   Menhir never imports Beacon directly; every artifact is serialized and validated by Beacon's own
   parser and validator before publication.
 - The published manifest passes `beacon validate` with zero errors and serves through Beacon's stdio
   server (`BEACON_MANIFEST_PATH=<path> beacon`).
+- The Beacon child runs with a minimal allowlisted environment (PATH, the OS runtime, home, temp,
+  locale, `PYTHONUTF8`-class switches). Menhir's own secrets (`NEO4J_PASSWORD`, API keys, auth
+  tokens) never reach `--beacon-python` or the git it spawns.
+- Expected refusals (`re-ingest first`, freshness or CAS refusals, an unusable interpreter, a
+  Beacon build/validate failure) print one `beacon generate refused: ...` line and exit with
+  code 2; a traceback means an unexpected error.
+- **First ingest after upgrading to scanner schema 7 is a full re-scan** of every project: the
+  schema version is part of the scan fingerprint, so stored fingerprints are invalidated. That
+  re-scan indexes the `.agent` orientation docs as `document` entities (and prunes them again
+  when the files are removed), so overview entity counts change once per project. Generation
+  refuses until that re-ingest has happened (`re-ingest first`).
 
 ## Failure behavior
 

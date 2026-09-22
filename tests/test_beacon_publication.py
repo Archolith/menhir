@@ -70,6 +70,27 @@ def test_validation_time_edit_preserved(tmp_path: Path) -> None:
     assert target.read_bytes() == b"user edited during validation"
 
 
+def test_before_publish_refusal_preserves_existing_manifest(tmp_path: Path) -> None:
+    target = tmp_path / "beacon.generated.yaml"
+    target.write_bytes(PAYLOAD)
+    calls: list[str] = []
+
+    def refuse() -> None:
+        calls.append("guard")
+        raise ValueError("source changed")
+
+    with pytest.raises(ValueError, match="source changed"):
+        publish_manifest(
+            tmp_path,
+            PAYLOAD,
+            validate=accept,
+            before_publish=refuse,
+            expected_sha256=hashlib.sha256(PAYLOAD).hexdigest(),
+        )
+    assert calls == ["guard"]
+    assert target.read_bytes() == PAYLOAD
+
+
 def test_existing_lock_and_invalid_payload_refused(tmp_path: Path) -> None:
     lock = tmp_path / ".beacon.generated.lock"
     lock.write_text("another operation", encoding="utf-8")

@@ -238,7 +238,9 @@ def release_structure_writer(neo4j: Any, handle: FenceHandle | None) -> None:
             """
             MATCH (p:ProjectIdentity {project_id: $project_id})
             SET p.active_writers =
-                [w IN coalesce(p.active_writers, []) WHERE NOT w STARTS WITH $prefix]
+                [w IN coalesce(p.active_writers, []) WHERE NOT w STARTS WITH $prefix],
+                p.last_structure_writer_id = $writer_id,
+                p.last_structure_write_finished_at = timestamp()
             WITH p
             MATCH (f:StructureWriteFence {id: $fence_id})
             SET f.writers = [w IN coalesce(f.writers, []) WHERE NOT w STARTS WITH $prefix]
@@ -246,6 +248,7 @@ def release_structure_writer(neo4j: Any, handle: FenceHandle | None) -> None:
             {
                 "fence_id": _FENCE_ID,
                 "prefix": f"{handle.writer_id}|",
+                "writer_id": handle.writer_id,
                 "project_id": handle.project_id,
             },
         )
