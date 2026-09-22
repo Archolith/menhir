@@ -931,7 +931,9 @@ class ConsolidationRepository:
                 .build()),
             params={"group_id": conflict_group_id, **namespace_params},
         )
-        prefetched_member_uuids = [str(r["uuid"]) for r in prefetch_rows if r.get("uuid")]
+        prefetched_member_uuids = sorted(
+            str(r["uuid"]) for r in prefetch_rows if r.get("uuid")
+        )
 
         if action == "keep_both":
             rows = self.neo4j.execute(
