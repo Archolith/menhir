@@ -15,6 +15,8 @@ from fastapi.responses import JSONResponse
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from menhir.api.oauth import JWKS_REFRESH_STATS
+
 
 router = APIRouter()
 
@@ -80,6 +82,8 @@ async def readyz(request: Request) -> JSONResponse:
             if mode == "candidate-readonly"
             else ("ready" if ready else "unavailable"),
             "failures": failures,
+            # Diagnostic only; never affects readiness. Counts are per process.
+            "oauth_jwks": JWKS_REFRESH_STATS.snapshot(),
         },
     )
 

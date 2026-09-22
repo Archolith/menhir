@@ -10,9 +10,12 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -24,6 +27,50 @@ from menhir.config.oauth import (
     _get_setting,
     build_oauth_config,
 )
+
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# JWKS refresh diagnostics
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class JwksRefreshStats:
+    """Process-wide JWKS refresh failure counters, surfaced on /readyz.
+
+    Diagnostic only: a failure here never changes readiness.
+    """
+
+    failures: int = 0
+    last_failure_at: str | None = None
+    last_failure_kind: str | None = None
+
+    def record(self, kind: str) -> None:
+        self.failures += 1
+        self.last_failure_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        self.last_failure_kind = kind
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "refresh_failures": self.failures,
+            "last_failure_at": self.last_failure_at,
+            "last_failure_kind": self.last_failure_kind,
+        }
+
+
+JWKS_REFRESH_STATS = JwksRefreshStats()
+
+
+def _redacted_uri(uri: str) -> str:
+    """scheme://host/path only -- drops userinfo, query and fragment."""
+    try:
+        parts = urlsplit(uri)
+        return f"{parts.scheme}://{parts.hostname or ''}{parts.path}"
+    except ValueError:
+        return "<unparseable>"
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +284,7 @@ class OAuthTokenVerifier:
             now = time.monotonic()
             if not force_refresh and self._jwks is not None and now < self._jwks_expires_at:
                 return self._jwks
+            started = time.monotonic()
             try:
                 async with httpx.AsyncClient(timeout=self.config.http_timeout_s) as client:
                     response = await client.get(self.config.jwks_uri)
@@ -245,12 +293,34 @@ class OAuthTokenVerifier:
             except OAuthAuthenticationError:
                 raise
             except Exception as exc:
+                self._log_jwks_failure(type(exc).__name__, str(exc), started, force_refresh)
                 raise OAuthAuthenticationError("server_error", "Unable to fetch OAuth JWKS") from exc
             if not isinstance(payload, dict) or not isinstance(payload.get("keys"), list):
+                self._log_jwks_failure("MalformedJWKS", "response has no keys list", started, force_refresh)
                 raise OAuthAuthenticationError("server_error", "OAuth JWKS response is malformed")
             self._jwks = jose_provider.parse_jwks(payload)
             self._jwks_expires_at = time.monotonic() + max(1, self.config.jwks_cache_ttl_s)
             return self._jwks
+
+    def _log_jwks_failure(
+        self, kind: str, message: str, started: float, force_refresh: bool
+    ) -> None:
+        JWKS_REFRESH_STATS.record(kind)
+        redacted = _redacted_uri(self.config.jwks_uri)
+        if self.config.jwks_uri:
+            # httpx messages embed the request URL; never log its userinfo/query.
+            message = message.replace(self.config.jwks_uri, redacted)
+        logger.warning(
+            "OAuth JWKS fetch failed: kind=%s error=%s uri=%s elapsed_s=%.3f "
+            "timeout_s=%s force_refresh=%s cached_keys=%s",
+            kind,
+            message[:300],
+            redacted,
+            time.monotonic() - started,
+            self.config.http_timeout_s,
+            force_refresh,
+            self._jwks is not None,
+        )
 
     def _validate_claims(self, claims: dict[str, Any]) -> None:
         if claims.get("iss") != self.config.issuer:

@@ -1,3 +1,22 @@
+## 2026-09-22 - a JWKS-fetch 503 now says why, and which request
+
+Production returned one `503 Unable to fetch OAuth JWKS` on 2026-09-22 02:31:32 UTC. The app
+fetches its own JWKS through the public URL (Cloudflare and back through the tunnel); that one
+fetch never reached the app, and nothing recorded why: the exception was discarded and the
+client's `request_id` appeared nowhere in the server log. Diagnostics only -- no auth outcome
+changes:
+
+- `_load_jwks` logs `OAuth JWKS fetch failed: kind=<exception> error=... uri=... elapsed_s=...`
+  (URI reduced to scheme/host/path, and the same redaction applied inside the httpx message).
+- The auth middleware logs `OAuth server_error -> 503: request_id=<id> ... cause=<exception>`
+  with the same id the client receives.
+- `/readyz` gains an `oauth_jwks` block (`refresh_failures`, `last_failure_at`,
+  `last_failure_kind`); it never affects readiness. Counts are per process.
+- `deploy/RUNBOOK.md` section 7 covers the symptom and where to look.
+
+The fixes themselves (keep cached keys when a refresh fails; verify against local keys rather
+than the public URL) are not implemented.
+
 ## 2026-09-21 - a tracked-write receipt can be traced to its enriched episode (#92)
 
 Every write leaves two `:Episodic` nodes: Menhir's receipt (the `episode_id` a caller is handed;
@@ -249,32 +268,3 @@ monotonic for the life of the project.
 - `tests/test_mvp_tracked_write_contract.py`: 31 focused formatter and bound-endpoint
   regression cases. Live stdio E2E-2 and exact-commit repository CI remain release gates.
 - Keep the newest ten dated entries per `.agent/maintenance.md`; older entries remain in Git history.
-
-## 2026-09-16 - `menhir sync` actually uploads
-
-The command refused every unqualified run with "the upload path is not implemented yet, and its
-chunk and quota limits have to be measured first". Both halves of that became false earlier today,
-so the refusal was the stalest thing in the CLI.
-
-`menhir sync` now builds the plan, writes the deterministic bundle to a temporary file, and sends
-it through `SnapshotUploader`. `--check` is unchanged and still local-only.
-
-- **A refusal stops a send structurally.** The blocked check runs before the upload branch rather
-  than inside it, so while a secret-risk path stands there is no code path that reaches the
-  network. Asserted without `--check`, against a fully configured remote, by making any attempt to
-  construct an uploader fail the test outright -- every other refusal test runs in `--check`, where
-  nothing could be sent anyway and the assertion proves less than it appears to.
-- **Missing configuration names the setting**, not the symptom. No `MENHIR_BACKEND_URL` says so and
-  offers `--check`; a non-operator key says the tools are operator-tier, because the server's own
-  refusal talks about permissions and sends the caller looking for a broken server instead of a
-  wrong key.
-- The bundle goes to a temp file rather than memory: the pilot quota admits 64 MiB compressed and
-  the uploader streams a chunk at a time, so the client is the only place bundle size would matter.
-- A SEALED upload prints that **nothing was extracted or written to the graph**. A user who reads
-  "uploaded" and assumes it was indexed has been misled about what this phase does.
-- An upload that ends in any other state exits non-zero. Every chunk being accepted while the
-  upload is not whole is not a transport failure, and must not read like success -- the server
-  holds a partial upload until the inactivity TTL.
-
-Driven end to end by `tests/remote_sim`: the real command, reading the environment a user sets,
-against a server that cannot see the repository it is receiving.

@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 from collections.abc import Callable, Sequence
 from urllib.parse import parse_qs, urlencode
 
@@ -54,6 +55,8 @@ LOOPBACK_BOOTSTRAP_ID = "loopback-bootstrap"
 _PROXY_FORWARDING_HEADERS = (b"x-forwarded-for", b"x-real-ip", b"forwarded")
 
 # Human-readable labels for the auth error envelope's top-level ``error`` field.
+logger = logging.getLogger(__name__)
+
 _STATUS_ERROR_LABELS = {
     400: "Bad Request",
     401: "Unauthorized",
@@ -782,6 +785,16 @@ class BearerAuthMiddleware:
         # rather than a 401 "re-authenticate" that sends them into a token-refresh
         # loop during an outage (N-003).
         if exc.error == "server_error":
+            # Log with the request id the client receives so a reported 503 can be
+            # found in the server log directly (not by timestamp matching).
+            cause = exc.__cause__
+            logger.warning(
+                "OAuth server_error -> 503: request_id=%s path=%s detail=%s cause=%s",
+                request_id_for_scope(scope),
+                scope.get("path", ""),
+                exc.description,
+                type(cause).__name__ if cause is not None else None,
+            )
             await self._send_auth_error(
                 scope,
                 send,

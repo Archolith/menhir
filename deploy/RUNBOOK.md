@@ -161,6 +161,43 @@ prints both. The desktop task copies the newest archive off-host at 00:30 local.
 Nothing prunes encrypted archives; prune by hand only with a verified desktop
 copy and never the newest two or the live generation (`pipeline/PHASE4.md`).
 
+## 7. Symptom: 503 "Unable to fetch OAuth JWKS"
+
+A client call fails with `503 Service Unavailable`, code `server_error`, detail
+`Unable to fetch OAuth JWKS`, and a `request_id`. Why: the app verifies its own
+tokens by fetching `MENHIR_OAUTH_JWKS_URI`, which is the *public*
+`https://memory.ctharvey.me/.well-known/jwks.json`. That request leaves the host,
+goes through Cloudflare and back in through `menhir-prod-cloudflared`. Keys are
+cached for `oauth_jwks_cache_ttl_s` (300 s); the first request after expiry
+refetches (5 s timeout) and fails outright if that one fetch fails, even though
+the cached keys are still valid.
+
+Check, from the desktop (`scripts\vps-ssh.ps1` logs in as `thron`):
+
+```
+.\scripts\vps-ssh.ps1 'docker logs --since 6h menhir-prod-app 2>&1 | grep -E "OAuth JWKS fetch failed|OAuth server_error|\" 503"'
+.\scripts\vps-ssh.ps1 'docker logs --since 6h menhir-prod-app 2>&1 | grep "jwks.json HTTP"'   # self-fetches that arrived
+.\scripts\vps-ssh.ps1 'docker logs --since 6h menhir-prod-cloudflared 2>&1 | grep ERR'
+curl -s https://memory.ctharvey.me/readyz      # oauth_jwks.refresh_failures / last_failure_*
+```
+
+- `OAuth server_error -> 503: request_id=<id>` matches the id the client got;
+  the `OAuth JWKS fetch failed: kind=...` line just before it says why (timeout,
+  DNS, connect, HTTP status, malformed). Both lines, and the `/readyz`
+  `oauth_jwks` block, exist only in releases built after 2026-09-22; on older
+  images you have only the access log and must match the 503 by timestamp.
+- No `jwks.json` GET reaching the app at that moment means the self-fetch was
+  lost between the app, Cloudflare and the tunnel, not in the app.
+- `/readyz` stays `ready` regardless; the counters are per process and reset on
+  restart.
+
+One isolated occurrence with healthy `/readyz` is a transient network blip; the
+client can retry. Repeated occurrences mean the Cloudflare/tunnel path is
+unhealthy. First observed 2026-09-22 02:31:32 UTC (one 503 in 30 h, no tunnel
+error; five in-container refetches afterwards took 0.13-0.31 s). The durable
+fixes (keep cached keys on refresh failure; verify against local keys instead
+of the public URL) are not implemented.
+
 ## Not covered: rebuilt images
 
 Releases 14-18 all inherited the 0.2.0-13 image. A rebuilt image needs
