@@ -324,9 +324,9 @@ class StructureGraphWriter:
         # The A0 orientation docs (`.agent/README.md`, `.agent/architecture.md`, ...) are
         # written through the same batch MERGE as files but carry the `document` role, which
         # the multi-role file prune above deliberately excludes: `ingest_document` writes the
-        # same role with absolute-path keys and `source = 'document-ingest'`, and those are
-        # not the scan's to delete. Restricting to `source = 'project-scan'` makes this the
-        # scanner pruning only what the scanner wrote. Same capacity rule: a truncated scan is
+        # same role with absolute-path keys and the `document-ingest` source label, and those
+        # are not the scan's to delete. Restricting the prune to STRUCTURE_SOURCE (passed as a
+        # parameter, never a literal) makes this the scanner pruning only what the scanner wrote. Same capacity rule: a truncated scan is
         # not evidence of absence. An empty keep-list on a complete scan means the project has
         # no orientation docs any more, and every stale one goes -- the single-role prune's
         # documented semantics, shared with endpoints and dependencies.
