@@ -1,17 +1,21 @@
 """Deciding which identity a scan writes under, and what to do when that cannot be decided.
 
-CF-257 phase 1. Resolution has three outcomes and only one of them is a decision the machine may
-take on its own:
+CF-257. Identity lives only in the graph; Menhir writes nothing into a checkout. Resolution has
+three outcomes and only one of them is a decision the machine may take on its own:
 
-    file present, valid        -> RESOLVED, use its id
-    file absent                -> NEEDS DECISION (adopt an existing id, or mint a new one)
+    directory verified         -> RESOLVED, use the bound id
+    not verified               -> NEEDS DECISION (adopt an existing id, or mint a new one)
     caller supplied an action  -> execute it
 
-**Why absent is never an automatic mint.** The identity file is gitignored -- deliberately, so a
-fork does not inherit its parent's identity -- which means a fresh clone, a new machine or a
-``git clean`` removes it. Minting silently there orphans the project's whole silo: 15,636 entities
-for menhir, 5,708 for archolith-bench, still in the graph and unreachable, with no error anywhere.
-The decision is cheap; the silent version is not recoverable without noticing first.
+"Verified" is established by the caller: this host has an active binding for the directory AND
+the checkout is the one that binding recorded (same repository origin; for a legacy binding that
+recorded none, a legacy ``.agent/project-id`` naming the same id).
+
+**Why unverified is never an automatic mint or reuse.** A fresh clone, a new machine, a moved repo
+or a different repository cloned into a bound directory all land here. Minting silently orphans the
+project's whole silo (15,636 entities for menhir, 5,708 for archolith-bench, unreachable with no
+error); reusing silently writes one repository's structure into another's silo. The decision is
+cheap; the silent version is not recoverable without noticing first.
 
 **Why this is a typed result rather than a prompt.** The callers are one-shot MCP and HTTP
 requests with no interactive channel, and the structure watcher is fully unattended. A "prompt"
@@ -99,24 +103,23 @@ class IdentityResolution:
 def resolve_identity(
     *,
     root_path: str,
-    existing_file_id: str | None,
-    candidate: IdentityCandidate | None,
+    verified_project_id: str | None,
+    candidates: list[IdentityCandidate],
     action: IdentityAction | None = None,
     adopt_project_id: str | None = None,
+    reason: str = "",
 ) -> IdentityResolution:
     """Decide the identity for a scan of *root_path*. Pure: no I/O, no minting.
 
-    Reading the file, querying for a candidate and writing the chosen id all happen at the call
-    site. Keeping the decision separate is what lets every branch -- including the ones that only
+    Verifying the directory, querying for candidates and binding the chosen id all happen at the
+    call site. *reason* names why an unverified directory needs a decision. Keeping the decision separate is what lets every branch -- including the ones that only
     occur on a fresh clone or a replaced machine -- be exercised without a filesystem or a graph.
     """
-    # An EXPLICIT action outranks the file. Checking the file first made `identity_action` a no-op
-    # wherever one already existed, so the two cases an operator most needs -- re-pointing a
-    # checkout at a different identity, and forcing a fresh one after a bad adopt -- were
-    # unreachable, silently, with the call reporting success.
-    if existing_file_id and action is None:
+    # An EXPLICIT action outranks the binding: re-pointing a checkout at a different identity, and
+    # forcing a fresh one after a bad adopt, are the two cases an operator most needs.
+    if verified_project_id and action is None:
         return IdentityResolution(
-            status=ResolutionStatus.RESOLVED, project_id=existing_file_id
+            status=ResolutionStatus.RESOLVED, project_id=verified_project_id
         )
 
     if action is IdentityAction.ADOPT:
@@ -126,7 +129,7 @@ def resolve_identity(
                 status=ResolutionStatus.NEEDS_DECISION,
                 reason="adopt_requires_project_id",
                 directory=root_path,
-                candidates=[candidate] if candidate else [],
+                candidates=list(candidates),
             )
         return IdentityResolution(status=ResolutionStatus.RESOLVED, project_id=chosen)
 
@@ -135,12 +138,11 @@ def resolve_identity(
         # checkout on another machine, which the gitignored design makes a separate project.
         return IdentityResolution(status=ResolutionStatus.RESOLVED, project_id=None)
 
-    # No file and no instruction. A candidate makes this recoverable; its absence does not make it
-    # automatic -- a moved repo, a replacement machine and a fresh clone all land here, and each
-    # needs a person to say whether this directory continues an existing project.
+    # Unverified and no instruction. A candidate makes this recoverable; its absence does not make
+    # it automatic -- each case needs a person to say whether this directory continues a project.
     return IdentityResolution(
         status=ResolutionStatus.NEEDS_DECISION,
-        reason="identity_file_missing" if candidate else "identity_file_missing_no_candidate",
+        reason=reason or ("directory_not_bound" if candidates else "directory_not_bound_no_candidate"),
         directory=root_path,
-        candidates=[candidate] if candidate else [],
+        candidates=list(candidates),
     )

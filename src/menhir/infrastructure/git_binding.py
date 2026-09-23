@@ -60,6 +60,19 @@ def _without_credentials(url: str) -> str:
     return urlunsplit((parts.scheme, host, parts.path, "", ""))
 
 
+def read_origin(root: Path) -> str:
+    """The ``origin`` URL (credentials stripped) of the repository whose top level is *root*.
+
+    ``""`` when *root* is not a repository top level, has no ``origin``, or git fails. Project
+    identity compares it with the repository a binding recorded, so a failure reads as "different
+    checkout" and asks for a decision rather than resolving.
+    """
+    dot_git = root / ".git"
+    if not (dot_git.is_dir() or dot_git.is_file()):
+        return ""
+    return _without_credentials((_git(root, "remote", "get-url", "origin") or "").strip())
+
+
 def read_git_binding(root: Path) -> tuple[str, str, bool] | None:
     """Return ``(commit, repository, dirty)`` for the repository at *root*, or ``None``.
 

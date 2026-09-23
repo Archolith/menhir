@@ -68,15 +68,14 @@ __all__ = [
     "IdentityBindingConflict",
     "IdentityRootContested",
     "BindingState",
-    "PendingIdentityPublication",
+    "RootBinding",
     "PROJECT_IDENTITY_CONSTRAINT",
     "PROJECT_IDENTITY_ROOT_CONSTRAINT",
     "PROJECT_IDENTITY_CONSTRAINTS",
     "ensure_binding_constraint",
     "bind_project_identity",
     "binding_for_root",
-    "pending_identity_publication_for_root",
-    "clear_identity_publication_pending",
+    "root_binding",
     "read_binding",
     "clear_conflict",
     "root_key_for",
@@ -123,12 +122,14 @@ class BindingState:
 
 
 @dataclass(frozen=True)
-class PendingIdentityPublication:
-    """A graph-committed binding whose checkout file still needs publication."""
+class RootBinding:
+    """The active identity for one directory on this host, and what it recorded about it."""
 
     project_id: str
-    canonical_root_path: str
     claim_generation: int
+    #: The checkout's ``origin`` when it was bound (``""`` = none). ``None`` = a binding recorded
+    #: before repositories were, whose only proof of checkout was the legacy identity file.
+    repository: str | None
 
 
 def root_key_for(root_path: str) -> str:
@@ -200,8 +201,13 @@ def bind_project_identity(
     rebind: bool = False,
     resolve_conflict: bool = False,
     publication_pending: bool = False,
+    repository: str | None = None,
 ) -> BindingState:
     """Bind *project_id* to *root_path* on this host, or raise.
+
+    *repository* is the checkout's ``origin`` (``""`` for none). It is recorded on a new binding,
+    on every transfer, and on a binding that predates it, so a later scan can tell the same
+    checkout from a different repository cloned into the same directory.
 
     ``rebind`` is a TRANSFER: the caller has operator authority and is saying this directory
     continues (or newly becomes) that project. It supersedes whatever active binding currently
@@ -225,6 +231,7 @@ def bind_project_identity(
             host=host,
             resolve_conflict=resolve_conflict,
             publication_pending=publication_pending,
+            repository=repository,
         )
 
     # A brand-new id stamps `root_key` on create, so the root constraint is the FIRST thing that
@@ -241,6 +248,7 @@ def bind_project_identity(
                             p.bound_at = datetime(),
                             p.bound_host = $host,
                             p.root_key = $root_key,
+                            p.bound_repository = $repository,
                             p.claim_generation = 1
             FOREACH (_ IN CASE WHEN $publication_pending THEN [1] ELSE [] END |
                 SET p.publication_pending = true,
@@ -258,6 +266,7 @@ def bind_project_identity(
                 "host": host,
                 "root_key": root_key,
                 "publication_pending": publication_pending,
+                "repository": repository,
             },
         )
     except Exception as exc:
@@ -268,7 +277,7 @@ def bind_project_identity(
             f"{root_path} is already bound on {host!r} to project id {incumbent or '<unknown>'}, "
             f"but {project_id} was presented for it. Only one identity may own a directory. "
             f"Nothing was changed. Transfer deliberately with an operator-tier identity_action, "
-            f"or remove the stale identity file from this checkout."
+            f"or re-scan without an identity_action to use the directory's current identity."
         ) from exc
     if not rows:  # pragma: no cover - MERGE always returns a row
         raise IdentityBindingConflict(f"could not bind {project_id}")
@@ -288,7 +297,7 @@ def bind_project_identity(
     if state == "superseded":
         raise IdentityBindingConflict(
             f"Project id {project_id} was SUPERSEDED: this directory was transferred to another "
-            f"identity. Re-scan without an identity file to pick up the current one, or transfer "
+            f"identity. Re-scan without an identity_action to pick up the current one, or transfer "
             f"it back explicitly with an operator-tier identity_action."
         )
 
@@ -322,7 +331,7 @@ def bind_project_identity(
             f"{root_path} is already bound on {host!r} to project id {rivals[0]}, but "
             f"{project_id} was presented for it. Only one identity may own a directory. The "
             f"incumbent is left intact: transfer deliberately with an operator-tier "
-            f"identity_action, or remove the stale identity file from this checkout."
+            f"identity_action, or re-scan without one to use the directory's current identity."
         )
 
     if not bound_host or stamped_key != root_key:
@@ -354,6 +363,17 @@ def bind_project_identity(
                 f"directory. Re-run the scan; if it persists, an operator must choose."
             ) from exc
 
+    if repository is not None:
+        # Only fills a gap: a recorded repository is changed by an operator transfer, never here.
+        neo4j.execute(
+            """
+            MATCH (p:ProjectIdentity {project_id: $project_id})
+            WHERE coalesce(p.state, 'bound') = 'bound' AND p.bound_repository IS NULL
+            SET p.bound_repository = $repository
+            """,
+            {"project_id": project_id, "repository": repository},
+        )
+
     # The generation is deliberately NOT touched on this path. An ordinary re-scan re-binds the
     # same identity to the same directory; bumping there would invalidate a concurrent writer of
     # the SAME identity that had done nothing wrong. Stamping a legacy row leaves it absent, which
@@ -375,6 +395,7 @@ def _transfer(
     host: str,
     resolve_conflict: bool = False,
     publication_pending: bool = False,
+    repository: str | None = None,
 ) -> BindingState:
     """Retire every other active claim on this (host, root) and claim it, in ONE statement.
 
@@ -458,6 +479,7 @@ def _transfer(
                 p.state = 'bound',
                 p.bound_host = $host,
                 p.root_key = $root_key,
+                p.bound_repository = coalesce($repository, p.bound_repository),
                 p.rebound_at = datetime(),
                 p.claim_generation = next_generation,
                 p.conflicting_root_path = CASE WHEN $resolve_conflict
@@ -484,6 +506,7 @@ def _transfer(
                 "lock_ids": lock_ids,
                 "resolve_conflict": resolve_conflict,
                 "publication_pending": publication_pending,
+                "repository": repository,
             },
         )
     except Exception as exc:
@@ -566,85 +589,37 @@ def binding_for_root(neo4j: Any, root_path: str) -> str | None:
     return None
 
 
-def pending_identity_publication_for_root(
-    neo4j: Any, root_path: str
-) -> PendingIdentityPublication | None:
-    """Return the current root's durable publication repair authorization, if any.
+def root_binding(neo4j: Any, root_path: str) -> RootBinding | None:
+    """The active binding for *root_path* on this host, with its generation and repository.
 
-    Every marker field must still agree with the active binding. That makes the marker a narrow
-    capability to replace this root's file with this id at this generation, rather than a generic
-    permission to overwrite a stale or copied identity file.
+    The authority for an ordinary scan: identity lives only in the graph, never in the checkout.
+    Same host/path matching as :func:`binding_for_root`.
     """
     host = _host()
-    root_key = root_key_for(root_path)
     rows = neo4j.execute(
         """
         MATCH (p:ProjectIdentity)
         WHERE coalesce(p.state, 'bound') = 'bound'
           AND p.bound_host = $host
-          AND p.root_key = $root_key
-          AND p.publication_pending = true
-          AND p.publication_pending_host = $host
-          AND p.publication_pending_root_key = $root_key
-          AND p.publication_pending_generation = coalesce(p.claim_generation, 0)
-        RETURN p.project_id AS id, p.canonical_root_path AS root,
+        RETURN p.project_id AS id, p.canonical_root_path AS root, p.root_key AS root_key,
                coalesce(p.claim_generation, 0) AS claim_generation,
-               p.publication_pending AS publication_pending
+               p.bound_repository AS repository
         """,
-        {"host": host, "root_key": root_key},
+        {"host": host},
     )
+    target = root_key_for(root_path)
     for row in rows:
-        # The explicit check also keeps the strict offline fake honest: it deliberately ignores
-        # predicates it cannot model and omits this field rather than manufacturing authority.
-        if row.get("publication_pending") is True and row.get("id"):
-            return PendingIdentityPublication(
+        claimed = str(row.get("root_key") or "")
+        if not claimed and row.get("root"):
+            claimed = root_key_for(str(row["root"]))
+        if claimed and claimed == target:
+            repository = row.get("repository")
+            return RootBinding(
                 project_id=str(row["id"]),
-                canonical_root_path=str(row.get("root") or root_path),
                 claim_generation=int(row.get("claim_generation") or 0),
+                repository=None if repository is None else str(repository),
             )
     return None
-
-
-def clear_identity_publication_pending(
-    neo4j: Any,
-    *,
-    project_id: str,
-    root_path: str,
-    claim_generation: int,
-) -> None:
-    """Clear only the marker proven current for this id, root, host, and generation."""
-    host = _host()
-    root_key = root_key_for(root_path)
-    rows = neo4j.execute(
-        """
-        MATCH (p:ProjectIdentity)
-        WHERE coalesce(p.state, 'bound') = 'bound'
-          AND p.bound_host = $host
-          AND p.root_key = $root_key
-          AND p.project_id = $expected_project_id
-          AND coalesce(p.claim_generation, 0) = $claim_generation
-          AND p.publication_pending = true
-          AND p.publication_pending_host = $host
-          AND p.publication_pending_root_key = $root_key
-          AND p.publication_pending_generation = $claim_generation
-        REMOVE p.publication_pending, p.publication_pending_host,
-               p.publication_pending_root_key, p.publication_pending_generation,
-               p.publication_pending_at
-        RETURN p.project_id AS id
-        """,
-        {
-            "host": host,
-            "root_key": root_key,
-            "expected_project_id": project_id,
-            "claim_generation": claim_generation,
-        },
-    )
-    if not any(str(row.get("id") or "") == project_id for row in rows):
-        raise IdentityBindingConflict(
-            f"Could not clear publication recovery for {project_id} at {root_path}: the active "
-            "binding or generation changed before publication completed. The marker was left "
-            "intact; re-scan to reconcile the current authoritative binding."
-        )
 
 
 def read_binding(neo4j: Any, project_id: str) -> BindingState | None:

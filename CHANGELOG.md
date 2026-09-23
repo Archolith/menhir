@@ -1,3 +1,21 @@
+## 2026-09-22 - project identity lives only in the graph; Menhir writes nothing into a checkout
+
+Menhir no longer creates, changes or deletes `.agent/project-id`, `.agent/.gitignore` or a lock
+file in any project (CF-257's per-checkout identity file is retired).
+
+- A directory resolves silently only when this host's active binding names it AND the checkout is
+  the one the binding recorded: the same `origin` (`""` for none). The binding now records
+  `bound_repository` on create and on every transfer.
+- A legacy binding (no recorded repository) is verified once by the legacy `.agent/project-id`
+  naming the same id, which is only read; the repository is then recorded and the file is never
+  consulted again. Without a matching file it is a decision (`legacy_binding_unverified`).
+- Everything else is a decision, as before: an unbound directory (`directory_not_bound`, the old
+  file's id offered as an adopt candidate for a moved checkout), or another repository in a bound
+  directory (`repository_changed`). A malformed legacy file is ignored, not fatal.
+- Removed: minting, the ignore rule, the `.agent/.gitignore` publication lock, and the publication
+  recovery marker functions. Transfers serialize on the graph (one statement, root constraint).
+- Scanner schema 8: `.agent/project-id` is scan-invisible (existing projects re-scan once).
+
 ## 2026-09-22 - Menhir serves Beacon memory evidence as a read-only provider
 
 Beacon now owns all beacon work and defines a backend-neutral memory-provider contract (Beacon
@@ -255,18 +273,4 @@ monotonic for the life of the project.
   zero semantic diff, and wrong-digest no-clobber. 17/17 pass locally; full offline and
   graph-backed CI on the exact SHA remain release gates. Live-Neo4j ingest→generate E2E-6
   and Beacon stdio tool-query acceptance are NOT RUN and stay with the MVP release lane.
-- Keep the newest ten dated entries per `.agent/maintenance.md`; older entries remain in Git history.
-
-## 2026-09-16 - local MVP tracked-write receipts and observation guidance
-
-- `src/menhir/mcp/formatters.py`: status/watch observations direct continuation to the
-  existing episode; remove duplicate-write advice and unsupported completion/retry promises.
-- `src/menhir/mcp/tools/ingest/add_memory_and_track.py`: clarify that the tool queues a
-  new write; preserve its accepted receipt when subsequent collection or formatting fails,
-  without exposing raw exception text. Optional queue diagnostics cannot hide an observed
-  episode status. Cancellation and existing write/auth arguments remain unchanged.
-- `docs/agent-usage.md`, `docs/templates/AGENTS.menhir.md`: document the #118 owner decision,
-  actual tool options, restricted-client behavior, and the separate TEMPORAL direct-write path.
-- `tests/test_mvp_tracked_write_contract.py`: 31 focused formatter and bound-endpoint
-  regression cases. Live stdio E2E-2 and exact-commit repository CI remain release gates.
 - Keep the newest ten dated entries per `.agent/maintenance.md`; older entries remain in Git history.

@@ -30,7 +30,8 @@ import yaml
 
 from menhir.core.backend_runtime import RuntimeProvider
 from menhir.core.backend_shared import _drain_background_errors
-from menhir.domain.project_id_file import mint_identity
+from menhir.infrastructure.git_binding import read_origin
+from menhir.infrastructure.project_identity_binding import bind_project_identity
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.structure_queries import StructureGraphWriter
 from menhir.services.beacon_generation import BeaconGenerationError, generate_beacon
@@ -85,17 +86,6 @@ def _fixture_repo(tmp_path: Path) -> Path:
     (agent / "architecture.md").write_text(
         f"# Architecture\n\n{ARCHITECTURE_FACT}\n", encoding="utf-8"
     )
-    # An established checkout carries the identity plumbing: the ignore rule
-    # menhir expects repos to have, and the identity file minted through
-    # menhir's own writer. Pre-minting keeps BOTH scans over an identical
-    # tree, so the changed-fact phase's manifest delta is exactly the
-    # orientation claim plus the cited fingerprint -- not identity-file
-    # publication noise.
-    (agent / ".gitignore").write_text(
-        "# menhir project identity (CF-257): per-checkout, never committed\nproject-id\n",
-        encoding="utf-8",
-    )
-    mint_identity(tmp_path)
     return tmp_path
 
 
@@ -240,9 +230,15 @@ async def test_e2e6_beacon_owned_generation_and_consumption(
     )
 
     # 0. real ingest through execute_project_ingest -> scan_and_write_project,
-    # then verify the graph is fresh BEFORE any Beacon contact. The fixture
-    # carries its identity file, so settlement takes the common
-    # established-checkout path and no operator decision is needed.
+    # then verify the graph is fresh BEFORE any Beacon contact. The checkout is
+    # established the way identity now lives -- a graph binding recording its
+    # (empty) origin, no file -- so no operator decision is needed.
+    bind_project_identity(
+        test_neo4j_repo,
+        project_id=str(uuid.uuid4()),
+        root_path=str(repo),
+        repository=read_origin(repo),
+    )
     await _ingest_and_await_write(
         provider,
         root=repo,
