@@ -417,3 +417,40 @@ def test_tool_reports_a_refusal_as_an_error(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(tool, "get_backend", lambda: Backend())
     with pytest.raises(ValueError, match="partial"):
         asyncio.run(tool.endpoint(" pid-1 "))
+
+
+def test_a_refusal_reaches_the_caller_as_an_mcp_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Through the call tracker, a refusal is an ``isError`` result Beacon can recognize."""
+    from mcp.types import CallToolResult
+
+    from menhir.core.request_context import bind_request_tier, reset_request_tier
+    from menhir.mcp import contracts
+    from menhir.mcp.telemetry.tracker import track_mcp_call
+    from menhir.mcp.tools.ops.get_beacon_evidence import GetBeaconEvidenceTool
+
+    rows: list[dict[str, Any]] = []
+
+    class Store:
+        def record(self, **row: Any) -> None:
+            rows.append(row)
+
+    class Backend:
+        async def query_structure(self, project: str, query_type: str) -> dict[str, str]:
+            return {"error": "project was indexed from a checkout with uncommitted changes"}
+
+    async def tracked(**kwargs: Any) -> Any:
+        return await track_mcp_call(**kwargs, store=Store())
+
+    monkeypatch.setattr(contracts, "track_mcp_call", tracked)
+    tool = GetBeaconEvidenceTool()
+    monkeypatch.setattr(tool, "get_backend", lambda: Backend())
+    token = bind_request_tier("readonly")
+    try:
+        result = asyncio.run(tool.execute(project_id="pid-1"))
+    finally:
+        reset_request_tier(token)
+
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    assert result.content[0].text == "project was indexed from a checkout with uncommitted changes"
+    assert rows and rows[-1]["success"] is False

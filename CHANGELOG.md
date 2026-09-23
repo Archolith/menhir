@@ -9,6 +9,9 @@ Found by running Beacon's build against a local Menhir (plan Phase 3A exit check
   staging files), the same set the scanner never reads, so publishing a beacon does not make the
   next index unservable. Any other change, or a rename touching another path, is still dirty;
   unparseable git status is dirty.
+- `get_beacon_evidence` returns a refusal as an MCP error result (`isError`) with the reason, so
+  Beacon can tell it from evidence. New `McpToolRefusal` in the call tracker; every other tool's
+  failure keeps its "Error: ..." text.
 
 ## 2026-09-22 - Menhir serves Beacon memory evidence as a read-only provider
 
