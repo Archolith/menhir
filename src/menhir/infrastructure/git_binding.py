@@ -14,6 +14,7 @@ import re
 
 # Fixed local git inspection only: fixed argv, no shell, no network.
 import subprocess  # nosec B404
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -73,11 +74,40 @@ def read_origin(root: Path) -> str:
     return _without_credentials((_git(root, "remote", "get-url", "origin") or "").strip())
 
 
-def read_git_binding(root: Path) -> tuple[str, str, bool] | None:
+def _status_paths(status: str) -> list[str] | None:
+    """Every path named by ``git status --porcelain=v1 -z`` output, or ``None`` if malformed.
+
+    A rename or copy entry names two paths (new, then original); both are returned.
+    """
+    paths: list[str] = []
+    tokens = status.split("\0")
+    if tokens and tokens[-1] == "":
+        tokens.pop()
+    index = 0
+    while index < len(tokens):
+        entry = tokens[index]
+        if len(entry) < 4 or entry[2] != " ":
+            return None
+        paths.append(entry[3:])
+        index += 1
+        if entry[0] in "RC":
+            if index >= len(tokens):
+                return None
+            paths.append(tokens[index])
+            index += 1
+    return paths
+
+
+def read_git_binding(
+    root: Path, ignore: Callable[[str], bool] | None = None
+) -> tuple[str, str, bool] | None:
     """Return ``(commit, repository, dirty)`` for the repository at *root*, or ``None``.
 
     Only a repository whose top level is *root* counts: a project directory nested inside
     another repository is not bound to that repository's commit.
+
+    *ignore* names root-relative paths whose state cannot change what the scan indexes (the
+    scanner never reads them); a change confined to those paths leaves the checkout clean.
     """
     dot_git = root / ".git"
     if not (dot_git.is_dir() or dot_git.is_file()):
@@ -86,6 +116,10 @@ def read_git_binding(root: Path) -> tuple[str, str, bool] | None:
     if not _OID.match(commit):
         return None
     origin = (_git(root, "remote", "get-url", "origin") or "").strip()
-    status = _git(root, "status", "--porcelain=v1", "--untracked-files=normal")
-    dirty = status is None or bool(status.strip())
+    status = _git(root, "status", "--porcelain=v1", "-z", "--untracked-files=normal")
+    paths = None if status is None else _status_paths(status)
+    if paths is None:
+        dirty = True
+    else:
+        dirty = any(ignore is None or not ignore(path) for path in paths)
     return commit, _without_credentials(origin), dirty

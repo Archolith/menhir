@@ -230,8 +230,8 @@ def _require_filesystem_match(guard: BeaconEvidenceGuard, project: str, repo_roo
 def _grounded_description(overview: dict[str, Any], project: str) -> str:
     """Return the description the scanner actually read, or refuse.
 
-    The overview's ``description`` is display text: when neither ``.agent/README.md`` nor
-    ``CLAUDE.md`` exists the writer stores a ``"<stack> project"`` placeholder there, so it can
+    The overview's ``description`` is display text: when none of ``.agent/README.md``,
+    ``CLAUDE.md`` or ``README.md`` yields a paragraph the writer stores a ``"<stack> project"`` placeholder there, so it can
     never be empty for a scanned project. Beacon's evidence schema requires a non-empty
     ``project.description`` and publishes it as the project's purpose, so an ungrounded value
     cannot be omitted either -- it is refused (PR #125 F4). ``indexed_description`` is the raw
@@ -249,7 +249,8 @@ def _grounded_description(overview: dict[str, Any], project: str) -> str:
     description = str(raw).strip()
     if not description:
         raise BeaconEvidenceError(
-            "no indexed project description (.agent/README.md or CLAUDE.md is missing); "
+            "no indexed project description (no paragraph in .agent/README.md, CLAUDE.md or "
+            "README.md); "
             f"refusing to invent one: {project}"
         )
     return description

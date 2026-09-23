@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 
 from menhir.mcp.contracts import ToolScope
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 
 
@@ -63,22 +64,23 @@ class GetBeaconEvidenceTool(BaseTextTool):
     async def endpoint(self, project_id: str = "", repository: str = "") -> str:
         project_id, repository = project_id.strip(), repository.strip()
         if bool(project_id) == bool(repository):
-            raise ValueError("name exactly one of project_id or repository")
+            raise McpToolRefusal("name exactly one of project_id or repository")
         backend = self.get_backend()
         if repository:
             found = await backend.query_structure(repository, "beacon_projects_for_repository")
             if isinstance(found, dict) and "error" in found:
-                raise ValueError(str(found["error"]))
+                raise McpToolRefusal(str(found["error"]))
             projects = list((found or {}).get("projects") or [])
             if not projects:
-                raise ValueError(f"no indexed project recorded repository {repository}")
+                raise McpToolRefusal(f"no indexed project recorded repository {repository}")
             if len(projects) > 1:
-                raise ValueError(
+                raise McpToolRefusal(
                     f"{len(projects)} indexed projects recorded repository {repository}; "
                     f"name one with project_id: {_describe(projects)}"
                 )
             project_id = projects[0]["project_id"]
         result = await backend.query_structure(project_id, "beacon_evidence")
         if isinstance(result, dict) and "error" in result:
-            raise ValueError(str(result["error"]))
+            # An MCP error result, so Beacon can tell a refusal from evidence.
+            raise McpToolRefusal(str(result["error"]))
         return json.dumps(result, sort_keys=True, ensure_ascii=True)

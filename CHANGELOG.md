@@ -14,12 +14,28 @@ file in any project (CF-257's per-checkout identity file is retired).
   directory (`repository_changed`). A malformed legacy file is ignored, not fatal.
 - Removed: minting, the ignore rule, the `.agent/.gitignore` publication lock, and the publication
   recovery marker functions. Transfers serialize on the graph (one statement, root constraint).
-- Scanner schema 8: `.agent/project-id` is scan-invisible (existing projects re-scan once).
+- Scanner schema 9: `.agent/project-id` is scan-invisible (existing projects re-scan once).
 - With no file to read, the id comes from Menhir: `ingest_project` reports it
   (`Scanned shop (project_id=...)`, also when skipped), and `get_beacon_evidence` accepts the
   checkout's `repository` origin instead of an id, serving the one project that recorded it and
   refusing with the list when several checkouts match. The tool census and client-policy digest
-  are unchanged (a parameter, not a tool).
+  are unchanged (a parameter, not a tool). Lookup refusals are MCP error results, like
+  evidence refusals.
+
+## 2026-09-22 - Beacon provider: README descriptions; Beacon output no longer dirties the index
+
+Found by running Beacon's build against a local Menhir (plan Phase 3A exit check).
+
+- A repository with neither `.agent/README.md` nor `CLAUDE.md` is described by the first
+  paragraph of its own `README.md`, so Beacon evidence no longer refuses a plain repository.
+  Scanner schema 8 re-scans existing projects once to pick this up.
+- The index's dirty flag ignores Beacon's own root artifacts (`beacon.generated.yaml` and its
+  staging files), the same set the scanner never reads, so publishing a beacon does not make the
+  next index unservable. Any other change, or a rename touching another path, is still dirty;
+  unparseable git status is dirty.
+- `get_beacon_evidence` returns a refusal as an MCP error result (`isError`) with the reason, so
+  Beacon can tell it from evidence. New `McpToolRefusal` in the call tracker; every other tool's
+  failure keeps its "Error: ..." text.
 
 ## 2026-09-22 - Menhir serves Beacon memory evidence as a read-only provider
 
@@ -253,29 +269,3 @@ history and the next claim reused generation 1. A generation that can be reused 
 a stale lease from the previous turn would match the new one on generation, leaving only the owner
 field between it and authority. Release now leaves an expired tombstone, keeping generations
 monotonic for the life of the project.
-
-## 2026-09-17 - Beacon generation from indexed project knowledge (#120)
-
-- `src/menhir/services/beacon_generation.py`: conservative source-grounded manifest
-  generation from StructureQueries evidence — intact-index/root-match/coverage/
-  fingerprint gating, indexed description and canonical documents only, no synthesized
-  purpose/commands/guardrails, fail closed on missing evidence.
-- `src/menhir/services/beacon_compat.py`: version-pinned subprocess boundary to a
-  separately installed Beacon 0.1.0 interpreter (framework dependency isolation); the
-  raw manifest is parsed and validated by Beacon's own loader/validator before any
-  bytes are published. No schema logic is copied into Menhir.
-- `src/menhir/services/beacon_publication.py`: staged, digest-gated publication to the
-  fixed sidecar `beacon.generated.yaml`; refuses overwriting initial outputs, foreign
-  or hand-edited artifacts, symlinked paths, and concurrent writers (advisory lock);
-  validates staged candidates before atomic replace; preserves mtime on zero diff.
-- `src/menhir/cli/beacon.py` (+ registration): `menhir beacon generate PROJECT --repo
-  --beacon-python [--refresh --expected-sha256]` local operator command.
-- `docs/agent-usage.md`: command, sidecar/refresh policy, dependency isolation, and
-  validation workflow.
-- `tests/test_beacon_publication.py` (7) and `tests/test_beacon_generation.py` (10):
-  publication safety, fail-closed evidence gating, real-Beacon round trips through the
-  actual parser/validator, `beacon validate` CLI acceptance, deterministic refresh with
-  zero semantic diff, and wrong-digest no-clobber. 17/17 pass locally; full offline and
-  graph-backed CI on the exact SHA remain release gates. Live-Neo4j ingest→generate E2E-6
-  and Beacon stdio tool-query acceptance are NOT RUN and stay with the MVP release lane.
-- Keep the newest ten dated entries per `.agent/maintenance.md`; older entries remain in Git history.

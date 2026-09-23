@@ -179,7 +179,8 @@ _MAX_FILE_BYTES = 2 * 1024 * 1024  # 2 MB — skip files larger than this to avo
 # fingerprint so a rules change invalidates every stored fingerprint and forces a re-scan --
 # otherwise the path+mtime fingerprint is unchanged, ingest skips as "unchanged", and existing
 # graphs keep their truncated state forever.
-SCANNER_SCHEMA_VERSION = 8  # v8: the legacy `.agent/project-id` identity file is scan-invisible
+SCANNER_SCHEMA_VERSION = 9  # v9: the legacy `.agent/project-id` identity file is scan-invisible
+# (v8: README.md is the last project-description fallback)
 
 # Beacon publication and evidence scratch files live at the repository root. They are
 # outputs/coordination state derived from a scan, never project source. Letting them back into
@@ -257,7 +258,7 @@ class ProjectScanner:
 
         project_name = name or root.name
         gitignore_patterns = _load_gitignore(root)
-        binding_before = _read_git_binding(root)
+        binding_before = _read_git_binding(root, ignore=_is_beacon_root_artifact)
 
         # Walk and collect
         all_rel_paths: list[str] = []
@@ -423,7 +424,7 @@ class ProjectScanner:
 
         # Read the binding on both sides of every filesystem read above: a commit or edit
         # landing mid-scan means the fingerprint and the commit may not describe one content.
-        binding_after = _read_git_binding(root)
+        binding_after = _read_git_binding(root, ignore=_is_beacon_root_artifact)
         if binding_after is not None:
             commit, repository, dirty = binding_after
             result.indexed_commit = commit
@@ -589,14 +590,17 @@ def _read_project_description(root: Path) -> str:
         except OSError:
             pass
 
-    # Fall back to CLAUDE.md
-    claude_md = root / "CLAUDE.md"
-    if claude_md.is_file():
-        try:
-            text = read_text_utf8(claude_md)[:1000]
-            return _first_paragraph(text)
-        except OSError:
-            pass
+    # Fall back to CLAUDE.md, then the project's own README.md: a repository without the
+    # agent-doc conventions still describes itself there (Beacon evidence refuses an empty one).
+    for name in ("CLAUDE.md", "README.md"):
+        path = root / name
+        if path.is_file():
+            try:
+                description = _first_paragraph(read_text_utf8(path)[:1000])
+            except OSError:
+                continue
+            if description:
+                return description
 
     return ""
 
