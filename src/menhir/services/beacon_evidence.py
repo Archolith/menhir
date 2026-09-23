@@ -30,11 +30,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 from menhir.infrastructure.project_scanner import ProjectScanner
 from menhir.services.beacon_compat import child_environment
@@ -354,11 +356,56 @@ class ProviderEvidenceReader(Protocol):
 
     def get_beacon_evidence_guard_by_id(self, project_id: str) -> dict[str, Any]: ...
 
+    def list_indexed_repositories(self) -> list[dict[str, str]]: ...
+
     def query_structure(self, project: str, query_type: str, **kwargs: Any) -> Any: ...
 
     def query_documents(
         self, project: str, path_filter: str = "", document_type: str | None = None
     ) -> list[dict[str, str]]: ...
+
+
+def normalize_repository(url: str) -> str:
+    """Repository identity as Beacon compares it: host (+ non-default port) + path, no scheme,
+    no ``.git``, lowercase. Mirrors ``beacon.main._normalize_repository`` so a lookup agrees
+    with Beacon's own freshness check."""
+    text = url.strip()
+    if not text:
+        return ""
+    scp = re.match(r"^[\w.-]+@([^:/]+):(.+)$", text)
+    if scp:
+        text = f"ssh://{scp.group(1)}/{scp.group(2)}"
+    parts = urlsplit(text)
+    path = parts.path.rstrip("/")
+    if path.endswith(".git"):
+        path = path[: -len(".git")]
+    try:
+        port_number = parts.port
+    except ValueError:
+        return ""
+    port = f":{port_number}" if port_number and port_number not in (22, 80, 443) else ""
+    return f"{(parts.hostname or '').lower()}{port}{path.lower()}"
+
+
+def find_projects_by_repository(
+    reader: ProviderEvidenceReader, repository: str
+) -> list[dict[str, str]]:
+    """Indexed projects whose last scan recorded *repository* as origin (Beacon's lookup).
+
+    Several checkouts of one repository are several projects; the caller must choose, so all are
+    returned rather than one guessed.
+    """
+    wanted = normalize_repository(repository)
+    if not wanted:
+        raise BeaconEvidenceError("a repository origin is required")
+    return sorted(
+        (
+            {k: row[k] for k in ("project_id", "name", "root_path")}
+            for row in reader.list_indexed_repositories()
+            if row.get("project_id") and normalize_repository(row.get("repository", "")) == wanted
+        ),
+        key=lambda row: (row["name"], row["project_id"]),
+    )
 
 
 def _provider_guard(reader: ProviderEvidenceReader, project_id: str) -> dict[str, Any]:

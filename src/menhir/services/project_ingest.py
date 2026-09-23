@@ -75,6 +75,9 @@ class ProjectIngestOutcome:
     #: empty project -- which is exactly how "Scanned demo: 0 entities, 0 edges" got reported as
     #: success while nothing had been written.
     needs_decision: dict[str, Any] | None = None
+    #: The project's Menhir id (UUID) the scan settled under. Identity lives only in Menhir's
+    #: graph, so this is how a caller (or Beacon's ``--memory-project``) learns it.
+    project_id: str | None = None
     episode: ProjectEpisodeOutcome = field(
         default_factory=lambda: ProjectEpisodeOutcome(ProjectEpisodeStatus.NOT_REQUESTED)
     )
@@ -183,7 +186,11 @@ async def execute_project_ingest(
     if result.get("status") == "needs_decision":
         return ProjectIngestOutcome(project_name=project_name, needs_decision=result)
     if result.get("skipped"):
-        return ProjectIngestOutcome(project_name=project_name, skipped=True)
+        return ProjectIngestOutcome(
+            project_name=project_name,
+            skipped=True,
+            project_id=result.get("project_id"),
+        )
 
     narrative = str(result.get("narrative") or "")
     episode = ProjectEpisodeOutcome(ProjectEpisodeStatus.NO_NARRATIVE)
@@ -220,6 +227,7 @@ async def execute_project_ingest(
         counts=dict(result.get("counts") or {}),
         meta=dict(result.get("meta") or {}),
         background=bool(result.get("background", False)),
+        project_id=result.get("project_id"),
         episode=episode,
     )
 

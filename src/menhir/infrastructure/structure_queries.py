@@ -699,6 +699,27 @@ class StructureGraphWriter:
             "writer_revision": str(row.get("writer_revision") or ""),
         }
 
+    def list_indexed_repositories(self) -> list[dict[str, str]]:
+        """Every indexed project with the repository origin its last scan recorded."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Entity {structure_role: 'project'})
+            WHERE n.structure_project_id IS NOT NULL AND n.indexed_repository IS NOT NULL
+            RETURN n.structure_project_id AS project_id, n.structure_project AS name,
+                   n.root_path AS root_path, n.indexed_repository AS repository
+            """,
+            {},
+        )
+        return [
+            {
+                "project_id": str(row.get("project_id") or ""),
+                "name": str(row.get("name") or ""),
+                "root_path": str(row.get("root_path") or ""),
+                "repository": str(row.get("repository") or ""),
+            }
+            for row in rows
+        ]
+
     def get_beacon_evidence_guard_by_id(self, project_id: str) -> dict[str, Any]:
         """The evidence fence for one project, looked up by its stable identity.
 

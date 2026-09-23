@@ -260,7 +260,11 @@ Menhir as a Beacon memory provider. Returns a `beacon-memory-evidence-1.1` docum
 indexed project, read from the structure graph only (no filesystem, no git, no writes). Its
 `binding` names the repository and the git commit the project was indexed from, so Beacon can
 refuse to publish it against any other checkout.
-- **`project_id`** (str): The project's stable Menhir id (`structure_project_id`).
+- **`project_id`** (str): The project's stable Menhir id (`structure_project_id`), as `ingest_project` reports it.
+- **`repository`** (str): Instead of `project_id`, the checkout's `origin` URL (compared as Beacon
+  compares it: host, non-default port, path; no scheme, no `.git`, lowercase). Exactly one of the
+  two is required. Several indexed checkouts of the repository are an error listing each
+  `project_id`, name and root; none is an error.
 - Returns the evidence as JSON text. Errors (nothing served) when the id is unknown or
   ambiguous, the index is partial or being written, the project was indexed without git or
   from a checkout with uncommitted changes, or it was re-indexed during the read.

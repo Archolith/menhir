@@ -15,6 +15,11 @@ file in any project (CF-257's per-checkout identity file is retired).
 - Removed: minting, the ignore rule, the `.agent/.gitignore` publication lock, and the publication
   recovery marker functions. Transfers serialize on the graph (one statement, root constraint).
 - Scanner schema 8: `.agent/project-id` is scan-invisible (existing projects re-scan once).
+- With no file to read, the id comes from Menhir: `ingest_project` reports it
+  (`Scanned shop (project_id=...)`, also when skipped), and `get_beacon_evidence` accepts the
+  checkout's `repository` origin instead of an id, serving the one project that recorded it and
+  refusing with the list when several checkouts match. The tool census and client-policy digest
+  are unchanged (a parameter, not a tool).
 
 ## 2026-09-22 - Menhir serves Beacon memory evidence as a read-only provider
 

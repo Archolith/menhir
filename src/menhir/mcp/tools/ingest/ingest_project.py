@@ -135,9 +135,10 @@ def _format_project_ingest_outcome(outcome: ProjectIngestOutcome) -> str:
         return chr(10).join(lines)
     if outcome.error:
         return f"Error: {outcome.error}"
+    identity = f" (project_id={outcome.project_id})" if outcome.project_id else ""
     if outcome.skipped:
         return (
-            f"Skipped {outcome.project_name}: fingerprint unchanged. "
+            f"Skipped {outcome.project_name}{identity}: fingerprint unchanged. "
             f"Use force=True to re-scan."
         )
 
@@ -168,7 +169,7 @@ def _format_project_ingest_outcome(outcome: ProjectIngestOutcome) -> str:
     )
 
     return (
-        f"Scanned {outcome.project_name}: {status_line} "
+        f"Scanned {outcome.project_name}{identity}: {status_line} "
         f"Semantic episode: {episode_status}\n"
         f"  dirs={dirs}, files={files}, "
         f"deps={deps}, endpoints={endpoints}, "
