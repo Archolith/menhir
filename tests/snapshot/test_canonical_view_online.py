@@ -131,9 +131,7 @@ def test_publish_refuses_empty_actor(repo, pid, mint, actor) -> None:
         )
 
     assert excinfo.value.code == ERR_VIEW_ACTOR_REQUIRED
-    view = read_view(repo, project_id=pid, view_key=VIEW)
-    assert view.current_root is None
-    assert view.last_promoted_by == ""
+    assert read_view(repo, project_id=pid, view_key=VIEW) is None
 
 
 def test_restore_refuses_empty_actor(repo, pid, mint) -> None:

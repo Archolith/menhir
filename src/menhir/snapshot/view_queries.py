@@ -484,10 +484,10 @@ class SnapshotStructureViewReader:
             where = ""
             params = self._params(view)
         elif path.endswith("/"):
-            where = "AND sym.structure_path STARTS WITH $prefix "
+            where = "WHERE sym.structure_path STARTS WITH $prefix "
             params = self._params(view, prefix=path)
         else:
-            where = "AND sym.structure_path STARTS WITH $prefix "
+            where = "WHERE sym.structure_path STARTS WITH $prefix "
             params = self._params(view, prefix=path + "::")
         rows = list(
             self.neo4j.execute(
@@ -502,10 +502,10 @@ class SnapshotStructureViewReader:
             )
         )
         if not path or path.endswith("/"):
-            trunc_where = "AND ($prefix = '' OR f.structure_path STARTS WITH $prefix) "
+            trunc_where = "WHERE ($prefix = '' OR f.structure_path STARTS WITH $prefix) "
             trunc_params = self._params(view, prefix=path)
         else:
-            trunc_where = "AND f.structure_path = $prefix "
+            trunc_where = "WHERE f.structure_path = $prefix "
             trunc_params = self._params(view, prefix=path)
         truncated_rows = list(
             self.neo4j.execute(

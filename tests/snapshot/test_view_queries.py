@@ -153,6 +153,7 @@ def test_every_snapshot_entity_match_is_root_scoped() -> None:
     assert snapshot_statements
     assert all("view_root: $root" in statement for statement in snapshot_statements)
     assert all("project_id: $pid" in statement for statement in snapshot_statements)
+    assert all(") AND " not in statement for statement in snapshot_statements)
     assert all(params.get("root") == "root-current" for statement, params in neo4j.calls
                if "SnapshotEntity" in statement)
 

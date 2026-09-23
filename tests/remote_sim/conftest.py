@@ -72,6 +72,8 @@ def _compose(*args: str, check: bool = True, timeout: float = 600.0) -> subproce
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=check,
         timeout=timeout,
     )

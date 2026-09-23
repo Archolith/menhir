@@ -8,6 +8,10 @@
   identity receipts rather than replacing them.
 - Resolve published snapshot structure through the canonical view while preserving byte-identical
   legacy responses for projects without one.
+- Fix the published-view symbol query's Cypher predicate and prove that an empty promotion actor
+  is refused without creating a view.
+- Decode remote-simulation Docker output as UTF-8 on Windows so teardown and startup diagnostics
+  cannot fail in a background reader thread.
 
 ## 2026-09-22 - Menhir serves Beacon memory evidence as a read-only provider
 

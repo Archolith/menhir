@@ -12,6 +12,17 @@ P4 design: `.agent/plans/menhir-snapshot-p4-graph-write-design-2026-09-17.md`
 Tenancy position: issue #127
 Status: **IMPLEMENTED — 2026-09-20.**
 
+Current-main verification (2026-09-22 PR integration):
+
+- 415 offline snapshot, MCP-tool, published-view, and watcher tests passed; 85 graph-backed tests
+  skipped by the default safety gate.
+- 83 graph-backed snapshot/view tests passed against the disposable Neo4j test container.
+- 9 remote-simulation tests passed through a Dockerized Menhir that cannot see the host checkout,
+  covering real bundle upload, negotiated chunking, explicit commit, and CLI product wiring.
+- The integration audit fixed one published-view Cypher syntax error and corrected the empty-actor
+  test to assert the required no-mutation outcome. Production deployment and live proof remain a
+  post-merge rollout step, not evidence claimed by this PR.
+
 Implementation decisions: a published canonical snapshot selected by its durable project id wins
 over local structure for that same identity; a display-name collision stays visible and resolves to
 the local project unless the caller selects the snapshot id explicitly. No published view preserves
