@@ -1,0 +1,209 @@
+beacon_version: '0.1'
+
+project:
+  name: menhir
+  tagline: Evidence and code intelligence for coding agents.
+  status: experimental
+  description: >
+    Menhir is an evidence and code-intelligence service for coding agents. It joins source
+    episodes, governed knowledge, engineering artifacts, repository structure, callers and tests
+    in one Neo4j graph, so an agent can see why something was done, where the evidence came from,
+    whether it is still current, and which code and tests a change affects.
+  repository: https://github.com/Archolith/menhir.git
+  primary_language: Python
+  license: Apache-2.0
+
+purpose:
+  one_sentence: >
+    Git records what changed; Menhir records why an agent acted, where the evidence came from,
+    whether it is still current, and which code and tests carry the impact.
+  problem: >
+    Coding agents work from context they cannot inspect: memories without sources, stale notes
+    presented as current, and change advice that silently assumes a complete index. Menhir makes
+    that context a trace an operator can check.
+  non_goals:
+    - a multi-tenant service (one operator per instance)
+    - a general chat memory or transcript store
+    - building or writing beacons (Beacon does that; Menhir is one read-only memory provider)
+    - writing files into the projects it indexes
+
+audiences:
+  - coding agents working on Menhir or on projects Menhir indexes
+  - the Menhir operator
+  - developers evaluating agent memory and code intelligence
+
+current_focus:
+  - the local-stdio MVP release (tracker Archolith/menhir#123)
+  - Menhir as a Beacon memory provider (get_beacon_evidence)
+  - project identity kept only in the graph
+
+core_concepts:
+  - id: structure_graph
+    name: Structural code graph
+    status: current
+    description: >
+      Files, symbols, imports, calls, tests, endpoints and dependencies of each indexed project,
+      queried with query_structure. Change analysis (blast_radius, affected_tests) reports
+      caveats instead of a false "safe" when the index is partial or stale.
+    implementation_locations:
+      - src/menhir/infrastructure/project_scanner.py
+      - src/menhir/infrastructure/structure_queries.py
+    sources:
+      - type: doc
+        title: Code graph and blast radius
+        path: README.md
+        status: current
+
+  - id: governed_memory
+    name: Governed memory and currentness
+    status: current
+    description: >
+      Memories keep their source episodes and carry lifecycle state: candidates, persistent
+      knowledge, conflicts and superseded history, so an agent can tell current guidance from
+      history and inspect where a claim came from.
+    implementation_locations:
+      - src/menhir/services/lifecycle_conflicts.py
+      - src/menhir/services/lifecycle_consolidation.py
+    sources:
+      - type: doc
+        title: Governance
+        path: docs/governance.md
+        status: current
+
+  - id: project_identity
+    name: Project identity
+    status: current
+    description: >
+      Each indexed project has a Menhir id held only in the graph, bound to one directory per
+      host and to the repository origin it was bound with. Menhir writes nothing into a
+      checkout; an unverified directory is a decision (new or adopt), never a silent guess.
+    implementation_locations:
+      - src/menhir/services/project_identity_service.py
+      - src/menhir/infrastructure/project_identity_binding.py
+    sources:
+      - type: file
+        title: Identity settlement
+        path: src/menhir/services/project_identity_service.py
+        status: current
+
+  - id: beacon_memory_provider
+    name: Beacon memory provider
+    status: current
+    description: >
+      get_beacon_evidence returns beacon-memory-evidence-1.1 for one indexed project, by id or by
+      repository origin, bound to the commit it was indexed from. It reads the graph only and
+      refuses a partial, in-progress or dirty index.
+    related_concepts:
+      - structure_graph
+      - project_identity
+    implementation_locations:
+      - src/menhir/services/beacon_evidence.py
+      - src/menhir/mcp/tools/ops/get_beacon_evidence.py
+    sources:
+      - type: doc
+        title: Menhir as a Beacon memory provider
+        path: docs/agent-usage.md
+        status: current
+
+canonical_docs:
+  - path: README.md
+    role: entrypoint
+    status: current
+  - path: AGENTS.md
+    role: reference
+    status: current
+  - path: .agent/README.md
+    role: entrypoint
+    status: current
+  - path: docs/agent-usage.md
+    role: reference
+    status: current
+  - path: docs/security-posture.md
+    role: reference
+    status: current
+  - path: docs/evaluation.md
+    role: reference
+    status: current
+  - path: docs/roadmap/menhir-mvp-roadmap.md
+    role: reference
+    status: current
+
+agent_guidance:
+  read_first:
+    - AGENTS.md
+    - .agent/README.md
+    - README.md
+  safe_first_tasks:
+    - add a focused regression test for a documented behavior
+    - fix a documentation route in .agent/README.md that points at a missing file
+  avoid_without_review:
+    - project identity binding and the structure write fence
+    - the production client policy and its canonical digest
+    - memory lifecycle and governance rules
+    - anything that deletes graph data
+  expected_behavior:
+    - read .agent/README.md as a router; do not preload all of .agent/
+    - run query_structure blast_radius once per file before editing it
+    - run the smallest credible tests; required CI runs the complete suite
+    - stage files explicitly and never commit secrets
+
+build_and_test:
+  setup: python -m pip install -e . --group dev
+  test: python -m pytest tests/<changed_area> -q
+  benchmark: ''
+
+guardrails:
+  - id: no_project_writes
+    scope: indexed_projects
+    severity: high
+    rule: >
+      Menhir never creates, changes or deletes files inside a project it indexes. Identity lives
+      in the graph; beacons are built and written by Beacon.
+    applies_to:
+      - src/menhir/services/project_identity_service.py
+      - src/menhir/infrastructure/project_scanner.py
+    sources:
+      - type: doc
+        title: Menhir as a Beacon memory provider
+        path: docs/agent-usage.md
+        status: current
+
+  - id: client_policy_census
+    scope: mcp_tool_surface
+    severity: high
+    rule: >
+      Adding, removing or renaming an MCP tool changes the tool census: update the access
+      contract and every client in the production client policy, and recompute its canonical
+      digest, or production refuses to start.
+    applies_to:
+      - src/menhir/access_contract.py
+      - deploy/client-policy.production.json
+    sources:
+      - type: file
+        title: Production client policy
+        path: src/menhir/api/client_policy.py
+        status: current
+
+  - id: ci_before_publication
+    scope: release
+    severity: high
+    rule: >
+      Production publication or promotion stays blocked until every required CI check for that
+      exact commit is green. Do not run the complete suite locally as a routine step.
+    sources:
+      - type: doc
+        title: Agent instructions
+        path: AGENTS.md
+        status: current
+
+  - id: no_secrets
+    scope: repository
+    severity: high
+    rule: >
+      Keep LLM, embedding, Neo4j and auth configuration in environment variables. Never commit or
+      record secrets, and report vulnerabilities privately.
+    sources:
+      - type: doc
+        title: Security and privacy
+        path: SECURITY.md
+        status: current
