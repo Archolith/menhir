@@ -657,7 +657,12 @@ class RuntimeProviderDataOpsMixin:
                     scan.indexed_repository,
                     scan.indexed_dirty,
                 )
-                return {"counts": {}, "narrative": "", "skipped": True}
+                return {
+                    "counts": {},
+                    "narrative": "",
+                    "skipped": True,
+                    "project_id": claim.project_id,
+                }
             _log.debug(
                 "Fingerprint mismatch: project=%s stored=%s computed=%s",
                 project_name,
@@ -746,6 +751,7 @@ class RuntimeProviderDataOpsMixin:
             "skipped": False,
             "meta": meta,
             "background": True,
+            "project_id": claim.project_id,
         }
 
     async def write_project_structure(
@@ -1002,6 +1008,21 @@ class RuntimeProviderDataOpsMixin:
                 return await self._off_loop(
                     build_provider_evidence, self.built.graph_adapter, project
                 )
+            except BeaconEvidenceError as exc:
+                return {"error": str(exc)}
+        if query_type == "beacon_projects_for_repository":
+            # `project` is a repository origin: which indexed projects Beacon may ask for.
+            from menhir.services.beacon_evidence import (
+                BeaconEvidenceError,
+                find_projects_by_repository,
+            )
+
+            try:
+                return {
+                    "projects": await self._off_loop(
+                        find_projects_by_repository, self.built.graph_adapter, project
+                    )
+                }
             except BeaconEvidenceError as exc:
                 return {"error": str(exc)}
         if query_type == "documents":

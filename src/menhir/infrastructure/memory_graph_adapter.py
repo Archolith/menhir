@@ -1339,6 +1339,9 @@ class MemoryGraphAdapter:
     def get_beacon_evidence_guard_by_id(self, project_id: str) -> dict[str, Any]:
         return self._structure.get_beacon_evidence_guard_by_id(project_id)
 
+    def list_indexed_repositories(self) -> list[dict[str, str]]:
+        return self._structure.list_indexed_repositories()
+
     def refresh_indexed_binding(
         self, project_name: str, fingerprint: str, commit: str, repository: str, dirty: bool
     ) -> bool:

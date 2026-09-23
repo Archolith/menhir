@@ -95,14 +95,18 @@ separate MVP retention work; this workflow does not certify them.
 ## Menhir as a Beacon memory provider
 
 Beacon builds beacons; Menhir answers what it has indexed. The read-only MCP tool
-`get_beacon_evidence(project_id)` returns a `beacon-memory-evidence-1.1` document for one
+`get_beacon_evidence(project_id | repository)` returns a `beacon-memory-evidence-1.1` document for one
 indexed project, bound to the repository and git commit it was indexed from. Beacon calls it:
 
 ```bash
 beacon build --repo . --memory https://memory.example.com/mcp-http --memory-project <project_id>
 ```
 
-`project_id` is the project's stable Menhir id (`structure_project_id`). Menhir serves evidence
+`project_id` is the project's stable Menhir id (`structure_project_id`); `ingest_project` reports
+it (`Scanned shop (project_id=...)`). Instead of an id the caller may pass the checkout's
+`repository` origin: Menhir serves the one indexed project that recorded it, and when several
+checkouts of that repository are indexed it refuses and lists each one's id, name and root. Identity
+lives only in Menhir's graph -- Menhir writes no identity file into the checkout. Menhir serves evidence
 only from a complete index of a clean checkout: index after committing, or the tool refuses
 ("indexed from a checkout with uncommitted changes"). A new commit with no file changes keeps the
 index and moves only the recorded commit. The tool reads the graph only -- no filesystem, git or

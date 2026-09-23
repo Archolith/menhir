@@ -179,7 +179,8 @@ _MAX_FILE_BYTES = 2 * 1024 * 1024  # 2 MB — skip files larger than this to avo
 # fingerprint so a rules change invalidates every stored fingerprint and forces a re-scan --
 # otherwise the path+mtime fingerprint is unchanged, ingest skips as "unchanged", and existing
 # graphs keep their truncated state forever.
-SCANNER_SCHEMA_VERSION = 8  # v8: README.md is the last project-description fallback
+SCANNER_SCHEMA_VERSION = 9  # v9: the legacy `.agent/project-id` identity file is scan-invisible
+# (v8: README.md is the last project-description fallback)
 
 # Beacon publication and evidence scratch files live at the repository root. They are
 # outputs/coordination state derived from a scan, never project source. Letting them back into
@@ -196,6 +197,10 @@ def _is_beacon_root_artifact(relative_path: str) -> bool:
         relative_path in _BEACON_ROOT_FILES
         or relative_path.startswith(_BEACON_ROOT_PREFIXES)
     )
+
+#: CF-257's legacy per-checkout identity file. Identity lives in the graph now and Menhir never
+#: writes it; files earlier versions left behind are Menhir state, not project content.
+_LEGACY_IDENTITY_FILE = ".agent/project-id"
 
 # --- Eligibility: an ordered deny-list. First match wins. ---------------------------------
 # Step 2 (preserve) runs BEFORE step 3 (extension exclusions) so that structural manifests are
@@ -306,7 +311,7 @@ class ProjectScanner:
                     continue
                 full = os.path.join(dirpath, fname)
                 rel = os.path.relpath(full, root).replace("\\", "/")
-                if _is_beacon_root_artifact(rel):
+                if _is_beacon_root_artifact(rel) or rel == _LEGACY_IDENTITY_FILE:
                     continue
                 if _matches_gitignore(full, root, gitignore_patterns):
                     continue

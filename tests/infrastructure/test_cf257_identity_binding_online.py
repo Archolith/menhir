@@ -148,96 +148,41 @@ def test_a_transfer_leaves_exactly_one_active_binding(repo, pid, on_host):
 
 
 @pytest.mark.online
-def test_graph_committed_publication_recovers_after_transient_unlink_failure(
-    repo, pid, on_host, monkeypatch, tmp_path
-):
-    """The real statement must persist the repair authority in the transfer transaction."""
-    from pathlib import Path
-    from types import SimpleNamespace
-
-    from menhir.domain.project_id_file import (
-        ensure_ignore_rule,
-        identity_path,
-        mint_identity,
-        read_identity,
-    )
-    from menhir.services.project_identity_service import (
-        ProjectIdentityPublicationFailed,
-        settle_project_identity,
-    )
+def test_the_real_statements_record_the_checkouts_repository(repo, pid, on_host):
+    """Identity lives only in the graph, so the repository must land exactly as intended: set on
+    create and on transfer, filled once on a legacy binding, never changed by an ordinary bind,
+    and kept by a transfer that names none (conflict resolution)."""
+    from menhir.infrastructure.project_identity_binding import root_binding
 
     host = f"cf257-host-{uuid.uuid4().hex[:6]}"
-    old, new = pid("publication-old"), pid("publication-new")
-    root = str(tmp_path)
+    root, legacy_root = f"/srv/{uuid.uuid4().hex[:8]}", f"/srv/{uuid.uuid4().hex[:8]}"
+    first, second, legacy = pid("repo-first"), pid("repo-second"), pid("repo-legacy")
     on_host(host)
-    ensure_ignore_rule(tmp_path)
-    mint_identity(tmp_path, project_id=old, display_name="proj")
-    bind_project_identity(repo, project_id=old, root_path=root)
 
-    real_unlink = Path.unlink
-    attempts = 0
+    def recorded(project_id):
+        return repo.execute(
+            "MATCH (p:ProjectIdentity {project_id:$id}) RETURN p.bound_repository AS r",
+            {"id": project_id},
+        )[0]["r"]
 
-    def fail_once(path, *args, **kwargs):
-        nonlocal attempts
-        if path == identity_path(tmp_path):
-            attempts += 1
-            if attempts == 1:
-                raise PermissionError("transient external lock")
-        return real_unlink(path, *args, **kwargs)
+    bind_project_identity(repo, project_id=first, root_path=root, repository="https://r/one")
+    assert recorded(first) == "https://r/one"
+    bind_project_identity(repo, project_id=first, root_path=root, repository="https://r/other")
+    assert recorded(first) == "https://r/one", "an ordinary bind changed a recorded repository"
 
-    monkeypatch.setattr(Path, "unlink", fail_once)
-    adapter = SimpleNamespace(neo4j=repo)
-
-    with pytest.raises(ProjectIdentityPublicationFailed, match="could not be written"):
-        settle_project_identity(
-            adapter,
-            root_path=root,
-            display_name="proj",
-            identity_action="adopt",
-            adopt_project_id=new,
-        )
-
-    pending = repo.execute(
-        "MATCH (p:ProjectIdentity {project_id:$id}) RETURN p.state AS state, "
-        "p.publication_pending AS pending, p.publication_pending_host AS host, "
-        "p.publication_pending_root_key AS root_key, "
-        "p.publication_pending_generation AS pending_generation, "
-        "p.claim_generation AS claim_generation",
-        {"id": new},
-    )[0]
-    assert pending["state"] == "bound" and pending["pending"] is True
-    assert pending["host"] == host and pending["root_key"] == root_key_for(root)
-    assert pending["pending_generation"] == pending["claim_generation"]
-    assert read_identity(tmp_path).project_id == old, "the failed unlink removed the old file"
-
-    claim, resolution = settle_project_identity(
-        adapter,
-        root_path=root,
-        display_name="proj",
+    bind_project_identity(
+        repo, project_id=second, root_path=root, rebind=True, repository="https://r/two"
     )
+    assert recorded(second) == "https://r/two"
+    assert root_binding(repo, root).repository == "https://r/two"
 
-    assert claim is None and resolution.reason == "identity_file_mismatch_publication_pending"
-    assert [candidate.project_id for candidate in resolution.candidates] == [new]
-    assert attempts == 1, "an unattended retry replaced the checkout's identity file"
+    clear_conflict(repo, project_id=second, keep_root_path=root)
+    assert recorded(second) == "https://r/two", "a transfer naming no repository erased it"
 
-    claim, resolution = settle_project_identity(
-        adapter,
-        root_path=root,
-        display_name="proj",
-        identity_action="adopt",
-        adopt_project_id=new,
-    )
-
-    assert attempts == 2, "the explicit retry did not replace the stale file"
-    assert claim.project_id == new and resolution.resolved
-    assert read_identity(tmp_path).project_id == new
-    cleared = repo.execute(
-        "MATCH (p:ProjectIdentity {project_id:$id}) RETURN "
-        "p.publication_pending AS pending, "
-        "p.publication_pending_generation AS pending_generation",
-        {"id": new},
-    )[0]
-    assert cleared["pending"] is None and cleared["pending_generation"] is None
+    bind_project_identity(repo, project_id=legacy, root_path=legacy_root)
+    assert recorded(legacy) is None and root_binding(repo, legacy_root).repository is None
+    bind_project_identity(repo, project_id=legacy, root_path=legacy_root, repository="")
+    assert recorded(legacy) == "" and root_binding(repo, legacy_root).repository == ""
 
 
 @pytest.mark.online

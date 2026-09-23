@@ -470,7 +470,6 @@ def test_cf103_symbol_rescan_path_is_guarded_at_both_sites() -> None:
 def test_cf103_rescan_refuses_a_root_outside_the_allowed_ingest_roots(monkeypatch, tmp_path) -> None:
     from menhir.core import ingest_guard
     from menhir.core.backend_runtime_data_ops import RuntimeProviderDataOpsMixin
-    from menhir.domain.project_id_file import ensure_ignore_rule, mint_identity
 
     allowed = tmp_path / "allowed"
     allowed.mkdir()
@@ -538,9 +537,14 @@ def test_cf103_rescan_refuses_a_root_outside_the_allowed_ingest_roots(monkeypatc
     assert scanned == []
 
     # The detached rescan may continue an established checkout, but it may not infer ownership
-    # from a host/path binding when the per-checkout identity file is absent.
-    ensure_ignore_rule(outside)
-    mint_identity(outside, project_id="bound-id", display_name="proj")
+    # from a legacy host/path binding (no recorded repository) unless the legacy identity file
+    # an earlier version left in the checkout names the same id.
+    import json
+
+    (outside / ".agent").mkdir()
+    (outside / ".agent" / "project-id").write_text(
+        json.dumps({"schema": 1, "project_id": "bound-id"}), encoding="utf-8"
+    )
     asyncio.run(
         ops._background_symbol_rescan(str(outside), "proj", "s", "u", tier="operator")
     )
