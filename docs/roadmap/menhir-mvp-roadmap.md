@@ -1,3 +1,7 @@
+---
+status: superseded
+superseded_by: .agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md
+---
 # Menhir MVP Roadmap
 
 > ## RECONCILED STATUS (2026-07-15) - READ THIS FIRST
