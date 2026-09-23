@@ -1,3 +1,18 @@
+## 2026-09-22 - Beacon provider: README descriptions; Beacon output no longer dirties the index
+
+Found by running Beacon's build against a local Menhir (plan Phase 3A exit check).
+
+- A repository with neither `.agent/README.md` nor `CLAUDE.md` is described by the first
+  paragraph of its own `README.md`, so Beacon evidence no longer refuses a plain repository.
+  Scanner schema 8 re-scans existing projects once to pick this up.
+- The index's dirty flag ignores Beacon's own root artifacts (`beacon.generated.yaml` and its
+  staging files), the same set the scanner never reads, so publishing a beacon does not make the
+  next index unservable. Any other change, or a rename touching another path, is still dirty;
+  unparseable git status is dirty.
+- `get_beacon_evidence` returns a refusal as an MCP error result (`isError`) with the reason, so
+  Beacon can tell it from evidence. New `McpToolRefusal` in the call tracker; every other tool's
+  failure keeps its "Error: ..." text.
+
 ## 2026-09-22 - Menhir serves Beacon memory evidence as a read-only provider
 
 Beacon now owns all beacon work and defines a backend-neutral memory-provider contract (Beacon
@@ -255,18 +270,4 @@ monotonic for the life of the project.
   zero semantic diff, and wrong-digest no-clobber. 17/17 pass locally; full offline and
   graph-backed CI on the exact SHA remain release gates. Live-Neo4j ingest→generate E2E-6
   and Beacon stdio tool-query acceptance are NOT RUN and stay with the MVP release lane.
-- Keep the newest ten dated entries per `.agent/maintenance.md`; older entries remain in Git history.
-
-## 2026-09-16 - local MVP tracked-write receipts and observation guidance
-
-- `src/menhir/mcp/formatters.py`: status/watch observations direct continuation to the
-  existing episode; remove duplicate-write advice and unsupported completion/retry promises.
-- `src/menhir/mcp/tools/ingest/add_memory_and_track.py`: clarify that the tool queues a
-  new write; preserve its accepted receipt when subsequent collection or formatting fails,
-  without exposing raw exception text. Optional queue diagnostics cannot hide an observed
-  episode status. Cancellation and existing write/auth arguments remain unchanged.
-- `docs/agent-usage.md`, `docs/templates/AGENTS.menhir.md`: document the #118 owner decision,
-  actual tool options, restricted-client behavior, and the separate TEMPORAL direct-write path.
-- `tests/test_mvp_tracked_write_contract.py`: 31 focused formatter and bound-endpoint
-  regression cases. Live stdio E2E-2 and exact-commit repository CI remain release gates.
 - Keep the newest ten dated entries per `.agent/maintenance.md`; older entries remain in Git history.

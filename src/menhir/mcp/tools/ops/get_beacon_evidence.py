@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 
 from menhir.mcp.contracts import ToolScope
+from menhir.mcp.telemetry.tracker import McpToolRefusal
 from menhir.mcp.tools.base import BaseTextTool
 
 
@@ -51,5 +52,6 @@ class GetBeaconEvidenceTool(BaseTextTool):
         backend = self.get_backend()
         result = await backend.query_structure(project_id.strip(), "beacon_evidence")
         if isinstance(result, dict) and "error" in result:
-            raise ValueError(str(result["error"]))
+            # An MCP error result, so Beacon can tell a refusal from evidence.
+            raise McpToolRefusal(str(result["error"]))
         return json.dumps(result, sort_keys=True, ensure_ascii=True)

@@ -134,6 +134,59 @@ def test_scan_of_a_dirty_checkout_is_marked_dirty(tmp_path: Path) -> None:
     assert ProjectScanner().scan(root, "shop").indexed_dirty is True
 
 
+def test_beacon_output_alone_leaves_the_scan_clean(tmp_path: Path) -> None:
+    """Beacon's own output is scan-invisible, so it cannot make the index differ from HEAD."""
+    root = _repo(tmp_path)
+    (root / "beacon.generated.yaml").write_text("beacon_version: '0.1'\n", encoding="utf-8")
+    (root / ".beacon.generated.yaml.tmp1").write_text("x\n", encoding="utf-8")
+    assert ProjectScanner().scan(root, "shop").indexed_dirty is False
+
+
+def test_beacon_output_does_not_hide_another_change(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / "beacon.generated.yaml").write_text("beacon_version: '0.1'\n", encoding="utf-8")
+    (root / "my notes.md").write_text("new\n", encoding="utf-8")
+    assert ProjectScanner().scan(root, "shop").indexed_dirty is True
+
+
+def test_a_rename_is_dirty_on_either_side(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _git(root, "mv", "README.md", "beacon.generated.yaml")
+    assert ProjectScanner().scan(root, "shop").indexed_dirty is True
+
+
+def test_unparseable_status_is_dirty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import menhir.infrastructure.git_binding as binding_module
+
+    root = _repo(tmp_path)
+    real = binding_module._git
+
+    def garbled(cwd: Path, *args: str) -> str | None:
+        return "garbage" if "status" in args else real(cwd, *args)
+
+    monkeypatch.setattr(binding_module, "_git", garbled)
+    binding = read_git_binding(root, ignore=lambda path: True)
+    assert binding is not None and binding[2] is True
+
+
+def test_readme_paragraph_describes_a_repo_without_agent_docs(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / "README.md").write_text(
+        "# Shop\n\nA small shop service.\nIt sells things.\n\nMore text.\n", encoding="utf-8"
+    )
+    _git(root, "commit", "-q", "-am", "describe")
+    scan = ProjectScanner().scan(root, "shop")
+    assert scan.description == "A small shop service. It sells things."
+    assert scan.indexed_dirty is False
+
+
+def test_agent_docs_still_win_over_the_readme(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / "README.md").write_text("# Shop\n\nFrom the README.\n", encoding="utf-8")
+    (root / "CLAUDE.md").write_text("# Shop\n\nFrom CLAUDE.md.\n", encoding="utf-8")
+    assert ProjectScanner().scan(root, "shop").description == "From CLAUDE.md."
+
+
 # ---------------------------------------------------------------------------
 # A skipped re-scan (same files, new commit) keeps the binding current
 # ---------------------------------------------------------------------------
@@ -364,3 +417,40 @@ def test_tool_reports_a_refusal_as_an_error(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(tool, "get_backend", lambda: Backend())
     with pytest.raises(ValueError, match="partial"):
         asyncio.run(tool.endpoint(" pid-1 "))
+
+
+def test_a_refusal_reaches_the_caller_as_an_mcp_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Through the call tracker, a refusal is an ``isError`` result Beacon can recognize."""
+    from mcp.types import CallToolResult
+
+    from menhir.core.request_context import bind_request_tier, reset_request_tier
+    from menhir.mcp import contracts
+    from menhir.mcp.telemetry.tracker import track_mcp_call
+    from menhir.mcp.tools.ops.get_beacon_evidence import GetBeaconEvidenceTool
+
+    rows: list[dict[str, Any]] = []
+
+    class Store:
+        def record(self, **row: Any) -> None:
+            rows.append(row)
+
+    class Backend:
+        async def query_structure(self, project: str, query_type: str) -> dict[str, str]:
+            return {"error": "project was indexed from a checkout with uncommitted changes"}
+
+    async def tracked(**kwargs: Any) -> Any:
+        return await track_mcp_call(**kwargs, store=Store())
+
+    monkeypatch.setattr(contracts, "track_mcp_call", tracked)
+    tool = GetBeaconEvidenceTool()
+    monkeypatch.setattr(tool, "get_backend", lambda: Backend())
+    token = bind_request_tier("readonly")
+    try:
+        result = asyncio.run(tool.execute(project_id="pid-1"))
+    finally:
+        reset_request_tier(token)
+
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    assert result.content[0].text == "project was indexed from a checkout with uncommitted changes"
+    assert rows and rows[-1]["success"] is False

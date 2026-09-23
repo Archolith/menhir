@@ -118,9 +118,10 @@ against this provider (plan Phase 3B removes it).
 Generation is conservative and fails closed: it requires an intact, complete index whose
 recorded root matches the requested repository, a scan fingerprint, an indexed project
 description, and at least one indexed canonical document. It never invents purpose, commands,
-guardrails, or concepts to fill schema fields. The description must come from
-`.agent/README.md` or `CLAUDE.md`: a repository with neither is refused (the `"<stack> project"`
-placeholder the overview shows for such projects is display text, not indexed purpose).
+guardrails, or concepts to fill schema fields. The description must come from the
+first paragraph of `.agent/README.md`, `CLAUDE.md` or, failing both, the root `README.md`: a
+repository with none of them is refused (the `"<stack> project"` placeholder the overview shows
+for such projects is display text, not indexed purpose).
 
 The evidence document Menhir hands to Beacon labels the project `experimental`, not `current`,
 and Beacon carries that through to the manifest's `project.status`. That is the only status the
