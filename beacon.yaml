@@ -8,7 +8,9 @@ project:
     Menhir is an evidence and code-intelligence service for coding agents. It joins source
     episodes, governed knowledge, engineering artifacts, repository structure, callers and tests
     in one Neo4j graph, so an agent can see why something was done, where the evidence came from,
-    whether it is still current, and which code and tests a change affects.
+    whether it is still current, and which code and tests a change affects. It is built for a
+    single operator, requires Python 3.12 or newer, and runs locally or on operator-controlled
+    hosts.
   repository: https://github.com/Archolith/menhir.git
   primary_language: Python
   license: Apache-2.0
@@ -20,12 +22,14 @@ purpose:
   problem: >
     Coding agents work from context they cannot inspect: memories without sources, stale notes
     presented as current, and change advice that silently assumes a complete index. Menhir makes
-    that context a trace an operator can check.
+    that context a trace an operator can check: source episode, governed memory, provenance and
+    lifecycle state, repository path and Git evidence, then callers, dependents and affected tests.
   non_goals:
-    - a multi-tenant service (one operator per instance)
+    - a multi-tenant service or isolation boundary (one operator per instance)
     - a general chat memory or transcript store
     - building or writing beacons (Beacon does that; Menhir is one read-only memory provider)
     - writing files into the projects it indexes
+    - a public benchmark headline score (benchmarks gate activation, they are not marketing)
 
 audiences:
   - coding agents working on Menhir or on projects Menhir indexes
@@ -36,38 +40,52 @@ current_focus:
   - the local-stdio MVP release (tracker Archolith/menhir#123)
   - Menhir as a Beacon memory provider (get_beacon_evidence)
   - project identity kept only in the graph
+  - ingest and projection correctness for typed scalar state before further retrieval tuning
 
 core_concepts:
   - id: structure_graph
     name: Structural code graph
     status: current
     description: >
-      Files, symbols, imports, calls, tests, endpoints and dependencies of each indexed project,
-      queried with query_structure. Change analysis (blast_radius, affected_tests) reports
-      caveats instead of a false "safe" when the index is partial or stale.
+      ingest_project indexes each project's files, symbols, imports, calls, tests, endpoints,
+      dependencies and nested projects; a watcher re-checks indexed projects every 30 minutes by
+      file fingerprint but never discovers new repositories. query_structure answers projects,
+      overview, files, symbols, imports, context, endpoints, dependencies and cross_refs.
+    related_concepts:
+      - change_analysis
+      - project_identity
     implementation_locations:
       - src/menhir/infrastructure/project_scanner.py
       - src/menhir/infrastructure/structure_queries.py
+      - src/menhir/services/project_ingest.py
     sources:
       - type: doc
         title: Code graph and blast radius
         path: README.md
         status: current
+      - type: doc
+        title: Structural code graph
+        path: .agent/README.md
+        status: current
 
-  - id: governed_memory
-    name: Governed memory and currentness
+  - id: change_analysis
+    name: Coverage-aware change analysis
     status: current
     description: >
-      Memories keep their source episodes and carry lifecycle state: candidates, persistent
-      knowledge, conflicts and superseded history, so an agent can tell current guidance from
-      history and inspect where a claim came from.
+      blast_radius walks reverse imports transitively, reports function callers and cross-project
+      references, maps affected tests and returns memories anchored to the affected files.
+      affected_tests narrows that to a minimal pytest command. An unindexed path or a stale
+      project root produces a caveat, never an empty "safe to change" answer.
+    related_concepts:
+      - structure_graph
+      - code_linked_memory
     implementation_locations:
-      - src/menhir/services/lifecycle_conflicts.py
-      - src/menhir/services/lifecycle_consolidation.py
+      - src/menhir/infrastructure/structure_queries.py
+      - src/menhir/mcp/tools/recall/query_structure.py
     sources:
       - type: doc
-        title: Governance
-        path: docs/governance.md
+        title: Code graph and blast radius
+        path: README.md
         status: current
 
   - id: project_identity
@@ -75,15 +93,243 @@ core_concepts:
     status: current
     description: >
       Each indexed project has a Menhir id held only in the graph, bound to one directory per
-      host and to the repository origin it was bound with. Menhir writes nothing into a
-      checkout; an unverified directory is a decision (new or adopt), never a silent guess.
+      host and to the repository origin it was bound with. ingest_project reports the id. Menhir
+      writes nothing into a checkout; an unverified directory is a decision (new or adopt), never
+      a silent guess.
     implementation_locations:
       - src/menhir/services/project_identity_service.py
       - src/menhir/infrastructure/project_identity_binding.py
+      - src/menhir/domain/project_identity_resolution.py
     sources:
+      - type: doc
+        title: Menhir as a Beacon memory provider
+        path: docs/agent-usage.md
+        status: current
       - type: file
         title: Identity settlement
         path: src/menhir/services/project_identity_service.py
+        status: current
+
+  - id: memory_ingest_queue
+    name: Episodes and the enrichment queue
+    status: current
+    description: >
+      add_memory writes an episode to a durable queue and returns without waiting; a background
+      worker sends it to the configured LLM through Graphiti, merges entities and relationships
+      into Neo4j, and stamps scope, provenance and structural anchors. Episodes move through
+      PENDING, ENRICHING, READY and FAILED; a failure is classified retryable, manual_review or
+      terminal. add_memory_and_track is the original write when immediate recall matters.
+    implementation_locations:
+      - src/menhir/services/ingest_queue.py
+      - src/menhir/services/ingest_worker.py
+      - src/menhir/services/enrichment_steps.py
+    sources:
+      - type: doc
+        title: How memory moves through the system
+        path: README.md
+        status: current
+      - type: doc
+        title: Local-stdio tracked-write workflow
+        path: docs/agent-usage.md
+        status: current
+      - type: doc
+        title: Glossary
+        path: .agent/glossary.md
+        status: current
+
+  - id: recall_and_context
+    name: Recall and context assembly
+    status: current
+    description: >
+      Graphiti supplies hybrid BM25 and vector candidates; Menhir reranks them with similarity,
+      graph adjacency, recency, prominence and conflict signals under named presets. Sessions
+      bootstrap with read_flagged_memories then recall_context_memories; build_context packs
+      memories and todos into a token budget; get_provenance expands a result into its source
+      episodes, evidence and code anchors. Menhir does not claim this beats vector-only search in
+      general.
+    related_concepts:
+      - governed_memory
+      - code_linked_memory
+    implementation_locations:
+      - src/menhir/services/recall_pipeline.py
+      - src/menhir/services/scoring_service.py
+      - src/menhir/services/context_builder.py
+      - src/menhir/mcp/tools/ops/get_provenance.py
+    sources:
+      - type: doc
+        title: Recall and retrieval scoring
+        path: README.md
+        status: current
+      - type: doc
+        title: Tasks - MCP
+        path: .agent/tasks-mcp.md
+        status: current
+
+  - id: code_linked_memory
+    name: Code-linked memory and stale anchors
+    status: current
+    description: >
+      Enrichment finds repository paths in a memory's narrative and attached Git diff, resolves
+      them against the structure graph and writes ANCHORED_TO. Passing file_context to recall
+      pulls in memories anchored to the file, its imports, importers and tests. When a file-event
+      hook reports that an anchored file changed, recall labels the anchor stale; the label is
+      advisory and never deletes, downranks or re-anchors the memory.
+    related_concepts:
+      - structure_graph
+      - agent_evidence_producers
+    implementation_locations:
+      - src/menhir/services/enrichment_steps.py
+      - src/menhir/services/stale_labeling.py
+    sources:
+      - type: doc
+        title: Code-related memory
+        path: README.md
+        status: current
+      - type: doc
+        title: Hook Center / tool event capture
+        path: docs/hook-center-tool-events.md
+        status: current
+
+  - id: governed_memory
+    name: Governed memory and currentness
+    status: current
+    description: >
+      Memories keep their source episodes and carry review and lifecycle state. CANDIDATE is
+      withheld from recall until a human approves it; PERSISTENT is normal durable memory;
+      PROMOTED is operator-designated authority; superseded and historical memory stays for audit
+      but is omitted from current-belief recall. Conflicts are scanned, reviewed and resolved
+      explicitly. Daily maintenance consolidates and may compress; automatic COMPRESSED to GONE is
+      disabled.
+    implementation_locations:
+      - src/menhir/services/candidate_service.py
+      - src/menhir/services/lifecycle_conflicts.py
+      - src/menhir/services/lifecycle_consolidation.py
+      - src/menhir/services/lifecycle_decay.py
+    sources:
+      - type: doc
+        title: Governance artifacts
+        path: docs/governance.md
+        status: current
+      - type: doc
+        title: Governance and currentness
+        path: README.md
+        status: current
+      - type: doc
+        title: Governance constitution
+        path: .agent/memory-governance.md
+        status: current
+
+  - id: work_artifacts
+    name: WorkArtifacts
+    status: current
+    description: >
+      Plans, reviews, investigations, implementation reports and handoffs are tracked as
+      WorkArtifacts. Git owns the Markdown; Menhir tracks stable identity, type, status, code
+      locations, open questions and typed relationships (reviews, implements, informs,
+      supersedes). Supersession changes the old artifact's status and writes the relationship
+      together.
+    implementation_locations:
+      - src/menhir/domain/work_artifact.py
+      - src/menhir/infrastructure/work_artifact_repository.py
+      - src/menhir/services/artifact_reconciliation_service.py
+    sources:
+      - type: doc
+        title: Governance and currentness
+        path: README.md
+        status: current
+      - type: doc
+        title: Creating and moving work artifacts
+        path: .agent/workflows/artifact_authoring.md
+        status: current
+
+  - id: todos
+    name: Code-located todos
+    status: current
+    description: >
+      Todos are graph nodes written directly (not through enrichment), with an open and closed
+      lifecycle and an optional repository-relative location (path plus symbol or line range).
+      Unresolved locations stay unresolved instead of being guessed. Open todos appear in
+      bootstrap, context and blast-radius output. Use a todo for work that must be closed and a
+      memory for knowledge.
+    implementation_locations:
+      - src/menhir/infrastructure/todo_repository.py
+      - src/menhir/domain/todo_location.py
+      - src/menhir/mcp/tools/ops/add_todo.py
+    sources:
+      - type: doc
+        title: Decide - TODO or memory
+        path: .agent/tasks-mcp.md
+        status: current
+
+  - id: typed_scalar_state
+    name: Typed scalar and event state
+    status: experimental
+    description: >
+      Grounded statements become immutable typed assertions (subject, attribute, value, unit,
+      operation, source span, namespace, time) folded deterministically into rebuildable
+      ScalarStateView and ScalarHistoryView; event history follows the same event, fold,
+      projection boundary. The infrastructure is implemented; activation and recall authority are
+      opt-in and default-off until extraction, namespace, replay and repair gates pass.
+    implementation_locations:
+      - src/menhir/domain/typed_assertion.py
+      - src/menhir/domain/scalar_state_fold.py
+      - src/menhir/services/scalar_state_service.py
+      - src/menhir/services/event_history_service.py
+    sources:
+      - type: doc
+        title: Typed scalar memory and current priorities
+        path: README.md
+        status: current
+      - type: doc
+        title: Default-off activation ledger
+        path: .agent/default-off-features.md
+        status: current
+
+  - id: agent_evidence_producers
+    name: Agent evidence producers
+    status: experimental
+    description: >
+      Optional hooks for Claude Code, Codex and OpenCode. TurnEvidence producers run a
+      deterministic triage over user prompts and send only prompts that look durable; the
+      file-event hook sends a path and change metadata, never file contents. Both fail open, call
+      no LLM and are never installed silently.
+    related_concepts:
+      - code_linked_memory
+    implementation_locations:
+      - scripts/hooks/menhir_turn_evidence_common.py
+      - src/menhir/api/routes_handlers.py
+    sources:
+      - type: doc
+        title: TurnEvidence producers
+        path: docs/turn-evidence-producers.md
+        status: current
+      - type: doc
+        title: Hook Center / tool event capture
+        path: docs/hook-center-tool-events.md
+        status: current
+
+  - id: access_surfaces_and_tiers
+    name: Access surfaces and credential tiers
+    status: current
+    description: >
+      menhir serve is the one runtime owner (Neo4j pool, enrichment queue, scheduler) behind
+      remote MCP at /mcp-http, REST at /api and the explorer. The stdio bridge
+      (python -m menhir.mcp.server) is a client of that backend and needs MENHIR_BACKEND_URL.
+      Exactly one auth mode is active (OAuth, client tokens, static keys, or loopback no-auth),
+      and tools are gated by tier: readonly, agent, operator.
+    implementation_locations:
+      - src/menhir/api/auth_mode.py
+      - src/menhir/access_contract.py
+      - src/menhir/mcp/server.py
+      - src/menhir/api/mcp_remote.py
+    sources:
+      - type: doc
+        title: Security posture
+        path: docs/security-posture.md
+        status: current
+      - type: doc
+        title: Backend-first MCP
+        path: .agent/workflows/backend-first-mcp.md
         status: current
 
   - id: beacon_memory_provider
@@ -91,8 +337,9 @@ core_concepts:
     status: current
     description: >
       get_beacon_evidence returns beacon-memory-evidence-1.1 for one indexed project, by id or by
-      repository origin, bound to the commit it was indexed from. It reads the graph only and
-      refuses a partial, in-progress or dirty index.
+      repository origin, bound to the commit it was indexed from. It reads the graph only,
+      refuses a partial, in-progress or dirty index, and is available to readonly, agent and
+      operator clients.
     related_concepts:
       - structure_graph
       - project_identity
@@ -110,7 +357,7 @@ canonical_docs:
     role: entrypoint
     status: current
   - path: AGENTS.md
-    role: reference
+    role: entrypoint
     status: current
   - path: .agent/README.md
     role: entrypoint
@@ -118,15 +365,54 @@ canonical_docs:
   - path: docs/agent-usage.md
     role: reference
     status: current
+  - path: docs/templates/AGENTS.menhir.md
+    role: reference
+    status: current
+  - path: docs/post-install.md
+    role: reference
+    status: current
+  - path: .agent/workflows/run_and_test.md
+    role: reference
+    status: current
+  - path: .agent/architecture.md
+    role: architecture
+    status: current
+  - path: .agent/endpoints.md
+    role: reference
+    status: current
+  - path: .agent/data_models.md
+    role: reference
+    status: current
   - path: docs/security-posture.md
+    role: reference
+    status: current
+  - path: SECURITY.md
+    role: reference
+    status: current
+  - path: docs/governance.md
     role: reference
     status: current
   - path: docs/evaluation.md
     role: reference
     status: current
-  - path: docs/roadmap/menhir-mvp-roadmap.md
+  - path: .agent/default-off-features.md
     role: reference
     status: current
+  - path: docs/turn-evidence-producers.md
+    role: reference
+    status: current
+  - path: docs/hook-center-tool-events.md
+    role: reference
+    status: current
+  - path: .agent/plans/README.md
+    role: reference
+    status: current
+  - path: .agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md
+    role: implementation_plan
+    status: current
+  - path: docs/roadmap/menhir-mvp-roadmap.md
+    role: implementation_plan
+    status: superseded
 
 agent_guidance:
   read_first:
@@ -136,15 +422,23 @@ agent_guidance:
   safe_first_tasks:
     - add a focused regression test for a documented behavior
     - fix a documentation route in .agent/README.md that points at a missing file
+    - add a default-off feature row to .agent/default-off-features.md when one ships
   avoid_without_review:
     - project identity binding and the structure write fence
-    - the production client policy and its canonical digest
-    - memory lifecycle and governance rules
-    - anything that deletes graph data
+    - the production client policy, the access contract and its canonical digest
+    - authentication modes, credential tiers and ingest path containment
+    - memory lifecycle, promotion and governance rules
+    - turning on a default-off feature
+    - anything that deletes or merges graph data
+    - deployment and release tooling under deploy/
   expected_behavior:
     - read .agent/README.md as a router; do not preload all of .agent/
-    - run query_structure blast_radius once per file before editing it
-    - run the smallest credible tests; required CI runs the complete suite
+    - confirm the project in query_structure projects, then run blast_radius once per file before editing it
+    - treat an empty or stale structural answer as inconclusive, not as proof of no impact
+    - extend the canonical backend and MCP contracts instead of adding parallel paths
+    - run the smallest credible tests plus matching ruff checks; required CI runs the complete suite
+    - report commands actually run, and name the lanes that were not run
+    - update the owning .agent doc and add a CHANGELOG entry for meaningful changes
     - stage files explicitly and never commit secrets
 
 build_and_test:
@@ -168,6 +462,60 @@ guardrails:
         path: docs/agent-usage.md
         status: current
 
+  - id: incomplete_index_is_inconclusive
+    scope: structure_queries
+    severity: high
+    rule: >
+      An unindexed path, an incomplete index or a stale anchor makes a result inconclusive. Never
+      report an empty blast radius or an empty affected-test set as proof that nothing depends on
+      a change; check the current code.
+    applies_to:
+      - src/menhir/infrastructure/structure_queries.py
+    sources:
+      - type: doc
+        title: Agent instructions
+        path: AGENTS.md
+        status: current
+      - type: doc
+        title: Code graph and blast radius
+        path: README.md
+        status: current
+
+  - id: stale_anchors_are_advisory
+    scope: hook_center
+    severity: medium
+    rule: >
+      A stale-anchor label is advisory. File events mark files dirty; they never delete, downrank
+      or re-anchor a memory, rebuild the index or clear dirty state automatically, and a
+      verification receipt changes the advisory without clearing staleness.
+    applies_to:
+      - src/menhir/services/stale_labeling.py
+    sources:
+      - type: doc
+        title: Hook Center / tool event capture
+        path: docs/hook-center-tool-events.md
+        status: current
+
+  - id: capture_is_not_transcript_logging
+    scope: agent_hooks
+    severity: high
+    rule: >
+      Producers keep only triage-accepted user prompts and file paths with change metadata: never
+      assistant turns, tool output, full transcripts or file contents. They call no LLM, fail
+      open, never block the host agent, and are never installed by setup without an explicit
+      choice.
+    applies_to:
+      - scripts/hooks/menhir_turn_evidence_common.py
+    sources:
+      - type: doc
+        title: TurnEvidence producers
+        path: docs/turn-evidence-producers.md
+        status: current
+      - type: doc
+        title: Post-install setup
+        path: docs/post-install.md
+        status: current
+
   - id: client_policy_census
     scope: mcp_tool_surface
     severity: high
@@ -184,6 +532,79 @@ guardrails:
         path: src/menhir/api/client_policy.py
         status: current
 
+  - id: no_auth_only_on_loopback
+    scope: http_surface
+    severity: high
+    rule: >
+      With no key configured the server serves an unauthenticated API on loopback only and
+      refuses a non-loopback bind. MENHIR_ALLOW_INSECURE_REMOTE_NO_AUTH is unsafe and for
+      isolated lab networks only. Each configured key must be distinct, and automated clients get
+      the least tier that works.
+    applies_to:
+      - src/menhir/api/auth_mode.py
+    sources:
+      - type: doc
+        title: Security posture
+        path: docs/security-posture.md
+        status: current
+
+  - id: ingest_path_containment
+    scope: ingest
+    severity: high
+    rule: >
+      agent and readonly callers may ingest only under MENHIR_INGEST_ALLOWED_ROOTS, which has no
+      default. Paths under logs/, backups/ or .git/ are refused for every tier, operator
+      included, and .env files are refused.
+    applies_to:
+      - src/menhir/core/ingest_guard.py
+    sources:
+      - type: doc
+        title: Security posture
+        path: docs/security-posture.md
+        status: current
+
+  - id: default_off_needs_evidence
+    scope: runtime_defaults
+    severity: medium
+    rule: >
+      Features shipped default-off stay off until an owner decides, on recorded evidence, to
+      activate them. Read-side experiments that were neutral or negative stay disabled. Record
+      every new default-off feature and every activation in the ledger.
+    sources:
+      - type: doc
+        title: Default-off activation ledger
+        path: .agent/default-off-features.md
+        status: current
+      - type: doc
+        title: Evaluation posture
+        path: docs/evaluation.md
+        status: current
+
+  - id: benchmark_publication
+    scope: evaluation
+    severity: medium
+    rule: >
+      Publish a benchmark number only when a current benchmark authority names the dataset
+      variant, command, source commit, date, method, baseline and evidence artifact. There is no
+      active public headline number.
+    sources:
+      - type: doc
+        title: Evaluation posture
+        path: docs/evaluation.md
+        status: current
+
+  - id: disposable_test_graph
+    scope: tests
+    severity: high
+    rule: >
+      Online tests run destructive, unscoped graph queries. Run them only against a disposable
+      Neo4j, never an operator or production graph, and only with explicit opt-in.
+    sources:
+      - type: doc
+        title: Run and test
+        path: .agent/workflows/run_and_test.md
+        status: current
+
   - id: ci_before_publication
     scope: release
     severity: high
@@ -195,6 +616,27 @@ guardrails:
         title: Agent instructions
         path: AGENTS.md
         status: current
+      - type: doc
+        title: Run and test
+        path: .agent/workflows/run_and_test.md
+        status: current
+
+  - id: artifact_moves_keep_identity
+    scope: work_artifacts
+    severity: medium
+    rule: >
+      A tracked plan, review, handoff or report keeps its UUID when moved and gets a new one when
+      copied; archiving needs an explicit terminal status. Run menhir artifacts validate . before
+      committing.
+    sources:
+      - type: doc
+        title: Maintenance
+        path: .agent/maintenance.md
+        status: current
+      - type: doc
+        title: Creating and moving work artifacts
+        path: .agent/workflows/artifact_authoring.md
+        status: current
 
   - id: no_secrets
     scope: repository
@@ -204,6 +646,72 @@ guardrails:
       record secrets, and report vulnerabilities privately.
     sources:
       - type: doc
-        title: Security and privacy
+        title: Security policy
         path: SECURITY.md
         status: current
+      - type: doc
+        title: Agent instructions
+        path: AGENTS.md
+        status: current
+
+project_state:
+  active_work:
+    title: Local-stdio MVP release
+    summary: >
+      A local, single-operator coding-agent service over MCP stdio covering memory,
+      WorkArtifacts, local code ingest and structure, todos and Beacon support, closed by an
+      independent audit, black-box E2Es and a fresh full-Oracle LongMemEval gate on a named
+      release candidate.
+    next_step: Finish the phase checklists in the release plan and freeze a release candidate.
+    sources:
+      - type: doc
+        title: Local-stdio MVP release plan
+        path: .agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md
+        status: current
+      - type: issue
+        title: Local-stdio MVP tracker
+        url: https://github.com/Archolith/menhir/issues/123
+        status: current
+  recently_completed:
+    - title: Menhir serves Beacon evidence by project id or repository origin
+      summary: >
+        get_beacon_evidence reads the graph only and returns bound beacon-memory-evidence-1.1.
+      sources:
+        - type: doc
+          title: Menhir as a Beacon memory provider
+          path: docs/agent-usage.md
+          status: current
+    - title: Project identity lives only in the graph
+      summary: Menhir no longer writes an identity file into indexed checkouts.
+      sources:
+        - type: doc
+          title: Menhir as a Beacon memory provider
+          path: docs/agent-usage.md
+          status: current
+  blockers:
+    - title: Deployment control plane is NOT READY
+      summary: >
+        Deployment implementation and production work are frozen until the recovery plan's
+        architecture is independently accepted.
+      sources:
+        - type: doc
+          title: Deployment recovery plan
+          path: .agent/plans/menhir-deployment-control-plane-architecture-reset-2026-09-08.md
+          status: current
+  pending_decisions:
+    - title: Retire menhir beacon generate
+      summary: >
+        The older generation path stays until Beacon's end-to-end lane runs against the provider.
+      sources:
+        - type: doc
+          title: Menhir as a Beacon memory provider
+          path: docs/agent-usage.md
+          status: current
+    - title: Context composition stages 2 to 4
+      summary: >
+        Decide whether they are still wanted after Stage 1's negative result.
+      sources:
+        - type: doc
+          title: Current plan index
+          path: .agent/plans/README.md
+          status: current

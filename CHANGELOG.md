@@ -1,11 +1,17 @@
 ## 2026-09-23 - Menhir's own beacon.yaml
 
-Menhir describes itself to coding agents through Beacon, in its own words: purpose, non-goals,
-audiences, four core concepts (structure graph, governed memory, project identity, Beacon memory
-provider), canonical docs, agent guidance, build and test commands, and four cited guardrails (no
-project writes, the client-policy census, CI before publication, no secrets). `beacon validate`:
-0 errors, 0 warnings. `beacon.generated.yaml` is committed once production Menhir can supply the
-bound evidence.
+Menhir describes itself to coding agents through Beacon, in its own words, drawn from the README,
+AGENTS.md, `.agent/` and `docs/`:
+
+- `beacon.yaml`: purpose, non-goals and audiences; 13 core concepts (structure graph, change
+  analysis, project identity, the enrichment queue, recall and context, code-linked memory and
+  stale anchors, governed memory, WorkArtifacts, todos, typed scalar state, agent evidence
+  producers, access surfaces and tiers, the Beacon memory provider), each with implementation
+  paths and sources; 20 canonical docs with status; agent guidance; build and test commands;
+  13 cited guardrails; and project state (the local-stdio MVP, recent work, the deployment
+  blocker, pending decisions).
+- `beacon validate`: 0 errors, 0 warnings. `beacon.generated.yaml` is committed once production
+  Menhir can supply the bound evidence.
 
 ## 2026-09-22 - project identity lives only in the graph; Menhir writes nothing into a checkout
 
