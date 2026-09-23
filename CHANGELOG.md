@@ -5,12 +5,15 @@ audiences, current focus, the entry docs and plans in reading order, and the are
 not change without review. Everything else is read at build time from the repository, git and
 Menhir's evidence (workspace plan `beacon-near-zero-authoring-plan-2026-09-23.md`).
 
+- `AGENTS.md`: five rules wrapped in `<!-- beacon:guardrail -->` markers (no secrets, extend the
+  canonical contracts, incomplete indexes are inconclusive, CI before publication, live tests
+  are opt-in); the wording is unchanged. Beacon cites and pins them exactly.
 - `docs/roadmap/menhir-mvp-roadmap.md`: frontmatter `status: superseded` (superseded by the
   local-stdio MVP release plan), so the beacon reads the status from the document itself.
 - A comprehensive hand-written version (13 concepts, 20 docs, 13 cited guardrails, project
   state) is kept at commit `dd73b1b9` as the golden reference. With Beacon P0/P1, the overlay plus
   Menhir's own files matches it on identity, purpose, non-goals, audiences, review areas and
-  commands; guardrails come from `AGENTS.md`/`SECURITY.md` sections (3 of 13); concepts and most
+  commands; guardrails come from `AGENTS.md` markers and `SECURITY.md` (6 of 13); concepts and most
   project state await Menhir's evidence and the forge adapter.
 - `beacon validate --intent`: 0 errors. `beacon.generated.yaml` is committed once production
   Menhir can supply the bound evidence.
