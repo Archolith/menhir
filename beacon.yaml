@@ -38,24 +38,19 @@ audiences:
 current_focus:
   - the local-stdio MVP release (tracker Archolith/menhir#123)
 
-# Entry points, then status overrides the repository does not state yet. (Beacon replaces the
-# whole list from intent today; plan P1 makes these overrides on declared docs.)
+# Entry points in AGENTS.md's reading order, then the plans. No statuses here: each document
+# states its own in frontmatter (the local-stdio plan is APPROVED; the July roadmap is superseded).
 canonical_docs:
   - path: AGENTS.md
     role: entrypoint
-    status: current
   - path: .agent/README.md
     role: entrypoint
-    status: current
   - path: README.md
     role: entrypoint
-    status: current
   - path: .agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md
     role: implementation_plan
-    status: current
   - path: docs/roadmap/menhir-mvp-roadmap.md
     role: implementation_plan
-    status: superseded
 
 agent_guidance:
   # Review areas written nowhere else in the repository. Plan: move them into AGENTS.md.

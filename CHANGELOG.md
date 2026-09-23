@@ -1,16 +1,19 @@
 ## 2026-09-23 - Menhir's own beacon.yaml
 
 Menhir's beacon intent holds only what a maintainer has to say: purpose, problem, non-goals,
-audiences, current focus, entry docs with two status overrides (the local-stdio release plan is
-current; the July MVP roadmap is superseded), and the areas an agent must not change without
-review. Everything else is meant to be read at build time from the repository, git and Menhir's
-evidence (workspace plan `beacon-near-zero-authoring-plan-2026-09-23.md`).
+audiences, current focus, the entry docs and plans in reading order, and the areas an agent must
+not change without review. Everything else is read at build time from the repository, git and
+Menhir's evidence (workspace plan `beacon-near-zero-authoring-plan-2026-09-23.md`).
 
+- `docs/roadmap/menhir-mvp-roadmap.md`: frontmatter `status: superseded` (superseded by the
+  local-stdio MVP release plan), so the beacon reads the status from the document itself.
 - A comprehensive hand-written version (13 concepts, 20 docs, 13 cited guardrails, project
-  state) is kept at commit `dd73b1b9` as the golden reference for Beacon's extractors.
-- `beacon validate`: 0 errors, 2 warnings (no guardrails, no test command), which Beacon's
-  declared-source readers are planned to fill. `beacon.generated.yaml` is committed once
-  production Menhir can supply the bound evidence.
+  state) is kept at commit `dd73b1b9` as the golden reference. With Beacon P0/P1, the overlay plus
+  Menhir's own files matches it on identity, purpose, non-goals, audiences, review areas and
+  commands; guardrails come from `AGENTS.md`/`SECURITY.md` sections (3 of 13); concepts and most
+  project state await Menhir's evidence and the forge adapter.
+- `beacon validate --intent`: 0 errors. `beacon.generated.yaml` is committed once production
+  Menhir can supply the bound evidence.
 
 ## 2026-09-22 - project identity lives only in the graph; Menhir writes nothing into a checkout
 
