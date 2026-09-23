@@ -43,8 +43,29 @@ from menhir.services.scheduler_protocols import (
     SchedulerIngestService,
     SchedulerLifecycleService,
 )
+from menhir.snapshot.view_root import sweep_view_roots
+from menhir.snapshot.promotion_attempt import reconcile_promotion_attempts
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Job: sweep snapshot view roots
+# ---------------------------------------------------------------------------
+
+async def sweep_snapshot_view_roots(
+    graph_adapter: SchedulerGraphAdapter,
+) -> dict[str, object]:
+    """Reclaim unpublishable snapshot roots without blocking the scheduler loop."""
+    attempts = await asyncio.to_thread(reconcile_promotion_attempts, graph_adapter.neo4j)
+    report = await asyncio.to_thread(sweep_view_roots, graph_adapter.neo4j)
+    return {
+        "promotion_attempts": attempts,
+        "examined": report.examined,
+        "retired": report.retired,
+        "purged_roots": report.purged_roots,
+        "purged_nodes": report.purged_nodes,
+    }
 
 
 # ---------------------------------------------------------------------------

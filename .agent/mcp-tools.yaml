@@ -17,7 +17,7 @@ mcp:
       # never feeds memory heat/promotion). Surfaced in the explorer Feature Usage page.
       ids: [mcp.tool.rate_recall]
     operator:
-      ids: [mcp.tool.force_scheduler_takeover, mcp.tool.flag_memory, mcp.tool.delete_memory, mcp.tool.recover_orphans]
+      ids: [mcp.tool.force_scheduler_takeover, mcp.tool.flag_memory, mcp.tool.delete_memory, mcp.tool.recover_orphans, mcp.tool.begin_project_snapshot, mcp.tool.put_project_snapshot_chunk, mcp.tool.commit_project_snapshot, mcp.tool.get_project_snapshot_status, mcp.tool.abort_project_snapshot]
   resources:
     system:
       ids: [mcp.resource.system.dependency_health, mcp.resource.system.metadata, mcp.resource.system.lifecycle_trace, mcp.resource.system.processing_queue]

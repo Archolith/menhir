@@ -1,7 +1,7 @@
 ---
 artifact_schema: 1
 artifact_type: plan
-artifact_status: PROPOSED
+artifact_status: IMPLEMENTED
 ---
 
 # From built to working: wiring remote sync end to end
@@ -10,26 +10,48 @@ Parent plan: `.agent/plans/menhir-mcp-snapshot-ingest-2026-09-16.md`
 P3 design: `.agent/plans/menhir-snapshot-p3-extraction-design-2026-09-17.md`
 P4 design: `.agent/plans/menhir-snapshot-p4-graph-write-design-2026-09-17.md`
 Tenancy position: issue #127
-Status: **PROPOSED — no implementation.**
+Status: **IMPLEMENTED — 2026-09-20.**
+
+Current-main verification (2026-09-22 PR integration):
+
+- 415 offline snapshot, MCP-tool, published-view, and watcher tests passed; 85 graph-backed tests
+  skipped by the default safety gate.
+- 83 graph-backed snapshot/view tests passed against the disposable Neo4j test container.
+- 9 remote-simulation tests passed through a Dockerized Menhir that cannot see the host checkout,
+  covering real bundle upload, negotiated chunking, explicit commit, and CLI product wiring.
+- The integration audit fixed one published-view Cypher syntax error and corrected the empty-actor
+  test to assert the required no-mutation outcome. Production deployment and live proof remain a
+  post-merge rollout step, not evidence claimed by this PR.
+
+Implementation decisions: a published canonical snapshot selected by its durable project id wins
+over local structure for that same identity; a display-name collision stays visible and resolves to
+the local project unless the caller selects the snapshot id explicitly. No published view preserves
+the legacy result shape; degraded views answer with a bounded warning; and explicit
+`commit_project_snapshot` (not the final chunk) triggers mode-gated work.
+Promotion records the authenticated MCP principal, durable intent is reconciled by the WRITE-only
+maintenance job, and deployment-wide root cleanup selects one oldest candidate per project before
+applying its bound. First sync receives a server-minted opaque project id; the CLI keeps a
+server-specific local receipt under `.menhir/`, and later begins must present an id already
+registered by that server. Display names never become graph identity.
 
 ## The problem this plan exists to fix
 
-P0–P4 built and proved each stage of remote sync in isolation. **None of the stages after upload
-are connected to anything.** Verified by call-site search, not by reading docs:
+At proposal time, P0–P4 had proved each stage in isolation and **none of the stages after upload
+were connected to anything.** This implementation closed those call-site gaps:
 
 | Stage | Built | Reachable at runtime |
 | --- | --- | --- |
 | Bundle + upload (`menhir sync`) | yes | **yes** |
 | Receive to `SEALED` + staged blob | yes | **yes** (operator surface, gated by mode) |
-| Extract archive (`archive_plan`, `extraction_writer`, `extract_worker`) | yes | **no caller** |
-| Shadow scan (`shadow_scan`) | yes | **no caller** |
-| Promote (`promotion`, `view_root`, `canonical_view`, `snapshot_structure`) | yes | **no caller** |
-| Read a published view | **not built** | — |
-| Reclaim abandoned roots (`sweep_view_roots`) | yes | **no scheduler** |
+| Extract archive (`archive_plan`, `extraction_writer`, `extract_worker`) | yes | **yes**, on explicit commit in SHADOW/WRITE |
+| Shadow scan (`shadow_scan`) | yes | **yes**, with materialized-root cleanup |
+| Promote (`promotion`, `view_root`, `canonical_view`, `snapshot_structure`) | yes | **yes**, in WRITE mode |
+| Read a published view | **yes** | **yes**, exact canonical identity precedes local structure |
+| Reclaim abandoned roots (`sweep_view_roots`) | yes | **yes**, scheduled in WRITE mode |
 
-So today a user syncs and gets **bytes on a disk**. The upload reaches `SEALED` and the chain
-stops there. Every module downstream is tested, including against a restored production graph, and
-none of it runs.
+At proposal time a user sync got only **bytes on a disk**: the upload reached `SEALED` and the
+chain stopped there. Every module downstream was tested, including against a restored production
+graph, but none of it ran.
 
 Two consequences shape the ordering below:
 
@@ -49,18 +71,16 @@ structure read through one allowlist — the same reason `write_project_structur
 identity fence lives. Guarding the 11 query types individually would mean 11 places to keep in
 step and the next query added would silently miss it.
 
-**Design questions to settle first — this step should not start until they are answered:**
+**Settled decisions:**
 
-- When a project has both a published view and local structure, **which answers?** Plausible
-  positions: local always wins (snapshot is advisory), view wins when present, or the caller
-  chooses. This is the single most consequential decision in the whole feature and it is not
-  currently written down anywhere.
-- How does `[SNAPSHOT ...]` status reach the caller — a field, a prefix on results, or a separate
-  status call? The parent plan asks for it without specifying the shape.
-- What does a **degraded** view return? The parent plan (line 738) says reads carry a warning. The
-  wire shape of that warning is undecided.
-- Does a read of a view need the same `(root, path)` index the writer uses, or different access
-  patterns? Worth answering before promotion's node shape is frozen by real data.
+- An exact server-issued project id selects the canonical snapshot before local structure. A
+  display name is only an alias: if an unrelated local project has the same name, the local project
+  answers and both entries remain listed; the snapshot remains selectable by its id.
+- Snapshot data travels in an internal envelope and the MCP renderer adds `[SNAPSHOT ...]`, keeping
+  the legacy wire output byte-identical when no canonical view exists.
+- A degraded view still answers but carries one bounded warning; new promotion into it is refused.
+- Reads use the writer's `(view_root, path)` index and constrain both relationship endpoints to the
+  current root and project id.
 
 **Acceptance:** a structure query against a project with a published view returns that view's
 content, carries its status, and a query against a project without one is byte-identical to today.
@@ -68,17 +88,16 @@ The pilot's read-comparison harness already exists and should be reused as the r
 
 ## Step 2 — Extraction and shadow scan, wired to `SHADOW`
 
-`SHADOW` mode claims to extract and scan without touching the graph. It currently does neither,
-because nothing calls the extraction chain.
+At proposal time `SHADOW` claimed to extract and scan without touching the graph but did neither,
+because nothing called the extraction chain.
 
 Wire `SEALED` upload → `archive_plan` → `extract_worker` → `shadow_scan` → report, with the
 existing lease and the existing subprocess isolation. This is the lowest-risk step in the plan:
 it is graph-inert by construction, the parent plan explicitly allows it to run indefinitely while
 evidence accumulates, and every component has a hostile-corpus test behind it.
 
-**Open:** what triggers extraction — the sealing call itself, an operator command, or a worker
-picking up sealed uploads? This is the same "is promotion queued" question from issue #127 in an
-earlier form, and answering it once covers both.
+**Settled:** explicit `commit_project_snapshot` triggers extraction. The final chunk only seals;
+it never opens attacker-supplied archive bytes as a side effect.
 
 **Acceptance:** an upload sealed in `SHADOW` produces a shadow report, leaves no extraction root
 behind, and writes nothing to the graph. Provable against the existing hostile corpus.
@@ -94,10 +113,10 @@ rather than isolation. The check belongs in the same statement as the CAS, for t
 `admit_structure_writer` documents: a build takes ~25s at real scale and ownership can change
 inside that window.
 
-Also in this step, because they are cheap now and not later:
+Also implemented in this step:
 
-- A guard on `mark_degraded`, which currently lets any caller wedge a shared project until a human
-  intervenes.
+- `mark_degraded` requires an authenticated actor; background recovery additionally uses a
+  generation/root guard so stale work cannot wedge a newer shared view.
 - A per-user bound under the shared `disk_budget_bytes`, so one large sync cannot starve the team.
 
 **Acceptance:** an operator can promote a sealed, extracted snapshot; the promotion is attributed;
@@ -110,10 +129,8 @@ still shows local structure unchanged.
 deployment. `services/scheduler_tasks.py` is the established home: standalone functions returning a
 result dict, wrapped by the orchestrator for timing and telemetry.
 
-**Open:** fairness. The current sweep is oldest-first with a global limit of 50, which under many
-projects lets the noisiest starve the others. For a single-company deployment this is a small
-concern and a round-robin over projects is probably sufficient — but it should be decided
-deliberately rather than inherited from the single-operator default.
+**Settled:** a deployment-wide pass chooses one oldest candidate per project before applying the
+global limit. An explicitly project-scoped sweep retains oldest-first behavior within that project.
 
 **Acceptance:** abandoned roots are reclaimed without operator action; current and previous roots
 survive; the existing sweep counterexamples still pass.
@@ -125,16 +142,20 @@ bad, with nothing recording that judgement — indistinguishable from success. D
 `promotion.py` and deliberately left open, because closing it needs a durable promotion-attempt
 record plus a reconciler.
 
-Left last on purpose. It is the largest item, it does not get more expensive with time, and with a
-small number of users the window is genuinely rare. It should be done before any deployment where
-nobody is watching the graph.
+Implemented with `SnapshotPromotionAttempt`, written before the flip and transitioned through
+publication/compensation to a terminal state. The WRITE-only maintenance cycle reconciles stale
+nonterminal attempts by restoring the retained root or marking the unchanged view degraded. Both
+operations are generation/root guarded so a concurrent valid promotion cannot be degraded. A
+repeated explicit commit also repairs a `PROMOTING` upload receipt from the durable attempt after a
+post-publication process crash; the disk-only inactivity sweep never guesses that state is failed.
 
 ## Step 6 — Make `menhir sync` tell the truth
 
-`sync.py` currently ends at `upload <state>`. Once steps 1–3 land, the command should report what
-actually happened to the snapshot — extracted, scanned, promoted, or refused — rather than
-reporting a successful upload of bytes that then go nowhere. Small, and worth doing in the same
-release as step 3 so the client's story matches the server's behaviour.
+`sync.py` now calls explicit commit after the server seals the upload and reports the terminal
+`received`, `scanned`, or `published` stage together with the server-issued project and snapshot
+ids. It persists the project receipt locally with atomic no-clobber publication for later syncs to
+the same server. The begin response advertises explicit-commit support, and the client refuses an
+older pre-commit server before sending source bytes.
 
 ## What is deliberately NOT here
 

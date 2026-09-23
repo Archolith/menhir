@@ -4,8 +4,7 @@ Plan: ``.agent/plans/menhir-mcp-snapshot-ingest-2026-09-16.md``.
 
 ``--check`` runs entirely locally: it reads the repository, applies the selection policy, and
 prints what a sync WOULD upload, making no network call and writing no archive. Without it the
-same plan is built and then uploaded, which became possible once P2A measured the transport and
-P2B built the client.
+same plan is built, uploaded, explicitly committed, and reported at the server's terminal stage.
 
 **A refusal stops a send, structurally.** The blocked check runs before the upload branch rather
 than inside it, so while a secret-risk path stands there is no code path that reaches the network.
@@ -17,7 +16,11 @@ logs or emits (plan invariant 5).
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated
 
@@ -44,6 +47,88 @@ _OMISSION_LABELS = {
     "local_receipt": "Menhir's own local receipts",
     "unreadable": "unreadable or unrepresentable",
 }
+
+
+def _remote_receipt_path(root: Path, url: str) -> Path:
+    key = hashlib.sha256(url.rstrip("/").encode("utf-8")).hexdigest()[:24]
+    return root / ".menhir" / "sources" / f"{key}.json"
+
+
+def _valid_remote_project_id(project_id: str) -> bool:
+    return (
+        project_id.startswith("project-")
+        and len(project_id) == 40
+        and all(c in "0123456789abcdef" for c in project_id[8:])
+    )
+
+
+def _read_remote_project_id(root: Path, url: str) -> str | None:
+    path = _remote_receipt_path(root, url)
+    if not path.exists():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        project_id = str(raw["project_id"])
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise SnapshotUploadError(
+            "sync.identity.invalid_receipt",
+            f"{path} is not a usable remote project receipt; repair it deliberately",
+        ) from exc
+    if raw.get("server_url") != url.rstrip("/") or not _valid_remote_project_id(project_id):
+        raise SnapshotUploadError(
+            "sync.identity.invalid_receipt",
+            f"{path} does not match this remote Menhir",
+        )
+    return project_id
+
+
+def _write_remote_project_id(root: Path, url: str, project_id: str) -> None:
+    if not _valid_remote_project_id(project_id):
+        raise SnapshotUploadError(
+            "sync.identity.invalid_server_receipt",
+            "the server returned an unusable project identity",
+        )
+    path = _remote_receipt_path(root, url)
+    payload = json.dumps(
+        {"schema": 1, "server_url": url.rstrip("/"), "project_id": project_id},
+        sort_keys=True,
+    ).encode("utf-8")
+    temp_path: Path | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, raw_temp = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+        )
+        temp_path = Path(raw_temp)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            # Linking a fully-written inode creates the final name atomically without replacing a
+            # receipt another process may have won concurrently. A crash can leave only a hidden
+            # temp file, never a partial authoritative receipt.
+            os.link(temp_path, path)
+        except FileExistsError:
+            existing = _read_remote_project_id(root, url)
+            if existing != project_id:
+                raise SnapshotUploadError(
+                    "sync.identity.receipt_conflict",
+                    "the server returned a different project identity than this checkout records",
+                )
+    except SnapshotUploadError:
+        raise
+    except OSError as exc:
+        raise SnapshotUploadError(
+            "sync.identity.receipt_write_failed",
+            "the remote project identity could not be stored locally",
+        ) from exc
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _report(plan: BundlePlan, *, limits=PROVISIONAL_LIMITS) -> None:
@@ -162,6 +247,7 @@ def _upload(plan: BundlePlan, *, settings: MemorySettings) -> None:
             outcome = SnapshotUploader(url, auth_key=key).upload(
                 archive,
                 project_key=plan.manifest.display_name,
+                project_id=plan.manifest.project_id,
                 progress=progress,
             )
         except SnapshotUploadError as exc:
@@ -170,21 +256,34 @@ def _upload(plan: BundlePlan, *, settings: MemorySettings) -> None:
             echo(f"                ({exc.code})")
             raise typer.Exit(code=1) from exc
 
+    try:
+        _write_remote_project_id(plan.root, url, outcome.project_id)
+    except SnapshotUploadError as exc:
+        echo("")
+        echo(f"sync completed, but the local identity receipt failed: {exc}")
+        echo(f"                ({exc.code})")
+        raise typer.Exit(code=1) from exc
+
     echo("")
     echo(f"upload          {outcome.state}")
     echo(
         f"                {outcome.sent_chunks} chunk(s) of {outcome.chunk_bytes} bytes, "
         f"{outcome.bytes_sent} bytes sent"
     )
-    if outcome.state != "SEALED":
-        # Every chunk was accepted and the upload still is not whole. Not a transport failure, so
-        # it must not read like success -- a partial upload nobody notices is the worst outcome
-        # here, because the server holds it until the inactivity TTL.
-        echo("                the server does not consider this upload complete")
+    if outcome.state not in {"SEALED", "READY"}:
+        echo("                the server did not reach a successful terminal stage")
         raise typer.Exit(code=1)
     echo("")
-    echo("The snapshot is staged on the server. Nothing has been extracted or written to the")
-    echo("graph: that arrives with later phases of the snapshot plan.")
+    stage = str(outcome.result.get("stage") or "received")
+    echo(f"server stage    {stage}")
+    echo(f"project id      {outcome.project_id}")
+    echo(f"snapshot id     {outcome.snapshot_id}")
+    if stage == "received":
+        echo("The server retained the sealed snapshot without opening it (receive mode).")
+    elif stage == "scanned":
+        echo("The server extracted and scanned the snapshot without writing the graph (shadow mode).")
+    elif stage == "published":
+        echo("The server published the snapshot as the project's canonical structural view.")
 
 
 def sync(
@@ -218,6 +317,7 @@ def sync(
         max_file_bytes=PROVISIONAL_LIMITS.max_file_bytes,
         allowed_secret_paths=frozenset(allow_path or ()),
     )
+    settings = MemorySettings.from_env()
     try:
         plan = build_plan(
             path or Path.cwd(),
@@ -228,6 +328,14 @@ def sync(
     except BundlerError as exc:
         typer.echo(f"{exc}")
         raise typer.Exit(code=1) from exc
+    if not check and (settings.backend_url or "").strip():
+        try:
+            project_id = _read_remote_project_id(plan.root, settings.backend_url.strip())
+        except SnapshotUploadError as exc:
+            typer.echo(f"{exc} ({exc.code})")
+            raise typer.Exit(code=1) from exc
+        if project_id:
+            plan = replace(plan, manifest=replace(plan.manifest, project_id=project_id))
 
     _report(plan)
     # Checked before the upload branch and not inside it: a refusal must stop a send, and the
@@ -237,4 +345,4 @@ def sync(
     if check:
         return
 
-    _upload(plan, settings=MemorySettings.from_env())
+    _upload(plan, settings=settings)

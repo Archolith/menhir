@@ -20,6 +20,7 @@ import pytest
 
 from menhir.snapshot.canonical_view import CANONICAL_VIEW_CONSTRAINTS, publish_root, read_view
 from menhir.snapshot.promotion import PromotionError, promote_snapshot
+from menhir.snapshot.promotion_attempt import PROMOTION_ATTEMPT_CONSTRAINTS
 from menhir.snapshot.snapshot_structure import iter_root_paths
 from menhir.snapshot.view_root import (
     ROOT_ABANDONED,
@@ -57,7 +58,11 @@ def repo():
     password = os.getenv("MENHIR_TEST_NEO4J_PASSWORD", "testpassword")
     driver = GraphDatabase.driver(uri, auth=(user, password))
     r = _Repo(driver)
-    for statement in [*CANONICAL_VIEW_CONSTRAINTS, *VIEW_ROOT_CONSTRAINTS]:
+    for statement in [
+        *CANONICAL_VIEW_CONSTRAINTS,
+        *VIEW_ROOT_CONSTRAINTS,
+        *PROMOTION_ATTEMPT_CONSTRAINTS,
+    ]:
         r.execute(statement, {})
     try:
         yield r
@@ -72,6 +77,11 @@ def repo():
         )
         r.execute(
             "MATCH (r:ViewRoot) WHERE r.project_id STARTS WITH 'p4-test-' DETACH DELETE r", {}
+        )
+        r.execute(
+            "MATCH (a:SnapshotPromotionAttempt) "
+            "WHERE a.project_id STARTS WITH 'p4-test-' DETACH DELETE a",
+            {},
         )
         driver.close()
 
@@ -122,6 +132,7 @@ def test_the_sweep_does_not_touch_the_current_root(repo, pid) -> None:
         project_id=pid,
         view_key=VIEW,
         snapshot_id="snap-1",
+        actor="test:operator",
         write_structure=_content(repo, pid),
     )
     _expire(repo, outcome.root_id)
@@ -142,10 +153,12 @@ def test_the_sweep_does_not_touch_the_previous_root(repo, pid) -> None:
     """`previous` is the gate's escape hatch; collecting it removes the only undo."""
     first = promote_snapshot(
         repo, project_id=pid, view_key=VIEW, snapshot_id="snap-1",
+        actor="test:operator",
         write_structure=_content(repo, pid),
     )
     second = promote_snapshot(
         repo, project_id=pid, view_key=VIEW, snapshot_id="snap-2",
+        actor="test:operator",
         write_structure=_content(repo, pid),
     )
     _expire(repo, first.root_id)
@@ -202,6 +215,7 @@ def test_the_sweep_reclaims_a_root_a_failed_promotion_left_behind(repo, pid) -> 
             project_id=pid,
             view_key=VIEW,
             snapshot_id="snap-1",
+            actor="test:operator",
             write_structure=_half_written,
             lease_seconds=0,
         )
@@ -229,6 +243,7 @@ def test_the_sweep_reclaims_a_root_demoted_past_previous(repo, pid) -> None:
     roots = [
         promote_snapshot(
             repo, project_id=pid, view_key=VIEW, snapshot_id=f"snap-{i}",
+            actor="test:operator",
             write_structure=_content(repo, pid),
         ).root_id
         for i in range(3)
@@ -275,6 +290,70 @@ def test_the_sweep_is_bounded_by_its_limit(repo, pid) -> None:
     assert report.examined == 2
 
 
+def test_project_scoped_sweep_preserves_oldest_first_selection(repo, pid) -> None:
+    """An explicit project keeps the original ordering and limit semantics."""
+    roots = [
+        begin_root(
+            repo, project_id=pid, view_key=VIEW, snapshot_id=f"snap-{i}", lease_seconds=0
+        ).root_id
+        for i in range(3)
+    ]
+    for expires_at, root_id in zip([30, 10, 20], roots):
+        repo.execute(
+            "MATCH (r:ViewRoot {root_id: $root}) SET r.lease_expires_at = $expires_at",
+            {"root": root_id, "expires_at": expires_at},
+        )
+
+    report = sweep_view_roots(repo, project_id=pid, limit=1)
+
+    assert report.examined == 1
+    assert read_root(repo, root_id=roots[0]).state == ROOT_BUILDING
+    assert read_root(repo, root_id=roots[1]).state == ROOT_ABANDONED
+    assert read_root(repo, root_id=roots[2]).state == ROOT_BUILDING
+
+
+def test_deployment_sweep_gives_each_project_one_candidate_before_limit(repo, pid) -> None:
+    """Old garbage from one noisy project must not starve another project's oldest root."""
+    other = f"p4-test-{uuid.uuid4().hex[:8]}"
+    noisy_roots = [
+        begin_root(
+            repo, project_id=pid, view_key=VIEW, snapshot_id=f"noisy-{i}", lease_seconds=0
+        ).root_id
+        for i in range(3)
+    ]
+    quiet_root = begin_root(
+        repo, project_id=other, view_key=VIEW, snapshot_id="quiet", lease_seconds=0
+    ).root_id
+    for expires_at, root_id in enumerate([*noisy_roots, quiet_root], start=1):
+        repo.execute(
+            "MATCH (r:ViewRoot {root_id: $root}) SET r.lease_expires_at = $expires_at",
+            {"root": root_id, "expires_at": expires_at},
+        )
+
+    report = sweep_view_roots(repo, limit=2)
+
+    assert report.examined == 2
+    assert read_root(repo, root_id=noisy_roots[0]).state == ROOT_ABANDONED
+    assert read_root(repo, root_id=noisy_roots[1]).state == ROOT_BUILDING
+    assert read_root(repo, root_id=quiet_root).state == ROOT_ABANDONED
+
+
+def test_deployment_sweep_applies_limit_after_per_project_selection(repo, pid) -> None:
+    """More projects than slots still obey the deployment-wide bound."""
+    project_ids = [pid, *[f"p4-test-{uuid.uuid4().hex[:8]}" for _ in range(2)]]
+    roots = [
+        begin_root(
+            repo, project_id=project, view_key=VIEW, snapshot_id="s", lease_seconds=0
+        ).root_id
+        for project in project_ids
+    ]
+
+    report = sweep_view_roots(repo, limit=2)
+
+    assert report.examined == 2
+    assert sum(read_root(repo, root_id=root).state == ROOT_ABANDONED for root in roots) == 2
+
+
 def test_a_sweep_with_nothing_to_do_reports_nothing(repo, pid) -> None:
     """The ordinary case, and it must not be confused with a failure."""
     report = sweep_view_roots(repo, project_id=pid)
@@ -301,7 +380,8 @@ def test_a_stale_candidate_hint_cannot_collect_a_root_that_got_published(repo, p
     )
     complete_root(repo, root_id=root_id)
     publish_root(
-        repo, project_id=pid, view_key=VIEW, root_id=root_id, expected_generation=0
+        repo, project_id=pid, view_key=VIEW, root_id=root_id, expected_generation=0,
+        actor="test:operator",
     )
     _expire(repo, root_id)
 

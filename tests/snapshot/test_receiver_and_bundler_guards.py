@@ -69,7 +69,8 @@ def test_a_zero_byte_upload_is_accepted(receiver: StagingReceiver) -> None:
     """
     record = receiver.begin(principal="alice", project_key="p", declared_bytes=0)
 
-    assert record.state is UploadState.RECEIVING
+    # There is no chunk call that could advance a zero-chunk plan, so it seals immediately.
+    assert record.state is UploadState.SEALED
     assert record.total_chunks == 0
 
 

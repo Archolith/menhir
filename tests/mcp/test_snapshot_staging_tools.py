@@ -26,6 +26,7 @@ from menhir.mcp.tools.ingest.snapshot_staging import (
     SNAPSHOT_RECEIVE_MODE_ENV,
     SNAPSHOT_STAGING_TOOLS,
     BeginProjectSnapshotTool,
+    CommitProjectSnapshotTool,
     GetProjectSnapshotStatusTool,
     PutProjectSnapshotChunkTool,
     staging_enabled,
@@ -219,6 +220,7 @@ async def test_begin_chunk_status_abort_round_trip(staging_on: None, session) ->
     )
     assert begun["ok"] is True
     assert begun["total_chunks"] == 2
+    assert begun["commit_required"] is True
     upload_id = begun["upload_id"]
 
     first = json.loads(
@@ -243,6 +245,14 @@ async def test_begin_chunk_status_abort_round_trip(staging_on: None, session) ->
     status = json.loads(await GetProjectSnapshotStatusTool().endpoint(upload_id=upload_id))
     assert status["state"] == "SEALED"
     assert status["received_bytes"] == 16
+
+    committed = json.loads(
+        await CommitProjectSnapshotTool().endpoint(upload_id=upload_id)
+    )
+    assert committed["state"] == "SEALED"
+    assert committed["result"] == {"stage": "received", "mode": "receive"}
+    assert committed["project_id"].startswith("project-")
+    assert committed["snapshot_id"].startswith("snapshot-")
 
 
 async def test_a_refusal_comes_back_as_a_stable_code_not_an_exception(

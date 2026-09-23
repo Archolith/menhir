@@ -1,11 +1,10 @@
-"""P2A staging receive tools: begin / chunk / status / abort. Off by default.
+"""Operator snapshot tools: begin / chunk / explicit commit / status / abort. Off by default.
 
 Plan: ``.agent/plans/menhir-mcp-snapshot-ingest-2026-09-16.md`` (P2A).
 
-These exist so the transport measurement runs against the REAL handler -- the same middleware,
-auth, request parser and telemetry a release would use -- rather than against a proxy for it. An
-`add_memory` padded-body probe cannot substitute: its schema validation, decoding, telemetry and
-allocation all differ from the chunk path, which is the thing being sized.
+The P2A receive surface remains the transport boundary. Explicit commit now hands a sealed upload
+to the mode-gated coordinator: RECEIVE records receipt, SHADOW extracts and scans, and WRITE may
+publish. The final chunk never triggers processing implicitly.
 
 **Three gates, not one.** Defence in depth here is cheap and the failure it prevents is a receive
 surface nobody meant to expose:
@@ -34,6 +33,7 @@ what plan invariant 5 forbids.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from menhir.config.snapshot_mode import (
@@ -50,6 +50,7 @@ __all__ = [
     "SNAPSHOT_STAGING_TOOLS",
     "AbortProjectSnapshotTool",
     "BeginProjectSnapshotTool",
+    "CommitProjectSnapshotTool",
     "GetProjectSnapshotStatusTool",
     "PutProjectSnapshotChunkTool",
     "snapshot_receive_mode",
@@ -65,7 +66,7 @@ MODE_STAGING = SnapshotReceiveMode.RECEIVE.value
 
 _DISABLED_MESSAGE = (
     "snapshot receive is disabled. It is an operator surface (plan P2A/P2B), enabled only by "
-    f"setting {SNAPSHOT_RECEIVE_MODE_ENV}=receive on an operator instance."
+    f"setting {SNAPSHOT_RECEIVE_MODE_ENV} to receive, shadow, or write on an operator instance."
 )
 
 
@@ -118,6 +119,9 @@ def _record_json(record: UploadRecord) -> dict[str, Any]:
         "missing_chunks": record.missing[:64],
         "missing_count": len(record.missing),
         "failure_code": record.failure_code,
+        "project_id": record.project_id,
+        "snapshot_id": record.snapshot_id,
+        "result": record.result,
     }
 
 
@@ -130,9 +134,11 @@ class _StagingTool(BaseJsonTool):
     destructive_hint = False
     open_world_hint = False
 
-    def _guard(self) -> None:
-        if not staging_enabled():
+    def _guard(self) -> SnapshotReceiveMode:
+        mode = snapshot_receive_mode()
+        if not mode.accepts_uploads:
             raise RuntimeError(_DISABLED_MESSAGE)
+        return mode
 
     def _refuse(self, exc: ReceiveError) -> str:
         return self.render_json(
@@ -147,8 +153,7 @@ class BeginProjectSnapshotTool(_StagingTool):
     description = (
         "Reserve an upload for a project snapshot bundle. Returns the upload id and the chunk "
         "size to use -- send chunks at THAT size, not a size of your own choosing. The snapshot "
-        "is inert: nothing is extracted, scanned, or written to the graph, so a completed upload "
-        "does not make the project searchable. Prefer running `menhir sync`, which builds the "
+        "remains inert until `commit_project_snapshot` is called. Prefer running `menhir sync`, which builds the "
         "bundle and drives this; call these tools directly only when that is not available."
     )
 
@@ -160,6 +165,7 @@ class BeginProjectSnapshotTool(_StagingTool):
         project_key: str,
         declared_bytes: int,
         chunk_bytes: int | None = None,
+        project_id: str | None = None,
         namespace: str = "",
     ) -> str:
         """Reserve an upload and return its id, negotiated chunk size, and chunk count.
@@ -170,6 +176,7 @@ class BeginProjectSnapshotTool(_StagingTool):
             declared_bytes: Size of the archive the caller intends to send. A claim used for the
                 chunk plan and an early refusal; what actually lands is counted chunk by chunk.
             chunk_bytes: Optional chunk size, bounded by the server's hard ceiling.
+            project_id: A prior server-issued project receipt, if this checkout has one.
         """
         self._guard()
         try:
@@ -178,10 +185,15 @@ class BeginProjectSnapshotTool(_StagingTool):
                 project_key=project_key,
                 declared_bytes=int(declared_bytes),
                 chunk_bytes=int(chunk_bytes) if chunk_bytes else None,
+                project_id=project_id,
             )
         except ReceiveError as exc:
             return self._refuse(exc)
-        return self.render_json(_record_json(record))
+        payload = _record_json(record)
+        # Capability handshake for clients that must know explicit commit exists before sending
+        # source bytes. Pre-commit servers omit this field and are refused client-side.
+        payload["commit_required"] = True
+        return self.render_json(payload)
 
 
 class PutProjectSnapshotChunkTool(_StagingTool):
@@ -265,6 +277,67 @@ class GetProjectSnapshotStatusTool(_StagingTool):
         return self.render_json(_record_json(record))
 
 
+class CommitProjectSnapshotTool(_StagingTool):
+    name = "commit_project_snapshot"
+    scope = ToolScope.OBJECT
+    title = "Commit Project Snapshot"
+    description = (
+        "Explicitly commit a completely uploaded snapshot. In receive mode this records receipt; "
+        "in shadow mode it extracts and scans without graph writes; in write mode it atomically "
+        "publishes the scanned structure. Returns the durable terminal server stage."
+    )
+
+    def timeout_for(self, **_unused: object) -> int:
+        return 900
+
+    async def endpoint(self, upload_id: str) -> str:
+        """Process a sealed upload under the configured receive-mode capability."""
+        mode = self._guard()
+        principal = _principal()
+        receiver = _receiver()
+        neo4j = None
+        if mode.writes_graph:
+            from menhir.core.runtime import _state
+
+            if _state.built is None:
+                return self.render_json(
+                    {
+                        "ok": False,
+                        "tool": self.operation,
+                        "error": {
+                            "code": "snapshot.pipeline.runtime_unavailable",
+                            "message": "snapshot write runtime is not ready",
+                        },
+                    }
+                )
+            neo4j = _state.built.graph_adapter.neo4j
+
+        from menhir.infrastructure.paths import state_dir
+        from menhir.snapshot.coordinator import SnapshotCoordinator
+
+        coordinator = SnapshotCoordinator(
+            receiver, state_root=state_dir(), mode=mode, neo4j=neo4j
+        )
+        try:
+            record = await asyncio.to_thread(
+                coordinator.commit, upload_id=upload_id, principal=principal
+            )
+        except ReceiveError as exc:
+            return self._refuse(exc)
+        except Exception as exc:  # noqa: BLE001 -- expose a code, never attacker-derived details
+            return self.render_json(
+                {
+                    "ok": False,
+                    "tool": self.operation,
+                    "error": {
+                        "code": str(getattr(exc, "code", "snapshot.pipeline.failed")),
+                        "message": "snapshot processing failed",
+                    },
+                }
+            )
+        return self.render_json(_record_json(record))
+
+
 class AbortProjectSnapshotTool(_StagingTool):
     name = "abort_project_snapshot"
     scope = ToolScope.OBJECT
@@ -285,10 +358,11 @@ class AbortProjectSnapshotTool(_StagingTool):
         return self.render_json(_record_json(record))
 
 
-#: Registered only while the mode is `staging` -- see `register_all_tools`.
+#: Registered only while the configured mode accepts uploads -- see `register_all_tools`.
 SNAPSHOT_STAGING_TOOLS = [
     BeginProjectSnapshotTool,
     PutProjectSnapshotChunkTool,
+    CommitProjectSnapshotTool,
     GetProjectSnapshotStatusTool,
     AbortProjectSnapshotTool,
 ]

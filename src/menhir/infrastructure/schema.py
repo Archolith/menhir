@@ -101,6 +101,13 @@ PHASE_ONE_REQUIRED_INDEXES = (
     "project_identity_id_unique",
     "project_identity_root_unique",
     "structure_project_path_unique",
+    # Snapshot canonical-view publication and recovery.
+    "canonical_view_identity",
+    "view_root_id",
+    "snapshot_entity_root",
+    "snapshot_entity_root_path",
+    "snapshot_promotion_attempt_id",
+    "snapshot_promotion_attempt_state",
 )
 
 # Name, constraint type, entity type, labels/types, ordered properties. Index names alone are not
@@ -127,6 +134,27 @@ PHASE_ONE_REQUIRED_CONSTRAINTS = (
         "NODE",
         ("Entity",),
         ("structure_project_id", "structure_path"),
+    ),
+    (
+        "canonical_view_identity",
+        "UNIQUENESS",
+        "NODE",
+        ("CanonicalView",),
+        ("project_id", "view_key"),
+    ),
+    (
+        "view_root_id",
+        "UNIQUENESS",
+        "NODE",
+        ("ViewRoot",),
+        ("root_id",),
+    ),
+    (
+        "snapshot_promotion_attempt_id",
+        "UNIQUENESS",
+        "NODE",
+        ("SnapshotPromotionAttempt",),
+        ("attempt_id",),
     ),
 )
 
@@ -588,11 +616,25 @@ def _project_identity_index_queries() -> list[str]:
     ]
 
 
+def _snapshot_index_queries() -> list[str]:
+    """DDL required by snapshot read, publish, cleanup, and recovery paths."""
+    from menhir.snapshot.canonical_view import CANONICAL_VIEW_CONSTRAINTS
+    from menhir.snapshot.promotion_attempt import PROMOTION_ATTEMPT_CONSTRAINTS
+    from menhir.snapshot.view_root import VIEW_ROOT_CONSTRAINTS
+
+    return [
+        *CANONICAL_VIEW_CONSTRAINTS,
+        *VIEW_ROOT_CONSTRAINTS,
+        *PROMOTION_ATTEMPT_CONSTRAINTS,
+    ]
+
+
 def get_phase1_bootstrap_queries() -> list[str]:
     """Return idempotent DDL and backfill queries for phase-1 memory shape."""
     return (
         [query.strip() for query in _node_index_queries()]
         + [query.strip() for query in _project_identity_index_queries()]
+        + [query.strip() for query in _snapshot_index_queries()]
         + [query.strip() for query in _artifact_index_queries()]
         + [query.strip() for query in _view_index_queries()]
         + [query.strip() for query in _metric_index_queries()]

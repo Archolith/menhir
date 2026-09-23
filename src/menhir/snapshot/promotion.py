@@ -24,19 +24,16 @@ none of these need a recovery routine that reasons about what the dead process w
 | mid-write | a BUILDING root, unreferenced | the sweeper, once the LEASE expires |
 | after `complete_root` | a COMPLETE root, unreferenced | the sweeper, on the same evidence |
 | after the flip | the promotion, which succeeded | nobody; a retry sees it is already current |
-| mid-compensation | a view pointing at the bad root | see the caveat below -- this one is NOT automatic |
+| mid-compensation | a view pointing at the bad root plus durable attempt | scheduled reconciler |
 
 Nothing in that table is cleaned up because a PID vanished, because a directory looked stale, or
 because enough time passed on some other machine's clock. Every row that reclaims anything does it
 on a lease expiring against the SERVER's clock.
 
-**The residual, stated rather than designed around.** A process killed between the flip and the
-compensation leaves the view pointing at a root a caller had already judged bad, with nothing
-recording that judgement -- indistinguishable from a promotion that succeeded. `promote_snapshot`
-narrows the window by marking the view degraded when compensation fails, but it cannot close it,
-because the intent to compensate is not durable. Making it durable means a promotion-attempt
-record and a reconciler, which is real work and is NOT in this module. Until then, a verifier that
-needs to survive its own death should run BEFORE the flip, where failure costs nothing.
+The flip is also bracketed by a durable promotion-attempt record. A process killed after the flip
+therefore leaves evidence that the reconciler can use to restore the previous root (or mark the
+view degraded when restoration is impossible). The attempt is written before publication, never
+reconstructed from process identity or timing.
 """
 
 from __future__ import annotations
@@ -52,6 +49,12 @@ from menhir.snapshot.canonical_view import (
     publish_root,
     read_view,
     restore_previous,
+)
+from menhir.snapshot.promotion_attempt import (
+    begin_attempt,
+    finish_attempt,
+    mark_attempt_compensating,
+    mark_attempt_published,
 )
 from menhir.snapshot.view_root import (
     DEFAULT_ROOT_LEASE_SECONDS,
@@ -111,6 +114,8 @@ def promote_snapshot(
     project_id: str,
     view_key: str,
     snapshot_id: str,
+    actor: str,
+    display_name: str = "",
     write_structure: Callable[[str, Callable[[], None]], None],
     verify_before_flip: Callable[[str], None] | None = None,
     verify_after_flip: Callable[[str], None] | None = None,
@@ -149,8 +154,6 @@ def promote_snapshot(
 
         try:
             write_structure(root_id, _renew)
-            if verify_before_flip is not None:
-                verify_before_flip(root_id)
         except BaseException as exc:
             # Deliberately BaseException. A KeyboardInterrupt here must not leave a root that looks
             # finished -- and it cannot, because nothing marks it COMPLETE. The root stays BUILDING,
@@ -181,6 +184,29 @@ def promote_snapshot(
 
     view = read_view(neo4j, project_id=project_id, view_key=view_key)
     expected = view.generation if view is not None else 0
+    attempt = begin_attempt(
+        neo4j,
+        project_id=project_id,
+        view_key=view_key,
+        snapshot_id=snapshot_id,
+        root_id=root_id,
+        actor=actor,
+        expected_generation=expected,
+    )
+
+    # This check is intentionally after root completion and durable intent creation, immediately
+    # before the atomic pointer move. The coordinator uses it to renew its filesystem processing
+    # fence; running it earlier would let the lease expire (or be superseded) while complete_root,
+    # view resolution, and attempt creation ran, after which a stale publisher could still flip.
+    if verify_before_flip is not None:
+        try:
+            verify_before_flip(root_id)
+        except BaseException as exc:
+            finish_attempt(neo4j, attempt_id=attempt.attempt_id, state="ABANDONED")
+            raise PromotionError(
+                ERR_PROMOTION_WRITE_FAILED,
+                "the snapshot could not be verified; nothing was published",
+            ) from exc
 
     try:
         published = publish_root(
@@ -189,21 +215,30 @@ def promote_snapshot(
             view_key=view_key,
             root_id=root_id,
             expected_generation=expected,
+            actor=actor,
+            display_name=display_name,
         )
     except ViewError as exc:
         if exc.code == ERR_VIEW_ALREADY_CURRENT:
             # The previous attempt published and the caller never learned it. Reporting this as a
             # failure would invite a rebuild-and-republish of a snapshot that is already live.
             current = read_view(neo4j, project_id=project_id, view_key=view_key)
+            finish_attempt(neo4j, attempt_id=attempt.attempt_id, state="SUCCEEDED")
             return PromotionOutcome(
                 root_id=root_id,
                 generation=current.generation if current else expected,
                 reused_root=reused is not None,
                 already_current=True,
             )
+        finish_attempt(neo4j, attempt_id=attempt.attempt_id, state="ABANDONED")
         raise
 
+    mark_attempt_published(
+        neo4j, attempt_id=attempt.attempt_id, generation=published.generation
+    )
+
     if verify_after_flip is None:
+        finish_attempt(neo4j, attempt_id=attempt.attempt_id, state="SUCCEEDED")
         return PromotionOutcome(
             root_id=root_id,
             generation=published.generation,
@@ -214,18 +249,27 @@ def promote_snapshot(
     try:
         verify_after_flip(root_id)
     except BaseException as exc:
+        mark_attempt_compensating(
+            neo4j,
+            attempt_id=attempt.attempt_id,
+            reason="post-publish verification failed",
+        )
         _compensate(
             neo4j,
             project_id=project_id,
             view_key=view_key,
             generation=published.generation,
             reason="post-publish verification failed",
+            actor=actor,
+            attempt_id=attempt.attempt_id,
         )
+        finish_attempt(neo4j, attempt_id=attempt.attempt_id, state="ROLLED_BACK")
         raise PromotionError(
             ERR_PROMOTION_VERIFY_FAILED,
             "the promotion was published and then rolled back",
         ) from exc
 
+    finish_attempt(neo4j, attempt_id=attempt.attempt_id, state="SUCCEEDED")
     return PromotionOutcome(
         root_id=root_id,
         generation=published.generation,
@@ -235,7 +279,14 @@ def promote_snapshot(
 
 
 def _compensate(
-    neo4j: Any, *, project_id: str, view_key: str, generation: int, reason: str
+    neo4j: Any,
+    *,
+    project_id: str,
+    view_key: str,
+    generation: int,
+    reason: str,
+    actor: str,
+    attempt_id: str,
 ) -> None:
     """Flip back, and make the failure loud if flipping back does not work.
 
@@ -252,7 +303,11 @@ def _compensate(
     """
     try:
         restore_previous(
-            neo4j, project_id=project_id, view_key=view_key, expected_generation=generation
+            neo4j,
+            project_id=project_id,
+            view_key=view_key,
+            expected_generation=generation,
+            actor=actor,
         )
         return
     except Exception:
@@ -262,7 +317,13 @@ def _compensate(
         )
 
     try:
-        mark_degraded(neo4j, project_id=project_id, view_key=view_key, reason=reason)
+        mark_degraded(
+            neo4j,
+            project_id=project_id,
+            view_key=view_key,
+            reason=reason,
+            actor=actor,
+        )
     except Exception as exc:
         raise PromotionError(
             ERR_PROMOTION_DEGRADED,
@@ -270,6 +331,8 @@ def _compensate(
             "this view is serving a snapshot that failed verification and nothing records it",
             degraded=False,
         ) from exc
+
+    finish_attempt(neo4j, attempt_id=attempt_id, state="DEGRADED")
 
     raise PromotionError(
         ERR_PROMOTION_DEGRADED,

@@ -34,6 +34,13 @@ from menhir.snapshot.promotion import (
     PromotionError,
     promote_snapshot,
 )
+from menhir.snapshot.promotion_attempt import (
+    PROMOTION_ATTEMPT_CONSTRAINTS,
+    begin_attempt,
+    mark_attempt_published,
+    read_attempt,
+    reconcile_promotion_attempts,
+)
 from menhir.snapshot.view_root import (
     ROOT_BUILDING,
     ROOT_COMPLETE,
@@ -68,7 +75,11 @@ def repo():
     password = os.getenv("MENHIR_TEST_NEO4J_PASSWORD", "testpassword")
     driver = GraphDatabase.driver(uri, auth=(user, password))
     r = _Repo(driver)
-    for statement in [*CANONICAL_VIEW_CONSTRAINTS, *VIEW_ROOT_CONSTRAINTS]:
+    for statement in [
+        *CANONICAL_VIEW_CONSTRAINTS,
+        *VIEW_ROOT_CONSTRAINTS,
+        *PROMOTION_ATTEMPT_CONSTRAINTS,
+    ]:
         r.execute(statement, {})
     try:
         yield r
@@ -80,6 +91,11 @@ def repo():
             "MATCH (r:ViewRoot) WHERE r.project_id STARTS WITH 'p4-test-' DETACH DELETE r", {}
         )
         r.execute("MATCH (n:SnapshotEntity) DETACH DELETE n", {})
+        r.execute(
+            "MATCH (a:SnapshotPromotionAttempt) "
+            "WHERE a.project_id STARTS WITH 'p4-test-' DETACH DELETE a",
+            {},
+        )
         driver.close()
 
 
@@ -129,6 +145,7 @@ def test_a_promotion_publishes_the_root_it_built(repo, pid) -> None:
         project_id=pid,
         view_key=VIEW,
         snapshot_id="snap-1",
+        actor="test:operator",
         write_structure=_writer(calls),
     )
 
@@ -143,10 +160,12 @@ def test_a_promotion_publishes_the_root_it_built(repo, pid) -> None:
 def test_a_second_promotion_keeps_the_first_as_previous(repo, pid) -> None:
     """Restore-from-previous is only possible if promotion actually maintains it."""
     first = promote_snapshot(
-        repo, project_id=pid, view_key=VIEW, snapshot_id="snap-1", write_structure=_writer()
+        repo, project_id=pid, view_key=VIEW, snapshot_id="snap-1",
+        actor="test:operator", write_structure=_writer()
     )
     second = promote_snapshot(
-        repo, project_id=pid, view_key=VIEW, snapshot_id="snap-2", write_structure=_writer()
+        repo, project_id=pid, view_key=VIEW, snapshot_id="snap-2",
+        actor="test:operator", write_structure=_writer()
     )
 
     view = read_view(repo, project_id=pid, view_key=VIEW)
@@ -169,6 +188,7 @@ def test_a_failed_write_publishes_nothing_and_leaves_the_root_unreferenced(repo,
             project_id=pid,
             view_key=VIEW,
             snapshot_id="snap-1",
+            actor="test:operator",
             write_structure=_writer(fail_with=RuntimeError("disk went away")),
         )
 
@@ -189,6 +209,7 @@ def test_an_interrupted_write_is_treated_the_same_as_a_failed_one(repo, pid) -> 
             project_id=pid,
             view_key=VIEW,
             snapshot_id="snap-1",
+            actor="test:operator",
             write_structure=_writer(fail_with=KeyboardInterrupt()),
         )
 
@@ -209,6 +230,7 @@ def test_verification_before_the_flip_costs_nothing_when_it_fails(repo, pid) -> 
             project_id=pid,
             view_key=VIEW,
             snapshot_id="snap-1",
+            actor="test:operator",
             write_structure=_writer(),
             verify_before_flip=_reject,
         )
@@ -234,6 +256,7 @@ def test_a_root_abandoned_before_the_flip_can_never_be_published(repo, pid) -> N
             view_key=VIEW,
             root_id=building.root_id,
             expected_generation=0,
+            actor="test:operator",
         )
     assert read_view(repo, project_id=pid, view_key=VIEW) is None
 
@@ -250,6 +273,7 @@ def test_a_write_that_outlives_its_lease_publishes_nothing(repo, pid) -> None:
             project_id=pid,
             view_key=VIEW,
             snapshot_id="snap-1",
+            actor="test:operator",
             write_structure=_writer(),
             lease_seconds=0,
         )
@@ -274,7 +298,8 @@ def test_renewing_during_a_long_write_keeps_the_promotion_alive(repo, pid) -> No
         renew_lease()
 
     outcome = promote_snapshot(
-        repo, project_id=pid, view_key=VIEW, snapshot_id="snap-1", write_structure=_write
+        repo, project_id=pid, view_key=VIEW, snapshot_id="snap-1",
+        actor="test:operator", write_structure=_write
     )
 
     assert read_view(repo, project_id=pid, view_key=VIEW).current_root == outcome.root_id
@@ -286,7 +311,8 @@ def test_renewing_during_a_long_write_keeps_the_promotion_alive(repo, pid) -> No
 def test_a_promotion_that_fails_verification_is_rolled_back_to_previous(repo, pid) -> None:
     """The restore-from-previous gate item, driven by the orchestration rather than by hand."""
     good = promote_snapshot(
-        repo, project_id=pid, view_key=VIEW, snapshot_id="snap-good", write_structure=_writer()
+        repo, project_id=pid, view_key=VIEW, snapshot_id="snap-good",
+        actor="test:operator", write_structure=_writer()
     )
 
     def _reject(root_id: str) -> None:
@@ -298,6 +324,7 @@ def test_a_promotion_that_fails_verification_is_rolled_back_to_previous(repo, pi
             project_id=pid,
             view_key=VIEW,
             snapshot_id="snap-bad",
+            actor="test:operator",
             write_structure=_writer(),
             verify_after_flip=_reject,
         )
@@ -325,6 +352,7 @@ def test_a_failed_compensation_degrades_the_view_and_says_so(repo, pid) -> None:
             project_id=pid,
             view_key=VIEW,
             snapshot_id="snap-1",
+            actor="test:operator",
             write_structure=_writer(),
             verify_after_flip=_reject,
         )
@@ -339,13 +367,18 @@ def test_a_failed_compensation_degrades_the_view_and_says_so(repo, pid) -> None:
 def test_a_degraded_view_refuses_the_next_promotion_entirely(repo, pid) -> None:
     """Fail-closed means nothing may be promoted INTO it until an operator acts."""
     promote_snapshot(
-        repo, project_id=pid, view_key=VIEW, snapshot_id="snap-1", write_structure=_writer()
+        repo, project_id=pid, view_key=VIEW, snapshot_id="snap-1",
+        actor="test:operator", write_structure=_writer()
     )
-    mark_degraded(repo, project_id=pid, view_key=VIEW, reason="compensation failed")
+    mark_degraded(
+        repo, project_id=pid, view_key=VIEW, reason="compensation failed",
+        actor="test:operator",
+    )
 
     with pytest.raises(ViewError) as excinfo:
         promote_snapshot(
-            repo, project_id=pid, view_key=VIEW, snapshot_id="snap-2", write_structure=_writer()
+            repo, project_id=pid, view_key=VIEW, snapshot_id="snap-2",
+            actor="test:operator", write_structure=_writer()
         )
 
     assert excinfo.value.code == ERR_VIEW_DEGRADED
@@ -363,15 +396,18 @@ def test_a_retry_after_a_successful_publish_does_not_republish(repo, pid) -> Non
     undo the gate depends on.
     """
     first = promote_snapshot(
-        repo, project_id=pid, view_key=VIEW, snapshot_id="snap-1", write_structure=_writer()
+        repo, project_id=pid, view_key=VIEW, snapshot_id="snap-1",
+        actor="test:operator", write_structure=_writer()
     )
     second = promote_snapshot(
-        repo, project_id=pid, view_key=VIEW, snapshot_id="snap-2", write_structure=_writer()
+        repo, project_id=pid, view_key=VIEW, snapshot_id="snap-2",
+        actor="test:operator", write_structure=_writer()
     )
     before = read_view(repo, project_id=pid, view_key=VIEW)
 
     retry = promote_snapshot(
-        repo, project_id=pid, view_key=VIEW, snapshot_id="snap-2", write_structure=_writer()
+        repo, project_id=pid, view_key=VIEW, snapshot_id="snap-2",
+        actor="test:operator", write_structure=_writer()
     )
 
     assert retry.already_current is True
@@ -397,6 +433,7 @@ def test_a_retry_adopts_a_root_an_earlier_attempt_finished(repo, pid) -> None:
         project_id=pid,
         view_key=VIEW,
         snapshot_id="snap-1",
+        actor="test:operator",
         write_structure=_writer(calls),
     )
 
@@ -416,6 +453,7 @@ def test_a_retry_does_not_adopt_a_root_that_is_still_being_written(repo, pid) ->
         project_id=pid,
         view_key=VIEW,
         snapshot_id="snap-1",
+        actor="test:operator",
         write_structure=_writer(calls),
     )
 
@@ -439,6 +477,7 @@ def test_a_file_removed_from_the_project_leaves_the_graph_without_any_prune(repo
         project_id=pid,
         view_key=VIEW,
         snapshot_id="snap-1",
+        actor="test:operator",
         write_structure=_content(repo, count=5),
     )
     second = promote_snapshot(
@@ -446,6 +485,7 @@ def test_a_file_removed_from_the_project_leaves_the_graph_without_any_prune(repo
         project_id=pid,
         view_key=VIEW,
         snapshot_id="snap-2",
+        actor="test:operator",
         write_structure=_content(repo, count=3),
     )
 
@@ -469,6 +509,7 @@ def test_the_root_left_behind_by_a_failed_promotion_is_reclaimable(repo, pid) ->
             project_id=pid,
             view_key=VIEW,
             snapshot_id="snap-1",
+            actor="test:operator",
             write_structure=_writer(fail_with=RuntimeError("boom")),
             lease_seconds=0,
         )
@@ -493,3 +534,46 @@ def test_a_completed_but_unpublished_root_is_not_mistaken_for_a_live_one(repo, p
 
     assert read_view(repo, project_id=pid, view_key=VIEW) is None
     assert retire_root(repo, root_id=built.root_id) is True
+
+
+def test_reconciler_rolls_back_a_published_attempt_left_nonterminal(repo, pid) -> None:
+    first = promote_snapshot(
+        repo,
+        project_id=pid,
+        view_key=VIEW,
+        snapshot_id="snap-good",
+        actor="test:operator",
+        write_structure=_content(repo, count=1),
+    )
+    candidate = complete_root(
+        repo,
+        root_id=begin_root(
+            repo, project_id=pid, view_key=VIEW, snapshot_id="snap-interrupted"
+        ).root_id,
+    )
+    attempt = begin_attempt(
+        repo,
+        project_id=pid,
+        view_key=VIEW,
+        snapshot_id="snap-interrupted",
+        root_id=candidate.root_id,
+        actor="test:operator",
+        expected_generation=1,
+    )
+    published = publish_root(
+        repo,
+        project_id=pid,
+        view_key=VIEW,
+        root_id=candidate.root_id,
+        expected_generation=1,
+        actor="test:operator",
+    )
+    mark_attempt_published(
+        repo, attempt_id=attempt.attempt_id, generation=published.generation
+    )
+
+    report = reconcile_promotion_attempts(repo, stale_after_ms=0)
+
+    assert report["rolled_back"] == 1
+    assert read_view(repo, project_id=pid, view_key=VIEW).current_root == first.root_id
+    assert read_attempt(repo, attempt_id=attempt.attempt_id).state == "ROLLED_BACK"

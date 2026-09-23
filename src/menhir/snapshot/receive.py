@@ -1,4 +1,4 @@
-"""P2A staging receiver: accept bundle chunks, reach SEALED, and touch nothing else.
+"""Durable snapshot receiver state used by the upload and processing pipeline.
 
 Plan: ``.agent/plans/menhir-mcp-snapshot-ingest-2026-09-16.md`` (P2A -- real-handler transport
 measurement, staging only).
@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import os
 import secrets
@@ -80,20 +81,32 @@ ERR_DISK_BUDGET = "snapshot.upload.staging_disk_budget"
 #: is not in a state the caller can reason about or retry into; it must start a new one.
 ERR_STAGING_LOST = "snapshot.upload.staged_bytes_lost"
 ERR_SIZE = "snapshot.upload.declared_size_rejected"
+ERR_PROJECT_KEY = "snapshot.upload.project_key_rejected"
+ERR_PROJECT_IDENTITY = "snapshot.upload.project_identity_rejected"
 
 
 class UploadState(str, Enum):
-    """P2A reaches SEALED and stops. EXTRACTING and everything past it belong to P3."""
+    """Durable upload and processing states exposed by snapshot status."""
 
     RECEIVING = "RECEIVING"
     SEALED = "SEALED"
+    EXTRACTING = "EXTRACTING"
+    SCANNING = "SCANNING"
+    PROMOTING = "PROMOTING"
+    READY = "READY"
     ABORTED = "ABORTED"
     EXPIRED = "EXPIRED"
     FAILED = "FAILED"
 
     @property
     def terminal(self) -> bool:
-        return self in (UploadState.SEALED, UploadState.ABORTED, UploadState.EXPIRED, UploadState.FAILED)
+        return self in (
+            UploadState.SEALED,
+            UploadState.READY,
+            UploadState.ABORTED,
+            UploadState.EXPIRED,
+            UploadState.FAILED,
+        )
 
 
 class ReceiveError(RuntimeError):
@@ -124,6 +137,9 @@ class StagingQuotas:
     #: Total staged bytes allowed before a new begin is refused. A begin must fail before the
     #: disk does: the gate requires proving refusal happens ahead of exhaustion, not at it.
     disk_budget_bytes: int = 4 * 1024 * 1024 * 1024
+    #: One caller may reserve at most a quarter of the shared pilot budget. This is an
+    #: operability bound for a multi-user company deployment, not a tenant-isolation boundary.
+    max_reserved_bytes_per_principal: int = 1024 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -133,6 +149,8 @@ class UploadRecord:
     upload_id: str
     principal: str
     project_key: str
+    project_id: str
+    snapshot_id: str
     state: UploadState
     declared_bytes: int
     chunk_bytes: int
@@ -143,6 +161,8 @@ class UploadRecord:
     received: dict[int, str] = field(default_factory=dict)
     received_bytes: int = 0
     failure_code: str | None = None
+    #: Bounded processing receipt: identifiers, counts and digests only. Never paths or content.
+    result: dict[str, Any] = field(default_factory=dict)
 
     @property
     def complete(self) -> bool:
@@ -157,6 +177,8 @@ class UploadRecord:
             "upload_id": self.upload_id,
             "principal": self.principal,
             "project_key": self.project_key,
+            "project_id": self.project_id,
+            "snapshot_id": self.snapshot_id,
             "state": self.state.value,
             "declared_bytes": self.declared_bytes,
             "chunk_bytes": self.chunk_bytes,
@@ -166,6 +188,7 @@ class UploadRecord:
             "received": {str(k): v for k, v in sorted(self.received.items())},
             "received_bytes": self.received_bytes,
             "failure_code": self.failure_code,
+            "result": self.result,
         }
 
     @classmethod
@@ -174,6 +197,8 @@ class UploadRecord:
             upload_id=str(raw["upload_id"]),
             principal=str(raw["principal"]),
             project_key=str(raw["project_key"]),
+            project_id=str(raw.get("project_id") or _project_id(str(raw["project_key"]))),
+            snapshot_id=str(raw.get("snapshot_id") or f"snap-{raw['upload_id']}"),
             state=UploadState(str(raw["state"])),
             declared_bytes=int(raw["declared_bytes"]),
             chunk_bytes=int(raw["chunk_bytes"]),
@@ -183,7 +208,23 @@ class UploadRecord:
             received={int(k): str(v) for k, v in (raw.get("received") or {}).items()},
             received_bytes=int(raw.get("received_bytes") or 0),
             failure_code=raw.get("failure_code"),
+            result=dict(raw.get("result") or {}),
         )
+
+
+def _project_id(project_key: str) -> str:
+    """Recover the legacy deterministic pilot id for pre-upgrade staged records.
+
+    Older record JSON lacks ``project_id``. Keeping its prior derivation lets status/sweep finish
+    those uploads after upgrade; all newly begun uploads use a random server-owned id below.
+    """
+    digest = hashlib.sha256(project_key.strip().encode("utf-8")).hexdigest()[:32]
+    return f"project-{digest}"
+
+
+def _new_project_id() -> str:
+    """Mint server-owned identity; a display label is never a graph identity."""
+    return f"project-{secrets.token_hex(16)}"
 
 
 class StagingReceiver:
@@ -256,6 +297,61 @@ class StagingReceiver:
                 records.append(record)
         return records
 
+    def _identity_dir(self) -> Path:
+        return self.root.parent / "snapshot-project-identities"
+
+    @staticmethod
+    def _valid_project_id(project_id: str) -> bool:
+        return (
+            project_id.startswith("project-")
+            and len(project_id) == 40
+            and all(c in "0123456789abcdef" for c in project_id[8:])
+        )
+
+    def _resolve_project_id(self, requested: str) -> str:
+        """Return a previously registered server id or refuse the claim."""
+        directory = self._identity_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        candidate = requested.strip()
+        if not self._valid_project_id(candidate):
+            raise ReceiveError(ERR_PROJECT_IDENTITY, "project identity is malformed")
+        path = directory / f"{candidate}.json"
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ReceiveError(
+                ERR_PROJECT_IDENTITY,
+                "project identity is not registered on this server",
+            ) from exc
+        if str(raw.get("project_id") or "") != candidate:
+            raise ReceiveError(ERR_PROJECT_IDENTITY, "project identity record is invalid")
+        return candidate
+
+    def _register_project_id(self, project_id: str, display_name: str) -> None:
+        directory = self._identity_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{project_id}.json"
+        payload = json.dumps(
+            {"project_id": project_id, "display_name": display_name}, sort_keys=True
+        ).encode("utf-8")
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError as exc:
+            raise ReceiveError(ERR_PROJECT_IDENTITY, "project identity allocation collided") from exc
+        except OSError as exc:
+            raise ReceiveError(ERR_PROJECT_IDENTITY, "project identity could not be registered") from exc
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+        except OSError as exc:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise ReceiveError(ERR_PROJECT_IDENTITY, "project identity could not be registered") from exc
+
     def staged_bytes(self) -> int:
         """Bytes currently on disk under the staging root, records included."""
         total = 0
@@ -271,7 +367,7 @@ class StagingReceiver:
 
     def begin(
         self, *, principal: str, project_key: str, declared_bytes: int,
-        chunk_bytes: int | None = None,
+        chunk_bytes: int | None = None, project_id: str | None = None,
     ) -> UploadRecord:
         """Reserve an upload. Allocates a record and a quota slot, never the declared size.
 
@@ -281,6 +377,11 @@ class StagingReceiver:
         now = self._clock()
         self.sweep(now=now)
 
+        normalized_project = project_key.strip()
+        if not normalized_project or len(normalized_project) > 200:
+            raise ReceiveError(
+                ERR_PROJECT_KEY, "project key must contain 1..200 non-whitespace characters"
+            )
         if declared_bytes < 0 or declared_bytes > self.limits.max_compressed_bytes:
             raise ReceiveError(
                 ERR_SIZE,
@@ -301,11 +402,17 @@ class StagingReceiver:
         if self.staged_bytes() + declared_bytes > self.quotas.disk_budget_bytes:
             raise ReceiveError(ERR_DISK_BUDGET, "staging disk budget exhausted; retry later")
 
+        upload_id = secrets.token_hex(16)
+        resolved_project_id = (
+            self._resolve_project_id(project_id) if project_id else _new_project_id()
+        )
         record = UploadRecord(
-            upload_id=secrets.token_hex(16),
+            upload_id=upload_id,
             principal=principal,
-            project_key=project_key,
-            state=UploadState.RECEIVING,
+            project_key=normalized_project,
+            project_id=resolved_project_id,
+            snapshot_id=f"snapshot-{upload_id}",
+            state=(UploadState.SEALED if declared_bytes == 0 else UploadState.RECEIVING),
             declared_bytes=declared_bytes,
             chunk_bytes=negotiated,
             total_chunks=chunk_count(declared_bytes, negotiated),
@@ -331,6 +438,24 @@ class StagingReceiver:
             raise
         return record
 
+    def ensure_project_identity(self, *, upload_id: str, principal: str) -> UploadRecord:
+        """Durably register the server-minted id immediately before a successful receipt."""
+        record = self._load_owned(upload_id, principal)
+        if record.state not in {
+            UploadState.SEALED,
+            UploadState.EXTRACTING,
+            UploadState.SCANNING,
+            UploadState.PROMOTING,
+            UploadState.READY,
+        }:
+            raise ReceiveError(ERR_WRONG_STATE, f"upload is {record.state.value}")
+        path = self._identity_dir() / f"{record.project_id}.json"
+        if path.exists():
+            self._resolve_project_id(record.project_id)
+            return record
+        self._register_project_id(record.project_id, record.project_key)
+        return record
+
     def _verify_reservation(self, record: UploadRecord) -> None:
         """Confirm the quotas still hold with this reservation counted, and back off if not.
 
@@ -348,7 +473,20 @@ class StagingReceiver:
         whereas over-admitting means a disk budget that does not bound anything. It is also
         self-correcting: once both have withdrawn, the slot is free and either retry succeeds.
         """
-        active = [r for r in self._all_records() if r.state is UploadState.RECEIVING]
+        records = self._all_records()
+        active = [r for r in records if r.state is UploadState.RECEIVING]
+        reserved = [
+            r
+            for r in records
+            if r.state
+            in {
+                UploadState.RECEIVING,
+                UploadState.SEALED,
+                UploadState.EXTRACTING,
+                UploadState.SCANNING,
+                UploadState.PROMOTING,
+            }
+        ]
 
         if (
             sum(1 for r in active if r.principal == record.principal)
@@ -366,8 +504,16 @@ class StagingReceiver:
                 ERR_TOO_MANY_PER_PROJECT,
                 f"at most {self.quotas.max_receiving_per_project} concurrent uploads per project",
             )
-        if sum(r.declared_bytes for r in active) > self.quotas.disk_budget_bytes:
+        if sum(r.declared_bytes for r in reserved) > self.quotas.disk_budget_bytes:
             raise ReceiveError(ERR_DISK_BUDGET, "staging disk budget exhausted; retry later")
+        if (
+            sum(r.declared_bytes for r in reserved if r.principal == record.principal)
+            > self.quotas.max_reserved_bytes_per_principal
+        ):
+            raise ReceiveError(
+                ERR_DISK_BUDGET,
+                "this caller's snapshot reservations reached the shared-budget safety bound",
+            )
 
     def put_chunk(
         self, *, upload_id: str, principal: str, index: int, data_b64: str,
@@ -471,19 +617,78 @@ class StagingReceiver:
     def status(self, *, upload_id: str, principal: str) -> UploadRecord:
         return self._load_owned(upload_id, principal)
 
+    def blob_path(self, *, upload_id: str, principal: str) -> Path:
+        """Return the owned sealed blob path to the coordinator, never to a client."""
+        record = self._load_owned(upload_id, principal)
+        if record.state not in {
+            UploadState.SEALED,
+            UploadState.EXTRACTING,
+            UploadState.SCANNING,
+            UploadState.PROMOTING,
+        }:
+            raise ReceiveError(ERR_WRONG_STATE, f"upload is {record.state.value}")
+        path = self._dir(upload_id) / "blob"
+        if not path.is_file():
+            failed = replace(
+                record,
+                state=UploadState.FAILED,
+                failure_code=ERR_STAGING_LOST,
+                updated_at=self._clock(),
+            )
+            self._write_record(failed)
+            raise ReceiveError(ERR_STAGING_LOST, "staged bytes for this upload are gone")
+        return path
+
+    def transition(
+        self,
+        *,
+        upload_id: str,
+        principal: str,
+        expected: set[UploadState],
+        state: UploadState,
+        failure_code: str | None = None,
+        result: dict[str, Any] | None = None,
+    ) -> UploadRecord:
+        """Move one owned record through the processing state machine.
+
+        The JSON sidecar remains the authority. The extraction lease supplies cross-process
+        exclusion; this transition supplies durable progress and restart-visible outcomes.
+        """
+        record = self._load_owned(upload_id, principal)
+        if record.state not in expected:
+            raise ReceiveError(ERR_WRONG_STATE, f"upload is {record.state.value}")
+        updated = replace(
+            record,
+            state=state,
+            failure_code=failure_code,
+            result=dict(record.result if result is None else result),
+            updated_at=self._clock(),
+        )
+        self._write_record(updated)
+        return updated
+
     def abort(self, *, upload_id: str, principal: str) -> UploadRecord:
         """Cancel an uncommitted upload and drop its bytes. Idempotent.
 
-        A SEALED upload is still abortable here because P2A never hands it anywhere; once P2B's
-        commit exists, a job past SEALED must complete or compensate instead.
+        A SEALED upload is still abortable before explicit commit. Once processing starts, the
+        coordinator must complete or compensate; abort cannot race it and delete its input.
         """
         record = self._load_owned(upload_id, principal)
         if record.state is UploadState.ABORTED:
             return record
+        if record.state not in {UploadState.RECEIVING, UploadState.SEALED}:
+            raise ReceiveError(ERR_WRONG_STATE, f"upload is {record.state.value}")
         aborted = replace(record, state=UploadState.ABORTED, updated_at=self._clock())
         self._write_record(aborted)
         self._drop_blob(upload_id)
         return aborted
+
+    def drop_blob(self, *, upload_id: str, principal: str) -> None:
+        """Release staged archive bytes after a terminal processing receipt is durable."""
+        record = self._load_owned(upload_id, principal)
+        if record.state not in {UploadState.READY, UploadState.FAILED}:
+            raise ReceiveError(ERR_WRONG_STATE, f"upload is {record.state.value}")
+        self._drop_blob(upload_id)
 
     def sweep(self, *, now: float | None = None) -> dict[str, int]:
         """Expire idle uploads and reclaim terminal ones. Safe to call on every operation.
@@ -503,6 +708,25 @@ class StagingReceiver:
                 self._drop_blob(record.upload_id)
                 expired += 1
                 continue
+            if record.state in {
+                UploadState.EXTRACTING,
+                UploadState.SCANNING,
+            } and idle >= self.quotas.inactivity_ttl_s:
+                self._write_record(
+                    replace(
+                        record,
+                        state=UploadState.FAILED,
+                        failure_code="snapshot.pipeline.abandoned",
+                        updated_at=moment,
+                    )
+                )
+                self._drop_blob(record.upload_id)
+                expired += 1
+                continue
+            # PROMOTING is deliberately not timed out here. The graph flip may have committed
+            # before the process died, and this disk-only receiver cannot safely call that a
+            # failure. A repeated explicit commit reconciles the durable promotion attempt and
+            # writes the truthful READY/FAILED receipt.
             if record.state.terminal and idle >= self.quotas.terminal_retention_s:
                 self._remove(record.upload_id)
                 reclaimed += 1

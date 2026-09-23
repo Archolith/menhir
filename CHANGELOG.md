@@ -1,3 +1,18 @@
+## 2026-09-22 - remote snapshot sync reaches an authoritative published view
+
+- Connect explicit snapshot commit to the mode-gated receive, extraction, shadow-scan, and
+  canonical graph-publication pipeline; the final chunk remains graph-inert.
+- Bind uploads and promotion attempts to the authenticated principal and a server-issued project
+  identity, with CAS publication, durable recovery intent, compensation, and degraded-view guards.
+- Persist a server-specific local project receipt atomically and refuse conflicting or malformed
+  identity receipts rather than replacing them.
+- Resolve published snapshot structure through the canonical view while preserving byte-identical
+  legacy responses for projects without one.
+- Fix the published-view symbol query's Cypher predicate and prove that an empty promotion actor
+  is refused without creating a view.
+- Decode remote-simulation Docker output as UTF-8 on Windows so teardown and startup diagnostics
+  cannot fail in a background reader thread.
+
 ## 2026-09-22 - Menhir serves Beacon memory evidence as a read-only provider
 
 Beacon now owns all beacon work and defines a backend-neutral memory-provider contract (Beacon

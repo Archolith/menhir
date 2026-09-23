@@ -92,6 +92,18 @@ Implementation order suggestion:
   - diff stored on episode node, appended to episode body during enrichment via `compose_episode_body()`
   - Graphiti can reason about code changes in context during entity/edge extraction
 - remaining work:
+  - **TODO — investigate bounded code-evidence capsules before implementation.** Turn the proposal in
+    `.agent/plans/menhir-mcp-snapshot-ingest-2026-09-16.md` into an implementation-ready design.
+    Trace both memory-write paths and all read/recall paths; decide the typed `code_context` wire
+    schema, snapshot/anchor verification boundary, content-addressed blob store, episode/assertion
+    linkage, cross-store retry/repair behavior, authorization checks, retention/reference counting,
+    secret handling, negotiated size limits, and migration/compatibility behavior for the existing
+    `diff` argument. Prototype the lowest-friction client behavior in which checkout context and
+    observed file/range anchors are attached automatically. Exit with an ADR or focused execution
+    plan, threat model, storage estimate, failure-state table, and tests proving exact retrieval
+    after workspace expiry, dirty-code fallback honesty, deduplication, tenant isolation, overflow
+    rejection, and `CONTENT_EXPIRED` behavior. Do not start production implementation until the
+    storage/graph ownership boundary and deletion semantics are settled.
   - diff size guard is **half done** (verified 2026-08-09). The *enrichment* half landed in
     `99c9743` (2026-03-21): `MAX_DIFF_CHARS = 50_000` in `services/enrichment_steps.py:157` bounds
     the composed episode body sent to Graphiti, so a huge diff can no longer blow the LLM context

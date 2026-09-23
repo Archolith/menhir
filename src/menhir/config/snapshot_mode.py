@@ -58,12 +58,12 @@ class SnapshotReceiveMode(str, Enum):
 
     @property
     def extracts_archives(self) -> bool:
-        """Whether an uploaded archive may be opened. P3 implements this; nothing does yet."""
+        """Whether an explicitly committed archive may be opened."""
         return self in {SnapshotReceiveMode.SHADOW, SnapshotReceiveMode.WRITE}
 
     @property
     def writes_graph(self) -> bool:
-        """Whether extraction results may reach the graph. P4 implements this; nothing does yet."""
+        """Whether committed scan results may reach the canonical graph view."""
         return self is SnapshotReceiveMode.WRITE
 
 

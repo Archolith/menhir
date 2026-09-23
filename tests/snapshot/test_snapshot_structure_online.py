@@ -23,6 +23,7 @@ import pytest
 
 from menhir.snapshot.canonical_view import CANONICAL_VIEW_CONSTRAINTS, read_view
 from menhir.snapshot.promotion import promote_snapshot
+from menhir.snapshot.promotion_attempt import PROMOTION_ATTEMPT_CONSTRAINTS
 from menhir.snapshot.snapshot_structure import (
     iter_root_paths,
     snapshot_structure_writer,
@@ -60,7 +61,11 @@ def repo():
     password = os.getenv("MENHIR_TEST_NEO4J_PASSWORD", "testpassword")
     driver = GraphDatabase.driver(uri, auth=(user, password))
     r = _Repo(driver)
-    for statement in [*CANONICAL_VIEW_CONSTRAINTS, *VIEW_ROOT_CONSTRAINTS]:
+    for statement in [
+        *CANONICAL_VIEW_CONSTRAINTS,
+        *VIEW_ROOT_CONSTRAINTS,
+        *PROMOTION_ATTEMPT_CONSTRAINTS,
+    ]:
         r.execute(statement, {})
 
     def _clear_decoys() -> None:
@@ -89,6 +94,11 @@ def repo():
         )
         r.execute(
             "MATCH (r:ViewRoot) WHERE r.project_id STARTS WITH 'p4-test-' DETACH DELETE r", {}
+        )
+        r.execute(
+            "MATCH (a:SnapshotPromotionAttempt) "
+            "WHERE a.project_id STARTS WITH 'p4-test-' DETACH DELETE a",
+            {},
         )
         driver.close()
 
@@ -339,6 +349,7 @@ def test_a_real_snapshot_promotes_end_to_end(repo, pid, scan) -> None:
         project_id=pid,
         view_key=VIEW,
         snapshot_id="snap-1",
+        actor="test:operator",
         write_structure=snapshot_structure_writer(repo, scan, project_id=pid, report=report),
     )
 
@@ -369,6 +380,7 @@ def test_a_deleted_file_is_absent_from_the_next_root_and_present_in_the_previous
         project_id=pid,
         view_key=VIEW,
         snapshot_id="snap-1",
+        actor="test:operator",
         write_structure=snapshot_structure_writer(repo, before, project_id=pid),
     )
     second = promote_snapshot(
@@ -376,6 +388,7 @@ def test_a_deleted_file_is_absent_from_the_next_root_and_present_in_the_previous
         project_id=pid,
         view_key=VIEW,
         snapshot_id="snap-2",
+        actor="test:operator",
         write_structure=snapshot_structure_writer(repo, after, project_id=pid),
     )
 

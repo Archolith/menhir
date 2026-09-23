@@ -7,11 +7,13 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from menhir.config.snapshot_mode import SnapshotReceiveMode
 from menhir.services.maintenance_scheduler import MaintenanceScheduler, _JobState
+from menhir.snapshot.view_root import SweepReport
 
 
 # ---------------------------------------------------------------------------
@@ -316,3 +318,148 @@ class TestSchedulerWatcherRegistration:
         )
         snapshot = scheduler.status_snapshot()
         assert "refresh_structure_graphs" in snapshot["jobs"]
+
+
+class TestSnapshotRootSweepTask:
+    """Tests for the standalone snapshot root sweep scheduler task."""
+
+    async def test_result_is_a_plain_counts_dict(self):
+        from menhir.services.scheduler_tasks import sweep_snapshot_view_roots
+
+        adapter = _StubGraphAdapter()
+        neo4j = object()
+        report = SweepReport(examined=4, retired=3, purged_roots=2, purged_nodes=11)
+        attempts = {"examined": 1, "rolled_back": 1, "abandoned": 0, "degraded": 0}
+        with patch.object(_StubGraphAdapter, "neo4j", neo4j), patch(
+            "menhir.services.scheduler_tasks.reconcile_promotion_attempts",
+            return_value=attempts,
+        ) as reconcile, patch(
+            "menhir.services.scheduler_tasks.sweep_view_roots", return_value=report
+        ) as sweep:
+            result = await sweep_snapshot_view_roots(adapter)
+
+        reconcile.assert_called_once_with(neo4j)
+        sweep.assert_called_once_with(neo4j)
+        assert result == {
+            "promotion_attempts": attempts,
+            "examined": 4,
+            "retired": 3,
+            "purged_roots": 2,
+            "purged_nodes": 11,
+        }
+        assert type(result) is dict
+
+    async def test_graph_error_is_left_for_scheduler_wrapper(self):
+        from menhir.services.scheduler_tasks import sweep_snapshot_view_roots
+
+        with patch(
+            "menhir.services.scheduler_tasks.sweep_view_roots",
+            side_effect=RuntimeError("graph unavailable"),
+        ):
+            with pytest.raises(RuntimeError, match="graph unavailable"):
+                await sweep_snapshot_view_roots(_StubGraphAdapter())
+
+
+class TestSnapshotRootSweepRegistration:
+    """Tests for mode-gated root sweep registration and automatic dispatch."""
+
+    @pytest.mark.parametrize(
+        "mode",
+        [SnapshotReceiveMode.OFF, SnapshotReceiveMode.RECEIVE, SnapshotReceiveMode.SHADOW],
+    )
+    def test_root_sweep_not_registered_without_graph_write_capability(self, mode):
+        with patch(
+            "menhir.services.maintenance_scheduler.snapshot_receive_mode", return_value=mode
+        ):
+            scheduler = MaintenanceScheduler(
+                ingest_service=_StubIngestService(),
+                graph_adapter=_StubGraphAdapter(),
+            )
+
+        assert "sweep_snapshot_view_roots" not in scheduler._jobs
+
+    def test_root_sweep_registered_in_write_mode_with_default_interval(self):
+        with patch(
+            "menhir.services.maintenance_scheduler.snapshot_receive_mode",
+            return_value=SnapshotReceiveMode.WRITE,
+        ):
+            scheduler = MaintenanceScheduler(
+                ingest_service=_StubIngestService(),
+                graph_adapter=_StubGraphAdapter(),
+            )
+
+        assert scheduler._jobs["sweep_snapshot_view_roots"].interval_s == 300.0
+
+    def test_root_sweep_interval_is_configurable(self):
+        with patch(
+            "menhir.services.maintenance_scheduler.snapshot_receive_mode",
+            return_value=SnapshotReceiveMode.WRITE,
+        ):
+            scheduler = MaintenanceScheduler(
+                ingest_service=_StubIngestService(),
+                graph_adapter=_StubGraphAdapter(),
+                snapshot_root_sweep_interval_s=123.0,
+            )
+
+        assert scheduler._jobs["sweep_snapshot_view_roots"].interval_s == 123.0
+
+    def test_root_sweep_can_be_disabled_in_write_mode(self):
+        with patch(
+            "menhir.services.maintenance_scheduler.snapshot_receive_mode",
+            return_value=SnapshotReceiveMode.WRITE,
+        ):
+            scheduler = MaintenanceScheduler(
+                ingest_service=_StubIngestService(),
+                graph_adapter=_StubGraphAdapter(),
+                snapshot_root_sweep_enabled=False,
+            )
+
+        assert "sweep_snapshot_view_roots" not in scheduler._jobs
+
+    async def test_due_root_sweep_is_dispatched_automatically(self):
+        with patch(
+            "menhir.services.maintenance_scheduler.snapshot_receive_mode",
+            return_value=SnapshotReceiveMode.WRITE,
+        ):
+            scheduler = MaintenanceScheduler(
+                ingest_service=_StubIngestService(),
+                graph_adapter=_StubGraphAdapter(),
+            )
+        job = scheduler._jobs["sweep_snapshot_view_roots"]
+        scheduler._jobs = {"sweep_snapshot_view_roots": job}
+        task = AsyncMock(
+            return_value={"examined": 1, "retired": 1, "purged_roots": 1, "purged_nodes": 4}
+        )
+
+        with patch(
+            "menhir.services.maintenance_scheduler.sweep_snapshot_view_roots", task
+        ), patch("menhir.services.maintenance_scheduler.record_mcp_event"):
+            await scheduler._run_due_jobs()
+
+        task.assert_awaited_once_with(scheduler.graph_adapter)
+        assert job.runs == 1
+        assert job.last_success is True
+
+    async def test_graph_error_is_reported_by_scheduler_wrapper(self):
+        with patch(
+            "menhir.services.maintenance_scheduler.snapshot_receive_mode",
+            return_value=SnapshotReceiveMode.WRITE,
+        ):
+            scheduler = MaintenanceScheduler(
+                ingest_service=_StubIngestService(),
+                graph_adapter=_StubGraphAdapter(),
+            )
+        job = scheduler._jobs["sweep_snapshot_view_roots"]
+        scheduler._jobs = {"sweep_snapshot_view_roots": job}
+        task = AsyncMock(side_effect=RuntimeError("graph unavailable"))
+
+        with patch(
+            "menhir.services.maintenance_scheduler.sweep_snapshot_view_roots", task
+        ), patch("menhir.services.maintenance_scheduler.record_mcp_event"), patch(
+            "menhir.services.maintenance_scheduler.record_failure_event"
+        ):
+            await scheduler._run_due_jobs()
+
+        assert job.runs == 1
+        assert job.last_success is False
+        assert job.last_result == {"error": "graph unavailable"}

@@ -771,6 +771,22 @@ Query the structural code graph for project layout, files, imports, tests, and e
 - `context`: combined view — file summary + symbols + import graph for one file. Replaces 3 separate queries.
 - `files` output includes `[hot:N]` tag when a file has been modified N times since last full scan.
 - Use `ingest_project` to scan a project directory into the graph; a background watcher auto-refreshes every 30 minutes.
+- When a canonical remote snapshot is published it takes precedence over local structure and the
+  response begins with `[SNAPSHOT ...]`; degraded views add a bounded warning. Without a published
+  view, formatting and data remain on the legacy local path.
+
+### Snapshot upload tools
+
+Concept ids: `mcp.tool.begin_project_snapshot`, `mcp.tool.put_project_snapshot_chunk`,
+`mcp.tool.commit_project_snapshot`, `mcp.tool.get_project_snapshot_status`,
+`mcp.tool.abort_project_snapshot`
+
+Operator-only tools, registered only when `MENHIR_SNAPSHOT_RECEIVE_MODE` is above `off`.
+`begin` returns the server chunk plan; `put` accepts one digest-checked chunk; `commit` is the only
+processing trigger. Its terminal receipt reports `received`, `scanned`, or `published` according
+to RECEIVE, SHADOW, or WRITE mode. Status returns durable progress and sanitized failure codes;
+abort is allowed only before processing starts. Begin also accepts an optional prior server-issued
+`project_id`; unknown ids are refused, while first sync mints an opaque id returned in the receipt.
 
 ### `rate_recall`
 Concept id: `mcp.tool.rate_recall`
