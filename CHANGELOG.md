@@ -1,17 +1,16 @@
 ## 2026-09-23 - Menhir's own beacon.yaml
 
-Menhir describes itself to coding agents through Beacon, in its own words, drawn from the README,
-AGENTS.md, `.agent/` and `docs/`:
+Menhir's beacon intent holds only what a maintainer has to say: purpose, problem, non-goals,
+audiences, current focus, entry docs with two status overrides (the local-stdio release plan is
+current; the July MVP roadmap is superseded), and the areas an agent must not change without
+review. Everything else is meant to be read at build time from the repository, git and Menhir's
+evidence (workspace plan `beacon-near-zero-authoring-plan-2026-09-23.md`).
 
-- `beacon.yaml`: purpose, non-goals and audiences; 13 core concepts (structure graph, change
-  analysis, project identity, the enrichment queue, recall and context, code-linked memory and
-  stale anchors, governed memory, WorkArtifacts, todos, typed scalar state, agent evidence
-  producers, access surfaces and tiers, the Beacon memory provider), each with implementation
-  paths and sources; 20 canonical docs with status; agent guidance; build and test commands;
-  13 cited guardrails; and project state (the local-stdio MVP, recent work, the deployment
-  blocker, pending decisions).
-- `beacon validate`: 0 errors, 0 warnings. `beacon.generated.yaml` is committed once production
-  Menhir can supply the bound evidence.
+- A comprehensive hand-written version (13 concepts, 20 docs, 13 cited guardrails, project
+  state) is kept at commit `dd73b1b9` as the golden reference for Beacon's extractors.
+- `beacon validate`: 0 errors, 2 warnings (no guardrails, no test command), which Beacon's
+  declared-source readers are planned to fill. `beacon.generated.yaml` is committed once
+  production Menhir can supply the bound evidence.
 
 ## 2026-09-22 - project identity lives only in the graph; Menhir writes nothing into a checkout
 
