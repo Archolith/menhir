@@ -278,12 +278,21 @@ async def retry_process_candidate(
                 namespace=str(row.get("namespace") or "default"),
                 **stamp_kwargs,
             )
-            record_retention_sources(
-                graph_adapter,
-                entity_uuids,
-                source_episode_uuid=episode_uuid,
-                namespace=str(row.get("namespace") or "default"),
-            )
+            try:
+                record_retention_sources(
+                    graph_adapter,
+                    entity_uuids,
+                    source_episode_uuid=episode_uuid,
+                    namespace=str(row.get("namespace") or "default"),
+                )
+            except ValueError as exc:
+                logger.warning(
+                    "Leaving failed episode unreconciled after incomplete retention provenance "
+                    "episode_id=%s error=%s",
+                    episode_uuid,
+                    exc,
+                )
+                return "waiting"
             if await asyncio.to_thread(
                 graph_adapter.mark_episode_ready,
                 episode_uuid,

@@ -55,6 +55,51 @@ def _exists(live_repo, uuid: str) -> bool:
     return bool(rows and int(rows[0]["count"]) > 0)
 
 
+def test_retention_write_requires_source_and_every_semantic_entity(
+    live_repo, tagged_graph
+) -> None:
+    adapter = MemoryGraphAdapter(neo4j=live_repo)
+    source = tagged_graph["source_a"]
+    target = tagged_graph["target"]
+    missing = f"{tagged_graph['tag']}-missing"
+    foreign = f"{tagged_graph['tag']}-foreign"
+    structural = f"{tagged_graph['tag']}-structural"
+    live_repo.execute(
+        """
+        CREATE (:Entity {uuid:$foreign, test_tag:$tag, namespace:'other'})
+        CREATE (:Entity {uuid:$structural, test_tag:$tag, namespace:'default',
+                         structure_role:'file'})
+        """,
+        params={**tagged_graph, "foreign": foreign, "structural": structural},
+    )
+
+    with pytest.raises(ValueError, match="source episode"):
+        adapter.record_retention_sources(
+            source_episode_uuid=missing, entity_uuids=[target], namespace="default"
+        )
+    with pytest.raises(ValueError, match="source episode"):
+        adapter.record_retention_sources(
+            source_episode_uuid=source, entity_uuids=[target], namespace="other"
+        )
+    with pytest.raises(ValueError, match="1 extracted entities"):
+        adapter.record_retention_sources(
+            source_episode_uuid=source, entity_uuids=[target, missing], namespace="default"
+        )
+    with pytest.raises(ValueError, match="1 extracted entities"):
+        adapter.record_retention_sources(
+            source_episode_uuid=source, entity_uuids=[foreign], namespace="default"
+        )
+
+    assert adapter.record_retention_sources(
+        source_episode_uuid=source, entity_uuids=[target, structural], namespace="default"
+    ) == 1
+    rows = live_repo.execute(
+        "MATCH (:Episodic {uuid:$source})-[r:RETENTION_SOURCE]->(n) RETURN collect(n.uuid) AS uuids",
+        params={"source": source},
+    )
+    assert rows[0]["uuids"] == [target]
+
+
 def test_flag_unflag_reflag_is_live_and_beneficial_rehydration_is_allowed(
     live_repo, tagged_graph
 ) -> None:

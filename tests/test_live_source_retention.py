@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -46,13 +48,13 @@ def test_retention_predicate_is_live_and_tenant_consistent() -> None:
 
 
 def test_record_retention_sources_is_scoped_idempotent_and_skips_structure() -> None:
-    neo4j = CaptureNeo4j([[{"linked": 2}]])
+    neo4j = CaptureNeo4j([[{"source_valid": True, "linked": 2, "invalid_entity_uuids": []}]])
     repo = EpisodeStampingRepository()
     repo.neo4j = neo4j
 
     linked = repo.record_retention_sources(
         source_episode_uuid="episode-1",
-        entity_uuids=["entity-1", "entity-1", "", "entity-2"],
+        entity_uuids=["entity-1", "entity-1", "entity-2"],
         namespace="project-a",
     )
 
@@ -76,6 +78,97 @@ def test_record_retention_sources_empty_input_is_noop() -> None:
         == 0
     )
     assert neo4j.calls == []
+
+
+@pytest.mark.parametrize(
+    ("source_episode_uuid", "entity_uuids"),
+    [("", ["entity-1"]), ("episode-1", [""])],
+)
+def test_record_retention_sources_rejects_empty_identity(
+    source_episode_uuid: str, entity_uuids: list[str]
+) -> None:
+    repo = EpisodeStampingRepository()
+    repo.neo4j = CaptureNeo4j()
+
+    with pytest.raises(ValueError, match="nonempty source and entity UUIDs"):
+        repo.record_retention_sources(
+            source_episode_uuid=source_episode_uuid,
+            entity_uuids=entity_uuids,
+            namespace="default",
+        )
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"source_valid": False, "linked": 0, "invalid_entity_uuids": []},
+        {"source_valid": True, "linked": 1, "invalid_entity_uuids": ["entity-2"]},
+    ],
+)
+def test_record_retention_sources_rejects_missing_provenance(result: dict[str, Any]) -> None:
+    repo = EpisodeStampingRepository()
+    repo.neo4j = CaptureNeo4j([[result]])
+
+    with pytest.raises(ValueError, match="Retention"):
+        repo.record_retention_sources(
+            source_episode_uuid="episode-1",
+            entity_uuids=["entity-1", "entity-2"],
+            namespace="default",
+        )
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_does_not_publish_ready_without_retention_links() -> None:
+    from menhir.services.enrichment_steps import try_reconcile_existing
+
+    class MissingLinkAdapter:
+        def find_completed_episode_artifact(self, **_: object) -> dict[str, object]:
+            return {"resolved_episode_uuid": "resolved", "entity_uuids": ["entity"], "edge_uuids": []}
+
+        def stamp_ingest_metadata(self, **_: object) -> SimpleNamespace:
+            return SimpleNamespace(nodes_touched=1, edges_touched=0)
+
+        def record_retention_sources(self, **_: object) -> int:
+            raise ValueError("Retention provenance missing for 1 extracted entities")
+
+        def mark_episode_ready(self, **_: object) -> bool:
+            raise AssertionError("READY must not publish without retention provenance")
+
+    ctx = SimpleNamespace(
+        graph_adapter=MissingLinkAdapter(),
+        episode_uuid="source",
+        claimed={"name": "source", "namespace": "default"},
+        worker_id="worker",
+    )
+    with pytest.raises(ValueError, match="Retention provenance missing"):
+        await try_reconcile_existing(ctx)
+
+
+@pytest.mark.asyncio
+async def test_scheduler_continues_after_incomplete_retention_provenance() -> None:
+    from menhir.services.scheduler_tasks import retry_process_candidate
+
+    class MissingLinkAdapter:
+        def find_completed_episode_artifact(self, **_: object) -> dict[str, object]:
+            return {"resolved_episode_uuid": "resolved", "entity_uuids": ["entity"], "edge_uuids": []}
+
+        def stamp_ingest_metadata(self, **_: object) -> SimpleNamespace:
+            return SimpleNamespace(nodes_touched=1, edges_touched=0)
+
+        def record_retention_sources(self, **_: object) -> int:
+            raise ValueError("Retention provenance missing for 1 extracted entities")
+
+        def mark_episode_ready(self, **_: object) -> bool:
+            raise AssertionError("READY must not publish without retention provenance")
+
+    result = await retry_process_candidate(
+        MissingLinkAdapter(),
+        SimpleNamespace(),
+        {"uuid": "source", "name": "source", "namespace": "default"},
+        max_attempts=3,
+        now=datetime.now(timezone.utc),
+    )
+    assert result == "waiting"
 
 
 def _signals(uuid: str, *, source_protected: bool = False) -> me.NodeSignals:
