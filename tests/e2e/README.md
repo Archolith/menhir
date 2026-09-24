@@ -85,7 +85,7 @@ existing file.
 | `MENHIR_E2E_NEO4J_URI` | `bolt://127.0.0.1:7689` | Disposable graph |
 | `MENHIR_E2E_BACKEND_PORT` | `8199` | Loopback `menhir serve` |
 | `MENHIR_E2E_WORK_ROOT` | pytest tmp dir | Venv, fixtures, evidence |
-| `MENHIR_E2E_BEACON_PYTHON` | unset | Interpreter with Beacon 0.1.0, for E2E-6 |
+| `MENHIR_E2E_BEACON_PYTHON` | unset | Interpreter whose Beacon supports `build`+`validate` (the SHA pinned in `.github/workflows/tests.yml`; PyPI 0.1.0 does not), for E2E-6 |
 
 Port `7689` is deliberately **not** `7688`: that is the unit suite's instance, and an E2E
 lane resetting it mid-run would corrupt a parallel `pytest --run-online` into failures
@@ -207,9 +207,12 @@ what the server returned.
 
 ## Known gaps
 
-- **E2E-6 needs a Beacon interpreter** (`MENHIR_E2E_BEACON_PYTHON`). The overwrite and CAS
-  refresh policy is already pinned in the lane's docstring, so what is missing is the
-  second venv, not the decision.
+- **E2E-6 needs a Beacon interpreter** (`MENHIR_E2E_BEACON_PYTHON`) that satisfies the
+  build contract: install the Beacon SHA pinned in `.github/workflows/tests.yml` into a
+  separate venv (the `stdio-e2e` CI job installs none, so this lane stays pending there).
+  The overwrite and CAS refresh policy is already pinned in the lane's docstring, so what is
+  missing is the second venv, not the decision. The graph-backed E2E-6 in
+  `tests/test_beacon_e2e6.py` (online job) already runs the full flow against that pin.
 - **No lane has been run end to end.** Every lane collects, skips cleanly without the
   opt-in, and asserts against tool signatures and output formats read from the source.
   That is not the same as having passed. Expect the first real run to surface format

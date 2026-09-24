@@ -1,0 +1,107 @@
+# Menhir's beacon intent: judgment and overrides only.
+# Everything else (license, language, commands, docs, concepts, guardrail documents, project
+# state) is read at build time from the repository, git and Menhir's own evidence.
+# The comprehensive hand-written version is kept at commit dd73b1b9 as the golden reference.
+beacon_version: '0.1'
+
+project:
+  name: menhir
+  tagline: Evidence and code intelligence for coding agents.
+  status: experimental
+  # Required by Beacon until descriptions can come from declared sources (plan P0).
+  description: >
+    Menhir is an evidence and code-intelligence service for coding agents. It joins source
+    episodes, governed knowledge, engineering artifacts, repository structure, callers and tests
+    in one Neo4j graph, so an agent can see why something was done, where the evidence came from,
+    whether it is still current, and which code and tests a change affects.
+
+purpose:
+  one_sentence: >
+    Git records what changed; Menhir records why an agent acted, where the evidence came from,
+    whether it is still current, and which code and tests carry the impact.
+  problem: >
+    Coding agents work from context they cannot inspect: memories without sources, stale notes
+    presented as current, and change advice that silently assumes a complete index. Menhir makes
+    that context a trace an operator can check.
+  non_goals:
+    - a multi-tenant service or isolation boundary (one operator per instance)
+    - a general chat memory or transcript store
+    - building or writing beacons (Beacon does that; Menhir is one read-only memory provider)
+    - writing files into the projects it indexes
+    - a public benchmark headline score (benchmarks gate activation, they are not marketing)
+
+audiences:
+  - coding agents working on Menhir or on projects Menhir indexes
+  - the Menhir operator
+  - developers evaluating agent memory and code intelligence
+
+current_focus:
+  - the local-stdio MVP release (tracker Archolith/menhir#123)
+
+# The documents an agent can search through Beacon, in reading order: entry points, architecture
+# and decisions, reference, workflows, then current plans and research indexes. Chosen by an agent
+# with no task context (2026-09-23); listing a document makes it searchable, not required reading.
+# No statuses here: each document states its own in frontmatter. The superseded July roadmap and
+# the operator-specific deploy runbook are left out.
+canonical_docs:
+  - path: AGENTS.md
+    role: entrypoint
+  - path: README.md
+    role: entrypoint
+  - path: .agent/README.md
+    role: entrypoint
+  - path: .agent/memory-foundations.md
+    role: architecture
+  - path: .agent/architecture.md
+    role: architecture
+  - path: .agent/memory-policy.md
+    role: architecture
+  - path: .agent/memory-governance.md
+    role: architecture
+  - path: .agent/data_models.md
+    role: reference
+  - path: .agent/endpoints.md
+    role: reference
+  - path: .agent/glossary.md
+    role: reference
+  - path: .agent/default-off-features.md
+    role: reference
+  - path: docs/security-posture.md
+    role: reference
+  - path: docs/post-install.md
+    role: workflow
+  - path: .agent/workflows/operations_runbook.md
+    role: workflow
+  - path: .agent/workflows/run_and_test.md
+    role: workflow
+  - path: .agent/workflows/code_conventions.md
+    role: workflow
+  - path: .agent/workflows/feature_planning.md
+    role: workflow
+  - path: .agent/maintenance.md
+    role: workflow
+  - path: .agent/workflows/artifact_authoring.md
+    role: workflow
+  - path: docs/runbooks/release.md
+    role: workflow
+  - path: .agent/plans/README.md
+    role: reference
+  - path: .agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md
+    role: implementation_plan
+  - path: .agent/plans/menhir-research-execution-ladder.md
+    role: implementation_plan
+  - path: .agent/reference/README.md
+    role: reference
+  - path: docs/research/README.md
+    role: research
+
+agent_guidance:
+  # Review areas written nowhere else in the repository. Plan: move them into AGENTS.md.
+  avoid_without_review:
+    - project identity binding and the structure write fence
+    - the production client policy, the access contract and its canonical digest
+    - authentication modes, credential tiers and ingest path containment
+    - memory lifecycle, promotion and governance rules
+    - turning on a default-off feature
+    - anything that deletes or merges graph data
+    - deployment and release tooling under deploy/

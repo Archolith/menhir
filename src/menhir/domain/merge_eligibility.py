@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from menhir.domain.namespace import normalize_namespace
+from menhir.domain.retention import source_retention_protected_cypher
 
 
 # Stable reason codes. These are contract surface -- telemetry, tests, and operator tooling key on
@@ -41,6 +42,7 @@ NAMESPACE_MISMATCH = "NAMESPACE_MISMATCH"
 NON_ACTIVE_FRESHNESS = "NON_ACTIVE_FRESHNESS"
 PROMOTED_SCOPE = "PROMOTED_SCOPE"
 USER_FLAGGED = "USER_FLAGGED"
+SOURCE_RETENTION_PROTECTED = "SOURCE_RETENTION_PROTECTED"
 PROTECTED_CONFLICT = "PROTECTED_CONFLICT"
 
 #: Freshness values that hard-veto a merge. Retained because the reason code and its telemetry
@@ -112,6 +114,7 @@ def mutable_eligibility_cypher(survivor: str = "survivor", absorbed: str = "abso
             f"toUpper(trim(coalesce({var}.freshness, 'ACTIVE'))) IN $mergeable_freshness",
             f"toUpper(trim(coalesce({var}.scope, ''))) <> 'PROMOTED'",
             f"coalesce({var}.user_flagged, false) = false",
+            f"NOT {source_retention_protected_cypher(var)}",
             f"NOT toLower(trim(coalesce({var}.conflict_status, ''))) IN $protected_conflict_states",
         ])
     clauses.append(
@@ -137,6 +140,7 @@ class NodeSignals:
     scope: str | None
     user_flagged: bool
     conflict_status: str | None
+    source_retention_protected: bool = False
 
 
 @dataclass(frozen=True)
@@ -207,7 +211,14 @@ def evaluate(survivor: NodeSignals, absorbed: NodeSignals) -> MergeEligibility:
     if flagged:
         return _veto(USER_FLAGGED, flagged=flagged)
 
-    # 8. Nodes under active conflict review must not be silently merged.
+    # 8. A currently flagged source episode protects every entity it produced.
+    source_protected = [
+        n.uuid for n in (survivor, absorbed) if n.source_retention_protected
+    ]
+    if source_protected:
+        return _veto(SOURCE_RETENTION_PROTECTED, protected=source_protected)
+
+    # 9. Nodes under active conflict review must not be silently merged.
     conflicted = [
         (n.uuid, n.conflict_status) for n in (survivor, absorbed)
         if str(n.conflict_status or "").strip().lower() in _PROTECTED_CONFLICT_STATES

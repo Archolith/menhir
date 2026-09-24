@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from menhir.domain.merge_eligibility import MergeEligibility
 
 from menhir.domain import merge_delta as md
+from menhir.domain.retention import same_tenant_cypher, source_retention_protected_cypher
 from menhir.infrastructure.cypher import non_derived_view_cypher
 from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S
 
@@ -168,6 +169,7 @@ class CorrelationRepository:
                    n.freshness AS freshness,
                    n.scope AS scope,
                    coalesce(n.user_flagged, false) AS user_flagged,
+                   {source_retention_protected_cypher("n")} AS source_retention_protected,
                    n.conflict_status AS conflict_status
             """,
             params={"s": survivor_uuid, "a": absorbed_uuid},
@@ -180,6 +182,7 @@ class CorrelationRepository:
                 return me.NodeSignals(
                     uuid=uuid, exists=False, ineligible_role=False, namespace="",
                     freshness=None, scope=None, user_flagged=False, conflict_status=None,
+                    source_retention_protected=False,
                 )
             return me.NodeSignals(
                 uuid=uuid,
@@ -192,6 +195,7 @@ class CorrelationRepository:
                 conflict_status=(
                     str(r["conflict_status"]) if r.get("conflict_status") is not None else None
                 ),
+                source_retention_protected=bool(r.get("source_retention_protected", False)),
             )
 
         return me.evaluate(_signals(survivor_uuid), _signals(absorbed_uuid))
@@ -275,6 +279,7 @@ class CorrelationRepository:
         survivor_properties: dict[str, Any],
         rebound_episodes: list[str],
         operation_id: str,
+        rebound_retention_sources: list[str] | None = None,
     ) -> dict[str, Any]:
         """Invert a merge in ONE atomic Cypher transaction (plan Phase 5).
 
@@ -339,6 +344,15 @@ class CorrelationRepository:
                 DELETE m
                 RETURN count(m) AS mentions_removed
             }
+            CALL {
+                WITH s
+                MATCH (source:Episodic)-[r:RETENTION_SOURCE]->(s)
+                WHERE source.uuid IN $rebound_retention_sources
+                  AND __RETENTION_SOURCE_TENANT__
+                  AND coalesce(r.direct, false) = false
+                DELETE r
+                RETURN count(r) AS retention_sources_removed
+            }
             // Subtractive lineage: drop ONLY this absorption, keeping any later ones.
             //
             // merge_audit is matched on the absorbed_uuid FIELD, not a bare-substring CONTAINS of the
@@ -350,8 +364,11 @@ class CorrelationRepository:
             SET s.merged_from = [x IN coalesce(s.merged_from, []) WHERE x <> $absorbed],
                 s.merge_audit = [x IN coalesce(s.merge_audit, [])
                                  WHERE NOT x CONTAINS $absorbed_audit_marker]
-            RETURN out_restored, in_restored, bridges_removed, mentions_removed
-            """,
+            RETURN out_restored, in_restored, bridges_removed, mentions_removed,
+                   retention_sources_removed
+            """.replace(
+                "__RETENTION_SOURCE_TENANT__", same_tenant_cypher("source", "s")
+            ),
             params={
                 "survivor": survivor_uuid,
                 "absorbed": absorbed_uuid,
@@ -363,6 +380,7 @@ class CorrelationRepository:
                 "in_rels": in_rels,
                 "survivor_properties": survivor_properties,
                 "rebound_episodes": rebound_episodes,
+                "rebound_retention_sources": rebound_retention_sources or [],
                 "operation_id": operation_id,
             },
             timeout_s=SAGA_MUTATION_TIMEOUT_S,  # bounded for ownership ageing (CF-211)
@@ -504,6 +522,14 @@ class CorrelationRepository:
             // if it removed them all, would strip provenance the survivor legitimately had.
             OPTIONAL MATCH (sep:Episodic)-[:MENTIONS]->(:Entity {uuid: $survivor_uuid})
             WITH absorbed, rels, episode_uuids, collect(DISTINCT sep.uuid) AS survivor_episode_uuids
+            OPTIONAL MATCH (retention_source:Episodic)-[:RETENTION_SOURCE]->(absorbed)
+            WHERE __ABSORBED_RETENTION_TENANT__
+            WITH absorbed, rels, episode_uuids, survivor_episode_uuids,
+                 collect(DISTINCT retention_source.uuid) AS retention_source_uuids
+            OPTIONAL MATCH (survivor_source:Episodic)-[:RETENTION_SOURCE]->(survivor_target:Entity {uuid: $survivor_uuid})
+            WHERE __SURVIVOR_RETENTION_TENANT__
+            WITH absorbed, rels, episode_uuids, survivor_episode_uuids, retention_source_uuids,
+                 collect(DISTINCT survivor_source.uuid) AS survivor_retention_source_uuids
             // The survivor's own provenance. Needed here because the merged contributor list is
             // computed in PYTHON (the tier table is the single authority and cannot be expressed in
             // Cypher), so Phase 2 receives finished values rather than deriving them itself.
@@ -525,8 +551,17 @@ class CorrelationRepository:
                    absorbed.namespace AS namespace,
                    [x IN rels WHERE x IS NOT NULL] AS relationships,
                    [x IN episode_uuids WHERE x IS NOT NULL] AS mentioned_by_episodes,
-                   [x IN survivor_episode_uuids WHERE x IS NOT NULL] AS survivor_episodes_before
-            """,
+                   [x IN survivor_episode_uuids WHERE x IS NOT NULL] AS survivor_episodes_before,
+                   [x IN retention_source_uuids WHERE x IS NOT NULL] AS retention_sources,
+                   [x IN survivor_retention_source_uuids WHERE x IS NOT NULL]
+                       AS survivor_retention_sources_before
+            """.replace(
+                "__ABSORBED_RETENTION_TENANT__",
+                same_tenant_cypher("retention_source", "absorbed"),
+            ).replace(
+                "__SURVIVOR_RETENTION_TENANT__",
+                same_tenant_cypher("survivor_source", "survivor_target"),
+            ),
             params={"absorbed_uuid": absorbed_uuid, "survivor_uuid": survivor_uuid},
         )
         if not snap_rows:
@@ -560,6 +595,10 @@ class CorrelationRepository:
                 # Survivor's episode set BEFORE this merge. Unmerge subtracts this from
                 # mentioned_by_episodes to remove exactly the edges the merge added.
                 "survivor_episodes_before": list(snap.get("survivor_episodes_before") or []),
+                "retention_sources": list(snap.get("retention_sources") or []),
+                "survivor_retention_sources_before": list(
+                    snap.get("survivor_retention_sources_before") or []
+                ),
             },
             default=str,
         )
@@ -584,6 +623,7 @@ class CorrelationRepository:
         # bridges over the (possibly empty) neighbor list without gating the row, so the merge always
         # reaches DETACH DELETE and RETURN even when the absorbed node had no bridgeable neighbors.
         rows = self._neo4j.execute(
+            (
             """
             MATCH (survivor:Entity {uuid: $survivor_uuid})
             MATCH (absorbed:Entity {uuid: $absorbed_uuid})
@@ -676,11 +716,25 @@ class CorrelationRepository:
             WITH survivor, absorbed, edges_bridged, collect(DISTINCT ep) AS episodes
             FOREACH (e IN episodes | MERGE (e)-[:MENTIONS]->(survivor))
             WITH survivor, absorbed, edges_bridged, size(episodes) AS episodes_rebound
+            // Preserve source-derived retention provenance independently of MENTIONS.
+            OPTIONAL MATCH (retention_source:Episodic)-[:RETENTION_SOURCE]->(absorbed)
+            WHERE __ABSORBED_RETENTION_TENANT__
+            WITH survivor, absorbed, edges_bridged, episodes_rebound,
+                 collect(DISTINCT retention_source) AS retention_sources
+            FOREACH (source IN retention_sources |
+                MERGE (source)-[:RETENTION_SOURCE]->(survivor)
+            )
+            WITH survivor, absorbed, edges_bridged, episodes_rebound,
+                 size(retention_sources) AS retention_sources_rebound
             // Remove the absorbed node
             DETACH DELETE absorbed
-            RETURN edges_bridged, episodes_rebound, 1 AS deleted,
+            RETURN edges_bridged, episodes_rebound, retention_sources_rebound, 1 AS deleted,
                    coalesce(survivor.namespace, survivor.group_id, 'default') AS merge_namespace
-            """,
+            """
+            ).replace(
+                "__ABSORBED_RETENTION_TENANT__",
+                same_tenant_cypher("retention_source", "absorbed"),
+            ),
             params={
                 # CF-47: the mutable predicates in the WHERE above are emitted by
                 # `domain.merge_eligibility`, and these are the values they bind. They come from
@@ -758,6 +812,7 @@ class CorrelationRepository:
             "merged": 1,
             "edges_bridged": int(row.get("edges_bridged", 0) or 0),
             "episodes_rebound": int(row.get("episodes_rebound", 0) or 0),
+            "retention_sources_rebound": int(row.get("retention_sources_rebound", 0) or 0),
             "deleted": int(row.get("deleted", 0) or 0),
         }
 

@@ -18,6 +18,16 @@ from menhir.services.maintenance_scheduler import MaintenanceScheduler, _JobStat
 # Minimal stubs for SchedulerGraphAdapter (structure watcher subset)
 # ---------------------------------------------------------------------------
 
+
+def _legacy_identity_file(root, project_id: str) -> None:
+    """A `.agent/project-id` as earlier Menhir versions left it; Menhir now only reads these."""
+    import json
+
+    path = Path(root) / ".agent" / "project-id"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"schema": 1, "project_id": project_id}), encoding="utf-8")
+
+
 @dataclass
 class _StubGraphAdapter:
     """Minimal graph adapter stub for structure watcher tests."""
@@ -168,14 +178,12 @@ class TestRefreshStructureGraphs:
         assert len(adapter._write_calls) == 0
 
     async def test_changed_fingerprint_rescans(self, tmp_path):
-        from menhir.domain.project_id_file import ensure_ignore_rule, mint_identity
         from menhir.services.scheduler_tasks import refresh_structure_graphs
 
         project_dir = tmp_path / "my-proj"
         project_dir.mkdir()
         (project_dir / "main.py").write_text("print('hello')")
-        ensure_ignore_rule(project_dir)
-        mint_identity(project_dir, project_id="id-my-proj", display_name="my-proj")
+        _legacy_identity_file(project_dir, "id-my-proj")
 
         adapter = _StubGraphAdapter(
             _projects=[{"name": "my-proj", "root_path": str(project_dir)}],
@@ -230,14 +238,12 @@ class TestRefreshStructureGraphs:
 
     async def test_first_ingest_no_stored_fingerprint(self, tmp_path):
         """When no fingerprint is stored (first scan), project should be scanned."""
-        from menhir.domain.project_id_file import ensure_ignore_rule, mint_identity
         from menhir.services.scheduler_tasks import refresh_structure_graphs
 
         project_dir = tmp_path / "new-proj"
         project_dir.mkdir()
         (project_dir / "app.py").write_text("pass")
-        ensure_ignore_rule(project_dir)
-        mint_identity(project_dir, project_id="id-new-proj", display_name="new-proj")
+        _legacy_identity_file(project_dir, "id-new-proj")
 
         adapter = _StubGraphAdapter(
             _projects=[{"name": "new-proj", "root_path": str(project_dir)}],

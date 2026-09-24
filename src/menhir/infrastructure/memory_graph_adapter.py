@@ -686,6 +686,19 @@ class MemoryGraphAdapter:
             belief_branch=belief_branch,
         )
 
+    def record_retention_sources(
+        self,
+        *,
+        source_episode_uuid: str,
+        entity_uuids: list[str],
+        namespace: str | None = None,
+    ) -> int:
+        return self._episodes.record_retention_sources(
+            source_episode_uuid=source_episode_uuid,
+            entity_uuids=entity_uuids,
+            namespace=namespace,
+        )
+
     def count_namespace(self, group_id: str, *, namespace: str | None = None) -> int:
         """Count nodes in the given graphiti group partition, without deleting anything.
 
@@ -1335,6 +1348,19 @@ class MemoryGraphAdapter:
 
     def get_scan_fingerprint(self, project_name: str) -> str | None:
         return self._structure.get_scan_fingerprint(project_name)
+
+    def get_beacon_evidence_guard_by_id(self, project_id: str) -> dict[str, Any]:
+        return self._structure.get_beacon_evidence_guard_by_id(project_id)
+
+    def list_indexed_repositories(self) -> list[dict[str, str]]:
+        return self._structure.list_indexed_repositories()
+
+    def refresh_indexed_binding(
+        self, project_name: str, fingerprint: str, commit: str, repository: str, dirty: bool
+    ) -> bool:
+        return self._structure.refresh_indexed_binding(
+            project_name, fingerprint, commit, repository, dirty
+        )
 
     def get_project_root_path(self, project_name: str) -> str | None:
         return self._structure.get_project_root_path(project_name)
@@ -2241,10 +2267,16 @@ class MemoryGraphAdapter:
         return self._correlation.capture_node_state(uuid)
 
     def delete_entities_returning_uuids(
-        self, node_uuids: list[str], *, require_scope: str | None = None
+        self,
+        node_uuids: list[str],
+        *,
+        require_scope: str | None = None,
+        protect_retention: bool = False,
     ) -> list[str]:
         return self._consolidation.delete_entities_returning_uuids(
-            node_uuids, require_scope=require_scope
+            node_uuids,
+            require_scope=require_scope,
+            protect_retention=protect_retention,
         )
 
     def newly_unreferenced_evidence(self, node_uuids: list[str]) -> list[str]:

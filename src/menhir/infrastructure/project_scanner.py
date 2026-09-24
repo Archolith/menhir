@@ -12,6 +12,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 from menhir.domain.utils import symbol_structure_path
+from menhir.infrastructure.git_binding import read_git_binding as _read_git_binding
 from menhir.infrastructure.text_io import read_text_utf8
 
 logger = logging.getLogger(__name__)
@@ -123,6 +124,13 @@ class ProjectScanResult:
     files_eligible: int = 0
     files_indexed: int = 0
     nested_repos: list[NestedRepo] = field(default_factory=list)
+    # The git commit this scan describes, for Beacon's evidence binding. `indexed_dirty` is True
+    # when the working tree had uncommitted changes (or HEAD moved during the scan): then the
+    # indexed content is not that commit and the binding must not be served. Empty/False when
+    # the root is not a git repository.
+    indexed_commit: str = ""
+    indexed_repository: str = ""
+    indexed_dirty: bool = False
 
     @property
     def partial_index(self) -> bool:
@@ -171,7 +179,28 @@ _MAX_FILE_BYTES = 2 * 1024 * 1024  # 2 MB — skip files larger than this to avo
 # fingerprint so a rules change invalidates every stored fingerprint and forces a re-scan --
 # otherwise the path+mtime fingerprint is unchanged, ingest skips as "unchanged", and existing
 # graphs keep their truncated state forever.
-SCANNER_SCHEMA_VERSION = 5
+SCANNER_SCHEMA_VERSION = 9  # v9: the legacy `.agent/project-id` identity file is scan-invisible
+# (v8: README.md is the last project-description fallback)
+
+# Beacon publication and evidence scratch files live at the repository root. They are
+# outputs/coordination state derived from a scan, never project source. Letting them back into
+# discovery makes the scan fingerprint self-referential: every refresh changes an mtime, which
+# forces another ingest and another refresh forever. The prefixes are deliberately root-only so
+# a legitimate nested file with the same basename remains visible.
+_BEACON_ROOT_FILES = {"beacon.generated.yaml", ".beacon.generated.lock"}
+_BEACON_ROOT_PREFIXES = (".beacon.generated.", ".beacon-evidence-")
+
+
+def _is_beacon_root_artifact(relative_path: str) -> bool:
+    """Return whether *relative_path* is Beacon-owned generated/scratch state."""
+    return "/" not in relative_path and (
+        relative_path in _BEACON_ROOT_FILES
+        or relative_path.startswith(_BEACON_ROOT_PREFIXES)
+    )
+
+#: CF-257's legacy per-checkout identity file. Identity lives in the graph now and Menhir never
+#: writes it; files earlier versions left behind are Menhir state, not project content.
+_LEGACY_IDENTITY_FILE = ".agent/project-id"
 
 # --- Eligibility: an ordered deny-list. First match wins. ---------------------------------
 # Step 2 (preserve) runs BEFORE step 3 (extension exclusions) so that structural manifests are
@@ -229,6 +258,7 @@ class ProjectScanner:
 
         project_name = name or root.name
         gitignore_patterns = _load_gitignore(root)
+        binding_before = _read_git_binding(root, ignore=_is_beacon_root_artifact)
 
         # Walk and collect
         all_rel_paths: list[str] = []
@@ -281,6 +311,8 @@ class ProjectScanner:
                     continue
                 full = os.path.join(dirpath, fname)
                 rel = os.path.relpath(full, root).replace("\\", "/")
+                if _is_beacon_root_artifact(rel) or rel == _LEGACY_IDENTITY_FILE:
+                    continue
                 if _matches_gitignore(full, root, gitignore_patterns):
                     continue
                 all_rel_paths.append(rel)
@@ -390,6 +422,14 @@ class ProjectScanner:
                     )
                 )
 
+        # Read the binding on both sides of every filesystem read above: a commit or edit
+        # landing mid-scan means the fingerprint and the commit may not describe one content.
+        binding_after = _read_git_binding(root, ignore=_is_beacon_root_artifact)
+        if binding_after is not None:
+            commit, repository, dirty = binding_after
+            result.indexed_commit = commit
+            result.indexed_repository = repository
+            result.indexed_dirty = dirty or binding_before != binding_after
         return result
 
 
@@ -446,6 +486,12 @@ def _classify_file_role(rel_path: str) -> str:
     name = os.path.basename(rel_path)
     parts = rel_path.replace("\\", "/").split("/")
 
+    # A0: bounded agent-orientation docs (Beacon v2 design, §A0). Classified
+    # before entrypoint/config checks so `.agent/README.md` is a document, not
+    # an entrypoint, and before the tests rule so `.agent/*` is never a test.
+    if len(parts) == 2 and parts[0] == ".agent" and name in _AGENT_ORIENTATION_DOCS:
+        return "document"
+
     # Entrypoints
     if name in _ENTRYPOINT_NAMES:
         return "entrypoint"
@@ -474,6 +520,14 @@ def _is_root_level(parts: list[str]) -> bool:
     return len(parts) <= 2
 
 
+#: A0 (Beacon v2 design): the only `.agent/` markdown files the scanner promotes
+#: to document-role entities. Orientation for any agent; contributor process docs
+#: (workflows, plans, file-index, maintenance) stay out of the document set.
+_AGENT_ORIENTATION_DOCS: frozenset[str] = frozenset(
+    {"README.md", "architecture.md", "data_models.md", "endpoints.md", "CHANGELOG.md"}
+)
+
+
 def _infer_description(rel_path: str, role: str) -> str:
     name = os.path.basename(rel_path)
     if role == "entrypoint":
@@ -482,6 +536,8 @@ def _infer_description(rel_path: str, role: str) -> str:
         return f"Configuration: {name}"
     if role == "test":
         return f"Test file: {name}"
+    if role == "document":
+        return f"Agent orientation doc: {name}"
     return ""
 
 
@@ -534,14 +590,17 @@ def _read_project_description(root: Path) -> str:
         except OSError:
             pass
 
-    # Fall back to CLAUDE.md
-    claude_md = root / "CLAUDE.md"
-    if claude_md.is_file():
-        try:
-            text = read_text_utf8(claude_md)[:1000]
-            return _first_paragraph(text)
-        except OSError:
-            pass
+    # Fall back to CLAUDE.md, then the project's own README.md: a repository without the
+    # agent-doc conventions still describes itself there (Beacon evidence refuses an empty one).
+    for name in ("CLAUDE.md", "README.md"):
+        path = root / name
+        if path.is_file():
+            try:
+                description = _first_paragraph(read_text_utf8(path)[:1000])
+            except OSError:
+                continue
+            if description:
+                return description
 
     return ""
 
@@ -999,6 +1058,11 @@ def is_eligible_file(rel_path: str, role: str) -> bool:
     if role in ("config", "entrypoint"):
         return True
     if _MANIFEST_PATTERN.match(name):
+        return True
+
+    # Step 2b -- A0: the bounded agent-orientation doc set is structural evidence
+    # (Beacon v2 design); other markdown remains excluded documentation.
+    if role == "document":
         return True
 
     # Step 3 -- exclude documentation and binaries by extension.

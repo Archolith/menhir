@@ -86,6 +86,7 @@ class FakeIdentityGraph:
                     "state": "bound",
                     "bound_host": params["host"],
                     "root_key": params["root_key"],
+                    "bound_repository": params.get("repository"),
                     "claim_generation": 1,
                 }
                 self._commit(before)
@@ -105,7 +106,7 @@ class FakeIdentityGraph:
             return []
 
         if text.startswith("MATCH (p:ProjectIdentity) WHERE coalesce(p.state, 'bound') = 'bound'"):
-            # binding_for_root and _active_rivals share this read.
+            # binding_for_root, root_binding and _active_rivals share this read.
             out = []
             for node_id, node in self.nodes.items():
                 if node.get("state", "bound") != "bound":
@@ -119,9 +120,17 @@ class FakeIdentityGraph:
                         "id": node_id,
                         "root": node.get("canonical_root_path"),
                         "root_key": node.get("root_key"),
+                        "claim_generation": int(node.get("claim_generation") or 0),
+                        "repository": node.get("bound_repository"),
                     }
                 )
             return out
+
+        if "AND p.bound_repository IS NULL SET p.bound_repository = $repository" in text:
+            node = self.nodes.get(pid)
+            if node and node.get("state", "bound") == "bound" and node.get("bound_repository") is None:
+                node["bound_repository"] = params["repository"]
+            return []
 
         if "SET p.bound_host = $host, p.root_key = $root_key" in text:
             before = self._snapshot()
@@ -160,6 +169,8 @@ class FakeIdentityGraph:
             node["state"] = "bound"
             node["bound_host"] = params["host"]
             node["root_key"] = params["root_key"]
+            if params.get("repository") is not None:
+                node["bound_repository"] = params["repository"]
             node["claim_generation"] = int(node.get("claim_generation") or 0) + 1
             self._commit(before)
             return [

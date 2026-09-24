@@ -184,6 +184,24 @@ class TestProjectScanner:
         r2 = scanner.scan(root)
         assert r1.scan_fingerprint != r2.scan_fingerprint
 
+    def test_beacon_generated_and_scratch_files_do_not_change_scan(self, tmp_path):
+        root = _make_python_project(tmp_path)
+        scanner = ProjectScanner()
+        baseline = scanner.scan(root)
+
+        excluded = {
+            "beacon.generated.yaml",
+            ".beacon.generated.lock",
+            ".beacon.generated.abc123.tmp",
+            ".beacon-evidence-abc123.json",
+        }
+        for name in excluded:
+            _write(root, name, f"scratch for {name}")
+
+        after = scanner.scan(root)
+        assert after.scan_fingerprint == baseline.scan_fingerprint
+        assert {entry.rel_path for entry in after.files}.isdisjoint(excluded)
+
     def test_scan_name_override(self, tmp_path):
         root = _make_python_project(tmp_path)
         result = ProjectScanner().scan(root, name="custom-name")
@@ -337,6 +355,24 @@ class TestDescriptionParsing:
         result = ProjectScanner().scan(root)
         assert "agent description" in result.description.lower()
 
+    def test_root_readme_is_the_last_description_fallback(self, tmp_path):
+        """A root README.md paragraph is the project's own words, so it grounds the description
+        when no orientation doc exists (Beacon provider F2)."""
+        root = tmp_path / "proj"
+        root.mkdir()
+        _write(root, "pyproject.toml", "[project]\nname='p'\n")
+        _write(root, "README.md", "# Proj\n\nA root readme.\n")
+        assert ProjectScanner().scan(root).description == "A root readme."
+
+    def test_no_description_source_means_no_description(self, tmp_path):
+        """With nothing to read the scanner reports "", never a placeholder, so writers and
+        Beacon evidence can tell a grounded description from a placeholder (PR #125 F4)."""
+        root = tmp_path / "proj"
+        root.mkdir()
+        _write(root, "pyproject.toml", "[project]\nname='p'\n")
+        _write(root, "README.md", "# Proj\n")
+        assert ProjectScanner().scan(root).description == ""
+
     def test_utf8_description_is_not_mojibake_under_any_locale(self, tmp_path):
         """UTF-8 docs must decode as UTF-8, not as the platform's locale codec.
 
@@ -393,7 +429,10 @@ class TestEligibility:
         assert is_eligible_file(rel_path, role) is True
 
     @pytest.mark.parametrize("rel_path", [
-        ".agent/README.md", "docs/guide.rst", "notes.txt", "server.log",
+        # .agent/README.md was REMOVED 2026-09-17 (A0, Beacon v2 design): the bounded
+        # agent-orientation doc set is now indexed as document-role entities and its
+        # True-eligibility is pinned by tests/test_scanner_agent_docs.py.
+        "docs/guide.rst", "notes.txt", "server.log",
         "assets/logo.png", "data/cache.sqlite3", "dist/wheel.whl",
     ])
     def test_documentation_and_binaries_excluded(self, rel_path):

@@ -9,8 +9,66 @@ Entries older than the 10 most recent, archived from `CHANGELOG.md`.
 - 2026-08-10: 2026-08-07 (1 entry).
 - 2026-08-11: 2026-08-07 (1 entry).
 - 2026-09-21: 2026-09-16 (1 entry).
+- 2026-09-23: 2026-09-17 (1 entry).
+- 2026-09-24: 2026-09-17 (1 entry).
 
 ---
+
+## 2026-09-17 - the shadow scan: structural parity, and the copy does not survive it
+
+The last P3 piece, and the only one that produces a result rather than a refusal. Its correctness
+question is different in kind: not "was the attack stopped" but "does scanning a snapshot remotely
+give the same answer as scanning the repository locally".
+
+**It calls the existing `ProjectScanner` rather than reimplementing one.** Parity is then true by
+construction and a surviving difference is a real one -- something the bundle dropped or the
+extraction changed -- instead of a disagreement between two scanners.
+
+**Local scanning is untouched, and that is asserted rather than claimed.**
+`project_scanner.py` is not modified; a test checks it against git, and the 196 pre-existing tests
+covering it pass unchanged.
+
+- The fingerprint excludes `root_path` (absolute), `file_mtime` (extraction writes new files),
+  `name` (the root is named for an upload) and the identity/self-fingerprint fields. Including any
+  would make every parity check fail for a reason unrelated to the snapshot -- worse than not
+  checking, because it trains a reader to ignore the result.
+- Every list is sorted. `os.scandir` promises no order and differs between filesystems, so an
+  unsorted fingerprint would differ between two scans of identical content.
+- **A test proves the exclusions did not make it blind**: dropping one source file still changes
+  the fingerprint. A digest that ignores enough to always match reports parity it never checked.
+- The materialised root is deleted after the report, including when the scan raises. A root that
+  outlives its report is an unattributed copy of somebody's repository sitting on a disk.
+- The report carries the three coverage counts and does NOT carry `partial_index` (invariant 4):
+  the counts are the source of truth and the derivation belongs to whoever can see the whole
+  picture.
+
+## 2026-09-17 - the extraction writer: bytes land, or nothing does
+
+The half of P3 with consequences outside the process. `archive_plan` decides what may be written
+and touches no disk; `extraction_lease` decides who may write it; this decides whether the bytes
+actually land. Every rule is enforced again here rather than assumed from upstream.
+
+- **The root is a boundary checked at the last line before `open()`.** Every joined path is
+  re-resolved and proven inside the root, duplicating a check `plan_archive` already does. The
+  duplication is the point: a containment check that lives only upstream is one refactor, one
+  second caller, or one plan built elsewhere away from not existing.
+- **Bytes are counted, never believed.** `declared_size` is metadata an attacker wrote, useful for
+  refusing early and worthless as a promise. The limit is enforced against what has actually
+  reached the disk, in 64 KiB blocks so a lying header cannot overshoot by a buffer's worth.
+- **The lease is re-checked as work proceeds**, because an extraction can outrun its own authority.
+- **A failure leaves no root**, including on `KeyboardInterrupt`. A half-written extraction that
+  survives is indistinguishable from a complete one to whatever finds it next.
+- **An existing root is refused, not reused and not deleted.** Adopting it would merge two
+  extractions; deleting it would destroy evidence this function does not own. Reclaiming it is the
+  sweep's job.
+
+Verified by negative control rather than by the tests passing: with `_safe_target` replaced by a
+naive join, the forged entry really is written outside the root; with the cleanup removed, the
+partial root really does survive. Both guards are load-bearing, which is the thing a green test run
+does not tell you.
+
+Still to come in P3: the subprocess wrapper this writer will run inside (decision 1), and the
+shadow scan.
 
 ## 2026-09-16 - the snapshot receive mode is declared once instead of compared everywhere
 

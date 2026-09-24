@@ -114,6 +114,43 @@ class TestStructureGraphWriter:
         assert first_params["sp"] == "test-project"
         assert first_params["spath"] == "."
 
+    def test_project_entity_persists_the_raw_scanned_description(self):
+        """PR #125 F4: `content` carries a display placeholder when the scanner read no
+        description; the raw value is persisted separately so Beacon generation can refuse
+        instead of publishing "python project" as the project's purpose."""
+        neo4j = RecordingNeo4j()
+        writer = StructureGraphWriter(neo4j=neo4j)
+
+        writer.write_project(_make_scan(description=""), session_id="s1", user_id="u1")
+
+        _, params = next((q, p) for q, p in neo4j.calls if "MERGE" in q)
+        assert params["content"] == "python project"
+        assert params["extra"]["indexed_description"] == ""
+
+        neo4j = RecordingNeo4j()
+        StructureGraphWriter(neo4j=neo4j).write_project(
+            _make_scan(description="Grounded text"), session_id="s1", user_id="u1"
+        )
+        _, params = next((q, p) for q, p in neo4j.calls if "MERGE" in q)
+        assert params["content"] == "Grounded text"
+        assert params["extra"]["indexed_description"] == "Grounded text"
+
+    def test_overview_distinguishes_unrecorded_from_empty_indexed_description(self):
+        def overview_for(indexed_description):
+            neo4j = MagicMock()
+            neo4j.execute.side_effect = [
+                [{"raw_entities": [], "raw_edges": [], "description": "python project",
+                  "stack": "python", "indexed_description": indexed_description}],
+                [],  # get_project_coverage
+                [],  # query_contained_repos
+            ]
+            return StructureGraphWriter(neo4j=neo4j).query_overview("p")
+
+        assert overview_for(None)["indexed_description"] is None
+        assert overview_for("")["indexed_description"] == ""
+        assert overview_for("Grounded")["indexed_description"] == "Grounded"
+        assert overview_for(None)["description"] == "python project"
+
     def test_directory_entities_batched(self):
         neo4j = RecordingNeo4j()
         writer = StructureGraphWriter(neo4j=neo4j)
@@ -484,6 +521,40 @@ class TestStructureGraphWriter:
         writer = StructureGraphWriter(neo4j=neo4j)
         assert writer.get_scan_fingerprint("myproj") == "abc123"
 
+    def test_beacon_evidence_guard_uses_project_identity_writer_state(self):
+        neo4j = MagicMock()
+        neo4j.execute.return_value = [{
+            "root_path": "/srv/project",
+            "scan_fingerprint": "fp-1",
+            "files_discovered": 5,
+            "files_eligible": 4,
+            "files_indexed": 4,
+            "partial_index": False,
+            "project_id": "project-id-1",
+            "identity_known": True,
+            "active_writers": ["writer-live"],
+            "writer_revision": "writer-prior",
+        }]
+        writer = StructureGraphWriter(neo4j=neo4j)
+
+        guard = writer.get_beacon_evidence_guard("myproj")
+
+        assert guard == {
+            "project_known": True,
+            "root_path": "/srv/project",
+            "scan_fingerprint": "fp-1",
+            "files_discovered": 5,
+            "files_eligible": 4,
+            "files_indexed": 4,
+            "partial_index": False,
+            "project_id": "project-id-1",
+            "identity_known": True,
+            "active_writers": ("writer-live",),
+            "writer_revision": "writer-prior",
+        }
+        query = neo4j.execute.call_args.args[0]
+        assert "active_writers" in query and "last_structure_writer_id" in query
+
     def test_idempotent_merge(self):
         """Running write_project twice should use MERGE (not CREATE)."""
         neo4j = RecordingNeo4j()
@@ -632,6 +703,49 @@ class TestQueryDocuments:
         ]
         assert len(match_calls) == 1
         assert match_calls[0][1]["prefix"] == "/some/dir"
+
+    def test_unset_properties_are_omitted_not_stringified(self):
+        """PR #125 F1: a scanner-indexed document has no document_type property.
+
+        Neo4j returns the unset property as a present key with value None. Stringifying it gave
+        the truthy "None", which every downstream `or "generic"` fallback let through, so
+        generated Beacon manifests published `role: None`.
+        """
+        neo4j = MagicMock()
+        neo4j.execute.return_value = [
+            {
+                "name": "architecture.md",
+                "path": ".agent/architecture.md",
+                "description": None,
+                "root_path": None,
+                "doc_type": None,
+            }
+        ]
+        writer = StructureGraphWriter(neo4j=neo4j)
+
+        [row] = writer.query_documents("p")
+
+        assert row == {"name": "architecture.md", "path": ".agent/architecture.md"}
+        assert "None" not in row.values()
+
+    def test_set_document_type_is_returned(self):
+        neo4j = MagicMock()
+        neo4j.execute.return_value = [
+            {
+                "name": "ref.md",
+                "path": "/abs/ref.md",
+                "description": "excerpt",
+                "root_path": "/abs/ref.md",
+                "doc_type": "reference_article",
+            }
+        ]
+        writer = StructureGraphWriter(neo4j=neo4j)
+
+        [row] = writer.query_documents("p")
+
+        assert row["doc_type"] == "reference_article"
+        assert row["root_path"] == "/abs/ref.md"
+        assert row["description"] == "excerpt"
 
 
 class TestIncrementalDiffAndHeat:
@@ -981,7 +1095,81 @@ class TestTruncatedScanNeverPrunesFiles:
             for q, params in neo.calls
             if "structure_role: $role" in q and "DETACH DELETE" in q
         }
-        assert role_prunes == {"endpoint", "dependency"}
+        assert role_prunes == {"endpoint", "dependency", "document"}
+
+    def test_complete_scan_prunes_scanner_documents_but_never_ingested_ones(self):
+        """PR #125 F5: the `document` role the scanner writes for `.agent` orientation docs
+        was never pruned, so a deleted `.agent/architecture.md` lived in the graph forever."""
+        from menhir.infrastructure.project_scanner import FileEntry
+
+        writer, neo = self._writer()
+        scan = _make_scan(
+            files=[
+                FileEntry(rel_path="a.py", role="file", description=""),
+                FileEntry(rel_path=".agent/README.md", role="document", description=""),
+            ],
+            files_discovered=2,
+            files_eligible=2,
+            files_indexed=2,
+        )
+        assert scan.partial_index is False
+
+        writer.write_project(scan, session_id="s", user_id="u")
+
+        doc_prunes = [
+            (q, params)
+            for q, params in neo.calls
+            if "structure_role: $role" in q
+            and "DETACH DELETE" in q
+            and params.get("role") == "document"
+        ]
+        assert len(doc_prunes) >= 1
+        for q, params in doc_prunes:
+            assert params["keep"] == [".agent/README.md"]
+            # Only the scanner's own documents: ingest_document rows carry
+            # source='document-ingest' and must survive every rescan.
+            assert "n.source = $source" in q
+            assert params["source"] == "project-scan"
+
+    def test_complete_scan_with_no_documents_prunes_every_scanner_document(self):
+        """Zero must be expressible: a project that removed its whole `.agent` set."""
+        from menhir.infrastructure.project_scanner import FileEntry
+
+        writer, neo = self._writer()
+        scan = _make_scan(
+            files=[FileEntry(rel_path="a.py", role="file", description="")],
+            files_discovered=1,
+            files_eligible=1,
+            files_indexed=1,
+        )
+
+        writer.write_project(scan, session_id="s", user_id="u")
+
+        doc_prunes = [
+            params
+            for q, params in neo.calls
+            if "structure_role: $role" in q and params.get("role") == "document"
+        ]
+        assert doc_prunes and all(p["keep"] == [] for p in doc_prunes)
+
+    def test_partial_scan_never_prunes_scanner_documents(self):
+        from menhir.infrastructure.project_scanner import FileEntry
+
+        writer, neo = self._writer()
+        scan = _make_scan(
+            files=[FileEntry(rel_path=".agent/README.md", role="document", description="")],
+            files_discovered=100,
+            files_eligible=100,
+            files_indexed=1,
+        )
+        assert scan.partial_index is True
+
+        writer.write_project(scan, session_id="s", user_id="u")
+
+        assert not [
+            q for q, params in neo.calls
+            if "DETACH DELETE" in q and params.get("role") == "document"
+        ]
 
     def test_contains_repo_edges_are_pruned_to_the_current_scan(self):
         """The umbrella's own edge must go when a sub-repo leaves; the child project stays."""

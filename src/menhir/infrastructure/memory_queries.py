@@ -722,8 +722,8 @@ class MemoryQueryRepository:
     def promote_memory(self, node_uuid: str) -> bool:
         """Promote a PERSISTENT memory to PROMOTED: operator-curated, verified ground truth (SSOT-08).
 
-        Distinct from user_flagged (importance to the user, auto-propagated,
-        decay-immune but still an ordinary claim): PROMOTED is a stronger,
+        Distinct from user_flagged (direct retention intent, decay-immune but still
+        an ordinary claim): PROMOTED is a stronger,
         deliberate curation action, never auto-set, meaning "this claim is
         verified and cannot be false." Confidence is pinned at 1.0 at
         promotion time; CorrelationService.classify_pair separately refuses

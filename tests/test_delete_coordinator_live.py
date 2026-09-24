@@ -158,11 +158,17 @@ def test_ttl_sweep_audits_what_happened_not_what_was_intended(coord, live_repo, 
     # the old code mis-audited (it had already logged `other` as deleted by this point).
     real_delete = coord.graph_adapter.delete_entities_returning_uuids
 
-    def promote_then_delete(node_uuids, *, require_scope=None):
+    def promote_then_delete(
+        node_uuids, *, require_scope=None, protect_retention=False
+    ):
         live_repo.execute(
             "MATCH (n:Entity {uuid:$u}) SET n.scope = 'PERSISTENT'", params={"u": nodes["other"]}
         )
-        return real_delete(node_uuids, require_scope=require_scope)
+        return real_delete(
+            node_uuids,
+            require_scope=require_scope,
+            protect_retention=protect_retention,
+        )
 
     coord.graph_adapter.delete_entities_returning_uuids = promote_then_delete  # type: ignore[method-assign]
 

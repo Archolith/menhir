@@ -132,12 +132,12 @@ jobs:
       # yet root-caused. This run may still fail/timeout on that file.
       # Beacon's framework dependency must not replace Menhir's pinned runtime.
       # Pin the authoritative Beacon source, not the unrelated PyPI name or a moving branch.
+      # The exact green PR-head SHA is the compatibility contract issue #120's E2E pins.
       - name: Install isolated Beacon integration dependency
         run: |
           python -m venv "$RUNNER_TEMP/beacon-env"
-          "$RUNNER_TEMP/beacon-env/bin/python" -m pip install "git+https://github.com/Archolith/beacon.git@382ed7b6437a4f6df365b9d87e3286f92be88efd"
-          "$RUNNER_TEMP/beacon-env/bin/python" -c "from beacon import __version__; assert __version__ == '0.1.0'"
-          echo "MENHIR_TEST_BEACON_PYTHON=$RUNNER_TEMP/beacon-env/bin/python" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/beacon-env/bin/python" -m pip install "git+https://github.com/Archolith/beacon.git@1cc3352b90004f3b76f1c5ed49ee4235c606a52f"
+                  echo "MENHIR_TEST_BEACON_PYTHON=$RUNNER_TEMP/beacon-env/bin/python" >> "$GITHUB_ENV"
 
       - name: Run offline tests
         working-directory: menhir
@@ -184,6 +184,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ./menhir pytest pytest-asyncio pytest-xdist pytest-timeout
+
+      # The E2E-6 graph-backed test launches Beacon's real stdio server and
+      # needs the SAME isolated, exact Beacon revision the offline job pins:
+      # a separate venv so Beacon's framework dependencies never replace
+      # Menhir's pinned runtime, and a fixed SHA so the compatibility contract
+      # cannot silently follow a moving branch.
+      - name: Install isolated Beacon integration dependency
+        run: |
+          python -m venv "$RUNNER_TEMP/beacon-env"
+          "$RUNNER_TEMP/beacon-env/bin/python" -m pip install "git+https://github.com/Archolith/beacon.git@1cc3352b90004f3b76f1c5ed49ee4235c606a52f"
+                  echo "MENHIR_TEST_BEACON_PYTHON=$RUNNER_TEMP/beacon-env/bin/python" >> "$GITHUB_ENV"
 
       # A missing test Neo4j makes `test_neo4j_repo` SKIP, not fail -- so a broken service
       # container would leave this job GREEN while running nothing at all. Prove connectivity
@@ -274,6 +285,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ./menhir build pytest pytest-asyncio pytest-timeout
+
+      # E2E-6 and E2E-8's Beacon criterion drive `menhir beacon generate` and Beacon's own
+      # validate/inspect/serve. Same isolated venv and exact SHA as the offline and online
+      # jobs: Beacon's dependencies stay out of the campaign's venv, and the compatibility
+      # contract cannot follow a moving branch. Without it both lanes declare_pending.
+      - name: Install isolated Beacon integration dependency
+        run: |
+          python -m venv "$RUNNER_TEMP/beacon-env"
+          "$RUNNER_TEMP/beacon-env/bin/python" -m pip install "git+https://github.com/Archolith/beacon.git@1cc3352b90004f3b76f1c5ed49ee4235c606a52f"
+          echo "MENHIR_E2E_BEACON_PYTHON=$RUNNER_TEMP/beacon-env/bin/python" >> "$GITHUB_ENV"
 
       # Port 7690, not 7688. The graph-backed job above owns 7688, and every lane here
       # DETACH DELETEs the graph between lanes -- sharing the port would let this job

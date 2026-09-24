@@ -39,6 +39,7 @@ PARENTS: dict[str, list[str]] = {
     ],
     "structure": [
         "query_structure",
+        "get_beacon_evidence",
     ],
     "conflicts": [
         "list_conflicts",

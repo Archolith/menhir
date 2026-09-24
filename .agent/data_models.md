@@ -250,7 +250,7 @@ Each node represents a memory unit stored in Neo4j. Labels: `Entity` or `Episodi
 | `sources` | array[string] | Ordered, de-duplicated contributor labels. Written by entity merge (`domain/merge_delta.derive_merged_provenance`): survivor contributors keep their positions, the absorbed node's new ones append. Absent on nodes written before the property existed — readers fall back to splitting the legacy comma-joined `source`, but an explicitly EMPTY list means "no contributors" and must NOT fall back. The placeholder `merged` is never a member. Projected by `MEMORY_RETURN_FIELDS` and read by BOTH halves of structural recognition (`structural_memory.legacy_structural_memory_cypher` and `infer_legacy_structure_role`): a merged legacy structure row's `source` no longer says `project-scan`, so a reader consulting only `source` would surface it in recall as an ordinary memory. |
 | `corroboration` | int | How many INDEPENDENT writers assert this node: distinct source FAMILIES in `sources`, not distinct labels (`claude-code` and `claude-chat` are one writer; see `utils.source_family`). Deliberately separate from `source_confidence` — authority is who said it, corroboration is how much independent observation agrees, and neither is a function of merge count. |
 | `source_confidence` | float | Trust level: user-confirmed (1.0) > structural/project-scan (0.9) > agent-reviewed (0.7) > LLM-inferred (0.5). These tiers are formalised as `ReviewState` (HUMAN_REVIEWED / AGENT_REVIEWED / UNREVIEWED) in `domain/truth/`; use `review_state_from_confidence()` to convert. Constants: `SOURCE_CONFIDENCE_USER` (1.0), `SOURCE_CONFIDENCE_STRUCTURAL` (0.9, HUMAN_REVIEWED threshold), `SOURCE_CONFIDENCE_AGENT_REVIEWED` (0.7, AGENT_REVIEWED threshold), `SOURCE_CONFIDENCE_AGENT` (0.5, default fallback). **This is the node's EFFECTIVE authority, which the label tier only bounds.** `source_confidence_for(label)` returns a *nominal ceiling*; a writer may deliberately stamp lower (`structure_queries` writes an inferred import target as `source='project-scan'` at agent tier, not the structural tier the label permits). So `source_confidence <= source_confidence_for(source)` always holds, but equality does not — never "repair" a node by recomputing this from its label. Merge takes `min(effective authority of each input, ceiling of the merged contributor set)`, so a merge can never raise trust and never discards an explicit downgrade (`domain/utils.effective_authority`). The valid domain is `0.0 .. SOURCE_CONFIDENCE_USER` inclusive; a stored value outside it is corruption rather than a downgrade and is answered by the label ceiling, the same path a missing or non-numeric value takes — it is never propagated. |
-| `user_flagged` | boolean | Explicit v1 user override for retention/promotion review |
+| `user_flagged` | boolean | Direct entity retention intent on new writes; existing true values remain protective even when their origin is unknown. Source-derived retention never sets this field. |
 | `bootstrap_scope` | string or null | Startup injection selector, independent of retention: `general`, `workspace:<normalized-key>`, or null for retention-only. Structural nodes must remain null. |
 | `created_at` | timestamp | Creation time |
 | `last_accessed` | timestamp | Used by recency bonus |
@@ -317,6 +317,15 @@ Episode nodes are provenance anchors created by each ingestion call. Label: `Epi
 | `diff` | string or null | Optional git diff attached at ingest time; appended to episode body during enrichment so Graphiti can reason about code changes |
 
 Episode nodes are included in graph traversal and provenance queries but excluded from default memory recall/ranking.
+
+Enrichment records `(:Episodic)-[:RETENTION_SOURCE]->(:Entity)` from the Menhir source episode
+to each eligible extracted semantic entity, whether or not the source is currently flagged. A
+source's live `user_flagged=true` protects its linked entities from harmful automatic lifecycle
+mutations. Structural entities are excluded. A missing or wrong-tenant source or semantic entity
+prevents enrichment from publishing `READY`. Merge and unmerge preserve these links. Existing
+episodes are not backfilled by this change; old true entity flags remain protective.
+Enrichment marks its retention links `direct=true`. A merge-rebound link has no direct marker;
+if enrichment later records the survivor directly, it marks that link direct so unmerge retains it.
 
 ### Node: Structural Entity
 

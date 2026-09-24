@@ -25,6 +25,14 @@ STAGE_TIMEOUT = "timeout"     # runner cancelled at the deadline; commit state U
 STAGE_COMPLETED = "completed"  # runner returned
 
 
+class McpToolRefusal(ValueError):
+    """A tool declining a request on purpose (for example, evidence it cannot vouch for).
+
+    The caller receives an MCP error result (``isError``) carrying this message, so a machine
+    client can tell a refusal from a result. Other tool failures keep the "Error: ..." text.
+    """
+
+
 def _caller_identity() -> tuple[str | None, str | None, str | None, str | None]:
     """(client_name, client_id, session_id, tier) for the current request, or Nones.
 
@@ -280,6 +288,13 @@ async def track_mcp_call(
                     isError=True,
                     _meta={"mcp/www_authenticate": exc.challenge},
                 ),
+            )
+        if isinstance(exc, McpToolRefusal):
+            from mcp.types import CallToolResult, TextContent
+
+            return cast(
+                T,
+                CallToolResult(content=[TextContent(type="text", text=str(exc))], isError=True),
             )
         if error_mapper is not None:
             return error_mapper(error_msg)

@@ -38,6 +38,18 @@ def _normalize_structure_path(path: str) -> str:
     return p.lstrip("/").rstrip("/")
 
 
+def _set_properties(record: dict[str, Any], keys: tuple[str, ...]) -> dict[str, str]:
+    """Return the optional node properties that are actually set, as strings.
+
+    Neo4j returns an unset property as a PRESENT key whose value is ``None``, so
+    ``str(record.get(key, default))`` yields the truthy string ``"None"`` and defeats every
+    downstream ``or default`` fallback. Scanner-indexed documents carry no ``document_type``,
+    which is how generated Beacon manifests came to publish ``role: None`` (PR #125 F1). An unset
+    property is therefore omitted, never stringified; readers apply their own documented default.
+    """
+    return {key: str(record[key]) for key in keys if record.get(key) is not None}
+
+
 #: The source label every node written by the project scanner carries.
 STRUCTURE_SOURCE = "project-scan"
 
@@ -195,6 +207,12 @@ class StructureGraphWriter:
                 "scan_fingerprint": scan.scan_fingerprint,
                 "stack": scan.stack,
                 "root_path": scan.root_path,
+                # The description exactly as the scanner read it from .agent/README.md or
+                # CLAUDE.md -- empty when neither exists. `content` above substitutes a
+                # display placeholder ("python project") for readability; consumers that must
+                # not present an invented purpose as indexed fact (Beacon generation) read
+                # this property instead (PR #125 F4).
+                "indexed_description": scan.description or "",
                 # Coverage accounting. `partial_index` is persisted (not just derived) so a
                 # reader that only fetches the project node can tell whether a negative
                 # structural answer is trustworthy.
@@ -202,6 +220,11 @@ class StructureGraphWriter:
                 "files_eligible": scan.files_eligible,
                 "files_indexed": scan.files_indexed,
                 "partial_index": scan.partial_index,
+                # Beacon evidence binding: written with the fingerprint so the two always
+                # describe the same scan (see refresh_indexed_binding for the skip paths).
+                "indexed_commit": getattr(scan, "indexed_commit", "") or "",
+                "indexed_repository": getattr(scan, "indexed_repository", "") or "",
+                "indexed_dirty": bool(getattr(scan, "indexed_dirty", False)),
             },
         )
         entity_count += 1
@@ -300,6 +323,32 @@ class StructureGraphWriter:
                 scan.files_indexed,
                 scan.files_eligible,
             )
+
+        # 3c. Prune scanner-written `document` entities the scan no longer sees (PR #125 F5).
+        #
+        # The A0 orientation docs (`.agent/README.md`, `.agent/architecture.md`, ...) are
+        # written through the same batch MERGE as files but carry the `document` role, which
+        # the multi-role file prune above deliberately excludes: `ingest_document` writes the
+        # same role with absolute-path keys and the `document-ingest` source label, and those
+        # are not the scan's to delete. Restricting the prune to STRUCTURE_SOURCE (passed as a
+        # parameter, never a literal) makes this the scanner pruning only what the scanner wrote. Same capacity rule: a truncated scan is
+        # not evidence of absence. An empty keep-list on a complete scan means the project has
+        # no orientation docs any more, and every stale one goes -- the single-role prune's
+        # documented semantics, shared with endpoints and dependencies.
+        if not scan.partial_index:
+            stale_docs = self._delete_stale_role_entities(
+                scan.name,
+                "document",
+                [f.rel_path for f in scan.files if f.role == "document"],
+                project_id,
+                source=STRUCTURE_SOURCE,
+            )
+            if stale_docs:
+                logger.info(
+                    "Pruned %d stale scanner document entities for project=%s",
+                    stale_docs,
+                    scan.name,
+                )
 
         # 4. Dependency entities (batched)
         dep_rows = [
@@ -607,6 +656,155 @@ class StructureGraphWriter:
             return str(rows[0]["root_path"])
         return None
 
+    def get_beacon_evidence_guard(self, project_name: str) -> dict[str, Any]:
+        """Return the project facts and writer revision that fence one evidence read.
+
+        Every production structure writer registers on ``ProjectIdentity.active_writers`` and
+        stamps ``last_structure_writer_id`` when it releases. Reading this row before and after
+        Beacon's independent graph queries therefore detects a writer active at either boundary
+        or one that completed entirely between them.
+        """
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Entity {structure_project: $name, structure_role: 'project'})
+            OPTIONAL MATCH (p:ProjectIdentity {project_id: n.structure_project_id})
+            RETURN n.root_path AS root_path,
+                   n.scan_fingerprint AS scan_fingerprint,
+                   n.files_discovered AS files_discovered,
+                   n.files_eligible AS files_eligible,
+                   n.files_indexed AS files_indexed,
+                   n.partial_index AS partial_index,
+                   n.structure_project_id AS project_id,
+                   p IS NOT NULL AS identity_known,
+                   coalesce(p.active_writers, []) AS active_writers,
+                   coalesce(p.last_structure_writer_id, '') AS writer_revision
+            LIMIT 1
+            """,
+            {"name": project_name},
+        )
+        if not rows:
+            return {"project_known": False}
+        row = rows[0]
+        return {
+            "project_known": True,
+            "root_path": str(row.get("root_path") or ""),
+            "scan_fingerprint": str(row.get("scan_fingerprint") or ""),
+            "files_discovered": row.get("files_discovered"),
+            "files_eligible": row.get("files_eligible"),
+            "files_indexed": row.get("files_indexed"),
+            "partial_index": bool(row.get("partial_index")),
+            "project_id": str(row.get("project_id") or ""),
+            "identity_known": bool(row.get("identity_known")),
+            "active_writers": tuple(str(item) for item in row.get("active_writers") or []),
+            "writer_revision": str(row.get("writer_revision") or ""),
+        }
+
+    def list_indexed_repositories(self) -> list[dict[str, str]]:
+        """Every indexed project with the repository origin its last scan recorded."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Entity {structure_role: 'project'})
+            WHERE n.structure_project_id IS NOT NULL AND n.indexed_repository IS NOT NULL
+            RETURN n.structure_project_id AS project_id, n.structure_project AS name,
+                   n.root_path AS root_path, n.indexed_repository AS repository
+            """,
+            {},
+        )
+        return [
+            {
+                "project_id": str(row.get("project_id") or ""),
+                "name": str(row.get("name") or ""),
+                "root_path": str(row.get("root_path") or ""),
+                "repository": str(row.get("repository") or ""),
+            }
+            for row in rows
+        ]
+
+    def get_beacon_evidence_guard_by_id(self, project_id: str) -> dict[str, Any]:
+        """The evidence fence for one project, looked up by its stable identity.
+
+        Same fields as :meth:`get_beacon_evidence_guard` plus the project name and the stored
+        evidence binding. Refuses to guess when the id matches more than one project node.
+        """
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Entity {structure_project_id: $project_id, structure_role: 'project'})
+            OPTIONAL MATCH (p:ProjectIdentity {project_id: n.structure_project_id})
+            RETURN n.structure_project AS name,
+                   n.root_path AS root_path,
+                   n.scan_fingerprint AS scan_fingerprint,
+                   n.files_discovered AS files_discovered,
+                   n.files_eligible AS files_eligible,
+                   n.files_indexed AS files_indexed,
+                   n.partial_index AS partial_index,
+                   n.indexed_commit AS indexed_commit,
+                   n.indexed_repository AS indexed_repository,
+                   n.indexed_dirty AS indexed_dirty,
+                   p IS NOT NULL AS identity_known,
+                   coalesce(p.active_writers, []) AS active_writers,
+                   coalesce(p.last_structure_writer_id, '') AS writer_revision
+            LIMIT 2
+            """,
+            {"project_id": project_id},
+        )
+        if not rows:
+            return {"project_known": False}
+        if len(rows) > 1:
+            return {"project_known": True, "ambiguous": True}
+        row = rows[0]
+        return {
+            "project_known": True,
+            "ambiguous": False,
+            "name": str(row.get("name") or ""),
+            "root_path": str(row.get("root_path") or ""),
+            "scan_fingerprint": str(row.get("scan_fingerprint") or ""),
+            "files_discovered": row.get("files_discovered"),
+            "files_eligible": row.get("files_eligible"),
+            "files_indexed": row.get("files_indexed"),
+            "partial_index": bool(row.get("partial_index")),
+            "indexed_commit": str(row.get("indexed_commit") or ""),
+            "indexed_repository": str(row.get("indexed_repository") or ""),
+            # None = indexed before the binding was recorded; treated as unknown, not clean.
+            "indexed_dirty": row.get("indexed_dirty"),
+            "identity_known": bool(row.get("identity_known")),
+            "active_writers": tuple(str(item) for item in row.get("active_writers") or []),
+            "writer_revision": str(row.get("writer_revision") or ""),
+        }
+
+    def refresh_indexed_binding(
+        self, project_name: str, fingerprint: str, commit: str, repository: str, dirty: bool
+    ) -> bool:
+        """Update only the evidence binding when an unchanged scan was skipped.
+
+        The fingerprint excludes ``.git``, so a new commit with identical files skips the full
+        write; the indexed content is then valid for the new commit and only the binding moves.
+        Writes nothing when the stored binding already matches, or when a full re-scan replaced
+        the fingerprint since the skip decision read it (compare-and-set on the fingerprint, so
+        a stale skip can never pair its binding with another scan's content). Returns True when
+        it wrote.
+        """
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Entity {structure_project: $name, structure_role: 'project'})
+            WHERE n.scan_fingerprint = $fingerprint
+              AND (coalesce(n.indexed_commit, '') <> $commit
+               OR coalesce(n.indexed_repository, '') <> $repository
+               OR n.indexed_dirty IS NULL OR n.indexed_dirty <> $dirty)
+            SET n.indexed_commit = $commit,
+                n.indexed_repository = $repository,
+                n.indexed_dirty = $dirty
+            RETURN count(n) AS updated
+            """,
+            {
+                "name": project_name,
+                "fingerprint": fingerprint,
+                "commit": commit,
+                "repository": repository,
+                "dirty": dirty,
+            },
+        )
+        return bool(rows and rows[0].get("updated"))
+
     def _owner_arms(
         self, alias: str, project_id: str | None
     ) -> tuple[str, ...]:
@@ -705,7 +903,7 @@ class StructureGraphWriter:
 
     def _delete_stale_role_entities(
         self, project_name: str, role: str, keep_paths: list[str],
-        project_id: str | None = None,
+        project_id: str | None = None, *, source: str | None = None,
     ) -> int:
         """Delete entities of *role* whose `structure_path` is absent from the current scan.
 
@@ -714,14 +912,20 @@ class StructureGraphWriter:
         complete scan, "found none" is a real answer and the only way to represent a project
         that stopped exposing anything. Guarding on emptiness instead made zero permanently
         unreachable -- see the archolith endpoint accumulation in `write_project` step 5b.
+
+        *source* narrows the prune to entities with that `source` label. The `document` role is
+        shared by scanner-written orientation docs (`project-scan`, repo-relative paths) and
+        `ingest_document` docs (`document-ingest`, absolute-path keys); only the former are the
+        scan's to prune.
         """
+        source_clause = " AND n.source = $source" if source is not None else ""
         deleted = 0
         for owner in self._owner_arms("n", project_id):
             rows = self.neo4j.execute(
                 f"""
                 MATCH (n:Entity {{structure_role: $role}})
                 WHERE {owner}
-                  AND NOT n.structure_path IN $keep
+                  AND NOT n.structure_path IN $keep{source_clause}
                 DETACH DELETE n
                 RETURN count(*) AS deleted
                 """,
@@ -729,6 +933,7 @@ class StructureGraphWriter:
                     **self._owner_params(project_name, project_id),
                     "role": role,
                     "keep": keep_paths,
+                    **({"source": source} if source is not None else {}),
                 },
             )
             deleted += int(rows[0].get("deleted", 0)) if rows else 0
@@ -880,10 +1085,11 @@ class StructureGraphWriter:
             }
             CALL {
                 OPTIONAL MATCH (n:Entity {structure_project: $p, structure_role: 'project'})
-                RETURN n.content AS description, n.stack AS stack
+                RETURN n.content AS description, n.stack AS stack,
+                       n.indexed_description AS indexed_description
                 LIMIT 1
             }
-            RETURN raw_entities, raw_edges, description, stack
+            RETURN raw_entities, raw_edges, description, stack, indexed_description
             """,
             {"p": project},
         )
@@ -906,9 +1112,15 @@ class StructureGraphWriter:
                 counts[str(name)] = counts.get(str(name), 0) + int(item.get("cnt") or 0)
             return counts
 
+        indexed_description = row.get("indexed_description")
         return {
             "project": project,
             "description": row.get("description") or "",
+            # None when the project node predates the property (or is absent): the reader
+            # cannot tell an empty scanner result from an unrecorded one, so it says so.
+            "indexed_description": (
+                None if indexed_description is None else str(indexed_description)
+            ),
             "stack": row.get("stack") or "",
             "entities": _tally(row.get("raw_entities"), "role"),
             "edges": _tally(row.get("raw_edges"), "rel"),
@@ -1002,7 +1214,7 @@ class StructureGraphWriter:
             WHERE {where_clause}
             RETURN n.name AS name, n.structure_path AS path,
                    n.content AS description, n.root_path AS root_path,
-                   n.document_type AS doc_type
+                   n.document_type AS doc_type, n.source AS source
             ORDER BY n.name
             """,
             params,
@@ -1011,9 +1223,7 @@ class StructureGraphWriter:
             {
                 "name": str(r["name"]),
                 "path": str(r["path"]),
-                "description": str(r.get("description", "")),
-                "root_path": str(r.get("root_path", "")),
-                "doc_type": str(r.get("doc_type", "generic")),
+                **_set_properties(r, ("description", "root_path", "doc_type", "source")),
             }
             for r in rows
         ]
@@ -1080,8 +1290,7 @@ class StructureGraphWriter:
         return [
             {
                 "name": str(r["name"]),
-                "root_path": str(r.get("root_path", "")),
-                "doc_type": str(r.get("doc_type", "generic")),
+                **_set_properties(r, ("root_path", "doc_type")),
             }
             for r in rows
         ]

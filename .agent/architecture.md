@@ -192,6 +192,10 @@ Direction:
 
 Concept id: `runtime.packages`
 
+`scripts/backfill_legacy_retention.py` inventories historical episode flags and source-to-entity
+provenance. Its reviewed maintenance write adds only `RETENTION_SOURCE` edges; it cannot infer or
+clear a legacy entity's direct flag intent.
+
 ```text
 src/menhir/
 |- __init__.py        Package metadata

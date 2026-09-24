@@ -25,7 +25,7 @@ from menhir.services.enrichment_failures import (
     is_budget_refusal,
     is_session_window_refusal,
 )
-from menhir.services.enrichment_steps import propagate_user_flag
+from menhir.services.enrichment_steps import record_retention_sources
 from menhir.services.event_consolidation import (
     EventConsolidationConfig,
     run_event_consolidation,
@@ -278,12 +278,21 @@ async def retry_process_candidate(
                 namespace=str(row.get("namespace") or "default"),
                 **stamp_kwargs,
             )
-            if bool(row.get("user_flagged", False)):
-                propagate_user_flag(
+            try:
+                record_retention_sources(
                     graph_adapter,
                     entity_uuids,
-                    episode_uuid=episode_uuid,
+                    source_episode_uuid=episode_uuid,
+                    namespace=str(row.get("namespace") or "default"),
                 )
+            except ValueError as exc:
+                logger.warning(
+                    "Leaving failed episode unreconciled after incomplete retention provenance "
+                    "episode_id=%s error=%s",
+                    episode_uuid,
+                    exc,
+                )
+                return "waiting"
             if await asyncio.to_thread(
                 graph_adapter.mark_episode_ready,
                 episode_uuid,
@@ -830,6 +839,17 @@ async def refresh_structure_graphs(
 
         stored_fp = await asyncio.to_thread(graph_adapter.get_scan_fingerprint, name)
         if stored_fp and stored_fp == scan.scan_fingerprint:
+            # Same files, possibly a new commit: keep the evidence binding current.
+            refresh = getattr(graph_adapter, "refresh_indexed_binding", None)
+            if refresh is not None:
+                await asyncio.to_thread(
+                    refresh,
+                    name,
+                    scan.scan_fingerprint,
+                    scan.indexed_commit,
+                    scan.indexed_repository,
+                    scan.indexed_dirty,
+                )
             skipped += 1
             continue
 

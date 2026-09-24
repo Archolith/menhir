@@ -33,8 +33,10 @@ import uuid as uuidlib
 import pytest
 
 from menhir.domain import merge_delta as md
+from menhir.infrastructure.consolidation_queries import ConsolidationRepository
 from menhir.infrastructure.correlation_queries import CorrelationRepository
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
+from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.services.merge_coordinator import MergeCoordinator
 from menhir.services import unmerge_coordinator as uc
 from menhir.services.unmerge_coordinator import UnmergeCoordinator
@@ -94,6 +96,8 @@ def pair(live_repo):
         CREATE (epa:Episodic {uuid:$ep_a, name:'absorbed episode', test_tag:$t})
         CREATE (eps)-[:MENTIONS]->(s)
         CREATE (epa)-[:MENTIONS {conf:0.7}]->(a)
+        CREATE (eps)-[:RETENTION_SOURCE]->(s)
+        CREATE (epa)-[:RETENTION_SOURCE]->(a)
         CREATE (a)-[:RELATES_TO {weight:0.9, kind:'first'}]->(p)
         CREATE (a)-[:RELATES_TO {weight:0.3, kind:'parallel'}]->(p)
         CREATE (p)-[:RELATES_TO {weight:0.5, kind:'incoming'}]->(a)
@@ -134,6 +138,14 @@ def test_merge_then_unmerge_restores_exactly(merger, unmerger, live_repo, pair):
     merged = merger.merge(survivor_uuid=pair["s"], absorbed_uuid=pair["a"], similarity=0.97)
     assert merged["merged"] == 1
     merge_op = merged["op_id"]
+    transferred = live_repo.execute(
+        """
+        MATCH (source:Episodic)-[:RETENTION_SOURCE]->(s:Entity {uuid:$survivor})
+        RETURN collect(source.uuid) AS sources
+        """,
+        params={"survivor": pair["s"]},
+    )[0]["sources"]
+    assert set(transferred) == {pair["ep_s"], pair["ep_a"]}
 
     res = unmerger.unmerge(merge_op)
     assert res["restored"] == 1, res
@@ -194,6 +206,33 @@ def test_merge_then_unmerge_restores_exactly(merger, unmerger, live_repo, pair):
     assert pair["a"] not in lineage
     assert unmerger.journal.get(merge_op)["state"] == "REVERSED"
     assert unmerger.journal.get(res["op_id"])["state"] == "COMMITTED"
+
+
+@pytest.mark.online
+def test_unmerge_keeps_retention_recorded_on_survivor_after_merge(
+    merger, unmerger, live_repo, pair
+):
+    adapter = MemoryGraphAdapter(neo4j=live_repo)
+    merged = merger.merge(survivor_uuid=pair["s"], absorbed_uuid=pair["a"], similarity=0.97)
+    assert merged["merged"] == 1
+
+    # A later enrichment independently establishes the survivor as a source-derived entity.
+    assert adapter.record_retention_sources(
+        source_episode_uuid=pair["ep_a"], entity_uuids=[pair["s"]], namespace="default"
+    ) == 1
+    assert unmerger.unmerge(merged["op_id"])["restored"] == 1
+
+    rows = live_repo.execute(
+        """
+        MATCH (:Episodic {uuid:$source})-[r:RETENTION_SOURCE]->(:Entity {uuid:$survivor})
+        RETURN count(r) AS count, collect(r.direct) AS direct
+        """,
+        params={"source": pair["ep_a"], "survivor": pair["s"]},
+    )
+    assert rows[0]["count"] == 1
+    assert rows[0]["direct"] == [True]
+    assert adapter.flag_memory(pair["ep_a"]) is True
+    assert ConsolidationRepository(live_repo).compress_node(pair["s"], "summary") is False
 
 
 @pytest.fixture
@@ -294,7 +333,7 @@ def test_dry_run_reports_without_mutating(merger, unmerger, live_repo, pair):
 
     assert res["restored"] == 0 and res["reason"] == "DRY_RUN"
     assert res["would_restore"]["out_relationships"] == 2  # two parallel RELATES_TO
-    assert res["would_restore"]["in_relationships"] == 2    # peer -> a, and episode MENTIONS -> a
+    assert res["would_restore"]["in_relationships"] == 3    # peer, MENTIONS, RETENTION_SOURCE
     assert live_repo.execute(
         "MATCH (n:Entity {uuid:$u}) RETURN count(n) AS c", params={"u": pair["a"]}
     )[0]["c"] == 0, "a dry run must not restore anything"

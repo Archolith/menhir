@@ -225,7 +225,12 @@ tuning.
 Memories can be session-scoped, persistent, active, compressed, promoted, flagged, or
 marked gone. Daily maintenance runs consolidation and decay checks. Eligible inactive
 memories may be compressed, and compressed content can be rehydrated when new context
-arrives. Flagged and promoted memories receive stronger retention protection.
+arrives. A direct entity flag protects that entity. Enrichment also links each eligible
+extracted entity to its source episode, so flagging or unflagging that episode changes
+the entity's automatic retention protection without copying the flag. Promoted
+memories receive stronger protection through their separate authority policy.
+Existing episodes are not backfilled with these links; their stored entity flags
+remain protective.
 
 Automatic transitions from `COMPRESSED` to `GONE` are disabled. The old deletion
 threshold did not provide a safe basis for irreversible removal. An operator can still
