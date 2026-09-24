@@ -12,6 +12,7 @@ import anyio
 from archolith_mcp_framework import create_gateway_server, run_server
 
 from menhir.infrastructure.logging_config import configure_logging
+from menhir.mcp.instructions import SERVER_INSTRUCTIONS
 from menhir.mcp.lifecycle import (
     _mcp_lifespan,
     _state,
@@ -32,10 +33,7 @@ logger = logging.getLogger(__name__)
 # Core tools pinned visible for LLM discovery; others found via search_tools/call_tool
 mcp = create_gateway_server(
     "menhir",
-    instructions=(
-        "Inspect provenance, govern durable context, and analyze repository structure "
-        "and change impact for coding agents."
-    ),
+    instructions=SERVER_INSTRUCTIONS,
     lifespan=_mcp_lifespan,
     always_visible=[
         "recall_memories",

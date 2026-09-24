@@ -1,3 +1,34 @@
+## 2026-09-24 - MCP clients are told when to use memory, not just what Menhir is
+
+Every MCP client receives the server instructions, whether or not a repository pastes the
+AGENTS.md template. They were one positioning sentence that never mentioned memory or recall,
+and in an agent evaluation agents skipped `recall_memories` in half the runs and used Menhir as a
+code index. With the new instructions and descriptions, every run recalled and most read the
+source episode; answers improved at the same cost.
+
+- `src/menhir/mcp/instructions.py` (new): `SERVER_INSTRUCTIONS`, shared by the stdio and remote
+  servers. It covers when recall is worth it (recorded decisions, rejected alternatives,
+  incidents, preferences, constraints; especially when the repository cannot supply the
+  rationale), the identifier discipline, one focused query first, `get_provenance` for exact
+  wording, checking dates, conflicts and stale anchors, and that an empty result does not prove
+  there is no history.
+- `src/menhir/mcp/server.py`, `src/menhir/api/mcp_remote.py`: use it.
+- `src/menhir/mcp/contracts.py`: `registered_description()` drops a docstring's opening sentence when
+  it repeats the curated description; 13 tools sent their lead sentence twice.
+- `recall_memories`, `get_provenance`, `query_structure`: descriptions say what each returns and
+  when to use the next tool. Recall returns summaries, not source episodes; `include_invalidated`
+  keeps superseded facts on returned results and is not a history search; `compact` and `trace` are
+  documented; the structure graph is not a substitute for targeted recall.
+- `get_artifact`, `list_artifacts`, `list_artifact_questions`: say they return records and document
+  locations, not document text (`get_artifact` claimed "in full"), and that an open question does
+  not establish a decision.
+- `docs/templates/AGENTS.menhir.md`, `docs/agent-usage.md`: the same when-to-recall and provenance
+  guidance; structure-first only for structural questions; `rate_recall` only where the client
+  exposes it (the readonly tier does not).
+- `tests/test_mcp_agent_guidance.py` (new): both transports send the shared text, every tool it names
+  exists, and no registered description repeats its lead sentence.
+- `CHANGELOG-archive.md`: archived the 2026-09-17 shadow-scan entry to keep ten.
+
 ## 2026-09-24 - source retention fails closed on incomplete provenance
 
 - `backfill_legacy_retention.py`: inventory all historical flags and processed sources, then add only individually reviewed, tenant-consistent source links under a quiesced, backed-up maintenance operation; preserve ambiguous entity flags.
@@ -210,31 +241,3 @@ deleted; Menhir now supplies only what it owns and Beacon generates:
   `1cc3352b90004f3b76f1c5ed49ee4235c606a52f` (not a moving branch) and drops the
   version-equality assert.
 - Requires a Beacon whose CLI supports build+validate (PR Archolith/beacon#10, stacked on #9).
-
-## 2026-09-17 - the shadow scan: structural parity, and the copy does not survive it
-
-The last P3 piece, and the only one that produces a result rather than a refusal. Its correctness
-question is different in kind: not "was the attack stopped" but "does scanning a snapshot remotely
-give the same answer as scanning the repository locally".
-
-**It calls the existing `ProjectScanner` rather than reimplementing one.** Parity is then true by
-construction and a surviving difference is a real one -- something the bundle dropped or the
-extraction changed -- instead of a disagreement between two scanners.
-
-**Local scanning is untouched, and that is asserted rather than claimed.**
-`project_scanner.py` is not modified; a test checks it against git, and the 196 pre-existing tests
-covering it pass unchanged.
-
-- The fingerprint excludes `root_path` (absolute), `file_mtime` (extraction writes new files),
-  `name` (the root is named for an upload) and the identity/self-fingerprint fields. Including any
-  would make every parity check fail for a reason unrelated to the snapshot -- worse than not
-  checking, because it trains a reader to ignore the result.
-- Every list is sorted. `os.scandir` promises no order and differs between filesystems, so an
-  unsorted fingerprint would differ between two scans of identical content.
-- **A test proves the exclusions did not make it blind**: dropping one source file still changes
-  the fingerprint. A digest that ignores enough to always match reports parity it never checked.
-- The materialised root is deleted after the report, including when the scan raises. A root that
-  outlives its report is an unattributed copy of somebody's repository sitting on a disk.
-- The report carries the three coverage counts and does NOT carry `partial_index` (invariant 4):
-  the counts are the source of truth and the derivation belongs to whoever can see the whole
-  picture.

@@ -98,8 +98,9 @@ class QueryStructureTool(BaseTextTool):
     destructive_hint = False
     open_world_hint = False
     description = (
-        "Query the structural code graph for project layout, files, imports, tests, endpoints, "
-        "and cross-project dependencies."
+        "Inspect indexed project layout, symbols, imports, tests, endpoints, dependencies and "
+        "change impact. For recorded decisions or historical rationale, use recall_memories; "
+        "linked memory previews here are not a substitute for targeted recall."
     )
 
     async def endpoint(
@@ -109,17 +110,18 @@ class QueryStructureTool(BaseTextTool):
         path: str = "",
         namespace: str = "",
     ) -> str:
-        """Query the structural code graph for project layout, files, imports, tests, and endpoints.
+        """query_type: projects, overview, files, imports, tests, endpoints,
+        dependencies, cross_refs, blast_radius, affected_tests, symbols, context.
+        project is required except for projects. Check projects before trusting
+        project-scoped results.
 
-        Args:
-            query_type: One of: projects, overview, files, imports, tests, endpoints, dependencies,
-                cross_refs, blast_radius, affected_tests, symbols, context.
-            project: Project name (required except for "projects").
-            path: File path filter. For symbols: exact file, dir prefix (trailing /), or empty.
-                For context: exact file path.
+        path: prefix for files; exact file for imports, tests or context;
+        comma-separated files for blast_radius or affected_tests; exact file,
+        directory prefix ending in /, or empty for symbols.
 
-        Returns:
-            Structured text result with the requested information.
+        Results reflect the index, not necessarily the current checkout. Verify
+        stale anchors and missing/partial indexes against current files. An empty
+        result does not establish no dependencies, tests or impact.
         """
         backend = self.get_backend()
 

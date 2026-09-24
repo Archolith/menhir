@@ -4,6 +4,9 @@ Menhir is most useful when an agent treats it as two related systems: durable se
 structural code graph. The client must supply stable workspace, namespace, project, reader, and file
 context instead of asking Menhir to guess them.
 
+Every MCP client receives a short version of this contract as the server instructions
+(`src/menhir/mcp/instructions.py`), with or without a pasted AGENTS.md block; keep the two consistent.
+
 ## Recommended session flow
 
 1. Bootstrap in two phases. Call `read_flagged_memories` first, then
@@ -12,12 +15,16 @@ context instead of asking Menhir to guess them.
    `ingest_project` before trusting an empty structural answer.
 3. Use `query_structure` for files, imports, symbols, endpoints, tests, context, and dependencies. Before
    editing a file, call `blast_radius` once for that file; use `affected_tests` to choose focused checks.
-4. Use targeted `recall_memories` when a decision, failure, preference, or prior implementation fact could
-   change the work. Pass `file_context` and `file_context_project` for code-related questions.
+4. Use targeted `recall_memories` when a decision, rejected alternative, incident, preference, or constraint
+   could change the work, especially when the repository and its Git history do not record the rationale.
+   Start with one focused query naming the component and the decision, and rephrase only if evidence is
+   missing. Pass `file_context` and `file_context_project` for code-related questions. Recall returns
+   summaries and facts; read the linked source excerpts with `get_provenance(node_uuid=...)` when wording or
+   rationale matters, and distinguish recorded reasons from inference.
 5. Verify stale anchors against the current file. An incomplete or stale project index makes an empty result
    inconclusive, not proof that no dependency exists.
-6. After using recall output, call `rate_recall` honestly. This records retrieval quality; it does not alter
-   memory ranking.
+6. If the client exposes `rate_recall` (agent tier), call it honestly after using recall output. This
+   records retrieval quality; it does not alter memory ranking.
 7. At the end of meaningful work, store durable lessons with `add_memory`. Attach a bounded Git diff when
    code paths matter. Record remaining work as a todo with a repository-relative code reference.
 

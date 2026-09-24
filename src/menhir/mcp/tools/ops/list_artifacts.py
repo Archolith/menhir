@@ -36,7 +36,11 @@ class ListArtifactsTool(BaseTextTool):
     read_only_hint = True
     destructive_hint = False
     open_world_hint = False
-    description = "List work artifacts filtered by type, status, or namespace."
+    description = (
+        "Locate recorded plans, reviews, investigations, reports and handoffs, filtered by type, "
+        "status, or namespace. Returns locations and metadata; read the document for its "
+        "rationale."
+    )
 
     async def endpoint(
         self, artifact_type: str = "", status: str = "", namespace: str = "", limit: int = 25
