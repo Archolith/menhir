@@ -33,8 +33,9 @@ def test_create_remote_mcp_registers_tools_and_resources(monkeypatch):
     remote_mcp = mcp_remote.create_remote_tool_only_mcp()
 
     assert created["name"] == "menhir"
-    assert "Inspect provenance" in created["instructions"]
-    assert "change impact" in created["instructions"]
+    from menhir.mcp.instructions import SERVER_INSTRUCTIONS
+
+    assert created["instructions"] == SERVER_INSTRUCTIONS
     assert tools_registered == [remote_mcp]
     assert resources_registered == [remote_mcp]
 
