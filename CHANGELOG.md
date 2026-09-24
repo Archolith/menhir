@@ -1,5 +1,7 @@
 ## 2026-09-24 - source retention fails closed on incomplete provenance
 
+- `backfill_legacy_retention.py`: inventory all historical flags and processed sources, then add only individually reviewed, tenant-consistent source links under a quiesced, backed-up maintenance operation; preserve ambiguous entity flags.
+- `test_backfill_legacy_retention.py`: cover incomplete, cross-tenant, structural, and merged candidates, manifest drift, and graph-backed live flag/unflag/reflag behavior.
 - `episode_stamping.py`: refuse a missing or wrong-tenant source or extracted semantic entity instead of silently returning fewer retention links.
 - `scheduler_tasks.py`: leave a failed episode unreconciled and continue the retry sweep when provenance is incomplete.
 - `test_live_source_retention.py` and `test_live_source_retention_live.py`: cover incomplete links and structural exclusions with focused unit and Neo4j tests.
