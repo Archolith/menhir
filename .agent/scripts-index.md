@@ -71,6 +71,7 @@ Do not add a `_` script to answer a question one of the durable instruments alre
 | `unmerge.py` | operator CLI to reverse a merge |
 | `migrate_namespace_default.py` | one-shot: normalize legacy nodes into the default namespace |
 | `migrate_flagged_bootstrap_scope.py` | one-time recall-hygiene classification cutover |
+| `backfill_legacy_retention.py` | read-only census of all flagged nodes and processed source episodes; reviewed, additive `RETENTION_SOURCE` backfill and exact post-apply verification during a quiesced maintenance window, never clearing legacy entity flags |
 | `repair_embedding_dimensions.py` | fix mismatched embedding dims |
 | `backfill_merge_audit.py` | copy graph merge_audit into the telemetry sidecar |
 | `metric_recapture.py` | recapture instrumentation :Entity view nodes as :Metric |
