@@ -9,8 +9,33 @@ Entries older than the 10 most recent, archived from `CHANGELOG.md`.
 - 2026-08-10: 2026-08-07 (1 entry).
 - 2026-08-11: 2026-08-07 (1 entry).
 - 2026-09-23: 2026-09-17 (1 entry).
+- 2026-09-24: 2026-09-17 (1 entry).
 
 ---
+
+## 2026-09-17 - extraction runs in a child process (P3 decision 1)
+
+`extraction_writer` holds the rules; this holds the blast radius. A malformed archive that hangs or
+crashes the ZIP parser is now a failed job rather than a server outage.
+
+**The counterexample this module exists for: a killed child runs no cleanup.** The writer removes
+its root in an `except` clause, and SIGKILL raises nothing -- so a child killed at its deadline
+leaves a half-written root and the PARENT has to remove it. Easy to miss precisely because the
+in-process cleanup is correct and already tested. Confirmed by negative control: with the parent's
+cleanup removed, the half-written root really does survive.
+
+- A hung child is killed at its deadline; a crashed one (segfault, OOM kill) becomes a stable code.
+- **Exit code 0 is not a result.** A child that printed a warning instead of JSON is refused rather
+  than read as success -- that is how an empty root becomes a believed snapshot.
+- Failures cross as codes, never tracebacks, and a child's refusal message is dropped. The child
+  was parsing attacker-chosen bytes, so its output is not a place to source an error string from.
+- The hanging and crashing children are injected as a different command, not hooked into the worker
+  with a test-only flag. A production module with a test branch can take that branch in production.
+
+**Containment is not uniform across platforms, stated rather than implied.** The wall-clock
+deadline works everywhere; the memory ceiling uses `RLIMIT_AS`, which POSIX has and Windows does
+not. Menhir deploys on Linux so the gap is development-only, but a caller believing the ceiling is
+universal would be believing something false.
 
 ## 2026-09-17 - the extraction writer: bytes land, or nothing does
 
