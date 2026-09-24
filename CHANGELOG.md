@@ -6,12 +6,13 @@ routes to could not be found through Beacon at all. In a Beacon-only evaluation 
 no file tools inverted the stdio runtime decision because `backend-first-mcp.md` and
 `.agent/architecture.md` were out of reach.
 
-- `beacon.yaml`: `canonical_docs` now lists 26 documents in reading order (entry points,
+- `beacon.yaml`: `canonical_docs` now lists 25 documents in reading order (entry points,
   architecture and decisions, reference, workflows, then the current plans and research indexes),
-  chosen by an agent with no task context. The superseded July roadmap is left out. Listing a
-  document makes it searchable, not required reading; the project overview still shows only the
-  first four. Checked locally: all 26 are indexed (452 search chunks, up from 105) and the
-  generated manifest grows by about 440 tokens.
+  chosen by an agent with no task context. The superseded July roadmap is left out, and so is
+  `deploy/RUNBOOK.md`, which is specific to one operator's deployment. Listing a document makes it
+  searchable, not required reading; the project overview still shows only the first four. Checked
+  locally: all listed documents are indexed (443 search chunks, up from 105) and the generated
+  manifest grows by about 420 tokens.
 - `CHANGELOG-archive.md`: the 2026-09-17 extraction-writer entry moved there (10-entry limit).
 
 ## 2026-09-23 - Menhir's own beacon.yaml

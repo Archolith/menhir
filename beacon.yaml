@@ -41,8 +41,8 @@ current_focus:
 # The documents an agent can search through Beacon, in reading order: entry points, architecture
 # and decisions, reference, workflows, then current plans and research indexes. Chosen by an agent
 # with no task context (2026-09-23); listing a document makes it searchable, not required reading.
-# No statuses here: each document states its own in frontmatter. The superseded July roadmap is
-# left out.
+# No statuses here: each document states its own in frontmatter. The superseded July roadmap and
+# the operator-specific deploy runbook are left out.
 canonical_docs:
   - path: AGENTS.md
     role: entrypoint
@@ -83,8 +83,6 @@ canonical_docs:
   - path: .agent/workflows/artifact_authoring.md
     role: workflow
   - path: docs/runbooks/release.md
-    role: workflow
-  - path: deploy/RUNBOOK.md
     role: workflow
   - path: .agent/plans/README.md
     role: reference
