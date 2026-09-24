@@ -321,6 +321,8 @@ source's live `user_flagged=true` protects its linked entities from harmful auto
 mutations. Structural entities are excluded. A missing or wrong-tenant source or semantic entity
 prevents enrichment from publishing `READY`. Merge and unmerge preserve these links. Existing
 episodes are not backfilled by this change; old true entity flags remain protective.
+Enrichment marks its retention links `direct=true`. A merge-rebound link has no direct marker;
+if enrichment later records the survivor directly, it marks that link direct so unmerge retains it.
 
 ### Node: Structural Entity
 

@@ -61,6 +61,7 @@ def test_record_retention_sources_is_scoped_idempotent_and_skips_structure() -> 
     assert linked == 2
     query, params = neo4j.calls[0]
     assert "MERGE (source)-[retention:RETENTION_SOURCE]->(entity)" in query
+    assert "SET retention.direct = true" in query
     assert "entity.structure_role IS NULL" in query
     assert "$tenant_namespaces" in query
     assert params["entity_uuids"] == ["entity-1", "entity-2"]

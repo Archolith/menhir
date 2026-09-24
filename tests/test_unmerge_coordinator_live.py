@@ -33,8 +33,10 @@ import uuid as uuidlib
 import pytest
 
 from menhir.domain import merge_delta as md
+from menhir.infrastructure.consolidation_queries import ConsolidationRepository
 from menhir.infrastructure.correlation_queries import CorrelationRepository
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
+from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.services.merge_coordinator import MergeCoordinator
 from menhir.services import unmerge_coordinator as uc
 from menhir.services.unmerge_coordinator import UnmergeCoordinator
@@ -204,6 +206,33 @@ def test_merge_then_unmerge_restores_exactly(merger, unmerger, live_repo, pair):
     assert pair["a"] not in lineage
     assert unmerger.journal.get(merge_op)["state"] == "REVERSED"
     assert unmerger.journal.get(res["op_id"])["state"] == "COMMITTED"
+
+
+@pytest.mark.online
+def test_unmerge_keeps_retention_recorded_on_survivor_after_merge(
+    merger, unmerger, live_repo, pair
+):
+    adapter = MemoryGraphAdapter(neo4j=live_repo)
+    merged = merger.merge(survivor_uuid=pair["s"], absorbed_uuid=pair["a"], similarity=0.97)
+    assert merged["merged"] == 1
+
+    # A later enrichment independently establishes the survivor as a source-derived entity.
+    assert adapter.record_retention_sources(
+        source_episode_uuid=pair["ep_a"], entity_uuids=[pair["s"]], namespace="default"
+    ) == 1
+    assert unmerger.unmerge(merged["op_id"])["restored"] == 1
+
+    rows = live_repo.execute(
+        """
+        MATCH (:Episodic {uuid:$source})-[r:RETENTION_SOURCE]->(:Entity {uuid:$survivor})
+        RETURN count(r) AS count, collect(r.direct) AS direct
+        """,
+        params={"source": pair["ep_a"], "survivor": pair["s"]},
+    )
+    assert rows[0]["count"] == 1
+    assert rows[0]["direct"] == [True]
+    assert adapter.flag_memory(pair["ep_a"]) is True
+    assert ConsolidationRepository(live_repo).compress_node(pair["s"], "summary") is False
 
 
 @pytest.fixture

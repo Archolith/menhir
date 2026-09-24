@@ -349,6 +349,7 @@ class CorrelationRepository:
                 MATCH (source:Episodic)-[r:RETENTION_SOURCE]->(s)
                 WHERE source.uuid IN $rebound_retention_sources
                   AND __RETENTION_SOURCE_TENANT__
+                  AND coalesce(r.direct, false) = false
                 DELETE r
                 RETURN count(r) AS retention_sources_removed
             }

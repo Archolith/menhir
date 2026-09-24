@@ -64,6 +64,7 @@ class EpisodeStampingRepository:
                      AND {same_tenant_cypher("source", "entity")} AS eligible
             FOREACH (_ IN CASE WHEN source_valid AND eligible THEN [1] ELSE [] END |
                 MERGE (source)-[retention:{RETENTION_SOURCE_RELATIONSHIP}]->(entity)
+                SET retention.direct = true
             )
             RETURN source_valid AS source_valid,
                    sum(CASE WHEN source_valid AND eligible THEN 1 ELSE 0 END) AS linked,
