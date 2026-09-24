@@ -139,42 +139,20 @@ def failure_details_from_exception(exc: Exception) -> dict[str, object]:
     return {}
 
 
-def propagate_user_flag(
+def record_retention_sources(
     graph_adapter: Any,
     node_uuids: list[str],
     *,
-    episode_uuid: str,
+    source_episode_uuid: str,
+    namespace: str,
 ) -> None:
-    """Flag each extracted entity node for retention, skipping structural nodes.
+    """Record source provenance without copying the source's mutable flag state."""
 
-    Single source of truth for propagating an episode's ``user_flagged`` onto the
-    entity nodes extracted from it. Entity resolution can dedupe an extracted node
-    onto an existing structural graph node (project/directory/file/document), which
-    ``flag_memory`` refuses by design with ``ValueError``; those are skipped rather
-    than raised so a single dedup-onto-structural node cannot abort the episode's
-    enrichment or reconcile. Every enrichment/reconcile path must call this instead
-    of looping over ``flag_memory`` directly (the guard previously lived in three
-    copies and drifted out of sync).
-
-    Propagates retention only. The episode's ``bootstrap_scope`` is deliberately NOT
-    forwarded: ``user_flagged`` is the retention override, ``bootstrap_scope`` is the
-    separate startup-selection bit (domain/bootstrap_scope.py). Forwarding it put every
-    extracted entity -- including shared hubs like "PostgreSQL 16" -- into the bootstrap
-    read, which requires both. An entity still gets a scope when flagged directly via
-    ``flag_memory(uuid, bootstrap_scope=...)``, and that existing scope survives here
-    because scope-less ``flag_memory`` leaves the property untouched.
-    """
-
-    for node_uuid in node_uuids:
-        try:
-            graph_adapter.flag_memory(node_uuid)
-        except ValueError:
-            logger.debug(
-                "Skipping flag on structural node uuid=%s during flag propagation "
-                "for episode_id=%s",
-                node_uuid,
-                episode_uuid,
-            )
+    graph_adapter.record_retention_sources(
+        source_episode_uuid=source_episode_uuid,
+        entity_uuids=node_uuids,
+        namespace=namespace,
+    )
 
 
 # Maximum diff size (in characters) appended to episode bodies.
@@ -313,12 +291,12 @@ async def try_reconcile_existing(ctx: EnrichmentContext) -> bool:
             namespace=str(ctx.claimed.get("namespace") or "default"),
             **stamp_kwargs,
         )
-        if bool(ctx.claimed.get("user_flagged", False)):
-            propagate_user_flag(
-                ctx.graph_adapter,
-                entity_uuids,
-                episode_uuid=ctx.episode_uuid,
-            )
+        record_retention_sources(
+            ctx.graph_adapter,
+            entity_uuids,
+            source_episode_uuid=ctx.episode_uuid,
+            namespace=str(ctx.claimed.get("namespace") or "default"),
+        )
         marked_ready = ctx.graph_adapter.mark_episode_ready(
             ctx.episode_uuid,
             worker_id=ctx.worker_id,
@@ -1173,12 +1151,12 @@ async def stamp_and_finalize(
         namespace=str(ctx.claimed.get("namespace") or "default"),
         **stamp_kwargs,
     )
-    if bool(ctx.claimed.get("user_flagged", False)):
-        propagate_user_flag(
-            ctx.graph_adapter,
-            [node.uuid for node in extracted_nodes],
-            episode_uuid=ctx.episode_uuid,
-        )
+    record_retention_sources(
+        ctx.graph_adapter,
+        [node.uuid for node in extracted_nodes],
+        source_episode_uuid=ctx.episode_uuid,
+        namespace=str(ctx.claimed.get("namespace") or "default"),
+    )
     # M6 Phase 5: Record scope assignment for extracted entity nodes
     if ctx.settings_record_revisions:
         for node in extracted_nodes:

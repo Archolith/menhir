@@ -316,10 +316,11 @@ async def test_e2e_08_isolation(
         # --- a capped scan must not authorize a destructive prune -------------------------
         before = graph_query(
             e2e_config,
-            "MATCH (n) WHERE n.group_id = $group RETURN count(n) AS nodes",
+            "MATCH (n) WHERE n.group_id = $group RETURN elementId(n) AS id",
             group=ns_a,
         )
-        nodes_before = before[0]["nodes"] if before else 0
+        before_ids = {row["id"] for row in before}
+        nodes_before = len(before_ids)
         assert nodes_before > 1, (
             f"namespace {ns_a} holds {nodes_before} nodes; the cap below would not be "
             "exceeded and the refusal would not be exercised"
@@ -340,14 +341,16 @@ async def test_e2e_08_isolation(
         )
         after = graph_query(
             e2e_config,
-            "MATCH (n) WHERE n.group_id = $group RETURN count(n) AS nodes",
+            "MATCH (n) WHERE n.group_id = $group RETURN elementId(n) AS id",
             group=ns_a,
         )
-        nodes_after = after[0]["nodes"] if after else 0
+        after_ids = {row["id"] for row in after}
+        nodes_after = len(after_ids)
         # The bug this guards against is a gate that reports a refusal after the delete
-        # has already run. Only the node count can tell those apart.
+        # has already run. A queued enrichment may add nodes while this check runs, so
+        # compare the original identities rather than requiring an unchanged count.
         documented_refusal = '"error"' in capped and "force=true" in capped
-        nothing_deleted = nodes_after == nodes_before
+        nothing_deleted = before_ids <= after_ids
         lane_evidence.record(
             "capped_scan_does_not_authorize_destructive_prune",
             passed=documented_refusal and nothing_deleted,
@@ -364,7 +367,7 @@ async def test_e2e_08_isolation(
         )
         assert nothing_deleted, (
             f"delete_namespace reported a refusal but the graph lost "
-            f"{nodes_before - nodes_after} nodes; the cap is checked after the delete"
+            f"{len(before_ids - after_ids)} original nodes; the cap is checked after the delete"
         )
 
     lane_evidence.close(status="PASS")

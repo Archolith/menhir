@@ -25,7 +25,7 @@ from menhir.services.enrichment_failures import (
     is_budget_refusal,
     is_session_window_refusal,
 )
-from menhir.services.enrichment_steps import propagate_user_flag
+from menhir.services.enrichment_steps import record_retention_sources
 from menhir.services.event_consolidation import (
     EventConsolidationConfig,
     run_event_consolidation,
@@ -278,12 +278,21 @@ async def retry_process_candidate(
                 namespace=str(row.get("namespace") or "default"),
                 **stamp_kwargs,
             )
-            if bool(row.get("user_flagged", False)):
-                propagate_user_flag(
+            try:
+                record_retention_sources(
                     graph_adapter,
                     entity_uuids,
-                    episode_uuid=episode_uuid,
+                    source_episode_uuid=episode_uuid,
+                    namespace=str(row.get("namespace") or "default"),
                 )
+            except ValueError as exc:
+                logger.warning(
+                    "Leaving failed episode unreconciled after incomplete retention provenance "
+                    "episode_id=%s error=%s",
+                    episode_uuid,
+                    exc,
+                )
+                return "waiting"
             if await asyncio.to_thread(
                 graph_adapter.mark_episode_ready,
                 episode_uuid,

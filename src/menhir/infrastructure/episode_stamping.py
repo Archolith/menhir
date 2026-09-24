@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from menhir.domain.namespace import stamped_namespace
+from menhir.domain.namespace import stamped_namespace, tenant_scope_cypher, tenant_scope_params
+from menhir.domain.retention import RETENTION_SOURCE_RELATIONSHIP, same_tenant_cypher
+from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.infrastructure.cypher import Cypher
 from menhir.infrastructure.schema import EDGE_LABELS
 
@@ -27,6 +29,64 @@ class EpisodeStampingRepository:
     """Post-ingest stamping and live processing metadata updates."""
 
     neo4j: Any
+
+    def record_retention_sources(
+        self,
+        *,
+        source_episode_uuid: str,
+        entity_uuids: list[str],
+        namespace: str | None = None,
+    ) -> int:
+        """Idempotently record which source episode produced each semantic entity.
+
+        The relationship records provenance, not a copied protection bit. Protection is derived
+        later from the source episode's current ``user_flagged`` value. Structural entities are
+        skipped; a missing or out-of-tenant semantic endpoint fails enrichment rather than
+        publishing an episode whose extracted entities lack retention provenance.
+        """
+
+        if not entity_uuids:
+            return 0
+        if not source_episode_uuid or any(not uuid for uuid in entity_uuids):
+            raise ValueError("Retention provenance requires nonempty source and entity UUIDs")
+        unique_entity_uuids = list(dict.fromkeys(entity_uuids))
+        rows = self.neo4j.execute(
+            f"""
+            OPTIONAL MATCH (source:Episodic {{uuid: $source_episode_uuid}})
+            WITH source, source IS NOT NULL AND ({tenant_scope_cypher("source")}) AS source_valid
+            UNWIND $entity_uuids AS entity_uuid
+            OPTIONAL MATCH (entity:Entity {{uuid: entity_uuid}})
+            WITH source, source_valid, entity_uuid, entity,
+                 entity IS NOT NULL AND coalesce(({non_structural_memory_cypher("entity")}), false)
+                     AS semantic
+            WITH source, source_valid, entity_uuid, entity, semantic,
+                 semantic AND ({tenant_scope_cypher("entity")})
+                     AND {same_tenant_cypher("source", "entity")} AS eligible
+            FOREACH (_ IN CASE WHEN source_valid AND eligible THEN [1] ELSE [] END |
+                MERGE (source)-[retention:{RETENTION_SOURCE_RELATIONSHIP}]->(entity)
+                SET retention.direct = true
+            )
+            RETURN source_valid AS source_valid,
+                   sum(CASE WHEN source_valid AND eligible THEN 1 ELSE 0 END) AS linked,
+                   [uuid IN collect(CASE
+                       WHEN entity IS NULL OR (semantic AND NOT coalesce(eligible, false))
+                       THEN entity_uuid ELSE null END)
+                    WHERE uuid IS NOT NULL] AS invalid_entity_uuids
+            """,
+            params={
+                "source_episode_uuid": source_episode_uuid,
+                "entity_uuids": unique_entity_uuids,
+                **tenant_scope_params(namespace),
+            },
+        )
+        if not rows or not rows[0].get("source_valid"):
+            raise ValueError("Retention source episode is missing or outside the requested tenant")
+        invalid_entity_uuids = rows[0].get("invalid_entity_uuids") or []
+        if invalid_entity_uuids:
+            raise ValueError(
+                f"Retention provenance missing for {len(invalid_entity_uuids)} extracted entities"
+            )
+        return int(rows[0].get("linked", 0))
 
     def stamp_ingest_metadata(
         self,
