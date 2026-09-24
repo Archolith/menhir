@@ -30,14 +30,18 @@ Recall normally returns summaries and facts. When wording or rationale matters, 
 get_provenance(node_uuid=...) for linked source excerpts; increase content_chars if truncated, up \
 to 5000. Cite the source and distinguish recorded reasons from inference.
 
-Use query_structure for layout and impact; check projects and index warnings. Verify current \
-behaviour against current code. Inspect dates, supersession, conflicts and stale anchors before \
-applying memory.
+Use query_structure for layout and impact; check projects and index warnings, and run \
+ingest_project if the repository is missing. Verify current behaviour against current code. \
+Inspect dates, supersession, conflicts and stale anchors before applying memory.
 
 When relevant, inspect list_todos/get_todo, list_artifacts/get_artifact, list_artifact_questions \
 or list_conflicts. Artifacts provide document locations. Discover unlisted tools through the \
 client's supported mechanism.
 
-Empty results do not prove no history exists. Report errors or degraded results; continue from \
-local evidence only when sufficient. Use authorized tools only. Store durable, verified lessons \
-when permitted; never secrets."""
+Empty results do not prove no history exists; a new project's memory starts empty. Report errors \
+or degraded results; continue from local evidence only when sufficient. Use authorized tools only.
+
+Store durable, verified lessons when permitted; never secrets. Write a decision together with its \
+reason and the alternative rejected, so a later "why" can be recalled. Use add_memory_and_track \
+when the write must be recallable in this session; keep its episode id and observe that id with \
+get_enrichment_status, never by writing again. Otherwise use add_memory."""

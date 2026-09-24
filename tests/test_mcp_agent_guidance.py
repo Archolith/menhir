@@ -66,3 +66,13 @@ def test_a_docstring_opening_with_the_curated_line_keeps_only_the_rest() -> None
     assert rendered.count("Curated one-liner.") == 1
     assert rendered.startswith("Curated one-liner.\n\nReturns things.")
     assert "Args:" in rendered
+
+
+def test_stdio_agents_see_the_tools_the_instructions_rely_on() -> None:
+    import asyncio
+
+    from menhir.mcp import server
+
+    visible = {tool.name for tool in asyncio.run(server.mcp.list_tools())}
+    assert {"recall_memories", "get_provenance", "query_structure", "read_flagged_memories"} <= visible
+

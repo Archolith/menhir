@@ -44,6 +44,9 @@ mcp = create_gateway_server(
         "recall_context_memories",
         "list_todos",
         "add_todo",
+        # The instructions send agents here for a recorded reason's exact wording; otherwise a
+        # stdio agent would first have to find it through search_tools.
+        "get_provenance",
     ],
 )
 
