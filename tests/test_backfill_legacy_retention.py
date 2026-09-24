@@ -107,6 +107,12 @@ def test_inventory_includes_all_flags_and_unflagged_source_candidates(
     assert "entity_content" not in rows[-1]
 
 
+def test_inventory_refuses_duplicate_source_rows() -> None:
+    repo = FakeRepo([], [_candidate(), _candidate()])
+    with pytest.raises(ValueError, match="duplicate source/Graphiti/entity"):
+        MODULE._inventory(repo, limit=10)
+
+
 @pytest.mark.parametrize(
     "change,reason",
     [

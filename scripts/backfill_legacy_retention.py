@@ -122,6 +122,17 @@ def _inventory(
         raise ValueError(
             "inventory exceeds limit; raise --limit to obtain a complete census"
         )
+    for row in flags:
+        row["labels"] = sorted(row.get("labels") or [])
+    flag_ids = [row.get("uuid") for row in flags]
+    if None in flag_ids or len(set(flag_ids)) != len(flag_ids):
+        raise ValueError("flag inventory has missing or duplicate UUIDs")
+    source_keys = [
+        (row.get("source_uuid"), row.get("graphiti_uuid"), row.get("entity_uuid"))
+        for row in sources
+    ]
+    if len(set(source_keys)) != len(source_keys):
+        raise ValueError("source inventory has duplicate source/Graphiti/entity rows")
     for row in sources:
         row["reason"] = _reason(row)
         for name in ("source_content", "graphiti_content"):
