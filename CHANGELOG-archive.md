@@ -8,9 +8,39 @@ Entries older than the 10 most recent, archived from `CHANGELOG.md`.
 - 2026-08-09: 2026-08-07 (1 entry).
 - 2026-08-10: 2026-08-07 (1 entry).
 - 2026-08-11: 2026-08-07 (1 entry).
+- 2026-09-21: 2026-09-16 (1 entry).
 - 2026-09-23: 2026-09-17 (1 entry).
+- 2026-09-24: 2026-09-17 (1 entry).
 
 ---
+
+## 2026-09-17 - the shadow scan: structural parity, and the copy does not survive it
+
+The last P3 piece, and the only one that produces a result rather than a refusal. Its correctness
+question is different in kind: not "was the attack stopped" but "does scanning a snapshot remotely
+give the same answer as scanning the repository locally".
+
+**It calls the existing `ProjectScanner` rather than reimplementing one.** Parity is then true by
+construction and a surviving difference is a real one -- something the bundle dropped or the
+extraction changed -- instead of a disagreement between two scanners.
+
+**Local scanning is untouched, and that is asserted rather than claimed.**
+`project_scanner.py` is not modified; a test checks it against git, and the 196 pre-existing tests
+covering it pass unchanged.
+
+- The fingerprint excludes `root_path` (absolute), `file_mtime` (extraction writes new files),
+  `name` (the root is named for an upload) and the identity/self-fingerprint fields. Including any
+  would make every parity check fail for a reason unrelated to the snapshot -- worse than not
+  checking, because it trains a reader to ignore the result.
+- Every list is sorted. `os.scandir` promises no order and differs between filesystems, so an
+  unsorted fingerprint would differ between two scans of identical content.
+- **A test proves the exclusions did not make it blind**: dropping one source file still changes
+  the fingerprint. A digest that ignores enough to always match reports parity it never checked.
+- The materialised root is deleted after the report, including when the scan raises. A root that
+  outlives its report is an unattributed copy of somebody's repository sitting on a disk.
+- The report carries the three coverage counts and does NOT carry `partial_index` (invariant 4):
+  the counts are the source of truth and the derivation belongs to whoever can see the whole
+  picture.
 
 ## 2026-09-17 - the extraction writer: bytes land, or nothing does
 
@@ -39,6 +69,31 @@ does not tell you.
 
 Still to come in P3: the subprocess wrapper this writer will run inside (decision 1), and the
 shadow scan.
+
+## 2026-09-16 - the snapshot receive mode is declared once instead of compared everywhere
+
+P2A read `MENHIR_SNAPSHOT_RECEIVE_MODE` with `os.getenv` inside the tool module and compared it to
+a string literal. Correct for one phase with one surface, and it does not survive three more modes:
+`shadow` extracts an archive and scans it, `write` also reaches the graph, and a string compared in
+each place that cares is how `receive` ends up extracting something.
+
+`menhir.config.snapshot_mode` now declares the ladder once, beside `auth_mode` and for the same
+reason -- "what is this server allowed to do?" should have one answer every caller reads.
+
+- `SnapshotReceiveMode` exposes `accepts_uploads`, `extracts_archives` and `writes_graph`, so
+  callers ask for the capability rather than comparing to a name. `mode == WRITE` in an extraction
+  guard is correct until `shadow` exists and silently wrong afterwards.
+- `extracts_archives` and `writes_graph` have no implementation -- P3 and P4 own those -- but are
+  pinned by test now, because the guards that will consult them get written against this contract.
+- **Unknown values resolve to OFF and do not raise.** A typo must not enable a receive surface, and
+  a snapshot mode nobody set is not a reason to refuse to boot.
+- P2A's `staging` still resolves, to `receive`. Silently becoming OFF after an upgrade would look
+  like the tools vanishing with nothing obviously wrong in the config. The remote-sim stack now
+  names `receive` so the alias is not the only thing exercised.
+
+`test_the_mode_is_off_unless_it_is_explicitly_staging` asserted that `receive` did NOT enable the
+tools. That was the phase's behaviour, not a safety property, so it was rewritten to pin the
+property that still holds: anything not naming a mode resolves to OFF.
 
 ## 2026-08-07 — docs: correct stale local-Docker Neo4j guidance in the operations runbook
 

@@ -6,6 +6,9 @@ does NOT mean its feature is live — most of the frontier retrieval stack ships
 2026-07-04 read-side bench verdict: neutral-to-negative on LongMemEval, so it does not earn being on
 by default). This ledger is the bridge between "built" and "on".
 
+The governing rollout decision is
+[ADR 0007](adr/0007-evidence-gated-default-off-feature-activation.md).
+
 **Rule of thumb.** Default-off-but-working stays out of production behavior until a per-deployment
 flag is set (or a bench lift verdict flips the default). Enabling any of these is an owner decision.
 

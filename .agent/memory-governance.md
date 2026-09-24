@@ -36,6 +36,10 @@ receipt? and can we undo it? Five obligations. Everything below is one of them.
 > **Nothing enters the record without a foundation; content plausibility never substitutes for
 > one.** The most damaging inadmissible evidence is the plausible kind.
 
+The reusable source-bound authority contract is recorded in
+[ADR 0009](adr/0009-source-bound-admission-authority.md). Its fail-closed core exists, while grant
+issuance, domain adoption, and the broader write-side constitution below remain open owner work.
+
 Exists: the stamping choke point (trust metadata in one function; `locked` guard prevents
 downgrade of settled scope), the perception veto-gate (aggregates commit only past a conjunctive
 abstain-only chain — the model admission gate in miniature), the CANDIDATE tier (human-review

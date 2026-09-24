@@ -107,6 +107,20 @@ Beacon now owns all beacon work and defines a backend-neutral memory-provider co
 - `menhir beacon generate` is unchanged; Phase 3B removes it after Beacon's lane passes against
   this provider.
 
+## 2026-09-21 - established architecture decisions become first-class ADRs
+
+- Added ADRs 0003–0010 for the shipped Event → Fold → View boundary, single runtime owner and
+  backend-first access, core-enforced namespace isolation, recoverable cross-store sagas,
+  evidence-gated default-off activation, identity/embodiment/locator separation, source-bound
+  admission authority, and deterministic canonical self identity.
+- The records distinguish implementation evidence from decision scope: namespace pins remain
+  defense-in-depth rather than hostile multitenancy, empirical feature gates do not delay known
+  safety/correctness fixes, projection kinds are not forced into one physical node shape, and
+  admission rollout, authority vocabularies, canonical-self activation, and historical fork
+  consolidation remain explicit owner decisions.
+- Added `.agent/adr/README.md`, routed it from `.agent/README.md`, and linked each decision from its
+  live architecture/data-model/activation owner document; no runtime behavior changed.
+
 ## 2026-09-21 - a tracked-write receipt can be traced to its enriched episode (#92)
 
 Every write leaves two `:Episodic` nodes: Menhir's receipt (the `episode_id` a caller is handed;
@@ -210,31 +224,3 @@ deleted; Menhir now supplies only what it owns and Beacon generates:
   `1cc3352b90004f3b76f1c5ed49ee4235c606a52f` (not a moving branch) and drops the
   version-equality assert.
 - Requires a Beacon whose CLI supports build+validate (PR Archolith/beacon#10, stacked on #9).
-
-## 2026-09-17 - the shadow scan: structural parity, and the copy does not survive it
-
-The last P3 piece, and the only one that produces a result rather than a refusal. Its correctness
-question is different in kind: not "was the attack stopped" but "does scanning a snapshot remotely
-give the same answer as scanning the repository locally".
-
-**It calls the existing `ProjectScanner` rather than reimplementing one.** Parity is then true by
-construction and a surviving difference is a real one -- something the bundle dropped or the
-extraction changed -- instead of a disagreement between two scanners.
-
-**Local scanning is untouched, and that is asserted rather than claimed.**
-`project_scanner.py` is not modified; a test checks it against git, and the 196 pre-existing tests
-covering it pass unchanged.
-
-- The fingerprint excludes `root_path` (absolute), `file_mtime` (extraction writes new files),
-  `name` (the root is named for an upload) and the identity/self-fingerprint fields. Including any
-  would make every parity check fail for a reason unrelated to the snapshot -- worse than not
-  checking, because it trains a reader to ignore the result.
-- Every list is sorted. `os.scandir` promises no order and differs between filesystems, so an
-  unsorted fingerprint would differ between two scans of identical content.
-- **A test proves the exclusions did not make it blind**: dropping one source file still changes
-  the fingerprint. A digest that ignores enough to always match reports parity it never checked.
-- The materialised root is deleted after the report, including when the scan raises. A root that
-  outlives its report is an unattributed copy of somebody's repository sitting on a disk.
-- The report carries the three coverage counts and does NOT carry `partial_index` (invariant 4):
-  the counts are the source of truth and the derivation belongs to whoever can see the whole
-  picture.

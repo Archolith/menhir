@@ -22,6 +22,9 @@ model section you need.
 
 Concept id: `model.primitives`
 
+The stable identity/embodiment/locator and declaration-resolution decision is recorded in
+[ADR 0008](adr/0008-separate-identity-embodiment-and-locator.md).
+
 Four general rules, extracted from the todo redesign and the artifact model but **not
 specific to either**. New features — beacons, orientations, workflows — should be checked
 against these before inventing their own vocabulary.
@@ -714,6 +717,8 @@ schedule, not on the immutable invocation evidence.
 ## Merge / delete lifecycle (recoverable saga)
 
 Concept id: `model.graph_operations`
+
+Decision record: [ADR 0006](adr/0006-recoverable-sagas-for-cross-store-mutations.md).
 
 SQLite and Neo4j cannot share a transaction, so every destructive graph mutation (merge, unmerge,
 delete) runs as a recoverable saga journaled in the telemetry sidecar. The missing
