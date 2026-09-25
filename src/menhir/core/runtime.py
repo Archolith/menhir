@@ -1,4 +1,13 @@
-"""Shared runtime lifecycle — canonical runtime owner for stdio and HTTP."""
+"""Shared runtime lifecycle — canonical runtime owner for stdio and HTTP.
+
+The startup passes, lifecycle/shutdown tasks, and the saga pieces no test pins to this module's
+namespace live in sibling modules (``runtime_passes.py``, ``runtime_lifecycle.py``,
+``runtime_saga.py``) and are re-imported below. Everything the test suite monkeypatches through
+``menhir.core.runtime`` -- the admission latch, ``_recover_saga_backlog``, the observe/recovery
+pair, ``_start_scheduler``, ``_initialize_services``, ``mcp_lifespan`` -- stays defined here on
+purpose: a moved body would resolve names in its sibling's globals and the patches would stop
+applying.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +16,6 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from time import perf_counter
-from typing import Any
 
 from menhir.config import MemorySettings
 from menhir.core import build_memory_services, prepare_memory_runtime
@@ -27,126 +35,33 @@ from .runtime_support import (
     _state,
 )
 
+# Facade re-imports from the sibling modules: every name below stays importable from
+# menhir.core.runtime, and the functions in this module call them through these module globals,
+# which is what keeps the test suite's monkeypatch seams on this module working.
+from .runtime_lifecycle import (
+    _clear_runtime_state,  # noqa: F401 - facade re-export
+    _run_orphan_recovery_in_background,
+    _schedule_shutdown_runtime,  # noqa: F401 - facade re-export
+    _shutdown_runtime,
+    _shutdown_runtime_sync,  # noqa: F401 - facade re-export
+    _stop_scheduler,  # noqa: F401 - facade re-export
+)
+from .runtime_passes import (
+    _run_initial_structure_scan,
+    _run_startup_artifact_reconcile,
+)
+from .runtime_saga import (
+    SAGA_GATE_WAIT_SECONDS,
+    SagaRecoveryNotWriteReady,
+    _SAGA_GATE_POLL_SECONDS,
+    _build_saga_dispatcher,  # noqa: F401 - facade re-export
+    _observe_saga_backlog,
+    _saga_recovery_is_armed,
+)
+
 logger = logging.getLogger(__name__)
 
 INIT_TIMEOUT = 30
-
-
-async def _run_initial_structure_scan(scheduler: MaintenanceScheduler) -> None:
-    try:
-        job = scheduler._jobs.get("refresh_structure_graphs")
-        if job is not None:
-            await scheduler._run_job(
-                job,
-                "scheduler_refresh_structure_graphs_initial",
-                scheduler._make_refresh_structure_graphs(),
-            )
-    except Exception:
-        logger.warning("Initial structure scan failed", exc_info=True)
-
-
-async def _run_startup_artifact_reconcile(built: object, settings: object) -> None:
-    """Recover artifact source drift the file-event hook could not see.
-
-    Hook coverage will never be complete: `apply_patch`, a shell `mv`, an IDE
-    refactor, a branch switch, and an external editor all move files without
-    emitting an event menhir can recognize. This pass is the backstop, and it
-    reports by default -- `safe_apply` is an explicit operator choice, because a
-    process that mutates the graph on boot is a process nobody watched do it.
-    """
-    mode = getattr(settings, "artifact_reconcile_mode", "audit")
-    if mode == "off":
-        return
-
-    repo_path = getattr(settings, "artifact_reconcile_repo", "") or ""
-    if not repo_path:
-        logger.debug(
-            "Artifact reconcile mode is %s but MENHIR_ARTIFACT_RECONCILE_REPO is unset; skipping",
-            mode,
-        )
-        return
-
-    repository = getattr(settings, "artifact_reconcile_repository", "") or ""
-    if not repository.strip():
-        logger.warning(
-            "Artifact reconcile mode is %s but "
-            "MENHIR_ARTIFACT_RECONCILE_REPOSITORY is unset; skipping",
-            mode,
-        )
-        return
-
-    adapter = getattr(built, "graph_adapter", None)
-    if adapter is None or not hasattr(adapter, "fetch_artifact_corpus_audit"):
-        return
-
-    try:
-        report = await asyncio.to_thread(
-            adapter.fetch_artifact_corpus_audit,
-            repo_path=repo_path,
-            repository=repository,
-        )
-    except Exception:
-        logger.warning("Startup artifact corpus audit failed", exc_info=True)
-        return
-
-    counts = report.get("counts") or {}
-    by_kind = counts.get("by_kind") or {}
-    logger.info(
-        "Artifact corpus audit (%s): %s entries, %s sources, actions=%s, digest=%s",
-        mode, counts.get("entries"), counts.get("sources"), by_kind,
-        report.get("plan_digest"),
-    )
-    if report.get("evidence_base_valid") is False:
-        logger.warning(
-            "Artifact corpus audit selected a Git evidence base that cannot be "
-            "compared with HEAD; apply will refuse until --from-commit selects a valid base"
-        )
-    if mode != "safe_apply":
-        return
-
-    # safe_apply re-derives the plan inside apply() and gates on the digest we
-    # just computed, so the window between audit and apply cannot be exploited.
-    try:
-        from menhir.services.artifact_reconciliation_service import (
-            ArtifactReconciliationService,
-        )
-
-        service = ArtifactReconciliationService(adapter._work_artifacts)  # noqa: SLF001
-        result = await asyncio.to_thread(
-            service.apply,
-            repo_path,
-            expected_digest=report.get("plan_digest") or "",
-            repository=repository,
-            allow_new_repository=False,
-        )
-        logger.info(
-            "Artifact corpus safe_apply: applied=%s skipped=%s conflicted=%s refused=%s",
-            len(result.applied), len(result.skipped), len(result.conflicted),
-            result.refused_reason,
-        )
-    except Exception:
-        logger.warning("Startup artifact corpus safe_apply failed", exc_info=True)
-
-
-def _build_saga_dispatcher(adapter: object) -> Any:
-    """The shared dispatcher wiring, re-exported so startup and the CLI cannot diverge."""
-    from menhir.services.saga_preflight import build_default_dispatcher
-
-    return build_default_dispatcher(adapter)
-
-
-def _observe_saga_backlog(adapter: object) -> object:
-    """Classify the PREPARED backlog without mutating anything."""
-    return _build_saga_dispatcher(adapter).observe()
-
-
-class SagaRecoveryNotWriteReady(RuntimeError):
-    """Live recovery could not clear the backlog, so this instance must not admit saga writers.
-
-    Raised during startup, deliberately fatal. The circuit-breaker rule is that a systemic recovery
-    failure means "stop recovery and keep the writer gate closed", never "stop recovery and start
-    normally" -- and the only way to keep it closed for this process is to refuse to finish booting.
-    """
 
 
 #: Why this process refused saga write admission, or None. Set once, never cleared.
@@ -174,15 +89,6 @@ def _refuse_saga_write_admission(reason: str) -> None:
 def _saga_write_admission_refused() -> str | None:
     """The standing refusal, if this process has one."""
     return _saga_admission_refusal
-
-
-#: How long a starting instance waits for a peer to finish recovery before giving up.
-#: Generous, because the alternative to waiting is refusing to boot: a peer draining a large
-#: backlog is normal, and a short timeout would turn ordinary simultaneous startup into an outage.
-SAGA_GATE_WAIT_SECONDS = 300.0
-
-#: Poll interval while waiting for the gate.
-_SAGA_GATE_POLL_SECONDS = 2.0
 
 
 def _recover_saga_backlog(adapter: object) -> object | None:
@@ -486,173 +392,6 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
     return scheduler
 
 
-async def _stop_scheduler() -> None:
-    scheduler = _state.scheduler
-    if isinstance(scheduler, MaintenanceScheduler):
-        try:
-            await scheduler.stop()
-        except asyncio.CancelledError:
-            logger.debug("Maintenance scheduler task was already cancelled during runtime shutdown")
-        finally:
-            _state.scheduler = None
-
-
-async def _run_orphan_recovery_in_background(built: object, session_id: str) -> None:
-    started_at = perf_counter()
-    record_lifecycle_event(component="runtime_init", event="recover_orphans", state="started")
-    logger.info("[post-init] Recovering orphans in background...")
-    try:
-        orphan_result = await built.lifecycle_service.recover_orphans()
-        elapsed_ms = int((perf_counter() - started_at) * 1000)
-        record_lifecycle_event(
-            component="runtime_init",
-            event="recover_orphans",
-            state="completed",
-            details={
-                "elapsed_ms": elapsed_ms,
-                "promoted": getattr(orphan_result, "promoted", None),
-                "deleted": getattr(orphan_result, "deleted", None),
-                "session_id": session_id,
-            },
-        )
-        logger.info(
-            "[post-init done] session=%s, orphans_promoted=%d orphans_deleted=%d",
-            session_id,
-            getattr(orphan_result, "promoted", -1),
-            getattr(orphan_result, "deleted", -1),
-        )
-    except asyncio.CancelledError:
-        elapsed_ms = int((perf_counter() - started_at) * 1000)
-        record_lifecycle_event(
-            component="runtime_shutdown",
-            event="recover_orphans",
-            state="cancelled",
-            details={"elapsed_ms": elapsed_ms, "session_id": session_id},
-        )
-        raise
-    except Exception:
-        elapsed_ms = int((perf_counter() - started_at) * 1000)
-        logger.warning("recover_orphans failed in background — skipping", exc_info=True)
-        record_lifecycle_event(
-            component="runtime_init",
-            event="recover_orphans",
-            state="error_skipped",
-            details={"elapsed_ms": elapsed_ms, "session_id": session_id},
-        )
-    finally:
-        current = asyncio.current_task()
-        if _state.orphan_recovery_task is current:
-            _state.orphan_recovery_task = None
-
-
-def _clear_runtime_state() -> None:
-    _state.clear_all()
-
-
-async def _shutdown_runtime() -> None:
-    built = _state.built
-    try:
-        orphan_task = _state.orphan_recovery_task
-        if isinstance(orphan_task, asyncio.Task) and not orphan_task.done():
-            orphan_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await orphan_task
-            _state.orphan_recovery_task = None
-        if built is not None and hasattr(built, "ingest_service"):
-            try:
-                released = await built.ingest_service.shutdown()
-                record_lifecycle_event(
-                    component="runtime_shutdown",
-                    event="ingest_service_shutdown",
-                    state="completed",
-                    details={"released": released},
-                )
-            except Exception:
-                record_lifecycle_event(
-                    component="runtime_shutdown",
-                    event="ingest_service_shutdown",
-                    state="failed",
-                )
-                logger.exception("ingest_service shutdown failed")
-        if built is not None and hasattr(built, "recall_service"):
-            try:
-                await built.recall_service.shutdown()
-                record_lifecycle_event(
-                    component="runtime_shutdown",
-                    event="recall_service_shutdown",
-                    state="completed",
-                )
-            except Exception:
-                record_lifecycle_event(
-                    component="runtime_shutdown",
-                    event="recall_service_shutdown",
-                    state="failed",
-                )
-                logger.exception("recall_service shutdown failed")
-        if built is not None and hasattr(built, "graphiti_client"):
-            try:
-                await built.graphiti_client.close()
-                record_lifecycle_event(
-                    component="runtime_shutdown",
-                    event="graphiti_client_close",
-                    state="completed",
-                )
-            except Exception:
-                record_lifecycle_event(
-                    component="runtime_shutdown",
-                    event="graphiti_client_close",
-                    state="failed",
-                )
-                logger.exception("Graphiti client close failed")
-        if built is not None and hasattr(built, "neo4j"):
-            try:
-                built.neo4j.close()
-                record_lifecycle_event(
-                    component="runtime_shutdown",
-                    event="neo4j_driver_close",
-                    state="completed",
-                )
-            except Exception:
-                record_lifecycle_event(
-                    component="runtime_shutdown",
-                    event="neo4j_driver_close",
-                    state="failed",
-                )
-                logger.exception("Neo4j driver close failed")
-        await _stop_scheduler()
-    finally:
-        _clear_runtime_state()
-
-
-def _schedule_shutdown_runtime(loop: asyncio.AbstractEventLoop) -> None:
-    existing = _state.shutdown_task
-    if isinstance(existing, asyncio.Task) and not existing.done():
-        return
-    task = loop.create_task(_shutdown_runtime())
-    _state.shutdown_task = task
-
-
-def _shutdown_runtime_sync() -> None:
-    existing_shutdown = _state.shutdown_task
-    if isinstance(existing_shutdown, asyncio.Task) and not existing_shutdown.done():
-        return
-    built = _state.built
-    scheduler = _state.scheduler
-    if built is None and scheduler is None:
-        return
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        try:
-            asyncio.run(_shutdown_runtime())
-        except RuntimeError:
-            logger.warning("Cannot run async shutdown — no accessible event loop")
-            _clear_runtime_state()
-    else:
-        _schedule_shutdown_runtime(loop)
-        logger.debug("Scheduled async shutdown hook on the active event loop")
-
-
 async def _initialize_services(
     settings: MemorySettings | None = None,
     *,
@@ -893,20 +632,6 @@ async def _bootstrap_runtime_on_startup() -> None:
         current = asyncio.current_task()
         if _state.startup_runtime_task is current:
             _state.startup_runtime_task = None
-
-
-def _saga_recovery_is_armed() -> bool:
-    """Whether this deployment asked for live recovery, so startup must wait for its verdict.
-
-    Fails closed: a settings read that raises answers True, because the alternative is serving
-    without knowing whether recovery was armed. Waiting costs startup latency; guessing wrong
-    costs the invariant.
-    """
-    try:
-        return str(MemorySettings.from_env().saga_reconcile_startup_mode or "").lower() == "live"
-    except Exception:
-        logger.warning("Could not read saga_reconcile_startup_mode; assuming live", exc_info=True)
-        return True
 
 
 @asynccontextmanager

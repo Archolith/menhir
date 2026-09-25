@@ -38,15 +38,36 @@ Execution shape (why this file has two entry points instead of one):
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import re
 import time
-from dataclasses import dataclass
 
 from menhir.domain.facet_derivation import derive_facets
 from menhir.domain.namespace import namespace_to_group_id, namespace_to_group_ids
-from menhir.domain.temporal import FactTemporal, TemporalQuery, matches_query
+
+# Facade re-exports: moved units stay importable from this module path.
+from menhir.services.shadow_context_composition_models import (
+    _STATUS_ABSTAINED_NO_CANDIDATES,
+    _STATUS_ABSTAINED_NO_ELIGIBLE,
+    _STATUS_ABSTAINED_TIE,
+    _STATUS_CANDIDATE_QUERY_FAILED,
+    _STATUS_MALFORMED_LLM_RESPONSE,
+    _STATUS_METADATA_GENERATION_FAILED,
+    _STATUS_SELECTED,
+    _STATUS_TIMED_OUT,
+    ExtractionCompositionShadowTrace,
+    ShadowCandidateFact,
+    ShadowCandidateLabels,
+    ShadowCompositionPrediction,
+    ShadowRankedHypothesis,
+    ShadowRejection,
+    _empty_prediction,
+)
+from menhir.services.shadow_context_composition_selection import (
+    _candidate_payload,
+    _parse_shadow_grounded_response,
+    _select_eligible_candidate,
+)
+from menhir.services.shadow_context_composition_trace import build_shadow_trace, shadow_trace_to_details
 
 logger = logging.getLogger(__name__)
 
@@ -62,150 +83,6 @@ _MIN_LITERAL_NAME_LEN = 3
 # claims) -- without a second cap the grounded-classification prompt's size (and LLM
 # token cost) is unbounded by real graph density, not by this module's own config.
 _MAX_CANDIDATE_FACTS = 30
-
-_STATUS_SELECTED = "selected"
-_STATUS_ABSTAINED_NO_CANDIDATES = "abstained_no_candidates"
-_STATUS_ABSTAINED_NO_ELIGIBLE = "abstained_no_eligible_candidates"
-_STATUS_ABSTAINED_TIE = "abstained_tie"
-_STATUS_CANDIDATE_QUERY_FAILED = "candidate_query_failed"
-_STATUS_METADATA_GENERATION_FAILED = "metadata_generation_failed"
-_STATUS_MALFORMED_LLM_RESPONSE = "malformed_llm_response"
-_STATUS_TIMED_OUT = "timed_out"
-
-
-# ---------------------------------------------------------------------------
-# Dataclasses — all frozen; ShadowCompositionPrediction and
-# ExtractionCompositionShadowTrace are each constructed exactly once, with final data,
-# never mutated after the fact (see the plan's point 3 for why: a frozen dataclass that
-# claims to be filled in later is a contradiction, not a design).
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class ShadowCandidateFact:
-    """One real fact-edge from the graph, at edge (not entity) granularity."""
-
-    fact_uuid: str
-    fact_text: str
-    source_uuid: str
-    source_name: str
-    target_uuid: str
-    target_name: str
-    valid_at: str | None
-    invalid_at: str | None
-    created_at: str | None
-    expired_at: str | None
-    retrieval_sources: frozenset[str]  # {"literal_name", "semantic_search"}
-    semantic_score: float | None = None
-
-
-@dataclass(frozen=True)
-class ShadowRankedHypothesis:
-    """Message-side: what the episode itself implies, up to 2 ranked guesses."""
-
-    shadow_facet: str
-    shadow_state_family: str
-    confidence: float
-
-
-@dataclass(frozen=True)
-class ShadowCandidateLabels:
-    """Candidate-side: labels grounded in ONE real candidate fact's own text."""
-
-    fact_uuid: str
-    shadow_facet: str | None
-    shadow_state_family: str | None
-    shadow_scope: str | None
-
-
-@dataclass(frozen=True)
-class ShadowRejection:
-    fact_uuid: str
-    reason: str
-
-
-@dataclass(frozen=True)
-class ShadowCompositionPrediction:
-    """Everything knowable BEFORE the real extraction call returns. Complete and
-    immutable at construction. status is always one of the _STATUS_* constants above;
-    when status != "selected"/"abstained_*", failure_stage/error are populated instead
-    of candidates/hypotheses (which may be empty but are never fabricated)."""
-
-    episode_uuid: str
-    namespace: str
-    status: str
-    failure_stage: str | None
-    error: str | None
-    candidates: tuple[ShadowCandidateFact, ...]
-    message_hypotheses: tuple[ShadowRankedHypothesis, ...]
-    candidate_labels: tuple[ShadowCandidateLabels, ...]
-    production_facets: tuple[str, ...]
-    rejected: tuple[ShadowRejection, ...]
-    selected_fact_uuid: str | None
-    abstention_reason: str | None
-    llm_tie_breaker_fired: bool
-    temporal_query: str = TemporalQuery.AS_KNOWN_AT.value
-    temporal_pivot: str | None = None
-    candidate_retrieval_ms: int = 0
-    metadata_generation_ms: int = 0
-    selection_ms: int = 0
-    note: str = ""
-
-
-@dataclass(frozen=True)
-class ExtractionCompositionShadowTrace:
-    """Prediction + real outcome, combined once in build_shadow_trace()."""
-
-    prediction: ShadowCompositionPrediction
-    production_extracted_node_names: tuple[str, ...]
-    production_extracted_facts: tuple[str, ...]
-    shadow_total_ms: int
-
-
-def _empty_prediction(
-    *,
-    episode_uuid: str,
-    namespace: str,
-    status: str,
-    failure_stage: str | None = None,
-    error: str | None = None,
-    reference_time: str | None = None,
-    production_facets: tuple[str, ...] = (),
-    candidate_retrieval_ms: int = 0,
-    candidates: tuple[ShadowCandidateFact, ...] = (),
-    note: str = "",
-) -> ShadowCompositionPrediction:
-    """Build a prediction for any early-exit path (failure or trivial abstention).
-    Centralizes the "always return a tagged result, never None" contract -- every
-    early-exit path in compose_shadow_prediction (including the "no candidates"
-    abstention) goes through here rather than hand-rolling the same ~10-field
-    construction, so a future field addition only needs updating in one place.
-
-    candidates defaults to () (the true "no candidates" cases), but every failure
-    path that occurs AFTER real candidates were already retrieved (metadata
-    generation failure, malformed LLM response, timeout) MUST pass the real
-    candidates through -- silently blanking them on failure is exactly the kind of
-    hidden-failure-mode this whole observability stage exists to prevent. A
-    malformed_llm_response trace with an empty candidate list is undiagnosable:
-    you can't tell whether the LLM saw reasonable input and produced garbage
-    output, or never got meaningful input in the first place."""
-    return ShadowCompositionPrediction(
-        episode_uuid=episode_uuid,
-        namespace=namespace,
-        status=status,
-        failure_stage=failure_stage,
-        error=error,
-        candidates=candidates,
-        message_hypotheses=(),
-        candidate_labels=(),
-        production_facets=production_facets,
-        rejected=(),
-        selected_fact_uuid=None,
-        abstention_reason=(status if status.startswith("abstained_") else None),
-        llm_tie_breaker_fired=False,
-        temporal_pivot=reference_time,
-        candidate_retrieval_ms=candidate_retrieval_ms,
-        note=note,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -547,217 +424,3 @@ async def run_shadow_composition_with_timeout(
             failure_stage="unexpected", error=str(exc),
             reference_time=reference_time,
         )
-
-
-def _candidate_payload(c: ShadowCandidateFact) -> dict[str, str]:
-    return {
-        "fact_uuid": c.fact_uuid, "fact_text": c.fact_text,
-        "source_name": c.source_name, "target_name": c.target_name,
-    }
-
-
-def _extract_json_object(raw: str) -> dict:
-    cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.IGNORECASE)
-    start, end = cleaned.find("{"), cleaned.rfind("}")
-    if start < 0 or end <= start:
-        raise ValueError("LLM response did not contain a JSON object")
-    return json.loads(cleaned[start:end + 1])
-
-
-def _parse_shadow_grounded_response(
-    raw: str,
-) -> tuple[list[ShadowRankedHypothesis], list[ShadowCandidateLabels]]:
-    parsed = _extract_json_object(raw)
-
-    hyps_raw = parsed.get("message_hypotheses")
-    hypotheses: list[ShadowRankedHypothesis] = []
-    if isinstance(hyps_raw, list):
-        for h in hyps_raw:
-            if not isinstance(h, dict):
-                continue
-            facet, family = h.get("shadow_facet"), h.get("shadow_state_family")
-            if facet and family:
-                try:
-                    confidence = float(h.get("confidence", 0.0))
-                except (TypeError, ValueError):
-                    confidence = 0.0
-                hypotheses.append(ShadowRankedHypothesis(str(facet), str(family), confidence))
-
-    labels_raw = parsed.get("candidate_labels")
-    labels: list[ShadowCandidateLabels] = []
-    if isinstance(labels_raw, list):
-        for entry in labels_raw:
-            if not isinstance(entry, dict) or not entry.get("fact_uuid"):
-                continue
-            labels.append(ShadowCandidateLabels(
-                fact_uuid=str(entry["fact_uuid"]),
-                shadow_facet=(str(entry["shadow_facet"]) if entry.get("shadow_facet") else None),
-                shadow_state_family=(str(entry["shadow_state_family"]) if entry.get("shadow_state_family") else None),
-                shadow_scope=(str(entry["shadow_scope"]) if entry.get("shadow_scope") else None),
-            ))
-
-    if not hypotheses and not labels:
-        raise ValueError("LLM response had neither message_hypotheses nor candidate_labels")
-    return hypotheses, labels
-
-
-def _label_matches_hypothesis(label: ShadowCandidateLabels, hyp: ShadowRankedHypothesis) -> bool:
-    if label.shadow_facet is None or label.shadow_state_family is None:
-        return False
-    return (
-        label.shadow_facet.strip().lower() == hyp.shadow_facet.strip().lower()
-        and label.shadow_state_family.strip().lower() == hyp.shadow_state_family.strip().lower()
-    )
-
-
-async def _select_eligible_candidate(
-    llm: object,
-    *,
-    episode_body: str,
-    reference_time: str,
-    candidates: list[ShadowCandidateFact],
-    message_hypotheses: list[ShadowRankedHypothesis],
-    candidate_labels: list[ShadowCandidateLabels],
-) -> tuple[str | None, str | None, bool, list[ShadowRejection]]:
-    """Deterministic eligibility filter (temporal + shadow-label match against the top
-    hypothesis), LLM tie-break only when 2+ candidates survive. Returns
-    (selected_fact_uuid, abstention_reason, llm_tie_breaker_fired, rejected)."""
-    rejected: list[ShadowRejection] = []
-
-    if not message_hypotheses:
-        for c in candidates:
-            rejected.append(ShadowRejection(c.fact_uuid, "no_message_hypothesis"))
-        return None, _STATUS_ABSTAINED_NO_ELIGIBLE, False, rejected
-
-    top_hypothesis = message_hypotheses[0]
-    labels_by_uuid = {label.fact_uuid: label for label in candidate_labels}
-
-    survivors: list[ShadowCandidateFact] = []
-    for c in candidates:
-        temporal = FactTemporal(
-            valid_at=c.valid_at, invalid_at=c.invalid_at,
-            created_at=c.created_at, expired_at=c.expired_at,
-        )
-        if not matches_query(temporal, TemporalQuery.AS_KNOWN_AT, as_of=reference_time):
-            rejected.append(ShadowRejection(c.fact_uuid, "not_known_at_reference_time"))
-            continue
-        label = labels_by_uuid.get(c.fact_uuid)
-        if label is None:
-            rejected.append(ShadowRejection(c.fact_uuid, "no_matching_label"))
-            continue
-        if not _label_matches_hypothesis(label, top_hypothesis):
-            rejected.append(ShadowRejection(c.fact_uuid, "shadow_label_mismatch"))
-            continue
-        survivors.append(c)
-
-    if not survivors:
-        return None, _STATUS_ABSTAINED_NO_ELIGIBLE, False, rejected
-    if len(survivors) == 1:
-        return survivors[0].fact_uuid, None, False, rejected
-
-    # 2+ survivors: genuine tie -- consult the LLM tie-breaker rather than picking
-    # arbitrarily (Phase 5 item 4's finding: the deterministic path always picks
-    # SOMETHING under a tie, which is exactly the case this stage must not repeat).
-    break_tie = getattr(llm, "break_shadow_tie", None)
-    if break_tie is None:
-        return None, _STATUS_ABSTAINED_TIE, False, rejected
-    try:
-        raw = await break_tie(episode_body, [_candidate_payload(c) for c in survivors])
-    except Exception:
-        return None, _STATUS_ABSTAINED_TIE, True, rejected
-    if raw is None:
-        return None, _STATUS_ABSTAINED_TIE, True, rejected
-    try:
-        parsed = _extract_json_object(raw)
-    except ValueError:
-        return None, _STATUS_ABSTAINED_TIE, True, rejected
-
-    picked = parsed.get("selected_fact_uuid")
-    survivor_uuids = {c.fact_uuid for c in survivors}
-    if picked and str(picked) in survivor_uuids:
-        return str(picked), None, True, rejected
-    return None, _STATUS_ABSTAINED_TIE, True, rejected
-
-
-# ---------------------------------------------------------------------------
-# Combine prediction + real extraction outcome into the final frozen trace.
-# ---------------------------------------------------------------------------
-
-def build_shadow_trace(
-    prediction: ShadowCompositionPrediction,
-    graphiti_result: object,
-    *,
-    shadow_total_ms: int,
-) -> ExtractionCompositionShadowTrace:
-    """One-shot construction combining the already-frozen prediction with the real
-    extraction outcome. Never mutates prediction; never called more than once per
-    episode."""
-    node_names: tuple[str, ...] = ()
-    fact_texts: tuple[str, ...] = ()
-    try:
-        nodes = getattr(graphiti_result, "nodes", None) or []
-        node_names = tuple(str(getattr(n, "name", "") or "") for n in nodes if getattr(n, "name", None))
-        edges = getattr(graphiti_result, "edges", None) or []
-        fact_texts = tuple(str(getattr(e, "fact", "") or "") for e in edges if getattr(e, "fact", None))
-    except Exception:
-        logger.debug("Failed to read production extraction result for shadow trace", exc_info=True)
-
-    return ExtractionCompositionShadowTrace(
-        prediction=prediction,
-        production_extracted_node_names=node_names,
-        production_extracted_facts=fact_texts,
-        shadow_total_ms=shadow_total_ms,
-    )
-
-
-def shadow_trace_to_details(trace: ExtractionCompositionShadowTrace) -> dict[str, object]:
-    """Flatten the trace into a JSON-serializable dict for record_lifecycle_event's
-    details_json column (dataclasses.asdict handles nested frozen dataclasses and
-    tuples/frozensets need explicit list conversion for JSON)."""
-    p = trace.prediction
-    return {
-        "episode_uuid": p.episode_uuid,
-        "namespace": p.namespace,
-        "status": p.status,
-        "failure_stage": p.failure_stage,
-        "error": p.error,
-        "candidates": [
-            {
-                "fact_uuid": c.fact_uuid, "fact_text": c.fact_text,
-                "source_uuid": c.source_uuid, "source_name": c.source_name,
-                "target_uuid": c.target_uuid, "target_name": c.target_name,
-                "valid_at": c.valid_at, "invalid_at": c.invalid_at,
-                "created_at": c.created_at, "expired_at": c.expired_at,
-                "retrieval_sources": sorted(c.retrieval_sources),
-                "semantic_score": c.semantic_score,
-            }
-            for c in p.candidates
-        ],
-        "message_hypotheses": [
-            {"shadow_facet": h.shadow_facet, "shadow_state_family": h.shadow_state_family, "confidence": h.confidence}
-            for h in p.message_hypotheses
-        ],
-        "candidate_labels": [
-            {
-                "fact_uuid": lb.fact_uuid, "shadow_facet": lb.shadow_facet,
-                "shadow_state_family": lb.shadow_state_family, "shadow_scope": lb.shadow_scope,
-            }
-            for lb in p.candidate_labels
-        ],
-        "production_facets": list(p.production_facets),
-        "rejected": [{"fact_uuid": r.fact_uuid, "reason": r.reason} for r in p.rejected],
-        "selected_fact_uuid": p.selected_fact_uuid,
-        "abstention_reason": p.abstention_reason,
-        "llm_tie_breaker_fired": p.llm_tie_breaker_fired,
-        "temporal_query": p.temporal_query,
-        "temporal_pivot": p.temporal_pivot,
-        "candidate_retrieval_ms": p.candidate_retrieval_ms,
-        "metadata_generation_ms": p.metadata_generation_ms,
-        "selection_ms": p.selection_ms,
-        "note": p.note,
-        "production_extracted_node_names": list(trace.production_extracted_node_names),
-        "production_extracted_facts": list(trace.production_extracted_facts),
-        "shadow_total_ms": trace.shadow_total_ms,
-    }

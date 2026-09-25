@@ -4,48 +4,31 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import datetime as dt
 import json
 import os
-import re
-import stat
 import sys
 from pathlib import Path
 from typing import Any
 
+# Siblings are imported by name because this runner is deployed as a bare script.
+_SCAFFOLD_DIR = str(Path(__file__).resolve().parent)
+if _SCAFFOLD_DIR not in sys.path:
+    sys.path.append(_SCAFFOLD_DIR)
+
 import menhir_app_only as app
 
-
-Error = app.AppOnlyError
-ROOT = app.ROOT
-STATUS = app.STATUS
-ADMISSION_LOCK = app.ADMISSION_LOCK
-UPLOAD_ROOT = Path("/home/thron/.menhir-security-config-upload")
-ACTIVE = STATUS / "security-config-active.json"
-LAST = STATUS / "security-config-last.json"
-BUNDLE_ID = re.compile(r"[a-f0-9]{32}")
-
-TARGETS = {
-    "release.json": app.LIVE_RELEASE,
-    "production.env": app.LIVE_ENV,
-    "client-policy.json": app.LIVE_POLICY,
-}
-DESTINATIONS = {
-    "release.json": "/srv/menhir/production/release/release.json",
-    "production.env": "/srv/menhir/production/release/production.env",
-    "client-policy.json": "/srv/menhir/production/policy/client-policy.json",
-}
-MODES = {
-    "release.json": 0o400,
-    "production.env": 0o400,
-    "client-policy.json": 0o644,
-}
-ALLOWED_ENV_CHANGES = app.ALLOWED_ENV_CHANGES | {"MENHIR_CLIENT_POLICY_DIGEST"}
-ALLOWED_RENDERED_CHANGES = {"production_env_sha256", "policy_sha256"}
-ALLOWED_CONFIG_DESTINATIONS = set(DESTINATIONS.values()) - {
-    "/srv/menhir/production/release/release.json",
-}
+from menhir_security_config_bundle import (
+    load_bundle, require_candidate_file, validate_policy_files, validate_source_manifest,
+)
+from menhir_security_config_classify import (
+    classify_bundle, classify_release, comparable_artifact,
+)
+from menhir_security_config_constants import (
+    ADMISSION_LOCK, ACTIVE, ALLOWED_CONFIG_DESTINATIONS, ALLOWED_ENV_CHANGES,
+    ALLOWED_RENDERED_CHANGES, BUNDLE_ID, DESTINATIONS, Error, LAST, MODES, ROOT, STATUS,
+    TARGETS, UPLOAD_ROOT,
+)
 
 
 def runner_authority_sha256() -> str:
@@ -69,218 +52,6 @@ def acquire_security_config_admission() -> app.DeploymentLocks:
     if ADMISSION_LOCK != Path("/run/lock/menhir-production-admission.lock"):
         raise Error("security-config admission authority is inconsistent")
     return app.acquire_lock()
-
-
-def require_candidate_file(path: Path, label: str) -> None:
-    app.require_upload(path, label)
-    if path.stat().st_size > 4 * 1024 * 1024:
-        raise Error(f"{label} is unexpectedly large")
-
-
-def validate_policy_files(bundle: Path, release: dict[str, Any]) -> None:
-    client = app.strict_load(bundle / "client-policy.json")
-    if client.get("version") not in {1, 2}:
-        raise Error("client-policy.json schema mismatch")
-    canonical = copy.deepcopy(client)
-    declared = canonical.pop("canonical_digest", None)
-    calculated = app.hashlib.sha256(json.dumps(
-        canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
-    ).encode("ascii")).hexdigest()
-    if declared != calculated:
-        raise Error("client-policy.json canonical digest mismatch")
-    expected = {
-        "client-policy.json": release.get("rendered", {}).get("policy_sha256"),
-        "production.env": release.get("rendered", {}).get("production_env_sha256"),
-    }
-    for name, digest in expected.items():
-        if digest != app.sha256(bundle / name):
-            raise Error(f"candidate {name} digest is not release-bound")
-
-
-def validate_source_manifest(
-    source: dict[str, Any], bundle: Path, release_sha: str, release_id: str,
-) -> None:
-    if set(source) != {"schema", "kind", "release_id", "release_sha256", "files"} \
-            or source.get("schema") != 1 \
-            or source.get("kind") != "menhir-release-install-bundle" \
-            or source.get("release_id") != release_id \
-            or source.get("release_sha256") != release_sha:
-        raise Error("source install-bundle manifest binding mismatch")
-    files = source.get("files")
-    if not isinstance(files, dict):
-        raise Error("source install-bundle files are missing")
-    for name, destination in DESTINATIONS.items():
-        row = files.get(destination)
-        if not isinstance(row, dict) or row.get("sha256") != app.sha256(bundle / name):
-            raise Error(f"source install-bundle does not bind {destination}")
-
-
-def load_bundle(
-    bundle_id: str, destination: Path | None = None, *, require_authority: bool = True,
-) -> dict[str, Any]:
-    if not BUNDLE_ID.fullmatch(bundle_id):
-        raise Error("bundle id must be 32 lowercase hexadecimal characters")
-    bundle = UPLOAD_ROOT / f"security-{bundle_id}"
-    try:
-        info = bundle.lstat()
-    except OSError as exc:
-        raise Error("uploaded security-config bundle is missing") from exc
-    if bundle.is_symlink() or not stat.S_ISDIR(info.st_mode) or info.st_uid != 1000 \
-            or stat.S_IMODE(info.st_mode) & 0o077:
-        raise Error("uploaded security-config bundle must be private and owned by thron")
-    names = set(TARGETS) | {"source-manifest.json", "docker-config.json"}
-    if require_authority:
-        names |= {app.STAGING_RECEIPT_NAME, app.APPROVAL_NAME}
-    for name in names:
-        require_candidate_file(bundle / name, name)
-    require_candidate_file(bundle / "security-config-manifest.json", "security-config-manifest.json")
-    manifest = app.strict_load(bundle / "security-config-manifest.json")
-    if set(manifest) != {"schema", "kind", "source_bundle_sha256", "files"} \
-            or manifest.get("schema") != 1 \
-            or manifest.get("kind") != "menhir-security-config-bundle":
-        raise Error("security-config bundle manifest schema mismatch")
-    files = manifest.get("files")
-    if not isinstance(files, dict) or set(files) != names:
-        raise Error("security-config bundle file set mismatch")
-    for name in names:
-        if files.get(name) != app.sha256(bundle / name):
-            raise Error(f"security-config bundle digest mismatch: {name}")
-    if manifest["source_bundle_sha256"] != app.sha256(bundle / "source-manifest.json"):
-        raise Error("security-config source manifest digest mismatch")
-    if destination is not None:
-        destination.mkdir(parents=True, mode=0o700)
-        os.chown(destination, 0, 0)
-        for name in names | {"security-config-manifest.json"}:
-            app.atomic_bytes(destination / name, (bundle / name).read_bytes(), 0o400)
-        bundle = destination
-    release = app.strict_load(bundle / "release.json")
-    release_sha = app.sha256(bundle / "release.json")
-    validate_source_manifest(
-        app.strict_load(bundle / "source-manifest.json"), bundle, release_sha,
-        str(release.get("release_id", "")),
-    )
-    validate_policy_files(bundle, release)
-    return {
-        "path": bundle, "release": release, "release_sha": release_sha,
-        "env": app.parse_env(bundle / "production.env"),
-    }
-
-
-def comparable_artifact(row: Any) -> Any:
-    if not isinstance(row, dict):
-        return row
-    result = copy.deepcopy(row)
-    if result.get("kind") == "git":
-        result.pop("commit", None)
-    return result
-
-
-def classify_release(
-    live: dict[str, Any], candidate: dict[str, Any], live_sha: str,
-    live_env: dict[str, str], candidate_env: dict[str, str], bundle: Path,
-) -> dict[str, Any]:
-    candidate_id = candidate.get("release_id")
-    live_id = live.get("release_id")
-    if not isinstance(candidate_id, str) or not app.ID.fullmatch(candidate_id) \
-            or candidate_id == live_id:
-        raise Error("security-config release identity is invalid or not new")
-    if candidate.get("deployment_class") != "security-config" \
-            or candidate.get("ingress_mode") != "cloudflared":
-        raise Error("candidate is not Cloudflared security-config authority")
-    for key in ("schema", "network", "deployment", "repo_remotes", "ingress_mode"):
-        if candidate.get(key) != live.get(key):
-            raise Error(f"protected release field differs: {key}")
-    for name in ("yawn_deploy",):
-        if candidate.get("repos", {}).get(name) != live.get("repos", {}).get(name):
-            raise Error(f"security-config cannot change repository: {name}")
-    for name in ("neo4j", "caddy", "base"):
-        if candidate.get("images", {}).get(name) != live.get("images", {}).get(name):
-            raise Error(f"security-config cannot change image: {name}")
-    candidate_image = candidate.get("images", {}).get("menhir")
-    if not isinstance(candidate_image, str) or not app.DIGEST.fullmatch(candidate_image):
-        raise Error("candidate Menhir image digest is invalid")
-    expected_rollback = {
-        "prior_release_id": live_id,
-        "prior_release_sha256": live_sha,
-        "prior_images": {
-            "menhir": live.get("images", {}).get("menhir"),
-            "neo4j": live.get("images", {}).get("neo4j"),
-            "caddy": live.get("images", {}).get("caddy"),
-        },
-    }
-    rollback = candidate.get("rollback_anchors")
-    if not isinstance(rollback, dict) or any(rollback.get(k) != v for k, v in expected_rollback.items()):
-        raise Error("candidate rollback anchors do not bind the exact live release")
-    if set(live_env) != set(candidate_env):
-        raise Error("candidate production environment adds or removes keys")
-    changed_env = sorted(key for key in live_env if live_env[key] != candidate_env[key])
-    if not changed_env or not set(changed_env).issubset(ALLOWED_ENV_CHANGES):
-        raise Error("protected production environment differs: " + ", ".join(changed_env))
-    expected_env = {
-        "MENHIR_RELEASE_ID": candidate_id,
-        "MENHIR_RELEASE_COMMIT": candidate.get("repos", {}).get("menhir"),
-        "MENHIR_CLIENT_POLICY_DIGEST": app.strict_load(
-            bundle / "client-policy.json"
-        ).get("canonical_digest"),
-    }
-    for key, value in expected_env.items():
-        if candidate_env.get(key) != value:
-            raise Error(f"candidate environment {key} is not release-bound")
-    image_ref = candidate_env.get("MENHIR_IMAGE", "")
-    live_image_ref = live_env.get("MENHIR_IMAGE", "")
-    if not image_ref.endswith("@" + candidate_image) \
-            or image_ref.rsplit("@", 1)[0] != live_image_ref.rsplit("@", 1)[0]:
-        raise Error("candidate Menhir image reference is invalid")
-    if candidate_env.get("NEO4J_IMAGE") != live_env.get("NEO4J_IMAGE"):
-        raise Error("candidate changes the Neo4j image reference")
-    for key in set(live.get("rendered", {})) | set(candidate.get("rendered", {})):
-        if key not in ALLOWED_RENDERED_CHANGES \
-                and candidate.get("rendered", {}).get(key) != live.get("rendered", {}).get(key):
-            raise Error(f"protected rendered authority differs: {key}")
-    live_secrets = live.get("secret_version_ids", {})
-    candidate_secrets = candidate.get("secret_version_ids", {})
-    for key in set(live_secrets) | set(candidate_secrets):
-        if key != "client-policy" and candidate_secrets.get(key) != live_secrets.get(key):
-            raise Error(f"security-config cannot rotate secret: {key}")
-    policy_digest = app.strict_load(bundle / "client-policy.json").get("canonical_digest")
-    if candidate_secrets.get("client-policy") != "sha256-" + str(policy_digest):
-        raise Error("client-policy secret version is not bound to its canonical digest")
-    live_artifacts = live.get("artifacts")
-    candidate_artifacts = candidate.get("artifacts")
-    if not isinstance(live_artifacts, dict) or not isinstance(candidate_artifacts, dict) \
-            or set(live_artifacts) != set(candidate_artifacts):
-        raise Error("release artifact authority differs")
-    for destination, row in candidate_artifacts.items():
-        prior = live_artifacts[destination]
-        if destination in ALLOWED_CONFIG_DESTINATIONS:
-            name = next(name for name, value in DESTINATIONS.items() if value == destination)
-            if not isinstance(row, dict) or row.get("sha256") != app.sha256(bundle / name):
-                raise Error(f"candidate artifact is not bound: {destination}")
-        elif comparable_artifact(row) != comparable_artifact(prior):
-            raise Error(f"protected artifact differs: {destination}")
-    return {
-        "classification": "security-config",
-        "live_release_id": live_id,
-        "candidate_release_id": candidate_id,
-        "prior_image": live.get("images", {}).get("menhir"),
-        "candidate_image": candidate_image,
-        "changed_environment_keys": changed_env,
-    }
-
-
-def classify_bundle(
-    bundle_id: str, destination: Path | None = None, *, require_authority: bool = True,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    for path, label in ((app.LIVE_RELEASE, "live release"), (app.LIVE_ENV, "live environment")):
-        app.require_root_file(path, label)
-    bundle = load_bundle(bundle_id, destination, require_authority=require_authority)
-    app.validate_release_file(bundle["path"] / "release.json")
-    result = classify_release(
-        app.strict_load(app.LIVE_RELEASE), bundle["release"], app.sha256(app.LIVE_RELEASE),
-        app.parse_env(app.LIVE_ENV), bundle["env"], bundle["path"],
-    )
-    result["candidate_release_sha256"] = bundle["release_sha"]
-    return bundle, result
 
 
 def write_stage(transaction: dict[str, Any], stage: str, **extra: Any) -> None:

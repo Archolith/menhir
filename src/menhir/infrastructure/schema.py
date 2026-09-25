@@ -3,10 +3,24 @@
 Milestone 1 requires the Graphiti-backed store to include policy fields for node and
 edge scoring, lifecycle, and conflict governance. This module keeps those migration
 queries centralised for easier reuse and testability.
+
+The readiness evidence sets and the activation-gated DDL families live in the
+``schema_readiness`` and ``schema_activation`` sibling modules; every moved public
+symbol is re-exported here so the original import path keeps working unchanged.
 """
 
 from __future__ import annotations
 
+from menhir.infrastructure.schema_activation import (
+    SCALAR_STATE_REQUIRED_INDEXES,
+    get_scalar_state_activation_queries,
+    get_view_evidence_lifecycle_activation_queries,
+)
+from menhir.infrastructure.schema_readiness import (
+    GRAPHITI_OWNED_INDEXES,
+    PHASE_ONE_REQUIRED_CONSTRAINTS,
+    PHASE_ONE_REQUIRED_INDEXES,
+)
 
 MEMORY_NODE_LABELS = ("Entity", "Episodic")
 EDGE_LABELS = ("RELATES_TO", "NEXT_EPISODE", "HAS_MEMBER", "HAS_EPISODE", "MENTIONS")
@@ -43,92 +57,6 @@ def get_artifact_reconciliation_schema_queries() -> list[str]:
         "CREATE CONSTRAINT artifact_reconcile_cursor_repository_unique IF NOT EXISTS "
         "FOR (n:ArtifactReconciliationCursor) REQUIRE n.repository IS UNIQUE",
     ]
-
-#: The three phase-one indexes GRAPHITI creates, not Menhir. Nothing in
-#: `get_phase1_bootstrap_queries` emits them -- they come from
-#: `graphiti_client.build_indices_and_constraints`, which `prepare_memory_runtime` skips when
-#: there is no usable LLM/embedder.
-#:
-#: Named separately because requiring them unconditionally made the documented "start against
-#: Neo4j alone" path impossible: the call that creates them was skipped, the readiness check
-#: demanded them anyway, and startup was refused. A fresh install with no AI provider could not
-#: start. They remain required whenever Graphiti IS available -- see
-#: `phase_one_schema_ready(require_graphiti=...)`.
-GRAPHITI_OWNED_INDEXES = frozenset({"episode_uuid", "episode_group_id", "episode_content"})
-
-PHASE_ONE_REQUIRED_INDEXES = (
-    "entity_type_idx",
-    "entity_scope_idx",
-    "episodic_type_idx",
-    "episodic_scope_idx",
-    "episodic_processing_state_idx",
-    "entity_bootstrap_scope_idx",
-    "episodic_bootstrap_scope_idx",
-    "episode_uuid",
-    "episode_group_id",
-    "episode_content",
-    # L4 artifact indexes — included so an existing install (core indexes already online)
-    # still reports schema_not_ready until these exist and gets them bootstrapped.
-    "entity_artifact_id_idx",
-    "entity_is_artifact_idx",
-    "entity_artifact_status_idx",
-    "evidence_artifact_id_idx",
-    "evidence_uuid_idx",
-    # View primitive indexes — supersession lookup + current-version filters.
-    "entity_view_key_idx",
-    # CF-112: the supersession lookup is a DISJUNCTION over (view_key OR qs_key). A
-    # disjunction needs EVERY branch indexed or the planner unions the seek with a full
-    # label scan -- measured at 61,005 dbHits vs 4 on 20,500 :Entity nodes, with no early
-    # exit from LIMIT 1. Required, not merely created, so an existing install reports
-    # schema_not_ready until the index that makes the write path cheap actually exists.
-    "entity_qs_key_idx",
-    "entity_view_kind_idx",
-    "entity_view_current_idx",
-    # Entity-anchored scalar_state identity (ScalarStateView Piece B) — required so an existing
-    # install (older view indexes already online) still reports schema_not_ready until it exists.
-    "entity_view_subject_uuid_idx",
-    # Metric class indexes — instrumentation Views under the :Metric label (Metric plan A5).
-    "metric_view_key_idx",
-    "metric_qs_key_idx",
-    "metric_view_kind_idx",
-    "metric_view_current_idx",
-    "metric_source_idx",
-    "metric_receipt_op_idx",
-    # CF-257: SHOW INDEXES also reports the backing RANGE indexes for uniqueness
-    # constraints under the constraint names. Keep all three constraints in the
-    # readiness set, otherwise an upgraded installation with every legacy index online
-    # skips bootstrap_phase_one() and never executes the new identity/structure DDL.
-    "project_identity_id_unique",
-    "project_identity_root_unique",
-    "structure_project_path_unique",
-)
-
-# Name, constraint type, entity type, labels/types, ordered properties. Index names alone are not
-# sufficient readiness evidence: Neo4j permits an ordinary RANGE index to use the prospective
-# constraint name, and SHOW INDEXES would then make startup skip the uniqueness DDL.
-PHASE_ONE_REQUIRED_CONSTRAINTS = (
-    (
-        "project_identity_id_unique",
-        "UNIQUENESS",
-        "NODE",
-        ("ProjectIdentity",),
-        ("project_id",),
-    ),
-    (
-        "project_identity_root_unique",
-        "UNIQUENESS",
-        "NODE",
-        ("ProjectIdentity",),
-        ("bound_host", "root_key"),
-    ),
-    (
-        "structure_project_path_unique",
-        "UNIQUENESS",
-        "NODE",
-        ("Entity",),
-        ("structure_project_id", "structure_path"),
-    ),
-)
 
 
 def _node_index_queries() -> list[str]:
@@ -315,120 +243,6 @@ def _turn_evidence_index_queries() -> list[str]:
         "CREATE INDEX turn_evidence_role_idx IF NOT EXISTS FOR (t:TurnEvidence) ON (t.role)",
         "CREATE INDEX turn_evidence_recorded_at_idx IF NOT EXISTS FOR (t:TurnEvidence) ON (t.recorded_at)",
         "CREATE INDEX turn_evidence_session_idx IF NOT EXISTS FOR (t:TurnEvidence) ON (t.session_id)",
-    ]
-
-
-#: constraint/index names backing the ScalarStateView typed-assertion store. Feature-scoped: these
-#: are created ONLY by the gated scalar-state activation path (get_scalar_state_activation_queries,
-#: run behind `assert_scalar_state_activatable`) — NOT by the unconditional bootstrap and NOT in
-#: PHASE_ONE_REQUIRED_INDEXES. These constraints define the source_key-anchored identity space, so
-#: creating them silently over a legacy (v1, claim_key-anchored) store would mix identity spaces;
-#: activation therefore refuses any legacy node first. `scalar_state_schema_ready()` checks them when
-#: the feature is enabled, so a scalar-state deploy still gates on its own DDL being online.
-SCALAR_STATE_REQUIRED_INDEXES: tuple[str, ...] = (
-    "typed_assertion_key_unique",
-    "typed_assertion_id_unique",
-    "typed_assertion_subject_uuid_idx",
-    "typed_assertion_claim_key_idx",
-    "typed_assertion_source_key_idx",
-    "typed_assertion_episode_idx",
-    "typed_assertion_head_source_key_unique",
-    "assertion_rebind_key_unique",
-    "assertion_rebind_op_idx",
-    "scalar_reconcile_receipt_key_unique",
-    "scalar_reconcile_op_idx",
-    "scalar_projection_repair_key_unique",
-    "scalar_projection_repair_pending_idx",
-    "scalar_state_view_current_key_unique",
-)
-
-
-def get_scalar_state_activation_queries() -> list[str]:
-    """Indexes/constraints backing the durable :TypedAssertion event log + its per-claim head
-    (ScalarStateView Piece C). These are DELIBERATELY NOT in `get_phase1_bootstrap_queries()`: they
-    define the source_key-anchored identity space (head unique on source_key; assertion_key built
-    from source_key), so creating them over a legacy (v1, claim_key-anchored) store would silently
-    mix identity spaces. They are created ONLY by the gated activation path
-    (`MemoryGraphAdapter.activate_scalar_state`), which first refuses any legacy/unstamped node via
-    `assert_scalar_state_activatable`. Fresh-only: after a clean activation every node carries
-    `identity_version = IDENTITY_VERSION`, so the two identity spaces never coexist.
-
-    assertion_key is the idempotency merge key; assertion_id is a unique node id;
-    subject_uuid/claim_key/source_key/episode back the per-entity fold input and provenance lookups;
-    the head's source_key is unique (one current per source claim). The leading DROP removes the
-    superseded v1 head claim_key uniqueness constraint if a legacy deploy still has it online (the
-    head is now source_key-keyed; claim_key is a non-unique historical property)."""
-    return [
-        # retire the superseded v1 identity constraint (head was claim_key-unique) if still online.
-        "DROP CONSTRAINT typed_assertion_head_claim_key_unique IF EXISTS",
-        # superseded by the namespace-keyed receipt identity (C.4.4): one op may hold one receipt PER
-        # namespace, so operation_id must NOT be unique.
-        "DROP CONSTRAINT scalar_reconcile_op_unique IF EXISTS",
-        "CREATE CONSTRAINT typed_assertion_key_unique IF NOT EXISTS FOR (a:TypedAssertion) REQUIRE a.assertion_key IS UNIQUE",
-        "CREATE CONSTRAINT typed_assertion_id_unique IF NOT EXISTS FOR (a:TypedAssertion) REQUIRE a.assertion_id IS UNIQUE",
-        "CREATE INDEX typed_assertion_subject_uuid_idx IF NOT EXISTS FOR (a:TypedAssertion) ON (a.subject_uuid)",
-        "CREATE INDEX typed_assertion_claim_key_idx IF NOT EXISTS FOR (a:TypedAssertion) ON (a.claim_key)",
-        "CREATE INDEX typed_assertion_source_key_idx IF NOT EXISTS FOR (a:TypedAssertion) ON (a.source_key)",
-        "CREATE INDEX typed_assertion_episode_idx IF NOT EXISTS FOR (a:TypedAssertion) ON (a.episode_uuid)",
-        # the head's ATOMIC identity is the binding-stable source_key (DB-enforced), so two concurrent
-        # first writes for one source claim — even bound through different subject_uuids after a merge
-        # — converge on one head. claim_key is a non-unique historical property (index only).
-        "CREATE CONSTRAINT typed_assertion_head_source_key_unique IF NOT EXISTS FOR (h:TypedAssertionHead) REQUIRE h.source_key IS UNIQUE",
-        "CREATE INDEX typed_assertion_head_claim_key_idx IF NOT EXISTS FOR (h:TypedAssertionHead) ON (h.claim_key)",
-        # merge-lineage journal (DB-unique per op+assertion) + reconciliation receipts (Piece C.3)
-        "CREATE CONSTRAINT assertion_rebind_key_unique IF NOT EXISTS FOR (r:AssertionRebind) REQUIRE r.rebind_key IS UNIQUE",
-        "CREATE INDEX assertion_rebind_op_idx IF NOT EXISTS FOR (r:AssertionRebind) ON (r.merge_op_id)",
-        # Reconciliation receipts are NAMESPACE-KEYED (C.4.4): one lifecycle op can span two assertion
-        # silos and is repaired independently per silo, so identity is (operation_id, kind, namespace)
-        # hashed into receipt_key. operation_id is a non-unique lookup property (index only) — a
-        # UNIQUE constraint on it would collapse the per-namespace receipts and let one silo's success
-        # certify another silo's failure.
-        "CREATE CONSTRAINT scalar_reconcile_receipt_key_unique IF NOT EXISTS FOR (rc:ScalarReconcile) REQUIRE rc.receipt_key IS UNIQUE",
-        "CREATE INDEX scalar_reconcile_op_idx IF NOT EXISTS FOR (rc:ScalarReconcile) ON (rc.operation_id)",
-        # Delete/time-activation projection receipts: DB-unique replay identity plus the scheduler's
-        # pending FIFO access path (G19/G20).
-        "CREATE CONSTRAINT scalar_projection_repair_key_unique IF NOT EXISTS FOR (rr:ScalarProjectionRepair) REQUIRE rr.repair_key IS UNIQUE",
-        "CREATE INDEX scalar_projection_repair_pending_idx IF NOT EXISTS FOR (rr:ScalarProjectionRepair) ON (rr.status, rr.started_at)",
-        # ONE current scalar_state View per view_key, DB-ENFORCED (C.4.4.4). The View writer reads the
-        # current version then CREATEs a new one with a random uuid; under read-committed isolation two
-        # independent workers rebuilding the same projection both read "no current" and each create a
-        # view_current=true node -> duplicate current Views for one slot. No query-level check-then-create
-        # can prevent that; only a DB constraint does. `ss_view_key_current` is set to the view_key ONLY
-        # while a scalar_state node is current, and REMOVED on supersession/retire, so the uniqueness
-        # boundary is exactly "one current per key". The property is NULL on every non-scalar fact, every
-        # Metric, and every superseded/retired scalar node, so those never participate (the fingerprinted
-        # metric saga and all other View kinds are untouched). Backfill current scalar nodes FIRST so the
-        # constraint can come online over an existing single-current store.
-        "MATCH (n:Entity {view_kind: 'scalar_state'}) WHERE coalesce(n.view_current, true) AND n.ss_view_key_current IS NULL SET n.ss_view_key_current = n.view_key",
-        "CREATE CONSTRAINT scalar_state_view_current_key_unique IF NOT EXISTS FOR (n:Entity) REQUIRE n.ss_view_key_current IS UNIQUE",
-    ]
-
-
-def get_view_evidence_lifecycle_activation_queries() -> list[str]:
-    """Return optional DDL for the activation-gated View evidence lifecycle.
-
-    These constraints and indexes support the namespace serialization fence, durable publication
-    intents and tombstones, and leased projection repair queue.  They are deliberately separate
-    from :func:`get_phase1_bootstrap_queries`: activation must first validate and reconcile existing
-    evidence/View state before uniqueness becomes authoritative.
-    """
-    return [
-        "CREATE CONSTRAINT evidence_namespace_fence_namespace_unique IF NOT EXISTS "
-        "FOR (f:EvidenceNamespaceFence) REQUIRE f.namespace_key IS UNIQUE",
-        "CREATE CONSTRAINT evidence_publication_intent_key_unique IF NOT EXISTS "
-        "FOR (i:EvidencePublicationIntent) REQUIRE i.intent_key IS UNIQUE",
-        "CREATE INDEX evidence_publication_intent_status_idx IF NOT EXISTS "
-        "FOR (i:EvidencePublicationIntent) ON (i.status)",
-        "CREATE CONSTRAINT evidence_tombstone_key_unique IF NOT EXISTS "
-        "FOR (t:EvidenceTombstone) REQUIRE t.tombstone_key IS UNIQUE",
-        "CREATE INDEX evidence_tombstone_digest_idx IF NOT EXISTS "
-        "FOR (t:EvidenceTombstone) ON (t.digest)",
-        "CREATE INDEX evidence_tombstone_key_id_idx IF NOT EXISTS "
-        "FOR (t:EvidenceTombstone) ON (t.key_id)",
-        "CREATE CONSTRAINT view_projection_repair_key_unique IF NOT EXISTS "
-        "FOR (r:ViewProjectionRepair) REQUIRE r.repair_key IS UNIQUE",
-        "CREATE INDEX view_projection_repair_status_lease_idx IF NOT EXISTS "
-        "FOR (r:ViewProjectionRepair) ON (r.status, r.lease_expires_at)",
     ]
 
 

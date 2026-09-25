@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shlex
-import subprocess
 import sys
-from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -25,61 +22,24 @@ from menhir.cli.output import (
     wrap_hook_response,
 )
 
+# Settings-file machinery moved to the hook_install/hook_events siblings; these re-exports
+# keep every existing menhir.cli.hook import site and monkeypatch target working unchanged.
+from menhir.cli.hook_events import _load_env, _parse_stdin
+from menhir.cli.hook_install import (
+    _HOOK_MARKER,
+    _entry_has_menhir_hook,
+    _format_hook_command,
+    _remove_managed_hook_entries,
+    _resolve_settings_path,
+    _strip_menhir_hook_commands,
+    _upsert_hook_entry,
+    install_hooks,
+)
+
 hook_app = typer.Typer(name="hook", help="Claude Code hook integration.")
 
 MIN_PROMPT_LEN = 15
-_HOOK_MARKER = "menhir.cli"
 CONTEXT_TIMEOUT_S: float = 8.0
-
-
-def _entry_has_menhir_hook(entry: object) -> bool:
-    """True when `entry` is a settings hook-entry containing a menhir hook command.
-
-    Total on arbitrary JSON: `~/.claude/settings.json` is hand-edited, so a malformed
-    entry is expected input, not an exceptional one. Returns False rather than raising
-    so a bad entry cannot abort an uninstall part-way through.
-    """
-    if not isinstance(entry, dict):
-        return False
-    hooks = entry.get("hooks")
-    if not isinstance(hooks, list):
-        return False
-    for hook in hooks:
-        if not isinstance(hook, dict):
-            continue
-        command = hook.get("command")
-        if isinstance(command, str) and _HOOK_MARKER in command:
-            return True
-    return False
-
-
-def _strip_menhir_hook_commands(entry: object) -> tuple[int, int]:
-    """Remove menhir hook commands from one entry in place, keeping the rest.
-
-    A settings entry can co-register third-party commands alongside menhir's, so
-    removal is per command, not per entry: the entry survives while any non-menhir
-    command remains, and its caller drops it only once empty. Total on arbitrary
-    JSON (same contract as `_entry_has_menhir_hook`): malformed entries return
-    (0, 0) untouched so a bad entry cannot abort an uninstall part-way through.
-    """
-    if not isinstance(entry, dict):
-        return 0, 0
-    hook_list = entry.get("hooks")
-    if not isinstance(hook_list, list):
-        return 0, 0
-    kept = [
-        hook
-        for hook in hook_list
-        if not (
-            isinstance(hook, dict)
-            and isinstance(hook.get("command"), str)
-            and _HOOK_MARKER in hook["command"]
-        )
-    ]
-    removed = len(hook_list) - len(kept)
-    if removed:
-        entry["hooks"] = kept
-    return removed, len(kept)
 
 
 # ---------------------------------------------------------------------------
@@ -121,33 +81,6 @@ def run(
             ),
             flush=True,
         )
-
-
-def _parse_stdin() -> tuple[str, str]:
-    """Parse session_id and prompt from stdin JSON. Returns (session_id, prompt)."""
-    session_id = "unknown"
-    prompt = ""
-    if not sys.stdin.isatty():
-        try:
-            hook_input = json.load(sys.stdin)
-            session_id = hook_input.get("session_id", session_id)
-            prompt = hook_input.get("prompt", "")
-        except Exception as exc:
-            print(f"menhir hook: stdin parse failed ({type(exc).__name__})", file=sys.stderr)
-    return session_id, prompt
-
-
-def _load_env() -> None:
-    """Load .env from ENV_FILE env var or package root."""
-    import os
-    from dotenv import load_dotenv
-
-    env_file = os.environ.get("ENV_FILE")
-    if env_file:
-        load_dotenv(env_file)
-    else:
-        pkg_dir = Path(__file__).resolve().parent.parent.parent.parent
-        load_dotenv(pkg_dir / ".env")
 
 
 # ---------------------------------------------------------------------------
@@ -487,154 +420,3 @@ def uninstall(
     typer.echo(f"Removed {removed} menhir hook(s) from {settings_path}")
     if kept_third_party:
         typer.echo(f"Kept {kept_third_party} third-party hook(s) co-registered in menhir entries")
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _upsert_hook_entry(hooks: dict, event_key: str, entry: dict) -> None:
-    """Insert or refresh the menhir hook entry in the given event key."""
-    event_hooks: list = hooks.setdefault(event_key, [])
-    if not isinstance(event_hooks, list):
-        raise ValueError(f"Expected hooks.{event_key} to be a JSON array")
-    new_commands = entry.get("hooks")
-    for i, existing_entry in enumerate(event_hooks):
-        if not isinstance(existing_entry, dict):
-            continue
-        if not _entry_has_menhir_hook(existing_entry):
-            continue
-        if not isinstance(new_commands, list):
-            # Malformed installer input: fall back to the old whole-entry replace.
-            event_hooks[i] = entry
-            return
-        # Same granularity rule as uninstall (#113): a reinstall refreshes only
-        # menhir's commands; third-party commands co-registered in the same entry
-        # survive it.
-        _strip_menhir_hook_commands(existing_entry)
-        refreshed = existing_entry.get("hooks")
-        if not isinstance(refreshed, list):
-            refreshed = []
-            existing_entry["hooks"] = refreshed
-        refreshed.extend(new_commands)
-        return
-    event_hooks.append(entry)
-
-
-def install_hooks(
-    *,
-    location: str,
-    frequency: int = 10,
-    save_frequency: int = 10,
-    workspace: str = "",
-    project_dir: Path | None = None,
-) -> tuple[Path, dict[str, str]]:
-    """Install the package-native recall hooks and preserve unrelated client config."""
-    from menhir.domain.bootstrap_scope import normalize_workspace_key
-
-    location = location.strip().lower()
-    if location not in ("user", "project"):
-        raise ValueError(f"Invalid location: {location!r}. Use 'user' or 'project'.")
-    if location == "project" and not workspace:
-        raise ValueError("Project hook installation requires --workspace.")
-    if location == "user" and workspace:
-        raise ValueError("User hooks are general-only; omit --workspace.")
-
-    workspace = normalize_workspace_key(workspace) if workspace else ""
-    if location == "project" and not workspace:
-        raise ValueError("Project hook installation requires a non-empty --workspace.")
-
-    if project_dir is None:
-        settings_path = _resolve_settings_path(location)
-    else:
-        settings_path = _resolve_settings_path(location, project_dir)
-
-    python_exe = sys.executable
-    venv_python = (
-        Path(sys.prefix)
-        / ("Scripts" if sys.platform == "win32" else "bin")
-        / Path(sys.executable).name
-    )
-    if venv_python.exists():
-        python_exe = str(venv_python)
-
-    recall_args = [python_exe, "-m", "menhir.cli", "hook", "run", "--frequency", str(frequency)]
-    if workspace:
-        recall_args.extend(("--workspace", workspace))
-    postcompact_args = [python_exe, "-m", "menhir.cli", "hook", "run", "--event", "postcompact"]
-    if workspace:
-        postcompact_args.extend(("--workspace", workspace))
-    commands = {
-        "recall": _format_hook_command(recall_args),
-        "save": _format_hook_command(
-            [python_exe, "-m", "menhir.cli", "hook", "run", "--event", "stop", "--frequency", str(save_frequency)]
-        ),
-        "postcompact": _format_hook_command(postcompact_args),
-    }
-
-    existing: dict = {}
-    if settings_path.exists():
-        try:
-            existing = json.loads(settings_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Could not parse {settings_path}: {exc}") from exc
-        if not isinstance(existing, dict):
-            raise ValueError(f"Expected a JSON object in {settings_path}")
-
-    hooks = existing.setdefault("hooks", {})
-    if not isinstance(hooks, dict):
-        raise ValueError(f"Expected 'hooks' to be a JSON object in {settings_path}")
-
-    _upsert_hook_entry(
-        hooks,
-        "UserPromptSubmit",
-        {"hooks": [{"type": "command", "command": commands["recall"]}]},
-    )
-    _upsert_hook_entry(
-        hooks,
-        "Stop",
-        {"hooks": [{"type": "command", "command": commands["save"]}]},
-    )
-    _upsert_hook_entry(
-        hooks,
-        "SessionStart",
-        {"hooks": [{"type": "command", "command": commands["postcompact"]}]},
-    )
-    _remove_managed_hook_entries(hooks, "PostCompact")
-
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
-    return settings_path, commands
-
-
-def _remove_managed_hook_entries(hooks: dict, event: str) -> None:
-    """Drop Menhir-owned hook commands for *event*, and the event itself once empty.
-
-    Needed when a registration moves: without it the old PostCompact entry survives every
-    reinstall, and an installer that only ever adds leaves the dead one running forever.
-    Third-party commands co-registered in a menhir entry survive the move.
-    """
-    entries = hooks.get(event)
-    if not isinstance(entries, list):
-        return
-    remaining: list = []
-    for entry in entries:
-        removed, kept = _strip_menhir_hook_commands(entry)
-        if kept or not removed:
-            remaining.append(entry)
-    if remaining:
-        hooks[event] = remaining
-    else:
-        hooks.pop(event, None)
-
-
-def _format_hook_command(args: list[str]) -> str:
-    if sys.platform == "win32":
-        return subprocess.list2cmdline(args)
-    return shlex.join(args)
-
-
-def _resolve_settings_path(location: str, project_dir: Path | None = None) -> Path:
-    if location == "user":
-        return Path.home() / ".claude" / "settings.json"
-    return (project_dir or Path.cwd()) / ".claude" / "settings.local.json"

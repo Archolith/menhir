@@ -66,53 +66,57 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import json
 import os
 import secrets
-import shutil
-import signal
 import subprocess
 import sys
 import tempfile
 import time
-import urllib.error
-import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, TextIO
-from urllib.parse import urlsplit
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-FORBIDDEN_PORTS = {8090}  # the real server — never bind or probe it here
-
-
-def free_port() -> int:
-    """Return an OS-assigned free localhost TCP port.
-
-    Throwaway servers must never bind a fixed port: a fixed port can collide with
-    an already-running instance (a dev/container server on 8099, say), and the
-    health-wait would then talk to *that* process. An ephemeral port + the
-    instance-id handshake together guarantee isolation.
-    """
-    import socket
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return int(s.getsockname()[1])
-
-SHAPES = ("no-auth", "static", "client-token", "oauth", "oauth-as")
-
-# Fixed, non-secret test credentials. These are deliberately well-known — the
-# whole point is a throwaway server with no real data behind it.
-TEST_KEYS = {
-    "operator": "test-operator-key",
-    "agent": "test-agent-key",
-    "readonly": "test-readonly-key",
-}
-
-# A JWKS URI that resolves to nothing, so the OAuth path exercises the
-# IdP-outage branch (server_error -> 503) deterministically.
-DEAD_JWKS_URI = "http://127.0.0.1:9/.well-known/jwks.json"
+if __package__:
+    from .test_server_container import (
+        _container_command,
+        _remove_container,
+        resolve_container_image,
+    )
+    from .test_server_env import _shape_env
+    from .test_server_neo4j import _throwaway_neo4j
+    from .test_server_util import (
+        DEAD_JWKS_URI,
+        FORBIDDEN_PORTS,
+        REPO_ROOT,
+        SHAPES,
+        TEST_KEYS,
+        _remove_workdir,
+        _terminate,
+        _validated_public_origin,
+        _wait_for_health,
+        free_port,
+    )
+else:  # direct `python scripts/dev/test_server.py` runs have no package context
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from scripts.dev.test_server_container import (
+        _container_command,
+        _remove_container,
+        resolve_container_image,
+    )
+    from scripts.dev.test_server_env import _shape_env
+    from scripts.dev.test_server_neo4j import _throwaway_neo4j
+    from scripts.dev.test_server_util import (
+        DEAD_JWKS_URI,
+        FORBIDDEN_PORTS,
+        REPO_ROOT,
+        SHAPES,
+        TEST_KEYS,
+        _remove_workdir,
+        _terminate,
+        _validated_public_origin,
+        _wait_for_health,
+        free_port,
+    )
 
 
 @dataclass
@@ -164,407 +168,6 @@ class RunningServer:
             self.proc,
             expect_instance_id=self.instance_id,
         )
-
-
-def _remove_workdir(path: Path) -> None:
-    """Remove sensitive throwaway state and surface any cleanup failure."""
-    shutil.rmtree(path)
-
-
-def _validated_public_origin(value: str) -> str:
-    """Return a canonical HTTPS origin suitable for a public OAuth test."""
-    raw = value.strip()
-    try:
-        parts = urlsplit(raw)
-        _ = parts.port
-    except ValueError as exc:
-        raise ValueError("--public-base-url must be a valid HTTPS origin") from exc
-    if (
-        parts.scheme.lower() != "https"
-        or not parts.hostname
-        or parts.username is not None
-        or parts.password is not None
-        or parts.path not in {"", "/"}
-        or parts.query
-        or parts.fragment
-    ):
-        raise ValueError(
-            "--public-base-url must be an HTTPS origin without credentials, path, query, or fragment"
-        )
-    return f"https://{parts.netloc}"
-
-
-def _shape_env(shape: str, *, port: int, host: str, workdir: Path, jwks_uri: str,
-               backend: str, instance_id: str,
-               neo4j: tuple[str, str, str] | None = None,
-               oauth: dict[str, str] | None = None,
-               public_base_url: str | None = None,
-               oauth_refresh: bool = False,
-               oauth_access_ttl_s: int | None = None) -> dict[str, str]:
-    """Build the *complete* environment for a shape from scratch (no repo leakage)."""
-    if shape not in SHAPES:
-        raise ValueError(f"unknown shape {shape!r}; choose from {SHAPES}")
-    if public_base_url is not None:
-        public_base_url = _validated_public_origin(public_base_url)
-
-    # Minimal base: just enough for Python + uvicorn to run. No MENHIR_*/NEO4J_*/
-    # OPENAI_* inherited from the caller's shell.
-    passthrough = ("PATH", "SYSTEMROOT", "SystemRoot", "WINDIR", "TEMP", "TMP",
-                   "PATHEXT", "COMSPEC", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
-                   "APPDATA", "LOCALAPPDATA", "USERPROFILE", "HOME", "LANG", "LC_ALL")
-    env: dict[str, str] = {k: os.environ[k] for k in passthrough if k in os.environ}
-
-    # Identity handshake: the server echoes this in /api/health, and the launcher
-    # verifies it before handing the URL to the caller. Guarantees we never talk
-    # to a *different* process that happens to hold this port.
-    env["MENHIR_INSTANCE_ID"] = instance_id
-
-    # An empty ENV_FILE that exists -> the explicit load_dotenv(ENV_FILE) calls
-    # load nothing from the repo.
-    env_file = workdir / "empty.env"
-    env_file.write_text("", encoding="utf-8")
-    env["ENV_FILE"] = str(env_file)
-    # Belt-and-suspenders: the server's import chain also does a *cwd-relative*
-    # dotenv auto-load that ignores ENV_FILE. We run the subprocess from an
-    # isolated cwd (the workdir, set at launch) and drop an empty ``.env`` there
-    # so that cwd-relative search finds nothing instead of the repo's real keys.
-    (workdir / ".env").write_text("", encoding="utf-8")
-
-    env["MENHIR_API_HOST"] = host
-    env["MENHIR_API_PORT"] = str(port)
-
-    # Backend isolation.
-    #  - "none" (default): reduced startup scope — the memory backend is NOT
-    #    started, so no Neo4j is contacted at all and the auth/OAuth surface
-    #    comes up instantly. Backend-dependent routes return 503. This is the
-    #    right mode for auth testing and needs no Docker.
-    #  - "neo4j": full startup scope against the provided throwaway Neo4j
-    #    (*neo4j* = (uri, user, password)). Populates the graph adapter so
-    #    backend routes (e.g. /api/tool-events) work. No LLM/OpenAI required —
-    #    the server degrades LLM features but the graph adapter is built from
-    #    Neo4j alone.
-    if backend == "neo4j":
-        if neo4j is None:
-            raise ValueError("backend='neo4j' requires a neo4j=(uri,user,password) tuple")
-        uri, user, password = neo4j
-        env["MENHIR_STARTUP_SCOPE"] = "full"
-        env["MENHIR_ALLOW_SYSTEM_PYTHON"] = "1"
-        env["NEO4J_URI"] = uri
-        env["NEO4J_USER"] = user
-        env["NEO4J_PASSWORD"] = password
-        env["WORKSPACE_ROOT"] = str(workdir)
-        env["MENHIR_MCP_TELEMETRY_DB"] = str(workdir / "mcp_telemetry.db")
-    else:  # "none"
-        env["MENHIR_STARTUP_SCOPE"] = "auth-only"
-        # A dead Neo4j URI as a belt-and-suspenders guarantee we never reach the
-        # real graph even if the scope gate were bypassed.
-        env["NEO4J_URI"] = "bolt://127.0.0.1:7699"
-        env["NEO4J_USER"] = "neo4j"
-        env["NEO4J_PASSWORD"] = "throwaway"
-
-    # Isolated stores for the client-token / AS SQLite dbs + signing key.
-    env["MENHIR_OAUTH_AS_DIR"] = str(workdir / "oauth-store")
-    (workdir / "oauth-store").mkdir(parents=True, exist_ok=True)
-
-    if shape == "static":
-        env["MENHIR_OPERATOR_KEY"] = TEST_KEYS["operator"]
-        env["MENHIR_AGENT_KEY"] = TEST_KEYS["agent"]
-        env["MENHIR_READONLY_KEY"] = TEST_KEYS["readonly"]
-    elif shape == "client-token":
-        env["MENHIR_CLIENT_TOKENS_ENABLED"] = "1"
-    elif shape == "oauth":
-        env["MENHIR_OAUTH_ENABLED"] = "true"
-        env["MENHIR_PUBLIC_BASE_URL"] = public_base_url or f"http://{host}:{port}"
-        # Defaults exercise the local dead-JWKS outage path. A real external IdP
-        # (e.g. Auth0) is driven by passing `oauth={issuer,jwks_uri,audience,
-        # authorization_servers}` to launch(); explicit values win over defaults.
-        env["MENHIR_OAUTH_ISSUER"] = "https://idp.test.local/"
-        env["MENHIR_OAUTH_JWKS_URI"] = jwks_uri
-        env["MENHIR_OAUTH_AUDIENCE"] = f"http://{host}:{port}/mcp-http"
-        # Required for the protected-resource metadata endpoint to render (200).
-        env["MENHIR_AUTHORIZATION_SERVERS"] = "https://idp.test.local/"
-        if oauth:
-            if oauth.get("issuer"):
-                env["MENHIR_OAUTH_ISSUER"] = oauth["issuer"]
-            if oauth.get("jwks_uri"):
-                env["MENHIR_OAUTH_JWKS_URI"] = oauth["jwks_uri"]
-            if oauth.get("audience"):
-                env["MENHIR_OAUTH_AUDIENCE"] = oauth["audience"]
-            if oauth.get("authorization_servers"):
-                env["MENHIR_AUTHORIZATION_SERVERS"] = oauth["authorization_servers"]
-    elif shape == "oauth-as":
-        env["MENHIR_OAUTH_AS_ENABLED"] = "1"
-        env["MENHIR_OAUTH_ENABLED"] = "true"
-        env["MENHIR_PUBLIC_BASE_URL"] = public_base_url or f"http://{host}:{port}"
-        if oauth_refresh:
-            env["MENHIR_OAUTH_AS_REFRESH_TOKENS_ENABLED"] = "1"
-            env["MENHIR_OAUTH_AS_REFRESH_WITHOUT_OFFLINE_ACCESS_ENABLED"] = "1"
-        if oauth_access_ttl_s is not None:
-            env["MENHIR_OAUTH_AS_ACCESS_TTL_S"] = str(oauth_access_ttl_s)
-        # This is a deliberately public, fixed test credential for an isolated
-        # throwaway graph. It must never be used for a real Menhir deployment.
-        env["MENHIR_OPERATOR_KEY"] = TEST_KEYS["operator"]
-    # no-auth: nothing extra (loopback + no keys)
-
-    return env
-
-
-@dataclass
-class _Neo4jSidecar:
-    uri: str
-    user: str
-    password: str
-    container: str | None  # None when reusing an external Neo4j (nothing to tear down)
-
-
-@contextlib.contextmanager
-def _throwaway_neo4j(*, wait_s: float = 90.0, allow_external: bool = True):
-    """Provide a throwaway Neo4j for backend-backed launches.
-
-    Fast path: if ``MENHIR_TEST_NEO4J_URI`` is set, reuse that Neo4j (with
-    ``MENHIR_TEST_NEO4J_USER`` / ``MENHIR_TEST_NEO4J_PASSWORD``) and start nothing.
-    Otherwise start a disposable ``neo4j:5-community`` container on an ephemeral
-    bolt port, wait until it accepts connections, and remove it on exit.
-    """
-    ext = os.getenv("MENHIR_TEST_NEO4J_URI")
-    if ext:
-        if not allow_external:
-            raise RuntimeError(
-                "public OAuth test profiles refuse MENHIR_TEST_NEO4J_URI reuse; "
-                "unset it so the launcher creates a disposable Docker Neo4j"
-            )
-        yield _Neo4jSidecar(
-            uri=ext,
-            user=os.getenv("MENHIR_TEST_NEO4J_USER", "neo4j"),
-            password=os.getenv("MENHIR_TEST_NEO4J_PASSWORD", "neo4j"),
-            container=None,
-        )
-        return
-
-    if shutil.which("docker") is None:
-        raise RuntimeError(
-            "backend='neo4j' needs Docker (or set MENHIR_TEST_NEO4J_URI to an "
-            "existing throwaway Neo4j). Docker was not found on PATH."
-        )
-    bolt = free_port()
-    name = f"menhir-smoke-neo4j-{secrets.token_hex(4)}"
-    password = "smokethrowaway"
-    run = subprocess.run(  # noqa: S603
-        ["docker", "run", "-d", "--rm", "--name", name,
-         "-p", f"127.0.0.1:{bolt}:7687",
-         "-e", f"NEO4J_AUTH=neo4j/{password}",
-         "-e", "NEO4J_server_memory_heap_max__size=512m",
-         "neo4j:5-community"],
-        capture_output=True, text=True,
-    )
-    if run.returncode != 0:
-        raise RuntimeError(f"failed to start throwaway Neo4j: {run.stderr.strip()}")
-    uri = f"bolt://127.0.0.1:{bolt}"
-    try:
-        _wait_for_neo4j(uri, "neo4j", password, wait_s)
-        yield _Neo4jSidecar(uri=uri, user="neo4j", password=password, container=name)
-    finally:
-        with contextlib.suppress(Exception):
-            subprocess.run(["docker", "rm", "-f", name],  # noqa: S603
-                           capture_output=True, text=True, timeout=30)
-
-
-def _wait_for_neo4j(uri: str, user: str, password: str, timeout_s: float) -> None:
-    """Block until the Neo4j at *uri* answers a trivial query, or time out."""
-    from neo4j import GraphDatabase  # local import: only needed for backend launches
-
-    deadline = time.monotonic() + timeout_s
-    last_err = ""
-    while time.monotonic() < deadline:
-        try:
-            driver = GraphDatabase.driver(uri, auth=(user, password))
-            try:
-                driver.verify_connectivity()
-                with driver.session() as s:
-                    s.run("RETURN 1").consume()
-                return
-            finally:
-                driver.close()
-        except Exception as exc:  # noqa: BLE001
-            last_err = str(exc)
-            time.sleep(1.0)
-    raise TimeoutError(f"throwaway Neo4j not ready after {timeout_s}s: {last_err}")
-
-
-def _wait_for_health(base_url: str, timeout_s: float, proc: subprocess.Popen,
-                     *, expect_instance_id: str) -> dict:
-    """Poll /api/health until *our* server answers or *timeout_s* elapses.
-
-    Verifies the health response carries our ``instance_id``. If a *different*
-    process holds this port (e.g. a dev server or a stale instance), its health
-    response won't match and we fail loudly instead of silently running against
-    the wrong server.
-    """
-    deadline = time.monotonic() + timeout_s
-    url = f"{base_url}/api/health"
-    last_err = ""
-    while time.monotonic() < deadline:
-        if proc.poll() is not None:
-            raise RuntimeError(f"server exited early (code {proc.returncode})")
-        try:
-            with urllib.request.urlopen(url, timeout=3) as resp:  # noqa: S310 (loopback)
-                payload = json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.URLError, ConnectionError, OSError) as exc:
-            last_err = str(exc)
-            time.sleep(0.4)
-            continue
-        got = payload.get("instance_id")
-        if got == expect_instance_id:
-            return payload
-        # A server answered but it is not ours — a foreign process on this port.
-        raise RuntimeError(
-            f"port {base_url} is held by a different server "
-            f"(instance_id={got!r}, expected {expect_instance_id!r}); refusing to "
-            f"run against it"
-        )
-    raise TimeoutError(f"health check timed out after {timeout_s}s: {last_err}")
-
-
-def _container_secret_mounts(workdir: Path, env: dict[str, str]) -> list[tuple[Path, str]]:
-    """Materialize throwaway files required by the production image entrypoint."""
-    menhir_dir = workdir / "container-secrets" / "menhir"
-    oauth_dir = workdir / "container-secrets" / "oauth"
-    policy_dir = workdir / "container-policy"
-    menhir_dir.mkdir(parents=True)
-    oauth_dir.mkdir(parents=True)
-    policy_dir.mkdir(parents=True)
-
-    secret_values = {
-        "neo4j-password": env["NEO4J_PASSWORD"],
-        "operator-key": env.get("MENHIR_OPERATOR_KEY", TEST_KEYS["operator"]),
-        "agent-key": env.get("MENHIR_AGENT_KEY", TEST_KEYS["agent"]),
-        "readonly-key": env.get("MENHIR_READONLY_KEY", TEST_KEYS["readonly"]),
-        "openai-api-key": env.get("OPENAI_API_KEY", ""),
-        "local-llm-api-key": env.get("LOCAL_LLM_API_KEY", ""),
-    }
-    for name, value in secret_values.items():
-        if value:
-            path = menhir_dir / name
-            path.write_text(value, encoding="utf-8")
-            path.chmod(0o600)
-
-    consent = oauth_dir / "oauth-consent-secret"
-    consent.write_text("throwaway-container-consent", encoding="utf-8")
-    consent.chmod(0o600)
-    signing_key = oauth_dir / "oauth_signing_key.json"
-    signing_key.write_text("{}", encoding="utf-8")
-    signing_key.chmod(0o600)
-    (policy_dir / "client-policy.json").write_bytes(
-        (REPO_ROOT / "deploy" / "client-policy.production.json").read_bytes()
-    )
-    return [
-        (menhir_dir, "/run/secrets/menhir"),
-        (oauth_dir, "/run/secrets/oauth"),
-        (policy_dir, "/srv/menhir/production/policy"),
-    ]
-
-
-def _container_command(
-    *, image: str, name: str, port: int, workdir: Path, env: dict[str, str]
-) -> tuple[list[str], dict[str, str]]:
-    """Build an isolated production-image invocation without secrets in argv."""
-    if not image.strip():
-        raise ValueError("container image must be non-empty")
-    neo4j = urlsplit(env["NEO4J_URI"])
-    if neo4j.hostname not in {"127.0.0.1", "localhost"} or neo4j.port is None:
-        raise ValueError("container-image tests require a loopback disposable Neo4j")
-
-    mounts = _container_secret_mounts(workdir, env)
-    prefixes = (
-        "ENV_FILE", "GRAPHITI_", "LLM_", "LOCAL_LLM_", "MENHIR_",
-        "NEO4J_", "OPENAI_", "SCHEDULER_", "GEMINI_",
-    )
-    secret_env_keys = {
-        "GEMINI_API_KEY", "LOCAL_LLM_API_KEY", "MENHIR_AGENT_KEY",
-        "MENHIR_API_KEY", "MENHIR_OPERATOR_KEY", "MENHIR_READONLY_KEY",
-        "NEO4J_PASSWORD", "OPENAI_API_KEY",
-    }
-    container_env = {
-        key: value for key, value in env.items()
-        if key.startswith(prefixes) and key not in secret_env_keys
-    }
-    container_env.update({
-        "ENV_FILE": "/tmp/empty.env",
-        "MENHIR_API_HOST": "0.0.0.0",
-        "MENHIR_API_PORT": "8099",
-        "MENHIR_OAUTH_AS_DIR": "/tmp/menhir-oauth",
-        "MENHIR_MCP_TELEMETRY_DB": "/tmp/menhir-telemetry.db",
-        "NEO4J_URI": f"bolt://host.docker.internal:{neo4j.port}",
-        "WORKSPACE_ROOT": "/tmp/menhir-workspace",
-    })
-    docker_env = os.environ.copy()
-    for key in secret_env_keys:
-        docker_env.pop(key, None)
-    docker_env.update(container_env)
-    command = [
-        "docker", "run", "--rm", "--pull=never", "--name", name,
-        "--read-only", "--tmpfs", "/tmp:rw,nosuid,size=512m",
-        "--no-healthcheck",
-        "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
-        "--add-host", "host.docker.internal:host-gateway",
-        "-p", f"127.0.0.1:{port}:8099",
-    ]
-    for source, target in mounts:
-        command.extend(["-v", f"{source}:{target}:ro"])
-    for key in sorted(container_env):
-        command.extend(["-e", key])
-    command.append(image)
-    return command, docker_env
-
-
-def resolve_container_image(image: str, *, expected_revision: str) -> tuple[str, str]:
-    """Resolve a tag once to an immutable image ID and verify its revision label."""
-    inspected = subprocess.run(
-        ["docker", "image", "inspect", image], capture_output=True, text=True,
-    )
-    if inspected.returncode != 0:
-        raise RuntimeError(f"cannot inspect release image {image!r}: {inspected.stderr.strip()}")
-    try:
-        records = json.loads(inspected.stdout)
-        record = records[0]
-        image_id = str(record["Id"])
-        revision = str(record["Config"]["Labels"]["org.opencontainers.image.revision"])
-    except (IndexError, KeyError, TypeError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"release image {image!r} has invalid identity metadata") from exc
-    if not image_id.startswith("sha256:"):
-        raise RuntimeError(f"release image {image!r} did not resolve to an immutable ID")
-    if revision != expected_revision:
-        raise RuntimeError(
-            f"release image revision mismatch: expected {expected_revision}, got {revision}"
-        )
-    return image_id, revision
-
-
-def _remove_container(name: str, proc: subprocess.Popen) -> None:
-    """Remove one exact throwaway container and reap its docker client."""
-    removed = None
-    for _attempt in range(2):
-        removed = subprocess.run(
-            ["docker", "rm", "-f", name], capture_output=True, text=True, timeout=30,
-        )
-        if removed.returncode == 0:
-            break
-        exists = subprocess.run(
-            ["docker", "container", "inspect", name],
-            capture_output=True, text=True, timeout=30,
-        )
-        if exists.returncode != 0:
-            break
-    _terminate(proc)
-    if removed is not None and removed.returncode != 0:
-        exists = subprocess.run(
-            ["docker", "container", "inspect", name],
-            capture_output=True, text=True, timeout=30,
-        )
-        if exists.returncode == 0:
-            raise RuntimeError(
-                f"throwaway container {name!r} survived removal: {removed.stderr.strip()}"
-            )
 
 
 @contextlib.contextmanager
@@ -678,29 +281,6 @@ def launch(shape: str, *, port: int | None = None, host: str = "127.0.0.1",
             print(f"[test_server] shape={shape} backend={backend} up at {base_url} "
                   f"(startup_mode={health.get('startup_mode')})", file=sys.stderr)
         yield srv
-
-
-def _terminate(proc: subprocess.Popen) -> None:
-    if proc.poll() is not None:
-        return
-    with contextlib.suppress(Exception):
-        if os.name == "nt":
-            proc.send_signal(signal.CTRL_BREAK_EVENT)
-        else:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-    try:
-        proc.wait(timeout=8)
-    except subprocess.TimeoutExpired:
-        with contextlib.suppress(Exception):
-            proc.kill()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(
-                f"test server process {proc.pid} did not exit after termination and kill"
-            ) from exc
-    if proc.poll() is None:
-        raise RuntimeError(f"test server process {proc.pid} is still running after termination")
 
 
 def _cli(argv: list[str] | None = None) -> int:

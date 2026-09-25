@@ -22,37 +22,11 @@ The "stale" signal (the whole point): a memory `(sem)-[a:ANCHORED_TO]->(f:file)`
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Any
 from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
+from .tool_event_repository_helpers import FILE_OPERATIONS, _parse_iso_utc, affected_paths
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_iso_utc(text: str) -> datetime | None:
-    """Parse an ISO-8601 UTC timestamp string, returning None on failure."""
-    try:
-        normalized = text.replace("Z", "+00:00")
-        dt = datetime.fromisoformat(normalized)
-        if dt.tzinfo is None:
-            return None
-        return dt
-    except (ValueError, TypeError):
-        return None
-
-#: file operations a v0 file_changed event may carry. rename also touches `old_path`.
-FILE_OPERATIONS = ("write", "edit", "delete", "rename", "create")
-
-
-def affected_paths(path: str | None, old_path: str | None, operation: str | None) -> list[str]:
-    """The structure paths an event touches: always `path`; also `old_path` on a rename/move (both the
-    source and destination file anchors are affected). Deterministic, pure — deduped, order-preserving,
-    empties dropped."""
-    out: list[str] = []
-    for p in (path, old_path if (operation or "").lower() == "rename" else None):
-        if p and p.strip() and p not in out:
-            out.append(p.strip())
-    return out
 
 
 class ToolEventRepository:

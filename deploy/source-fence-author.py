@@ -13,155 +13,60 @@ import base64
 import hashlib
 import json
 import os
-import re
-import ssl
 import stat
 import sys
 import tempfile
-import urllib.error
-import urllib.parse
-import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Mapping, NamedTuple
+from typing import Callable
 
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import (
-    Ed25519PrivateKey,
-    Ed25519PublicKey,
-)
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR / "lib"))
 
+# Keep the sibling parts package importable even when this module is loaded by
+# path (importlib spec) rather than imported as a script or package member.
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.append(str(SCRIPT_DIR))
+
 from menhir_schema import source_fence_payload, validate_release  # noqa: E402
-
-
-MAX_JSON_BYTES = 1024 * 1024
-MAX_KEY_BYTES = 64 * 1024
-MAX_TOKEN_BYTES = 4096
-NETWORK_TIMEOUT_SECONDS = 15
-EVIDENCE_MAX_AGE = timedelta(minutes=5)
-RECEIPT_VALIDITY = timedelta(minutes=5)
-
-_CHALLENGE_RE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
-_B64URL_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-_DNS_RE = re.compile(
-    r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\."
-    r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$"
+from source_fence_author_parts import (  # noqa: E402
+    EVIDENCE_MAX_AGE,
+    MAX_JSON_BYTES,
+    MAX_KEY_BYTES,
+    MAX_TOKEN_BYTES,
+    NETWORK_TIMEOUT_SECONDS,
+    ProbeRequest,
+    ProbeResponse,
+    RECEIPT_VALIDITY,
+    SourceFenceError,
+    TLSFiles,
+    Transport,
+    _B64URL_RE,
+    _CHALLENGE_KEYS,
+    _CHALLENGE_RE,
+    _DNS_RE,
+    _EVIDENCE_COMMON_KEYS,
+    _REFUSAL,
+    _RejectRedirects,
+    _assert_fresh,
+    _call,
+    _canonical_https_origin,
+    _decode_b64url,
+    _default_transport,
+    _header,
+    _inspect_regular,
+    _parse_utc,
+    _read_regular,
+    _read_response_json,
+    _require_root_owned_nonwritable,
+    _strict_json_bytes,
+    _utc_now,
+    _verify_challenge_response,
+    _verify_mutation_refusal,
 )
-
-_CHALLENGE_KEYS = frozenset({
-    "challenge", "instance_id", "key_id", "mutation_fence", "release_id",
-    "runtime_mode", "signature",
-})
-_REFUSAL = {
-    "error": "temporarily_unavailable",
-    "error_description": "candidate-readonly mode does not admit authority mutations",
-}
-_EVIDENCE_COMMON_KEYS = frozenset({
-    "schema", "kind", "release_id", "release_manifest_sha256", "source_id",
-    "observed_utc",
-})
-
-
-class SourceFenceError(ValueError):
-    """A safe, operator-facing source-fence refusal."""
-
-
-class ProbeRequest(NamedTuple):
-    method: str
-    url: str
-    headers: dict[str, str]
-    body: bytes
-
-
-class ProbeResponse(NamedTuple):
-    status: int
-    headers: Mapping[str, str]
-    body: bytes
-
-
-class TLSFiles(NamedTuple):
-    ca: Path
-    client_cert: Path
-    client_key: Path
-
-
-Transport = Callable[[ProbeRequest, TLSFiles, int], ProbeResponse]
-
-
-def _inspect_regular(path: Path, label: str, maximum: int) -> os.stat_result:
-    try:
-        info = path.lstat()
-    except OSError as exc:
-        raise SourceFenceError(f"cannot inspect {label}") from exc
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-        raise SourceFenceError(f"{label} must be a regular non-symlink file")
-    if info.st_size <= 0 or info.st_size > maximum:
-        raise SourceFenceError(f"{label} has an invalid size")
-    return info
-
-
-def _read_regular(path: Path, label: str, maximum: int) -> bytes:
-    _inspect_regular(path, label, maximum)
-    flags = os.O_RDONLY
-    # Windows CRT text mode translates CRLF to LF. These bytes are security
-    # authority: release digests and one-line token framing must remain exact.
-    if hasattr(os, "O_BINARY"):
-        flags |= os.O_BINARY
-    if hasattr(os, "O_CLOEXEC"):
-        flags |= os.O_CLOEXEC
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    try:
-        descriptor = os.open(path, flags)
-    except OSError as exc:
-        raise SourceFenceError(f"cannot open {label}") from exc
-    try:
-        info = os.fstat(descriptor)
-        if not stat.S_ISREG(info.st_mode) or info.st_size <= 0 or info.st_size > maximum:
-            raise SourceFenceError(f"{label} has an invalid size or type")
-        chunks = []
-        remaining = maximum + 1
-        while remaining:
-            chunk = os.read(descriptor, min(65536, remaining))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            remaining -= len(chunk)
-        raw = b"".join(chunks)
-        if not raw or len(raw) > maximum:
-            raise SourceFenceError(f"{label} has an invalid size")
-        return raw
-    finally:
-        os.close(descriptor)
-
-
-def _require_root_owned_nonwritable(path: Path, label: str) -> None:
-    """Match Menhir's root-owned, non-group/other-writable authority rule."""
-    if os.name != "posix":
-        return
-    info = path.lstat()
-    if info.st_uid != 0:
-        raise SourceFenceError(f"{label} must be root-owned")
-    if stat.S_IMODE(info.st_mode) & 0o022:
-        raise SourceFenceError(f"{label} must not be group/other writable")
-
-
-def _strict_json_bytes(raw: bytes, label: str):
-    def reject_duplicates(pairs):
-        result = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError(f"duplicate key: {key}")
-            result[key] = value
-        return result
-
-    try:
-        return json.loads(raw.decode("utf-8"), object_pairs_hook=reject_duplicates)
-    except (UnicodeDecodeError, ValueError) as exc:
-        raise SourceFenceError(f"invalid {label}") from exc
 
 
 def _load_release(path: Path) -> tuple[dict, str]:
@@ -175,21 +80,6 @@ def _load_release(path: Path) -> tuple[dict, str]:
     if before != after or _strict_json_bytes(after, "release authority") != release:
         raise SourceFenceError("release authority changed while it was loaded")
     return release, hashlib.sha256(after).hexdigest()
-
-
-def _decode_b64url(value: object, label: str, length: int) -> bytes:
-    if not isinstance(value, str) or not value or "=" in value or not _B64URL_RE.fullmatch(value):
-        raise SourceFenceError(f"{label} is not canonical unpadded base64url")
-    try:
-        raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
-    except (ValueError, TypeError) as exc:
-        raise SourceFenceError(f"{label} is invalid") from exc
-    if (
-        len(raw) != length
-        or base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii") != value
-    ):
-        raise SourceFenceError(f"{label} has an invalid encoding or length")
-    return raw
 
 
 def _load_signing_key(path: Path, release: dict) -> Ed25519PrivateKey:
@@ -231,68 +121,6 @@ def _read_token(path: Path) -> str:
     return token_bytes.decode("ascii")
 
 
-def _canonical_https_origin(value: str) -> str:
-    try:
-        parsed = urllib.parse.urlsplit(value)
-        port = parsed.port
-    except (TypeError, ValueError) as exc:
-        raise SourceFenceError("probe base must be one canonical HTTPS origin") from exc
-    if (
-        not isinstance(value, str)
-        or parsed.scheme != "https"
-        or not parsed.hostname
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.path
-        or parsed.query
-        or parsed.fragment
-        or "%" in parsed.netloc
-        or port == 443
-    ):
-        raise SourceFenceError("probe base must be one canonical HTTPS origin")
-    hostname = parsed.hostname
-    if ":" in hostname:
-        import ipaddress
-        try:
-            host = f"[{ipaddress.IPv6Address(hostname).compressed}]"
-        except ValueError as exc:
-            raise SourceFenceError("probe base must be one canonical HTTPS origin") from exc
-    else:
-        if not _DNS_RE.fullmatch(hostname):
-            raise SourceFenceError("probe base must be one canonical HTTPS origin")
-        host = hostname
-    canonical = f"https://{host}" + (f":{port}" if port is not None else "")
-    if value != canonical:
-        raise SourceFenceError("probe base must be one canonical HTTPS origin")
-    return canonical
-
-
-def _parse_utc(value: object, label: str) -> datetime:
-    if not isinstance(value, str) or not value:
-        raise SourceFenceError(f"{label} must be an ISO-8601 timestamp")
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise SourceFenceError(f"{label} must be an ISO-8601 timestamp") from exc
-    if parsed.tzinfo is None:
-        raise SourceFenceError(f"{label} must include a timezone")
-    return parsed.astimezone(timezone.utc)
-
-
-def _utc_now(clock: Callable[[], datetime]) -> datetime:
-    current = clock()
-    if not isinstance(current, datetime) or current.tzinfo is None:
-        raise SourceFenceError("clock must return a timezone-aware datetime")
-    return current.astimezone(timezone.utc)
-
-
-def _assert_fresh(observed: datetime, now: datetime, label: str) -> None:
-    if observed > now + timedelta(seconds=60):
-        raise SourceFenceError(f"{label} is in the future")
-    if observed < now - EVIDENCE_MAX_AGE:
-        raise SourceFenceError(f"{label} is stale")
-
-
 def _load_evidence(
     path: Path,
     *,
@@ -322,126 +150,6 @@ def _load_evidence(
     observed = _parse_utc(body.get("observed_utc"), f"{label} observed_utc")
     _assert_fresh(observed, now, label)
     return source_id, observed
-
-
-def _read_response_json(response: ProbeResponse, label: str):
-    if len(response.body) > MAX_JSON_BYTES:
-        raise SourceFenceError(f"{label} response is too large")
-    return _strict_json_bytes(response.body, f"{label} response")
-
-
-class _RejectRedirects(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
-        return None
-
-
-def _default_transport(
-    request: ProbeRequest, tls: TLSFiles, timeout: int
-) -> ProbeResponse:
-    try:
-        context = ssl.create_default_context(cafile=str(tls.ca))
-        context.load_cert_chain(certfile=str(tls.client_cert), keyfile=str(tls.client_key))
-        opener = urllib.request.build_opener(
-            urllib.request.HTTPSHandler(context=context), _RejectRedirects()
-        )
-        wire_request = urllib.request.Request(
-            request.url,
-            data=request.body,
-            headers=request.headers,
-            method=request.method,
-        )
-        try:
-            response = opener.open(wire_request, timeout=timeout)
-        except urllib.error.HTTPError as exc:
-            response = exc
-        with response:
-            body = response.read(MAX_JSON_BYTES + 1)
-            if len(body) > MAX_JSON_BYTES:
-                raise SourceFenceError("source probe response is too large")
-            return ProbeResponse(
-                int(response.status), dict(response.headers.items()), body
-            )
-    except SourceFenceError:
-        raise
-    except Exception as exc:
-        raise SourceFenceError("source probe transport or mTLS setup failed") from exc
-
-
-def _call(
-    transport: Transport,
-    request: ProbeRequest,
-    tls: TLSFiles,
-    expected_status: int,
-    label: str,
-) -> ProbeResponse:
-    try:
-        response = transport(request, tls, NETWORK_TIMEOUT_SECONDS)
-    except SourceFenceError:
-        raise
-    except Exception as exc:
-        raise SourceFenceError(f"{label} transport failed") from exc
-    if not isinstance(response, ProbeResponse):
-        raise SourceFenceError(f"{label} transport returned an invalid response")
-    if response.status != expected_status:
-        raise SourceFenceError(
-            f"{label} must return exact status {expected_status}, got {response.status}"
-        )
-    return response
-
-
-def _verify_challenge_response(
-    response: ProbeResponse,
-    *,
-    challenge: str,
-    release: dict,
-    expected_source_id: str,
-) -> bool:
-    body = _read_response_json(response, "source-fence challenge")
-    if not isinstance(body, dict) or set(body) != _CHALLENGE_KEYS:
-        raise SourceFenceError("source-fence challenge response has invalid exact keys")
-    instance_id = body.get("instance_id")
-    if not isinstance(instance_id, str) or not instance_id:
-        raise SourceFenceError("source-fence challenge instance_id must be nonempty")
-    claims = {key: value for key, value in body.items() if key != "signature"}
-    expected = {
-        "challenge": challenge,
-        "instance_id": expected_source_id,
-        "key_id": release["source_fence_key_id"],
-        "mutation_fence": True,
-        "release_id": release["release_id"],
-        "runtime_mode": "candidate-readonly",
-    }
-    if claims != expected:
-        if instance_id != expected_source_id:
-            raise SourceFenceError("live challenge does not identify the same source_id")
-        raise SourceFenceError("source-fence challenge claims differ from release authority")
-    signature = _decode_b64url(body.get("signature"), "source-fence challenge signature", 64)
-    public = _decode_b64url(
-        release["source_fence_public_key"], "release source_fence_public_key", 32
-    )
-    payload = json.dumps(claims, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    try:
-        Ed25519PublicKey.from_public_bytes(public).verify(signature, payload)
-    except Exception as exc:
-        raise SourceFenceError("source-fence challenge signature is invalid") from exc
-    return True
-
-
-def _header(response: ProbeResponse, name: str) -> str | None:
-    wanted = name.lower()
-    for key, value in response.headers.items():
-        if key.lower() == wanted:
-            return value
-    return None
-
-
-def _verify_mutation_refusal(response: ProbeResponse) -> bool:
-    body = _read_response_json(response, "source mutation probe")
-    if body != _REFUSAL:
-        raise SourceFenceError("source mutation probe does not match the exact refusal contract")
-    if _header(response, "Retry-After") != "60" or _header(response, "Cache-Control") != "no-store":
-        raise SourceFenceError("source mutation probe refusal headers are invalid")
-    return True
 
 
 def _tls_files(

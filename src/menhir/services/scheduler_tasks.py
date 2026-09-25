@@ -3,36 +3,36 @@
 Each function performs one scheduler job and returns a result dict.
 The scheduler orchestrator wraps these with timing, telemetry, and
 job-state bookkeeping.
+
+This module is the facade for the ``scheduler_tasks_*`` sibling modules: the retry,
+conflict, queue-health, counter-sync, structure-refresh, and telemetry-prune job
+families live beside it and are re-exported below, so every existing import site of
+``menhir.services.scheduler_tasks`` keeps working unchanged. ``consolidate_personal_memory``
+and ``_CallCounter`` remain defined here on purpose: the literal-source plumbing pins
+(tests/test_gate_relaxations.py, tests/test_scalar_threshold_setting.py,
+tests/test_scheduler_task_boundaries.py) and the ``run_scalar_consolidation`` /
+``select_event_targets`` / ``run_event_consolidation`` monkeypatch seams resolve against
+this module. ``record_failure_event`` stays imported as the patch target for the retry
+family, and ``_PROJECT_INDEX_PATH`` stays defined here as the patch target for the
+structure family; both siblings resolve them through this module at call time.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import consolidation_audit as _audit
-from menhir.infrastructure.episode_lifecycle import TRANSIENT_RETRY_CAP
-from menhir.infrastructure.episode_repository import is_recoverable_context_window_error
 from menhir.infrastructure.telemetry import record_failure_event
-from menhir.services.enrichment_failures import (
-    classify_enrichment_failure,
-    is_budget_refusal,
-    is_session_window_refusal,
-)
-from menhir.services.enrichment_steps import record_retention_sources
+from menhir.services.enrichment_failures import is_budget_refusal
 from menhir.services.event_consolidation import (
     EventConsolidationConfig,
     run_event_consolidation,
     select_event_targets,
 )
-from menhir.services.failure_counter_bridge import sync_failure_counters
-from menhir.services.instability_counter_bridge import sync_instability_counters
 from menhir.services.scalar_consolidation import (
     ScalarConsolidationConfig,
     run_scalar_consolidation,
@@ -41,36 +41,46 @@ from menhir.services.scalar_consolidation import (
 from menhir.services.scheduler_protocols import (
     SchedulerGraphAdapter,
     SchedulerIngestService,
-    SchedulerLifecycleService,
+)
+
+# Facade re-exports: moved units stay importable from this module path.
+from menhir.services.scheduler_tasks_conflicts import (
+    auto_resolve_conflicts,
+    confirm_conflicts,
+    review_unresolved_conflicts,
+)
+from menhir.services.scheduler_tasks_counters import (
+    sync_experience_counters,
+    sync_verifiers_job,
+)
+from menhir.services.scheduler_tasks_health import (
+    _NEVER_RETRIED_CLASSIFICATIONS,
+    observe_queue_health,
+)
+from menhir.services.scheduler_tasks_prune import (
+    prune_telemetry_revisions,
+    prune_telemetry_tables,
+)
+from menhir.services.scheduler_tasks_retry import (
+    _parse_timestamp,
+    compute_failed_retry_delay_s,
+    retry_failed_enrichments,
+    retry_process_candidate,
+)
+from menhir.services.scheduler_tasks_structure import (
+    _write_project_index,
+    refresh_structure_graphs,
 )
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Hook integration: project index file (patch anchor -- the writer itself lives in
+# scheduler_tasks_structure and resolves this constant through the facade at call time)
 # ---------------------------------------------------------------------------
 
-def _parse_timestamp(value: object | None) -> datetime | None:
-    if value is None:
-        return None
-    rendered = str(value).strip()
-    if not rendered:
-        return None
-    if rendered.endswith("Z"):
-        rendered = rendered[:-1] + "+00:00"
-    try:
-        parsed = datetime.fromisoformat(rendered)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed
-
-
-def compute_failed_retry_delay_s(processing_attempts: object | None) -> int:
-    attempts = max(1, int(processing_attempts or 1))
-    return 30 * (2 ** max(0, attempts - 1))
+_PROJECT_INDEX_PATH = Path.home() / ".claude" / "hooks" / "project-index.json"
 
 
 # ---------------------------------------------------------------------------
@@ -89,416 +99,6 @@ async def recover_stale_leases(
         "stale_resets": stale_resets,
         "queued": queued,
         "queue_depth": ingest_service.get_queue_depth(),
-    }
-
-
-# ---------------------------------------------------------------------------
-# Job: observe queue health
-# ---------------------------------------------------------------------------
-
-#: Classifications that `retry_process_candidate` refuses to requeue. Episodes carrying one
-#: are done being handled automatically -- no scheduler pass will ever pick them up again.
-_NEVER_RETRIED_CLASSIFICATIONS = ("terminal", "manual_review")
-
-
-async def observe_queue_health(
-    ingest_service: SchedulerIngestService,
-    graph_adapter: SchedulerGraphAdapter,
-) -> dict[str, object]:
-    """Report queue counts, and WARN loudly about episodes nothing will ever retry.
-
-    A FAILED episode classified `terminal` or `manual_review` is parked permanently: it holds
-    its content but has no `:Entity` nodes, and recall searches `:Entity`, so the memory is
-    invisible while `add_memory` already reported success to the caller. Nothing else in the
-    system says so -- `_run_job` files this job's return value into the telemetry sidecar and
-    never logs it, so a backlog here is silent by construction.
-
-    That is exactly how 196 episodes sat unrecallable for eight months (an OpenAI 400
-    context-length error fell through every marker list to the `manual_review` default, which
-    is correct -- a 400 is not retryable -- but nothing surfaced the growing pile). The counts
-    below are cheap; the warning is the point.
-    """
-    # CF-99: the maintenance loop must never block. A blocked loop cannot renew the
-    # scheduler lease, which lets a second owner start mutating the same graph.
-    overview = await asyncio.to_thread(graph_adapter.fetch_memory_overview)
-    result: dict[str, object] = {
-        "queue_depth": ingest_service.get_queue_depth(),
-        "failed_enrichments": ingest_service.get_failed_enrichment_count(),
-        "pending_count": overview.get("pending_count"),
-        "enriching_count": overview.get("enriching_count"),
-        "failed_count": overview.get("failed_count"),
-    }
-
-    try:
-        signatures = await asyncio.to_thread(
-            graph_adapter.fetch_failed_error_signatures, limit=25
-        )
-    except Exception as exc:  # noqa: BLE001 - health reporting must never break the loop
-        logger.warning("queue health: could not group failed-episode errors: %s", exc)
-        return result
-
-    buckets: dict[str, int] = {}
-    budget_parked = 0
-    worst: tuple[int, str, str] | None = None  # (count, error, oldest_at)
-    for row in signatures:
-        error = str(row.get("error") or "")
-        count = int(row.get("count") or 0)
-        classification = classify_enrichment_failure(error)
-        buckets[classification] = buckets.get(classification, 0) + count
-        if is_budget_refusal(error) and classification in _NEVER_RETRIED_CLASSIFICATIONS:
-            # Only refusals nothing will retry are "parked". A session-window refusal is now
-            # retryable and clears itself, so counting it here would report a backlog that
-            # needs no operator action -- the exact dilution this metric was split out to avoid.
-            budget_parked += count
-        if classification in _NEVER_RETRIED_CLASSIFICATIONS:
-            if worst is None or count > worst[0]:
-                worst = (count, error, str(row.get("oldest_at") or "unknown"))
-
-    stuck = sum(buckets.get(name, 0) for name in _NEVER_RETRIED_CLASSIFICATIONS)
-    result["failed_by_classification"] = dict(sorted(buckets.items()))
-    result["awaiting_manual_review"] = stuck
-    # Broken out of the parked pile because the two need OPPOSITE operator actions: a parse-error
-    # pile is a model or prompt problem, a budget pile means the cap is too low for real episodes
-    # and is fixed by raising it and requeueing. Folded together they read as one backlog with no
-    # indicated action -- which is how the 196-episode pile above stayed unactioned.
-    result["parked_on_budget"] = budget_parked
-
-    if stuck > 0 and worst is not None:
-        top_count, top_error, oldest_at = worst
-        logger.warning(
-            "STUCK ENRICHMENT BACKLOG: %d failed episode(s) will NEVER be retried "
-            "automatically (%s). Their content is in the graph but has no entities, so it is "
-            "invisible to recall even though add_memory reported success. Oldest since %s. "
-            "Top cause (%d): %.200s. Fix the root cause, then recover with "
-            "scripts/retry_failed_episodes.py --apply.",
-            stuck,
-            ", ".join(f"{k}={v}" for k, v in sorted(buckets.items()) if k in _NEVER_RETRIED_CLASSIFICATIONS),
-            oldest_at,
-            top_count,
-            top_error.replace("\n", " "),
-        )
-
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Job: auto-resolve stale conflicts
-# ---------------------------------------------------------------------------
-
-async def auto_resolve_conflicts(
-    lifecycle_service: SchedulerLifecycleService,
-    *,
-    max_age_days: int = 14,
-    limit: int = 50,
-) -> dict[str, object]:
-    groups_resolved = await asyncio.to_thread(
-        lifecycle_service.auto_resolve_stale_conflicts,
-        max_age_days=max_age_days,
-        limit=limit,
-    )
-    return {"groups_resolved": groups_resolved}
-
-
-# ---------------------------------------------------------------------------
-# Job: confirm pending conflicts via LLM
-# ---------------------------------------------------------------------------
-
-async def confirm_conflicts(
-    lifecycle_service: SchedulerLifecycleService,
-    *,
-    limit: int = 20,
-) -> dict[str, object]:
-    counts = await lifecycle_service.confirm_pending_conflicts(limit=limit)
-    return dict(counts)
-
-
-# ---------------------------------------------------------------------------
-# Job: LLM-review unresolved conflicts (weekly, clears false positives)
-# ---------------------------------------------------------------------------
-
-async def review_unresolved_conflicts(
-    lifecycle_service: SchedulerLifecycleService,
-    *,
-    limit: int = 50,
-) -> dict[str, object]:
-    """Re-evaluate unresolved conflict groups through the LLM reviewer.
-
-    Groups that the LLM clears as false positives are resolved as keep_both.
-    Groups that the LLM confirms as genuine contradictions stay unresolved
-    for manual attention. This prevents the unresolved queue from growing
-    indefinitely with pairs that are merely similar but not contradictory.
-    """
-    counts = await lifecycle_service.confirm_pending_conflicts(
-        limit=limit, status="unresolved", verbose=True,
-    )
-    logger.info(
-        "review_unresolved_conflicts: confirmed=%s cleared=%s errors=%s",
-        counts.get("confirmed"), counts.get("cleared"), counts.get("errors"),
-    )
-    return dict(counts)
-
-
-# ---------------------------------------------------------------------------
-# Job: retry failed enrichments
-# ---------------------------------------------------------------------------
-
-async def retry_process_candidate(
-    graph_adapter: SchedulerGraphAdapter,
-    ingest_service: SchedulerIngestService,
-    row: dict,
-    max_attempts: int,
-    now: datetime,
-) -> str:
-    """Decide what to do with one failed enrichment candidate. Returns the action taken."""
-    episode_uuid = str(row.get("uuid") or "")
-    anchor_name = str(row.get("name") or "")
-    processing_attempts = int(row.get("processing_attempts") or 0)
-
-    if episode_uuid and anchor_name:
-        existing_completion = await asyncio.to_thread(
-            graph_adapter.find_completed_episode_artifact,
-            anchor_uuid=episode_uuid,
-            anchor_name=anchor_name,
-        )
-        if existing_completion is not None:
-            resolved_episode_uuid = str(existing_completion.get("resolved_episode_uuid") or "")
-            entity_uuids = [str(u) for u in (existing_completion.get("entity_uuids") or []) if str(u)]
-            edge_uuids = [str(u) for u in (existing_completion.get("edge_uuids") or []) if str(u)]
-            stamp_kwargs: dict[str, object] = {}
-            if row.get("bootstrap_scope") is not None:
-                stamp_kwargs["bootstrap_scope"] = row.get("bootstrap_scope")
-            stamped = await asyncio.to_thread(
-                graph_adapter.stamp_ingest_metadata,
-                node_uuids=[resolved_episode_uuid] + entity_uuids,
-                edge_uuids=edge_uuids,
-                session_id=str(row.get("session_id") or ""),
-                user_id=str(row.get("user_id") or ""),
-                source=str(row.get("source") or "claude-code"),
-                source_confidence=source_confidence_for(str(row.get("source") or "claude-code")),
-                namespace=str(row.get("namespace") or "default"),
-                **stamp_kwargs,
-            )
-            record_retention_sources(
-                graph_adapter,
-                entity_uuids,
-                source_episode_uuid=episode_uuid,
-                namespace=str(row.get("namespace") or "default"),
-            )
-            if await asyncio.to_thread(
-                graph_adapter.mark_episode_ready,
-                episode_uuid,
-                required_state="FAILED",
-                resolved_episode_uuid=resolved_episode_uuid,
-                nodes_touched=stamped.nodes_touched,
-                edges_touched=stamped.edges_touched,
-            ):
-                return "reconciled"
-
-    classification = classify_enrichment_failure(row.get("processing_error"))
-    # Only an operator-clearable context-window error (local n_ctx too small) bypasses the
-    # terminal gate below and earns the extended retry cap. A hosted provider's hard limit is
-    # also a context-window error, but re-sending the same payload cannot ever succeed.
-    context_window_mismatch = is_recoverable_context_window_error(row.get("processing_error"))
-    session_window_refusal = is_session_window_refusal(row.get("processing_error"))
-    error_text = str(row.get("processing_error") or "")
-    queue_depth = ingest_service.get_queue_depth()
-    context_cap = ingest_service.get_context_window_retry_attempts()
-    effective_max = max(max_attempts, context_cap) if context_window_mismatch else max_attempts
-
-    if classification in ("terminal", "manual_review") and not context_window_mismatch:
-        record_failure_event(
-            operation="scheduler_retry_failed_enrichments",
-            episode_uuid=episode_uuid,
-            failure_stage="retry_classification",
-            classification=classification,
-            retryable=False,
-            processing_attempt=processing_attempts,
-            queue_depth=queue_depth,
-            error_type="terminal_failure" if classification == "terminal" else "manual_review_required",
-            error=error_text or classification.replace("_", " "),
-            details={"decision": "not_requeued"},
-        )
-        return "terminal"
-
-    if processing_attempts >= effective_max:
-        record_failure_event(
-            operation="scheduler_retry_failed_enrichments",
-            episode_uuid=episode_uuid,
-            failure_stage="retry_attempts_exhausted",
-            classification="exhausted",
-            retryable=False,
-            processing_attempt=processing_attempts,
-            queue_depth=queue_depth,
-            error_type="retry_attempts_exhausted",
-            error=error_text or "retry attempts exhausted",
-            details={
-                "max_attempts": max_attempts,
-                "effective_max": effective_max,
-                "decision": "not_requeued",
-                "context_window_mismatch": context_window_mismatch,
-            },
-        )
-        return "exhausted"
-
-    # Transient requeues (outage, circuit-open, backpressure) refund `processing_attempts`
-    # (#79/#70), so the genuine-failure ceiling above cannot see them. Termination for a
-    # permanently dead provider rides this separate, much larger counter instead.
-    transient_retries = int(row.get("transient_retries") or 0)
-    if classification == "retryable" and transient_retries >= TRANSIENT_RETRY_CAP:
-        record_failure_event(
-            operation="scheduler_retry_failed_enrichments",
-            episode_uuid=episode_uuid,
-            failure_stage="retry_transient_exhausted",
-            classification="exhausted",
-            retryable=False,
-            processing_attempt=processing_attempts,
-            queue_depth=queue_depth,
-            error_type="transient_retries_exhausted",
-            error=error_text or "transient retries exhausted",
-            details={
-                "transient_retries": transient_retries,
-                "transient_cap": TRANSIENT_RETRY_CAP,
-                "decision": "not_requeued",
-            },
-        )
-        return "exhausted"
-
-    completed_at = _parse_timestamp(row.get("processing_completed_at"))
-    retry_delay_s = compute_failed_retry_delay_s(processing_attempts)
-    if session_window_refusal:
-        # The ordinary backoff starts at 30s. The session window is 900s by default, so without
-        # this floor every attempt would land inside the same exhausted window, fail identically,
-        # and burn the attempt ceiling -- parking the episode exactly as before while spending
-        # calls to get there. Deferring past the window is what makes the retry meaningful.
-        retry_delay_s = max(retry_delay_s, int(ingest_service.get_llm_session_window_seconds()))
-    if completed_at is not None and (now - completed_at).total_seconds() < retry_delay_s:
-        record_failure_event(
-            operation="scheduler_retry_failed_enrichments",
-            episode_uuid=episode_uuid,
-            failure_stage="retry_backoff_wait",
-            classification="retryable",
-            retryable=True,
-            processing_attempt=processing_attempts,
-            queue_depth=queue_depth,
-            error_type="retry_backoff_wait",
-            error=error_text or "retry waiting for backoff",
-            details={"retry_delay_s": retry_delay_s, "decision": "deferred"},
-        )
-        return "waiting"
-
-    if await ingest_service.requeue_failed_episode(episode_uuid):
-        return "requeued"
-    return "skipped"
-
-
-async def retry_failed_enrichments(
-    ingest_service: SchedulerIngestService,
-    graph_adapter: SchedulerGraphAdapter,
-    *,
-    failed_retry_limit: int = 50,
-) -> dict[str, object]:
-    now = datetime.now(timezone.utc)
-    counts: dict[str, int] = dict(reconciled=0, requeued=0, terminal=0, waiting=0, exhausted=0)
-    candidates = await asyncio.to_thread(
-        graph_adapter.fetch_failed_episode_retry_candidates, limit=failed_retry_limit
-    )
-    max_attempts = ingest_service.get_max_enrichment_attempts()
-    for row in candidates:
-        action = await retry_process_candidate(graph_adapter, ingest_service, row, max_attempts, now)
-        if action in counts:
-            counts[action] += 1
-    return {
-        "candidates": len(candidates),
-        **counts,
-        "queue_depth": ingest_service.get_queue_depth(),
-    }
-
-
-# ---------------------------------------------------------------------------
-# Job: sync experience counters
-# ---------------------------------------------------------------------------
-
-async def sync_experience_counters(
-    graph_adapter: SchedulerGraphAdapter,
-    *,
-    namespace: str = "agent-experience",
-    embed: Callable[[str], "list[float] | None"] | None = None,
-) -> dict[str, object]:
-    """Fold telemetry events into supersedable :Metric instrumentation counters.
-
-    Two deterministic folds over the telemetry store (no LLM): failure_events ->
-    '<op>_<err>_failed' counters, and memory_revisions -> '<field>_revised' belief-instability
-    counters. Both write via the MetricWriteCoordinator saga as :Metric nodes -- instrumentation,
-    excluded from semantic recall by label. Runs on the maintenance loop in prod; disabled in
-    benchmark mode with the rest of the scheduler.
-
-    `embed` is accepted for caller compatibility but IGNORED: Metrics do not carry a
-    name_embedding (they never rank in recall), so there is nothing to embed. It can be dropped
-    once the scheduler stops constructing an experience embedder.
-    """
-    del embed  # vestigial: Metrics do not embed
-    from menhir.infrastructure.telemetry import telemetry_store
-    from menhir.infrastructure.graph_operations import GraphOperationsJournal
-    from menhir.infrastructure.metric_receipts import MetricReceiptStore
-    from menhir.services.metric_write_coordinator import MetricWriteCoordinator
-
-    # The coordinator, journal, and receipts all resolve to the telemetry sidecar DB (the journal
-    # and receipts default to default_telemetry_db_path, and the coordinator's db defaults to the
-    # journal's), so the saga's PREPARED journal-row + receipt commit atomically in one connection.
-    coordinator = MetricWriteCoordinator(
-        graph_adapter=graph_adapter,
-        journal=GraphOperationsJournal(),
-        receipts=MetricReceiptStore(),
-        namespace=namespace,
-    )
-
-    # sync_failure_counters / sync_instability_counters are synchronous and perform blocking I/O
-    # (SQLite fold + Neo4j saga). Run them on a worker thread so the maintenance loop never blocks
-    # the asyncio event loop. Mirrors refresh_structure_graphs.
-    failures = await asyncio.to_thread(
-        sync_failure_counters,
-        store=telemetry_store, coordinator=coordinator, namespace=namespace,
-    )
-    instability = await asyncio.to_thread(
-        sync_instability_counters,
-        store=telemetry_store, coordinator=coordinator, namespace=namespace,
-    )
-    return {
-        "failure_counters": len(failures),
-        "instability_counters": len(instability),
-    }
-
-
-# ---------------------------------------------------------------------------
-# Job: sync graph-native verifiers
-# ---------------------------------------------------------------------------
-
-async def sync_verifiers_job(
-    graph_adapter: SchedulerGraphAdapter,
-    *,
-    verifier_repo: object,
-    verifier_context: object,
-    namespace: str = "agent-status",
-    embed: Callable[[str], "list[float] | None"] | None = None,
-) -> dict[str, object]:
-    """Re-derive config/status registers from their source of truth via graph verifiers and flag
-    referencing beliefs on change. Blocking (Neo4j reads/writes + embed HTTP) so it runs on a worker
-    thread, mirroring sync_experience_counters — the maintenance loop must never block the event loop."""
-    from menhir.services.verifier_sync import sync_verifiers
-
-    results = await asyncio.to_thread(
-        sync_verifiers,
-        repo=verifier_repo, graph_adapter=graph_adapter, context=verifier_context,
-        namespace=namespace, embed=embed,
-    )
-    refreshed = sum(1 for r in results if r.get("status") == "refreshed")
-    changed = sum(1 for r in results if r.get("changed"))
-    flagged = sum(int(r.get("beliefs_flagged") or 0) for r in results)
-    return {
-        "verifiers": len(results),
-        "refreshed": refreshed,
-        "changed": changed,
-        "beliefs_flagged": flagged,
     }
 
 
@@ -768,221 +368,3 @@ async def consolidate_personal_memory(
         k: v for k, v in result.items() if isinstance(v, (int, float, str, bool))
     })
     return result
-
-
-# ---------------------------------------------------------------------------
-# Job: refresh structure graphs
-# ---------------------------------------------------------------------------
-
-async def refresh_structure_graphs(
-    graph_adapter: SchedulerGraphAdapter,
-) -> dict[str, object]:
-    """Re-scan all known projects whose file fingerprint has changed."""
-    from menhir.infrastructure.project_scanner import ProjectScanner
-    from menhir.infrastructure.repo_topology import classify_root
-    from menhir.infrastructure.structure_write_fence import StructureWritesFrozen
-    from menhir.services.project_identity_service import settle_project_identity
-
-    projects = await asyncio.to_thread(graph_adapter.list_structure_projects)
-    if not projects:
-        return {"projects_known": 0, "scanned": 0, "skipped": 0, "errors": 0}
-
-    scanner = ProjectScanner()
-    scanned = 0
-    skipped = 0
-    errors = 0
-    details: list[dict[str, str]] = []
-
-    for proj in projects:
-        name = proj.get("name", "")
-        root_path = proj.get("root_path", "")
-        if not root_path or not await asyncio.to_thread(os.path.isdir, root_path):
-            errors += 1
-            details.append({"project": name, "status": "path_missing"})
-            continue
-
-        # CF-257 phase 0. The watcher is unattended and re-scans every known project on a timer,
-        # so if a recorded root_path ever became a worktree -- a checkout moved, a directory
-        # replaced -- it would refresh the canonical project from the wrong copy on every cycle
-        # with nobody watching. The ingest guard cannot cover this: it runs at claim time, and
-        # this path re-scans an already-claimed project. Reported like `path_missing`, never
-        # raised: one unscannable project must not stop the sweep.
-        topology = await asyncio.to_thread(classify_root, root_path)
-        if not topology.may_scan:
-            errors += 1
-            details.append({
-                "project": name,
-                "status": f"identity_refused: {topology.kind.value}",
-                "detail": topology.detail,
-            })
-            logger.warning(
-                "Structure watcher refused %s at %s: %s", name, root_path, topology.detail
-            )
-            continue
-
-        try:
-            scan = await asyncio.to_thread(scanner.scan, root_path, name)
-        except Exception as exc:
-            errors += 1
-            details.append({"project": name, "status": f"scan_error: {exc}"})
-            logger.warning("Structure watcher scan failed for %s: %s", name, exc)
-            continue
-
-        stored_fp = await asyncio.to_thread(graph_adapter.get_scan_fingerprint, name)
-        if stored_fp and stored_fp == scan.scan_fingerprint:
-            skipped += 1
-            continue
-
-        # CF-257. The watcher writes through the same adapter method as everything else, so it
-        # must settle identity too -- it re-scans every known project on a timer, which is exactly
-        # why leaving it out produced 1,816 id-less nodes rather than a handful. It never mints:
-        # an unattended job inventing an identity is the silent-mint failure this design refuses.
-        try:
-            claim, resolution = await asyncio.to_thread(
-                settle_project_identity,
-                graph_adapter, root_path=root_path, display_name=name,
-            )
-        except Exception as exc:  # noqa: BLE001 - one project must not stop the sweep
-            errors += 1
-            details.append({"project": name, "status": f"identity_error: {exc}"})
-            continue
-        if claim is None:
-            skipped += 1
-            details.append({
-                "project": name,
-                "status": "identity_needs_decision",
-                "reason": resolution.reason,
-            })
-            continue
-        scan.project_id = claim.project_id
-        scan.identity_generation = claim.generation
-
-        try:
-            # write_project_structure MERGEs thousands of nodes/edges — a heavy synchronous Neo4j
-            # write. Offload it (like scanner.scan above) so the maintenance loop never freezes the
-            # asyncio event loop while re-writing a large project's structure.
-            counts = await asyncio.to_thread(graph_adapter.write_project_structure, scan, "watcher", "system")
-            scanned += 1
-            details.append({
-                "project": name,
-                "status": "refreshed",
-                "entities": str(counts.get("entities", 0)),
-                "edges": str(counts.get("edges", 0)),
-            })
-        except StructureWritesFrozen:
-            # CF-257 phase 2. A migration holds the fence. Reported like `path_missing` and
-            # `identity_refused` rather than raised: the sweep must not die because a migration is
-            # in progress, and the next cycle picks the project up once the fence lifts.
-            skipped += 1
-            details.append({"project": name, "status": "frozen_for_migration"})
-            continue
-        except Exception as exc:
-            errors += 1
-            details.append({"project": name, "status": f"write_error: {exc}"})
-            logger.warning("Structure watcher write failed for %s: %s", name, exc)
-
-    # Write project index for hooks integration. A synchronous JSON write to the
-    # user's home directory -- offload it like every other I/O in this job so the
-    # maintenance loop never freezes the event loop for its duration.
-    await asyncio.to_thread(_write_project_index, projects)
-
-    return {
-        "projects_known": len(projects),
-        "scanned": scanned,
-        "skipped": skipped,
-        "errors": errors,
-        "details": details,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Hook integration: project index file
-# ---------------------------------------------------------------------------
-
-_PROJECT_INDEX_PATH = Path.home() / ".claude" / "hooks" / "project-index.json"
-
-
-def _write_project_index(
-    projects: list[dict[str, str]],
-    *,
-    index_path: Path | None = None,
-) -> None:
-    """Write a JSON index of ingested projects for hook scripts to read.
-
-    Best-effort — failure is logged but never propagated.
-    """
-    target = index_path or _PROJECT_INDEX_PATH
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        index = [
-            {"name": p.get("name", ""), "root_path": p.get("root_path", "")}
-            for p in projects
-            if p.get("name") and p.get("root_path")
-        ]
-        target.write_text(
-            json.dumps(index, indent=2),
-            encoding="utf-8",
-        )
-    except Exception:
-        logger.debug("Failed to write project index for hooks", exc_info=True)
-
-
-async def prune_telemetry_tables(
-    *, observability_days: int, diagnostic_days: int
-) -> dict[str, object]:
-    """Delete sidecar telemetry rows past their retention window (CF-171).
-
-    Nothing deleted from any of the nine high-volume tables. The one pruner that existed targeted
-    `memory_revisions` -- by write volume the LEAST affected table -- and was itself never wired
-    until CF-166. Measured growth is ~664 bytes/row against ~30 rows per ingest, and this is the
-    file six writers contend on, so the size is not merely disk: a larger file means longer WAL
-    checkpoints and deeper B-trees, which lengthens exactly the CF-170 writes that block the loop.
-
-    A tier set to 0 is skipped entirely, so an operator can disable one window without disabling
-    the other. Threaded off the event loop for the same reason as its sibling.
-    """
-    from menhir.infrastructure.telemetry import telemetry_store
-
-    if observability_days <= 0 and diagnostic_days <= 0:
-        return {"pruned": {}, "skipped": "both tiers disabled"}
-
-    deleted = await asyncio.to_thread(
-        telemetry_store.prune_telemetry_tables,
-        observability_days=observability_days if observability_days > 0 else 10**6,
-        diagnostic_days=diagnostic_days if diagnostic_days > 0 else 10**6,
-    )
-    total = sum(deleted.values())
-    if total:
-        logger.info(
-            "Pruned %d telemetry row(s) across %d table(s): %s",
-            total,
-            len(deleted),
-            ", ".join(f"{t}={n}" for t, n in sorted(deleted.items())),
-        )
-    return {"pruned": deleted, "total": total}
-
-
-async def prune_telemetry_revisions(*, retention_days: int) -> dict[str, object]:
-    """Delete `memory_revisions` rows past the retention window.
-
-    This job exists because the control it drives did not. `prune_old_revisions` was written,
-    fully unit-tested, and never called from production: `grep` found its definition and six
-    test references, and nothing else. The setting that is supposed to configure it,
-    `MENHIR_REVISION_RETENTION_DAYS`, was parsed into `revision_retention_days` and then read
-    nowhere. Meanwhile the operator runbook stated, as fact, that the window was enforced and
-    configurable. Three independent failures of one control, and a document asserting it worked.
-
-    Threaded off the event loop: the store does synchronous SQLite with a commit, and the
-    sidecar is shared by seven writers.
-    """
-    from menhir.infrastructure.telemetry import telemetry_store
-
-    days = max(1, int(retention_days))
-    deleted = await asyncio.to_thread(
-        telemetry_store.prune_old_revisions, retention_days=days
-    )
-    if deleted:
-        logger.info(
-            "Pruned %d memory_revisions row(s) older than %d day(s)", deleted, days
-        )
-    return {"retention_days": days, "rows_deleted": int(deleted)}

@@ -1,126 +1,50 @@
-"""REST API endpoints for remote memory access."""
+"""REST API endpoints for remote memory access.
+
+Cohesive route groups live in the sibling ``routes_*.py`` modules; all of them decorate the
+shared router from ``routes_router``. This module stays the facade every existing import site
+uses (``menhir.api.routes``) and hosts the routes whose module-level guard seams and
+source-level checks (``inspect.getsource`` / AST allowlists) pin them here.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import logging
-from uuid import uuid4
-from typing import Any
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import HTTPException, Query, Request
 
-from menhir.core.backend_impl import _drain_background_errors
 from menhir.domain.bootstrap_scope import bootstrap_selection
 from menhir.domain.recall import InvalidQueryPresetError
 from menhir.domain.session import new_session
 from menhir.domain.structural_memory import is_structural_memory_row
-from menhir.mcp.service_access import get_request_session
 
-from .routes_handlers import (
-    backend_invoke_impl,
-    list_clients_impl,
-    mint_client_impl,
-    phase3_reset_impl,
-    phase3_run_impl,
-    phase3_status_impl,
-    phase3_views_impl,
-    revoke_client_impl,
-)
-
+# Facade re-exports: every moved public symbol is re-exported here, so existing
+# `from menhir.api.routes import X` sites keep working. The routes_support guards
+# (_get_backend, _require_tier, ...) stay bound here because the handlers below read
+# them from this namespace and tests patch them on this module.
+from .routes_admin import list_clients, mint_client, revoke_client
+from .routes_handlers import phase3_reset_impl
+from .routes_health import health, ready
+from .routes_ingest_support import _count_linked_entities, _terminal_status_from_row
+from .routes_internal import backend_invoke
+from .routes_phase3 import phase3_run, phase3_status, phase3_views
+from .routes_router import router
+from .routes_scalar_authority import scalar_authority_contributors
 from .routes_support import (
-    BootstrapContextRequest,
-    ClientSummary,
-    ContextRequest,
-    ContextResponse,
-    FlagResponse,
-    HealthResponse,
-    ListClientsResponse,
-    MemoryRequest,
-    MemoryResponse,
-    EpisodeAdmissionRequest,
-    EpisodeAdmissionResponse,
-    MintClientRequest,
-    MintClientResponse,
-    Phase3ResetResponse,
-    Phase3RunRequest,
-    Phase3RunResponse,
-    Phase3StatusResponse,
-    Phase3ViewsResponse,
-    ReadyResponse,
-    RecallMemory,
-    RecallRequest,
-    RecallResponse,
-    RevokeClientResponse,
-    RuntimeContext,
-    StaleAnchorVerificationRequest,
-    StaleAnchorVerificationResponse,
-    StatsResponse,
-    ToolEventRequest,
-    ToolEventResponse,
-    TurnEvidenceRequest,
-    TurnEvidenceResponse,
-    UnflagResponse,
-    _BACKEND_METHODS,
-    _OP_TIER_AGENT,
-    _OP_TIER_OPERATOR,
-    _VALID_CLIENT_TIERS,
-    _capability_payload,
-    _get_backend,
-    _get_client_token_store,
-    _get_runtime_context,
-    _require_phase3_adapter,
-    _require_runtime_context,
-    _require_tier,
-    _required_tier_for_operation,
-    _resolve_caller_session,
-    _resolve_namespace,
-    _provider_auth_failure_text,
-    _service_payload,
-    _try_record_destructive_op_rest,
+    BootstrapContextRequest, ContextRequest, ContextResponse,
+    EpisodeAdmissionRequest, EpisodeAdmissionResponse,
+    FlagResponse, MemoryRequest, MemoryResponse, Phase3ResetResponse,
+    RecallMemory, RecallRequest, RecallResponse,
+    StaleAnchorVerificationRequest, StaleAnchorVerificationResponse,
+    StatsResponse, UnflagResponse,
+    _BACKEND_METHODS, _OP_TIER_AGENT, _OP_TIER_OPERATOR,
+    _capability_payload, _get_backend, _get_runtime_context,
+    _require_phase3_adapter, _require_runtime_context, _require_tier,
+    _required_tier_for_operation, _resolve_caller_session, _resolve_namespace,
+    _service_payload, _try_record_destructive_op_rest,
 )
-
-logger = logging.getLogger(__name__)
-
-router = APIRouter(prefix="/api")
-_INTERNAL_BACKEND_PREFIX = "/internal/backend"
-
-
-@router.get("/health", response_model=HealthResponse)
-async def health(request: Request) -> HealthResponse:
-    runtime_ctx = _get_runtime_context(request)
-    capabilities = runtime_ctx.capabilities if runtime_ctx is not None else None
-    settings = getattr(request.app.state, "settings", None)
-    status = "ok" if runtime_ctx is not None else "starting"
-    return HealthResponse(
-        status=status,
-        services=_service_payload(runtime_ctx),
-        startup_mode=capabilities.startup_mode if capabilities is not None else None,
-        instance_id=str(settings.instance_id) or None if settings is not None else None,
-        provider_auth_failure=_provider_auth_failure_text(),
-    )
-
-
-@router.get("/ready", response_model=ReadyResponse)
-async def ready(request: Request) -> ReadyResponse:
-    runtime_ctx = _get_runtime_context(request)
-    capabilities = runtime_ctx.capabilities if runtime_ctx is not None else None
-    if capabilities is None:
-        return ReadyResponse(
-            status="starting",
-            startup_mode="unavailable",
-            capabilities=_capability_payload(None),
-            failures=["runtime not initialized"],
-        )
-    auth_failure = _provider_auth_failure_text()
-    status = "ready" if capabilities.enrichment_ready and auth_failure is None else "degraded"
-    return ReadyResponse(
-        status=status,
-        startup_mode=capabilities.startup_mode,
-        capabilities=_capability_payload(runtime_ctx),
-        failures=list(capabilities.failures),
-        provider_auth_failure=auth_failure,
-    )
+from .routes_tool_events import record_tool_event
+from .routes_turn_evidence import link_episode_admission, record_turn_evidence
 
 
 @router.post("/recall", response_model=RecallResponse, response_model_exclude_none=True)
@@ -174,30 +98,6 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
         authority_layer=result.get("authority_layer"),
         event_authority_layer=result.get("event_authority_layer"),
     )
-
-
-@router.get("/scalar-authority/{view_uuid}/contributors")
-async def scalar_authority_contributors(
-    request: Request,
-    view_uuid: str,
-    namespace: str | None = None,
-    limit: Annotated[int, Query(ge=1, le=50)] = 8,
-    offset: Annotated[int, Query(ge=0)] = 0,
-) -> dict[str, object]:
-    """Expand a structured scalar-authority verdict's bounded provenance window."""
-    _require_tier("readonly")
-    runtime_ctx = _require_runtime_context(request)
-    adapter = getattr(runtime_ctx.built, "graph_adapter", None)
-    if adapter is None or not hasattr(adapter, "fetch_scalar_authority_contributors"):
-        raise HTTPException(status_code=503, detail="scalar authority provenance unavailable")
-    resolved = _resolve_namespace(request, namespace)
-    from menhir.domain.namespace import stamped_namespace
-    payload = await asyncio.to_thread(
-        adapter.fetch_scalar_authority_contributors,
-        view_uuid=view_uuid, limit=limit, offset=offset,
-        namespace=stamped_namespace(resolved),
-    )
-    return {"view_uuid": view_uuid, **payload}
 
 
 @router.get("/bootstrap/flagged")
@@ -399,261 +299,6 @@ async def ingest_memory(
     )
 
 
-async def _count_linked_entities(
-    runtime_ctx: object, row: dict[str, object] | None, episode_id: str
-) -> int | None:
-    """How many entities the write is linked to, or None when it cannot be determined.
-
-    The API's ``episode_id`` is Menhir's anchor node; Graphiti stores the extracted entities
-    against its own ``:Episodic`` node, which the anchor records as ``resolved_episode_uuid``.
-    Counting against the anchor always read 0 -- verified against a graph whose entities were
-    recallable -- so resolve first and fall back to the anchor only when unresolved.
-    """
-
-    adapter = getattr(getattr(runtime_ctx, "built", None), "graph_adapter", None)
-    fetch = getattr(adapter, "fetch_linked_entity_uuids_for_episode", None)
-    target = str((row or {}).get("resolved_episode_uuid") or episode_id or "")
-    if fetch is None or not target:
-        return None
-    try:
-        return len(await asyncio.to_thread(fetch, target))
-    except Exception:  # noqa: BLE001 - advisory count; the write is already committed
-        return None
-
-
-def _terminal_status_from_row(
-    row: dict[str, object] | None, *, fallback: str
-) -> tuple[str, str | None, str | None, bool]:
-    """Turn a processing row into (status, error, retry, timed_out) for a waited write.
-
-    ``wait_for_episode_processing`` returns the row once it is READY or FAILED, or the last row
-    it saw when the timeout elapsed. A missing row means the anchor was never written; keep the
-    queue status rather than invent one.
-    """
-
-    if row is None:
-        return fallback, None, None, False
-    state = row.get("processing_state")
-    state_text = str(getattr(state, "value", state) or "").lower()
-    if state_text == "failed":
-        from menhir.services.enrichment_failures import classify_enrichment_failure
-
-        error_text = str(row.get("processing_error") or "") or None
-        return "failed", error_text, classify_enrichment_failure(error_text), False
-    if state_text == "ready":
-        return "ready", None, None, False
-    return (state_text or fallback), None, None, True
-
-
-@router.post("/turn-evidence", response_model=TurnEvidenceResponse)
-async def record_turn_evidence(request: Request, body: TurnEvidenceRequest) -> TurnEvidenceResponse:
-    """Capture one candidate user turn as a `:TurnEvidence` node (ADR 0001). Idempotent on turn_key.
-    Selective evidence only — the producer triages before posting; the server runs no LLM. Raw
-    evidence never enters normal recall; Phase 3 reads role=user evidence."""
-    _require_tier("agent")
-    runtime_ctx = _require_runtime_context(request)
-    text = (body.text or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="text is required")
-    if body.role not in ("user", "assistant", "tool", "agent"):
-        raise HTTPException(status_code=400, detail="role must be one of user|assistant|tool|agent")
-    adapter = getattr(runtime_ctx.built, "graph_adapter", None)
-    if adapter is None or not hasattr(adapter, "record_turn_evidence"):
-        raise HTTPException(status_code=503, detail="turn-evidence capture unavailable")
-    try:
-        result = await asyncio.to_thread(
-            adapter.record_turn_evidence,
-            text=text,
-            role=body.role,
-            declarant=body.declarant,
-            session_id=body.session_id,
-            occurred_at=body.occurred_at,
-            namespace=_resolve_namespace(request, body.namespace),
-            source_kind=body.source_kind,
-            source_id=body.source_id,
-            source_client=body.source_client,
-            hook_version=body.hook_version,
-            cwd=body.cwd,
-            transcript_path=body.transcript_path,
-            triage_reason=body.triage_reason,
-            triage_version=body.triage_version,
-            metadata=body.metadata,
-            turn_key=body.turn_key,
-            prompt_id=body.prompt_id,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return TurnEvidenceResponse(
-        turn_id=result["turn_id"],
-        created=result["created"],
-        recorded_at=result["recorded_at"],
-        occurred_at=result.get("occurred_at"),
-    )
-
-
-@router.post("/episode-admission", response_model=EpisodeAdmissionResponse)
-async def link_episode_admission(
-    request: Request, body: EpisodeAdmissionRequest
-) -> EpisodeAdmissionResponse:
-    """Join a memory to the captured turn it answered, and project that turn's text.
-
-    A host's post-tool lifecycle event fires AFTER `add_memory` has run, so it cannot pass
-    `turn_evidence_uuid` on the original call; it reports the pairing here instead. Draws
-    `(:Episodic)-[:ADMITTED_ON]->(:TurnEvidence)` and mints the evidence projection, so a scalar
-    assertion extracted from the user's words can reach entities extracted from those same words.
-
-    MATCH-only on both endpoints: an id naming nothing draws nothing and MERGEs no stub, so a wrong
-    or stale id is inert rather than corrupting.
-
-    NOT A VERIFICATION STEP. Both ids come from the caller and the server cannot confirm the memory
-    actually came from that turn. It grants nothing a same-key client lacks -- such a client can
-    already write a `:TurnEvidence` claiming `declarant='user'` -- but the resulting edge must not be
-    read as proof a human spoke. Same `agent` tier as turn capture, for exactly that reason.
-    """
-    _require_tier("agent")
-    runtime_ctx = _require_runtime_context(request)
-    episode_uuid = (body.episode_uuid or "").strip()
-    turn_evidence_uuid = (body.turn_evidence_uuid or "").strip()
-    if not episode_uuid or not turn_evidence_uuid:
-        raise HTTPException(
-            status_code=400, detail="episode_uuid and turn_evidence_uuid are both required")
-    adapter = getattr(runtime_ctx.built, "graph_adapter", None)
-    if adapter is None or not hasattr(adapter, "link_episode_admission"):
-        raise HTTPException(status_code=503, detail="episode admission unavailable")
-    ingest_service = getattr(runtime_ctx.built, "ingest_service", None)
-    if ingest_service is None or not hasattr(
-        ingest_service, "enqueue_pending_episode"
-    ):
-        raise HTTPException(status_code=503, detail="episode enrichment queue unavailable")
-    enrichment_enabled = getattr(ingest_service, "enrichment_enabled", None)
-    if not callable(enrichment_enabled) or not enrichment_enabled():
-        raise HTTPException(status_code=503, detail="episode enrichment is disabled")
-
-    # Resolved once and used for BOTH the link and the projection below. They must be the same
-    # value: linking in one namespace while projecting from another is precisely the split that
-    # let a caller reach a foreign turn's text.
-    resolved_namespace = _resolve_namespace(request, None)
-
-    linked = bool(await asyncio.to_thread(
-        adapter.link_episode_admission,
-        episode_uuid=episode_uuid, turn_evidence_uuid=turn_evidence_uuid,
-        namespace=resolved_namespace,
-    ))
-
-    # Only project once the join actually landed. Projecting after a failed link would enrich a turn
-    # that no memory references, which is capture-volume enrichment -- the cost ADR 0001 rejected.
-    projection_uuid = None
-    if linked and hasattr(adapter, "create_evidence_projection"):
-        session = get_request_session()
-        projection_uuid = await asyncio.to_thread(
-            adapter.create_evidence_projection,
-            turn_evidence_uuid=turn_evidence_uuid,
-            projection_uuid=str(uuid4()),
-            name=f"evidence-projection-{turn_evidence_uuid}",
-            session_id=getattr(session, "session_id", "") or "",
-            user_id=getattr(session, "user_id", "") or "",
-            namespace=resolved_namespace,
-        )
-        queue_uuid = projection_uuid
-        if queue_uuid is None and hasattr(
-            adapter, "find_pending_evidence_projection_uuid"
-        ):
-            # Creation is idempotent. If an earlier request created the durable PENDING node but
-            # failed while enqueueing it, the retry must recover and enqueue that same node rather
-            # than interpreting "already exists" as completed work.
-            queue_uuid = await asyncio.to_thread(
-                adapter.find_pending_evidence_projection_uuid,
-                turn_evidence_uuid=turn_evidence_uuid,
-                namespace=resolved_namespace,
-            )
-        if queue_uuid:
-            # False is an idempotent outcome (already queued, or it raced into ENRICHING), not a
-            # refusal. Exceptions remain visible, and a retry can recover the durable PENDING node.
-            enqueued = await ingest_service.enqueue_pending_episode(queue_uuid)
-            if not enqueued and not enrichment_enabled():
-                # Close the small race between the pre-write capability check and enqueue. The
-                # durable PENDING projection remains discoverable for a later retry.
-                raise HTTPException(
-                    status_code=503,
-                    detail="evidence projection created but enrichment became disabled",
-                )
-    return EpisodeAdmissionResponse(linked=linked, projection_uuid=projection_uuid)
-
-
-@router.post("/tool-events", response_model=ToolEventResponse)
-async def record_tool_event(request: Request, body: ToolEventRequest) -> ToolEventResponse:
-    """Hook Center v0: accept a normalized tool/file event and DETERMINISTICALLY mark the affected
-    structure-file node dirty (so stale file references become detectable). No file content, no
-    transcript, no LLM, no structure rebuild. Forward-compatible name: v0 handles `file_changed`;
-    other `event_type`s are accepted-and-ignored so future tool events don't break older servers."""
-    _require_tier("agent")
-    runtime_ctx = _require_runtime_context(request)
-    if body.event_type != "file_changed":
-        # accept-and-ignore: keeps the endpoint forward-compatible for later tool-event kinds.
-        return ToolEventResponse(accepted=True, event_type=body.event_type, operation=body.operation,
-                                 matched=0, marked_dirty=False, ignored_reason="unsupported event_type in v0")
-    path = (body.path or "").strip()
-    if not path:
-        raise HTTPException(status_code=400, detail="path is required for a file_changed event")
-    adapter = getattr(runtime_ctx.built, "graph_adapter", None)
-    if adapter is None or not hasattr(adapter, "record_file_event"):
-        raise HTTPException(status_code=503, detail="tool-event capture unavailable")
-    # Derive only the structural scope from project_root. Artifact repository identity is separate.
-    project = body.project
-    if project is None and body.project_root:
-        import os as _os
-        project = _os.path.basename(body.project_root.rstrip("/\\")) or None
-    try:
-        result = await asyncio.to_thread(
-            adapter.record_file_event,
-            path=path,
-            operation=body.operation,
-            old_path=body.old_path,
-            project=project,
-            after_hash=body.after_hash,
-            mtime=body.mtime,
-            source_client=body.source_client,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    # Artifact source reconciliation is a second, independent consumer of the
-    # same event. It runs after the structural mark has already been recorded so
-    # a reconciliation refusal cannot roll back or suppress stale detection --
-    # the hook is a low-latency accelerator, not the coverage backstop.
-    reconciliation = None
-    if hasattr(adapter, "reconcile_file_event_source"):
-        repository = (body.repository or "").strip()
-        if not repository:
-            reconciliation = {
-                "attempted": True,
-                "applied": False,
-                "reason": "repository_identity_missing",
-            }
-        else:
-            try:
-                reconciliation = await asyncio.to_thread(
-                    adapter.reconcile_file_event_source,
-                    path=path,
-                    operation=body.operation,
-                    old_path=body.old_path,
-                    repository=repository,
-                    after_hash=body.after_hash,
-                    git_commit=body.git_commit,
-                )
-            except Exception as exc:  # noqa: BLE001 - never fail the hook on this leg
-                logger.warning("artifact source reconciliation failed for %s: %s", path, exc)
-                reconciliation = {"attempted": True, "applied": False, "reason": "error"}
-            if reconciliation and not reconciliation.get("attempted"):
-                reconciliation = None  # not corpus material; nothing worth reporting
-
-    return ToolEventResponse(
-        accepted=True, event_type=body.event_type, operation=body.operation,
-        matched=int(result.get("matched", 0)), marked_dirty=bool(result.get("marked_dirty", False)),
-        artifact_reconciliation=reconciliation,
-    )
-
-
 @router.get("/tool-events/dirty")
 async def tool_events_dirty(request: Request, project: str | None = None) -> dict:
     """Diagnostic: current dirty files + stale anchored memories (recall/visibility for Hook Center)."""
@@ -829,48 +474,6 @@ async def stats(
         operations=op_stats,
     )
 
-@router.post("/phase3/run", response_model=Phase3RunResponse)
-async def phase3_run(request: Request, body: Phase3RunRequest) -> Phase3RunResponse:
-    """Run one personal-memory View consolidation pass over a single namespace (black-box eval
-    surface for archolith-bench). Mirrors the scheduler job: real LLM, all bias guards pinned on,
-    batch re-fold, isolated to the explicit namespace so it never touches other silos."""
-    return await phase3_run_impl(
-        request,
-        body,
-        require_tier=_require_tier,
-        require_phase3_adapter=_require_phase3_adapter,
-    )
-
-
-@router.get("/phase3/status", response_model=Phase3StatusResponse)
-async def phase3_status(
-    request: Request,
-    namespace: Annotated[str, Query(min_length=1)],
-) -> Phase3StatusResponse:
-    """Report whether a namespace is dirty (Phase 3 would consolidate it) and its evidence count."""
-    return await phase3_status_impl(
-        request,
-        namespace,
-        require_phase3_adapter=_require_phase3_adapter,
-    )
-
-
-@router.get("/views", response_model=Phase3ViewsResponse)
-async def phase3_views(
-    request: Request,
-    namespace: Annotated[str, Query(min_length=1)],
-    limit: Annotated[int, Query(ge=1, le=500)] = 100,
-) -> Phase3ViewsResponse:
-    """List current counter Views for a namespace, each with full value history (current +
-    superseded, so currentness/supersession is inspectable). USER Views and `subject='perception'`
-    abstention receipts (F1 observability, out of recall) are returned separately."""
-    return await phase3_views_impl(
-        request,
-        namespace,
-        limit,
-        require_phase3_adapter=_require_phase3_adapter,
-    )
-
 
 @router.post("/phase3/reset", response_model=Phase3ResetResponse)
 async def phase3_reset(
@@ -887,61 +490,4 @@ async def phase3_reset(
         try_record_destructive_op_rest=_try_record_destructive_op_rest,
         require_phase3_adapter=_require_phase3_adapter,
         get_backend=_get_backend,
-    )
-
-
-@router.post(f"{_INTERNAL_BACKEND_PREFIX}/{{operation}}", include_in_schema=False)
-async def backend_invoke(request: Request, operation: str, body: dict[str, Any] | None = None) -> Any:
-    return await backend_invoke_impl(
-        request,
-        operation,
-        body,
-        backend_methods=_BACKEND_METHODS,
-        required_tier_for_operation=_required_tier_for_operation,
-        require_tier=_require_tier,
-        try_record_destructive_op_rest=_try_record_destructive_op_rest,
-        resolve_caller_session=_resolve_caller_session,
-        get_backend=_get_backend,
-        drain_background_errors=_drain_background_errors,
-        logger=logger,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Per-client token tier — admin endpoints (mint / revoke)
-# ---------------------------------------------------------------------------
-# Auth for /api/admin/* is enforced by BearerAuthMiddleware's admin gate
-# (operator key or loopback origin), which binds the operator tier before the
-# handler runs. _require_tier("operator") below is defense-in-depth.
-
-@router.post("/admin/clients", response_model=MintClientResponse)
-async def mint_client(request: Request, body: MintClientRequest) -> MintClientResponse:
-    return await mint_client_impl(
-        request,
-        body,
-        require_tier=_require_tier,
-        valid_client_tiers=_VALID_CLIENT_TIERS,
-        get_client_token_store=_get_client_token_store,
-        try_record_destructive_op_rest=_try_record_destructive_op_rest,
-        get_request_session_func=get_request_session,
-    )
-
-
-@router.get("/admin/clients", response_model=ListClientsResponse)
-async def list_clients(request: Request) -> ListClientsResponse:
-    return await list_clients_impl(
-        request,
-        require_tier=_require_tier,
-        get_client_token_store=_get_client_token_store,
-    )
-
-
-@router.post("/admin/clients/{client_id}/revoke", response_model=RevokeClientResponse)
-async def revoke_client(request: Request, client_id: str) -> RevokeClientResponse:
-    return await revoke_client_impl(
-        request,
-        client_id,
-        require_tier=_require_tier,
-        get_client_token_store=_get_client_token_store,
-        try_record_destructive_op_rest=_try_record_destructive_op_rest,
     )

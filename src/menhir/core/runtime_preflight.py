@@ -7,12 +7,19 @@ import json
 import logging
 import os
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from menhir.config import MemorySettings
+from menhir.core.runtime_preflight_capabilities import RuntimeCapabilities
+from menhir.core.runtime_preflight_env import check_expected_python_runtime, expected_venv_python
+from menhir.core.runtime_preflight_providers import (
+    CREDENTIAL_REJECTED,
+    CREDENTIAL_UNVERIFIED,
+    CREDENTIAL_VERIFIED,
+    check_openai_provider_configuration,
+)
 from menhir.infrastructure.embedding_dimensions import (
     embedding_dimension_health,
     expected_graphiti_embedding_dimension,
@@ -35,77 +42,9 @@ _STARTUP_WAIT_SECONDS = 90
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class RuntimeCapabilities:
-    """Runtime dependency snapshot used for startup and readiness reporting."""
-
-    venv_ready: bool
-    graphiti_dependency_ready: bool
-    neo4j_ready: bool
-    graphiti_llm_ready: bool
-    embedder_ready: bool
-    reranker_ready: bool
-    failures: tuple[str, ...] = field(default_factory=tuple)
-    #: Outcome of the free GET /v1/models credential probe for a cloud provider:
-    #: "verified" (200), "rejected" (401/403), "unverified" (network/other -- startup
-    #: proceeds), or "n/a" when no cloud provider is configured.
-    cloud_credential: str = "n/a"
-    #: Neo4j probe outcome: "ok", "unauthorized" (server reached, credentials refused),
-    #: "unreachable" (no server answered), or "unknown".
-    neo4j_status: str = "unknown"
-    #: Models a hosted endpoint did not list at GET /models but is expected to serve anyway.
-    #: Readiness is still True -- gateways routinely omit models they serve -- but the report
-    #: says so, because a bare [ok] next to a startup log warning about the same model reads
-    #: as two health signals disagreeing.
-    unlisted_models: tuple[str, ...] = field(default_factory=tuple)
-
-    @property
-    def llm_ready(self) -> bool:
-        return self.graphiti_llm_ready
-
-    @property
-    def graphiti_ready(self) -> bool:
-        return self.neo4j_ready and self.embedder_ready
-
-    @property
-    def reads_ready(self) -> bool:
-        return self.neo4j_ready and self.embedder_ready
-
-    @property
-    def queue_writes_ready(self) -> bool:
-        return self.neo4j_ready
-
-    @property
-    def enrichment_ready(self) -> bool:
-        return self.neo4j_ready and self.embedder_ready and self.graphiti_llm_ready
-
-    @property
-    def startup_mode(self) -> str:
-        if self.enrichment_ready:
-            return "full"
-        if self.reads_ready:
-            return "degraded_reads_only"
-        if self.queue_writes_ready:
-            return "degraded_queue_only"
-        return "unavailable"
-
-    @property
-    def is_strictly_startable(self) -> bool:
-        return not self.failures
-
-
 def _should_bypass_local_auth(base_url: str) -> bool:
     normalized = (base_url or "").strip().lower()
     return normalized.startswith("http://127.0.0.1") or normalized.startswith("http://localhost")
-
-
-def expected_venv_python() -> Path:
-    """Return the canonical interpreter path for the project virtual environment."""
-
-    repo_root = Path(__file__).resolve().parents[3]
-    if os.name == "nt":
-        return repo_root / ".venv" / "Scripts" / "python.exe"
-    return repo_root / ".venv" / "bin" / "python"
 
 
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -125,21 +64,6 @@ def venv_guard_applies() -> bool:
     if os.getenv("MENHIR_ALLOW_SYSTEM_PYTHON", "").strip().lower() in _TRUTHY:
         return False
     return expected_venv_python().exists()
-
-
-def check_expected_python_runtime(executable: str | None = None) -> bool:
-    """Require the MCP server to run from the project virtualenv interpreter."""
-
-    active = Path(executable or sys.executable).resolve()
-    expected = expected_venv_python().resolve()
-    if active != expected:
-        logger.error(
-            "Expected menhir MCP to run from %s but active interpreter is %s",
-            expected,
-            active,
-        )
-        return False
-    return True
 
 
 def check_graphiti_dependency() -> bool:
@@ -289,11 +213,6 @@ def check_llama_connectivity(
             return False
 
 
-CREDENTIAL_VERIFIED = "verified"
-CREDENTIAL_REJECTED = "rejected"
-CREDENTIAL_UNVERIFIED = "unverified"
-
-
 def probe_openai_credential(
     *,
     api_key: str,
@@ -326,39 +245,6 @@ def probe_openai_credential(
     except (URLError, OSError, ValueError) as exc:
         logger.warning("Cloud credential probe inconclusive (%s); continuing.", exc)
         return CREDENTIAL_UNVERIFIED
-
-
-def check_openai_provider_configuration(
-    *,
-    api_key: str,
-    chat_model: str,
-    embed_model: str,
-    credential_status: str | None = None,
-) -> bool:
-    """Validate cloud OpenAI provider configuration.
-
-    ``credential_status`` is the shared result of :func:`probe_openai_credential`. Only a
-    definite rejection fails the check: a probe that could not reach the provider (blocked
-    outbound sockets, a slow network) leaves startup exactly as permissive as before, and
-    real request failures are still handled at call time.
-    """
-
-    if not api_key.strip():
-        logger.error("OpenAI provider is configured but OPENAI_API_KEY is missing.")
-        return False
-    if not chat_model.strip() and not embed_model.strip():
-        logger.error("OpenAI provider is configured but no chat or embedding model is set.")
-        return False
-    if credential_status == CREDENTIAL_REJECTED:
-        logger.error("OpenAI rejected OPENAI_API_KEY (401/403) on GET /models.")
-        return False
-    logger.info(
-        "OpenAI provider configuration %s for startup (chat=%s, embed=%s).",
-        "verified" if credential_status == CREDENTIAL_VERIFIED else "accepted (credential not verified)",
-        chat_model or "(none)",
-        embed_model or "(none)",
-    )
-    return True
 
 
 def collect_runtime_failures(

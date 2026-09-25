@@ -1,3 +1,23 @@
+## 2026-09-25 - non-test modules split under the 500-line limit (wave 1)
+
+102 maintained non-test Python files over 500 lines were reduced by behavior-preserving
+extraction: cohesive units moved into new sibling modules, with every moved public symbol
+re-exported from the original module so no import site anywhere changes. 99 targets are now
+at or under 500 lines (94,719 to 33,724 lines across the same 102 paths), with the moved code
+in 404 new sibling modules, each also under 500 lines.
+
+Three documented exceptions remain: `deploy/personal_stage_vps.py` is unchanged because the
+single-file exact-census VPS deployment contract installs exactly one runner and the runner
+self-pins its digest; `src/menhir/core/runtime.py` (954 to 679) and `src/menhir/mcp/contracts.py`
+(832 to 570) keep their test monkeypatch seam units in place, since moved bodies would resolve
+names in the sibling module and silently stop intercepting test patches.
+
+Verification: `ruff check --select F811,F821,ASYNC` is clean over all 457 changed files,
+`python -m compileall` is clean across src/deploy/scripts/pipeline, and `pytest --collect-only`
+collects 10,690 tests with no errors. Collection must run from the repository root because one
+test reads a cwd-relative source path. The full offline and graph-backed suites run in CI on
+this SHA.
+
 ## 2026-09-22 - memory write bounds now apply before every supported ingest side effect
 
 The REST memory route already rejected episode text above 48,000 characters and diffs above

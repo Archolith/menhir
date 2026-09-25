@@ -4,99 +4,30 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
 import hashlib
 import json
-import os
 import re
 import secrets
-import shutil
 import subprocess
-import tarfile
-import tempfile
+import sys
 from pathlib import Path
 from typing import Any, Sequence
 
-SHA256_RE = re.compile(r"[0-9a-f]{64}")
-DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
-VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+-[0-9]+")
-PUSH_DIGEST_RE = re.compile(r"digest:\s+(sha256:[0-9a-f]{64})")
-REMOTE_DIGEST_RE = re.compile(r"(?m)^Digest:\s+(sha256:[0-9a-f]{64})\s*$")
-LABELS = {
-    "commit": "org.opencontainers.image.revision",
-    "version": "org.opencontainers.image.version",
-    "wheel_manifest_sha256": "org.archolith.menhir.wheel-manifest.sha256",
-    "oauth_wheel_sha256": "org.archolith.oauth.wheel.sha256",
-}
-EVIDENCE_FILES = {
-    "sbom": "release-image-evidence/sbom.syft.json",
-    "vulnerability_scan": "release-image-evidence/scan.grype.json",
-}
-SCANNER_REPOSITORIES = {
-    "syft": frozenset({"anchore/syft", "docker.io/anchore/syft"}),
-    "grype": frozenset({"anchore/grype", "docker.io/anchore/grype"}),
-}
-SEVERITIES = ("Unknown", "Negligible", "Low", "Medium", "High", "Critical")
-MAX_EVIDENCE_BYTES = 256 * 1024 * 1024
-CANONICAL_SOURCE_REPOSITORY = "Archolith/menhir"
+# Keep the sibling parts package importable even when this module is loaded by
+# path (importlib spec) rather than imported as a script or package member.
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.append(str(_SCRIPT_DIR))
 
-
-class BuildImageError(RuntimeError):
-    pass
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def sha256_bytes(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
-
-
-def oauth_wheel_sha256(wheelhouse: Path) -> str:
-    manifest = wheelhouse / "SHA256SUMS"
-    if not manifest.is_file() or manifest.is_symlink():
-        raise BuildImageError(f"wheel manifest is missing or unsafe: {manifest}")
-    matches: list[str] = []
-    manifested: set[str] = set()
-    for number, raw in enumerate(manifest.read_text(encoding="ascii").splitlines(), 1):
-        parts = raw.split(maxsplit=1)
-        if len(parts) != 2 or SHA256_RE.fullmatch(parts[0]) is None:
-            raise BuildImageError(f"malformed SHA256SUMS line {number}")
-        relative = parts[1].lstrip("* ")
-        if "/" in relative or "\\" in relative or relative in {"", ".", ".."}:
-            raise BuildImageError(f"unsafe wheel path on SHA256SUMS line {number}")
-        if relative in manifested:
-            raise BuildImageError(f"duplicate wheel manifest entry: {relative}")
-        manifested.add(relative)
-        wheel = wheelhouse / relative
-        if not wheel.is_file() or wheel.is_symlink():
-            raise BuildImageError(f"manifest wheel is missing or unsafe: {relative}")
-        actual = sha256_file(wheel)
-        if actual != parts[0]:
-            raise BuildImageError(f"wheel digest mismatch: {relative}")
-        normalized = relative.lower().replace("-", "_")
-        if normalized.startswith("archolith_oauth_") and normalized.endswith(".whl"):
-            matches.append(actual)
-    actual = set()
-    for entry in wheelhouse.iterdir():
-        if entry.name == "SHA256SUMS":
-            continue
-        if entry.is_symlink() or not entry.is_file() or entry.suffix != ".whl":
-            raise BuildImageError(f"unexpected or unsafe wheelhouse entry: {entry.name}")
-        actual.add(entry.name)
-    if actual != manifested:
-        raise BuildImageError(
-            "wheel manifest closure mismatch: "
-            f"missing={sorted(manifested - actual)}, extra={sorted(actual - manifested)}"
-        )
-    if len(matches) != 1:
-        raise BuildImageError("wheelhouse must contain exactly one archolith_oauth wheel")
-    return matches[0]
+from build_release_image_parts import (  # noqa: E402
+    CANONICAL_SOURCE_REPOSITORY, BuildImageError, DIGEST_RE, EVIDENCE_FILES, LABELS,
+    MAX_EVIDENCE_BYTES, PUSH_DIGEST_RE, REMOTE_DIGEST_RE, SCANNER_REPOSITORIES, SEVERITIES,
+    SHA256_RE, VERSION_RE, atomic_json, build_command, committed_build_context,
+    git_source_date_epoch, inspect_image, oauth_wheel_sha256, parser, remote_manifest_digest,
+    sha256_bytes, sha256_file, _parse_report, _push_digest, _read_bytes, _read_json_bytes,
+    _repository_relative, _require_sha256, _scanner_descriptor, _scanner_source_image_id,
+    _validate_common_args, _validate_scanner_image, _verify_artifact_file, _write_evidence,
+)
 
 
 def git_commit(repo: Path, *, allow_untracked: bool = False) -> str:
@@ -120,163 +51,6 @@ def git_commit(repo: Path, *, allow_untracked: bool = False) -> str:
     if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
         raise BuildImageError("Git HEAD is not a full commit digest")
     return commit
-
-
-def git_source_date_epoch(repo: Path, commit: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(repo), "show", "-s", "--format=%ct", commit],
-        check=True, capture_output=True, text=True,
-    )
-    value = result.stdout.strip()
-    if re.fullmatch(r"[1-9][0-9]{8,}", value) is None:
-        raise BuildImageError("Git commit timestamp is malformed")
-    return value
-
-
-def _repository_relative(repo: Path, path: Path, label: str) -> Path:
-    try:
-        relative = path.resolve(strict=True).relative_to(repo.resolve(strict=True))
-    except (OSError, ValueError) as exc:
-        raise BuildImageError(f"{label} must be inside the repository") from exc
-    if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
-        raise BuildImageError(f"{label} is not a canonical repository path")
-    return relative
-
-
-@contextmanager
-def committed_build_context(
-    repo: Path, commit: str, dockerfile: Path, wheelhouse: Path,
-):
-    """Yield a Docker context made from the commit plus the verified wheelhouse."""
-    dockerfile_relative = _repository_relative(repo, dockerfile, "Dockerfile")
-    wheelhouse_relative = _repository_relative(repo, wheelhouse, "wheelhouse")
-    oauth_wheel_sha256(wheelhouse)
-    with tempfile.TemporaryDirectory(prefix="menhir-release-context-") as temporary:
-        root = Path(temporary)
-        archive_path = root / "source.tar"
-        context = root / "context"
-        context.mkdir()
-        subprocess.run(
-            ["git", "-C", str(repo), "archive", "--format=tar", "--output",
-             str(archive_path), commit],
-            check=True,
-        )
-        with tarfile.open(archive_path, mode="r:") as archive:
-            archive.extractall(context, filter="data")
-        staged_wheelhouse = context / wheelhouse_relative
-        if staged_wheelhouse.exists() or staged_wheelhouse.is_symlink():
-            raise BuildImageError("committed source unexpectedly contains deploy/wheelhouse")
-        staged_wheelhouse.mkdir(parents=True)
-        for entry in wheelhouse.iterdir():
-            shutil.copyfile(entry, staged_wheelhouse / entry.name, follow_symlinks=False)
-        oauth_wheel_sha256(staged_wheelhouse)
-        staged_dockerfile = context / dockerfile_relative
-        if not staged_dockerfile.is_file() or staged_dockerfile.is_symlink():
-            raise BuildImageError("committed Dockerfile is missing or unsafe")
-        yield context, staged_dockerfile
-
-
-def build_command(*, repo: Path, dockerfile: Path, image_tag: str, python_base: str,
-                  commit: str, version: str, wheel_manifest: str,
-                  oauth_wheel: str, source_date_epoch: str) -> list[str]:
-    return [
-        "docker", "build", "--file", str(dockerfile),
-        "--network", "none", "--pull=false", "--no-cache",
-        "--platform", "linux/amd64", "--provenance=false", "--sbom=false",
-        "--build-arg", f"PYTHON_BASE={python_base}",
-        "--build-arg", f"SOURCE_DATE_EPOCH={source_date_epoch}",
-        "--build-arg", f"RELEASE_COMMIT={commit}",
-        "--build-arg", f"RELEASE_VERSION={version}",
-        "--build-arg", f"WHEEL_MANIFEST_SHA256={wheel_manifest}",
-        "--build-arg", f"OAUTH_WHEEL_SHA256={oauth_wheel}",
-        "--tag", image_tag, str(repo),
-    ]
-
-
-def inspect_image(image_tag: str, expected: dict[str, str]) -> tuple[str, dict[str, str], str]:
-    result = subprocess.run(
-        ["docker", "image", "inspect", image_tag],
-        check=True, capture_output=True, text=True,
-    )
-    rows = json.loads(result.stdout)
-    if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
-        raise BuildImageError("docker image inspect returned an unexpected shape")
-    image_id = rows[0].get("Id")
-    config = rows[0].get("Config")
-    if not isinstance(image_id, str) or DIGEST_RE.fullmatch(image_id) is None:
-        raise BuildImageError("built image ID is missing or malformed")
-    if not isinstance(config, dict):
-        raise BuildImageError("built image config is missing")
-    labels = config.get("Labels") or {}
-    if not isinstance(labels, dict):
-        raise BuildImageError("built image labels are malformed")
-    actual = {name: labels.get(label) for name, label in LABELS.items()}
-    if actual != expected:
-        raise BuildImageError(f"built image labels do not match derived inputs: {actual!r}")
-    encoded = json.dumps(
-        config, ensure_ascii=True, separators=(",", ":"), sort_keys=True,
-    ).encode("ascii")
-    return image_id, actual, hashlib.sha256(encoded).hexdigest()
-
-
-def _validate_scanner_image(value: Any, scanner: str) -> str:
-    if not isinstance(value, str):
-        raise BuildImageError(f"{scanner} scanner image is required")
-    repository, separator, digest = value.rpartition("@")
-    if (not separator or repository not in SCANNER_REPOSITORIES[scanner]
-            or DIGEST_RE.fullmatch(digest) is None):
-        raise BuildImageError(
-            f"{scanner} scanner must use its official image pinned by SHA-256 digest"
-        )
-    return value
-
-
-def _scanner_descriptor(document: dict[str, Any], scanner: str) -> str:
-    descriptor = document.get("descriptor")
-    if not isinstance(descriptor, dict):
-        raise BuildImageError(f"{scanner} report descriptor is missing")
-    name = descriptor.get("name")
-    version = descriptor.get("version")
-    if not isinstance(name, str) or name.lower() != scanner:
-        raise BuildImageError(f"{scanner} report names an unexpected scanner")
-    if not isinstance(version, str) or not version or len(version) > 128:
-        raise BuildImageError(f"{scanner} report version is missing or malformed")
-    return version
-
-
-def _scanner_source_image_id(
-    document: dict[str, Any], scanner: str, expected_image_id: str,
-) -> str:
-    source = document.get("source")
-    if not isinstance(source, dict) or source.get("type") != "image":
-        raise BuildImageError(f"{scanner} report source is not a container image")
-    candidates: list[Any] = []
-    for field in ("metadata", "target"):
-        nested = source.get(field)
-        if isinstance(nested, dict):
-            candidates.extend((nested.get("id"), nested.get("imageID")))
-    candidates.extend((source.get("imageID"), source.get("id")))
-    image_ids = {
-        value for value in candidates
-        if isinstance(value, str) and DIGEST_RE.fullmatch(value) is not None
-    }
-    if expected_image_id not in image_ids:
-        raise BuildImageError(
-            f"{scanner} report does not identify the expected candidate image"
-        )
-    return expected_image_id
-
-
-def _parse_report(raw: bytes, scanner: str) -> dict[str, Any]:
-    if not raw or len(raw) > MAX_EVIDENCE_BYTES:
-        raise BuildImageError(f"{scanner} report is empty or too large")
-    try:
-        document = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise BuildImageError(f"{scanner} report is not valid UTF-8 JSON") from exc
-    if not isinstance(document, dict):
-        raise BuildImageError(f"{scanner} report must contain a JSON object")
-    return document
 
 
 def validate_sbom(raw: bytes, expected_image_id: str) -> dict[str, Any]:
@@ -384,19 +158,6 @@ def _run_scanner(*, scanner: str, image: str, archive: Path) -> bytes:
             )
 
 
-def _write_evidence(path: Path, raw: bytes) -> str:
-    if path.parent.is_symlink():
-        raise BuildImageError("evidence destination must not traverse a symlink")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists() or path.is_symlink():
-        raise BuildImageError(f"evidence destination already exists: {path}")
-    with path.open("xb") as handle:
-        handle.write(raw)
-        handle.flush()
-        os.fsync(handle.fileno())
-    return sha256_bytes(raw)
-
-
 def generate_evidence(*, artifact_root: Path, archive: Path, archive_sha256: str,
                       image_id: str, syft_image: str,
                       grype_image: str) -> dict[str, Any]:
@@ -420,68 +181,6 @@ def generate_evidence(*, artifact_root: Path, archive: Path, archive_sha256: str
             "validation": summary,
         }
     return result
-
-
-def atomic_json(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        with os.fdopen(descriptor, "w", encoding="ascii") as handle:
-            json.dump(value, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
-
-
-def _read_bytes(path: Path, label: str) -> bytes:
-    if not path.is_file() or path.is_symlink():
-        raise BuildImageError(f"{label} is missing or unsafe")
-    return path.read_bytes()
-
-
-def _read_json_bytes(raw: bytes, label: str) -> dict[str, Any]:
-    try:
-        value = json.loads(raw.decode("ascii"))
-    except (UnicodeError, json.JSONDecodeError) as exc:
-        raise BuildImageError(f"{label} is not valid ASCII JSON") from exc
-    if not isinstance(value, dict):
-        raise BuildImageError(f"{label} must contain a JSON object")
-    return value
-
-
-def _require_sha256(value: Any, label: str, *, prefixed: bool = False) -> str:
-    pattern = DIGEST_RE if prefixed else SHA256_RE
-    if not isinstance(value, str) or pattern.fullmatch(value) is None:
-        raise BuildImageError(f"{label} is missing or malformed")
-    return value
-
-
-def _verify_artifact_file(root: Path, relative: str, label: str) -> Path:
-    allowed = {
-        "release-image.tar",
-        "release-image-metadata.json",
-        "release-image-identity.json",
-        *EVIDENCE_FILES.values(),
-    }
-    if relative not in allowed:
-        raise BuildImageError(f"{label} has an unexpected artifact path")
-    current = root
-    for part in Path(relative).parts:
-        current = current / part
-        if current.is_symlink():
-            raise BuildImageError(f"{label} must not traverse a symlink")
-    try:
-        candidate = current.resolve(strict=True)
-        candidate.relative_to(root)
-    except (FileNotFoundError, ValueError):
-        raise BuildImageError(f"{label} escaped the validation artifact") from None
-    if not candidate.is_file() or candidate.is_symlink():
-        raise BuildImageError(f"{label} is missing or unsafe")
-    return candidate
 
 
 def create_validation_bundle(args: argparse.Namespace) -> dict[str, Any]:
@@ -698,33 +397,6 @@ def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> t
     return metadata, identity
 
 
-def _push_digest(image_tag: str) -> str:
-    result = subprocess.run(
-        ["docker", "push", image_tag], check=True, capture_output=True, text=True,
-    )
-    matches = PUSH_DIGEST_RE.findall(result.stdout + "\n" + result.stderr)
-    if not matches:
-        raise BuildImageError("docker push did not report a registry manifest digest")
-    return matches[-1]
-
-
-def remote_manifest_digest(image_tag: str) -> str | None:
-    result = subprocess.run(
-        ["docker", "buildx", "imagetools", "inspect", image_tag],
-        check=False, capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        message = (result.stdout + "\n" + result.stderr).lower()
-        if any(marker in message for marker in ("manifest unknown", "no such manifest", "not found")):
-            return None
-        raise BuildImageError(f"could not inspect remote tag: {message.strip()}")
-    matches = REMOTE_DIGEST_RE.findall(result.stdout)
-    if len(matches) != 1:
-        raise BuildImageError("remote manifest digest is missing or malformed")
-    digest = matches[0]
-    return _require_sha256(digest, "remote manifest digest", prefixed=True)
-
-
 def _verify_remote_candidate(
     *, repository: str, digest: str, metadata: dict[str, Any],
 ) -> None:
@@ -798,21 +470,6 @@ def publish_bundle(args: argparse.Namespace) -> dict[str, Any]:
     return publication
 
 
-def _validate_common_args(args: argparse.Namespace) -> None:
-    if VERSION_RE.fullmatch(args.version) is None:
-        raise BuildImageError("version must match <major>.<minor>.<patch>-<sequence>")
-    remainder = args.image.removeprefix("ghcr.io/")
-    if (remainder == args.image or "/" not in remainder or "@" in args.image
-            or ":" in remainder):
-        raise BuildImageError("image must be an untagged ghcr.io repository")
-    if re.search(r"@sha256:[0-9a-f]{64}$", args.python_base) is None:
-        raise BuildImageError("python base must be digest-pinned")
-    if args.expected_commit and re.fullmatch(r"[0-9a-f]{40}", args.expected_commit) is None:
-        raise BuildImageError("expected commit must be a full commit digest")
-    if args.source_repository != CANONICAL_SOURCE_REPOSITORY:
-        raise BuildImageError("source repository must be the canonical Archolith/menhir repository")
-
-
 def run(args: argparse.Namespace) -> dict[str, Any]:
     _validate_common_args(args)
     if args.mode == "build":
@@ -823,27 +480,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     if args.mode == "publish":
         return publish_bundle(args)
     raise BuildImageError(f"unsupported mode: {args.mode}")
-
-
-def parser() -> argparse.ArgumentParser:
-    value = argparse.ArgumentParser(description=__doc__)
-    value.add_argument("--mode", choices=("build", "verify", "publish"), default="build")
-    value.add_argument("--version", required=True)
-    value.add_argument("--image", required=True, help="repository name without tag")
-    value.add_argument("--python-base", required=True)
-    value.add_argument("--repo", type=Path, default=Path.cwd())
-    value.add_argument("--dockerfile", type=Path, default=Path("deploy/Dockerfile"))
-    value.add_argument("--wheelhouse", type=Path, default=Path("deploy/wheelhouse"))
-    value.add_argument("--expected-commit")
-    value.add_argument("--source-repository", required=True)
-    value.add_argument("--output", type=Path)
-    value.add_argument("--metadata", type=Path)
-    value.add_argument("--identity", type=Path)
-    value.add_argument("--image-archive", type=Path)
-    value.add_argument("--expected-identity-sha256")
-    value.add_argument("--syft-image")
-    value.add_argument("--grype-image")
-    return value
 
 
 def main(argv: Sequence[str] | None = None) -> int:
