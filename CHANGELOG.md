@@ -1,3 +1,40 @@
+## 2026-09-24 - MCP clients are told when to use memory, not just what Menhir is
+
+Every MCP client receives the server instructions, whether or not a repository pastes the
+AGENTS.md template. They were one positioning sentence that never mentioned memory or recall,
+and in an agent evaluation agents skipped `recall_memories` in half the runs and used Menhir as a
+code index. With the new instructions and descriptions, every run recalled and most read the
+source episode; answers improved at the same cost.
+
+- `src/menhir/mcp/instructions.py` (new): `SERVER_INSTRUCTIONS`, shared by the stdio and remote
+  servers. It covers when recall is worth it (recorded decisions, rejected alternatives,
+  incidents, preferences, constraints; especially when the repository cannot supply the
+  rationale), the identifier discipline, one focused query first, `get_provenance` for exact
+  wording, checking dates, conflicts and stale anchors, and that an empty result does not prove
+  there is no history.
+- The instructions also carry the local-stdio MVP write path (#118): write a decision with its
+  reason and the rejected alternative; `add_memory_and_track` when the write must be recallable
+  in the same session, observing its episode id rather than writing again; `ingest_project`
+  when the repository is missing; a new project's memory starts empty.
+- `src/menhir/mcp/server.py`, `src/menhir/api/mcp_remote.py`: use it. The stdio gateway also pins
+  `get_provenance`, which the instructions rely on for a recorded reason's exact wording.
+- `src/menhir/mcp/contracts.py`: `registered_description()` drops a docstring's opening sentence when
+  it repeats the curated description; 13 tools sent their lead sentence twice.
+- `recall_memories`, `get_provenance`, `query_structure`: descriptions say what each returns and
+  when to use the next tool. Recall returns summaries, not source episodes; `include_invalidated`
+  keeps superseded facts on returned results and is not a history search; `compact` and `trace` are
+  documented; the structure graph is not a substitute for targeted recall.
+- `get_artifact`, `list_artifacts`, `list_artifact_questions`: say they return records and document
+  locations, not document text (`get_artifact` claimed "in full"), and that an open question does
+  not establish a decision.
+- `docs/templates/AGENTS.menhir.md`, `docs/agent-usage.md`, `README.md`: the same when-to-recall and provenance
+  guidance; structure-first only for structural questions; `rate_recall` only where the client
+  exposes it (the readonly tier does not).
+- `tests/test_mcp_agent_guidance.py` (new): both transports send the shared text, every tool it names
+  exists, stdio agents see the tools it relies on, and no registered description repeats its lead
+  sentence. `tests/e2e/test_e2e_01_cold_install.py`: `get_provenance` joins the pinned MVP surface.
+- `CHANGELOG-archive.md`: archived the 2026-09-17 shadow-scan entry to keep ten.
+
 ## 2026-09-24 - source retention fails closed on incomplete provenance
 
 - `backfill_legacy_retention.py`: inventory all historical flags and processed sources, then add only individually reviewed, tenant-consistent source links under a quiesced, backed-up maintenance operation; preserve ambiguous entity flags.

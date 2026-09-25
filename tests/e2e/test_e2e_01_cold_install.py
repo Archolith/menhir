@@ -46,6 +46,7 @@ REQUIRED_TOOLS = frozenset(
         "recall_context_memories",
         "list_todos",
         "add_todo",
+        "get_provenance",
         "search_tools",
         "call_tool",
     }

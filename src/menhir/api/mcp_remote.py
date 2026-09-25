@@ -9,14 +9,12 @@ from mcp.types import Tool as MCPTool
 from starlette.types import ASGIApp
 
 from menhir.mcp.contracts import _tier_allows
+from menhir.mcp.instructions import SERVER_INSTRUCTIONS
 from menhir.mcp.resources import register_memory_resources
 from menhir.mcp.service_access import get_client_tool_allowlist, get_request_tier
 from menhir.mcp.tools import register_all_tools
 
-_INSTRUCTIONS = (
-    "Inspect provenance, govern durable context, and analyze repository structure "
-    "and change impact for coding agents."
-)
+_INSTRUCTIONS = SERVER_INSTRUCTIONS
 
 
 @lru_cache(maxsize=1)

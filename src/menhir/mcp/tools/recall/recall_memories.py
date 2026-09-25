@@ -65,7 +65,10 @@ class RecallMemoriesTool(BaseJsonTool):
     read_only_hint = True
     destructive_hint = False
     open_world_hint = False
-    description = "Search memories by semantic similarity."
+    description = (
+        "Find recorded decisions, reasons, incidents, preferences and constraints using "
+        "vector/full-text retrieval and contextual ranking."
+    )
 
     async def endpoint(
         self,
@@ -79,19 +82,28 @@ class RecallMemoriesTool(BaseJsonTool):
         compact: bool | None = None,
         trace: bool = False,
     ) -> str:
-        """Search memories by semantic similarity. Returns ranked results with relevance scores.
+        """Name the component and decision in query. Start with one focused query;
+        rephrase if needed. limit defaults to 5. preset defaults to knowledge;
+        recent and connected change ranking. emotional and conflict are also
+        accepted ranking presets, not dedicated search modes.
 
-        Args:
-            query: What to search for. Natural language works best.
-            preset: Ranking strategy — "knowledge" (default), "recent", "connected". Also accepts "emotional" and "conflict" (partial — weight balance only, no domain signals yet).
-            limit: Max results to return (default: 5).
-            file_context: Optional file path — boosts memories linked to this file and its structural neighbors.
-            file_context_project: Optional project name for file_context disambiguation.
-            namespace: Optional silo to scope this operation to. Empty = default/global behavior.
-            include_invalidated: When True, also return superseded/historical beliefs (expired facts). Default False = current beliefs only.
+        file_context adds file-linked context; supply file_context_project to
+        disambiguate the structural project. namespace scopes the operation,
+        subject to the client's configured pin.
 
-        Returns:
-            Ranked memory results with scores and explainability breakdown.
+        Returns ranked memory summaries, UUIDs, available temporal facts and
+        warnings, not normally source episodes. Use get_provenance(node_uuid=...)
+        on an entity/View result to inspect linked source excerpts.
+
+        include_invalidated=true retains superseded fact edges attached to
+        returned results; it does not search all historical episodes.
+        compact=true omits per-item type/breakdown and candidates_evaluated;
+        omitting it uses the server default. trace=true requests retrieval
+        diagnostics when available; it does not retrieve source text.
+
+        Scores indicate retrieval relevance, not truth. Check dates, conflicts,
+        stale-anchor warnings and response notes. Empty results do not establish
+        that no relevant memory exists.
         """
         backend = self.get_backend()
         try:

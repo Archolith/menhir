@@ -37,7 +37,10 @@ class ArtifactQuestionsTool(BaseTextTool):
     read_only_hint = True
     destructive_hint = False
     open_world_hint = False
-    description = "List open, answered, or deferred design questions on work artifacts."
+    description = (
+        "Read recorded open, answered, or deferred design questions on work artifacts. An open "
+        "question does not establish a decision."
+    )
 
     async def endpoint(
         self, artifact_uuid: str = "", status: str = "open", namespace: str = "", limit: int = 25

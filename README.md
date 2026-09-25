@@ -78,11 +78,14 @@ A typical agent session can use Menhir at each stage:
 1. Run `ingest_project` to build or refresh the repository graph.
 2. Before editing, use `query_structure` for local context, blast radius, and affected
    tests. Pass `file_context` to `recall_memories` to pull in code-linked decisions,
-   failures, and constraints.
+   failures, and constraints. When a design choice or constraint could change the work and
+   the repository does not record why, recall the recorded reason and read its source with
+   `get_provenance`.
 3. During the session, optional hooks can collect durable user-provided evidence and
    mark changed files dirty. Hook failures do not block the coding agent.
 4. After the change, attach the Git diff to `add_memory` so new lessons can be anchored
-   to touched files. Record remaining code work with repository-relative todo locations,
+   to touched files. Write each decision with its reason and the alternative rejected; use
+   `add_memory_and_track` when the write must be recallable in the same session. Record remaining code work with repository-relative todo locations,
    and update any plan, review, report, or handoff artifacts.
 
 ```text
