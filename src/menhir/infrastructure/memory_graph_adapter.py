@@ -923,6 +923,9 @@ class MemoryGraphAdapter:
     def compress_node(self, node_uuid: str, compressed_summary: str) -> bool:
         return self._consolidation.compress_node(node_uuid, compressed_summary)
 
+    def mark_decay_candidates_selected(self, node_uuids: list[str]) -> int:
+        return self._consolidation.mark_decay_candidates_selected(node_uuids)
+
     def fetch_node_freshness(self, node_uuids: list[str]) -> dict[str, str]:
         return self._consolidation.fetch_node_freshness(node_uuids)
 

@@ -14,6 +14,18 @@ Entries older than the 10 most recent, archived from `CHANGELOG.md`.
 
 ---
 
+## 2026-09-24 - source retention fails closed on incomplete provenance
+
+- `backfill_legacy_retention.py`: inventory all historical flags and processed sources, then add only individually reviewed, tenant-consistent source links under a quiesced, backed-up maintenance operation; preserve ambiguous entity flags.
+- `test_backfill_legacy_retention.py`: cover incomplete, cross-tenant, structural, and merged candidates, manifest drift, and graph-backed live flag/unflag/reflag behavior.
+- `episode_stamping.py`: refuse a missing or wrong-tenant source or extracted semantic entity instead of silently returning fewer retention links.
+- `scheduler_tasks.py`: leave a failed episode unreconciled and continue the retry sweep when provenance is incomplete.
+- `test_live_source_retention.py` and `test_live_source_retention_live.py`: cover incomplete links and structural exclusions with focused unit and Neo4j tests.
+- `test_e2e_08_isolation_adversarial.py`: compare original node identities during capped-delete refusal so concurrent enrichment additions do not register as deletion.
+- `memory_queries.py`, `.agent/data_models.md`, and `README.md`: describe direct entity flags, live source-linked protection, and the historical cutover limit.
+- `episode_stamping.py` and `correlation_queries.py`: mark enrichment-written provenance as direct so unmerge preserves a survivor link recorded after the merge.
+- `test_live_source_retention.py` and `test_unmerge_coordinator_live.py`: verify the direct marker and the graph-backed merge, later write, unmerge sequence.
+
 ## 2026-09-23 - Beacon can search the docs an agent needs to get oriented
 
 Beacon only searches the documents listed in `beacon.yaml`'s `canonical_docs`. The list named five

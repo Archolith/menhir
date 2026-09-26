@@ -265,6 +265,13 @@ class LifecycleDecayMixin:
             min_days_since_accessed=_DEFAULT_COMPRESS_DAYS,
             max_edge_count=_DEFAULT_COMPRESS_EDGE_COUNT,
         )
+        # Persist the whole selection before processing. Skips and temporary failures still
+        # yield their place next run; a marker-write failure aborts instead of hiding stalled progress.
+        if active_candidates:
+            await asyncio.to_thread(
+                self.graph_adapter.mark_decay_candidates_selected,
+                [str(row["uuid"]) for row in active_candidates],
+            )
 
         consecutive_llm_failures = 0
         for candidate in active_candidates:
@@ -338,6 +345,11 @@ class LifecycleDecayMixin:
             max_edge_count=_DEFAULT_GONE_EDGE_COUNT,
             max_sharpness=_DEFAULT_GONE_SHARPNESS,
         )
+        if delete_candidates:
+            await asyncio.to_thread(
+                self.graph_adapter.mark_decay_candidates_selected,
+                [str(row["uuid"]) for row in delete_candidates],
+            )
         for candidate in delete_candidates:
             candidate["last_accessed_days_ago"] = days_ago(candidate.get("last_accessed"))
             if self.should_delete(candidate):
@@ -365,6 +377,10 @@ class LifecycleDecayMixin:
         # ever built, goes through an explicit terminal-state reaper -- see
         # .agent/plans/menhir-terminal-reaper.md and the merge/decay lifecycle review (P0).
         orphan_subgraphs_cleaned = 0
+        logger.info(
+            "Decay selection: active_selected=%d compressed_selected=%d sharpness=%d compressed=%d deleted=%d",
+            len(active_candidates), len(delete_candidates), sharpness_recalculated, compressed, deleted,
+        )
         return DecayResult(
             edge_counts_synced=edge_counts_synced,
             sharpness_recalculated=sharpness_recalculated,

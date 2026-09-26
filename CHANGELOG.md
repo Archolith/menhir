@@ -1,3 +1,19 @@
+## 2026-09-26 - remaining MVP audit fixes for recall and decay (#154, #144)
+
+- `recall_pipeline.py`: acquire applicable independent sources before deciding recall is empty;
+  assemble standalone edge candidates before fallback, retain pending results and search-failure attribution,
+  and avoid metadata/adjacency round trips for an empty node pool.
+- `consolidation_queries.py`, `memory_graph_adapter.py`, `lifecycle_decay.py`: rotate bounded decay
+  batches by persistent least-recent selection, mark selected rows before processing, and log selection
+  separately from successful work. Preserve access/age/retention/policy gates and deletion disarm.
+- `test_recall_service.py`: empty/filtered/failed/pending semantic pools, file visibility/session guards,
+  enabled observation-only and standalone edge lanes, plus actual scoped file-to-recall Neo4j acquisition.
+- `test_lifecycle_service.py`: actual 501-record skipped-batch/restart regression, marker order for both
+  phases, unchanged access/freshness, direct/source retention, and marker-failure refusal.
+- `.agent/memory-policy.md`, `.agent/data_models.md`: define independent acquisition and the scheduling-only
+  selection marker, finite-set fairness and restart/rollout limits. No production writes or migration.
+- `CHANGELOG-archive.md`: move the oldest entry to keep ten.
+
 ## 2026-09-26 - chronological memory reads tolerate legacy timestamp storage (#145)
 
 - Normalize native dates and valid legacy ISO text before database ordering and limits in recent,
@@ -130,15 +146,3 @@ source episode; answers improved at the same cost.
   exists, stdio agents see the tools it relies on, and no registered description repeats its lead
   sentence. `tests/e2e/test_e2e_01_cold_install.py`: `get_provenance` joins the pinned MVP surface.
 - `CHANGELOG-archive.md`: archived the 2026-09-17 shadow-scan entry to keep ten.
-
-## 2026-09-24 - source retention fails closed on incomplete provenance
-
-- `backfill_legacy_retention.py`: inventory all historical flags and processed sources, then add only individually reviewed, tenant-consistent source links under a quiesced, backed-up maintenance operation; preserve ambiguous entity flags.
-- `test_backfill_legacy_retention.py`: cover incomplete, cross-tenant, structural, and merged candidates, manifest drift, and graph-backed live flag/unflag/reflag behavior.
-- `episode_stamping.py`: refuse a missing or wrong-tenant source or extracted semantic entity instead of silently returning fewer retention links.
-- `scheduler_tasks.py`: leave a failed episode unreconciled and continue the retry sweep when provenance is incomplete.
-- `test_live_source_retention.py` and `test_live_source_retention_live.py`: cover incomplete links and structural exclusions with focused unit and Neo4j tests.
-- `test_e2e_08_isolation_adversarial.py`: compare original node identities during capped-delete refusal so concurrent enrichment additions do not register as deletion.
-- `memory_queries.py`, `.agent/data_models.md`, and `README.md`: describe direct entity flags, live source-linked protection, and the historical cutover limit.
-- `episode_stamping.py` and `correlation_queries.py`: mark enrichment-written provenance as direct so unmerge preserves a survivor link recorded after the merge.
-- `test_live_source_retention.py` and `test_unmerge_coordinator_live.py`: verify the direct marker and the graph-backed merge, later write, unmerge sequence.

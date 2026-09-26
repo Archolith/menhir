@@ -528,6 +528,136 @@ def test_thresholds_match_design_doc():
 # --- Decay orchestration ---
 
 @pytest.mark.asyncio
+async def test_decay_marker_failure_aborts_before_processing(
+    stub_memory_graph_adapter, stub_graphiti_client, monkeypatch,
+):
+    stub_memory_graph_adapter.decay_candidates_by_freshness = {
+        "ACTIVE": [{"uuid": "selected", "content": "body"}],
+    }
+    def fail_mark(uuids):
+        assert uuids == ["selected"]
+        raise RuntimeError("marker unavailable")
+    monkeypatch.setattr(stub_memory_graph_adapter, "mark_decay_candidates_selected", fail_mark)
+    svc = LifecycleService(graph_adapter=stub_memory_graph_adapter, graphiti_client=stub_graphiti_client)
+    with pytest.raises(RuntimeError, match="marker unavailable"):
+        await svc.apply_decay()
+    assert stub_graphiti_client.count_similar_by_cosine_calls == []
+    assert stub_memory_graph_adapter.sharpness_updates == {}
+
+
+@pytest.mark.online
+@pytest.mark.parametrize("freshness", ["ACTIVE", "COMPRESSED"])
+def test_decay_selection_rotates_missing_invalid_and_native_markers(test_neo4j_repo, freshness):
+    from uuid import uuid4
+    from menhir.infrastructure.consolidation_queries import ConsolidationRepository
+
+    tag = "issue144-" + uuid4().hex
+    uuids = [tag + str(i) for i in range(4)]
+    try:
+        test_neo4j_repo.execute("""
+            UNWIND range(0,3) AS i
+            CREATE (n:Entity {uuid:$uuids[i], name:'Memory', content:'body', scope:'PERSISTENT',
+                type:'SEMANTIC', freshness:$freshness, sharpness:0.0, created_at:datetime('1999-01-01'),
+                last_accessed:datetime('1999-01-01')})
+            SET n.decay_last_selected_at = CASE i WHEN 1 THEN 'bad'
+                WHEN 2 THEN '2000-01-01T00:00:00Z' WHEN 3 THEN datetime('2001-01-01') ELSE null END
+        """, {"uuids": uuids, "freshness": freshness})
+        repo = ConsolidationRepository(test_neo4j_repo)
+        kwargs = {"min_days_since_accessed": 7, "max_edge_count": 5, "max_sharpness": 0.5, "limit": 2}
+        assert [row["uuid"] for row in repo.fetch_decay_candidates(freshness, **kwargs)] == uuids[:2]
+        assert repo.mark_decay_candidates_selected(uuids[:2]) == 2
+        assert [row["uuid"] for row in repo.fetch_decay_candidates(freshness, **kwargs)] == uuids[2:]
+        rows = test_neo4j_repo.execute("""
+            MATCH (n:Entity) WHERE n.uuid IN $uuids
+            RETURN n.created_at AS created, n.last_accessed AS accessed, n.freshness AS freshness
+        """, {"uuids": uuids})
+        assert all(row["created"].year == row["accessed"].year == 1999
+                   and row["freshness"] == freshness for row in rows)
+    finally:
+        test_neo4j_repo.execute("MATCH (n:Entity) WHERE n.uuid IN $uuids DETACH DELETE n", {"uuids": uuids})
+
+@pytest.mark.online
+@pytest.mark.asyncio
+@pytest.mark.timeout(180)
+async def test_decay_rotates_past_500_skips_after_restart(test_neo4j_repo, stub_graphiti_client, caplog, tmp_path):
+    from uuid import uuid4
+    from unittest.mock import AsyncMock
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    tag = "issue144-" + uuid4().hex
+    target = tag + "-target"
+    rows = [{"uuid": f"{tag}-{i:04}", "body": "" if i < 125 else "unique" if i >= 375 else "body",
+             "type": "IDENTITY" if 125 <= i < 250 else "SEMANTIC",
+             "rehydrated": 3 if 250 <= i < 375 else 0} for i in range(500)]
+    uuids = [row["uuid"] for row in rows] + [target, tag + "-protected", tag + "-source", tag + "-retained"]
+    try:
+        test_neo4j_repo.execute("""
+            UNWIND $rows AS row
+            CREATE (:Entity {uuid:row.uuid, name:'Skipped', content:row.body, namespace:$ns,
+                scope:'PERSISTENT', freshness:'ACTIVE', type:row.type, rehydration_count:row.rehydrated,
+                sharpness:0.0, created_at:datetime('1999-01-01'), last_accessed:datetime('1999-01-01')})
+        """, {"rows": rows, "ns": tag})
+        test_neo4j_repo.execute("""
+            CREATE (:Entity {uuid:$target, name:'Target', content:'Compressible body', namespace:$ns,
+                scope:'PERSISTENT', freshness:'ACTIVE', type:'SEMANTIC', sharpness:0.0,
+                created_at:datetime('2000-01-01'), last_accessed:datetime('1999-01-01')})
+            CREATE (:Entity {uuid:$protected, name:'Protected', content:'Retained body', namespace:$ns,
+                scope:'PERSISTENT', freshness:'ACTIVE', type:'SEMANTIC', user_flagged:true,
+                created_at:datetime('1990-01-01'), last_accessed:datetime('1990-01-01')})
+            CREATE (source:Episodic {uuid:$source, namespace:$ns, user_flagged:true})
+            CREATE (retained:Entity {uuid:$retained, namespace:$ns, name:'Source retained', content:'Retained body',
+                scope:'PERSISTENT', freshness:'ACTIVE', type:'SEMANTIC',
+                created_at:datetime('1990-01-01'), last_accessed:datetime('1990-01-01')})
+            CREATE (source)-[:RETENTION_SOURCE]->(retained)
+        """, {"target": target, "protected": tag + "-protected", "source": tag + "-source",
+               "retained": tag + "-retained", "ns": tag})
+        async def similar(query, **kwargs):
+            return 0 if query == "unique" else 4
+        stub_graphiti_client.count_similar_by_cosine = similar
+        llm = _FakeLLM()
+        llm.compress_content = AsyncMock(return_value="Compressed body")
+        first = LifecycleService(graph_adapter=MemoryGraphAdapter(neo4j=test_neo4j_repo),
+                                 graphiti_client=stub_graphiti_client, llm=llm,
+                                 pending_actions=PendingActionStore(db_path=tmp_path / "pending.db"))
+        with caplog.at_level("INFO"):
+            assert (await first.apply_decay()).compressed == 0
+            first_markers = test_neo4j_repo.execute(
+                "MATCH (n:Entity) WHERE n.uuid IN $uuids RETURN n.uuid AS uuid, n.decay_last_selected_at AS selected",
+                {"uuids": [row["uuid"] for row in rows]},
+            )
+            # A new service and adapter must resume from durable selection state.
+            second = LifecycleService(graph_adapter=MemoryGraphAdapter(neo4j=test_neo4j_repo),
+                                      graphiti_client=stub_graphiti_client, llm=llm,
+                                      pending_actions=PendingActionStore(db_path=tmp_path / "pending.db"))
+            assert (await second.apply_decay()).compressed == 1
+        llm.compress_content.assert_awaited_once_with("Compressible body")
+        assert "active_selected=500" in caplog.text
+        assert "compressed=1" in caplog.text
+        marked = test_neo4j_repo.execute("""
+            MATCH (n:Entity) WHERE n.uuid IN $uuids
+            RETURN n.uuid AS uuid, n.freshness AS freshness, n.decay_last_selected_at AS selected,
+                   n.last_accessed AS accessed
+        """, {"uuids": uuids})
+        by_uuid = {row["uuid"]: row for row in marked}
+        assert by_uuid[target]["freshness"] == "COMPRESSED"
+        assert all(by_uuid[row["uuid"]]["freshness"] == "ACTIVE" for row in rows)
+        assert all(by_uuid[row["uuid"]]["selected"] is not None for row in rows)
+        assert all(by_uuid[row["uuid"]]["accessed"].year == 1999 for row in rows)
+        for suffix in ["-protected", "-retained"]:
+            assert by_uuid[tag + suffix]["selected"] is None
+            assert by_uuid[tag + suffix]["freshness"] == "ACTIVE"
+        # The remaining skipped record is revisited on the next bounded acquisition.
+        selected = second.graph_adapter.fetch_decay_candidates("ACTIVE", min_days_since_accessed=7,
+                                                               max_edge_count=5)
+        assert len(selected) == 500
+        not_revisited = [row["uuid"] for row in first_markers
+                         if row["selected"] == by_uuid[row["uuid"]]["selected"]]
+        assert len(not_revisited) == 1
+        assert selected[0]["uuid"] == not_revisited[0]
+    finally:
+        test_neo4j_repo.execute("MATCH (n) WHERE n.uuid IN $uuids DETACH DELETE n", {"uuids": uuids})
+
+@pytest.mark.asyncio
 async def test_apply_decay_runs_full_core_pass(stub_memory_graph_adapter, stub_graphiti_client, tmp_path):
     old_active = datetime.now(timezone.utc) - timedelta(days=45)
     old_compressed = datetime.now(timezone.utc) - timedelta(days=120)

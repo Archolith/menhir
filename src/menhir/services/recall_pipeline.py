@@ -405,38 +405,9 @@ async def run_recall(
         for uuid, _name, _score in search_results:
             score_kind_map[uuid] = RetrievalScoreKind.WEIGHTED_RRF_NORMALIZED
 
-    if not search_results:
-        if visible_pending_rows:
-            return RecallResult(
-                query=query,
-                preset=preset.value,
-                results=service._pending_fallback_results(
-                    visible_pending_rows, preset, limit,
-                    include_session=include_session, session_id=session_id,
-                ),
-                candidates_evaluated=0,
-                nodes_touched=0,
-                note=(
-                    "Recall search backend failed; pending results may be incomplete."
-                    if search_error
-                    else None
-                ),
-                search_error=search_error,
-            )
-        if not pending_entity_uuids:
-            return RecallResult(
-                query=query,
-                preset=preset.value,
-                results=[],
-                candidates_evaluated=0,
-                nodes_touched=0,
-                note=(
-                    "Recall search backend failed; this is not a confirmed zero-match result."
-                    if search_error
-                    else None
-                ),
-                search_error=search_error,
-            )
+    # Independent sources below must run even when semantic search is empty or failed.
+    # Pending-only fallback is assembled after those sources have had a chance to contribute.
+    if not search_results and pending_entity_uuids:
         search_results = [(uuid, uuid, PENDING_ENTITY_SIMILARITY) for uuid in pending_entity_uuids]
 
     candidate_uuids = list(dict.fromkeys(pending_entity_uuids + [uuid for uuid, _, _ in search_results]))
@@ -553,7 +524,10 @@ async def run_recall(
 
     # --- Metadata fetch + filter (before adjacency, so hidden nodes don't affect ranking) ---
     _t = perf_counter()
-    metadata_rows = await asyncio.to_thread(service.graph_adapter.fetch_candidate_metadata, candidate_uuids)
+    metadata_rows = (
+        await asyncio.to_thread(service.graph_adapter.fetch_candidate_metadata, candidate_uuids)
+        if candidate_uuids else []
+    )
     metadata_by_uuid: dict[str, dict[str, object]] = {}
     for row in metadata_rows:
         uuid = str(row.get("uuid") or "").strip()
@@ -1284,45 +1258,12 @@ async def run_recall(
             )
         _t_phases["view_authority"] = int((perf_counter() - _t) * 1000)
 
-    if not candidate_inputs:
-        if visible_pending_rows:
-            return RecallResult(
-                query=query,
-                preset=preset.value,
-                results=service._pending_fallback_results(
-                    visible_pending_rows, preset, limit,
-                    include_session=include_session, session_id=session_id,
-                ),
-                candidates_evaluated=0,
-                nodes_touched=0,
-                note=(
-                    "Recall search backend failed; pending results may be incomplete."
-                    if search_error
-                    else None
-                ),
-                search_error=search_error,
-                authority_layer=tuple(authority_layer) or None,
-            )
-        return RecallResult(
-            query=query,
-            preset=preset.value,
-            results=[],
-            candidates_evaluated=0,
-            nodes_touched=0,
-            note=(
-                "Recall search backend failed; this is not a confirmed zero-match result."
-                if search_error
-                else None
-            ),
-            search_error=search_error,
-            authority_layer=tuple(authority_layer) or None,
-        )
-
     # --- Adjacency ---
     _t = perf_counter()
     eligible_uuids = [str(c["uuid"]) for c in candidate_inputs]
-    adjacency_map, edge_index = await service._compute_adjacency(
-        eligible_uuids, context_node_ids, namespace,
+    adjacency_map, edge_index = (
+        await service._compute_adjacency(eligible_uuids, context_node_ids, namespace)
+        if eligible_uuids else ({}, {})
     )
     _t_phases["adjacency"] = int((perf_counter() - _t) * 1000)
 
@@ -1429,6 +1370,40 @@ async def run_recall(
         logger.debug(
             "fact-edge standalone injection query=%r added=%d edges (k=%d)",
             query[:60], edges_added, tuning.fact_edge_k,
+        )
+
+    if not candidates:
+        if visible_pending_rows:
+            return RecallResult(
+                query=query,
+                preset=preset.value,
+                results=service._pending_fallback_results(
+                    visible_pending_rows, preset, limit,
+                    include_session=include_session, session_id=session_id,
+                ),
+                candidates_evaluated=0,
+                nodes_touched=0,
+                note=(
+                    "Recall search backend failed; pending results may be incomplete."
+                    if search_error
+                    else None
+                ),
+                search_error=search_error,
+                authority_layer=tuple(authority_layer) or None,
+            )
+        return RecallResult(
+            query=query,
+            preset=preset.value,
+            results=[],
+            candidates_evaluated=0,
+            nodes_touched=0,
+            note=(
+                "Recall search backend failed; this is not a confirmed zero-match result."
+                if search_error
+                else None
+            ),
+            search_error=search_error,
+            authority_layer=tuple(authority_layer) or None,
         )
 
     # --- Frontier provenance: derive evidence_kinds + project for the oracle/warden path ---

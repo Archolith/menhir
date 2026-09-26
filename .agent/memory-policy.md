@@ -6,6 +6,34 @@ Use this file first when you need behavior and policy without loading the full d
 
 ## Scope
 
+### Independent recall acquisition (#154)
+
+An empty or failed base semantic search does not conclude recall. File-linked context, enabled observation
+and assertion/history lanes, and enabled fact-edge lanes first acquire their own bounded candidates. Ordinary
+metadata/session/namespace/View admission and scoring still apply. Pending-only/empty fallback is assembled
+after standalone edge candidates, so it cannot mask an eligible independent source. Preserve the base search
+error and incomplete-results warning even when another source succeeds; disabled lanes remain disabled.
+
+### Bounded decay progress (#144)
+
+The oldest eligible batch can contain records that policy or runtime repeatedly skips. Rotate bounded batches
+by least-recent selection, using a native `decay_last_selected_at` property on existing Entity nodes, with
+creation time and UUID as stable ties. Unselected or invalid-marker records come first. A separate batch marker
+write after acquisition records selection before processing; it never claims successful compression and never
+touches access time, age, sharpness, flags, or eligibility. Keep acquisition read-only for inspection callers.
+
+This extends the existing consolidation repository and lifecycle sweep, without a new cursor store, graph
+label, migration, or unbounded scan loop. Persistent markers survive a service restart and skipped records
+return after the other eligible batches. An aborted selected batch is retried on a later rotation. Existing
+500-record per-phase limits and all acquisition/mutation protection gates remain. Selection counts in logs
+must be distinguished from recalculation/compression/deletion counts. Old workers do not honor this ordering;
+single-runtime rollout is required for the scheduling behavior. Under a finite, stable eligible set every
+batch eventually receives a turn; continuous unbounded arrivals do not imply a fairness guarantee.
+
+If the selection marker cannot be written, abort before processing that batch. Selection is not a lease;
+concurrent workers retain the existing process/service coordination contract. A selection mark written before
+a crash may delay a retry until the next rotation, but never changes whether a destructive mutation is allowed.
+
 ### Chronological memory timestamps (#145)
 
 The four generic memory lists (recent, flagged bootstrap, scope, and type) must order by the actual access
