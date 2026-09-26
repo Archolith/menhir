@@ -1,3 +1,12 @@
+## 2026-09-26 - startup context supporting reads retain namespace scope (#116)
+
+- `src/menhir/mcp/tools/recall/recall_context_memories.py`: pass the effective tool namespace
+  to flag inspection and stale-TODO reads, preserving unscoped behavior and client pins.
+- `tests/test_cf238_bootstrap_receipt_identity.py`: exercise MCP execution and the real local
+  provider through scoped, default, omitted, and conflicting/omitted client-pin cases.
+- `.agent/tasks-mcp.md`: describe the supporting-read scope and the agreed MVP deferral of
+  the full effective-scope receipt feature. #116 remains open.
+
 ## 2026-09-25 - decay age pre-filters follow eligible policy thresholds (#86)
 
 - `src/menhir/services/lifecycle_models.py`: derive compression and deletion age minima
@@ -152,18 +161,3 @@ file in any project (CF-257's per-checkout identity file is retired).
   refusing with the list when several checkouts match. The tool census and client-policy digest
   are unchanged (a parameter, not a tool). Lookup refusals are MCP error results, like
   evidence refusals.
-
-## 2026-09-22 - Beacon provider: README descriptions; Beacon output no longer dirties the index
-
-Found by running Beacon's build against a local Menhir (plan Phase 3A exit check).
-
-- A repository with neither `.agent/README.md` nor `CLAUDE.md` is described by the first
-  paragraph of its own `README.md`, so Beacon evidence no longer refuses a plain repository.
-  Scanner schema 8 re-scans existing projects once to pick this up.
-- The index's dirty flag ignores Beacon's own root artifacts (`beacon.generated.yaml` and its
-  staging files), the same set the scanner never reads, so publishing a beacon does not make the
-  next index unservable. Any other change, or a rename touching another path, is still dirty;
-  unparseable git status is dirty.
-- `get_beacon_evidence` returns a refusal as an MCP error result (`isError`) with the reason, so
-  Beacon can tell it from evidence. New `McpToolRefusal` in the call tracker; every other tool's
-  failure keeps its "Error: ..." text.

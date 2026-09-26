@@ -33,6 +33,12 @@ Use this file when the work is about tool selection, resource usage, bootstrap r
 - call `read_flagged_memories(reader_id=..., workspace=...)` and then `recall_context_memories` with the same reader/workspace; receipts do not cross workspace selections
 
 ### Choose between recall tools
+
+Startup context's flag inspection and stale-TODO warning use the same storage namespace as
+its relevant/recent reads, including client pins. An omitted namespace remains unfiltered;
+`workspace` selects bootstrap pins and is not a storage namespace. The full effective-scope
+receipt feature (#116) is deferred for MVP; these corrections do not add a scope receipt.
+
 - **Session start bootstrap** → `read_flagged_memories` then `recall_context_memories` (two-phase, returns flagged + relevant + recent)
 - **Codex token-light bootstrap** → `memory_gateway(action="bootstrap_context", payload_json=...)` on the Codex gateway server
 - **Mid-task targeted search** → `recall_memories` (standalone semantic search, no bootstrap dependency)
