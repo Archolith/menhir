@@ -11,7 +11,7 @@
 - Recall/MCP/graph regressions cover owners, absent stamps, disabled inclusion, all assembly paths,
   refresh changes, caller/process identity, and actual disposable-Neo4j query-to-recall behavior.
   Existing test doubles accept the extended internal signatures.
-- The stdio lifecycle lane explicitly promotes its corrected recall result before a new
+- The stdio lifecycle lane flags, consolidates, then promotes its corrected recall result before a new
   conversation is expected to retrieve it, and verifies the same UUID after restart.
 - `.agent/memory-policy.md`: document conversation admission and its namespace-auth boundary.
 

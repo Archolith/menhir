@@ -337,6 +337,16 @@ async def test_e2e_02_memory_lifecycle(
         ]
         assert corrected_items, f"no corrected recall result to promote: {after[:600]}"
         promoted_uuid = corrected_items[0]["uuid"]
+        flagged = _text(await client.call_tool(
+            "call_tool",
+            {"name": "flag_memory", "arguments": {"node_uuid": promoted_uuid, "namespace": namespace}},
+        ))
+        assert f"Flagged memory {promoted_uuid} for permanent retention" in flagged, flagged[:600]
+        # Promotion requires PERSISTENT scope. Flagging protects this fact during
+        # the normal SESSION -> PERSISTENT consolidation on our disposable graph.
+        await client.call_tool("call_tool", {
+            "name": "recover_orphans", "arguments": {"max_age_hours": 0.0},
+        })
         promoted = _text(await client.call_tool(
             "call_tool",
             {"name": "promote_memory", "arguments": {"node_uuid": promoted_uuid, "namespace": namespace}},
