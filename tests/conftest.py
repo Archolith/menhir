@@ -1102,7 +1102,8 @@ class StubMemoryGraphAdapter:
         return True
 
     def fetch_relevant_pending_episodes(
-        self, query: str, limit: int = 3, *, namespace: str | None = None
+        self, query: str, limit: int = 3, *, namespace: str | None = None,
+        include_session: bool = True, session_id: str | None = None,
     ) -> list[dict[str, object]]:
         # `namespace` mirrors the real adapter signature (tenant scoping, CF-104). This stub
         # serves canned rows for recall-wiring tests and does not model the filter; the

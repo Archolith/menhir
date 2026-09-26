@@ -135,7 +135,8 @@ async def run_recall(
         try:
             visible_pending_rows, pending_entity_uuids = (
                 await service._wait_for_pending_episodes(
-                    query, limit, pending_wait_timeout_s, namespace=namespace
+                    query, limit, pending_wait_timeout_s, namespace=namespace,
+                    include_session=include_session, session_id=session_id,
                 )
             )
         except _PROGRAMMING_ERRORS:
@@ -409,7 +410,10 @@ async def run_recall(
             return RecallResult(
                 query=query,
                 preset=preset.value,
-                results=service._pending_fallback_results(visible_pending_rows, preset, limit),
+                results=service._pending_fallback_results(
+                    visible_pending_rows, preset, limit,
+                    include_session=include_session, session_id=session_id,
+                ),
                 candidates_evaluated=0,
                 nodes_touched=0,
                 note=(
@@ -581,14 +585,10 @@ async def run_recall(
             continue
         if freshness == FreshnessState.GONE:
             continue
-        if scope == NodeScope.SESSION:
-            if not include_session:
-                continue
-            # When the caller identifies a session, SESSION scope is an ownership
-            # boundary, not a broad opt-in to every fresh node in the namespace.
-            # Missing owner stamps fail closed for an identified caller.
-            if session_id is not None and str(meta.get("session_id") or "") != session_id:
-                continue
+        if not service._session_scope_admitted(
+            scope, meta.get("session_id"), include_session=include_session, session_id=session_id,
+        ):
+            continue
         # Materialized Views have a fail-closed context contract. Historical/debug inspection uses
         # direct getters and operator listings; ``include_superseded`` must not turn ordinary recall
         # into an inspection API. Missing lifecycle stamps, OPERATOR audience, retirement, or a
@@ -1286,7 +1286,10 @@ async def run_recall(
             return RecallResult(
                 query=query,
                 preset=preset.value,
-                results=service._pending_fallback_results(visible_pending_rows, preset, limit),
+                results=service._pending_fallback_results(
+                    visible_pending_rows, preset, limit,
+                    include_session=include_session, session_id=session_id,
+                ),
                 candidates_evaluated=0,
                 nodes_touched=0,
                 note=(
@@ -1487,7 +1490,9 @@ async def run_recall(
         )
         _t_phases["frontier"] = int((perf_counter() - _t) * 1000)
 
-    pending_fallback = service._pending_fallback_results(visible_pending_rows, preset, limit)
+    pending_fallback = service._pending_fallback_results(
+        visible_pending_rows, preset, limit, include_session=include_session, session_id=session_id,
+    )
     top_results = pending_fallback + scored[:max(0, limit - len(pending_fallback))]
 
     # Signal when all candidates were below the similarity floor

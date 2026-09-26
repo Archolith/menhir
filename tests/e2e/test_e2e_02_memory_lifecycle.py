@@ -329,6 +329,30 @@ async def test_e2e_02_memory_lifecycle(
             json.dumps({"node": node_uuid, "episode": correction_episode, "text": provenance}, indent=2),
         )
 
+        # SESSION memories belong to this bridge conversation. Make the corrected
+        # fact durable before a new bridge session is expected to recall it.
+        corrected_items = [
+            item for item in json.loads(after)["items"]
+            if CORRECTED_AMOUNT in json.dumps(item) and item.get("uuid")
+        ]
+        assert corrected_items, f"no corrected recall result to promote: {after[:600]}"
+        promoted_uuid = corrected_items[0]["uuid"]
+        flagged = _text(await client.call_tool(
+            "call_tool",
+            {"name": "flag_memory", "arguments": {"node_uuid": promoted_uuid, "namespace": namespace}},
+        ))
+        assert f"Flagged memory {promoted_uuid} for permanent retention" in flagged, flagged[:600]
+        # Promotion requires PERSISTENT scope. Flagging protects this fact during
+        # the normal SESSION -> PERSISTENT consolidation on our disposable graph.
+        await client.call_tool("call_tool", {
+            "name": "recover_orphans", "arguments": {"max_age_hours": 0.0},
+        })
+        promoted = _text(await client.call_tool(
+            "call_tool",
+            {"name": "promote_memory", "arguments": {"node_uuid": promoted_uuid, "namespace": namespace}},
+        ))
+        assert f"Promoted memory {promoted_uuid} to PROMOTED" in promoted, promoted[:600]
+
     # --- restart: the bridge reconnects to the same backend and the graph persists ---
     async with stdio_session(
         e2e_config, e2e_installed.venv_python, lane_evidence, feature_env=child_env
@@ -341,6 +365,7 @@ async def test_e2e_02_memory_lifecycle(
         )
         lane_evidence.record("restart_then_recall_again", passed=CORRECTED_AMOUNT in persisted, detail=persisted[:400])
         assert CORRECTED_AMOUNT in persisted, persisted[:600]
+        assert any(item["uuid"] == promoted_uuid for item in json.loads(persisted)["items"]), persisted[:600]
 
     if deferred_failures:
         lane_evidence.close(status="FAIL")

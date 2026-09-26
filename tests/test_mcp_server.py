@@ -320,6 +320,7 @@ class StubRecallService:
         preset,
         limit,
         include_session=False,
+        session_id=None,
         wait_for_pending=False,
         file_context=None,
         file_context_project=None,
