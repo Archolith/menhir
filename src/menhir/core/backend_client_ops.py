@@ -390,8 +390,8 @@ class BackendClientOpsMixin:
     async def get_max_enrichment_attempts(self) -> int:
         return int(await self._request("get_max_enrichment_attempts"))
 
-    async def recover_orphans(self, *, max_age_hours: float = 24.0) -> dict[str, Any]:
-        return await self._request("recover_orphans", {"max_age_hours": max_age_hours})
+    async def recover_orphans(self, *, max_age_hours: float = 24.0, dry_run: bool = False) -> dict[str, Any]:
+        return await self._request("recover_orphans", {"max_age_hours": max_age_hours, "dry_run": dry_run})
 
     async def fetch_session_entities(
         self, *, session_id: str | None = None, max_age_hours: float = 24.0

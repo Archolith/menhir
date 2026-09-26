@@ -403,7 +403,7 @@ class MemoryBackend(Protocol):
     # ------------------------------------------------------------------
 
     async def recover_orphans(
-        self, *, max_age_hours: float = 24.0
+        self, *, max_age_hours: float = 24.0, dry_run: bool = False
     ) -> dict[str, Any]:
         """Recover orphaned entities. Returns RecoveryResult-shaped dict.
 

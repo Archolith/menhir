@@ -25,6 +25,7 @@ from menhir.core.backend_impl import (
     drain_client_warnings,
 )
 from menhir.domain.recall import InvalidQueryPresetError
+from menhir.services.lifecycle_models import ConsolidationResult
 
 
 def _build_fake_runtime_ctx(backend_overrides: dict | None = None):
@@ -146,6 +147,40 @@ def backend_client_like_uvicorn(server_app):
 
 
 class TestBackendRoundTrip:
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_recover_orphans_preview_round_trip(self, backend_client):
+        bc, ctx = backend_client
+        preview = {"dry_run": True, "scope": "global", "session_nodes_found": 0,
+                   "ttl_expired_nodes_found": 1, "empty_orphan_episodes_found": 0}
+        ctx.built.lifecycle_service = SimpleNamespace(
+            preview_orphan_recovery=AsyncMock(return_value=preview),
+            recover_orphans=AsyncMock(side_effect=AssertionError("preview executed recovery")),
+        )
+
+        assert await bc.recover_orphans(max_age_hours=720, dry_run=True) == preview
+        ctx.built.lifecycle_service.preview_orphan_recovery.assert_awaited_once_with(max_age_hours=720)
+        ctx.built.lifecycle_service.recover_orphans.assert_not_awaited()
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_recover_orphans_execution_preserves_demoted_count(self, backend_client):
+        bc, ctx = backend_client
+        ctx.built.lifecycle_service = SimpleNamespace(
+            preview_orphan_recovery=AsyncMock(side_effect=AssertionError("unexpected preview")),
+            recover_orphans=AsyncMock(return_value=ConsolidationResult(
+                promoted=0, demoted=2, deleted=1, conflicts_detected=0,
+                skipped_pending=0, orphan_episodes_cleaned=0,
+            )),
+        )
+
+        result = await bc.recover_orphans(max_age_hours=720)
+
+        assert result["demoted"] == 2
+        assert result["deleted"] == 1
+        ctx.built.lifecycle_service.recover_orphans.assert_awaited_once_with(max_age_hours=720)
+        ctx.built.lifecycle_service.preview_orphan_recovery.assert_not_awaited()
+
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_flag_memory(self, backend_client):

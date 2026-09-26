@@ -1161,8 +1161,8 @@ class MemoryGraphAdapter:
     def count_pending_episodes(self, session_id: str | None = None) -> int:
         return self._episodes.count_pending_episodes(session_id)
 
-    def cleanup_orphan_episodes(self, session_id: str | None = None) -> int:
-        return self._episodes.cleanup_orphan_episodes(session_id)
+    def cleanup_orphan_episodes(self, session_id: str | None = None, *, dry_run: bool = False) -> int:
+        return self._episodes.cleanup_orphan_episodes(session_id, dry_run=dry_run)
 
     def increment_edge_weight(self, edge_uuid: str) -> bool:
         return self._consolidation.increment_edge_weight(edge_uuid)

@@ -158,3 +158,22 @@ def test_an_empty_result_set_returns_zero() -> None:
     repo = _repo([[]])
     assert repo.cleanup_orphan_episodes("session-1") == 0
     assert repo.neo4j.calls, "the query must still have been issued"
+
+
+@pytest.mark.unit
+def test_preview_uses_the_same_eligibility_without_deleting() -> None:
+    repo = _repo([[{"eligible": 2}]])
+
+    assert repo.cleanup_orphan_episodes(None, dry_run=True) == 2
+    query = _query(repo)
+    assert "count(n) AS eligible" in query
+    assert "DETACH DELETE" not in query
+    for condition in (
+        "n.scope = 'SESSION'",
+        "n.processing_state = 'READY'",
+        "coalesce(n.user_flagged, false) = false",
+        "NOT EXISTS { MATCH (n)-[]-(e:Entity) }",
+        "coalesce(trim(n.content), '') = ''",
+        f"duration({{days: {_ORPHAN_EPISODE_MIN_AGE_DAYS}}})",
+    ):
+        assert condition in query
