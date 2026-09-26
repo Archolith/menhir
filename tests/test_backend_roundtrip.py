@@ -25,7 +25,37 @@ from menhir.core.backend_impl import (
     drain_client_warnings,
 )
 from menhir.domain.recall import InvalidQueryPresetError
+from menhir.domain.session import new_session
+from menhir.mcp import service_access
 from menhir.services.lifecycle_models import ConsolidationResult
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bound_caller", [False, True])
+async def test_stdio_backend_factory_preserves_write_session_on_recall(server_app, monkeypatch, bound_caller):
+    """The bridge must use the writer's identity across distinct HTTP operation paths."""
+    from menhir.core.runtime import _state
+
+    app, ctx = server_app
+    monkeypatch.setattr(_state, "built", None)
+    monkeypatch.setattr(_state, "session", None)
+    monkeypatch.setattr(service_access, "_client_session", None)
+    caller = new_session("bridge-user", session_id="conversation-A") if bound_caller else None
+    monkeypatch.setattr(service_access, "get_request_session", lambda: caller)
+    settings = MemorySettings(backend_url="http://127.0.0.1:8100", api_key="test-api-key")
+    writer = service_access.get_mcp_session(settings)
+    backend = service_access.build_memory_backend(settings)
+    ctx.built.ingest_service.queue_episode_for_enrichment = AsyncMock(return_value={"episode_id": "queued"})
+    protected = BearerAuthMiddleware(app, api_key="test-api-key")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=protected), base_url="http://testserver") as client:
+        monkeypatch.setattr(backend, "_client", client)
+        await backend.queue_episode("fresh fact", user_id=writer.user_id, session_id=writer.session_id)
+        await backend.recall("fresh fact", include_session=True)
+        await backend.build_context("fresh fact", session_id=writer.session_id)
+    queued_session = ctx.built.ingest_service.queue_episode_for_enrichment.call_args.args[1]
+    assert queued_session.session_id == writer.session_id
+    assert ctx.built.recall_service.recall.call_args.kwargs["session_id"] == writer.session_id
+    assert ctx.built.context_builder.build_context.call_args.kwargs["session_id"] == writer.session_id
 
 
 def _build_fake_runtime_ctx(backend_overrides: dict | None = None):

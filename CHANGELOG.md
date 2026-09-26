@@ -1,6 +1,8 @@
 ## 2026-09-26 - semantic recall preserves conversation admission (#148)
 
 - `backend_runtime_data_ops.py`: forward the effective request/process session into recall.
+- `backend_client.py` and `service_access.py`: carry the writer's conversation identity through
+  the stdio HTTP bridge; regressions exercise actual auth middleware across operation paths.
 - `recall_support.py` and `recall_pipeline.py`: share ordinary/pending SESSION admission,
   filter before waiting, recheck refreshed source ownership before pending/READY projection,
   and require explicit policy inputs at all three pending-result assembly paths.
@@ -9,6 +11,8 @@
 - Recall/MCP/graph regressions cover owners, absent stamps, disabled inclusion, all assembly paths,
   refresh changes, caller/process identity, and actual disposable-Neo4j query-to-recall behavior.
   Existing test doubles accept the extended internal signatures.
+- The stdio lifecycle lane explicitly promotes its corrected recall result before a new
+  conversation is expected to retrieve it, and verifies the same UUID after restart.
 - `.agent/memory-policy.md`: document conversation admission and its namespace-auth boundary.
 
 ## 2026-09-26 - startup context supporting reads retain namespace scope (#116)

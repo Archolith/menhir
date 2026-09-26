@@ -12,6 +12,7 @@ from menhir.config import MemorySettings
 from menhir.core.backend_config import resolve_backend_auth_key
 from menhir.core.backend_protocol import MemoryBackend
 from menhir.domain.recall import InvalidQueryPresetError
+from menhir.domain.session import MemorySession
 
 from .backend_client_ops import BackendClientOpsMixin
 from .backend_shared import _push_client_warning
@@ -52,6 +53,7 @@ class BackendClient(BackendClientOpsMixin, MemoryBackend):
         timeout_s: float = 30.0,
         client: httpx.AsyncClient | None = None,
         settings: MemorySettings | None = None,
+        caller_session: MemorySession | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_s = timeout_s
@@ -59,6 +61,7 @@ class BackendClient(BackendClientOpsMixin, MemoryBackend):
         self._owns_client = client is None
         self._client_lock = asyncio.Lock()
         self._settings = settings or MemorySettings.from_env()
+        self._caller_session = caller_session
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is not None:
@@ -74,6 +77,8 @@ class BackendClient(BackendClientOpsMixin, MemoryBackend):
         # Unconditional: every other header here is conditional on configuration, and an agent
         # that appears only when some setting happens to be set is the case that gets refused.
         headers: dict[str, str] = {"User-Agent": client_user_agent()}
+        if self._caller_session is not None and self._caller_session.session_id:
+            headers["x-menhir-session-id"] = self._caller_session.session_id
         key = resolve_backend_auth_key(self._settings)
         if key:
             headers["Authorization"] = f"Bearer {key}"
