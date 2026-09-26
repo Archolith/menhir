@@ -1,4 +1,4 @@
-## 2026-09-25 - ingest setup cleanup and raw-capture failure visibility (#70)
+## 2026-09-25 - ingest cleanup and fallback failure visibility (#70)
 
 - `src/menhir/services/ingest_worker.py`: include heartbeat, usage callback, and context setup
   in the cleanup boundary; setup errors and cancellation stop the heartbeat and restore request context.
@@ -6,7 +6,11 @@
   preserve the original episode's terminal failure handling.
 - `tests/test_services_pipeline.py`: cover failures before and after callback installation,
   setup cancellation, and a visible capture warning with the original content retained.
-- `.agent/workflows/logging-and-troubleshooting.md`: explain the capture warning and retained episode.
+- `src/menhir/services/event_fold.py`: warn when counter or timeline embedding fails while
+  preserving the derived write and keyword-only fallback.
+- `tests/test_windowed_fold.py`: verify both result shapes survive embedding failure and warnings
+  appear only on failure, not successful or intentionally omitted embedding.
+- `.agent/workflows/logging-and-troubleshooting.md`: explain capture and event-fold warnings.
 
 ## 2026-09-25 - orphan recovery preview covers every execution phase (#149)
 
