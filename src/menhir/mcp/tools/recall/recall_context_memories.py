@@ -143,6 +143,9 @@ class RecallContextMemoriesTool(BaseJsonTool):
                         "content": scored.get("content"),
                         "similarity": (scored.get("breakdown") or {}).get("semantic_similarity"),
                         "stale_anchor_info": scored.get("stale_anchor_info"),
+                        "status": scored.get("status"),
+                        "artifact_status": scored.get("artifact_status"),
+                        "superseded_by": scored.get("superseded_by"),
                     }
                 )
         recent_rows = await backend.fetch_recent_memories(

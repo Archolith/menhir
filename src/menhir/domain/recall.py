@@ -146,6 +146,9 @@ class ScoredMemory:
     # Dict keys: stale_anchor (bool), stale_reason (str|None), dirty_at (str|None),
     # anchored_at (str|None), path (str|None).
     stale_anchor_info: dict[str, Any] | None = field(default=None)
+    status: str | None = None
+    artifact_status: str | None = None
+    superseded_by: str | None = None
 
 
 @dataclass(frozen=True)
@@ -268,3 +271,6 @@ class CandidateData:
     # is always CandidateSource.SCALAR_AUTHORITY (floor-exempt), but it is marked authoritative ONLY
     # when its effective tier rests on a foundation (not agent-only extraction) -- else it stays advisory.
     is_scalar_authority: bool = False
+    status: str | None = None
+    artifact_status: str | None = None
+    superseded_by: str | None = None

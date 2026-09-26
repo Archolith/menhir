@@ -1212,3 +1212,28 @@ def test_add_memory_returns_error_when_backend_resolution_fails(monkeypatch):
     result = asyncio.run(add_memory("remember this", source="claude-code"))
 
     assert result.startswith("Error: RuntimeError: MCP stdio now requires menhir_BACKEND_URL.")
+@pytest.mark.parametrize("state,note", [
+    ({"status": "completed"}, "not an outstanding obligation"),
+    ({"artifact_status": "historical", "superseded_by": "new"}, "not current guidance"),
+])
+def test_startup_relevant_and_recent_keep_lifecycle_state(stubbed_mcp_state, state, note):
+    built, adapter, _ = stubbed_mcp_state
+    row = {"uuid": "123e4567-e89b-12d3-a456-426614174222", "name": "Task",
+           "content": "Submit report by Friday", "scope": "PERSISTENT", "type": "SEMANTIC",
+           "user_flagged": False, **state}
+    recent = {**row, "uuid": "123e4567-e89b-12d3-a456-426614174223"}
+    adapter.fetch_memory_by_uuid = lambda *args, **kwargs: row
+    adapter.fetch_recent_memories = lambda *args, **kwargs: [recent]
+
+    async def recall(*args, **kwargs):
+        return {"results": [{**row, "memory_type": "SEMANTIC",
+                             "breakdown": {"semantic_similarity": .9}}]}
+    built.recall_service.recall = recall
+    asyncio.run(read_flagged_memories(reader_id="lifecycle-reader", limit=10))
+    payload = _parse_json_text(asyncio.run(recall_context_memories(
+        reader_id="lifecycle-reader", query="report", recent_limit=5,
+    )))
+    for item in [payload["relevant"][0], payload["recent"][0]]:
+        for key, value in state.items():
+            assert item[key] == value
+        assert note in item["lifecycle_note"]

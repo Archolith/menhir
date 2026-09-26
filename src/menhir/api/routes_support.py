@@ -209,6 +209,10 @@ class RecallTemporalFact(BaseModel):
 
 
 class RecallMemory(BaseModel):
+    status: str | None = None
+    artifact_status: str | None = None
+    superseded_by: str | None = None
+    lifecycle_note: str | None = None
     uuid: str
     name: str
     content: str | None

@@ -893,3 +893,47 @@ async def test_build_context_does_not_starve_the_loop_reading_linked_docs(tmp_pa
         "the linked-doc branch did not run, so the tick count below would be vacuous"
     )
     assert ticks >= 3, f"event loop starved while reading linked docs ({ticks} ticks)"
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state,note", [
+    ({"status": "completed"}, "not an outstanding obligation"),
+    ({"artifact_status": "historical", "superseded_by": "new"}, "not current guidance"),
+])
+async def test_context_lifecycle_label_is_atomic_under_budget(state, note):
+    memory = replace(_mem("history", "Task", "Submit report by Friday", 0.9), **state)
+    builder = _build_service(_recall_result([memory]))
+    for budget in (50, 100, 2000):
+        result = await builder.build_context("task", max_tokens=budget)
+        if "Submit report by Friday" in result.context:
+            assert note in result.context
+        assert result.token_estimate <= budget
+    result = await builder.build_context("task", max_tokens=2000)
+    assert note in result.context
+
+
+@pytest.mark.parametrize("historical", [
+    {"status": "completed"}, {"artifact_status": "historical"}, {"superseded_by": "new"},
+])
+def test_context_dedup_preserves_active_and_historical_same_instruction(historical):
+    active = _mem("active", "Task", "Submit report by Friday", 0.8)
+    old = replace(active, uuid="history", final_score=0.9, **historical)
+    assert {m.uuid for m in _deduplicate([old, active])} == {"active", "history"}
+    almost_same = replace(active, uuid="similar", content="Submit the report by Friday")
+    assert {m.uuid for m in _deduplicate([old, almost_same])} == {"similar", "history"}
+
+
+@pytest.mark.parametrize("state,note", [
+    ({"status": "completed"}, "not an outstanding obligation"),
+    ({"artifact_status": "historical"}, "not current guidance"),
+])
+def test_brief_lifecycle_note_survives_long_fact_clipping(state, note):
+    from menhir.domain.brief_builder import build_bundles, build_timeline_bundle
+    memory = replace(
+        _mem("history", "Task", "Submit report " * 80, 0.9), **state,
+        temporal_facts=(TemporalFact("Submit report " * 80, "2026-09-26", None, None, None,
+                                    True, "current_belief"),),
+    )
+    bundle = build_timeline_bundle([memory])
+    assert note in bundle.lines[0]
+    assert " (current)" not in bundle.lines[0]
+    flat = replace(memory, temporal_facts=())
+    assert note in build_bundles([flat])[0].lines[0]

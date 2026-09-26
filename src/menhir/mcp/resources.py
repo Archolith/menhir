@@ -20,6 +20,7 @@ from menhir.domain.models import NodeScope, ProcessingState
 from menhir.domain.recall import QueryPreset
 from menhir.domain.utils import decode_json_value, excerpt
 from menhir.mcp.contracts import BaseJsonResource
+from menhir.mcp.formatters import _memory_lifecycle_fields
 from menhir.mcp.service_access import get_mcp_session
 
 _TYPE_PATTERN = re.compile(r"^[A-Za-z0-9_\- ]{1,64}$")
@@ -79,6 +80,7 @@ def _normalize_memory_row(row: dict[str, Any] | None, *, detail: bool = False) -
     if row is None:
         return None
     compact = {
+        **_memory_lifecycle_fields(row),
         "uuid": row.get("uuid"),
         "name": row.get("name"),
         "type": row.get("type"),
@@ -131,6 +133,7 @@ def _normalize_scored_result(scored: Any) -> dict[str, Any]:
     if isinstance(scored, dict):
         breakdown = scored.get("breakdown") or {}
         return {
+            **_memory_lifecycle_fields(scored),
             "uuid": scored.get("uuid"),
             "name": scored.get("name"),
             "type": scored.get("type") or scored.get("memory_type"),
@@ -146,6 +149,7 @@ def _normalize_scored_result(scored: Any) -> dict[str, Any]:
         }
     breakdown = getattr(scored, "breakdown", None)
     return {
+        **_memory_lifecycle_fields(scored),
         "uuid": getattr(scored, "uuid", None),
         "name": getattr(scored, "name", None),
         "type": getattr(scored, "memory_type", None),

@@ -11,6 +11,7 @@ from uuid import UUID
 
 from menhir.core.reader_identity import normalize_reader_id as _normalize_reader_id
 from menhir.domain.models import ProcessingState
+from menhir.domain.recall_visibility import memory_lifecycle_note
 from menhir.domain.utils import excerpt
 from menhir.services.stale_labeling import (
     STALE_ACTION, STALE_ACTION_OUTDATED,
@@ -155,8 +156,19 @@ def _compact_json(payload: dict[str, object]) -> str:
     return json.dumps(payload, separators=(",", ":"), ensure_ascii=True, default=str)
 
 
+def _memory_lifecycle_fields(row: object) -> dict[str, object]:
+    """Preserve existing state fields and annotate history on every serialized read."""
+    fields = {key: _tf(row, key) for key in ("status", "artifact_status", "superseded_by")}
+    note = memory_lifecycle_note(**fields)
+    result = {key: value for key, value in fields.items() if value is not None}
+    if note:
+        result["lifecycle_note"] = note
+    return result
+
+
 def _compact_memory_item(row: dict[str, object], *, tag: str) -> dict[str, object]:
     item = {
+        **_memory_lifecycle_fields(row),
         "uuid": row.get("uuid"),
         "name": row.get("name") or row.get("uuid") or "(unnamed)",
         "scope": row.get("scope") or "UNKNOWN",
@@ -225,6 +237,7 @@ def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, obj
     sim_raw = _bd(breakdown, "semantic_similarity")
     relevance = "high" if sim_raw >= 0.7 else "medium" if sim_raw >= 0.4 else "low"
     item: dict[str, object] = {
+        **_memory_lifecycle_fields(scored),
         "uuid": getattr(scored, "uuid", None),
         "name": getattr(scored, "name", None),
         "scope": getattr(scored, "scope", None),

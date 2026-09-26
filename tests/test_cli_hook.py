@@ -1118,3 +1118,13 @@ def test_uninstall_kept_count_excludes_entries_that_were_never_at_risk(
     assert len(entries) == 2
     assert [h["command"] for h in entries[0]["hooks"]] == ["third-party-linter --fix"]
     assert entries[1]["hooks"][0]["command"] == "always-was-third-party"
+@pytest.mark.parametrize("state,note", [
+    ({"status": "completed"}, "not an outstanding obligation"),
+    ({"artifact_status": "historical"}, "not current guidance"),
+])
+def test_pinned_lifecycle_note_survives_content_truncation(state, note):
+    from menhir.cli.output import _format_item
+    output = _format_item({"name": "Task", "content": "Submit report " * 80,
+                           "scope": "PERSISTENT", "type": "TEMPORAL", **state})
+    assert note in output
+    assert "Submit report" in output

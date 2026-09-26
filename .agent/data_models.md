@@ -5,6 +5,12 @@ model section you need.
 
 ## Quick Index
 
+Generic memory read results and `CandidateData`/`ScoredMemory` retain three optional existing node properties:
+`status` (TEMPORAL open/completed), `artifact_status` (L4 candidate/trusted/historical), and `superseded_by`
+(replacement L4 artifact identifier). Compact/full MCP and resource results include present values plus a derived
+`lifecycle_note` for completed or superseded history. REST `RecallMemory` exposes the same four optional fields.
+Original content stays unchanged; absent state does not imply history. See `memory-policy.md` for the read policy.
+
 - Need episode processing fields: read `model.episode`
 - Need durable memory node fields: read `model.entity`
 - Need TODO / task state fields: read `model.todo`

@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from menhir.core.backend_impl import _drain_background_errors
 from menhir.domain.bootstrap_scope import bootstrap_selection
 from menhir.domain.recall import InvalidQueryPresetError
+from menhir.domain.recall_visibility import memory_lifecycle_note
 from menhir.domain.session import new_session
 from menhir.domain.structural_memory import is_structural_memory_row
 from menhir.mcp.service_access import get_request_session
@@ -147,6 +148,13 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
         preset=str(result.get("preset") or body.preset),
         results=[
             RecallMemory(
+                status=m.get("status"),
+                artifact_status=m.get("artifact_status"),
+                superseded_by=m.get("superseded_by"),
+                lifecycle_note=memory_lifecycle_note(
+                    status=m.get("status"), artifact_status=m.get("artifact_status"),
+                    superseded_by=m.get("superseded_by"),
+                ),
                 uuid=str(m.get("uuid") or ""),
                 name=str(m.get("name") or ""),
                 content=m.get("content"),
@@ -251,7 +259,7 @@ async def bootstrap_context(
     request: Request, body: BootstrapContextRequest
 ) -> dict[str, object]:
     """Return scoped recent/relevant context after the matching pin receipt."""
-    from menhir.mcp.formatters import _compact_scored_item, _normalize_reader_id
+    from menhir.mcp.formatters import _compact_scored_item, _memory_lifecycle_fields, _normalize_reader_id
     from menhir.mcp.lifecycle import _has_recent_flagged_bootstrap_read
     from types import SimpleNamespace
 
@@ -305,7 +313,7 @@ async def bootstrap_context(
         namespace=resolved_namespace,
     )
     recent = [
-        row
+        {**row, **_memory_lifecycle_fields(row)}
         for row in recent_rows
         if not bool(row.get("user_flagged")) and not is_structural_memory_row(row)
     ][: body.recent_limit]

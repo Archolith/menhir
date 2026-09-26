@@ -6,6 +6,24 @@ Use this file first when you need behavior and policy without loading the full d
 
 ## Scope
 
+### Generic reads of completed and superseded memories (#143)
+
+Generic recall, recent/startup context, resources, and REST reads keep history searchable. They carry the
+stored `status`, `artifact_status`, and `superseded_by` fields without changing original content or ranking.
+An explicit `status=completed` is labeled as historical context, not an outstanding obligation. An
+`artifact_status=historical` or nonblank `superseded_by` is labeled as superseded content, not current guidance.
+Text context retains that label in the same budgeted item as its content, including clipped timelines and
+pinned hook output. Context deduplication preserves records with distinct lifecycle states.
+
+Absent, blank, and unknown state values do not invent completion or supersession. Open reminders and trusted
+artifacts retain their ordinary presentation. Dedicated reminder lists continue to include only open records;
+explicit UUID inspection remains available for historical records. A timeline's current-belief marker describes
+fact belief time, not an outstanding task, and uses that explicit wording on historical memories.
+
+These fields already exist on TEMPORAL and L4 institutional artifact nodes. This change requires no database
+migration and does not activate the L4 production flow or change the separate WorkArtifact lifecycle. Readers
+observe the state acquired during their read; a concurrent close/supersession is reflected on a subsequent read.
+
 This file covers:
 
 - graph semantics
