@@ -123,7 +123,7 @@ class LifecycleDecayMixin:
 
     @staticmethod
     def _compress_content(content: str | None) -> str:
-        """Fallback compression used until the LLM path is wired in."""
+        """Return a short deterministic truncation; automatic decay uses the LLM compression path."""
         text = (content or "").strip()
         if len(text) <= 200:
             return text

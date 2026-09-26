@@ -147,6 +147,9 @@ Detail notes:
 - compression should preserve fallback access to richer content long enough to recover from bad summaries
 - contradiction handling should keep both versions until resolution instead of silently overwriting the older one
 - sharpness thresholds, prominence brakes, and rehydration rules together define when a memory is safe, compressible, or recoverable
+- decay age pre-filters use the minimum compression/deletion days among non-exempt type policies,
+  derived at process startup. Exempt IDENTITY thresholds do not lower those minima; zero thresholds
+  on a non-exempt policy do. Policy edits require a process restart.
 - materialized Views are governed by their fold/projection lifecycle, not ordinary memory decay; generic compression and deletion must exclude them
 - a current FACT View's `MENTIONS` links retain its `:Episodic`/`:TurnEvidence` contributors from automatic orphan cleanup; a durable contributor UUID without a live evidence node is an audit receipt, not recall authority
 - explicit erasure still wins: it retires dependent current Views, scrubs erased contributor UUIDs from retained versions, and resets projection watermarks atomically before deleting evidence
