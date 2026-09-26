@@ -812,3 +812,36 @@ class TestBackendRefusalsOnNamedRoutes:
         resp = app_client.post("/api/memory/some-uuid/flag")
         assert resp.status_code == 500
         assert "neo4j" not in resp.text
+@pytest.mark.parametrize("state,note", [
+    ({"status": "completed"}, "not an outstanding obligation"),
+    ({"artifact_status": "historical", "superseded_by": "new"}, "not current guidance"),
+    ({"status": "open"}, None), ({}, None),
+])
+def test_rest_recall_preserves_lifecycle(client, fake_backend, state, note):
+    result = fake_backend.recall.return_value
+    result["results"][0].update(state)
+    response = client.post("/api/recall", json={"query": "test query"})
+    assert response.status_code == 200
+    item = response.json()["results"][0]
+    assert item["content"] == "Dog named Miso"
+    for key, value in state.items():
+        assert item[key] == value
+    if note:
+        assert note in item["lifecycle_note"]
+    else:
+        assert item.get("lifecycle_note") is None
+def test_rest_bootstrap_context_keeps_lifecycle_state(client, fake_backend):
+    state = {"artifact_status": "historical", "superseded_by": "replacement"}
+    fake_backend.recall.return_value["results"][0].update(state)
+    fake_backend.fetch_recent_memories.return_value[0].update(status="completed")
+    flagged = client.get("/api/bootstrap/flagged", params={"reader_id": "history-reader", "workspace": "alpha"})
+    assert flagged.status_code == 200
+    response = client.post("/api/bootstrap/context", json={
+        "reader_id": "history-reader", "workspace": "alpha", "namespace": "alpha", "query": "report",
+    })
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["relevant"][0]["superseded_by"] == "replacement"
+    assert "not current guidance" in payload["relevant"][0]["lifecycle_note"]
+    assert payload["recent"][0]["status"] == "completed"
+    assert "not an outstanding obligation" in payload["recent"][0]["lifecycle_note"]

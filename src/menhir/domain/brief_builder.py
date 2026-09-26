@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from menhir.domain.recall_visibility import memory_lifecycle_note
+
 from menhir.domain.recall import ScoredMemory, TemporalFact
 
 # Merge-shape labels (mirror the ProvenanceClassifier taxonomy). When build_context recalls with
@@ -75,33 +77,49 @@ def _day(valid_at: str) -> str:
 
 def _memory_text(m: ScoredMemory) -> str:
     """Prefer the entity summary/content; fall back to the entity name."""
-    return _clip(m.content or m.name or "")
+    return _lifecycle_text(m, m.content or m.name or "")
+
+
+def _lifecycle_text(m: ScoredMemory, text: str) -> str:
+    note = memory_lifecycle_note(
+        status=m.status, artifact_status=m.artifact_status, superseded_by=m.superseded_by,
+    )
+    return f"{note} {_clip(text)}" if note else _clip(text)
 
 
 def _timeline_lines(dated: list[ScoredMemory]) -> tuple[list[str], list[str]]:
     """Return (lines, uuids) for the chronological bundle: one line per (fact|memory),
     ordered by world-time, current beliefs marked. Undated-but-related facts are skipped
     here (they flow through the flat path)."""
-    events: list[tuple[str, bool, str | None, str, str]] = []  # (day, is_current, invalid_at, text, uuid)
+    # (day, is_current_belief, invalid_at, text, uuid, historical_memory)
+    events: list[tuple[str, bool, str | None, str, str, bool]] = []
     for m in dated:
         facts = _dated_facts(m)
+        historical = bool(memory_lifecycle_note(
+            status=m.status, artifact_status=m.artifact_status, superseded_by=m.superseded_by,
+        ))
         if facts:
             for tf in facts:
                 text = tf.fact or m.content or m.name or ""
-                events.append((_day(tf.valid_at or ""), tf.is_current_belief, tf.invalid_at, _clip(text), m.uuid))
+                events.append((
+                    _day(tf.valid_at or ""), tf.is_current_belief, tf.invalid_at,
+                    _lifecycle_text(m, text), m.uuid, historical,
+                ))
         else:  # dated at the memory level but no fact string
-            events.append((_day(_earliest_valid_at(m) or ""), True, None, _memory_text(m), m.uuid))
+            events.append((
+                _day(_earliest_valid_at(m) or ""), True, None, _memory_text(m), m.uuid, historical,
+            ))
     events.sort(key=lambda e: e[0])
     lines: list[str] = []
     uuids: list[str] = []
     seen: set[tuple[str, str]] = set()
-    for day, is_current, invalid_at, text, uuid in events:
+    for day, is_current, invalid_at, text, uuid, historical in events:
         key = (day, text)
         if key in seen:
             continue
         seen.add(key)
         if is_current:
-            tag = " (current)"
+            tag = " (current belief)" if historical else " (current)"
         else:
             end = _day(invalid_at) if invalid_at else ""
             tag = f" (superseded until {end})" if end else " (superseded)"

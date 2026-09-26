@@ -9,6 +9,8 @@ import sys
 import time
 from pathlib import Path
 
+from menhir.domain.recall_visibility import memory_lifecycle_note
+
 from menhir.services.context_builder import estimate_tokens
 
 MAX_SUMMARY = 120
@@ -280,7 +282,12 @@ def _format_item(item: dict) -> str:
         return ""
     if len(content) > MAX_SUMMARY:
         content = content[:MAX_SUMMARY].rstrip() + "..."
-    return f"- {name}: {content}"
+    note = memory_lifecycle_note(
+        status=item.get("status"), artifact_status=item.get("artifact_status"),
+        superseded_by=item.get("superseded_by"),
+    )
+    marker = f" ({note})" if note else ""
+    return f"- {name}{marker}: {content}"
 
 
 def _escape_inline(value: str) -> str:

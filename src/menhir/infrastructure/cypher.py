@@ -275,6 +275,9 @@ MEMORY_RETURN_FIELDS = (
     "n.scope AS scope",
     "n.content AS content",
     "n.summary AS summary",
+    "n.status AS status",
+    "n.artifact_status AS artifact_status",
+    "n.superseded_by AS superseded_by",
     "n.source AS source",
     # The contributor list, not just the primary `source`. A merged node's `source` holds only the
     # LOWEST-tier contributor, so `project-scan` can be present in provenance while absent from that
@@ -306,6 +309,9 @@ ENTITY_METADATA_FIELDS = (
     "n.type AS type",
     "n.content AS content",
     "n.summary AS summary",
+    "n.status AS status",
+    "n.artifact_status AS artifact_status",
+    "n.superseded_by AS superseded_by",
     "n.last_accessed AS last_accessed",
     "n.created_at AS created_at",
     "n.belief_commit AS belief_commit",

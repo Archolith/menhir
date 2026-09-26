@@ -11,6 +11,47 @@ import pytest
 from menhir.mcp.tools.recall.recall_memories import RecallMemoriesTool
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("compact", [False, True])
+@pytest.mark.parametrize("state,expected_note", [
+    ({"status": "completed", "type": "TEMPORAL"}, "not an outstanding obligation"),
+    ({"artifact_status": "historical", "superseded_by": "new-artifact"}, "not current guidance"),
+    ({"superseded_by": "new-artifact"}, "not current guidance"),
+])
+async def test_generic_lifecycle_state_survives_public_recall(
+    stub_graphiti_client, stub_memory_graph_adapter, state, expected_note, compact,
+) -> None:
+    from datetime import datetime, timezone
+
+    from menhir.core.backend_runtime import RuntimeProvider
+    from menhir.services.recall_service import RecallService
+    from menhir.services.scoring_service import ScoringService
+
+    row = {
+        "uuid": "historical", "name": "Submit report", "content": "Submit report by Friday",
+        "type": "SEMANTIC", "scope": "PERSISTENT", "namespace": "tenant-a",
+        "freshness": "ACTIVE", "last_accessed": datetime.now(timezone.utc),
+        "edge_count": 1, "sharpness": 0.1, **state,
+    }
+    stub_graphiti_client.search_scored_results = [("historical", "Submit report", 0.85)]
+    stub_memory_graph_adapter.candidate_metadata = [row]
+    service = RecallService(
+        graphiti_client=stub_graphiti_client, graph_adapter=stub_memory_graph_adapter,
+        scoring_service=ScoringService(),
+    )
+    runtime = RuntimeProvider(SimpleNamespace(recall_service=service), process_session=None)
+    tool = RecallMemoriesTool()
+    tool.get_backend = MagicMock(return_value=runtime)
+    payload = json.loads(await tool.endpoint(query="Submit report", namespace="tenant-a", compact=compact))
+    item, = payload["items"]
+    assert item["uuid"] == "historical"  # Historical records remain searchable.
+    for key in ("status", "artifact_status", "superseded_by"):
+        if key in state:
+            assert item[key] == state[key]
+    assert expected_note in item["lifecycle_note"]
+    assert item["summary"] == "Submit report by Friday"
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("compact", [False, True])

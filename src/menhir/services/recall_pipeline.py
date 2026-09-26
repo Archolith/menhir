@@ -647,6 +647,9 @@ async def run_recall(
                     "content_cosine": content_cosine_map.get(uuid),
                     "is_superseded_view": is_superseded_view,
                     "view_kind": meta.get("view_kind"),
+                    "status": meta.get("status"),
+                    "artifact_status": meta.get("artifact_status"),
+                    "superseded_by": meta.get("superseded_by"),
                 }
             )
         except Exception as exc:
@@ -1342,6 +1345,9 @@ async def run_recall(
                 source=c.get("source") or CandidateSource.VECTOR,  # type: ignore[arg-type]
                 is_superseded_view=bool(c.get("is_superseded_view")),
                 view_kind=c.get("view_kind") or None,
+                status=c.get("status"),
+                artifact_status=c.get("artifact_status"),
+                superseded_by=c.get("superseded_by"),
                 retrieval_score=float(c["similarity"]),
                 retrieval_score_kind=c.get("retrieval_score_kind")
                 or RetrievalScoreKind.GRAPHITI_RRF,  # type: ignore[arg-type]

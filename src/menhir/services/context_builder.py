@@ -10,6 +10,8 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from menhir.domain.recall_visibility import memory_lifecycle_note
+
 from menhir.domain.recall import (
     EventAuthorityVerdict,
     QueryPreset,
@@ -128,12 +130,12 @@ def _deduplicate(memories: list[ScoredMemory]) -> list[ScoredMemory]:
         words_map[m.uuid] = set(norm.split())
 
     # Exact-match collapse (skip if different claim shapes)
-    seen_norms: dict[tuple[str, str | None], ScoredMemory] = {}
+    seen_norms: dict[tuple[str, str | None, str | None, str | None, str | None], ScoredMemory] = {}
     unique: list[ScoredMemory] = []
     for m in memories:
         norm = norm_map[m.uuid]
-        # Use (normalized_text, view_kind) as dedup key to prevent collapsing across shapes
-        dedup_key = (norm, m.view_kind)
+        # Preserve distinct lifecycle states even when the original instruction is identical.
+        dedup_key = (norm, m.view_kind, m.status, m.artifact_status, m.superseded_by)
         existing = seen_norms.get(dedup_key)
         if existing is not None:
             if m.final_score > existing.final_score:
@@ -150,7 +152,10 @@ def _deduplicate(memories: list[ScoredMemory]) -> list[ScoredMemory]:
         redundant = False
         for k in kept:
             # Only dedup if both have same view_kind (or both are None)
-            if m.view_kind == k.view_kind and _jaccard(words_m, words_map[k.uuid]) > 0.8:
+            same_state = (m.status, m.artifact_status, m.superseded_by) == (
+                k.status, k.artifact_status, k.superseded_by,
+            )
+            if m.view_kind == k.view_kind and same_state and _jaccard(words_m, words_map[k.uuid]) > 0.8:
                 redundant = True
                 break
         if not redundant:
@@ -432,6 +437,11 @@ class ContextBuilderService:
                 # them are active. Markers only activate when their gates are on (warden_label
                 # needs enable_warden_gate; is_superseded_view needs include_superseded).
                 markers = []
+                lifecycle_note = memory_lifecycle_note(
+                    status=mem.status, artifact_status=mem.artifact_status, superseded_by=mem.superseded_by,
+                )
+                if lifecycle_note:
+                    markers.append(lifecycle_note)
                 if getattr(mem, "is_scalar_authority", False):
                     markers.append("current authority")
                 if mem.is_superseded_view:
