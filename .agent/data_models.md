@@ -268,6 +268,7 @@ Each node represents a memory unit stored in Neo4j. Labels: `Entity` or `Episodi
 | `edge_count` | int | Cached incoming edge count proxy for prominence (synced by `sync_edge_counts()`) |
 | `promoted_at` | timestamp | Set when a SESSION node is promoted to PERSISTENT; null for nodes that were always PERSISTENT |
 | `rehydration_count` | int | Counter for compress→rehydrate cycles; nodes exempt from further compression after 3 cycles |
+| `decay_last_selected_at` | datetime or null | Native database-time scheduling marker set for a bounded decay batch before processing, including later skips. Least-recent selection rotates batches across restarts. Missing/invalid markers are unselected; never an access time, eligibility signal, success receipt, or lease. |
 | `emotions` | array[object] | Optional v1 emotion metadata list |
 | `merged_from` | array[string] | UUIDs this survivor has absorbed via merge. Cleared subtractively on unmerge (only the reversed absorption is removed). |
 | `merge_audit` | array[string] | One JSON blob per absorption (absorbed node's pre-merge snapshot, relationships, episode provenance). Matched by the `"absorbed_uuid"` field, never a bare substring — see the merge/delete lifecycle section. |

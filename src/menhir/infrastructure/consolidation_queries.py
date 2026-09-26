@@ -21,8 +21,7 @@ from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S, Neo4jRepository
 
 logger = logging.getLogger(__name__)
 
-# Bounded per run so the decay sweep can't stall indefinitely; the stable
-# ORDER BY means successive runs make forward progress.
+# Bounded per run; least-recent selection rotates past records skipped by policy.
 _DECAY_CANDIDATE_LIMIT = 500
 
 
@@ -223,6 +222,7 @@ class ConsolidationRepository:
                    f"{memory_recency_cypher()} < datetime() - duration({{days: $min_days_since_accessed}})",
                    "coalesce(toInteger(n.edge_count), 0) < $max_edge_count")
             .where_if(max_sharpness is not None, "n.sharpness IS NOT NULL AND toFloat(n.sharpness) < $max_sharpness")
+            .with_clause(f"n, {memory_timestamp_cypher('n.decay_last_selected_at')} AS selected_at")
             .return_raw("""n.uuid AS uuid,
        n.type AS type,
        n.name AS name,
@@ -239,6 +239,7 @@ class ConsolidationRepository:
        CASE WHEN n.target_date IS NOT NULL AND date(n.target_date) < date() THEN true ELSE false END AS target_date_passed,
        n.created_at AS created_at""")
             .order_by(
+                f"selected_at IS NOT NULL ASC, selected_at ASC, "
                 f"coalesce({memory_timestamp_cypher('n.created_at')}, "
                 f"{memory_timestamp_cypher('n.last_accessed')}) ASC, n.uuid"
             )
@@ -253,6 +254,20 @@ class ConsolidationRepository:
         if max_sharpness is not None:
             params["max_sharpness"] = max_sharpness
         return self.neo4j.execute(query, params=params)
+
+    def mark_decay_candidates_selected(self, node_uuids: list[str]) -> int:
+        """Persist scheduling progress, independently of eligibility or processing success."""
+        if not node_uuids:
+            return 0
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Entity) WHERE n.uuid IN $uuids
+            SET n.decay_last_selected_at = datetime()
+            RETURN count(n) AS marked
+            """,
+            {"uuids": list(dict.fromkeys(node_uuids))},
+        )
+        return int(rows[0].get("marked", 0)) if rows else 0
 
     def compress_node(self, node_uuid: str, compressed_summary: str) -> bool:
         """Transition a PERSISTENT ACTIVE node to COMPRESSED with a summary."""

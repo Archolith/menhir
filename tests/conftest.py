@@ -494,6 +494,9 @@ class StubMemoryGraphAdapter:
         self.node_freshness[node_uuid] = FreshnessState.COMPRESSED
         return True
 
+    def mark_decay_candidates_selected(self, node_uuids: list[str]) -> int:
+        return len(node_uuids)
+
     def fetch_node_freshness(self, node_uuids: list[str]) -> dict[str, str]:
         freshness_map: dict[str, str] = {}
         metadata_by_uuid = {

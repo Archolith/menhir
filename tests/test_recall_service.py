@@ -634,6 +634,127 @@ async def test_recall_empty_search_returns_empty_result(
     assert result.search_error is None
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("base", ["empty", "filtered", "failed", "pending"])
+async def test_independent_file_source_survives_empty_semantic_pool(
+    stub_graphiti_client, stub_memory_graph_adapter, base,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    stub_graphiti_client.search_scored_results = []
+    linked = {**_meta("linked", "File-linked guidance"), "namespace": "proj"}
+    foreign = {**_meta("foreign", "Foreign"), "namespace": "other"}
+    hidden = {**_meta("hidden", "Hidden"), "namespace": "proj", "scope": "CANDIDATE"}
+    session = {**_meta("session", "Other session"), "namespace": "proj", "scope": "SESSION",
+               "session_id": "other-session"}
+    stub_memory_graph_adapter.candidate_metadata = [linked, foreign, hidden, session]
+    if base == "filtered":
+        stub_graphiti_client.search_scored_results = [("hidden", "Hidden", 0.9)]
+    elif base == "failed":
+        stub_graphiti_client.search_scored = AsyncMock(side_effect=RuntimeError("search unavailable"))
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+    svc._resolve_file_context = AsyncMock(return_value=["linked", "foreign", "hidden", "session"])
+    if base == "pending":
+        svc._wait_for_pending_episodes = AsyncMock(return_value=([
+            {"uuid": "pending", "name": "Pending", "content": "Pending content", "scope": "PERSISTENT",
+             "processing_state": "ENRICHING"},
+        ], []))
+    result = await svc.recall("file guidance", file_context="src/main.py", file_context_project="proj",
+                              namespace="proj", session_id="current-session", include_session=True,
+                              wait_for_pending=base == "pending", update_access=False)
+    assert "linked" in [row.uuid for row in result.results]
+    assert not {"foreign", "hidden", "session"} & {row.uuid for row in result.results}
+    svc._resolve_file_context.assert_awaited_once_with("src/main.py", "proj")
+    assert bool(result.search_error) is (base == "failed")
+    if base == "failed":
+        assert "incomplete" in result.note
+    if base == "pending":
+        assert "pending" in [row.uuid for row in result.results]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("filtered_base", [False, True])
+async def test_standalone_fact_edges_run_after_empty_node_pool(
+    stub_graphiti_client, stub_memory_graph_adapter, filtered_base,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    stub_graphiti_client.search_scored_results = [("hidden", "Hidden", 0.9)] if filtered_base else []
+    stub_memory_graph_adapter.candidate_metadata = [{**_meta("hidden", "Hidden"), "scope": "CANDIDATE"}]
+    stub_graphiti_client.search_edges_scored = AsyncMock(return_value=[
+        {"uuid": "edge", "fact": "Recorded edge fact", "score": 0.8},
+    ])
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+    result = await svc.recall("recorded fact", namespace="proj", update_access=False,
+                              tuning=RetrievalTuningConfig(enable_fact_edges=True, fact_edge_mode="standalone"))
+    assert [row.uuid for row in result.results] == ["edge"]
+    stub_graphiti_client.search_edges_scored.assert_awaited_once_with(
+        "recorded fact", num_results=20, group_ids=["proj"],
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_observation_only_recall_respects_feature_switch(
+    stub_graphiti_client, stub_memory_graph_adapter, enabled,
+) -> None:
+    from unittest.mock import Mock
+
+    stub_graphiti_client.search_scored_results = []
+    stub_memory_graph_adapter.search_assertion_embeddings = Mock(return_value=_one_observation_hit())
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter,
+                                scalar_view_authority_enabled=enabled)
+    result = await svc.recall("how many rare coins", namespace="proj", update_access=False)
+    assert ("obs-aid-1" in [row.uuid for row in result.results]) is enabled
+    if enabled:
+        stub_memory_graph_adapter.search_assertion_embeddings.assert_called_once_with(
+            [0.1, 0.2], limit=10, namespaces=["proj"],
+        )
+    else:
+        stub_memory_graph_adapter.search_assertion_embeddings.assert_not_called()
+
+
+@pytest.mark.online
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_base", [False, True])
+async def test_empty_search_recalls_actual_file_links_with_visibility_guards(
+    test_neo4j_repo, stub_graphiti_client, failed_base,
+) -> None:
+    from uuid import uuid4
+    from unittest.mock import AsyncMock
+
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    tag = "issue154-" + uuid4().hex
+    uuids = [tag + suffix for suffix in ["-file", "-live", "-foreign", "-hidden", "-session"]]
+    try:
+        test_neo4j_repo.execute("""
+            CREATE (f:Entity {uuid:$file, structure_project:$ns, structure_path:'src/main.py',
+                              structure_role:'File', name:'src/main.py'})
+            WITH f UNWIND $rows AS row
+            CREATE (n:Entity {uuid:row.uuid, name:'Guidance', content:'Recorded file guidance',
+                type:'SEMANTIC', scope:row.scope, freshness:'ACTIVE', namespace:row.ns,
+                session_id:'other', created_at:datetime(), last_accessed:datetime()})
+            CREATE (n)-[:ANCHORED_TO]->(f)
+        """, {"file": uuids[0], "ns": tag, "rows": [
+            {"uuid": uuids[1], "ns": tag, "scope": "PERSISTENT"},
+            {"uuid": uuids[2], "ns": tag + "-other", "scope": "PERSISTENT"},
+            {"uuid": uuids[3], "ns": tag, "scope": "CANDIDATE"},
+            {"uuid": uuids[4], "ns": tag, "scope": "SESSION"},
+        ]})
+        stub_graphiti_client.search_scored_results = []
+        if failed_base:
+            stub_graphiti_client.search_scored = AsyncMock(side_effect=RuntimeError("search unavailable"))
+        svc = RecallService(graphiti_client=stub_graphiti_client,
+                            graph_adapter=MemoryGraphAdapter(neo4j=test_neo4j_repo), scoring_service=ScoringService())
+        result = await svc.recall("guidance", file_context="src/main.py", file_context_project=tag,
+                                  namespace=tag, include_session=True, session_id="current", update_access=False)
+        assert [row.uuid for row in result.results] == [uuids[1]]
+        assert bool(result.search_error) is failed_base
+    finally:
+        test_neo4j_repo.execute("MATCH (n:Entity) WHERE n.uuid IN $uuids DETACH DELETE n", {"uuids": uuids})
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_recall_reports_search_failure_as_degraded_not_zero_match(
