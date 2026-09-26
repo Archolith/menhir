@@ -14,6 +14,23 @@ Entries older than the 10 most recent, archived from `CHANGELOG.md`.
 
 ---
 
+## 2026-09-23 - Beacon can search the docs an agent needs to get oriented
+
+Beacon only searches the documents listed in `beacon.yaml`'s `canonical_docs`. The list named five
+entry points and plans, so the architecture, workflow and procedure documents that `.agent/README.md`
+routes to could not be found through Beacon at all. In a Beacon-only evaluation run, an agent with
+no file tools inverted the stdio runtime decision because `backend-first-mcp.md` and
+`.agent/architecture.md` were out of reach.
+
+- `beacon.yaml`: `canonical_docs` now lists 25 documents in reading order (entry points,
+  architecture and decisions, reference, workflows, then the current plans and research indexes),
+  chosen by an agent with no task context. The superseded July roadmap is left out, and so is
+  `deploy/RUNBOOK.md`, which is specific to one operator's deployment. Listing a document makes it
+  searchable, not required reading; the project overview still shows only the first four. Checked
+  locally: all listed documents are indexed (443 search chunks, up from 105) and the generated
+  manifest grows by about 420 tokens.
+- `CHANGELOG-archive.md`: the 2026-09-17 extraction-writer entry moved there (10-entry limit).
+
 ## 2026-09-17 - the shadow scan: structural parity, and the copy does not survive it
 
 The last P3 piece, and the only one that produces a result rather than a refusal. Its correctness

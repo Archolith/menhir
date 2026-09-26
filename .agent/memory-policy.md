@@ -6,6 +6,46 @@ Use this file first when you need behavior and policy without loading the full d
 
 ## Scope
 
+### Chronological memory timestamps (#145)
+
+The four generic memory lists (recent, flagged bootstrap, scope, and type) must order by the actual access
+instant, falling back to creation time when access time is missing or malformed. Valid legacy ISO strings
+and native Neo4j timestamps remain readable before any data backfill. Unknown dates sort after known dates;
+equal instants use UUID as the tie-break. Filtering and limits remain in the database.
+
+New writes to recallable memory nodes use native Neo4j zoned datetimes. Graphiti and existing Cypher-native
+writers already do this; direct TEMPORAL, candidate, L4, TODO-reminder mirror, and View refresh paths stamp
+native dates too. Dedicated TODO/WorkArtifact metadata and structural-only records retain their separate contracts.
+
+Use a shared guarded Cypher conversion, with explicit calendar/time validation before parsing legacy text;
+do not introduce APOC or a new stored sort key. Missing timezone/local date values are interpreted as UTC.
+The age predicates that consume these memory properties use the same conversion; an unknown age cannot
+justify destructive decay. This provides compatibility while old application versions may still write text.
+No startup schema rewrite or production backfill is part of the fix. Any optional conversion of existing
+properties must be bounded, previewed, backed up, and applied manually after approval.
+
+Compatibility accepts extended ISO calendar dates and date-times with seconds, up to nine fractional digits,
+and `Z` or numeric offsets through +/-18:00. Native zone annotations retain their explicit offset. Date-only
+and naive/local values mean UTC. Invalid dates, unsupported types, and unsupported timestamp spellings are
+unknown; valid creation time supplies the fallback. Returned properties retain their original stored values.
+
+Writer census: Graphiti persistence, episode lifecycle, schema missing-value fills, and recall touches already
+use native dates. The five direct repositories above are aligned by this change. Schema startup deliberately
+does not rewrite existing strings. Older deployed binaries, manual imports, and arbitrary property-map inputs
+can still introduce text; this is a compatible reader policy, not a database type constraint.
+
+Optional manual normalization: first deploy the compatible readers and align/drain old writers. Back up the
+graph, preview a bounded explicit UUID manifest of non-structural Entity/Episodic properties, and compute each
+proposed value with `memory_timestamp_cypher`; reject unknown values for individual review. Apply only reviewed
+values in small transactions that recheck namespace, labels, and the original property before writing; skip
+concurrent changes. Reread the converted manifest, compare instants and list ordering, then repeat the inventory
+until no reviewed legacy values remain. Never replace an invalid date with the current time. No conversion is
+executed by this PR. Such a backfill needs its own reviewed maintenance command and authorization.
+
+Separate relevance scoring still uses `domain.utils.days_ago`, which defaults legacy ISO text to 30 days.
+This PR fixes chronological lists and database age predicates, not that scoring contract. Converting stored
+text to native dates can therefore change relevance/sharpness scores; preview that effect before any backfill.
+
 ### Generic reads of completed and superseded memories (#143)
 
 Generic recall, recent/startup context, resources, and REST reads keep history searchable. They carry the

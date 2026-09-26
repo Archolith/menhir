@@ -1124,5 +1124,7 @@ class TestExports:
             # decision whenever the module's public surface changes, which is exactly what adding
             # a shared Cypher fragment helper is.
             "non_derived_view_cypher",
+            "memory_timestamp_cypher",
+            "memory_recency_cypher",
         }
         assert set(cypher.__all__) == expected

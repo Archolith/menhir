@@ -137,15 +137,15 @@ class ArtifactRepository:
                 a.artifact_anchors = $anchors,
                 a.source_confidence = $source_confidence,
                 a.user_flagged = false,
-                a.created_at = $now,
-                a.last_accessed = $now,
+                a.created_at = datetime($now),
+                a.last_accessed = datetime($now),
                 a.freshness = 'ACTIVE',
                 a.edge_count = 0,
                 a.sharpness = 0.0
             ON MATCH SET
                 a.summary = $summary,
                 a.artifact_anchors = $anchors,
-                a.last_accessed = $now
+                a.last_accessed = datetime($now)
             FOREACH (ev IN $evidence |
                 MERGE (e:Evidence {artifact_id: $artifact_id, kind: ev.kind, ref: ev.ref})
                 ON CREATE SET
@@ -182,7 +182,7 @@ class ArtifactRepository:
             },
         )
         row = dict(rows[0]) if rows else {"uuid": node_uuid, "scope": scope, "status": status}
-        row["created"] = bool(row.get("created_at") == now)
+        row["created"] = row.get("uuid") == node_uuid
         return row
 
     def promote_artifact(self, artifact_id: str, *, trusted_confidence: float = 0.9) -> bool:
@@ -203,7 +203,7 @@ class ArtifactRepository:
                 a.freshness = 'ACTIVE',
                 a.source_confidence = $trusted_confidence,
                 a.promoted_at = datetime(),
-                a.last_accessed = $now
+                a.last_accessed = datetime($now)
             RETURN count(a) AS promoted
             """,
             {"artifact_id": artifact_id, "now": now, "trusted_confidence": float(trusted_confidence)},
@@ -220,7 +220,7 @@ class ArtifactRepository:
             WHERE old.artifact_id <> new.artifact_id
             SET old.artifact_status = 'historical',
                 old.superseded_by = $new_id,
-                old.last_accessed = $now,
+                old.last_accessed = datetime($now),
                 new.supersedes = $old_id
             MERGE (new)-[:SUPERSEDES]->(old)
             RETURN count(old) AS superseded

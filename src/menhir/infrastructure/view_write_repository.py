@@ -357,7 +357,7 @@ class ViewWriteRepositoryMixin:
                     MATCH (n:Entity {uuid: $u})
                     WHERE coalesce(n.view_current, n.qs_current, true)
                       AND NOT coalesce(n.retired, false)
-                    SET n.last_accessed = $now,
+                    SET n.last_accessed = datetime($now),
                         n.view_fence_generation = f.generation
                     SET n += $refresh
                     RETURN n.uuid AS uuid
@@ -376,7 +376,7 @@ class ViewWriteRepositoryMixin:
                 prov = {}
             else:
                 self.neo4j.execute(
-                    f"MATCH (n:{label} {{uuid:$u}}) SET n.last_accessed=$now, n += $refresh "
+                    f"MATCH (n:{label} {{uuid:$u}}) SET n.last_accessed=datetime($now), n += $refresh "
                     "RETURN n.uuid",
                     {"u": current["uuid"], "now": now, "refresh": dict(refresh_props or {})},
                     timeout_s=SAGA_MUTATION_TIMEOUT_S,  # CF-211
@@ -474,7 +474,7 @@ class ViewWriteRepositoryMixin:
             OPTIONAL MATCH (old:{label} {{uuid: $old}})
             FOREACH (o IN CASE WHEN old IS NULL THEN [] ELSE [old] END |
                 SET o.view_current = false, o.qs_current = false, o.superseded_by = $uuid,
-                    o.expired_at = datetime($now), o.last_accessed = $now
+                    o.expired_at = datetime($now), o.last_accessed = datetime($now)
                 {clear_current_key})
             WITH f, old, evidence
             CREATE (n:{label} {{
@@ -718,7 +718,7 @@ class ViewWriteRepositoryMixin:
         protect against lost updates -- the write lock is taken at the `SET`, but the property read
         happens upstream in the `UNWIND`, so two concurrent refreshes could both read the same base
         list, serialize at the SET, and have the second commit a union missing the first's UUIDs.
-        The leading `SET n.last_accessed = $now` exists to take the node's exclusive write lock
+        The leading `SET n.last_accessed = datetime($now)` exists to take the node's exclusive write lock
         BEFORE `episode_uuids` is read (Neo4j's documented explicit-locking pattern). A concurrent
         refresh then blocks there, and once it proceeds its read sees the other's committed list. It
         writes `last_accessed`, which this statement sets anyway, so the lock costs no extra property.
@@ -768,7 +768,7 @@ class ViewWriteRepositoryMixin:
             WHERE resolved_count = size(requested)
               AND all(e IN evidence WHERE
                   coalesce(e.evidence_generation, e.publication_generation) = f.generation)
-            SET n.last_accessed = $now, n.view_fence_generation = f.generation
+            SET n.last_accessed = datetime($now), n.view_fence_generation = f.generation
             WITH n, (coalesce(n.episode_uuids, []) + $eps) AS all_eids
             UNWIND CASE WHEN size(all_eids) = 0 THEN [null] ELSE all_eids END AS eid
             WITH n, eid ORDER BY eid
@@ -947,7 +947,7 @@ class ViewWriteRepositoryMixin:
             WHERE resolved_count = size($eps)
               AND all(e IN evidence WHERE
                   coalesce(e.evidence_generation, e.publication_generation) = f.generation)
-            SET n.last_accessed = $now,
+            SET n.last_accessed = datetime($now),
                 n.view_fence_generation = f.generation,
                 n.episode_uuids = $eps,
                 n.supporting_event_count = size($eps),

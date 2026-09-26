@@ -14,7 +14,9 @@ from typing import Any
 
 from menhir.domain.recall import adjacency_edge_pattern
 from menhir.domain.retention import destructive_retention_allowed_cypher
-from menhir.infrastructure.cypher import Cypher, non_derived_view_cypher
+from menhir.infrastructure.cypher import (
+    Cypher, memory_recency_cypher, memory_timestamp_cypher, non_derived_view_cypher,
+)
 from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S, Neo4jRepository
 
 logger = logging.getLogger(__name__)
@@ -218,7 +220,7 @@ class ConsolidationRepository:
             .where("n.scope = 'PERSISTENT'",
                    "n.freshness = $freshness",
                    harmful_automatic_mutation_allowed_cypher("n"),
-                   "coalesce(n.last_accessed, n.created_at) < datetime() - duration({days: $min_days_since_accessed})",
+                   f"{memory_recency_cypher()} < datetime() - duration({{days: $min_days_since_accessed}})",
                    "coalesce(toInteger(n.edge_count), 0) < $max_edge_count")
             .where_if(max_sharpness is not None, "n.sharpness IS NOT NULL AND toFloat(n.sharpness) < $max_sharpness")
             .return_raw("""n.uuid AS uuid,
@@ -236,7 +238,10 @@ class ConsolidationRepository:
        coalesce(toInteger(n.rehydration_count), 0) AS rehydration_count,
        CASE WHEN n.target_date IS NOT NULL AND date(n.target_date) < date() THEN true ELSE false END AS target_date_passed,
        n.created_at AS created_at""")
-            .order_by("coalesce(n.created_at, n.last_accessed) ASC, n.uuid")
+            .order_by(
+                f"coalesce({memory_timestamp_cypher('n.created_at')}, "
+                f"{memory_timestamp_cypher('n.last_accessed')}) ASC, n.uuid"
+            )
             .limit()
             .build())
         params: dict[str, object] = {
@@ -388,7 +393,10 @@ class ConsolidationRepository:
             .match("(n:Entity)")
             .where("n.scope = 'SESSION'", automatic_lifecycle_protection_cypher("n"))
             .where_if(session_id is not None, "n.session_id = $session_id")
-            .where_if(max_age_hours > 0, "n.created_at < datetime() - duration({hours: $max_age_hours})")
+            .where_if(
+                max_age_hours > 0,
+                f"{memory_timestamp_cypher('n.created_at')} < datetime() - duration({{hours: $max_age_hours}})",
+            )
             .return_raw("""n.uuid AS uuid,
        n.name AS name,
        n.content AS content,
@@ -400,7 +408,7 @@ class ConsolidationRepository:
        coalesce(n.namespace, 'default') AS namespace,
        n.created_at AS created_at,
        n.ttl_expires AS ttl_expires""")
-            .order_by("n.created_at ASC")
+            .order_by(f"{memory_timestamp_cypher('n.created_at')} ASC, n.uuid")
             .build())
         return self.neo4j.execute(query, params=params)
 

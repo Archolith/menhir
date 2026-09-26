@@ -1,3 +1,16 @@
+## 2026-09-26 - chronological memory reads tolerate legacy timestamp storage (#145)
+
+- Normalize native dates and valid legacy ISO text before database ordering and limits in recent,
+  flagged, scope, and type reads; invalid access falls back to creation, unknown dates sort last,
+  and equal instants use a stable UUID tie-break without losing fractional precision.
+- Stamp native memory timestamps in TEMPORAL, candidate, L4, TODO-reminder mirrors, and View refreshes;
+  retain candidate/artifact creation receipts when storage types change.
+- Use guarded timestamp conversion for decay and session age predicates; unknown ages cannot
+  justify destructive decay. Document writer coverage, manual backfill precautions, and scoring limits.
+- Disposable Neo4j regressions cover actual reads/touches, bounded startup selection, writer receipts,
+  lifecycle protection, offsets, invalid calendar values, native/local dates, and nanosecond ties.
+- Archive the oldest changelog entry to keep ten. No automatic migration or production data changes.
+
 ## 2026-09-26 - generic reads preserve completion and artifact supersession (#143)
 
 - Preserve stored status, artifact status, and replacement identifiers through graph projections,
@@ -129,20 +142,3 @@ source episode; answers improved at the same cost.
 - `memory_queries.py`, `.agent/data_models.md`, and `README.md`: describe direct entity flags, live source-linked protection, and the historical cutover limit.
 - `episode_stamping.py` and `correlation_queries.py`: mark enrichment-written provenance as direct so unmerge preserves a survivor link recorded after the merge.
 - `test_live_source_retention.py` and `test_unmerge_coordinator_live.py`: verify the direct marker and the graph-backed merge, later write, unmerge sequence.
-
-## 2026-09-23 - Beacon can search the docs an agent needs to get oriented
-
-Beacon only searches the documents listed in `beacon.yaml`'s `canonical_docs`. The list named five
-entry points and plans, so the architecture, workflow and procedure documents that `.agent/README.md`
-routes to could not be found through Beacon at all. In a Beacon-only evaluation run, an agent with
-no file tools inverted the stdio runtime decision because `backend-first-mcp.md` and
-`.agent/architecture.md` were out of reach.
-
-- `beacon.yaml`: `canonical_docs` now lists 25 documents in reading order (entry points,
-  architecture and decisions, reference, workflows, then the current plans and research indexes),
-  chosen by an agent with no task context. The superseded July roadmap is left out, and so is
-  `deploy/RUNBOOK.md`, which is specific to one operator's deployment. Listing a document makes it
-  searchable, not required reading; the project overview still shows only the first four. Checked
-  locally: all listed documents are indexed (443 search chunks, up from 105) and the generated
-  manifest grows by about 420 tokens.
-- `CHANGELOG-archive.md`: the 2026-09-17 extraction-writer entry moved there (10-entry limit).
