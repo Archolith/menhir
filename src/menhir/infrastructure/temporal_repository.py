@@ -127,8 +127,8 @@ class TemporalRepository:
                 n.scope        = 'PERSISTENT',
                 n.user_flagged = $user_flagged,
                 n.bootstrap_scope = $bootstrap_scope,
-                n.created_at   = $now,
-                n.last_accessed = $now,
+                n.created_at   = datetime($now),
+                n.last_accessed = datetime($now),
                 n.freshness    = 'ACTIVE',
                 n.edge_count   = 0,
                 n.sharpness    = 1.0
@@ -181,7 +181,7 @@ class TemporalRepository:
             """
             MATCH (n:Entity {uuid: $uuid, type: 'TEMPORAL'})
             WHERE n.status = 'open'
-            SET n.status = 'completed', n.last_accessed = $now
+            SET n.status = 'completed', n.last_accessed = datetime($now)
             RETURN count(n) AS updated
             """,
             {"uuid": uuid, "now": now},

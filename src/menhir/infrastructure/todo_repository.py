@@ -277,8 +277,8 @@ class TodoRepository:
                     r.source        = $source,
                     r.scope         = 'PERSISTENT',
                     r.namespace     = $r_namespace,
-                    r.created_at    = $now,
-                    r.last_accessed = $now,
+                    r.created_at    = datetime($now),
+                    r.last_accessed = datetime($now),
                     r.freshness     = 'ACTIVE',
                     r.edge_count    = 0,
                     r.sharpness     = 1.0
@@ -504,7 +504,7 @@ class TodoRepository:
             SET t.status = $to_status, t.closed_at = {closed_at}
             WITH t
             OPTIONAL MATCH (t)-[:HAS_REMINDER]->(r:Entity {{type: 'TEMPORAL'}})
-            SET r.status = $reminder_status, r.last_accessed = $now
+            SET r.status = $reminder_status, r.last_accessed = datetime($now)
             RETURN count(t) AS applied
             """,
             {
@@ -592,7 +592,7 @@ class TodoRepository:
             SET t_old.status = 'closed', t_old.closed_at = $now
             WITH t_old
             OPTIONAL MATCH (t_old)-[:HAS_REMINDER]->(r:Entity {{type: 'TEMPORAL'}})
-            SET r.status = 'completed', r.last_accessed = $now
+            SET r.status = 'completed', r.last_accessed = datetime($now)
             RETURN count(t_old) AS applied
             """,
             {
@@ -716,7 +716,7 @@ class TodoRepository:
             WITH n
             OPTIONAL MATCH (n)-[:HAS_REMINDER]->(r:Entity {type: 'TEMPORAL'})
             WHERE r.status = 'open'
-            SET r.status = 'completed', r.last_accessed = $now
+            SET r.status = 'completed', r.last_accessed = datetime($now)
             RETURN count(n) AS updated
             """,
             {"uuid": uuid, "now": now},
@@ -1002,7 +1002,7 @@ class TodoRepository:
             SET n.status = 'closed', n.closed_at = $now
             WITH n
             OPTIONAL MATCH (n)-[:HAS_REMINDER]->(r:Entity {type: 'TEMPORAL', status: 'open'})
-            SET r.status = 'completed', r.last_accessed = $now
+            SET r.status = 'completed', r.last_accessed = datetime($now)
             RETURN count(n) AS closed
             """,
             {"uuids": stale_uuids, "now": now},

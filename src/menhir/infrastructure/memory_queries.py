@@ -23,6 +23,7 @@ from menhir.infrastructure.cypher import (
     ENTITY_METADATA_FIELDS,
     FACT_TEMPORAL_FIELDS,
     MEMORY_RETURN_FIELDS,
+    memory_recency_cypher,
     SHADOW_CANDIDATE_FACT_EDGE_FIELDS,
 )
 from menhir.infrastructure.neo4j import Neo4jRepository
@@ -196,8 +197,9 @@ class MemoryQueryRepository:
         query = (Cypher()
             .match("(n)")
             .where(*where)
+            .with_clause(f"n, {memory_recency_cypher()} AS recency")
             .return_fields(MEMORY_RETURN_FIELDS)
-            .order_by("coalesce(n.last_accessed, n.created_at) DESC, n.uuid")
+            .order_by("recency IS NOT NULL DESC, recency DESC, n.uuid")
             .limit()
             .build())
         return self.neo4j.execute(query, params=params)
@@ -233,8 +235,9 @@ class MemoryQueryRepository:
         query = (Cypher()
             .match("(n)")
             .where(*where)
+            .with_clause(f"n, {memory_recency_cypher()} AS recency")
             .return_fields(MEMORY_RETURN_FIELDS)
-            .order_by("coalesce(n.last_accessed, n.created_at) DESC, n.uuid")
+            .order_by("recency IS NOT NULL DESC, recency DESC, n.uuid")
             .limit()
             .build())
         return self.neo4j.execute(query, params=params)
@@ -312,8 +315,9 @@ class MemoryQueryRepository:
         query = (Cypher()
             .match("(n)")
             .where(*where)
+            .with_clause(f"n, {memory_recency_cypher()} AS recency")
             .return_fields(MEMORY_RETURN_FIELDS)
-            .order_by("coalesce(n.last_accessed, n.created_at) DESC, n.uuid")
+            .order_by("recency IS NOT NULL DESC, recency DESC, n.uuid")
             .limit()
             .build())
         return self.neo4j.execute(query, params=params)
@@ -332,8 +336,9 @@ class MemoryQueryRepository:
         query = (Cypher()
             .match("(n:Entity)")
             .where(*where)
+            .with_clause(f"n, {memory_recency_cypher()} AS recency")
             .return_fields(MEMORY_RETURN_FIELDS)
-            .order_by("coalesce(n.last_accessed, n.created_at) DESC, n.uuid")
+            .order_by("recency IS NOT NULL DESC, recency DESC, n.uuid")
             .limit()
             .build())
         return self.neo4j.execute(query, params=params)

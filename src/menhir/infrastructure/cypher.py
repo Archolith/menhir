@@ -20,7 +20,56 @@ __all__ = [
     "LLM_RESET_SET",
     "build_reset_or_fail_query",
     "non_derived_view_cypher",
+    "memory_timestamp_cypher",
+    "memory_recency_cypher",
 ]
+
+
+def memory_timestamp_cypher(value: str) -> str:
+    """Normalize a memory instant without throwing on malformed legacy properties.
+
+    Native zoned/local datetimes and dates plus extended ISO calendar strings are supported.
+    Legacy naive values mean UTC. Calendar validation precedes datetime(): regex alone admits
+    impossible days such as February 30. Unsupported types/text return null, never today's date.
+    ``value`` is an internal Cypher expression, not caller-supplied input. toStringOrNull() supports
+    older Neo4j 5 releases and rejects arrays without throwing. Numeric UTC offsets are authoritative;
+    a well-formed terminal native zone annotation is removed before parsing. No APOC is required.
+    """
+    raw = "_memory_ts"
+    base = f"head(split({raw}, '['))"
+    year = f"toInteger(substring({raw}, 0, 4))"
+    month = f"toInteger(substring({raw}, 5, 2))"
+    day = f"toInteger(substring({raw}, 8, 2))"
+    days_in_month = (
+        f"CASE WHEN {month} IN [4, 6, 9, 11] THEN 30 "
+        f"WHEN {month} = 2 THEN CASE WHEN {year} % 400 = 0 "
+        f"OR ({year} % 4 = 0 AND {year} % 100 <> 0) THEN 29 ELSE 28 END ELSE 31 END"
+    )
+    pattern = (
+        "[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])"
+        "([T ]([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]{1,9})?"
+        # Bracket suffixes are accepted only with an explicit, validated offset.
+        "((Z|[+-]((0[0-9]|1[0-7]):[0-5][0-9]|18:00))"
+        r"(\\[[A-Za-z0-9_+./-]+\\])?)?)?"
+    )
+    text = (
+        f"CASE WHEN size({base}) = 10 THEN {base} + 'T00:00:00Z' "
+        f"WHEN {base} =~ '.*(Z|[+-][0-9]{{2}}:[0-9]{{2}})' THEN replace({base}, ' ', 'T') "
+        f"ELSE replace({base}, ' ', 'T') + 'Z' END"
+    )
+    return (
+        f"head([{raw} IN [toStringOrNull({value})] | CASE WHEN {raw} =~ '{pattern}' "
+        f"AND {year} >= 1 AND {day} <= ({days_in_month}) "
+        f"THEN datetime({{datetime: datetime({text}), timezone: 'UTC'}}) ELSE null END])"
+    )
+
+
+def memory_recency_cypher(variable: str = "n") -> str:
+    """Use a valid access instant, then creation; unknown values remain null."""
+    return (
+        f"coalesce({memory_timestamp_cypher(variable + '.last_accessed')}, "
+        f"{memory_timestamp_cypher(variable + '.created_at')})"
+    )
 
 
 class Cypher:

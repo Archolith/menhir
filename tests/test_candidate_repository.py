@@ -24,8 +24,8 @@ from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 class _EchoNeo4j:
     """Stub Neo4j that records calls and echoes a create-shaped row.
 
-    ``created_at`` echoes the ``now`` param so create_candidate computes created=True;
-    set ``echo_created_at`` to a different value to simulate an ON MATCH refresh.
+    A create echoes the generated UUID; an ON MATCH refresh returns the existing UUID.
+    ``echo_created_at`` selects a refresh row for the legacy fixture callers.
     """
 
     echo_created_at: str | None = None
@@ -36,7 +36,7 @@ class _EchoNeo4j:
         self.calls.append({"query": query, "params": p})
         return [
             {
-                "uuid": p.get("uuid"),
+                "uuid": "existing-candidate" if self.echo_created_at else p.get("uuid"),
                 "scope": "CANDIDATE",
                 "cluster_id": p.get("cluster_id"),
                 "evidence_strength": p.get("evidence_strength"),
