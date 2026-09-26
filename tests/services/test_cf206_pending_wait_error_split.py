@@ -10,6 +10,7 @@ propagate, everything else still degrades.
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 
 import pytest
 
@@ -26,7 +27,10 @@ class _Client:
 
 class _Service:
     def __init__(self, pending_raises=None, pending_result=None):
-        self.client = _Client()
+        self.graphiti_client = _Client()
+        self.graph_adapter = SimpleNamespace(fetch_candidate_metadata=lambda uuids: [])
+        self.scalar_view_authority_enabled = False
+        self.scalar_history_enabled = False
         self.pending_raises = pending_raises
         self.pending_result = pending_result if pending_result is not None else ([], [])
         self.fallback_rows = None
@@ -61,6 +65,7 @@ async def test_infrastructure_failure_still_degrades(caplog):
         result = await run_recall(service, "some query", wait_for_pending=True)
     assert isinstance(result, RecallResult)
     assert result.results == []
+    assert result.search_error is None
     assert "continuing with normal recall" in caplog.text
 
 
@@ -71,4 +76,5 @@ async def test_no_exception_pending_rows_still_used():
     service = _Service(pending_result=([pending_row], ["ep-1"]))
     result = await run_recall(service, "some query", wait_for_pending=True)
     assert isinstance(result, RecallResult)
+    assert result.search_error is None
     assert service.fallback_rows == [pending_row]
