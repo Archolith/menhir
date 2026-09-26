@@ -329,6 +329,7 @@ class RuntimeProviderDataOpsMixin:
             preset=parse_query_preset(preset),
             limit=limit,
             include_session=include_session,
+            session_id=self._effective_session_id(),
             include_superseded=include_superseded,
             wait_for_pending=wait_for_pending,
             file_context=file_context,

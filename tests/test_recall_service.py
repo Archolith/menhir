@@ -169,6 +169,90 @@ async def test_recall_session_id_excludes_other_and_unstamped_session_nodes(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+@pytest.mark.parametrize("pool", ["empty", "filtered", "ordinary"])
+@pytest.mark.parametrize(
+    "scope,owner,include_session,session_id,admitted",
+    [
+        ("SESSION", "A", True, "A", True),
+        ("SESSION", "B", True, "A", False),
+        ("SESSION", None, True, "A", False),
+        ("SESSION", "A", False, "A", False),
+        ("SESSION", "B", False, None, False),
+        ("SESSION", "B", True, None, True),
+        ("SESSION", None, True, None, True),
+        ("PERSISTENT", "B", False, "A", True),
+    ],
+)
+async def test_pending_fallback_obeys_session_admission_at_every_assembly_path(
+    stub_graphiti_client, stub_memory_graph_adapter,
+    pool, scope, owner, include_session, session_id, admitted,
+) -> None:
+    if pool == "empty":
+        stub_graphiti_client.search_scored_results = []
+    else:
+        _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
+        if pool == "filtered":
+            for row in stub_memory_graph_adapter.candidate_metadata:
+                row["scope"] = "CANDIDATE"
+    stub_memory_graph_adapter.pending_episode_rows["pending"] = {
+        "uuid": "pending", "content": "pending fact", "scope": scope,
+        "session_id": owner, "processing_state": "PENDING",
+    }
+    waits = []
+
+    class Ingest:
+        async def wait_for_episode_processing(self, episode_uuid, *, timeout_s):
+            waits.append(episode_uuid)
+            return dict(stub_memory_graph_adapter.pending_episode_rows[episode_uuid])
+
+    svc = _build_recall_service(
+        stub_graphiti_client, stub_memory_graph_adapter, ingest_service=Ingest()
+    )
+    result = await svc.recall(
+        "pending fact", include_session=include_session, session_id=session_id,
+        wait_for_pending=True, pending_wait_timeout_s=0.01,
+    )
+    ids = [memory.uuid for memory in result.results]
+    assert ("pending" in ids) is admitted
+    assert waits == (["pending"] if admitted else [])
+    if pool == "ordinary":
+        assert {"entity-1", "entity-2"}.issubset(ids)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refreshed_state", ["PENDING", "READY"])
+async def test_pending_refresh_cannot_change_session_owner_and_remain_admitted(
+    stub_graphiti_client, stub_memory_graph_adapter, refreshed_state,
+) -> None:
+    stub_graphiti_client.search_scored_results = []
+    stub_memory_graph_adapter.pending_episode_rows["pending"] = {
+        "uuid": "pending", "content": "pending fact", "scope": "SESSION",
+        "session_id": "A", "processing_state": "PENDING",
+    }
+    stub_memory_graph_adapter.candidate_metadata = [_meta("linked", "Linked entity")]
+
+    class Ingest:
+        async def wait_for_episode_processing(self, episode_uuid, *, timeout_s):
+            return {
+                **stub_memory_graph_adapter.pending_episode_rows[episode_uuid],
+                "session_id": "B", "processing_state": refreshed_state,
+                "linked_entity_uuids": ["linked"],
+            }
+
+    svc = _build_recall_service(
+        stub_graphiti_client, stub_memory_graph_adapter, ingest_service=Ingest()
+    )
+    result = await svc.recall(
+        "pending fact", include_session=True, session_id="A", wait_for_pending=True,
+    )
+    assert result.results == []
+    # Even READY source links must not be admitted as candidate-generation evidence.
+    assert result.candidates_evaluated == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_recall_excludes_gone_nodes(
     stub_graphiti_client, stub_memory_graph_adapter
 ) -> None:
@@ -674,7 +758,7 @@ async def test_recall_waits_for_relevant_pending_episode(
         ingest_service=StubIngestService(),
     )
 
-    await svc.recall("test query", wait_for_pending=True)
+    await svc.recall("test query", wait_for_pending=True, include_session=True)
 
     assert svc.ingest_service.waits == ["pending-1"]
 

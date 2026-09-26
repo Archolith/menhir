@@ -31,12 +31,14 @@ class _Service:
         self.pending_result = pending_result if pending_result is not None else ([], [])
         self.fallback_rows = None
 
-    async def _wait_for_pending_episodes(self, query, limit, timeout_s, *, namespace=None):
+    async def _wait_for_pending_episodes(
+        self, query, limit, timeout_s, *, namespace=None, include_session=True, session_id=None,
+    ):
         if self.pending_raises is not None:
             raise self.pending_raises
         return self.pending_result
 
-    def _pending_fallback_results(self, rows, preset, limit):
+    def _pending_fallback_results(self, rows, preset, limit, *, include_session, session_id):
         self.fallback_rows = rows
         return [("fallback", rows)]
 

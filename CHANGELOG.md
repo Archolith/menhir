@@ -1,3 +1,16 @@
+## 2026-09-26 - semantic recall preserves conversation admission (#148)
+
+- `backend_runtime_data_ops.py`: forward the effective request/process session into recall.
+- `recall_support.py` and `recall_pipeline.py`: share ordinary/pending SESSION admission,
+  filter before waiting, recheck refreshed source ownership before pending/READY projection,
+  and require explicit policy inputs at all three pending-result assembly paths.
+- `episode_lifecycle.py` and `memory_graph_adapter.py`: filter pending sources before the
+  bounded query limit and carry owner stamps, preserving namespace filtering and anonymous opt-in.
+- Recall/MCP/graph regressions cover owners, absent stamps, disabled inclusion, all assembly paths,
+  refresh changes, caller/process identity, and actual disposable-Neo4j query-to-recall behavior.
+  Existing test doubles accept the extended internal signatures.
+- `.agent/memory-policy.md`: document conversation admission and its namespace-auth boundary.
+
 ## 2026-09-26 - startup context supporting reads retain namespace scope (#116)
 
 - `src/menhir/mcp/tools/recall/recall_context_memories.py`: pass the effective tool namespace
@@ -137,27 +150,3 @@ Menhir's evidence (workspace plan `beacon-near-zero-authoring-plan-2026-09-23.md
   project state await Menhir's evidence and the forge adapter.
 - `beacon validate --intent`: 0 errors. `beacon.generated.yaml` is committed once production
   Menhir can supply the bound evidence.
-
-## 2026-09-22 - project identity lives only in the graph; Menhir writes nothing into a checkout
-
-Menhir no longer creates, changes or deletes `.agent/project-id`, `.agent/.gitignore` or a lock
-file in any project (CF-257's per-checkout identity file is retired).
-
-- A directory resolves silently only when this host's active binding names it AND the checkout is
-  the one the binding recorded: the same `origin` (`""` for none). The binding now records
-  `bound_repository` on create and on every transfer.
-- A legacy binding (no recorded repository) is verified once by the legacy `.agent/project-id`
-  naming the same id, which is only read; the repository is then recorded and the file is never
-  consulted again. Without a matching file it is a decision (`legacy_binding_unverified`).
-- Everything else is a decision, as before: an unbound directory (`directory_not_bound`, the old
-  file's id offered as an adopt candidate for a moved checkout), or another repository in a bound
-  directory (`repository_changed`). A malformed legacy file is ignored, not fatal.
-- Removed: minting, the ignore rule, the `.agent/.gitignore` publication lock, and the publication
-  recovery marker functions. Transfers serialize on the graph (one statement, root constraint).
-- Scanner schema 9: `.agent/project-id` is scan-invisible (existing projects re-scan once).
-- With no file to read, the id comes from Menhir: `ingest_project` reports it
-  (`Scanned shop (project_id=...)`, also when skipped), and `get_beacon_evidence` accepts the
-  checkout's `repository` origin instead of an id, serving the one project that recorded it and
-  refusing with the list when several checkouts match. The tool census and client-policy digest
-  are unchanged (a parameter, not a tool). Lookup refusals are MCP error results, like
-  evidence refusals.

@@ -121,6 +121,16 @@ Key points:
 - `PERSISTENT` is durable memory
 - `PROMOTED` is protected durable memory with higher retention weight
 
+Semantic recall applies the same SESSION admission to enriched entities and pending source
+fallbacks. `include_session=False` excludes SESSION records. With inclusion enabled and a
+caller session id, only that session's stamped records qualify; missing owners are excluded.
+Runtime recall uses the request session, falling back to the process session. Direct sessionless
+reads with inclusion enabled retain the existing broad opt-in, including ownerless records.
+PERSISTENT/PROMOTED records remain eligible under their other guards. Missing/blank pending scope
+is treated as SESSION. Pending selection filters before its limit and rechecks refreshed records
+before exposing pending content or injecting READY-linked entities. Session identity is a
+conversation-context selector; credential-bound namespaces remain the authorization boundary.
+
 Detail notes:
 - session writes may be journal-first or graph-first, but the semantic distinction is the same: session scope is the working layer before durable retention
 - queue state, retries, and audit trails are increasingly sidecar concerns even though semantic truth stays in the graph

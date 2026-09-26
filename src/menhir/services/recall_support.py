@@ -188,13 +188,31 @@ class RecallSupportMixin:
         )
 
     @staticmethod
+    def _session_scope_admitted(
+        scope: str, owner_session_id: object, *, include_session: bool, session_id: str | None,
+    ) -> bool:
+        """Preserve anonymous opt-in; identified SESSION reads require their own stamp."""
+        return scope != NodeScope.SESSION or (
+            include_session and (session_id is None or str(owner_session_id or "") == session_id)
+        )
+
+    @staticmethod
     def _pending_fallback_results(
         pending_rows: list[dict[str, object]],
         preset: QueryPreset,
         limit: int,
+        *,
+        include_session: bool,
+        session_id: str | None,
     ) -> list[ScoredMemory]:
         results: list[ScoredMemory] = []
-        for row in pending_rows[:limit]:
+        admitted = [
+            row for row in pending_rows if RecallSupportMixin._session_scope_admitted(
+                str(row.get("scope") or NodeScope.SESSION), row.get("session_id"),
+                include_session=include_session, session_id=session_id,
+            )
+        ]
+        for row in admitted[:limit]:
             state = str(row.get("processing_state") or ProcessingState.PENDING)
             content = row.get("content")
             breakdown = RelevanceBreakdown(
@@ -230,6 +248,8 @@ class RecallSupportMixin:
         timeout_s: float,
         *,
         namespace: str | None = None,
+        include_session: bool = True,
+        session_id: str | None = None,
     ) -> tuple[list[dict[str, object]], list[str]]:
         """Wait for in-flight episodes to finish; return (visible_pending_rows, entity_uuids).
 
@@ -245,7 +265,15 @@ class RecallSupportMixin:
             query,
             limit=3,
             namespace=namespace,
+            include_session=include_session,
+            session_id=session_id,
         )
+        pending_candidates = [
+            row for row in pending_candidates if self._session_scope_admitted(
+                str(row.get("scope") or NodeScope.SESSION), row.get("session_id"),
+                include_session=include_session, session_id=session_id,
+            )
+        ]
         if not pending_candidates:
             return [], []
 
@@ -292,7 +320,10 @@ class RecallSupportMixin:
             refreshed = updated_rows_by_uuid.get(row_uuid)
             if refreshed is None:
                 refreshed = await asyncio.to_thread(self.graph_adapter.fetch_episode_processing, row_uuid)
-            if refreshed is not None:
+            if refreshed is not None and self._session_scope_admitted(
+                str(refreshed.get("scope") or NodeScope.SESSION), refreshed.get("session_id"),
+                include_session=include_session, session_id=session_id,
+            ):
                 refreshed_pending_rows.append(refreshed)
 
         visible_pending_rows = [
