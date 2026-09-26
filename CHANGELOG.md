@@ -1,3 +1,14 @@
+## 2026-09-25 - decay age pre-filters follow eligible policy thresholds (#86)
+
+- `src/menhir/services/lifecycle_models.py`: derive compression and deletion age minima
+  from non-exempt policies at startup, preventing future lower thresholds from being skipped.
+  Current eligible-policy minima remain 7 and 30 days; zero-day non-exempt policies participate.
+- `src/menhir/services/lifecycle_decay.py`: replace the obsolete pre-LLM compression docstring
+  with the helper's actual truncation behavior and the automatic sweep's LLM path.
+- `tests/test_decay_logic.py`: verify both real sweep requests in fresh processes with shorter,
+  zero-day, and exempt policies, without mutating shared test module imports.
+- `.agent/memory-policy.md`: document the pre-filter rule, exemption choice, and restart requirement.
+
 ## 2026-09-25 - stale-verification reads avoid Neo4j 5.26-only label syntax (#69)
 
 - `src/menhir/infrastructure/tool_event_repository.py`: match the fixed
@@ -156,24 +167,3 @@ Found by running Beacon's build against a local Menhir (plan Phase 3A exit check
 - `get_beacon_evidence` returns a refusal as an MCP error result (`isError`) with the reason, so
   Beacon can tell it from evidence. New `McpToolRefusal` in the call tracker; every other tool's
   failure keeps its "Error: ..." text.
-
-## 2026-09-22 - Menhir serves Beacon memory evidence as a read-only provider
-
-Beacon now owns all beacon work and defines a backend-neutral memory-provider contract (Beacon
-`7a94fb0`). This is Menhir's side of it (plan Phase 3A); nothing here writes into a project.
-
-- The project scan records the git binding it describes: indexed commit, origin URL (credentials
-  stripped) and a dirty flag, read before and after the walk. It crosses the upload boundary and
-  is written in the same project-node write as the scan fingerprint.
-- Both fingerprint-skip paths (ingest, structure watcher) refresh only the binding when the files
-  are unchanged but the commit moved, and write nothing when it is already current.
-- `build_provider_evidence` reads the graph only and returns `beacon-memory-evidence-1.1`. It
-  refuses an unknown or ambiguous id, a partial or in-progress index, an index taken without git
-  or from a dirty checkout, and a re-index during the read. It sets no `project.status` (Menhir
-  does not judge maturity).
-- MCP tool `get_beacon_evidence(project_id)`: readonly tier, `menhir:read`, read-only, GLOBAL
-  like the structure graph it reads. Added to the agent allow-list and every production client;
-  `deploy/client-policy.production.json` digest is now
-  `04abc7bdf5d59d31e497dcefb9d431c06cf6cb0f34d395469391fabd77fbb0aa` -- a release must ship it.
-- `menhir beacon generate` is unchanged; Phase 3B removes it after Beacon's lane passes against
-  this provider.

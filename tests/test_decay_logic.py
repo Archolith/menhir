@@ -7,6 +7,12 @@ separately once built.
 
 from __future__ import annotations
 
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
 import pytest
 
 from menhir.domain.memory_types import MEMORY_TYPE_POLICIES, get_policy
@@ -88,6 +94,57 @@ def _compressed_node(
 
 
 # --- Constants match design doc ---
+
+@pytest.mark.parametrize(
+    "compress_days,gone_days,exempt,expected",
+    [(2.5, 11.5, False, [2.5, 11.5]), (0, 0, False, [0, 0]), (0, 0, True, [7, 30])],
+)
+def test_decay_prefilters_follow_registry_at_startup(
+    compress_days: float,
+    gone_days: float,
+    exempt: bool,
+    expected: list[float],
+    tmp_path: Path,
+) -> None:
+    """A future policy must reach both real sweep queries without reloading shared test modules."""
+    script = """
+import asyncio
+from dataclasses import replace
+import json
+import sys
+from types import SimpleNamespace
+from menhir.domain.memory_types import MEMORY_TYPE_POLICIES
+
+assert 'menhir.services.lifecycle_models' not in sys.modules
+MEMORY_TYPE_POLICIES['TEST_POLICY'] = replace(
+    MEMORY_TYPE_POLICIES['SEMANTIC'], name='TEST_POLICY',
+    compress_days=float(sys.argv[1]), gone_days=float(sys.argv[2]), decay_exempt=sys.argv[3] == 'True',
+)
+from menhir.services.lifecycle_decay import LifecycleDecayMixin
+
+calls = []
+def fetch(freshness, *, min_days_since_accessed, **kwargs):
+    calls.append([freshness.value, min_days_since_accessed])
+    return []
+
+worker = LifecycleDecayMixin()
+worker.graph_adapter = SimpleNamespace(sync_edge_counts=lambda: 0, fetch_decay_candidates=fetch)
+asyncio.run(worker._run_decay())
+print(json.dumps(calls))
+"""
+    source_root = str(Path(__file__).resolve().parents[1] / "src")
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(compress_days), str(gone_days), str(exempt)],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": source_root},
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == [["ACTIVE", expected[0]], ["COMPRESSED", expected[1]]]
+
 
 def test_compress_thresholds_match_design():
     assert DECAY_COMPRESS_DAYS == 30

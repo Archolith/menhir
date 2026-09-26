@@ -13,7 +13,7 @@ from uuid import uuid4
 # Optional async callback: (processed, total, current_node_name) -> None
 ProgressCallback = Callable[[int, int, str], Awaitable[None]]
 
-from menhir.domain.memory_types import get_policy
+from menhir.domain.memory_types import MEMORY_TYPE_POLICIES, get_policy
 from menhir.domain.models import FreshnessState, NodeScope
 from menhir.domain.namespace import namespace_to_group_ids
 from menhir.domain.utils import days_ago
@@ -55,9 +55,11 @@ SHARPNESS_COSINE_FLOOR = 0.80
 
 # Default thresholds used only for fetch_decay_candidates queries (pre-filter).
 # Actual compress/delete decisions are made by MemoryTypePolicy.should_compress/should_delete.
-_DEFAULT_COMPRESS_DAYS = 7    # lowest compress_days across all policies (TEMPORAL)
+# Derive once at startup from decay-eligible policies; exempt types never drive these minima.
+# Include zero thresholds for non-exempt policies: their decision methods allow immediate decay.
+_DEFAULT_COMPRESS_DAYS = min(p.compress_days for p in MEMORY_TYPE_POLICIES.values() if not p.decay_exempt)
 _DEFAULT_COMPRESS_EDGE_COUNT = 5
-_DEFAULT_GONE_DAYS = 30       # lowest gone_days across all policies (TEMPORAL)
+_DEFAULT_GONE_DAYS = min(p.gone_days for p in MEMORY_TYPE_POLICIES.values() if not p.decay_exempt)
 _DEFAULT_GONE_EDGE_COUNT = 3
 _DEFAULT_GONE_SHARPNESS = 0.1
 
