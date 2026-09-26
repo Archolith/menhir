@@ -1,3 +1,17 @@
+## 2026-09-25 - ingest cleanup and fallback failure visibility (#70)
+
+- `src/menhir/services/ingest_worker.py`: include heartbeat, usage callback, and context setup
+  in the cleanup boundary; setup errors and cancellation stop the heartbeat and restore request context.
+- `src/menhir/services/enrichment_steps.py`: warn when oversized-episode raw capture fails;
+  preserve the original episode's terminal failure handling.
+- `tests/test_services_pipeline.py`: cover failures before and after callback installation,
+  setup cancellation, and a visible capture warning with the original content retained.
+- `src/menhir/services/event_fold.py`: warn when counter or timeline embedding fails while
+  preserving the derived write and keyword-only fallback.
+- `tests/test_windowed_fold.py`: verify both result shapes survive embedding failure and warnings
+  appear only on failure, not successful or intentionally omitted embedding.
+- `.agent/workflows/logging-and-troubleshooting.md`: explain capture and event-fold warnings.
+
 ## 2026-09-25 - orphan recovery preview covers every execution phase (#149)
 
 - `recover_orphans` uses one backend contract in local and HTTP modes; execution preserves the
@@ -167,26 +181,3 @@ Beacon now owns all beacon work and defines a backend-neutral memory-provider co
   consolidation remain explicit owner decisions.
 - Added `.agent/adr/README.md`, routed it from `.agent/README.md`, and linked each decision from its
   live architecture/data-model/activation owner document; no runtime behavior changed.
-
-## 2026-09-21 - a tracked-write receipt can be traced to its enriched episode (#92)
-
-Every write leaves two `:Episodic` nodes: Menhir's receipt (the `episode_id` a caller is handed;
-carries `processing_*`) and the node Graphiti mints inside `add_episode` (carries the MENTIONS
-edges). That is by construction -- Menhir cannot pass a uuid into Graphiti -- and it is not double
-LLM cost. What it broke was traceability: `get_provenance` named only the Graphiti twin, so an
-agent holding its receipt could not match provenance to its own write. E2E-2 reproduced it.
-
-**The link already existed, one-way, and nobody surfaced it.** `mark_episode_ready` has recorded
-the Graphiti uuid on the receipt as `resolved_episode_uuid` since the anchor design; the entity
-count on `POST /api/memory` already resolved through it. So the change is exposure, not schema:
-
-- `get_provenance` lists `episode_id` (the receipt) beside `uuid` (the twin) for every episode,
-  resolved by a reverse lookup on `resolved_episode_uuid` in `fetch_node_receipts`. Null for
-  episodes enriched before the anchor recorded it -- honest, not hidden.
-- `get_enrichment_status` reports `enriched_episode_uuid` so the pair is reachable from the
-  receipt side too. Either id gets you the other.
-- No new relationship, no migration, no backfill; the index for the lookup was already declared.
-- The issue's RCA attributes the twin to the evidence projection (`turn_evidence_uuid`). The
-  reproduction had none; the twin on the `add_memory_and_track` path is Graphiti's own node.
-- E2E-2 is re-selected in the `stdio-e2e` job and `provenance_reachable_from_receipt` now asserts
-  the structured field, not a substring. An online test proves the Cypher against a real graph.

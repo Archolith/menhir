@@ -128,47 +128,50 @@ class IngestWorkerMixin:
         started = perf_counter()
         processing_attempts = int(claimed.get("processing_attempts") or 0)
         heartbeat_stop = asyncio.Event()
-        heartbeat_task = asyncio.create_task(
-            self._processing_heartbeat_loop(episode_uuid, heartbeat_stop),
-            name=f"menhir-enrichment-heartbeat-{episode_uuid}",
-        )
-        # The session key is captured HERE, not looked up inside the callback: the callback fires
-        # from worker threads (graphiti dispatches model calls through asyncio.to_thread), where
-        # per-request context is not available. Closing over it is what lets the per-call
-        # reservation know which window it is spending from.
-        from menhir.services.ingest_queue import session_budget_key
-
-        budget_key = session_budget_key(episode_uuid, claimed.get("session_id"))
-        usage_token = set_llm_usage_callback(
-            lambda event: self._record_episode_llm_usage(
-                episode_uuid, event, budget_key=budget_key
-            )
-        )
-
-        ctx = EnrichmentContext(
-            episode_uuid=episode_uuid,
-            claimed=claimed,
-            started=started,
-            processing_attempts=processing_attempts,
-            worker_id=self._worker_id,
-            graph_adapter=self.graph_adapter,
-            graphiti_client=self.graphiti_client,
-            lifecycle_service=self.lifecycle_service,
-            llm=self.llm,
-            ingest_gate=self._gate(),
-            processing_steps_total=self._processing_steps_total,
-            settings_record_revisions=self._settings_record_revisions,
-            ready_warning_ms=self._ready_warning_ms,
-            graphiti_add_episode_timeout_s=self._graphiti_add_episode_timeout_s,
-            graphiti_episode_max_estimated_tokens=self._graphiti_episode_max_estimated_tokens,
-            canonical_self_binding_mode=self._canonical_self_binding_mode,
-            get_queue_depth=self.get_queue_depth,
-            shadow_context_composition=self._shadow_context_composition,
-            shadow_composition_timeout_s=self._shadow_composition_timeout_s,
-            register_background_task=self._register_shadow_task,
-        )
-
+        heartbeat_task: asyncio.Task[None] | None = None
+        usage_token = None
+        ctx: EnrichmentContext | None = None
         try:
+            heartbeat_task = asyncio.create_task(
+                self._processing_heartbeat_loop(episode_uuid, heartbeat_stop),
+                name=f"menhir-enrichment-heartbeat-{episode_uuid}",
+            )
+            # The session key is captured HERE, not looked up inside the callback: the callback fires
+            # from worker threads (graphiti dispatches model calls through asyncio.to_thread), where
+            # per-request context is not available. Closing over it is what lets the per-call
+            # reservation know which window it is spending from.
+            from menhir.services.ingest_queue import session_budget_key
+
+            budget_key = session_budget_key(episode_uuid, claimed.get("session_id"))
+            usage_token = set_llm_usage_callback(
+                lambda event: self._record_episode_llm_usage(
+                    episode_uuid, event, budget_key=budget_key
+                )
+            )
+
+            ctx = EnrichmentContext(
+                episode_uuid=episode_uuid,
+                claimed=claimed,
+                started=started,
+                processing_attempts=processing_attempts,
+                worker_id=self._worker_id,
+                graph_adapter=self.graph_adapter,
+                graphiti_client=self.graphiti_client,
+                lifecycle_service=self.lifecycle_service,
+                llm=self.llm,
+                ingest_gate=self._gate(),
+                processing_steps_total=self._processing_steps_total,
+                settings_record_revisions=self._settings_record_revisions,
+                ready_warning_ms=self._ready_warning_ms,
+                graphiti_add_episode_timeout_s=self._graphiti_add_episode_timeout_s,
+                graphiti_episode_max_estimated_tokens=self._graphiti_episode_max_estimated_tokens,
+                canonical_self_binding_mode=self._canonical_self_binding_mode,
+                get_queue_depth=self.get_queue_depth,
+                shadow_context_composition=self._shadow_context_composition,
+                shadow_composition_timeout_s=self._shadow_composition_timeout_s,
+                register_background_task=self._register_shadow_task,
+            )
+
             record_lifecycle_event(
                 component="ingest_worker",
                 event="claim_pending_episode",
@@ -257,17 +260,21 @@ class IngestWorkerMixin:
             )
             return
         except Exception as exc:
+            if ctx is None:
+                raise  # The worker logs setup failures; lease recovery can retry after cleanup.
             self._failed_enrichments += 1
             await handle_enrichment_failure(ctx, exc)
             return
         finally:
-            reset_llm_usage_callback(usage_token)
+            if usage_token is not None:
+                reset_llm_usage_callback(usage_token)
             clear_extraction_receipt()
             self._job_llm_call_counts.pop(episode_uuid, None)
             heartbeat_stop.set()
-            heartbeat_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await heartbeat_task
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await heartbeat_task
 
         return
 

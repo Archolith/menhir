@@ -49,6 +49,16 @@ Get-Content .\logs\server.log -Tail 80
 Get-Content .\logs\server.err.log -Tail 80
 ```
 
+For oversized ingest episodes, `Failed to create raw-capture for oversized episode <id>`
+is a warning that the fallback recallable entity could not be saved. The original episode
+remains stored and is marked `FAILED`; the separate preflight rejection warning still reports
+why enrichment was refused. Use the episode ID and capture error to investigate the storage failure.
+
+`Event-fold counter embedding failed` and `Event-fold timeline embedding failed` warnings
+identify the subject, namespace, and embedding error (plus the measure for a counter).
+The derived result is still saved without an embedding, so retrieval falls back to keywords.
+Successful embedding and intentionally omitted embedding do not emit these warnings.
+
 ### HTTP request behavior
 
 Check:
