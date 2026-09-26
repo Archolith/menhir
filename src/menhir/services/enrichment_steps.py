@@ -374,7 +374,7 @@ async def run_preflight_rejection(ctx: EnrichmentContext) -> bool:
                     source=str(ctx.claimed.get("source") or "claude-code"),
                 )
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Failed to create raw-capture for oversized episode %s: %s",
                 ctx.episode_uuid,
                 e,

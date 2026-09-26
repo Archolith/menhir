@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import shutil
 import time
@@ -991,6 +992,119 @@ async def test_process_pending_episode_marks_failed_when_graphiti_raises(
 
     assert adapter.pending_episode_rows[episode_uuid]["processing_state"] == "FAILED"
     assert adapter.stamp_calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_stage", ["callback", "context", "cancelled_context"])
+async def test_process_pending_episode_cleans_up_after_setup_failure(
+    stub_memory_graph_adapter: "StubMemoryGraphAdapter",
+    stub_graphiti_client: "StubGraphitiClient",
+    stub_llm_adapter: object,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    from menhir.infrastructure import observability
+
+    adapter = stub_memory_graph_adapter
+    service = IngestService(
+        graphiti_client=stub_graphiti_client,
+        graph_adapter=adapter,
+        llm=stub_llm_adapter,
+    )
+    episode_uuid = adapter.create_pending_episode(
+        episode_uuid="pending-setup-fail",
+        name="episode-setup-fail",
+        content="first event",
+        session_id="session-1",
+        user_id="user-1",
+        source="unit-test",
+        source_confidence=0.5,
+    )
+    heartbeat_tasks: list[asyncio.Task[object]] = []
+    cleared_receipts: list[bool] = []
+    service._job_llm_call_counts[episode_uuid] = 1
+    monkeypatch.setattr(
+        "menhir.services.ingest_worker.clear_extraction_receipt",
+        lambda: cleared_receipts.append(True),
+    )
+
+    def fail_setup(*args: object) -> None:
+        heartbeat_tasks.extend(
+            task for task in asyncio.all_tasks()
+            if task.get_name() == f"menhir-enrichment-heartbeat-{episode_uuid}"
+        )
+        if failure_stage == "cancelled_context":
+            raise asyncio.CancelledError("setup cancelled")
+        raise RuntimeError("setup failed")
+
+    if failure_stage == "callback":
+        monkeypatch.setattr("menhir.services.ingest_worker.set_llm_usage_callback", fail_setup)
+    else:
+        monkeypatch.setattr(service, "_gate", fail_setup)
+
+    inherited_callback = lambda event: None
+    inherited_token = observability.set_llm_usage_callback(inherited_callback)
+    try:
+        error_type = asyncio.CancelledError if failure_stage == "cancelled_context" else RuntimeError
+        with pytest.raises(error_type):
+            await service._process_pending_episode(episode_uuid)
+
+        assert len(heartbeat_tasks) == 1
+        assert heartbeat_tasks[0].done(), "setup failure left a lease heartbeat running"
+        assert observability._llm_usage_callback.get() is inherited_callback
+        assert episode_uuid not in service._job_llm_call_counts
+        assert cleared_receipts == [True]
+        assert stub_graphiti_client.add_episode_calls == []
+    finally:
+        for task in heartbeat_tasks:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        observability.reset_llm_usage_callback(inherited_token)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_process_pending_episode_warns_when_raw_capture_fails(
+    stub_memory_graph_adapter: "StubMemoryGraphAdapter",
+    stub_graphiti_client: "StubGraphitiClient",
+    stub_llm_adapter: object,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    adapter = stub_memory_graph_adapter
+    service = IngestService(
+        graphiti_client=stub_graphiti_client,
+        graph_adapter=adapter,
+        llm=stub_llm_adapter,
+    )
+    service._graphiti_episode_max_estimated_tokens = 8
+    episode_uuid = adapter.create_pending_episode(
+        episode_uuid="pending-capture-fail",
+        name="episode-capture-fail",
+        content="x" * 128,
+        session_id="session-1",
+        user_id="user-1",
+        source="unit-test",
+        source_confidence=0.5,
+    )
+
+    def fail_capture(**kwargs: object) -> None:
+        raise OSError("capture storage unavailable")
+
+    monkeypatch.setattr(adapter, "create_raw_capture_entity", fail_capture)
+    with caplog.at_level(logging.WARNING, logger="menhir.services.enrichment_steps"):
+        await service._process_pending_episode(episode_uuid)
+
+    capture_errors = [record for record in caplog.records if "Failed to create raw-capture" in record.message]
+    assert len(capture_errors) == 1
+    assert capture_errors[0].levelno == logging.WARNING
+    assert episode_uuid in capture_errors[0].message
+    assert "capture storage unavailable" in capture_errors[0].message
+    assert adapter.pending_episode_rows[episode_uuid]["processing_state"] == "FAILED"
+    assert adapter.pending_episode_rows[episode_uuid]["content"] == "x" * 128
+    assert stub_graphiti_client.add_episode_calls == []
 
 
 @pytest.mark.unit

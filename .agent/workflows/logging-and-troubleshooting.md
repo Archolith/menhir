@@ -49,6 +49,11 @@ Get-Content .\logs\server.log -Tail 80
 Get-Content .\logs\server.err.log -Tail 80
 ```
 
+For oversized ingest episodes, `Failed to create raw-capture for oversized episode <id>`
+is a warning that the fallback recallable entity could not be saved. The original episode
+remains stored and is marked `FAILED`; the separate preflight rejection warning still reports
+why enrichment was refused. Use the episode ID and capture error to investigate the storage failure.
+
 ### HTTP request behavior
 
 Check:
