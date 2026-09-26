@@ -32,6 +32,84 @@ class TestVerificationConstants:
         assert STALE_ADVISORY != STALE_ADVISORY_STILL_VALID
 
 
+# Both repository reads must compile real Cypher; FakeNeo4j cannot catch #69.
+@pytest.fixture
+def live_verification_repo(test_neo4j_repo):
+    from menhir.infrastructure.tool_event_repository import ToolEventRepository
+
+    test_neo4j_repo.execute(
+        "UNWIND $memories AS memory CREATE (:Entity {uuid: memory.uuid, namespace: memory.namespace})",
+        params={"memories": [
+            {"uuid": "verification-memory-a", "namespace": "verification-tenant-a"},
+            {"uuid": "verification-memory-b", "namespace": "verification-tenant-b"},
+        ]},
+    )
+    repo = ToolEventRepository(test_neo4j_repo)
+    receipts = [
+        ("a", "menhir", "src/foo.py", "outdated", "2026-07-06T00:00:00Z"),
+        ("a", "menhir", "src/foo.py", "needs_review", "2026-07-08T00:00:00Z"),
+        ("a", "menhir", "src/foo.py", "still_valid", "2026-07-09T00:00:00Z"),
+        ("a", "menhir", "src/bar.py", "needs_review", "2026-07-09T00:00:00Z"),
+        ("a", "other-project", "src/other.py", "still_valid", "2026-07-10T00:00:00Z"),
+        ("b", "menhir", "src/foo.py", "superseded", "2026-07-10T00:00:00Z"),
+    ]
+    for tenant, project, path, outcome, verified_at in receipts:
+        repo.record_stale_anchor_verification(
+            namespace=f"verification-tenant-{tenant}", memory_uuid=f"verification-memory-{tenant}",
+            project=project, path=path, outcome=outcome, verified_at=verified_at,
+            verified_by="test-agent", basis="inspected_current_file", notes=f"receipt-{tenant}",
+        )
+    return repo
+
+
+@pytest.mark.online
+def test_list_verifications_compiles_and_filters_on_live_neo4j(live_verification_repo) -> None:
+    repo = live_verification_repo
+    all_rows = repo.list_stale_anchor_verifications(namespace="verification-tenant-a")
+    assert len(all_rows) == 5
+    assert {row["memory_uuid"] for row in all_rows} == {"verification-memory-a"}
+    assert all_rows[0]["verified_at"] == "2026-07-10T00:00:00Z"
+
+    rows = repo.list_stale_anchor_verifications(
+        namespace="verification-tenant-a", memory_uuid="verification-memory-a",
+        project="menhir", path="src/foo.py", limit=1,
+    )
+    assert len(rows) == 1
+    assert rows[0]["outcome"] == "still_valid"
+    assert rows[0]["verified_at"] == "2026-07-09T00:00:00Z"
+    assert rows[0]["notes"] == "receipt-a"
+    assert rows[0]["uuid"]
+    assert rows[0]["created_at"]
+    assert repo.list_stale_anchor_verifications(
+        namespace="verification-tenant-b", memory_uuid="verification-memory-a",
+    ) == []
+
+
+@pytest.mark.online
+def test_latest_verifications_compiles_and_matches_post_dirty_paths_on_live_neo4j(live_verification_repo) -> None:
+    result = live_verification_repo.latest_stale_anchor_verifications(stale_anchors=[
+        {"memory_uuid": "verification-memory-a", "path": "src/foo.py", "dirty_at": "2026-07-07T00:00:00Z"},
+        {"memory_uuid": "verification-memory-a", "path": "src/bar.py", "dirty_at": "2026-07-10T00:00:00Z"},
+        {"memory_uuid": "verification-memory-a", "path": "src/absent.py", "dirty_at": "2026-07-07T00:00:00Z"},
+    ])
+    key = ("verification-memory-a", "src/foo.py")
+    assert set(result) == {key}
+    assert result[key]["outcome"] == "still_valid"
+    assert result[key]["verified_at"] == "2026-07-09T00:00:00Z"
+    assert result[key]["notes"] == "receipt-a"
+
+
+@pytest.mark.online
+def test_verification_reads_return_empty_on_live_neo4j_without_receipts(test_neo4j_repo) -> None:
+    from menhir.infrastructure.tool_event_repository import ToolEventRepository
+
+    repo = ToolEventRepository(test_neo4j_repo)
+    assert repo.list_stale_anchor_verifications(namespace="verification-absent") == []
+    assert repo.latest_stale_anchor_verifications(stale_anchors=[
+        {"memory_uuid": "verification-absent", "path": "src/foo.py", "dirty_at": "2026-07-07T00:00:00Z"},
+    ]) == {}
+
+
 # ---------------------------------------------------------------------------
 # Repository (via FakeNeo4j)
 # ---------------------------------------------------------------------------
@@ -183,16 +261,16 @@ class TestListVerifications:
         # (the fake doesn't enforce LIMIT; we test that the param is passed)
         assert rows[0]["uuid"] == "v0"
 
-    def test_optional_schema_is_accessed_dynamically(self):
+    def test_fixed_label_and_dynamic_properties_keep_neo4j_5_compatibility(self):
         r = _repo(default=[])
 
         r.list_stale_anchor_verifications(namespace="tenant-a", memory_uuid="m1")
 
         query, params = r._neo4j.executed[-1]
-        assert "MATCH (v:$($verification_label))" in query
+        assert "MATCH (v:StaleAnchorVerification)" in query
         assert "v.memory_uuid" not in query
         assert "v.verified_at" not in query
-        assert params["verification_label"] == "StaleAnchorVerification"
+        assert "verification_label" not in params
         assert params["memory_uuid_key"] == "memory_uuid"
         assert params["verified_at_key"] == "verified_at"
 
@@ -214,16 +292,16 @@ class TestLatestVerifications:
         assert ("m1", "src/foo.py") in result
         assert result[("m1", "src/foo.py")]["outcome"] == "still_valid"
 
-    def test_optional_schema_is_accessed_dynamically(self):
+    def test_fixed_label_and_dynamic_properties_keep_neo4j_5_compatibility(self):
         r = _repo(default=[])
 
         r.latest_stale_anchor_verifications(stale_anchors=[self._STALE_M1])
 
         query, params = r._neo4j.executed[-1]
-        assert "MATCH (v:$($verification_label))" in query
+        assert "MATCH (v:StaleAnchorVerification)" in query
         assert "v.memory_uuid" not in query
         assert "v.verified_at" not in query
-        assert params["verification_label"] == "StaleAnchorVerification"
+        assert "verification_label" not in params
         assert params["memory_uuid_key"] == "memory_uuid"
         assert params["verified_at_key"] == "verified_at"
 

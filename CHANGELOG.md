@@ -1,3 +1,13 @@
+## 2026-09-25 - stale-verification reads avoid Neo4j 5.26-only label syntax (#69)
+
+- `src/menhir/infrastructure/tool_event_repository.py`: match the fixed
+  `StaleAnchorVerification` label in both receipt reads and remove unused label parameters.
+  Preserve property parameters, tenant filtering, sorting, and post-dirty matching.
+- `tests/test_stale_anchor_verifications.py`: update query contract checks and execute both
+  reads against disposable Neo4j, covering filters, limits, ordering, receipt paths, and empty results.
+- Verified the previous queries execute on Neo4j 5.26.31. Dynamic MATCH labels were introduced
+  in 5.26; this change removes that unnecessary version dependency without claiming a 5.26 failure.
+
 ## 2026-09-25 - ingest cleanup and fallback failure visibility (#70)
 
 - `src/menhir/services/ingest_worker.py`: include heartbeat, usage callback, and context setup
@@ -167,17 +177,3 @@ Beacon now owns all beacon work and defines a backend-neutral memory-provider co
   `04abc7bdf5d59d31e497dcefb9d431c06cf6cb0f34d395469391fabd77fbb0aa` -- a release must ship it.
 - `menhir beacon generate` is unchanged; Phase 3B removes it after Beacon's lane passes against
   this provider.
-
-## 2026-09-21 - established architecture decisions become first-class ADRs
-
-- Added ADRs 0003–0010 for the shipped Event → Fold → View boundary, single runtime owner and
-  backend-first access, core-enforced namespace isolation, recoverable cross-store sagas,
-  evidence-gated default-off activation, identity/embodiment/locator separation, source-bound
-  admission authority, and deterministic canonical self identity.
-- The records distinguish implementation evidence from decision scope: namespace pins remain
-  defense-in-depth rather than hostile multitenancy, empirical feature gates do not delay known
-  safety/correctness fixes, projection kinds are not forced into one physical node shape, and
-  admission rollout, authority vocabularies, canonical-self activation, and historical fork
-  consolidation remain explicit owner decisions.
-- Added `.agent/adr/README.md`, routed it from `.agent/README.md`, and linked each decision from its
-  live architecture/data-model/activation owner document; no runtime behavior changed.
