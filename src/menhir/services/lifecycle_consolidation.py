@@ -477,4 +477,26 @@ class LifecycleConsolidationMixin:
         logger.info("Running orphan recovery for SESSION nodes older than %.1f hours", max_age_hours)
         return await self.consolidate_session(max_age_hours=max_age_hours, on_progress=on_progress)
 
+    async def preview_orphan_recovery(self, max_age_hours: float = ORPHAN_MAX_AGE_HOURS) -> dict[str, Any]:
+        """Preview all phases of global orphan recovery without changing graph state.
+
+        The age argument gates consolidation only. TTL expiry and empty-episode cleanup
+        retain their independent eligibility rules; a promotion may rescue an expired node.
+        Phase counts are therefore not a prediction of exact mutation counts.
+        """
+        candidates, expired, empty_episodes = await asyncio.gather(
+            asyncio.to_thread(self.graph_adapter.fetch_session_entities, None, max_age_hours),
+            asyncio.to_thread(self.graph_adapter.fetch_ttl_expired_session_uuids, None),
+            asyncio.to_thread(self.graph_adapter.cleanup_orphan_episodes, None, dry_run=True),
+        )
+        return {
+            "dry_run": True,
+            "scope": "global",
+            "max_age_hours": max_age_hours,
+            "session_nodes_found": len(candidates),
+            "ttl_expired_nodes_found": len(expired),
+            "empty_orphan_episodes_found": empty_episodes,
+            "age_rule": "max_age_hours applies to consolidation; TTL expiry and empty-episode cleanup use their own rules",
+        }
+
     # --- Decay lifecycle (M4) ---

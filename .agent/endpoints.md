@@ -498,10 +498,17 @@ after its `target_date` passes.
 ### `recover_orphans`
 Concept id: `mcp.tool.recover_orphans`
 
-Recover orphaned SESSION nodes from crashed or abandoned sessions.
-- **`max_age_hours`** (float, optional): Only process SESSION nodes older than this (default: 4.0).
-- **`dry_run`** (bool, optional): Report counts without making changes (default: false).
-- Promotes or deletes stale SESSION nodes that were never consolidated.
+Recover stale SESSION nodes globally, then delete expired demoted SESSION nodes and eligible
+empty orphan episodes. Requires operator access in both local and HTTP modes.
+- **`max_age_hours`** (float, optional): Minimum age for SESSION consolidation only (default: 4.0).
+  The expired-TTL sweep uses `ttl_expires < now`, regardless of this argument. Empty-episode
+  cleanup only targets READY, unflagged, edgeless episodes older than seven days
+  with empty content.
+- **`dry_run`** (bool, optional): Read-only preview of all three phases (default: false).
+  Returns `session_nodes_found`, `ttl_expired_nodes_found`, and `empty_orphan_episodes_found`
+  separately. An expired node may be rescued by promotion, so counts are not exact outcome
+  predictions; all-zero counts mean execution has no eligible work on an unchanged graph.
+- Execution returns the canonical consolidation counters, including `demoted`.
 
 ### `add_todo`
 Concept id: `mcp.tool.add_todo`

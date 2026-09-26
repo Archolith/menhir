@@ -7,10 +7,13 @@ on the MCP server and can be called directly.
 
 import asyncio
 import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from menhir.mcp import server as mcp_server
+from menhir.mcp.tools.ops.recover_orphans import RecoverOrphansTool
 
 
 # Registration is where several per-tool properties live (namespace threading,
@@ -118,3 +121,19 @@ def test_always_visible_tools_appear_in_list_tools():
     # Synthetic tools
     assert "search_tools" in visible_names
     assert "call_tool" in visible_names
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dry_run", [True, False])
+async def test_recover_orphans_tool_uses_canonical_backend_result(monkeypatch, dry_run):
+    backend = SimpleNamespace(
+        recover_orphans=AsyncMock(return_value={"dry_run": dry_run, "demoted": 2}),
+        fetch_session_entities=AsyncMock(side_effect=AssertionError("unexpected pre-read")),
+    )
+    monkeypatch.setattr(RecoverOrphansTool, "get_backend", lambda self: backend)
+
+    result = json.loads(await RecoverOrphansTool().endpoint(max_age_hours=720, dry_run=dry_run))
+
+    assert result == {"dry_run": dry_run, "demoted": 2}
+    backend.recover_orphans.assert_awaited_once_with(max_age_hours=720, dry_run=dry_run)
+    backend.fetch_session_entities.assert_not_awaited()

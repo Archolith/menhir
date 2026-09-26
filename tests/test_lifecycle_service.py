@@ -424,6 +424,30 @@ async def test_orphan_recovery_delegates_to_consolidation(stub_memory_graph_adap
     assert result.promoted == 1
 
 
+@pytest.mark.asyncio
+async def test_orphan_recovery_preview_includes_global_cleanup_phases(stub_graphiti_client):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    graph = SimpleNamespace(
+        fetch_session_entities=MagicMock(return_value=[]),
+        fetch_ttl_expired_session_uuids=MagicMock(return_value=[{"uuid": "expired-other-session"}]),
+        cleanup_orphan_episodes=MagicMock(return_value=1),
+    )
+    svc = LifecycleService(graph_adapter=graph, graphiti_client=stub_graphiti_client)
+
+    preview = await svc.preview_orphan_recovery(max_age_hours=720)
+
+    assert preview["session_nodes_found"] == 0
+    assert preview["ttl_expired_nodes_found"] == 1
+    assert preview["empty_orphan_episodes_found"] == 1
+    assert preview["scope"] == "global"
+    assert "TTL expiry" in preview["age_rule"]
+    graph.fetch_session_entities.assert_called_once_with(None, 720)
+    graph.fetch_ttl_expired_session_uuids.assert_called_once_with(None)
+    graph.cleanup_orphan_episodes.assert_called_once_with(None, dry_run=True)
+
+
 # --- Idempotency ---
 
 @pytest.mark.asyncio
