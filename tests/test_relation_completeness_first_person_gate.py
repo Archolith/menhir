@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from menhir.infrastructure import graphiti_extraction_patches as gep
+from menhir.infrastructure import graphiti_extraction_policy as gep
 
 pytestmark = pytest.mark.unit
 

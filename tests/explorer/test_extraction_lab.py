@@ -476,13 +476,10 @@ class TestApplyPromptVariant:
         enough to verify the override lands in the right place.
 
         MARKED `online`/`needs_llm` (CF-152). It was unmarked and therefore ran in the
-        default offline lane, where it does two things an offline unit test must not:
+        default offline lane, where it does one thing an offline unit test must not:
         `MemorySettings.from_env()` loads the operator's REAL OpenAI keys (conftest's
         pytest_configure overrides only the NEO4J_* variables, so the graph is safely pinned to
-        the disposable instance but the LLM credentials are genuine), and
-        `GraphitiClient.from_settings` applies sixteen irreversible `_patch_graphiti_*` mutations
-        to `graphiti_core` that persist for the rest of the process and affect every test that
-        follows it in that worker.
+        the disposable instance but the LLM credentials are genuine).
         """
         from menhir.config import MemorySettings
         from menhir.infrastructure.graphiti_client import GraphitiClient

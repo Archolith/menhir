@@ -25,8 +25,8 @@ from menhir.domain.self_identity import (
     SelfEvidenceKind, self_context_for_pending_episode,
     self_subject_endpoint_for_claim, self_uuid_for_namespace,
 )
-from menhir.infrastructure import graphiti_extraction_patches as extraction
-from menhir.infrastructure import graphiti_model_patches as models
+from menhir.infrastructure import graphiti_extraction_policy as extraction
+from menhir.infrastructure import graphiti_resolution_policy as models
 from menhir.infrastructure.self_binding import SelfBindMode, InvalidSelfSubjectDeclarationError
 
 pytestmark = pytest.mark.unit
@@ -103,7 +103,7 @@ async def test_model_reference_uses_preallocated_node_not_model_identity(monkeyp
         assert endpoint.marker in kwargs["custom_extraction_instructions"]
         return [carrier, target], [relation], {carrier.uuid: [0], target.uuid: [0]}
 
-    monkeypatch.setattr(combined, "extract_nodes_and_edges", extract)
+    monkeypatch.setattr(extraction, "extract_nodes_and_edges", extract)
     nodes, edges, indices = await extraction._run_graphiti_combined_extraction(
         object(), SimpleNamespace(uuid="graphiti-episode"), [], None, None, None
     )
@@ -131,7 +131,7 @@ async def test_mixed_payload_gets_one_correction_then_withholds_unresolved_alias
         return nodes, [edge("marker", "postcards", f"{endpoint.marker} owns postcards."),
                        edge("fallback", "stamps", "user owns stamps.")], {n.uuid: [0] for n in nodes}
 
-    monkeypatch.setattr(combined, "extract_nodes_and_edges", extract)
+    monkeypatch.setattr(extraction, "extract_nodes_and_edges", extract)
     nodes, edges, indices = await extraction._run_graphiti_combined_extraction(
         object(), SimpleNamespace(uuid="graphiti-episode"), [], None, None, None
     )
@@ -178,14 +178,14 @@ async def test_bound_author_bypasses_candidates_and_normal_enrichment_stays_live
     collect = AsyncMock(return_value=[[existing_bike]])
     monkeypatch.setattr(operations, "_collect_candidate_nodes", collect)
     monkeypatch.setattr(models, "_existing_canonical_node", AsyncMock(return_value=stored_self))
-    for module in (operations, graphiti, bulk):
-        monkeypatch.setattr(module, "resolve_extracted_nodes", module.resolve_extracted_nodes)
-    monkeypatch.setattr(operations, "_menhir_adaptive_dedupe_patched", False, raising=False)
-    models._patch_graphiti_adaptive_dedupe()
     clients = SimpleNamespace(llm_client=AsyncMock(), embedder=SimpleNamespace(
         create_batch=AsyncMock(return_value=[[0.1, 0.2], [0.3, 0.4]])
     ))
-    resolved, uuid_map, _ = await operations.resolve_extracted_nodes(clients, nodes)
+    resolved, uuid_map, _ = await operations.resolve_extracted_nodes(
+        clients, nodes,
+        node_pre_resolution_hook=models.MenhirNodePreResolutionHook(),
+        candidate_filter_hook=models.MenhirCandidateFilterHook(),
+    )
     assert [n.uuid for n in collect.await_args.args[1]] == ["bike-new"]
     assert uuid_map[stored_self.uuid] == stored_self.uuid
     clients.llm_client.generate_response.assert_not_awaited()  # No self LLM dedup.
@@ -203,8 +203,6 @@ async def test_bound_author_bypasses_candidates_and_normal_enrichment_stays_live
 
     clients.llm_client.generate_response.side_effect = model
     monkeypatch.setattr(operations, "_extract_entity_attributes", operations._extract_entity_attributes)
-    monkeypatch.setattr(operations, "_menhir_untyped_attribute_preservation_patched", False, raising=False)
-    models._patch_graphiti_untyped_attribute_preservation()
     hydrated = await graphiti.extract_attributes_from_nodes(
         clients, resolved, SimpleNamespace(content=receipt.episode_text, valid_at=NOW), [],
         entity_types={"Bicycle": Bicycle}, edges=[],
@@ -222,7 +220,7 @@ async def test_legacy_modes_keep_original_extraction_payload(monkeypatch, mode):
     extraction.begin_extraction_receipt("legacy", "I own a bicycle.", self_bind_mode=mode)
     n = node("legacy-user", "user")
     fake = AsyncMock(return_value=([n], [], {n.uuid: [0]}))
-    monkeypatch.setattr(combined, "extract_nodes_and_edges", fake)
+    monkeypatch.setattr(extraction, "extract_nodes_and_edges", fake)
     result = await extraction._run_graphiti_combined_extraction(
         object(), SimpleNamespace(uuid="legacy"), [], None, None, None
     )
@@ -240,13 +238,12 @@ async def test_concurrent_namespaces_do_not_share_author_nodes():
     assert a[0] != b[0] and a[1] != b[1]
 
 
-async def test_enforce_refuses_native_dispatch_when_bypass_patch_is_missing(monkeypatch):
+async def test_enforce_refuses_native_dispatch_when_policy_hooks_are_missing(monkeypatch):
     from menhir.infrastructure.graphiti_client import GraphitiClient
     receipt_for("I own postcards.")
-    monkeypatch.setattr(graphiti, "extract_nodes", object())
     native = AsyncMock()
     client = GraphitiClient(client=native)
-    with pytest.raises(RuntimeError, match="requires combined extraction"):
+    with pytest.raises(RuntimeError, match="requires the Menhir extraction and resolution"):
         await client.add_episode(name="test", episode_body="I own postcards.",
                                  source_description="user", reference_time=NOW)
     native.add_episode.assert_not_awaited()
@@ -267,7 +264,7 @@ async def test_semantic_dispositions_preserve_negation_and_ordinary_actors(monke
         nodes = [node("actor", name), node("object", "car" if "car" in text else "access")]
         model_fact = fact.replace("user", endpoint.marker) if actor == "AUTHOR" else fact
         payload = (nodes, [edge("actor", "object", model_fact)], {n.uuid: [0] for n in nodes})
-    monkeypatch.setattr(combined, "extract_nodes_and_edges", AsyncMock(return_value=payload))
+    monkeypatch.setattr(extraction, "extract_nodes_and_edges", AsyncMock(return_value=payload))
     nodes, edges, _ = await extraction._run_graphiti_combined_extraction(
         object(), SimpleNamespace(uuid="graphiti-episode"), [], None, None, None
     )

@@ -156,11 +156,17 @@ jobs:
             --frozen \
             --no-group dev \
             --no-emit-project \
+            --no-emit-package graphiti-core \
             --output-file "$RUNNER_TEMP/release-requirements.txt"
           cat > "$RUNNER_TEMP/build-backend-requirements.txt" <<'EOF'
           packaging==25.0 --hash=sha256:29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484
           setuptools==83.0.0 --hash=sha256:29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3
           wheel==0.46.2 --hash=sha256:33ae60725d69eaa249bc1982e739943c23b34b58d51f1cb6253453773aca6e65
+          hatchling==1.32.4 --hash=sha256:08ecf7548fb48205e7f213d70c71e67b8271b7242093dc3f1da578b42c734a2c
+          pathspec==1.1.1 --hash=sha256:a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189
+          pluggy==1.6.0 --hash=sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746
+          tomlkit==0.15.1 --hash=sha256:177a05aece5a8ca5266fd3c448abb47b8d352f09d477d3ca8332db4d89b24304
+          trove-classifiers==2026.9.21.13 --hash=sha256:8b1ff4f9c191b1040b71c37f1e445ab99732911e3cd91de52838453a854d7a17
           EOF
           mkdir -p "$RUNNER_TEMP/build-backend-wheelhouse"
           python -m pip download \
@@ -186,10 +192,35 @@ jobs:
             --require-hashes \
             --requirement "$RUNNER_TEMP/release-requirements.txt" \
             --wheel-dir deploy/wheelhouse
-          # The first-party dependencies used to be built from git here, unhashed and with
-          # PIP_NO_INDEX set, because a VCS requirement cannot carry a hash. They are PyPI
-          # releases now, so they come through the hashed export above with everything else
-          # and no step in this job resolves from a repository.
+          # The hashed export above covers every registry dependency; graphiti-core (Git,
+          # built just below at the exact fork commit) and the first-party Menhir wheel
+          # (built from the checked-out source further below) are the only non-registry
+          # inputs to the offline wheelhouse.
+          # graphiti-core is pinned to the exact Archolith fork commit; a Git requirement
+          # cannot carry a hash, so it is excluded from the hashed export above and built
+          # explicitly at that exact commit here. This is the only step in the job that
+          # resolves from a repository, and it resolves the exact pinned SHA.
+          GRAPHITI_REQUIREMENT="$(python - <<'PY'
+          import re
+          import tomllib
+          from pathlib import Path
+
+          dependencies = tomllib.loads(Path("pyproject.toml").read_text())["project"]["dependencies"]
+          pins = [dep for dep in dependencies if dep.startswith("graphiti-core @ ")]
+          if len(pins) != 1 or not re.fullmatch(
+              r"graphiti-core @ git\+https://github\.com/Archolith/graphiti\.git@[0-9a-f]{40}", pins[0]
+          ):
+              raise SystemExit("graphiti-core must pin one exact Archolith fork commit")
+          print(pins[0])
+          PY
+          )"
+          python -m pip wheel \
+            --disable-pip-version-check \
+            --no-cache-dir \
+            --no-deps \
+            --no-build-isolation \
+            --wheel-dir deploy/wheelhouse \
+            "$GRAPHITI_REQUIREMENT"
           export PIP_NO_INDEX=1
           git archive --format=tar --output "$RUNNER_TEMP/menhir-source.tar" HEAD
           mkdir "$RUNNER_TEMP/menhir-source"

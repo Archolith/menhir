@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -131,6 +136,27 @@ def test_validation_builds_a_frozen_wheelhouse_from_the_clean_checkout() -> None
     assert '--expected-commit "$SOURCE_COMMIT"' in validate
     assert '["diff", "--quiet"]' in BUILDER_TEXT
     assert '["diff", "--cached", "--quiet"]' in BUILDER_TEXT
+
+
+@pytest.mark.parametrize("revision,accepted", [("a" * 40, True), ("main", False), ("v0.30.2", False)])
+def test_graphiti_wheel_build_reads_and_validates_the_project_pin(tmp_path, revision, accepted) -> None:
+    marker = 'GRAPHITI_REQUIREMENT="$(python - <<\'PY\'\n'
+    script = textwrap.dedent(TEXT.split(marker, 1)[1].split("\n          PY", 1)[0])
+    requirement = f"graphiti-core @ git+https://github.com/Archolith/graphiti.git@{revision}"
+    (tmp_path / "pyproject.toml").write_text(
+        f'[project]\ndependencies = ["{requirement}"]\n', encoding="utf-8"
+    )
+    result = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, capture_output=True, text=True)
+    assert (result.returncode == 0) is accepted
+    if accepted:
+        assert result.stdout.strip() == requirement
+    else:
+        assert "must pin one exact Archolith fork commit" in result.stderr
+    build = TEXT.split(marker, 1)[1].split("export PIP_NO_INDEX=1", 1)[0]
+    assert '"$GRAPHITI_REQUIREMENT"' in build
+    assert "--no-build-isolation" in build
+    assert "--no-emit-package graphiti-core" in TEXT
+    assert "hatchling==1.32.4 --hash=sha256:" in TEXT
 
 
 def test_scanners_are_official_digest_pins_acquired_before_the_build() -> None:

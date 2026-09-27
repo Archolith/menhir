@@ -150,7 +150,7 @@ GATE_APPROVED_HUMAN_SOURCES = frozenset({"user", "manual"})
 #: Normalized names that *may* denote the human, consulted ONLY after trusted evidence exists.
 #: Membership here is never itself evidence -- see :func:`is_self_alias`.
 #:
-#: DOMAIN: extracted entity NAMES, mirroring ``graphiti_extraction_patches``, which governs the
+#: DOMAIN: extracted entity NAMES, mirroring ``graphiti_extraction_policy``, which governs the
 #: same seam this contract binds at.
 #:
 #: Two other self-token sets exist and are **deliberately different, not drift**. They answer

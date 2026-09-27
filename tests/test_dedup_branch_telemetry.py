@@ -1,10 +1,10 @@
-"""Phase 5: which deterministic-resolution branch each ordinary node took.
+"""Resolution-branch telemetry, re-homed on the fork's supported hook callbacks.
 
-The RCA could only *infer* that production was taking the ambiguous branch, because nothing
-recorded it. With 66 exact-name `user` nodes against a 15-candidate window, `unique_exact_bind`
-is arithmetically unreachable and every extraction lands in `multiple_exact_llm`, where a
-`duplicate_candidate_id = -1` mints another fork. These counters make a recurrence attributable
-instead of reconstructed after the fact.
+The former installer #13 wrapped the resolver's private similarity helper; the fork
+owns that boundary and exposes no private seam by design. Menhir reconstructs the
+same visibility — per-node pre-resolution, per-candidate pool composition and
+exclusions, and per-merge LLM outcomes — at the supported hook boundaries, and
+flushes it once per ``add_episode`` call.
 """
 
 from __future__ import annotations
@@ -14,259 +14,151 @@ from types import SimpleNamespace
 
 import pytest
 
-from menhir.infrastructure.graphiti_model_patches import (
-    _classify_dedup_branches,
-    _patch_graphiti_dedup_branch_telemetry,
+from menhir.infrastructure.graphiti_resolution_policy import (
+    MenhirCandidateFilterHook,
+    MenhirIdentityGateHook,
+    ResolutionTelemetry,
+    flush_resolution_telemetry,
+    start_resolution_telemetry,
 )
+from graphiti_core.candidate_filter import CandidateFilterDecision
+from graphiti_core.identity_gate import IdentityGateDecision
 
 
-def _node(name: str, uuid: str = "x"):
+def _node(name: str, uuid: str = "x", **attributes):
     from graphiti_core.nodes import EntityNode
 
     return EntityNode(
         uuid=uuid, name=name, group_id="", labels=["Entity"],
         created_at=datetime.now(timezone.utc),
+        attributes=dict(attributes),
     )
 
 
-def _indexes(normalized_existing: dict):
-    return SimpleNamespace(normalized_existing=normalized_existing)
-
-
-def _state(resolved, unresolved):
-    return SimpleNamespace(resolved_nodes=resolved, unresolved_indices=unresolved, uuid_map={})
-
-
-@pytest.mark.unit
-def test_unique_exact_match_is_the_deterministic_bind():
-    nodes = [_node("Rachel")]
-    counts = _classify_dedup_branches(
-        nodes, _indexes({"rachel": [object()]}), set(), _state([object()], [])
+def _gate_context(extracted, candidate, *, episode=None, edges=None):
+    return SimpleNamespace(
+        extracted_node=extracted,
+        candidate_node=candidate,
+        candidate_id=0,
+        episode=episode,
+        previous_episodes=[],
+        edges=list(edges or []),
     )
-    assert counts["unique_exact_bind"] == 1
-    assert counts["multiple_exact_llm"] == 0
+
+
+class _FakeEdge:
+    def __init__(self, fact: str) -> None:
+        self.fact = fact
 
 
 @pytest.mark.unit
-def test_the_production_failure_mode_is_counted_distinctly():
-    """The exact shape the RCA measured: many exact matches for one name, so the deterministic
-    branch is unreachable and the node is escalated to the LLM."""
-    nodes = [_node("user")]
-    counts = _classify_dedup_branches(
-        nodes, _indexes({"user": [object()] * 15}), set(), _state([None], [0])
+@pytest.mark.asyncio
+async def test_candidate_filter_counts_pools_and_exclusions():
+    start_resolution_telemetry()
+    hook = MenhirCandidateFilterHook()
+    extracted = _node("coins", "e1")
+    structural = _node("scoring_service.py", "c1", structure_role="file")
+    view = _node("alice's coins: 37", "c2", is_view=True)
+    semantic = _node("Alice's coins", "c3")
+
+    for candidate in (structural, view, semantic):
+        await hook.filter_candidate(SimpleNamespace(extracted_node=extracted, candidate_node=candidate))
+
+    collector = SimpleNamespace()  # placeholder to keep naming clear
+    del collector
+
+    from menhir.infrastructure.graphiti_resolution_policy import (
+        _resolution_telemetry,
     )
-    assert counts["multiple_exact_llm"] == 1
-    assert counts["unique_exact_bind"] == 0
+
+    telemetry = _resolution_telemetry.get()
+    details = telemetry.as_details()
+    assert details["structural_excluded"] == 1
+    assert details["view_excluded"] == 1
+    assert details["candidate_count_max"] == 1
+    assert details["no_candidates_new"] == 0
 
 
 @pytest.mark.unit
-def test_low_entropy_name_with_no_exact_match_is_the_entropy_guard():
-    """`user` is low entropy, so with zero exact matches it never reaches fuzzy matching."""
-    nodes = [_node("user")]
-    counts = _classify_dedup_branches(nodes, _indexes({}), set(), _state([None], [0]))
-    assert counts["entropy_guard_skip"] == 1
+@pytest.mark.asyncio
+async def test_identity_gate_counts_merges_and_vetoes():
+    start_resolution_telemetry()
+    hook = MenhirIdentityGateHook()
+    extracted = _node("the suburbs", "e1")
+    chicago = _node("Chicago", "c1")
+    metro = _node("NYC metro area", "c2")
+    nyc = _node("NYC", "e2")
+
+    assert await hook.evaluate_identity_gate(_gate_context(extracted, chicago)) is IdentityGateDecision.VETO
+    assert await hook.evaluate_identity_gate(_gate_context(nyc, metro)) is IdentityGateDecision.ALLOW
+
+    from menhir.infrastructure.graphiti_resolution_policy import _resolution_telemetry
+
+    details = _resolution_telemetry.get().as_details()
+    assert details["identity_gate_vetoes"] == 1
+    assert details["llm_selected_candidate"] == 1
 
 
 @pytest.mark.unit
-def test_counts_cover_every_node_exactly_once():
-    nodes = [_node("user"), _node("Rachel"), _node("Chicago")]
-    counts = _classify_dedup_branches(
-        nodes,
-        _indexes({"rachel": [object()], "chicago": [object()] * 3}),
-        set(),
-        _state([None, object(), None], [0, 2]),
+@pytest.mark.asyncio
+async def test_edge_consistency_veto_survives_the_hook_path():
+    """Fact text mentioning the extracted name but not the candidate contradicts the merge."""
+    hook = MenhirIdentityGateHook()
+    extracted = _node("the suburbs", "e1")
+    candidate = _node("suburbs park", "c1")  # name-overlap evidence exists...
+
+    # ...but the episode's edges mention "the suburbs" and never the candidate.
+    decision = await hook.evaluate_identity_gate(
+        _gate_context(extracted, candidate, edges=[_FakeEdge("Rachel moved to the suburbs.")])
     )
-    assert sum(counts.values()) == len(nodes)
+
+    assert decision is IdentityGateDecision.VETO
 
 
 @pytest.mark.unit
-def test_classification_never_raises_on_malformed_input():
-    """Instrumentation sits in the dedup hot path; a defect here must not fail an ingest."""
-    counts = _classify_dedup_branches(
-        [SimpleNamespace()], _indexes({}), set(), _state([None], [])
-    )
-    assert sum(counts.values()) == 0
-
-
-@pytest.mark.unit
-def test_patch_is_idempotent_and_preserves_resolution_behavior():
-    """Applied twice must not double-wrap, and the wrapped resolver must still resolve."""
-    from graphiti_core.utils.maintenance import node_operations as no
-
-    original = no._resolve_with_similarity
-    try:
-        _patch_graphiti_dedup_branch_telemetry()
-        once = no._resolve_with_similarity
-        _patch_graphiti_dedup_branch_telemetry()
-        assert no._resolve_with_similarity is once, "patch double-wrapped the resolver"
-
-        # Real resolution through the wrapper: one exact candidate must still bind.
-        existing = _node("Rachel", uuid="existing-1")
-        extracted = [_node("Rachel", uuid="extracted-1")]
-        indexes = no._build_candidate_indexes([existing])
-        state = no.DedupResolutionState(resolved_nodes=[None], uuid_map={}, unresolved_indices=[])
-        no._resolve_with_similarity(extracted, indexes, state)
-        assert state.resolved_nodes[0] is not None
-        assert state.uuid_map["extracted-1"] == "existing-1"
-    finally:
-        no._resolve_with_similarity = original
-
-
-@pytest.mark.unit
-def test_llm_outcomes_are_recorded(monkeypatch):
-    """REVIEW P2. The similarity wrapper cannot see what the LLM decided, so on its own it leaves
-    the exact branch the RCA implicated -- an escalation returning duplicate_candidate_id = -1,
-    which mints another node -- unrecorded."""
-    from menhir.infrastructure.graphiti_model_patches import _record_resolution_outcomes
+def test_flush_records_one_outcomes_event(monkeypatch):
+    from menhir.infrastructure.graphiti_resolution_policy import _resolution_telemetry
+    import menhir.infrastructure.telemetry.recorders as recorders
 
     recorded: list[dict] = []
 
-    import menhir.infrastructure.telemetry.recorders as recorders
-
     def _capture(*, component, event, state, episode_uuid=None, details=None, **kw):
-        recorded.append({"event": event, "details": details or {}})
+        recorded.append({"component": component, "event": event, "details": details or {}})
 
     monkeypatch.setattr(recorders, "record_lifecycle_event", _capture)
 
-    extracted = [_node("Rachel", "e1"), _node("Chicago", "e2"), _node("user", "e3")]
-    # e1 resolved onto an existing candidate; e2 kept its own uuid (a new node); e3 unresolved.
-    resolved = [_node("Rachel", "existing-1"), extracted[1], None]
-    state = _state(resolved, [])
-    _record_resolution_outcomes(
-        SimpleNamespace(embedder=None), extracted, [[object()], [object()], []],
-        [0, 1, 2], state, set(),
-    )
+    telemetry = ResolutionTelemetry()
+    telemetry.extracted_node_count = 3
+    telemetry.pre_resolved_self = 1
+    telemetry.identity_gate_merges = 2
+    telemetry.identity_gate_vetoes = 1
+    _resolution_telemetry.set(telemetry)
 
-    assert recorded, "no resolution outcome event was recorded"
+    flush_resolution_telemetry()
+
+    assert len(recorded) == 1
+    assert recorded[0]["component"] == "graphiti_dedup"
+    assert recorded[0]["event"] == "resolution_outcomes"
     d = recorded[0]["details"]
-    assert d["llm_selected_candidate"] == 1
-    assert d["llm_selected_new"] == 2
-    assert d["escalated_to_llm"] == 3
-    assert d["unresolved_after_llm"] == 1
-    assert d["no_candidates_new"] == 1
-    assert "embedding_dimension" in d and "embedding_model" in d
+    assert d["extracted_node_count"] == 3
+    assert d["pre_resolved_self"] == 1
+    assert d["llm_selected_candidate"] == 2
+    assert d["identity_gate_vetoes"] == 1
+    assert _resolution_telemetry.get() is None, "flush must reset the collector"
 
 
 @pytest.mark.unit
-def test_outcome_telemetry_never_raises():
-    """Sits in the dedup hot path for every entity."""
-    from menhir.infrastructure.graphiti_model_patches import _record_resolution_outcomes
-
-    _record_resolution_outcomes(None, [SimpleNamespace()], [None], [0], _state([None], []), set())
-
-
-@pytest.mark.unit
-def test_prompt_sections_count_candidate_attributes():
-    """REVIEW P2. Measuring only name/labels/summary undercounts by whatever matters most: a
-    candidate carrying a 1,000-character attribute was reported as nine characters, so the number
-    could not answer what is actually filling a saturated dedupe prompt."""
-    from menhir.infrastructure.graphiti_model_patches import _measure_prompt_sections
-
-    candidate = _node("Rachel", "c1")
-    candidate.summary = "x" * 500
-    candidate.attributes = {"bio": "y" * 1000}
-
-    sizes = _measure_prompt_sections([_node("user", "e1")], [candidate])
-
-    assert sizes["candidate_chars"] > 1000, "the candidate attribute was not counted"
-    # ...while the summary is still sliced to 120 in the prompt, so the full 500 is NOT counted.
-    assert sizes["candidate_chars"] < 1000 + 500
-
-
-@pytest.mark.unit
-def test_prompt_sections_count_the_episode_and_previous_episodes():
-    """The other half of the undercount: both were omitted entirely."""
-    from types import SimpleNamespace
-
-    from menhir.infrastructure.graphiti_model_patches import _measure_prompt_sections
-
-    sizes = _measure_prompt_sections(
-        [_node("user", "e1")],
-        [],
-        None,
-        SimpleNamespace(content="e" * 300),
-        [SimpleNamespace(content="p" * 200, valid_at=None)],
-    )
-
-    assert sizes["episode_chars"] >= 300
-    assert sizes["previous_episode_count"] == 1
-    assert sizes["previous_episode_chars"] >= 200
-    assert sizes["total_chars"] >= sizes["episode_chars"] + sizes["previous_episode_chars"]
-
-
-@pytest.mark.unit
-def test_prompt_sections_count_previous_episode_timestamps():
-    """Graphiti serializes ``valid_at.isoformat()`` into every history item. Omitting it made a
-    timestamped history measure identically to one without timestamps."""
-    from menhir.infrastructure.graphiti_model_patches import _measure_prompt_sections
-
-    without_timestamp = _measure_prompt_sections(
-        [], [], None, None, [SimpleNamespace(content="same", valid_at=None)]
-    )
-    with_timestamp = _measure_prompt_sections(
-        [],
-        [],
-        None,
-        None,
-        [SimpleNamespace(content="same", valid_at=datetime(2026, 9, 4, tzinfo=timezone.utc))],
-    )
-
-    assert (
-        with_timestamp["previous_episode_chars"]
-        > without_timestamp["previous_episode_chars"]
-    )
-
-
-@pytest.mark.unit
-def test_prompt_measurement_never_raises_on_malformed_input():
-    """It runs per dedupe batch in the ingest path."""
-    from menhir.infrastructure.graphiti_model_patches import _measure_prompt_sections
-
-    sizes = _measure_prompt_sections([object()], [object()], object(), object(), object())
-    assert sizes["entity_count"] == 1
-
-
-@pytest.mark.unit
-def test_outcome_event_carries_the_score_and_prompt_fields(monkeypatch):
-    from menhir.infrastructure.graphiti_model_patches import _record_resolution_outcomes
-
-    recorded: list[dict] = []
+def test_flush_never_raises_and_is_a_noop_without_a_collector(monkeypatch):
     import menhir.infrastructure.telemetry.recorders as recorders
 
-    monkeypatch.setattr(
-        recorders,
-        "record_lifecycle_event",
-        lambda **kw: recorded.append(kw.get("details") or {}),
-    )
+    def _boom(**kw):
+        raise RuntimeError("telemetry backend down")
 
-    _record_resolution_outcomes(
-        SimpleNamespace(embedder=None),
-        [_node("user", "e1")],
-        [[]],
-        [],
-        _state([None], []),
-        set(),
-        [
-            {
-                "entity_count": 1,
-                "entity_chars": 100,
-                "candidate_count": 15,
-                "candidate_chars": 900,
-                "episode_chars": 200,
-                "previous_episode_count": 0,
-                "previous_episode_chars": 0,
-                "total_chars": 1200,
-            }
-        ],
-    )
+    monkeypatch.setattr(recorders, "record_lifecycle_event", _boom)
 
-    d = recorded[0]
-    assert d["llm_prompt_batches"] == 1
-    assert d["llm_prompt_candidate_count_max"] == 15
-    assert d["llm_prompt_candidate_chars_max"] == 900
-    assert d["llm_prompt_total_chars_max"] == 1200
-    # Per-candidate cosine scores are deliberately NOT here: graphiti's search discards the score
-    # it ranked by, so any value would have been measured from embeddings that are None in
-    # production. The saturation signature stays visible in candidate_count_max.
-    assert "candidate_score_max" not in d
-    assert "candidate_count_max" in d
+    flush_resolution_telemetry()  # no collector: no-op
+    from menhir.infrastructure.graphiti_resolution_policy import _resolution_telemetry
+
+    _resolution_telemetry.set(ResolutionTelemetry())
+    flush_resolution_telemetry()  # recorder raises: swallowed, collector still reset
+    assert _resolution_telemetry.get() is None

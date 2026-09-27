@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from menhir.infrastructure.graphiti_extraction_patches import (
+from menhir.infrastructure.graphiti_extraction_policy import (
     parse_titled_list,
     _sanitize_combined_payload,
     CombinedExtractionReceipt,
@@ -199,7 +199,7 @@ def test_synthetic_edge_carries_episode_indices():
 def test_synthetic_edge_survives_the_real_sanitizer():
     """Round-trip: feeding a synthetic edge back through _sanitize_combined_edge must not drop it,
     which is what would happen if any indispensable field were missing or blank."""
-    from menhir.infrastructure.graphiti_extraction_patches import _sanitize_combined_edge
+    from menhir.infrastructure.graphiti_extraction_policy import _sanitize_combined_edge
     receipt = CombinedExtractionReceipt()
     out = _sanitize_combined_payload(
         _payload(["Admon", "Magdy", "Ehab", "Sara", "Mostafa", "Nemr", "Adam"]), receipt, ROSTER)
