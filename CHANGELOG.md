@@ -2,6 +2,8 @@
 
 - Require `archolith-graphiti-core==0.30.2.post1` so normal installs can use a
   public wheel rather than a VCS checkout while retaining the native fork hooks.
+- Lock the published PyPI wheel and source hashes from fork tag `v0.30.2.post1`;
+  verify a fresh Menhir wheel install resolves the public fork without upstream Graphiti.
 - Simplify the release image to consume the locked, hashed fork wheel directly.
 - Make the fork package and its cold-install compatibility an explicit MVP gate;
   defer Beacon generation and consumption from this release.

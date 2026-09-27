@@ -183,8 +183,8 @@ The audit is a code-and-contract review, not an E2E run. It asks whether the imp
 
 ### B6. Graphiti fork packaging and compatibility
 
-- [ ] Publish the Archolith Graphiti fork wheel under its distinct distribution name, with native hooks present.
-- [ ] Lock Menhir to the public wheel with an exact version and registry hash, without a VCS dependency.
+- [x] Publish the Archolith Graphiti fork wheel under its distinct distribution name, with native hooks present (`v0.30.2.post1` at `dbb0e33`, wheel SHA-256 `a748f98e0b09d64ab1eb29bd3449f52b552250a31663e86c4d99dc51ddf991f0`).
+- [x] Lock Menhir to the public wheel with an exact version and registry hash, without a VCS dependency.
 - [ ] Confirm a fresh package install and container build resolve the same fork version without also installing upstream `graphiti-core`.
 - [ ] Exercise Menhir's fork-hook contract and representative memory ingest/recall against that build.
 
