@@ -1,5 +1,13 @@
 # Menhir
 
+[![Tests](https://github.com/Archolith/menhir/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Archolith/menhir/actions/workflows/tests.yml)
+[![PyPI](https://img.shields.io/pypi/v/archolith-menhir?label=pypi)](https://pypi.org/project/archolith-menhir/)
+[![Python](https://img.shields.io/badge/python-3.12%2B-3776ab)](https://pypi.org/project/archolith-menhir/)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![beacon](https://img.shields.io/endpoint?url=https%3A%2F%2Fmenhir.archolith.dev%2Fv1%2Fbadge.json)](https://menhir.archolith.dev/.well-known/archolith-beacon)
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Add_Menhir_beacon-0098FF?logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=menhir-beacon&config=%7B%22type%22%3A%22http%22%2C%22url%22%3A%22https%3A%2F%2Fmenhir.archolith.dev%2Fmcp%22%7D)
+[![Add to Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=menhir-beacon&config=eyJ1cmwiOiJodHRwczovL21lbmhpci5hcmNob2xpdGguZGV2L21jcCJ9)
+
 > Git records what changed. Menhir records why an agent acted, where the evidence came
 > from, whether it is still current, and which code and tests carry the impact.
 
@@ -21,7 +29,12 @@ Python 3.12 or newer, and is designed for local or operator-controlled deploymen
 [Quick start](#quick-start) | [Agent workflow](#a-coding-loop) |
 [Blast radius](#code-graph-and-blast-radius) |
 [Governance](#governance-and-currentness) | [Evaluation](#evaluation-posture) |
-[Security](#security-and-privacy)
+[Security](#security-and-privacy) | [Project beacon](https://menhir.archolith.dev/.well-known/archolith-beacon)
+
+Coding agents can read this project's documented knowledge, meaning its purpose, guardrails,
+decisions and docs, from its public [Beacon](https://github.com/Archolith/beacon) at
+`https://menhir.archolith.dev/mcp` (Streamable HTTP, read-only, no auth). It serves this
+repository's published docs only. It is not a Menhir memory server and holds no one's memory.
 
 ## Why Menhir is useful for agentic coding
 
