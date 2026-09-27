@@ -76,10 +76,10 @@ Concept id: `runtime.stack`
 
 - Python 3.12+
 - Neo4j 5 (remote systemd service via bolt)
-- `graphiti-core` @ `git+https://github.com/Archolith/graphiti.git@6b907b93fed32cb979093327608a4fd897b39751`
-  (Archolith soft fork of `getzep/graphiti`, baseline `v0.30.2`; Menhir policy rides the fork's
-  explicit hooks — no runtime monkeypatching). Publication constraint: the pinned commit must be
-  pushed to GitHub before release CI can resolve it.
+- `archolith-graphiti-core==0.30.2.post1` (Archolith soft fork of `getzep/graphiti`,
+  baseline `v0.30.2`; it still imports as `graphiti_core`). Menhir policy uses its explicit
+  hooks without runtime monkeypatching. The fork must be published as a hashed registry
+  wheel before the release lock and cold-install paths can be verified.
 - llama.cpp (`llama-server`) via OpenAI-compatible API
 - provider scaffold for pluggable chat backends (`openai_compat`, `openai`; `anthropic` scaffolded only)
 - Langfuse (optional local tracing for OpenAI-compatible llama.cpp calls)

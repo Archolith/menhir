@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import tomllib
 from importlib.metadata import version
 from pathlib import Path
@@ -26,14 +25,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_installed_fork_and_lock_match_the_immutable_dependency() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    pins = [dep for dep in project["project"]["dependencies"] if dep.startswith("graphiti-core @ ")]
-    assert len(pins) == 1
-    match = re.fullmatch(r"graphiti-core @ git\+https://github\.com/Archolith/graphiti\.git@([0-9a-f]{40})", pins[0])
-    assert match is not None
+    assert "archolith-graphiti-core==0.30.2.post1" in project["project"]["dependencies"]
     lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
-    package = next(item for item in lock["package"] if item["name"] == "graphiti-core")
-    assert package["source"]["git"].endswith("#" + match[1])
-    assert package["version"] == version("graphiti-core") == "0.30.2"
+    package = next(item for item in lock["package"] if item["name"] == "archolith-graphiti-core")
+    assert package["source"] == {"registry": "https://pypi.org/simple"}
+    assert package["version"] == version("archolith-graphiti-core") == "0.30.2.post1"
 
 
 @pytest.mark.asyncio

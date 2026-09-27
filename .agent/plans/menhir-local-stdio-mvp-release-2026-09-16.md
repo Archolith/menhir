@@ -42,12 +42,10 @@ Loopback HTTP, Neo4j, workers, schedulers, and other local processes may remain 
    - preserve repository-relative location/context where supported;
    - persist TODO lifecycle across restart.
 
-5. **Beacon generation**
-   - generate or refresh the canonical Beacon artifact for an indexed local project from Menhir-held project knowledge;
-   - output must conform to the current Beacon manifest contract (`beacon.yaml` unless that contract changes before freeze);
-   - generated output must pass Beacon's own validator;
-   - generated output must be usable by Beacon's stdio server for project overview/onboarding/search/guardrail queries;
-   - generated claims must not silently invent unsupported project facts: source/currentness/uncertainty rules must be explicit.
+5. **Archolith Graphiti fork dependency**
+   - ship the native Graphiti extension hooks used by Menhir as a public, versioned wheel;
+   - install the fork from a hashed package-registry dependency on the cold-install and container paths;
+   - keep the upstream `graphiti-core` distribution out of the same environment to avoid competing `graphiti_core` packages.
 
 ### Explicitly outside MVP
 
@@ -63,6 +61,7 @@ Unless a release-blocking dependency is discovered, the following are post-MVP:
 - project rename/migration support unless a local E2E proves it is already safe;
 - change-provenance briefs and other new composition features;
 - default-off research/scalar/event authority features unless separately promoted before the RC freeze.
+- Beacon generation and Beacon MCP consumption (deferred in #120; may be shown separately, but are not release gates).
 
 ## 2. Release rule
 
@@ -110,7 +109,7 @@ This plan must produce separate durable artifacts rather than hiding results in 
 - [ ] Confirm provider/model defaults used for canonical ingest.
 - [ ] Confirm which currently default-off features remain off.
 - [ ] Confirm project rename is unsupported unless explicitly promoted after E2E proof.
-- [ ] Confirm Beacon generation output contract and command/tool name.
+- [ ] Confirm the exact Archolith Graphiti distribution/version and public wheel hash used by every supported install path.
 
 ### A2. Reconcile current work in flight
 
@@ -182,15 +181,12 @@ The audit is a code-and-contract review, not an E2E run. It asks whether the imp
 - [ ] closing a TODO is idempotent or fails clearly.
 - [ ] persistence and ordering are deterministic enough for agent use.
 
-### B6. Beacon generation
+### B6. Graphiti fork packaging and compatibility
 
-- [ ] Identify the authoritative Menhir→Beacon mapping.
-- [ ] Generated `beacon.yaml` conforms to the current Beacon schema/version.
-- [ ] source paths and line/range provenance are truthful when emitted.
-- [ ] stale/superseded/experimental knowledge cannot be rendered as unqualified current truth.
-- [ ] generation is deterministic for a frozen Menhir graph/config or differences are explicitly explained.
-- [ ] generator does not overwrite a hand-authored Beacon without an explicit safe policy.
-- [ ] output passes `beacon validate` and produces sensible `beacon inspect` output.
+- [ ] Publish the Archolith Graphiti fork wheel under its distinct distribution name, with native hooks present.
+- [ ] Lock Menhir to the public wheel with an exact version and registry hash, without a VCS dependency.
+- [ ] Confirm a fresh package install and container build resolve the same fork version without also installing upstream `graphiti-core`.
+- [ ] Exercise Menhir's fork-hook contract and representative memory ingest/recall against that build.
 
 ### B7. Persistence, failure and resource safety
 
@@ -266,21 +262,15 @@ Use a fixture artifact corpus committed to Git.
 - [ ] repeat close or invalid close and verify safe behavior;
 - [ ] restart and verify persistence.
 
-### E2E-6 — Beacon generation and consumption
+### E2E-6 — Graphiti fork cold-install compatibility
 
-Use the same indexed fixture repository.
+Use the same clean environment and fixture repository as E2E-1.
 
-- [ ] generate Beacon output from Menhir;
-- [ ] assert the expected file/artifact exists without an unsafe overwrite;
-- [ ] run `beacon validate` against generated output — zero validation errors;
-- [ ] run `beacon inspect` and snapshot the normalized output;
-- [ ] launch Beacon's own stdio MCP server using the generated manifest;
-- [ ] query project overview;
-- [ ] query task-scoped onboarding;
-- [ ] query at least one generated concept or guardrail;
-- [ ] verify returned claims can be traced to the generated manifest/source material;
-- [ ] regenerate without graph/source changes and verify deterministic/controlled diff behavior;
-- [ ] change one source fact, refresh Menhir, regenerate, and verify only the expected Beacon portion changes.
+- [ ] install Menhir from the published package and verify the exact Archolith Graphiti wheel/version/hash;
+- [ ] verify the upstream `graphiti-core` distribution is absent;
+- [ ] start Menhir with the fork hooks wired, ingest one fixture episode, and recall it;
+- [ ] build and start the release container from the same locked dependency set;
+- [ ] verify both install paths expose the same fork version and hook behavior.
 
 ### E2E-7 — restart and interrupted work
 
@@ -298,7 +288,7 @@ Use the same indexed fixture repository.
 - [ ] oversized memory/diff is refused/truncated exactly as documented;
 - [ ] partial/capped code scan does not authorize destructive pruning of omitted files;
 - [ ] stale or unknown code coverage cannot produce an unqualified “safe” result;
-- [ ] invalid Beacon generation inputs fail without clobbering an existing manifest;
+- [ ] an incompatible or missing Graphiti fork fails explicitly during startup or install;
 - [ ] provider failure does not silently pass the E2E.
 
 **Gate C:** all required happy paths pass; every negative test either passes or creates a release-blocking issue with a reproduced failure.
@@ -312,6 +302,7 @@ Use the same indexed fixture repository.
 - [ ] Ensure working tree is clean.
 - [ ] Record exact Menhir commit as `MVP_RC_COMMIT`.
 - [ ] Record exact package artifact/wheel identity/hash.
+- [ ] Record the Archolith Graphiti fork wheel identity/hash and verify that the Menhir lock resolves it from the registry.
 - [ ] Freeze relevant configuration/defaults.
 - [ ] No unrelated merges until canonical evidence is complete.
 
@@ -319,7 +310,7 @@ Use the same indexed fixture repository.
 
 ## 8. Phase E — canonical full Oracle LongMemEval campaign
 
-LongMemEval and product E2Es answer different questions. LME measures memory quality; it does not certify artifacts, TODOs, code ingest, Beacon generation, installation, or restart behavior.
+LongMemEval and product E2Es answer different questions. LME measures memory quality; it does not certify artifacts, TODOs, code ingest, fork packaging, installation, or restart behavior.
 
 ### E1. Fresh build
 
@@ -374,7 +365,7 @@ Re-run the complete E2E campaign from Phase C using the exact RC commit/package 
 - [ ] E2E-3 code ingest/structure PASS;
 - [ ] E2E-4 WorkArtifacts PASS;
 - [ ] E2E-5 TODOs PASS;
-- [ ] E2E-6 Beacon generation/Beacon consumption PASS;
+- [ ] E2E-6 Graphiti fork cold-install compatibility PASS;
 - [ ] E2E-7 restart/interruption PASS;
 - [ ] E2E-8 isolation/adversarial PASS.
 
@@ -391,7 +382,7 @@ Re-run the complete E2E campaign from Phase C using the exact RC commit/package 
 - [ ] Post-MVP items remain open without delaying release.
 - [ ] Update evaluation docs with new canonical benchmark evidence.
 - [ ] Update MVP/README install and stdio instructions to match the tested path exactly.
-- [ ] Document Beacon generation command, overwrite/update policy, and validation workflow.
+- [ ] Document the Graphiti fork distribution, version, and supported upgrade path.
 - [ ] Record exact release commit and evidence links.
 - [ ] Transition this plan to IMPLEMENTED only after all mandatory gates pass.
 
@@ -430,7 +421,7 @@ These are starting hypotheses only; the audit/E2Es own the final ruling.
 - [ ] WorkArtifacts
 - [ ] local code ingest / structure
 - [ ] TODOs
-- [ ] Beacon generation
+- [ ] Archolith Graphiti fork dependency
 - [ ] explicit post-MVP exclusions documented
 
 ### Quality
@@ -441,7 +432,7 @@ These are starting hypotheses only; the audit/E2Es own the final ruling.
 - [ ] stdio MCP E2E green
 - [ ] restart/interruption E2E green
 - [ ] isolation/adversarial E2E green
-- [ ] Beacon generation validates and serves through Beacon MCP
+- [ ] Graphiti fork installs from a hashed public wheel on supported paths
 
 ### Benchmark
 - [ ] fresh graph
@@ -458,7 +449,7 @@ These are starting hypotheses only; the audit/E2Es own the final ruling.
 - [ ] issue sweep complete
 - [ ] limitations documented
 - [ ] README/install path matches tested path
-- [ ] Beacon generation docs match tested path
+- [ ] Graphiti fork install docs match tested path
 - [ ] evidence artifacts linked
 - [ ] release tag/version cut only after all mandatory gates pass
 
@@ -466,7 +457,7 @@ These are starting hypotheses only; the audit/E2Es own the final ruling.
 
 Stop and return to a new RC cycle if any of the following occurs:
 
-- a supported operation can silently lose/cross-link user memory, code structure, artifact identity, TODO state, or generated Beacon content;
+- a supported operation can silently lose/cross-link user memory, code structure, artifact identity, or TODO state;
 - namespaces cross-contaminate;
 - a fresh install cannot reach the supported stdio surface using documented steps;
 - restart produces false success or unrecoverable corruption on an ordinary supported flow;

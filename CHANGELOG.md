@@ -1,3 +1,11 @@
+## 2026-09-27 - Prepare public Graphiti fork package for Menhir MVP
+
+- Require `archolith-graphiti-core==0.30.2.post1` so normal installs can use a
+  public wheel rather than a VCS checkout while retaining the native fork hooks.
+- Simplify the release image to consume the locked, hashed fork wheel directly.
+- Make the fork package and its cold-install compatibility an explicit MVP gate;
+  defer Beacon generation and consumption from this release.
+
 ## 2026-09-26 - Reconcile native Graphiti fork with current Menhir
 
 - `pyproject.toml`, `uv.lock`: pin the public Archolith Graphiti 0.30.2 maintenance
