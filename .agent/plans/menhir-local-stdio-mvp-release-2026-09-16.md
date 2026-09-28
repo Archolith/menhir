@@ -100,16 +100,63 @@ This plan must produce separate durable artifacts rather than hiding results in 
 
 ## 4. Phase A — scope freeze and preflight
 
+### Approved MVP platform and candidate configuration (2026-09-27)
+
+The owner approved this supported-path decision after the default stdio E2E pack
+passed on Windows and Ubuntu. It defines the candidate contract; the exact RC
+commit, installed dependency set, environment values, and benchmark graph are
+frozen later under Gate D. Neither platform preflight is a frozen-RC run.
+
+- **Platforms:** Windows 11 AMD64 and Ubuntu Linux AMD64, with Python 3.12 or
+  newer as required by the package. The measured paths use Python 3.12.10 on
+  Windows and Python 3.12 in Ubuntu CI; other Python versions and OS variants
+  have not received this MVP E2E acceptance.
+- **Agent interface and topology:** one local operator uses MCP stdio. Its
+  bridge calls one long-lived Menhir backend over loopback HTTP; the backend
+  uses Neo4j 5 with APOC. The bundled Docker Compose graph is an optional
+  way to start Neo4j locally, not a second agent-facing interface.
+- **Normal provider defaults:** chat and Graphiti extraction default to
+  `local`; Graphiti embedding inherits that provider when unset. The local
+  endpoint defaults to `http://127.0.0.1:8081/v1` and the chat model name to
+  `qwen3.5-35b-a3b`. The local embedding model defaults to an empty string:
+  the operator must configure a compatible model and live endpoint. The
+  `local` provider denotes an OpenAI-compatible endpoint and can point to a
+  hosted gateway; it does not promise local inference. An explicit `openai`
+  provider selection remains available.
+- **Canonical benchmark configuration:** separate from the normal install,
+  the planned Oracle path uses OpenAI `gpt-4o-mini` for extraction,
+  `text-embedding-3-small` for embeddings, `gpt-4o` for answers, and
+  `gpt-4o-mini` for judging, with adaptive segmentation. The five-item
+  preflight and canonical quality run must verify and record their actual
+  model and provider settings before they count as evidence.
+- **Dependency identity:** `archolith-graphiti-core==0.30.2.post1` from PyPI,
+  with locked wheel SHA-256
+  `a748f98e0b09d64ab1eb29bd3449f52b552250a31663e86c4d99dc51ddf991f0`.
+  The same environment must not install upstream `graphiti-core`.
+  `archolith-mcp-framework==0.2.0` and `archolith-oauth==0.3.1` remain the
+  direct package pins; the RC records the complete resolved set.
+- **Feature and product limits:** scalar-state, event-history, frontier
+  retrieval/brief, and canonical-self activation flags remain at their
+  shipped default-off settings; no research lane is promoted for MVP.
+  Project rename, Beacon integration, and remote MCP remain outside this
+  release contract.
+
+The Windows local run on merged `4750b1c8` and the Ubuntu [post-merge CI
+run](https://github.com/Archolith/menhir/actions/runs/36368518264) each reported
+11 default stdio E2E passes and one declared release-container skip. The
+candidate-wheel fork path passed; release-container validation, the five-item
+Oracle preflight, exact RC configuration, and frozen-RC evidence remain open.
+
 ### A1. Freeze supported behavior
 
-- [ ] Confirm the required capability list in §1.
-- [ ] Confirm stdio is the only supported agent-facing transport for MVP.
-- [ ] Confirm the local backend/Neo4j topology used by stdio.
-- [ ] Confirm the supported primary OS/platform set for the MVP package.
-- [ ] Confirm provider/model defaults used for canonical ingest.
-- [ ] Confirm which currently default-off features remain off.
-- [ ] Confirm project rename is unsupported unless explicitly promoted after E2E proof.
-- [ ] Confirm the exact Archolith Graphiti distribution/version and public wheel hash used by every supported install path.
+- [x] Confirm the required capability list in §1.
+- [x] Confirm stdio is the only supported agent-facing transport for MVP.
+- [x] Confirm the local backend/Neo4j topology used by stdio.
+- [x] Confirm the supported primary OS/platform set for the MVP package.
+- [x] Confirm provider/model defaults and planned canonical benchmark models; verify actual settings in benchmark preflight.
+- [x] Confirm which currently default-off features remain off.
+- [x] Confirm project rename is unsupported unless explicitly promoted after E2E proof.
+- [x] Confirm the exact Archolith Graphiti distribution/version and public wheel hash for supported candidate-wheel installs; release-container validation remains open.
 
 ### A2. Reconcile current work in flight
 

@@ -1,3 +1,14 @@
+## 2026-09-25 - decay age pre-filters follow eligible policy thresholds (#86)
+
+- `src/menhir/services/lifecycle_models.py`: derive compression and deletion age minima
+  from non-exempt policies at startup, preventing future lower thresholds from being skipped.
+  Current eligible-policy minima remain 7 and 30 days; zero-day non-exempt policies participate.
+- `src/menhir/services/lifecycle_decay.py`: replace the obsolete pre-LLM compression docstring
+  with the helper's actual truncation behavior and the automatic sweep's LLM path.
+- `tests/test_decay_logic.py`: verify both real sweep requests in fresh processes with shorter,
+  zero-day, and exempt policies, without mutating shared test module imports.
+- `.agent/memory-policy.md`: document the pre-filter rule, exemption choice, and restart requirement.
+
 ## 2026-09-24 - MCP clients are told when to use memory, not just what Menhir is
 
 Every MCP client receives the server instructions, whether or not a repository pastes the
