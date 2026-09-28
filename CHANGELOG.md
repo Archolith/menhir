@@ -1,3 +1,11 @@
+## 2026-09-28 - Harden post-release audit boundaries before MVP RC
+
+- `.github/workflows/tests.yml`, `tests/e2e/conftest.py`, `tests/e2e/_harness/ci_evidence_gate.py`, `tests/test_e2e_ci_gate.py`: fail wheel-build errors and reject missing, skipped, or unproven installed-wheel acceptance in CI.
+- `src/menhir/services/beacon_compat.py`, `tests/test_beacon_compat.py`: isolate Beacon subprocess imports from repository-controlled modules while preserving the installed Beacon contract.
+- `src/menhir/snapshot/upload_client.py`, `src/menhir/cli/sync.py`, `tests/snapshot/test_upload_client_offline.py`, `tests/snapshot/test_upload_security.py`: refuse unsafe operator-key transports and redirects before disclosure.
+- `src/menhir/infrastructure/graphiti_llm_adapter.py`, `tests/test_graphiti_combined_extraction_patch.py`, `tests/test_graphiti_fork_contract.py`, `docs/post-install.md`: restore JSON-object relationship aliases and explain mixed Graphiti installation repair.
+- `.agent/plans/menhir-post-v023-audit-remediation-2026-09-28.md`, `.agent/plans/README.md`, `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: keep the follow-up work and RC gate explicit.
+
 ## 2026-09-28 - Close the local-stdio MVP Gate B audit
 
 - `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`: close Gate B against merged main after exact-commit CI, Ubuntu stdio criteria, Windows strict E2E, and no-publish Graphiti image receipts; keep RC freeze and final release separate.
@@ -105,18 +113,3 @@
 - `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`: record the
   supported-path evidence map and the outstanding packaged-Graphiti E2E and
   release-container validation blockers without claiming Gate B closure.
-
-## 2026-09-27 - Prepare public Graphiti fork package for Menhir MVP
-
-- Require `archolith-graphiti-core==0.30.2.post1` so normal installs can use a
-  public wheel rather than a VCS checkout while retaining the native fork hooks.
-- Lock the published PyPI wheel and source hashes from fork tag `v0.30.2.post1`;
-  verify a fresh Menhir wheel install resolves the public fork without upstream Graphiti.
-- Simplify the release image to consume the locked, hashed fork wheel directly.
-- Make the fork package and its cold-install compatibility an explicit MVP gate;
-  defer Beacon generation and consumption from this release.
-- `graphiti_client.py`, `graphiti_llm_adapter.py`: retain DeepSeek's JSON-object
-  fallback with its schema prompt, and accept the fork's typed-attribute extraction
-  flag while preserving its preamble across retries.
-- `tests/test_graphiti_client.py`: cover provider requests and the fork's typed
-  node-attribute path through Menhir's adapter.
