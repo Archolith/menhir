@@ -10,6 +10,8 @@ from types import ModuleType
 
 import pytest
 from pydantic import BaseModel, Field
+from graphiti_core.nodes import EntityNode
+from graphiti_core.utils.maintenance.node_operations import _extract_entity_attributes
 
 from menhir.config import MemorySettings
 from menhir.infrastructure.graphiti_client import GraphitiClient
@@ -171,6 +173,7 @@ class _DummyChatCompletions:
         temperature: float,
         max_tokens: int,
         response_format: object,
+        extra_body: object | None = None,
     ) -> _DummyChatResponse:
         self.calls.append(
             {
@@ -179,6 +182,7 @@ class _DummyChatCompletions:
                 "temperature": temperature,
                 "max_tokens": max_tokens,
                 "response_format": response_format,
+                "extra_body": extra_body,
             }
         )
         return self.response
@@ -318,6 +322,72 @@ def test_graphiti_client_pins_llm_temperature_to_zero(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("base_url", "model", "expected_mode"),
+    [
+        ("https://api.deepseek.com/v1", "chat-model", "json_object"),
+        ("https://llm.example/v1", "deepseek-v4-flash", "json_object"),
+        ("https://llm.example/v1", "chat-model", "json_schema"),
+    ],
+)
+async def test_graphiti_client_uses_compatible_structured_output(
+    monkeypatch: pytest.MonkeyPatch,
+    base_url: str,
+    model: str,
+    expected_mode: str,
+) -> None:
+    """The configured endpoint/model controls the actual fork request format."""
+    monkeypatch.setattr(graphiti_client_module, "_GRAPHITI_IMPORT_ERROR", None)
+    monkeypatch.setattr(graphiti_client_module, "OpenAIEmbedderConfig", _DummyOpenAIEmbedderConfig)
+    monkeypatch.setattr(graphiti_client_module, "OpenAIEmbedder", _DummyOpenAIEmbedder)
+    monkeypatch.setattr(graphiti_client_module, "OpenAIRerankerClient", _DummyOpenAIRerankerClient)
+    monkeypatch.setattr(graphiti_client_module, "Neo4jDriver", _DummyNeo4jDriver)
+    monkeypatch.setattr(graphiti_client_module, "Graphiti", _DummyGraphiti)
+    chat_client = _DummyOpenAIChat(response=_DummyChatResponse(content='{"value": "ok"}'))
+    monkeypatch.setattr(
+        graphiti_client_module,
+        "build_async_openai_client",
+        lambda **_kwargs: type("Client", (), {"chat": chat_client})(),
+    )
+    settings = MemorySettings(
+        graphiti_provider="local",
+        neo4j_uri="bolt://db:7687",
+        neo4j_database="test",
+        neo4j_user="neo",
+        neo4j_password="secret",
+        local_llm_base_url=base_url,
+        local_llm_api_key="key",
+        local_llm_chat_model=model,
+        local_llm_embed_model="embed-model",
+    )
+
+    wrapper = GraphitiClient.from_settings(settings)
+
+    class ResponsePayload(BaseModel):
+        value: str
+
+    response = await wrapper.client.llm_client.generate_response(
+        [
+            _DummyOpenAIMessage(role="system", content="Extract a value."),
+            _DummyOpenAIMessage(role="user", content="hello"),
+        ],
+        response_model=ResponsePayload,
+    )
+
+    assert response == {"value": "ok"}
+    request = chat_client.completions.calls[0]
+    assert request["response_format"]["type"] == expected_mode
+    if expected_mode == "json_object":
+        assert "Respond with a JSON object in the following format" in request["messages"][-1]["content"]
+        assert '"value"' in request["messages"][-1]["content"]
+        assert request["extra_body"] == {"thinking": {"type": "disabled"}}
+    else:
+        assert "Respond with a JSON object in the following format" not in request["messages"][-1]["content"]
+        assert request["extra_body"] is None
+
+
+@pytest.mark.unit
 def test_graphiti_client_rejects_non_openai_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(graphiti_client_module, "_GRAPHITI_IMPORT_ERROR", None)
 
@@ -452,6 +522,54 @@ def _make_adapter_client(content: str) -> tuple[MenhirOpenAIGenericClient, _Dumm
     llm_client.temperature = 0.0
     llm_client.model = "chat-model"
     return llm_client, chat_client.completions
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_menhir_client_preserves_attribute_extraction_preamble_on_retry() -> None:
+    """Typed node/edge attribute calls use the fork's keyword-only contract."""
+    class ResponsePayload(BaseModel):
+        value: str
+
+    llm_client, completions = _make_adapter_client('{"value": "ok"}')
+    requests: list[dict[str, object]] = []
+
+    async def flaky_create(**kwargs: object) -> _DummyChatResponse:
+        requests.append(kwargs)
+        if len(requests) == 1:
+            return _DummyChatResponse(content="{broken")
+        return _DummyChatResponse(content='{"value": "ok"}')
+
+    completions.create = flaky_create  # type: ignore[method-assign]
+    response = await llm_client.generate_response(
+        [
+            _DummyOpenAIMessage(role="system", content="Extract attributes."),
+            _DummyOpenAIMessage(role="user", content="person: Ada"),
+        ],
+        response_model=ResponsePayload,
+        attribute_extraction=True,
+    )
+
+    assert response == {"value": "ok"}
+    assert len(requests) == 2
+    for request in requests:
+        assert "<<graphiti.attr_extraction.preamble.v1>>" in request["messages"][0]["content"]
+    assert "Retry 1/" in requests[1]["messages"][-1]["content"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_typed_node_attribute_extraction_uses_menhir_adapter() -> None:
+    class PersonAttributes(BaseModel):
+        favorite_food: str
+
+    llm_client, completions = _make_adapter_client('{"favorite_food": "sushi"}')
+    node = EntityNode(name="Ada", group_id="group", labels=["Entity", "Person"])
+
+    attributes = await _extract_entity_attributes(llm_client, node, None, None, PersonAttributes)
+
+    assert attributes == {"favorite_food": "sushi"}
+    assert "<<graphiti.attr_extraction.preamble.v1>>" in completions.calls[0]["messages"][0]["content"]
 
 
 @pytest.mark.unit

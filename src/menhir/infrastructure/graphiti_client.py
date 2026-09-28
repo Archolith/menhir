@@ -243,10 +243,13 @@ class GraphitiClient:
             # mode; the fork injects the response model's schema into the prompt
             # for those instead of relying on API-side enforcement.
             raw_llm_client = async_client
-            provider_kind = str(getattr(llm_provider.kind, "value", llm_provider.kind))
-            structured_output_mode = (
-                "json_object" if provider_kind == "deepseek" else "json_schema"
+            # DeepSeek is configured through the OpenAI-compatible `local` provider,
+            # so provider kind alone cannot identify its JSON-mode limitation.
+            is_deepseek = (
+                "deepseek" in (llama_base_url or "").lower()
+                or "deepseek" in llm_provider.chat_model.lower()
             )
+            structured_output_mode = "json_object" if is_deepseek else "json_schema"
             llm_client = MenhirOpenAIGenericClient(
                 config=LLMConfig(
                     api_key=llm_provider.api_key,

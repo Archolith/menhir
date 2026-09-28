@@ -16,6 +16,7 @@ Menhir-owned halves of the former ``_patch_graphiti_openai_generic_client``
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from time import monotonic
@@ -461,6 +462,8 @@ class MenhirOpenAIGenericClient(OpenAIGenericClient):
         model_size: Any = None,
         group_id: str | None = None,
         prompt_name: str | None = None,
+        *,
+        attribute_extraction: bool = False,
     ) -> dict[str, Any]:
         """Menhir's concise retry loop around the fork's single-shot request path.
 
@@ -471,6 +474,13 @@ class MenhirOpenAIGenericClient(OpenAIGenericClient):
         import openai as _openai
 
         from graphiti_core.llm_client.client import RateLimitError
+
+        self._apply_attribute_extraction_preamble(messages, attribute_extraction)
+        if response_model is not None and self.structured_output_mode == "json_object":
+            serialized_model = json.dumps(response_model.model_json_schema())
+            messages[-1].content += (
+                f"\n\nRespond with a JSON object in the following format:\n\n{serialized_model}"
+            )
 
         if max_tokens is None:
             max_tokens = self.max_tokens

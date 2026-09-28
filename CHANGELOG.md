@@ -7,6 +7,11 @@
 - Simplify the release image to consume the locked, hashed fork wheel directly.
 - Make the fork package and its cold-install compatibility an explicit MVP gate;
   defer Beacon generation and consumption from this release.
+- `graphiti_client.py`, `graphiti_llm_adapter.py`: retain DeepSeek's JSON-object
+  fallback with its schema prompt, and accept the fork's typed-attribute extraction
+  flag while preserving its preamble across retries.
+- `tests/test_graphiti_client.py`: cover provider requests and the fork's typed
+  node-attribute path through Menhir's adapter.
 
 ## 2026-09-26 - Reconcile native Graphiti fork with current Menhir
 
