@@ -348,10 +348,10 @@ Use the same clean environment and fixture repository as E2E-1.
 
 ## 7. Phase D — blocker fixes and RC freeze
 
-- [ ] Fix all Gate B/C blockers.
-- [ ] Re-run focused regression tests for every fix.
-- [ ] Re-run the complete pre-freeze E2E campaign.
-- [ ] Run the normal unit/integration/graph-backed suite and required CI checks.
+- [x] Fix all identified pre-freeze Gate B/C blockers; re-check on the named RC.
+- [x] Re-run focused regression tests for the Gate B fixes (including 23 disposable-graph structure/artifact/TODO tests).
+- [x] Re-run the complete pre-freeze E2E campaign (clean Windows 13/13, 71/71 criteria).
+- [x] Run the normal unit/integration/graph-backed suite and required CI checks (merged `0f8deac5`, four jobs PASS).
 - [ ] Ensure working tree is clean.
 - [ ] Record exact Menhir commit as `MVP_RC_COMMIT`.
 - [ ] Record exact package artifact/wheel identity/hash.
