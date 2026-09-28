@@ -19,6 +19,7 @@ import graphiti_core.graphiti as graphiti_module  # noqa: E402
 from graphiti_core.extraction_routing import ExtractionRoute  # noqa: E402
 from graphiti_core.extraction_routing import SingleEpisodeExtractionResult  # noqa: E402
 from graphiti_core.prompts.extract_nodes_and_edges import CombinedExtraction  # noqa: E402
+from graphiti_core.prompts.extract_nodes import ExtractedEntities  # noqa: E402
 from graphiti_core.prompts.models import Message  # noqa: E402
 
 import menhir.infrastructure.graphiti_extraction_policy as patches  # noqa: E402
@@ -151,6 +152,31 @@ async def test_json_object_adapter_preserves_typed_attribute_field_names() -> No
     )
 
     assert Attributes(**response) == Attributes(**payload)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("node", "expected_type_id"),
+    [({"name": "Neo4j", "entity": 3}, 3),
+     ({"name": "Neo4j", "type": "Technology"}, 0)],
+)
+async def test_json_object_adapter_leaves_native_node_aliases_to_fork(
+    node: dict, expected_type_id: int,
+) -> None:
+    adapter = MenhirOpenAIGenericClient.__new__(MenhirOpenAIGenericClient)
+    adapter.max_tokens = 128
+    adapter.structured_output_mode = "json_object"
+    payload = {"extracted_entities": [node]}
+    adapter._generate_response = AsyncMock(return_value=payload)
+
+    response = await adapter.generate_response(
+        [Message(role="system", content="Extract nodes."),
+         Message(role="user", content="Neo4j is a database.")],
+        response_model=ExtractedEntities,
+    )
+
+    assert response == payload
+    assert ExtractedEntities(**response).extracted_entities[0].entity_type_id == expected_type_id
 
 
 def test_no_graphiti_extraction_symbols_are_rebound() -> None:
