@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
+import stat
 import subprocess
 from contextlib import nullcontext
 from pathlib import Path
@@ -376,6 +378,7 @@ def test_scanners_read_the_sealed_archive_without_invoking_real_docker(
         assert f"docker-archive:/candidate/{archive.name}" in command
         assert kwargs == {"check": False, "capture_output": True}
     assert "none" in scanner_calls[0][0]
+    assert "/tmp:rw,nosuid,nodev,size=2147483648" in scanner_calls[0][0]
     assert len(volume_calls) == 2
     assert volume_calls[0][0][2] == "create"
     assert volume_calls[1][0][2] == "rm"
@@ -447,7 +450,9 @@ def test_build_emits_validation_schema_3_and_identity_schema_2(
 
     def fake_run(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
         if command[:3] == ["docker", "image", "save"]:
-            Path(command[command.index("--output") + 1]).write_bytes(b"sealed release image")
+            saved_archive = Path(command[command.index("--output") + 1])
+            saved_archive.write_bytes(b"sealed release image")
+            saved_archive.chmod(0o600)
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(MODULE, "git_commit", lambda _repo, **_kwargs: COMMIT)
@@ -469,6 +474,8 @@ def test_build_emits_validation_schema_3_and_identity_schema_2(
     )
 
     metadata = MODULE.create_validation_bundle(args)
+    if os.name == "posix":
+        assert stat.S_IMODE(archive.stat().st_mode) == 0o644
     identity = json.loads(identity_path.read_text(encoding="ascii"))
     assert metadata["schema"] == 3
     assert identity["schema"] == 2

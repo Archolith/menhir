@@ -285,6 +285,7 @@ jobs:
           SYFT_IMAGE: ${{ inputs.syft_image }}
           VERSION: ${{ inputs.version }}
         run: |
+          set +e
           python deploy/build_release_image.py \
             --mode build \
             --version "$VERSION" \
@@ -296,7 +297,70 @@ jobs:
             --expected-commit "$SOURCE_COMMIT" \
             --output release-image-metadata.json \
             --identity release-image-identity.json \
-            --image-archive release-image.tar
+            --image-archive release-image.tar 2>&1 | tee "$RUNNER_TEMP/release-image-build.log"
+          build_status=${PIPESTATUS[0]}
+          set -e
+          if (( build_status != 0 )); then
+            diagnostic=$(grep -F 'release image operation failed:' "$RUNNER_TEMP/release-image-build.log" | tail -n 1 || true)
+            diagnostic=${diagnostic:-$(tail -n 1 "$RUNNER_TEMP/release-image-build.log")}
+            diagnostic=${diagnostic//'%'/'%25'}
+            printf '::error title=Release image validation::%s\n' "$diagnostic"
+            exit "$build_status"
+          fi
+
+      - name: Verify native Graphiti fork inside candidate image
+        env:
+          IMAGE: ${{ inputs.image }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges=true \
+            --env MENHIR_STARTUP_SCOPE=full \
+            --env MENHIR_API_HOST=127.0.0.1 \
+            --entrypoint python --interactive "$IMAGE:$VERSION" - <<'PY' | tee release-image-evidence/graphiti-container.json
+          import asyncio
+          import importlib.metadata as metadata
+          import inspect
+          import json
+
+          from graphiti_core import Graphiti
+          from menhir.config.settings_model import MemorySettings
+          from menhir.infrastructure.graphiti_client import GraphitiClient
+          from menhir.infrastructure.graphiti_resolution_policy import menhir_resolution_hooks_installed
+
+          fork = metadata.distribution("archolith-graphiti-core")
+          try:
+              metadata.distribution("graphiti-core")
+          except metadata.PackageNotFoundError:
+              upstream_absent = True
+          else:
+              upstream_absent = False
+
+          async def hooks_wired():
+              client = GraphitiClient.from_settings(MemorySettings.from_env())
+              try:
+                  return menhir_resolution_hooks_installed(client.client)
+              finally:
+                  await client.close()
+
+          hook_parameters = {
+              "single_episode_extraction_hook", "identity_gate_hook",
+              "candidate_filter_hook", "node_pre_resolution_hook",
+          }
+          result = {
+              "fork_version": fork.version,
+              "upstream_absent": upstream_absent,
+              "native_hook_parameters": hook_parameters <= set(inspect.signature(Graphiti).parameters),
+              "menhir_hooks_wired": asyncio.run(hooks_wired()),
+          }
+          print(json.dumps(result, sort_keys=True))
+          assert result == {
+              "fork_version": "0.30.2.post1",
+              "upstream_absent": True,
+              "native_hook_parameters": True,
+              "menhir_hooks_wired": True,
+          }, result
+          PY
 
       - name: Bind sealed identity to validation outputs
         id: identity

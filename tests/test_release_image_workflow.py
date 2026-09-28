@@ -169,6 +169,14 @@ def test_validation_generates_and_uploads_structurally_checked_evidence() -> Non
     assert 'for field in ("matches", "ignoredMatches")' in BUILDER_TEXT
     assert 'if counts["Critical"]:' in BUILDER_TEXT
     assert '"image_archive_sha256": archive_sha256' in BUILDER_TEXT
+    assert validate.index("Verify native Graphiti fork inside candidate image") < validate.index(
+        "Upload sealed candidate and evidence"
+    )
+    assert "--network none --read-only --cap-drop ALL" in validate
+    assert 'metadata.distribution("archolith-graphiti-core")' in validate
+    assert 'metadata.distribution("graphiti-core")' in validate
+    assert "menhir_resolution_hooks_installed(client.client)" in validate
+    assert "release-image-evidence/graphiti-container.json" in validate
 
 
 def test_metadata_schema_versions_are_validation_3_identity_2_publication_2() -> None:
