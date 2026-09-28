@@ -45,8 +45,21 @@ def _create_pending_episode(graph: MemoryGraphAdapter, suffix: str) -> str:
 
 def _exhaust_transient_budget(graph: MemoryGraphAdapter, episode_uuid: str) -> None:
     """Drive a PENDING episode to the transient cap through the real refund protocol."""
-    for _ in range(TRANSIENT_RETRY_CAP):
-        assert graph.count_transient_requeue(episode_uuid)
+    for attempt in range(TRANSIENT_RETRY_CAP):
+        worker_id = f"transient-worker-{attempt}"
+        claimed = graph.claim_pending_episode(
+            episode_uuid,
+            max_attempts=3,
+            worker_id=worker_id,
+            lease_seconds=900,
+        )
+        assert claimed is not None
+        assert graph.mark_episode_pending(
+            episode_uuid,
+            worker_id=worker_id,
+            transient_requeue=True,
+            claim_started_at=claimed["processing_started_at"],
+        )
 
 
 def _episode_row(test_neo4j_repo, episode_uuid: str) -> dict:

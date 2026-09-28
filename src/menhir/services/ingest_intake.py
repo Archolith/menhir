@@ -49,6 +49,7 @@ from menhir.services.enrichment_steps import (
     try_reconcile_existing,
 )
 from menhir.services.ingest_gate import IngestGate
+from menhir.services.ingest_limits import validate_memory_payload
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,8 @@ class IngestIntakeMixin:
         Gate user-tier claims (source='user' or 'manual') using turn evidence grounding before
         persistence. If the claim is ungrounded, downgrade to agent_inference tier.
         """
+
+        validate_memory_payload(episode, diff)
 
         from menhir.domain.namespace import stamped_namespace
         from menhir.domain.bootstrap_scope import normalize_bootstrap_scope_for_flag

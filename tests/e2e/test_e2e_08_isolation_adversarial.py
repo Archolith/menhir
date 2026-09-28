@@ -97,7 +97,7 @@ EPISODE_ID = re.compile(r"episode_id[=:]\s*([0-9a-f-]{36})")
 TENANT_A = "The Northwind billing service charges customers monthly and retries failures twice."
 TENANT_B = "The Northwind billing service charges customers monthly and retries failures twice."
 
-#: MAX_DIFF_CHARS is 50_000 (services/enrichment_steps.py:183). Comfortably past it.
+#: MAX_DIFF_CHARS is 50_000 (services/ingest_limits.py). Comfortably past it.
 OVERSIZED_DIFF = "diff --git a/x b/x\n" + ("+padding line that is long enough to matter\n" * 4000)
 
 
@@ -323,7 +323,11 @@ async def test_e2e_08_isolation(
         # truncation that SAYS it truncated is fine. Silently storing a partial diff while
         # reporting an ordinary success is the failure: every later reader treats the
         # fragment as the whole change.
-        refused_outright = "Failed to store memory." in oversized or "too large" in oversized.lower()
+        refused_outright = (
+            "Failed to store memory." in oversized
+            or "too large" in oversized.lower()
+            or "Memory diff exceeds" in oversized
+        )
         accepted = "Queued." in oversized
         marked = False
         stored: list[dict] = []

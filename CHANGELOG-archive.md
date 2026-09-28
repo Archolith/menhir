@@ -1,3 +1,8 @@
+## 2026-09-27 - Start independent local-stdio MVP release audit
+
+- `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`: record the
+  supported-path evidence map and the outstanding packaged-Graphiti E2E and
+  release-container validation blockers without claiming Gate B closure.
 ## 2026-09-27 - Prepare public Graphiti fork package for Menhir MVP
 
 - Require `archolith-graphiti-core==0.30.2.post1` so normal installs can use a

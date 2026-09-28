@@ -474,10 +474,20 @@ class MemoryGraphAdapter:
         )
 
     def mark_episode_failed(
-        self, episode_uuid: str, error: str, *, worker_id: str | None = None
+        self,
+        episode_uuid: str,
+        error: str,
+        *,
+        worker_id: str | None = None,
+        transient_requeue: bool = False,
+        claim_started_at: object | None = None,
     ) -> bool:
         return self._episodes.mark_episode_failed(
-            episode_uuid, error, worker_id=worker_id
+            episode_uuid,
+            error,
+            worker_id=worker_id,
+            transient_requeue=transient_requeue,
+            claim_started_at=claim_started_at,
         )
 
     def mark_episode_pending(
@@ -486,16 +496,16 @@ class MemoryGraphAdapter:
         *,
         retry_after_s: float = 0.0,
         worker_id: str | None = None,
+        transient_requeue: bool = False,
+        claim_started_at: object | None = None,
     ) -> bool:
         return self._episodes.mark_episode_pending(
             episode_uuid,
             retry_after_s=retry_after_s,
             worker_id=worker_id,
+            transient_requeue=transient_requeue,
+            claim_started_at=claim_started_at,
         )
-
-    def count_transient_requeue(self, episode_uuid: str) -> bool:
-        """Refund one claim's attempt and bump the transient counter (#79/#70)."""
-        return self._episodes.count_transient_requeue(episode_uuid)
 
     def fail_transient_exhausted_pending_episodes(
         self, *, transient_max: int = TRANSIENT_RETRY_CAP
@@ -1206,11 +1216,27 @@ class MemoryGraphAdapter:
     ) -> list[dict[str, Any]]:
         return self._consolidation.list_conflict_pairs(status=status, limit=limit)
 
-    def bridge_edges_for_node(self, node_uuid: str) -> int:
-        return self._consolidation.bridge_edges_for_node(node_uuid)
+    def bridge_edges_for_node(
+        self,
+        node_uuid: str,
+        *,
+        namespace: str | None = None,
+    ) -> int:
+        return self._consolidation.bridge_edges_for_node(
+            node_uuid,
+            namespace=namespace,
+        )
 
-    def bridge_edges_for_nodes(self, node_uuids: list[str]) -> int:
-        return self._consolidation.bridge_edges_for_nodes(node_uuids)
+    def bridge_edges_for_nodes(
+        self,
+        node_uuids: list[str],
+        *,
+        namespace: str | None = None,
+    ) -> int:
+        return self._consolidation.bridge_edges_for_nodes(
+            node_uuids,
+            namespace=namespace,
+        )
 
     def resolve_conflict_group(
         self,
@@ -1221,6 +1247,7 @@ class MemoryGraphAdapter:
         remove_uuid: str | None = None,
         resolution_status: str = "resolved",
         allow_promoted_removal: bool = False,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         return self._consolidation.resolve_conflict_group(
             conflict_group_id,
@@ -1229,6 +1256,7 @@ class MemoryGraphAdapter:
             remove_uuid=remove_uuid,
             resolution_status=resolution_status,
             allow_promoted_removal=allow_promoted_removal,
+            namespace=namespace,
         )
 
     # -------------------------------------------------------------------------

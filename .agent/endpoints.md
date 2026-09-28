@@ -330,6 +330,7 @@ List grouped memory conflicts for operator review.
 Concept id: `mcp.tool.resolve_conflict`
 
 Resolve one conflict group using explicit operator intent.
+- Resolution, verification readback, and edge bridging stay within the caller's pinned namespace, including for a mixed legacy group.
 - **`group_id`** (str): Conflict group id.
 - **`action`** (str): One of `keep_both`, `replace`, or `discard_new`.
 - **`keep_uuid`** (str, optional): UUID to retain for `replace` / `discard_new`.

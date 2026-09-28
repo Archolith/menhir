@@ -310,7 +310,7 @@ Episode nodes are provenance anchors created by each ingestion call. Label: `Epi
 | `processing_llm_active_model` | string | Most recent active LLM model observed for this episode |
 | `processing_llm_active_endpoint` | string | Most recent active OpenAI-compatible endpoint observed for this episode |
 | `processing_heartbeat_at` | timestamp | Last worker heartbeat while the episode is being processed |
-| `processing_attempts` | int | Number of claim attempts made by enrichment workers |
+| `processing_attempts` | int | Claims that remain counted after claim-fenced transient refunds; transient requeues increment `transient_retries` in the same state transition |
 | `processing_owner` | string | Worker identity holding the current enrichment lease (`null` when not owned) |
 | `processing_lease_expires_at` | timestamp | Lease expiry timestamp for the current enrichment claim |
 | `processing_error` | string | Last terminal error when state is `FAILED` |

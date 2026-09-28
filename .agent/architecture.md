@@ -241,6 +241,7 @@ src/menhir/
 |   |- recall_pipeline.py  Candidate acquisition, scoring, enrichment, and result assembly
 |   |- ingest_service.py  Public IngestService dataclass and composition facade
 |   |- ingest_queue.py / ingest_worker.py / ingest_intake.py  Queue lifecycle, enrichment workers, and intake operations
+|   |- ingest_limits.py  Shared memory text and diff size bounds at write entry points
 |   |- lifecycle_service.py  Public LifecycleService dataclass and composition facade
 |   |- lifecycle_consolidation.py / lifecycle_decay.py / lifecycle_conflicts.py  Focused lifecycle workflows
 |- mcp/               FastMCP server (43 tools, 9 resources, SQLite telemetry, structured failure logs, deferred enrichment, scheduler)

@@ -6,6 +6,7 @@ import os
 import shutil
 import tempfile
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -309,6 +310,7 @@ class StubMemoryGraphAdapter:
     adjacency_calls: list[dict[str, object]] = field(default_factory=list)
     temporal_fact_rows: list[dict[str, object]] = field(default_factory=list)
     touch_count: int = 0
+    claim_sequence: int = 0
     pending_episode_rows: dict[str, dict[str, object]] = field(default_factory=dict)
     edge_counts_synced: int = 0
     sync_edge_counts_calls: int = 0
@@ -656,6 +658,8 @@ class StubMemoryGraphAdapter:
         row["processing_llm_active_kind"] = None
         row["processing_llm_active_model"] = None
         row["processing_llm_active_endpoint"] = None
+        self.claim_sequence += 1
+        row["processing_started_at"] = f"claim-{self.claim_sequence}"
         row["processing_attempts"] = attempts + 1
         row["processing_owner"] = worker_id
         row["processing_lease_expires_at"] = lease_seconds
@@ -700,15 +704,34 @@ class StubMemoryGraphAdapter:
         row["enriched_edges_touched"] = edges_touched
         return True
 
-    def mark_episode_failed(self, episode_uuid: str, error: str, *, worker_id: str | None = None) -> bool:
+    def mark_episode_failed(
+        self,
+        episode_uuid: str,
+        error: str,
+        *,
+        worker_id: str | None = None,
+        transient_requeue: bool = False,
+        claim_started_at: object | None = None,
+    ) -> bool:
         row = self.pending_episode_rows.get(episode_uuid)
         if row is None:
+            return False
+        if transient_requeue and (
+            worker_id is None
+            or claim_started_at is None
+            or row.get("processing_started_at") != claim_started_at
+        ):
             return False
         if worker_id is not None and (
             row.get("processing_state") != ProcessingState.ENRICHING
             or row.get("processing_owner") != worker_id
         ):
             return False
+        if transient_requeue:
+            row["transient_retries"] = int(row.get("transient_retries") or 0) + 1
+            row["processing_attempts"] = max(
+                int(row.get("processing_attempts") or 0) - 1, 0
+            )
         row["processing_state"] = ProcessingState.FAILED
         row["processing_stage"] = "failed"
         row["processing_substage"] = "failed"
@@ -836,15 +859,6 @@ class StubMemoryGraphAdapter:
             failed += 1
         return failed
 
-    def count_transient_requeue(self, episode_uuid: str) -> bool:
-        """Refund one claim's attempt and bump the transient counter (#79/#70)."""
-        row = self.pending_episode_rows.get(episode_uuid)
-        if row is None:
-            return False
-        row["transient_retries"] = int(row.get("transient_retries") or 0) + 1
-        row["processing_attempts"] = max(int(row.get("processing_attempts") or 0) - 1, 0)
-        return True
-
     def fail_transient_exhausted_pending_episodes(self, *, transient_max: int = 20) -> int:
         failed = 0
         for row in self.pending_episode_rows.values():
@@ -901,16 +915,29 @@ class StubMemoryGraphAdapter:
         *,
         retry_after_s: float = 0.0,
         worker_id: str | None = None,
+        transient_requeue: bool = False,
+        claim_started_at: object | None = None,
     ) -> bool:
         """Release back to PENDING without incrementing attempts (circuit breaker requeue)."""
         row = self.pending_episode_rows.get(episode_uuid)
         if row is None:
+            return False
+        if transient_requeue and (
+            worker_id is None
+            or claim_started_at is None
+            or row.get("processing_started_at") != claim_started_at
+        ):
             return False
         if worker_id is not None and (
             row.get("processing_state") != ProcessingState.ENRICHING
             or row.get("processing_owner") != worker_id
         ):
             return False
+        if transient_requeue:
+            row["transient_retries"] = int(row.get("transient_retries") or 0) + 1
+            row["processing_attempts"] = max(
+                int(row.get("processing_attempts") or 0) - 1, 0
+            )
         row["processing_state"] = ProcessingState.PENDING
         row["processing_stage"] = "queued"
         row["processing_substage"] = "circuit_breaker_requeue"
@@ -1387,6 +1414,7 @@ class StubMemoryGraphAdapter:
         remove_uuid: str | None = None,
         resolution_status: str = "resolved",
         allow_promoted_removal: bool = False,
+        namespace: str | None = None,
     ) -> dict[str, object]:
         _VALID_ACTIONS = {"keep_both", "replace", "discard_new"}
         if action not in _VALID_ACTIONS:
@@ -1488,10 +1516,20 @@ class StubMemoryGraphAdapter:
             requeued += 1
         return requeued
 
-    def bridge_edges_for_node(self, node_uuid: str) -> int:
+    def bridge_edges_for_node(
+        self,
+        node_uuid: str,
+        *,
+        namespace: str | None = None,
+    ) -> int:
         return 1
 
-    def bridge_edges_for_nodes(self, node_uuids: list[str]) -> int:
+    def bridge_edges_for_nodes(
+        self,
+        node_uuids: list[str],
+        *,
+        namespace: str | None = None,
+    ) -> int:
         return len(node_uuids)
 
     def count_pending_episodes(self, session_id: str | None = None) -> int:
