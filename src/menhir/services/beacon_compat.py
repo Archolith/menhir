@@ -89,7 +89,7 @@ def child_environment(parent: Mapping[str, str] | None = None) -> dict[str, str]
 def _run(beacon_python: str, args: list[str], *, cwd: Path | None, timeout: int) -> str:
     try:
         completed = subprocess.run(  # nosec B603 - fixed argv, no shell
-            [beacon_python, *args],
+            [beacon_python, "-I", *args],
             capture_output=True,
             check=False,
             timeout=timeout,
