@@ -4,6 +4,29 @@
 runtime dependencies, an MCP client connection, and whichever optional agent integrations the operator
 has explicitly chosen.
 
+If upgrading from Menhir v0.2.3, install into a fresh virtual environment. That version may have
+installed upstream `graphiti-core`; current Menhir uses `archolith-graphiti-core==0.30.2.post1`.
+Both distributions write the `graphiti_core` package, so an in-place upgrade or later upstream
+reinstall can leave mixed files even when `pip check` reports no conflict. From the repository
+checkout, a fresh installation is:
+
+```bash
+python -m venv .venv
+.venv/bin/python -m pip install .
+```
+
+On Windows, use `.\.venv\Scripts\python.exe -m pip install .` for the second command. To repair an
+existing virtual environment instead, remove both distributions before reinstalling Menhir:
+
+```bash
+python -m pip uninstall -y graphiti-core archolith-graphiti-core
+python -m pip install .
+```
+
+Use that environment's Python for the repair commands. If import fails because
+`GraphitiRequestTooLargeError` is missing, the installed `graphiti_core` files do not match the
+required fork.
+
 ## 1. Finish the safe checkout setup
 
 Run this from the cloned repository:

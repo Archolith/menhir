@@ -23,7 +23,18 @@ from time import monotonic
 from typing import Any
 from urllib.parse import urlsplit
 
-from graphiti_core.errors import GraphitiRequestTooLargeError
+try:
+    from graphiti_core.errors import GraphitiRequestTooLargeError
+except ImportError as exc:
+    if "cannot import name 'GraphitiRequestTooLargeError'" not in str(exc):
+        raise
+    raise ImportError(
+        "graphiti_core.errors is missing GraphitiRequestTooLargeError. Menhir requires "
+        "archolith-graphiti-core==0.30.2.post1; an older graphiti-core install may have "
+        "overwritten the fork's shared graphiti_core files. Use a fresh virtual environment "
+        "or uninstall both graphiti-core distributions before reinstalling Menhir "
+        "(see docs/post-install.md)."
+    ) from exc
 from graphiti_core.llm_client.client import get_extraction_language_instruction
 from graphiti_core.llm_client.config import LLMConfig
 from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
@@ -35,6 +46,7 @@ from graphiti_core.prompts.models import Message
 from menhir.infrastructure.graphiti_extraction_policy import get_extraction_receipt
 from menhir.infrastructure.graphiti_helpers import (
     _build_graphiti_failure_details,
+    _normalize_graphiti_json_payload,
     _raw_preview,
 )
 
@@ -493,7 +505,7 @@ class MenhirOpenAIGenericClient(OpenAIGenericClient):
 
         while retry_count <= _LOCAL_MODEL_MAX_RETRIES:
             try:
-                return await self._generate_response(
+                response = await self._generate_response(
                     messages,
                     response_model,
                     max_tokens=effective_max_tokens,
@@ -501,6 +513,9 @@ class MenhirOpenAIGenericClient(OpenAIGenericClient):
                     group_id=group_id,
                     prompt_name=prompt_name,
                 )
+                if getattr(self, "structured_output_mode", "json_schema") == "json_object":
+                    return _normalize_graphiti_json_payload(response)
+                return response
             except RateLimitError:
                 raise
             except GraphitiRequestTooLargeError:
