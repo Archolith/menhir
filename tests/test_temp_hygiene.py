@@ -95,3 +95,9 @@ def test_readonly_scratch_file_is_removed(tmp_path: Path) -> None:
     remove_test_dir(scratch)
 
     assert not scratch.exists()
+
+
+def test_pytest_scratch_is_outside_the_checkout(tmp_path: Path) -> None:
+    """A tmp_path must model a non-repository directory when tests need one."""
+
+    assert not tmp_path.resolve().is_relative_to(TESTS_ROOT.parent.resolve())

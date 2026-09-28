@@ -3,10 +3,25 @@
 from __future__ import annotations
 
 import gc
+import logging
 import os
 import shutil
 import stat
 from pathlib import Path
+
+
+def close_test_log_handlers(root: Path) -> None:
+    """Release Menhir CLI file handlers created inside this pytest run."""
+
+    root = root.resolve()
+    for name in ("", "uvicorn", "uvicorn.error", "uvicorn.access", "menhir"):
+        logger = logging.getLogger(name)
+        for handler in tuple(logger.handlers):
+            if isinstance(handler, logging.FileHandler) and Path(
+                handler.baseFilename
+            ).resolve().is_relative_to(root):
+                logger.removeHandler(handler)
+                handler.close()
 
 
 def remove_test_dir(path: Path) -> None:

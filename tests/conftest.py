@@ -10,14 +10,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests._temp_cleanup import remove_test_dir
+from tests._temp_cleanup import close_test_log_handlers, remove_test_dir
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
 from menhir.infrastructure import LLMAdapter, PhaseOneSchemaResult, PolicyStampResult
 from menhir.infrastructure import operation_owner as _operation_owner
 from menhir.infrastructure.memory_graph_adapter import is_context_window_error_text
 
 
-_LOCAL_PYTEST_TEMP = Path(__file__).resolve().parents[1] / ".agent" / "test_tmp"
+# Several tests need tmp_path to be outside the Git checkout so they can model
+# a directory that is not a repository. Keep the old location without changing
+# process-wide tempfile settings or replacing pytest's built-in tmp_path.
+_LOCAL_PYTEST_TEMP = Path.home() / ".codex" / "memories" / "pytest_tmp"
 _LOCAL_PYTEST_TEMP.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("PYTEST_DEBUG_TEMPROOT", str(_LOCAL_PYTEST_TEMP))
 
@@ -27,7 +30,9 @@ def _cleanup_pytest_temp_session(tmp_path_factory: pytest.TempPathFactory):
     """Remove this run's pytest scratch tree and report failed cleanup."""
 
     yield
-    remove_test_dir(tmp_path_factory.getbasetemp())
+    basetemp = tmp_path_factory.getbasetemp()
+    close_test_log_handlers(basetemp)
+    remove_test_dir(basetemp)
 
 
 def pytest_configure(config: pytest.Config) -> None:
