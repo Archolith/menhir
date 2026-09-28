@@ -46,14 +46,13 @@ class _FakeResponse:
 
 
 def _reply(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
-    """Make the client's `urlopen` return `raw` as a 200 body.
+    """Make the client's redirect-denying transport return `raw` as a 200 body.
 
-    Patched at `urlopen` rather than at a seam on the class, because `_call` opens the URL
-    directly -- there is no injection point. That is worth noting: the client is testable here only
-    because `urllib` is patchable, and a seam would be better if this file grows.
+    The real opener blocks redirects before it can forward the operator bearer key.
+    These malformed-response tests replace only that transport seam.
     """
     monkeypatch.setattr(
-        "menhir.snapshot.upload_client.urllib.request.urlopen",
+        "menhir.snapshot.upload_client._open_no_redirect",
         lambda _request, timeout=None: _FakeResponse(raw),
     )
 
