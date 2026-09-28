@@ -39,6 +39,9 @@ __all__ = [
     "StaleIdentityClaim",
     "FenceHandle",
     "IdentityClaim",
+    "StaleStructureScan",
+    "issue_structure_scan_generation",
+    "lock_structure_project",
     "admit_structure_writer",
     "release_structure_writer",
     "raise_fence",
@@ -69,6 +72,10 @@ class StructureWritesFrozen(RuntimeError):
 
 class StaleIdentityClaim(RuntimeError):
     """The identity a scan settled under is no longer the active binding for its directory."""
+
+
+class StaleStructureScan(RuntimeError):
+    """A newer scan was issued before this captured scan could publish."""
 
 
 @dataclass(frozen=True)
@@ -193,6 +200,65 @@ def admit_structure_writer(
         f"describes a directory this identity no longer owns, and writing it would carry the "
         f"per-project stale prune into another project's silo."
     )
+
+
+def issue_structure_scan_generation(neo4j: Any, claim: IdentityClaim) -> int:
+    """Mint a monotonic project token before traversal under the migration/identity fence."""
+    handle = admit_structure_writer(neo4j, label="begin structure scan", claim=claim)
+    try:
+        rows = neo4j.execute(
+            """
+            MATCH (p:ProjectIdentity {project_id: $project_id})
+            SET p.last_scan_probe = timestamp()
+            WITH p
+            WHERE coalesce(p.state, 'bound') = 'bound'
+              AND p.bound_host = $host AND p.root_key = $root_key
+              AND coalesce(p.claim_generation, 0) = $identity_generation
+            SET p.structure_scan_generation =
+                coalesce(p.structure_scan_generation, 0) + 1
+            RETURN p.structure_scan_generation AS generation
+            """,
+            {"project_id": claim.project_id, "host": claim.host,
+             "root_key": claim.root_key, "identity_generation": claim.generation},
+        )
+        if not rows:
+            raise StaleIdentityClaim("Project identity changed before the structure scan began")
+        return int(rows[0]["generation"])
+    finally:
+        release_structure_writer(neo4j, handle)
+
+
+def lock_structure_project(
+    tx: Any, claim: IdentityClaim, *, scan_generation: int | None = None,
+) -> None:
+    """Lock identity and validate a scan inside the transaction that performs every write.
+
+    Document writes pass no generation but still take the same project lock, so their entity
+    mutation cannot interleave with a structural scan publication.
+    """
+    if scan_generation is not None and scan_generation < 1:
+        raise StaleStructureScan("Structure scan generation must be positive")
+    rows = tx.execute(
+        """
+        MATCH (p:ProjectIdentity {project_id: $project_id})
+        SET p.last_publication_probe = timestamp()
+        WITH p
+        WHERE coalesce(p.state, 'bound') = 'bound'
+          AND p.bound_host = $host AND p.root_key = $root_key
+          AND coalesce(p.claim_generation, 0) = $identity_generation
+          AND ($scan_generation IS NULL OR
+               p.structure_scan_generation = $scan_generation)
+        RETURN p.project_id AS project_id
+        """,
+        {"project_id": claim.project_id, "host": claim.host,
+         "root_key": claim.root_key, "identity_generation": claim.generation,
+         "scan_generation": scan_generation},
+    )
+    if not rows:
+        raise StaleStructureScan(
+            f"Refusing stale structure publication for {claim.project_id}: identity or scan "
+            "generation changed. Re-scan before writing."
+        )
 
 
 def writers_holding_identities(neo4j: Any, project_ids: list[str]) -> list[dict[str, Any]]:

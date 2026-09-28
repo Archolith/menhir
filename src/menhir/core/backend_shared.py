@@ -124,6 +124,11 @@ def _project_scan_from_dict(payload: dict[str, Any]) -> ProjectScanResult:
             if payload.get("identity_generation") is not None
             else None
         ),
+        scan_generation=(
+            int(payload["scan_generation"])
+            if payload.get("scan_generation") is not None
+            else None
+        ),
         # Coverage counts must survive this boundary or `partial_index` is silently lost on
         # the remote path and consumers fall back to reporting absence as fact.
         # Beacon evidence binding: must cross the upload boundary or remote ingests store none.

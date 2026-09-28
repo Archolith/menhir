@@ -1,3 +1,34 @@
+## 2026-09-28 - Close Gate B structure, artifact, and TODO correctness gaps
+
+- `src/menhir/infrastructure/project_scanner.py`: refuse unreadable traversal, stat, and source reads before publication; bump the scanner fingerprint schema.
+- `src/menhir/infrastructure/structure_write_fence.py`: issue graph-backed scan generations and lock each project during transactional publication.
+- `src/menhir/infrastructure/structure_queries.py`: publish scan fingerprint, coverage, and indexed revision only after the structural transaction's entity and edge writes succeed.
+- `src/menhir/infrastructure/memory_graph_adapter.py`: validate the latest scan generation and publish structure, binding refreshes, and document writes under the project transaction lock.
+- `src/menhir/core/backend_runtime_data_ops.py`: mint scan generations before manual and detached symbol scans and carry them into skipped binding refreshes.
+- `src/menhir/core/backend_shared.py`: preserve the scan generation through serialized payloads.
+- `src/menhir/services/scheduler_tasks.py`: settle identity and mint the generation before watcher traversal; report scan and binding failures.
+- `src/menhir/services/scheduler_protocols.py`: describe the watcher scan-generation and binding-refresh methods.
+- `src/menhir/domain/work_artifact.py`: require a replacement for `SUPERSEDED` and validate known lifecycle states.
+- `src/menhir/infrastructure/work_artifact_repository.py`: lock artifact updates and compare observed lifecycle state before applying transitions or supersession, including legacy null namespaces.
+- `src/menhir/services/artifact_reconciliation_service.py`: leave unresolved source declarations in place when a superseded registration has no replacement.
+- `src/menhir/mcp/tools/ops/transition_artifact.py`: explain stale transitions and the dedicated supersession operation.
+- `src/menhir/infrastructure/todo_repository.py`: resolve normalized locations against unique visible files in the edge mutation; return all linked and unresolved locations.
+- `src/menhir/mcp/tools/ops/add_todo.py`: report linked files and unresolved location reasons.
+- `src/menhir/mcp/tools/ops/get_todo.py`: display every linked file on a TODO read.
+- `src/menhir/mcp/tools/recall/query_structure.py`: qualify empty symbols, dependencies, documents, and affected-test answers by index coverage.
+- `tests/test_project_scanner.py`: traversal, stat, and required-read refusal regressions.
+- `tests/test_query_structure_tool.py`: complete, partial, and legacy-unknown negative-answer regressions.
+- `tests/test_structure_watcher.py`, `tests/test_beacon_provider.py`, and `tests/infrastructure/test_cf257_detached_write_identity.py`: cover the new watcher and detached-write ordering contract.
+- `tests/infrastructure/test_gateb_structure_publication_online.py`: real-Neo4j late-scan, rollback, binding, and same-project serialization regressions.
+- `tests/test_work_artifact.py`, `tests/test_artifact_tools.py`, `tests/test_artifact_source_reconciliation_io.py`, and `tests/test_cf48_domain_owns_artifact_predicates.py`: artifact lifecycle and unresolved-import regressions.
+- `tests/test_work_artifact_online.py`: real-Neo4j artifact transition, supersession, and rollback races.
+- `tests/test_todo.py` and `tests/test_todo_file_link_online.py`: unique, ambiguous, multi-location, namespace, and restart link regressions.
+- `tests/e2e/test_e2e_08_isolation_adversarial.py`: distinguish namespace-delete caps from a real structural scan cap and check preservation of an indexed file.
+- `tests/e2e/test_e2e_04_workartifacts.py` and `tests/e2e/_harness/artifact_corpus.py`: verify a legacy superseded source without a replacement stays unregistered and byte-identical while valid artifacts reconcile.
+- `tests/e2e/README.md`: explain the two separate cap criteria.
+- `.agent/data_models.md`, `.agent/endpoints.md`, and `.agent/workflows/artifact_authoring.md`: document scan ordering, TODO resolution, and replacement-backed supersession.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-28 - Plan Gate B correctness remediation
 
 - `.agent/plans/menhir-gate-b-remediation-2026-09-28.md`: define bounded fixes and
@@ -111,15 +142,3 @@
 - Disposable Neo4j regressions cover actual reads/touches, bounded startup selection, writer receipts,
   lifecycle protection, offsets, invalid calendar values, native/local dates, and nanosecond ties.
 - Archive the oldest changelog entry to keep ten. No automatic migration or production data changes.
-
-## 2026-09-26 - generic reads preserve completion and artifact supersession (#143)
-
-- Preserve stored status, artifact status, and replacement identifiers through graph projections,
-  recall scoring, MCP/resource serializers, REST recall, and startup context.
-- Label completed obligations and historical artifacts while keeping original content searchable;
-  retain labels through context budgets, clipped timelines, and pinned hook summaries.
-- Preserve distinct lifecycle states during context deduplication. Ordinary records retain their
-  existing presentation; dedicated reminder lists still include only open reminders.
-- Regressions cover compact/full recall, startup and REST reads, resources, clipping/budgets,
-  ordinary/unknown state controls, and actual completion/supersession writers on disposable Neo4j.
-- Document the read policy and optional result fields. No database migration or production activation.

@@ -18,7 +18,8 @@ async def transition_artifact(
     Args:
         artifact_uuid: The artifact to move.
         to_status: Target status, e.g. REVIEWED, APPROVED, IMPLEMENTING,
-                   IMPLEMENTED, COMPLETE, READY_FOR_REVIEW, SUPERSEDED, DEFERRED.
+                   IMPLEMENTED, COMPLETE, READY_FOR_REVIEW, DEFERRED.
+                   Use supersede_artifact(new_uuid, old_uuid) for SUPERSEDED.
         namespace: Restrict to a single silo. A pinned client has this forced.
 
     Returns:
@@ -65,6 +66,10 @@ class TransitionArtifactTool(BaseTextTool):
         reason = result.get("reason") or "unknown"
         if reason == "artifact_not_found":
             return f"Artifact {artifact_uuid} not found"
+        if reason == "supersession_requires_replacement":
+            return "Refused: SUPERSEDED requires a replacement. Use supersede_artifact(new_uuid, old_uuid)."
+        if reason == "stale_transition":
+            return f"Refused: {artifact_uuid} changed during this transition. Read it again before retrying."
         valid = result.get("valid_transitions")
         suffix = f" Legal from here: {', '.join(sorted(valid))}" if valid else ""
         return (

@@ -14,6 +14,7 @@ import json
 import subprocess
 from dataclasses import asdict
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -192,13 +193,20 @@ def test_agent_docs_still_win_over_the_readme(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_watcher_refreshes_the_binding_when_files_are_unchanged(tmp_path: Path) -> None:
+def test_watcher_refreshes_the_binding_when_files_are_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from menhir.services.scheduler_tasks import refresh_structure_graphs
 
     root = _repo(tmp_path)
     fingerprint = ProjectScanner().scan(root, "shop").scan_fingerprint
     _git(root, "commit", "-q", "--allow-empty", "-m", "same files, new commit")
     new_head = _git(root, "rev-parse", "HEAD")
+    claim = SimpleNamespace(project_id="shop-id", generation=1)
+    monkeypatch.setattr(
+        "menhir.services.project_identity_service.settle_project_identity",
+        lambda *args, **kwargs: (claim, None),
+    )
 
     class Adapter:
         def __init__(self) -> None:
@@ -211,10 +219,16 @@ def test_watcher_refreshes_the_binding_when_files_are_unchanged(tmp_path: Path) 
         def get_scan_fingerprint(self, name: str) -> str:
             return fingerprint
 
+        def begin_structure_scan(self, supplied_claim: Any) -> int:
+            assert supplied_claim is claim
+            return 1
+
         def refresh_indexed_binding(
-            self, name: str, fp: str, commit: str, repository: str, dirty: bool
+            self, name: str, fp: str, commit: str, repository: str, dirty: bool,
+            *, claim: Any, scan_generation: int,
         ) -> bool:
             assert fp == fingerprint  # the refresh is conditional on the fingerprint it read
+            assert claim is not None and scan_generation == 1
             self.refreshed.append((name, commit, repository, dirty))
             return True
 

@@ -18,7 +18,7 @@ criteria; it does not redefine them.
 | E2E-5 | TODO lifecycle | **implemented** |
 | E2E-6 | public Graphiti fork in a clean Menhir wheel | wheel/stdio path implemented; release-container path pending |
 | E2E-7 | restart and interrupted work | **implemented** |
-| E2E-8 | isolation and adversarial (carries #88's regression pin) | 8 supported criteria implemented, including missing-fork refusal |
+| E2E-8 | isolation and adversarial (carries #88's regression pin) | 9 supported criteria implemented, including missing-fork refusal and a real structural scan-cap check |
 
 E2E-6 downloads the exact public Graphiti fork wheel named by `uv.lock`, checks its hash
 and every installed Python source file, constructs the installed Menhir Graphiti client
@@ -32,6 +32,9 @@ provider-failure handling needs one that reliably fails. Its former Beacon adver
 criterion is deferred with #120. The Graphiti fork refusal test installs the candidate
 wheel into a second disposable environment, removes only the fork from that environment,
 and verifies both package integrity and Menhir's runtime check reject it by name.
+The namespace-delete limit and structural scan cap have separate criteria: the former
+checks `delete_namespace(max_nodes=1)` refuses without deleting nodes, while the latter
+indexes a file, exceeds the scanner's 2,000-file cap, and verifies the older file survives.
 
 A scaffolded lane is **not** a silent skip. `_harness/pending.py` writes a full evidence
 directory recording every acceptance criterion as unproven, then skips — so

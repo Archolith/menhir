@@ -53,12 +53,10 @@ from menhir.domain.work_artifact import (
     ARTIFACT_SCHEMA_VERSION,
     ARTIFACT_TYPES,
     DEFAULT_ARTIFACT_NAMESPACE,
-    INITIAL_STATUS,
     NAMESPACE_COMPATIBILITY_PARAMS,
     REFERENCES_TODO_EDGE,
     SUPERSEDES_EDGE,
     SUPERSESSION_PARAMS,
-    TERMINAL_ANY,
     ArtifactMedium,
     ArtifactSourceSpec,
     ArtifactStatus,
@@ -75,7 +73,6 @@ from menhir.domain.work_artifact import (
     supersession_cypher,
     normalize_declarations,
     relation_is_legal,
-    valid_statuses,
 )
 from menhir.infrastructure.schema import (
     ARTIFACT_RECONCILIATION_REQUIRED_CONSTRAINTS,
@@ -129,8 +126,8 @@ class WorkArtifactRepository:
 
         ``status`` defaults to the type's initial state. An explicit status is
         accepted (migration needs to land an artifact already IMPLEMENTED) but
-        must be legal for the type -- an illegal one is refused rather than
-        stored, since a bad state would then be transitioned *from*.
+        must be legal for the type. SUPERSEDED is refused here: only the paired
+        supersession operation may create that status and its replacement edge.
 
         ``status_raw`` keeps whatever the document actually said, and
         ``status_unresolved_reason`` records why it could not be mapped. The
@@ -1199,7 +1196,8 @@ class WorkArtifactRepository:
             f"""
             MATCH (a:WorkArtifact {{artifact_uuid: $uuid}})
             WHERE true {ns_filter}
-            RETURN a.artifact_type AS artifact_type, a.status AS status
+            RETURN a.artifact_type AS artifact_type, a.status AS status,
+                   a.namespace AS namespace
             """,
             params,
         )
@@ -1208,6 +1206,15 @@ class WorkArtifactRepository:
 
         artifact_type = rows[0].get("artifact_type")
         from_status = rows[0].get("status")
+        if to_status == ArtifactStatus.SUPERSEDED:
+            return {
+                "applied": False,
+                "reason": "supersession_requires_replacement",
+                "from_status": from_status,
+                "to_status": to_status,
+                "artifact_type": artifact_type,
+                "valid_transitions": sorted(legal_next_statuses(artifact_type, from_status)),
+            }
         if not can_transition(artifact_type, from_status, to_status):
             return {
                 "applied": False,
@@ -1223,22 +1230,36 @@ class WorkArtifactRepository:
             }
 
         now = datetime.now(timezone.utc).isoformat()
-        # The predicate is REPEATED inside the mutation, not just in the legality read above.
-        # Scoping only the preflight leaves the read-to-write window unguarded; the merge path
-        # in correlation_queries closes the same race the same way.
+        # Acquiring the node's write lock precedes the CAS predicate. The revision is
+        # deliberately additive: old rows need no migration, and a failed CAS may
+        # increment it without changing the artifact lifecycle.
         write_params: dict[str, Any] = {
-            "uuid": artifact_uuid, "to_status": to_status, "now": now
+            "uuid": artifact_uuid, "to_status": to_status, "now": now,
+            "from_status": from_status, "artifact_type": artifact_type,
+            "observed_namespace": rows[0].get("namespace"),
         }
         if scoped:
             write_params["namespace"] = normalize_namespace(namespace)
-        self.neo4j.execute(
+        updated = self.neo4j.execute(
             f"""
             MATCH (a:WorkArtifact {{artifact_uuid: $uuid}})
             WHERE true {ns_filter}
+            SET a.lifecycle_revision = coalesce(a.lifecycle_revision, 0) + 1
+            WITH a
+            WHERE a.artifact_type = $artifact_type AND a.status = $from_status
+              AND (a.namespace = $observed_namespace OR
+                   (a.namespace IS NULL AND $observed_namespace IS NULL))
             SET a.status = $to_status, a.status_changed_at = $now, a.updated_at = $now
+            RETURN count(a) AS applied
             """,
             write_params,
         )
+        if not updated or int(updated[0].get("applied", 0)) == 0:
+            return {
+                "applied": False, "reason": "stale_transition",
+                "from_status": from_status, "to_status": to_status,
+                "artifact_type": artifact_type,
+            }
         return {"applied": True, "from_status": from_status, "to_status": to_status}
 
     # ------------------------------------------------------------------
@@ -1318,10 +1339,17 @@ class WorkArtifactRepository:
         that applied.
         """
         now = datetime.now(timezone.utc).isoformat()
+        first_uuid, second_uuid = sorted((new_uuid, old_uuid))
         rows = self.neo4j.execute(
-            f"""
-            MATCH (new:WorkArtifact {{artifact_uuid: $new_uuid}})
-            MATCH (old:WorkArtifact {{artifact_uuid: $old_uuid}})
+            """
+            MATCH (first:WorkArtifact {artifact_uuid: $first_uuid})
+            SET first.lifecycle_revision = coalesce(first.lifecycle_revision, 0) + 1
+            WITH first
+            MATCH (second:WorkArtifact {artifact_uuid: $second_uuid})
+            SET second.lifecycle_revision = coalesce(second.lifecycle_revision, 0) + 1
+            WITH first, second
+            WITH CASE WHEN first.artifact_uuid = $new_uuid THEN first ELSE second END AS new,
+                 CASE WHEN first.artifact_uuid = $old_uuid THEN first ELSE second END AS old
             WHERE """
             + supersession_cypher()
             + f"""
@@ -1332,8 +1360,11 @@ class WorkArtifactRepository:
             {
                 "new_uuid": new_uuid,
                 "old_uuid": old_uuid,
+                "first_uuid": first_uuid,
+                "second_uuid": second_uuid,
                 # CF-48: bound by the domain's own `supersession_cypher`, from `TERMINAL_ANY`.
                 **SUPERSESSION_PARAMS,
+                "known_types": sorted(ARTIFACT_TYPES),
                 "superseded": ArtifactStatus.SUPERSEDED,
                 "default_ns": DEFAULT_ARTIFACT_NAMESPACE,
                 "now": now,

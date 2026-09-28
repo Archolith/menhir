@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 
 from menhir.mcp.tools.base import BaseTextTool
@@ -307,7 +306,7 @@ class QueryStructureTool(BaseTextTool):
                         + "."
                     )
                 lines = [
-                    f"Test coverage"
+                    "Test coverage"
                     + (f" for {path}" if path else f" in {project}")
                     + f" ({len(tests)}):"
                 ]
@@ -327,7 +326,7 @@ class QueryStructureTool(BaseTextTool):
             if query_type == "dependencies":
                 deps = await backend.query_structure(project, "dependencies")
                 if not deps:
-                    return f"No dependencies found in {project}."
+                    return f"No dependencies found in {project}.{neg}"
                 return f"Dependencies for {project} ({len(deps)}): {', '.join(deps)}"
 
             if query_type == "cross_refs":
@@ -362,13 +361,13 @@ class QueryStructureTool(BaseTextTool):
                 result = await backend.query_structure(
                     project, "affected_tests", {"file_paths": file_paths}
                 )
-                return _format_affected_tests(result)
+                return _format_affected_tests(result, neg=neg)
 
             if query_type == "symbols":
                 result = await backend.query_structure(
                     project, "symbols", {"path": path}
                 )
-                return _format_symbols(result, path, project)
+                return _format_symbols(result, path, project, neg=neg)
 
             if query_type == "context":
                 if not path:
@@ -385,7 +384,7 @@ class QueryStructureTool(BaseTextTool):
                 kwargs = {"path": path} if path else {}
                 result = await backend.query_structure(project, "documents", kwargs)
                 if not result:
-                    return f"No documents found for {project}."
+                    return f"No documents found for {project}.{neg}"
                 lines = [f"Documents for {project} ({len(result)}):"]
                 for d in result:
                     tag = (
@@ -431,7 +430,8 @@ def _coverage_caveat(data: dict) -> str | None:
 def _negative_qualifier(coverage: dict | None) -> str:
     """Suffix appended to any 'nothing found' message so it never reads as proven absence.
 
-    Completeness-sensitive queries (files, imports, tests, endpoints, symbols, cross-refs) all
+    Completeness-sensitive queries (files, imports, tests, endpoints, symbols, cross-refs,
+    dependencies, documents, affected tests) all
     answer from the same index. An empty result means "not in the index", which equals "does
     not exist" only when the index is known complete.
     """
@@ -503,7 +503,7 @@ def _format_blast_radius(data: dict, project: str) -> str:
         )
 
     if data["cross_project_refs"]:
-        lines.append(f"\nCross-project impact:")
+        lines.append("\nCross-project impact:")
         for r in data["cross_project_refs"]:
             lines.append(f"  -> {r['target']} via {r['mechanism']}")
 
@@ -533,7 +533,7 @@ def _format_blast_radius(data: dict, project: str) -> str:
     return "\n".join(lines)
 
 
-def _format_affected_tests(data: dict) -> str:
+def _format_affected_tests(data: dict, *, neg: str = "") -> str:
     lines = []
 
     if not data["test_files"]:
@@ -557,7 +557,7 @@ def _format_affected_tests(data: dict) -> str:
                 "test mappings may be missing."
             )
         else:
-            lines.append("No specific tests found for the changed files.")
+            lines.append(f"No specific tests found for the changed files.{neg}")
         lines.append("Recommendation: run full test suite.")
         lines.append(f"\n  {data['test_command']}")
         return "\n".join(lines)
@@ -581,12 +581,12 @@ def _format_affected_tests(data: dict) -> str:
     return "\n".join(lines)
 
 
-def _format_symbols(data: dict, path: str, project: str) -> str:
+def _format_symbols(data: dict, path: str, project: str, *, neg: str = "") -> str:
     symbols = data.get("symbols", [])
     truncated = data.get("truncated", False)
     scope = path if path else project
     if not symbols:
-        return f"No symbols found for {scope}."
+        return f"No symbols found for {scope}.{neg}"
     lines = [
         f"Symbols in {scope} ({len(symbols)})"
         + (" [TRUNCATED — per-file cap hit]" if truncated else "")

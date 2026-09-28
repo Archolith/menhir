@@ -829,30 +829,6 @@ async def refresh_structure_graphs(
             )
             continue
 
-        try:
-            scan = await asyncio.to_thread(scanner.scan, root_path, name)
-        except Exception as exc:
-            errors += 1
-            details.append({"project": name, "status": f"scan_error: {exc}"})
-            logger.warning("Structure watcher scan failed for %s: %s", name, exc)
-            continue
-
-        stored_fp = await asyncio.to_thread(graph_adapter.get_scan_fingerprint, name)
-        if stored_fp and stored_fp == scan.scan_fingerprint:
-            # Same files, possibly a new commit: keep the evidence binding current.
-            refresh = getattr(graph_adapter, "refresh_indexed_binding", None)
-            if refresh is not None:
-                await asyncio.to_thread(
-                    refresh,
-                    name,
-                    scan.scan_fingerprint,
-                    scan.indexed_commit,
-                    scan.indexed_repository,
-                    scan.indexed_dirty,
-                )
-            skipped += 1
-            continue
-
         # CF-257. The watcher writes through the same adapter method as everything else, so it
         # must settle identity too -- it re-scans every known project on a timer, which is exactly
         # why leaving it out produced 1,816 id-less nodes rather than a handful. It never mints:
@@ -874,8 +850,36 @@ async def refresh_structure_graphs(
                 "reason": resolution.reason,
             })
             continue
+        try:
+            scan_generation = await asyncio.to_thread(
+                graph_adapter.begin_structure_scan, claim
+            )
+            scan = await asyncio.to_thread(scanner.scan, root_path, name)
+        except Exception as exc:
+            errors += 1
+            details.append({"project": name, "status": f"scan_error: {exc}"})
+            logger.warning("Structure watcher scan failed for %s: %s", name, exc)
+            continue
         scan.project_id = claim.project_id
         scan.identity_generation = claim.generation
+        scan.scan_generation = scan_generation
+
+        stored_fp = await asyncio.to_thread(graph_adapter.get_scan_fingerprint, name)
+        if stored_fp and stored_fp == scan.scan_fingerprint:
+            try:
+                refresh = getattr(graph_adapter, "refresh_indexed_binding", None)
+                if refresh is not None:
+                    await asyncio.to_thread(
+                        refresh, name, scan.scan_fingerprint, scan.indexed_commit,
+                        scan.indexed_repository, scan.indexed_dirty,
+                        claim=claim, scan_generation=scan_generation,
+                    )
+            except Exception as exc:
+                errors += 1
+                details.append({"project": name, "status": f"binding_error: {exc}"})
+                continue
+            skipped += 1
+            continue
 
         try:
             # write_project_structure MERGEs thousands of nodes/edges — a heavy synchronous Neo4j

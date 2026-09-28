@@ -76,6 +76,7 @@ def ops(monkeypatch, tmp_path):
     instance._off_loop = _off_loop
     instance.built = SimpleNamespace(
         graph_adapter=SimpleNamespace(
+            begin_structure_scan=lambda claim: 1,
             get_scan_fingerprint=lambda name: None,
             get_project_root_path=lambda name: None,
             write_project_structure=lambda scan, s, u: written.append(scan.name) or {},
@@ -598,6 +599,7 @@ def test_document_adapter_refuses_absent_claim_context(
 def test_document_adapter_releases_fence_when_writer_fails(monkeypatch):
     import menhir.infrastructure.project_identity_binding as binding
     import menhir.infrastructure.structure_write_fence as fence
+    import menhir.infrastructure.structure_queries as structure_queries
 
     events: list[object] = []
 
@@ -621,7 +623,13 @@ def test_document_adapter_releases_fence_when_writer_fails(monkeypatch):
     monkeypatch.setattr(fence, "IdentityClaim", _claim)
     monkeypatch.setattr(fence, "admit_structure_writer", _admit)
     monkeypatch.setattr(fence, "release_structure_writer", _release)
+    monkeypatch.setattr(fence, "lock_structure_project", lambda tx, claim: None)
+    monkeypatch.setattr(
+        structure_queries, "StructureGraphWriter",
+        lambda tx: SimpleNamespace(write_document=_write),
+    )
     adapter = _bare_memory_adapter(_write)
+    adapter.neo4j = SimpleNamespace(execute_write=lambda work: work(object()))
 
     with pytest.raises(RuntimeError, match="writer failed"):
         adapter.write_document(

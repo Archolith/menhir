@@ -95,6 +95,15 @@ class SchedulerGraphAdapter(Protocol):
     def get_scan_fingerprint(self, project_name: str) -> str | None:
         ...
 
+    def begin_structure_scan(self, claim: Any) -> int:
+        ...
+
+    def refresh_indexed_binding(
+        self, project_name: str, fingerprint: str, commit: str, repository: str,
+        dirty: bool, *, claim: Any, scan_generation: int,
+    ) -> bool:
+        ...
+
     def write_project_structure(self, scan: "ProjectScanResult", session_id: str, user_id: str) -> dict[str, int]:
         ...
 

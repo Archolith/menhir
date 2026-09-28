@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 
 def _make_tool(backend: MagicMock):
     from menhir.mcp.tools.recall.query_structure import QueryStructureTool
@@ -188,3 +190,43 @@ def test_files_negative_is_qualified_when_partial() -> None:
     out = _run(_backend(partial, []), query_type="files", project="p1")
 
     assert "not evidence of absence" in out
+
+
+@pytest.mark.parametrize("query_type", ["dependencies", "documents", "symbols"])
+@pytest.mark.parametrize(
+    ("project_meta", "expected"),
+    [
+        ({"files_eligible": 100, "files_indexed": 100}, "fully indexed"),
+        ({"files_eligible": 100, "files_indexed": 40, "partial_index": True},
+         "not evidence of absence"),
+        ({"files_eligible": None, "files_indexed": None}, "unverified"),
+    ],
+)
+def test_additional_empty_structure_answers_explain_coverage(
+    query_type: str, project_meta: dict, expected: str,
+) -> None:
+    out = _run(_backend(_projects(**project_meta), {"symbols": []} if query_type == "symbols" else []),
+               query_type=query_type, project="p1")
+    assert expected in out.lower()
+
+
+@pytest.mark.parametrize(
+    ("project_meta", "expected"),
+    [
+        ({"files_eligible": 100, "files_indexed": 100}, "fully indexed"),
+        ({"files_eligible": 100, "files_indexed": 40, "partial_index": True},
+         "partially indexed"),
+        ({"files_eligible": None, "files_indexed": None}, "unverified"),
+    ],
+)
+def test_no_affected_tests_explains_coverage(project_meta: dict, expected: str) -> None:
+    data = {
+        "test_files": [], "unindexed_paths": [], "test_command": "pytest",
+        "changed_files": ["a.py"],
+        "coverage": {"partial_index": bool(project_meta.get("partial_index")),
+                     "files_indexed": project_meta.get("files_indexed"),
+                     "files_eligible": project_meta.get("files_eligible")},
+    }
+    out = _run(_backend(_projects(**project_meta), data),
+               query_type="affected_tests", project="p1", path="a.py")
+    assert expected in out.lower()

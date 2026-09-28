@@ -204,7 +204,6 @@ class StructureGraphWriter:
             user_id=user_id,
             now=now,
             extra={
-                "scan_fingerprint": scan.scan_fingerprint,
                 "stack": scan.stack,
                 "root_path": scan.root_path,
                 # The description exactly as the scanner read it from .agent/README.md or
@@ -213,18 +212,6 @@ class StructureGraphWriter:
                 # not present an invented purpose as indexed fact (Beacon generation) read
                 # this property instead (PR #125 F4).
                 "indexed_description": scan.description or "",
-                # Coverage accounting. `partial_index` is persisted (not just derived) so a
-                # reader that only fetches the project node can tell whether a negative
-                # structural answer is trustworthy.
-                "files_discovered": scan.files_discovered,
-                "files_eligible": scan.files_eligible,
-                "files_indexed": scan.files_indexed,
-                "partial_index": scan.partial_index,
-                # Beacon evidence binding: written with the fingerprint so the two always
-                # describe the same scan (see refresh_indexed_binding for the skip paths).
-                "indexed_commit": getattr(scan, "indexed_commit", "") or "",
-                "indexed_repository": getattr(scan, "indexed_repository", "") or "",
-                "indexed_dirty": bool(getattr(scan, "indexed_dirty", False)),
             },
         )
         entity_count += 1
@@ -505,6 +492,37 @@ class StructureGraphWriter:
                 for ce in scan.call_edges
             ]
             edge_count += self._write_edges_batch("CALLS", intra_calls, scan.name)
+
+        # This is the completion marker for the entire structural transaction. A failed
+        # entity/edge/prune statement never publishes a new fingerprint, coverage or Beacon
+        # binding. The adapter commits all of the above and this marker atomically.
+        completion = self.neo4j.execute(
+            """
+            MATCH (p:Entity {structure_project: $name, structure_role: 'project'})
+            WHERE p.structure_project_id = $project_id
+            SET p.scan_fingerprint = $fingerprint,
+                p.files_discovered = $discovered,
+                p.files_eligible = $eligible,
+                p.files_indexed = $indexed,
+                p.partial_index = $partial,
+                p.indexed_commit = $commit,
+                p.indexed_repository = $repository,
+                p.indexed_dirty = $dirty
+            RETURN count(p) AS updated
+            """,
+            {"name": scan.name, "project_id": project_id,
+             "fingerprint": scan.scan_fingerprint,
+             "discovered": scan.files_discovered, "eligible": scan.files_eligible,
+             "indexed": scan.files_indexed, "partial": scan.partial_index,
+             "commit": getattr(scan, "indexed_commit", "") or "",
+             "repository": getattr(scan, "indexed_repository", "") or "",
+             "dirty": bool(getattr(scan, "indexed_dirty", False))},
+        )
+        if not completion or int(completion[0].get("updated", 0)) != 1:
+            raise RuntimeError(
+                f"Structure completion marker for {scan.name!r} did not address exactly "
+                "one project node; refusing publication"
+            )
 
         logger.info(
             "Structure write complete: project=%s entities=%d edges=%d",

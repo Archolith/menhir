@@ -131,39 +131,36 @@ class TodoRepository:
 
     def __init__(self, neo4j: Any) -> None:
         self.neo4j = neo4j
-        self._known_projects_cache: frozenset[str] | None = None
 
     # ------------------------------------------------------------------
     # Locations
     # ------------------------------------------------------------------
 
-    def _known_projects(self) -> frozenset[str]:
+    def _known_projects(self, namespace: str) -> frozenset[str]:
         """Project names the structure graph knows, for bare `<project>/<path>` refs.
 
-        Cached per repository instance: the set changes only when a project is
-        scanned, and normalization must not pay a graph round trip per segment.
+        Look up once per TODO, not per segment. A long-lived repository must see projects
+        indexed after it was constructed, or a valid project-qualified ref stays unresolved.
         """
-        if self._known_projects_cache is None:
-            rows = self.neo4j.execute(
-                """
-                MATCH (e:Entity)
-                WHERE e.structure_project IS NOT NULL
-                RETURN DISTINCT e.structure_project AS p
-                """,
-                {},
-            )
-            self._known_projects_cache = frozenset(
-                str(r["p"]) for r in rows if r.get("p")
-            )
-        return self._known_projects_cache
+        rows = self.neo4j.execute(
+            """
+            MATCH (e:Entity)
+            WHERE e.structure_project IS NOT NULL
+              AND (e.namespace IS NULL OR e.namespace IN [$namespace, $default_namespace])
+            RETURN DISTINCT e.structure_project AS p
+            """,
+            {"namespace": namespace, "default_namespace": DEFAULT_NAMESPACE},
+        )
+        return frozenset(str(r["p"]) for r in rows if r.get("p"))
 
     def _write_locations(
         self,
         todo_uuid: str,
         code_ref: str | None,
         structure_project: str | None,
-    ) -> list[dict[str, Any]]:
-        """Normalize ``code_ref`` into owned :TodoLocation nodes.
+        namespace: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Normalize locations and link only individually unambiguous visible files.
 
         :TodoLocation carries its own label and never :Entity or :Episodic --
         the same containment the :TurnEvidence node uses -- so a location can
@@ -171,28 +168,69 @@ class TodoRepository:
         inherited through the owning :Todo, so there is no copy to drift.
         """
         if not code_ref:
-            return []
+            return [], []
 
         locations = parse_code_ref(
             code_ref,
             structure_project=structure_project,
-            known_projects=self._known_projects(),
+            known_projects=self._known_projects(namespace),
             workspace_marker=default_workspace_marker(),
         )
         if not locations:
-            return []
+            return [], []
 
         rows = [loc.as_properties() for loc in locations]
-        self.neo4j.execute(
-            """
-            MATCH (t:Todo {uuid: $uuid})
+        results = self.neo4j.execute(
+            f"""
+            MATCH (t:Todo {{uuid: $uuid}})
             UNWIND $rows AS row
+            OPTIONAL MATCH (f:Entity)
+            WHERE row.resolution_status = 'resolved'
+              AND f.structure_role IN ['file', 'entrypoint', 'config', 'test']
+              AND {code_ref_file_predicate('f', 'row.path')}
+              AND (row.project IS NULL OR f.structure_project = row.project)
+              AND (f.namespace IS NULL OR f.namespace IN [$namespace, $default_namespace])
+            WITH t, row, collect(DISTINCT f) AS candidates
+            WITH t, row, candidates, size(candidates) AS candidate_count
             CREATE (t)-[:HAS_LOCATION]->(l:TodoLocation)
-            SET l += row
+            SET l += row,
+                l.resolution_status = CASE
+                    WHEN row.resolution_status <> 'resolved' THEN row.resolution_status
+                    WHEN candidate_count = 1 THEN 'resolved'
+                    ELSE 'unresolved' END,
+                l.unresolved_reason = CASE
+                    WHEN row.resolution_status <> 'resolved' THEN row.unresolved_reason
+                    WHEN candidate_count = 0 THEN 'file_not_found'
+                    WHEN candidate_count > 1 THEN 'ambiguous_file' END
+            FOREACH (chosen IN CASE WHEN candidate_count = 1 THEN candidates ELSE [] END |
+                MERGE (t)-[:REFERENCES_FILE]->(chosen))
+            RETURN row.ordinal AS ordinal,
+                   l.resolution_status AS resolution_status,
+                   l.unresolved_reason AS unresolved_reason,
+                   candidate_count AS candidate_count,
+                   CASE WHEN candidate_count = 1 THEN head(candidates).structure_path END AS linked_path,
+                   CASE WHEN candidate_count = 1 THEN head(candidates).structure_project END AS linked_project
+            ORDER BY ordinal
             """,
-            {"uuid": todo_uuid, "rows": rows},
+            {"uuid": todo_uuid, "rows": rows, "namespace": namespace,
+             "default_namespace": DEFAULT_NAMESPACE},
         )
-        return rows
+        by_ordinal = {int(result["ordinal"]): result for result in results}
+        links: list[dict[str, Any]] = []
+        for row in rows:
+            outcome = by_ordinal.get(int(row["ordinal"]))
+            if outcome is None:
+                row["resolution_status"] = "unresolved"
+                row["unresolved_reason"] = "link_resolution_unavailable"
+                continue
+            row["resolution_status"] = outcome["resolution_status"]
+            row["unresolved_reason"] = outcome.get("unresolved_reason")
+            if outcome.get("linked_path"):
+                links.append({
+                    "ordinal": row["ordinal"], "path": outcome["linked_path"],
+                    "project": outcome.get("linked_project"),
+                })
+        return rows, links
 
     # ------------------------------------------------------------------
     # Write
@@ -212,8 +250,8 @@ class TodoRepository:
     ) -> dict[str, Any]:
         """Create an open :Todo node and wire graph edges.
 
-        Edges created (best-effort, silent on miss):
-          - REFERENCES_FILE → structural :Entity matching code_ref file path
+        Edges created:
+          - REFERENCES_FILE → one visible structural file per unambiguous location
           - CREATED_FROM    → :Episodic matching episode_uuid
         """
         safe_priority = priority if priority in _VALID_PRIORITIES else "normal"
@@ -297,27 +335,6 @@ class TodoRepository:
                 },
             )
 
-        # --- REFERENCES_FILE edge ---
-        linked_file_path: str | None = None
-        if code_ref:
-            file_path = code_ref.split(":")[0] if ":" in code_ref else code_ref
-            rows = self.neo4j.execute(
-                f"""
-                MATCH (todo:Todo {{uuid: $uuid}})
-                OPTIONAL MATCH (f:Entity)
-                WHERE f.structure_role IN ['file', 'entrypoint', 'config', 'test']
-                  AND {code_ref_file_predicate('f', '$file_path')}
-                  AND ($structure_project IS NULL OR f.structure_project = $structure_project)
-                WITH todo, f WHERE f IS NOT NULL
-                CREATE (todo)-[:REFERENCES_FILE]->(f)
-                RETURN f.structure_path AS linked_path
-                LIMIT 1
-                """,
-                {"uuid": todo_uuid, "file_path": file_path, "structure_project": structure_project},
-            )
-            if rows:
-                linked_file_path = rows[0].get("linked_path")
-
         # --- CREATED_FROM edge ---
         if episode_uuid:
             self.neo4j.execute(
@@ -331,7 +348,9 @@ class TodoRepository:
             )
 
         # --- HAS_LOCATION nodes (normalized from the author's code_ref) ---
-        locations = self._write_locations(todo_uuid, code_ref, structure_project)
+        locations, linked_files = self._write_locations(
+            todo_uuid, code_ref, structure_project, safe_namespace
+        )
 
         return {
             "uuid": todo_uuid,
@@ -347,7 +366,8 @@ class TodoRepository:
             "reminder_uuid": reminder_uuid,
             "episode_uuid": episode_uuid,
             "structure_project": structure_project,
-            "linked_file_path": linked_file_path,
+            "linked_file_path": linked_files[0]["path"] if linked_files else None,
+            "linked_files": linked_files,
             "locations": locations,
         }
 
@@ -837,9 +857,9 @@ class TodoRepository:
 
         ``list_todos`` truncates content to a snippet, so long multi-part todos
         are unreadable through it. This is the read that returns the whole
-        record, plus the graph context written at create time: the linked file
+        record, plus the graph context written at create time: the linked files
         (REFERENCES_FILE), the originating episode (CREATED_FROM), and the
-        and the entities that reference it.
+        entities that reference it.
 
         Returns None when no :Todo has that uuid.
 
@@ -855,12 +875,13 @@ class TodoRepository:
             MATCH (n:Todo {uuid: $uuid})
             WHERE $namespaces IS NULL OR n.namespace IN $namespaces
             OPTIONAL MATCH (n)-[:REFERENCES_FILE]->(f:Entity)
+            WITH n, collect(DISTINCT f {.uuid, .structure_path, .structure_project}) AS linked_files
             OPTIONAL MATCH (n)-[:CREATED_FROM]->(ep:Episodic)
-            WITH n, f, ep,
+            WITH n, linked_files, head(collect(DISTINCT ep.uuid)) AS episode_uuid,
                  """ + TODO_AGE_DAYS_CYPHER + """ AS age_days
             OPTIONAL MATCH (n)-[:HAS_LOCATION]->(loc:TodoLocation)
-            WITH n, f, ep, age_days, loc ORDER BY loc.ordinal ASC
-            WITH n, f, ep, age_days,
+            WITH n, linked_files, episode_uuid, age_days, loc ORDER BY loc.ordinal ASC
+            WITH n, linked_files, episode_uuid, age_days,
                  collect(loc {.project, .path, .kind, .line_start, .line_end,
                               .symbol, .ordinal, .resolution_status,
                               .unresolved_reason}) AS locations
@@ -877,9 +898,12 @@ class TodoRepository:
                 n.namespace  AS namespace,
                 age_days     AS age_days,
                 CASE WHEN age_days > $stale_after THEN true ELSE false END AS stale,
-                f.structure_path    AS linked_file_path,
-                f.structure_project AS linked_file_project,
-                ep.uuid             AS episode_uuid,
+                CASE WHEN size(linked_files) > 0 THEN head(linked_files).structure_path END
+                    AS linked_file_path,
+                CASE WHEN size(linked_files) > 0 THEN head(linked_files).structure_project END
+                    AS linked_file_project,
+                linked_files        AS linked_files,
+                episode_uuid        AS episode_uuid,
                 locations           AS locations
             LIMIT 1
             """,
@@ -897,6 +921,18 @@ class TodoRepository:
         # collect over an independent relationship multiplies the intermediate
         # rows before aggregation.
         todo = dict(rows[0])
+        linked_files = sorted(
+            todo.get("linked_files") or [],
+            key=lambda item: (
+                str(item.get("structure_project") or ""),
+                str(item.get("structure_path") or ""),
+                str(item.get("uuid") or ""),
+            ),
+        )
+        todo["linked_files"] = linked_files
+        if linked_files:
+            todo["linked_file_path"] = linked_files[0].get("structure_path")
+            todo["linked_file_project"] = linked_files[0].get("structure_project")
         todo["inbound_links"] = self.todo_inbound_links(uuid)
         # Fetched separately for the same reason inbound links are: a third and fourth
         # collect over independent relationships would multiply intermediate rows.

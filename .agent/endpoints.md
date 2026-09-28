@@ -515,12 +515,12 @@ Concept id: `mcp.tool.add_todo`
 
 Create a persistent TODO item that survives across sessions. TODOs are stored as `:Todo` nodes in Neo4j and are never enriched or decayed.
 - **`text`** (str): The TODO description. Be specific and actionable.
-- **`code_ref`** (str, optional): File path and optional line, e.g. `src/api/routes.py:42`.
+- **`code_ref`** (str, optional): One or more file paths with optional lines, e.g. `src/api/routes.py:42`.
 - **`priority`** (str, optional): `low`, `normal`, or `high` (default: `normal`).
 - **`episode_uuid`** (str, optional): UUID of an episodic memory that triggered this TODO. Creates a `CREATED_FROM` edge.
-- **`structure_project`** (str, optional): Project name for scoped `REFERENCES_FILE` linking. Required in multi-repo workspaces to avoid cross-project path ambiguity.
+- **`structure_project`** (str, optional): Project name for scoped `REFERENCES_FILE` linking. Supply it when paths are shared across projects.
 - **`namespace`** (str, optional): Silo to scope the TODO to. Empty means the shared `default` silo — a stored TODO always carries a non-null namespace.
-- Response includes `uuid`, priority tag, and any auto-linked graph nodes (`linked_file_path`, `linked_entities`, provenance episode).
+- Response includes `uuid`, priority tag, linked files, and an explicit reason for every unresolved or ambiguous location. A file edge is created only for one unique visible match per normalized location.
 - See `model.todo` in `data_models.md` for the full node schema and edge semantics.
 
 ### `list_todos`
@@ -539,7 +539,7 @@ Concept id: `mcp.tool.get_todo`
 Read one TODO in full — the content `list_todos` truncates, plus its graph context.
 - **`uuid`** (str): UUID of the TODO.
 - **`namespace`** (str, optional): Silo to enforce. Empty looks up by uuid alone; supplying one refuses a TODO outside that silo and the shared `default` bucket. The namespace is reported either way.
-- Returns priority, status, dates, age/stale flag, `code_ref`, the linked file
+- Returns priority, status, dates, age/stale flag, `code_ref`, all linked files
   (`REFERENCES_FILE`), the originating episode (`CREATED_FROM`), the entities named in the
   content, the normalized `:TodoLocation` records, inbound semantic links
   (`MENTIONS_TODO`/`ADDRESSES_TODO`/`RESOLVES_TODO`/`REOPENS_TODO`), and the untruncated body.
@@ -623,6 +623,9 @@ Move an artifact to a new lifecycle status.
 - **`to_status`** (str): Target status.
 - Checked against the artifact's stored type and current status, so steps cannot be
   skipped: a `PROPOSED` plan cannot jump to `IMPLEMENTED`.
+- A concurrent change refuses as stale; read the artifact again before retrying.
+- `SUPERSEDED` requires `supersede_artifact(new_uuid, old_uuid)`, which records the
+  replacement edge and terminal status together. Plain transition refuses it.
 - A refusal names the statuses that *are* reachable from the current one.
 
 ### `audit_artifact_corpus`
