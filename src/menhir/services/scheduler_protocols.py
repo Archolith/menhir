@@ -92,7 +92,18 @@ class SchedulerGraphAdapter(Protocol):
     def list_orphan_structure_projects(self) -> list[dict[str, Any]]:
         ...
 
-    def get_scan_fingerprint(self, project_name: str) -> str | None:
+    def get_scan_fingerprint(
+        self, project_name: str, *, project_id: str | None = None
+    ) -> str | None:
+        ...
+
+    def begin_structure_scan(self, claim: Any) -> int:
+        ...
+
+    def refresh_indexed_binding(
+        self, project_name: str, fingerprint: str, commit: str, repository: str,
+        dirty: bool, *, claim: Any, scan_generation: int,
+    ) -> bool:
         ...
 
     def write_project_structure(self, scan: "ProjectScanResult", session_id: str, user_id: str) -> dict[str, int]:

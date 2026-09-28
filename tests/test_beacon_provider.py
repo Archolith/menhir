@@ -14,6 +14,7 @@ import json
 import subprocess
 from dataclasses import asdict
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -192,13 +193,20 @@ def test_agent_docs_still_win_over_the_readme(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_watcher_refreshes_the_binding_when_files_are_unchanged(tmp_path: Path) -> None:
+def test_watcher_refreshes_the_binding_when_files_are_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from menhir.services.scheduler_tasks import refresh_structure_graphs
 
     root = _repo(tmp_path)
     fingerprint = ProjectScanner().scan(root, "shop").scan_fingerprint
     _git(root, "commit", "-q", "--allow-empty", "-m", "same files, new commit")
     new_head = _git(root, "rev-parse", "HEAD")
+    claim = SimpleNamespace(project_id="shop-id", generation=1)
+    monkeypatch.setattr(
+        "menhir.services.project_identity_service.settle_project_identity",
+        lambda *args, **kwargs: (claim, None),
+    )
 
     class Adapter:
         def __init__(self) -> None:
@@ -208,13 +216,19 @@ def test_watcher_refreshes_the_binding_when_files_are_unchanged(tmp_path: Path) 
         def list_structure_projects(self) -> list[dict[str, str]]:
             return [{"name": "shop", "root_path": str(root)}]
 
-        def get_scan_fingerprint(self, name: str) -> str:
+        def get_scan_fingerprint(self, name: str, *, project_id: str | None = None) -> str:
             return fingerprint
 
+        def begin_structure_scan(self, supplied_claim: Any) -> int:
+            assert supplied_claim is claim
+            return 1
+
         def refresh_indexed_binding(
-            self, name: str, fp: str, commit: str, repository: str, dirty: bool
+            self, name: str, fp: str, commit: str, repository: str, dirty: bool,
+            *, claim: Any, scan_generation: int,
         ) -> bool:
             assert fp == fingerprint  # the refresh is conditional on the fingerprint it read
+            assert claim is not None and scan_generation == 1
             self.refreshed.append((name, commit, repository, dirty))
             return True
 
@@ -244,7 +258,10 @@ class _ProjectNode:
             or p.get("indexed_dirty") != params["dirty"]
         )
         assert "n.scan_fingerprint = $fingerprint" in query
-        if p.get("scan_fingerprint") == params["fingerprint"] and differs:
+        assert "n.structure_project_id = $project_id" in query
+        if (p.get("scan_fingerprint") == params["fingerprint"]
+                and p.get("structure_project_id", "project-id-1") == params["project_id"]
+                and differs):
             p.update(
                 indexed_commit=params["commit"],
                 indexed_repository=params["repository"],
@@ -262,7 +279,9 @@ def _writer(node: _ProjectNode) -> Any:
 
 def test_refresh_moves_the_binding_to_the_new_commit() -> None:
     node = _ProjectNode(scan_fingerprint="fp", indexed_commit=COMMIT, indexed_dirty=False)
-    assert _writer(node).refresh_indexed_binding("shop", "fp", "b" * 40, "", False) is True
+    assert _writer(node).refresh_indexed_binding(
+        "shop", "fp", "b" * 40, "", False, project_id="project-id-1"
+    ) is True
     assert node.props["indexed_commit"] == "b" * 40
 
 
@@ -270,13 +289,17 @@ def test_refresh_writes_nothing_when_the_binding_is_unchanged() -> None:
     node = _ProjectNode(
         scan_fingerprint="fp", indexed_commit=COMMIT, indexed_repository="", indexed_dirty=False
     )
-    assert _writer(node).refresh_indexed_binding("shop", "fp", COMMIT, "", False) is False
+    assert _writer(node).refresh_indexed_binding(
+        "shop", "fp", COMMIT, "", False, project_id="project-id-1"
+    ) is False
 
 
 def test_a_stale_skip_cannot_rebind_another_scans_content() -> None:
     """A full re-scan replaced the fingerprint after the skip read it: no write."""
     node = _ProjectNode(scan_fingerprint="fp-new", indexed_commit="c" * 40, indexed_dirty=False)
-    assert _writer(node).refresh_indexed_binding("shop", "fp-old", "b" * 40, "", False) is False
+    assert _writer(node).refresh_indexed_binding(
+        "shop", "fp-old", "b" * 40, "", False, project_id="project-id-1"
+    ) is False
     assert node.props["indexed_commit"] == "c" * 40
 
 

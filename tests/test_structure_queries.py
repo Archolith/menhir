@@ -40,6 +40,8 @@ class RecordingNeo4j:
         # For count-returning queries, return a plausible result
         if "count(r)" in query:
             return [{"cnt": 1}]
+        if "RETURN count(p) AS updated" in query:
+            return [{"updated": 1}]
         if "scan_fingerprint" in query and "RETURN" in query:
             return [{"fp": None}]
         return []
@@ -565,6 +567,8 @@ class TestStructureGraphWriter:
 
         # Verify all entity queries use MERGE
         for query, _ in neo4j.calls:
+            if "RETURN count(p) AS updated" in query:
+                continue  # completion marker updates the project merged above
             if "Entity" in query and ("SET" in query or "CREATE" in query):
                 assert "MERGE" in query, f"Expected MERGE in: {query[:80]}"
 
@@ -779,6 +783,8 @@ class TestIncrementalDiffAndHeat:
                 {"path": "src/service.py", "mtime": 200.0},
             ]
             if "file_mtime IS NOT NULL" in query
+            else [{"updated": 1}]
+            if "RETURN count(p) AS updated" in query
             else [{"cnt": 1}]
             if "count(r)" in query
             else []
@@ -814,6 +820,8 @@ class TestIncrementalDiffAndHeat:
                 {"path": "src/service.py", "mtime": 200.0},
             ]
             if "file_mtime IS NOT NULL" in query
+            else [{"updated": 1}]
+            if "RETURN count(p) AS updated" in query
             else [{"cnt": 1}]
             if "count(r)" in query
             else []

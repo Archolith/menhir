@@ -40,11 +40,13 @@ that surfaces the moment any other read path forgets the filter.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 import subprocess
 import sys
+import time
 from uuid import uuid4
 
 import pytest
@@ -56,6 +58,7 @@ from tests.e2e._harness.features import FeatureCombo
 from tests.e2e._harness.artifact_corpus import (
     EXPECTED_ARTIFACTS,
     MALFORMED_PATH,
+    UNRESOLVED_SUPERSEDED_PATH,
     build_artifact_corpus,
     write_malformed_document,
 )
@@ -70,7 +73,8 @@ ISOLATION_CRITERIA = [
     "same_filenames_two_projects_do_not_cross_link",
     "stale_or_unknown_coverage_never_reports_safe",
     "oversized_memory_or_diff_refused_as_documented",
-    "capped_scan_does_not_authorize_destructive_prune",
+    "namespace_delete_cap_refuses_without_deletion",
+    "structure_scan_cap_preserves_previously_indexed_file",
 ]
 
 PROVIDER_CRITERIA = ["provider_failure_does_not_silently_pass"]
@@ -319,7 +323,7 @@ async def test_e2e_08_isolation(
             f"partial diff is stored as if complete:\n{oversized[:600]}"
         )
 
-        # --- a capped scan must not authorize a destructive prune -------------------------
+        # --- namespace deletion refuses when its node cap is exceeded ---------------------
         before = graph_query(
             e2e_config,
             "MATCH (n) WHERE n.group_id = $group RETURN elementId(n) AS id",
@@ -358,7 +362,7 @@ async def test_e2e_08_isolation(
         documented_refusal = '"error"' in capped and "force=true" in capped
         nothing_deleted = before_ids <= after_ids
         lane_evidence.record(
-            "capped_scan_does_not_authorize_destructive_prune",
+            "namespace_delete_cap_refuses_without_deletion",
             passed=documented_refusal and nothing_deleted,
             detail={
                 "response": capped[:400],
@@ -375,6 +379,63 @@ async def test_e2e_08_isolation(
             f"delete_namespace reported a refusal but the graph lost "
             f"{len(before_ids - after_ids)} original nodes; the cap is checked after the delete"
         )
+
+        # --- actual structural file cap: absence in a capped scan cannot prune ---------
+        cap_project = f"scan-cap-{suffix}"
+        cap_fixture = build_fixture_repo(e2e_config.fixtures_dir / cap_project)
+        retained = cap_fixture.path / "tests" / "test_retained.py"
+        retained.write_text("def test_retained(): pass\n", encoding="utf-8")
+        first = _text(await client.call_tool("call_tool", {
+            "name": "ingest_project", "arguments": {
+                "path": str(cap_fixture.path), "name": cap_project,
+                "identity_action": "new",
+            },
+        }))
+        assert first.startswith("Scanned "), first[:400]
+        await wait_for_project_indexed(client, cap_project)
+
+        # Source files outrank tests when the 2,000-file cap binds, so this existing test file
+        # is deliberately omitted from the second scan. Its old graph node must survive.
+        filler = cap_fixture.path / "src" / "cap"
+        filler.mkdir(parents=True, exist_ok=True)
+        for index in range(2001):
+            (filler / f"f{index:04d}.py").write_text("value = 1\n", encoding="utf-8")
+        second = _text(await client.call_tool("call_tool", {
+            "name": "ingest_project", "arguments": {
+                "path": str(cap_fixture.path), "name": cap_project, "force": True,
+            },
+        }))
+        assert second.startswith("Scanned "), second[:400]
+
+        deadline = time.monotonic() + 300
+        coverage = []
+        while time.monotonic() < deadline:
+            coverage = graph_query(
+                e2e_config,
+                "MATCH (p:Entity {structure_project: $project, structure_role: 'project'}) "
+                "RETURN p.partial_index AS partial, p.files_eligible AS eligible, "
+                "p.files_indexed AS indexed",
+                project=cap_project,
+            )
+            if coverage and coverage[0].get("partial") is True:
+                break
+            await asyncio.sleep(1)
+        assert coverage and coverage[0].get("partial") is True, (
+            f"capped scan did not publish partial coverage: {coverage}"
+        )
+        retained_rows = graph_query(
+            e2e_config,
+            "MATCH (f:Entity {structure_project: $project, "
+            "structure_path: 'tests/test_retained.py'}) RETURN f.uuid AS uuid",
+            project=cap_project,
+        )
+        preserved = len(retained_rows) == 1
+        lane_evidence.record(
+            "structure_scan_cap_preserves_previously_indexed_file",
+            passed=preserved and coverage[0]["eligible"] > coverage[0]["indexed"],
+            detail={"coverage": coverage[0], "retained_rows": retained_rows},
+        )
+        assert preserved, "the capped structural scan pruned an unseen indexed file"
 
     lane_evidence.close(status="PASS")
 
@@ -591,13 +652,16 @@ async def test_e2e_08_malformed_artifact_metadata(
     good_registered = [p for p in EXPECTED_ARTIFACTS if registered.get(p)]
     uncorrupted = len(good_registered) == len(EXPECTED_ARTIFACTS)
     still_refused = not registered.get(MALFORMED_PATH)
+    unresolved_superseded_refused = not registered.get(UNRESOLVED_SUPERSEDED_PATH)
     lane_evidence.record(
         "malformed_artifact_metadata_fails_without_corruption",
-        passed=is_conflict and names_the_reason and lists_every_error and uncorrupted and still_refused,
+        passed=(is_conflict and names_the_reason and lists_every_error and uncorrupted
+                and still_refused and unresolved_superseded_refused),
         detail={
             "good_documents_registered": sorted(good_registered),
             "expected_good": sorted(EXPECTED_ARTIFACTS),
             "malformed_still_unregistered": still_refused,
+            "unresolved_superseded_still_unregistered": unresolved_superseded_refused,
         },
     )
     assert uncorrupted, (
@@ -606,6 +670,9 @@ async def test_e2e_08_malformed_artifact_metadata(
     )
     assert still_refused, (
         f"{MALFORMED_PATH} was registered despite its metadata being rejected"
+    )
+    assert unresolved_superseded_refused, (
+        f"{UNRESOLVED_SUPERSEDED_PATH} was registered without a replacement"
     )
 
     lane_evidence.close(status="PASS")

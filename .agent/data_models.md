@@ -354,6 +354,18 @@ Common distinguishing fields:
 
 Structural entities use the same `Entity` label and several shared fields (`uuid`, `scope`, `source`, `created_at`, `last_accessed`) but are not treated as normal semantic recall results.
 
+`ProjectIdentity.structure_scan_generation` is a graph-issued counter minted before each
+filesystem traversal. The scan carries that counter and its identity generation. Publication
+locks the identity and checks both values in one Neo4j transaction containing every structural
+mutation and prune. A missing or superseded scan generation refuses before changing the index;
+an interrupted transaction leaves the previous fingerprint, coverage, entities, and edges.
+Traversal, stat, or required-file read failures abort the scan before publication. A deliberate
+2,000-file cap records partial coverage and cannot authorize pruning unseen paths.
+Partial scans also preserve unseen symbols from older file rows without timestamps. Skipped
+fingerprint reads and binding refreshes match the claimed project identity, so one project's
+scan cannot refresh another same-name project. Transported scan payloads must include
+consistent discovered, eligible, and indexed counts.
+
 Legacy compatibility: a small pre-`structure_role` corpus still exists in production. A row is
 treated as structural on bootstrap read paths when its source contains `project-scan` and its
 trimmed content begins with the deterministic `Directory:`, `File:`, or `Project:` scan shape.
@@ -403,7 +415,15 @@ is given and always reports the TODO's namespace.
 - Use `add_memory` when: the item is a fact, decision, preference, or observation — something to recall and reason about rather than track and close.
 - Rule of thumb: if you would write it on a task board → TODO. If you would write it in a notebook → memory.
 
-**Multi-repo scoping**: always pass `structure_project` when creating a TODO with a `code_ref` in a multi-repo workspace. Without it, `REFERENCES_FILE` edge linking uses suffix-only path matching which can bind to the wrong project's file.
+**Multi-repo scoping**: pass `structure_project` when a TODO's `code_ref` names a file in a
+multi-repo workspace. Menhir normalizes each declared location, checks visible structural
+files, and creates `REFERENCES_FILE` only when exactly one permitted file matches that
+location. An omitted project can resolve when exactly one visible file matches; the chosen
+project and canonical file path are then stored on `TodoLocation`. Ambiguous matches, duplicate
+legacy file nodes, unknown projects, or conflicting project declarations leave that location
+unlinked with an explicit reason. Each location has
+its own result; one ambiguous path does not prevent another unambiguous path from linking.
+Existing TODO edges are not silently rewritten by this rule.
 
 ### Node: TurnEvidence
 

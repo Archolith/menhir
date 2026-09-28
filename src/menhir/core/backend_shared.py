@@ -97,6 +97,24 @@ def _to_jsonable(value: Any) -> Any:
 
 
 def _project_scan_from_dict(payload: dict[str, Any]) -> ProjectScanResult:
+    coverage_fields = ("files_discovered", "files_eligible", "files_indexed")
+    missing = [field for field in coverage_fields if field not in payload]
+    if missing:
+        raise ValueError(
+            "Structure scan payload lacks coverage counts ("
+            + ", ".join(missing)
+            + "); re-scan with a current client before publication"
+        )
+    try:
+        discovered, eligible, indexed = (
+            int(payload[field]) for field in coverage_fields
+        )
+    except (TypeError, ValueError) as error:
+        raise ValueError("Structure scan coverage counts must be integers") from error
+    if not (0 <= indexed <= eligible <= discovered):
+        raise ValueError("Structure scan coverage counts are inconsistent")
+    if indexed != len(payload.get("files") or []):
+        raise ValueError("Structure scan indexed count does not match its file list")
     return ProjectScanResult(
         name=str(payload.get("name") or ""),
         root_path=str(payload.get("root_path") or ""),
@@ -124,15 +142,20 @@ def _project_scan_from_dict(payload: dict[str, Any]) -> ProjectScanResult:
             if payload.get("identity_generation") is not None
             else None
         ),
+        scan_generation=(
+            int(payload["scan_generation"])
+            if payload.get("scan_generation") is not None
+            else None
+        ),
         # Coverage counts must survive this boundary or `partial_index` is silently lost on
         # the remote path and consumers fall back to reporting absence as fact.
         # Beacon evidence binding: must cross the upload boundary or remote ingests store none.
         indexed_commit=str(payload.get("indexed_commit") or ""),
         indexed_repository=str(payload.get("indexed_repository") or ""),
         indexed_dirty=bool(payload.get("indexed_dirty")),
-        files_discovered=int(payload.get("files_discovered") or 0),
-        files_eligible=int(payload.get("files_eligible") or 0),
-        files_indexed=int(payload.get("files_indexed") or 0),
+        files_discovered=discovered,
+        files_eligible=eligible,
+        files_indexed=indexed,
         nested_repos=[NestedRepo(**item) for item in payload.get("nested_repos", []) or []],
         symbols=[SymbolEntry(**item) for item in payload.get("symbols", []) or []],
         truncated_symbol_files=[

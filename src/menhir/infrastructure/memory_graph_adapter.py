@@ -1235,6 +1235,12 @@ class MemoryGraphAdapter:
     # Structure graph delegates → StructureGraphWriter
     # -------------------------------------------------------------------------
 
+    def begin_structure_scan(self, claim: Any) -> int:
+        """Issue an ordering token before reading a project's filesystem."""
+        from menhir.infrastructure.structure_write_fence import issue_structure_scan_generation
+
+        return issue_structure_scan_generation(self.neo4j, claim)
+
     def write_project_structure(
         self,
         scan: Any,
@@ -1250,8 +1256,10 @@ class MemoryGraphAdapter:
         """
         from menhir.infrastructure.project_identity_binding import binding_host, root_key_for
         from menhir.infrastructure.structure_write_fence import (
-            IdentityClaim, admit_structure_writer, release_structure_writer,
+            IdentityClaim, StaleStructureScan, admit_structure_writer,
+            lock_structure_project, release_structure_writer,
         )
+        from menhir.infrastructure.structure_queries import StructureGraphWriter
 
         # CF-257. The identity invariant belongs HERE, beside the fence, for the same reason the
         # fence does: this is the one method every structure writer funnels through. Settling
@@ -1286,11 +1294,21 @@ class MemoryGraphAdapter:
             generation=int(getattr(scan, "identity_generation", 0) or 0),
             host=binding_host(),
         )
+        generation = getattr(scan, "scan_generation", None)
+        if generation is None:
+            raise StaleStructureScan(
+                "Structure scan has no graph-issued generation. Begin a fresh scan before "
+                "traversal; a captured payload cannot be authorized at write time."
+            )
         handle = admit_structure_writer(
             self.neo4j, label=str(getattr(scan, "name", "") or ""), claim=claim
         )
         try:
-            return self._structure.write_project(scan, session_id, user_id)
+            def _publish(tx: Any) -> dict[str, int]:
+                lock_structure_project(tx, claim, scan_generation=int(generation))
+                return StructureGraphWriter(tx).write_project(scan, session_id, user_id)
+
+            return self.neo4j.execute_write(_publish)
         finally:
             release_structure_writer(self.neo4j, handle)
 
@@ -1311,8 +1329,10 @@ class MemoryGraphAdapter:
         """Write one document under the same durable identity fence as a project scan."""
         from menhir.infrastructure.project_identity_binding import binding_host, root_key_for
         from menhir.infrastructure.structure_write_fence import (
-            IdentityClaim, admit_structure_writer, release_structure_writer,
+            IdentityClaim, admit_structure_writer, lock_structure_project,
+            release_structure_writer,
         )
+        from menhir.infrastructure.structure_queries import StructureGraphWriter
 
         if not project_id:
             raise ValueError(
@@ -1337,21 +1357,22 @@ class MemoryGraphAdapter:
         )
         handle = admit_structure_writer(self.neo4j, label=project, claim=claim)
         try:
-            self._structure.write_document(
-                file_path,
-                content,
-                project=project,
-                structure_path=structure_path,
-                structure_project_id=str(project_id),
-                session_id=session_id,
-                user_id=user_id,
-                document_type=document_type,
-            )
+            def _publish_document(tx: Any) -> None:
+                lock_structure_project(tx, claim)
+                StructureGraphWriter(tx).write_document(
+                    file_path, content, project=project, structure_path=structure_path,
+                    structure_project_id=str(project_id), session_id=session_id,
+                    user_id=user_id, document_type=document_type,
+                )
+
+            self.neo4j.execute_write(_publish_document)
         finally:
             release_structure_writer(self.neo4j, handle)
 
-    def get_scan_fingerprint(self, project_name: str) -> str | None:
-        return self._structure.get_scan_fingerprint(project_name)
+    def get_scan_fingerprint(
+        self, project_name: str, *, project_id: str | None = None
+    ) -> str | None:
+        return self._structure.get_scan_fingerprint(project_name, project_id=project_id)
 
     def get_beacon_evidence_guard_by_id(self, project_id: str) -> dict[str, Any]:
         return self._structure.get_beacon_evidence_guard_by_id(project_id)
@@ -1360,11 +1381,26 @@ class MemoryGraphAdapter:
         return self._structure.list_indexed_repositories()
 
     def refresh_indexed_binding(
-        self, project_name: str, fingerprint: str, commit: str, repository: str, dirty: bool
+        self, project_name: str, fingerprint: str, commit: str, repository: str, dirty: bool,
+        *, claim: Any, scan_generation: int,
     ) -> bool:
-        return self._structure.refresh_indexed_binding(
-            project_name, fingerprint, commit, repository, dirty
+        from menhir.infrastructure.structure_queries import StructureGraphWriter
+        from menhir.infrastructure.structure_write_fence import (
+            admit_structure_writer, lock_structure_project, release_structure_writer,
         )
+
+        handle = admit_structure_writer(self.neo4j, label=project_name, claim=claim)
+        try:
+            def _refresh(tx: Any) -> bool:
+                lock_structure_project(tx, claim, scan_generation=scan_generation)
+                return StructureGraphWriter(tx).refresh_indexed_binding(
+                    project_name, fingerprint, commit, repository, dirty,
+                    project_id=claim.project_id,
+                )
+
+            return self.neo4j.execute_write(_refresh)
+        finally:
+            release_structure_writer(self.neo4j, handle)
 
     def get_project_root_path(self, project_name: str) -> str | None:
         return self._structure.get_project_root_path(project_name)
