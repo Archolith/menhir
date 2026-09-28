@@ -276,8 +276,8 @@ jobs:
           cache: "pip"
           cache-dependency-path: menhir/pyproject.toml
 
-      # `build` is the wheel frontend the campaign uses; without it every lane SKIPS with
-      # "wheel build failed", which would leave this job green while running nothing.
+      # `build` is the wheel frontend the campaign uses. A missing frontend now
+      # fails the enabled campaign at fixture setup.
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -315,13 +315,23 @@ jobs:
         working-directory: menhir
         env:
           MENHIR_E2E: "1"
+          MENHIR_E2E_STRICT: "1"
           MENHIR_E2E_NEO4J_URI: bolt://127.0.0.1:7690
           # Pinned so the evidence upload below can find it. Left unset, the campaign
           # writes under pytest's basetemp (/tmp/pytest-of-runner/...), outside the
           # checkout, and the first green run uploaded an empty artifact without saying so.
           MENHIR_E2E_WORK_ROOT: ${{ github.workspace }}/menhir/.e2e-work
         run: |
-          pytest tests/e2e -v -rs
+          pytest tests/e2e -v -rs --junitxml=.e2e-work/junit.xml
+
+      # A green pytest exit can still mean every runnable lane skipped. Compare the
+      # collected cases with their verdicts; only E2E-6's no-image PENDING is expected.
+      - name: Verify campaign evidence
+        if: always()
+        working-directory: menhir
+        run: |
+          python -m tests.e2e._harness.ci_evidence_gate \
+            --junit .e2e-work/junit.xml --evidence .e2e-work/evidence
 
       # result.json is what Gate C actually asks for: which acceptance criteria were
       # proven, not merely whether pytest was green. Kept on failure too -- that is when
@@ -332,7 +342,6 @@ jobs:
         with:
           name: stdio-e2e-evidence
           path: menhir/.e2e-work/evidence/**
-          # error, not ignore: every lane writes result.json even when it skips or
-          # crashes, so a run with no evidence is a run that did not happen.
+          # error, not ignore: no evidence means the campaign did not run.
           if-no-files-found: error
           retention-days: 14
