@@ -40,6 +40,7 @@ class RuntimeProviderAdminOpsMixin:
         keep_uuid: str | None = None,
         remove_uuid: str | None = None,
         allow_promoted_removal: bool = False,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         return _to_jsonable(
             await self._off_loop(
@@ -50,6 +51,7 @@ class RuntimeProviderAdminOpsMixin:
                 remove_uuid=remove_uuid,
                 resolution_status=resolution_status,
                 allow_promoted_removal=allow_promoted_removal,
+                namespace=namespace,
             )
         )
 
@@ -615,6 +617,9 @@ class RuntimeProviderAdminOpsMixin:
         namespace: str | None = None,
         turn_evidence_uuid: str | None = None,
     ) -> dict[str, Any]:
+        from menhir.services.ingest_limits import validate_memory_payload
+
+        validate_memory_payload(content)
         kwargs: dict[str, Any] = {
             "content": content,
             "target_date": target_date,

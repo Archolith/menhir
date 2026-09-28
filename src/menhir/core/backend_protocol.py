@@ -316,8 +316,9 @@ class MemoryBackend(Protocol):
         keep_uuid: str | None = None,
         remove_uuid: str | None = None,
         allow_promoted_removal: bool = False,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
-        """Resolve a conflict group."""
+        """Resolve a conflict group, optionally restricted to one namespace."""
         ...
 
     async def requeue_conflicts_for_llm_review(

@@ -298,6 +298,7 @@ class BackendClientOpsMixin:
         keep_uuid: str | None = None,
         remove_uuid: str | None = None,
         allow_promoted_removal: bool = False,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         return await self._request(
             "resolve_conflict_group",
@@ -308,6 +309,7 @@ class BackendClientOpsMixin:
                 "keep_uuid": keep_uuid,
                 "remove_uuid": remove_uuid,
                 "allow_promoted_removal": allow_promoted_removal,
+                "namespace": namespace,
             },
         )
 

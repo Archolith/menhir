@@ -16,6 +16,56 @@ def _make_repo(execute_return=None):
     return repo
 
 
+class TestAtomicTransientRefundQueries:
+    @pytest.mark.parametrize(
+        ("method_name", "terminal_state"),
+        (("mark_episode_pending", "PENDING"), ("mark_episode_failed", "FAILED")),
+    )
+    def test_refund_is_folded_into_claim_incarnation_fenced_transition(
+        self, method_name, terminal_state
+    ):
+        repo = _make_repo([{"updated": 1}])
+        method = getattr(repo, method_name)
+        kwargs = {
+            "worker_id": "worker-A",
+            "transient_requeue": True,
+            "claim_started_at": "claim-1",
+        }
+        if method_name == "mark_episode_failed":
+            assert method("ep-1", "timeout", **kwargs)
+        else:
+            assert method("ep-1", **kwargs)
+
+        query = repo.neo4j.execute.call_args.args[0]
+        params = repo.neo4j.execute.call_args.kwargs["params"]
+        assert "n.processing_state = 'ENRICHING'" in query
+        assert "n.processing_owner = $worker_id" in query
+        assert (
+            "n.processing_started_at.epochSeconds"
+            " = datetime($claim_started_at).epochSeconds"
+        ) in query
+        assert (
+            "n.processing_started_at.nanosecond"
+            " = datetime($claim_started_at).nanosecond"
+        ) in query
+        assert "n.transient_retries = CASE WHEN $transient_requeue" in query
+        assert "n.processing_attempts = CASE WHEN NOT $transient_requeue" in query
+        assert f"n.processing_state = '{terminal_state}'" in query
+        assert params["worker_id"] == "worker-A"
+        assert params["transient_requeue"] is True
+        assert params["claim_started_at"] == "claim-1"
+
+    def test_non_refund_admin_transition_keeps_legacy_unowned_path(self):
+        repo = _make_repo([{"updated": 1}])
+
+        assert repo.mark_episode_pending("ep-1")
+
+        params = repo.neo4j.execute.call_args.kwargs["params"]
+        assert params["worker_id"] is None
+        assert params["transient_requeue"] is False
+        assert params["claim_started_at"] is None
+
+
 class TestClaimContextRetryDefault:
     """Verify context_retry_attempts=0 disables extra context retries."""
 
@@ -103,6 +153,7 @@ class TestClaimProjectionCarriesWorldTime:
         "reference_time",
         "queued_at",
         "turn_evidence_uuid",
+        "processing_started_at",
     )
 
     def _claim_query(self):
