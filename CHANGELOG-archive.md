@@ -1,3 +1,12 @@
+## 2026-09-26 - startup context supporting reads retain namespace scope (#116)
+
+- `src/menhir/mcp/tools/recall/recall_context_memories.py`: pass the effective tool namespace
+  to flag inspection and stale-TODO reads, preserving unscoped behavior and client pins.
+- `tests/test_cf238_bootstrap_receipt_identity.py`: exercise MCP execution and the real local
+  provider through scoped, default, omitted, and conflicting/omitted client-pin cases.
+- `.agent/tasks-mcp.md`: describe the supporting-read scope and the agreed MVP deferral of
+  the full effective-scope receipt feature. #116 remains open.
+
 ## 2026-09-25 - decay age pre-filters follow eligible policy thresholds (#86)
 
 - `src/menhir/services/lifecycle_models.py`: derive compression and deletion age minima

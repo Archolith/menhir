@@ -607,20 +607,21 @@ Other CLI commands include `menhir console` for an interactive shell and
 
 ## Docker test stack
 
-The deployment compose file starts Menhir and an isolated, disposable Neo4j instance.
-It is a test stack, not a production template, and its supplied configuration uses
-OpenAI for extraction and embeddings.
+The public Compose files are disposable checks for an already built Menhir
+image. The full stack uses an isolated Neo4j volume and a configured model
+provider; its example uses paid OpenAI extraction and embeddings. For a local
+installation from source, follow the setup above and use
+`menhir up --compose-neo4j`.
 
-**It does not build from a plain clone.** `deploy/Dockerfile` installs from a pre-built
-wheelhouse and a digest-pinned base image that the release pipeline produces
-(`pip wheel . --wheel-dir deploy/wheelhouse`, see `deploy/`). To run Menhir in a container from
-source, use any Python 3.12 image with the pip steps above; the compose file below is for
-release verification.
+**The image does not build from a plain clone.** `deploy/Dockerfile` installs
+from a prepared, hash-verified wheelhouse on a digest-pinned base image. The
+release pipeline builds and verifies that image before a Compose check.
 
 ```bash
+# First load or tag a verified image as menhir:test.
 cp deploy/.env.deploy.example deploy/.env.deploy
 # Set OPENAI_API_KEY and MENHIR_OPERATOR_KEY in deploy/.env.deploy.
-docker compose -f deploy/docker-compose.full.yml up -d --build
+docker compose -f deploy/docker-compose.full.yml up -d
 curl -fsS http://127.0.0.1:8099/api/health
 ```
 
@@ -635,8 +636,9 @@ Two path and networking details matter in Docker:
 - `127.0.0.1` inside a container is the container itself. To use a model server on the
   host, set `LOCAL_LLM_BASE_URL` to an address such as `host.docker.internal`.
 
-See [`deploy/README.md`](deploy/README.md) for client-token bootstrap and deployment
-details.
+See [`deploy/README.md`](deploy/README.md) for client-token bootstrap and image
+verification details. Operator-specific production deployment is maintained in
+the private `Archolith/menhir-deploy` repository.
 
 ## Security and privacy
 

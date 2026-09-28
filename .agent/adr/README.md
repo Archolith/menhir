@@ -5,7 +5,7 @@ Accepted Menhir architecture decisions, in sequence:
 | ADR | Status | Decision |
 |---|---|---|
 | [0001](0001-conversation-turn-capture-surface.md) | Accepted target; implementation followed | Capture selective user-authored evidence as `:TurnEvidence`, separate from memory. |
-| [0002](0002-menhir-production-ingress-ownership.md) | Corrected | Cloudflared is the sole Menhir production ingress. |
+| 0002 | Moved to private `Archolith/menhir-deploy` | Production ingress ownership. |
 | [0003](0003-event-fold-view-projection-boundary.md) | Accepted retrospectively | Preserve evidence and derive rebuildable Views through deterministic folds. |
 | [0004](0004-single-runtime-owner-and-backend-first-access.md) | Accepted retrospectively | `menhir serve` owns the runtime; MCP and REST use the backend contract. |
 | [0005](0005-core-enforced-namespace-isolation.md) | Accepted retrospectively | Enforce configured namespace isolation below transport-specific code. |

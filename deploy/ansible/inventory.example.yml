@@ -1,8 +1,0 @@
----
-all:
-  children:
-    menhir_hosts:
-      hosts:
-        menhir-example:
-          ansible_host: menhir.example.invalid
-          ansible_user: example-operator

@@ -1,163 +1,49 @@
-# Menhir Docker deployment
+# Menhir self-host and image verification
 
-For an immutable production release to the live VPS, start with
-[RUNBOOK.md](RUNBOOK.md) (the release-and-deploy procedure as run for 0.2.0-14
-through 18) and use [PRODUCTION.md](PRODUCTION.md) as the detailed contract. The
-older [playbook](LIVE_VPS_PLAYBOOK.md) covers the rebuilt-image path only. The one-endpoint,
-per-client OAuth identity, and ChatGPT/Codex/Claude/OpenCode role invariant is
-in [ACCESS_CONTRACT.md](ACCESS_CONTRACT.md).
+The supported public MVP path is the local install and server described in the
+[root README](../README.md). `menhir up --compose-neo4j` starts a local,
+disposable Neo4j instance; `menhir check`, `menhir diagnostics`, and
+`menhir serve` verify the package and API. These commands do not require the
+operator deployment repository.
 
-Use [RELEASE_AUTOMATION.md](RELEASE_AUTOMATION.md) for the two maintained workflows: product
-preparation/finalization and the separate resumable personal deployment flow. Normal production
-changes must pass `personal_deploy.py select -> stage -> approve -> promote`; do not invoke the
-lower-level production wrapper directly except during explicit recovery.
+The files here also retain the generic, sealed-image build and disposable
+Docker test stacks. `Dockerfile` deliberately installs only from a prepared,
+hash-verified `deploy/wheelhouse` and requires a digest-pinned `PYTHON_BASE`.
+It cannot build from a plain clone. CI prepares that wheelhouse and uses
+`build_release_image.py` to bind the image to its source and wheel digests.
+The Docker stacks expect an already built and verified image tagged
+`menhir:test`; they do not build or publish one.
 
-Production deployment has two operational paths:
+## Disposable image checks
 
-- routine `app-only`: verify the one-time scaffold, pull and replace only the Menhir
-  app image, run authenticated acceptance, and automatically restore the prior image
-  on failure; target completion is five minutes;
-- `maintenance`/`recovery`: use the full backup, restore rehearsal, candidate,
-  writer-fence, route, and promotion transaction.
-
-Do not run the full maintenance transaction merely because application code changed.
-The exact classification and escalation rules are in
-[LIVE_VPS_PLAYBOOK.md](LIVE_VPS_PLAYBOOK.md#deployment-classes).
-
-The installed host scaffold is managed by
-`C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1`: use `-Mode Install` only
-for scaffold changes and `-Mode AppOnly` for routine read-only admission. Neo4j
-Community backups are offline maintenance, not an unattended production timer.
-
-A containerized Menhir for **test deployments** — in particular, validating the
-auth/OAuth surface (including the proxied-deployment guards **CT-001** and
-**RL-001**) behind a real reverse proxy, which cannot be exercised locally.
-
-The image does **not** build from a plain `git clone`. `Dockerfile` performs no live git,
-PyPI, or apt resolution: it installs from a pre-built wheelhouse at `deploy/wheelhouse`
-(`pip wheel . --wheel-dir deploy/wheelhouse`, including Menhir's two unpublished first-party
-dependencies `archolith-mcp-framework` and `archolith-oauth`) on a digest-pinned base image,
-both produced by the release pipeline described below. To run Menhir in a container from
-source, use any Python 3.12 image with the pip steps in the root README.
-
-## Contents
-
-| File | Purpose |
-|------|---------|
-| `Dockerfile` | Two-stage runtime image (context = repo root). |
-| `build.sh` | Build the image (`docker build -f deploy/Dockerfile .`). |
-| `docker-compose.test.yml` | Test stack. Phase 1 = auth-only (no Neo4j); Phase 2 = full + throwaway Neo4j. |
-| `docker-compose.full.yml` | Full stack: menhir + an isolated throwaway Neo4j. |
-
-## 1. Bring it up (new-user flow — from a menhir clone)
+After preparing or loading a verified image as `menhir:test`, create an
+operator credential and start the auth-only test stack:
 
 ```bash
 export MENHIR_OPERATOR_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-docker compose -f deploy/docker-compose.test.yml up -d --build
-docker compose -f deploy/docker-compose.test.yml logs -f menhir-test
+docker compose -f deploy/docker-compose.test.yml up -d
+curl -fsS http://127.0.0.1:8099/api/health
 ```
 
-That is all a new user needs: clone menhir, set one bootstrap operator credential,
-then run `up --build`. No PyPI package, workspace layout, or separate framework
-checkout is required. Compose fails closed when `MENHIR_OPERATOR_KEY` is unset.
+This stack binds Menhir only to loopback, uses an isolated state volume, and
+does not start Neo4j by default. See comments in `docker-compose.test.yml` to
+enable its throwaway Neo4j service for full-mode checks. The separate
+`docker-compose.full.yml` stack requires a configured model provider and a
+disposable database; its example uses paid OpenAI models. Neither stack is a
+production template.
 
-To build the image explicitly (e.g. to tag/push it):
+With the network-bound container, credential-free bootstrap is disabled.
+Use `MENHIR_OPERATOR_KEY` to create the first client token, for example:
 
 ```bash
-deploy/build.sh                      # -> menhir:test
-IMAGE=<registry>/menhir:test deploy/build.sh && docker push <registry>/menhir:test
+curl -fsS -X POST http://127.0.0.1:8099/api/admin/clients \
+  -H "authorization: Bearer $MENHIR_OPERATOR_KEY" \
+  -H 'content-type: application/json' \
+  -d '{"client_name":"my-agent","tier":"operator"}'
 ```
 
-> Maintainer note: the first-party dependencies are pinned by tag/commit in
-> `pyproject.toml`. To pick up a framework change, bump the pin there and rebuild;
-> Docker's layer cache keys on `pyproject.toml`, so the builder stage re-resolves.
-
-Phase 1 defaults: **auth-only scope** (no Neo4j), **client-token tier** enabled,
-`MENHIR_TRUSTED_PROXY=1`, state in a `/data` volume, published on
-**`127.0.0.1:8099`** (loopback only — the reverse proxy reaches it, the internet
-does not hit the app port directly).
-
-Health: `curl -fsS http://127.0.0.1:8099/api/health` → `{"status": ...}`.
-
-### First operator credential (container binds `0.0.0.0`)
-
-The container binds `0.0.0.0`, which is a **network bind**, so the credential-free
-loopback bootstrap is disabled by design (a network-bound server can't be
-bootstrapped without a credential — a proxy could otherwise spoof a loopback
-origin). For a container/proxied deployment you therefore provide a credential:
-
-- **Client-token tier:** set `MENHIR_OPERATOR_KEY=<secret>` and use it to mint the
-  first client token, e.g.
-
-  ```bash
-  curl -s -X POST http://127.0.0.1:8099/api/admin/clients \
-       -H "authorization: Bearer $MENHIR_OPERATOR_KEY" \
-       -H 'content-type: application/json' \
-       -d '{"client_name":"my-agent","tier":"operator"}'
-  # -> {"client_id":..., "token":"<shown once>", ...}
-  ```
-
-- **OAuth mode:** set the `MENHIR_OAUTH_*` vars instead; tokens come from the IdP.
-
-(A no-credential `POST /api/admin/clients` correctly returns `401` on the container.)
-
-## 2. Put it behind the reverse proxy (validates CT-001 / RL-001)
-
-The proxied topology is exactly what CT-001/RL-001 harden against. With Caddy,
-add a route for a test hostname:
-
-```caddyfile
-menhir-test.<your-domain> {
-    reverse_proxy 127.0.0.1:8099
-}
-```
-
-**Two layers of bootstrap protection, depending on how the app binds:**
-
-- **Container default (`0.0.0.0` bind) — primary protection.** A network bind
-  disables the credential-free loopback bootstrap outright, so *any*
-  `POST /api/admin/clients` without a credential is `401`, proxy or not. This is
-  the safest posture and what the compose file ships. Provide the first
-  credential per §1.
-
-- **App loopback-bound behind a same-host proxy (`MENHIR_API_HOST=127.0.0.1`) —
-  CT-001 forwarding-header guard.** In this shape the app *would* accept a
-  loopback bootstrap, so the extra guard matters: Caddy's `reverse_proxy` sets
-  `X-Forwarded-For`, so a bootstrap arriving through the proxy carries it and is
-  refused, while a direct loopback `curl` on the host (no such header) still
-  bootstraps. Verify:
-
-  ```bash
-  # through the proxy -> 401 (forwarding-header guard engaged)
-  curl -s -o /dev/null -w '%{http_code}\n' -X POST https://menhir-test.<domain>/api/admin/clients \
-       -H 'content-type: application/json' -d '{"client_name":"x","tier":"operator"}'
-  # on the host, direct to the loopback-bound app, empty store -> 200
-  curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8099/api/admin/clients \
-       -H 'content-type: application/json' -d '{"client_name":"x","tier":"operator"}'
-  ```
-
-- **RL-001** — with `MENHIR_TRUSTED_PROXY=1`, the AS rate limits key on the
-  real client from Caddy's `X-Forwarded-For` last hop instead of collapsing
-  every caller onto the proxy's address.
-
-> Operational rule (see `docs/runbooks/client-token-tier.md`): on a proxied
-> deployment, **pre-mint the first operator token (or set `MENHIR_OPERATOR_KEY`)
-> before wiring the proxy**, and never revoke the last active token while the
-> proxy is attached — revocation re-opens the bootstrap window.
-
-## 3. Safety
-
-- This is a **test** stack: isolated data volume, own port, **no shared
-  database**. Never point it at a production Neo4j/Postgres.
-- The app port is published on loopback only; exposure is via the reverse proxy.
-- Auth is always enforced: the default is the client-token tier; the no-auth
-  bind guard refuses an unauthenticated non-loopback bind, so the container
-  will not start `0.0.0.0` without an auth mode configured.
-
-## Phase 2 — full mode
-
-Uncomment the `neo4j-test` service and the marked `menhir-test` lines in
-`docker-compose.test.yml` (sets `MENHIR_STARTUP_SCOPE=full` +
-`NEO4J_URI=bolt://neo4j-test:7687`). This adds an **isolated throwaway** Neo4j
-so the memory backend can be exercised too — still fully separate from any
-production graph.
+The local backup helper, example environment file, and image verification
+tools remain in this public directory. Operator-specific host configuration,
+production runbooks, release receipts, staging, and promotion live in the
+private `Archolith/menhir-deploy` repository. Removing them from the current
+public tree does not remove previously published Git history.
