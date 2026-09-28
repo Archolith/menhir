@@ -15,6 +15,7 @@ This index routes the current execution owners listed below exactly once.
 | Document | Current ownership |
 |---|---|
 | [`menhir-local-stdio-mvp-release-2026-09-16.md`](menhir-local-stdio-mvp-release-2026-09-16.md) | Define and close the local stdio MVP: memory, WorkArtifacts, local code ingest/structure, TODOs, the public Graphiti fork, independent audit, black-box E2Es, and a fresh full-Oracle LongMemEval release gate. Beacon is deferred. |
+| [`menhir-gate-b-remediation-2026-09-28.md`](menhir-gate-b-remediation-2026-09-28.md) | PROPOSED bounded work package under the local-stdio MVP plan: resolve audit B-04–B-08 and B-09/B-10 coverage, then obtain exact-commit evidence and independent re-audit. Does not authorize release or #119 repair. |
 | Deployment control-plane architecture reset | Private `Archolith/menhir-deploy` repository. Only the repository-census Phase 0 is eligible to start; implementation remains blocked. |
 | [`menhir-feature-flag-registry.md`](menhir-feature-flag-registry.md) | Define one declarative feature-flag inventory and CI-enforce consistency with settings and environment documentation. |
 | [`menhir-core-promotion-restack-2026-08-31.md`](menhir-core-promotion-restack-2026-08-31.md) | Restack core-promotion PRs #11–#42 from the bottom branch, preserve tranche boundaries, and repair definition-scoped bounded recovery in tranches 5 and 9. |
