@@ -239,7 +239,7 @@ def test_candidate_mode_requires_production_surface() -> None:
 
 def _production_settings(**overrides: object) -> MemorySettings:
     policy_path = (
-        Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
+        Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "client-policy.synthetic.json"
     )
     values: dict[str, object] = {
         "startup_scope": "production",
@@ -248,16 +248,16 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_enabled": True,
         "oauth_as_enabled": True,
         "oauth_as_refresh_tokens_enabled": True,
-        "oauth_public_base_url": "https://memory.ctharvey.me",
-        "oauth_resource": "https://memory.ctharvey.me/mcp-http",
-        "oauth_audiences": ("https://memory.ctharvey.me/mcp-http",),
-        "oauth_issuer": "https://memory.ctharvey.me",
-        "oauth_jwks_uri": "https://memory.ctharvey.me/.well-known/jwks.json",
+        "oauth_public_base_url": "https://menhir.example.com",
+        "oauth_resource": "https://menhir.example.com/mcp-http",
+        "oauth_audiences": ("https://menhir.example.com/mcp-http",),
+        "oauth_issuer": "https://menhir.example.com",
+        "oauth_jwks_uri": "https://menhir.example.com/.well-known/jwks.json",
         "client_policy_path": str(policy_path),
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "04abc7bdf5d59d31e497dcefb9d431c06cf6cb0f34d395469391fabd77fbb0aa",
+        "client_policy_digest": json.loads(policy_path.read_text(encoding="utf-8"))["canonical_digest"],
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -325,268 +325,10 @@ async def test_candidate_recall_forces_access_updates_off(monkeypatch) -> None:
     assert observed["update_access"] is False
 
 
-def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
-    path = (
-        Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
-    )
-    digest = "04abc7bdf5d59d31e497dcefb9d431c06cf6cb0f34d395469391fabd77fbb0aa"
-
-    from menhir.mcp.tools import ALL_TOOLS
-
-    authority = load_client_policy(
-        str(path),
-        digest,
-        tool_catalog=frozenset(tool.name for tool in ALL_TOOLS),
-    )
-    policy = authority.require_client(
-        client_id="69c2cd871b488ff4",
-        scopes=frozenset({"menhir:read", "menhir:write", "menhir:admin"}),
-        tier="operator",
-    )
-
-    assert policy.label == "chatgpt-chat"
-    assert policy.maximum_tier == "operator"
-    web_denied_tools = frozenset(
-        {
-            "delete_namespace",
-            "mint_client",
-            "revoke_client",
-        }
-    )
-    web_allowed_tools = frozenset(tool.name for tool in ALL_TOOLS) - web_denied_tools
-    assert policy.allowed_tools == web_allowed_tools
-    assert policy.denied_tools == web_denied_tools
-    assert "list_todos" in policy.allowed_tools
-    assert "ingest_document" in policy.allowed_tools
-    assert "ingest_project" in policy.allowed_tools
-    assert "resolve_conflict" in policy.allowed_tools
-    assert "pause_scheduler" in policy.allowed_tools
-    assert policy.registration is not None
-    assert policy.registration.redirect_uris == (
-        "https://chatgpt.com/connector_platform_oauth_redirect",
-    )
-    assert authority.require_authorization(
-        client_id="69c2cd871b488ff4",
-        scopes=frozenset({"menhir:read", "menhir:write", "menhir:admin"}),
-    ) is policy
-
-    chatgpt_cimd = authority.require_client(
-        client_id="https://chatgpt.com/oauth/client.json",
-        scopes=frozenset({"menhir:read", "menhir:write", "menhir:admin"}),
-        tier="operator",
-    )
-    assert chatgpt_cimd.label == "chatgpt-web-cimd"
-    assert chatgpt_cimd.registration is None
-    assert chatgpt_cimd.allowed_tools == web_allowed_tools
-    assert chatgpt_cimd.denied_tools == web_denied_tools
-
-    claude_web = authority.require_client(
-        client_id="6cf6322fa828bb72",
-        scopes=frozenset(
-            {"menhir:read", "menhir:write", "menhir:admin", "offline_access"}
-        ),
-        tier="operator",
-    )
-    assert claude_web.label == "claude-web"
-    assert claude_web.registration is not None
-    assert claude_web.registration.redirect_uris == (
-        "https://claude.ai/api/mcp/auth_callback",
-    )
-    assert claude_web.registration.protocol_scopes == frozenset({"offline_access"})
-    assert claude_web.allowed_tools == web_allowed_tools
-    assert claude_web.denied_tools == web_denied_tools
-    assert authority.require_authorization(
-        client_id="6cf6322fa828bb72",
-        scopes=frozenset(
-            {"menhir:read", "menhir:write", "menhir:admin", "offline_access"}
-        ),
-    ) is claude_web
-
-    assert authority.version == 2
-    assert authority.access_contract is not None
-    assert is_canonical_primary_endpoint(authority.access_contract.primary_endpoint)
-    assert {
-        product: access.role
-        for product, access in authority.access_contract.products.items()
-    } == EXPECTED_PRODUCT_ROLES
-    assert authority.access_contract.products["chatgpt"].client_ids == (
-        "69c2cd871b488ff4",
-        "https://chatgpt.com/oauth/client.json",
-    )
-    authority.access_contract.require_oauth_scope_mapping(
-        scopes_supported=("menhir:read", "menhir:write", "menhir:admin"),
-        read_scopes=("menhir:read",),
-        write_scopes=("menhir:write",),
-        admin_scopes=("menhir:admin",),
-    )
-
-    with pytest.raises(PermissionError, match="scopes do not match"):
-        authority.require_authorization(
-            client_id="https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=codex",
-            scopes=frozenset({"menhir:read", "menhir:admin"}),
-        )
-
-    with pytest.raises(PermissionError, match="scopes do not match"):
-        authority.require_client(
-            client_id="6cf6322fa828bb72",
-            scopes=frozenset({"menhir:read", "menhir:write", "offline_access"}),
-            tier="agent",
-        )
-
-    with pytest.raises(PermissionError, match="scopes do not match"):
-        authority.require_client(
-            client_id="6cf6322fa828bb72",
-            scopes=frozenset(
-                {
-                    "menhir:read",
-                    "menhir:write",
-                    "menhir:admin",
-                    "offline_access",
-                    "openid",
-                }
-            ),
-            tier="operator",
-        )
-
-    bridge_ids = {
-        client_id: client_policy
-        for client_id, client_policy in authority.clients.items()
-        if client_id.startswith(
-            "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client="
-        )
-    }
-    assert len(bridge_ids) == 12
-    assert len({entry.label for entry in bridge_ids.values()}) == 12
-    for label in {
-        "agent-smith-claude",
-        "agent-smith-codex",
-        "agent-smith-wsl-claude",
-    }:
-        operator = next(entry for entry in bridge_ids.values() if entry.label == label)
-        assert operator.maximum_tier == "operator"
-        assert operator.scopes == frozenset(
-            {"menhir:read", "menhir:write", "menhir:admin"}
-        )
-        assert operator.allowed_tools == web_allowed_tools
-        assert operator.denied_tools == web_denied_tools
-        assert "get_provenance" in operator.allowed_tools
-    agent_base_tools = frozenset(
-        {
-            "add_memory",
-            "add_todo",
-            "build_context",
-            "close_stale_todos",
-            "close_todo",
-            "get_beacon_evidence",
-            "get_todo",
-            "list_todos",
-            "query_structure",
-            "read_flagged_memories",
-            "recall_context_memories",
-            "recall_memories",
-        }
-    )
-    expected_agent_tools = {
-        "agent-smith-antigravity-ide": agent_base_tools,
-        "agent-smith-cline": agent_base_tools,
-        "agent-smith-gemini": agent_base_tools,
-        "agent-smith-gemini-config": agent_base_tools,
-        "agent-smith-goose": agent_base_tools,
-        "agent-smith-opencode": agent_base_tools,
-        "agent-smith-qwen": agent_base_tools,
-        "agent-smith-wsl-opencode": agent_base_tools,
-        "agent-smith-zcode": agent_base_tools,
-    }
-    assert {
-        entry.label: entry.allowed_tools
-        for entry in bridge_ids.values()
-        if entry.maximum_tier == "agent"
-    } == expected_agent_tools
-    assert all(
-        "ingest_project" in entry.denied_tools
-        for entry in bridge_ids.values()
-        if entry.maximum_tier == "agent"
-    )
-    assert bridge_ids[
-        "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=codex"
-    ].allowed_tools == web_allowed_tools
-    assert not any("reasonix" in client_id for client_id in authority.clients)
-    assert (
-        "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json"
-        not in authority.clients
-    )
 
 
-def test_cloudflared_example_exposes_agent_smith_metadata_before_deny_rules() -> None:
-    path = (
-        Path(__file__).resolve().parents[1]
-        / "deploy"
-        / "cloudflared-config.production.yml.example"
-    )
-    text = path.read_text(encoding="utf-8")
-
-    metadata_route = "client-metadata/agent-smith\\.json"
-    hostname_deny = "hostname: memory.example.com\n    service: http_status:404"
-    assert metadata_route in text
-    assert hostname_deny in text
-    assert text.index(metadata_route) < text.index(hostname_deny)
 
 
-def test_candidate_compose_uses_exact_restored_production_authorities() -> None:
-    root = Path(__file__).resolve().parents[1]
-    compose = (root / "deploy" / "docker-compose.production.yml").read_text(
-        encoding="utf-8"
-    )
-    release_lib = (root / "deploy" / "release-lib.sh").read_text(encoding="utf-8")
-    authority_digest = (root / "deploy" / "lib" / "authority_digest.py").read_text(
-        encoding="utf-8"
-    )
-
-    assert "source: ${MENHIR_STATE_ROOT:-/srv/menhir/production/state}/oauth" in compose
-    assert (
-        "source: ${MENHIR_PROD_ROOT:-/srv/menhir/production}/state/oauth" not in compose
-    )
-    assert 'MENHIR_OAUTH_AS_REFRESH_WITHOUT_OFFLINE_ACCESS_ENABLED: "true"' in compose
-    assert (
-        'MENHIR_OAUTH_SCOPES_SUPPORTED: "menhir:read,menhir:write,menhir:admin"'
-        in compose
-    )
-    assert 'MENHIR_OAUTH_ADMIN_SCOPES: "menhir:admin"' in compose
-    assert 'MENHIR_STATE_ROOT="${MENHIR_ROOT}/state"' in release_lib
-    assert 'MENHIR_PROD_SECRETS_DIR="${MENHIR_ROOT}/secrets"' in release_lib
-    assert 'MENHIR_PROD_POLICY_DIR="${MENHIR_ROOT}/policy"' in release_lib
-    assert (
-        'MENHIR_TELEMETRY_ROOT="${candidate_root}/probe-output/telemetry"'
-        in release_lib
-    )
-    assert '"oauth=${MENHIR_ROOT}/state/oauth"' in release_lib
-    assert '"telemetry=${MENHIR_ROOT}/state/telemetry"' in release_lib
-    assert 'python3 "$(authority_digest_tool)" local-set' in release_lib
-    assert '< "$(authority_digest_tool)"' in release_lib
-    assert "SHOW INDEXES" in authority_digest
-    assert "SHOW CONSTRAINTS" in authority_digest
-    assert "SHOW DATABASES" in authority_digest
-    assert "SHOW USERS" in authority_digest
-    assert "SHOW ROLES WITH USERS" in authority_digest
-    assert "SHOW PRIVILEGES" in authority_digest
-    assert (
-        'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" run '
-        '--rm --no-deps -T menhir '
-        "python3 - neo4j" in release_lib
-    )
-    assert (
-        "docker inspect -f '{{.State.Running}}' menhir-candidate-app"
-        in release_lib
-    )
-    assert (
-        'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" exec '
-        '-T menhir python3 - neo4j' in release_lib
-    )
-    assert (
-        'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" config --quiet'
-        in release_lib
-    )
-    assert "toString(" not in release_lib
 
 
 def test_production_startup_refuses_scope_mapping_below_access_contract(
@@ -613,63 +355,12 @@ def test_production_startup_refuses_scope_mapping_below_access_contract(
         )
 
 
-def test_release_schema_helpers_support_installed_flat_layout() -> None:
-    root = Path(__file__).resolve().parents[1]
-    release_lib = (root / "deploy" / "release-lib.sh").read_text(encoding="utf-8")
-    release_validate = (root / "deploy" / "release-validate.sh").read_text(
-        encoding="utf-8"
-    )
-    release_run = (root / "deploy" / "release-run.sh").read_text(encoding="utf-8")
-
-    assert '[ -f "$schema" ] || schema="${helper_dir}/menhir_schema.py"' in release_lib
-    assert '[ -f "$SCHEMA" ] || SCHEMA="${SCRIPT_DIR}/menhir_schema.py"' in release_validate
-    assert (
-        '[ -f "$same_host_helper" ] || '
-        'same_host_helper="${SCRIPT_DIR}/same_host_fence.py"'
-    ) in release_run
-    assert 'python3 "${SCRIPT_DIR}/lib/same_host_fence.py"' not in release_run
 
 
-def test_secret_mode_verifier_normalizes_shell_octal_notation() -> None:
-    source = (
-        Path(__file__).resolve().parents[1] / "deploy" / "secrets-map.sh"
-    ).read_text(encoding="utf-8")
-
-    assert 'normalized_mode="${m#0}"' in source
-    assert '[ "$am" = "$normalized_mode" ]' in source
 
 
-def test_production_compose_uses_compose_v5_compatible_pid_limits() -> None:
-    compose = (
-        Path(__file__).resolve().parents[1]
-        / "deploy"
-        / "docker-compose.production.yml"
-    ).read_text(encoding="utf-8")
-
-    assert "pids_limit:" not in compose
-    assert "          pids: 1024" in compose
-    assert "          pids: 256" in compose
-    assert "      timeout: 15s" in compose
 
 
-def test_cloudflared_ingress_is_pinned_and_public_surface_is_allowlisted() -> None:
-    root = Path(__file__).resolve().parents[1]
-    compose = (root / "deploy" / "docker-compose.cloudflared.yml").read_text(
-        encoding="utf-8"
-    )
-    config = (
-        root / "deploy" / "cloudflared.production.yml.example"
-    ).read_text(encoding="utf-8")
-
-    assert "cloudflare/cloudflared@sha256:" in compose
-    assert "ipv4_address: 172.30.0.2" in compose
-    assert "source: /srv/menhir/production/secrets/cloudflare/credentials.json" in compose
-    assert "mcp-http(?:/.*)?" in config
-    assert "oauth/(?:authorize|token|register)" in config
-    assert "|livez|readyz)" in config
-    assert config.count("service: http_status:404") == 2
-    assert "/internal/source-fence" not in config
-    assert "/api/" not in config
 
 
 def test_client_policy_rejects_duplicate_json_keys(tmp_path: Path) -> None:
@@ -698,10 +389,10 @@ def _write_policy_with_digest(path: Path, payload: dict[str, object]) -> str:
 
 def test_client_policy_loads_static_public_web_registration(tmp_path: Path) -> None:
     source = (
-        Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
+        Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "client-policy.synthetic.json"
     )
     payload = json.loads(source.read_text(encoding="utf-8"))
-    client_id = "69c2cd871b488ff4"
+    client_id = "example-chatgpt-web"
     payload["clients"][client_id]["registration"] = {
         "client_name": "chatgpt-chat",
         "redirect_uris": ["https://chatgpt.com/connector_platform_oauth_redirect"],
@@ -722,10 +413,10 @@ def test_client_policy_loads_static_public_web_registration(tmp_path: Path) -> N
 
 def test_client_policy_rejects_protocol_scope_as_permission(tmp_path: Path) -> None:
     source = (
-        Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
+        Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "client-policy.synthetic.json"
     )
     payload = json.loads(source.read_text(encoding="utf-8"))
-    payload["clients"]["6cf6322fa828bb72"]["scopes"].append("offline_access")
+    payload["clients"]["example-claude-web"]["scopes"].append("offline_access")
     policy_path = tmp_path / "protocol-scope-policy.json"
     digest = _write_policy_with_digest(policy_path, payload)
 
@@ -735,11 +426,11 @@ def test_client_policy_rejects_protocol_scope_as_permission(tmp_path: Path) -> N
 
 def test_client_policy_rejects_contract_role_drift(tmp_path: Path) -> None:
     source = (
-        Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
+        Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "client-policy.synthetic.json"
     )
     payload = json.loads(source.read_text(encoding="utf-8"))
     codex_id = (
-        "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=codex"
+        "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=codex"
     )
     payload["clients"][codex_id]["maximum_tier"] = "agent"
     policy_path = tmp_path / "role-drift-policy.json"
@@ -751,11 +442,11 @@ def test_client_policy_rejects_contract_role_drift(tmp_path: Path) -> None:
 
 def test_client_policy_rejects_second_primary_endpoint(tmp_path: Path) -> None:
     source = (
-        Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
+        Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "client-policy.synthetic.json"
     )
     payload = json.loads(source.read_text(encoding="utf-8"))
     payload["access_contract"]["primary_endpoint"] = (
-        "https://memory.ctharvey.me/mcp"
+        "https://menhir.example.com/mcp"
     )
     policy_path = tmp_path / "endpoint-drift-policy.json"
     digest = _write_policy_with_digest(policy_path, payload)
@@ -792,10 +483,10 @@ def test_client_policy_rejects_unsafe_web_registration(
     tmp_path: Path, registration: dict[str, object]
 ) -> None:
     source = (
-        Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
+        Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "client-policy.synthetic.json"
     )
     payload = json.loads(source.read_text(encoding="utf-8"))
-    payload["clients"]["69c2cd871b488ff4"]["registration"] = registration
+    payload["clients"]["example-chatgpt-web"]["registration"] = registration
     policy_path = tmp_path / "unsafe-web-policy.json"
     digest = _write_policy_with_digest(policy_path, payload)
 
@@ -805,10 +496,10 @@ def test_client_policy_rejects_unsafe_web_registration(
 
 def test_client_policy_rejects_legacy_cross_client_consent_group(tmp_path: Path) -> None:
     source = (
-        Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
+        Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "client-policy.synthetic.json"
     )
     payload = json.loads(source.read_text(encoding="utf-8"))
-    payload["clients"]["69c2cd871b488ff4"]["consent_group"] = "agent-smith"
+    payload["clients"]["example-chatgpt-web"]["consent_group"] = "agent-smith"
     canonical = dict(payload)
     canonical.pop("canonical_digest", None)
     digest = hashlib.sha256(

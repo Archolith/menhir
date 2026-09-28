@@ -53,18 +53,12 @@ Do not add a `_` script to answer a question one of the durable instruments alre
 `opencode-plugin/menhir-turn-evidence.js`. ADR 0001 producers.
 
 ### Operations and one-time migrations
+Operator deployment, staging, promotion, host scaffold, and release-ceremony
+scripts are indexed in the private `Archolith/menhir-deploy` repository.
+
 | Script | Purpose |
 |---|---|
-| `deploy/release_flow.py` | Resumable, digest-bound product-release coordinator: derives the next label with `next-id`, then runs `prepare`, `finalize`, explicit `publish`, and `status`; publication archives only prepared fragments with a transaction receipt, while direct deploy remains disabled in favor of personal staging and approval |
-| `deploy/personal_deploy.py` | Resumable personal promotion coordinator: one `rehearse` invocation selects and stages the exact published product, then `approve` records owner identity and `promote` requires both a root transaction receipt and the executing wrapper's digest- and time-bound receipt |
-| `deploy/personal_security_config.ps1` | Repository-owned desktop operator wrapper for bounded security-config uploads and the dedicated root transaction |
-| `deploy/scaffold/menhir_security_config.py` | Root-owned security-config classifier/transaction: atomically replaces the reviewed auth/config set plus app, proves Neo4j and Cloudflared unchanged, and rolls back the complete prior set |
-| `deploy/ansible/playbook.yml` | Bounded host-prerequisite convergence: root directories/tmpfiles, scaffold audit units, and retirement of duplicate Caddy writer units; always preview with check/diff and verify over SSH with testinfra |
 | `.github/workflows/release-image.yml` | Reusable release-image validation/publication workflow with no-push validation, protected publication environment, least-privilege permissions, retained metadata, and provenance attestations |
-| `deploy/release_spec.py` | Strictly validates release inputs and generates the maintained four-repository release-author specification |
-| `deploy/release_notes.py` | Validates committed change fragments and deterministically renders release Markdown or JSON |
-| `deploy/build_install_bundle.py` | Builds and revalidates the exact reviewed host installation bundle from committed blobs and rendered artifacts |
-| `deploy/release-install.sh` | Root-only transactional bundle installer with an independent destination allowlist and rollback of replaced files; does not start cutover |
 | `run_mcp_gateway.py` | stdio launcher for the MCP server |
 | `export_graph_backup.py` / `_tolerant.py` | logical graph backup; the tolerant variant survives corruption |
 | `migrate_schema_v_property.py` | dry-run-first `_yawn_schema_v` removal and replacement-index migration. Remote writes require `--allow-remote`; configured production targets require `--allow-production` after a verified backup |

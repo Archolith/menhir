@@ -1,3 +1,17 @@
+## 2026-09-27 - Separate operator deployment from public Menhir
+
+- Move the operator host configuration, production runbooks, release receipts,
+  staging/promotion scripts, migration pipeline, and offline tests into the
+  private `Archolith/menhir-deploy` repository. Preserve their relative paths
+  for offline verification with a pinned public Menhir checkout.
+- Keep the public package, local self-host instructions, sealed image builder,
+  and disposable Docker checks. Correct the Docker guide so it no longer
+  claims a plain clone can build the release image.
+- Replace production-policy fixtures in public security tests with a synthetic
+  policy. Keep runtime checks public and add a boundary check against re-adding
+  operator files. Earlier public Git history still contains operator details;
+  no history rewrite, host rotation, deployment, or release occurred.
+
 ## 2026-09-27 - Record local-stdio MVP platform and configuration decision
 
 - `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: approve Windows 11
@@ -117,12 +131,3 @@
 - The stdio lifecycle lane flags, consolidates, then promotes its corrected recall result before a new
   conversation is expected to retrieve it, and verifies the same UUID after restart.
 - `.agent/memory-policy.md`: document conversation admission and its namespace-auth boundary.
-
-## 2026-09-26 - startup context supporting reads retain namespace scope (#116)
-
-- `src/menhir/mcp/tools/recall/recall_context_memories.py`: pass the effective tool namespace
-  to flag inspection and stale-TODO reads, preserving unscoped behavior and client pins.
-- `tests/test_cf238_bootstrap_receipt_identity.py`: exercise MCP execution and the real local
-  provider through scoped, default, omitted, and conflicting/omitted client-pin cases.
-- `.agent/tasks-mcp.md`: describe the supporting-read scope and the agreed MVP deferral of
-  the full effective-scope receipt feature. #116 remains open.

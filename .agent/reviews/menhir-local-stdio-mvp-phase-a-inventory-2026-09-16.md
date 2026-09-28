@@ -106,7 +106,7 @@ The current plan index contains legitimate execution authorities for work broade
 | Current plan | MVP routing | Rationale |
 |---|---|---|
 | `menhir-local-stdio-mvp-release-2026-09-16.md` | **CONTINUE — release authority** | Owns the lane. |
-| `menhir-deployment-control-plane-architecture-reset-2026-09-08.md` | HOLD / POST-MVP | Remote/deployment control plane excluded. |
+| Private `Archolith/menhir-deploy` control-plane reset plan | HOLD / POST-MVP | Remote/deployment control plane excluded. |
 | `menhir-feature-flag-registry.md` | HOLD implementation; USE inventory | The manual flag census is useful for freezing defaults, but building a new registry now is unnecessary runtime churn. |
 | `menhir-core-promotion-restack-2026-08-31.md` | HOLD / POST-MVP | Research/core-promotion branch work is not needed by the local MVP; no stack merges during RC lane. |
 | `menhir-research-execution-ladder.md` | HOLD / POST-MVP | Default-off research lane. |

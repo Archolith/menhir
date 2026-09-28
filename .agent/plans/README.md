@@ -15,7 +15,7 @@ This index routes the current execution owners listed below exactly once.
 | Document | Current ownership |
 |---|---|
 | [`menhir-local-stdio-mvp-release-2026-09-16.md`](menhir-local-stdio-mvp-release-2026-09-16.md) | Define and close the local stdio MVP: memory, WorkArtifacts, local code ingest/structure, TODOs, the public Graphiti fork, independent audit, black-box E2Es, and a fresh full-Oracle LongMemEval release gate. Beacon is deferred. |
-| [`menhir-deployment-control-plane-architecture-reset-2026-09-08.md`](menhir-deployment-control-plane-architecture-reset-2026-09-08.md) | Current `NOT READY` status, eight open architecture issues, and a serial recovery plan. Only the repository-census Phase 0 is eligible to start; all implementation remains blocked. |
+| Deployment control-plane architecture reset | Private `Archolith/menhir-deploy` repository. Only the repository-census Phase 0 is eligible to start; implementation remains blocked. |
 | [`menhir-feature-flag-registry.md`](menhir-feature-flag-registry.md) | Define one declarative feature-flag inventory and CI-enforce consistency with settings and environment documentation. |
 | [`menhir-core-promotion-restack-2026-08-31.md`](menhir-core-promotion-restack-2026-08-31.md) | Restack core-promotion PRs #11–#42 from the bottom branch, preserve tranche boundaries, and repair definition-scoped bounded recovery in tranches 5 and 9. |
 | [`menhir-research-execution-ladder.md`](menhir-research-execution-ladder.md) | Dependency-ordered research → code → bench sequence. Read-side rungs are closed; Track W6 is the remaining write-side rung. |

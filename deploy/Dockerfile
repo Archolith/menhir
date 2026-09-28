@@ -20,9 +20,9 @@
 # provenance label from Git and the wheelhouse; operators do not transcribe
 # RELEASE_COMMIT or wheel digests into a raw docker build command.
 #
-# The compose contract (deploy/docker-compose.production.yml) supplies the
-# image reference as the required MENHIR_IMAGE variable; there is no source
-# build on the VPS.
+# The operator's production Compose contract lives in the private
+# Archolith/menhir-deploy repository. It consumes an immutable image reference;
+# there is no source build on the host.
 
 # Declared before FROM so CI can override it; re-checked inside the stage so
 # the build fails closed with a clear message when it is not digest-pinned.

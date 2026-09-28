@@ -6,7 +6,7 @@ of historical provenance: reconciliation once selected a Graphiti episode by nam
 No entity flag or bootstrap scope is changed by this script.
 
 Apply only during a quiesced maintenance window with a verified recoverable backup.
-Production use must follow deploy/RUNBOOK.md and install a #142-capable runtime
+Production use must follow the private Archolith/menhir-deploy runbook and install a #142-capable runtime
 before writers resume. This script does not classify direct entity-flag intent.
 """
 
