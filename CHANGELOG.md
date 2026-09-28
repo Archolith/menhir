@@ -1,3 +1,12 @@
+## 2026-09-27 - Record local-stdio MVP platform and configuration decision
+
+- `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: approve Windows 11
+  AMD64 and Ubuntu Linux AMD64 as the primary MVP platforms; record the stdio,
+  backend, Neo4j, provider, benchmark-model, default-off feature, and public
+  Graphiti fork contract. Keep Oracle preflight, container validation, RC freeze,
+  and frozen-RC evidence open.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-27 - Add packaged Graphiti fork stdio acceptance path
 
 - `tests/e2e/test_e2e_06_graphiti_fork.py`: verify the public fork wheel hash,
@@ -117,14 +126,3 @@
   provider through scoped, default, omitted, and conflicting/omitted client-pin cases.
 - `.agent/tasks-mcp.md`: describe the supporting-read scope and the agreed MVP deferral of
   the full effective-scope receipt feature. #116 remains open.
-
-## 2026-09-25 - decay age pre-filters follow eligible policy thresholds (#86)
-
-- `src/menhir/services/lifecycle_models.py`: derive compression and deletion age minima
-  from non-exempt policies at startup, preventing future lower thresholds from being skipped.
-  Current eligible-policy minima remain 7 and 30 days; zero-day non-exempt policies participate.
-- `src/menhir/services/lifecycle_decay.py`: replace the obsolete pre-LLM compression docstring
-  with the helper's actual truncation behavior and the automatic sweep's LLM path.
-- `tests/test_decay_logic.py`: verify both real sweep requests in fresh processes with shorter,
-  zero-day, and exempt policies, without mutating shared test module imports.
-- `.agent/memory-policy.md`: document the pre-filter rule, exemption choice, and restart requirement.
