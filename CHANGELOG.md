@@ -1,3 +1,22 @@
+## 2026-09-27 - Add packaged Graphiti fork stdio acceptance path
+
+- `tests/e2e/test_e2e_06_graphiti_fork.py`: verify the public fork wheel hash,
+  installed source bytes, absence of upstream Graphiti, native hook wiring, and
+  deterministic ingest/recall through the installed Menhir stdio path.
+- `tests/e2e/beacon_post_mvp_scenarios.py`,
+  `tests/e2e/test_e2e_08_isolation_adversarial.py`, `.github/workflows/tests.yml`:
+  remove deferred Beacon from MVP execution and verify a missing fork makes both
+  package integrity and Menhir's runtime check fail explicitly in a disposable install.
+- `tests/e2e/README.md`, `.agent/plans/README.md`, the approved MVP plan, and the
+  MVP release audit: distinguish the candidate-wheel result from the later
+  release-container gate and keep that gate explicitly PENDING in E2E evidence.
+
+## 2026-09-27 - Start independent local-stdio MVP release audit
+
+- `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`: record the
+  supported-path evidence map and the outstanding packaged-Graphiti E2E and
+  release-container validation blockers without claiming Gate B closure.
+
 ## 2026-09-27 - Prepare public Graphiti fork package for Menhir MVP
 
 - Require `archolith-graphiti-core==0.30.2.post1` so normal installs can use a
@@ -109,37 +128,3 @@
 - `tests/test_decay_logic.py`: verify both real sweep requests in fresh processes with shorter,
   zero-day, and exempt policies, without mutating shared test module imports.
 - `.agent/memory-policy.md`: document the pre-filter rule, exemption choice, and restart requirement.
-
-## 2026-09-25 - stale-verification reads avoid Neo4j 5.26-only label syntax (#69)
-
-- `src/menhir/infrastructure/tool_event_repository.py`: match the fixed
-  `StaleAnchorVerification` label in both receipt reads and remove unused label parameters.
-  Preserve property parameters, tenant filtering, sorting, and post-dirty matching.
-- `tests/test_stale_anchor_verifications.py`: update query contract checks and execute both
-  reads against disposable Neo4j, covering filters, limits, ordering, receipt paths, and empty results.
-- Verified the previous queries execute on Neo4j 5.26.31. Dynamic MATCH labels were introduced
-  in 5.26; this change removes that unnecessary version dependency without claiming a 5.26 failure.
-
-## 2026-09-25 - ingest cleanup and fallback failure visibility (#70)
-
-- `src/menhir/services/ingest_worker.py`: include heartbeat, usage callback, and context setup
-  in the cleanup boundary; setup errors and cancellation stop the heartbeat and restore request context.
-- `src/menhir/services/enrichment_steps.py`: warn when oversized-episode raw capture fails;
-  preserve the original episode's terminal failure handling.
-- `tests/test_services_pipeline.py`: cover failures before and after callback installation,
-  setup cancellation, and a visible capture warning with the original content retained.
-- `src/menhir/services/event_fold.py`: warn when counter or timeline embedding fails while
-  preserving the derived write and keyword-only fallback.
-- `tests/test_windowed_fold.py`: verify both result shapes survive embedding failure and warnings
-  appear only on failure, not successful or intentionally omitted embedding.
-- `.agent/workflows/logging-and-troubleshooting.md`: explain capture and event-fold warnings.
-
-## 2026-09-25 - orphan recovery preview covers every execution phase (#149)
-
-- `recover_orphans` uses one backend contract in local and HTTP modes; execution preserves the
-  `demoted` counter and skips the unused pre-read.
-- The read-only preview scans all sessions and separately reports consolidation candidates,
-  expired demotion TTL nodes, and eligible empty episodes. The age argument applies to
-  consolidation; existing TTL and seven-day empty-episode safeguards remain in force.
-- Focused unit, HTTP round-trip, and disposable Neo4j regressions cover the preview and actual
-  cleanup, including flagged and content-bearing survivors.

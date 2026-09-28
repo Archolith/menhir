@@ -266,7 +266,7 @@ Use a fixture artifact corpus committed to Git.
 
 Use the same clean environment and fixture repository as E2E-1.
 
-- [ ] install Menhir from the published package and verify the exact Archolith Graphiti wheel/version/hash;
+- [ ] install Menhir from the named candidate wheel in a clean environment and verify the exact public Archolith Graphiti wheel/version/hash;
 - [ ] verify the upstream `graphiti-core` distribution is absent;
 - [ ] start Menhir with the fork hooks wired, ingest one fixture episode, and recall it;
 - [ ] build and start the release container from the same locked dependency set;

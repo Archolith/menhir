@@ -1,4 +1,8 @@
-"""E2E-6 — Beacon generation and consumption.
+"""Post-MVP Beacon generation and consumption scenarios.
+
+This module is deliberately not named ``test_*.py``. Beacon was deferred from the
+local-stdio MVP in #120; the active E2E-6 now tests the public Graphiti fork.
+The historical scenarios below are retained for a later Beacon integration campaign.
 
 Implemented ahead of lanes 2-5/7-8 because #120's generator has already landed on main
 (``23f22c8b``: ``cli/beacon.py``, ``services/beacon_generation.py``, ``beacon_compat.py``,

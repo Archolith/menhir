@@ -8,8 +8,8 @@ MENTIONS); this lane is where that assertion lives for the release.
 Every criterion here is a negative test. Per Gate C, a negative test that fails is not a
 lane failure to be retried -- it is a release-blocking issue with a reproduced failure.
 
-WHY THIS MODULE IS THREE TESTS
-------------------------------
+WHY THIS MODULE HAS SEPARATE TESTS
+----------------------------------
 A lane declares one provider, and these criteria need two opposite ones. Proving the
 #88 isolation pin needs a provider that succeeds, because the failure mode is entities
 extracted into the wrong silo and an extraction that never happens cannot land anywhere.
@@ -17,9 +17,11 @@ Proving "provider failure does not silently pass" needs one that reliably fails.
 Combining them would mean one of the two criteria was asserted against a provider that
 could not produce its failure mode. So they are separate tests in the same module.
 
-The third test is the declared-pending remainder, and it exists rather than being
-deleted because Gate C counts checklist items: a criterion that quietly stops being
-listed reads as a criterion that was met.
+The missing Graphiti fork criterion removes the public distribution from a separate
+installed-wheel environment, then checks the operator's dependency command. Gate C
+counts checklist items: a criterion that quietly stops being listed reads as a
+criterion that was met. The former Beacon adversarial scenario stays uncollected
+after its deferral in #120.
 
 THE #88 PIN USES THE DETERMINISTIC PROVIDER, NOT A LIVE ONE
 ------------------------------------------------------------
@@ -39,13 +41,16 @@ that surfaces the moment any other read path forgets the filter.
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
+import sys
 from uuid import uuid4
 
 import pytest
 
 from tests.e2e._harness.client import stdio_session, wait_for_project_indexed
-from tests.e2e._harness.config import E2EConfig
+from tests.e2e._harness.config import E2EConfig, child_environment
 from tests.e2e._harness.evidence import LaneEvidence
 from tests.e2e._harness.features import FeatureCombo
 from tests.e2e._harness.artifact_corpus import (
@@ -56,7 +61,7 @@ from tests.e2e._harness.artifact_corpus import (
 )
 from tests.e2e._harness.fixture_repo import UNINDEXED_PATH, build_fixture_repo
 from tests.e2e._harness.pending import declare_pending
-from tests.e2e._harness.stack import graph_query, run_menhir_cli
+from tests.e2e._harness.stack import InstalledMenhir, graph_query, run_menhir_cli
 
 pytestmark = [pytest.mark.e2e, pytest.mark.timeout(3000)]
 
@@ -72,7 +77,8 @@ PROVIDER_CRITERIA = ["provider_failure_does_not_silently_pass"]
 
 CORPUS_CRITERIA = ["malformed_artifact_metadata_fails_without_corruption"]
 
-DEFERRED_CRITERIA = ["invalid_beacon_input_does_not_clobber_manifest"]
+FORK_REFUSAL_CRITERIA = ["missing_or_incompatible_graphiti_fork_fails_explicitly"]
+BEACON_POST_MVP_CRITERIA = ["invalid_beacon_input_does_not_clobber_manifest"]
 
 EPISODE_ID = re.compile(r"episode_id[=:]\s*([0-9a-f-]{36})")
 
@@ -605,7 +611,128 @@ async def test_e2e_08_malformed_artifact_metadata(
     lane_evidence.close(status="PASS")
 
 
-async def test_e2e_08_malformed_hand_authored_beacon_is_not_clobbered(
+def test_e2e_08_missing_fork_refusal(
+    e2e_config: E2EConfig,
+    e2e_installed: InstalledMenhir,
+    lane_evidence: LaneEvidence,
+) -> None:
+    """A broken installed-wheel environment must refuse Menhir's runtime check."""
+
+    # Never uninstall from the shared E2E interpreter: every other lane needs it.
+    broken_venv = e2e_config.work_root / "missing-fork-venv"
+    create = subprocess.run(
+        [sys.executable, "-m", "venv", str(broken_venv)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=300,
+    )
+    assert create.returncode == 0, create.stderr[-1500:]
+    broken_python = broken_venv / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    install = subprocess.run(
+        [
+            str(broken_python),
+            "-m",
+            "pip",
+            "install",
+            "-q",
+            str(e2e_installed.wheel_path),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=1200,
+    )
+    assert install.returncode == 0, install.stderr[-1500:]
+    installed_fork = subprocess.run(
+        [str(broken_python), "-m", "pip", "show", "archolith-graphiti-core"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    assert installed_fork.returncode == 0, installed_fork.stderr[-1500:]
+    assert "Version: 0.30.2.post1" in installed_fork.stdout, installed_fork.stdout
+    healthy_check = subprocess.run(
+        [str(broken_python), "-m", "pip", "check"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    assert healthy_check.returncode == 0, (
+        "the disposable environment was already broken before removing the fork: "
+        f"{healthy_check.stdout}{healthy_check.stderr}"
+    )
+    remove = subprocess.run(
+        [str(broken_python), "-m", "pip", "uninstall", "-y", "archolith-graphiti-core"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    assert remove.returncode == 0, remove.stderr[-1500:]
+    assert "Successfully uninstalled archolith-graphiti-core" in remove.stdout, remove.stdout
+
+    dependency_check = subprocess.run(
+        [str(broken_python), "-m", "pip", "check"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    dependency_output = dependency_check.stdout + dependency_check.stderr
+    lane_evidence.attach("missing-fork-pip-check.txt", dependency_output)
+    assert dependency_check.returncode != 0, (
+        "pip check accepted an environment missing the fork"
+    )
+    assert "archolith-graphiti-core" in dependency_output.lower(), dependency_output[
+        -1500:
+    ]
+
+    runtime_check = subprocess.run(
+        [str(broken_python), "-m", "menhir.main", "check"],
+        cwd=str(e2e_config.state_dir),
+        env=child_environment(e2e_config),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    runtime_output = runtime_check.stdout + runtime_check.stderr
+    lane_evidence.attach("missing-fork-menhir-check.txt", runtime_output)
+    refused = (
+        runtime_check.returncode != 0 and "graphiti_core" in runtime_output.lower()
+    )
+    lane_evidence.record(
+        FORK_REFUSAL_CRITERIA[0],
+        passed=refused,
+        detail={
+            "wheel_sha256": e2e_installed.wheel_sha256,
+            "pip_check_exit": dependency_check.returncode,
+            "runtime_check_exit": runtime_check.returncode,
+            "runtime_message": runtime_output.strip().splitlines()[-1]
+            if runtime_output.strip()
+            else "",
+        },
+    )
+    assert refused, (
+        "Menhir did not explicitly reject a missing Graphiti fork: "
+        f"exit={runtime_check.returncode}, output={runtime_output[-1500:]}"
+    )
+    lane_evidence.close(status="PASS")
+
+
+async def beacon_post_mvp_malformed_hand_authored_manifest_is_not_clobbered(
     e2e_config: E2EConfig,
     e2e_installed,
     running_stack,
@@ -613,7 +740,7 @@ async def test_e2e_08_malformed_hand_authored_beacon_is_not_clobbered(
     feature_env: dict[str, str],
     lane_evidence: LaneEvidence,
 ) -> None:
-    """A malformed hand-authored ``beacon.yaml`` must neither block generation nor be touched.
+    """Uncollected post-MVP scenario for a malformed hand-authored ``beacon.yaml``.
 
     E2E-6 proves the sidecar policy against a VALID hand-authored manifest. The adversarial
     question is what happens when the file a careless implementation would overwrite is
@@ -633,7 +760,7 @@ async def test_e2e_08_malformed_hand_authored_beacon_is_not_clobbered(
     if beacon_python is None:
         declare_pending(
             lane_evidence,
-            DEFERRED_CRITERIA,
+            BEACON_POST_MVP_CRITERIA,
             note="MENHIR_E2E_BEACON_PYTHON is unset or missing; the Beacon-side half cannot run.",
         )
 
