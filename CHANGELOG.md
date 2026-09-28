@@ -5,8 +5,8 @@
   deterministic ingest/recall through the installed Menhir stdio path.
 - `tests/e2e/beacon_post_mvp_scenarios.py`,
   `tests/e2e/test_e2e_08_isolation_adversarial.py`, `.github/workflows/tests.yml`:
-  remove deferred Beacon from MVP execution and keep the missing-fork adversarial
-  criterion explicitly pending.
+  remove deferred Beacon from MVP execution and verify a missing fork makes both
+  package integrity and Menhir's runtime check fail explicitly in a disposable install.
 - `tests/e2e/README.md`, `.agent/plans/README.md`, the approved MVP plan, and the
   MVP release audit: distinguish the candidate-wheel result from the later
   release-container gate and keep that gate explicitly PENDING in E2E evidence.

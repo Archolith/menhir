@@ -130,9 +130,8 @@ jobs:
       # TestDecayLLMWiring failures in the same file) has a separate, unfixed hang
       # in the LLM chat-completion retry/backoff path -- tracked as a follow-up, not
       # yet root-caused. This run may still fail/timeout on that file.
-      # Beacon's framework dependency must not replace Menhir's pinned runtime.
-      # Pin the authoritative Beacon source, not the unrelated PyPI name or a moving branch.
-      # The exact green PR-head SHA is the compatibility contract issue #120's E2E pins.
+      # Existing Beacon tests still use an isolated, pinned dependency. Beacon release
+      # acceptance is deferred with #120; the active E2E-6 now covers the Graphiti fork.
       - name: Install isolated Beacon integration dependency
         run: |
           python -m venv "$RUNNER_TEMP/beacon-env"
@@ -185,11 +184,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ./menhir pytest pytest-asyncio pytest-xdist pytest-timeout
 
-      # The E2E-6 graph-backed test launches Beacon's real stdio server and
-      # needs the SAME isolated, exact Beacon revision the offline job pins:
-      # a separate venv so Beacon's framework dependencies never replace
-      # Menhir's pinned runtime, and a fixed SHA so the compatibility contract
-      # cannot silently follow a moving branch.
+      # Existing graph-backed Beacon tests use the same isolated revision as the
+      # offline job. Beacon-specific release acceptance is deferred with #120;
+      # the active Graphiti E2E-6 runs in the separate stdio job below.
       - name: Install isolated Beacon integration dependency
         run: |
           python -m venv "$RUNNER_TEMP/beacon-env"

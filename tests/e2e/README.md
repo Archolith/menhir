@@ -3,7 +3,7 @@
 Harness for the local-stdio MVP release plan's **Phase C** (pre-freeze E2Es) and
 **Phase F** (the same eight lanes rerun on the frozen RC).
 
-Authority: `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md` §6 owns the
+Authority: `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md` �6 owns the
 acceptance criteria. Tracking roll-up: issue #123. This directory implements those
 criteria; it does not redefine them.
 
@@ -18,7 +18,7 @@ criteria; it does not redefine them.
 | E2E-5 | TODO lifecycle | **implemented** |
 | E2E-6 | public Graphiti fork in a clean Menhir wheel | wheel/stdio path implemented; release-container path pending |
 | E2E-7 | restart and interrupted work | **implemented** |
-| E2E-8 | isolation and adversarial (carries #88's regression pin) | 7 supported criteria implemented; missing/incompatible fork refusal pending |
+| E2E-8 | isolation and adversarial (carries #88's regression pin) | 8 supported criteria implemented, including missing-fork refusal |
 
 E2E-6 downloads the exact public Graphiti fork wheel named by `uv.lock`, checks its hash
 and every installed Python source file, constructs the installed Menhir Graphiti client
@@ -29,11 +29,12 @@ criteria, so the wheel-path PASS cannot be mistaken for the full lane. Beacon sc
 
 E2E-8 uses separate tests because namespace isolation needs a successful provider while
 provider-failure handling needs one that reliably fails. Its former Beacon adversarial
-criterion is deferred with #120. The approved replacement criterion, missing/incompatible
-Graphiti fork refusal, remains to be implemented.
+criterion is deferred with #120. The Graphiti fork refusal test installs the candidate
+wheel into a second disposable environment, removes only the fork from that environment,
+and verifies both package integrity and Menhir's runtime check reject it by name.
 
 A scaffolded lane is **not** a silent skip. `_harness/pending.py` writes a full evidence
-directory recording every acceptance criterion as unproven, then skips — so
+directory recording every acceptance criterion as unproven, then skips � so
 `result.json` reads `status: PENDING, criteria_passed: 0` with each criterion named.
 The plan says a skip is not a pass; the evidence tree says so too.
 
@@ -68,7 +69,7 @@ acceptance criteria were proven, and a green run with pending lanes is not the s
 as a green run without them:
 
 ```bash
-cat evidence/<run_id>/*/result.json   | jq -r '.lane + ": " + .status + " — " + (.criteria_unproven | join(", "))'
+cat evidence/<run_id>/*/result.json   | jq -r '.lane + ": " + .status + " � " + (.criteria_unproven | join(", "))'
 ```
 
 No lane currently asks for a live model, so a full campaign run spends nothing and needs no
@@ -79,7 +80,7 @@ API key.
 The repo convention for expensive lanes is a CLI flag (`--run-online`,
 `--run-remote-sim`). pytest only honours `pytest_addoption` in the *initial* conftest, so
 a `--run-e2e` flag has to be declared in `tests/conftest.py`. That is a two-line change
-and the right end state — it is deliberately not made here so this scaffold touches no
+and the right end state � it is deliberately not made here so this scaffold touches no
 existing file.
 
 ## Configuration
@@ -87,7 +88,7 @@ existing file.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `MENHIR_E2E` | unset | `1` enables the campaign |
-| `MENHIR_E2E_STRICT` | unset | `1` aborts on a dirty tree — **required for the RC run** |
+| `MENHIR_E2E_STRICT` | unset | `1` aborts on a dirty tree � **required for the RC run** |
 | `MENHIR_E2E_NEO4J_URI` | `bolt://127.0.0.1:7689` | Disposable graph |
 | `MENHIR_E2E_BACKEND_PORT` | `8199` | Loopback `menhir serve` |
 | `MENHIR_E2E_WORK_ROOT` | pytest tmp dir | Venv, fixtures, evidence |
@@ -95,7 +96,7 @@ existing file.
 
 Port `7689` is deliberately **not** `7688`: that is the unit suite's instance, and an E2E
 lane resetting it mid-run would corrupt a parallel `pytest --run-online` into failures
-that look like product defects. Port `8100` is refused outright — it is the documented
+that look like product defects. Port `8100` is refused outright � it is the documented
 default for the operator's own `menhir serve`.
 
 ## Providers
@@ -113,8 +114,8 @@ carries two fake OpenAI-compatible servers in `_harness/providers.py`, ported fr
 The default is **no provider**: a lane that does not declare one gets no credentials and
 no endpoint, so an unintended live call fails loudly instead of quietly spending budget.
 
-The deterministic handler is why E2E-2 can assert on real enrichment output — READY
-status, recall by wording and paraphrase, correction currentness — rather than only the
+The deterministic handler is why E2E-2 can assert on real enrichment output � READY
+status, recall by wording and paraphrase, correction currentness � rather than only the
 states reachable without a model. `failing` exists because E2E-8 requires that provider
 failure does not silently pass, and that is only testable against something that
 reliably fails.
@@ -159,7 +160,7 @@ Three design points worth knowing before extending this:
    resolution; applying the combo to one would report a configuration that was never
    fully in effect.
 3. **The backend starts per lane, not per session.** Flags are read at startup, so a
-   session-scoped backend could not honour a per-combo matrix — it would report results
+   session-scoped backend could not honour a per-combo matrix � it would report results
    for whichever combination started first.
 
 Powerset sweeps above 8 flags are refused. Eight is already 256 runs of every lane.
@@ -179,7 +180,7 @@ So the fence is re-established at the process boundary, in `_harness/config.py`:
 - `ENV_FILE` points at a harness-written file, and cwd is the harness state directory,
   so neither env-file discovery path can reach the checkout;
 - `assert_not_production` refuses the recorded prod URI, the ambient `NEO4J_URI`, and
-  loopback `:7687` — compared by host:port with scheme dropped, so swapping `bolt://`
+  loopback `:7687` � compared by host:port with scheme dropped, so swapping `bolt://`
   for `neo4j://` or `localhost` for `127.0.0.1` does not slip past it;
 - the check runs again inside `reset_graph`, because that is the function that destroys
   data, and again after a lane's `extra` env is applied.
@@ -204,7 +205,7 @@ evidence/<run_id>/<lane>[<combo>]/
 ```
 
 `result.json` records each acceptance criterion by its plan identifier, because "the lane
-passed" is not what Gate C asks for — it asks which checklist items were proven. A
+passed" is not what Gate C asks for � it asks which checklist items were proven. A
 criterion recorded twice keeps the worse outcome, so a lane cannot overwrite a failure it
 already saw by re-asserting more loosely after a retry.
 
