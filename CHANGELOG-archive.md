@@ -1,3 +1,22 @@
+## 2026-09-26 - Reconcile native Graphiti fork with current Menhir
+
+- `pyproject.toml`, `uv.lock`: pin the public Archolith Graphiti 0.30.2 maintenance
+  commit `6b907b93fed32cb979093327608a4fd897b39751` and preserve locked registry dependencies.
+- Recover the unfinished Phase F migration onto published main: replace all 17 runtime
+  patch installers with native fork hooks and Menhir-owned extraction, resolution and
+  LLM policy adapters. Keep subsequent ingestion, retention and recall fixes.
+- `graphiti_client.py`, `graphiti_resolution_policy.py`: flush telemetry inside its
+  request task on success, failure and cancellation; count empty candidate searches.
+- `graphiti_llm_adapter.py`: preserve namespace and operation metadata across retries.
+- Release wheelhouse: derive the immutable fork requirement from package metadata,
+  pin/hash the additional build backend closure, and build without isolated dependency
+  resolution. Docker remains an offline wheel consumer.
+- Migrated contract tests and added dependency, request-context, task-boundary and
+  immutable-build-pin regressions. Feature defaults and deployed configuration stay as-is.
+- Fork baseline is now 0.30.2. Default-on readiness (#169 and siblings) still requires
+  outstanding source-grounding fixes and current graph/model quality evidence; this
+  integration does not itself qualify a feature for default enablement.
+
 ## 2026-09-26 - remaining MVP audit fixes for recall and decay (#154, #144)
 
 - `recall_pipeline.py`: acquire applicable independent sources before deciding recall is empty;

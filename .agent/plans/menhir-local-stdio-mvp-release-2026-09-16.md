@@ -11,6 +11,8 @@ artifact_status: APPROVED
 **Owner:** Menhir  
 **Purpose:** Define, audit, test, benchmark, and close a bounded local MVP without absorbing the entire Menhir backlog.
 
+**Current gate:** Gate B audit COMPLETE and pre-freeze Gate C acceptance evidenced on merged `main` `0f8deac52628b29e91ab3bee66256d0a4a1789fb`. Phase D blocker review and named RC freeze are next. No RC, deployment, #119 repair, or final release is authorized by this status.
+
 ## 1. MVP contract
 
 The MVP is a **local, single-operator coding-agent service exposed to the agent through MCP stdio**.
@@ -82,7 +84,7 @@ No release decision is based solely on the size of the open-issue backlog. Every
 This plan must produce separate durable artifacts rather than hiding results in this checklist.
 
 1. **Independent release audit**
-   - path: `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-XX.md`
+   - path: `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`
    - artifact type: `review`
    - records scope, findings, severity, reproduction, disposition, and release blockers.
 
@@ -232,8 +234,8 @@ The audit is a code-and-contract review, not an E2E run. It asks whether the imp
 
 - [x] Publish the Archolith Graphiti fork wheel under its distinct distribution name, with native hooks present (`v0.30.2.post1` at `dbb0e33`, wheel SHA-256 `a748f98e0b09d64ab1eb29bd3449f52b552250a31663e86c4d99dc51ddf991f0`).
 - [x] Lock Menhir to the public wheel with an exact version and registry hash, without a VCS dependency.
-- [ ] Confirm a fresh package install and container build resolve the same fork version without also installing upstream `graphiti-core`.
-- [ ] Exercise Menhir's fork-hook contract and representative memory ingest/recall against that build.
+- [x] Confirm a fresh package install and no-publish container build resolve the same fork version without also installing upstream `graphiti-core` (pre-freeze evidence on `0f8deac5`; final RC repeat remains).
+- [x] Exercise Menhir's fork-hook contract and representative memory ingest/recall against that build (pre-freeze evidence on `0f8deac5`; final RC repeat remains).
 
 ### B7. Persistence, failure and resource safety
 
@@ -245,6 +247,8 @@ The audit is a code-and-contract review, not an E2E run. It asks whether the imp
 - [ ] logs/telemetry do not leak secrets or produce misleading healthy states.
 
 **Gate B:** every HIGH/critical correctness or data-loss finding on a supported path is fixed or explicitly proven unreachable under the MVP contract. The audit artifact is COMPLETE before RC freeze.
+
+**Gate B result:** COMPLETE on merged `0f8deac5`; see the [audit](../reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md) and its exact-main CI and no-publish image receipts.
 
 ## 6. Phase C — pre-freeze black-box E2E campaign
 
@@ -339,6 +343,8 @@ Use the same clean environment and fixture repository as E2E-1.
 - [ ] provider failure does not silently pass the E2E.
 
 **Gate C:** all required happy paths pass; every negative test either passes or creates a release-blocking issue with a reproduced failure.
+
+**Pre-freeze Gate C result:** PASS on the reviewed source tree: a clean Windows campaign recorded 13/13 tests and 71/71 criteria, while exact-merged Ubuntu stdio CI recorded 69/69 runnable criteria and the same-commit no-publish image verifier recorded the remaining 2/2 container criteria. The named frozen-RC rerun remains Phase F work.
 
 ## 7. Phase D — blocker fixes and RC freeze
 
@@ -472,14 +478,14 @@ These are starting hypotheses only; the audit/E2Es own the final ruling.
 - [ ] explicit post-MVP exclusions documented
 
 ### Quality
-- [ ] independent release audit COMPLETE
-- [ ] all blockers fixed or disproven
-- [ ] full normal test/CI suite green
-- [ ] cold-package install E2E green
-- [ ] stdio MCP E2E green
-- [ ] restart/interruption E2E green
-- [ ] isolation/adversarial E2E green
-- [ ] Graphiti fork installs from a hashed public wheel on supported paths
+- [x] independent release audit COMPLETE (Gate B, merged `0f8deac5`)
+- [x] pre-freeze Gate B/C blockers fixed or disproven; frozen-RC review remains later
+- [x] full normal test/CI suite green on merged `0f8deac5`
+- [x] cold-package install E2E green on merged `0f8deac5`
+- [x] stdio MCP E2E green on merged `0f8deac5`
+- [x] restart/interruption E2E green on merged `0f8deac5`
+- [x] isolation/adversarial E2E green on merged `0f8deac5`
+- [x] Graphiti fork installs from a hashed public wheel on supported paths
 
 ### Benchmark
 - [ ] fresh graph
