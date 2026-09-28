@@ -14,6 +14,7 @@ This index routes the current execution owners listed below exactly once.
 
 | Document | Current ownership |
 |---|---|
+| [`menhir-post-v023-audit-remediation-2026-09-28.md`](menhir-post-v023-audit-remediation-2026-09-28.md) | Fix the release-to-main Astra audit findings before naming an MVP release candidate. |
 | [`menhir-local-stdio-mvp-release-2026-09-16.md`](menhir-local-stdio-mvp-release-2026-09-16.md) | Gate B audit and pre-freeze Gate C E2Es complete; Phase D named-RC preparation, the fresh full-Oracle LongMemEval gate, frozen-RC rerun, and final release remain. Beacon is deferred. |
 | Deployment control-plane architecture reset | Private `Archolith/menhir-deploy` repository. Only the repository-census Phase 0 is eligible to start; implementation remains blocked. |
 | [`menhir-feature-flag-registry.md`](menhir-feature-flag-registry.md) | Define one declarative feature-flag inventory and CI-enforce consistency with settings and environment documentation. |

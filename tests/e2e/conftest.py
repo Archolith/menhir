@@ -131,8 +131,8 @@ def e2e_installed(e2e_config: E2EConfig):
 
     try:
         wheel = build_wheel(e2e_config.work_root / "dist")
-    except Exception as exc:  # noqa: BLE001 - surfaced as a skip with the real reason
-        pytest.skip(f"wheel build failed (is `build` installed?): {exc}")
+    except Exception as exc:  # noqa: BLE001 - a failed candidate build fails the campaign
+        pytest.fail(f"wheel build failed (is `build` installed?): {exc}")
 
     installed = install_into_venv(e2e_config, wheel)
     yield installed

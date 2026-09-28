@@ -11,7 +11,7 @@ artifact_status: APPROVED
 **Owner:** Menhir  
 **Purpose:** Define, audit, test, benchmark, and close a bounded local MVP without absorbing the entire Menhir backlog.
 
-**Current gate:** Gate B audit COMPLETE and pre-freeze Gate C acceptance evidenced on merged `main` `0f8deac52628b29e91ab3bee66256d0a4a1789fb`. Phase D blocker review and named RC freeze are next. No RC, deployment, #119 repair, or final release is authorized by this status.
+**Current gate:** Gate B audit COMPLETE and pre-freeze Gate C acceptance evidenced on merged `main` `0f8deac52628b29e91ab3bee66256d0a4a1789fb`. The post-v0.2.3 Astra audit found additional CI, security, and compatibility work, tracked in [its remediation plan](menhir-post-v023-audit-remediation-2026-09-28.md). Phase D blocker review is active; named RC freeze waits for those fixes to merge and pass exact-commit CI. No RC, deployment, #119 repair, or final release is authorized by this status.
 
 ## 1. MVP contract
 
@@ -348,10 +348,11 @@ Use the same clean environment and fixture repository as E2E-1.
 
 ## 7. Phase D — blocker fixes and RC freeze
 
-- [x] Fix all identified pre-freeze Gate B/C blockers; re-check on the named RC.
+- [x] Fix the identified Gate B/C blockers from the `0f8deac5` audit; re-check on the named RC.
 - [x] Re-run focused regression tests for the Gate B fixes (including 23 disposable-graph structure/artifact/TODO tests).
 - [x] Re-run the complete pre-freeze E2E campaign (clean Windows 13/13, 71/71 criteria).
 - [x] Run the normal unit/integration/graph-backed suite and required CI checks (merged `0f8deac5`, four jobs PASS).
+- [ ] Close the post-v0.2.3 Astra findings: fail closed on missing installed-wheel acceptance, isolate Beacon imports, protect sync credentials, restore Graphiti JSON-object aliases, and document mixed-distribution repair. Require reviewed merged code and exact-commit CI before RC freeze.
 - [ ] Ensure working tree is clean.
 - [ ] Record exact Menhir commit as `MVP_RC_COMMIT`.
 - [ ] Record exact package artifact/wheel identity/hash.

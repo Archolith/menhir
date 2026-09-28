@@ -8,16 +8,22 @@ activation, custom-edge-schema compatibility routing, and per-call edge carriage
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import BaseModel
 
 pytest.importorskip("graphiti_core")
 
 import graphiti_core.graphiti as graphiti_module  # noqa: E402
 from graphiti_core.extraction_routing import ExtractionRoute  # noqa: E402
 from graphiti_core.extraction_routing import SingleEpisodeExtractionResult  # noqa: E402
+from graphiti_core.prompts.extract_nodes_and_edges import CombinedExtraction  # noqa: E402
+from graphiti_core.prompts.extract_nodes import ExtractedEntities  # noqa: E402
+from graphiti_core.prompts.models import Message  # noqa: E402
 
 import menhir.infrastructure.graphiti_extraction_policy as patches  # noqa: E402
+from menhir.infrastructure.graphiti_llm_adapter import MenhirOpenAIGenericClient  # noqa: E402
 
 
 pytestmark = pytest.mark.unit
@@ -37,6 +43,140 @@ def _context(**changes) -> SimpleNamespace:
     for key, value in changes.items():
         setattr(context, key, value)
     return context
+
+
+async def _response_through_adapter_and_proxy(
+    payload: dict, mode: str,
+) -> tuple[dict, patches.CombinedExtractionReceipt]:
+    adapter = MenhirOpenAIGenericClient.__new__(MenhirOpenAIGenericClient)
+    adapter.max_tokens = 128
+    adapter.structured_output_mode = mode
+    adapter._generate_response = AsyncMock(return_value=payload)
+    receipt = patches.begin_extraction_receipt("ep-1", "user: Alice uses Neo4j.")
+    proxy = patches._PayloadSanitizingLLMClient(SimpleNamespace(llm_client=adapter), receipt)
+    try:
+        response = await proxy.generate_response(
+            [Message(role="system", content="Extract entities and edges."),
+             Message(role="user", content="Alice uses Neo4j.")],
+            response_model=CombinedExtraction,
+        )
+        return response, receipt
+    finally:
+        patches.clear_extraction_receipt()
+
+
+@pytest.mark.asyncio
+async def test_json_object_adapter_preserves_relationship_alias_through_proxy() -> None:
+    payload = {
+        "extracted_entities": [
+            {"name": "Alice", "entity_type_id": 0},
+            {"name": "Neo4j", "entity_type_id": 0},
+        ],
+        "edges": [{
+            "source_entity_name": "Alice",
+            "target_entity_name": "Neo4j",
+            "relation_type": "USES",
+            "relationship": "Alice uses Neo4j",
+            "episode_indices": [0],
+        }],
+    }
+
+    response, receipt = await _response_through_adapter_and_proxy(payload, "json_object")
+
+    assert CombinedExtraction(**response).edges[0].fact == "Alice uses Neo4j"
+    assert len(response["edges"]) == 1
+    assert receipt.raw_edge_count == 1
+    assert receipt.malformed_edges_dropped == 0
+
+
+@pytest.mark.asyncio
+async def test_strict_adapter_preserves_canonical_response_through_proxy() -> None:
+    payload = {
+        "extracted_entities": [
+            {"name": "Alice", "entity_type_id": 0},
+            {"name": "Neo4j", "entity_type_id": 0},
+        ],
+        "edges": [{
+            "source_entity_name": "Alice",
+            "target_entity_name": "Neo4j",
+            "relation_type": "USES",
+            "fact": "Alice uses Neo4j",
+            "episode_indices": [0],
+        }],
+    }
+
+    response, receipt = await _response_through_adapter_and_proxy(payload, "json_schema")
+
+    assert CombinedExtraction(**response).edges[0].fact == "Alice uses Neo4j"
+    assert response["edges"] == payload["edges"]
+    assert receipt.raw_edge_count == 1
+    assert receipt.malformed_edges_dropped == 0
+
+
+@pytest.mark.asyncio
+async def test_json_object_adapter_still_drops_malformed_edge_through_proxy() -> None:
+    payload = {
+        "extracted_entities": [{"name": "Alice", "entity_type_id": 0}],
+        "edges": [{
+            "source_entity_name": "Alice",
+            "relation_type": "USES",
+            "relationship": "Alice uses Neo4j",
+            "episode_indices": [0],
+        }],
+    }
+
+    response, receipt = await _response_through_adapter_and_proxy(payload, "json_object")
+
+    assert CombinedExtraction(**response).edges == []
+    assert receipt.raw_edge_count == 1
+    assert receipt.malformed_edges_dropped == 1
+
+
+@pytest.mark.asyncio
+async def test_json_object_adapter_preserves_typed_attribute_field_names() -> None:
+    class Attributes(BaseModel):
+        type: str
+        entity: str
+
+    payload = {"type": "database", "entity": "Neo4j"}
+    adapter = MenhirOpenAIGenericClient.__new__(MenhirOpenAIGenericClient)
+    adapter.max_tokens = 128
+    adapter.structured_output_mode = "json_object"
+    adapter._generate_response = AsyncMock(return_value=payload)
+
+    response = await adapter.generate_response(
+        [Message(role="system", content="Extract attributes."),
+         Message(role="user", content="Neo4j is a database.")],
+        response_model=Attributes,
+        attribute_extraction=True,
+    )
+
+    assert Attributes(**response) == Attributes(**payload)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("node", "expected_type_id"),
+    [({"name": "Neo4j", "entity": 3}, 3),
+     ({"name": "Neo4j", "type": "Technology"}, 0)],
+)
+async def test_json_object_adapter_leaves_native_node_aliases_to_fork(
+    node: dict, expected_type_id: int,
+) -> None:
+    adapter = MenhirOpenAIGenericClient.__new__(MenhirOpenAIGenericClient)
+    adapter.max_tokens = 128
+    adapter.structured_output_mode = "json_object"
+    payload = {"extracted_entities": [node]}
+    adapter._generate_response = AsyncMock(return_value=payload)
+
+    response = await adapter.generate_response(
+        [Message(role="system", content="Extract nodes."),
+         Message(role="user", content="Neo4j is a database.")],
+        response_model=ExtractedEntities,
+    )
+
+    assert response == payload
+    assert ExtractedEntities(**response).extracted_entities[0].entity_type_id == expected_type_id
 
 
 def test_no_graphiti_extraction_symbols_are_rebound() -> None:

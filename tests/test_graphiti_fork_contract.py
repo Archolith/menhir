@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
+import importlib.util
+import os
+import subprocess
+import sys
 import tomllib
 from importlib.metadata import version
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -32,9 +37,66 @@ def test_installed_fork_and_lock_match_the_immutable_dependency() -> None:
     assert package["version"] == version("archolith-graphiti-core") == "0.30.2.post1"
 
 
+def test_adapter_reports_missing_fork_symbol_as_mixed_install(monkeypatch) -> None:
+    """A stale shared package should explain the repair before other imports run."""
+    adapter_path = ROOT / "src" / "menhir" / "infrastructure" / "graphiti_llm_adapter.py"
+    spec = importlib.util.spec_from_file_location("_adapter_missing_fork_symbol", adapter_path)
+    assert spec is not None and spec.loader is not None
+    adapter = importlib.util.module_from_spec(spec)
+    original_import = builtins.__import__
+
+    def import_without_fork_error(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "graphiti_core.errors" and "GraphitiRequestTooLargeError" in fromlist:
+            return ModuleType("graphiti_core.errors")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_fork_error)
+    with pytest.raises(ImportError, match="graphiti_core.errors is missing") as exc_info:
+        spec.loader.exec_module(adapter)
+    assert "archolith-graphiti-core==0.30.2.post1" in str(exc_info.value)
+    assert "fresh virtual environment" in str(exc_info.value)
+
+
+def test_cold_graphiti_client_import_reports_mixed_install() -> None:
+    """The ordinary application import must diagnose overwritten fork files."""
+    script = """
+import builtins
+import types
+
+original = builtins.__import__
+def mixed(name, globals=None, locals=None, fromlist=(), level=0):
+    module = original(name, globals, locals, fromlist, level)
+    if fromlist and 'GraphitiRequestTooLargeError' in fromlist:
+        stale = types.ModuleType(module.__name__)
+        stale.__dict__.update({key: value for key, value in module.__dict__.items()
+                               if key != 'GraphitiRequestTooLargeError'})
+        return stale
+    return module
+builtins.__import__ = mixed
+try:
+    import menhir.infrastructure.graphiti_client
+except ImportError as exc:
+    assert 'archolith-graphiti-core==0.30.2.post1' in str(exc), str(exc)
+    assert 'fresh virtual environment' in str(exc), str(exc)
+else:
+    raise AssertionError('mixed installation was accepted')
+"""
+    completed = subprocess.run(
+        [sys.executable, "-B", "-c", script],
+        cwd=ROOT,
+        env={**os.environ, "PYTHON_DOTENV_DISABLED": "1", "PYTHONPATH": str(ROOT / "src")},
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
 @pytest.mark.asyncio
 async def test_retry_adapter_preserves_namespace_and_operation() -> None:
     client = MenhirOpenAIGenericClient.__new__(MenhirOpenAIGenericClient)
+    client.structured_output_mode = "json_schema"
     client.max_tokens = 100
     client._generate_response = AsyncMock(side_effect=[ValueError("bad JSON"), {"ok": True}])
     result = await client.generate_response(
