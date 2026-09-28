@@ -1,11 +1,17 @@
 """Keep operator deployment material out of the public Menhir checkout."""
 
+import ipaddress
 from pathlib import Path
 import re
 import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _tracked_deploy_paths() -> list[str]:
+    tracked = subprocess.check_output(["git", "ls-files", "-z", "deploy"], cwd=ROOT)
+    return [part.decode("utf-8") for part in tracked.split(b"\0") if part]
 
 
 def test_operator_deployment_material_is_not_in_public_tree() -> None:
@@ -25,11 +31,25 @@ def test_operator_deployment_material_is_not_in_public_tree() -> None:
         "deploy/ansible/playbook.yml",
     )
     assert not [relative for relative in forbidden if (ROOT / relative).exists()]
+    operator_prefixes = (
+        "deploy/ansible/",
+        "deploy/changes/releases/",
+        "deploy/personal_",
+        "deploy/scaffold/",
+    )
+    assert not [path for path in _tracked_deploy_paths() if path.startswith(operator_prefixes)]
 
 
 def test_public_deploy_files_contain_no_operator_host_address() -> None:
     windows_home = re.compile(rb"[A-Za-z]:\\Users\\[^\\\s]+", re.I)
-    tracked = subprocess.check_output(["git", "ls-files", "-z", "deploy"], cwd=ROOT)
-    for relative in (part.decode("utf-8") for part in tracked.split(b"\0") if part):
+    ipv4 = re.compile(rb"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+    for relative in _tracked_deploy_paths():
         path = ROOT / relative
-        assert windows_home.search(path.read_bytes()) is None, relative
+        contents = path.read_bytes()
+        assert windows_home.search(contents) is None, relative
+        for candidate in ipv4.findall(contents):
+            try:
+                address = ipaddress.ip_address(candidate.decode("ascii"))
+            except ValueError:
+                continue
+            assert not address.is_global, relative
