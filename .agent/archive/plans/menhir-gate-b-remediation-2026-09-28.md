@@ -2,14 +2,16 @@
 artifact_schema: 1
 artifact_uuid: 9cc79c12-d89a-46cd-a3ab-c7599a07f8c2
 artifact_type: plan
-artifact_status: PROPOSED
+artifact_status: IMPLEMENTED
 informs: dbde430c-9be1-4131-aa85-871a8e99e5ef
 ---
 
 # Menhir Gate B correctness remediation
 
-**Owner:** Menhir, under [the approved MVP release plan, Phase B](menhir-local-stdio-mvp-release-2026-09-16.md#5-phase-b--independent-mvp-audit). This is its bounded remediation work package, not another release roadmap.
-**Basis:** [independent audit](../reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md), B-04–B-10, against merged `14aed115dd0ecb8878aef9b44bfc6a233748cb1a`; audit recorded on `c66f0678`. Audit PR #179 is open/unmerged at drafting; reconcile its disposition before implementation.
+**Disposition:** IMPLEMENTED by merged PRs #180 and #182. The [Gate B audit](../../reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md) closed against main `0f8deac52628b29e91ab3bee66256d0a4a1789fb` with exact-commit CI and no-publish image evidence. The design and prospective instructions below are retained as the historical work package, not open release work.
+
+**Owner:** Menhir, under [the approved MVP release plan, Phase B](../../plans/menhir-local-stdio-mvp-release-2026-09-16.md#5-phase-b--independent-mvp-audit).
+**Drafting basis:** Independent audit B-04–B-10 against merged `14aed115dd0ecb8878aef9b44bfc6a233748cb1a`; audit recorded on `c66f0678`. PR #179 was open at drafting.
 
 ## Why and scope
 
@@ -59,4 +61,4 @@ Rollback stops writers, preserves a graph backup/evidence, and returns to the pr
 
 ## Docs and completion
 
-Update this index, the audit finding dispositions, E2E inventory/reporter, lifecycle/location contract docs (`data_models.md`, `endpoints.md`, `workflows/artifact_authoring.md` as affected), and CHANGELOG. Update issue #123 only when tracker writes are available; otherwise retain an explicit local update packet and mark synchronization pending. This work completes when B-04–B-10 have reviewed fixes and evidence. Gate B remains **BLOCKED** until its independent audit also receives B-02 release-container evidence. RC freeze, canonical benchmark/E2E gates, #119 at the single final release, and release approval stay with the parent MVP plan.
+Update this index, the audit finding dispositions, E2E inventory/reporter, lifecycle/location contract docs (`data_models.md`, `endpoints.md`, `workflows/artifact_authoring.md` as affected), and CHANGELOG. Update issue #123 only when tracker writes are available; otherwise retain an explicit local update packet and mark synchronization pending. This work completes when B-04–B-10 have reviewed fixes and evidence. At planning time Gate B remained **BLOCKED** until its independent audit also received B-02 release-container evidence; that condition is now satisfied by the linked audit. RC freeze, canonical benchmark/E2E gates, #119 at the single final release, and release approval stay with the parent MVP plan.

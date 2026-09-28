@@ -2,7 +2,7 @@
 artifact_schema: 1
 artifact_uuid: 6f52ab20-83ef-44ae-b838-1797c31018d2
 artifact_type: review
-artifact_status: OPEN
+artifact_status: COMPLETE
 reviews: dbde430c-9be1-4131-aa85-871a8e99e5ef
 ---
 
@@ -14,28 +14,32 @@ reviews: dbde430c-9be1-4131-aa85-871a8e99e5ef
 
 **Authority:** [local-stdio MVP release plan](../plans/menhir-local-stdio-mvp-release-2026-09-16.md), Phase B
 
-**State:** OPEN / final candidate evidence in progress. The historical findings below were recorded before PRs #179–#181 merged. Their current dispositions are here; the old pass-by-pass text remains as the review history, not the latest verdict. This is not RC freeze or release approval.
+**Remediation:** [implemented Gate B work package](../archive/plans/menhir-gate-b-remediation-2026-09-28.md)
+
+**State:** COMPLETE for Gate B on merged `main` at `0f8deac52628b29e91ab3bee66256d0a4a1789fb`. The older pass-by-pass findings below remain as review history; the current dispositions are here. This is not RC freeze or release approval.
 
 ## Current disposition, 2026-09-28
 
-**Reviewed main:** `45b91cf3abef05091270b69ed81f00fa53ee8235` (PRs [#179](https://github.com/Archolith/menhir/pull/179), [#180](https://github.com/Archolith/menhir/pull/180), and [#181](https://github.com/Archolith/menhir/pull/181) merged). [Post-merge CI](https://github.com/Archolith/menhir/actions/runs/36463630273) passed lint, offline tests, disposable-graph online tests, and installed-wheel stdio E2E. Its downloaded stdio evidence records 11 PASS tests and 68/68 implemented criteria PASS; the two release-container criteria correctly remained PENDING in that separate job.
+**Reviewed main:** `0f8deac52628b29e91ab3bee66256d0a4a1789fb` (PRs [#179](https://github.com/Archolith/menhir/pull/179) through [#182](https://github.com/Archolith/menhir/pull/182) merged). [Exact-main CI](https://github.com/Archolith/menhir/actions/runs/36469337579) passed lint, complete offline tests, disposable-Neo4j online tests, and installed-wheel stdio E2E. The downloaded [stdio evidence artifact](https://github.com/Archolith/menhir/actions/runs/36469337579/artifacts/10990429298) names that clean commit, Ubuntu Linux AMD64, Python 3.12.14, and wheel SHA-256 `00ea87d14eac989e424a2e536bf09c570d1745c90a99863fc2db46b454bf5596`. Its 12 runnable tests and 69/69 runnable criteria PASS, including an OS-level denied-directory scan. The two container criteria are explicitly PENDING in the ordinary CI job because it has no image bundle.
 
-The [no-publish image validation](https://github.com/Archolith/menhir/actions/runs/36464246373) passed on the **same commit**. The downloadable sealed bundle binds image ID `sha256:4ac07f89438d64a4e1485294a1a0c6c17e4c0917cda55d4b1b568a37f66ab21c` to that source commit and its archive/SBOM/vulnerability-report digests. The image's own probe reports `archolith-graphiti-core==0.30.2.post1`, no upstream `graphiti-core` distribution, all native hook parameters present, and Menhir's hooks wired. Syft reported 187 packages; Grype found zero Critical findings and passed the workflow's stated policy. The validation job did not publish an image.
+The [exact-main no-publish image validation](https://github.com/Archolith/menhir/actions/runs/36469391462) passed on the **same commit**. Its downloadable [sealed bundle](https://github.com/Archolith/menhir/actions/runs/36469391462/artifacts/10990578258) binds image ID `sha256:5bbd937d87c279a03d853538aa5a80350a231dba17f8cbedff6d6b4aef0359b8` to that source commit and its archive/SBOM/vulnerability-report digests. A clean-checkout E2E-6 verification loaded the image, verified those bindings, and recorded both container criteria PASS (2/2): `archolith-graphiti-core==0.30.2.post1`, no upstream `graphiti-core`, all native hook parameters present, and Menhir's hooks wired. Grype reported zero Critical and 50 High findings; High is permitted by the current image policy and needs release-stage triage. The publication job was skipped.
+
+The clean Windows 11 AMD64 / Python 3.12.10 campaign on PR #182 head `cf72d9c6bd6e22a0cb6f2c79afb32f95571b3332` passed all 13 tests and 71/71 criteria in one strict run, with no pending result. Its candidate wheel SHA-256 was `9b547145578ddb05913a48ab2ef8b6fa6aabb0a0f42d0072efae9d6340234ae9`. The merge commit and that branch commit have identical Git tree `b5bfb2a46954cbba1f71662e207cd5dffd018368`; the exact-merged Ubuntu and container receipts above independently bind the merged commit.
 
 | Finding | Current disposition and direct evidence |
 | --- | --- |
 | B-01 | **Resolved.** Installed-wheel E2E-6 passed all five fork criteria in the post-merge stdio artifact. |
-| B-02 | **Resolved for pre-freeze validation.** The exact-main no-publish image workflow and in-container Graphiti probe passed. The branch adds an optional E2E-6 bundle verifier so the two container criteria can be recorded as PASS in a single strict campaign; that branch run remains to be completed. |
+| B-02 | **Resolved.** The exact-main no-publish image workflow and in-container Graphiti probe passed; E2E-6 recorded both container criteria PASS on the merged commit. The Windows strict campaign also recorded both PASS on an identical source tree. |
 | B-03 | **Resolved.** E2E inventory and execution exclude deferred Beacon cases and include the fork refusal. |
-| B-04 | **Fixed on main; platform acceptance being completed.** The scanner raises on traversal, stat, or required-read failure before publication; incomplete caps cannot authorize prune. A disposable-graph injected failure regression and scan-cap E2E passed in post-merge CI. A new Windows ACL denied-directory installed-wheel E2E on this review branch passed: caller received a traversal refusal, and all 35 indexed entities and 44 relationships were unchanged. Ubuntu receipt remains to be checked in branch CI. |
+| B-04 | **Resolved.** The scanner raises on traversal, stat, or required-read failure before publication; incomplete caps cannot authorize prune. The real denied-directory installed-wheel E2E passed on Windows and on exact-merged Ubuntu: the caller received a traversal refusal and previously indexed structure remained unchanged. Disposable-graph injected-failure and capped-scan regressions also passed. |
 | B-05 | **Fixed on main.** Each scan receives a graph-backed generation before traversal; publication locks its project and checks the latest generation inside one Neo4j transaction. Online regressions cover stale publication, serialization, rollback, restart, and missing token. |
 | B-06/B-07 | **Fixed on main.** Artifact transitions compare the observed type/status/namespace while holding the graph lock; supersession creates the replacement edge in the same mutation. General or newly registered edge-less `SUPERSEDED` is refused. Online tests cover competing transitions and replacements, plus rollback. |
 | B-08 | **Fixed on main.** TODO file resolution links only a unique permitted candidate; ambiguous/unknown locations stay saved and explicitly unresolved. Online tests cover duplicate paths, namespace boundaries, multiple locations, and restart. |
 | B-09/B-10 | **Fixed on main.** Empty structure answers include the measured or unknown coverage qualifier. E2E-8 now separates namespace-delete limits from a real capped structural scan over an indexed file. |
 
-The branch's first real ACL test exposed a caller-quality gap: the graph remained intact, but a traversal error surfaced as an opaque HTTP 500. This change maps that scan failure to the established caller-visible refusal path. The rerun passed on Windows against a disposable Neo4j graph; the changed online regression is being rerun. The branch must still pass its exact-SHA CI, Ubuntu denial test, no-publish bundle verification, and complete strict pre-freeze E2E before this review can become `COMPLETE`. Frozen-RC and final release evidence are later gates.
+PR #182 also corrected the caller-quality gap exposed by the first Windows ACL run: a rejected traversal had preserved the graph but surfaced as an opaque HTTP 500. The merged code now returns a clear refusal; the Windows and Ubuntu E2Es and 23 focused local disposable-graph structure/artifact/TODO tests passed. No HIGH/critical supported-path correctness or data-loss finding remains open in this Gate B review. Frozen-RC acceptance, #119's deferred production repair, image vulnerability triage, and final release remain separate gates.
 
-## Findings
+## Historical first-pass findings
 
 | ID | Disposition | Evidence and required action |
 | --- | --- | --- |
@@ -49,7 +53,7 @@ No new HIGH-severity implementation defect was confirmed in the first pass. B-01
 
 `tests/e2e/test_e2e_06_graphiti_fork.py` checks the exact public wheel hash against `uv.lock`, compares all installed `graphiti_core` Python files to that wheel, rejects an upstream `graphiti-core` collision, constructs Menhir's installed Graphiti client to inspect its four native hooks, and drives one deterministic ingest/recall through MCP stdio. The isolated Windows package probe matched all 163 installed source files and reported all four hooks wired. CI on implementation commit `d7dd3477` passed lint, offline, online, and stdio E2E jobs; the uploaded report records packaged-fork PASS (5/5), including READY enrichment and recall over stdio. E2E-8 now tests the missing-fork variant in a second installed-wheel environment; its focused Windows run passed after `pip check` and Menhir both refused the broken environment by name. This does not separately exercise an incompatible version. The release-container half of E2E-6 remains PENDING (0/2) under B-02. Deferred Beacon scenarios are not required for MVP.
 
-## Supported-path disposition
+## Historical supported-path disposition
 
 | Phase B area | Code/contract evidence inspected | Status before RC freeze |
 | --- | --- | --- |
@@ -61,9 +65,9 @@ No new HIGH-severity implementation defect was confirmed in the first pass. B-01
 | B6 — Graphiti fork | `pyproject.toml` and `uv.lock` pin the public fork. The fresh merged-wheel install passed; `test_graphiti_fork_contract.py` covers immutable dependency and adapter boundaries. The audit branch's installed-wheel native-hook stdio acceptance passed on implementation commit `d7dd3477`; its missing-fork negative check passed locally. | **Blocked:** B-02 release-container validation and the later frozen-RC rerun remain. |
 | B7 — persistence/failure | E2E-7 declares interrupted-work recovery and no false READY. E2E-8 declares provider-failure, oversize, isolation, and partial-scan checks. | **Verify:** complete E2E-7/E2E-8 and inspect failure/secret-handling paths on the named candidate. |
 
-## Second independent pass on merged `14aed115` (2026-09-28)
+## Historical second independent pass on merged `14aed115` (2026-09-28)
 
-The current commit has a successful [four-job CI run](https://github.com/Archolith/menhir/actions/runs/36379240436) (lint, complete offline, disposable-Neo4j online, and stdio E2E). The stdio job passed, but its evidence artifact could not be downloaded with the available GitHub credential (HTTP 401); a job success is not a criterion-by-criterion receipt. A focused local pytest collection failed before tests ran because this checkout's global Python lacks `graphiti_core`. Neither result is represented as a new local test pass. The prior clean Windows E2E receipt on `4750b1c8` remains 11 PASS / one declared release-container PENDING.
+At that baseline, a [four-job CI run](https://github.com/Archolith/menhir/actions/runs/36379240436) passed (lint, complete offline, disposable-Neo4j online, and stdio E2E). The stdio job passed, but its evidence artifact could not then be downloaded with the available GitHub credential (HTTP 401); a job success was not a criterion-by-criterion receipt. A focused local pytest collection failed before tests ran because that checkout's global Python lacked `graphiti_core`. Neither result was represented as a new local test pass. The then-current clean Windows E2E receipt on `4750b1c8` remained 11 PASS / one declared release-container PENDING.
 
 | ID | Area / severity | Supported-path failure and required action |
 | --- | --- | --- |
@@ -85,10 +89,10 @@ The current commit has a successful [four-job CI run](https://github.com/Archoli
 - **B6 Graphiti fork: wheel path passes; container path pending (B-02).** `pyproject.toml` and `uv.lock` pin the distinct public fork. Installed-wheel native-hook ingest/recall and missing-fork refusal passed previously. The release-container validation still has no passing receipt; no image was published.
 - **B7 persistence/failure/resource: provisional, not a release pass.** E2E-7 exercises kill/restart, graph-backed no-false-READY, and operator lease recovery; E2E-8 exercises provider failure, oversized diff, and namespace isolation. Current CI ran the stdio job successfully. The evidence artifact was unavailable to this audit credential, and the frozen-candidate rerun remains required. B-04/B-05 are also B7 data-integrity risks.
 
-**Gate B verdict: BLOCKED.** Fix B-04 through B-08 on supported paths, add direct regressions (including the mislabeled E2E structural scan), rerun focused tests plus the required exact-SHA CI/E2E lanes, and independently review the changed behavior. Keep this review `OPEN` until those findings are resolved and the release-container evidence is available. This audit did not freeze an RC, deploy, repair the production graph, publish, or release.
+**Historical Gate B verdict at `14aed115`: BLOCKED.** That pass required B-04 through B-10 fixes, direct regressions, exact-SHA CI/E2E, and release-container evidence. Those requirements were resolved in the current disposition above. The audit did not freeze an RC, deploy, repair the production graph, publish, or release.
 
 ## Separation from Gate A and release
 
 Gate A's supported-platform/configuration decision and paid five-item Oracle graph preflight have since passed and are recorded in issue #123. The five-item preflight is a harness smoke, not six-type quality evidence. The public fork's locked wheel SHA-256 is `a748f98e0b09d64ab1eb29bd3449f52b552250a31663e86c4d99dc51ddf991f0`.
 
-This review remains OPEN until every Phase B item is independently checked and every HIGH/critical supported-path finding is fixed or proven unreachable. Do not freeze an RC or release from this report.
+Gate B is complete for the reviewed local-stdio MVP scope. Do not infer RC freeze or release approval from this review.

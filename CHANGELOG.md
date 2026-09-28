@@ -1,3 +1,10 @@
+## 2026-09-28 - Close the local-stdio MVP Gate B audit
+
+- `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`: close Gate B against merged main after exact-commit CI, Ubuntu stdio criteria, Windows strict E2E, and no-publish Graphiti image receipts; keep RC freeze and final release separate.
+- `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: record Gate B and pre-freeze Gate C completion, exact evidence, and the remaining named-RC work.
+- `.agent/archive/plans/menhir-gate-b-remediation-2026-09-28.md`, `.agent/plans/README.md`: mark the completed remediation plan IMPLEMENTED, archive it, and remove it from active execution routing.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-28 - Prove denied scans and sealed Graphiti container preflight
 
 - `src/menhir/core/backend_runtime_data_ops.py`: report failed project traversal to stdio callers as a clear refusal while preserving the existing index.
@@ -113,22 +120,3 @@
   flag while preserving its preamble across retries.
 - `tests/test_graphiti_client.py`: cover provider requests and the fork's typed
   node-attribute path through Menhir's adapter.
-
-## 2026-09-26 - Reconcile native Graphiti fork with current Menhir
-
-- `pyproject.toml`, `uv.lock`: pin the public Archolith Graphiti 0.30.2 maintenance
-  commit `6b907b93fed32cb979093327608a4fd897b39751` and preserve locked registry dependencies.
-- Recover the unfinished Phase F migration onto published main: replace all 17 runtime
-  patch installers with native fork hooks and Menhir-owned extraction, resolution and
-  LLM policy adapters. Keep subsequent ingestion, retention and recall fixes.
-- `graphiti_client.py`, `graphiti_resolution_policy.py`: flush telemetry inside its
-  request task on success, failure and cancellation; count empty candidate searches.
-- `graphiti_llm_adapter.py`: preserve namespace and operation metadata across retries.
-- Release wheelhouse: derive the immutable fork requirement from package metadata,
-  pin/hash the additional build backend closure, and build without isolated dependency
-  resolution. Docker remains an offline wheel consumer.
-- Migrated contract tests and added dependency, request-context, task-boundary and
-  immutable-build-pin regressions. Feature defaults and deployed configuration stay as-is.
-- Fork baseline is now 0.30.2. Default-on readiness (#169 and siblings) still requires
-  outstanding source-grounding fixes and current graph/model quality evidence; this
-  integration does not itself qualify a feature for default enablement.
