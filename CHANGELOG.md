@@ -1,8 +1,8 @@
 ## 2026-09-28 - Let isolated scanners read the release image archive
 
-- `deploy/build_release_image.py`: make the saved public-source image archive readable to non-root Syft and Grype containers before no-publish validation.
+- `deploy/build_release_image.py`: make the saved public-source image archive readable to non-root scanners and give Syft enough temporary space to unpack its layers during no-publish validation.
 - `.github/workflows/release-image.yml`: surface a failed builder's final diagnostic as a job annotation so a no-publish failure remains actionable when logs are unavailable.
-- `tests/test_build_release_image.py`: reproduce Docker's restrictive archive mode and verify the scanner-readable mode on POSIX.
+- `tests/test_build_release_image.py`: reproduce Docker's restrictive archive mode, verify the scanner-readable mode on POSIX, and pin Syft's temporary-space budget.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
 
 ## 2026-09-28 - Close Gate B structure, artifact, and TODO correctness gaps

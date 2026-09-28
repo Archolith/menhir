@@ -378,6 +378,7 @@ def test_scanners_read_the_sealed_archive_without_invoking_real_docker(
         assert f"docker-archive:/candidate/{archive.name}" in command
         assert kwargs == {"check": False, "capture_output": True}
     assert "none" in scanner_calls[0][0]
+    assert "/tmp:rw,nosuid,nodev,size=2147483648" in scanner_calls[0][0]
     assert len(volume_calls) == 2
     assert volume_calls[0][0][2] == "create"
     assert volume_calls[1][0][2] == "rm"

@@ -352,7 +352,7 @@ def _run_scanner(*, scanner: str, image: str, archive: Path) -> bytes:
     database_volume: str | None = None
     if scanner == "syft":
         command.extend((
-            "--tmpfs", "/tmp:rw,nosuid,nodev,size=268435456",
+            "--tmpfs", "/tmp:rw,nosuid,nodev,size=2147483648",
             "--network", "none", "--env", "SYFT_CHECK_FOR_APP_UPDATE=false",
         ))
     else:
