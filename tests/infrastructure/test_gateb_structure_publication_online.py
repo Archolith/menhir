@@ -247,7 +247,7 @@ def test_traversal_failure_after_prior_index_leaves_graph_unchanged(
             project_identity_service, "settle_project_identity",
             lambda *args, **kwargs: (claim, None),
         )
-        with pytest.raises(OSError, match="could not traverse"):
+        with pytest.raises(ValueError, match="Project scan refused:.*could not traverse"):
             asyncio.run(ops.scan_and_write_project(
                 str(source_root), name=name, force=True, session_id="s", user_id="u",
             ))

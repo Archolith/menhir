@@ -1,3 +1,19 @@
+## 2026-09-26 - remaining MVP audit fixes for recall and decay (#154, #144)
+
+- `recall_pipeline.py`: acquire applicable independent sources before deciding recall is empty;
+  assemble standalone edge candidates before fallback, retain pending results and search-failure attribution,
+  and avoid metadata/adjacency round trips for an empty node pool.
+- `consolidation_queries.py`, `memory_graph_adapter.py`, `lifecycle_decay.py`: rotate bounded decay
+  batches by persistent least-recent selection, mark selected rows before processing, and log selection
+  separately from successful work. Preserve access/age/retention/policy gates and deletion disarm.
+- `test_recall_service.py`: empty/filtered/failed/pending semantic pools, file visibility/session guards,
+  enabled observation-only and standalone edge lanes, plus actual scoped file-to-recall Neo4j acquisition.
+- `test_lifecycle_service.py`: actual 501-record skipped-batch/restart regression, marker order for both
+  phases, unchanged access/freshness, direct/source retention, and marker-failure refusal.
+- `.agent/memory-policy.md`, `.agent/data_models.md`: define independent acquisition and the scheduling-only
+  selection marker, finite-set fairness and restart/rollout limits. No production writes or migration.
+- `CHANGELOG-archive.md`: move the oldest entry to keep ten.
+
 ## 2026-09-26 - chronological memory reads tolerate legacy timestamp storage (#145)
 
 - Normalize native dates and valid legacy ISO text before database ordering and limits in recent,

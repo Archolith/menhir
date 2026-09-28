@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
+import sys
 import tomllib
 import urllib.request
 from pathlib import Path
@@ -20,7 +22,7 @@ import pytest
 
 from tests.e2e._harness.client import stdio_session
 from tests.e2e._harness.config import E2EConfig, child_environment
-from tests.e2e._harness.evidence import LaneEvidence
+from tests.e2e._harness.evidence import LaneEvidence, repo_commit, tree_is_clean
 from tests.e2e._harness.features import FeatureCombo
 from tests.e2e._harness.pending import declare_pending
 from tests.e2e._harness.providers import REFUND_ORIGINAL_AMOUNT
@@ -268,11 +270,85 @@ async def test_e2e_06_packaged_graphiti_fork(
     lane_evidence.close(status="PASS")
 
 
-def test_e2e_06_release_container_pending(lane_evidence: LaneEvidence) -> None:
-    """Do not let a passing wheel test silently close the full E2E-6 contract."""
+def test_e2e_06_release_container(lane_evidence: LaneEvidence) -> None:
+    """Verify an exact-commit no-publish image bundle and run its installed fork."""
+    raw = os.getenv("MENHIR_E2E_RELEASE_IMAGE_BUNDLE", "").strip()
+    if not raw:
+        declare_pending(
+            lane_evidence,
+            CONTAINER_CRITERIA,
+            note="Set MENHIR_E2E_RELEASE_IMAGE_BUNDLE to an exact-commit no-publish validation artifact.",
+        )
+    bundle = Path(raw).resolve(strict=True)
+    assert bundle.is_dir(), bundle
+    clean, dirty_paths = tree_is_clean(REPO_ROOT)
+    assert clean, f"container evidence requires a clean tree: {dirty_paths[:20]}"
+    commit = repo_commit(REPO_ROOT)
+    identity_path = bundle / "release-image-identity.json"
+    metadata_path = bundle / "release-image-metadata.json"
+    archive_path = bundle / "release-image.tar"
+    identity = json.loads(identity_path.read_text(encoding="utf-8"))
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert identity["source_commit"] == metadata["source_commit"] == commit
+    assert identity["source_repository"] == metadata["source_repository"] == "Archolith/menhir"
+    identity_sha256 = hashlib.sha256(identity_path.read_bytes()).hexdigest()
 
-    declare_pending(
-        lane_evidence,
-        CONTAINER_CRITERIA,
-        note="Container validation is reserved for the later release gate; no image is built or published here.",
+    verify = subprocess.run(
+        [
+            sys.executable, str(REPO_ROOT / "deploy" / "build_release_image.py"),
+            "--mode", "verify", "--version", metadata["labels"]["version"],
+            "--image", metadata["image_tag"].rsplit(":", 1)[0],
+            "--python-base", metadata["python_base"],
+            "--repo", str(REPO_ROOT),
+            "--source-repository", "Archolith/menhir",
+            "--metadata", str(metadata_path), "--identity", str(identity_path),
+            "--image-archive", str(archive_path),
+            "--expected-identity-sha256", identity_sha256,
+        ],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=600,
     )
+    lane_evidence.attach("container-verify.txt", verify.stdout + "\n" + verify.stderr)
+    lane_evidence.record(
+        CONTAINER_CRITERIA[0], passed=verify.returncode == 0,
+        detail={"source_commit": commit, "identity_sha256": identity_sha256,
+                "image_id": metadata["image_id"], "verify_exit": verify.returncode},
+    )
+    assert verify.returncode == 0, (verify.stdout + verify.stderr)[-1500:]
+
+    probe = subprocess.run(
+        ["docker", "run", "--rm", "--network", "none", "--read-only",
+         "--cap-drop", "ALL", "--security-opt", "no-new-privileges=true",
+         "--env", "MENHIR_STARTUP_SCOPE=full", "--env", "MENHIR_API_HOST=127.0.0.1",
+         "--entrypoint", "python", metadata["image_tag"], "-c", "\n".join([
+             "import asyncio, importlib.metadata as md, inspect, json",
+             "from graphiti_core import Graphiti",
+             "from menhir.config.settings_model import MemorySettings",
+             "from menhir.infrastructure.graphiti_client import GraphitiClient",
+             "from menhir.infrastructure.graphiti_resolution_policy import menhir_resolution_hooks_installed",
+             "fork = md.distribution('archolith-graphiti-core')",
+             "try: md.distribution('graphiti-core'); upstream_absent = False",
+             "except md.PackageNotFoundError: upstream_absent = True",
+             "async def wired():",
+             "    client = GraphitiClient.from_settings(MemorySettings.from_env())",
+             "    try: return menhir_resolution_hooks_installed(client.client)",
+             "    finally: await client.close()",
+             "parameters = {'single_episode_extraction_hook', 'identity_gate_hook',",
+             "              'candidate_filter_hook', 'node_pre_resolution_hook'}",
+             "print(json.dumps({'fork_version': fork.version, 'upstream_absent': upstream_absent,",
+             "    'native_hook_parameters': parameters <= set(inspect.signature(Graphiti).parameters),",
+             "    'menhir_hooks_wired': asyncio.run(wired())}))",
+         ])],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=180,
+    )
+    lane_evidence.attach("container-fork-probe.txt", probe.stdout + "\n" + probe.stderr)
+    assert probe.returncode == 0, (probe.stdout + probe.stderr)[-1500:]
+    actual = json.loads(probe.stdout.strip().splitlines()[-1])
+    expected = {"fork_version": FORK_VERSION, "upstream_absent": True,
+                "native_hook_parameters": True, "menhir_hooks_wired": True}
+    lane_evidence.record(
+        CONTAINER_CRITERIA[1], passed=actual == expected,
+        detail={"image_id": metadata["image_id"], **actual},
+    )
+    assert actual == expected, actual
+    lane_evidence.record_stack(source_commit=commit, image_id=metadata["image_id"])
+    lane_evidence.close(status="PASS")

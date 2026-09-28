@@ -14,7 +14,26 @@ reviews: dbde430c-9be1-4131-aa85-871a8e99e5ef
 
 **Authority:** [local-stdio MVP release plan](../plans/menhir-local-stdio-mvp-release-2026-09-16.md), Phase B
 
-**State:** OPEN / BLOCKED. The second pass found supported-path correctness risks described below. This is not Gate B closure or release approval.
+**State:** OPEN / final candidate evidence in progress. The historical findings below were recorded before PRs #179–#181 merged. Their current dispositions are here; the old pass-by-pass text remains as the review history, not the latest verdict. This is not RC freeze or release approval.
+
+## Current disposition, 2026-09-28
+
+**Reviewed main:** `45b91cf3abef05091270b69ed81f00fa53ee8235` (PRs [#179](https://github.com/Archolith/menhir/pull/179), [#180](https://github.com/Archolith/menhir/pull/180), and [#181](https://github.com/Archolith/menhir/pull/181) merged). [Post-merge CI](https://github.com/Archolith/menhir/actions/runs/36463630273) passed lint, offline tests, disposable-graph online tests, and installed-wheel stdio E2E. Its downloaded stdio evidence records 11 PASS tests and 68/68 implemented criteria PASS; the two release-container criteria correctly remained PENDING in that separate job.
+
+The [no-publish image validation](https://github.com/Archolith/menhir/actions/runs/36464246373) passed on the **same commit**. The downloadable sealed bundle binds image ID `sha256:4ac07f89438d64a4e1485294a1a0c6c17e4c0917cda55d4b1b568a37f66ab21c` to that source commit and its archive/SBOM/vulnerability-report digests. The image's own probe reports `archolith-graphiti-core==0.30.2.post1`, no upstream `graphiti-core` distribution, all native hook parameters present, and Menhir's hooks wired. Syft reported 187 packages; Grype found zero Critical findings and passed the workflow's stated policy. The validation job did not publish an image.
+
+| Finding | Current disposition and direct evidence |
+| --- | --- |
+| B-01 | **Resolved.** Installed-wheel E2E-6 passed all five fork criteria in the post-merge stdio artifact. |
+| B-02 | **Resolved for pre-freeze validation.** The exact-main no-publish image workflow and in-container Graphiti probe passed. The branch adds an optional E2E-6 bundle verifier so the two container criteria can be recorded as PASS in a single strict campaign; that branch run remains to be completed. |
+| B-03 | **Resolved.** E2E inventory and execution exclude deferred Beacon cases and include the fork refusal. |
+| B-04 | **Fixed on main; platform acceptance being completed.** The scanner raises on traversal, stat, or required-read failure before publication; incomplete caps cannot authorize prune. A disposable-graph injected failure regression and scan-cap E2E passed in post-merge CI. A new Windows ACL denied-directory installed-wheel E2E on this review branch passed: caller received a traversal refusal, and all 35 indexed entities and 44 relationships were unchanged. Ubuntu receipt remains to be checked in branch CI. |
+| B-05 | **Fixed on main.** Each scan receives a graph-backed generation before traversal; publication locks its project and checks the latest generation inside one Neo4j transaction. Online regressions cover stale publication, serialization, rollback, restart, and missing token. |
+| B-06/B-07 | **Fixed on main.** Artifact transitions compare the observed type/status/namespace while holding the graph lock; supersession creates the replacement edge in the same mutation. General or newly registered edge-less `SUPERSEDED` is refused. Online tests cover competing transitions and replacements, plus rollback. |
+| B-08 | **Fixed on main.** TODO file resolution links only a unique permitted candidate; ambiguous/unknown locations stay saved and explicitly unresolved. Online tests cover duplicate paths, namespace boundaries, multiple locations, and restart. |
+| B-09/B-10 | **Fixed on main.** Empty structure answers include the measured or unknown coverage qualifier. E2E-8 now separates namespace-delete limits from a real capped structural scan over an indexed file. |
+
+The branch's first real ACL test exposed a caller-quality gap: the graph remained intact, but a traversal error surfaced as an opaque HTTP 500. This change maps that scan failure to the established caller-visible refusal path. The rerun passed on Windows against a disposable Neo4j graph; the changed online regression is being rerun. The branch must still pass its exact-SHA CI, Ubuntu denial test, no-publish bundle verification, and complete strict pre-freeze E2E before this review can become `COMPLETE`. Frozen-RC and final release evidence are later gates.
 
 ## Findings
 
