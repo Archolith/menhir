@@ -1,3 +1,9 @@
+## 2026-09-27 - Start independent local-stdio MVP release audit
+
+- `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`: record the
+  supported-path evidence map and the outstanding packaged-Graphiti E2E and
+  release-container validation blockers without claiming Gate B closure.
+
 ## 2026-09-27 - Prepare public Graphiti fork package for Menhir MVP
 
 - Require `archolith-graphiti-core==0.30.2.post1` so normal installs can use a
@@ -119,27 +125,3 @@
   reads against disposable Neo4j, covering filters, limits, ordering, receipt paths, and empty results.
 - Verified the previous queries execute on Neo4j 5.26.31. Dynamic MATCH labels were introduced
   in 5.26; this change removes that unnecessary version dependency without claiming a 5.26 failure.
-
-## 2026-09-25 - ingest cleanup and fallback failure visibility (#70)
-
-- `src/menhir/services/ingest_worker.py`: include heartbeat, usage callback, and context setup
-  in the cleanup boundary; setup errors and cancellation stop the heartbeat and restore request context.
-- `src/menhir/services/enrichment_steps.py`: warn when oversized-episode raw capture fails;
-  preserve the original episode's terminal failure handling.
-- `tests/test_services_pipeline.py`: cover failures before and after callback installation,
-  setup cancellation, and a visible capture warning with the original content retained.
-- `src/menhir/services/event_fold.py`: warn when counter or timeline embedding fails while
-  preserving the derived write and keyword-only fallback.
-- `tests/test_windowed_fold.py`: verify both result shapes survive embedding failure and warnings
-  appear only on failure, not successful or intentionally omitted embedding.
-- `.agent/workflows/logging-and-troubleshooting.md`: explain capture and event-fold warnings.
-
-## 2026-09-25 - orphan recovery preview covers every execution phase (#149)
-
-- `recover_orphans` uses one backend contract in local and HTTP modes; execution preserves the
-  `demoted` counter and skips the unused pre-read.
-- The read-only preview scans all sessions and separately reports consolidation candidates,
-  expired demotion TTL nodes, and eligible empty episodes. The age argument applies to
-  consolidation; existing TTL and seven-day empty-episode safeguards remain in force.
-- Focused unit, HTTP round-trip, and disposable Neo4j regressions cover the preview and actual
-  cleanup, including flagged and content-bearing survivors.
