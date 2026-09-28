@@ -10,9 +10,11 @@ reviews: dbde430c-9be1-4131-aa85-871a8e99e5ef
 
 **Review baseline:** `c49b6bd9cf32503f4c85fd80c0bf302e7fdc38e4` (merged `main`, 2026-09-27)
 
+**Second-pass baseline:** `14aed115dd0ecb8878aef9b44bfc6a233748cb1a` (merged `main`, 2026-09-28)
+
 **Authority:** [local-stdio MVP release plan](../plans/menhir-local-stdio-mvp-release-2026-09-16.md), Phase B
 
-**State:** OPEN. This is the first independent code-and-contract pass, not Gate B closure or release approval.
+**State:** OPEN / BLOCKED. The second pass found supported-path correctness risks described below. This is not Gate B closure or release approval.
 
 ## Findings
 
@@ -22,7 +24,7 @@ reviews: dbde430c-9be1-4131-aa85-871a8e99e5ef
 | B-02 | **BLOCKER — release-container validation outstanding** | A fresh Windows Python 3.12.10 environment installed a Menhir wheel built from this commit, resolved public `archolith-graphiti-core==0.30.2.post1` with no upstream or VCS distribution, imported the four native hooks, and passed dependency compatibility for 95 packages. This proves the package path only. [No-push image validation run 36362966372](https://github.com/Archolith/menhir/actions/runs/36362966372) built the image but failed when Syft could not read its archive; publication was skipped. Fix and revalidate the container path at the later release gate. No image publication or deployment is authorized by this audit. |
 | B-03 | **FIXED ON AUDIT BRANCH — evidence map was stale** | At the review baseline, `tests/e2e/README.md` assigned E2E-6 and an E2E-8 criterion to Beacon. The follow-up updates the lane inventory, moves the Beacon E2E-6 scenario outside test collection, and adds a real missing-fork refusal check for E2E-8. |
 
-No new HIGH-severity implementation defect was confirmed in this pass. B-01's candidate-wheel gap is resolved on the audit branch; B-02 remains a release blocker. This does not establish frozen-RC acceptance.
+No new HIGH-severity implementation defect was confirmed in the first pass. B-01's candidate-wheel gap is resolved on main; B-02 remains a release blocker. The second pass below identifies additional blockers. This does not establish frozen-RC acceptance.
 
 ## Follow-up on the audit branch
 
@@ -40,8 +42,34 @@ No new HIGH-severity implementation defect was confirmed in this pass. B-01's ca
 | B6 — Graphiti fork | `pyproject.toml` and `uv.lock` pin the public fork. The fresh merged-wheel install passed; `test_graphiti_fork_contract.py` covers immutable dependency and adapter boundaries. The audit branch's installed-wheel native-hook stdio acceptance passed on implementation commit `d7dd3477`; its missing-fork negative check passed locally. | **Blocked:** B-02 release-container validation and the later frozen-RC rerun remain. |
 | B7 — persistence/failure | E2E-7 declares interrupted-work recovery and no false READY. E2E-8 declares provider-failure, oversize, isolation, and partial-scan checks. | **Verify:** complete E2E-7/E2E-8 and inspect failure/secret-handling paths on the named candidate. |
 
+## Second independent pass on merged `14aed115` (2026-09-28)
+
+The current commit has a successful [four-job CI run](https://github.com/Archolith/menhir/actions/runs/36379240436) (lint, complete offline, disposable-Neo4j online, and stdio E2E). The stdio job passed, but its evidence artifact could not be downloaded with the available GitHub credential (HTTP 401); a job success is not a criterion-by-criterion receipt. A focused local pytest collection failed before tests ran because this checkout's global Python lacks `graphiti_core`. Neither result is represented as a new local test pass. The prior clean Windows E2E receipt on `4750b1c8` remains 11 PASS / one declared release-container PENDING.
+
+| ID | Area / severity | Supported-path failure and required action |
+| --- | --- | --- |
+| B-04 | **B3 BLOCKER — incomplete traversal can prune indexed structure** | `project_scanner.py` calls `os.walk(root)` without `onerror` (line 269). By default a `scandir` error is ignored; `partial_index` only detects the file cap (lines 135–143). A temporarily unreadable subtree therefore looks absent in a complete scan, and `structure_queries.py` may delete its existing file/directory entities (lines 179–180, 254–256, 304–310). Make traversal failure explicit and refuse destructive pruning on incomplete coverage; test an injected unreadable-directory scan against an already indexed tree. |
+| B-05 | **B3 BLOCKER — concurrent scans can regress structure** | Manual ingest schedules a detached write (`backend_runtime_data_ops.py`, lines 640–748); the watcher writes independently. `structure_write_fence.py` admits multiple writers for the same project (lines 150–177), while `structure_queries.py` writes fingerprint/entities and prunes without a freshness CAS (lines 159–229, 304–310). If older scan A writes after newer scan B, A can restore stale structure and delete B-only paths. Serialize per project or reject stale scans at the mutation boundary; test the A-scan/B-scan/B-write/A-write interleaving. |
+| B-06 | **B4 BLOCKER — lifecycle read/write race** | `transition_artifact_status` checks legality from a read at `work_artifact_repository.py:1198–1223`, then writes by UUID/namespace without matching the observed status at lines 1234–1242. Concurrent transitions can both pass from one state and the later one can overwrite a terminal state. Add compare-and-set to the graph mutation and a stale-transition regression. |
+| B-07 | **B4 BLOCKER — supersession can lack its replacement edge** | The general `transition_artifact` tool advertises `SUPERSEDED` and the domain permits it, but the general transition only changes status. The dedicated `supersede_artifact` path documents and atomically creates the `new → old` edge. Route `SUPERSEDED` through the dedicated operation or define and enforce a different explicit contract; test that a superseded artifact always records its replacement. |
+| B-08 | **B5 BLOCKER — ambiguous TODO file reference links across projects** | `add_todo` permits `code_ref` without `structure_project`. `todo_repository.py:300–319` creates `REFERENCES_FILE` for every matching relative path across projects, then `LIMIT 1` returns only one arbitrary match. A TODO can appear attached to the wrong project. Refuse/leave unlinked when ambiguous, or require a resolved project; test two projects with the same relative path. |
+| B-09 | **B3 MEDIUM — incomplete negative-answer caveats** | `query_structure.py` computes a coverage qualifier but empty symbols/dependencies/documents/affected-tests paths omit it (lines 327–331, 383–389, 539–560, 584–589). Extend the qualifier and test legacy/partial coverage. |
+| B-10 | **E2E coverage mismatch** | E2E-8's criterion named `capped_scan_does_not_authorize_destructive_prune` actually calls `delete_namespace` with `max_nodes=1` (`tests/e2e/test_e2e_08_isolation_adversarial.py:322–376`); it never caps a structural scan. Rename that criterion for what it proves and add a real structure-cap/traversal-error regression. |
+
+### Area-by-area second-pass verdict
+
+- **B1 stdio/MCP: provisionally passes code review.** `mcp/server.py` binds explicit local operator trust, registration validates declared scopes/metadata, and E2E-1 uses an installed wheel and stock MCP client for initialization, discovery, schema shape, and shutdown. The exact-commit stdio CI job passed. No new HIGH finding was identified here; its criterion evidence still belongs in the final RC pack.
+- **B2 memory: provisionally passes code review with #119 held.** `add_memory` says PENDING; `add_memory_and_track` preserves an accepted receipt when observation fails and distinguishes READY/FAILED/timeout. #88 has two real-LLM disposable-graph passes and a deterministic same-session namespace E2E pin. #70's heartbeat/observability sites now use `try/finally` and warning logs. Scalar/event/frontier flags are default-off. #119's historical repair is explicitly deferred to the single final release, so production rollout is not claimed here.
+- **B3 structure: blocked by B-04/B-05; B-09 is additional correctness work.** The local path uses identity admission; project rename remains unsupported. A partial-cap guard exists, but it does not cover traversal failure, and concurrent accepted scans lack freshness control.
+- **B4 WorkArtifacts: blocked by B-06/B-07.** MCP/backend supersede argument order and the dedicated edge/status transaction are consistent; source reconciliation, read-only audit, and UUID validation have code and E2E coverage, subject to final RC rerun.
+- **B5 TODOs: blocked by B-08.** Add/list/get/close and restart are covered in E2E-5; repeat close reports an explicit outcome. Equal-time list ordering lacks a UUID tie-breaker (low severity), but the ambiguous file-link path is the release concern.
+- **B6 Graphiti fork: wheel path passes; container path pending (B-02).** `pyproject.toml` and `uv.lock` pin the distinct public fork. Installed-wheel native-hook ingest/recall and missing-fork refusal passed previously. The release-container validation still has no passing receipt; no image was published.
+- **B7 persistence/failure/resource: provisional, not a release pass.** E2E-7 exercises kill/restart, graph-backed no-false-READY, and operator lease recovery; E2E-8 exercises provider failure, oversized diff, and namespace isolation. Current CI ran the stdio job successfully. The evidence artifact was unavailable to this audit credential, and the frozen-candidate rerun remains required. B-04/B-05 are also B7 data-integrity risks.
+
+**Gate B verdict: BLOCKED.** Fix B-04 through B-08 on supported paths, add direct regressions (including the mislabeled E2E structural scan), rerun focused tests plus the required exact-SHA CI/E2E lanes, and independently review the changed behavior. Keep this review `OPEN` until those findings are resolved and the release-container evidence is available. This audit did not freeze an RC, deploy, repair the production graph, publish, or release.
+
 ## Separation from Gate A and release
 
-Gate A still needs an explicit supported-platform/configuration decision and a live five-item Oracle preflight. The no-cost benchmark preflight passed 85 validator/provenance/ingest-fixture tests and its calls match current Menhir API fields, but no live graph or paid model call was run. A bare `--limit 5` samples only temporal-reasoning; it is a harness smoke, not six-type quality evidence. The public fork's locked wheel SHA-256 is `a748f98e0b09d64ab1eb29bd3449f52b552250a31663e86c4d99dc51ddf991f0`.
+Gate A's supported-platform/configuration decision and paid five-item Oracle graph preflight have since passed and are recorded in issue #123. The five-item preflight is a harness smoke, not six-type quality evidence. The public fork's locked wheel SHA-256 is `a748f98e0b09d64ab1eb29bd3449f52b552250a31663e86c4d99dc51ddf991f0`.
 
 This review remains OPEN until every Phase B item is independently checked and every HIGH/critical supported-path finding is fixed or proven unreachable. Do not freeze an RC or release from this report.
