@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import os
+import asyncio
 import threading
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,7 +15,6 @@ from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.project_identity_binding import binding_host, root_key_for
 from menhir.infrastructure.project_scanner import FileEntry, ProjectScanResult
-from menhir.infrastructure.project_scanner import ProjectScanner
 from menhir.infrastructure.structure_queries import StructureGraphWriter
 from menhir.infrastructure.structure_write_fence import IdentityClaim, StaleStructureScan
 
@@ -199,19 +200,38 @@ def test_binding_refresh_cannot_update_a_same_name_other_identity(graph):
 def test_traversal_failure_after_prior_index_leaves_graph_unchanged(
     graph, tmp_path: Path, monkeypatch,
 ):
+    from menhir.core import backend_runtime_data_ops as runtime_module
+    from menhir.core import ingest_guard
+    from menhir.domain import project_identity as identity_module
     from menhir.infrastructure import project_scanner as scanner_module
+    from menhir.infrastructure import repo_topology
+    from menhir.services import project_identity_service
 
     repo, adapter, name, root, claim = graph
     initial = adapter.begin_structure_scan(claim)
     adapter.write_project_structure(
         _scan(name, root, claim, "initial", "src/old.py", initial), "s", "u",
     )
-    before = _state(repo, name)
+    before_entities = repo.execute(
+        """MATCH (n:Entity {structure_project: $name})
+        RETURN n.structure_path AS path, properties(n) AS props ORDER BY path""",
+        {"name": name},
+    )
+    before_edges = repo.execute(
+        """MATCH (a:Entity {structure_project: $name})-[r]->(b:Entity)
+        RETURN a.structure_path AS source, type(r) AS relation,
+               b.structure_path AS target ORDER BY source, relation, target""",
+        {"name": name},
+    )
     source_root = tmp_path / name
     source_root.mkdir()
     (source_root / "src").mkdir()
     (source_root / "src" / "new.py").write_text("pass\n", encoding="utf-8")
-    adapter.begin_structure_scan(claim)
+    ops = runtime_module.RuntimeProviderDataOpsMixin()
+    async def _off_loop(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+    ops._off_loop = _off_loop
+    ops.built = SimpleNamespace(graph_adapter=adapter)
 
     def denied_walk(_root, *, onerror):
         onerror(PermissionError("injected unreadable directory"))
@@ -219,9 +239,29 @@ def test_traversal_failure_after_prior_index_leaves_graph_unchanged(
 
     with monkeypatch.context() as patch:
         patch.setattr(scanner_module.os, "walk", denied_walk)
+        patch.setattr(runtime_module, "get_request_tier", lambda: "agent")
+        patch.setattr(ingest_guard, "ensure_ingest_path_allowed", lambda path, **kw: Path(path))
+        patch.setattr(repo_topology, "classify_root", lambda path: None)
+        patch.setattr(identity_module, "ensure_scan_root_owns_identity", lambda **kw: None)
+        patch.setattr(
+            project_identity_service, "settle_project_identity",
+            lambda *args, **kwargs: (claim, None),
+        )
         with pytest.raises(OSError, match="could not traverse"):
-            ProjectScanner().scan(source_root, name)
-    assert _state(repo, name) == before
+            asyncio.run(ops.scan_and_write_project(
+                str(source_root), name=name, force=True, session_id="s", user_id="u",
+            ))
+    assert repo.execute(
+        """MATCH (n:Entity {structure_project: $name})
+        RETURN n.structure_path AS path, properties(n) AS props ORDER BY path""",
+        {"name": name},
+    ) == before_entities
+    assert repo.execute(
+        """MATCH (a:Entity {structure_project: $name})-[r]->(b:Entity)
+        RETURN a.structure_path AS source, type(r) AS relation,
+               b.structure_path AS target ORDER BY source, relation, target""",
+        {"name": name},
+    ) == before_edges
 
 
 def test_same_project_token_issuance_waits_for_publication_transaction(graph, monkeypatch):
