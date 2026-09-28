@@ -1,3 +1,9 @@
+## 2026-09-28 - Let isolated scanners read the release image archive
+
+- `deploy/build_release_image.py`: make the saved public-source image archive readable to non-root Syft and Grype containers before no-publish validation.
+- `tests/test_build_release_image.py`: reproduce Docker's restrictive archive mode and verify the scanner-readable mode on POSIX.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-28 - Close Gate B structure, artifact, and TODO correctness gaps
 
 - `src/menhir/infrastructure/project_scanner.py`: refuse unreadable traversal, stat, and source reads before publication; bump the scanner fingerprint schema.
@@ -130,16 +136,3 @@
 - `.agent/memory-policy.md`, `.agent/data_models.md`: define independent acquisition and the scheduling-only
   selection marker, finite-set fairness and restart/rollout limits. No production writes or migration.
 - `CHANGELOG-archive.md`: move the oldest entry to keep ten.
-
-## 2026-09-26 - chronological memory reads tolerate legacy timestamp storage (#145)
-
-- Normalize native dates and valid legacy ISO text before database ordering and limits in recent,
-  flagged, scope, and type reads; invalid access falls back to creation, unknown dates sort last,
-  and equal instants use a stable UUID tie-break without losing fractional precision.
-- Stamp native memory timestamps in TEMPORAL, candidate, L4, TODO-reminder mirrors, and View refreshes;
-  retain candidate/artifact creation receipts when storage types change.
-- Use guarded timestamp conversion for decay and session age predicates; unknown ages cannot
-  justify destructive decay. Document writer coverage, manual backfill precautions, and scoring limits.
-- Disposable Neo4j regressions cover actual reads/touches, bounded startup selection, writer receipts,
-  lifecycle protection, offsets, invalid calendar values, native/local dates, and nanosecond ties.
-- Archive the oldest changelog entry to keep ten. No automatic migration or production data changes.

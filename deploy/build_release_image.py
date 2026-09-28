@@ -528,6 +528,10 @@ def create_validation_bundle(args: argparse.Namespace) -> dict[str, Any]:
     )
     if not archive.is_file() or archive.is_symlink():
         raise BuildImageError("docker did not create a safe image archive")
+    # The digest-pinned scanner containers run as non-root users. Docker saves
+    # archives mode 0600 on the CI host, so their read-only bind mount must be
+    # made readable before scanning the public-source image.
+    archive.chmod(0o644)
     archive_sha256 = sha256_file(archive)
     artifact_root = args.output.resolve().parent
     evidence = generate_evidence(
