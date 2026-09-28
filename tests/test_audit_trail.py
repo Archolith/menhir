@@ -7,7 +7,6 @@ order. Emission must NEVER raise into the caller, and two channels are independe
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -18,8 +17,8 @@ from menhir.infrastructure.telemetry.store import McpTelemetryStore
 
 
 @pytest.fixture
-def store():
-    return McpTelemetryStore(Path(tempfile.mkdtemp()) / "audit.db")
+def store(tmp_path: Path):
+    return McpTelemetryStore(tmp_path / "audit.db")
 
 
 @pytest.fixture

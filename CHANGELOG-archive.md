@@ -1,3 +1,16 @@
+## 2026-09-27 - Add packaged Graphiti fork stdio acceptance path
+
+- `tests/e2e/test_e2e_06_graphiti_fork.py`: verify the public fork wheel hash,
+  installed source bytes, absence of upstream Graphiti, native hook wiring, and
+  deterministic ingest/recall through the installed Menhir stdio path.
+- `tests/e2e/beacon_post_mvp_scenarios.py`,
+  `tests/e2e/test_e2e_08_isolation_adversarial.py`, `.github/workflows/tests.yml`:
+  remove deferred Beacon from MVP execution and verify a missing fork makes both
+  package integrity and Menhir's runtime check fail explicitly in a disposable install.
+- `tests/e2e/README.md`, `.agent/plans/README.md`, the approved MVP plan, and the
+  MVP release audit: distinguish the candidate-wheel result from the later
+  release-container gate and keep that gate explicitly PENDING in E2E evidence.
+
 ## 2026-09-27 - Start independent local-stdio MVP release audit
 
 - `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`: record the
