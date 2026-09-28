@@ -455,7 +455,9 @@ def _container_secret_mounts(workdir: Path, env: dict[str, str]) -> list[tuple[P
     signing_key.write_text("{}", encoding="utf-8")
     signing_key.chmod(0o600)
     (policy_dir / "client-policy.json").write_bytes(
-        (REPO_ROOT / "deploy" / "client-policy.production.json").read_bytes()
+        # This tool only assembles a disposable local container. Never mount
+        # the operator's private production policy into its test instance.
+        (REPO_ROOT / "tests" / "fixtures" / "client-policy.synthetic.json").read_bytes()
     )
     return [
         (menhir_dir, "/run/secrets/menhir"),
