@@ -131,6 +131,14 @@ def test_beacon_failure_does_not_reveal_parent_secret(
     assert "secret=<absent>" in str(exc_info.value)
 
 
+def test_isolated_beacon_child_keeps_utf8_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    from menhir.services.beacon_compat import _run
+
+    monkeypatch.setenv("PYTHONUTF8", "1")
+    output = _run(sys.executable, ["-c", "print(chr(233))"], cwd=None, timeout=10)
+    assert output.strip() == "é"
+
+
 def test_beacon_child_does_not_inherit_parent_secrets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

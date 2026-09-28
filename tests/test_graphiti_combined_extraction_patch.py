@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import BaseModel
 
 pytest.importorskip("graphiti_core")
 
@@ -128,6 +129,28 @@ async def test_json_object_adapter_still_drops_malformed_edge_through_proxy() ->
     assert CombinedExtraction(**response).edges == []
     assert receipt.raw_edge_count == 1
     assert receipt.malformed_edges_dropped == 1
+
+
+@pytest.mark.asyncio
+async def test_json_object_adapter_preserves_typed_attribute_field_names() -> None:
+    class Attributes(BaseModel):
+        type: str
+        entity: str
+
+    payload = {"type": "database", "entity": "Neo4j"}
+    adapter = MenhirOpenAIGenericClient.__new__(MenhirOpenAIGenericClient)
+    adapter.max_tokens = 128
+    adapter.structured_output_mode = "json_object"
+    adapter._generate_response = AsyncMock(return_value=payload)
+
+    response = await adapter.generate_response(
+        [Message(role="system", content="Extract attributes."),
+         Message(role="user", content="Neo4j is a database.")],
+        response_model=Attributes,
+        attribute_extraction=True,
+    )
+
+    assert Attributes(**response) == Attributes(**payload)
 
 
 def test_no_graphiti_extraction_symbols_are_rebound() -> None:

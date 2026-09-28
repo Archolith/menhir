@@ -41,6 +41,9 @@ from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
 from graphiti_core.llm_client.request_guard import (
     RequestGuard,
 )
+from graphiti_core.prompts.extract_edges import ExtractedEdges
+from graphiti_core.prompts.extract_nodes_and_edges import CombinedExtraction
+from graphiti_core.prompts.extract_nodes import ExtractedEntities
 from graphiti_core.prompts.models import Message
 
 from menhir.infrastructure.graphiti_extraction_policy import get_extraction_receipt
@@ -513,7 +516,13 @@ class MenhirOpenAIGenericClient(OpenAIGenericClient):
                     group_id=group_id,
                     prompt_name=prompt_name,
                 )
-                if getattr(self, "structured_output_mode", "json_schema") == "json_object":
+                # This normalizer rewrites generic keys such as ``type`` and
+                # ``entity``. Apply it only to extraction envelopes; typed
+                # attribute models may use those keys literally.
+                if (
+                    getattr(self, "structured_output_mode", "json_schema") == "json_object"
+                    and response_model in (CombinedExtraction, ExtractedEntities, ExtractedEdges)
+                ):
                     return _normalize_graphiti_json_payload(response)
                 return response
             except RateLimitError:
