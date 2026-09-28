@@ -641,7 +641,12 @@ class RuntimeProviderDataOpsMixin:
             self.built.graph_adapter.begin_structure_scan, claim
         )
         scanner = ProjectScanner()
-        scan = await asyncio.to_thread(scanner.scan, path, project_name)
+        try:
+            scan = await asyncio.to_thread(scanner.scan, path, project_name)
+        except OSError as exc:
+            # A failed walk leaves the existing index untouched. Give stdio callers
+            # the reason through the backend refusal path instead of an opaque 500.
+            raise ValueError(f"Project scan refused: {exc}") from exc
         # Carried on the scan so every writer under `write_project` stamps it without a second
         # parameter threaded through four batch helpers.
         scan.project_id = claim.project_id

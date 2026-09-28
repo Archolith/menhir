@@ -41,12 +41,17 @@ that surfaces the moment any other read path forgets the filter.
 from __future__ import annotations
 
 import asyncio
+import csv
+from contextlib import contextmanager
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import time
+from pathlib import Path
+from typing import Iterator
 from uuid import uuid4
 
 import pytest
@@ -76,6 +81,7 @@ ISOLATION_CRITERIA = [
     "namespace_delete_cap_refuses_without_deletion",
     "structure_scan_cap_preserves_previously_indexed_file",
 ]
+DENIED_DIRECTORY_CRITERIA = ["os_denied_directory_preserves_previously_indexed_structure"]
 
 PROVIDER_CRITERIA = ["provider_failure_does_not_silently_pass"]
 
@@ -99,6 +105,42 @@ def _text(result: object) -> str:
     content = getattr(result, "content", None) or []
     parts = [getattr(item, "text", "") for item in content]
     return "\n".join(part for part in parts if part)
+
+
+@contextmanager
+def _deny_directory_listing(directory: Path) -> Iterator[None]:
+    """Deny real OS traversal to both the test and the backend, then restore it."""
+    if os.name == "nt":
+        identity = subprocess.run(
+            ["whoami", "/user", "/fo", "csv", "/nh"],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        sid = next(csv.reader(identity.splitlines()))[1]
+        assert sid.startswith("S-"), f"could not resolve current Windows SID: {sid!r}"
+        subprocess.run(
+            ["icacls", str(directory), "/deny", f"*{sid}:(RD)"],
+            capture_output=True, text=True, check=True,
+        )
+        try:
+            with pytest.raises(PermissionError, match="denied"):
+                list(os.scandir(directory))
+            yield
+        finally:
+            subprocess.run(
+                ["icacls", str(directory), "/remove:d", f"*{sid}"],
+                capture_output=True, text=True, check=True,
+            )
+    elif os.name == "posix":
+        original_mode = stat.S_IMODE(directory.stat().st_mode)
+        directory.chmod(0)
+        try:
+            with pytest.raises(PermissionError):
+                list(os.scandir(directory))
+            yield
+        finally:
+            directory.chmod(original_mode)
+    else:
+        pytest.skip(f"OS-level directory denial is unsupported on {os.name}")
 
 
 @pytest.mark.provider("deterministic")
@@ -436,6 +478,89 @@ async def test_e2e_08_isolation(
             detail={"coverage": coverage[0], "retained_rows": retained_rows},
         )
         assert preserved, "the capped structural scan pruned an unseen indexed file"
+
+    lane_evidence.close(status="PASS")
+
+
+@pytest.mark.provider("deterministic")
+async def test_e2e_08_os_denied_directory_preserves_structure(
+    e2e_config: E2EConfig,
+    e2e_installed,
+    running_stack,
+    feature_combo: FeatureCombo,
+    feature_env: dict[str, str],
+    provider_env: dict[str, str],
+    lane_evidence: LaneEvidence,
+) -> None:
+    """A real denied subtree cannot turn an existing index into evidence of deletion."""
+    lane_evidence.record_stack(features=feature_combo.label, provider="deterministic")
+    project = f"os-denied-{uuid4().hex[:10]}"
+    fixture = build_fixture_repo(e2e_config.fixtures_dir / project)
+    denied = fixture.path / "src" / "protected"
+    denied.mkdir(parents=True)
+    (denied / "retained.py").write_text(
+        "def retained_marker():\n    return 1\n", encoding="utf-8",
+    )
+    child_env = {**feature_env, **provider_env}
+
+    def graph_state() -> dict[str, list[dict]]:
+        return {
+            "entities": graph_query(
+                e2e_config,
+                "MATCH (n:Entity {structure_project: $project}) "
+                "RETURN n.uuid AS uuid, properties(n) AS properties ORDER BY uuid",
+                project=project,
+            ),
+            "relationships": graph_query(
+                e2e_config,
+                "MATCH (a:Entity {structure_project: $project})-[r]->(b:Entity) "
+                "RETURN a.uuid AS source, type(r) AS relation, b.uuid AS target, "
+                "properties(r) AS properties ORDER BY source, relation, target",
+                project=project,
+            ),
+        }
+
+    async with stdio_session(
+        e2e_config, e2e_installed.venv_python, lane_evidence, feature_env=child_env,
+    ) as client:
+        initial = _text(await client.call_tool("call_tool", {
+            "name": "ingest_project", "arguments": {
+                "path": str(fixture.path), "name": project, "identity_action": "new",
+            },
+        }))
+        assert initial.startswith("Scanned "), initial[:500]
+        await wait_for_project_indexed(client, project, symbol_path="src/protected/retained.py")
+        before = graph_state()
+        assert any(
+            row["properties"].get("structure_path") == "src/protected/retained.py"
+            for row in before["entities"]
+        ), "the file was never indexed before access was denied"
+
+        with _deny_directory_listing(denied):
+            try:
+                failed = _text(await client.call_tool("call_tool", {
+                    "name": "ingest_project", "arguments": {
+                        "path": str(fixture.path), "name": project, "force": True,
+                    },
+                }))
+            except Exception as exc:  # noqa: BLE001 - the client may surface a tool error
+                failed = f"{type(exc).__name__}: {exc}"
+            after = graph_state()
+
+        refused = "could not traverse" in failed.lower() and not failed.startswith("Scanned ")
+        unchanged = before == after
+        lane_evidence.record(
+            DENIED_DIRECTORY_CRITERIA[0],
+            passed=refused and unchanged,
+            detail={
+                "response": failed[:1000],
+                "entities_before": len(before["entities"]),
+                "relationships_before": len(before["relationships"]),
+                "graph_unchanged": unchanged,
+            },
+        )
+        assert refused, f"denied traversal was not reported to the caller: {failed[:700]}"
+        assert unchanged, "a denied subtree changed indexed entities or relationships"
 
     lane_evidence.close(status="PASS")
 

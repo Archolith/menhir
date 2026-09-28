@@ -16,15 +16,16 @@ criteria; it does not redefine them.
 | E2E-3 | integrated coding workflow | **implemented** |
 | E2E-4 | WorkArtifact lifecycle | **implemented** |
 | E2E-5 | TODO lifecycle | **implemented** |
-| E2E-6 | public Graphiti fork in a clean Menhir wheel | wheel/stdio path implemented; release-container path pending |
+| E2E-6 | public Graphiti fork in a clean Menhir wheel and sealed image | wheel/stdio path implemented; container path runs with an exact-commit no-publish bundle |
 | E2E-7 | restart and interrupted work | **implemented** |
-| E2E-8 | isolation and adversarial (carries #88's regression pin) | 9 supported criteria implemented, including missing-fork refusal and a real structural scan-cap check |
+| E2E-8 | isolation and adversarial (carries #88's regression pin) | 10 supported criteria implemented, including missing-fork refusal, a real structural scan-cap check, and OS-level denied traversal |
 
 E2E-6 downloads the exact public Graphiti fork wheel named by `uv.lock`, checks its hash
 and every installed Python source file, constructs the installed Menhir Graphiti client
 to check all four native hooks, then ingests and recalls through stdio with a deterministic
-provider. A separate E2E-6 test writes a PENDING evidence record for the release-container
-criteria, so the wheel-path PASS cannot be mistaken for the full lane. Beacon scenarios remain in
+provider. A separate E2E-6 test validates the no-publish image bundle against the clean
+checkout's commit, loads and inspects the sealed image, then runs the fork hook probe inside
+it. Without a bundle it records both container criteria as PENDING. Beacon scenarios remain in
 `beacon_post_mvp_scenarios.py` but are not part of this MVP release lane.
 
 E2E-8 uses separate tests because namespace isolation needs a successful provider while
@@ -36,9 +37,10 @@ The namespace-delete limit and structural scan cap have separate criteria: the f
 checks `delete_namespace(max_nodes=1)` refuses without deleting nodes, while the latter
 indexes a file, exceeds the scanner's 2,000-file cap, and verifies the older file survives.
 An unreadable-directory regression is covered by deterministic fault injection through manual
-ingestion over an already indexed disposable graph. An OS-level denied-directory E2E is still
-a platform evidence gap; Windows ACL and POSIX permission behavior need separate release-platform
-runs.
+ingestion over an already indexed disposable graph. A separate OS-level test denies directory
+listing with a Windows ACL or POSIX mode, then checks that manual ingestion reports the failure
+and preserves the indexed entities and relationships. It skips only on an unsupported OS;
+failure to enforce denial on a supported host fails the test. Both release platforms need a run receipt.
 
 A scaffolded lane is **not** a silent skip. `_harness/pending.py` writes a full evidence
 directory recording every acceptance criterion as unproven, then skips — so
@@ -66,6 +68,11 @@ run in one way that matters:
 ```bash
 MENHIR_E2E=1 MENHIR_E2E_STRICT=1 pytest tests/e2e -v
 ```
+
+Set `MENHIR_E2E_RELEASE_IMAGE_BUNDLE` to the downloaded no-publish validation artifact
+for the **same commit** to prove E2E-6's container criteria. The test requires a clean
+tree and refuses a bundle built from another commit. It verifies the sealed archive,
+SBOM, vulnerability report, image labels, and installed fork hooks without publishing.
 
 `MENHIR_E2E_STRICT=1` aborts on a dirty working tree. Without it the campaign will build a
 wheel from uncommitted changes and record a commit hash that does not describe what was
@@ -99,6 +106,7 @@ existing file.
 | `MENHIR_E2E_NEO4J_URI` | `bolt://127.0.0.1:7689` | Disposable graph |
 | `MENHIR_E2E_BACKEND_PORT` | `8199` | Loopback `menhir serve` |
 | `MENHIR_E2E_WORK_ROOT` | pytest tmp dir | Venv, fixtures, evidence |
+| `MENHIR_E2E_RELEASE_IMAGE_BUNDLE` | unset | Exact-commit no-publish image validation artifact for E2E-6; unset means two explicit PENDING criteria |
 | `MENHIR_E2E_BEACON_PYTHON` | unset | Optional post-MVP Beacon scenario interpreter; the MVP CI lane does not install Beacon |
 
 Port `7689` is deliberately **not** `7688`: that is the unit suite's instance, and an E2E
@@ -221,14 +229,7 @@ what the server returned.
 
 ## Known gaps
 
-- **E2E-6 needs a Beacon interpreter** (`MENHIR_E2E_BEACON_PYTHON`) that satisfies the
-  build contract: install the Beacon SHA pinned in `.github/workflows/tests.yml` into a
-  separate venv (the `stdio-e2e` CI job installs none, so this lane stays pending there).
-  The overwrite and CAS refresh policy is already pinned in the lane's docstring, so what is
-  missing is the second venv, not the decision. The graph-backed E2E-6 in
-  `tests/test_beacon_e2e6.py` (online job) already runs the full flow against that pin.
-- **No lane has been run end to end.** Every lane collects, skips cleanly without the
-  opt-in, and asserts against tool signatures and output formats read from the source.
-  That is not the same as having passed. Expect the first real run to surface format
-  mismatches; treat an early failure as the harness finding its footing rather than as a
-  product defect, until the transcript says otherwise.
+- Ordinary stdio CI has no release-image bundle, so E2E-6's container test records two
+  PENDING criteria there. Run the exact-commit no-publish image workflow and supply its
+  artifact to a separate strict campaign before claiming complete pre-freeze evidence.
+- Beacon scenarios are deferred from this MVP and are not part of the eight-lane campaign.

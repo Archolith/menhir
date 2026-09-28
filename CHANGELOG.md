@@ -1,3 +1,13 @@
+## 2026-09-28 - Prove denied scans and sealed Graphiti container preflight
+
+- `src/menhir/core/backend_runtime_data_ops.py`: report failed project traversal to stdio callers as a clear refusal while preserving the existing index.
+- `tests/infrastructure/test_gateb_structure_publication_online.py`: keep the graph-preservation regression aligned with the caller-visible refusal.
+- `tests/e2e/test_e2e_08_isolation_adversarial.py`: deny a real directory listing on Windows or POSIX and compare the indexed graph before and after a rejected rescan.
+- `tests/e2e/test_e2e_06_graphiti_fork.py`: verify and probe a no-publish release image artifact from the same clean commit; retain explicit PENDING evidence when no bundle is supplied.
+- `tests/e2e/README.md`: document both platform and container evidence paths.
+- `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`: reconcile merged correctness fixes and exact-commit evidence without declaring RC release approval.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-28 - Let isolated scanners read the release image archive
 
 - `deploy/build_release_image.py`: make the saved public-source image archive readable to non-root scanners and give Syft enough temporary space to unpack its layers during no-publish validation.
@@ -122,19 +132,3 @@
 - Fork baseline is now 0.30.2. Default-on readiness (#169 and siblings) still requires
   outstanding source-grounding fixes and current graph/model quality evidence; this
   integration does not itself qualify a feature for default enablement.
-
-## 2026-09-26 - remaining MVP audit fixes for recall and decay (#154, #144)
-
-- `recall_pipeline.py`: acquire applicable independent sources before deciding recall is empty;
-  assemble standalone edge candidates before fallback, retain pending results and search-failure attribution,
-  and avoid metadata/adjacency round trips for an empty node pool.
-- `consolidation_queries.py`, `memory_graph_adapter.py`, `lifecycle_decay.py`: rotate bounded decay
-  batches by persistent least-recent selection, mark selected rows before processing, and log selection
-  separately from successful work. Preserve access/age/retention/policy gates and deletion disarm.
-- `test_recall_service.py`: empty/filtered/failed/pending semantic pools, file visibility/session guards,
-  enabled observation-only and standalone edge lanes, plus actual scoped file-to-recall Neo4j acquisition.
-- `test_lifecycle_service.py`: actual 501-record skipped-batch/restart regression, marker order for both
-  phases, unchanged access/freshness, direct/source retention, and marker-failure refusal.
-- `.agent/memory-policy.md`, `.agent/data_models.md`: define independent acquisition and the scheduling-only
-  selection marker, finite-set fairness and restart/rollout limits. No production writes or migration.
-- `CHANGELOG-archive.md`: move the oldest entry to keep ten.
