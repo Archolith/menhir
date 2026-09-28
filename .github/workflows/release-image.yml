@@ -285,6 +285,7 @@ jobs:
           SYFT_IMAGE: ${{ inputs.syft_image }}
           VERSION: ${{ inputs.version }}
         run: |
+          set +e
           python deploy/build_release_image.py \
             --mode build \
             --version "$VERSION" \
@@ -296,7 +297,16 @@ jobs:
             --expected-commit "$SOURCE_COMMIT" \
             --output release-image-metadata.json \
             --identity release-image-identity.json \
-            --image-archive release-image.tar
+            --image-archive release-image.tar 2>&1 | tee "$RUNNER_TEMP/release-image-build.log"
+          build_status=${PIPESTATUS[0]}
+          set -e
+          if (( build_status != 0 )); then
+            diagnostic=$(grep -F 'release image operation failed:' "$RUNNER_TEMP/release-image-build.log" | tail -n 1 || true)
+            diagnostic=${diagnostic:-$(tail -n 1 "$RUNNER_TEMP/release-image-build.log")}
+            diagnostic=${diagnostic//'%'/'%25'}
+            printf '::error title=Release image validation::%s\n' "$diagnostic"
+            exit "$build_status"
+          fi
 
       - name: Bind sealed identity to validation outputs
         id: identity

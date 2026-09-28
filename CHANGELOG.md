@@ -1,6 +1,7 @@
 ## 2026-09-28 - Let isolated scanners read the release image archive
 
 - `deploy/build_release_image.py`: make the saved public-source image archive readable to non-root Syft and Grype containers before no-publish validation.
+- `.github/workflows/release-image.yml`: surface a failed builder's final diagnostic as a job annotation so a no-publish failure remains actionable when logs are unavailable.
 - `tests/test_build_release_image.py`: reproduce Docker's restrictive archive mode and verify the scanner-readable mode on POSIX.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
 
