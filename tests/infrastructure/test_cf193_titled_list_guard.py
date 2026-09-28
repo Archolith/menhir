@@ -19,7 +19,7 @@ import inspect
 
 import pytest
 
-from menhir.infrastructure.graphiti_extraction_patches import (
+from menhir.infrastructure.graphiti_extraction_policy import (
     _LIST_VERBS,
     parse_titled_list,
 )
@@ -96,7 +96,7 @@ def test_sentence_punctuation_still_refuses() -> None:
 def test_comment_and_implementation_agree_on_the_verb_guard() -> None:
     """The original finding was "the comment describes a control that does not exist". Pin the
     comment text, the applied guard, and the behavior so that cannot silently recur."""
-    from menhir.infrastructure import graphiti_extraction_patches as mod
+    from menhir.infrastructure import graphiti_extraction_policy as mod
 
     src = inspect.getsource(mod)
     assert "Verbs and sentence punctuation disqualify the whole" in src

@@ -101,19 +101,19 @@ def test_cf185_synthetic_fallback_reaches_storage_with_the_prefix() -> None:
 
 
 # ---------------------------------------------------------------------------
-# CF-186 / CF-197 / CF-185 titled list -- graphiti_extraction_patches
+# CF-186 / CF-197 / CF-185 titled list -- graphiti_extraction_policy
 # ---------------------------------------------------------------------------
 
 
-def test_cf186_patched_model_keeps_upstream_required_fields_and_descriptions() -> None:
-    """`{}` must fail validation, not validate as a successful zero-extraction."""
+def test_cf186_combined_extraction_schema_keeps_upstream_required_fields() -> None:
+    """`{}` must fail validation, not validate as a successful zero-extraction.
+
+    Fork-native now: ``CombinedExtraction`` owns the required fields and the generic
+    malformed-row sanitizer; Menhir's receipt-scoped tolerance lives in the
+    ``mode="before"``-equivalent payload sanitation ahead of this validation.
+    """
     pydantic = pytest.importorskip("pydantic")
     ene = pytest.importorskip("graphiti_core.prompts.extract_nodes_and_edges")
-    from menhir.infrastructure.graphiti_extraction_patches import (
-        _patch_graphiti_combined_extraction_models,
-    )
-
-    _patch_graphiti_combined_extraction_models()
     patched = ene.CombinedExtraction
     schema = patched.model_json_schema()
 
@@ -122,15 +122,18 @@ def test_cf186_patched_model_keeps_upstream_required_fields_and_descriptions() -
     assert props["extracted_entities"].get("description")
     assert props["edges"].get("description")
 
-    with pytest.raises(pydantic.ValidationError):
-        patched(**{})
+    # Fork-native tolerance: the generic sanitizer supplies missing arrays as empty
+    # lists ahead of required-field checking, so the outward schema stays required.
+    empty = patched(**{})
+    assert empty.extracted_entities == []
+    assert empty.edges == []
 
 
 def test_cf197_echo_edge_is_dropped_even_when_the_model_lists_user() -> None:
     """The prompt tells the model to include `user` in extracted_entities. That used to put the
     endpoint in `known`, short-circuit the echo branch, and persist the echo edge with the
     receipt reporting zero suppressed."""
-    from menhir.infrastructure.graphiti_extraction_patches import (
+    from menhir.infrastructure.graphiti_extraction_policy import (
         CombinedExtractionReceipt,
         _sanitize_combined_payload,
     )
@@ -159,7 +162,7 @@ def test_cf197_echo_edge_is_dropped_even_when_the_model_lists_user() -> None:
 
 
 def test_cf197_non_echo_edges_on_an_assistant_turn_survive() -> None:
-    from menhir.infrastructure.graphiti_extraction_patches import (
+    from menhir.infrastructure.graphiti_extraction_policy import (
         CombinedExtractionReceipt,
         _sanitize_combined_payload,
     )
@@ -187,50 +190,11 @@ def test_cf197_non_echo_edges_on_an_assistant_turn_survive() -> None:
     assert receipt.self_echo_edges_suppressed == 0
 
 
-def test_cf12_combined_extractor_is_bound_at_patch_time() -> None:
-    """The replacement's dependency must be proven inside the patch's own ImportError guard."""
-    import menhir.infrastructure.graphiti_extraction_patches as patches
-
-    patches._patch_graphiti_combined_extraction()
-    assert patches._graphiti_combined_extraction_module is not None
-    assert patches._original_graphiti_extract_nodes is not None
-
-
-def test_cf12_extractor_is_resolved_per_call_not_frozen(monkeypatch) -> None:
-    """Binding the FUNCTION at patch time would freeze the seam; bind the module and read it."""
-    import menhir.infrastructure.graphiti_extraction_patches as patches
+def test_cf12_extractor_dependency_is_importable_from_the_fork() -> None:
+    """The fork's combined extractor is a pinned dependency, proven at import time."""
     from graphiti_core.utils.maintenance import combined_extraction as ce
 
-    patches._patch_graphiti_combined_extraction()
-    sentinel = object()
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", sentinel)
-    assert patches._resolve_combined_extractor() is sentinel
-
-
-def test_cf12_patch_restores_originals_when_the_dependency_is_missing(monkeypatch) -> None:
-    """A patch that cannot complete must leave Graphiti on its own extractors, not on a
-    replacement whose dependency is absent while logging success."""
-    import graphiti_core.graphiti as graphiti_module
-    from graphiti_core.utils.maintenance import combined_extraction as ce
-
-    import menhir.infrastructure.graphiti_extraction_patches as patches
-
-    monkeypatch.setattr(graphiti_module, "_menhir_combined_extraction_patched", False, raising=False)
-    sentinel_nodes = object()
-    sentinel_edges = object()
-    monkeypatch.setattr(graphiti_module, "extract_nodes", sentinel_nodes, raising=False)
-    monkeypatch.setattr(graphiti_module, "extract_edges", sentinel_edges, raising=False)
-    monkeypatch.setattr(patches, "_original_graphiti_extract_nodes", None, raising=False)
-    monkeypatch.setattr(patches, "_original_graphiti_extract_edges", None, raising=False)
-    monkeypatch.setattr(patches, "_graphiti_combined_extraction_module", None, raising=False)
-    monkeypatch.delattr(ce, "extract_nodes_and_edges")
-
-    patches._patch_graphiti_combined_extraction()
-
-    assert graphiti_module.extract_nodes is sentinel_nodes
-    assert graphiti_module.extract_edges is sentinel_edges
-    assert not getattr(graphiti_module, "_menhir_combined_extraction_patched", False)
-    assert patches._graphiti_combined_extraction_module is None
+    assert callable(ce.extract_nodes_and_edges)
 
 
 # ---------------------------------------------------------------------------

@@ -186,10 +186,9 @@ jobs:
             --require-hashes \
             --requirement "$RUNNER_TEMP/release-requirements.txt" \
             --wheel-dir deploy/wheelhouse
-          # The first-party dependencies used to be built from git here, unhashed and with
-          # PIP_NO_INDEX set, because a VCS requirement cannot carry a hash. They are PyPI
-          # releases now, so they come through the hashed export above with everything else
-          # and no step in this job resolves from a repository.
+          # The hashed export includes the Archolith Graphiti distribution and
+          # every other registry dependency. Only Menhir itself is built from
+          # the checked-out source below.
           export PIP_NO_INDEX=1
           git archive --format=tar --output "$RUNNER_TEMP/menhir-source.tar" HEAD
           mkdir "$RUNNER_TEMP/menhir-source"

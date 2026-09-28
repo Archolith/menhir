@@ -1,15 +1,14 @@
-"""Tests for truncation-aware retry escalation in the Graphiti LLM patch."""
+"""Tests for truncation-aware retry escalation in the Menhir LLM adapter."""
 
 from __future__ import annotations
 
-import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from menhir.infrastructure.graphiti_llm_patches import GraphitiRequestTooLargeError
-from menhir.infrastructure.graphiti_patches import (
+from graphiti_core.errors import GraphitiRequestTooLargeError
+from menhir.infrastructure.graphiti_llm_adapter import (
     _looks_like_truncation,
     _truncation_offset,
 )
@@ -101,21 +100,15 @@ class TestRetryEscalation:
 
     @pytest.fixture
     def patched_client(self, monkeypatch: pytest.MonkeyPatch):
-        """Build a minimal OpenAIGenericClient with patched _generate_response."""
-        import menhir.infrastructure.graphiti_patches as patches
-        from graphiti_core.llm_client.openai_generic_client import (
-            OpenAIGenericClient,
-        )
+        """Build a minimal MenhirOpenAIGenericClient with a mocked _generate_response."""
+        from menhir.infrastructure.graphiti_llm_adapter import MenhirOpenAIGenericClient
 
-        # Ensure patch is applied (idempotent)
-        patches._patch_graphiti_openai_generic_client(OpenAIGenericClient)
-
-        client = MagicMock(spec=OpenAIGenericClient)
+        client = MagicMock(spec=MenhirOpenAIGenericClient)
         client.max_tokens = 4096
         client.model = "gpt-4o-mini"
         client._clean_input = lambda self_or_text, text=None: text if text is not None else self_or_text
-        # Bind the patched methods
-        client.generate_response = OpenAIGenericClient.generate_response.__get__(client)
+        # Bind the adapter's retry loop
+        client.generate_response = MenhirOpenAIGenericClient.generate_response.__get__(client)
         client._generate_response = AsyncMock()
         return client
 
@@ -173,11 +166,11 @@ class TestRetryEscalation:
 
     @pytest.mark.asyncio
     async def test_context_length_error_is_not_retried(self, patched_client) -> None:
-        """An unchanged oversized payload cannot succeed on a later attempt."""
+        """A context-length rejection (fork-normalized) can never succeed on a later attempt."""
         from graphiti_core.prompts.models import Message
 
-        patched_client._generate_response.side_effect = RuntimeError(
-            "context_length_exceeded: maximum context length is 128000 tokens"
+        patched_client._generate_response.side_effect = GraphitiRequestTooLargeError(
+            "Provider rejected the assembled LLM request because it exceeds the model window."
         )
         messages = [Message(role="system", content="test"), Message(role="user", content="test")]
 

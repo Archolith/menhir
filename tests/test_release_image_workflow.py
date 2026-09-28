@@ -133,6 +133,16 @@ def test_validation_builds_a_frozen_wheelhouse_from_the_clean_checkout() -> None
     assert '["diff", "--cached", "--quiet"]' in BUILDER_TEXT
 
 
+def test_graphiti_fork_uses_the_hashed_registry_wheelhouse() -> None:
+    validate = _block("validate", 2)
+    assert "--no-emit-package graphiti-core" not in validate
+    assert "--no-emit-package archolith-graphiti-core" not in validate
+    assert "git+https://github.com/Archolith/graphiti" not in validate
+    assert "GRAPHITI_REQUIREMENT" not in validate
+    assert '"$RUNNER_TEMP/release-requirements.txt"' in validate
+    assert "--require-hashes" in validate
+
+
 def test_scanners_are_official_digest_pins_acquired_before_the_build() -> None:
     validate = _block("validate", 2)
     scanner_at = validate.index("Acquire digest-pinned scanners")

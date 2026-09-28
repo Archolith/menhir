@@ -46,7 +46,7 @@ from graphiti_core.prompts import dedupe_nodes
 from graphiti_core.prompts.dedupe_nodes import NodeResolutions
 
 # Import the Menhir anti-conflation patch
-from menhir.infrastructure.graphiti_patches import _DEDUP_ANTI_CONFLATION_EXAMPLE
+from menhir.infrastructure.graphiti_resolution_policy import _DEDUP_ANTI_CONFLATION_EXAMPLE
 
 
 # ── Trial 10 exact context ──

@@ -1,4 +1,9 @@
-"""Regression coverage for Graphiti node-dedupe candidate fan-out."""
+"""Regression coverage for Graphiti node-dedupe candidate fan-out.
+
+Adaptive request bisection is fork-native (``GraphitiRequestTooLargeError`` +
+``_resolve_unresolved_indices``); these tests exercise it through the fork's
+public ``resolve_extracted_nodes`` exactly as Menhir now consumes it.
+"""
 
 from __future__ import annotations
 
@@ -6,10 +11,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from menhir.infrastructure import graphiti_llm_patches
-from menhir.infrastructure.graphiti_llm_patches import GraphitiRequestTooLargeError
-from menhir.infrastructure.graphiti_llm_patches import _enforce_request_size
-from menhir.infrastructure.graphiti_model_patches import _patch_graphiti_adaptive_dedupe
+from graphiti_core.errors import GraphitiRequestTooLargeError
+from graphiti_core.llm_client.request_guard import CHARS_PER_TOKEN
 
 
 def _node(uuid: str, *, metadata: str = "") -> SimpleNamespace:
@@ -29,8 +32,6 @@ async def _run_synthetic_resolution(
     max_entities_per_request: int,
 ) -> tuple[list[SimpleNamespace], dict[str, str], list[tuple[int, int]]]:
     import graphiti_core.utils.maintenance.node_operations as node_operations
-
-    _patch_graphiti_adaptive_dedupe()
 
     extracted_nodes = [_node(f"extracted-{idx}") for idx in range(entity_count)]
     candidates_by_extracted = [
@@ -57,6 +58,7 @@ async def _run_synthetic_resolution(
         episode,
         previous_episodes,
         entity_types,
+        **kwargs,
     ):
         del llm_client, episode, previous_episodes, entity_types
         batch_size = len(state.unresolved_indices)
@@ -113,13 +115,16 @@ async def test_98_entities_bisect_oversized_candidate_union(monkeypatch) -> None
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_real_graphiti_prompt_builder_splits_until_local_guard_accepts(monkeypatch) -> None:
-    """Exercise real prompt assembly, not an entity-count stand-in for payload size."""
+async def test_real_graphiti_prompt_builder_splits_until_request_fits(monkeypatch) -> None:
+    """Exercise real prompt assembly, not an entity-count stand-in for payload size.
+
+    The oversized request is rejected by the fork-native ceiling mechanism (the same
+    ``GraphitiRequestTooLargeError`` the fork's request guard raises) and the batch
+    is bisected until every sub-request fits.
+    """
     import graphiti_core.utils.maintenance.node_operations as node_operations
 
-    _patch_graphiti_adaptive_dedupe()
-    monkeypatch.setattr(graphiti_llm_patches, "_MAX_REQUEST_ESTIMATED_TOKENS", 60_000)
-
+    ceiling = 60_000
     extracted_nodes = [_node(f"probe-{idx}") for idx in range(98)]
     candidates_by_extracted = [
         [
@@ -146,12 +151,11 @@ async def test_real_graphiti_prompt_builder_splits_until_local_guard_accepts(mon
             del response_model, kwargs
             request = [{"role": message.role, "content": message.content} for message in messages]
             total_chars = sum(len(message["content"]) for message in request)
-            estimated_tokens = (
-                total_chars + graphiti_llm_patches._CHARS_PER_TOKEN - 1
-            ) // graphiti_llm_patches._CHARS_PER_TOKEN
+            estimated_tokens = (total_chars + CHARS_PER_TOKEN - 1) // CHARS_PER_TOKEN
             attempted_estimates.append(estimated_tokens)
-            accepted = _enforce_request_size(request, "synthetic", None)
-            accepted_estimates.append(accepted)
+            if estimated_tokens > ceiling:
+                raise GraphitiRequestTooLargeError("synthetic context limit")
+            accepted_estimates.append(estimated_tokens)
 
             extracted_count = messages[-1].content.count('"entity_type"')
             return {
@@ -172,7 +176,7 @@ async def test_real_graphiti_prompt_builder_splits_until_local_guard_accepts(mon
     assert [node.uuid for node in resolved] == [f"probe-{idx}" for idx in range(98)]
     assert uuid_map == {f"probe-{idx}": f"probe-{idx}" for idx in range(98)}
     assert duplicate_pairs == []
-    assert attempted_estimates[0] > 60_000
+    assert attempted_estimates[0] > ceiling
     assert len(attempted_estimates) > len(accepted_estimates)
     assert accepted_estimates
-    assert all(estimate <= 60_000 for estimate in accepted_estimates)
+    assert all(estimate <= ceiling for estimate in accepted_estimates)

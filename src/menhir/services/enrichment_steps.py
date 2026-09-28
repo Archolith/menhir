@@ -45,7 +45,7 @@ from menhir.infrastructure.telemetry import (
     record_memory_revision,
 )
 from menhir.infrastructure.graphiti_helpers import SYNTHETIC_FACT_PREFIX, strip_synthetic_prefix
-from menhir.infrastructure.graphiti_patches import (
+from menhir.infrastructure.graphiti_extraction_policy import (
     begin_extraction_receipt,
     is_policy_empty_extraction,
     clear_extraction_receipt,

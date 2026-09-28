@@ -20,7 +20,6 @@ try:
     from graphiti_core.driver.neo4j_driver import Neo4jDriver
     from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
     from graphiti_core.llm_client.config import LLMConfig
-    from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
 except ModuleNotFoundError as exc:  # pragma: no cover - import guard
     Graphiti = Any  # type: ignore[assignment]
     OpenAIRerankerClient = None  # type: ignore[assignment]
@@ -28,41 +27,33 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import guard
     OpenAIEmbedder = None  # type: ignore[assignment]
     OpenAIEmbedderConfig = None  # type: ignore[assignment]
     LLMConfig = None  # type: ignore[assignment]
-    OpenAIGenericClient = None  # type: ignore[assignment]
     _GRAPHITI_IMPORT_ERROR = exc
 else:
     _GRAPHITI_IMPORT_ERROR = None
 
-from menhir.config import MemorySettings
-from menhir.infrastructure.circuit_breaker import CircuitBreaker
-from menhir.infrastructure.embedding_cache import get_embedding_cache
-from menhir.infrastructure.embedding_dimensions import expected_graphiti_embedding_dimension
-from menhir.infrastructure.observability import build_async_openai_client
-from menhir.infrastructure.providers import ProviderConfig, reset_client_cache
-from menhir.infrastructure.telemetry import record_lifecycle_event
-
-from menhir.infrastructure.graphiti_patches import (  # noqa: E402
-    _patch_graphiti_adaptive_dedupe,
-    _patch_graphiti_dedup_branch_telemetry,
-    _patch_graphiti_combined_extraction,
-    _patch_graphiti_combined_extraction_models,
-    _patch_graphiti_dedupe_resolutions,
-    _patch_graphiti_dedup_identity_gate,
-    _patch_graphiti_dedup_prompt,
-    _patch_graphiti_edge_none_fields,
-    _patch_graphiti_entity_record_group_id,
-    _patch_graphiti_entity_extraction,
-    _patch_graphiti_node_summary_none,
-    _patch_graphiti_none_replace,
-    _patch_graphiti_openai_generic_client as _patch_graphiti_openai_generic_client_impl,
-    _patch_graphiti_prompt_json,
-    _patch_graphiti_structural_candidate_isolation,
-    _patch_graphiti_summarize,
-    _patch_graphiti_untyped_attribute_preservation,
-    _safe_to_prompt_json,  # re-exported for test compatibility
+from menhir.config import MemorySettings  # noqa: E402
+from menhir.infrastructure.circuit_breaker import CircuitBreaker  # noqa: E402
+from menhir.infrastructure.embedding_cache import get_embedding_cache  # noqa: E402
+from menhir.infrastructure.embedding_dimensions import expected_graphiti_embedding_dimension  # noqa: E402
+from menhir.infrastructure.graphiti_extraction_policy import MenhirExtractionHook  # noqa: E402
+from menhir.infrastructure.graphiti_llm_adapter import (  # noqa: E402
+    MenhirOpenAIGenericClient,
+    _ProviderExtrasAsyncClient,
+    build_menhir_request_guard,
 )
+from menhir.infrastructure.graphiti_resolution_policy import (  # noqa: E402
+    MenhirCandidateFilterHook,
+    MenhirIdentityGateHook,
+    MenhirNodePreResolutionHook,
+    flush_resolution_telemetry,
+    install_entity_record_group_id_resolver,
+    menhir_resolution_hooks_installed,
+)
+from menhir.infrastructure.observability import build_async_openai_client  # noqa: E402
+from menhir.infrastructure.providers import ProviderConfig, reset_client_cache  # noqa: E402
+from menhir.infrastructure.telemetry import record_lifecycle_event  # noqa: E402
 
-__all__ = ["GraphitiClient", "_safe_to_prompt_json"]
+__all__ = ["GraphitiClient"]
 
 
 @contextlib.contextmanager
@@ -109,13 +100,6 @@ def _schedule_client_close(client: Any) -> asyncio.Task | None:
     except RuntimeError:
         return None
     return loop.create_task(aclose())
-
-
-def _patch_graphiti_openai_generic_client(max_request_estimated_tokens: int | None = None) -> None:
-    """Patch Graphiti's OpenAI-compatible client to handle loose JSON output."""
-    _patch_graphiti_openai_generic_client_impl(
-        OpenAIGenericClient, max_request_estimated_tokens=max_request_estimated_tokens
-    )
 
 
 @dataclass
@@ -205,25 +189,13 @@ class GraphitiClient:
                 "graphiti_core is required to construct a GraphitiClient from settings."
             ) from _GRAPHITI_IMPORT_ERROR
 
-        _patch_graphiti_prompt_json()
-        _patch_graphiti_combined_extraction()
-        _patch_graphiti_combined_extraction_models()
-        _patch_graphiti_entity_extraction()
-        _patch_graphiti_dedupe_resolutions()
-        _patch_graphiti_dedup_prompt()
-        _patch_graphiti_dedup_identity_gate()
-        _patch_graphiti_structural_candidate_isolation()
-        _patch_graphiti_untyped_attribute_preservation()
-        _patch_graphiti_dedup_branch_telemetry()
-        _patch_graphiti_adaptive_dedupe()
-        _patch_graphiti_openai_generic_client(
-            max_request_estimated_tokens=int(settings.graphiti_request_max_estimated_tokens)
-        )
-        _patch_graphiti_summarize()
-        _patch_graphiti_none_replace()
-        _patch_graphiti_entity_record_group_id()
-        _patch_graphiti_node_summary_none()
-        _patch_graphiti_edge_none_fields()
+        # Menhir policy rides entirely on the fork's explicit extension points:
+        # entity-record namespace inference via the fork's startup resolver seam,
+        # extraction/receipt/binding policy via SingleEpisodeExtractionHook,
+        # dedupe policy via the identity-gate / candidate-filter / node
+        # pre-resolution hooks, and request ceilings/telemetry via RequestGuard.
+        # No Graphiti symbol is rebound at runtime.
+        install_entity_record_group_id_resolver()
         llm_provider = ProviderConfig.for_graphiti_llm(settings)
         embed_provider = ProviderConfig.for_graphiti_embedder(settings)
         reranker_provider = ProviderConfig.for_graphiti_reranker(settings)
@@ -266,15 +238,31 @@ class GraphitiClient:
             # Graphiti's DEFAULT_TEMPERATURE is 1, which permits high sampling
             # variance — live-traced as the root cause of stochastic entity
             # conflation (e.g. "the suburbs" merged into "Chicago" at ~3% rate).
-            llm_client = OpenAIGenericClient(
+            #
+            # Providers without native json_schema support run in json_object
+            # mode; the fork injects the response model's schema into the prompt
+            # for those instead of relying on API-side enforcement.
+            raw_llm_client = async_client
+            # DeepSeek is configured through the OpenAI-compatible `local` provider,
+            # so provider kind alone cannot identify its JSON-mode limitation.
+            is_deepseek = (
+                "deepseek" in (llama_base_url or "").lower()
+                or "deepseek" in llm_provider.chat_model.lower()
+            )
+            structured_output_mode = "json_object" if is_deepseek else "json_schema"
+            llm_client = MenhirOpenAIGenericClient(
                 config=LLMConfig(
                     api_key=llm_provider.api_key,
                     base_url=llama_base_url,
                     model=llm_provider.chat_model,
                     temperature=0,
                 ),
-                client=async_client,
+                client=_ProviderExtrasAsyncClient(raw_llm_client, llama_base_url),
                 max_tokens=settings.llm_max_tokens,
+                structured_output_mode=structured_output_mode,
+                request_guard=build_menhir_request_guard(
+                    int(settings.graphiti_request_max_estimated_tokens)
+                ),
             )
         embed_base_url = embed_provider.base_url
         embed_dimension = expected_graphiti_embedding_dimension(settings)
@@ -332,6 +320,10 @@ class GraphitiClient:
                 llm_client=llm_client,
                 embedder=embedder,
                 cross_encoder=cross_encoder,
+                single_episode_extraction_hook=MenhirExtractionHook(),
+                identity_gate_hook=MenhirIdentityGateHook(),
+                candidate_filter_hook=MenhirCandidateFilterHook(),
+                node_pre_resolution_hook=MenhirNodePreResolutionHook(),
             ),
             llm_base_url=llama_base_url,
             embed_base_url=embed_base_url,
@@ -347,7 +339,15 @@ class GraphitiClient:
 
     async def _await_add_episode_request(self, *, awaitable: Any) -> Any:
         """Await the Graphiti request, cancelling the inner task if the outer timeout fires."""
-        pending = asyncio.create_task(awaitable)
+        async def request_with_telemetry() -> Any:
+            try:
+                return await awaitable
+            finally:
+                # The extraction/resolution hooks create the ContextVar collector in
+                # this task. A flush in the parent task cannot see that collector.
+                flush_resolution_telemetry()
+
+        pending = asyncio.create_task(request_with_telemetry())
         try:
             return await pending
         except BaseException:
@@ -416,24 +416,17 @@ class GraphitiClient:
         group_id: str = "",
     ) -> Any:
         """Delegate episode ingestion to Graphiti."""
-        from menhir.infrastructure.graphiti_extraction_patches import (
-            _extract_nodes_combined_for_add_episode,
-            get_extraction_receipt,
-        )
+        from menhir.infrastructure.graphiti_extraction_policy import get_extraction_receipt
 
         receipt = get_extraction_receipt()
         if receipt is not None and str(receipt.self_bind_mode) == "enforce":
-            import graphiti_core.graphiti as graphiti_module
-            import graphiti_core.utils.maintenance.node_operations as node_operations
-
-            # A failed compatibility patch must not reopen probabilistic self resolution.
+            # A partial construction must not reopen probabilistic self resolution.
             # Check before the native add_episode call can perform any persistence.
-            if (
-                graphiti_module.extract_nodes is not _extract_nodes_combined_for_add_episode
-                or not getattr(node_operations, "_menhir_adaptive_dedupe_patched", False)
-                or graphiti_module.resolve_extracted_nodes is not node_operations.resolve_extracted_nodes
-            ):
-                raise RuntimeError("canonical-self enforce requires combined extraction and resolver bypass")
+            if not menhir_resolution_hooks_installed(self.client):
+                raise RuntimeError(
+                    "canonical-self enforce requires the Menhir extraction and resolution "
+                    "policy hooks to be installed on the Graphiti instance"
+                )
         task = "memory: graphiti add_episode"
         child_task_id = f"{(episode_uuid or name).replace('-', '')[:8]}:graphiti:add-episode:{int(perf_counter() * 1000)}"
         request_started = perf_counter()

@@ -76,7 +76,11 @@ Concept id: `runtime.stack`
 
 - Python 3.12+
 - Neo4j 5 (remote systemd service via bolt)
-- `graphiti-core` >=0.28.1 (graph memory framework)
+- `archolith-graphiti-core==0.30.2.post1` (Archolith soft fork of `getzep/graphiti`,
+  baseline `v0.30.2`; it still imports as `graphiti_core`). Menhir policy uses its explicit
+  hooks without runtime monkeypatching. Published from fork tag `v0.30.2.post1` at
+  `dbb0e33fbf7fdfbbe66bd1de7e2942d2dc4198bd`; the locked PyPI wheel SHA-256 is
+  `a748f98e0b09d64ab1eb29bd3449f52b552250a31663e86c4d99dc51ddf991f0`.
 - llama.cpp (`llama-server`) via OpenAI-compatible API
 - provider scaffold for pluggable chat backends (`openai_compat`, `openai`; `anthropic` scaffolded only)
 - Langfuse (optional local tracing for OpenAI-compatible llama.cpp calls)
@@ -210,7 +214,9 @@ src/menhir/
 |   |- truth/         Truth package (SSOT for provenance/trust): ReviewState, TruthAttestation, TruthClaim,
 |                     WardenLabel, ANCHOR_KINDS, KIND_TO_SIGNAL, DIVERSITY_FAMILY, SOURCE_CONFIDENCE_* constants
 |- infrastructure/    Neo4jRepository, GraphitiClient, MemoryGraphAdapter, schema bootstrap
-|   |- graphiti_*_patches.py  Extraction, model/dedup, and LLM-response compatibility families
+|   |- graphiti_extraction_policy.py  Menhir extraction-receipt/payload/binding policy on the fork's extraction hook
+|   |- graphiti_resolution_policy.py  Menhir identity-gate / candidate-filter / pre-resolution adapters + resolver seam
+|   |- graphiti_llm_adapter.py        Menhir LLM retry/strict-schema/RequestGuard adapter subclass
 |   |- telemetry/store.py  SQLite connection and schema owner
 |   |- telemetry/*_store.py  Event, lifecycle, and recall/client persistence families
 |   |- view_repository.py  Composition facade over View models, writes, scalar authority, and queries
@@ -325,8 +331,8 @@ The system has a working ingestion pipeline:
 
 1. **Bootstrap** (`prepare_memory_runtime`)
    - Initialize Neo4j repository (lazy driver)
-   - Construct Graphiti client from settings (patches prompt JSON serialization and installs the
-     Graphiti 0.29.2 combined-extraction compatibility layer)
+   - Construct Graphiti client from settings (installs the Menhir policy hooks on the
+     Archolith graphiti fork's explicit extension points; no runtime symbol mutation)
    - Run Graphiti `build_indices_and_constraints()`
    - Run menhir phase-1 schema bootstrap (indexes + defaults for all policy fields)
 
@@ -578,7 +584,7 @@ ingestion boundary owns:
 | `services/ingest_intake.py` | admission gate decides whether a `user`/`manual` claim is grounded |
 | `services/enrichment_steps.py` | reconstructs the identity context from the claimed episode |
 | `infrastructure/self_binding.py` | rewrites the proven human across the extraction payload |
-| `infrastructure/graphiti_model_patches.py` | withholds a bound self and, in `enforce`, isolates canonical self from ordinary resolution |
+| `infrastructure/graphiti_resolution_policy.py` | withholds a bound self and, in `enforce`, isolates canonical self from ordinary resolution |
 
 Evidence survives the asynchronous queue in the episode's persisted `source`. That value is a
 gate receipt rather than a caller's assertion: `evaluate_user_tier_claim` requires Menhir-owned
@@ -640,9 +646,10 @@ provenance remains available for inspection. Summaries are model-derived context
 truth; `fact_source=original` means extractor-originated, not human-approved.
 
 Canonical identity stays out of exact/similarity/LLM/override candidate selection. Ordinary nodes
-cannot resolve onto canonical self in `enforce`. The production adapter checks the extraction and
-resolver bypass hooks before dispatch, refusing a missing patch rather than falling back to the
-probabilistic writer. The AST census pins the single declaration at receipt construction.
+cannot resolve onto canonical self in `enforce`. The production adapter checks that the Menhir
+policy hooks are installed on the Graphiti instance before dispatch, refusing a partially wired
+client rather than falling back to the probabilistic writer. The AST census pins the single
+declaration at receipt construction.
 `off` and `observe` retain legacy prompts, hydration and resolution, with no endpoint injection.
 
 This is a small follow-up to PR #45's pinned identity baseline, not the larger signed-assertion or
@@ -752,7 +759,8 @@ Primary storage is Neo4j.
   general rules govern how objects, subordinates, declarations and locators relate;
   they are not specific to todos or artifacts, and rediscovering them per feature is
   how duplicate vocabulary gets introduced.
-- Graphiti prompt JSON serialization is patched at runtime to handle Neo4j temporal values.
+- Graphiti prompt JSON serialization handles Neo4j temporal values natively in the fork
+  (`graphiti_core.prompts.prompt_helpers.to_prompt_json`).
 
 ### Work-artifact corpus reconciliation
 

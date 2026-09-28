@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from menhir.infrastructure.graphiti_patches import (
+from menhir.infrastructure.graphiti_resolution_policy import (
     _edge_facts_mention,
     _has_positive_identity_evidence,
 )

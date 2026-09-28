@@ -52,6 +52,25 @@ wheels = [
 ]
 
 [[package]]
+name = "archolith-graphiti-core"
+version = "0.30.2.post1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "neo4j" },
+    { name = "numpy" },
+    { name = "openai" },
+    { name = "posthog" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "tenacity" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ee/e5/4db0411b38e444595f062d9cba0bb98337319b0bc9f18029aec8c3f23cbc/archolith_graphiti_core-0.30.2.post1.tar.gz", hash = "sha256:16f1e0048715cf3372a300c77357bf6f2ded0bf725b6e7079e536d070c0e755f", size = 7134775, upload-time = "2026-09-27T23:26:46.141Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/46/10/19f6ebbaff977b7c3a03dc7b568a332335093f8315a41428f130408f48f9/archolith_graphiti_core-0.30.2.post1-py3-none-any.whl", hash = "sha256:a748f98e0b09d64ab1eb29bd3449f52b552250a31663e86c4d99dc51ddf991f0", size = 392888, upload-time = "2026-09-27T23:26:43.908Z" },
+]
+
+[[package]]
 name = "archolith-mcp-framework"
 version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -68,11 +87,11 @@ name = "archolith-menhir"
 version = "0.2.3"
 source = { editable = "." }
 dependencies = [
+    { name = "archolith-graphiti-core" },
     { name = "archolith-mcp-framework" },
     { name = "archolith-oauth" },
     { name = "fastapi" },
     { name = "fastmcp" },
-    { name = "graphiti-core" },
     { name = "httpx" },
     { name = "jinja2" },
     { name = "joserfc" },
@@ -95,11 +114,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "archolith-graphiti-core", specifier = "==0.30.2.post1" },
     { name = "archolith-mcp-framework", specifier = "==0.2.0" },
     { name = "archolith-oauth", specifier = "==0.3.1" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "fastmcp", specifier = ">=3.2.4,<4" },
-    { name = "graphiti-core", specifier = "==0.29.3" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "jinja2", specifier = ">=3.1,<4" },
     { name = "joserfc", specifier = ">=1.0,<2" },
@@ -583,24 +602,6 @@ server = [
     { name = "uvicorn" },
     { name = "watchfiles" },
     { name = "websockets" },
-]
-
-[[package]]
-name = "graphiti-core"
-version = "0.29.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "neo4j" },
-    { name = "numpy" },
-    { name = "openai" },
-    { name = "posthog" },
-    { name = "pydantic" },
-    { name = "python-dotenv" },
-    { name = "tenacity" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/af/5b/afc2c564f4bcc247720dad769096184e3c298429ea4302a6ae4635267efc/graphiti_core-0.29.3.tar.gz", hash = "sha256:c3650626c0eb61c1ba2765ce6f08900abe68ec7f984f2e098b4922ebf5e81298", size = 6978366, upload-time = "2026-07-27T20:58:03.161Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/61/e4/8273941a0e7a1a3ef4350ff810ed6ddd2d907ebdce95cbbcf2484b2c5de7/graphiti_core-0.29.3-py3-none-any.whl", hash = "sha256:0210510e8043b5b4fa57aa038934e849b2e61d31d298200b0074faf7ca793ed5", size = 361487, upload-time = "2026-07-27T20:58:00.971Z" },
 ]
 
 [[package]]

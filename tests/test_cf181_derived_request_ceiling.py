@@ -40,14 +40,21 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-import menhir.infrastructure.graphiti_llm_patches as patches
-from menhir.infrastructure.graphiti_llm_patches import (
-    GraphitiRequestTooLargeError,
-    _enforce_request_size,
+import menhir.infrastructure.graphiti_llm_adapter as patches
+from graphiti_core.errors import GraphitiRequestTooLargeError
+from graphiti_core.llm_client.request_guard import (
+    build_request_context,
+    enforce_request_ceiling,
+)
+from menhir.infrastructure.graphiti_llm_adapter import (
+    _DERIVED_CEILING_TTL_S,
     _is_loopback,
     _n_ctx_from_props,
+    _probe_endpoint_context_window,
     resolve_request_ceiling,
 )
+
+_DEFAULT_CONFIGURED_CEILING = 100_000
 
 pytestmark = pytest.mark.unit
 
@@ -92,7 +99,7 @@ def props_server():
 def test_the_ceiling_is_derived_from_the_models_actual_window(props_server) -> None:
     """THE FINDING. 32,768 window, 25% held back for the response -> 24,576, not the 100,000 that
     could never fire."""
-    ceiling = asyncio.run(resolve_request_ceiling(props_server["endpoint"]))
+    ceiling = asyncio.run(resolve_request_ceiling(props_server["endpoint"], _DEFAULT_CONFIGURED_CEILING))
 
     assert ceiling == 24576
 
@@ -101,7 +108,7 @@ def test_room_is_reserved_for_the_response(props_server) -> None:
     """The window holds request PLUS completion. A ceiling equal to the whole window guarantees a
     rejection on any request that comes close to it -- the derivation would then cause the failure
     it exists to prevent."""
-    ceiling = asyncio.run(resolve_request_ceiling(props_server["endpoint"]))
+    ceiling = asyncio.run(resolve_request_ceiling(props_server["endpoint"], _DEFAULT_CONFIGURED_CEILING))
 
     assert ceiling < 32768
 
@@ -131,21 +138,18 @@ def test_every_spelling_llama_cpp_has_used_is_read(payload, expected) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_derivation_can_lower_the_ceiling_but_never_raise_it(props_server, monkeypatch) -> None:
+def test_derivation_can_lower_the_ceiling_but_never_raise_it(props_server) -> None:
     """SAFETY RULE 1. The configured value is also a cost bound: a huge-context model must not be
     allowed to widen it into an expensive request against a metered provider."""
     props_server["payload"] = {"n_ctx": 1_000_000}
-    monkeypatch.setattr(patches, "_MAX_REQUEST_ESTIMATED_TOKENS", 10_000)
 
-    assert asyncio.run(resolve_request_ceiling(props_server["endpoint"])) == 10_000
+    assert asyncio.run(resolve_request_ceiling(props_server["endpoint"], 10_000)) == 10_000
 
 
-def test_a_disabled_check_stays_disabled(props_server, monkeypatch) -> None:
+def test_a_disabled_check_stays_disabled(props_server) -> None:
     """SAFETY RULE 2. `0` is a deliberate opt-out. Re-enabling it because a probe happened to
     succeed would be the mechanism overriding the operator."""
-    monkeypatch.setattr(patches, "_MAX_REQUEST_ESTIMATED_TOKENS", 0)
-
-    assert asyncio.run(resolve_request_ceiling(props_server["endpoint"])) == 0
+    assert asyncio.run(resolve_request_ceiling(props_server["endpoint"], 0)) == 0
     assert props_server["hits"] == 0, "a disabled check should not even probe"
 
 
@@ -155,13 +159,13 @@ def test_a_failed_probe_falls_back_to_the_configured_ceiling(props_server) -> No
     bound into no bound, which is strictly worse than the finding."""
     props_server["status"] = 500
 
-    assert asyncio.run(resolve_request_ceiling(props_server["endpoint"])) == 100_000
+    assert asyncio.run(resolve_request_ceiling(props_server["endpoint"], _DEFAULT_CONFIGURED_CEILING)) == 100_000
 
 
 def test_an_unreachable_endpoint_falls_back_rather_than_hanging() -> None:
     """The live case: the scheduler is up but the llama server is not, so `/llama/props` proxies to
     something dead. Verified against the real scheduler during development."""
-    ceiling = asyncio.run(resolve_request_ceiling("http://127.0.0.1:8082/v1/t/probe-target"))
+    ceiling = asyncio.run(resolve_request_ceiling("http://127.0.0.1:8082/v1/t/probe-target", _DEFAULT_CONFIGURED_CEILING))
 
     assert ceiling == 100_000
 
@@ -199,7 +203,7 @@ def test_a_remote_provider_is_never_probed(monkeypatch) -> None:
 
     monkeypatch.setattr(patches, "_probe_endpoint_context_window", _record)
 
-    assert asyncio.run(resolve_request_ceiling("https://api.deepseek.com/v1")) == 100_000
+    assert asyncio.run(resolve_request_ceiling("https://api.deepseek.com/v1", _DEFAULT_CONFIGURED_CEILING)) == 100_000
     assert probed == [], f"a third-party endpoint was probed: {probed}"
 
 
@@ -212,7 +216,7 @@ def test_the_window_is_not_probed_on_every_request(props_server) -> None:
     """This resolves once per assembled request. Probing each time would add a round trip to
     remove one."""
     for _ in range(5):
-        asyncio.run(resolve_request_ceiling(props_server["endpoint"]))
+        asyncio.run(resolve_request_ceiling(props_server["endpoint"], _DEFAULT_CONFIGURED_CEILING))
 
     assert props_server["hits"] == 1
 
@@ -227,10 +231,10 @@ def test_the_cache_expires_so_a_model_swap_is_picked_up(props_server, monkeypatc
     # passed. Caught by mutation: only expiry may cause the second probe here.
     monkeypatch.setattr(patches, "_DERIVED_CEILING_TTL_S", -1.0)
 
-    assert asyncio.run(resolve_request_ceiling(props_server["endpoint"])) == 24576
+    assert asyncio.run(resolve_request_ceiling(props_server["endpoint"], _DEFAULT_CONFIGURED_CEILING)) == 24576
     props_server["payload"] = {"n_ctx": 8192}
 
-    assert asyncio.run(resolve_request_ceiling(props_server["endpoint"])) == 6144
+    assert asyncio.run(resolve_request_ceiling(props_server["endpoint"], _DEFAULT_CONFIGURED_CEILING)) == 6144
     assert props_server["hits"] == 2, "the expired entry was not re-probed"
 
 
@@ -240,7 +244,7 @@ def test_a_failed_probe_is_cached_too(props_server) -> None:
     props_server["status"] = 500
 
     for _ in range(4):
-        asyncio.run(resolve_request_ceiling(props_server["endpoint"]))
+        asyncio.run(resolve_request_ceiling(props_server["endpoint"], _DEFAULT_CONFIGURED_CEILING))
 
     assert props_server["hits"] == 1
 
@@ -248,11 +252,11 @@ def test_a_failed_probe_is_cached_too(props_server) -> None:
 def test_ceilings_are_keyed_per_endpoint(props_server) -> None:
     """The wake sequence rotates base URLs per task, so one process legitimately talks to several
     endpoints. A single cached value would attribute one model's window to another."""
-    asyncio.run(resolve_request_ceiling(props_server["endpoint"]))
+    asyncio.run(resolve_request_ceiling(props_server["endpoint"], _DEFAULT_CONFIGURED_CEILING))
     props_server["payload"] = {"n_ctx": 8192}
     other = props_server["endpoint"].replace("graphiti-search", "graphiti-add-episode")
 
-    assert asyncio.run(resolve_request_ceiling(other)) == 6144
+    assert asyncio.run(resolve_request_ceiling(other, _DEFAULT_CONFIGURED_CEILING)) == 6144
     assert props_server["hits"] == 2
 
 
@@ -261,32 +265,28 @@ def test_ceilings_are_keyed_per_endpoint(props_server) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_the_derived_ceiling_is_what_gets_enforced() -> None:
-    """TRAP T17. A resolver that returns the right number proves nothing about the guard using it,
-    and the guard read a module global before this change."""
-    messages = [{"role": "user", "content": "x" * 30_000}]  # ~10,000 estimated tokens
+def _context_for(messages: list[dict[str, str]]):
+    return build_request_context(model="m", endpoint=None, messages=messages)
 
-    assert _enforce_request_size(messages, "m", None, 20_000) == 10_000
+
+def test_the_derived_ceiling_is_what_gets_enforced() -> None:
+    """TRAP T17. A resolver that returns the right number proves nothing about the guard using it.
+    The fork's guard enforces the resolver's per-request value against the measured context."""
+    messages = [{"role": "user", "content": "x" * 30_000}]  # ~10,000 estimated tokens
+    context = _context_for(messages)
+
+    enforce_request_ceiling(context, 20_000)  # under the ceiling: no rejection
 
     with pytest.raises(GraphitiRequestTooLargeError) as excinfo:
-        _enforce_request_size(messages, "m", None, 5_000)
+        enforce_request_ceiling(context, 5_000)
     assert "5,000 ceiling" in str(excinfo.value), "the rejection must quote the ceiling it applied"
 
 
-def test_omitting_the_ceiling_still_uses_the_configured_one(monkeypatch) -> None:
-    """POSITIVE CONTROL. The parameter is optional so existing callers keep working; a default that
-    silently meant "no ceiling" would disable the guard for every one of them."""
-    monkeypatch.setattr(patches, "_MAX_REQUEST_ESTIMATED_TOKENS", 1_000)
-
-    with pytest.raises(GraphitiRequestTooLargeError):
-        _enforce_request_size([{"role": "user", "content": "x" * 30_000}], "m", None)
-
-
-def test_the_generate_path_resolves_before_enforcing() -> None:
-    """The call site, asserted at source: the resolver has to be awaited and its result passed, or
-    the derivation is dead code."""
+def test_the_adapter_wires_the_resolver_into_the_forks_guard() -> None:
+    """The derivation is dead code unless the adapter awaits it and the guard enforces it."""
     import inspect
 
     source = inspect.getsource(patches)
-    assert "_ceiling = await resolve_request_ceiling(endpoint)" in source
-    assert "openai_messages, model, endpoint, _ceiling" in source
+    assert "async def resolve_request_ceiling(self, context" in source
+    assert "await resolve_request_ceiling(context.endpoint, self._configured)" in source
+    assert "ceiling_resolver=MenhirRequestCeilingResolver(configured_ceiling)" in source

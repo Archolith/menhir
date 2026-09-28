@@ -1,3 +1,37 @@
+## 2026-09-27 - Prepare public Graphiti fork package for Menhir MVP
+
+- Require `archolith-graphiti-core==0.30.2.post1` so normal installs can use a
+  public wheel rather than a VCS checkout while retaining the native fork hooks.
+- Lock the published PyPI wheel and source hashes from fork tag `v0.30.2.post1`;
+  verify a fresh Menhir wheel install resolves the public fork without upstream Graphiti.
+- Simplify the release image to consume the locked, hashed fork wheel directly.
+- Make the fork package and its cold-install compatibility an explicit MVP gate;
+  defer Beacon generation and consumption from this release.
+- `graphiti_client.py`, `graphiti_llm_adapter.py`: retain DeepSeek's JSON-object
+  fallback with its schema prompt, and accept the fork's typed-attribute extraction
+  flag while preserving its preamble across retries.
+- `tests/test_graphiti_client.py`: cover provider requests and the fork's typed
+  node-attribute path through Menhir's adapter.
+
+## 2026-09-26 - Reconcile native Graphiti fork with current Menhir
+
+- `pyproject.toml`, `uv.lock`: pin the public Archolith Graphiti 0.30.2 maintenance
+  commit `6b907b93fed32cb979093327608a4fd897b39751` and preserve locked registry dependencies.
+- Recover the unfinished Phase F migration onto published main: replace all 17 runtime
+  patch installers with native fork hooks and Menhir-owned extraction, resolution and
+  LLM policy adapters. Keep subsequent ingestion, retention and recall fixes.
+- `graphiti_client.py`, `graphiti_resolution_policy.py`: flush telemetry inside its
+  request task on success, failure and cancellation; count empty candidate searches.
+- `graphiti_llm_adapter.py`: preserve namespace and operation metadata across retries.
+- Release wheelhouse: derive the immutable fork requirement from package metadata,
+  pin/hash the additional build backend closure, and build without isolated dependency
+  resolution. Docker remains an offline wheel consumer.
+- Migrated contract tests and added dependency, request-context, task-boundary and
+  immutable-build-pin regressions. Feature defaults and deployed configuration stay as-is.
+- Fork baseline is now 0.30.2. Default-on readiness (#169 and siblings) still requires
+  outstanding source-grounding fixes and current graph/model quality evidence; this
+  integration does not itself qualify a feature for default enablement.
+
 ## 2026-09-26 - remaining MVP audit fixes for recall and decay (#154, #144)
 
 - `recall_pipeline.py`: acquire applicable independent sources before deciding recall is empty;
@@ -109,40 +143,3 @@
   consolidation; existing TTL and seven-day empty-episode safeguards remain in force.
 - Focused unit, HTTP round-trip, and disposable Neo4j regressions cover the preview and actual
   cleanup, including flagged and content-bearing survivors.
-
-## 2026-09-24 - MCP clients are told when to use memory, not just what Menhir is
-
-Every MCP client receives the server instructions, whether or not a repository pastes the
-AGENTS.md template. They were one positioning sentence that never mentioned memory or recall,
-and in an agent evaluation agents skipped `recall_memories` in half the runs and used Menhir as a
-code index. With the new instructions and descriptions, every run recalled and most read the
-source episode; answers improved at the same cost.
-
-- `src/menhir/mcp/instructions.py` (new): `SERVER_INSTRUCTIONS`, shared by the stdio and remote
-  servers. It covers when recall is worth it (recorded decisions, rejected alternatives,
-  incidents, preferences, constraints; especially when the repository cannot supply the
-  rationale), the identifier discipline, one focused query first, `get_provenance` for exact
-  wording, checking dates, conflicts and stale anchors, and that an empty result does not prove
-  there is no history.
-- The instructions also carry the local-stdio MVP write path (#118): write a decision with its
-  reason and the rejected alternative; `add_memory_and_track` when the write must be recallable
-  in the same session, observing its episode id rather than writing again; `ingest_project`
-  when the repository is missing; a new project's memory starts empty.
-- `src/menhir/mcp/server.py`, `src/menhir/api/mcp_remote.py`: use it. The stdio gateway also pins
-  `get_provenance`, which the instructions rely on for a recorded reason's exact wording.
-- `src/menhir/mcp/contracts.py`: `registered_description()` drops a docstring's opening sentence when
-  it repeats the curated description; 13 tools sent their lead sentence twice.
-- `recall_memories`, `get_provenance`, `query_structure`: descriptions say what each returns and
-  when to use the next tool. Recall returns summaries, not source episodes; `include_invalidated`
-  keeps superseded facts on returned results and is not a history search; `compact` and `trace` are
-  documented; the structure graph is not a substitute for targeted recall.
-- `get_artifact`, `list_artifacts`, `list_artifact_questions`: say they return records and document
-  locations, not document text (`get_artifact` claimed "in full"), and that an open question does
-  not establish a decision.
-- `docs/templates/AGENTS.menhir.md`, `docs/agent-usage.md`, `README.md`: the same when-to-recall and provenance
-  guidance; structure-first only for structural questions; `rate_recall` only where the client
-  exposes it (the readonly tier does not).
-- `tests/test_mcp_agent_guidance.py` (new): both transports send the shared text, every tool it names
-  exists, stdio agents see the tools it relies on, and no registered description repeats its lead
-  sentence. `tests/e2e/test_e2e_01_cold_install.py`: `get_provenance` joins the pinned MVP surface.
-- `CHANGELOG-archive.md`: archived the 2026-09-17 shadow-scan entry to keep ten.

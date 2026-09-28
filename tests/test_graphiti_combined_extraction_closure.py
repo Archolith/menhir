@@ -20,8 +20,8 @@ import pytest
 pytest.importorskip("graphiti_core")
 
 import graphiti_core.utils.maintenance.combined_extraction as ce  # noqa: E402
-import menhir.infrastructure.graphiti_extraction_patches as extraction_patches  # noqa: E402
-import menhir.infrastructure.graphiti_patches as patches  # noqa: E402
+import menhir.infrastructure.graphiti_extraction_policy as patches  # noqa: E402
+
 import menhir.services.enrichment_steps as steps  # noqa: E402
 from menhir.domain.self_identity import (  # noqa: E402
     SUBJECT_ENDPOINT_MARKER_PREFIX,
@@ -40,13 +40,28 @@ from menhir.services.enrichment_failures import classify_enrichment_failure  # n
 
 @pytest.fixture(autouse=True)
 def _install_and_reset() -> None:
-    patches._patch_graphiti_combined_extraction_models()
     patches.clear_extraction_receipt()
     yield
     patches.clear_extraction_receipt()
 
 
+class _FakeClients:
+    """Stand-in for the fork's GraphitiClients bundle: only model_copy is needed."""
+
+    def __init__(self) -> None:
+        self.llm_client = object()
+
+    def model_copy(self, *, update: dict) -> "_FakeClients":
+        copy = _FakeClients()
+        copy.llm_client = update["llm_client"]
+        return copy
+
+
 def _build(payload: dict) -> object:
+    """Validate a raw payload the way production does: Menhir sanitation, then the fork model."""
+    receipt = patches.get_extraction_receipt()
+    if receipt is not None:
+        payload = patches._sanitize_combined_payload(payload, receipt, receipt.episode_text)
     return ce.CombinedExtraction(**payload)
 
 
@@ -370,9 +385,9 @@ async def test_endpoint_grounded_in_previous_episode_context_is_synthesized(
         )
         return obj.extracted_entities, obj.edges, {}
 
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
-    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
-        clients=object(),
+    monkeypatch.setattr(patches, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, _ = await patches._run_graphiti_combined_extraction(
+        clients=_FakeClients(),
         episode=SimpleNamespace(uuid="ep-context"),
         previous_episodes=[
             SimpleNamespace(content="The user is planning to visit her friend Rachel.")
@@ -418,9 +433,9 @@ async def test_exact_app_turn_gets_one_relationless_repair(
         receipt.raw_edge_count = 1
         return [SimpleNamespace(name="user"), SimpleNamespace(name="new app")], [edge], {}
 
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
-    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
-        clients=object(),
+    monkeypatch.setattr(patches, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, _ = await patches._run_graphiti_combined_extraction(
+        clients=_FakeClients(),
         episode=SimpleNamespace(uuid="ep-exact-app"),
         previous_episodes=[],
         entity_types=None,
@@ -496,9 +511,9 @@ async def test_exact_parental_leave_interest_turn_gets_relationless_repair(
         )
         return obj.extracted_entities, obj.edges, {}
 
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
-    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
-        clients=object(),
+    monkeypatch.setattr(patches, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, _ = await patches._run_graphiti_combined_extraction(
+        clients=_FakeClients(),
         episode=SimpleNamespace(uuid="ep-parental-leave-interest"),
         previous_episodes=[],
         entity_types=None,
@@ -538,9 +553,9 @@ async def test_bare_information_question_contract_does_not_infer_interest(
         obj = _build({"extracted_entities": [], "edges": []})
         return obj.extracted_entities, obj.edges, {}
 
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
-    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
-        clients=object(),
+    monkeypatch.setattr(patches, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, _ = await patches._run_graphiti_combined_extraction(
+        clients=_FakeClients(),
         episode=SimpleNamespace(uuid="ep-bare-information-question"),
         previous_episodes=[],
         entity_types=None,
@@ -619,9 +634,9 @@ async def test_bare_numeric_reply_repairs_with_adjacent_transcript_context(
         )
         return obj.extracted_entities, obj.edges, {}
 
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
-    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
-        clients=object(),
+    monkeypatch.setattr(patches, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, _ = await patches._run_graphiti_combined_extraction(
+        clients=_FakeClients(),
         episode=SimpleNamespace(uuid="24bd4f72-0b8e-4b03-abeb-074b72250b8b"),
         previous_episodes=[],
         entity_types=None,
@@ -704,9 +719,9 @@ async def test_context_assisted_repair_suppresses_a_preceding_claim_copied_into_
         # Graphiti drops orphan entities after the sanitizer removes the only edge.
         return [], obj.edges, {}
 
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
-    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
-        clients=object(),
+    monkeypatch.setattr(patches, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, _ = await patches._run_graphiti_combined_extraction(
+        clients=_FakeClients(),
         episode=SimpleNamespace(uuid="ep-context-copy-control"),
         previous_episodes=[],
         entity_types=None,
@@ -743,9 +758,9 @@ async def test_relationless_repair_is_bounded_to_one_extra_call(
         receipt.raw_edge_count = 0
         return [], [], {}
 
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
-    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
-        clients=object(),
+    monkeypatch.setattr(patches, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, _ = await patches._run_graphiti_combined_extraction(
+        clients=_FakeClients(),
         episode=SimpleNamespace(uuid="ep-still-relationless"),
         previous_episodes=[],
         entity_types=None,
@@ -791,9 +806,9 @@ async def test_relationship_bearing_first_pass_does_not_pay_for_repair(
         receipt.raw_edge_count = 1
         return [SimpleNamespace(name="user"), SimpleNamespace(name="grocery list app")], [edge], {}
 
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
-    _, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
-        clients=object(),
+    monkeypatch.setattr(patches, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    _, edges, _ = await patches._run_graphiti_combined_extraction(
+        clients=_FakeClients(),
         episode=SimpleNamespace(uuid="ep-complete"),
         previous_episodes=[],
         entity_types=None,
@@ -828,9 +843,9 @@ async def test_assistant_self_only_relationless_is_policy_empty_without_repair(
         receipt.assistant_self_only_relationless = True
         return [], [], {}
 
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
-    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
-        clients=object(),
+    monkeypatch.setattr(patches, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, _ = await patches._run_graphiti_combined_extraction(
+        clients=_FakeClients(),
         episode=SimpleNamespace(uuid="ep-assistant-boilerplate"),
         previous_episodes=[],
         entity_types=None,
@@ -916,9 +931,9 @@ async def _run_two_pass_extraction(
         calls += 1
         return [], [], {}
 
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
-    await extraction_patches._run_graphiti_combined_extraction(
-        clients=object(),
+    monkeypatch.setattr(patches, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    await patches._run_graphiti_combined_extraction(
+        clients=_FakeClients(),
         episode=SimpleNamespace(uuid=episode_key),
         previous_episodes=[],
         entity_types=None,
@@ -1012,20 +1027,32 @@ def test_malformed_edge_dropped_valid_sibling_survives() -> None:
     assert patches.get_extraction_receipt().malformed_edges_dropped == 1
 
 
-def test_no_active_receipt_passes_payload_through_unchanged() -> None:
-    """Scoping: with no active receipt the validator must not alter other callers' payloads.
+def test_no_receipt_payload_still_gets_fork_native_row_sanitation() -> None:
+    """Scoping: with no active receipt only the fork's GENERIC sanitation runs.
 
-    A malformed edge (missing target) still raises upstream ValidationError, proving the
-    hardening did not run outside Menhir's forced single-episode path.
+    Menhir's receipt-scoped policy (marker suppression, echo suppression, endpoint
+    closure, titled-list synthesis) is inactive without a receipt, but the fork's
+    native ``sanitize_malformed_rows`` always drops malformed rows for every caller.
     """
     patches.clear_extraction_receipt()
-    with pytest.raises(Exception):
-        _build(
-            {
-                "extracted_entities": [{"name": "X", "entity_type_id": 0}],
-                "edges": [{"source_entity_name": "A", "relation_type": "R", "fact": "f"}],
-            }
-        )
+    obj = _build(
+        {
+            "extracted_entities": [{"name": "X", "entity_type_id": 0}],
+            "edges": [
+                {"source_entity_name": "A", "relation_type": "R", "fact": "f"},
+                {
+                    "source_entity_name": "X",
+                    "target_entity_name": "A",
+                    "relation_type": "R",
+                    "fact": "valid row",
+                    "episode_indices": [0],
+                },
+            ],
+        }
+    )
+
+    assert len(obj.edges) == 1
+    assert obj.edges[0].fact == "valid row"
 
 
 @pytest.mark.asyncio
@@ -1313,9 +1340,9 @@ async def test_receipt_owned_subject_endpoint_binds_before_resolution(
             "postcards-node": [0],
         }
 
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
-    nodes, edges, index_map = await extraction_patches._run_graphiti_combined_extraction(
-        clients=object(),
+    monkeypatch.setattr(patches, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, index_map = await patches._run_graphiti_combined_extraction(
+        clients=_FakeClients(),
         episode=SimpleNamespace(uuid="projection-1"),
         previous_episodes=[],
         entity_types=None,
@@ -1366,9 +1393,9 @@ async def test_subject_endpoint_corrective_retry_replaces_model_user_fallback(
         )
         return [marker, target], [edge], {"marker": [0], "postcards": [0]}
 
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
-    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
-        clients=object(),
+    monkeypatch.setattr(patches, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, _ = await patches._run_graphiti_combined_extraction(
+        clients=_FakeClients(),
         episode=SimpleNamespace(uuid="projection-1"),
         previous_episodes=[],
         entity_types=None,
@@ -1400,14 +1427,14 @@ async def test_missing_marker_after_correction_withholds_only_ambiguous_output(
     async def fake_extract_nodes_and_edges(*args, **kwargs):
         return [ordinary, target], [edge], {}
 
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
-    nodes, edges, indices = await extraction_patches._run_graphiti_combined_extraction(
-        clients=object(), episode=SimpleNamespace(uuid="projection-1"),
+    monkeypatch.setattr(patches, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, indices = await patches._run_graphiti_combined_extraction(
+        clients=_FakeClients(), episode=SimpleNamespace(uuid="projection-1"),
         previous_episodes=[], entity_types=None, excluded_entity_types=None,
         custom_extraction_instructions=None,
     )
     assert nodes == [] and edges == [] and indices == {}
-    assert extraction_patches.is_policy_empty_extraction(patches.get_extraction_receipt())
+    assert patches.is_policy_empty_extraction(patches.get_extraction_receipt())
 
 
 
@@ -1447,9 +1474,9 @@ async def test_third_person_and_named_reported_speakers_remain_ordinary(
         calls += 1
         return [self_like, target], [edge], {"ordinary": [0], "target": [0]}
 
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
-    nodes, _, _ = await extraction_patches._run_graphiti_combined_extraction(
-        clients=object(), episode=SimpleNamespace(uuid="projection-1"),
+    monkeypatch.setattr(patches, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, _, _ = await patches._run_graphiti_combined_extraction(
+        clients=_FakeClients(), episode=SimpleNamespace(uuid="projection-1"),
         previous_episodes=[], entity_types=None, excluded_entity_types=None,
         custom_extraction_instructions=None,
     )
@@ -1472,10 +1499,10 @@ async def test_subject_endpoint_refuses_reserved_prefix_in_previous_context(
         called = True
         return [], [], {}
 
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    monkeypatch.setattr(patches, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
     with pytest.raises(InvalidSelfSubjectDeclarationError, match="context"):
-        await extraction_patches._run_graphiti_combined_extraction(
-            clients=object(),
+        await patches._run_graphiti_combined_extraction(
+            clients=_FakeClients(),
             episode=SimpleNamespace(uuid="projection-1"),
             previous_episodes=[
                 SimpleNamespace(content=f"stale {SUBJECT_ENDPOINT_MARKER_PREFIX}token")
@@ -1489,7 +1516,7 @@ async def test_subject_endpoint_refuses_reserved_prefix_in_previous_context(
 
 def test_sanitizer_materializes_only_the_receipt_owned_subject_endpoint() -> None:
     endpoint = _begin_subject_endpoint_receipt()
-    valid = extraction_patches._sanitize_combined_payload(
+    valid = patches._sanitize_combined_payload(
         {
             "extracted_entities": [{"name": "postcards", "entity_type_id": 0}],
             "edges": [{
@@ -1506,7 +1533,7 @@ def test_sanitizer_materializes_only_the_receipt_owned_subject_endpoint() -> Non
     assert endpoint.marker in {row["name"] for row in valid["extracted_entities"]}
 
     stale = f"{SUBJECT_ENDPOINT_MARKER_PREFIX}stale"
-    invalid = extraction_patches._sanitize_combined_payload(
+    invalid = patches._sanitize_combined_payload(
         {
             "extracted_entities": [
                 {"name": stale, "entity_type_id": 0},
@@ -1530,7 +1557,7 @@ def test_sanitizer_materializes_only_the_receipt_owned_subject_endpoint() -> Non
 def test_marker_text_without_marker_endpoint_is_dropped_before_persistence() -> None:
     endpoint = _begin_subject_endpoint_receipt()
     receipt = patches.get_extraction_receipt()
-    payload = extraction_patches._sanitize_combined_payload(
+    payload = patches._sanitize_combined_payload(
         {
             "extracted_entities": [
                 {"name": "postcards", "entity_type_id": 0},
@@ -1556,7 +1583,7 @@ def test_marker_text_without_marker_endpoint_is_dropped_before_persistence() -> 
 def test_marker_transport_is_not_a_semantic_grounding_certificate() -> None:
     endpoint = _begin_subject_endpoint_receipt()
     receipt = patches.get_extraction_receipt()
-    payload = extraction_patches._sanitize_combined_payload(
+    payload = patches._sanitize_combined_payload(
         {
             "extracted_entities": [{"name": "Kubernetes", "entity_type_id": 0}],
             "edges": [{
@@ -1596,7 +1623,7 @@ def test_natural_language_shape_does_not_control_structural_identity(
     receipt = patches.get_extraction_receipt()
     assert receipt is not None
     receipt.episode_text = episode_text
-    payload = extraction_patches._sanitize_combined_payload(
+    payload = patches._sanitize_combined_payload(
         {
             "extracted_entities": [
                 {"name": endpoint.marker, "entity_type_id": 0},
@@ -1635,7 +1662,7 @@ def test_endpoint_transport_is_available_without_a_first_person_parser(
     endpoint = _begin_subject_endpoint_receipt()
     receipt = patches.get_extraction_receipt()
     receipt.episode_text = episode_text
-    assert extraction_patches._active_subject_marker(receipt) == endpoint.marker
+    assert patches._active_subject_marker(receipt) == endpoint.marker
 
 
 def test_quoted_semantics_do_not_issue_a_new_identity_declaration() -> None:
@@ -1654,7 +1681,7 @@ def test_quoted_semantics_do_not_issue_a_new_identity_declaration() -> None:
     )
 
     declared = receipt.self_identity
-    extraction_patches._bind_subject_endpoint(
+    patches._bind_subject_endpoint(
         [marker_node, target], [edge], {"marker": [0]}, receipt
     )
     assert receipt.self_identity is declared
@@ -1670,7 +1697,7 @@ def test_reserved_prefix_has_no_new_semantics_outside_enforce(mode) -> None:
         self_bind_mode=mode,
     )
     literal = f"{SUBJECT_ENDPOINT_MARKER_PREFIX}ordinary"
-    payload = extraction_patches._sanitize_combined_payload(
+    payload = patches._sanitize_combined_payload(
         {
             "extracted_entities": [
                 {"name": literal, "entity_type_id": 0},
@@ -1722,9 +1749,9 @@ async def test_subject_endpoint_is_reused_by_relationless_repair(
         receipt.raw_edge_count = 1
         return [marker_node, target], [edge], {"marker": [0], "postcards": [0]}
 
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
-    nodes, _, _ = await extraction_patches._run_graphiti_combined_extraction(
-        clients=object(),
+    monkeypatch.setattr(patches, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, _, _ = await patches._run_graphiti_combined_extraction(
+        clients=_FakeClients(),
         episode=SimpleNamespace(uuid="projection-1"),
         previous_episodes=[],
         entity_types=None,
@@ -1772,9 +1799,9 @@ async def test_subject_marker_and_qualified_application_user_remain_distinct(
             "role": [0],
         }
 
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
-    nodes, final_edges, _ = await extraction_patches._run_graphiti_combined_extraction(
-        clients=object(),
+    monkeypatch.setattr(patches, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, final_edges, _ = await patches._run_graphiti_combined_extraction(
+        clients=_FakeClients(),
         episode=SimpleNamespace(uuid="projection-1"),
         previous_episodes=[],
         entity_types=None,
@@ -1814,7 +1841,7 @@ def test_subject_marker_requires_edge_and_current_episode_attribution(
     receipt.graphiti_episode_uuid = "projection-1"
 
     with pytest.raises(InvalidSelfSubjectDeclarationError, match=message):
-        extraction_patches._bind_subject_endpoint(
+        patches._bind_subject_endpoint(
             [marker_node], edges, index_map, receipt
         )
 
@@ -1829,7 +1856,7 @@ def test_duplicate_subject_marker_nodes_are_refused() -> None:
     assert receipt is not None
 
     with pytest.raises(InvalidSelfSubjectDeclarationError, match="more than one"):
-        extraction_patches._bind_subject_endpoint(nodes, [], {}, receipt)
+        patches._bind_subject_endpoint(nodes, [], {}, receipt)
 
 
 def test_context_only_marker_edge_cannot_authorize_current_subject() -> None:
@@ -1845,7 +1872,7 @@ def test_context_only_marker_edge_cannot_authorize_current_subject() -> None:
     receipt.graphiti_episode_uuid = "current-graphiti-episode"
 
     with pytest.raises(InvalidSelfSubjectDeclarationError, match="current Graphiti episode"):
-        extraction_patches._bind_subject_endpoint(
+        patches._bind_subject_endpoint(
             [marker_node], [edge], {"marker": [0]}, receipt
         )
 
@@ -1867,7 +1894,7 @@ def test_marker_edge_attribution_is_not_misrepresented_as_owner_confirmation() -
 
     declared = receipt.self_identity
     nodes, edges = [marker_node, target], [edge]
-    result = extraction_patches._bind_subject_endpoint(nodes, edges, {"marker": [0]}, receipt)
+    result = patches._bind_subject_endpoint(nodes, edges, {"marker": [0]}, receipt)
     assert result.bound
     assert receipt.self_identity is declared
     assert nodes[0].uuid == self_uuid_for_namespace("default")

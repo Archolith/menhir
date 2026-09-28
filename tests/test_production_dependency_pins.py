@@ -19,6 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PINNED_FIRST_PARTY = {
     "archolith-oauth": "0.3.1",
     "archolith-mcp-framework": "0.2.0",
+    "archolith-graphiti-core": "0.30.2.post1",
 }
 
 
@@ -72,3 +73,8 @@ def test_no_dependency_is_resolved_from_a_repository() -> None:
 
     vcs = [d for d in _dependencies() if "@" in d and "://" in d]
     assert vcs == [], f"dependencies resolved from a repository: {vcs}"
+
+
+def test_upstream_graphiti_distribution_is_not_installed_alongside_the_fork() -> None:
+    lock = tomllib.loads((PROJECT_ROOT / "uv.lock").read_text(encoding="utf-8"))
+    assert not any(package["name"] == "graphiti-core" for package in lock["package"])

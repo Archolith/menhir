@@ -1,15 +1,35 @@
-"""Combined Graphiti extraction and extraction-receipt compatibility patches."""
+"""Menhir extraction-receipt and canonical-self policy for the Graphiti fork.
+
+This module is the Menhir-owned adapter half of the former combined-extraction
+installers (#1/#2). The fork owns the routing mechanism
+(``graphiti_core.extraction_routing``) and generic malformed-row sanitation
+(``CombinedExtraction.sanitize_malformed_rows``); this module owns the Menhir
+policy that rides on the fork's explicit ``SingleEpisodeExtractionHook``:
+
+- per-episode extraction receipts (raw -> final counts, binding inputs),
+- relation-completeness / endpoint-marker extraction instructions,
+- Menhir payload sanitation (marker suppression, self-echo suppression,
+  endpoint closure, titled-list synthesis, grounding guards),
+- relationless repair and author-endpoint correction retries,
+- canonical-self binding before resolution,
+
+without rebinding any Graphiti symbol.
+"""
 
 from __future__ import annotations
 
 from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
-import json
 import logging
 import re
-from time import perf_counter
 from typing import Any, Callable
+
+from graphiti_core.extraction_routing import (
+    ExtractionRoute,
+    SingleEpisodeExtractionResult,
+)
+from graphiti_core.utils.maintenance.combined_extraction import extract_nodes_and_edges
 
 from menhir.domain.namespace import namespace_to_group_id
 from menhir.domain.self_identity import (
@@ -29,47 +49,9 @@ from menhir.infrastructure.self_binding import (
     SelfBindResult,
     bind_canonical_self,
 )
-from menhir.infrastructure.graphiti_helpers import (
-    SYNTHETIC_FACT_PREFIX,
-    _build_graphiti_failure_details,
-    _describe_openai_client_base_url,
-    _extract_first_json_payload,
-    _normalize_graphiti_json_payload,
-    _raw_preview,
-    check_graphiti_version,
-)
+from menhir.infrastructure.graphiti_helpers import SYNTHETIC_FACT_PREFIX
 
 logger = logging.getLogger(__name__)
-
-# Version guard - run once at import like the pre-CF-87 local check did. The
-# shared helper (graphiti_helpers.check_graphiti_version) owns the expected
-# prefix declaration and the warn-only logic.
-check_graphiti_version()
-
-_combined_extraction_cache: ContextVar[tuple[str, list[Any]] | None] = ContextVar(
-    "menhir_graphiti_combined_extraction_cache",
-    default=None,
-)
-_original_graphiti_extract_edges: Any | None = None
-_original_graphiti_extract_nodes: Any | None = None
-#: The MODULE holding the replacement extractor's real dependency, imported at patch time so the
-#: patch's own ImportError guard covers it. Deliberately the module and not the function: the
-#: attribute is read per call so a later rebind -- another patch, or a test seam -- is still seen.
-#: Freezing the function here would trade one silent-failure mode for another.
-_graphiti_combined_extraction_module: Any | None = None
-
-
-def _resolve_combined_extractor() -> Any:
-    """Return the combined extractor, resolved from the module bound at patch time.
-
-    Falls back to a direct import for callers that reach this function without having applied the
-    patch (the extraction tests do exactly that). Availability is still PROVEN at patch time, which
-    is the point of CF-12: the patch no longer reports success while its real dependency is absent.
-    """
-    module = _graphiti_combined_extraction_module
-    if module is None:
-        from graphiti_core.utils.maintenance import combined_extraction as module
-    return module.extract_nodes_and_edges
 
 
 # ---------------------------------------------------------------------------
@@ -201,24 +183,10 @@ _LIST_BULLET_RE = re.compile(r"^\s*(?:[-*•]|\d{1,2}[.)])\s+")
 
 #: An item must look like a NAME, not a sentence. Verbs and sentence punctuation disqualify the whole
 #: block -- one prose line is enough to refuse, because a half-parsed list is worse than none.
-#: Verbs come from the closed allowlist `_LIST_VERBS` below -- the same style as
-#: `_ACQUISITION_VERBS` in services/event_history_recall.py. No stemming, no synonyms, no
-#: part-of-speech call.
-#:
-#: The rule is POSITIONAL: an item that BEGINS with a verb or a pronoun and continues is a clause,
-#: not a name -- "buy milk", "fixed the bug", "ate lunch", "we are working today".
-#:
-#: Matching an allowlisted verb ANYWHERE was tried first and over-refused badly, because most of
-#: these words are also common nouns: it rejected "Tools:/saw/hammer/drill",
-#: "Races:/fun run/night run" and an album named "Work" -- exactly the NAME lists this parser
-#: exists to accept. Anchoring at the start costs the mid-item case (a clause whose first word is
-#: neither verb nor pronoun still passes THIS guard) and buys back that whole class of lists.
-#: Sentence punctuation and the 6-word cap remain as the other two guards.
 _LIST_ITEM_MAX_WORDS = 6
 
 #: Verbs that disqualify an item (and therefore the whole block) under the "items are NAMES, not
-#: clauses" rule. A closed, conservative allowlist matched at word boundaries; includes the
-#: inflections observed on the CF-193 probes (`buy`, `walk`, `call`, `fixed`, `shipped`, `ate`).
+#: clauses" rule. A closed, conservative allowlist matched at word boundaries.
 _LIST_VERBS: tuple[str, ...] = (
     "buy", "bought", "buying", "purchase", "purchased", "purchasing",
     "walk", "walked", "walking",
@@ -241,14 +209,12 @@ _LIST_VERBS: tuple[str, ...] = (
     "read", "reading",
     "write", "wrote", "written", "writing",
 )
-#: Personal pronouns. A NAME does not begin with one; a clause does ("we are working today",
-#: "i bought milk"). Same leading-token rule as the verbs, so this stays one concept.
+#: Personal pronouns. A NAME does not begin with one; a clause does.
 _LIST_CLAUSE_PRONOUNS: tuple[str, ...] = (
     "i", "we", "you", "he", "she", "they", "it", "my", "our", "your", "their",
 )
 
 #: An item that BEGINS with a verb or a pronoun and continues is a clause, not a name.
-#: Anchored at the start on purpose -- see the note above `_LIST_ITEM_MAX_WORDS`.
 _LIST_VERB_RE = re.compile(
     r"^(?:"
     + "|".join(re.escape(w) for w in (*_LIST_VERBS, *_LIST_CLAUSE_PRONOUNS))
@@ -258,11 +224,10 @@ _LIST_VERB_RE = re.compile(
 
 
 def parse_titled_list(episode_text: str) -> tuple[str, list[str]] | None:
-    """Parse ``title:\\n item\\n item...`` into (title, items), or None when it is not clearly a list.
+    """Parse ``title:\n item\n item...`` into (title, items), or None when it is not clearly a list.
 
     DELIBERATELY STRICT -- refusing a real list costs one enrichment that behaves exactly as it does
-    today, while accepting prose invents membership edges that are silently wrong. Every rule below
-    exists to make the second failure impossible, so read them as a whitelist, not a heuristic:
+    today, while accepting prose invents membership edges that are silently wrong.
 
       * the first line must contain ':' -- an explicit author-written "a list follows" marker
       * at least 3 items, so a colon in ordinary prose cannot produce a two-node "list"
@@ -270,10 +235,8 @@ def parse_titled_list(episode_text: str) -> tuple[str, list[str]] | None:
         (`_LIST_VERBS`) -- items are NAMES, not clauses
       * ONE non-conforming item refuses the WHOLE block (no partial parse)
 
-    The FIRST ITEM MAY SIT ON THE TITLE LINE (`agents names below:Admon`), which is how the turn that
-    motivated this is actually written. Requiring the colon to end the line refused exactly that case.
-    The title may be the first line of the turn or follow a role prefix ("user: agents names below:").
-    Returns names exactly as written, minus bullet decoration; deduplication is left to resolution.
+    The FIRST ITEM MAY SIT ON THE TITLE LINE (`agents names below:Admon`). Returns names exactly as
+    written, minus bullet decoration; deduplication is left to resolution.
     """
     text = str(episode_text or "")
     if ":" not in text or "\n" not in text:
@@ -315,31 +278,19 @@ def is_policy_empty_extraction(receipt: "CombinedExtractionReceipt | None") -> b
 
     An assistant turn that only restates the human's own facts (`user -> X`) has every edge
     suppressed by design, which leaves nothing to persist. That is the CORRECT outcome, and it is
-    deterministic: retrying re-extracts the same echo and suppresses it again, so treating it as a
-    retryable failure burns the episode's whole retry budget and inflates the measured failure rate.
-    The same policy applies when extraction returns only a self label and no edge: a repair could
-    only produce the assistant-authored self edge this policy would suppress. Real collapses remain
-    visible because either every surviving raw edge must be accounted for as echo, or every
-    relationless entity must be a self label on an explicitly prefixed assistant turn.
+    deterministic. Real collapses remain visible because either every surviving raw edge must be
+    accounted for as echo, or every relationless entity must be a self label on an explicitly
+    prefixed assistant turn.
     """
     if receipt is None:
         return False
     if receipt.assistant_self_only_relationless:
         return True
-    # BOTH passes must independently have produced only self-labels with zero edges. This covers
-    # user turns like "Thanks again for your help!" whose evidence projections bypass the adaptive
-    # segmenter and correctly extract only {"name":"user"} twice over. Requiring the INITIAL pass
-    # to be self-only too is what keeps the guard honest: a first pass that extracted a real entity
-    # and a repair that came back with only `user` is content the pipeline lost, and it must stay a
-    # visible collapse rather than borrow this success path from the repair's shape alone.
     if (receipt.relationless_repair_attempted
             and not receipt.relationless_repair_succeeded
             and receipt.initial_self_only_entities
             and receipt.repair_self_only_entities):
         return True
-    # Native context can prime a repair to copy a preceding claim into a truly empty current turn.
-    # If the first pass saw only self and EVERY usable repair edge lacked any current-message anchor,
-    # the grounding guard correctly removed copied context and the resulting empty is intentional.
     usable_repair_edges = receipt.raw_edge_count - receipt.malformed_edges_dropped
     if (
         receipt.relationless_repair_attempted
@@ -440,14 +391,9 @@ def clear_extraction_receipt() -> None:
 
 def _normalize_endpoint_name(name: Any) -> str:
     """Match graphiti's exact node-name normalization so endpoint checks agree with resolution."""
-    try:
-        from graphiti_core.utils.maintenance.dedup_helpers import _normalize_string_exact
+    from graphiti_core.utils.maintenance.dedup_helpers import _normalize_string_exact
 
-        return _normalize_string_exact(str(name))
-    except Exception:  # pragma: no cover - fallback mirrors graphiti's implementation
-        import re
-
-        return re.sub(r"[\s]+", " ", str(name).lower()).strip()
+    return _normalize_string_exact(str(name))
 
 
 def _active_subject_marker(receipt: CombinedExtractionReceipt | None) -> str:
@@ -466,8 +412,6 @@ def _subject_marker_guard_active(receipt: CombinedExtractionReceipt | None) -> b
 
 
 # Pronoun / role-label endpoints that must never be synthesized as KG identities.
-# Synthesizing these would fragment identity (an incidental per-episode ``I``/``me``/
-# ``user`` node) and pre-empt the deliberately deferred canonical self-identity feature.
 _NON_SYNTHESIZABLE_ENDPOINTS = frozenset(
     {
         "i", "me", "my", "mine", "myself",
@@ -488,14 +432,10 @@ _NON_SYNTHESIZABLE_ENDPOINTS = frozenset(
 
 #: Canonical self-entity display name. Mirrors `menhir.services.typed_scalar_rules
 #: .SELF_SUBJECT_DISPLAY` deliberately by value rather than by import: infrastructure must not
-#: depend on services. If that constant changes, change this with it.
+#: depend on services.
 _SELF_ENTITY_NAME = "user"
 
-#: Labels denoting the HUMAN. Third-person ("user") is how gpt-4o-mini actually writes the speaker;
-#: first-person is included for extractors that phrase it that way.
-#: DOMAIN: extracted entity NAMES. Includes "my"/"mine" because an extractor can emit them as an
-#: endpoint name; the scalar and event subject allowlists deliberately exclude them. Three sets, three
-#: questions -- see ``domain/self_identity.SELF_ALIASES`` before changing any of them.
+#: Labels denoting the HUMAN. DOMAIN: extracted entity NAMES.
 _SELF_THIRD_PERSON = frozenset({"user", "the user"})
 _SELF_FIRST_PERSON = frozenset({"i", "me", "my", "mine", "myself"})
 _ASSISTANT_POLICY_SELF_LABELS = _SELF_THIRD_PERSON | _SELF_FIRST_PERSON
@@ -514,37 +454,12 @@ def _episode_role(episode_text: str) -> str:
 def _is_unresolved_self_like_endpoint(normalized_name: str, episode_text: str) -> bool:
     """True when endpoint closure may retain this as an ORDINARY self-like entity.
 
-    WHY THIS EXISTS: gpt-4o-mini emits the speaker as the literal token ``user`` and never as
-    ``I``. ``user`` is in `_NON_SYNTHESIZABLE_ENDPOINTS`, so every edge it anchors was dropped for
-    want of an endpoint; graphiti then orphan-pruned every node those edges would have connected,
-    and content-bearing episodes persisted nothing (CombinedExtractionCollapsedError). Measured on
-    the cc5ded98 smoke: 5 of 6 USER turns collapsed this way -- the refusal was destroying
-    precisely the user's own facts, which is the opposite of what it was protecting.
-
     This helper does **not** establish identity and does **not** assign the canonical UUID. It only
     rewrites equivalent endpoint spellings to the display name ``user`` and lets ordinary Graphiti
-    resolution decide where that node goes. That can still create or reuse a fork. Canonical binding
-    happens later and requires an exact node declaration; turn role plus this name shape is not one.
+    resolution decide where that node goes.
 
     ASSISTANT TURNS ARE EXCLUDED. A ``user -> X`` edge on an assistant turn is the model restating
-    what the human already said in their own turn, so binding it mints a DUPLICATE of a fact that
-    exists with better provenance on the user turn -- second-hand, in the assistant's paraphrase.
-    Observed directly on cc5ded98: turn 8 (user) yields "User hopes to complete a few personal
-    projects, such as building a simple web scraper", and turn 9 (assistant) yields "User wants to
-    build a web scraper to apply their skills to real-world problems" -- the same fact twice, and
-    before this fix ONLY the assistant's copy survived. First-person on an assistant turn is the
-    ASSISTANT, so binding it would additionally misattribute the model's own statements ("I'm an
-    AI, so I was trained on a massive dataset") to the human.
-
-    This does NOT stop assistant turns being ingested: entity-to-entity facts (the recommendations
-    that LongMemEval's `single-session-assistant` category asks about -- 56/500 items, e.g. "the
-    Italian restaurant you recommended" -> Roscioli) are untouched. Only the `user -> X` echo is
-    dropped. An assistant turn whose edges are ALL `user -> X` will therefore still collapse; that
-    turn carried nothing but echo, so the loss is intended rather than a defect.
-
-    Unknown role (no ``user:``/``assistant:`` prefix) is retained by this endpoint-closure rule, so
-    content outside the benchmark's prefixed format keeps the collapse fix. It gains no canonical
-    subject authority.
+    what the human already said in their own turn.
     """
     if _episode_role(episode_text) == "assistant":
         return False
@@ -571,10 +486,8 @@ def _is_synthesizable_endpoint(
     """Return True when a missing edge endpoint may be materialized as a new entity.
 
     Conservative on purpose: reject pronoun/role labels outright, and — when extractor
-    grounding text is available — require the name to appear literally in either the
-    current episode or the previous episodes Graphiti included in the extraction prompt.
-    This admits a resolved antecedent such as ``Rachel`` for "She moved to Chicago"
-    without admitting a name absent from the model's supplied conversation context.
+    grounding text is available — require the name to appear literally (whole tokens) in either
+    the current episode or the previous episodes Graphiti included in the extraction prompt.
     """
     if not isinstance(name, str):
         return False
@@ -588,23 +501,6 @@ def _is_synthesizable_endpoint(
         text for text in grounding_texts if isinstance(text, str) and text
     )
     if available_grounding:
-        # CF-192(a): match on WORD BOUNDARIES, not bare substring containment.
-        #
-        # `normalized in text.casefold()` admitted any short hallucinated name that happened to sit
-        # inside a longer word: against "I joined the channel yesterday" it accepted `Ann`
-        # ("ch-ann-el"), `Chan`, `Ester` ("y-ester-day") and `Yes` ("yes-terday"). This guard stands
-        # between a model-hallucinated edge endpoint and a materialized KG entity, and because
-        # previous-episode texts join the grounding set it got WEAKER the more context the
-        # extractor was given.
-        #
-        # The docstring above already required the name to "appear literally"; substring
-        # containment is not that. Note this also FIXES the docstring's own worked example --
-        # `Rachel` for "She moved to Chicago" was rejected before, because the antecedent is
-        # resolved from a previous episode whose text must contain the token, and a substring test
-        # gives no better answer there than a token test does.
-        #
-        # A multi-word name ("Service Mesh") is matched as a phrase of whole tokens, so internal
-        # spacing and punctuation in the source text do not defeat it.
         name_tokens = [t.casefold() for t in _CURRENT_MESSAGE_TOKEN_RE.findall(stripped)]
         if not name_tokens:
             return False
@@ -726,24 +622,12 @@ def _current_message_anchor_tokens(episode_text: str) -> set[str]:
 
 
 #: Edge fields that may serve as EVIDENCE that an edge is grounded in the current turn.
-#:
-#: CF-192(b): `relation_type` is deliberately absent. It is model-supplied boilerplate -- the repair
-#: prompt (`_RELATIONLESS_REPAIR_CORE`) instructs the model to emit relation labels -- so
-#: counting its tokens as evidence lets the model ground its own edge. Measured: against
-#: "Thanks, that helps me understand more." an edge whose endpoints and fact were copied entirely
-#: from prior context was admitted, matching on `more` supplied by its own
-#: `WANTS_TO_KNOW_MORE_ABOUT` label. An acknowledgement turn could persist a durable interest edge
-#: about an entity the user never mentioned, with the receipt reporting 0 suppressed.
+#: `relation_type` is deliberately absent (model-supplied boilerplate).
 _EDGE_ANCHOR_EVIDENCE_FIELDS = ("source_entity_name", "target_entity_name", "fact")
 
 
 def _edge_has_current_message_anchor(edge: dict[str, Any], episode_text: str) -> bool:
-    """True when the edge shares a meaningful token with the CURRENT turn.
-
-    A deterministic precision guard against the model re-emitting a claim from preceding context.
-    Only fields carrying extracted CONTENT count as evidence -- see
-    `_EDGE_ANCHOR_EVIDENCE_FIELDS`.
-    """
+    """True when the edge shares a meaningful token with the CURRENT turn."""
     current_tokens = _current_message_anchor_tokens(episode_text)
     if not current_tokens:
         return False
@@ -756,23 +640,6 @@ def _edge_has_current_message_anchor(edge: dict[str, Any], episode_text: str) ->
     return bool(current_tokens & edge_tokens)
 
 
-def _anchor_token_forms(tokens: set[str]) -> set[str]:
-    """Small literal morphology bridge for current-text grounding (``own``/``owns``)."""
-    forms: set[str] = set()
-    for token in tokens:
-        folded = token.casefold()
-        forms.add(folded)
-        if len(folded) > 3 and folded.endswith("s"):
-            forms.add(folded[:-1])
-        if len(folded) > 4 and folded.endswith("es"):
-            forms.add(folded[:-2])
-        if len(folded) > 4 and folded.endswith("ed"):
-            forms.add(folded[:-2])
-        if len(folded) > 5 and folded.endswith("ing"):
-            forms.add(folded[:-3])
-    return forms
-
-
 def _sanitize_combined_payload(
     data: Any,
     receipt: CombinedExtractionReceipt | None,
@@ -783,9 +650,7 @@ def _sanitize_combined_payload(
     Order (per remediation contract): record raw counts -> drop malformed edge rows
     -> normalize extracted entities -> add missing usable edge endpoints -> hand back
     to Graphiti for its normal resolution. Runs BEFORE ``CombinedExtraction`` is
-    validated so a single malformed row cannot invalidate the whole batch, and BEFORE
-    Graphiti's edge/orphan pruning so a legitimate edge is not dropped for lack of a
-    listed endpoint.
+    validated so a single malformed row cannot invalidate the whole batch.
     """
     if not isinstance(data, dict):
         return data
@@ -813,7 +678,6 @@ def _sanitize_combined_payload(
             and norm["name"] != marker
         ):
             # A stale, malformed, or model-invented reserved endpoint is never an ordinary entity.
-            # Only the exact capability token on this task's receipt may survive sanitation.
             entities_dropped += 1
             continue
         entities.append(norm)
@@ -854,8 +718,6 @@ def _sanitize_combined_payload(
             if marker_occurs_in_text and (
                 not endpoint_uses_marker or not active_marker_occurs or foreign_marker_occurs
             ):
-                # A marker in prose without the exact marker endpoint has no authority path that
-                # can scrub it before persistence. Drop the edge rather than leak a capability.
                 edges_dropped += 1
                 subject_marker_edges_suppressed += 1
                 continue
@@ -902,31 +764,21 @@ def _sanitize_combined_payload(
             if is_assistant_turn and (
                 norm_key in _SELF_THIRD_PERSON or norm_key in _SELF_FIRST_PERSON
             ):
-                # This is the assistant restating a fact the human already gave first-hand. The
-                # decision is made on ROLE + LABEL alone and is tested BEFORE `known` membership,
-                # because enforcement used to rely on leaving the endpoint unbound so graphiti
-                # would drop the edge -- and Menhir's own `_RELATION_COMPLETENESS_CORE`
-                # tells the model to include `user` in extracted_entities, which puts the endpoint
-                # in `known` and silently disabled the whole policy. Break: a doomed edge must not
-                # go on to mint a synthesized endpoint entity for its other side.
+                # This is the assistant restating a fact the human already gave first-hand.
                 edge_is_self_echo = True
                 break
             if norm_key in known:
                 continue
             marker = _active_subject_marker(receipt)
             if marker and endpoint_name == marker:
-                # The marker is grounded by the receipt, not by user text.  Materialize it only
-                # when the extractor used it as an endpoint. This carrier is only transport and
-                # is later replaced with Menhir's preallocated author; it has no identity authority.
+                # The marker is grounded by the receipt, not by user text.
                 entities.append({"name": marker, "entity_type_id": -1})
                 known.add(norm_key)
                 synthesized += 1
                 continue
             if _is_unresolved_self_like_endpoint(norm_key, episode_text):
                 # Normalize the endpoint spelling and materialize it ONCE per payload so Graphiti
-                # does not drop the edge. This is availability recovery, not identity resolution:
-                # the node remains an ordinary candidate unless a separate structured producer
-                # declares its exact UUID after extraction.
+                # does not drop the edge. Availability recovery, not identity resolution.
                 edge[endpoint_key] = _SELF_ENTITY_NAME
                 if self_key not in known:
                     entities.append({"name": _SELF_ENTITY_NAME, "entity_type_id": -1})
@@ -949,33 +801,15 @@ def _sanitize_combined_payload(
                 entities.append({"name": endpoint_name.strip(), "entity_type_id": -1})
                 known.add(norm_key)
                 synthesized += 1
-            # Otherwise leave it missing. NOTE: graphiti drops this one edge during resolution --
-            # true locally, but if it was the LAST edge every node it would have connected is then
-            # orphan-pruned and the whole episode collapses. The self-like case above is retained
-            # only to avoid that cascade; it is deliberately not promoted to canonical self.
         if edge_is_self_echo:
             self_echo_edges += 1
             continue
         surviving_edges.append(edge)
 
-    # Echo edges are dropped EXPLICITLY rather than by leaving an endpoint unbound. The old
-    # implicit enforcement only worked when the model omitted `user` from extracted_entities;
-    # when it lists `user` -- which the extraction prompt asks it to do -- the endpoint resolves
-    # and the echo edge survived, duplicating the user's own first-hand fact under the assistant's
-    # paraphrase while the receipt reported zero suppressed.
-    # The titled-list fallback below keeps its ORIGINAL trigger: it asks whether the extractor
-    # produced any edge at all, which is the question it was written to ask. Testing the post-drop
-    # list instead would newly fire list synthesis on echo-only assistant turns -- a separate
-    # decision that this fix deliberately does not make.
     extractor_produced_edges = bool(edges)
     edges = surviving_edges
 
-    # Titled list: the turn states membership through SYNTAX rather than a verb, so the extractor
-    # returns names with no relation between them. Every node is then orphan-pruned for want of an
-    # edge and the whole episode collapses -- the content is correct and is lost anyway. Emit the
-    # membership the list states, which keeps the names connected and makes the collapse moot.
-    # Only when the extractor found NO usable edges: if it did state relations, they are the truth
-    # of the turn and a synthetic membership edge must not compete with them.
+    # Titled list: the turn states membership through SYNTAX rather than a verb.
     list_edges_added = 0
     if not extractor_produced_edges:
         parsed = parse_titled_list(episode_text)
@@ -983,26 +817,16 @@ def _sanitize_combined_payload(
             container, items = parsed
             container_key = _normalize_endpoint_name(container)
             extracted_keys = {_normalize_endpoint_name(e["name"]) for e in entities}
-            # Require the extractor to have independently seen the items. The parse decides they are
-            # a LIST; the extractor decides they are ENTITIES. Needing both means a mis-parse of
-            # prose cannot mint nodes on its own.
             matched = [it for it in items if _normalize_endpoint_name(it) in extracted_keys]
             if len(matched) >= 3:
                 if container_key not in extracted_keys:
                     entities.append({"name": container, "entity_type_id": -1})
                     extracted_keys.add(container_key)
                 for item in matched:
-                    # Built through the SAME sanitizer every model-produced edge goes through, so a
-                    # synthetic edge can never carry a shape the real path would have rejected or
-                    # normalized differently (e.g. `episode_indices`, which graphiti uses to map the
-                    # edge to its source episode and to pick its reference time).
                     synthetic = _sanitize_combined_edge({
                         "relation_type": _MEMBERSHIP_RELATION,
                         "source_entity_name": item,
                         "target_entity_name": container,
-                        # Menhir built this fact, not the model. It carries the synthetic marker so
-                        # the storage boundary classifies it honestly instead of stamping
-                        # fact_source="original" on a sentence the model never asserted.
                         "fact": f"{SYNTHETIC_FACT_PREFIX}{item} is listed under {container}",
                         "episode_indices": [0],
                     })
@@ -1020,11 +844,6 @@ def _sanitize_combined_payload(
         receipt.context_unsupported_edges_suppressed = context_unsupported_edges
         receipt.subject_marker_edges_suppressed = subject_marker_edges_suppressed
         receipt.assistant_self_only_relationless = assistant_self_only_relationless
-        # The validator runs once per extraction call and cannot see which pass it is in, so the
-        # repair flag -- set by `_run_graphiti_combined_extraction` BEFORE the second call -- is the
-        # discriminator. Writing both passes into one field would let the repair's shape overwrite
-        # the first pass's evidence, which is exactly what `is_policy_empty_extraction` must not
-        # lose sight of.
         if receipt.relationless_repair_attempted:
             receipt.repair_self_only_entities = _all_self_labels
         else:
@@ -1062,12 +881,11 @@ def _sanitize_combined_payload(
 
 
 # ---------------------------------------------------------------------------
-# Graphiti single-episode combined extraction patch
+# Menhir extraction instructions
 # ---------------------------------------------------------------------------
 
 
-#: Subject-neutral half of the relation-completeness contract. "The subject", not "the
-#: speaker": for third-person text the speaker is precisely the wrong thing to steer toward.
+#: Subject-neutral half of the relation-completeness contract.
 _RELATION_COMPLETENESS_CORE = """\
 MENHIR RELATION COMPLETENESS:
 - Do not return an entity without a relationship when CURRENT MESSAGES state what the subject
@@ -1078,10 +896,7 @@ MENHIR RELATION COMPLETENESS:
 """
 
 #: First-person half. Appended ONLY when the episode text actually contains a first-person
-#: reference (`_is_first_person`). Issue #90: appended unconditionally, gpt-4o-mini applied
-#: "represent I/me/my with `user`" to a third-person subject and rewrote "Alice owns 37 coins"
-#: as "User owns 37 coins" -- no `Alice` node was ever created, and the bogus `user` cascaded
-#: into a self-fork, a self-subject perceiver proposal, and a missing View.
+#: reference (`_is_first_person`).
 _FIRST_PERSON_SELF_BINDING = """\
 - In a human-authored first-person statement, represent I/me/my with the canonical entity `user`
   and emit the direct speaker-to-target relationship. Include `user` in extracted_entities.
@@ -1119,26 +934,12 @@ def _relation_completeness_instructions(
     endpoint: SelfSubjectEndpointEnvelope | None,
     episode_text: str,
 ) -> str:
-    """Render the relation-completeness contract for one episode.
-
-    The self-binding rules are appended only when `episode_text` is first-person. The gate is
-    the SAME predicate `_unresolved_author_aliases` uses to decide whether a `user` node is the
-    author, so the prompt that produces `user` and the post-processing that trusts it cannot
-    disagree about what counts as first-person.
-    """
+    """Render the relation-completeness contract for one episode."""
     if not _is_first_person(episode_text):
-        # NOTHING for third-person text -- not even the subject-neutral core. Live evidence
-        # (2026-09-12, fix commit 7e0d4124): with core alone, "Alice wakes up at 7:30 AM."
-        # extracted zero entities, because "omit the entity if no relationship is stated"
-        # with no relationship shape to follow made the model drop everything. The
-        # 2026-07-20 run with no block at all persisted `Alice` + `7:30 AM` and materialized
-        # the View. 811dd41b introduced this block to repair relationless FIRST-PERSON
-        # memories; third-person text never needed it and is worse off with any of it.
+        # NOTHING for third-person text -- not even the subject-neutral core.
         return ""
     core = _RELATION_COMPLETENESS_CORE
     marker = endpoint.marker if endpoint is not None else None
-    # The self-binding bullets go in front of the closing "do not invent" rule so that rule
-    # stays the block's final word, as it was before the split.
     head, sep, tail = core.partition(_DO_NOT_INVENT)
     return head + _first_person_self_binding(marker) + sep + tail
 
@@ -1194,20 +995,12 @@ MENHIR INVALID AUTHOR-ENDPOINT CORRECTION:
 """
 
 
-# A refusal hint, NOT proof of authorship or subjecthood. Do not add quote/grammar
-# exceptions: a match can only withhold an ambiguous alias, never authorize a bind.
+# A refusal hint, NOT proof of authorship or subjecthood.
 _AUTHOR_REFERENCE_RE = re.compile(r"\b(?:i|me|my|mine|myself)\b", re.IGNORECASE)
 
 
 def _is_first_person(text: str) -> bool:
-    """True when `text` contains a first-person singular reference.
-
-    The single source of truth for "is the author speaking?" -- consulted by the prompt that
-    asks the model to emit `user` (`_relation_completeness_instructions`) AND by the
-    post-processing that decides whether an emitted `user` is the author
-    (`_unresolved_author_aliases`). Plural first person (we/our/us) is deliberately not here;
-    that is pre-existing behaviour and a separate question.
-    """
+    """True when `text` contains a first-person singular reference."""
     return bool(_AUTHOR_REFERENCE_RE.search(text or ""))
 
 
@@ -1258,11 +1051,6 @@ Do not extract a claim merely because it appears in PREVIOUS MESSAGES.
 _RELATIONLESS_REPAIR_CONTEXT_MAX_CHARS = 6000
 
 
-def _episode_cache_key(episode: Any) -> str:
-    episodes = episode if isinstance(episode, list) else [episode]
-    return "|".join(str(getattr(item, "uuid", id(item))) for item in episodes)
-
-
 def _combine_extraction_instructions(*parts: str | None) -> str:
     """Append Menhir instructions without discarding a caller's custom extraction contract."""
     return "\n\n".join(part.strip() for part in parts if isinstance(part, str) and part.strip())
@@ -1300,28 +1088,16 @@ def _load_relationless_repair_context(
     return tuple(reversed(bounded_reversed))
 
 
-#: The section delimiters graphiti's prompt templates wrap `previous_episodes` in. Stored turn
-#: text is rendered inside them via `to_prompt_json`, which is `json.dumps` -- it escapes quotes
-#: and newlines but NOT angle brackets, so a turn containing the closing tag reproduces it
-#: verbatim in the rendered prompt and can appear to end the quoted section (CF-194).
-#:
-#: This is coupled to the vendored template by construction: if graphiti renames these tags the
-#: neutralisation goes stale silently. The pairing is asserted in the extraction-patch tests.
+#: The section delimiters graphiti's prompt templates wrap `previous_episodes` in (CF-194).
 _PROMPT_SECTION_TAGS = ("<PREVIOUS MESSAGES>", "</PREVIOUS MESSAGES>",
                         "<CURRENT MESSAGE>", "</CURRENT MESSAGE>")
 
 
 def _neutralize_prompt_delimiters(text: str) -> str:
-    """Defang the prompt's own structural tags inside attacker-influenced context text.
-
-    Deliberately narrow: only the exact tags are rewritten, and only by breaking the angle
-    brackets, so ordinary prose and code in a captured turn survive unchanged. Escaping every
-    `<`/`>` would mangle legitimate content for no additional guarantee.
-    """
+    """Defang the prompt's own structural tags inside attacker-influenced context text."""
     out = text
     for tag in _PROMPT_SECTION_TAGS:
         if tag.lower() in out.lower():
-            # Case-insensitive replace without regex, preserving surrounding text.
             lowered, needle, cursor, pieces = out.lower(), tag.lower(), 0, []
             while True:
                 hit = lowered.find(needle, cursor)
@@ -1396,13 +1172,7 @@ def _bind_subject_endpoint(
     index_map: dict[str, list[int]],
     receipt: CombinedExtractionReceipt,
 ) -> SelfBindResult:
-    """Attach inferred relationships to the preallocated author, atomically before dedup.
-
-    The model's marker node is a transport reference, NOT the declared identity. Discard it
-    (including model-produced properties) and connect a copy of Menhir's existing author node.
-    No interpretation of natural-language shape issues the declaration. Inaccurate relationship
-    attribution remains a possible extraction error under the automatic-memory contract.
-    """
+    """Attach inferred relationships to the preallocated author, atomically before dedup."""
     endpoint = receipt.self_subject_endpoint
     identity = receipt.self_identity
     owned = receipt.self_subject_node
@@ -1449,7 +1219,6 @@ def _bind_subject_endpoint(
             raise InvalidSelfSubjectDeclarationError("marker node lacks current-episode index attribution")
 
     # An ambiguous alias is never guessed into the author or persisted as a substitute self.
-    # This can withhold a legitimate bare RBAC `user` in mixed prose; qualified names survive.
     unsafe = _unresolved_author_aliases(nodes, receipt)
     rejected = [edge for edge in edges if unsafe & _edge_endpoint_uuids(edge)]
     rejected_ids = {id(edge) for edge in rejected}
@@ -1470,8 +1239,6 @@ def _bind_subject_endpoint(
                     setattr(edge, attr, author.uuid)
         result = bind_canonical_self(kept_nodes, candidate_edges, candidate_index, identity, receipt.self_bind_mode)
     else:
-        # The identity was established before extraction, but there is no usable reference to
-        # persist. Do not fabricate an author fact or attach a node to an unrelated episode.
         result = SelfBindResult(SelfBindOutcome.NO_SELF_CANDIDATE, mode=receipt.self_bind_mode)
 
     # Publish only after transport validation, copies, quarantine, and binding all succeeded.
@@ -1493,16 +1260,7 @@ def _record_self_binding(
     index_map: dict[str, list[int]],
     receipt: CombinedExtractionReceipt,
 ) -> SelfBindResult:
-    """Run the binding decision and record it, without letting telemetry break extraction.
-
-    A refusal is a DECISION, not an absence of one, so it is recorded on the same event as every
-    other outcome. Recording it after the raise -- or not at all -- would make the one outcome an
-    operator most needs to see during an observation window the only invisible one.
-
-    Observe mode must also not fail the episode. Its entire purpose is to measure what enforce
-    would do without changing behavior; propagating the refusal there would make merely observing
-    a durable change in ingest success.
-    """
+    """Run the binding decision and record it, without letting telemetry break extraction."""
     try:
         identity = receipt.self_identity
         if (
@@ -1553,6 +1311,63 @@ def _record_self_binding_decision(
         logger.exception("Failed to record canonical-self binding telemetry")
 
 
+# ---------------------------------------------------------------------------
+# Menhir single-episode extraction hook (fork extension point)
+# ---------------------------------------------------------------------------
+
+
+class _ClientsView:
+    """Per-call clients view whose ``llm_client`` is the sanitizing proxy.
+
+    Everything else delegates to the real clients bundle. This is composition over
+    a per-call argument — the real bundle is never mutated.
+    """
+
+    def __init__(self, clients: Any, llm_client: Any) -> None:
+        self._clients = clients
+        self.llm_client = llm_client
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._clients, name)
+
+
+class _PayloadSanitizingLLMClient:
+    """Per-call LLM-client view that applies Menhir payload sanitation.
+
+    The fork's ``extract_nodes_and_edges`` validates the raw model payload through
+    ``CombinedExtraction``. Menhir's payload policy (marker suppression, echo
+    suppression, endpoint closure, titled-list synthesis, grounding guards) must run
+    BEFORE that validation, so the extraction hook passes the extractor a shallow
+    per-call copy of the clients bundle whose ``llm_client`` is this proxy. The proxy
+    delegates everything to the real client and rewrites only the combined-extraction
+    response dict. This is composition over a per-call argument — no Graphiti symbol
+    is rebound and the real clients bundle is not mutated.
+    """
+
+    def __init__(self, inner: Any, receipt: CombinedExtractionReceipt) -> None:
+        self._clients = inner
+        self._receipt = receipt
+
+    @property
+    def _inner(self) -> Any:
+        return self._clients.llm_client
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    async def generate_response(self, messages: Any, response_model: Any = None, **kwargs: Any) -> Any:
+        response = await self._inner.generate_response(
+            messages, response_model=response_model, **kwargs
+        )
+        if (
+            response_model is not None
+            and getattr(response_model, "__name__", "") == "CombinedExtraction"
+            and isinstance(response, dict)
+        ):
+            return _sanitize_combined_payload(response, self._receipt, self._receipt.episode_text)
+        return response
+
+
 async def _run_graphiti_combined_extraction(
     clients: Any,
     episode: Any,
@@ -1560,29 +1375,23 @@ async def _run_graphiti_combined_extraction(
     entity_types: Any,
     excluded_entity_types: Any,
     custom_extraction_instructions: str | None,
+    receipt: CombinedExtractionReceipt | None = None,
 ) -> tuple[list[Any], list[Any], dict[str, list[int]]]:
-    # Resolved at patch time (see `_patch_graphiti_combined_extraction`) so the patch's own
-    # ImportError guard covers this dependency. Importing it here instead put the replacement
-    # function's real dependency outside the guard: the patch reported success and every
-    # subsequent add_episode raised.
-    extract_nodes_and_edges = _resolve_combined_extractor()
+    """Run combined extraction under the active receipt's Menhir policy."""
+    if receipt is None:
+        receipt = get_extraction_receipt()
+    assert receipt is not None
+    receipt.graphiti_episode_uuid = str(getattr(episode, "uuid", "") or "").strip()
+    receipt.previous_episode_texts = tuple(
+        content
+        for item in (previous_episodes or [])
+        if isinstance((content := getattr(item, "content", None)), str)
+        and content.strip()
+    )
 
-    receipt = _extraction_receipt.get()
-    if receipt is not None:
-        receipt.graphiti_episode_uuid = str(getattr(episode, "uuid", "") or "").strip()
-        receipt.previous_episode_texts = tuple(
-            content
-            for item in (previous_episodes or [])
-            if isinstance((content := getattr(item, "content", None)), str)
-            and content.strip()
-        )
-
-    declared_endpoint = receipt.self_subject_endpoint if receipt is not None else None
+    declared_endpoint = receipt.self_subject_endpoint
     endpoint = declared_endpoint  # Transport exists regardless of grammar or model output.
     if declared_endpoint is not None:
-        # Eligibility is rare and enforce-only.  Pay the bounded graph read up front so a marker
-        # collision in repair context is rejected before even the first model dispatch; the same
-        # cached context is reused if relationless repair is actually needed.
         if receipt.relationless_repair_context_loader is not None:
             receipt.relationless_repair_context_texts = _load_relationless_repair_context(
                 receipt
@@ -1606,16 +1415,25 @@ async def _run_graphiti_combined_extraction(
         _relation_completeness_instructions(endpoint, receipt.episode_text),
         endpoint_instructions,
     )
-    nodes, edges, index_map = await extract_nodes_and_edges(
-        clients,
-        episode,
-        previous_episodes,
-        entity_types=entity_types,
-        excluded_entity_types=excluded_entity_types,
-        custom_extraction_instructions=effective_instructions,
-    )
+
+    def _extract(
+        previous: list[Any],
+        instructions: str | None,
+    ) -> Any:
+        proxied_clients = _ClientsView(
+            clients, _PayloadSanitizingLLMClient(clients, receipt)
+        )
+        return extract_nodes_and_edges(
+            proxied_clients,
+            episode,
+            previous,
+            entity_types=entity_types,
+            excluded_entity_types=excluded_entity_types,
+            custom_extraction_instructions=instructions,
+        )
+
+    nodes, edges, index_map = await _extract(previous_episodes, effective_instructions)
     if _needs_relationless_repair(receipt, edges):
-        assert receipt is not None  # narrowed by _needs_relationless_repair
         receipt.relationless_repair_attempted = True
         receipt.relationless_initial_entity_count = receipt.raw_entity_count
         receipt.relationless_initial_edge_count = receipt.raw_edge_count
@@ -1654,20 +1472,11 @@ async def _run_graphiti_combined_extraction(
             previous_episodes,
             receipt.relationless_repair_context_texts,
         )
-        nodes, edges, index_map = await extract_nodes_and_edges(
-            clients,
-            episode,
-            repair_previous_episodes,
-            entity_types=entity_types,
-            excluded_entity_types=excluded_entity_types,
-            custom_extraction_instructions=repair_instructions,
+        nodes, edges, index_map = await _extract(
+            repair_previous_episodes, repair_instructions
         )
         receipt.relationless_repair_succeeded = bool(edges)
         if not edges:
-            # The repair prompt permits a truly relation-free turn to return both lists empty.
-            # Do not let that second response erase the first response's evidence that content was
-            # extracted and then lost: stamp_and_finalize must still take the visible failure path,
-            # not misreport this as an ordinary zero-extraction success.
             receipt.raw_entity_count = max(
                 receipt.raw_entity_count,
                 receipt.relationless_initial_entity_count,
@@ -1686,14 +1495,10 @@ async def _run_graphiti_combined_extraction(
         )
     if (
         endpoint is not None
-        and receipt is not None
         and _unresolved_author_aliases(nodes, receipt)
     ):
         # Real models can privilege a familiar `user` convention even when a later instruction
-        # declares a safer opaque endpoint. Do not reinterpret that string as provenance. Give the
-        # model one bounded correction with no conflicting Menhir-authored `user` instruction;
-        # final quarantine withholds unresolved references, even beside another valid marker.
-        assert receipt is not None
+        # declares a safer opaque endpoint. One bounded correction.
         logger.warning(
             "Eligible extraction used an undeclared self-like endpoint; running one corrective "
             "retry episode_id=%s",
@@ -1709,206 +1514,60 @@ async def _run_graphiti_combined_extraction(
             previous_episodes,
             receipt.relationless_repair_context_texts,
         )
-        nodes, edges, index_map = await extract_nodes_and_edges(
-            clients,
-            episode,
-            correction_previous_episodes,
-            entity_types=entity_types,
-            excluded_entity_types=excluded_entity_types,
-            custom_extraction_instructions=correction_instructions,
+        nodes, edges, index_map = await _extract(
+            correction_previous_episodes, correction_instructions
         )
-    # Bind the proven human AFTER the relationless-repair branch above: a repair re-runs
-    # extraction and replaces nodes/edges/index_map wholesale, so binding before it would be
-    # discarded. This is the last point where the payload is final and Graphiti has not yet
-    # acquired candidates.
-    if receipt is not None and receipt.self_identity is not None:
+    # Bind the proven human AFTER the repair branches above: a repair re-runs extraction and
+    # replaces nodes/edges/index_map wholesale.
+    if receipt.self_identity is not None:
         receipt.self_bind_result = _record_self_binding(
             nodes, edges, index_map, receipt
         )
 
-    if receipt is not None:
-        receipt.resolved_node_count = len(nodes)
-        receipt.resolved_edge_count = len(edges)
-        surviving_inputs = (
-            receipt.raw_entity_count
-            - receipt.malformed_entities_dropped
-            + receipt.endpoints_synthesized
-        )
-        receipt.orphan_nodes_dropped = max(0, surviving_inputs - len(nodes))
+    receipt.resolved_node_count = len(nodes)
+    receipt.resolved_edge_count = len(edges)
+    surviving_inputs = (
+        receipt.raw_entity_count
+        - receipt.malformed_entities_dropped
+        + receipt.endpoints_synthesized
+    )
+    receipt.orphan_nodes_dropped = max(0, surviving_inputs - len(nodes))
     return nodes, edges, index_map
 
 
-async def _extract_nodes_combined_for_add_episode(
-    clients: Any,
-    episode: Any,
-    previous_episodes: list[Any],
-    entity_types: Any = None,
-    excluded_entity_types: Any = None,
-    custom_extraction_instructions: str | None = None,
-) -> tuple[list[Any], dict[str, list[int]]]:
-    nodes, edges, index_map = await _run_graphiti_combined_extraction(
-        clients,
-        episode,
-        previous_episodes,
-        entity_types,
-        excluded_entity_types,
-        custom_extraction_instructions,
-    )
-    _combined_extraction_cache.set((_episode_cache_key(episode), edges))
-    return nodes, index_map
+class MenhirExtractionHook:
+    """Menhir policy adapter on the fork's ``SingleEpisodeExtractionHook`` seam.
 
-
-async def _extract_edges_from_combined_cache(
-    clients: Any,
-    episode: Any,
-    extracted_nodes: list[Any],
-    previous_episodes: list[Any],
-    edge_type_map: Any,
-    group_id: str,
-    edge_types: Any = None,
-    custom_extraction_instructions: str | None = None,
-) -> list[Any]:
-    cached = _combined_extraction_cache.get()
-    _combined_extraction_cache.set(None)
-    if cached is not None and cached[0] == _episode_cache_key(episode) and not edge_types:
-        return cached[1]
-    if _original_graphiti_extract_edges is None:
-        raise RuntimeError("Graphiti edge extraction fallback was not initialized")
-    return await _original_graphiti_extract_edges(
-        clients,
-        episode,
-        extracted_nodes,
-        previous_episodes,
-        edge_type_map,
-        group_id,
-        edge_types,
-        custom_extraction_instructions,
-    )
-
-
-def _patch_graphiti_combined_extraction() -> None:
-    """Use Graphiti's typed combined extractor for single-episode ``add_episode``.
-
-    Graphiti 0.29 documents the combined extractor as the path that prevents orphaned
-    nodes by extracting entities and their relationships in one response, but its
-    single-episode API still calls the older separate functions. Menhir's repeated
-    extraction gate showed 10/10 capture for the live suburbs/downtown failure class,
-    versus 0/10 for the separate path, with both false-positive controls held flat.
-
-    The edge result is carried across node resolution in a ContextVar so concurrent
-    namespaces cannot see each other's extraction state. Custom edge schemas fall back
-    to Graphiti's original edge extractor because the node-stage signature does not
-    expose those schemas to the combined call.
+    With no active extraction receipt the hook returns ``None`` so the fork's default
+    routing applies untouched. With an active receipt it performs the combined
+    extraction itself under Menhir's payload/instruction/binding policy and supplies
+    the result to the fork through ``SingleEpisodeExtractionResult``; edges then flow
+    into native resolution as ``precomputed_edges``. Episodes with custom edge
+    schemas keep the fork's SEPARATE compatibility route.
     """
 
-    global _original_graphiti_extract_edges
-    global _original_graphiti_extract_nodes
-    global _graphiti_combined_extraction_module
-
-    graphiti_module = None
-    try:
-        import graphiti_core.graphiti as graphiti_module
-
-        if getattr(graphiti_module, "_menhir_combined_extraction_patched", False):
-            return
-        # Prove the replacement's own dependency FIRST, inside this guard. It used to be imported
-        # lazily inside `_run_graphiti_combined_extraction`, where this except clause could not
-        # reach it: the patch logged success and every add_episode then raised.
-        from graphiti_core.utils.maintenance import combined_extraction as _combined_module
-
-        _combined_module.extract_nodes_and_edges  # noqa: B018 - presence check, guarded above
-
-        _original_graphiti_extract_nodes = graphiti_module.extract_nodes
-        _original_graphiti_extract_edges = graphiti_module.extract_edges
-        _graphiti_combined_extraction_module = _combined_module
-        graphiti_module.extract_nodes = _extract_nodes_combined_for_add_episode
-        graphiti_module.extract_edges = _extract_edges_from_combined_cache
-        graphiti_module._menhir_combined_extraction_patched = True
-        logger.debug("Graphiti single-episode combined extraction patch applied")
-    except (ImportError, AttributeError) as exc:
-        # Restore whatever was rebound before the failure, so a partial patch cannot leave
-        # Graphiti pointing at a replacement whose dependency is missing. Without originals to
-        # restore to, the old code left the process with no fallback at all.
-        if graphiti_module is not None:
-            if _original_graphiti_extract_nodes is not None:
-                graphiti_module.extract_nodes = _original_graphiti_extract_nodes
-            if _original_graphiti_extract_edges is not None:
-                graphiti_module.extract_edges = _original_graphiti_extract_edges
-        _original_graphiti_extract_nodes = None
-        _original_graphiti_extract_edges = None
-        _graphiti_combined_extraction_module = None
-        logger.warning(
-            "Failed to patch Graphiti combined extraction; left Graphiti on its own extractors: %s",
-            exc,
+    async def extract_single_episode(self, context: Any) -> Any:
+        from menhir.infrastructure.graphiti_resolution_policy import (
+            start_resolution_telemetry,
         )
 
-
-def _patch_graphiti_combined_extraction_models() -> None:
-    """Harden the combined-extraction response model: sanitize + close edge endpoints.
-
-    Menhir forces single-episode ``add_episode`` through Graphiti's combined extractor
-    (``extract_nodes_and_edges``), whose response model ``CombinedExtraction`` — unlike
-    the separate-path ``ExtractedEntities`` that ``_patch_graphiti_entity_extraction``
-    already hardens — has NO malformed-row tolerance and NO edge-endpoint closure. That
-    left the path Menhir mandates with two live defects:
-
-    1. A single malformed edge row (e.g. missing ``target_entity_name``) fails the whole
-       ``CombinedExtraction(**llm_response)`` construction, zeroing the episode.
-    2. An edge whose endpoint is absent from ``extracted_entities`` (e.g. ``Alice`` in
-       ``Alice -OWNS-> Alice's coins`` when only the possessive was extracted) is dropped
-       by Graphiti, then its now-unconnected partner is orphan-pruned — persisting zero
-       entities from a content-bearing episode.
-
-    This wraps ``CombinedExtraction`` with a ``mode="before"`` validator that drops only
-    malformed rows and materializes missing edge endpoints (generic ``Entity``, gated
-    against pronouns/names absent from the current and previous episode context) BEFORE
-    validation and Graphiti's own resolution.
-
-    The hardening is scoped to Menhir's forced path via the extraction-receipt ContextVar:
-    when no receipt is active (any other combined-extraction caller, e.g. extraction_lab),
-    the validator passes the payload through unchanged. The symbol is replaced in BOTH the
-    prompts module (source of truth) and the maintenance module (which imports it directly),
-    mirroring the dual-module pattern the separate-extraction patch already uses.
-    """
-    try:
-        import graphiti_core.prompts.extract_nodes_and_edges as _ene_module
-        import graphiti_core.utils.maintenance.combined_extraction as _ce_module
-        from pydantic import BaseModel, Field, model_validator
-
-        if getattr(_ce_module, "_menhir_combined_models_patched", False):
-            return
-
-        _CombinedEntity = _ene_module.CombinedEntity
-        _CombinedFact = _ene_module.CombinedFact
-
-        class PatchedCombinedExtraction(BaseModel):
-            # Field declarations are copied VERBATIM from upstream CombinedExtraction: both
-            # required, both described. `model_json_schema()` is what the structured-output path
-            # sends as `response_format.json_schema`, so relaxing these to `default_factory=list`
-            # told the model both arrays were optional and stripped their descriptions -- weakening
-            # the constraint on exactly the local models this patch family exists to compensate for
-            # -- and turned a `{}` or typo'd-key response from a loud upstream ValidationError into
-            # a silent, successful zero-extraction. The tolerance belongs in the `mode="before"`
-            # validator below, which runs ahead of required-field checking and can supply the
-            # defaults without changing the schema handed to the model.
-            extracted_entities: list[_CombinedEntity] = Field(  # type: ignore[valid-type]
-                ..., description="List of extracted entities"
-            )
-            edges: list[_CombinedFact] = Field(  # type: ignore[valid-type]
-                ..., description="List of extracted relationship facts"
-            )
-
-            @model_validator(mode="before")
-            @classmethod
-            def _menhir_sanitize(cls, data: Any) -> Any:
-                receipt = _extraction_receipt.get()
-                if receipt is None:
-                    return data  # not Menhir's forced path — leave payload untouched
-                return _sanitize_combined_payload(data, receipt, receipt.episode_text)
-
-        _ene_module.CombinedExtraction = PatchedCombinedExtraction  # type: ignore[assignment]
-        _ce_module.CombinedExtraction = PatchedCombinedExtraction  # type: ignore[assignment]
-        _ce_module._menhir_combined_models_patched = True  # type: ignore[attr-defined]
-        logger.debug("Graphiti combined-extraction model hardening patch applied")
-    except (ImportError, AttributeError) as exc:
-        logger.warning("Failed to patch Graphiti combined-extraction models: %s", exc)
+        receipt = get_extraction_receipt()
+        if receipt is None:
+            return None
+        if context.edge_types:
+            return ExtractionRoute.SEPARATE
+        start_resolution_telemetry()
+        nodes, edges, index_map = await _run_graphiti_combined_extraction(
+            context.clients,
+            context.episode,
+            context.previous_episodes,
+            context.entity_types,
+            context.excluded_entity_types,
+            context.custom_extraction_instructions,
+            receipt,
+        )
+        return SingleEpisodeExtractionResult(
+            nodes=nodes,
+            edges=edges,
+            node_episode_index_map=index_map,
+        )

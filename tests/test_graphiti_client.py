@@ -10,6 +10,8 @@ from types import ModuleType
 
 import pytest
 from pydantic import BaseModel, Field
+from graphiti_core.nodes import EntityNode
+from graphiti_core.utils.maintenance.node_operations import _extract_entity_attributes
 
 from menhir.config import MemorySettings
 from menhir.infrastructure.graphiti_client import GraphitiClient
@@ -18,7 +20,10 @@ from menhir.infrastructure.graphiti_helpers import (
     _normalize_graphiti_json_payload,
     _raw_preview,
 )
-from menhir.infrastructure.graphiti_llm_patches import _openai_strict_json_schema
+from menhir.infrastructure.graphiti_llm_adapter import (
+    MenhirOpenAIGenericClient,
+    _openai_strict_json_schema,
+)
 import menhir.infrastructure.graphiti_client as graphiti_client_module
 
 
@@ -28,10 +33,11 @@ class _DummyTemporalValue:
 
 
 class _DummyOpenAIGenericClient:
-    def __init__(self, *, config: object, client: object | None = None, max_tokens: int | None = None) -> None:
+    def __init__(self, *, config: object, client: object | None = None, max_tokens: int | None = None, **kwargs: object) -> None:
         self.config = config
         self.client = client
         self.max_tokens = max_tokens
+        self.kwargs = kwargs
 
 
 class _DummyLLMConfig:
@@ -88,6 +94,7 @@ class _DummyGraphiti:
         llm_client: object,
         embedder: object,
         cross_encoder: object | None = None,
+        **hook_kwargs: object,
     ) -> None:
         self.uri = uri
         self.user = user
@@ -96,6 +103,7 @@ class _DummyGraphiti:
         self.llm_client = llm_client
         self.embedder = embedder
         self.cross_encoder = cross_encoder
+        self.hook_kwargs = hook_kwargs
         self.indices_calls = 0
         self.add_episode_calls: list[dict[str, object]] = []
         self.search_calls: list[dict[str, object]] = []
@@ -165,6 +173,7 @@ class _DummyChatCompletions:
         temperature: float,
         max_tokens: int,
         response_format: object,
+        extra_body: object | None = None,
     ) -> _DummyChatResponse:
         self.calls.append(
             {
@@ -173,6 +182,7 @@ class _DummyChatCompletions:
                 "temperature": temperature,
                 "max_tokens": max_tokens,
                 "response_format": response_format,
+                "extra_body": extra_body,
             }
         )
         return self.response
@@ -222,7 +232,7 @@ def _stub_search_config(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_graphiti_client_from_settings_builds_expected_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(graphiti_client_module, "_GRAPHITI_IMPORT_ERROR", None)
     monkeypatch.setattr(graphiti_client_module, "LLMConfig", _DummyLLMConfig)
-    monkeypatch.setattr(graphiti_client_module, "OpenAIGenericClient", _DummyOpenAIGenericClient)
+    monkeypatch.setattr(graphiti_client_module, "MenhirOpenAIGenericClient", _DummyOpenAIGenericClient)
     monkeypatch.setattr(graphiti_client_module, "OpenAIEmbedderConfig", _DummyOpenAIEmbedderConfig)
     monkeypatch.setattr(graphiti_client_module, "OpenAIEmbedder", _DummyOpenAIEmbedder)
     monkeypatch.setattr(graphiti_client_module, "OpenAIRerankerClient", _DummyOpenAIRerankerClient)
@@ -257,7 +267,7 @@ def test_graphiti_client_from_settings_builds_expected_dependencies(monkeypatch:
     assert wrapper.client.llm_client.config.base_url == "http://local-llm:1234/v1"
     assert wrapper.client.llm_client.config.api_key == "local-key"
     assert wrapper.client.llm_client.config.model == "chat-model"
-    assert wrapper.client.llm_client.client is observed_client
+    assert wrapper.client.llm_client.client._inner is observed_client
     assert wrapper.client.embedder.config.base_url == "http://local-llm:1234/v1"
     assert wrapper.client.embedder.config.api_key == "local-key"
     assert wrapper.client.embedder.config.embedding_model == "embed-model"
@@ -279,7 +289,7 @@ def test_graphiti_client_pins_llm_temperature_to_zero(monkeypatch: pytest.Monkey
     """
     monkeypatch.setattr(graphiti_client_module, "_GRAPHITI_IMPORT_ERROR", None)
     monkeypatch.setattr(graphiti_client_module, "LLMConfig", _DummyLLMConfig)
-    monkeypatch.setattr(graphiti_client_module, "OpenAIGenericClient", _DummyOpenAIGenericClient)
+    monkeypatch.setattr(graphiti_client_module, "MenhirOpenAIGenericClient", _DummyOpenAIGenericClient)
     monkeypatch.setattr(graphiti_client_module, "OpenAIEmbedderConfig", _DummyOpenAIEmbedderConfig)
     monkeypatch.setattr(graphiti_client_module, "OpenAIEmbedder", _DummyOpenAIEmbedder)
     monkeypatch.setattr(graphiti_client_module, "OpenAIRerankerClient", _DummyOpenAIRerankerClient)
@@ -312,6 +322,72 @@ def test_graphiti_client_pins_llm_temperature_to_zero(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("base_url", "model", "expected_mode"),
+    [
+        ("https://api.deepseek.com/v1", "chat-model", "json_object"),
+        ("https://llm.example/v1", "deepseek-v4-flash", "json_object"),
+        ("https://llm.example/v1", "chat-model", "json_schema"),
+    ],
+)
+async def test_graphiti_client_uses_compatible_structured_output(
+    monkeypatch: pytest.MonkeyPatch,
+    base_url: str,
+    model: str,
+    expected_mode: str,
+) -> None:
+    """The configured endpoint/model controls the actual fork request format."""
+    monkeypatch.setattr(graphiti_client_module, "_GRAPHITI_IMPORT_ERROR", None)
+    monkeypatch.setattr(graphiti_client_module, "OpenAIEmbedderConfig", _DummyOpenAIEmbedderConfig)
+    monkeypatch.setattr(graphiti_client_module, "OpenAIEmbedder", _DummyOpenAIEmbedder)
+    monkeypatch.setattr(graphiti_client_module, "OpenAIRerankerClient", _DummyOpenAIRerankerClient)
+    monkeypatch.setattr(graphiti_client_module, "Neo4jDriver", _DummyNeo4jDriver)
+    monkeypatch.setattr(graphiti_client_module, "Graphiti", _DummyGraphiti)
+    chat_client = _DummyOpenAIChat(response=_DummyChatResponse(content='{"value": "ok"}'))
+    monkeypatch.setattr(
+        graphiti_client_module,
+        "build_async_openai_client",
+        lambda **_kwargs: type("Client", (), {"chat": chat_client})(),
+    )
+    settings = MemorySettings(
+        graphiti_provider="local",
+        neo4j_uri="bolt://db:7687",
+        neo4j_database="test",
+        neo4j_user="neo",
+        neo4j_password="secret",
+        local_llm_base_url=base_url,
+        local_llm_api_key="key",
+        local_llm_chat_model=model,
+        local_llm_embed_model="embed-model",
+    )
+
+    wrapper = GraphitiClient.from_settings(settings)
+
+    class ResponsePayload(BaseModel):
+        value: str
+
+    response = await wrapper.client.llm_client.generate_response(
+        [
+            _DummyOpenAIMessage(role="system", content="Extract a value."),
+            _DummyOpenAIMessage(role="user", content="hello"),
+        ],
+        response_model=ResponsePayload,
+    )
+
+    assert response == {"value": "ok"}
+    request = chat_client.completions.calls[0]
+    assert request["response_format"]["type"] == expected_mode
+    if expected_mode == "json_object":
+        assert "Respond with a JSON object in the following format" in request["messages"][-1]["content"]
+        assert '"value"' in request["messages"][-1]["content"]
+        assert request["extra_body"] == {"thinking": {"type": "disabled"}}
+    else:
+        assert "Respond with a JSON object in the following format" not in request["messages"][-1]["content"]
+        assert request["extra_body"] is None
+
+
+@pytest.mark.unit
 def test_graphiti_client_rejects_non_openai_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(graphiti_client_module, "_GRAPHITI_IMPORT_ERROR", None)
 
@@ -325,7 +401,7 @@ def test_graphiti_client_rejects_non_openai_provider(monkeypatch: pytest.MonkeyP
 def test_graphiti_client_supports_openai_llm_with_local_embedder(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(graphiti_client_module, "_GRAPHITI_IMPORT_ERROR", None)
     monkeypatch.setattr(graphiti_client_module, "LLMConfig", _DummyLLMConfig)
-    monkeypatch.setattr(graphiti_client_module, "OpenAIGenericClient", _DummyOpenAIGenericClient)
+    monkeypatch.setattr(graphiti_client_module, "MenhirOpenAIGenericClient", _DummyOpenAIGenericClient)
     monkeypatch.setattr(graphiti_client_module, "OpenAIEmbedderConfig", _DummyOpenAIEmbedderConfig)
     monkeypatch.setattr(graphiti_client_module, "OpenAIEmbedder", _DummyOpenAIEmbedder)
     monkeypatch.setattr(graphiti_client_module, "OpenAIRerankerClient", _DummyOpenAIRerankerClient)
@@ -370,7 +446,7 @@ def test_graphiti_client_supports_openai_llm_with_local_embedder(monkeypatch: py
 def test_graphiti_client_sets_openai_embedding_dimension(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(graphiti_client_module, "_GRAPHITI_IMPORT_ERROR", None)
     monkeypatch.setattr(graphiti_client_module, "LLMConfig", _DummyLLMConfig)
-    monkeypatch.setattr(graphiti_client_module, "OpenAIGenericClient", _DummyOpenAIGenericClient)
+    monkeypatch.setattr(graphiti_client_module, "MenhirOpenAIGenericClient", _DummyOpenAIGenericClient)
     monkeypatch.setattr(graphiti_client_module, "OpenAIEmbedderConfig", _DummyOpenAIEmbedderConfig)
     monkeypatch.setattr(graphiti_client_module, "OpenAIEmbedder", _DummyOpenAIEmbedder)
     monkeypatch.setattr(graphiti_client_module, "OpenAIRerankerClient", _DummyOpenAIRerankerClient)
@@ -391,15 +467,6 @@ def test_graphiti_client_sets_openai_embedding_dimension(monkeypatch: pytest.Mon
     )
 
     assert wrapper.client.embedder.config.embedding_dim == 1536
-
-
-@pytest.mark.unit
-def test_safe_to_prompt_json_serializes_temporal_values() -> None:
-    payload = {"created_at": _DummyTemporalValue()}
-
-    result = graphiti_client_module._safe_to_prompt_json(payload)
-
-    assert result == '{"created_at": "2026-03-06T12:00:00+00:00"}'
 
 
 @pytest.mark.unit
@@ -443,35 +510,75 @@ def test_openai_structured_output_schema_is_strict_at_every_object() -> None:
     assert nested["required"] == ["name", "tags"]
 
 
+def _make_adapter_client(content: str) -> tuple[MenhirOpenAIGenericClient, _DummyChatCompletions]:
+    """Build a real MenhirOpenAIGenericClient over a dummy chat transport."""
+    chat_client = _DummyOpenAIChat(response=_DummyChatResponse(content=content))
+    client = type("Client", (), {"chat": chat_client})()
+    llm_client = MenhirOpenAIGenericClient(
+        config=None,
+        client=client,
+        max_tokens=128,
+    )
+    llm_client.temperature = 0.0
+    llm_client.model = "chat-model"
+    return llm_client, chat_client.completions
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_graphiti_openai_generic_client_sends_strict_response_format(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_menhir_client_preserves_attribute_extraction_preamble_on_retry() -> None:
+    """Typed node/edge attribute calls use the fork's keyword-only contract."""
+    class ResponsePayload(BaseModel):
+        value: str
+
+    llm_client, completions = _make_adapter_client('{"value": "ok"}')
+    requests: list[dict[str, object]] = []
+
+    async def flaky_create(**kwargs: object) -> _DummyChatResponse:
+        requests.append(kwargs)
+        if len(requests) == 1:
+            return _DummyChatResponse(content="{broken")
+        return _DummyChatResponse(content='{"value": "ok"}')
+
+    completions.create = flaky_create  # type: ignore[method-assign]
+    response = await llm_client.generate_response(
+        [
+            _DummyOpenAIMessage(role="system", content="Extract attributes."),
+            _DummyOpenAIMessage(role="user", content="person: Ada"),
+        ],
+        response_model=ResponsePayload,
+        attribute_extraction=True,
+    )
+
+    assert response == {"value": "ok"}
+    assert len(requests) == 2
+    for request in requests:
+        assert "<<graphiti.attr_extraction.preamble.v1>>" in request["messages"][0]["content"]
+    assert "Retry 1/" in requests[1]["messages"][-1]["content"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_typed_node_attribute_extraction_uses_menhir_adapter() -> None:
+    class PersonAttributes(BaseModel):
+        favorite_food: str
+
+    llm_client, completions = _make_adapter_client('{"favorite_food": "sushi"}')
+    node = EntityNode(name="Ada", group_id="group", labels=["Entity", "Person"])
+
+    attributes = await _extract_entity_attributes(llm_client, node, None, None, PersonAttributes)
+
+    assert attributes == {"favorite_food": "sushi"}
+    assert "<<graphiti.attr_extraction.preamble.v1>>" in completions.calls[0]["messages"][0]["content"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_menhir_client_sends_strict_response_format() -> None:
     class ResponsePayload(BaseModel):
         value: str = "default"
 
-    class _PatchedOpenAIGenericClient:
-        def __init__(self, *, config: object, client: object | None = None) -> None:
-            self.config = config
-            self.client = client
-            self.max_tokens = 128
-            self.model = "chat-model"
-            self.temperature = 0.0
-
-        def _clean_input(self, value: str) -> str:
-            return value
-
-    chat_client = _DummyOpenAIChat(
-        response=_DummyChatResponse(content='{"value": "ok"}')
-    )
-    client = type("Client", (), {"chat": chat_client})()
-    monkeypatch.setattr(
-        graphiti_client_module, "OpenAIGenericClient", _PatchedOpenAIGenericClient
-    )
-    monkeypatch.delattr(_PatchedOpenAIGenericClient, "_yawn_patched", raising=False)
-    graphiti_client_module._patch_graphiti_openai_generic_client()
-    llm_client = _PatchedOpenAIGenericClient(config=object(), client=client)
+    llm_client, completions = _make_adapter_client('{"value": "ok"}')
 
     response = await llm_client._generate_response(
         messages=[_DummyOpenAIMessage(role="user", content="hello")],
@@ -480,7 +587,7 @@ async def test_graphiti_openai_generic_client_sends_strict_response_format(
     )
 
     assert response == {"value": "ok"}
-    response_format = chat_client.completions.calls[0]["response_format"]
+    response_format = completions.calls[0]["response_format"]
     assert response_format["type"] == "json_schema"
     assert response_format["json_schema"]["strict"] is True
     assert response_format["json_schema"]["schema"]["additionalProperties"] is False
@@ -489,37 +596,15 @@ async def test_graphiti_openai_generic_client_sends_strict_response_format(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_graphiti_openai_generic_client_logs_request_and_response(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_menhir_request_guard_logs_request_and_response(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    class _PatchedOpenAIGenericClient:
-        def __init__(self, *, config: object, client: object | None = None, max_tokens: int | None = None) -> None:
-            self.config = config
-            self.client = client
-            self.max_tokens = max_tokens or 128
-            self.model = "chat-model"
-            self.temperature = 0.1
+    from menhir.infrastructure.graphiti_llm_adapter import build_menhir_request_guard
 
-        def _clean_input(self, value: str) -> str:
-            return value
+    llm_client, _completions = _make_adapter_client('{"ok": true}')
+    llm_client.request_guard = build_menhir_request_guard(100000)
 
-    class _PatchedChatClient:
-        def __init__(self) -> None:
-            self.chat = _DummyOpenAIChat(response=_DummyChatResponse(content='{"ok": true}'))
-
-    monkeypatch.setattr(graphiti_client_module, "OpenAIGenericClient", _PatchedOpenAIGenericClient)
-    monkeypatch.delattr(_PatchedOpenAIGenericClient, "_generate_response", raising=False)
-    monkeypatch.delattr(_PatchedOpenAIGenericClient, "_yawn_patched", raising=False)
-    graphiti_client_module._patch_graphiti_openai_generic_client()
-
-    llm_client = _PatchedOpenAIGenericClient(
-        config=object(),
-        client=_PatchedChatClient(),
-        max_tokens=128,
-    )
-
-    with caplog.at_level(logging.DEBUG):
+    with caplog.at_level(logging.INFO):
         response = await llm_client._generate_response(
             messages=[_DummyOpenAIMessage(role="user", content="hello")],
             max_tokens=64,
@@ -532,88 +617,48 @@ async def test_graphiti_openai_generic_client_logs_request_and_response(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_graphiti_openai_generic_client_logs_parse_failure(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_menhir_request_guard_attaches_parse_failure_diagnostics(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    class _PatchedOpenAIGenericClient:
-        def __init__(self, *, config: object, client: object | None = None, max_tokens: int | None = None) -> None:
-            self.config = config
-            self.client = client
-            self.max_tokens = max_tokens or 128
-            self.model = "chat-model"
-            self.temperature = 0.1
+    from menhir.infrastructure.graphiti_llm_adapter import build_menhir_request_guard
 
-        def _clean_input(self, value: str) -> str:
-            return value
+    llm_client, _completions = _make_adapter_client("bad-json")
+    llm_client.request_guard = build_menhir_request_guard(100000)
 
-    class _PatchedChatClient:
-        def __init__(self) -> None:
-            self.chat = _DummyOpenAIChat(response=_DummyChatResponse(content="bad-json"))
-
-    monkeypatch.setattr(graphiti_client_module, "OpenAIGenericClient", _PatchedOpenAIGenericClient)
-    monkeypatch.delattr(_PatchedOpenAIGenericClient, "_generate_response", raising=False)
-    monkeypatch.delattr(_PatchedOpenAIGenericClient, "_yawn_patched", raising=False)
-    graphiti_client_module._patch_graphiti_openai_generic_client()
-
-    llm_client = _PatchedOpenAIGenericClient(
-        config=object(),
-        client=_PatchedChatClient(),
-        max_tokens=128,
-    )
-
-    with caplog.at_level(logging.DEBUG), pytest.raises(ValueError, match="not valid JSON") as exc_info:
+    with caplog.at_level(logging.INFO), pytest.raises(Exception, match="Expecting value") as exc_info:
         await llm_client._generate_response(
             messages=[_DummyOpenAIMessage(role="user", content="hello")],
             max_tokens=64,
         )
 
-    assert "Graphiti OpenAI-compatible request begin" in caplog.text
-    assert "Graphiti OpenAI-compatible response parse failure" in caplog.text
-    assert exc_info.value.menhir_failure_details["graphiti_prompt_preview"] == "user: hello"
-    assert exc_info.value.menhir_failure_details["graphiti_raw_response_preview"] == "bad-json"
+    assert "Graphiti OpenAI-compatible request failed" in caplog.text
+    details = getattr(exc_info.value, "menhir_failure_details", None)
+    assert details is not None
+    assert details["graphiti_failure_phase"] == "provider_error"
+    assert details["graphiti_message_count"] == 1
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_graphiti_openai_generic_client_attaches_empty_response_diagnostics(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class _PatchedOpenAIGenericClient:
-        def __init__(self, *, config: object, client: object | None = None, max_tokens: int | None = None) -> None:
-            self.config = config
-            self.client = client
-            self.max_tokens = max_tokens or 128
-            self.model = "chat-model"
-            self.temperature = 0.1
+async def test_menhir_request_guard_attaches_empty_response_diagnostics() -> None:
+    from menhir.infrastructure.graphiti_llm_adapter import build_menhir_request_guard
 
-        def _clean_input(self, value: str) -> str:
-            return value
+    llm_client, _completions = _make_adapter_client("")
+    llm_client.request_guard = build_menhir_request_guard(100000)
 
-    class _PatchedChatClient:
-        def __init__(self) -> None:
-            self.chat = _DummyOpenAIChat(response=_DummyChatResponse(content="   "))
-
-    monkeypatch.setattr(graphiti_client_module, "OpenAIGenericClient", _PatchedOpenAIGenericClient)
-    monkeypatch.delattr(_PatchedOpenAIGenericClient, "_generate_response", raising=False)
-    monkeypatch.delattr(_PatchedOpenAIGenericClient, "_yawn_patched", raising=False)
-    graphiti_client_module._patch_graphiti_openai_generic_client()
-
-    llm_client = _PatchedOpenAIGenericClient(
-        config=object(),
-        client=_PatchedChatClient(),
-        max_tokens=128,
-    )
-
-    with pytest.raises(ValueError, match="empty response") as exc_info:
+    with pytest.raises(Exception, match="empty response") as exc_info:
         await llm_client._generate_response(
-            messages=[_DummyOpenAIMessage(role="system", content="sys"), _DummyOpenAIMessage(role="user", content="hello")],
+            messages=[
+                _DummyOpenAIMessage(role="system", content="sys"),
+                _DummyOpenAIMessage(role="user", content="hello"),
+            ],
             max_tokens=64,
         )
 
-    assert exc_info.value.menhir_failure_details["graphiti_prompt_preview"] == "system: sys | user: hello"
-    assert exc_info.value.menhir_failure_details["graphiti_raw_response_preview"] == ""
-    assert exc_info.value.menhir_failure_details["graphiti_raw_response_length"] == 3
+    details = getattr(exc_info.value, "menhir_failure_details", None)
+    assert details is not None
+    assert details["graphiti_failure_phase"] == "provider_error"
+    assert details["graphiti_message_count"] == 2
 
 
 @pytest.mark.unit

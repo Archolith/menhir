@@ -39,7 +39,7 @@ from menhir.infrastructure.telemetry import (
 )
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure.circuit_breaker import CircuitOpenError
-from menhir.infrastructure.graphiti_patches import clear_extraction_receipt
+from menhir.infrastructure.graphiti_extraction_policy import clear_extraction_receipt
 from menhir.services.enrichment_steps import (
     EnrichmentContext,
     add_episode_with_timeout,
