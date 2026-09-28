@@ -75,7 +75,9 @@ class _StubGraphAdapter:
     def list_structure_projects(self) -> list[dict[str, str]]:
         return self._projects
 
-    def get_scan_fingerprint(self, project_name: str) -> str | None:
+    def get_scan_fingerprint(
+        self, project_name: str, *, project_id: str | None = None
+    ) -> str | None:
         return self._fingerprints.get(project_name)
 
     def begin_structure_scan(self, claim: object) -> int:

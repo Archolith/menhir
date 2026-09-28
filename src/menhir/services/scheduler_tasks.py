@@ -864,7 +864,9 @@ async def refresh_structure_graphs(
         scan.identity_generation = claim.generation
         scan.scan_generation = scan_generation
 
-        stored_fp = await asyncio.to_thread(graph_adapter.get_scan_fingerprint, name)
+        stored_fp = await asyncio.to_thread(
+            graph_adapter.get_scan_fingerprint, name, project_id=claim.project_id
+        )
         if stored_fp and stored_fp == scan.scan_fingerprint:
             try:
                 refresh = getattr(graph_adapter, "refresh_indexed_binding", None)

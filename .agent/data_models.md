@@ -361,6 +361,10 @@ mutation and prune. A missing or superseded scan generation refuses before chang
 an interrupted transaction leaves the previous fingerprint, coverage, entities, and edges.
 Traversal, stat, or required-file read failures abort the scan before publication. A deliberate
 2,000-file cap records partial coverage and cannot authorize pruning unseen paths.
+Partial scans also preserve unseen symbols from older file rows without timestamps. Skipped
+fingerprint reads and binding refreshes match the claimed project identity, so one project's
+scan cannot refresh another same-name project. Transported scan payloads must include
+consistent discovered, eligible, and indexed counts.
 
 Legacy compatibility: a small pre-`structure_role` corpus still exists in production. A row is
 treated as structural on bootstrap read paths when its source contains `project-scan` and its
@@ -414,8 +418,10 @@ is given and always reports the TODO's namespace.
 **Multi-repo scoping**: pass `structure_project` when a TODO's `code_ref` names a file in a
 multi-repo workspace. Menhir normalizes each declared location, checks visible structural
 files, and creates `REFERENCES_FILE` only when exactly one permitted file matches that
-location. Omitted project, duplicate legacy file nodes, unknown project, or conflicting
-project declarations leave that location unlinked with an explicit reason. Each location has
+location. An omitted project can resolve when exactly one visible file matches; the chosen
+project and canonical file path are then stored on `TodoLocation`. Ambiguous matches, duplicate
+legacy file nodes, unknown projects, or conflicting project declarations leave that location
+unlinked with an explicit reason. Each location has
 its own result; one ambiguous path does not prevent another unambiguous path from linking.
 Existing TODO edges are not silently rewritten by this rule.
 

@@ -2,24 +2,24 @@
 
 - `src/menhir/infrastructure/project_scanner.py`: refuse unreadable traversal, stat, and source reads before publication; bump the scanner fingerprint schema.
 - `src/menhir/infrastructure/structure_write_fence.py`: issue graph-backed scan generations and lock each project during transactional publication.
-- `src/menhir/infrastructure/structure_queries.py`: publish scan fingerprint, coverage, and indexed revision only after the structural transaction's entity and edge writes succeed.
+- `src/menhir/infrastructure/structure_queries.py`: publish scan metadata last, preserve unseen legacy symbols on capped scans, and scope fingerprint reads and binding refreshes to project identity.
 - `src/menhir/infrastructure/memory_graph_adapter.py`: validate the latest scan generation and publish structure, binding refreshes, and document writes under the project transaction lock.
 - `src/menhir/core/backend_runtime_data_ops.py`: mint scan generations before manual and detached symbol scans and carry them into skipped binding refreshes.
-- `src/menhir/core/backend_shared.py`: preserve the scan generation through serialized payloads.
+- `src/menhir/core/backend_shared.py`: preserve scan generations through serialized payloads and reject missing or inconsistent coverage counts before publication.
 - `src/menhir/services/scheduler_tasks.py`: settle identity and mint the generation before watcher traversal; report scan and binding failures.
 - `src/menhir/services/scheduler_protocols.py`: describe the watcher scan-generation and binding-refresh methods.
 - `src/menhir/domain/work_artifact.py`: require a replacement for `SUPERSEDED` and validate known lifecycle states.
 - `src/menhir/infrastructure/work_artifact_repository.py`: lock artifact updates and compare observed lifecycle state before applying transitions or supersession, including legacy null namespaces.
 - `src/menhir/services/artifact_reconciliation_service.py`: leave unresolved source declarations in place when a superseded registration has no replacement.
 - `src/menhir/mcp/tools/ops/transition_artifact.py`: explain stale transitions and the dedicated supersession operation.
-- `src/menhir/infrastructure/todo_repository.py`: resolve normalized locations against unique visible files in the edge mutation; return all linked and unresolved locations.
+- `src/menhir/infrastructure/todo_repository.py`: link unique visible files, persist each chosen project and canonical path, and return linked and unresolved locations.
 - `src/menhir/mcp/tools/ops/add_todo.py`: report linked files and unresolved location reasons.
 - `src/menhir/mcp/tools/ops/get_todo.py`: display every linked file on a TODO read.
 - `src/menhir/mcp/tools/recall/query_structure.py`: qualify empty symbols, dependencies, documents, and affected-test answers by index coverage.
 - `tests/test_project_scanner.py`: traversal, stat, and required-read refusal regressions.
 - `tests/test_query_structure_tool.py`: complete, partial, and legacy-unknown negative-answer regressions.
 - `tests/test_structure_watcher.py`, `tests/test_beacon_provider.py`, and `tests/infrastructure/test_cf257_detached_write_identity.py`: cover the new watcher and detached-write ordering contract.
-- `tests/infrastructure/test_gateb_structure_publication_online.py`: real-Neo4j late-scan, rollback, binding, and same-project serialization regressions.
+- `tests/infrastructure/test_gateb_structure_publication_online.py`: real-Neo4j stale-scan, rollback, same-project serialization, capped legacy-symbol, cross-identity refresh, and injected-traversal regressions.
 - `tests/test_work_artifact.py`, `tests/test_artifact_tools.py`, `tests/test_artifact_source_reconciliation_io.py`, and `tests/test_cf48_domain_owns_artifact_predicates.py`: artifact lifecycle and unresolved-import regressions.
 - `tests/test_work_artifact_online.py`: real-Neo4j artifact transition, supersession, and rollback races.
 - `tests/test_todo.py` and `tests/test_todo_file_link_online.py`: unique, ambiguous, multi-location, namespace, and restart link regressions.

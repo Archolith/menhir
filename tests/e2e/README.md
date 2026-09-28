@@ -35,6 +35,9 @@ and verifies both package integrity and Menhir's runtime check reject it by name
 The namespace-delete limit and structural scan cap have separate criteria: the former
 checks `delete_namespace(max_nodes=1)` refuses without deleting nodes, while the latter
 indexes a file, exceeds the scanner's 2,000-file cap, and verifies the older file survives.
+An unreadable-directory regression is covered by deterministic scanner fault injection over
+an already indexed disposable graph. An OS-level denied-directory E2E is still a platform
+evidence gap; Windows ACL and POSIX permission behavior need separate release-platform runs.
 
 A scaffolded lane is **not** a silent skip. `_harness/pending.py` writes a full evidence
 directory recording every acceptance criterion as unproven, then skips — so

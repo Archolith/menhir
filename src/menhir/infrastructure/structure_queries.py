@@ -188,8 +188,12 @@ class StructureGraphWriter:
             if changed_paths:
                 self._increment_heat(scan.name, list(changed_paths))
         else:
-            # First scan — no stored mtimes yet, process everything
-            changed_paths = None
+            # A first complete scan can replace all symbols. A partial scan cannot: older
+            # symbols may lack file_mtime, so an empty mtime map does not prove that no
+            # previously indexed files exist outside this capped view.
+            changed_paths = (
+                {entry.rel_path for entry in scan.files} if scan.partial_index else None
+            )
             deleted_paths = set()
 
         # 1. Project entity
@@ -639,14 +643,17 @@ class StructureGraphWriter:
             if str(r.get("path") or "") in variants
         }
 
-    def get_scan_fingerprint(self, project_name: str) -> str | None:
+    def get_scan_fingerprint(
+        self, project_name: str, *, project_id: str | None = None
+    ) -> str | None:
         """Read stored fingerprint for a project entity."""
         rows = self.neo4j.execute(
             """
             MATCH (n:Entity {structure_project: $name, structure_role: 'project'})
+            WHERE $project_id IS NULL OR n.structure_project_id = $project_id
             RETURN n.scan_fingerprint AS fp
             """,
-            {"name": project_name},
+            {"name": project_name, "project_id": project_id},
         )
         if rows and rows[0].get("fp"):
             return str(rows[0]["fp"])
@@ -790,7 +797,8 @@ class StructureGraphWriter:
         }
 
     def refresh_indexed_binding(
-        self, project_name: str, fingerprint: str, commit: str, repository: str, dirty: bool
+        self, project_name: str, fingerprint: str, commit: str, repository: str, dirty: bool,
+        *, project_id: str,
     ) -> bool:
         """Update only the evidence binding when an unchanged scan was skipped.
 
@@ -804,7 +812,8 @@ class StructureGraphWriter:
         rows = self.neo4j.execute(
             """
             MATCH (n:Entity {structure_project: $name, structure_role: 'project'})
-            WHERE n.scan_fingerprint = $fingerprint
+            WHERE n.structure_project_id = $project_id
+              AND n.scan_fingerprint = $fingerprint
               AND (coalesce(n.indexed_commit, '') <> $commit
                OR coalesce(n.indexed_repository, '') <> $repository
                OR n.indexed_dirty IS NULL OR n.indexed_dirty <> $dirty)
@@ -815,6 +824,7 @@ class StructureGraphWriter:
             """,
             {
                 "name": project_name,
+                "project_id": project_id,
                 "fingerprint": fingerprint,
                 "commit": commit,
                 "repository": repository,

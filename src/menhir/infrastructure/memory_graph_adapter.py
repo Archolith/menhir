@@ -1369,8 +1369,10 @@ class MemoryGraphAdapter:
         finally:
             release_structure_writer(self.neo4j, handle)
 
-    def get_scan_fingerprint(self, project_name: str) -> str | None:
-        return self._structure.get_scan_fingerprint(project_name)
+    def get_scan_fingerprint(
+        self, project_name: str, *, project_id: str | None = None
+    ) -> str | None:
+        return self._structure.get_scan_fingerprint(project_name, project_id=project_id)
 
     def get_beacon_evidence_guard_by_id(self, project_id: str) -> dict[str, Any]:
         return self._structure.get_beacon_evidence_guard_by_id(project_id)
@@ -1393,6 +1395,7 @@ class MemoryGraphAdapter:
                 lock_structure_project(tx, claim, scan_generation=scan_generation)
                 return StructureGraphWriter(tx).refresh_indexed_binding(
                     project_name, fingerprint, commit, repository, dirty,
+                    project_id=claim.project_id,
                 )
 
             return self.neo4j.execute_write(_refresh)

@@ -92,7 +92,9 @@ class SchedulerGraphAdapter(Protocol):
     def list_orphan_structure_projects(self) -> list[dict[str, Any]]:
         ...
 
-    def get_scan_fingerprint(self, project_name: str) -> str | None:
+    def get_scan_fingerprint(
+        self, project_name: str, *, project_id: str | None = None
+    ) -> str | None:
         ...
 
     def begin_structure_scan(self, claim: Any) -> int:

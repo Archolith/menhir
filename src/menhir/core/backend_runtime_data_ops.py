@@ -650,7 +650,8 @@ class RuntimeProviderDataOpsMixin:
 
         if not force:
             stored_fp = await self._off_loop(
-                self.built.graph_adapter.get_scan_fingerprint, project_name
+                self.built.graph_adapter.get_scan_fingerprint, project_name,
+                project_id=claim.project_id,
             )
             if stored_fp and stored_fp == scan.scan_fingerprint:
                 # Same files, possibly a new commit: keep the evidence binding current.

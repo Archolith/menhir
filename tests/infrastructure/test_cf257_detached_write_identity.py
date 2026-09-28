@@ -77,7 +77,7 @@ def ops(monkeypatch, tmp_path):
     instance.built = SimpleNamespace(
         graph_adapter=SimpleNamespace(
             begin_structure_scan=lambda claim: 1,
-            get_scan_fingerprint=lambda name: None,
+            get_scan_fingerprint=lambda name, **kwargs: None,
             get_project_root_path=lambda name: None,
             write_project_structure=lambda scan, s, u: written.append(scan.name) or {},
             neo4j=_Neo4j(),
@@ -367,6 +367,7 @@ def _payload(root, **extra):
         "directories": [], "files": [], "dependencies": [], "endpoints": [],
         "imports": [], "test_edges": [], "cross_project_refs": [],
         "symbols": [], "call_edges": [], "scan_fingerprint": "fp",
+        "files_discovered": 0, "files_eligible": 0, "files_indexed": 0,
         # #98: the caller must now present the claim generation it settled under -- the handler
         # used to fill this in from the binding it was about to be checked against, which made
         # the compare-and-set compare a value with itself. These cases are about ID resolution,

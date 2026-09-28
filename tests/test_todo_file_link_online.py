@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 
+from menhir.infrastructure.structure_queries import StructureGraphWriter
 from menhir.infrastructure.todo_repository import TodoRepository
 
 pytestmark = [pytest.mark.online, pytest.mark.timeout(60)]
@@ -69,6 +70,25 @@ def test_ambiguous_path_stays_unlinked_but_explicit_project_links_one(
     assert _edges(graph, explicit["uuid"]) == [
         {"uuid": alpha_uuid, "project": "beta", "path": "src/main.py"}
     ]
+
+
+def test_resolved_unqualified_location_keeps_its_project_after_another_project_appears(
+    test_neo4j_repo: Any,
+) -> None:
+    graph = test_neo4j_repo
+    _file(graph, "alpha", "src/main.py")
+    repo = TodoRepository(graph)
+    created = repo.create_todo(content="alpha work", code_ref="src/main.py:7")
+    assert created["locations"][0]["project"] == "alpha"
+    assert _locations(graph, created["uuid"])[0]["project"] == "alpha"
+
+    _file(graph, "beta", "src/main.py")
+    assert StructureGraphWriter(graph).query_blast_radius(
+        "beta", ["src/main.py"]
+    )["open_todos"] == []
+    assert [row["uuid"] for row in StructureGraphWriter(graph).query_blast_radius(
+        "alpha", ["src/main.py"]
+    )["open_todos"]] == [created["uuid"]]
 
 
 def test_unknown_and_conflicting_projects_never_fall_back(test_neo4j_repo: Any) -> None:

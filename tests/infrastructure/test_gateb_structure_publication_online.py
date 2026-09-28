@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import threading
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +13,7 @@ from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.project_identity_binding import binding_host, root_key_for
 from menhir.infrastructure.project_scanner import FileEntry, ProjectScanResult
+from menhir.infrastructure.project_scanner import ProjectScanner
 from menhir.infrastructure.structure_queries import StructureGraphWriter
 from menhir.infrastructure.structure_write_fence import IdentityClaim, StaleStructureScan
 
@@ -141,6 +143,85 @@ def test_unchanged_fingerprint_refresh_rejects_stale_scan(graph):
         "RETURN p.indexed_commit AS commit", {"name": name},
     )
     assert rows == [{"commit": "new-commit"}]
+
+
+def test_partial_scan_keeps_unseen_legacy_symbols_without_file_mtimes(graph):
+    repo, adapter, name, root, claim = graph
+    initial = adapter.begin_structure_scan(claim)
+    adapter.write_project_structure(
+        _scan(name, root, claim, "initial", "src/old.py", initial), "s", "u",
+    )
+    repo.execute(
+        """MATCH (f:Entity {structure_project: $name, structure_path: 'src/old.py'})
+        REMOVE f.file_mtime
+        CREATE (sym:Entity {structure_project: $name, structure_project_id: $id,
+          structure_role: 'symbol', structure_path: 'src/old.py::old', name: 'old'})
+        CREATE (f)-[:DEFINES]->(sym)""",
+        {"name": name, "id": claim.project_id},
+    )
+    token = adapter.begin_structure_scan(claim)
+    partial = _scan(name, root, claim, "partial", "src/new.py", token)
+    partial.files_discovered = 2
+    partial.files_eligible = 2
+    partial.files_indexed = 1
+    assert partial.partial_index is True
+    adapter.write_project_structure(partial, "s", "u")
+
+    rows = repo.execute(
+        """MATCH (f:Entity {structure_project: $name, structure_path: 'src/old.py'})
+        -[:DEFINES]->(sym:Entity {structure_role: 'symbol'})
+        RETURN sym.structure_path AS path""",
+        {"name": name},
+    )
+    assert rows == [{"path": "src/old.py::old"}]
+
+
+def test_binding_refresh_cannot_update_a_same_name_other_identity(graph):
+    repo, adapter, name, root, claim = graph
+    repo.execute(
+        """CREATE (:Entity {structure_project: $name, structure_role: 'project',
+          structure_path: '.', structure_project_id: 'other-id',
+          scan_fingerprint: 'same', indexed_commit: 'old-commit'})""",
+        {"name": name},
+    )
+    assert adapter.get_scan_fingerprint(name, project_id=claim.project_id) is None
+    token = adapter.begin_structure_scan(claim)
+    assert adapter.refresh_indexed_binding(
+        name, "same", "wrong-commit", "origin", False,
+        claim=claim, scan_generation=token,
+    ) is False
+    assert repo.execute(
+        """MATCH (p:Entity {structure_project: $name, structure_role: 'project'})
+        RETURN p.indexed_commit AS commit""", {"name": name},
+    ) == [{"commit": "old-commit"}]
+
+
+def test_traversal_failure_after_prior_index_leaves_graph_unchanged(
+    graph, tmp_path: Path, monkeypatch,
+):
+    from menhir.infrastructure import project_scanner as scanner_module
+
+    repo, adapter, name, root, claim = graph
+    initial = adapter.begin_structure_scan(claim)
+    adapter.write_project_structure(
+        _scan(name, root, claim, "initial", "src/old.py", initial), "s", "u",
+    )
+    before = _state(repo, name)
+    source_root = tmp_path / name
+    source_root.mkdir()
+    (source_root / "src").mkdir()
+    (source_root / "src" / "new.py").write_text("pass\n", encoding="utf-8")
+    adapter.begin_structure_scan(claim)
+
+    def denied_walk(_root, *, onerror):
+        onerror(PermissionError("injected unreadable directory"))
+        return []
+
+    with monkeypatch.context() as patch:
+        patch.setattr(scanner_module.os, "walk", denied_walk)
+        with pytest.raises(OSError, match="could not traverse"):
+            ProjectScanner().scan(source_root, name)
+    assert _state(repo, name) == before
 
 
 def test_same_project_token_issuance_waits_for_publication_transaction(graph, monkeypatch):

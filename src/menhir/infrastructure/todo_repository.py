@@ -194,6 +194,10 @@ class TodoRepository:
             WITH t, row, candidates, size(candidates) AS candidate_count
             CREATE (t)-[:HAS_LOCATION]->(l:TodoLocation)
             SET l += row,
+                l.project = CASE WHEN candidate_count = 1
+                    THEN head(candidates).structure_project ELSE row.project END,
+                l.path = CASE WHEN candidate_count = 1
+                    THEN head(candidates).structure_path ELSE row.path END,
                 l.resolution_status = CASE
                     WHEN row.resolution_status <> 'resolved' THEN row.resolution_status
                     WHEN candidate_count = 1 THEN 'resolved'
@@ -205,6 +209,8 @@ class TodoRepository:
             FOREACH (chosen IN CASE WHEN candidate_count = 1 THEN candidates ELSE [] END |
                 MERGE (t)-[:REFERENCES_FILE]->(chosen))
             RETURN row.ordinal AS ordinal,
+                   l.project AS project,
+                   l.path AS path,
                    l.resolution_status AS resolution_status,
                    l.unresolved_reason AS unresolved_reason,
                    candidate_count AS candidate_count,
@@ -225,6 +231,10 @@ class TodoRepository:
                 continue
             row["resolution_status"] = outcome["resolution_status"]
             row["unresolved_reason"] = outcome.get("unresolved_reason")
+            if "project" in outcome:
+                row["project"] = outcome["project"]
+            if "path" in outcome:
+                row["path"] = outcome["path"]
             if outcome.get("linked_path"):
                 links.append({
                     "ordinal": row["ordinal"], "path": outcome["linked_path"],

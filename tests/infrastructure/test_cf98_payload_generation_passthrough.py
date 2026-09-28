@@ -87,6 +87,9 @@ def test_the_transport_boundary_still_carries_the_caller_generation() -> None:
             "description": "",
             "project_id": "11111111-2222-3333-4444-555555555555",
             "identity_generation": 7,
+            "files_discovered": 0,
+            "files_eligible": 0,
+            "files_indexed": 0,
         }
     )
 
@@ -101,7 +104,29 @@ def test_an_absent_generation_deserializes_as_none_not_zero() -> None:
     from menhir.core.backend_shared import _project_scan_from_dict
 
     scan = _project_scan_from_dict(
-        {"name": "proj", "root_path": "/srv/proj", "stack": "python", "description": ""}
+        {"name": "proj", "root_path": "/srv/proj", "stack": "python", "description": "",
+         "files_discovered": 0, "files_eligible": 0, "files_indexed": 0}
     )
 
     assert scan.identity_generation is None
+
+
+def test_payload_without_coverage_is_refused_before_it_can_authorize_pruning() -> None:
+    from menhir.core.backend_shared import _project_scan_from_dict
+
+    with pytest.raises(ValueError, match="lacks coverage counts"):
+        _project_scan_from_dict({
+            "name": "proj", "root_path": "/srv/proj", "scan_generation": 3,
+            "files": [],
+        })
+
+
+def test_payload_coverage_must_match_the_transported_files() -> None:
+    from menhir.core.backend_shared import _project_scan_from_dict
+
+    with pytest.raises(ValueError, match="does not match"):
+        _project_scan_from_dict({
+            "name": "proj", "root_path": "/srv/proj", "scan_generation": 3,
+            "files": [], "files_discovered": 2, "files_eligible": 2,
+            "files_indexed": 1,
+        })
