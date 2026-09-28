@@ -8,8 +8,8 @@ MENTIONS); this lane is where that assertion lives for the release.
 Every criterion here is a negative test. Per Gate C, a negative test that fails is not a
 lane failure to be retried -- it is a release-blocking issue with a reproduced failure.
 
-WHY THIS MODULE IS THREE TESTS
-------------------------------
+WHY THIS MODULE HAS SEPARATE TESTS
+----------------------------------
 A lane declares one provider, and these criteria need two opposite ones. Proving the
 #88 isolation pin needs a provider that succeeds, because the failure mode is entities
 extracted into the wrong silo and an extraction that never happens cannot land anywhere.
@@ -17,9 +17,10 @@ Proving "provider failure does not silently pass" needs one that reliably fails.
 Combining them would mean one of the two criteria was asserted against a provider that
 could not produce its failure mode. So they are separate tests in the same module.
 
-The third test is the declared-pending remainder, and it exists rather than being
-deleted because Gate C counts checklist items: a criterion that quietly stops being
-listed reads as a criterion that was met.
+The missing/incompatible Graphiti fork criterion is declared pending until it has a
+real install or startup refusal test. Gate C counts checklist items: a criterion that
+quietly stops being listed reads as a criterion that was met. The former Beacon
+adversarial scenario stays uncollected after its deferral in #120.
 
 THE #88 PIN USES THE DETERMINISTIC PROVIDER, NOT A LIVE ONE
 ------------------------------------------------------------
@@ -72,7 +73,8 @@ PROVIDER_CRITERIA = ["provider_failure_does_not_silently_pass"]
 
 CORPUS_CRITERIA = ["malformed_artifact_metadata_fails_without_corruption"]
 
-DEFERRED_CRITERIA = ["invalid_beacon_input_does_not_clobber_manifest"]
+FORK_REFUSAL_CRITERIA = ["missing_or_incompatible_graphiti_fork_fails_explicitly"]
+BEACON_POST_MVP_CRITERIA = ["invalid_beacon_input_does_not_clobber_manifest"]
 
 EPISODE_ID = re.compile(r"episode_id[=:]\s*([0-9a-f-]{36})")
 
@@ -605,7 +607,17 @@ async def test_e2e_08_malformed_artifact_metadata(
     lane_evidence.close(status="PASS")
 
 
-async def test_e2e_08_malformed_hand_authored_beacon_is_not_clobbered(
+async def test_e2e_08_missing_fork_refusal(lane_evidence: LaneEvidence) -> None:
+    """Keep the approved fork-refusal criterion visible until it has a real test."""
+
+    declare_pending(
+        lane_evidence,
+        FORK_REFUSAL_CRITERIA,
+        note="A disposable missing/incompatible-fork startup or install probe is still needed.",
+    )
+
+
+async def beacon_post_mvp_malformed_hand_authored_manifest_is_not_clobbered(
     e2e_config: E2EConfig,
     e2e_installed,
     running_stack,
@@ -613,7 +625,7 @@ async def test_e2e_08_malformed_hand_authored_beacon_is_not_clobbered(
     feature_env: dict[str, str],
     lane_evidence: LaneEvidence,
 ) -> None:
-    """A malformed hand-authored ``beacon.yaml`` must neither block generation nor be touched.
+    """Uncollected post-MVP scenario for a malformed hand-authored ``beacon.yaml``.
 
     E2E-6 proves the sidecar policy against a VALID hand-authored manifest. The adversarial
     question is what happens when the file a careless implementation would overwrite is
@@ -633,7 +645,7 @@ async def test_e2e_08_malformed_hand_authored_beacon_is_not_clobbered(
     if beacon_python is None:
         declare_pending(
             lane_evidence,
-            DEFERRED_CRITERIA,
+            BEACON_POST_MVP_CRITERIA,
             note="MENHIR_E2E_BEACON_PYTHON is unset or missing; the Beacon-side half cannot run.",
         )
 

@@ -1,3 +1,16 @@
+## 2026-09-27 - Add packaged Graphiti fork stdio acceptance path
+
+- `tests/e2e/test_e2e_06_graphiti_fork.py`: verify the public fork wheel hash,
+  installed source bytes, absence of upstream Graphiti, native hook wiring, and
+  deterministic ingest/recall through the installed Menhir stdio path.
+- `tests/e2e/beacon_post_mvp_scenarios.py`,
+  `tests/e2e/test_e2e_08_isolation_adversarial.py`, `.github/workflows/tests.yml`:
+  remove deferred Beacon from MVP execution and keep the missing-fork adversarial
+  criterion explicitly pending.
+- `tests/e2e/README.md`, `.agent/plans/README.md`, the approved MVP plan, and the
+  MVP release audit: distinguish the candidate-wheel result from the later
+  release-container gate and keep that gate explicitly PENDING in E2E evidence.
+
 ## 2026-09-27 - Start independent local-stdio MVP release audit
 
 - `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`: record the
@@ -115,13 +128,3 @@
 - `tests/test_decay_logic.py`: verify both real sweep requests in fresh processes with shorter,
   zero-day, and exempt policies, without mutating shared test module imports.
 - `.agent/memory-policy.md`: document the pre-filter rule, exemption choice, and restart requirement.
-
-## 2026-09-25 - stale-verification reads avoid Neo4j 5.26-only label syntax (#69)
-
-- `src/menhir/infrastructure/tool_event_repository.py`: match the fixed
-  `StaleAnchorVerification` label in both receipt reads and remove unused label parameters.
-  Preserve property parameters, tenant filtering, sorting, and post-dirty matching.
-- `tests/test_stale_anchor_verifications.py`: update query contract checks and execute both
-  reads against disposable Neo4j, covering filters, limits, ordering, receipt paths, and empty results.
-- Verified the previous queries execute on Neo4j 5.26.31. Dynamic MATCH labels were introduced
-  in 5.26; this change removes that unnecessary version dependency without claiming a 5.26 failure.

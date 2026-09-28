@@ -16,15 +16,21 @@ criteria; it does not redefine them.
 | E2E-3 | integrated coding workflow | **implemented** |
 | E2E-4 | WorkArtifact lifecycle | **implemented** |
 | E2E-5 | TODO lifecycle | **implemented** |
-| E2E-6 | Beacon generation and consumption | scaffolded, policy pinned |
+| E2E-6 | public Graphiti fork in a clean Menhir wheel | wheel/stdio path implemented; release-container path pending |
 | E2E-7 | restart and interrupted work | **implemented** |
-| E2E-8 | isolation and adversarial (carries #88's regression pin) | **7 of 8 criteria** |
+| E2E-8 | isolation and adversarial (carries #88's regression pin) | 7 supported criteria implemented; missing/incompatible fork refusal pending |
 
-E2E-8 is four tests rather than one. A lane declares a single provider, and its criteria
-need opposite ones: the #88 isolation pin needs a provider that succeeds (entities must be
-written before they can land in the wrong silo), while "provider failure does not silently
-pass" needs one that reliably fails. Its one remaining criterion is the adversarial variant of E2E-6's happy path, and is
-declared pending against that prerequisite.
+E2E-6 downloads the exact public Graphiti fork wheel named by `uv.lock`, checks its hash
+and every installed Python source file, constructs the installed Menhir Graphiti client
+to check all four native hooks, then ingests and recalls through stdio with a deterministic
+provider. A separate E2E-6 test writes a PENDING evidence record for the release-container
+criteria, so the wheel-path PASS cannot be mistaken for the full lane. Beacon scenarios remain in
+`beacon_post_mvp_scenarios.py` but are not part of this MVP release lane.
+
+E2E-8 uses separate tests because namespace isolation needs a successful provider while
+provider-failure handling needs one that reliably fails. Its former Beacon adversarial
+criterion is deferred with #120. The approved replacement criterion, missing/incompatible
+Graphiti fork refusal, remains to be implemented.
 
 A scaffolded lane is **not** a silent skip. `_harness/pending.py` writes a full evidence
 directory recording every acceptance criterion as unproven, then skips — so
@@ -85,7 +91,7 @@ existing file.
 | `MENHIR_E2E_NEO4J_URI` | `bolt://127.0.0.1:7689` | Disposable graph |
 | `MENHIR_E2E_BACKEND_PORT` | `8199` | Loopback `menhir serve` |
 | `MENHIR_E2E_WORK_ROOT` | pytest tmp dir | Venv, fixtures, evidence |
-| `MENHIR_E2E_BEACON_PYTHON` | unset | Interpreter whose Beacon supports `build`+`validate` (the SHA pinned in `.github/workflows/tests.yml`; PyPI 0.1.0 does not), for E2E-6 |
+| `MENHIR_E2E_BEACON_PYTHON` | unset | Optional post-MVP Beacon scenario interpreter; the MVP CI lane does not install Beacon |
 
 Port `7689` is deliberately **not** `7688`: that is the unit suite's instance, and an E2E
 lane resetting it mid-run would corrupt a parallel `pytest --run-online` into failures
