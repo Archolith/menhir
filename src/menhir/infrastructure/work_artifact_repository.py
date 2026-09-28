@@ -1247,8 +1247,7 @@ class WorkArtifactRepository:
             SET a.lifecycle_revision = coalesce(a.lifecycle_revision, 0) + 1
             WITH a
             WHERE a.artifact_type = $artifact_type AND a.status = $from_status
-              AND (a.namespace = $observed_namespace OR
-                   (a.namespace IS NULL AND $observed_namespace IS NULL))
+              AND coalesce(a.namespace, '') = coalesce($observed_namespace, '')
             SET a.status = $to_status, a.status_changed_at = $now, a.updated_at = $now
             RETURN count(a) AS applied
             """,

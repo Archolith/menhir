@@ -19,6 +19,7 @@
 - `tests/test_project_scanner.py`: traversal, stat, and required-read refusal regressions.
 - `tests/test_query_structure_tool.py`: complete, partial, and legacy-unknown negative-answer regressions.
 - `tests/test_structure_watcher.py`, `tests/test_beacon_provider.py`, and `tests/infrastructure/test_cf257_detached_write_identity.py`: cover the new watcher and detached-write ordering contract.
+- `tests/infrastructure/test_cf257_stale_claim.py`, `tests/test_high_wave1_remediation.py`, and `tests/test_high_wave5_explorer_domain.py`: keep the existing identity, rescan, and unscoped-transition regressions aligned with the new token and lifecycle compare-and-set boundaries.
 - `tests/infrastructure/test_gateb_structure_publication_online.py`: real-Neo4j stale-scan, rollback, same-project serialization, capped legacy-symbol, cross-identity refresh, and injected-traversal regressions.
 - `tests/test_work_artifact.py`, `tests/test_artifact_tools.py`, `tests/test_artifact_source_reconciliation_io.py`, and `tests/test_cf48_domain_owns_artifact_predicates.py`: artifact lifecycle and unresolved-import regressions.
 - `tests/test_work_artifact_online.py`: real-Neo4j artifact transition, supersession, and rollback races.
