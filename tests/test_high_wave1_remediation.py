@@ -464,6 +464,8 @@ def test_cf103_rescan_refuses_a_root_outside_the_allowed_ingest_roots(monkeypatc
     ops.built = SimpleNamespace(
         graph_adapter=SimpleNamespace(
             get_project_root_path=lambda name: None,
+            begin_structure_scan=lambda claim: 1,
+            write_project_structure=lambda scan, session_id, user_id: {},
             neo4j=SimpleNamespace(
                 execute=lambda cypher, params=None: (
                     # `p.project_id <> $project_id` is in the statement and has to be honoured:

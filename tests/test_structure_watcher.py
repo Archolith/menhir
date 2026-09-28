@@ -75,8 +75,16 @@ class _StubGraphAdapter:
     def list_structure_projects(self) -> list[dict[str, str]]:
         return self._projects
 
-    def get_scan_fingerprint(self, project_name: str) -> str | None:
+    def get_scan_fingerprint(
+        self, project_name: str, *, project_id: str | None = None
+    ) -> str | None:
         return self._fingerprints.get(project_name)
+
+    def begin_structure_scan(self, claim: object) -> int:
+        return 1
+
+    def refresh_indexed_binding(self, *args: object, **kwargs: object) -> bool:
+        return False
 
     def write_project_structure(self, scan: object, session_id: str, user_id: str) -> dict[str, int]:
         self._write_calls.append((getattr(scan, "name", ""), session_id, user_id))
@@ -221,6 +229,7 @@ class TestRefreshStructureGraphs:
 
         project_dir = tmp_path / "bad-proj"
         project_dir.mkdir()
+        _legacy_identity_file(project_dir, "id-bad-proj")
 
         adapter = _StubGraphAdapter(
             _projects=[{"name": "bad-proj", "root_path": str(project_dir)}],

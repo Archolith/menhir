@@ -1,3 +1,15 @@
+## 2026-09-26 - generic reads preserve completion and artifact supersession (#143)
+
+- Preserve stored status, artifact status, and replacement identifiers through graph projections,
+  recall scoring, MCP/resource serializers, REST recall, and startup context.
+- Label completed obligations and historical artifacts while keeping original content searchable;
+  retain labels through context budgets, clipped timelines, and pinned hook summaries.
+- Preserve distinct lifecycle states during context deduplication. Ordinary records retain their
+  existing presentation; dedicated reminder lists still include only open reminders.
+- Regressions cover compact/full recall, startup and REST reads, resources, clipping/budgets,
+  ordinary/unknown state controls, and actual completion/supersession writers on disposable Neo4j.
+- Document the read policy and optional result fields. No database migration or production activation.
+
 ## 2026-09-26 - semantic recall preserves conversation admission (#148)
 
 - `backend_runtime_data_ops.py`: forward the effective request/process session into recall.

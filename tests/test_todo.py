@@ -222,29 +222,36 @@ def test_create_todo_with_code_ref_issues_references_file_query() -> None:
 
     repo.create_todo(content="Fix handler", code_ref="src/api/routes.py:42")
 
-    # calls: CREATE, REFERENCES_FILE, known-projects lookup, HAS_LOCATION.
+    # calls: CREATE, visible-project lookup, combined HAS_LOCATION/file-link mutation.
     # The trailing location->file audit-edge write was removed in CF-143 -- it MERGEd
     # (l)-[:REFERENCES_FILE]->(f) from :TodoLocation and nothing ever traversed it. The
     # :Todo-level REFERENCES_FILE edge asserted below is a different edge and IS read.
-    assert len(neo4j.calls) == 4
-    file_query = neo4j.calls[1]["query"]
+    assert len(neo4j.calls) == 3
+    file_query = neo4j.calls[2]["query"]
     assert "REFERENCES_FILE" in file_query
-    assert neo4j.calls[1]["params"]["file_path"] == "src/api/routes.py"
+    assert "collect(DISTINCT f) AS candidates" in file_query
+    assert "candidate_count = 1" in file_query
+    assert "LIMIT 1" not in file_query
+    assert neo4j.calls[2]["params"]["rows"][0]["path"] == "src/api/routes.py"
 
 
 @pytest.mark.unit
 def test_create_todo_linked_file_path_populated_when_matched() -> None:
-    # Responses in call order: CREATE, REFERENCES_FILE match, then location writes
+    # Responses in call order: CREATE, visible-project lookup, combined mutation.
     neo4j = _StubNeo4j(responses=[
         [],
-        [{"linked_path": "src/api/routes.py"}],
         [],
+        [{"ordinal": 0, "resolution_status": "resolved", "unresolved_reason": None,
+          "linked_path": "src/api/routes.py", "linked_project": "menhir"}],
     ])
     repo = TodoRepository(neo4j)
 
     result = repo.create_todo(content="Fix handler", code_ref="src/api/routes.py:42")
 
     assert result["linked_file_path"] == "src/api/routes.py"
+    assert result["linked_files"] == [
+        {"ordinal": 0, "path": "src/api/routes.py", "project": "menhir"}
+    ]
 
 
 @pytest.mark.unit
@@ -258,13 +265,34 @@ def test_create_todo_linked_file_path_none_when_no_structural_match() -> None:
 
 
 @pytest.mark.unit
+def test_add_todo_tool_reports_ambiguous_file_link() -> None:
+    from menhir.mcp.tools.ops.add_todo import AddTodoTool
+
+    tool = AddTodoTool()
+    backend = MagicMock()
+    backend.create_todo = AsyncMock(return_value={
+        "uuid": "todo-1", "priority": "normal", "code_ref": "src/main.py",
+        "linked_files": [], "locations": [{
+            "raw_segment": "src/main.py", "resolution_status": "unresolved",
+            "unresolved_reason": "ambiguous_file",
+        }],
+    })
+    tool.get_backend = MagicMock(return_value=backend)
+
+    import asyncio
+    out = asyncio.run(tool.endpoint(text="Fix it", code_ref="src/main.py"))
+    assert "Created TODO uuid=todo-1" in out
+    assert "file link unresolved for src/main.py: ambiguous_file" in out
+
+
+@pytest.mark.unit
 def test_create_todo_code_ref_without_line_number() -> None:
     neo4j = _StubNeo4j()
     repo = TodoRepository(neo4j)
 
     repo.create_todo(content="Fix this", code_ref="src/api/routes.py")
 
-    assert neo4j.calls[1]["params"]["file_path"] == "src/api/routes.py"
+    assert neo4j.calls[2]["params"]["rows"][0]["path"] == "src/api/routes.py"
 
 
 @pytest.mark.unit
@@ -304,14 +332,14 @@ def test_create_todo_no_episode_uuid_skips_created_from() -> None:
 
 @pytest.mark.unit
 def test_create_todo_all_params_together() -> None:
-    # Call order: CREATE, REFERENCES_FILE, CREATED_FROM, known-projects lookup, HAS_LOCATION.
+    # Call order: CREATE, CREATED_FROM, visible-project lookup, combined location/link mutation.
     # The location->file audit-edge write that used to follow was removed in CF-143 (dead write).
     neo4j = _StubNeo4j(responses=[
         [],
-        [{"linked_path": "src/api/routes.py"}],
         [],
         [{"p": "menhir"}],
-        [],
+        [{"ordinal": 0, "resolution_status": "resolved", "unresolved_reason": None,
+          "linked_path": "src/api/routes.py", "linked_project": "menhir"}],
     ])
     repo = TodoRepository(neo4j)
 
@@ -321,7 +349,7 @@ def test_create_todo_all_params_together() -> None:
         episode_uuid="ep-123",
     )
 
-    assert len(neo4j.calls) == 5
+    assert len(neo4j.calls) == 4
     assert result["linked_file_path"] == "src/api/routes.py"
     assert result["episode_uuid"] == "ep-123"
     assert [(l["path"], l["line_start"]) for l in result["locations"]] == [
@@ -999,6 +1027,27 @@ def test_get_todo_tool_returns_full_content_untruncated() -> None:
     assert "[HIGH]" in result
     assert "src/api.py:10" in result
     assert "STALE" in result
+
+
+@pytest.mark.unit
+def test_get_todo_tool_lists_every_linked_file() -> None:
+    from menhir.mcp.tools.ops.get_todo import GetTodoTool
+
+    tool = GetTodoTool()
+    backend = MagicMock()
+    backend.get_todo = AsyncMock(return_value={
+        "uuid": "abc", "content": "Fix both", "priority": "normal", "status": "open",
+        "linked_files": [
+            {"structure_path": "src/a.py", "structure_project": "alpha"},
+            {"structure_path": "src/b.py", "structure_project": "alpha"},
+        ],
+    })
+    tool.get_backend = MagicMock(return_value=backend)
+
+    import asyncio
+    out = asyncio.run(tool.endpoint(uuid="abc"))
+    assert "linked file: src/a.py (alpha)" in out
+    assert "linked file: src/b.py (alpha)" in out
 
 
 @pytest.mark.unit

@@ -65,10 +65,10 @@ def test_no_backward_transitions() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("terminal", [ArtifactStatus.SUPERSEDED, ArtifactStatus.DEFERRED])
-def test_terminal_states_are_reachable_from_anywhere(terminal: str) -> None:
+def test_deferred_is_reachable_from_anywhere_but_superseded_requires_replacement() -> None:
     for start in (ArtifactStatus.PROPOSED, ArtifactStatus.APPROVED, ArtifactStatus.IMPLEMENTED):
-        assert can_transition(ArtifactType.PLAN, start, terminal)
+        assert can_transition(ArtifactType.PLAN, start, ArtifactStatus.DEFERRED)
+        assert not can_transition(ArtifactType.PLAN, start, ArtifactStatus.SUPERSEDED)
 
 
 @pytest.mark.unit
@@ -195,6 +195,16 @@ def test_create_artifact_accepts_explicit_status_for_migration() -> None:
 
 
 @pytest.mark.unit
+def test_create_artifact_refuses_edge_less_superseded_registration() -> None:
+    neo4j = _StubNeo4j()
+    with pytest.raises(ValueError, match="supersede_artifact"):
+        WorkArtifactRepository(neo4j).create_artifact(
+            artifact_type=ArtifactType.PLAN, title="x", status=ArtifactStatus.SUPERSEDED
+        )
+    assert neo4j.calls == []
+
+
+@pytest.mark.unit
 def test_embodiment_flattens_medium_specific_locator_legs() -> None:
     neo4j = _StubNeo4j()
     repo = WorkArtifactRepository(neo4j)
@@ -284,13 +294,39 @@ def test_transition_checks_against_stored_status_not_caller_assertion() -> None:
 
 @pytest.mark.unit
 def test_legal_transition_applies() -> None:
-    neo4j = _StubNeo4j(responses=[[{"artifact_type": "plan", "status": "PROPOSED"}], []])
+    neo4j = _StubNeo4j(responses=[[
+        {"artifact_type": "plan", "status": "PROPOSED", "namespace": "default"}
+    ], [{"applied": 1}]])
     repo = WorkArtifactRepository(neo4j)
 
     result = repo.transition_status("a1", ArtifactStatus.REVIEWED)
 
     assert result["applied"] is True
     assert "SET a.status = $to_status" in neo4j.calls[1]["query"]
+    assert "SET a.lifecycle_revision" in neo4j.calls[1]["query"]
+    assert "a.status = $from_status" in neo4j.calls[1]["query"]
+    assert neo4j.calls[1]["params"]["observed_namespace"] == "default"
+
+
+@pytest.mark.unit
+def test_lost_transition_reports_stale_instead_of_success() -> None:
+    neo4j = _StubNeo4j(responses=[[
+        {"artifact_type": "plan", "status": "PROPOSED", "namespace": "default"}
+    ], [{"applied": 0}]])
+    result = WorkArtifactRepository(neo4j).transition_status("a1", ArtifactStatus.REVIEWED)
+    assert result == {
+        "applied": False, "reason": "stale_transition",
+        "from_status": "PROPOSED", "to_status": "REVIEWED", "artifact_type": "plan",
+    }
+
+
+@pytest.mark.unit
+def test_direct_superseded_transition_refuses_before_write() -> None:
+    neo4j = _StubNeo4j(responses=[[{"artifact_type": "plan", "status": "PROPOSED"}]])
+    result = WorkArtifactRepository(neo4j).transition_status("a1", ArtifactStatus.SUPERSEDED)
+    assert result["reason"] == "supersession_requires_replacement"
+    assert ArtifactStatus.SUPERSEDED not in result["valid_transitions"]
+    assert len(neo4j.calls) == 1
 
 
 @pytest.mark.unit
@@ -443,6 +479,17 @@ def test_supersede_moves_status_and_edge_in_one_statement() -> None:
     query = neo4j.calls[0]["query"]
     assert "MERGE (new)-[:SUPERSEDES]->(old)" in query
     assert "SET old.status = $superseded" in query
+    assert query.index("SET first.lifecycle_revision") < query.index("SET second.lifecycle_revision")
+    assert query.index("SET second.lifecycle_revision") < query.index("MERGE (new)-[:SUPERSEDES]->(old)")
+    assert neo4j.calls[0]["params"]["first_uuid"] == "new"
+
+
+@pytest.mark.unit
+def test_supersession_locks_artifacts_in_uuid_order_regardless_of_roles() -> None:
+    neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
+    WorkArtifactRepository(neo4j).supersede_artifact("z-new", "a-old")
+    assert neo4j.calls[0]["params"]["first_uuid"] == "a-old"
+    assert neo4j.calls[0]["params"]["second_uuid"] == "z-new"
 
 
 @pytest.mark.unit

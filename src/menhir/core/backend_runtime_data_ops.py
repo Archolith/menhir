@@ -637,16 +637,21 @@ class RuntimeProviderDataOpsMixin:
             # lets each decide -- retry with an action, or skip and report.
             return resolution.as_dict()
 
+        scan_generation = await self._off_loop(
+            self.built.graph_adapter.begin_structure_scan, claim
+        )
         scanner = ProjectScanner()
         scan = await asyncio.to_thread(scanner.scan, path, project_name)
         # Carried on the scan so every writer under `write_project` stamps it without a second
         # parameter threaded through four batch helpers.
         scan.project_id = claim.project_id
         scan.identity_generation = claim.generation
+        scan.scan_generation = scan_generation
 
         if not force:
             stored_fp = await self._off_loop(
-                self.built.graph_adapter.get_scan_fingerprint, project_name
+                self.built.graph_adapter.get_scan_fingerprint, project_name,
+                project_id=claim.project_id,
             )
             if stored_fp and stored_fp == scan.scan_fingerprint:
                 # Same files, possibly a new commit: keep the evidence binding current.
@@ -657,6 +662,8 @@ class RuntimeProviderDataOpsMixin:
                     scan.indexed_commit,
                     scan.indexed_repository,
                     scan.indexed_dirty,
+                    claim=claim,
+                    scan_generation=scan_generation,
                 )
                 return {
                     "counts": {},
@@ -966,9 +973,13 @@ class RuntimeProviderDataOpsMixin:
             )
             return
         try:
+            scan_generation = await _asyncio.to_thread(
+                self.built.graph_adapter.begin_structure_scan, rescan_claim
+            )
             fresh_scan = await _asyncio.to_thread(_PS().scan, root, name)
             fresh_scan.project_id = rescan_claim.project_id
             fresh_scan.identity_generation = rescan_claim.generation
+            fresh_scan.scan_generation = scan_generation
             await _asyncio.to_thread(
                 self.built.graph_adapter.write_project_structure,
                 fresh_scan,

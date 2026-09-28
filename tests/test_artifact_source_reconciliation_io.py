@@ -875,6 +875,28 @@ def test_registration_persists_an_unrecognized_status_reason(tmp_path: Path) -> 
 
 
 @pytest.mark.unit
+def test_superseded_source_registration_remains_unresolved_without_replacement(
+    tmp_path: Path,
+) -> None:
+    source = _write(tmp_path, ".agent/plans/a.md", "# A\n\nStatus: SUPERSEDED\n")
+    before = source.read_bytes()
+    digest = ArtifactReconciliationService(_RecordingRepo()).audit(
+        tmp_path, repository="t"
+    ).plan_digest
+    repo = _RecordingRepo()
+    result = ArtifactReconciliationService(repo).apply(
+        tmp_path, expected_digest=digest, repository="t", allow_new_repository=True
+    )
+    assert not result.cursor_advanced
+    assert result.cursor_reason == "writes_skipped"
+    assert len(result.skipped) == 1
+    assert result.skipped[0]["outcome"]["reason"] == "superseded_registration_requires_replacement"
+    assert result.skipped[0]["outcome"]["raw_status"] == "SUPERSEDED"
+    assert all(name != "register" for name, _ in repo.calls)
+    assert source.read_bytes() == before
+
+
+@pytest.mark.unit
 def test_existing_source_less_declared_uuid_dispatches_attach_not_register(
     tmp_path: Path,
 ) -> None:

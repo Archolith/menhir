@@ -56,10 +56,16 @@ class GetTodoTool(BaseTextTool):
             lines.append(f"source: {row['source']}")
         if row.get("code_ref"):
             lines.append(f"code_ref: {row['code_ref']}")
-        if row.get("linked_file_path"):
-            project = row.get("linked_file_project")
+        linked_files = row.get("linked_files") or []
+        if not linked_files and row.get("linked_file_path"):
+            linked_files = [{
+                "structure_path": row["linked_file_path"],
+                "structure_project": row.get("linked_file_project"),
+            }]
+        for linked in linked_files:
+            project = linked.get("structure_project")
             suffix = f" ({project})" if project else ""
-            lines.append(f"linked file: {row['linked_file_path']}{suffix}")
+            lines.append(f"linked file: {linked.get('structure_path')}{suffix}")
         if row.get("episode_uuid"):
             lines.append(f"created from episode: {row['episode_uuid']}")
         locations = row.get("locations") or []

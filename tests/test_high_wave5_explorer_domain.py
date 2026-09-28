@@ -279,5 +279,7 @@ def test_cf117_unscoped_transition_is_unchanged() -> None:
     repo.transition_status("a-1", "REVIEWED")
 
     for query, params in neo4j.calls:
-        assert "namespace" not in query
+        # The unscoped mutation still has no requested-tenant filter. Its observed
+        # namespace comparison is a lifecycle CAS against concurrent changes.
+        assert "a.namespace = $namespace" not in query
         assert "namespace" not in params
