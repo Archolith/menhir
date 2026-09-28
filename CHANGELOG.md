@@ -1,3 +1,11 @@
+## 2026-09-28 - Keep pytest scratch local and report cleanup failures
+
+- `pytest.ini`, `tests/conftest.py`, `tests/_temp_cleanup.py`: use pytest's public temporary-path fixtures under the workspace, remove the session tree with Windows read-only-file handling, and surface residue as a test failure.
+- `tests/infrastructure/test_git_log.py`, `tests/test_audit_trail.py`, `tests/test_consolidation_audit.py`, `tests/test_consumer_session_e2e.py`, `tests/test_telemetry_stats.py`: move test scratch databases and Git repositories under pytest-owned temporary paths and restore the session test's telemetry setting.
+- `tests/test_mcp_server.py`, `tests/test_mcp_telemetry.py`, `tests/test_services_pipeline.py`: report manual scratch cleanup failures instead of silently ignoring them, and close the inspected SQLite connection.
+- `tests/test_temp_hygiene.py`: catch direct scratch-directory bypasses and hidden cleanup failures in future tests.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-28 - Reconcile local-main MVP safety fixes
 
 - `src/menhir/infrastructure/episode_lifecycle.py`, `src/menhir/infrastructure/memory_graph_adapter.py`, `src/menhir/services/enrichment_steps.py`, `src/menhir/services/ingest_worker.py`: fold transient retry refunds into the claim-fenced episode transition so stale workers cannot refund a newer claim.
@@ -102,16 +110,3 @@
   Graphiti fork contract. Keep Oracle preflight, container validation, RC freeze,
   and frozen-RC evidence open.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-09-27 - Add packaged Graphiti fork stdio acceptance path
-
-- `tests/e2e/test_e2e_06_graphiti_fork.py`: verify the public fork wheel hash,
-  installed source bytes, absence of upstream Graphiti, native hook wiring, and
-  deterministic ingest/recall through the installed Menhir stdio path.
-- `tests/e2e/beacon_post_mvp_scenarios.py`,
-  `tests/e2e/test_e2e_08_isolation_adversarial.py`, `.github/workflows/tests.yml`:
-  remove deferred Beacon from MVP execution and verify a missing fork makes both
-  package integrity and Menhir's runtime check fail explicitly in a disposable install.
-- `tests/e2e/README.md`, `.agent/plans/README.md`, the approved MVP plan, and the
-  MVP release audit: distinguish the candidate-wheel result from the later
-  release-container gate and keep that gate explicitly PENDING in E2E evidence.

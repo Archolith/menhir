@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -24,49 +23,47 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture
-def git_repo():
+def git_repo(tmp_path: Path):
     """Create a temporary git repository with initial commit.
 
-    Sets user.email and user.name. Yields the repo path; cleans up on teardown.
+    Sets user.email and user.name. The pytest session owns scratch cleanup.
     """
-    tmpdir = tempfile.mkdtemp()
-    repo_path = Path(tmpdir)
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
 
-    try:
-        # Initialize repo and configure user
-        subprocess.run(
-            ["git", "-C", str(repo_path), "init", "-q"],
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(repo_path), "config", "user.email", "test@example.com"],
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(repo_path), "config", "user.name", "Test User"],
-            check=True,
-            capture_output=True,
-        )
+    # Initialize repo and configure user. The shared session fixture removes
+    # pytest-owned scratch, including read-only Git objects, at teardown.
+    subprocess.run(
+        ["git", "-C", str(repo_path), "init", "-q"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo_path), "config", "user.email", "test@example.com"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo_path), "config", "user.name", "Test User"],
+        check=True,
+        capture_output=True,
+    )
 
-        # Create initial commit
-        initial_file = repo_path / "initial.txt"
-        initial_file.write_text("initial content\n")
-        subprocess.run(
-            ["git", "-C", str(repo_path), "add", "initial.txt"],
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(repo_path), "commit", "-q", "-m", "Initial commit"],
-            check=True,
-            capture_output=True,
-        )
+    # Create initial commit
+    initial_file = repo_path / "initial.txt"
+    initial_file.write_text("initial content\n")
+    subprocess.run(
+        ["git", "-C", str(repo_path), "add", "initial.txt"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo_path), "commit", "-q", "-m", "Initial commit"],
+        check=True,
+        capture_output=True,
+    )
 
-        yield str(repo_path)
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+    yield str(repo_path)
 
 
 def test_no_changes_since_head_is_empty(git_repo):

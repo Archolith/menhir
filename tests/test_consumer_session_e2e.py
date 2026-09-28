@@ -97,7 +97,7 @@ class SessionReport:
 
 
 @pytest.fixture(scope="module")
-def live_settings():
+def live_settings(tmp_path_factory: pytest.TempPathFactory):
     """Real settings, with the graph pinned to the disposable instance.
 
     `.env` carries the provider credentials AND a PRODUCTION `NEO4J_URI`. `pytest_configure` has
@@ -106,8 +106,6 @@ def live_settings():
     this module writes, enriches, and deletes, and a misconfiguration would do that to the
     operator's real memories.
     """
-    import tempfile
-
     from dotenv import load_dotenv
 
     from menhir.config import MemorySettings
@@ -119,20 +117,28 @@ def live_settings():
     # fixture is function-scoped and cannot help: this fixture is module-scoped and runs first,
     # so without this the gate wrote its PendingActionStore rows into the operator's REAL
     # `.agent/mcp_telemetry.db`. Caught by reading the fixture repr in a failure dump.
-    sidecar = Path(tempfile.mkdtemp(prefix="menhir-session-e2e-")) / "telemetry.db"
+    sidecar = tmp_path_factory.mktemp("menhir-session-e2e") / "telemetry.db"
+    previous_sidecar = os.environ.get("MENHIR_MCP_TELEMETRY_DB")
     os.environ["MENHIR_MCP_TELEMETRY_DB"] = str(sidecar)
+    try:
+        settings = MemorySettings.from_env()
 
-    settings = MemorySettings.from_env()
+        test_uri = os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://127.0.0.1:7688")
+        assert settings.neo4j_uri == test_uri, (
+            f"REFUSING TO RUN: settings resolve to {settings.neo4j_uri}, not the disposable test "
+            f"instance {test_uri}. This suite performs destructive writes."
+        )
 
-    test_uri = os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://127.0.0.1:7688")
-    assert settings.neo4j_uri == test_uri, (
-        f"REFUSING TO RUN: settings resolve to {settings.neo4j_uri}, not the disposable test "
-        f"instance {test_uri}. This suite performs destructive writes."
-    )
-
-    if not (settings.openai_api_key or settings.local_llm_base_url):
-        pytest.skip("no chat provider configured; an acceptance gate must not run without an LLM")
-    return settings
+        if not (settings.openai_api_key or settings.local_llm_base_url):
+            pytest.skip(
+                "no chat provider configured; an acceptance gate must not run without an LLM"
+            )
+        yield settings
+    finally:
+        if previous_sidecar is None:
+            os.environ.pop("MENHIR_MCP_TELEMETRY_DB", None)
+        else:
+            os.environ["MENHIR_MCP_TELEMETRY_DB"] = previous_sidecar
 
 
 @pytest.fixture(scope="module")

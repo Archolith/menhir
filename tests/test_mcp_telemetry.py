@@ -1,9 +1,11 @@
 import asyncio
-import shutil
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from uuid import uuid4
 
+from tests._temp_cleanup import remove_test_dir
+from menhir.infrastructure.observability import LLMUsageEvent
 from menhir.mcp.telemetry import (
     McpTelemetryStore,
     record_failure_event,
@@ -12,8 +14,6 @@ from menhir.mcp.telemetry import (
     record_mcp_event,
     track_mcp_call,
 )
-from menhir.infrastructure.observability import LLMUsageEvent
-
 
 _TEST_TMP_ROOT = Path(__file__).resolve().parents[1] / ".agent" / "test_tmp"
 
@@ -26,7 +26,7 @@ def _make_db_path() -> Path:
 
 
 def _cleanup_db_path(db_path: Path) -> None:
-    shutil.rmtree(db_path.parent, ignore_errors=True)
+    remove_test_dir(db_path.parent)
 
 
 def _fetch_rows(db_path):
@@ -143,7 +143,8 @@ def test_connect_uses_bounded_busy_timeout():
     store = McpTelemetryStore(db_path=db_path)
     try:
         store._ensure_ready()
-        with store._connect() as conn:
+        # sqlite3.Connection.__exit__ commits or rolls back; it does not close.
+        with closing(store._connect()) as conn:
             (busy_ms,) = conn.execute("PRAGMA busy_timeout").fetchone()
         assert busy_ms == 5000        # bounded, not 0 (the indefinite/no-wait default)
     finally:

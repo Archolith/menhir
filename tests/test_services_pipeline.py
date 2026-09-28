@@ -7,7 +7,6 @@ import contextlib
 import json
 import logging
 import os
-import shutil
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +14,7 @@ from uuid import uuid4
 
 import pytest
 
+from tests._temp_cleanup import remove_test_dir
 from menhir.domain import IngestStatus, new_session
 from menhir.config import MemorySettings
 from menhir.core import BuildArtifacts, build_memory_services, prepare_memory_runtime
@@ -1959,7 +1959,7 @@ async def test_maintenance_scheduler_runs_phase_one_jobs(monkeypatch: pytest.Mon
         snapshot = scheduler.status_snapshot()
         await scheduler.stop()
     finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
+        remove_test_dir(run_dir)
 
     assert snapshot["running"] is True
     assert snapshot["jobs"]["recover_stale_leases"]["runs"] >= 1
@@ -2018,7 +2018,7 @@ async def test_maintenance_scheduler_start_stop_is_idempotent() -> None:
         await scheduler.stop()
         assert scheduler.is_running() is False
     finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
+        remove_test_dir(run_dir)
 
 
 @pytest.mark.unit
@@ -2069,7 +2069,7 @@ async def test_maintenance_scheduler_stop_ignores_cancelled_task() -> None:
         assert scheduler._task is None
         assert scheduler.is_running() is False
     finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
+        remove_test_dir(run_dir)
 
 
 @pytest.mark.unit
@@ -2150,7 +2150,7 @@ async def test_maintenance_scheduler_allows_only_one_live_owner() -> None:
 
         await second.stop()
     finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
+        remove_test_dir(run_dir)
 
 
 @pytest.mark.unit
@@ -2242,7 +2242,7 @@ async def test_maintenance_scheduler_force_takeover_transfers_active_owner() -> 
 
         await second.stop()
     finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
+        remove_test_dir(run_dir)
 
 
 @pytest.mark.unit
@@ -2330,7 +2330,7 @@ async def test_maintenance_scheduler_heartbeat_keeps_lease_alive_during_long_job
         await first.stop()
         await second.stop()
     finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
+        remove_test_dir(run_dir)
 
 
 @pytest.mark.unit
@@ -2432,7 +2432,7 @@ async def test_maintenance_scheduler_forced_takeover_fences_displaced_owner_mid_
 
         await second.stop()
     finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
+        remove_test_dir(run_dir)
 
 
 @pytest.mark.unit

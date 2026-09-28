@@ -1,6 +1,5 @@
 import asyncio
 import json
-import shutil
 from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -8,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 
+from tests._temp_cleanup import remove_test_dir
 from menhir.mcp import lifecycle as mcp_server_lifecycle
 from menhir.mcp import resources as mcp_resources
 from menhir.mcp import server as mcp_server
@@ -41,7 +41,7 @@ def _make_db_path() -> Path:
 
 
 def _cleanup_db_path(db_path: Path) -> None:
-    shutil.rmtree(db_path.parent, ignore_errors=True)
+    remove_test_dir(db_path.parent)
 
 
 class StubGraphAdapter:

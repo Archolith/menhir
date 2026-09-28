@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
-import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -12,18 +10,24 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests._temp_cleanup import remove_test_dir
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
 from menhir.infrastructure import LLMAdapter, PhaseOneSchemaResult, PolicyStampResult
 from menhir.infrastructure import operation_owner as _operation_owner
 from menhir.infrastructure.memory_graph_adapter import is_context_window_error_text
 
 
-_LOCAL_PYTEST_TEMP = Path.home() / ".codex" / "memories" / "pytest_tmp"
+_LOCAL_PYTEST_TEMP = Path(__file__).resolve().parents[1] / ".agent" / "test_tmp"
 _LOCAL_PYTEST_TEMP.mkdir(parents=True, exist_ok=True)
-os.environ.setdefault("TMPDIR", str(_LOCAL_PYTEST_TEMP))
-os.environ.setdefault("TEMP", str(_LOCAL_PYTEST_TEMP))
-os.environ.setdefault("TMP", str(_LOCAL_PYTEST_TEMP))
-tempfile.tempdir = str(_LOCAL_PYTEST_TEMP)
+os.environ.setdefault("PYTEST_DEBUG_TEMPROOT", str(_LOCAL_PYTEST_TEMP))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _cleanup_pytest_temp_session(tmp_path_factory: pytest.TempPathFactory):
+    """Remove this run's pytest scratch tree and report failed cleanup."""
+
+    yield
+    remove_test_dir(tmp_path_factory.getbasetemp())
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -271,17 +275,6 @@ def _normalize_uri(uri: str) -> str:
             value = value[len(scheme):]
             break
     return value.replace("127.0.0.1", "localhost").rstrip("/")
-
-
-@pytest.fixture
-def tmp_path() -> Path:
-    """Provide a workspace-local tmp_path to avoid Windows tempdir permission issues."""
-
-    path = Path(tempfile.mkdtemp(prefix="pytest-case-", dir=str(_LOCAL_PYTEST_TEMP)))
-    try:
-        yield path
-    finally:
-        shutil.rmtree(path, ignore_errors=True)
 
 
 def _default_schema_result() -> PhaseOneSchemaResult:
