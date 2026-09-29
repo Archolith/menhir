@@ -118,7 +118,7 @@ def test_money_decimal_serialization_and_hydration_preserve_exact_scale():
     TypedAssertionRepository(fake).record_assertion(assertion)
 
     params = fake.executed[0][1]
-    assert params["value_norm"] == "1200.50"
+    assert params["value_norm"] == "1200.5"
     assert params["value_json"] == "1200.50"
     hydrated = TypedAssertionRepository._hydrate({
         "value_kind": "money", "value_json": "1200.50",

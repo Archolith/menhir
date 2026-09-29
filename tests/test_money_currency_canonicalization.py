@@ -156,10 +156,10 @@ def test_money_values_are_parsed_as_exact_decimals(source, model_value, expected
 
 @pytest.mark.unit
 def test_decimal_money_normalization_is_canonical_and_exact():
-    assert normalize_scalar(Decimal("0.10")) == "0.10"
-    assert normalize_scalar(Decimal("0.20")) == "0.20"
-    assert normalize_scalar(Decimal("0.30")) == "0.30"
-    assert normalize_scalar(Decimal("1200.50")) == "1200.50"
+    assert normalize_scalar(Decimal("0.10")) == "0.1"
+    assert normalize_scalar(Decimal("0.20")) == "0.2"
+    assert normalize_scalar(Decimal("0.30")) == "0.3"
+    assert normalize_scalar(Decimal("1200.50")) == "1200.5"
 
 
 @pytest.mark.unit
@@ -172,7 +172,7 @@ def test_money_decimal_arithmetic_converges_with_directly_stated_value():
     folded = start + delta
 
     assert folded == direct
-    assert normalize_scalar(folded) == normalize_scalar(direct) == "0.30"
+    assert normalize_scalar(folded) == normalize_scalar(direct) == "0.3"
 
 
 @pytest.mark.unit

@@ -17,7 +17,8 @@ from menhir.infrastructure.typed_assertion_models import (
 def _scalar_value_json(value: Any) -> str:
     """Encode Decimal values as JSON numbers so currency scale survives durable storage."""
     if isinstance(value, Decimal):
-        return normalize_scalar(value)
+        # Exact scale, not the canonical identity form: normalize_scalar strips trailing zeros (#152).
+        return format(value, "f") if value.is_finite() else str(value)
     if isinstance(value, (list, tuple)):
         return "[" + ", ".join(_scalar_value_json(item) for item in value) + "]"
     return json.dumps(value, ensure_ascii=False)
