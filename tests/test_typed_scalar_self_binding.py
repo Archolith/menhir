@@ -346,7 +346,12 @@ def test_ensure_self_entity_rejects_empty_namespace():
 #
 # The rule being protected: normalize the QUERY, keep the MATCH exact and unique.
 
-from menhir.services.typed_scalar_rules import _bind_subject, _subject_variants
+from menhir.services.typed_scalar_rules import (
+    _SubjectMatchStatus,
+    _bind_subject,
+    _match_from_candidates,
+    _subject_variants,
+)
 
 
 def test_exact_match_still_wins_and_is_tried_first():
@@ -354,6 +359,42 @@ def test_exact_match_still_wins_and_is_tried_first():
     ents = [{"uuid": "e-1", "name": "boots"}, {"uuid": "e-2", "name": "my boots"}]
     uid, disp = _bind_subject("my boots", ents)
     assert (uid, disp) == ("e-2", "my boots")
+
+
+def test_ambiguous_exact_match_cannot_select_a_generic_variant():
+    ents = [
+        {"uuid": "e-1", "name": "my boots"},
+        {"uuid": "e-2", "name": "My Boots"},
+        {"uuid": "e-3", "name": "boots"},
+    ]
+    assert _bind_subject("my boots", ents) == (None, None)
+
+
+def test_invalid_exact_match_cannot_select_a_generic_variant():
+    ents = [{"uuid": "  ", "name": "my boots"}, {"uuid": "e-3", "name": "boots"}]
+    assert _bind_subject("my boots", ents) == (None, None)
+
+
+def test_ambiguous_variant_cannot_select_a_less_specific_variant():
+    ents = [
+        {"uuid": "e-1", "name": "new black shoes"},
+        {"uuid": "e-2", "name": "New Black Shoes"},
+        {"uuid": "e-3", "name": "black shoes"},
+    ]
+    assert _bind_subject("my new black shoes", ents) == (None, None)
+
+
+def test_candidate_match_distinguishes_absent_ambiguous_invalid_and_unique():
+    assert _match_from_candidates("boots", []).status is _SubjectMatchStatus.ABSENT
+    assert _match_from_candidates("boots", [
+        {"uuid": "e-1", "name": "boots"}, {"uuid": "e-2", "name": "Boots"},
+    ]).status is _SubjectMatchStatus.AMBIGUOUS
+    assert _match_from_candidates("boots", [
+        {"uuid": " ", "name": "boots"},
+    ]).status is _SubjectMatchStatus.INVALID
+    assert _match_from_candidates("boots", [
+        {"uuid": "e-1", "name": "boots"},
+    ]).status is _SubjectMatchStatus.UNIQUE
 
 
 def test_leading_determiner_stripped_as_fallback():
