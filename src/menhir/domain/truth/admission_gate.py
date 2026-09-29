@@ -119,6 +119,17 @@ def evaluate_user_tier_claim(
             turn_evidence_uuid=turn_id or None,
         )
 
+    # Agent-quoted evidence -> deny. The text on such a turn was supplied BY AN AGENT (e.g. via
+    # the add_memory `user_statement` parameter), not captured from a real user turn, so citing
+    # it must never upgrade a user-tier claim: an agent could otherwise mint its own grounds.
+    if str(turn_evidence.get("source_kind") or "") == "agent_quoted":
+        return AdmissionVerdict(
+            granted=False,
+            effective_source="agent_inference",
+            reason="turn evidence is agent_quoted, not captured from the user",
+            turn_evidence_uuid=turn_id or None,
+        )
+
     # Session/namespace mismatch (tolerant of None on both sides, strict on explicit values).
     evidence_session = str(turn_evidence.get("session_id") or "") if turn_evidence.get("session_id") else None
     evidence_namespace = str(turn_evidence.get("namespace") or "") if turn_evidence.get("namespace") else None

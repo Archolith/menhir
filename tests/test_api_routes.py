@@ -427,6 +427,23 @@ class TestIngest:
         )
 
 
+    def test_ingest_forwards_user_statement(self, client, fake_backend):
+        resp = client.post(
+            "/api/memory",
+            json={"episode": "User has 20 coins", "user_statement": "I have 20 coins"},
+        )
+        assert resp.status_code == 200
+        assert fake_backend.queue_episode.await_args.kwargs["user_statement"] == "I have 20 coins"
+
+    def test_ingest_rejects_user_statement_with_turn_evidence_uuid(self, client, fake_backend):
+        resp = client.post(
+            "/api/memory",
+            json={"episode": "x", "user_statement": "I have 20 coins", "turn_evidence_uuid": "te-1"},
+        )
+        assert resp.status_code == 400
+        fake_backend.queue_episode.assert_not_awaited()
+
+
 class TestDeleteAndFlag:
     def test_delete_memory(self, client, fake_backend):
         resp = client.delete("/api/memory/some-uuid")

@@ -1,3 +1,11 @@
+## 2026-09-29 - Accept agent-quoted user statements for scalar perception
+
+- `src/menhir/mcp/tools/ingest/add_memory.py`, `src/menhir/core/backend_*.py`, `src/menhir/api/routes.py`, `src/menhir/api/routes_support.py`: new optional `user_statement` (verbatim user words) on `add_memory`, exclusive with `turn_evidence_uuid`, carried through MCP, in-process and REST and sent only when set. `add_memory_and_track` keeps its MVP signature.
+- `src/menhir/services/ingest_intake.py`: record it as `:TurnEvidence` with `source_kind='agent_quoted'` and link it provenance-only; failures never fail the ingest.
+- `src/menhir/domain/truth/admission_gate.py`, `src/menhir/infrastructure/scalar_view_repository.py`, `src/menhir/infrastructure/turn_evidence_repository.py`: agent-quoted evidence never grants user tier, never counts as user foundation, and never feeds the counter or event lanes; the scalar lane keeps it.
+- `tests/test_agent_quoted_evidence.py`, `tests/test_api_routes.py`: gate, foundation, lane, intake and REST coverage.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-29 - Require money and measurement quotes to state their value
 
 - `src/menhir/services/typed_scalar_rules.py`: a model-supplied money or measurement value drops with `value_not_in_span` unless its grounded quote states it as digits (thousands separators, decimals, k/million scale) or English number words; the check runs last so earlier drop reasons are unchanged, and counts, durations, frequencies and clock times keep their span-derived values (#89).
@@ -69,12 +77,3 @@
 - `tests/test_mcp_server.py`, `tests/test_mcp_telemetry.py`, `tests/test_services_pipeline.py`: report manual scratch cleanup failures instead of silently ignoring them, and close the inspected SQLite connection.
 - `tests/test_temp_hygiene.py`: catch direct scratch-directory bypasses and hidden cleanup failures, and keep pytest paths outside the repository for non-repository tests.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-09-28 - Reconcile local-main MVP safety fixes
-
-- `src/menhir/infrastructure/episode_lifecycle.py`, `src/menhir/infrastructure/memory_graph_adapter.py`, `src/menhir/services/enrichment_steps.py`, `src/menhir/services/ingest_worker.py`: fold transient retry refunds into the claim-fenced episode transition so stale workers cannot refund a newer claim.
-- `src/menhir/infrastructure/consolidation_queries.py`, `src/menhir/core/backend_client_ops.py`, `src/menhir/core/backend_protocol.py`, `src/menhir/core/backend_runtime_admin_ops.py`, `src/menhir/mcp/tools/conflict/resolve_conflict.py`: keep conflict reads, writes, readback, and edge bridging inside the requested namespace; return conflict member UUIDs in stable order.
-- `src/menhir/services/ingest_limits.py`, `src/menhir/services/ingest_intake.py`, `src/menhir/api/routes_support.py`, `src/menhir/services/enrichment_steps.py`, `src/menhir/core/backend_runtime_admin_ops.py`: share memory text and diff limits across local intake, direct temporal writes, and the API.
-- `tests/conftest.py`, `tests/services/test_ingest_write_bounds.py`, `tests/test_api_routes.py`, `tests/test_backend_roundtrip.py`, `tests/test_circuit_breaker.py`, `tests/test_conflict_namespace_scope.py`, `tests/test_episode_lifecycle.py`, `tests/test_high_wave1_remediation.py`, `tests/test_mcp_server.py`, `tests/test_memory_graph_adapter_methods.py`, `tests/test_transient_exhausted_recovery_live.py`, `tests/test_transient_refund_online.py`: cover write boundaries, mixed-group namespace isolation, deterministic results, and stale-claim retry accounting.
-- `tests/e2e/test_e2e_08_isolation_adversarial.py`: recognize the shared validator's explicit oversized-diff refusal in the stdio acceptance criterion.
-- `.agent/plans/menhir-local-main-safety-reconciliation-2026-09-28.md`, `.agent/plans/README.md`, `.agent/architecture.md`, `.agent/data_models.md`, `.agent/endpoints.md`: record the reconciliation scope and updated contracts.

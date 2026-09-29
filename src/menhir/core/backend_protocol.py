@@ -61,12 +61,15 @@ class MemoryBackend(Protocol):
         namespace: str | None = None,
         occurred_at: str | None = None,
         turn_evidence_uuid: str | None = None,
+        user_statement: str | None = None,
     ) -> dict[str, Any]:
         """Queue an episode for enrichment. Returns QueueResult-shaped dict.
 
         Args:
             turn_evidence_uuid: Optional UUID of a :TurnEvidence node for grounding
                                source='user'/'manual' claims at the top trust tier.
+            user_statement: The user's verbatim words the memory is based on; recorded as
+                            agent-quoted evidence (provenance only, never a user-tier ground).
         """
         ...
 

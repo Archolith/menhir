@@ -244,6 +244,7 @@ class TurnEvidenceRepository:
             MATCH (t:TurnEvidence)
             WHERE t.role = 'user' AND t.declarant = 'user' AND t.namespace IS NOT NULL
                   AND t.text IS NOT NULL AND t.text <> ''
+                  AND coalesce(t.source_kind, '') <> 'agent_quoted'
             WITH t.namespace AS ns, max(t.recorded_at) AS newest
             WHERE newest IS NOT NULL
             OPTIONAL MATCH (w:ConsolidationWatermark {group_id: ns})
@@ -264,6 +265,7 @@ class TurnEvidenceRepository:
             MATCH (t:TurnEvidence {turn_id: $turn_id})
             RETURN t.turn_id AS turn_id, t.role AS role, t.declarant AS declarant,
                    t.text AS text, t.session_id AS session_id, t.namespace AS namespace,
+                   t.source_kind AS source_kind,
                    toString(t.occurred_at) AS occurred_at, toString(t.recorded_at) AS recorded_at
             LIMIT 1
             """,
@@ -328,6 +330,7 @@ class TurnEvidenceRepository:
             """
             MATCH (t:TurnEvidence {namespace: $ns})
             WHERE t.role = 'user' AND t.declarant = 'user' AND t.text IS NOT NULL AND t.text <> ''
+                  AND coalesce(t.source_kind, '') <> 'agent_quoted'
             RETURN t.turn_id AS uuid,
                    toString(coalesce(t.occurred_at, t.recorded_at, datetime())) AS valid_at,
                    t.text AS content
@@ -437,6 +440,7 @@ class TurnEvidenceRepository:
             MATCH (t:TurnEvidence)
             WHERE t.role = 'user' AND t.declarant = 'user' AND t.namespace IS NOT NULL
                   AND t.text IS NOT NULL AND t.text <> ''
+                  AND coalesce(t.source_kind, '') <> 'agent_quoted'
             OPTIONAL MATCH (w:EventConsolidationWatermark {group_id: t.namespace})
             WITH t.namespace AS ns, w, t.recorded_at AS ckey, t.turn_id AS tuuid
             WITH ns,
@@ -473,6 +477,7 @@ class TurnEvidenceRepository:
                  CASE WHEN reset THEN null ELSE w.cursor_uuid END AS cu
             MATCH (t:TurnEvidence {namespace: $ns})
             WHERE t.role = 'user' AND t.declarant = 'user' AND t.text IS NOT NULL AND t.text <> ''
+                  AND coalesce(t.source_kind, '') <> 'agent_quoted'
             WITH t, cca, cu, t.recorded_at AS ckey
             WHERE cca IS NULL OR ckey > cca OR (ckey = cca AND t.turn_id > cu)
             RETURN t.turn_id AS uuid,

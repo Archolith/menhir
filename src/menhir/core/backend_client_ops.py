@@ -21,22 +21,24 @@ class BackendClientOpsMixin:
         namespace: str | None = None,
         occurred_at: str | None = None,
         turn_evidence_uuid: str | None = None,
+        user_statement: str | None = None,
     ) -> dict[str, Any]:
-        return await self._request(
-            "queue_episode",
-            {
-                "text": text,
-                "user_id": user_id,
-                "session_id": session_id,
-                "source": source,
-                "diff": diff,
-                "flagged": flagged,
-                "bootstrap_scope": bootstrap_scope,
-                "namespace": namespace,
-                "occurred_at": occurred_at,
-                "turn_evidence_uuid": turn_evidence_uuid,
-            },
-        )
+        params: dict[str, Any] = {
+            "text": text,
+            "user_id": user_id,
+            "session_id": session_id,
+            "source": source,
+            "diff": diff,
+            "flagged": flagged,
+            "bootstrap_scope": bootstrap_scope,
+            "namespace": namespace,
+            "occurred_at": occurred_at,
+            "turn_evidence_uuid": turn_evidence_uuid,
+        }
+        # Sent only when set, so a bridge talking to an older backend keeps working without it.
+        if (user_statement or "").strip():
+            params["user_statement"] = user_statement
+        return await self._request("queue_episode", params)
 
     async def flag_memory(
         self, node_uuid: str, bootstrap_scope: str | None = None
