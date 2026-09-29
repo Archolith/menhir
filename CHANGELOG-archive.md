@@ -1,3 +1,12 @@
+## 2026-09-27 - Record local-stdio MVP platform and configuration decision
+
+- `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: approve Windows 11
+  AMD64 and Ubuntu Linux AMD64 as the primary MVP platforms; record the stdio,
+  backend, Neo4j, provider, benchmark-model, default-off feature, and public
+  Graphiti fork contract. Keep Oracle preflight, container validation, RC freeze,
+  and frozen-RC evidence open.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-27 - Add packaged Graphiti fork stdio acceptance path
 
 - `tests/e2e/test_e2e_06_graphiti_fork.py`: verify the public fork wheel hash,

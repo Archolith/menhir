@@ -172,6 +172,8 @@ def test_validation_generates_and_uploads_structurally_checked_evidence() -> Non
     assert validate.index("Verify native Graphiti fork inside candidate image") < validate.index(
         "Upload sealed candidate and evidence"
     )
+    fork_step = validate.split("      - name: Verify native Graphiti fork inside candidate image", 1)[1]
+    assert "        run: |\n          set -euo pipefail\n          docker run" in fork_step
     assert "--network none --read-only --cap-drop ALL" in validate
     assert 'metadata.distribution("archolith-graphiti-core")' in validate
     assert 'metadata.distribution("graphiti-core")' in validate

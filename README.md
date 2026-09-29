@@ -385,39 +385,47 @@ run them by hand.
 
 ### Connect an MCP client
 
-Point an HTTP-capable MCP client at `/mcp-http`. On a fresh local install `menhir setup` writes
-no credentials at all, and with none configured Menhir binds to loopback and accepts MCP
-requests without an `Authorization` header -- so the smallest working config is:
+Keep `menhir up` (or `menhir serve`) running, then configure a local MCP client to launch
+the stdio bridge with the same Python installation as Menhir. The bridge connects to the
+running backend; it does not start one. A fresh loopback install needs no key:
 
 ```json
 {
   "mcpServers": {
     "memory": {
-      "type": "http",
-      "url": "http://127.0.0.1:8100/mcp-http"
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "menhir.mcp.server"],
+      "env": { "MENHIR_BACKEND_URL": "http://127.0.0.1:8100" }
     }
   }
 }
 ```
 
-The moment you configure any of `MENHIR_OPERATOR_KEY`, `MENHIR_AGENT_KEY`, or
-`MENHIR_READONLY_KEY`, every MCP request needs a matching bearer token and an unauthenticated
-one is refused with `401 Missing or invalid API key`. That is the right setting for anything
-beyond a single-user loopback install -- the credential tier decides which tools the client may
-call, and giving an automated client the agent key rather than the operator key is the point of
-having tiers:
+Use the absolute path to the Menhir environment's Python if your MCP client launches with
+a different one. Set `MENHIR_BACKEND_URL` in the client's environment even when the backend
+has its own `.env` file.
+
+Once any tier key is configured, unauthenticated MCP requests are refused. Configure a
+distinct `MENHIR_AGENT_KEY` on the backend, restart it, and pass the same value in the stdio
+client's `env` alongside `MENHIR_BACKEND_URL`. The agent key gives an automated client its
+intended tool tier:
 
 ```bash
-echo "MENHIR_AGENT_KEY=$(openssl rand -hex 24)" >> "${MENHIR_STATE_DIR:-~/.menhir}/.env"
+echo "MENHIR_AGENT_KEY=$(openssl rand -hex 24)" >> "${MENHIR_STATE_DIR:-$HOME/.menhir}/.env"
 ```
 
 ```json
 {
   "mcpServers": {
     "memory": {
-      "type": "http",
-      "url": "http://127.0.0.1:8100/mcp-http",
-      "headers": { "Authorization": "Bearer <the MENHIR_AGENT_KEY value>" }
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "menhir.mcp.server"],
+      "env": {
+        "MENHIR_BACKEND_URL": "http://127.0.0.1:8100",
+        "MENHIR_AGENT_KEY": "<the MENHIR_AGENT_KEY value>"
+      }
     }
   }
 }
@@ -427,11 +435,11 @@ Each configured key must be a distinct value: `_resolve_tier` returns the first 
 operator first, so a shared value would silently promote every client holding it to the highest
 tier it appears in. Startup refuses that rather than granting it.
 
-For a client that speaks stdio rather than HTTP, run `python -m menhir.mcp.server`; it bridges
-to the same runtime and needs no separate server process.
+The backend also exposes Streamable HTTP at `/mcp-http` for HTTP-capable clients. Local
+stdio is the supported MVP client path.
 
-**Check it without a client.** The transport is stateless Streamable HTTP -- no session id is
-issued and none is needed -- so one request lists the tools:
+**Check the HTTP endpoint without a client.** Its transport is stateless Streamable HTTP --
+no session id is issued or needed -- so one request lists the tools:
 
 ```bash
 curl -fsS -X POST http://127.0.0.1:8100/mcp-http \

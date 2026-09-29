@@ -1,3 +1,10 @@
+## 2026-09-28 - Preserve MVP release evidence and clarify stdio setup
+
+- `README.md`, `docs/post-install.md`, `.env.example`: show the running-backend requirement and client environment for the supported local stdio path.
+- `tests/e2e/conftest.py`, `tests/e2e/README.md`, `tests/test_e2e_work_root.py`: keep local E2E evidence outside pytest's session scratch directory and document where to inspect it.
+- `.github/workflows/release-image.yml`, `tests/test_release_image_workflow.py`: fail validation when the in-image Graphiti fork probe fails before evidence upload.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-28 - Keep pytest scratch local and report cleanup failures
 
 - `pytest.ini`, `tests/conftest.py`, `tests/_temp_cleanup.py`: use pytest's public temporary-path fixtures outside the Git checkout, close CLI log handlers in the scratch tree, remove it with Windows read-only-file handling, and surface residue as a test failure.
@@ -101,12 +108,3 @@
   policy. Keep runtime checks public and add a boundary check against re-adding
   operator files. Earlier public Git history still contains operator details;
   no history rewrite, host rotation, deployment, or release occurred.
-
-## 2026-09-27 - Record local-stdio MVP platform and configuration decision
-
-- `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: approve Windows 11
-  AMD64 and Ubuntu Linux AMD64 as the primary MVP platforms; record the stdio,
-  backend, Neo4j, provider, benchmark-model, default-off feature, and public
-  Graphiti fork contract. Keep Oracle preflight, container validation, RC freeze,
-  and frozen-RC evidence open.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
