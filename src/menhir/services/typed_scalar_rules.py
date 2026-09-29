@@ -836,6 +836,77 @@ def _ground_span(content: str, stated_span: str) -> tuple[int, int] | None:
     return (m.start(), m.end())
 
 
+#: #89 semantic grounding applies to kinds whose value is taken from the model as-is. Counts,
+#: durations, frequencies and clock times are derived or canonicalized from the span already.
+_VALUE_IN_SPAN_KINDS = frozenset({"money", "measurement"})
+_ONES_WORDS = (
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
+    "nineteen",
+)
+_TENS_WORDS = {
+    "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+    "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
+}
+_WORD_NUMBERS: dict[str, Decimal] = {w: Decimal(i) for i, w in enumerate(_ONES_WORDS)}
+for _tens_word, _tens_value in _TENS_WORDS.items():
+    _WORD_NUMBERS[_tens_word] = Decimal(_tens_value)
+    for _i in range(1, 10):
+        for _sep in ("-", " "):
+            _WORD_NUMBERS[f"{_tens_word}{_sep}{_ONES_WORDS[_i]}"] = Decimal(_tens_value + _i)
+_WORD_NUMBERS["hundred"] = Decimal(100)
+_WORD_NUMBERS["dozen"] = Decimal(12)
+_WORD_NUMBERS["half"] = Decimal("0.5")
+_SCALE_WORDS = {
+    "k": Decimal(1_000), "thousand": Decimal(1_000),
+    "m": Decimal(1_000_000), "mm": Decimal(1_000_000), "million": Decimal(1_000_000),
+    "b": Decimal(1_000_000_000), "bn": Decimal(1_000_000_000), "billion": Decimal(1_000_000_000),
+}
+_SCALE_RE = r"(?:\s*(?P<scale>k|mm|m|bn|b|thousand|million|billion)\b)?"
+_DIGIT_NUMBER_RE = re.compile(r"(?<![\w.])(?P<num>\d[\d,]*(?:\.\d+)?|\.\d+)" + _SCALE_RE, re.IGNORECASE)
+_WORD_NUMBER_RE = re.compile(
+    r"\b(?P<num>" + "|".join(re.escape(w) for w in sorted(_WORD_NUMBERS, key=len, reverse=True))
+    + r")\b" + _SCALE_RE,
+    re.IGNORECASE,
+)
+
+
+def _stated_numbers(stated_span: str) -> set[Decimal]:
+    """Every number the quote states: digits (thousands separators, decimals, optional k/million
+    style scale) and English number words 0-100 plus dozen/half. Loose words such as "a" or
+    "a couple" are deliberately not numbers."""
+    found: set[Decimal] = set()
+    text = stated_span or ""
+    for pattern, lookup in ((_DIGIT_NUMBER_RE, None), (_WORD_NUMBER_RE, _WORD_NUMBERS)):
+        for match in pattern.finditer(text):
+            raw = match.group("num")
+            try:
+                base = lookup[raw.lower()] if lookup else Decimal(raw.replace(",", ""))
+            except (InvalidOperation, KeyError):
+                continue
+            scale = match.group("scale")
+            # "$5k" states 5000, not 5: a scaled number counts only at its scaled value.
+            found.add(base * _SCALE_WORDS[scale.lower()] if scale else base)
+    return found
+
+
+def _span_states_value(value: Any, stated_span: str) -> bool:
+    """#89: True when the quote states every numeric component of `value` (a [lo, hi] range needs
+    both ends). A negative value also matches its magnitude, since deltas carry direction in words."""
+    components = list(value) if isinstance(value, (list, tuple)) else [value]
+    stated = _stated_numbers(stated_span)
+    for component in components:
+        if isinstance(component, bool) or not isinstance(component, (int, float, Decimal)):
+            return False
+        try:
+            number = Decimal(str(component))
+        except InvalidOperation:
+            return False
+        if number not in stated and -number not in stated:
+            return False
+    return True
+
+
 def extract_typed_scalars_once(
     episodes: list[Any], llm_complete: LlmComplete,
     *, on_drop: "Callable[[str], None] | None" = None,
@@ -1157,6 +1228,12 @@ def parse_scalar_row(
     _disp, _keep, when = resolve_temporal_disposition(stated_span, when, operation, _ep_ref)
     if not _keep:
         drop(f"temporal_{_disp}")
+        return None
+
+    # Semantic grounding (#89), last so every earlier drop keeps its reason: a model-supplied money or
+    # measurement value must be stated in its own quote, or the evidence cannot justify it.
+    if value_kind in _VALUE_IN_SPAN_KINDS and not _span_states_value(value, stated_span):
+        drop("value_not_in_span")
         return None
 
     return TypedScalarProposal(
