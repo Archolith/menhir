@@ -575,6 +575,8 @@ class TestPhase3:
             )
         assert resp.status_code == 200
         assert consolidate.await_args.kwargs["enable_counter_state"] is False
+        assert consolidate.await_args.kwargs["enable_scalar_state"] is True
+        assert consolidate.await_args.kwargs["enable_event_history"] is False
 
     def test_run_503_when_no_chat_provider(self, client):
         with patch(
