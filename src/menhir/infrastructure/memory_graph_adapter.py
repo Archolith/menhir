@@ -1527,26 +1527,20 @@ class MemoryGraphAdapter:
         never scalar-consolidated, consolidated by a different perceiver_version, or carrying episodes
         beyond the stored cursor.
 
-        G14 bridge: prefers raw :TurnEvidence when any user-authored Turn exists (mirrors the counter
-        path's per-call switch above), so the typed-scalar path discovers user input -- and grounds its
-        assertions to the declarant foundation -- in a Turn-capturing production box; otherwise falls
-        back to the legacy `user:`-prefixed Episodic path (benchmark fixtures)."""
-        if self._turn_evidence.evidence_exists():
-            return self._turn_evidence.list_scalar_dirty_evidence_namespaces(
-                perceiver_version=perceiver_version, limit=limit)
-        return self._personal_memory.list_scalar_dirty_namespaces(
+        Reads canonical role=user :TurnEvidence ONLY — no Episodic `user:`-prefix fallback (issue #95).
+        The work-discovery cursor is the SAME :ScalarConsolidationWatermark the legacy path used, so
+        existing cursors remain valid."""
+        return self._turn_evidence.list_scalar_dirty_evidence_namespaces(
             perceiver_version=perceiver_version, limit=limit)
 
     def load_next_scalar_batch(
         self, namespace: str, *, perceiver_version: str, limit: int = 500
     ) -> list[dict[str, Any]]:
-        """The next bounded page of USER episodes AFTER the namespace's scalar cursor (C.4.3
-        truncation-safe backfill). See PersonalMemoryRepository.load_next_scalar_batch. G14: reads
-        :TurnEvidence (turn_id as the grounding anchor) when Turn evidence exists, else Episodic."""
-        if self._turn_evidence.evidence_exists():
-            return self._turn_evidence.load_next_scalar_evidence_batch(
-                namespace, perceiver_version=perceiver_version, limit=limit)
-        return self._personal_memory.load_next_scalar_batch(
+        """The next bounded page of user :TurnEvidence AFTER the namespace's scalar cursor (C.4.3
+        truncation-safe backfill), keyed by `turn_id` as the grounding anchor. Rows carry the same
+        shape as the legacy Episodic path: `cursor_at` is the monotonic work-discovery key the caller
+        advances the cursor with; `valid_at` is the assertion's world time."""
+        return self._turn_evidence.load_next_scalar_evidence_batch(
             namespace, perceiver_version=perceiver_version, limit=limit)
 
     def advance_scalar_cursor(
@@ -1555,10 +1549,18 @@ class MemoryGraphAdapter:
     ) -> None:
         """Advance the namespace's scalar cursor to the last processed episode's monotonic
         work-discovery key `cursor_at` (C.4.3, NOT world-time). Called only after a batch actually
-        ran, so a partial backfill resumes without stranding the tail."""
+        ran, so a partial backfill resumes without stranding the tail.
+
+        Uses the SAME :ScalarConsolidationWatermark cursor store the evidence-path discovery/batch
+        queries read, so load and advance stay consistent."""
         self._personal_memory.advance_scalar_cursor(
             namespace, cursor_at=cursor_at, cursor_uuid=cursor_uuid,
             perceiver_version=perceiver_version, at=at)
+
+    def evidence_exists(self) -> bool:
+        """Whether any :TurnEvidence exists (scalar visibility gate; the counter lane also switches
+        on this)."""
+        return self._turn_evidence.evidence_exists()
 
     # --- event-consolidation cursor (Event History consolidation source) ---
     # These delegates read canonical :TurnEvidence ONLY — no Episodic fallback and no global

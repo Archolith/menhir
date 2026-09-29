@@ -10,6 +10,27 @@ from typing import Any, Callable, Protocol
 
 logger = logging.getLogger(__name__)
 
+_warned_no_scalar_evidence = False
+
+
+def _warn_once_if_no_scalar_evidence(graph_adapter: Any) -> None:
+    """One warning per process when the scalar lane runs but the graph holds no user :TurnEvidence
+    at all (issue #95: the Episodic `user:`-prefix fallback is gone, so nothing would ever be
+    discovered). Never raises."""
+    global _warned_no_scalar_evidence
+    if _warned_no_scalar_evidence:
+        return
+    try:
+        if not graph_adapter.evidence_exists():
+            _warned_no_scalar_evidence = True
+            logger.warning(
+                "typed-scalar consolidation found no role='user' TurnEvidence in the graph; "
+                "it will discover no work until evidence is recorded via "
+                "add_memory(user_statement=...) or a TurnEvidence producer hook"
+            )
+    except Exception:  # noqa: BLE001 - visibility must never fail target selection
+        logger.exception("typed-scalar evidence visibility check failed (non-fatal)")
+
 
 class CountingLlm(Protocol):
     """Callable LLM seam whose invocation count is shared across consolidation phases."""
@@ -51,6 +72,8 @@ class ScalarConsolidationGraph(Protocol):
 
     def retire_counters_superseded_by_scalar(self, *, namespace: str) -> int: ...
 
+    def evidence_exists(self) -> bool: ...
+
 
 @dataclass(frozen=True)
 class ScalarConsolidationConfig:
@@ -87,6 +110,7 @@ async def select_scalar_targets(
 ) -> list[str]:
     """Snapshot scalar-dirty namespaces before the blocking consolidation worker starts."""
 
+    _warn_once_if_no_scalar_evidence(graph_adapter)
     if namespaces is not None:
         return list(namespaces)
     return await asyncio.to_thread(
