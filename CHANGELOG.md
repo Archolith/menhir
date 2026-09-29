@@ -1,3 +1,12 @@
+## 2026-09-28 - Ground scalar clock times with dotted meridiems
+
+- `src/menhir/services/typed_scalar_rules.py`: normalize dotted AM/PM source
+  times correctly and refuse unsupported suffixes instead of accepting a bare
+  time prefix that could overwrite a correct model value.
+- `tests/test_typed_scalar_perception.py`: cover source spelling, noon and
+  midnight, malformed times, and full-row grounding.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-28 - Refuse ambiguous scalar subject fallback
 
 - `src/menhir/services/typed_scalar_rules.py`: distinguish absent, ambiguous,
@@ -67,36 +76,4 @@
 - `.github/workflows/release-image.yml`: surface a failed builder's final diagnostic as a job annotation and verify the fork version, upstream absence, and native hook wiring inside the no-publish candidate image.
 - `tests/test_build_release_image.py`: reproduce Docker's restrictive archive mode, verify the scanner-readable mode on POSIX, and pin Syft's temporary-space budget.
 - `tests/test_release_image_workflow.py`: keep the offline container fork probe in the validation job before artifact upload.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-09-28 - Close Gate B structure, artifact, and TODO correctness gaps
-
-- `src/menhir/infrastructure/project_scanner.py`: refuse unreadable traversal, stat, and source reads before publication; bump the scanner fingerprint schema.
-- `src/menhir/infrastructure/structure_write_fence.py`: issue graph-backed scan generations and lock each project during transactional publication.
-- `src/menhir/infrastructure/structure_queries.py`: publish scan metadata last, preserve unseen legacy symbols on capped scans, and scope fingerprint reads and binding refreshes to project identity.
-- `src/menhir/infrastructure/memory_graph_adapter.py`: validate the latest scan generation and publish structure, binding refreshes, and document writes under the project transaction lock.
-- `src/menhir/core/backend_runtime_data_ops.py`: mint scan generations before manual and detached symbol scans and carry them into skipped binding refreshes.
-- `src/menhir/core/backend_shared.py`: preserve scan generations through serialized payloads and reject missing or inconsistent coverage counts before publication.
-- `src/menhir/services/scheduler_tasks.py`: settle identity and mint the generation before watcher traversal; report scan and binding failures.
-- `src/menhir/services/scheduler_protocols.py`: describe the watcher scan-generation and binding-refresh methods.
-- `src/menhir/domain/work_artifact.py`: require a replacement for `SUPERSEDED` and validate known lifecycle states.
-- `src/menhir/infrastructure/work_artifact_repository.py`: lock artifact updates and compare observed lifecycle state before applying transitions or supersession, including legacy null namespaces.
-- `src/menhir/services/artifact_reconciliation_service.py`: leave unresolved source declarations in place when a superseded registration has no replacement.
-- `src/menhir/mcp/tools/ops/transition_artifact.py`: explain stale transitions and the dedicated supersession operation.
-- `src/menhir/infrastructure/todo_repository.py`: link unique visible files, persist each chosen project and canonical path, and return linked and unresolved locations.
-- `src/menhir/mcp/tools/ops/add_todo.py`: report linked files and unresolved location reasons.
-- `src/menhir/mcp/tools/ops/get_todo.py`: display every linked file on a TODO read.
-- `src/menhir/mcp/tools/recall/query_structure.py`: qualify empty symbols, dependencies, documents, and affected-test answers by index coverage.
-- `tests/test_project_scanner.py`: traversal, stat, and required-read refusal regressions.
-- `tests/test_query_structure_tool.py`: complete, partial, and legacy-unknown negative-answer regressions.
-- `tests/test_structure_watcher.py`, `tests/test_beacon_provider.py`, and `tests/infrastructure/test_cf257_detached_write_identity.py`: cover the new watcher and detached-write ordering contract.
-- `tests/infrastructure/test_cf257_stale_claim.py`, `tests/test_high_wave1_remediation.py`, and `tests/test_high_wave5_explorer_domain.py`: keep the existing identity, rescan, and unscoped-transition regressions aligned with the new token and lifecycle compare-and-set boundaries.
-- `tests/infrastructure/test_gateb_structure_publication_online.py`: real-Neo4j stale-scan, rollback, same-project serialization, capped legacy-symbol, cross-identity refresh, and injected-traversal regressions.
-- `tests/test_work_artifact.py`, `tests/test_artifact_tools.py`, `tests/test_artifact_source_reconciliation_io.py`, and `tests/test_cf48_domain_owns_artifact_predicates.py`: artifact lifecycle and unresolved-import regressions.
-- `tests/test_work_artifact_online.py`: real-Neo4j artifact transition, supersession, and rollback races.
-- `tests/test_todo.py` and `tests/test_todo_file_link_online.py`: unique, ambiguous, multi-location, namespace, and restart link regressions.
-- `tests/e2e/test_e2e_08_isolation_adversarial.py`: distinguish namespace-delete caps from a real structural scan cap and check preservation of an indexed file.
-- `tests/e2e/test_e2e_04_workartifacts.py` and `tests/e2e/_harness/artifact_corpus.py`: verify a legacy superseded source without a replacement stays unregistered and byte-identical while valid artifacts reconcile.
-- `tests/e2e/README.md`: explain the two separate cap criteria.
-- `.agent/data_models.md`, `.agent/endpoints.md`, and `.agent/workflows/artifact_authoring.md`: document scan ordering, TODO resolution, and replacement-backed supersession.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.

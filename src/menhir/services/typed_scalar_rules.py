@@ -93,9 +93,13 @@ _MEASUREMENT_AMOUNT_UNIT_RE = re.compile(
     re.IGNORECASE,
 )
 _CLOCK_SOURCE_RE = re.compile(
-    r"(?<!\d)(?P<hour>\d{1,2}):(?P<minute>[0-5]\d)\s*(?P<meridiem>am|pm)?\b",
+    r"(?<!\d)(?P<hour>\d{1,2}):(?P<minute>[0-5]\d)(?!\d)",
     re.IGNORECASE,
 )
+# Consume a possible meridiem-like token as a whole; an invalid spelling must not leave a
+# valid-looking bare clock prefix behind for the source-value override.
+_CLOCK_MERIDIEM_RE = re.compile(r"^\s*(?P<suffix>[ap](?:[.\s/:-]?m)[\w.]*)", re.IGNORECASE)
+_CLOCK_SUPPORTED_MERIDIEM_RE = re.compile(r"[ap]\.?m\.?", re.IGNORECASE)
 _USD_SOURCE_RE = re.compile(r"\$|\b(?:usd|dollars?)\b", re.IGNORECASE)
 _BOOLEAN_UNCERTAIN_RE = re.compile(
     r"\b(?:no\s+longer|used\s+to|did(?:\s+not|n't)\s+use\s+to|might|may|could|perhaps)\b|"
@@ -662,7 +666,14 @@ def _clock_time_from_source(stated_span: str) -> str | None:
     match = matches[0]
     hour = int(match.group("hour"))
     minute = int(match.group("minute"))
-    meridiem = (match.group("meridiem") or "").lower()
+    tail = (stated_span or "")[match.end():]
+    suffix_match = _CLOCK_MERIDIEM_RE.match(tail)
+    suffix = suffix_match.group("suffix") if suffix_match else ""
+    if suffix and _CLOCK_SUPPORTED_MERIDIEM_RE.fullmatch(suffix) is None:
+        return None
+    if not suffix and tail and (tail[0].isalnum() or tail[0] == "_"):
+        return None  # Never accept a bare-time prefix of a connected, unsupported token.
+    meridiem = suffix.replace(".", "").lower()
     if meridiem:
         if not 1 <= hour <= 12:
             return None
