@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 
@@ -429,7 +430,7 @@ class TestLinkedEntitiesAcceptsTurnEvidenceId:
 
 class TestLookupEntitiesByNormalizedNames:
     """The optional same-namespace repository fallback for typed-scalar binding (C.4.3) is exact and
-    fail-closed: nonblank namespace, group_id equality, View exclusion, blank-uuid exclusion."""
+    fail-closed: nonblank namespace, shared tenant scope, View exclusion, blank-uuid exclusion."""
 
     def _query_and_params(self, repo):
         call = repo.neo4j.execute.call_args
@@ -448,14 +449,21 @@ class TestLookupEntitiesByNormalizedNames:
         assert repo.lookup_entities_by_normalized_names("ns", []) == []
         repo.neo4j.execute.assert_not_called()
 
-    def test_query_uses_group_id_equality_for_same_namespace(self):
+    def test_query_uses_shared_scope_for_named_namespace(self):
         repo = _make_repo([])
         repo.lookup_entities_by_normalized_names("tenant-a", ["black shoes"])
         query, params = self._query_and_params(repo)
-        assert "n.group_id = $namespace" in query                 # same-namespace, not cross-tenant
+        assert "coalesce(n.namespace, n.group_id, '') IN $tenant_namespaces" in query
         assert "toLower(trim(n.name)) IN $spellings" in query     # exact normalized-name equality
-        assert params["namespace"] == "tenant-a"
+        assert params["tenant_namespaces"] == ["tenant-a"]
         assert params["spellings"] == ["black shoes"]
+
+    def test_default_namespace_queries_both_persisted_silo_spellings(self):
+        repo = _make_repo([])
+        repo.lookup_entities_by_normalized_names("default", ["black shoes"])
+        query, params = self._query_and_params(repo)
+        assert "coalesce(n.namespace, n.group_id, '') IN $tenant_namespaces" in query
+        assert set(params["tenant_namespaces"]) == {"default", ""}
 
     def test_query_excludes_derived_views_and_blank_uuids(self):
         repo = _make_repo([])
@@ -473,6 +481,33 @@ class TestLookupEntitiesByNormalizedNames:
         ])
         got = repo.lookup_entities_by_normalized_names("ns", ["black shoes"])
         assert got == [{"uuid": "e-1", "name": "black shoes"}]
+
+
+@pytest.mark.online
+def test_normalized_name_lookup_reads_default_silo_without_crossing_tenants(test_neo4j_repo):
+    prefix = f"cf77-{uuid4().hex}-"
+    rows = [
+        {"uuid": prefix + "current", "name": "black shoes", "group_id": ""},
+        {"uuid": prefix + "legacy", "name": "black shoes", "group_id": "default"},
+        {"uuid": prefix + "named", "name": "black shoes", "group_id": "tenant-a"},
+        {"uuid": prefix + "other", "name": "black shoes", "group_id": "tenant-b"},
+        {"uuid": prefix + "view", "name": "black shoes", "group_id": "", "is_view": True},
+    ]
+    test_neo4j_repo.execute("UNWIND $rows AS row CREATE (n:Entity) SET n += row", params={"rows": rows})
+    repo = EpisodeLifecycleRepository()
+    repo.neo4j = test_neo4j_repo
+    try:
+        assert {row["uuid"] for row in repo.lookup_entities_by_normalized_names(
+            "default", ["black shoes"],
+        )} == {prefix + "current", prefix + "legacy"}
+        assert {row["uuid"] for row in repo.lookup_entities_by_normalized_names(
+            "tenant-a", ["black shoes"],
+        )} == {prefix + "named"}
+    finally:
+        test_neo4j_repo.execute(
+            "MATCH (n:Entity) WHERE n.uuid STARTS WITH $prefix DETACH DELETE n",
+            params={"prefix": prefix},
+        )
 
 class TestAdapterDelegatesNormalizedNameLookup:
     """The MemoryGraphAdapter façade must forward the same-namespace lookup to the episode repo, so the

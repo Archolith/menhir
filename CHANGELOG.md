@@ -1,3 +1,13 @@
+## 2026-09-28 - Restore default-silo scalar owner lookup
+
+- `src/menhir/infrastructure/episode_lifecycle.py`: use the shared tenant-scope
+  predicate for exact fallback entity lookup, including both persisted default
+  namespace spellings while keeping named tenants scoped.
+- `tests/test_episode_lifecycle.py`: cover default and named namespace query
+  parameters and a disposable-graph regression for current, legacy, named,
+  and derived-View entities.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-28 - Schedule scalar-only personal memory
 
 - `src/menhir/core/runtime.py`, `src/menhir/services/maintenance_scheduler.py`:
@@ -68,14 +78,4 @@
 - `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`: close Gate B against merged main after exact-commit CI, Ubuntu stdio criteria, Windows strict E2E, and no-publish Graphiti image receipts; keep RC freeze and final release separate.
 - `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: record Gate B and pre-freeze Gate C completion, exact evidence, and the remaining named-RC work.
 - `.agent/archive/plans/menhir-gate-b-remediation-2026-09-28.md`, `.agent/plans/README.md`: mark the completed remediation plan IMPLEMENTED, archive it, and remove it from active execution routing.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-09-28 - Prove denied scans and sealed Graphiti container preflight
-
-- `src/menhir/core/backend_runtime_data_ops.py`: report failed project traversal to stdio callers as a clear refusal while preserving the existing index.
-- `tests/infrastructure/test_gateb_structure_publication_online.py`: keep the graph-preservation regression aligned with the caller-visible refusal.
-- `tests/e2e/test_e2e_08_isolation_adversarial.py`: deny a real directory listing on Windows or POSIX and compare the indexed graph before and after a rejected rescan.
-- `tests/e2e/test_e2e_06_graphiti_fork.py`: verify and probe a no-publish release image artifact from the same clean commit; retain explicit PENDING evidence when no bundle is supplied.
-- `tests/e2e/README.md`: document both platform and container evidence paths.
-- `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`: reconcile merged correctness fixes and exact-commit evidence without declaring RC release approval.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.

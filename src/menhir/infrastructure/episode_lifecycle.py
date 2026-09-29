@@ -1125,8 +1125,8 @@ NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If
         unique fail-closed binder over the returned rows. Fail-closed on every axis:
           * requires a NONBLANK `namespace` — an empty/absent namespace returns [] (never a
             namespace-blind lookup that could leak across tenants);
-          * enforces `group_id` EQUALITY (`n.group_id = $namespace`), so a subject can never bind to an
-            entity from a different namespace silo;
+          * applies the shared tenant-scope predicate, including both persisted spellings of the
+            default silo, so a subject cannot bind to another namespace's entity;
           * matches only `toLower(trim(n.name)) IN $spellings` — the SAME normalize-then-lower form the
             unique binder uses (`str(name).strip().lower()`), so a name that carries surrounding
             whitespace is still found;
@@ -1140,7 +1140,7 @@ NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If
         rows = self.neo4j.execute(
             f"""
             MATCH (n:Entity)
-            WHERE n.group_id = $namespace
+            WHERE {tenant_scope_cypher("n")}
               AND toLower(trim(n.name)) IN $spellings
               AND n.uuid IS NOT NULL AND trim(toString(n.uuid)) <> ''
               AND {non_derived_view_cypher("n")}
@@ -1149,7 +1149,10 @@ NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If
                    coalesce(n.is_quantstate, false) AS is_quantstate,
                    n.view_kind AS view_kind
             """,
-            params={"namespace": namespace, "spellings": [s.strip() for s in safe_spellings]},
+            params={
+                **tenant_scope_params(namespace),
+                "spellings": [s.strip() for s in safe_spellings],
+            },
         )
         out: list[dict[str, str]] = []
         for row in rows:
