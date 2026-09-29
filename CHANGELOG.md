@@ -1,3 +1,9 @@
+## 2026-09-29 - Read multi-word numbers whole in scalar counts and frequencies
+
+- `src/menhir/services/typed_scalar_rules.py`: counts read thirteen to nineteen, the tens, and tens compounds ("twenty-five", "twenty five") as one number, so "twenty-five postcards" is 25, not 5. A count, range bound or frequency count joined to another number word, digit or scale word ("two hundred", "2 thousand") now gives no value instead of a piece of the number, and a frequency with a multi-word number before "every" no longer defaults to a count of 1 (#200).
+- `tests/test_scalar_compound_number_words.py`: compound, scaled, range, delta and frequency cases, plus unchanged single-word readings.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-29 - Default the scalar agreement gate to lenient
 
 - `src/menhir/config/settings_model.py`: `personal_memory_scalar_threshold` defaults to `2/3` and attribute/scope/subject reconciliation to on; scalar state itself stays off.
@@ -71,9 +77,4 @@
 - `tests/test_typed_scalar_self_binding.py`,
   `tests/test_typed_scalar_bind_persist.py`: cover exact and variant ambiguity,
   blank UUIDs, both namespace forms, persisted advisories, and repair.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-09-28 - Reconcile MVP preflight evidence before RC freeze
-
-- `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: record the completed issue inventory, five-item Oracle harness preflight, and merged Opus fixes while keeping exact-RC gates open.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
