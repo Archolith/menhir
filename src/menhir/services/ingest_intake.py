@@ -70,11 +70,16 @@ class IngestIntakeMixin:
         namespace: str | None = None,
         occurred_at: str | None = None,
         turn_evidence_uuid: str | None = None,
+        user_statement: str | None = None,
     ) -> IngestResult:
         """Durably record a raw episode and queue background enrichment.
 
         Gate user-tier claims (source='user' or 'manual') using turn evidence grounding before
         persistence. If the claim is ungrounded, downgrade to agent_inference tier.
+
+        `user_statement`: the agent-supplied verbatim user words. Recorded as `:TurnEvidence`
+        with source_kind='agent_quoted' -- provenance for scalar perception ONLY. It is never
+        passed to the admission gate and never counts as user foundation.
         """
 
         validate_memory_payload(episode, diff)
@@ -87,6 +92,32 @@ class IngestIntakeMixin:
         episode_name = f"episode-{session.session_id}-{episode_uuid}"
         reference_time = _parse_occurred_at(occurred_at)
         normalized_bootstrap_scope = normalize_bootstrap_scope_for_flag(bootstrap_scope, flagged)
+
+        # Agent-quoted evidence (best-effort, like every other provenance write below): record
+        # the caller's verbatim user words as a role='user' :TurnEvidence stamped
+        # source_kind='agent_quoted'. A failure is logged and NEVER fails the ingest; a
+        # whitespace-only statement is ignored. The returned turn id feeds ONLY the ungated
+        # provenance branch below -- it must never reach the admission gate as grounds.
+        agent_quoted_turn_id: str | None = None
+        statement_text = (user_statement or "").strip()
+        if statement_text:
+            try:
+                recorded = self.graph_adapter.record_turn_evidence(
+                    text=statement_text,
+                    role="user",
+                    declarant="user",
+                    source_kind="agent_quoted",
+                    session_id=session.session_id,
+                    namespace=namespace,
+                    source_client=(session.client_name or None),
+                )
+                agent_quoted_turn_id = str(recorded.get("turn_id") or "").strip() or None
+            except Exception:
+                logger.warning(
+                    "Failed to record agent_quoted turn evidence for session=%s; "
+                    "memory proceeds without it (non-fatal)",
+                    session.session_id, exc_info=True,
+                )
 
         try:
             # Gate user-tier claims: fetch turn evidence and evaluate.
@@ -168,14 +199,22 @@ class IngestIntakeMixin:
             # edge must not fail the write.
             evidence_projection_uuid: str | None = None
             if verdict is not None:
-                admitted_on_uuid = verdict.turn_evidence_uuid if verdict.granted else None
+                # On a denial, an agent_quoted turn from this call may still draw a provenance-only
+                # edge: foundation queries exclude agent_quoted evidence, so it cannot read as a
+                # user admission, and scalar binding needs the edge to reach this memory.
+                admitted_on_uuid = (
+                    verdict.turn_evidence_uuid if verdict.granted else agent_quoted_turn_id
+                )
                 # Granted-verdict case: the edge records WHY the elevated tier was granted, so its
                 # loss is an auditability gap an operator must be able to see.
                 admission_is_load_bearing = verdict.granted
             else:
-                admitted_on_uuid = (turn_evidence_uuid or "").strip() or None
-                # Caller-supplied case: provenance only, the tier was already agent and does not
-                # depend on this edge, so a failure stays non-fatal and quiet.
+                # Caller-supplied case, extended to include an agent_quoted turn recorded from
+                # `user_statement` this call. Provenance only, the tier was already agent and does
+                # not depend on this edge, so a failure stays non-fatal and quiet. A
+                # caller-supplied turn_evidence_uuid wins over the agent-quoted id; neither can
+                # raise the tier because the gate never sees either one on this branch.
+                admitted_on_uuid = (turn_evidence_uuid or "").strip() or agent_quoted_turn_id
                 admission_is_load_bearing = False
             if admitted_on_uuid:
                 try:

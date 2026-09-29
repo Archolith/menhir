@@ -324,7 +324,7 @@ class ScalarViewRepositoryMixin:
             f"""
             MATCH (v:Entity {{uuid: $view_uuid}})-[:CURRENT_ANCHOR]->(a:TypedAssertion)
             MATCH (te:TurnEvidence {{declarant: 'user'}})-[:FOUNDS]->(a)
-            WHERE true {ns_filter}
+            WHERE coalesce(te.source_kind, '') <> 'agent_quoted' {ns_filter}
             RETURN count(te) > 0 AS founded
             """,
             {"view_uuid": view_uuid, "ns": namespace or ""},
@@ -345,7 +345,8 @@ class ScalarViewRepositoryMixin:
         rows = self.neo4j.execute(
             f"""
             MATCH (te:TurnEvidence {{declarant: 'user'}})-[:FOUNDS]->(a:TypedAssertion)
-            WHERE a.assertion_id IN $ids {ns_filter}
+            WHERE a.assertion_id IN $ids
+                  AND coalesce(te.source_kind, '') <> 'agent_quoted' {ns_filter}
             RETURN count(te) > 0 AS founded
             """,
             {"ids": list(assertion_ids), "ns": namespace or ""},

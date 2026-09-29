@@ -337,6 +337,9 @@ class MemoryRequest(BaseModel):
     flagged: bool = False
     bootstrap_scope: str | None = None
     turn_evidence_uuid: str | None = None
+    #: The user's verbatim words, supplied by the agent. Recorded as agent_quoted TurnEvidence:
+    #: scalar perception input only, never user-tier grounds. Exclusive with turn_evidence_uuid.
+    user_statement: str | None = None
 
 
 class MemoryResponse(BaseModel):

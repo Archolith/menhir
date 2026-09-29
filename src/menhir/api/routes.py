@@ -371,6 +371,13 @@ async def ingest_memory(
         ingest_kwargs["flagged"] = True
     if body.bootstrap_scope is not None:
         ingest_kwargs["bootstrap_scope"] = body.bootstrap_scope
+    if (body.user_statement or "").strip():
+        if (body.turn_evidence_uuid or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail="user_statement and turn_evidence_uuid are mutually exclusive",
+            )
+        ingest_kwargs["user_statement"] = body.user_statement
     result = await backend.queue_episode(
         body.episode,
         user_id=session.user_id,
