@@ -231,3 +231,35 @@ Nothing in P1-P3 touches runtime behavior; P4 adds a read-only CLI.
 - P4 verification: run `menhir config show` against the live `.env` and diff its "effective"
   column against the 2026-09-11 scan table (the one in this plan's Origin block) -- they must
   agree on every row, or the scan had an error the join just exposed.
+
+## Reconciliation with #168 Phase 0 (2026-09-28, `de370260`)
+
+Still PROPOSED; no registry code exists (`config/feature_flags.py` and its test are absent).
+#168 reuses this plan as its single flag owner and does not start a second registry. Rechecked
+against current code (details in `menhir-168-phase0-baseline-contract.md`):
+
+- **Counts hold:** 44 bool settings, 153 `MemorySettings` fields in total.
+- **Documentation gap is wider than the Origin block says:** 27 of 44 bool settings have no env
+  var in `.env.example`. That includes every #170-#173 candidate except scalar_state,
+  view_authority, reconcile_*, consolidation_audit, deterministic_shadow (documented under the
+  alias `MENHIR_SCALAR_DETERMINISTIC_SHADOW`), warden_gate, evidence_anchor, content_vector,
+  fact_edges and brief_builder. `MENHIR_CANONICAL_SELF_BINDING_MODE` is also undocumented.
+- **Env-only census:** 20 `MENHIR_*` vars are read outside `settings_model.py`; 16 are absent from
+  `.env.example` (the Origin list plus `MENHIR_CONSOLE_SCHEME`, `MENHIR_EMBEDDING_CACHE_MAX_SIZE`,
+  `MENHIR_SAGA_ALL_WRITERS_GATE_AWARE`, `MENHIR_SNAPSHOT_RECEIVE_MODE`). `MENHIR_INGEST_ALLOWED_ROOTS`
+  is now documented.
+- **Invalid and absent values:** `parse_bool_env` maps anything outside `1/true/yes` to False, so an
+  empty or mistyped value silently turns off a default-ON flag. Modes are unvalidated at load
+  (`canonical_self_binding_mode` falls back to `off` with a warning at its consumer). #168 needs
+  the registry to state per-flag invalid-value behavior before any flag is promoted to default-ON.
+  Candidate addition: a T8 asserting that default-ON bools reject unrecognized values, or document it.
+- **`requires` edges #168 needs recorded (T6):** view_authority -> scalar_state;
+  event_history_authority -> event_history; scalar_reconcile_* / threshold -> scalar_state (plus
+  perceiver-version bump); belief_gate and evidence_anchor -> warden_gate;
+  deterministic_shadow audit output -> consolidation_audit.
+- **Observation switches** (`*_audit_enabled`, `frontier_shadow`, `shadow_context_composition`)
+  should carry a registry marker so #168 can refuse to count them as user defaults.
+
+Scope for #168: P1-P3 (registry, tests, `.env.example` backfill) are the parts #168's final gate
+("update settings/example descriptions") depends on. P4-P5 remain optional. Open decision 3
+(scheduler intervals wait for #81) is now unblocked: #81 landed as `24cedca2`.
