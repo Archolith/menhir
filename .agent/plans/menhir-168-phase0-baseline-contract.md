@@ -15,6 +15,11 @@ Owner decisions 2026-09-28: section 6 limits **ratified as written**; campaign m
 fix is deferred. **No dollar ceiling is set and no paid run is authorized**: the owner
 questioned whether paid calls are needed at all, so every live run needs a fresh go-ahead.
 
+Scalar decisions (#170): agreement is **lenient** (threshold `2/3`, attribute/scope/subject
+reconciliation on), and scalar input is the user's statement **quoted verbatim by the agent** on
+`add_memory`, trusted for perception only. Both still have to pass the section 6 limits. Plan:
+`menhir-scalar-default-enablement-plan.md`.
+
 Owner issue: [#168](https://github.com/Archolith/menhir/issues/168). Children #169-#173 consume
 this baseline; nothing here enables a feature.
 
