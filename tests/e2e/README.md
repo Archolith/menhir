@@ -83,8 +83,12 @@ acceptance criteria were proven, and a green run with pending lanes is not the s
 as a green run without them:
 
 ```bash
-cat evidence/<run_id>/*/result.json   | jq -r '.lane + ": " + .status + " — " + (.criteria_unproven | join(", "))'
+cat .e2e-work/evidence/<run_id>/*/result.json | jq -r '.lane + ": " + .status + " — " + (.criteria_unproven | join(", "))'
 ```
+
+The default work root is `.e2e-work` in the repository. It is gitignored and survives
+pytest teardown so the RC evidence can be inspected. If `MENHIR_E2E_WORK_ROOT` is set,
+read `evidence/<run_id>/*/result.json` under that directory instead.
 
 No lane currently asks for a live model, so a full campaign run spends nothing and needs no
 API key.
@@ -105,7 +109,7 @@ existing file.
 | `MENHIR_E2E_STRICT` | unset | `1` aborts on a dirty tree — **required for the RC run** |
 | `MENHIR_E2E_NEO4J_URI` | `bolt://127.0.0.1:7689` | Disposable graph |
 | `MENHIR_E2E_BACKEND_PORT` | `8199` | Loopback `menhir serve` |
-| `MENHIR_E2E_WORK_ROOT` | pytest tmp dir | Venv, fixtures, evidence |
+| `MENHIR_E2E_WORK_ROOT` | `<repo>/.e2e-work` | Persistent, gitignored venv, fixtures, evidence |
 | `MENHIR_E2E_RELEASE_IMAGE_BUNDLE` | unset | Exact-commit no-publish image validation artifact for E2E-6; unset means two explicit PENDING criteria |
 | `MENHIR_E2E_BEACON_PYTHON` | unset | Optional post-MVP Beacon scenario interpreter; the MVP CI lane does not install Beacon |
 

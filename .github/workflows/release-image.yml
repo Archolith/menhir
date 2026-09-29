@@ -313,6 +313,7 @@ jobs:
           IMAGE: ${{ inputs.image }}
           VERSION: ${{ inputs.version }}
         run: |
+          set -euo pipefail
           docker run --rm --network none --read-only --cap-drop ALL \
             --security-opt no-new-privileges=true \
             --env MENHIR_STARTUP_SCOPE=full \

@@ -95,14 +95,16 @@ def e2e_run_id() -> str:
 
 
 @pytest.fixture(scope="session")
-def e2e_config(tmp_path_factory: pytest.TempPathFactory) -> E2EConfig:
+def e2e_config() -> E2EConfig:
     """Resolve and validate campaign configuration. Fails closed on an unsafe graph."""
 
     # Fail at session setup, not mid-lane, if the feature registry has drifted from the
     # settings model: a stale registry silently toggles nothing.
     validate_registry(REPO_ROOT / "src" / "menhir" / "config" / "settings_model.py")
 
-    work_root = Path(os.getenv("MENHIR_E2E_WORK_ROOT") or tmp_path_factory.mktemp("menhir-e2e"))
+    # Keep release evidence outside pytest's session scratch tree, which the root
+    # conftest removes at teardown. The default directory is gitignored.
+    work_root = Path(os.getenv("MENHIR_E2E_WORK_ROOT") or REPO_ROOT / ".e2e-work")
     config = E2EConfig(work_root=work_root)
     config.validate()
     for directory in (config.state_dir, config.evidence_dir, config.fixtures_dir):

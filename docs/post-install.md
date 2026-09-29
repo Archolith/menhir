@@ -85,9 +85,14 @@ the agent hooks must target another port.
 
 ## 3. Register the MCP client
 
-Point HTTP-capable clients at `http://127.0.0.1:8100/mcp-http`. When authentication is enabled, use a
-credential with the smallest tier the client needs. Stdio clients must set `MENHIR_BACKEND_URL` and
-connect through `python -m menhir.mcp.server`; the stdio bridge does not start another runtime.
+For the supported local MVP path, keep `menhir serve` running and configure the client to launch
+`python -m menhir.mcp.server` with `MENHIR_BACKEND_URL=http://127.0.0.1:8100` in the client's
+environment. Use the Python installation that contains Menhir. If the backend has tier keys,
+pass its `MENHIR_AGENT_KEY` to the client too. The [stdio client example](../README.md#connect-an-mcp-client)
+shows both settings. The stdio bridge connects to the running backend; it does not start one.
+
+HTTP-capable clients can also connect to `http://127.0.0.1:8100/mcp-http`. When authentication is
+enabled, use a credential with the smallest tier the client needs.
 
 Client schemas and credential stores differ, so `menhir setup` does not rewrite MCP client config.
 Validate the connection by listing tools, calling `query_structure` with `query_type="projects"`, and
