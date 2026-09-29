@@ -1,3 +1,8 @@
+## 2026-09-28 - Reconcile MVP preflight evidence before RC freeze
+
+- `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: record the completed issue inventory, five-item Oracle harness preflight, and merged Opus fixes while keeping exact-RC gates open.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-28 - Preserve MVP release evidence and clarify stdio setup
 
 - `README.md`, `docs/post-install.md`, `.env.example`: show the running-backend requirement and client environment for the supported local stdio path.
@@ -94,17 +99,3 @@
 - `.agent/plans/README.md`: route the proposed work package under the approved
   local-stdio MVP release plan.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-09-27 - Separate operator deployment from public Menhir
-
-- Move the operator host configuration, production runbooks, release receipts,
-  staging/promotion scripts, migration pipeline, and offline tests into the
-  private `Archolith/menhir-deploy` repository. Preserve their relative paths
-  for offline verification with a pinned public Menhir checkout.
-- Keep the public package, local self-host instructions, sealed image builder,
-  and disposable Docker checks. Correct the Docker guide so it no longer
-  claims a plain clone can build the release image.
-- Replace production-policy fixtures in public security tests with a synthetic
-  policy. Keep runtime checks public and add a boundary check against re-adding
-  operator files. Earlier public Git history still contains operator details;
-  no history rewrite, host rotation, deployment, or release occurred.
