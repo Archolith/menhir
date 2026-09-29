@@ -1,3 +1,9 @@
+## 2026-09-29 - Require money and measurement quotes to state their value
+
+- `src/menhir/services/typed_scalar_rules.py`: a model-supplied money or measurement value drops with `value_not_in_span` unless its grounded quote states it as digits (thousands separators, decimals, k/million scale) or English number words; the check runs last so earlier drop reasons are unchanged, and counts, durations, frequencies and clock times keep their span-derived values (#89).
+- `tests/test_scalar_value_in_quote.py`: stated and missing money forms, measurement, scaled amounts, and unchanged count correction and multi-number abstention.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-29 - Treat equal Decimal amounts as one scalar value
 
 - `src/menhir/domain/typed_assertion.py`: canonical numeric form for voting and identity strips insignificant Decimal scale and signs zero (10, 10.0, 10.00 -> "10"; -0.00 -> "0"), without float (#152).
@@ -72,11 +78,3 @@
 - `tests/conftest.py`, `tests/services/test_ingest_write_bounds.py`, `tests/test_api_routes.py`, `tests/test_backend_roundtrip.py`, `tests/test_circuit_breaker.py`, `tests/test_conflict_namespace_scope.py`, `tests/test_episode_lifecycle.py`, `tests/test_high_wave1_remediation.py`, `tests/test_mcp_server.py`, `tests/test_memory_graph_adapter_methods.py`, `tests/test_transient_exhausted_recovery_live.py`, `tests/test_transient_refund_online.py`: cover write boundaries, mixed-group namespace isolation, deterministic results, and stale-claim retry accounting.
 - `tests/e2e/test_e2e_08_isolation_adversarial.py`: recognize the shared validator's explicit oversized-diff refusal in the stdio acceptance criterion.
 - `.agent/plans/menhir-local-main-safety-reconciliation-2026-09-28.md`, `.agent/plans/README.md`, `.agent/architecture.md`, `.agent/data_models.md`, `.agent/endpoints.md`: record the reconciliation scope and updated contracts.
-
-## 2026-09-28 - Harden post-release audit boundaries before MVP RC
-
-- `.github/workflows/tests.yml`, `tests/e2e/conftest.py`, `tests/e2e/_harness/ci_evidence_gate.py`, `tests/test_e2e_ci_gate.py`: fail wheel-build errors and reject missing, skipped, or unproven installed-wheel acceptance in CI.
-- `src/menhir/services/beacon_compat.py`, `tests/test_beacon_compat.py`: isolate Beacon subprocess imports from repository-controlled modules while preserving the installed Beacon contract.
-- `src/menhir/snapshot/upload_client.py`, `src/menhir/cli/sync.py`, `tests/snapshot/test_upload_client_offline.py`, `tests/snapshot/test_upload_security.py`: refuse unsafe operator-key transports and redirects before disclosure.
-- `src/menhir/infrastructure/graphiti_llm_adapter.py`, `tests/test_graphiti_combined_extraction_patch.py`, `tests/test_graphiti_fork_contract.py`, `docs/post-install.md`: restore JSON-object relationship aliases and explain mixed Graphiti installation repair.
-- `.agent/plans/menhir-post-v023-audit-remediation-2026-09-28.md`, `.agent/plans/README.md`, `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: keep the follow-up work and RC gate explicit.

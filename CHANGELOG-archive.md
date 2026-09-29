@@ -1,3 +1,11 @@
+## 2026-09-28 - Harden post-release audit boundaries before MVP RC
+
+- `.github/workflows/tests.yml`, `tests/e2e/conftest.py`, `tests/e2e/_harness/ci_evidence_gate.py`, `tests/test_e2e_ci_gate.py`: fail wheel-build errors and reject missing, skipped, or unproven installed-wheel acceptance in CI.
+- `src/menhir/services/beacon_compat.py`, `tests/test_beacon_compat.py`: isolate Beacon subprocess imports from repository-controlled modules while preserving the installed Beacon contract.
+- `src/menhir/snapshot/upload_client.py`, `src/menhir/cli/sync.py`, `tests/snapshot/test_upload_client_offline.py`, `tests/snapshot/test_upload_security.py`: refuse unsafe operator-key transports and redirects before disclosure.
+- `src/menhir/infrastructure/graphiti_llm_adapter.py`, `tests/test_graphiti_combined_extraction_patch.py`, `tests/test_graphiti_fork_contract.py`, `docs/post-install.md`: restore JSON-object relationship aliases and explain mixed Graphiti installation repair.
+- `.agent/plans/menhir-post-v023-audit-remediation-2026-09-28.md`, `.agent/plans/README.md`, `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: keep the follow-up work and RC gate explicit.
+
 ## 2026-09-28 - Close the local-stdio MVP Gate B audit
 
 - `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`: close Gate B against merged main after exact-commit CI, Ubuntu stdio criteria, Windows strict E2E, and no-publish Graphiti image receipts; keep RC freeze and final release separate.

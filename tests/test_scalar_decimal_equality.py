@@ -9,7 +9,7 @@ stay distinct. No float is ever introduced for Decimals.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
 import pytest
@@ -135,11 +135,11 @@ def test_agreement_gate_commits_money_proposals_differing_only_in_scale():
 
 @pytest.mark.unit
 def test_agreement_gate_control_genuinely_different_values_do_not_commit():
+    # Off-quote amounts are dropped at extraction (#89), so vary the value on the one grounded
+    # proposal and hand the samples to the gate directly.
     ep = [_Ep(uuid="money-scatter-152", content="my savings balance is $10")]
-    samples = [
-        extract_typed_scalars_once(ep, _llm([_money_row(value=v, stated_span="my savings balance is $10")]))
-        for v in ("10", "10.01", "10.02")
-    ]
+    (base,) = extract_typed_scalars_once(ep, _llm([_money_row(value="10", stated_span="my savings balance is $10")]))
+    samples = [[replace(base, value=Decimal(v))] for v in ("10", "10.01", "10.02")]
     assert len(samples) == 3 and all(len(s) == 1 for s in samples)
 
     decisions = gate_typed_scalars(samples)
