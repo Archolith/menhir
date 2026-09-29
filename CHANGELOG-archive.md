@@ -1,3 +1,11 @@
+## 2026-09-28 - Let isolated scanners read the release image archive
+
+- `deploy/build_release_image.py`: make the saved public-source image archive readable to non-root scanners and give Syft enough temporary space to unpack its layers during no-publish validation.
+- `.github/workflows/release-image.yml`: surface a failed builder's final diagnostic as a job annotation and verify the fork version, upstream absence, and native hook wiring inside the no-publish candidate image.
+- `tests/test_build_release_image.py`: reproduce Docker's restrictive archive mode, verify the scanner-readable mode on POSIX, and pin Syft's temporary-space budget.
+- `tests/test_release_image_workflow.py`: keep the offline container fork probe in the validation job before artifact upload.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-28 - Close Gate B structure, artifact, and TODO correctness gaps
 
 - `src/menhir/infrastructure/project_scanner.py`: refuse unreadable traversal, stat, and source reads before publication; bump the scanner fingerprint schema.

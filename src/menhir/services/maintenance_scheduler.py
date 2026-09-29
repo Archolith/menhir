@@ -182,7 +182,7 @@ class MaintenanceScheduler:
         if self.verifier_sync_enabled and self.verifier_repo is not None:
             self._jobs["sync_verifiers"] = _JobState(interval_s=self.verifier_sync_interval_s)
         if (
-            (self.personal_memory_enabled or self.event_history_enabled)
+            (self.personal_memory_enabled or self.event_history_enabled or self.scalar_state_enabled)
             and self.personal_memory_llm is not None
         ):
             self._jobs["consolidate_personal_memory"] = _JobState(interval_s=self.personal_memory_interval_s)

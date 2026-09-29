@@ -1,3 +1,13 @@
+## 2026-09-28 - Schedule scalar-only personal memory
+
+- `src/menhir/core/runtime.py`, `src/menhir/services/maintenance_scheduler.py`:
+  create the chat dependency and register the shared background job when scalar
+  state alone is enabled, while keeping counter and event lanes independent.
+- `tests/test_settings_event_history_runtime.py`, `tests/test_api_routes.py`:
+  cover all eight lane combinations, the unavailable-provider case, and scalar
+  parity with API-triggered consolidation.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-28 - Ground scalar clock times with dotted meridiems
 
 - `src/menhir/services/typed_scalar_rules.py`: normalize dotted AM/PM source
@@ -68,12 +78,4 @@
 - `tests/e2e/test_e2e_06_graphiti_fork.py`: verify and probe a no-publish release image artifact from the same clean commit; retain explicit PENDING evidence when no bundle is supplied.
 - `tests/e2e/README.md`: document both platform and container evidence paths.
 - `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`: reconcile merged correctness fixes and exact-commit evidence without declaring RC release approval.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-09-28 - Let isolated scanners read the release image archive
-
-- `deploy/build_release_image.py`: make the saved public-source image archive readable to non-root scanners and give Syft enough temporary space to unpack its layers during no-publish validation.
-- `.github/workflows/release-image.yml`: surface a failed builder's final diagnostic as a job annotation and verify the fork version, upstream absence, and native hook wiring inside the no-publish candidate image.
-- `tests/test_build_release_image.py`: reproduce Docker's restrictive archive mode, verify the scanner-readable mode on POSIX, and pin Syft's temporary-space budget.
-- `tests/test_release_image_workflow.py`: keep the offline container fork probe in the validation job before artifact upload.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.

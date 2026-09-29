@@ -395,8 +395,9 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
 
     personal_memory_enabled = getattr(settings, "personal_memory_consolidation_enabled", False)
     event_history_enabled = getattr(settings, "personal_memory_event_history_enabled", False)
+    scalar_state_enabled = getattr(settings, "personal_memory_scalar_state_enabled", False)
     personal_memory_llm = None
-    if (personal_memory_enabled or event_history_enabled) and settings is not None:
+    if (personal_memory_enabled or event_history_enabled or scalar_state_enabled) and settings is not None:
         from menhir.infrastructure.sync_llm import make_sync_chat
 
         pm_model = getattr(settings, "personal_memory_consolidation_chat_model", "") or None
@@ -407,7 +408,7 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
                 settings, "personal_memory_consolidation_disable_reasoning", False)))
         if personal_memory_llm is None:
             logger.warning(
-                "personal-memory consolidation or event history enabled but no sync chat provider; job disabled")
+                "personal-memory consolidation, event history, or scalar state enabled but no sync chat provider; job disabled")
 
     scheduler = MaintenanceScheduler(
         ingest_service=built.ingest_service,
@@ -442,7 +443,7 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         personal_memory_call_budget=getattr(settings, "personal_memory_consolidation_call_budget", 300),
         personal_memory_verify_retries=getattr(settings, "personal_memory_consolidation_verify_retries", 0),
         personal_memory_sum_grounding=getattr(settings, "personal_memory_consolidation_sum_grounding", False),
-        scalar_state_enabled=getattr(settings, "personal_memory_scalar_state_enabled", False),
+        scalar_state_enabled=scalar_state_enabled,
         scalar_state_perceiver_version=getattr(
             settings, "personal_memory_scalar_state_perceiver_version", "v2"),
         scalar_reconcile_attribute=getattr(

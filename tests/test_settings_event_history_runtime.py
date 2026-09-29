@@ -8,7 +8,10 @@ assertions; no benchmark ids, answers, or fixture-specific wording.
 from __future__ import annotations
 
 import asyncio
+from itertools import product
 from types import SimpleNamespace
+
+import pytest
 
 from menhir.config.settings_model import MemorySettings
 from menhir.services.maintenance_scheduler import MaintenanceScheduler
@@ -189,3 +192,82 @@ def test_runtime_off_path_does_not_create_sync_chat_for_these_paths(monkeypatch)
     assert calls == []
     assert captured["event_history_enabled"] is False
     assert captured["personal_memory_llm"] is None
+
+
+@pytest.mark.parametrize(("counter", "event", "scalar"), list(product((False, True), repeat=3)))
+def test_runtime_registers_only_requested_personal_memory_lanes(
+    monkeypatch, counter: bool, event: bool, scalar: bool,
+) -> None:
+    import menhir.core.runtime as runtime
+
+    chat_requests: list[object] = []
+
+    def _make_chat(settings, **kwargs):
+        chat_requests.append((settings, kwargs))
+        return _llm
+
+    async def _start_without_lease(_scheduler):
+        return True
+
+    monkeypatch.setattr("menhir.infrastructure.sync_llm.make_sync_chat", _make_chat)
+    monkeypatch.setattr(MaintenanceScheduler, "start", _start_without_lease)
+    monkeypatch.setattr(MaintenanceScheduler, "status_snapshot", lambda self: {"running": True})
+    monkeypatch.setattr(runtime, "_state", SimpleNamespace(scheduler=None))
+    monkeypatch.setattr(runtime, "make_view_embedder", lambda settings: None)
+    monkeypatch.setattr(runtime, "view_embedder_version", lambda settings: "test")
+    captured = _capture_consolidate(monkeypatch)
+    settings = MemorySettings(
+        personal_memory_consolidation_enabled=counter,
+        personal_memory_event_history_enabled=event,
+        personal_memory_scalar_state_enabled=scalar,
+        verifier_sync_enabled=False,
+        structure_watcher_enabled=False,
+        artifact_reconcile_mode="off",
+        personal_memory_consolidation_audit_enabled=False,
+        personal_memory_recall_audit_enabled=False,
+    )
+    built = SimpleNamespace(
+        settings=settings,
+        ingest_service=_Ingest(),
+        graph_adapter=SimpleNamespace(neo4j=None),
+        lifecycle_service=None,
+    )
+
+    scheduler = asyncio.run(runtime._start_scheduler(built))
+    requested = counter or event or scalar
+    assert len(chat_requests) == int(requested)
+    assert ("consolidate_personal_memory" in scheduler._jobs) is requested
+    if requested:
+        asyncio.run(scheduler._make_consolidate_personal_memory())
+        assert captured["enable_counter_state"] is counter
+        assert captured["enable_event_history"] is event
+        assert captured["enable_scalar_state"] is scalar
+
+
+def test_scalar_only_without_chat_provider_does_not_register_job(monkeypatch) -> None:
+    import menhir.core.runtime as runtime
+
+    async def _start_without_lease(_scheduler):
+        return True
+
+    monkeypatch.setattr("menhir.infrastructure.sync_llm.make_sync_chat", lambda *a, **k: None)
+    monkeypatch.setattr(MaintenanceScheduler, "start", _start_without_lease)
+    monkeypatch.setattr(MaintenanceScheduler, "status_snapshot", lambda self: {"running": True})
+    monkeypatch.setattr(runtime, "_state", SimpleNamespace(scheduler=None))
+    monkeypatch.setattr(runtime, "make_view_embedder", lambda settings: None)
+    monkeypatch.setattr(runtime, "view_embedder_version", lambda settings: "test")
+    settings = MemorySettings(
+        personal_memory_scalar_state_enabled=True,
+        verifier_sync_enabled=False,
+        structure_watcher_enabled=False,
+        artifact_reconcile_mode="off",
+    )
+    built = SimpleNamespace(
+        settings=settings,
+        ingest_service=_Ingest(),
+        graph_adapter=SimpleNamespace(neo4j=None),
+        lifecycle_service=None,
+    )
+
+    scheduler = asyncio.run(runtime._start_scheduler(built))
+    assert "consolidate_personal_memory" not in scheduler._jobs
