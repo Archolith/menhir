@@ -306,44 +306,50 @@ class MemorySettings:
     # unambiguous current View + complete overlap proof); every other case stays advisory. The
     # decision is computed by menhir.domain.scalar_view_authority.decide_view_authority.
     personal_memory_scalar_view_authority_enabled: bool = False
-    # Attribute reconciliation in the k-sample consistency gate. OFF by default. When on, the samples
+    # Attribute reconciliation in the k-sample consistency gate. ON by default (lenient-agreement
+    # defaults, 2026-09). When on, the samples
     # vote WITHOUT the free-text attribute name and the name is chosen modally afterwards (ties to the
     # longest, then lexicographic -- a pure function of the candidate set, never of sample order).
     # Measured cause: replaying the frozen LME panel through the real parser and gate, the model emits
     # the asked value in 100/100 namespace-trials and all k samples emit it in 81/100, but only 23/100
     # commit -- samples agree the user has 25 postcards and disagree on whether the slot is called
     # `postcard_count`, `collection_size`, or `count`, and the disagreement vetoes the fact. Turning
-    # this on takes that panel to 34/100 at the shipped threshold of 1.0, and to 72/100 at a 2/3
-    # threshold -- see gate_typed_scalars for the full grid. This flag is the SECOND-largest lever;
-    # the unanimity requirement itself is the largest. It is independently settings-exposed below.
+    # this on takes that panel to 34/100 at the unanimity threshold of 1.0, and to 72/100 at a 2/3
+    # threshold -- see gate_typed_scalars for the full grid. It is independently settings-exposed below.
     # It is RECALL-affecting, not behavior-neutral: more claims
     # commit, so more assertions and Views are written. The chosen name lands in `slot_key`, so a
     # namespace consolidated with this on and off can hold the same fact under two different slots --
     # bump `personal_memory_scalar_state_perceiver_version` when flipping it if that matters.
-    personal_memory_scalar_reconcile_attribute: bool = False
+    # Defaults changed 2026-09 for new installs; existing namespaces flipping these should bump
+    # `personal_memory_scalar_state_perceiver_version`.
+    personal_memory_scalar_reconcile_attribute: bool = True
     # Scope/subject/self identity reconciliation -- the same defect as the attribute above, relocated.
     # The model smears one fact's identity across subject/attribute/scope in arbitrary order, so
     # exact-matching each field independently turns one agreed fact into several single-vote claims.
     # These vote on the identity TUPLE (never field-by-field, which could synthesize a slot no sample
-    # proposed) and pick the modal combination. All OFF by default and all RECALL-affecting when on,
+    # proposed) and pick the modal combination. All RECALL-affecting when on,
     # for the same reason as reconcile_attribute: more claims commit, so more assertions and Views are
     # written, and the reconciled subject/scope lands in the durable slot -- bump
     # `personal_memory_scalar_state_perceiver_version` when flipping these on an existing namespace.
     # Measured on the frozen LME panel at threshold=2/3 with reconcile_attribute on: +scope 65 -> 70,
     # +scope+subject -> 72 correct current Views out of 100, stale-as-current 0 throughout.
-    personal_memory_scalar_reconcile_scope: bool = False
-    personal_memory_scalar_reconcile_subject: bool = False
+    # Defaults changed 2026-09 for new installs; existing namespaces flipping these should bump
+    # `personal_memory_scalar_state_perceiver_version`.
+    personal_memory_scalar_reconcile_scope: bool = True
+    personal_memory_scalar_reconcile_subject: bool = True
     # Fold first-person subjects ('I', 'me', 'my') to the bound self display before the vote, so the
     # vote key stops contradicting the binder. Measured effect on the LME panel: ZERO cells in every
     # configuration -- the extraction prompt already emits 'user' almost without exception. Exposed
     # because the vote key genuinely disagreed with the binder, not because it moved the number.
     personal_memory_scalar_canonical_self: bool = False
-    # Agreement required by the typed-scalar gate only. Default 1.0 preserves today's unanimous
-    # behavior. The env value also accepts ratio syntax (`2/3`) so operators do not accidentally use
+    # Agreement required by the typed-scalar gate only. Default 2/3 is the lenient-agreement policy:
+    # at k=3 two agreeing samples commit. The env value also accepts ratio syntax (`2/3`) so
+    # operators do not accidentally use
     # 0.67, which is GREATER than two thirds and therefore still requires all three votes at k=3.
-    # Settings exposure is not activation: scalar-state and attribute reconciliation remain
-    # independently default-off.
-    personal_memory_scalar_threshold: float = 1.0
+    # Settings exposure is not activation: scalar-state remains independently default-off.
+    # Defaults changed 2026-09 for new installs; existing namespaces flipping these should bump
+    # `personal_memory_scalar_state_perceiver_version`.
+    personal_memory_scalar_threshold: float = 2 / 3
     # Consolidation audit trail. OFF by default and behavior-neutral: when on, the consolidation job
     # emits a structured, replayable lifecycle event at each decision point (perception, binding /
     # pending-repair, scalar fold outcome, View write/retire/supersede, reconcile, counters, merges,

@@ -13,8 +13,8 @@ from menhir.services.maintenance_scheduler import MaintenanceScheduler
 
 
 @pytest.mark.unit
-def test_scalar_threshold_defaults_to_unanimous() -> None:
-    assert MemorySettings().personal_memory_scalar_threshold == 1.0
+def test_scalar_threshold_defaults_to_lenient_ratio() -> None:
+    assert MemorySettings().personal_memory_scalar_threshold == 2 / 3
 
 
 @pytest.mark.unit

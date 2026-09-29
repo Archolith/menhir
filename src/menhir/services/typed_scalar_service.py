@@ -696,11 +696,11 @@ class TypedScalarPerceptionService:
 
     def perceive_and_persist(
         self, episodes: list[Any], llm_complete: LlmComplete, *, k: int = 3,
-        threshold: float = 1.0, namespace: str | None = None,
+        threshold: float = 2 / 3, namespace: str | None = None,
         episode_reference_time: Callable[[str], str | None] | None = None,
-        reconcile_attribute: bool = False,
-        reconcile_scope: bool = False,
-        reconcile_subject: bool = False,
+        reconcile_attribute: bool = True,
+        reconcile_scope: bool = True,
+        reconcile_subject: bool = True,
         canonical_self: bool = False,
     ) -> dict[str, Any]:
         """Perceive typed scalars from `episodes` and durably persist the committed, bound ones.
@@ -713,7 +713,8 @@ class TypedScalarPerceptionService:
         `gate_typed_scalars`: samples vote WITHOUT the named free-text identity fields and the
         winning combination is chosen modally afterwards, as a vote on the identity TUPLE (never
         field-by-field, which could synthesize a slot no sample proposed). `canonical_self` folds
-        first-person subjects to the bound self display before the vote. All default off; see that
+        first-person subjects to the bound self display before the vote. Defaults follow the
+        lenient-agreement policy (threshold 2/3, all three reconciles on, 2026-09); see that
         function for the measurement. Safe span alignment is always enabled here: overlapping quote
         variants with the same constrained value semantics are grounded to their deterministic
         common source substring before persistence, so sample wording cannot fork one source claim."""

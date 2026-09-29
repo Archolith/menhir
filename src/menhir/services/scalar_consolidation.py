@@ -85,12 +85,13 @@ class ScalarConsolidationConfig:
     lineage_limit: int = 5000
     embed_version: str | None = None
     # Drop the free-text attribute name from the k-sample vote and reconcile it modally afterwards.
-    # OFF by default; RECALL-affecting when on (more claims clear the gate), not behaviour-neutral.
-    reconcile_attribute: bool = False
+    # ON by default (lenient-agreement defaults, 2026-09, matching MemorySettings);
+    # RECALL-affecting when on (more claims clear the gate), not behaviour-neutral.
+    reconcile_attribute: bool = True
     # Same defect relocated into the other two identity fields, plus first-person canonicalization.
-    # All OFF by default and all RECALL-affecting when on, for the same reason as the attribute.
-    reconcile_scope: bool = False
-    reconcile_subject: bool = False
+    # Scope/subject ON by default (matching MemorySettings); canonical_self stays OFF.
+    reconcile_scope: bool = True
+    reconcile_subject: bool = True
     canonical_self: bool = False
     # When True, scalar_history Views are built alongside scalar_state at ingest and repair time.
     scalar_history_enabled: bool = False
