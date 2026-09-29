@@ -1,3 +1,13 @@
+## 2026-09-28 - Refuse ambiguous scalar subject fallback
+
+- `src/menhir/services/typed_scalar_rules.py`: distinguish absent, ambiguous,
+  invalid, and unique subject matches so a conflicting local owner cannot fall
+  through to a looser spelling or namespace lookup.
+- `tests/test_typed_scalar_self_binding.py`,
+  `tests/test_typed_scalar_bind_persist.py`: cover exact and variant ambiguity,
+  blank UUIDs, both namespace forms, persisted advisories, and repair.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-28 - Reconcile MVP preflight evidence before RC freeze
 
 - `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: record the completed issue inventory, five-item Oracle harness preflight, and merged Opus fixes while keeping exact-RC gates open.
@@ -89,13 +99,4 @@
 - `tests/e2e/test_e2e_04_workartifacts.py` and `tests/e2e/_harness/artifact_corpus.py`: verify a legacy superseded source without a replacement stays unregistered and byte-identical while valid artifacts reconcile.
 - `tests/e2e/README.md`: explain the two separate cap criteria.
 - `.agent/data_models.md`, `.agent/endpoints.md`, and `.agent/workflows/artifact_authoring.md`: document scan ordering, TODO resolution, and replacement-backed supersession.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-09-28 - Plan Gate B correctness remediation
-
-- `.agent/plans/menhir-gate-b-remediation-2026-09-28.md`: define bounded fixes and
-  regression evidence for supported-path structure, WorkArtifact, and TODO audit
-  findings, including concurrency, legacy-state, and rollback decisions.
-- `.agent/plans/README.md`: route the proposed work package under the approved
-  local-stdio MVP release plan.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.

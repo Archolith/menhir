@@ -1,3 +1,12 @@
+## 2026-09-28 - Plan Gate B correctness remediation
+
+- `.agent/plans/menhir-gate-b-remediation-2026-09-28.md`: define bounded fixes and
+  regression evidence for supported-path structure, WorkArtifact, and TODO audit
+  findings, including concurrency, legacy-state, and rollback decisions.
+- `.agent/plans/README.md`: route the proposed work package under the approved
+  local-stdio MVP release plan.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-27 - Separate operator deployment from public Menhir
 
 - Move the operator host configuration, production runbooks, release receipts,

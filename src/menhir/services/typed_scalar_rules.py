@@ -10,6 +10,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from enum import Enum
 from typing import Any, Callable
 
 from menhir.domain.typed_assertion import (
@@ -1992,40 +1993,70 @@ def _subject_spellings(subject_text: str) -> list[str]:
     return out
 
 
-def _bind_from_candidates(
+class _SubjectMatchStatus(Enum):
+    ABSENT = "absent"
+    AMBIGUOUS = "ambiguous"
+    INVALID = "invalid"
+    UNIQUE = "unique"
+
+
+@dataclass(frozen=True)
+class _SubjectMatch:
+    status: _SubjectMatchStatus
+    uuid: str | None = None
+    display: str | None = None
+
+
+def _match_from_candidates(
     subject_text: str, candidates: list[dict[str, Any]],
-) -> tuple[str | None, str | None]:
-    """The UNIQUE fail-closed binder over a candidate row set: match each normalized spelling, in
-    priority order, by exact name equality; bind on a single match with a nonblank uuid; abstain
-    (None, None) on zero, multiple, or a blank-uuid match. `candidates` is either the episode's linked
-    entities or the result of a same-namespace repository lookup — both are fed through this SAME
-    binder so authority never depends on which candidate source won."""
+) -> _SubjectMatch:
+    """Bind the first matching spelling, preserving why binding must abstain.
+
+    Only an absent spelling permits a less-specific variant or repository fallback. An ambiguous
+    or invalid match is a refusal, not permission to select another owner.
+    """
     target = subject_text.strip().lower()
     if not target:
-        return None, None
+        return _SubjectMatch(_SubjectMatchStatus.ABSENT)
 
-    def _unique(candidate: str) -> tuple[str | None, str | None]:
+    def _match(candidate: str) -> _SubjectMatch:
         matches = [
             e for e in candidates
             if str(e.get("name", "") or "").strip().lower() == candidate
         ]
+        if not matches:
+            return _SubjectMatch(_SubjectMatchStatus.ABSENT)
         if len(matches) != 1:
-            return None, None
+            return _SubjectMatch(_SubjectMatchStatus.AMBIGUOUS)
         uuid = str(matches[0].get("uuid") or "").strip()
         if not uuid:
-            return None, None
-        return uuid, (str(matches[0].get("name") or "").strip() or subject_text)
+            return _SubjectMatch(_SubjectMatchStatus.INVALID)
+        return _SubjectMatch(
+            _SubjectMatchStatus.UNIQUE,
+            uuid,
+            str(matches[0].get("name") or "").strip() or subject_text,
+        )
 
-    uuid, display = _unique(target)
-    if uuid is not None:
-        return uuid, display
+    exact = _match(target)
+    if exact.status is not _SubjectMatchStatus.ABSENT:
+        return exact
 
     for variant in _subject_variants(target):
         if variant in SELF_TOKENS:
             continue
-        uuid, display = _unique(variant)
-        if uuid is not None:
-            return uuid, display
+        match = _match(variant)
+        if match.status is not _SubjectMatchStatus.ABSENT:
+            return match
+    return _SubjectMatch(_SubjectMatchStatus.ABSENT)
+
+
+def _bind_from_candidates(
+    subject_text: str, candidates: list[dict[str, Any]],
+) -> tuple[str | None, str | None]:
+    """Keep the tuple-shaped binder for local callers while refusing non-unique owners."""
+    match = _match_from_candidates(subject_text, candidates)
+    if match.status is _SubjectMatchStatus.UNIQUE:
+        return match.uuid, match.display
     return None, None
 
 
@@ -2061,10 +2092,11 @@ def _resolve_subject(
       2. EXACT LOCAL EPISODE matching next: bind against the episode's SURVIVING linked entities by
          exact normalized-name equality (`_bind_from_candidates`). Authority is asserted ONLY on a
          unique local match.
-      3. OPTIONAL same-namespace repository lookup, ONLY after the local pass fails: when
+      3. OPTIONAL same-namespace repository lookup, ONLY when the local pass has no match: when
          `lookup_namespace_entities` is supplied AND `namespace` is nonblank, ask the repository for
          same-namespace entities matching the bounded normalized spellings, then feed those rows
-         through the SAME unique fail-closed binder. No fuzzy/substring/stem/synonyms anywhere.
+         through the SAME unique fail-closed binder. A local ambiguous or invalid match abstains
+         without consulting another owner. No fuzzy/substring/stem/synonyms anywhere.
 
     When the self seam is absent, unavailable, or the subject is not first-person, and neither the
     local nor (when enabled) namespace pass yields a unique match, binding abstains to (None, None) —
@@ -2091,17 +2123,19 @@ def _resolve_subject(
         #                     any assertion bound to the twin onto a dead uuid. Refuse.
         if namespace:
             return None, None
-    local = _bind_from_candidates(subject_text, entities)
-    if local[0] is not None:
-        return local
+    local = _match_from_candidates(subject_text, entities)
+    if local.status is _SubjectMatchStatus.UNIQUE:
+        return local.uuid, local.display
+    if local.status is not _SubjectMatchStatus.ABSENT:
+        return None, None
     if lookup_namespace_entities is not None and namespace:
         try:
             rows = lookup_namespace_entities(namespace, _subject_spellings(subject_text))
         except Exception:  # noqa: BLE001 - the repository fallback is best-effort; never crash binding
             rows = []
-        namespace_match = _bind_from_candidates(subject_text, rows or [])
-        if namespace_match[0] is not None:
-            return namespace_match
+        namespace_match = _match_from_candidates(subject_text, rows or [])
+        if namespace_match.status is _SubjectMatchStatus.UNIQUE:
+            return namespace_match.uuid, namespace_match.display
     return None, None
 
 
