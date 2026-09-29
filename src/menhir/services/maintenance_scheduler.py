@@ -109,15 +109,18 @@ class MaintenanceScheduler:
     scalar_state_enabled: bool = False
     scalar_state_perceiver_version: str = "v1"
     # Drop the free-text attribute name from the k-sample vote and reconcile it modally afterwards.
-    # OFF by default; RECALL-affecting when on (more claims clear the gate), not behavior-neutral.
-    scalar_reconcile_attribute: bool = False
+    # ON by default (lenient-agreement defaults, 2026-09, matching MemorySettings);
+    # RECALL-affecting when on (more claims clear the gate), not behavior-neutral.
+    scalar_reconcile_attribute: bool = True
     # The same identity-smearing defect relocated into scope/subject, plus first-person folding.
-    # All OFF by default and all RECALL-affecting when on, exactly as the attribute switch above.
-    scalar_reconcile_scope: bool = False
-    scalar_reconcile_subject: bool = False
+    # Scope/subject ON by default (matching MemorySettings); canonical_self stays OFF.
+    # All RECALL-affecting when on, exactly as the attribute switch above.
+    scalar_reconcile_scope: bool = True
+    scalar_reconcile_subject: bool = True
     scalar_canonical_self: bool = False
-    # Typed-scalar agreement only. The counter path keeps its existing unanimous threshold.
-    scalar_threshold: float = 1.0
+    # Typed-scalar agreement only. Default 2/3 matches MemorySettings (two of three votes at k=3).
+    # The counter path keeps its existing unanimous threshold.
+    scalar_threshold: float = 2 / 3
     # Build advisory scalar_history Views alongside scalar_state at ingest and repair time.
     scalar_history_enabled: bool = False
     # Observe-only deterministic typed-scalar shadow; default off and behavior-neutral.

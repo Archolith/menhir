@@ -1,3 +1,11 @@
+## 2026-09-29 - Default the scalar agreement gate to lenient
+
+- `src/menhir/config/settings_model.py`: `personal_memory_scalar_threshold` defaults to `2/3` and attribute/scope/subject reconciliation to on; scalar state itself stays off.
+- `src/menhir/services/maintenance_scheduler.py`, `scheduler_tasks.py`, `scalar_consolidation.py`, `typed_scalar_service.py`: align the same knobs' fallback defaults.
+- `.env.example`: document the new defaults and that the gain is not yet re-measured on current Menhir.
+- `tests/test_scalar_lenient_defaults.py`: defaults, overrides and the k=3 two-vote commit; `tests/test_scalar_threshold_setting.py`, `tests/test_gate_relaxations.py`: update the pinned old defaults.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-29 - Read scalar input only from TurnEvidence
 
 - `src/menhir/infrastructure/memory_graph_adapter.py`, `src/menhir/infrastructure/personal_memory_queries.py`: the typed-scalar lane always discovers and loads work from `:TurnEvidence`; the legacy `user:`-prefix Episodic selectors are removed (#95). The shared scalar cursor writer stays.
@@ -68,11 +76,4 @@
 ## 2026-09-28 - Reconcile MVP preflight evidence before RC freeze
 
 - `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: record the completed issue inventory, five-item Oracle harness preflight, and merged Opus fixes while keeping exact-RC gates open.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-09-28 - Preserve MVP release evidence and clarify stdio setup
-
-- `README.md`, `docs/post-install.md`, `.env.example`: show the running-backend requirement and client environment for the supported local stdio path.
-- `tests/e2e/conftest.py`, `tests/e2e/README.md`, `tests/test_e2e_work_root.py`: keep local E2E evidence outside pytest's session scratch directory and document where to inspect it.
-- `.github/workflows/release-image.yml`, `tests/test_release_image_workflow.py`: fail validation when the in-image Graphiti fork probe fails before evidence upload.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
