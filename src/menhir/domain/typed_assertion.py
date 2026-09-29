@@ -158,15 +158,26 @@ def _is_integral_number(value: Any) -> bool:
 
 
 def _num_norm(x: int | float | Decimal) -> str:
-    """Stable string for one number. An arbitrary-precision int is stringified directly (never routed
-    through `float()`/`math.isfinite`, which would `OverflowError` on a huge int); a non-finite float
-    (NaN/inf) is stringified defensively rather than run through `int()` (which raises on NaN/inf).
-    `validate_value` rejects both non-finite and non-representable numbers upstream, so this is a
-    belt-and-suspenders guard that never itself crashes the key builder."""
+    """Stable string for one number, CANONICAL for voting/identity: scale-independent (10, 10.0 and
+    Decimal("10.00") all -> "10"), zero-sign-normalized (0 / 0.00 / -0.00 / Decimal("-0") -> "0"),
+    and never routed through float for Decimals. A finite Decimal is `normalize()`d to strip
+    insignificant trailing zeros, then rendered in plain non-exponent notation (`format(.., "f")`,
+    so Decimal("1E+2") -> "100", not "1E+2"); distinct values keep distinct strings (10 vs 10.01,
+    fractional cents, arbitrary-precision magnitudes). An arbitrary-precision int is stringified
+    directly (never routed through `float()`/`math.isfinite`, which would `OverflowError` on a huge
+    int); a non-finite float (NaN/inf) is stringified defensively rather than run through `int()`
+    (which raises on NaN/inf). `validate_value` rejects both non-finite and non-representable
+    numbers upstream, so this is a belt-and-suspenders guard that never itself crashes the key
+    builder."""
     if isinstance(x, int) and not isinstance(x, bool):
         return str(x)
     if isinstance(x, Decimal):
-        return format(x, "f") if x.is_finite() else str(x)
+        if not x.is_finite():
+            return str(x)
+        normalized = x.normalize()
+        if normalized == 0:
+            return "0"
+        return format(normalized, "f")
     if not math.isfinite(x):
         return str(x)
     return str(int(x)) if float(x) == int(x) else str(x)
