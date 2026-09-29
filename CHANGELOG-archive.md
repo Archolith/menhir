@@ -1,3 +1,8 @@
+## 2026-09-28 - Reconcile MVP preflight evidence before RC freeze
+
+- `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: record the completed issue inventory, five-item Oracle harness preflight, and merged Opus fixes while keeping exact-RC gates open.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-28 - Preserve MVP release evidence and clarify stdio setup
 
 - `README.md`, `docs/post-install.md`, `.env.example`: show the running-backend requirement and client environment for the supported local stdio path.

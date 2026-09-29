@@ -66,6 +66,23 @@ _FREQUENCY_NUMBER_PATTERN = (
     r"(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
     r"once|twice|thrice)"
 )
+# Any number-like word or digit run. A value token glued to one of these by whitespace or a hyphen
+# is only part of a longer number ("twenty-five", "two hundred", "2 thousand"), so it must not be
+# read on its own (#200).
+_NUMBERISH_PATTERN = (
+    r"(?:\d[\d,]*(?:\.\d+)?|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+    r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|"
+    r"sixty|seventy|eighty|ninety|hundred|thousand|million|billion|dozen)"
+)
+_NUMBERISH_BEFORE_RE = re.compile(rf"(?<![\w.]){_NUMBERISH_PATTERN}[\s-]+$", re.IGNORECASE)
+_NUMBERISH_AFTER_RE = re.compile(rf"^[\s-]+{_NUMBERISH_PATTERN}(?![\w.])", re.IGNORECASE)
+
+
+def _joined_to_number(text: str, start: int, end: int) -> bool:
+    """True when text[start:end] is glued to another number word or digit run."""
+    return bool(_NUMBERISH_BEFORE_RE.search(text[:start]) or _NUMBERISH_AFTER_RE.match(text[end:]))
+
+
 _FREQUENCY_INTERVAL_RE = re.compile(
     rf"\b(?:(?P<count>{_FREQUENCY_NUMBER_PATTERN})(?:\s+times?)?\s+)?"
     rf"every\s+(?:(?P<interval>other|{_FREQUENCY_NUMBER_PATTERN})\s+)?"
@@ -177,11 +194,13 @@ def _normalize_interval_frequency(stated_span: str) -> tuple[int | float, str] |
         # than asserting a guess. A phrase with no number at all ("every week", "every other
         # week", "every three days") is genuinely count-1 and still normalizes as before.
         if re.search(
-            rf"\b{_FREQUENCY_NUMBER_PATTERN}\b",
+            rf"\b(?:{_FREQUENCY_NUMBER_PATTERN}|{_NUMBERISH_PATTERN})\b",
             stated_span[: match.start()],
             re.IGNORECASE,
         ):
             return None
+    elif _joined_to_number(stated_span, match.start("count"), match.end("count")):
+        return None
     count = _frequency_number(count_text, default=1.0)
     rate = count / interval
     value: int | float = int(rate) if rate.is_integer() else rate
@@ -686,14 +705,30 @@ def _clock_time_from_source(stated_span: str) -> str | None:
     return f"{hour:02d}:{minute:02d}"
 
 
-_COUNT_WORDS = dict(_FREQUENCY_NUMBER_WORDS)
+_COUNT_WORDS: dict[str, int] = dict(_FREQUENCY_NUMBER_WORDS)
+_COUNT_WORDS.update({
+    "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+    "seventeen": 17, "eighteen": 18, "nineteen": 19,
+})
+for _count_tens_word, _count_tens_value in (
+    ("twenty", 20), ("thirty", 30), ("forty", 40), ("fifty", 50),
+    ("sixty", 60), ("seventy", 70), ("eighty", 80), ("ninety", 90),
+):
+    _COUNT_WORDS[_count_tens_word] = _count_tens_value
+    for _count_ones_word, _count_ones_value in list(_FREQUENCY_NUMBER_WORDS.items())[:9]:
+        for _count_sep in ("-", " "):
+            _COUNT_WORDS[f"{_count_tens_word}{_count_sep}{_count_ones_word}"] = (
+                _count_tens_value + _count_ones_value
+            )
+# Longest first, so "twenty-five" wins over its "twenty" prefix.
+_COUNT_WORD_ALT = "|".join(sorted(_COUNT_WORDS, key=len, reverse=True))
 _COUNT_TOKEN_RE = re.compile(
-    rf"(?<![\w.])(?P<token>{_SOURCE_NUMBER}|{'|'.join(_COUNT_WORDS)})(?![\w.])",
+    rf"(?<![\w.])(?P<token>{_SOURCE_NUMBER}|{_COUNT_WORD_ALT})(?![\w.])",
     re.IGNORECASE,
 )
 _COUNT_RANGE_RE = re.compile(
-    rf"\b(?:between|from)\s+(?P<low>{_SOURCE_NUMBER}|{'|'.join(_COUNT_WORDS)})\s+"
-    rf"(?:and|to)\s+(?P<high>{_SOURCE_NUMBER}|{'|'.join(_COUNT_WORDS)})\b",
+    rf"\b(?:between|from)\s+(?P<low>{_SOURCE_NUMBER}|{_COUNT_WORD_ALT})\s+"
+    rf"(?:and|to)\s+(?P<high>{_SOURCE_NUMBER}|{_COUNT_WORD_ALT})\b",
     re.IGNORECASE,
 )
 _COUNT_NEGATIVE_DELTA_RE = re.compile(
@@ -718,14 +753,19 @@ def _count_value_from_source(stated_span: str, operation: str, model_value: Any)
     span = _SRC_ISO_RE.sub(" ", _SRC_MONTH_DAY_YEAR_RE.sub(" ", stated_span or ""))
     range_match = _COUNT_RANGE_RE.search(span)
     if operation != "delta" and range_match is not None:
+        if any(
+            _joined_to_number(span, range_match.start(g), range_match.end(g)) for g in ("low", "high")
+        ):
+            return None
         return [
             _count_token_value(range_match.group("low")),
             _count_token_value(range_match.group("high")),
         ]
 
-    tokens = [match.group("token") for match in _COUNT_TOKEN_RE.finditer(span)]
-    if len(tokens) != 1:
+    matches = list(_COUNT_TOKEN_RE.finditer(span))
+    if len(matches) != 1 or _joined_to_number(span, matches[0].start(), matches[0].end()):
         return None
+    tokens = [matches[0].group("token")]
     value = _count_token_value(tokens[0])
     if operation != "delta":
         return value
