@@ -11,7 +11,7 @@ artifact_status: APPROVED
 **Owner:** Menhir  
 **Purpose:** Define, audit, test, benchmark, and close a bounded local MVP without absorbing the entire Menhir backlog.
 
-**Current gate:** Gate B audit COMPLETE and pre-freeze Gate C acceptance evidenced on merged `main` `0f8deac52628b29e91ab3bee66256d0a4a1789fb`. The post-v0.2.3 Astra audit found additional CI, security, and compatibility work, tracked in [its remediation plan](menhir-post-v023-audit-remediation-2026-09-28.md). Phase D blocker review is active; named RC freeze waits for those fixes to merge and pass exact-commit CI. No RC, deployment, #119 repair, or final release is authorized by this status.
+**Current gate:** Gate B audit and pre-freeze Gate C acceptance are complete. The post-v0.2.3 fixes and the Opus review follow-up are merged through [PR #187](https://github.com/Archolith/menhir/pull/187); its four required checks passed on the reviewed head. Phase A inventory and the five-item Oracle harness preflight are recorded below. Phase D remains open for exact merged-commit checks, current release-container evidence, wheel identity, and configuration freeze before naming an RC. No RC, deployment, #119 repair, or final release is authorized by this status.
 
 ## 1. MVP contract
 
@@ -146,8 +146,10 @@ frozen later under Gate D. Neither platform preflight is a frozen-RC run.
 The Windows local run on merged `4750b1c8` and the Ubuntu [post-merge CI
 run](https://github.com/Archolith/menhir/actions/runs/36368518264) each reported
 11 default stdio E2E passes and one declared release-container skip. The
-candidate-wheel fork path passed; release-container validation, the five-item
-Oracle preflight, exact RC configuration, and frozen-RC evidence remain open.
+candidate-wheel fork path passed. The [five-item Oracle harness preflight](https://github.com/Archolith/menhir/issues/123#issuecomment-5871929112)
+also passed on a fresh graph; it is not quality or frozen-RC evidence. Current
+release-container validation, exact RC configuration, Oracle-500, and frozen-RC
+E2E remain open.
 
 ### A1. Freeze supported behavior
 
@@ -162,20 +164,34 @@ Oracle preflight, exact RC configuration, and frozen-RC evidence remain open.
 
 ### A2. Reconcile current work in flight
 
-- [ ] Inventory all open Menhir issues and active plans against the MVP contract.
-- [ ] Mark each BLOCKER / FIX IF CHEAP / DOCUMENTED LIMITATION / POST-MVP / RESEARCH.
+- [x] Inventory all open Menhir issues and active plans against the MVP contract in the [Phase A inventory](../reviews/menhir-local-stdio-mvp-phase-a-inventory-2026-09-16.md).
+- [x] Mark each BLOCKER / FIX IF CHEAP / DOCUMENTED LIMITATION / POST-MVP / RESEARCH. The later [#120 deferral](https://github.com/Archolith/menhir/issues/120) supersedes that inventory's Beacon blocker classification.
 - [ ] Do not merge unrelated architecture cleanup into the MVP lane.
 - [ ] Keep already-approved correctness work that directly affects a required surface.
 - [ ] Record all release-changing feature flags/defaults.
 
+The inventory and dispositions are complete; the remaining A2 bullets are
+controls through RC freeze. Record the exact selected flags and defaults with
+the named candidate under Gate D.
+
 ### A3. Benchmark preflight
 
-- [ ] Verify `archolith-bench` LongMemEval harness against current Menhir APIs.
-- [ ] Verify a throwaway 5-item Oracle graph can build from the intended candidate branch.
-- [ ] Verify provenance/manifest records clean commit and fresh graph correctly.
-- [ ] Verify zero failed episodes is enforced by the acceptance validator.
-- [ ] Verify temporal-date repair/backfill behavior is current and automatic or explicitly executed.
-- [ ] Verify per-question-type stratification; never use a bare grouped `--limit` as representative evidence.
+- [x] Verify `archolith-bench` LongMemEval harness against the Menhir preflight candidate.
+- [x] Verify a throwaway 5-item Oracle graph can build from the intended candidate branch.
+- [x] Verify provenance/manifest records clean commit and fresh graph correctly.
+- [x] Verify zero failed episodes is enforced by the acceptance validator.
+- [x] Verify temporal-date repair/backfill behavior is current and automatic or explicitly executed.
+- [x] Verify the analysis harness samples and reports by question type; never use a bare grouped `--limit` as representative evidence.
+
+The [Gate A receipt](https://github.com/Archolith/menhir/issues/123#issuecomment-5871929112)
+records a fresh graph, clean Menhir and bench commits, 5/5 items, zero failed or
+requeued episodes, validator PASS with no warnings, and zero date mismatches
+across 119 graph records with date backfill disabled. Bench PR #9 merged the
+preflight fix. The bench analysis [documents](https://github.com/Archolith/archolith-bench/blob/master/scripts/longmemeval/README.md)
+and [implements](https://github.com/Archolith/archolith-bench/blob/master/scripts/longmemeval/analysis/lib/retrieval_quality.py)
+per-type sampling.
+These checks establish harness readiness only; Oracle-500 retrieval and answer
+quality still need canonical evidence on the named RC.
 
 **Gate A:** no expensive canonical run until scope, harness, and evidence contracts are known-good.
 
