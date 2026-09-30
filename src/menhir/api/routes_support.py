@@ -196,6 +196,13 @@ class RecallRequest(BaseModel):
     # This enriches returned memories with history; it does not add invalidated candidates.
     include_invalidated: bool = False
     trace: bool = False
+    # Per-call source-memory section size override. None = deployment default
+    # (MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT when MENHIR_FRONTIER_SOURCE_MEMORIES is on,
+    # else off); 0 = off for this call; >0 = that limit, enabling the section for this
+    # call even when the deployment flag is off. The section carries SESSION-scoped
+    # raw episodes, so it is off whenever include_session is False (promoted
+    # knowledge only).
+    source_memory_limit: int | None = Field(default=None, ge=0, le=50)
 
 
 class RecallTemporalFact(BaseModel):
@@ -288,6 +295,18 @@ class EventAuthorityVerdictResponse(BaseModel):
     kind: str
 
 
+class SourceMemoryResponse(BaseModel):
+    """One entry of the additive source-memory section (raw episode content, oldest first)."""
+
+    uuid: str
+    content: str
+    reference_time: str | None = None
+    cosine: float
+    source: str | None = None
+    pool_id: str | None = None
+    pool_anchor: str | None = None
+
+
 class RecallResponse(BaseModel):
     query: str
     preset: str
@@ -296,6 +315,7 @@ class RecallResponse(BaseModel):
     trace: dict[str, object] | None = None
     authority_layer: list[ScalarAuthorityVerdictResponse] | None = None
     event_authority_layer: list[EventAuthorityVerdictResponse] | None = None
+    source_memories: list[SourceMemoryResponse] | None = None
 
 
 class BootstrapContextRequest(BaseModel):

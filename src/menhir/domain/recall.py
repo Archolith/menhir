@@ -218,6 +218,23 @@ class EventAuthorityVerdict:
 
 
 @dataclass(frozen=True)
+class SourceMemory:
+    """One entry of the additive source-memory section (raw episode content, not fused).
+
+    Never a ranked candidate: `results` and `candidates_evaluated` are identical with
+    the lane on or off. Ordered oldest-first by `reference_time`, then uuid.
+    """
+
+    uuid: str
+    content: str
+    reference_time: str | None
+    cosine: float
+    source: str | None
+    pool_id: str | None = None
+    pool_anchor: str | None = None
+
+
+@dataclass(frozen=True)
 class RecallResult:
     query: str
     preset: str
@@ -236,6 +253,10 @@ class RecallResult:
     # First-person event authority, separate from scalar authority. None when the authority feature
     # is disabled, no verdict was produced, or the query abstained; preserves flag-off wire output.
     event_authority_layer: tuple[EventAuthorityVerdict, ...] | None = None
+    # Source-memory lane (MENHIR_FRONTIER_SOURCE_MEMORIES): additive section of raw episode
+    # memories next to `results`, oldest first. None when the lane is off or failed;
+    # `results`/`candidates_evaluated` are identical either way.
+    source_memories: tuple[SourceMemory, ...] | None = None
 
 
 @dataclass(frozen=True)

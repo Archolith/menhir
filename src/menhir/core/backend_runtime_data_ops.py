@@ -311,6 +311,7 @@ class RuntimeProviderDataOpsMixin:
         namespace: str | None = None,
         include_invalidated: bool = False,
         trace: bool = False,
+        source_memory_limit: int | None = None,
     ) -> dict[str, Any]:
         # Map the env-driven frontier portions into the recall call. With no
         # MENHIR_FRONTIER_* set this is all-off -> today's ScoringService path; trace is
@@ -327,6 +328,8 @@ class RuntimeProviderDataOpsMixin:
             frontier_kwargs["tuning"] = tuning
         if trace:
             frontier_kwargs["trace"] = trace
+        if source_memory_limit is not None:
+            frontier_kwargs["source_memory_limit"] = int(source_memory_limit)
         result = await self.built.recall_service.recall(
             query,
             preset=parse_query_preset(preset),
@@ -348,6 +351,8 @@ class RuntimeProviderDataOpsMixin:
             payload.pop("authority_layer", None)
         if payload.get("event_authority_layer") is None:
             payload.pop("event_authority_layer", None)
+        if payload.get("source_memories") is None:
+            payload.pop("source_memories", None)
         return payload
 
     async def view_entropy(

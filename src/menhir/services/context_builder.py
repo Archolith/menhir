@@ -516,6 +516,29 @@ class ContextBuilderService:
                     lines.append(advisory_line)
                     running_tokens += advisory_tokens
 
+        # Source-memory lane (MENHIR_FRONTIER_SOURCE_MEMORIES, additive, default off):
+        # the session's most similar raw episode memories (up to the limit) with their own time, packed AFTER the
+        # ranked list so it supplements rather than displaces relevance order. Flag-off
+        # (or lane failure) adds no lines and preserves the context byte-for-byte.
+        if not fail_closed and recall_result.source_memories:
+            source_lines = ["Source memories (raw episodes, oldest first):"]
+            for sm in recall_result.source_memories:
+                pool_tag = (
+                    f" [pool {sm.pool_id} via {sm.pool_anchor}]"
+                    if sm.pool_id
+                    else ""
+                )
+                source_lines.append(
+                    f"  - {sm.reference_time or 'unknown time'} | {sm.content}{pool_tag}"
+                )
+            source_block = "\n".join(source_lines)
+            source_tokens = _tokens_for(source_block)
+            if running_tokens + source_tokens <= effective_budget:
+                lines.append(source_block)
+                running_tokens += source_tokens
+            else:
+                truncated = True
+
         if not fail_closed and self.brief_builder_enabled and not truncated:
             # Frontier: APPEND a supplementary Timeline view below the relevance list, so
             # temporal questions get an ordered, currency-marked chain without displacing

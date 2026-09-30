@@ -321,6 +321,10 @@ class StubMemoryGraphAdapter:
     raw_capture_calls: list[dict[str, object]] = field(default_factory=list)
     content_embedding_results: list[dict[str, object]] = field(default_factory=list)
     content_embedding_calls: list[dict[str, object]] = field(default_factory=list)
+    # Source-memory lane (default-off) stubs, mirroring the content-vector pair above.
+    episode_embedding_results: list[dict[str, object]] = field(default_factory=list)
+    episode_embedding_calls: list[dict[str, object]] = field(default_factory=list)
+    episode_embeddings_written: dict[str, tuple[list[float], str]] = field(default_factory=dict)
 
     def bootstrap_phase_one(self) -> PhaseOneSchemaResult:
         self.calls += 1
@@ -470,6 +474,36 @@ class StubMemoryGraphAdapter:
             {"query_vector": query_vector, "limit": limit, "group_ids": group_ids}
         )
         return self.content_embedding_results
+
+    def search_episode_embeddings(
+        self,
+        query_vector: list[float],
+        *,
+        limit: int = 10,
+        namespace: str | None = None,
+    ) -> list[dict[str, object]]:
+        self.episode_embedding_calls.append(
+            {"query_vector": query_vector, "limit": limit, "namespace": namespace}
+        )
+        return self.episode_embedding_results
+
+    def episode_has_content_embedding(self, episode_uuid: str) -> bool:
+        return episode_uuid in self.episode_embeddings_written
+
+    def set_episode_content_embedding(
+        self, episode_uuid: str, embedding: list[float], model: str
+    ) -> bool:
+        self.episode_embeddings_written[episode_uuid] = (embedding, model)
+        return True
+
+    def list_episodes_missing_content_embedding(
+        self, namespace: str | None = None, limit: int = 100
+    ) -> list[dict[str, object]]:
+        return [
+            {"uuid": uuid, "content": row.get("content")}
+            for uuid, row in self.pending_episode_rows.items()
+            if uuid not in self.episode_embeddings_written and row.get("content")
+        ][:limit]
 
     def fetch_temporal_facts(self, node_uuids: list[str]) -> list[dict[str, object]]:
         return self.temporal_fact_rows

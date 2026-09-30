@@ -44,6 +44,7 @@ from menhir.services.enrichment_steps import (
     EnrichmentContext,
     add_episode_with_timeout,
     build_episode_preflight_rejection,
+    embed_episode_content,
     handle_enrichment_failure,
     run_graphiti_extraction,
     run_preflight_rejection,
@@ -165,6 +166,7 @@ class IngestWorkerMixin:
                 graphiti_add_episode_timeout_s=self._graphiti_add_episode_timeout_s,
                 graphiti_episode_max_estimated_tokens=self._graphiti_episode_max_estimated_tokens,
                 canonical_self_binding_mode=self._canonical_self_binding_mode,
+                source_memories_enabled=self._source_memories_enabled,
                 get_queue_depth=self.get_queue_depth,
                 shadow_context_composition=self._shadow_context_composition,
                 shadow_composition_timeout_s=self._shadow_composition_timeout_s,
@@ -230,6 +232,7 @@ class IngestWorkerMixin:
             # entity count multiplies judge calls, and episode content drives entity count -- so
             # only an in-flight bound stops it.
 
+            await embed_episode_content(ctx)
             await run_graphiti_extraction(ctx, finalize_under_gate=True)
         except CircuitOpenError as exc:
             logger.warning(

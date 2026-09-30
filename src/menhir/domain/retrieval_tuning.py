@@ -293,6 +293,19 @@ class RetrievalTuningConfig:
     # control/treatment arms use ``production_fused`` so BM25 membership alone never
     # grants a floor exemption that today's opaque Graphiti fusion does not grant.
     fusion_admission_policy: str = "attributed"
+    # Source-memory lane (plan menhir-source-memory-lane). EXPERIMENTAL, default OFF ==
+    # today's behavior byte-for-byte. When on, recall builds an ADDITIVE source_memories
+    # section (raw episode contents by cosine over n.content_embedding, oldest first) next
+    # to the ranked results. Never fused: results/candidates_evaluated are identical with
+    # the lane on or off. See MENHIR_FRONTIER_SOURCE_MEMORIES.
+    enable_source_memories: bool = False
+    # Section size (effective only when enable_source_memories is on, or when a caller
+    # passes an explicit per-call source_memory_limit > 0).
+    source_memory_limit: int = 10
+    # Per-memory content cap in the section; cut content ends with a trailing ellipsis.
+    source_memory_max_chars: int = 600
+    # Group the section's returned memories into anchor-based pools (pure, deterministic).
+    source_memory_pools: bool = False
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.hybrid_alpha <= 1.0:
@@ -320,4 +333,13 @@ class RetrievalTuningConfig:
             raise ValueError(
                 "fusion_admission_policy must be attributed or production_fused, "
                 f"got {self.fusion_admission_policy!r}"
+            )
+        if not 1 <= self.source_memory_limit <= 50:
+            raise ValueError(
+                f"source_memory_limit must be in [1, 50], got {self.source_memory_limit!r}"
+            )
+        if not 100 <= self.source_memory_max_chars <= 4000:
+            raise ValueError(
+                "source_memory_max_chars must be in [100, 4000], "
+                f"got {self.source_memory_max_chars!r}"
             )

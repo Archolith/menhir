@@ -101,23 +101,24 @@ class BackendClientOpsMixin:
         file_context: str | None = None,
         file_context_project: str | None = None,
         namespace: str | None = None,
+        source_memory_limit: int | None = None,
     ) -> dict[str, Any]:
-        return await self._request(
-            "recall",
-            {
-                "query": query,
-                "preset": preset,
-                "limit": limit,
-                "include_session": include_session,
-                "include_superseded": include_superseded,
-                "include_invalidated": include_invalidated,
-                "wait_for_pending": wait_for_pending,
-                "file_context": file_context,
-                "file_context_project": file_context_project,
-                "namespace": namespace,
-                "trace": trace,
-            },
-        )
+        params: dict[str, Any] = {
+            "query": query,
+            "preset": preset,
+            "limit": limit,
+            "include_session": include_session,
+            "include_superseded": include_superseded,
+            "include_invalidated": include_invalidated,
+            "wait_for_pending": wait_for_pending,
+            "file_context": file_context,
+            "file_context_project": file_context_project,
+            "namespace": namespace,
+            "trace": trace,
+        }
+        if source_memory_limit is not None:
+            params["source_memory_limit"] = int(source_memory_limit)
+        return await self._request("recall", params)
 
     async def view_entropy(
         self,

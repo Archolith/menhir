@@ -29,6 +29,7 @@ async def recall_memories(
     include_invalidated: bool = False,
     compact: bool | None = None,
     trace: bool = False,
+    source_memory_limit: int | None = None,
 ) -> str:
     """Search memories by semantic similarity. Returns ranked results with relevance scores.
 
@@ -41,6 +42,7 @@ async def recall_memories(
         namespace: Optional silo to scope this operation to. Empty = default/global behavior.
         include_invalidated: When True, also return superseded/historical beliefs (expired facts). Default False = current beliefs only.
         compact: True to drop per-item explainability (breakdown sub-scores, type) and candidates_evaluated, keeping only the decision-relevant fields (name, scope, score, relevance, summary, uuid). None defers to the MENHIR_RECALL_COMPACT env default (off).
+        source_memory_limit: Per-call size of the additive source-memory section (raw episode memories with their time, kept NEXT TO the ranked results, never fused into them). None = deployment default (on with MENHIR_FRONTIER_SOURCE_MEMORIES, else off); 0 = off for this call; 1..50 = that many entries for this call, even when the deployment flag is off. The section carries SESSION-scoped raw episodes, so it is off whenever include_session is false (promoted knowledge only); this tool always recalls with include_session=true.
 
     Returns:
         Ranked memory results with scores and explainability breakdown.
@@ -53,6 +55,7 @@ async def recall_memories(
         include_invalidated=include_invalidated,
         _compact=compact,
         trace=trace,
+        source_memory_limit=source_memory_limit,
     )
 
 
@@ -81,6 +84,7 @@ class RecallMemoriesTool(BaseJsonTool):
         include_invalidated: bool = False,
         compact: bool | None = None,
         trace: bool = False,
+        source_memory_limit: int | None = None,
     ) -> str:
         """Name the component and decision in query. Start with one focused query;
         rephrase if needed. limit defaults to 5. preset defaults to knowledge;
@@ -118,6 +122,7 @@ class RecallMemoriesTool(BaseJsonTool):
                 namespace=namespace or None,
                 include_invalidated=include_invalidated,
                 trace=trace,
+                source_memory_limit=source_memory_limit,
             )
         except ValueError:
             return self.render_json(
@@ -174,6 +179,10 @@ class RecallMemoriesTool(BaseJsonTool):
         if result.get("event_authority_layer"):
             # Decision-relevant and already bounded by recall (7.J), so compact mode retains it.
             payload["event_authority_layer"] = result.get("event_authority_layer")
+        if result.get("source_memories"):
+            # Decision-relevant (raw source text + its time) and bounded by limit, so compact
+            # mode retains it alongside the ranked results.
+            payload["source_memories"] = result.get("source_memories")
         if trace and result.get("trace") is not None:
             payload["trace"] = result.get("trace")
         if elapsed_since_last_access is not None:

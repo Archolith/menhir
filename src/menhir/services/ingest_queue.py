@@ -79,6 +79,7 @@ class IngestQueueMixin:
         ingest_concurrency: int | None = None,
         shadow_context_composition: bool | None = None,
         shadow_composition_timeout_s: float | None = None,
+        source_memories_enabled: bool | None = None,
     ) -> None:
         """Apply runtime configuration values derived from MemorySettings."""
         if graphiti_add_episode_timeout_s is not None:
@@ -118,6 +119,8 @@ class IngestQueueMixin:
             self._shadow_context_composition = bool(shadow_context_composition)
         if shadow_composition_timeout_s is not None:
             self._shadow_composition_timeout_s = max(1.0, float(shadow_composition_timeout_s))
+        if source_memories_enabled is not None:
+            self._source_memories_enabled = bool(source_memories_enabled)
 
     def _register_shadow_task(self, task: asyncio.Task) -> None:
         """Track a detached shadow-composition task so shutdown() can drain it."""

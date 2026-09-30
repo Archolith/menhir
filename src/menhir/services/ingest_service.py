@@ -121,6 +121,9 @@ class IngestService(IngestQueueMixin, IngestWorkerMixin, IngestIntakeMixin):
     # .agent/plans/menhir-context-composition-production-integration.md). Off by default.
     _shadow_context_composition: bool = field(default=False, init=False, repr=False)
     _shadow_composition_timeout_s: float = field(default=30.0, init=False, repr=False)
+    # Source-memory lane (MENHIR_FRONTIER_SOURCE_MEMORIES). Off by default: no
+    # episode-content embedding call is made and ingest behavior is unchanged.
+    _source_memories_enabled: bool = field(default=False, init=False, repr=False)
     # Detached background shadow-composition tasks, tracked so shutdown() can drain them
     # instead of leaving "Task was destroyed but it is pending" warnings behind.
     _shadow_tasks: set[asyncio.Task] = field(default_factory=set, init=False, repr=False)
