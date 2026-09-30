@@ -72,6 +72,7 @@ scripts are indexed in the private `Archolith/menhir-deploy` repository.
 | `repair_lme_valid_at.py` | restore conversation-time valid_at on the LME corpus |
 | `repair_lme_scalar_source_times.py` | dry-run-first repair of TurnEvidence/assertion world time from a frozen LME fixture, followed by deterministic ScalarStateView rebuild; requires verified graph snapshot to apply |
 | `backfill_admitted_on.py` | backfill `(:Episodic)-[:ADMITTED_ON]->(:TurnEvidence)` on a pre-existing graph. REQUIRED before typed-scalar binding can resolve a turn_id on any corpus built before that edge existed. Dry-run by default; remote writes require an explicit acknowledgement |
+| `backfill_episode_embeddings.py` | backfill `n.content_embedding` on Menhir `:Episodic` nodes for the source-memory recall lane (`MENHIR_FRONTIER_SOURCE_MEMORIES`). REQUIRED on any graph built before the flag was enabled; idempotent, `--dry-run` default-off write path, embeds via the configured Graphiti embedder with the same 8k-char cap as the ingest step |
 | `retry_failed_episodes.py` | bulk re-enrich FAILED episodes in paced waves after a root-cause fix lands. Dry-run by default; `--apply` required, `--error-contains` filters by cause. Operator-tier (needs `MENHIR_OPERATOR_KEY`). Verify the fix on ONE episode first — a bulk pass against an unfixed cause burns every retry counter for nothing |
 | `setup_remote_test_neo4j.sh` | stand up the dedicated TEST Neo4j (port 7688) |
 | `maintenance/*.py` | dirty-file, stale-anchor, and stale-verification reporting |

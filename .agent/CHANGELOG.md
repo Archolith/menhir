@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-09-30 - Source-memory recall lane (step 1, default off)
+
+- New additive recall section `source_memories` (raw episode memories by cosine over
+  `n.content_embedding`, oldest first, capped per entry), kept NEXT TO the ranked
+  results and never fused into them. Flag off (default) leaves recall, ingest and all
+  wire output byte-for-byte unchanged and makes no embedding call.
+- Settings: `MENHIR_FRONTIER_SOURCE_MEMORIES` (off), `_SOURCE_MEMORY_K` (10, 1..50),
+  `_SOURCE_MEMORY_MAX_CHARS` (600, 100..4000), `_SOURCE_MEMORY_POOLS` (off), mapped
+  into `RetrievalTuningConfig` and the Recall Lab tuning. Per-call override
+  `source_memory_k` on `RecallService.recall`, the REST `RecallRequest` and the MCP
+  `recall_memories` tool (`0` = off for the call; `>0` = enable for the call).
+- Ingest step `embed_episode_content` embeds episode content (8k-char cap) via the
+  Graphiti embedder when the flag is on; skips evidence projections and
+  already-embedded episodes; any exception is logged at WARNING and swallowed.
+- New `scripts/backfill_episode_embeddings.py` (idempotent, `--dry-run`) for
+  pre-existing graphs; documented in `.agent/scripts-index.md`.
+- Optional anchor pools (`domain/source_memory_pools.py`, pure/deterministic) group
+  the section's returned memories when `_SOURCE_MEMORY_POOLS` is on.
+- Recall Lab opt-in arm tunings: `enable_source_memories=true` adds the section to an
+  arm's output, and additionally `source_memory_pools=true` groups it into pools; these
+  are tunings, not default arms (`DEFAULT_ARMS` is unchanged), and the Lab request must
+  set `include_session=true` for the section to appear. Lane failures degrade to a
+  "Source-memory lane unavailable" note; ranked results never change.
+
 ## 2026-09-26 - Reconcile native Graphiti fork with current Menhir
 
 - `pyproject.toml`, `uv.lock`: pin the public Archolith Graphiti 0.30.2 maintenance
