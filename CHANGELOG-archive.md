@@ -1,3 +1,12 @@
+## 2026-09-28 - Ground scalar clock times with dotted meridiems
+
+- `src/menhir/services/typed_scalar_rules.py`: normalize dotted AM/PM source
+  times correctly and refuse unsupported suffixes instead of accepting a bare
+  time prefix that could overwrite a correct model value.
+- `tests/test_typed_scalar_perception.py`: cover source spelling, noon and
+  midnight, malformed times, and full-row grounding.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-28 - Refuse ambiguous scalar subject fallback
 
 - `src/menhir/services/typed_scalar_rules.py`: distinguish absent, ambiguous,

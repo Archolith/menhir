@@ -1,3 +1,9 @@
+## 2026-09-30 - Keep merge lineage out of Graphiti prompts
+
+- `src/menhir/infrastructure/graphiti_llm_adapter.py`: the provider wrapper removes `merge_audit`, `merged_from` and `last_merge_op_id` from tagged JSON blocks before a Graphiti request is sent. The fork serializes entity attributes into its dedup and summary contexts, so the merge audit trail rode along and grew with every merge (64% of the dedup candidate block in AMA runs; one 131k-char NodeResolutions prompt). In a 60-call replay, dropping it matched the control consensus as often as a fresh control run and cut dedup input about 79%. Prompts without lineage are sent unchanged.
+- `tests/infrastructure/test_merge_lineage_prompt_policy.py`: renders the real fork dedup and summary prompts with lineage-carrying nodes; only lineage is removed and the rest of the prompt is byte-identical.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-29 - Give verdict LLM calls room to answer on reasoning models
 
 - `src/menhir/infrastructure/llm.py`: the identity judge, contradiction check and shadow tie-break use a shared `_VERDICT_MAX_TOKENS` (1024) instead of 64/64/128. On reasoning models `max_tokens` also covers hidden reasoning, so most identity-judge calls ended empty and became `None` votes that route merges to conflict (#203). `_chat_text` now warns when a completion comes back empty, naming the operation and budget.
@@ -64,13 +70,4 @@
 - `tests/test_settings_event_history_runtime.py`, `tests/test_api_routes.py`:
   cover all eight lane combinations, the unavailable-provider case, and scalar
   parity with API-triggered consolidation.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-09-28 - Ground scalar clock times with dotted meridiems
-
-- `src/menhir/services/typed_scalar_rules.py`: normalize dotted AM/PM source
-  times correctly and refuse unsupported suffixes instead of accepting a bare
-  time prefix that could overwrite a correct model value.
-- `tests/test_typed_scalar_perception.py`: cover source spelling, noon and
-  midnight, malformed times, and full-row grounding.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
