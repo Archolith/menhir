@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from time import monotonic
 from typing import Any
 from urllib.parse import urlsplit
@@ -44,6 +45,7 @@ from graphiti_core.llm_client.request_guard import (
 from graphiti_core.prompts.extract_edges import ExtractedEdges
 from graphiti_core.prompts.extract_nodes_and_edges import CombinedExtraction
 from graphiti_core.prompts.models import Message
+from graphiti_core.prompts.prompt_helpers import to_prompt_json
 
 from menhir.infrastructure.graphiti_extraction_policy import get_extraction_receipt
 from menhir.infrastructure.graphiti_helpers import (
@@ -360,7 +362,75 @@ class _ProviderExtrasCompletions:
         extra: dict[str, Any] = _provider_extra_body(kwargs.get("model"), self._base_url)
         if extra:
             kwargs["extra_body"] = {**(kwargs.get("extra_body") or {}), **extra}
+        if kwargs.get("messages"):
+            kwargs["messages"] = _strip_merge_lineage(kwargs["messages"])
         return await self._inner.create(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Prompt data policy: merge lineage never reaches the model
+# ---------------------------------------------------------------------------
+
+#: Menhir merge bookkeeping stored on entity nodes. The fork serializes node attributes into its
+#: dedup (``**candidate.attributes``) and summary (``'attributes': node.attributes``) contexts, so
+#: without this the audit trail rides along. It grows with every merge: 64% of the dedup candidate
+#: block in AMA runs, one 131k-char NodeResolutions prompt. Dropping it matched the control
+#: consensus as often as a fresh control run did while cutting dedup input ~79%.
+MERGE_LINEAGE_KEYS = frozenset({"merge_audit", "merged_from", "last_merge_op_id"})
+
+_TAGGED_JSON_BLOCK = re.compile(r"(<([A-Z][A-Z _]*)>\s*)([\[{].*?)(\s*</\2>)", re.S)
+
+
+def _without_lineage(value: Any) -> tuple[Any, bool]:
+    if isinstance(value, dict):
+        changed = False
+        out: dict[str, Any] = {}
+        for key, item in value.items():
+            if key in MERGE_LINEAGE_KEYS:
+                changed = True
+                continue
+            out[key], child_changed = _without_lineage(item)
+            changed = changed or child_changed
+        return out, changed
+    if isinstance(value, list):
+        items = [_without_lineage(item) for item in value]
+        return [item for item, _ in items], any(changed for _, changed in items)
+    return value, False
+
+
+def _strip_merge_lineage_text(content: str) -> str:
+    """Remove lineage keys from tagged JSON blocks; anything that does not parse is left alone."""
+    if not any(key in content for key in MERGE_LINEAGE_KEYS):
+        return content
+
+    def rewrite(match: re.Match[str]) -> str:
+        try:
+            data = json.loads(match.group(3))
+        except ValueError:
+            return match.group(0)
+        cleaned, changed = _without_lineage(data)
+        if not changed:
+            return match.group(0)
+        return f"{match.group(1)}{to_prompt_json(cleaned)}{match.group(4)}"
+
+    return _TAGGED_JSON_BLOCK.sub(rewrite, content)
+
+
+def _strip_merge_lineage(messages: Any) -> Any:
+    """Return messages with merge lineage removed; unchanged messages keep their identity."""
+    if not isinstance(messages, list):
+        return messages
+    out = []
+    changed = False
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, str):
+            cleaned = _strip_merge_lineage_text(content)
+            if cleaned is not content:
+                message = {**message, "content": cleaned}
+                changed = True
+        out.append(message)
+    return out if changed else messages
 
 
 def _provider_extra_body(model: str | None, endpoint: str) -> dict[str, Any]:
