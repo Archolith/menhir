@@ -20,7 +20,9 @@ Every MCP client receives a short version of this contract as the server instruc
    Start with one focused query naming the component and the decision, and rephrase only if evidence is
    missing. Pass `file_context` and `file_context_project` for code-related questions. Recall returns
    summaries and facts; read the linked source excerpts with `get_provenance(node_uuid=...)` when wording or
-   rationale matters, and distinguish recorded reasons from inference.
+   rationale matters, and distinguish recorded reasons from inference. When the question needs how
+   something changed, the sequence of states, or what it was before, follow with `recall_history`
+   (time-ordered matching memories, oldest first).
 5. Verify stale anchors against the current file. An incomplete or stale project index makes an empty result
    inconclusive, not proof that no dependency exists.
 6. If the client exposes `rate_recall` (agent tier), call it honestly after using recall output. This
