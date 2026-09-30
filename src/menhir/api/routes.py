@@ -49,11 +49,14 @@ from .routes_support import (
     Phase3StatusResponse,
     Phase3ViewsResponse,
     ReadyResponse,
+    RecallHistoryRequest,
+    RecallHistoryResponse,
     RecallMemory,
     RecallRequest,
     RecallResponse,
     RevokeClientResponse,
     RuntimeContext,
+    SourceMemoryResponse,
     StaleAnchorVerificationRequest,
     StaleAnchorVerificationResponse,
     StatsResponse,
@@ -184,6 +187,40 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
         authority_layer=result.get("authority_layer"),
         event_authority_layer=result.get("event_authority_layer"),
         source_memories=result.get("source_memories"),
+    )
+
+
+@router.post(
+    "/recall/history",
+    response_model=RecallHistoryResponse,
+    response_model_exclude_none=True,
+)
+async def recall_history(request: Request, body: RecallHistoryRequest) -> RecallHistoryResponse:
+    backend = _get_backend(request)
+    try:
+        result = await backend.recall_history(
+            body.query,
+            namespace=_resolve_namespace(request, body.namespace),
+            limit=body.limit,
+            pools=body.pools,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return RecallHistoryResponse(
+        query=str(result.get("query") or body.query),
+        memories=[
+            SourceMemoryResponse(
+                uuid=str(m.get("uuid") or ""),
+                content=str(m.get("content") or ""),
+                reference_time=m.get("reference_time"),
+                cosine=float(m.get("cosine") or 0.0),
+                source=m.get("source"),
+                pool_id=m.get("pool_id"),
+                pool_anchor=m.get("pool_anchor"),
+            )
+            for m in result.get("memories", []) or []
+        ],
+        note=result.get("note"),
     )
 
 

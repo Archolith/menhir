@@ -55,6 +55,7 @@ CONTENT_BEARING_OPERATIONS: tuple[str, ...] = (
     "add_memory",
     "add_memory_and_track",
     "recall_memories",
+    "recall_history",
     "build_context",
     "ingest_document",
 )

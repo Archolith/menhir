@@ -20,6 +20,7 @@ from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.recall import (
     CandidateData,
     QueryPreset,
+    RecallHistoryResult,
     RecallResult,
     RetrievalScoreKind,
     ScalarAuthorityContributor,
@@ -168,6 +169,75 @@ async def _build_source_memories(
             exc_info=True,
         )
         return None, "Source-memory lane unavailable", int((perf_counter() - started) * 1000)
+
+
+#: recall_history drill-down: full content up to this many chars, then a trailing ellipsis.
+_RECALL_HISTORY_MAX_CHARS = 4000
+
+#: recall_history empty-result note: the lane only reads embeddings, so an empty
+#: result means no embedded memory matched -- not that no memory exists.
+_RECALL_HISTORY_EMPTY_NOTE = (
+    "No embedded memories matched. Memories are embedded when "
+    "MENHIR_FRONTIER_SOURCE_MEMORIES is on; run scripts/backfill_episode_embeddings.py "
+    "for older memories."
+)
+
+
+async def run_recall_history(
+    service: Any,
+    query: str,
+    *,
+    namespace: str | None = None,
+    limit: int = 30,
+    pools: bool = True,
+) -> RecallHistoryResult:
+    """recall_history drill-down: matching episode memories, strictly oldest first.
+
+    Read-only re-use of the source-memory lane's embed + episode-embedding search.
+    Unlike the lane, failures RAISE (the tool/route layers convert errors); no
+    ``last_accessed`` touches, no access updates. Works whether or not
+    ``MENHIR_FRONTIER_SOURCE_MEMORIES`` is on: it only reads embeddings.
+    """
+    stripped = (query or "").strip()
+    if not stripped:
+        raise ValueError("recall_history requires a non-empty query")
+    effective_limit = max(1, min(50, int(limit)))
+    query_vector = await service.graphiti_client.embed_query(stripped)
+    rows = await asyncio.to_thread(
+        service.graph_adapter.search_episode_embeddings,
+        query_vector,
+        limit=effective_limit,
+        namespace=namespace,
+    )
+    memories: list[SourceMemory] = []
+    for row in rows:
+        uuid = str(row.get("uuid") or "").strip()
+        if not uuid:
+            continue
+        raw_content = str(row.get("content") or "")
+        text = " ".join(raw_content.split())
+        if len(text) > _RECALL_HISTORY_MAX_CHARS:
+            text = text[:_RECALL_HISTORY_MAX_CHARS] + "…"
+        memories.append(SourceMemory(
+            uuid=uuid,
+            content=text,
+            reference_time=row.get("reference_time") or None,
+            cosine=float(row.get("cosine") or 0.0),
+            source=row.get("source") or None,
+        ))
+    memories.sort(key=lambda sm: (sm.reference_time or "", sm.uuid))
+    if pools and memories:
+        from menhir.domain.source_memory_pools import assign_pools
+
+        memories = [
+            replace(sm, pool_id=pool_id, pool_anchor=anchor)
+            for sm, pool_id, anchor in assign_pools(memories)
+        ]
+    return RecallHistoryResult(
+        query=stripped,
+        memories=tuple(memories),
+        note=_RECALL_HISTORY_EMPTY_NOTE if not memories else None,
+    )
 
 
 async def run_recall(

@@ -77,7 +77,8 @@ from menhir.services.recall_policies import (
     _staleness_evidence_for,
 )
 
-from menhir.services.recall_pipeline import apply_event_history_authority_layer, run_recall
+from menhir.services.recall_pipeline import (
+    apply_event_history_authority_layer, run_recall, run_recall_history)
 from menhir.services.recall_support import RecallSupportMixin
 
 
@@ -151,3 +152,6 @@ class RecallService(RecallSupportMixin):
             source_memory_limit=source_memory_limit,
         )
         return await apply_event_history_authority_layer(self, result, query, namespace)
+
+    # Drill-down; delegates to run_recall_history, which takes the service first.
+    recall_history = run_recall_history
