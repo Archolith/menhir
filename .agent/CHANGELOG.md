@@ -6,10 +6,10 @@
   `n.content_embedding`, oldest first, capped per entry), kept NEXT TO the ranked
   results and never fused into them. Flag off (default) leaves recall, ingest and all
   wire output byte-for-byte unchanged and makes no embedding call.
-- Settings: `MENHIR_FRONTIER_SOURCE_MEMORIES` (off), `_SOURCE_MEMORY_K` (10, 1..50),
+- Settings: `MENHIR_FRONTIER_SOURCE_MEMORIES` (off), `_SOURCE_MEMORY_LIMIT` (10, 1..50),
   `_SOURCE_MEMORY_MAX_CHARS` (600, 100..4000), `_SOURCE_MEMORY_POOLS` (off), mapped
   into `RetrievalTuningConfig` and the Recall Lab tuning. Per-call override
-  `source_memory_k` on `RecallService.recall`, the REST `RecallRequest` and the MCP
+  `source_memory_limit` on `RecallService.recall`, the REST `RecallRequest` and the MCP
   `recall_memories` tool (`0` = off for the call; `>0` = enable for the call).
 - Ingest step `embed_episode_content` embeds episode content (8k-char cap) via the
   Graphiti embedder when the flag is on; skips evidence projections and

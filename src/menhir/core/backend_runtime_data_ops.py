@@ -311,7 +311,7 @@ class RuntimeProviderDataOpsMixin:
         namespace: str | None = None,
         include_invalidated: bool = False,
         trace: bool = False,
-        source_memory_k: int | None = None,
+        source_memory_limit: int | None = None,
     ) -> dict[str, Any]:
         # Map the env-driven frontier portions into the recall call. With no
         # MENHIR_FRONTIER_* set this is all-off -> today's ScoringService path; trace is
@@ -328,8 +328,8 @@ class RuntimeProviderDataOpsMixin:
             frontier_kwargs["tuning"] = tuning
         if trace:
             frontier_kwargs["trace"] = trace
-        if source_memory_k is not None:
-            frontier_kwargs["source_memory_k"] = int(source_memory_k)
+        if source_memory_limit is not None:
+            frontier_kwargs["source_memory_limit"] = int(source_memory_limit)
         result = await self.built.recall_service.recall(
             query,
             preset=parse_query_preset(preset),

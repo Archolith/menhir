@@ -104,24 +104,24 @@ async def _build_source_memories(
     query: str,
     namespace: str | None,
     tuning: RetrievalTuningConfig,
-    source_memory_k: int | None,
+    source_memory_limit: int | None,
     *,
     include_session: bool,
     content_query_vector: list[float] | None,
 ) -> tuple[tuple[SourceMemory, ...] | None, str | None, int]:
     """Run the additive source-memory lane; never raises.
 
-    Returns ``(section, failure_note, elapsed_ms)``. Effective k: ``None`` -> the tuning
+    Returns ``(section, failure_note, elapsed_ms)``. Effective limit: ``None`` -> the tuning
     default when the deployment flag is on, else 0; ``0`` -> off for this call; ``>0`` ->
-    that k (an explicit request enables the lane for this call even when the flag is off).
+    that limit (an explicit request enables the lane for this call even when the flag is off).
     The lane is also off for ``include_session=False`` calls: the section carries
     SESSION-scoped raw episodes, and that flag means promoted knowledge only.
     """
-    if source_memory_k is None:
-        effective_k = tuning.source_memory_k if tuning.enable_source_memories else 0
+    if source_memory_limit is None:
+        effective_limit = tuning.source_memory_limit if tuning.enable_source_memories else 0
     else:
-        effective_k = max(0, int(source_memory_k))
-    if effective_k <= 0 or not include_session:
+        effective_limit = max(0, int(source_memory_limit))
+    if effective_limit <= 0 or not include_session:
         return None, None, 0
     started = perf_counter()
     try:
@@ -131,7 +131,7 @@ async def _build_source_memories(
         rows = await asyncio.to_thread(
             service.graph_adapter.search_episode_embeddings,
             query_vector,
-            limit=effective_k,
+            limit=effective_limit,
             namespace=namespace,
         )
         section: list[SourceMemory] = []
@@ -190,7 +190,7 @@ async def run_recall(
     tuning: RetrievalTuningConfig | None = None,
     trace: bool = False,
     update_access: bool = True,
-    source_memory_k: int | None = None,
+    source_memory_limit: int | None = None,
 ) -> RecallResult:
     # update_access=False makes recall a pure read: no last_accessed touches, no
     # edge-weight reinforcement, no rehydration scheduling. For measurement probes
@@ -1450,7 +1450,7 @@ async def run_recall(
         )
 
     # --- Source-memory lane (additive; default OFF) ---
-    # AMA-Bench supersession A/B: the session's top-k episode memories by embedding
+    # AMA-Bench supersession A/B: the session's most similar episode memories by embedding
     # similarity, each with its time, NEXT TO the ranked results (never fused) fixed 41
     # answers and broke 19 (sign test p=0.006); "latest X" stale answers fell 9 -> 3.
     # Runs on EVERY return path (including the no-candidate fallbacks) so the section
@@ -1458,7 +1458,7 @@ async def run_recall(
     # `candidates_evaluated` are identical with the lane on or off; a lane failure
     # degrades to a note append, never to a failed recall.
     source_memories, source_memory_note, source_memory_ms = await _build_source_memories(
-        service, query, namespace, tuning, source_memory_k,
+        service, query, namespace, tuning, source_memory_limit,
         include_session=include_session, content_query_vector=content_query_vector,
     )
     if source_memory_ms:
@@ -1568,7 +1568,7 @@ async def run_recall(
     _t_phases["scoring"] = int((perf_counter() - _t) * 1000)
 
     # --- Frontier portions (active): reorder by combiner / gate by wardens ---
-    # Applied to the survivors BEFORE the top-k slice so it shapes which make the cut.
+    # Applied to the survivors BEFORE the limit slice so it shapes which make the cut.
     # OFF by default -> this block is skipped and the path is byte-for-byte the old one.
     frontier_note: str | None = None
     if scored and (tuning.enable_oracle_ranking or tuning.enable_warden_gate or tuning.enable_belief_gate):

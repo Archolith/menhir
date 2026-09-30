@@ -50,7 +50,7 @@ class RecallLabTuning(BaseModel):
     content_vector_weight: float = Field(default=0.5, ge=0.0, le=10.0)
     fusion_admission_policy: Literal["attributed", "production_fused"] = "attributed"
     enable_source_memories: bool = False
-    source_memory_k: int = Field(default=10, ge=1, le=50)
+    source_memory_limit: int = Field(default=10, ge=1, le=50)
     source_memory_max_chars: int = Field(default=600, ge=100, le=4000)
     source_memory_pools: bool = False
 

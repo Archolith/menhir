@@ -101,7 +101,7 @@ class BackendClientOpsMixin:
         file_context: str | None = None,
         file_context_project: str | None = None,
         namespace: str | None = None,
-        source_memory_k: int | None = None,
+        source_memory_limit: int | None = None,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {
             "query": query,
@@ -116,8 +116,8 @@ class BackendClientOpsMixin:
             "namespace": namespace,
             "trace": trace,
         }
-        if source_memory_k is not None:
-            params["source_memory_k"] = int(source_memory_k)
+        if source_memory_limit is not None:
+            params["source_memory_limit"] = int(source_memory_limit)
         return await self._request("recall", params)
 
     async def view_entropy(

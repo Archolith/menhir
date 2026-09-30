@@ -418,7 +418,7 @@ class MemorySettings:
     # n.content_embedding), NEXT TO the ranked results, never fused into them. Requires the
     # ingest-side episode-content embedding step (also gated by frontier_source_memories).
     frontier_source_memories: bool = False  # additive source-memory section next to ranked recall
-    frontier_source_memory_k: int = 10          # section size (1..50; validated in RetrievalTuningConfig)
+    frontier_source_memory_limit: int = 10          # section size (1..50; validated in RetrievalTuningConfig)
     frontier_source_memory_max_chars: int = 600  # per-memory content cap (100..4000)
     frontier_source_memory_pools: bool = False  # group section entries by shared anchors
 
@@ -733,7 +733,7 @@ class MemorySettings:
             similarity_scale=self.frontier_similarity_scale,
             enable_assertion_shadow=self.frontier_shadow,
             enable_source_memories=self.frontier_source_memories,
-            source_memory_k=self.frontier_source_memory_k,
+            source_memory_limit=self.frontier_source_memory_limit,
             source_memory_max_chars=self.frontier_source_memory_max_chars,
             source_memory_pools=self.frontier_source_memory_pools,
         )
@@ -942,9 +942,9 @@ class MemorySettings:
             frontier_shadow=parse_bool_env(_getenv("MENHIR_FRONTIER_SHADOW", default=str(cls.frontier_shadow))),
             frontier_brief_builder=parse_bool_env(_getenv("MENHIR_FRONTIER_BRIEF_BUILDER", default=str(cls.frontier_brief_builder))),
             frontier_source_memories=parse_bool_env(_getenv("MENHIR_FRONTIER_SOURCE_MEMORIES", default=str(cls.frontier_source_memories))),
-            frontier_source_memory_k=_parse_int(
-                _getenv("MENHIR_FRONTIER_SOURCE_MEMORY_K", default=str(cls.frontier_source_memory_k)),
-                env_var="MENHIR_FRONTIER_SOURCE_MEMORY_K",
+            frontier_source_memory_limit=_parse_int(
+                _getenv("MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT", default=str(cls.frontier_source_memory_limit)),
+                env_var="MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT",
                 minimum=1,
                 maximum=50,
             ),

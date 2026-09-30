@@ -517,7 +517,7 @@ class ContextBuilderService:
                     running_tokens += advisory_tokens
 
         # Source-memory lane (MENHIR_FRONTIER_SOURCE_MEMORIES, additive, default off):
-        # the session's top-k raw episode memories with their own time, packed AFTER the
+        # the session's most similar raw episode memories (up to the limit) with their own time, packed AFTER the
         # ranked list so it supplements rather than displaces relevance order. Flag-off
         # (or lane failure) adds no lines and preserves the context byte-for-byte.
         if not fail_closed and recall_result.source_memories:

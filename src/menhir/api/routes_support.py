@@ -197,12 +197,12 @@ class RecallRequest(BaseModel):
     include_invalidated: bool = False
     trace: bool = False
     # Per-call source-memory section size override. None = deployment default
-    # (MENHIR_FRONTIER_SOURCE_MEMORY_K when MENHIR_FRONTIER_SOURCE_MEMORIES is on,
-    # else off); 0 = off for this call; >0 = that k, enabling the section for this
+    # (MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT when MENHIR_FRONTIER_SOURCE_MEMORIES is on,
+    # else off); 0 = off for this call; >0 = that limit, enabling the section for this
     # call even when the deployment flag is off. The section carries SESSION-scoped
     # raw episodes, so it is off whenever include_session is False (promoted
     # knowledge only).
-    source_memory_k: int | None = Field(default=None, ge=0, le=50)
+    source_memory_limit: int | None = Field(default=None, ge=0, le=50)
 
 
 class RecallTemporalFact(BaseModel):

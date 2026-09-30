@@ -24,18 +24,18 @@ section 4.1c (owner's copy; not required to implement this).
 2. **Settings** (`src/menhir/config/settings_model.py`, mirror `frontier_content_vector*` at lines
    ~400, ~712 and ~906 exactly, including env parsing and validation style):
    - `frontier_source_memories: bool = False` <- `MENHIR_FRONTIER_SOURCE_MEMORIES`
-   - `frontier_source_memory_k: int = 10` <- `MENHIR_FRONTIER_SOURCE_MEMORY_K` (1..50)
+   - `frontier_source_memory_limit: int = 10` <- `MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT` (1..50)
    - `frontier_source_memory_max_chars: int = 600` <- `MENHIR_FRONTIER_SOURCE_MEMORY_MAX_CHARS` (100..4000)
    - `frontier_source_memory_pools: bool = False` <- `MENHIR_FRONTIER_SOURCE_MEMORY_POOLS`
    Mapped into `RetrievalTuningConfig` (`src/menhir/domain/retrieval_tuning.py`) as
-   `enable_source_memories`, `source_memory_k`, `source_memory_max_chars`, `source_memory_pools`,
+   `enable_source_memories`, `source_memory_limit`, `source_memory_max_chars`, `source_memory_pools`,
    with `__post_init__` range validation, and into `RecallLabTuning` (`src/menhir/explorer/recall_lab.py`).
-3. **Per-call override** `source_memory_k: int | None = None` on `RecallService.recall`
+3. **Per-call override** `source_memory_limit: int | None = None` on `RecallService.recall`
    (`services/recall_service.py:110`), on `RecallRequest` (`api/routes_support.py:179`,
    `Field(default=None, ge=0, le=50)`) and on the MCP tool `recall_memories`
-   (`mcp/tools/recall/recall_memories.py`, documented in its docstring). Effective k:
-   `None` -> `tuning.source_memory_k` if `tuning.enable_source_memories` else 0; `0` -> off for this
-   call; `>0` -> that k (explicit request enables it for the call even if the flag is off).
+   (`mcp/tools/recall/recall_memories.py`, documented in its docstring). Effective limit:
+   `None` -> `tuning.source_memory_limit` if `tuning.enable_source_memories` else 0; `0` -> off for this
+   call; `>0` -> that limit (explicit request enables it for the call even if the flag is off).
 4. **Write: episode content embedding.** New `EpisodeLifecycleRepository`-side (or memory-queries-side,
    follow where similar `SET` writes on `:Episodic` live, e.g. `infrastructure/episode_lifecycle.py`)
    methods, exposed through `infrastructure/memory_graph_adapter.py`:
@@ -78,7 +78,7 @@ section 4.1c (owner's copy; not required to implement this).
    Use the shared predicate functions; do not respell them. Namespace `''` and `'default'` are the
    same silo (see `domain/namespace.py` `namespace_spellings`).
 8. **Recall section.** In `services/recall_pipeline.py`, after final ranking (next to the POST-RANK
-   temporal-facts enrichment), when effective k > 0: embed the query once (reuse the vector if the
+   temporal-facts enrichment), when effective limit > 0: embed the query once (reuse the vector if the
    content-vector lane already computed one), call the search, and build
    `source_memories: tuple[SourceMemory, ...]` ordered **oldest first** by `reference_time`, then uuid.
    `SourceMemory` is a new frozen dataclass in `domain/recall.py`:
@@ -88,7 +88,7 @@ section 4.1c (owner's copy; not required to implement this).
    the lane on or off** (it is additive, never fused). On any lane failure: log ERROR, set
    `source_memories=None`, and append the note `"Source-memory lane unavailable"` (same note-joining
    style as `search_error`). Include the lane in the trace when `trace=True` if a natural slot exists
-   (k, hits, elapsed ms); otherwise skip.
+   (limit, hits, elapsed ms); otherwise skip.
    `RecallResult` gets `source_memories: tuple[SourceMemory, ...] | None = None`. Propagate it to
    every place `event_authority_layer` is propagated (grep it: `api/routes.py`,
    `api/routes_support.py` response model `SourceMemoryResponse`, `mcp/tools/recall/recall_memories.py`
@@ -126,7 +126,7 @@ Adding stub methods to the shared test doubles in `tests/conftest.py` (mirroring
 - ingest step: skipped when setting off; skipped when embedding exists; skipped for projections;
   embedder exception is swallowed and enrichment continues;
 - settings env parsing and range validation for the four settings;
-- API `RecallRequest.source_memory_k` bounds, response field omitted when None; MCP payload key.
+- API `RecallRequest.source_memory_limit` bounds, response field omitted when None; MCP payload key.
 
 ## Docs
 `.agent/CHANGELOG.md` (dated entry), `.agent/default-off-features.md` (new entry: what it does, flags,

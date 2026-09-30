@@ -130,8 +130,8 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
     recall_kwargs: dict[str, object] = {}
     if body.trace:
         recall_kwargs["trace"] = True
-    if body.source_memory_k is not None:
-        recall_kwargs["source_memory_k"] = body.source_memory_k
+    if body.source_memory_limit is not None:
+        recall_kwargs["source_memory_limit"] = body.source_memory_limit
     try:
         result = await backend.recall(
             body.query,

@@ -181,7 +181,7 @@ async def test_flag_off_returns_none_and_makes_no_calls(
 
     on = await _svc(stub_graphiti_client, stub_memory_graph_adapter).recall(
         "query",
-        tuning=_tuning(enable_source_memories=True, source_memory_k=10),
+        tuning=_tuning(enable_source_memories=True, source_memory_limit=10),
         include_session=True,
     )
 
@@ -243,14 +243,14 @@ async def test_per_call_zero_disables_and_positive_enables(
     off = await svc.recall(
         "query",
         tuning=_tuning(enable_source_memories=True),
-        source_memory_k=0,
+        source_memory_limit=0,
         include_session=True,
     )
     assert off.source_memories is None
     assert stub_memory_graph_adapter.episode_embedding_calls == []
 
     on = await svc.recall(
-        "query", tuning=_tuning(), source_memory_k=3, include_session=True
+        "query", tuning=_tuning(), source_memory_limit=3, include_session=True
     )
     assert on.source_memories is not None and len(on.source_memories) == 3
     assert stub_memory_graph_adapter.episode_embedding_calls[-1]["limit"] == 3
@@ -545,41 +545,41 @@ async def test_ingest_step_swallows_embedder_errors(
 def test_settings_defaults_are_off(monkeypatch: pytest.MonkeyPatch) -> None:
     for var in (
         "MENHIR_FRONTIER_SOURCE_MEMORIES",
-        "MENHIR_FRONTIER_SOURCE_MEMORY_K",
+        "MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT",
         "MENHIR_FRONTIER_SOURCE_MEMORY_MAX_CHARS",
         "MENHIR_FRONTIER_SOURCE_MEMORY_POOLS",
     ):
         monkeypatch.delenv(var, raising=False)
     settings = MemorySettings.from_env()
     assert settings.frontier_source_memories is False
-    assert settings.frontier_source_memory_k == 10
+    assert settings.frontier_source_memory_limit == 10
     assert settings.frontier_source_memory_max_chars == 600
     assert settings.frontier_source_memory_pools is False
 
     tuning = settings.retrieval_tuning()
     assert tuning.enable_source_memories is False
-    assert tuning.source_memory_k == 10
+    assert tuning.source_memory_limit == 10
     assert tuning.source_memory_max_chars == 600
     assert tuning.source_memory_pools is False
 
 
 def test_settings_env_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORIES", "true")
-    monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_K", "25")
+    monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT", "25")
     monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_MAX_CHARS", "1200")
     monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_POOLS", "1")
     settings = MemorySettings.from_env()
     assert settings.frontier_source_memories is True
-    assert settings.frontier_source_memory_k == 25
+    assert settings.frontier_source_memory_limit == 25
     assert settings.frontier_source_memory_max_chars == 1200
     assert settings.frontier_source_memory_pools is True
 
 
 def test_settings_env_bounds_fail_at_startup(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_K", "99")
+    monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT", "99")
     with pytest.raises(ValueError):
         MemorySettings.from_env()
-    monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_K", "10")
+    monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT", "10")
     monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_MAX_CHARS", "9999")
     with pytest.raises(ValueError):
         MemorySettings.from_env()
@@ -587,16 +587,16 @@ def test_settings_env_bounds_fail_at_startup(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_tuning_range_validation() -> None:
     with pytest.raises(ValueError):
-        RetrievalTuningConfig(source_memory_k=0)
+        RetrievalTuningConfig(source_memory_limit=0)
     with pytest.raises(ValueError):
-        RetrievalTuningConfig(source_memory_k=51)
+        RetrievalTuningConfig(source_memory_limit=51)
     with pytest.raises(ValueError):
         RetrievalTuningConfig(source_memory_max_chars=50)
     with pytest.raises(ValueError):
         RetrievalTuningConfig(source_memory_max_chars=5000)
     # Bounds are inclusive.
-    RetrievalTuningConfig(source_memory_k=1, source_memory_max_chars=4000)
-    RetrievalTuningConfig(source_memory_k=50, source_memory_max_chars=100)
+    RetrievalTuningConfig(source_memory_limit=1, source_memory_max_chars=4000)
+    RetrievalTuningConfig(source_memory_limit=50, source_memory_max_chars=100)
 
 
 # ---------------------------------------------------------------------------
@@ -604,17 +604,17 @@ def test_tuning_range_validation() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_recall_request_source_memory_k_bounds() -> None:
+def test_recall_request_source_memory_limit_bounds() -> None:
     from menhir.api.routes_support import RecallRequest
     from pydantic import ValidationError
 
-    assert RecallRequest(query="q").source_memory_k is None
-    assert RecallRequest(query="q", source_memory_k=0).source_memory_k == 0
-    assert RecallRequest(query="q", source_memory_k=50).source_memory_k == 50
+    assert RecallRequest(query="q").source_memory_limit is None
+    assert RecallRequest(query="q", source_memory_limit=0).source_memory_limit == 0
+    assert RecallRequest(query="q", source_memory_limit=50).source_memory_limit == 50
     with pytest.raises(ValidationError):
-        RecallRequest(query="q", source_memory_k=51)
+        RecallRequest(query="q", source_memory_limit=51)
     with pytest.raises(ValidationError):
-        RecallRequest(query="q", source_memory_k=-1)
+        RecallRequest(query="q", source_memory_limit=-1)
 
 
 def test_recall_response_omits_source_memories_when_none() -> None:
@@ -655,7 +655,7 @@ async def test_mcp_payload_keeps_source_memories_key(
     tool = RecallMemoriesTool()
     monkeypatch.setattr(tool, "get_backend", lambda: SimpleNamespaceBackend(_recall))
 
-    raw = await tool.endpoint("query", source_memory_k=3)
+    raw = await tool.endpoint("query", source_memory_limit=3)
     payload = json.loads(raw)
     assert payload["source_memories"][0]["uuid"] == "ep-1"
 

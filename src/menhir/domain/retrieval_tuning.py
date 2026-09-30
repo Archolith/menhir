@@ -300,8 +300,8 @@ class RetrievalTuningConfig:
     # the lane on or off. See MENHIR_FRONTIER_SOURCE_MEMORIES.
     enable_source_memories: bool = False
     # Section size (effective only when enable_source_memories is on, or when a caller
-    # passes an explicit per-call source_memory_k > 0).
-    source_memory_k: int = 10
+    # passes an explicit per-call source_memory_limit > 0).
+    source_memory_limit: int = 10
     # Per-memory content cap in the section; cut content ends with a trailing ellipsis.
     source_memory_max_chars: int = 600
     # Group the section's returned memories into anchor-based pools (pure, deterministic).
@@ -334,9 +334,9 @@ class RetrievalTuningConfig:
                 "fusion_admission_policy must be attributed or production_fused, "
                 f"got {self.fusion_admission_policy!r}"
             )
-        if not 1 <= self.source_memory_k <= 50:
+        if not 1 <= self.source_memory_limit <= 50:
             raise ValueError(
-                f"source_memory_k must be in [1, 50], got {self.source_memory_k!r}"
+                f"source_memory_limit must be in [1, 50], got {self.source_memory_limit!r}"
             )
         if not 100 <= self.source_memory_max_chars <= 4000:
             raise ValueError(
