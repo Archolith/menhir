@@ -1,3 +1,13 @@
+## 2026-09-28 - Refuse ambiguous scalar subject fallback
+
+- `src/menhir/services/typed_scalar_rules.py`: distinguish absent, ambiguous,
+  invalid, and unique subject matches so a conflicting local owner cannot fall
+  through to a looser spelling or namespace lookup.
+- `tests/test_typed_scalar_self_binding.py`,
+  `tests/test_typed_scalar_bind_persist.py`: cover exact and variant ambiguity,
+  blank UUIDs, both namespace forms, persisted advisories, and repair.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-28 - Reconcile MVP preflight evidence before RC freeze
 
 - `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: record the completed issue inventory, five-item Oracle harness preflight, and merged Opus fixes while keeping exact-RC gates open.
