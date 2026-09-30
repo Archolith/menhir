@@ -387,6 +387,26 @@ class MemoryGraphAdapter:
             namespace=namespace,
         )
 
+    def episode_has_content_embedding(self, episode_uuid: str) -> bool:
+        """See EpisodeLifecycleRepository.episode_has_content_embedding."""
+        return self._episodes.episode_has_content_embedding(episode_uuid)
+
+    def set_episode_content_embedding(
+        self, episode_uuid: str, embedding: list[float], model: str
+    ) -> bool:
+        """See EpisodeLifecycleRepository.set_episode_content_embedding."""
+        return self._episodes.set_episode_content_embedding(
+            episode_uuid, embedding, model
+        )
+
+    def list_episodes_missing_content_embedding(
+        self, namespace: str | None = None, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """See EpisodeLifecycleRepository.list_episodes_missing_content_embedding."""
+        return self._episodes.list_episodes_missing_content_embedding(
+            namespace, limit
+        )
+
     def create_evidence_projection(
         self, *, turn_evidence_uuid: str, projection_uuid: str, name: str,
         session_id: str, user_id: str, namespace: str,
@@ -854,6 +874,18 @@ class MemoryGraphAdapter:
     ) -> list[dict[str, object]]:
         return self._memory_queries.search_content_embeddings(
             query_vector, limit=limit, group_ids=group_ids
+        )
+
+    def search_episode_embeddings(
+        self,
+        query_vector: list[float],
+        *,
+        limit: int = 10,
+        namespace: str | None = None,
+    ) -> list[dict[str, object]]:
+        """Source-memory lane search over :Episodic content embeddings (read-only)."""
+        return self._memory_queries.search_episode_embeddings(
+            query_vector, limit=limit, namespace=namespace
         )
 
     def search_assertion_embeddings(

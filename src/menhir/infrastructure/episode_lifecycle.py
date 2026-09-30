@@ -13,7 +13,9 @@ from menhir.domain.namespace import (
     tenant_scope_cypher,
     tenant_scope_params,
 )
+from menhir.domain.recall_visibility import default_recall_visibility_cypher
 from menhir.domain.self_identity import self_uuid_for_namespace
+from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure.cypher import (
     Cypher,
@@ -176,6 +178,79 @@ class EpisodeLifecycleRepository:
             },
         )
         return episode_uuid
+
+    def episode_has_content_embedding(self, episode_uuid: str) -> bool:
+        """Whether this Menhir-owned `:Episodic` node already carries a content embedding."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $uuid})
+            RETURN n.content_embedding IS NOT NULL AS has_embedding
+            """,
+            params={"uuid": episode_uuid},
+        )
+        return bool(rows and rows[0].get("has_embedding"))
+
+    def set_episode_content_embedding(
+        self, episode_uuid: str, embedding: list[float], model: str
+    ) -> bool:
+        """Stamp a content embedding onto Menhir's own `:Episodic` queue node.
+
+        The evidence-projection guard in the WHERE clause is the backstop: evidence
+        projections are an entity source, not memory (ADR 0001), and must never be
+        embedded into the source-memory lane. Returns whether a node was written.
+        """
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $uuid})
+            WHERE NOT coalesce(n.is_evidence_projection, false)
+            SET n.content_embedding = $embedding,
+                n.content_embedding_model = $model,
+                n.content_embedding_at = datetime()
+            RETURN n.uuid AS uuid
+            """,
+            params={
+                "uuid": episode_uuid,
+                "embedding": embedding,
+                "model": model,
+            },
+        )
+        return bool(rows)
+
+    def list_episodes_missing_content_embedding(
+        self, namespace: str | None = None, limit: int = 100
+    ) -> list[dict[str, object]]:
+        """Page through Menhir `:Episodic` nodes with no content embedding yet.
+
+        Same predicates as the source-memory read query: the shared structural and
+        visibility predicates, the shared `tenant_scope_cypher` tenancy predicate ('' and
+        'default' are the same silo; None is unscoped), and the `processing_state` guard that
+        matches only Menhir's own queue nodes and excludes FAILED enrichments -- so
+        the backfill writes embeddings only for episodes the recall lane would ever
+        surface. Idempotent by construction: a node gains `content_embedding` and
+        drops out of this listing.
+        """
+        safe_limit = max(1, min(limit, 500))
+        where = [
+            "(n:Episodic)",
+            "n.content_embedding IS NULL",
+            "n.processing_state IS NOT NULL",
+            "n.processing_state <> 'FAILED'",
+            non_structural_memory_cypher("n"),
+            default_recall_visibility_cypher("n"),
+        ]
+        params: dict[str, Any] = {"limit": safe_limit, **tenant_scope_params(namespace)}
+        where.append(tenant_scope_cypher("n"))
+        rows = self.neo4j.execute(
+            f"""
+            MATCH (n)
+            WHERE {" AND ".join(where)}
+            RETURN n.uuid AS uuid, n.content AS content
+            ORDER BY n.uuid
+            LIMIT $limit
+            """,
+            params=params,
+        )
+        return [row for row in rows if row.get("content")]
 
     def create_evidence_projection(
         self, *, turn_evidence_uuid: str, projection_uuid: str, name: str,

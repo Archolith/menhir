@@ -125,6 +125,9 @@ class EnrichmentContext:
     #: Canonical-self binding rollout: "off" (default), "observe" or "enforce". Defaulted so every
     #: construction site predating this field keeps pre-change behavior.
     canonical_self_binding_mode: str = "off"
+    #: Source-memory lane (MENHIR_FRONTIER_SOURCE_MEMORIES). Defaulted so every construction
+    #: site predating this field keeps pre-change behavior: no episode-content embedding call.
+    source_memories_enabled: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -762,6 +765,76 @@ async def _run_shadow_composition_and_log(
         # become an unretrieved-task-exception warning at GC time, and must never be
         # mistaken for a real extraction failure.
         logger.warning("Shadow composition logging failed episode_id=%s", ctx.episode_uuid, exc_info=True)
+
+
+# ---------------------------------------------------------------------------
+# Source-memory lane: episode content embedding (best-effort, never fatal)
+# ---------------------------------------------------------------------------
+
+#: Episode content is truncated before embedding so a pathological payload cannot
+#: blow the embedder's window; 8,000 chars is far beyond any real turn.
+_SOURCE_MEMORY_EMBED_MAX_CHARS = 8000
+
+
+def _episode_embedder_model_name(graphiti_client: Any) -> str:
+    """Best-effort embedder model name; 'unknown' when it cannot be resolved."""
+    embedder = getattr(graphiti_client, "embedder_ref", None)
+    if embedder is not None:
+        for attr in ("model", "model_name", "embed_model"):
+            value = getattr(embedder, attr, None)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return "unknown"
+
+
+#: Bound on the embedder call so a hung endpoint cannot stall the enrichment worker.
+_SOURCE_MEMORY_EMBED_TIMEOUT_S = 10.0
+
+
+async def embed_episode_content(ctx: EnrichmentContext) -> None:
+    """Embed the episode's raw content for the source-memory recall lane (default-off).
+
+    Runs only when the deployment enabled ``frontier_source_memories``. Skips evidence
+    projections (the SET-side guard in ``set_episode_content_embedding`` is the backstop)
+    and episodes that already carry an embedding, so the step is idempotent across
+    retries. The embedder call is bounded (10s) and graph I/O runs in a worker thread.
+    ANY exception or timeout is logged at WARNING and swallowed: this lane must never
+    fail, delay-retry, or requeue enrichment.
+    """
+    if not getattr(ctx, "source_memories_enabled", False):
+        return
+    try:
+        claimed = ctx.claimed
+        if claimed.get("is_evidence_projection"):
+            return
+        has_embedding = await asyncio.to_thread(
+            ctx.graph_adapter.episode_has_content_embedding, ctx.episode_uuid
+        )
+        if has_embedding:
+            return
+        content = str(claimed.get("content") or "")[:_SOURCE_MEMORY_EMBED_MAX_CHARS]
+        if not content.strip():
+            return
+        embedding = await asyncio.wait_for(
+            ctx.graphiti_client.embed_query(content),
+            timeout=_SOURCE_MEMORY_EMBED_TIMEOUT_S,
+        )
+        if not embedding:
+            return
+        model = _episode_embedder_model_name(ctx.graphiti_client)
+        await asyncio.to_thread(
+            ctx.graph_adapter.set_episode_content_embedding,
+            ctx.episode_uuid,
+            embedding,
+            model,
+        )
+    except Exception as exc:  # never fail, delay, or requeue enrichment for this lane
+        logger.warning(
+            "Source-memory episode embedding skipped episode_id=%s: %s: %s",
+            ctx.episode_uuid,
+            exc.__class__.__name__,
+            exc,
+        )
 
 
 # ---------------------------------------------------------------------------

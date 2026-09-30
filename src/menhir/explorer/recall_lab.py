@@ -49,6 +49,10 @@ class RecallLabTuning(BaseModel):
     content_vector_k: int = Field(default=100, ge=1, le=200)
     content_vector_weight: float = Field(default=0.5, ge=0.0, le=10.0)
     fusion_admission_policy: Literal["attributed", "production_fused"] = "attributed"
+    enable_source_memories: bool = False
+    source_memory_k: int = Field(default=10, ge=1, le=50)
+    source_memory_max_chars: int = Field(default=600, ge=100, le=4000)
+    source_memory_pools: bool = False
 
     def to_domain(self) -> RetrievalTuningConfig:
         return RetrievalTuningConfig(**self.model_dump())
@@ -76,7 +80,7 @@ class RecallLabRequest(BaseModel):
     include_invalidated: bool = False
     judge: bool = False
     judge_passes: int = Field(default=2, ge=1, le=2)
-    arms: list[RecallLabArm] = Field(min_length=1, max_length=9)
+    arms: list[RecallLabArm] = Field(min_length=1, max_length=12)
 
     @model_validator(mode="after")
     def validate_request(self) -> RecallLabRequest:
@@ -548,6 +552,10 @@ def _serialize_result(result: object, *, reveal: bool) -> dict[str, Any]:
     # so asdict() round-trips cleanly through the same JSON shape /api/recall emits.
     authority_layer = _value(result, "authority_layer")
     event_authority_layer = _value(result, "event_authority_layer")
+    # Source-memory lane (default-off): the additive section, serialized next to the
+    # ranked results exactly as /api/recall emits it (field names already match
+    # SourceMemoryResponse, so asdict round-trips cleanly).
+    source_memories = _value(result, "source_memories")
 
     return {
         "query": str(_value(result, "query", "")),
@@ -567,6 +575,13 @@ def _serialize_result(result: object, *, reveal: bool) -> dict[str, Any]:
         "event_authority_layer": (
             _redact_authority_verdicts([asdict(v) for v in event_authority_layer], reveal=reveal)
             if event_authority_layer else None
+        ),
+        "source_memories": (
+            [
+                redact_mapping(asdict(sm), reveal=reveal)
+                for sm in source_memories
+            ]
+            if source_memories else None
         ),
     }
 

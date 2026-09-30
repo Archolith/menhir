@@ -14,7 +14,13 @@ from typing import Any
 from uuid import uuid4
 
 from menhir.domain.bootstrap_scope import bootstrap_selection, normalize_bootstrap_scope
-from menhir.domain.namespace import normalize_namespace, namespace_spellings, namespace_to_group_ids
+from menhir.domain.namespace import (
+    normalize_namespace,
+    namespace_spellings,
+    namespace_to_group_ids,
+    tenant_scope_cypher,
+    tenant_scope_params,
+)
 from menhir.domain.recall_visibility import default_recall_visibility_cypher
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.recall import adjacency_edge_pattern
@@ -370,6 +376,57 @@ class MemoryQueryRepository:
                 "group_ids": group_ids,
                 "limit": safe_limit,
             },
+        )
+
+    def search_episode_embeddings(
+        self,
+        query_vector: list[float],
+        *,
+        limit: int = 10,
+        namespace: str | None = None,
+    ) -> list[dict[str, object]]:
+        """Cosine hits over Menhir `:Episodic` content embeddings (source-memory lane).
+
+        Read-only; pairs with the ingest-side `set_episode_content_embedding` write.
+        Uses the same shared structural/visibility predicates and the shared
+        `tenant_scope_cypher` tenancy predicate as the rest of the domain ('' and 'default' are
+        the same silo; None is unscoped), so only memories generic recall could surface are
+        searched. Only
+        Menhir's own queue nodes match (they carry `processing_state`; Graphiti's own
+        `:Episodic` resolution nodes do not) and FAILED enrichments are excluded. A
+        stale-dimension embedding is skipped by the size guard instead of erroring
+        the query. Evidence projections are excluded by
+        `non_structural_memory_cypher`.
+        """
+        safe_limit = max(1, min(limit, 50))
+        where = [
+            "n.content_embedding IS NOT NULL",
+            "size(n.content_embedding) = size($query_vector)",
+            "n.processing_state IS NOT NULL",
+            "n.processing_state <> 'FAILED'",
+            non_structural_memory_cypher("n"),
+            default_recall_visibility_cypher("n"),
+        ]
+        params: dict[str, Any] = {
+            "query_vector": query_vector,
+            "limit": safe_limit,
+            **tenant_scope_params(namespace),
+        }
+        where.append(tenant_scope_cypher("n"))
+        return self.neo4j.execute(
+            f"""
+            MATCH (n:Episodic)
+            WHERE {" AND ".join(where)}
+            WITH n, vector.similarity.cosine(n.content_embedding, $query_vector) AS cosine
+            WHERE cosine IS NOT NULL
+            RETURN n.uuid AS uuid, n.content AS content, n.source AS source,
+                   n.session_id AS session_id,
+                   toString(coalesce(n.reference_time, n.created_at)) AS reference_time,
+                   cosine
+            ORDER BY cosine DESC, n.uuid
+            LIMIT $limit
+            """,
+            params=params,
         )
 
     def search_assertion_embeddings(

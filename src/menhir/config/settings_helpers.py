@@ -8,7 +8,9 @@ import os
 logger = logging.getLogger(__name__)
 
 
-def _parse_int(raw: str, *, env_var: str, minimum: int | None = None) -> int:
+def _parse_int(
+    raw: str, *, env_var: str, minimum: int | None = None, maximum: int | None = None
+) -> int:
     try:
         value = int(raw)
     except ValueError:
@@ -18,6 +20,10 @@ def _parse_int(raw: str, *, env_var: str, minimum: int | None = None) -> int:
     if minimum is not None and value < minimum:
         raise ValueError(
             f"Environment variable {env_var}={raw!r} is below the minimum {minimum}"
+        )
+    if maximum is not None and value > maximum:
+        raise ValueError(
+            f"Environment variable {env_var}={raw!r} is above the maximum {maximum}"
         )
     return value
 

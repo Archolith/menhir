@@ -127,6 +127,7 @@ class RecallService(RecallSupportMixin):
         tuning: RetrievalTuningConfig | None = None,
         trace: bool = False,
         update_access: bool = True,
+        source_memory_k: int | None = None,
     ) -> RecallResult:
         result = await run_recall(
             self,
@@ -147,5 +148,6 @@ class RecallService(RecallSupportMixin):
             tuning=tuning,
             trace=trace,
             update_access=update_access and not self.read_only,
+            source_memory_k=source_memory_k,
         )
         return await apply_event_history_authority_layer(self, result, query, namespace)

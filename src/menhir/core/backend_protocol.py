@@ -145,6 +145,7 @@ class MemoryBackend(Protocol):
         namespace: str | None = None,
         include_invalidated: bool = False,
         trace: bool = False,
+        source_memory_k: int | None = None,
     ) -> dict[str, Any]:
         """Search memory graph. Returns RecallResult-shaped dict."""
         ...
