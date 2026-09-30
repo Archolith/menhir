@@ -1,3 +1,9 @@
+## 2026-09-29 - Give verdict LLM calls room to answer on reasoning models
+
+- `src/menhir/infrastructure/llm.py`: the identity judge, contradiction check and shadow tie-break use a shared `_VERDICT_MAX_TOKENS` (1024) instead of 64/64/128. On reasoning models `max_tokens` also covers hidden reasoning, so most identity-judge calls ended empty and became `None` votes that route merges to conflict (#203). `_chat_text` now warns when a completion comes back empty, naming the operation and budget.
+- `tests/infrastructure/test_verdict_budget_203.py`: a simulated reasoning model that answers only above a reasoning budget, the empty-completion warning, and the unchanged fail-safe `None` for a real empty answer.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-29 - Read multi-word numbers whole in scalar counts and frequencies
 
 - `src/menhir/services/typed_scalar_rules.py`: counts read thirteen to nineteen, the tens, and tens compounds ("twenty-five", "twenty five") as one number, so "twenty-five postcards" is 25, not 5. A count, range bound or frequency count joined to another number word, digit or scale word ("two hundred", "2 thousand") now gives no value instead of a piece of the number, and a frequency with a multi-word number before "every" no longer defaults to a count of 1 (#200).
@@ -67,14 +73,4 @@
   time prefix that could overwrite a correct model value.
 - `tests/test_typed_scalar_perception.py`: cover source spelling, noon and
   midnight, malformed times, and full-row grounding.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-09-28 - Refuse ambiguous scalar subject fallback
-
-- `src/menhir/services/typed_scalar_rules.py`: distinguish absent, ambiguous,
-  invalid, and unique subject matches so a conflicting local owner cannot fall
-  through to a looser spelling or namespace lookup.
-- `tests/test_typed_scalar_self_binding.py`,
-  `tests/test_typed_scalar_bind_persist.py`: cover exact and variant ambiguity,
-  blank UUIDs, both namespace forms, persisted advisories, and repair.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
