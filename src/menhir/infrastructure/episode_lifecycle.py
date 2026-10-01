@@ -10,6 +10,7 @@ from typing import Any
 
 from menhir.domain.namespace import (
     namespace_to_group_id,
+    normalize_namespace,
     tenant_scope_cypher,
     tenant_scope_params,
 )
@@ -230,6 +231,46 @@ class EpisodeLifecycleRepository:
             },
         )
         return bool(rows)
+
+    def episodic_twin_uuids(self, node_uuid: str) -> list[str]:
+        """The other `:Episodic` node(s) of the same memory, in the same namespace (read-only).
+
+        Each memory has Menhir's queue node and the Graphiti episode it resolves to
+        (`resolved_episode_uuid`). Erasing one must erase the other: the Graphiti episode keeps the
+        verbatim content (audit Q1 / #119). Returns the Graphiti episode for a queue node and the
+        queue node(s) for a Graphiti episode; nothing for any other uuid. A twin in a different
+        canonical namespace is never returned -- the erasure was authorized for the target's silo.
+        """
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $uuid})
+            OPTIONAL MATCH (g:Episodic)
+            WHERE n.resolved_episode_uuid IS NOT NULL AND g.uuid = n.resolved_episode_uuid
+            OPTIONAL MATCH (q:Episodic)
+            WHERE q.resolved_episode_uuid = n.uuid
+            WITH n, [t IN collect(DISTINCT g) + collect(DISTINCT q) WHERE t IS NOT NULL] AS twins
+            UNWIND CASE WHEN size(twins) = 0 THEN [null] ELSE twins END AS t
+            RETURN n.namespace AS n_namespace, n.group_id AS n_group_id,
+                   t.uuid AS uuid, t.namespace AS t_namespace, t.group_id AS t_group_id
+            """,
+            params={"uuid": node_uuid},
+        )
+
+        def silo(namespace: object, group_id: object) -> str:
+            # Same precedence as the delete cascade's namespace key: namespace, then group_id.
+            return normalize_namespace(namespace if namespace is not None else group_id)
+
+        twins: list[str] = []
+        for row in rows:
+            twin = row.get("uuid")
+            if not twin or twin == node_uuid or twin in twins:
+                continue
+            if silo(row.get("t_namespace"), row.get("t_group_id")) != silo(
+                row.get("n_namespace"), row.get("n_group_id")
+            ):
+                continue
+            twins.append(str(twin))
+        return twins
 
     def list_episodes_missing_content_embedding(
         self,
