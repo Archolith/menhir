@@ -237,6 +237,10 @@ class ContextBuilderService:
     # (domain/brief_builder) instead of a flat "[Memory i] name: content" list. Off = today's
     # behavior byte-for-byte. Wired from settings.frontier_brief_builder at bootstrap.
     brief_builder_enabled: bool = False
+    # Frontier: minimum DISTINCT valid_at instants the appended Timeline needs before it is
+    # rendered (domain/brief_builder gate). Lower it to 1 to restore the pre-#172 behavior
+    # of rendering a timeline for any dated fact.
+    brief_min_timeline_points: int = 3
     # Frontier: per-call size of the additive source-memory section inside build_context's
     # recall. None = no section (build_context passes no tuning); bootstrap sets it from
     # MENHIR_FRONTIER_SOURCE_MEMORIES / _SOURCE_MEMORY_LIMIT so the flag stays deployment-scoped.
@@ -554,7 +558,7 @@ class ContextBuilderService:
             # Timeline can show superseded->current progression.
             from menhir.domain.brief_builder import build_timeline_bundle, render_bundles
 
-            timeline = build_timeline_bundle(memories)
+            timeline = build_timeline_bundle(memories, min_points=self.brief_min_timeline_points)
             if timeline is not None:
                 block = render_bundles([timeline], include_provenance=include_scores)
                 tokens = _tokens_for(block)

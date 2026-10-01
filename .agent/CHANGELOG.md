@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-10-01 - #172 adaptive brief timeline: instant ordering + long-running gate
+
+- The appended Timeline bundle now orders lines by the full `valid_at` instant
+  (ISO-8601 with `Z` and optional `[Zone]` suffix; unparseable values sort last
+  without raising) instead of by calendar day, so a same-day multi-step history
+  (AMA-style) renders in step order and de-duplicates by `(instant, text)`.
+- Label precision is adaptive: `[YYYY-MM-DD]` when no two distinct instants share
+  a day (today's output byte-identical), otherwise `[YYYY-MM-DD HH:MM]` (UTC),
+  escalating to seconds when two distinct instants share a minute. `superseded
+  until` follows the same precision.
+- Long-running gate: `build_timeline_bundle` gained `min_points` (default 1,
+  preserving direct-caller behavior) and returns `None` when the rendered lines
+  span fewer distinct instants. `ContextBuilderService` gains
+  `brief_min_timeline_points` wired from the new
+  `frontier_brief_min_timeline_points` setting (default 3, values < 1 clamp to 1,
+  env `MENHIR_FRONTIER_BRIEF_MIN_TIMELINE_POINTS`).
+
 ## 2026-10-01 - #172 context packing: declare tiktoken, skip oversized memories
 
 - `tiktoken` is now a declared dependency (`tiktoken>=0.8,<1`), so standard installs

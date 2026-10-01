@@ -24,7 +24,10 @@ current-belief filter (recall_service.py:1137).
 
 from __future__ import annotations
 
+import re
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from menhir.domain.recall_visibility import memory_lifecycle_note
 
@@ -70,11 +73,6 @@ def _earliest_valid_at(m: ScoredMemory) -> str | None:
     return min(vs) if vs else None
 
 
-def _day(valid_at: str) -> str:
-    """ISO instant -> YYYY-MM-DD for a compact date label (best-effort)."""
-    return (valid_at or "")[:10]
-
-
 def _memory_text(m: ScoredMemory) -> str:
     """Prefer the entity summary/content; fall back to the entity name."""
     return _lifecycle_text(m, m.content or m.name or "")
@@ -87,11 +85,50 @@ def _lifecycle_text(m: ScoredMemory, text: str) -> str:
     return f"{note} {_clip(text)}" if note else _clip(text)
 
 
+def _parse_instant(valid_at: str) -> datetime | None:
+    """Parse an ISO-8601 instant (trailing ``Z`` and an optional ``[Zone]`` suffix such
+    as ``2026-01-01T00:01:00Z[UTC]``) into a naive-UTC datetime. None when unparseable."""
+    raw = (valid_at or "").strip()
+    text = re.sub(r"\[[^\]]*\]$", "", raw)
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def _instant_key(valid_at: str) -> tuple[int, object]:
+    """Sort key over valid_at instants: parseable ones first (by instant), then
+    unparseable ones by their raw string. Never raises."""
+    raw = (valid_at or "").strip()
+    dt = _parse_instant(raw)
+    if dt is None:
+        return (1, raw)
+    return (0, dt)
+
+
+def _label_formatter(instants: list[datetime]) -> Callable[[datetime], str]:
+    """Pick the label precision for a timeline: day-only unless two DISTINCT instants
+    share a calendar day (then minute precision), with second precision when two
+    distinct instants share the same minute."""
+    distinct = sorted(set(instants))
+    if len(distinct) >= 2:
+        if len({d.date() for d in distinct}) < len(distinct):
+            if len({d.replace(second=0, microsecond=0) for d in distinct}) < len(distinct):
+                return lambda dt: f"{dt:%Y-%m-%d %H:%M:%S}"
+            return lambda dt: f"{dt:%Y-%m-%d %H:%M}"
+    return lambda dt: f"{dt:%Y-%m-%d}"
+
+
 def _timeline_lines(dated: list[ScoredMemory]) -> tuple[list[str], list[str]]:
     """Return (lines, uuids) for the chronological bundle: one line per (fact|memory),
-    ordered by world-time, current beliefs marked. Undated-but-related facts are skipped
-    here (they flow through the flat path)."""
-    # (day, is_current_belief, invalid_at, text, uuid, historical_memory)
+    ordered by world-time (full instant, stable for ties), current beliefs marked.
+    Undated-but-related facts are skipped here (they flow through the flat path)."""
+    # (valid_at, is_current_belief, invalid_at, text, uuid, historical_memory)
     events: list[tuple[str, bool, str | None, str, str, bool]] = []
     for m in dated:
         facts = _dated_facts(m)
@@ -102,35 +139,48 @@ def _timeline_lines(dated: list[ScoredMemory]) -> tuple[list[str], list[str]]:
             for tf in facts:
                 text = tf.fact or m.content or m.name or ""
                 events.append((
-                    _day(tf.valid_at or ""), tf.is_current_belief, tf.invalid_at,
+                    tf.valid_at or "", tf.is_current_belief, tf.invalid_at,
                     _lifecycle_text(m, text), m.uuid, historical,
                 ))
         else:  # dated at the memory level but no fact string
             events.append((
-                _day(_earliest_valid_at(m) or ""), True, None, _memory_text(m), m.uuid, historical,
+                _earliest_valid_at(m) or "", True, None, _memory_text(m), m.uuid, historical,
             ))
-    events.sort(key=lambda e: e[0])
+    events.sort(key=lambda e: _instant_key(e[0]))
+    parsed = [dt for dt in (_parse_instant(e[0]) for e in events) if dt is not None]
+    fmt = _label_formatter(parsed)
     lines: list[str] = []
     uuids: list[str] = []
-    seen: set[tuple[str, str]] = set()
-    for day, is_current, invalid_at, text, uuid, historical in events:
-        key = (day, text)
+    seen: set[tuple[tuple[int, object], str]] = set()
+    for valid_at, is_current, invalid_at, text, uuid, historical in events:
+        key = (_instant_key(valid_at), text)
         if key in seen:
             continue
         seen.add(key)
         if is_current:
             tag = " (current belief)" if historical else " (current)"
         else:
-            end = _day(invalid_at) if invalid_at else ""
+            end_dt = _parse_instant(invalid_at) if invalid_at else None
+            if end_dt is not None:
+                end = fmt(end_dt)
+            else:
+                end = (invalid_at or "")[:10]
             tag = f" (superseded until {end})" if end else " (superseded)"
-        lines.append(f"- [{day}] {text}{tag}")
+        dt = _parse_instant(valid_at)
+        label = fmt(dt) if dt is not None else (valid_at or "")[:10]
+        lines.append(f"- [{label}] {text}{tag}")
         uuids.append(uuid)
     return lines, uuids
 
 
-def build_timeline_bundle(memories: list[ScoredMemory]) -> EvidenceBundle | None:
+def build_timeline_bundle(
+    memories: list[ScoredMemory], *, min_points: int = 1,
+) -> EvidenceBundle | None:
     """Build a single chronological Timeline bundle from the dated facts in `memories`
-    (world-time ordered, currency-marked). Returns None when nothing is dated.
+    (world-time ordered, currency-marked). Returns None when nothing is dated, or when the
+    number of DISTINCT valid_at instants among the rendered lines is below `min_points`
+    (the long-running gate: a timeline needs a real history to be worth its tokens).
+    `min_points=1` preserves the previous behavior for direct callers.
 
     This is a SUPPLEMENTARY view: an A/B showed that leading the brief with the Timeline
     (displacing recall's relevance order) is net-negative — the answer is usually the
@@ -140,6 +190,11 @@ def build_timeline_bundle(memories: list[ScoredMemory]) -> EvidenceBundle | None
     """
     dated = [m for m in memories if _dated_facts(m)]
     if not dated:
+        return None
+    distinct_instants = {
+        _instant_key(tf.valid_at or "") for m in dated for tf in _dated_facts(m)
+    }
+    if len(distinct_instants) < max(1, min_points):
         return None
     lines, uuids = _timeline_lines(dated)
     if not lines:
