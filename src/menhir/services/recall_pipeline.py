@@ -537,6 +537,16 @@ async def run_recall(
             )
     _t_phases["vector_search"] = int((perf_counter() - _t) * 1000)
 
+    # menhir #171: start the source-memory lane now so its episode search overlaps the
+    # metadata and adjacency phases instead of adding to them. Its query embedding is a cache
+    # hit (Graphiti's vector search just embedded the same text). Awaited below where it was
+    # awaited before, so results, notes and return paths are unchanged. The helper never raises
+    # and is read-only, so if recall exits before awaiting it the task just finishes on its own.
+    source_memory_task = asyncio.create_task(_build_source_memories(
+        service, query, namespace, tuning, source_memory_limit,
+        include_session=include_session, content_query_vector=content_query_vector,
+    ))
+
     # Plan 1b (staged; default "rrf" == byte-identical): normalize graphiti's
     # RRF reranker score to [0, 1] so the VECTOR `similarity` lane shares one
     # scale with the [0, 1] SOURCE_PRIORS, restoring PENDING=1.0's intended
@@ -1536,10 +1546,7 @@ async def run_recall(
     # is available even when semantic search found nothing. `results` and
     # `candidates_evaluated` are identical with the lane on or off; a lane failure
     # degrades to a note append, never to a failed recall.
-    source_memories, source_memory_note, source_memory_ms = await _build_source_memories(
-        service, query, namespace, tuning, source_memory_limit,
-        include_session=include_session, content_query_vector=content_query_vector,
-    )
+    source_memories, source_memory_note, source_memory_ms = await source_memory_task
     if source_memory_ms:
         _t_phases["source_memories"] = source_memory_ms
 
