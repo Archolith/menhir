@@ -52,6 +52,7 @@ AGENT_ALLOWED_TOOLS = frozenset(
         "recall_context_memories",
         "recall_history",
         "recall_memories",
+        "recall_timeline",
     }
 )
 OPERATOR_REQUIRED_TOOLS = frozenset(

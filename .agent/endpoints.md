@@ -437,6 +437,25 @@ List saved memories matching a subject in time order (oldest first), with option
 - Read-only drill-down: no access updates, no ranking changes.
 - Returns compact JSON with `query`, `count`, and `memories[]` (`time`, `content`, `uuid`, `source`, plus `pool_id`/`pool_anchor` when pooled). A `note` is set (with empty `memories`) when no embedded memory matched — run `scripts/backfill_episode_embeddings.py` for pre-flag memories.
 
+### `recall_timeline`
+Concept id: `mcp.tool.recall_timeline`
+
+Navigate a recorded-time thread of saved memories on demand: page around an instant, a window, a memory, or a semantic seed, optionally restricted to one subject's thread, with typed scalar/event histories. Order is RECORDED time (episode `valid_at`).
+- Exactly one of `at` / `window_from`+`window_to` / `around` / `cursor` / `query` is required when any is given; `subject` is a filter that combines with every mode and alone means the latest page of the subject thread.
+- **`at`** (str, optional): ISO instant to split the timeline around.
+- **`window_from`** / **`window_to`** (str, optional): ISO instants bounding an ascending window.
+- **`around`** (str, optional): Memory uuid anchoring the page.
+- **`cursor`** (str, optional): Opaque cursor from `prev_cursor` / `next_cursor` (tenant/thread-bound).
+- **`query`** (str, optional): Semantic seed; the timeline anchors on the best-matching memory.
+- **`subject`** (str, optional): Entity name or uuid restricting the timeline to that thread.
+- **`direction`** (str, optional): `before`, `after`, or `both` (default).
+- **`limit`** (int, optional): Max entries per page (default: 10, max: 50).
+- **`detail`** (str, optional): `headline` (default) or `full`.
+- **`facts`** (bool, optional): Attach RELATES_TO facts to entries (default: false).
+- **`history_view`** / **`history_offset`** / **`history_limit`**: page one typed-history view at an offset (default: latest page, 10 entries).
+- Read-only: no access updates, no ranking changes.
+- Returns compact JSON with `thread`, `count`, and `entries[]` (`recorded_at`, `headline`, `uuid`, `source`, `is_anchor`, optional `content`/`facts`), plus `prev_cursor`/`next_cursor` when more pages exist, the `subject` when resolved, and `histories[]` (typed scalar/event pages) for subject threads. A `note` is set when a `query` seed matched nothing.
+
 ### `flag_memory`
 Concept id: `mcp.tool.flag_memory`
 

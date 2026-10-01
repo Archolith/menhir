@@ -373,6 +373,49 @@ class RuntimeProviderDataOpsMixin:
             payload.pop("note", None)
         return payload
 
+    async def recall_timeline(
+        self,
+        *,
+        namespace: str | None = None,
+        query: str | None = None,
+        subject: str | None = None,
+        at: str | None = None,
+        window_from: str | None = None,
+        window_to: str | None = None,
+        around: str | None = None,
+        cursor: str | None = None,
+        direction: str = "both",
+        limit: int = 10,
+        detail: str = "headline",
+        facts: bool = False,
+        history_view: str | None = None,
+        history_offset: int | None = None,
+        history_limit: int = 10,
+    ) -> dict[str, Any]:
+        from dataclasses import asdict
+
+        result = await self.built.recall_service.recall_timeline(
+            namespace=namespace,
+            query=query,
+            subject=subject,
+            at=at,
+            window_from=window_from,
+            window_to=window_to,
+            around=around,
+            cursor=cursor,
+            direction=direction,
+            limit=limit,
+            detail=detail,
+            facts=facts,
+            history_view=history_view,
+            history_offset=history_offset,
+            history_limit=history_limit,
+        )
+        payload = _to_jsonable(asdict(result))
+        if payload.get("note") is None:
+            payload.pop("note", None)
+        return payload
+
     async def view_entropy(
         self,
         *,

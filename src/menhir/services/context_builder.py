@@ -233,10 +233,6 @@ class ContextResult:
 class ContextBuilderService:
     recall_service: RecallService
     graph_adapter: MemoryGraphAdapter | None = None
-    # Frontier: cluster recalled memories into temporal/currency-aware evidence bundles
-    # (domain/brief_builder) instead of a flat "[Memory i] name: content" list. Off = today's
-    # behavior byte-for-byte. Wired from settings.frontier_brief_builder at bootstrap.
-    brief_builder_enabled: bool = False
     # Frontier: per-call size of the additive source-memory section inside build_context's
     # recall. None = no section (build_context passes no tuning); bootstrap sets it from
     # MENHIR_FRONTIER_SOURCE_MEMORIES / _SOURCE_MEMORY_LIMIT so the flag stays deployment-scoped.
@@ -546,21 +542,6 @@ class ContextBuilderService:
                 running_tokens += source_tokens
             else:
                 truncated = True
-
-        if not fail_closed and self.brief_builder_enabled and not truncated:
-            # Frontier: APPEND a supplementary Timeline view below the relevance list, so
-            # temporal questions get an ordered, currency-marked chain without displacing
-            # the answer. Only if budget remains; recall used include_invalidated so the
-            # Timeline can show superseded->current progression.
-            from menhir.domain.brief_builder import build_timeline_bundle, render_bundles
-
-            timeline = build_timeline_bundle(memories)
-            if timeline is not None:
-                block = render_bundles([timeline], include_provenance=include_scores)
-                tokens = _tokens_for(block)
-                if running_tokens + tokens <= effective_budget:
-                    lines.append(block)
-                    running_tokens += tokens
 
         # Track actual memory count — advisory lines are not memories.
         # memory_ids was populated only for actual memory entries, so its

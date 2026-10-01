@@ -32,6 +32,7 @@ from menhir.infrastructure.cypher import (
     FACT_TEMPORAL_FIELDS,
     MEMORY_RETURN_FIELDS,
     memory_recency_cypher,
+    non_derived_view_cypher,
     SHADOW_CANDIDATE_FACT_EDGE_FIELDS,
 )
 from menhir.infrastructure.neo4j import Neo4jRepository
@@ -444,6 +445,214 @@ class MemoryQueryRepository:
             """,
             params=params,
         )
+
+    # --- Timeline navigation (recall_timeline, read-only) --------------------
+
+    def _timeline_episode_where(
+        self, *, namespace: str | None, params: dict[str, Any]
+    ) -> list[str]:
+        """The exact visible-episode predicates of `search_episode_embeddings`, minus
+        the embedding ones, plus the `valid_at` requirement of the total order (A1/A2).
+
+        Shared by `timeline_page` and `timeline_anchor` so the two can never drift.
+        Tenancy goes through the shared helpers only: `tenant_scope_prefilter_cypher`
+        FIRST when the namespace is scoped (same `namespace_spellings` check as #171),
+        `tenant_scope_cypher` always. No namespace/group_id comparison is spelled here.
+        """
+        # Timeline reads Graphiti's resolved :Episodic nodes (they carry valid_at, MENTIONS and the
+        # fact edges' `episodes` ids); Menhir's queue node carries reference_time, not valid_at, so
+        # `valid_at IS NOT NULL` selects one node per memory. processing_state is only guaranteed on
+        # the queue node, so it is NOT required here; explicit FAILED is still excluded.
+        where = [
+            "n.valid_at IS NOT NULL",
+            "coalesce(n.processing_state, '') <> 'FAILED'",
+            non_structural_memory_cypher("n"),
+            default_recall_visibility_cypher("n"),
+        ]
+        params.update(tenant_scope_params(namespace))
+        if namespace_spellings(namespace) is not None:
+            where.insert(0, tenant_scope_prefilter_cypher("n"))
+        where.append(tenant_scope_cypher("n"))
+        return where
+
+    @staticmethod
+    def _timeline_match(subject_uuid: str | None) -> str:
+        """MENTIONS join when a subject thread is requested, plain episodes otherwise (A3)."""
+        if subject_uuid:
+            return "(s:Entity {uuid:$subject_uuid})<-[:MENTIONS]-(n:Episodic)"
+        return "(n:Episodic)"
+
+    _TIMELINE_RETURN = (
+        "n.uuid AS uuid, toString(n.valid_at) AS valid_at, "
+        "toString(n.created_at) AS created_at, n.content AS content, "
+        "n.session_id AS session_id, n.source AS source"
+    )
+
+    def timeline_page(
+        self,
+        *,
+        namespace: str | None,
+        subject_uuid: str | None = None,
+        after: tuple[str, str | None, str] | None = None,
+        before: tuple[str, str | None, str] | None = None,
+        window_from: str | None = None,
+        window_to: str | None = None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """One page of the recorded-time total order over visible episodes (A1/A3).
+
+        Order key is `(n.valid_at, coalesce(n.created_at, epoch), n.uuid)`; only
+        episodes with a non-null `valid_at` take part. `after`/`before` are exclusive
+        cursor keys `(valid_at_iso, created_at_iso, uuid)`; `before` queries DESC with
+        LIMIT and the returned rows are reversed so the caller always receives ASC.
+        Read-only: never touches `last_accessed`.
+        """
+        safe_limit = max(1, min(int(limit), 50))
+        params: dict[str, Any] = {
+            "limit": safe_limit,
+            "epoch": "1970-01-01T00:00:00Z",
+            "subject_uuid": subject_uuid,
+        }
+        where = self._timeline_episode_where(namespace=namespace, params=params)
+        if after is not None:
+            where.append(
+                "(n.valid_at > datetime($after_valid_at) "
+                "OR (n.valid_at = datetime($after_valid_at) AND "
+                "(coalesce(n.created_at, datetime($epoch)) > "
+                "coalesce(datetime($after_created_at), datetime($epoch)) OR "
+                "(coalesce(n.created_at, datetime($epoch)) = "
+                "coalesce(datetime($after_created_at), datetime($epoch)) AND "
+                "n.uuid > $after_uuid))))"
+            )
+            params["after_valid_at"] = after[0]
+            params["after_created_at"] = after[1]
+            params["after_uuid"] = after[2]
+        if before is not None:
+            where.append(
+                "(n.valid_at < datetime($before_valid_at) "
+                "OR (n.valid_at = datetime($before_valid_at) AND "
+                "(coalesce(n.created_at, datetime($epoch)) < "
+                "coalesce(datetime($before_created_at), datetime($epoch)) OR "
+                "(coalesce(n.created_at, datetime($epoch)) = "
+                "coalesce(datetime($before_created_at), datetime($epoch)) AND "
+                "n.uuid < $before_uuid))))"
+            )
+            params["before_valid_at"] = before[0]
+            params["before_created_at"] = before[1]
+            params["before_uuid"] = before[2]
+        if window_from is not None:
+            where.append("n.valid_at >= datetime($window_from)")
+            params["window_from"] = window_from
+        if window_to is not None:
+            where.append("n.valid_at <= datetime($window_to)")
+            params["window_to"] = window_to
+        desc = before is not None
+        direction = "DESC" if desc else "ASC"
+        query = f"""
+            MATCH {self._timeline_match(subject_uuid)}
+            WHERE {" AND ".join(where)}
+            RETURN {self._TIMELINE_RETURN}
+            ORDER BY n.valid_at {direction},
+                     coalesce(n.created_at, datetime($epoch)) {direction},
+                     n.uuid {direction}
+            LIMIT $limit
+        """
+        rows = self.neo4j.execute(query, params=params)
+        if desc:
+            rows.reverse()
+        return rows
+
+    def timeline_anchor(
+        self,
+        *,
+        uuid: str,
+        namespace: str | None,
+        subject_uuid: str | None = None,
+    ) -> dict[str, Any] | None:
+        """The anchor episode for `around` navigation, only if it is visible (A3).
+
+        Applies exactly the A2 predicates (and the MENTIONS join when a subject thread
+        is requested), so a hidden or foreign episode is indistinguishable from a
+        nonexistent one. Read-only.
+        """
+        params: dict[str, Any] = {
+            "anchor_uuid": uuid,
+            "epoch": "1970-01-01T00:00:00Z",
+            "subject_uuid": subject_uuid,
+        }
+        where = self._timeline_episode_where(namespace=namespace, params=params)
+        where.append("n.uuid = $anchor_uuid")
+        query = f"""
+            MATCH {self._timeline_match(subject_uuid)}
+            WHERE {" AND ".join(where)}
+            RETURN {self._TIMELINE_RETURN}
+            LIMIT 1
+        """
+        rows = self.neo4j.execute(query, params=params)
+        return rows[0] if rows else None
+
+    def timeline_facts(
+        self, *, episode_uuids: list[str], namespace: str | None
+    ) -> dict[str, list[dict[str, Any]]]:
+        """RELATES_TO facts attached to the page's episodes, grouped per episode (A3).
+
+        Tenancy on the fact edge goes through `tenant_scope_cypher("r")` only. Bounded:
+        at most 50 episodes (clamped here) and 20 facts per episode, ordered by
+        `r.valid_at`. Read-only.
+        """
+        safe_uuids = [u for u in episode_uuids if u][:50]
+        if not safe_uuids:
+            return {}
+        query = f"""
+            UNWIND $episode_uuids AS episode_uuid
+            MATCH (ep:Episodic {{uuid: episode_uuid}})-[:MENTIONS]->(:Entity)
+                  -[r:RELATES_TO]-(:Entity)
+            WHERE episode_uuid IN coalesce(r.episodes, [])
+              AND {tenant_scope_cypher("r")}
+            WITH DISTINCT episode_uuid, r
+            ORDER BY r.valid_at
+            WITH episode_uuid, collect({{
+                fact: r.fact,
+                valid_at: toString(r.valid_at),
+                invalid_at: toString(r.invalid_at),
+                expired_at: toString(r.expired_at)
+            }})[0..20] AS facts
+            RETURN episode_uuid, facts
+        """
+        params: dict[str, Any] = {
+            "episode_uuids": safe_uuids,
+            **tenant_scope_params(namespace),
+        }
+        rows = self.neo4j.execute(query, params=params)
+        return {str(row["episode_uuid"]): list(row.get("facts") or []) for row in rows}
+
+    def resolve_timeline_subject(
+        self, *, subject: str, namespace: str | None
+    ) -> list[dict[str, Any]]:
+        """Resolve a subject thread anchor: an entity uuid or an exact case-insensitive
+        name among visible non-View `:Entity` nodes in scope (A3).
+
+        Returns up to 5 `{uuid, name}` candidates; the caller decides between unique,
+        ambiguous, and unknown. Read-only.
+        """
+        where = [
+            "(n.uuid = $subject OR (n.name IS NOT NULL AND toLower(n.name) = toLower($subject)))",
+            non_derived_view_cypher("n"),
+            default_recall_visibility_cypher("n"),
+        ]
+        params: dict[str, Any] = {"subject": str(subject).strip(), "limit": 5}
+        params.update(tenant_scope_params(namespace))
+        if namespace_spellings(namespace) is not None:
+            where.insert(0, tenant_scope_prefilter_cypher("n"))
+        where.append(tenant_scope_cypher("n"))
+        query = f"""
+            MATCH (n:Entity)
+            WHERE {" AND ".join(where)}
+            RETURN n.uuid AS uuid, n.name AS name
+            ORDER BY n.uuid
+            LIMIT $limit
+        """
+        return self.neo4j.execute(query, params=params)
 
     def search_assertion_embeddings(
         self,

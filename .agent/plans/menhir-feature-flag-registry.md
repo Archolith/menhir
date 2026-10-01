@@ -243,7 +243,8 @@ against current code (details in `menhir-168-phase0-baseline-contract.md`):
   var in `.env.example`. That includes every #170-#173 candidate except scalar_state,
   view_authority, reconcile_*, consolidation_audit, deterministic_shadow (documented under the
   alias `MENHIR_SCALAR_DETERMINISTIC_SHADOW`), warden_gate, evidence_anchor, content_vector,
-  fact_edges and brief_builder. `MENHIR_CANONICAL_SELF_BINDING_MODE` is also undocumented.
+  fact_edges and brief_builder (the brief_builder flag was removed 2026-10-01, superseded by
+  `recall_timeline`). `MENHIR_CANONICAL_SELF_BINDING_MODE` is also undocumented.
 - **Env-only census:** 20 `MENHIR_*` vars are read outside `settings_model.py`; 16 are absent from
   `.env.example` (the Origin list plus `MENHIR_CONSOLE_SCHEME`, `MENHIR_EMBEDDING_CACHE_MAX_SIZE`,
   `MENHIR_SAGA_ALL_WRITERS_GATE_AWARE`, `MENHIR_SNAPSHOT_RECEIVE_MODE`). `MENHIR_INGEST_ALLOWED_ROOTS`

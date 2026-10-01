@@ -44,6 +44,7 @@ receipt feature (#116) is deferred for MVP; these corrections do not add a scope
 - **Codex token-light bootstrap** → `memory_gateway(action="bootstrap_context", payload_json=...)` on the Codex gateway server
 - **Mid-task targeted search** → `recall_memories` (standalone semantic search, no bootstrap dependency)
 - **How something changed / sequence of states** → `recall_history` (time-ordered drill-down, oldest first, optional pools)
+- **What was known at a time / how a thread unfolded** → `recall_timeline` (recorded-time navigation: at/window/around/cursor/query, optional subject thread, typed histories)
 - **Token-budgeted context block** → `build_context` (packs memories + TODOs within a token limit)
 - **How long since last access** → `get_client_context` (no recall, just identity + elapsed time)
 

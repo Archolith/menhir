@@ -80,6 +80,7 @@ from menhir.services.recall_policies import (
 from menhir.services.recall_pipeline import (
     apply_event_history_authority_layer, run_recall, run_recall_history)
 from menhir.services.recall_support import RecallSupportMixin
+from menhir.services.timeline_service import run_recall_timeline
 
 
 @dataclass
@@ -155,3 +156,4 @@ class RecallService(RecallSupportMixin):
 
     # Drill-down; delegates to run_recall_history, which takes the service first.
     recall_history = run_recall_history
+    recall_timeline = run_recall_timeline  # on-demand recorded-time navigation (same delegation)

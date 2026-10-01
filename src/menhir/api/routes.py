@@ -54,6 +54,8 @@ from .routes_support import (
     RecallMemory,
     RecallRequest,
     RecallResponse,
+    RecallTimelineRequest,
+    RecallTimelineResponse,
     RevokeClientResponse,
     RuntimeContext,
     SourceMemoryResponse,
@@ -221,6 +223,46 @@ async def recall_history(request: Request, body: RecallHistoryRequest) -> Recall
             for m in result.get("memories", []) or []
         ],
         note=result.get("note"),
+    )
+
+
+@router.post(
+    "/recall/timeline",
+    response_model=RecallTimelineResponse,
+    response_model_exclude_none=True,
+)
+async def recall_timeline(request: Request, body: RecallTimelineRequest) -> RecallTimelineResponse:
+    backend = _get_backend(request)
+    try:
+        result = await backend.recall_timeline(
+            namespace=_resolve_namespace(request, body.namespace),
+            query=body.query,
+            subject=body.subject,
+            at=body.at,
+            window_from=body.window_from,
+            window_to=body.window_to,
+            around=body.around,
+            cursor=body.cursor,
+            direction=body.direction,
+            limit=body.limit,
+            detail=body.detail,
+            facts=body.facts,
+            history_view=body.history_view,
+            history_offset=body.history_offset,
+            history_limit=body.history_limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return RecallTimelineResponse(
+        thread=str(result.get("thread") or "namespace"),
+        subject_uuid=result.get("subject_uuid"),
+        subject_name=result.get("subject_name"),
+        entries=result.get("entries", []) or [],
+        prev_cursor=result.get("prev_cursor"),
+        next_cursor=result.get("next_cursor"),
+        histories=result.get("histories", []) or [],
+        note=result.get("note"),
+        time_basis=str(result.get("time_basis") or "recorded"),
     )
 
 

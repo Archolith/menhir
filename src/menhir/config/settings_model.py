@@ -415,7 +415,6 @@ class MemorySettings:
     frontier_fact_edge_mode: str = "standalone"  # how fact edges enter the pool: "standalone" (terse fact as its own candidate; net-negative at N=30) or "pointer" (hydrate endpoint nodes' rich context; preferred)
     frontier_similarity_scale: str = "rrf"  # similarity lane scale (plan 1a/1b): "rrf" (today; RRF ~[0,2]) or "normalized" (divide search scores by the pinned RRF max -> [0,1], restoring PENDING's top-pin; ranking change, A/B before default flip)
     frontier_shadow: bool = False          # observe-only oracle/warden pass (trace)
-    frontier_brief_builder: bool = False   # build_context stage (NOT recall tuning): keep the relevance-ranked list as the brief, then APPEND a supplementary temporal Timeline below it. Measured safe/neutral on LME (append +0.03 vs replace -0.10); off by default pending a lift verdict at larger N
     # Source-memory recall lane: additive section of raw episode memories (cosine over
     # n.content_embedding), NEXT TO the ranked results, never fused into them. Requires the
     # ingest-side episode-content embedding step (also gated by frontier_source_memories).
@@ -942,7 +941,6 @@ class MemorySettings:
             frontier_fact_edge_mode=_getenv("MENHIR_FRONTIER_FACT_EDGE_MODE", default=cls.frontier_fact_edge_mode).strip().lower(),
             frontier_similarity_scale=_getenv("MENHIR_FRONTIER_SIMILARITY_SCALE", default=cls.frontier_similarity_scale).strip().lower(),
             frontier_shadow=parse_bool_env(_getenv("MENHIR_FRONTIER_SHADOW", default=str(cls.frontier_shadow))),
-            frontier_brief_builder=parse_bool_env(_getenv("MENHIR_FRONTIER_BRIEF_BUILDER", default=str(cls.frontier_brief_builder))),
             frontier_source_memories=parse_bool_env(_getenv("MENHIR_FRONTIER_SOURCE_MEMORIES", default=str(cls.frontier_source_memories))),
             frontier_source_memory_limit=_parse_int(
                 _getenv("MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT", default=str(cls.frontier_source_memory_limit)),

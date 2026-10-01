@@ -138,6 +138,44 @@ class BackendClientOpsMixin:
             },
         )
 
+    async def recall_timeline(
+        self,
+        *,
+        namespace: str | None = None,
+        query: str | None = None,
+        subject: str | None = None,
+        at: str | None = None,
+        window_from: str | None = None,
+        window_to: str | None = None,
+        around: str | None = None,
+        cursor: str | None = None,
+        direction: str = "both",
+        limit: int = 10,
+        detail: str = "headline",
+        facts: bool = False,
+        history_view: str | None = None,
+        history_offset: int | None = None,
+        history_limit: int = 10,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "namespace": namespace,
+            "query": query,
+            "subject": subject,
+            "at": at,
+            "window_from": window_from,
+            "window_to": window_to,
+            "around": around,
+            "cursor": cursor,
+            "direction": direction,
+            "limit": int(limit),
+            "detail": detail,
+            "facts": bool(facts),
+            "history_view": history_view,
+            "history_offset": history_offset,
+            "history_limit": int(history_limit),
+        }
+        return await self._request("recall_timeline", params)
+
     async def view_entropy(
         self,
         *,
