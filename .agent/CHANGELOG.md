@@ -16,6 +16,15 @@
 - Registries: `AGENT_ALLOWED_TOOLS`, feature taxonomy `retrieve`,
   `RATABLE_OPERATIONS`, `get_memory_stats` user ops, `.agent/concept-ids.yaml`
   (`mcp.tool.recall_history`), `endpoints.md`, `tasks-mcp.md`.
+## 2026-09-30 - Source-memory lane on by default
+
+- `frontier_source_memories` now defaults to `True` in `MemorySettings` (owner-approved
+  after evaluation: AMA-Bench live A/B 505 q x 2 fixed 104 / broke 52 vs off; LongMemEval
+  oracle 500 q x 2 correctness 0.340 -> 0.711). Library defaults
+  (`RetrievalTuningConfig.enable_source_memories`, Recall Lab tunings) and ingest
+  internal defaults are unchanged — they mean "no settings supplied".
+- Upgrade note: existing graphs must run `scripts/backfill_episode_embeddings.py` ONCE.
+  Set `MENHIR_FRONTIER_SOURCE_MEMORIES=false` to opt out.
 
 ## 2026-09-30 - Source-memory recall lane (step 1, default off)
 
