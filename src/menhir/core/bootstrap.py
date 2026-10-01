@@ -241,6 +241,11 @@ def build_memory_services(
         recall_service=recall_service,
         graph_adapter=graph_adapter,
         brief_builder_enabled=settings.frontier_brief_builder,
+        source_memory_limit=(
+            getattr(settings, "frontier_source_memory_limit", None)
+            if getattr(settings, "frontier_source_memories", False)
+            else None
+        ),
     )
     candidate_service = CandidateService(
         graph_adapter=graph_adapter,

@@ -417,7 +417,7 @@ class MemorySettings:
     # Source-memory recall lane: additive section of raw episode memories (cosine over
     # n.content_embedding), NEXT TO the ranked results, never fused into them. Requires the
     # ingest-side episode-content embedding step (also gated by frontier_source_memories).
-    frontier_source_memories: bool = False  # additive source-memory section next to ranked recall
+    frontier_source_memories: bool = True  # additive source-memory section next to ranked recall (default on)
     frontier_source_memory_limit: int = 10          # section size (1..50; validated in RetrievalTuningConfig)
     frontier_source_memory_max_chars: int = 600  # per-memory content cap (100..4000)
     frontier_source_memory_pools: bool = False  # group section entries by shared anchors

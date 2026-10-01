@@ -35,7 +35,6 @@ mapped into `RetrievalTuningConfig` at the recall entry via `retrieval_tuning()`
 | Fact-edge injection (RELATES_TO into candidate pool) | `frontier_fact_edges` (+ `frontier_fact_edge_mode`) | recall tuning | standalone net-negative at N=30; "pointer" preferred | retrieval fact-edge work |
 | Similarity lane scale | `frontier_similarity_scale` (`rrf` default / `normalized`) | recall tuning | ranking change; A/B before flip | `retrieval-scale-contract-and-gap-remediation.md` (1a/1b) |
 | Shadow pass (observe-only oracle/warden trace) | `frontier_shadow` / `MENHIR_FRONTIER_SHADOW` | recall tuning | observe-only | oracle stack |
-| Source-memory recall lane (additive raw-episode section next to ranked results, never fused; ingest-side episode-content embedding + `scripts/backfill_episode_embeddings.py` backfill; optional anchor pools via `frontier_source_memory_pools`) | `frontier_source_memories` / `MENHIR_FRONTIER_SOURCE_MEMORIES` (+ `_SOURCE_MEMORY_LIMIT`, `_SOURCE_MEMORY_MAX_CHARS`, `_SOURCE_MEMORY_POOLS`; per-call `source_memory_limit` on REST/MCP/recall) | recall tuning (`enable_source_memories`) + ingest gate (`source_memories_enabled`). Recall Lab exposes it as opt-in arm tunings only (`enable_source_memories=true`; pools additionally `source_memory_pools=true`) — no default arms — and the Lab request must set `include_session=true` | AMA-Bench supersession A/B (205 q, 2 repeats): fixed 41 / broke 19 vs production (sign test p=0.006); TEXT2SQL "latest X" stale answers 9 -> 3; pooled variant neutral (43/20) | `menhir-source-memory-lane-plan.md` |
 | Deterministic typed-scalar shadow | `personal_memory_scalar_deterministic_shadow` / `MENHIR_SCALAR_DETERMINISTIC_SHADOW` | `TypedScalarPerceptionService` after the LLM gate; audit rows also require consolidation audit | observe-only; held-out agreement/router gates not yet measured | `menhir-deterministic-first-event-scalar-2026-07-30.md` |
 | Event History Phase 3 Consolidation | `personal_memory_event_history_enabled` / `MENHIR_EVENT_HISTORY_ENABLED` | backfill :TurnEvidence -> assertions via independent watermark cursor | production-capable but default-off; Phase 1-5 complete | `menhir-event-history-plan.md` + commits 048b8d9..51c11cf |
 | Event History Phase 4 Recall Authority | `personal_memory_event_history_authority_enabled` / `MENHIR_EVENT_HISTORY_AUTHORITY_ENABLED` | conditional first-person event route probed only when enabled and namespace present | production-capable but default-off; independent of scalar authority | commits 048b8d9..51c11cf |
@@ -45,6 +44,12 @@ mapped into `RetrievalTuningConfig` at the recall entry via `retrieval_tuning()`
 ## Activated (moved on default-on)
 
 _(none yet — add rows here with the activation date when a flag flips `True` or a gate is removed)_
+
+### Graduated to default-on 2026-09-30: source-memory recall lane
+
+| Feature | Flag / env | Gate location | Evidence | Source plan |
+|---|---|---|---|---|
+| Source-memory recall lane (additive raw-episode section next to ranked results, never fused; ingest-side episode-content embedding + `scripts/backfill_episode_embeddings.py` backfill; optional anchor pools via `frontier_source_memory_pools`) | `frontier_source_memories` / `MENHIR_FRONTIER_SOURCE_MEMORIES` (+ `_SOURCE_MEMORY_LIMIT`, `_SOURCE_MEMORY_MAX_CHARS`, `_SOURCE_MEMORY_POOLS`; per-call `source_memory_limit` on REST/MCP/recall) | recall tuning (`enable_source_memories`) + ingest gate (`source_memories_enabled`). Recall Lab exposes it as opt-in arm tunings only — no default arms | AMA-Bench live A/B (505 q x 2: limit 10 fixed 104 / broke 52 vs off; non-state types improved) and LongMemEval oracle 500 q x 2 (0.340 -> 0.711 correct, knowledge-update 0.365 -> 0.782, every type improved, consistent fixed 183 / broke 4) | `menhir-source-memory-lane-plan.md` |
 
 ---
 

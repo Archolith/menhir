@@ -542,7 +542,10 @@ async def test_ingest_step_swallows_embedder_errors(
 # ---------------------------------------------------------------------------
 
 
-def test_settings_defaults_are_off(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_settings_defaults_deployment_on_library_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Library default (no settings supplied) stays off; the deployment default is on.
+    assert RetrievalTuningConfig().enable_source_memories is False
+
     for var in (
         "MENHIR_FRONTIER_SOURCE_MEMORIES",
         "MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT",
@@ -551,13 +554,13 @@ def test_settings_defaults_are_off(monkeypatch: pytest.MonkeyPatch) -> None:
     ):
         monkeypatch.delenv(var, raising=False)
     settings = MemorySettings.from_env()
-    assert settings.frontier_source_memories is False
+    assert settings.frontier_source_memories is True
     assert settings.frontier_source_memory_limit == 10
     assert settings.frontier_source_memory_max_chars == 600
     assert settings.frontier_source_memory_pools is False
 
     tuning = settings.retrieval_tuning()
-    assert tuning.enable_source_memories is False
+    assert tuning.enable_source_memories is True
     assert tuning.source_memory_limit == 10
     assert tuning.source_memory_max_chars == 600
     assert tuning.source_memory_pools is False
@@ -666,3 +669,71 @@ class SimpleNamespaceBackend:
 
     async def recall(self, *args, **kwargs):
         return await self._recall(*args, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# ContextBuilderService source_memory_limit wiring
+# ---------------------------------------------------------------------------
+
+
+def _recall_result_with_source_memories() -> RecallResult:
+    from menhir.domain.retrieval_trace_models import RelevanceBreakdown
+    from menhir.domain.recall import ScoredMemory
+
+    return RecallResult(
+        query="q",
+        preset="knowledge",
+        results=[
+            ScoredMemory(
+                uuid="e1", name="E1", content="c", scope="PERSISTENT",
+                memory_type="SEMANTIC", final_score=1.0,
+                breakdown=RelevanceBreakdown(
+                    semantic_similarity=1.0, adjacency_bonus=0.0, recency_bonus=0.0,
+                    prominence_bonus=0.0, conflict_bonus=0.0, type_boost=0.0,
+                    preset="knowledge", alpha=0.2, beta=0.1, gamma=0.1, delta=0.0,
+                ),
+            )
+        ],
+        candidates_evaluated=1,
+        nodes_touched=0,
+        source_memories=(
+            SourceMemory(
+                uuid="ep-1", content="used cd 3", reference_time="2026-01-01",
+                cosine=0.9, source="claude-code",
+            ),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_context_builder_passes_source_memory_limit_when_set() -> None:
+    received: dict[str, Any] = {}
+
+    class _RecordingRecallService:
+        async def recall(self, *args, **kwargs):
+            received.update(kwargs)
+            return _recall_result_with_source_memories()
+
+    builder = ContextBuilderService(
+        recall_service=_RecordingRecallService(), source_memory_limit=5
+    )
+    out = await builder.build_context("q")
+
+    assert received.get("source_memory_limit") == 5
+    assert "Source memories" in out.context
+    assert "used cd 3" in out.context
+
+
+@pytest.mark.asyncio
+async def test_context_builder_omits_source_memory_limit_when_none() -> None:
+    received: dict[str, Any] = {}
+
+    class _RecordingRecallService:
+        async def recall(self, *args, **kwargs):
+            received.update(kwargs)
+            return _recall_result_with_source_memories()
+
+    builder = ContextBuilderService(recall_service=_RecordingRecallService())
+    await builder.build_context("q")
+
+    assert "source_memory_limit" not in received

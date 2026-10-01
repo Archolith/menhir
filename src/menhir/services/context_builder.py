@@ -8,7 +8,7 @@ import math
 import os
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from menhir.domain.recall_visibility import memory_lifecycle_note
 
@@ -237,6 +237,10 @@ class ContextBuilderService:
     # (domain/brief_builder) instead of a flat "[Memory i] name: content" list. Off = today's
     # behavior byte-for-byte. Wired from settings.frontier_brief_builder at bootstrap.
     brief_builder_enabled: bool = False
+    # Frontier: per-call size of the additive source-memory section inside build_context's
+    # recall. None = no section (build_context passes no tuning); bootstrap sets it from
+    # MENHIR_FRONTIER_SOURCE_MEMORIES / _SOURCE_MEMORY_LIMIT so the flag stays deployment-scoped.
+    source_memory_limit: int | None = None
 
     async def build_context(
         self,
@@ -253,6 +257,9 @@ class ContextBuilderService:
         # Rich context always keeps historical source-time evidence. This does not add
         # invalidated candidates; it only prevents a recalled older fact from losing the
         # happened-at stamp needed to compare it with a later fact.
+        recall_kwargs: dict[str, Any] = {}
+        if self.source_memory_limit is not None:
+            recall_kwargs["source_memory_limit"] = self.source_memory_limit
         recall_result: RecallResult = await self.recall_service.recall(
             # build_context is an ordinary agent recall surface.  Fresh tracked writes
             # initially produce SESSION-scoped nodes, so excluding that scope makes a
@@ -260,6 +267,7 @@ class ContextBuilderService:
             query, preset=preset, namespace=namespace, include_session=True,
             session_id=session_id,
             include_invalidated=True,
+            **recall_kwargs,
         )
         memories = list(recall_result.results)
 
