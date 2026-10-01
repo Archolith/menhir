@@ -51,6 +51,7 @@ from menhir.infrastructure.graphiti_extraction_policy import (
     clear_extraction_receipt,
     get_extraction_receipt,
 )
+from menhir.services.embedding_identity import comparable_model, embedder_model_name
 from menhir.services.enrichment_failures import (
     classify_enrichment_failure,
     is_graphiti_output_parse_error,
@@ -778,13 +779,7 @@ _SOURCE_MEMORY_EMBED_MAX_CHARS = 8000
 
 def _episode_embedder_model_name(graphiti_client: Any) -> str:
     """Best-effort embedder model name; 'unknown' when it cannot be resolved."""
-    embedder = getattr(graphiti_client, "embedder_ref", None)
-    if embedder is not None:
-        for attr in ("model", "model_name", "embed_model"):
-            value = getattr(embedder, attr, None)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-    return "unknown"
+    return embedder_model_name(graphiti_client)
 
 
 #: Bound on the embedder call so a hung endpoint cannot stall the enrichment worker.
@@ -807,8 +802,12 @@ async def embed_episode_content(ctx: EnrichmentContext) -> None:
         claimed = ctx.claimed
         if claimed.get("is_evidence_projection"):
             return
+        current_model = comparable_model(_episode_embedder_model_name(ctx.graphiti_client))
         has_embedding = await asyncio.to_thread(
-            ctx.graph_adapter.episode_has_content_embedding, ctx.episode_uuid
+            ctx.graph_adapter.episode_has_content_embedding,
+            ctx.episode_uuid,
+            # Model-aware only when the model resolves (audit F2); otherwise today's check.
+            *((current_model,) if current_model else ()),
         )
         if has_embedding:
             return

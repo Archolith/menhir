@@ -180,15 +180,29 @@ class EpisodeLifecycleRepository:
         )
         return episode_uuid
 
-    def episode_has_content_embedding(self, episode_uuid: str) -> bool:
-        """Whether this Menhir-owned `:Episodic` node already carries a content embedding."""
-        rows = self.neo4j.execute(
-            """
-            MATCH (n:Episodic {uuid: $uuid})
-            RETURN n.content_embedding IS NOT NULL AS has_embedding
-            """,
-            params={"uuid": episode_uuid},
-        )
+    def episode_has_content_embedding(self, episode_uuid: str, model: str | None = None) -> bool:
+        """Whether this Menhir-owned `:Episodic` node already carries a content embedding.
+
+        With ``model``, an embedding stamped by a DIFFERENT model does not count, so the ingest
+        step re-embeds it instead of keeping a vector from another space (audit F2).
+        """
+        if model is None:
+            rows = self.neo4j.execute(
+                """
+                MATCH (n:Episodic {uuid: $uuid})
+                RETURN n.content_embedding IS NOT NULL AS has_embedding
+                """,
+                params={"uuid": episode_uuid},
+            )
+        else:
+            rows = self.neo4j.execute(
+                """
+                MATCH (n:Episodic {uuid: $uuid})
+                RETURN n.content_embedding IS NOT NULL
+                       AND coalesce(n.content_embedding_model, '') = $model AS has_embedding
+                """,
+                params={"uuid": episode_uuid, "model": model},
+            )
         return bool(rows and rows[0].get("has_embedding"))
 
     def set_episode_content_embedding(
@@ -218,9 +232,19 @@ class EpisodeLifecycleRepository:
         return bool(rows)
 
     def list_episodes_missing_content_embedding(
-        self, namespace: str | None = None, limit: int = 100
+        self,
+        namespace: str | None = None,
+        limit: int = 100,
+        *,
+        after_uuid: str | None = None,
+        model: str | None = None,
     ) -> list[dict[str, object]]:
-        """Page through Menhir `:Episodic` nodes with no content embedding yet.
+        """Page through Menhir `:Episodic` nodes that need a content embedding.
+
+        Needs one = no embedding yet, or (with ``model``) an embedding stamped by a different
+        model. Blank content is excluded IN the query and paging is by an exclusive ``after_uuid``
+        cursor (``ORDER BY n.uuid``), so a page is short only at the true end and rows a caller
+        skips are never re-listed ahead of the rest (audit F1).
 
         Same predicates as the source-memory read query: the shared structural and
         visibility predicates, the shared `tenant_scope_cypher` tenancy predicate ('' and
@@ -234,14 +258,22 @@ class EpisodeLifecycleRepository:
         safe_limit = max(1, min(limit, 500))
         where = [
             "(n:Episodic)",
-            "n.content_embedding IS NULL",
+            "(n.content_embedding IS NULL OR ($model IS NOT NULL"
+            " AND coalesce(n.content_embedding_model, '') <> $model))",
+            "trim(coalesce(n.content, '')) <> ''",
+            "($after_uuid IS NULL OR n.uuid > $after_uuid)",
             menhir_queue_episode_cypher("n"),
             "n.processing_state IS NOT NULL",
             "n.processing_state <> 'FAILED'",
             non_structural_memory_cypher("n"),
             default_recall_visibility_cypher("n"),
         ]
-        params: dict[str, Any] = {"limit": safe_limit, **tenant_scope_params(namespace)}
+        params: dict[str, Any] = {
+            "limit": safe_limit,
+            "after_uuid": after_uuid,
+            "model": model,
+            **tenant_scope_params(namespace),
+        }
         where.append(tenant_scope_cypher("n"))
         rows = self.neo4j.execute(
             f"""
@@ -253,7 +285,7 @@ class EpisodeLifecycleRepository:
             """,
             params=params,
         )
-        return [row for row in rows if row.get("content")]
+        return list(rows)
 
     def create_evidence_projection(
         self, *, turn_evidence_uuid: str, projection_uuid: str, name: str,

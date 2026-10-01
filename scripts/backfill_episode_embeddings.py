@@ -10,7 +10,8 @@ structural/visibility predicates the read query uses, so it only embeds episodes
 generic recall could ever surface -- and writes embeddings with the same
 `set_episode_content_embedding` helper the ingest step uses.
 
-IDEMPOTENT: a written embedding removes the node from the listing, so re-running
+IDEMPOTENT: a written embedding removes the node from the listing (unless stamped by a
+different embedder model, which is re-embedded), so re-running
 writes nothing new. Safe to re-run after a partial batch.
 
 Usage:
@@ -37,6 +38,7 @@ from menhir.infrastructure.episode_repository import EpisodeRepository
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.observability import build_async_openai_client
 from menhir.infrastructure.providers import ProviderConfig
+from menhir.services.embedding_identity import comparable_model
 
 #: Same truncation bound as the ingest step (services/enrichment_steps.py).
 _EMBED_MAX_CHARS = 8000
@@ -84,6 +86,12 @@ async def _run(args: argparse.Namespace) -> int:
     repo = EpisodeRepository(neo4j)
     written = 0
     skipped = 0
+    # Re-embed vectors stamped by a different model too (audit F2); None = model unresolved.
+    model = comparable_model(ProviderConfig.for_graphiti_embedder(settings).embed_model)
+    client = None
+    # Exclusive uuid cursor (audit F1): a row skipped below is never re-listed ahead of the rest,
+    # and the loop ends only on an empty page.
+    after_uuid: str | None = None
     try:
         while True:
             if args.limit is not None and written >= args.limit:
@@ -92,30 +100,30 @@ async def _run(args: argparse.Namespace) -> int:
             if args.limit is not None:
                 batch_limit = min(batch_limit, args.limit - written)
             rows = repo.list_episodes_missing_content_embedding(
-                args.namespace, limit=batch_limit
+                args.namespace, limit=batch_limit, after_uuid=after_uuid, model=model
             )
             if not rows:
                 break
+            after_uuid = str(rows[-1]["uuid"])
             if args.dry_run:
-                print(f"[dry-run] would embed {len(rows)} episode(s); e.g.:")
+                print(f"[dry-run] would embed {len(rows)} episode(s) in the first page; e.g.:")
                 for row in rows[:5]:
                     preview = str(row.get("content") or "")[:70].replace("\n", " ")
                     print(f"  {row.get('uuid')} {preview!r}")
                 written += len(rows)
                 break
-            client, model = _resolve_embedder(settings)
+            if client is None:
+                client, embed_model = _resolve_embedder(settings)
             for row in rows:
                 content = str(row.get("content") or "")[:_EMBED_MAX_CHARS]
                 if not content.strip():
                     skipped += 1
                     continue
-                embedding = await _embed_text(client, model=model, text=content)
-                if repo.set_episode_content_embedding(str(row["uuid"]), embedding, model):
+                embedding = await _embed_text(client, model=embed_model, text=content)
+                if repo.set_episode_content_embedding(str(row["uuid"]), embedding, embed_model):
                     written += 1
                 else:
                     skipped += 1
-            if len(rows) < batch_limit:
-                break
     finally:
         neo4j.close()
     mode = "would write" if args.dry_run else "wrote"

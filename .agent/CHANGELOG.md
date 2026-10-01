@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-01 - Source-memory backfill paging and embedding-model identity (delta audit F1/F2)
+
+- F1: `list_episodes_missing_content_embedding` filters blank content in Cypher (not after `LIMIT`)
+  and pages by an exclusive `after_uuid` cursor; `scripts/backfill_episode_embeddings.py` advances
+  that cursor and stops only on an empty page. Before, a page with blank rows ended the run early
+  and rows the script skipped were re-listed first forever.
+- F2: new `services/embedding_identity.py`. When the current embedder model resolves, the
+  source-memory search and `recall_history` compare only vectors stamped with that
+  `content_embedding_model`, the ingest step re-embeds a vector from another model, and the
+  backfill lists other-model vectors for re-embedding. Unresolved model (`unknown`): no filter,
+  byte-identical to before.
+- Live (LME copy, single model): search results identical on 40/40 namespaces with the stamped
+  model; a different model returns none and the backfill would re-embed.
+
 ## 2026-10-01 - #215 source-memory reads and backfill select only Menhir queue nodes
 
 - New `domain/episode_nodes.py::menhir_queue_episode_cypher` (`valid_at IS NULL`): Menhir's queue
