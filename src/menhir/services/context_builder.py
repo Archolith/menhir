@@ -515,7 +515,7 @@ class ContextBuilderService:
 
                 if running_tokens + total_tokens > effective_budget:
                     truncated = True
-                    break
+                    continue
 
                 lines.append(line)
                 memory_ids.append(mem.uuid)
