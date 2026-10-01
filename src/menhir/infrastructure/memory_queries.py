@@ -468,6 +468,12 @@ class MemoryQueryRepository:
             "coalesce(n.processing_state, '') <> 'FAILED'",
             non_structural_memory_cypher("n"),
             default_recall_visibility_cypher("n"),
+            # The memory still exists: a visible Menhir queue node resolves to this episode. Deleting
+            # or erasing a memory by its receipt (queue-node) uuid removes that twin, so the timeline
+            # stops showing the raw text even though Graphiti's episode survives (audit Q1 / #119).
+            # `episodic_resolved_episode_uuid_idx` backs the lookup.
+            "EXISTS { MATCH (q:Episodic) WHERE q.resolved_episode_uuid = n.uuid AND "
+            + default_recall_visibility_cypher("q") + " }",
         ]
         params.update(tenant_scope_params(namespace))
         if namespace_spellings(namespace) is not None:

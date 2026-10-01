@@ -1050,3 +1050,17 @@ async def test_at_accepts_neo4j_zoned_instant_from_own_output() -> None:
     assert [e.uuid for e in result.entries]
     with pytest.raises(ValueError):
         await _svc(_StubAdapter(rows)).recall_timeline(namespace="ns", at="not-a-time[UTC]")
+
+
+def test_timeline_hides_episodes_whose_memory_receipt_is_gone() -> None:
+    # Audit Q1: erasing/deleting a memory by its receipt (queue-node) uuid leaves Graphiti's
+    # episode with the raw text; the timeline must only show episodes a visible queue node
+    # still resolves to -- on pages and on `around` anchors alike.
+    for call in ("page", "anchor"):
+        repository, neo4j = _repository()
+        if call == "page":
+            repository.timeline_page(namespace="tenant-a", limit=5)
+        else:
+            repository.timeline_anchor(uuid="ep-1", namespace="tenant-a")
+        query, _params = neo4j.calls[0]
+        assert "EXISTS { MATCH (q:Episodic) WHERE q.resolved_episode_uuid = n.uuid AND" in query
