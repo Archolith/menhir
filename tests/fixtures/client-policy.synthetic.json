@@ -39,7 +39,7 @@
       }
     }
   },
-  "canonical_digest": "25aaecd192d55dffb92b4953bcd4528798be2caad6f549abe95c9ec228302375",
+  "canonical_digest": "442a3d0a7b6cb94b9f19573490ab59ab9fcf16f7942356ff64ac2088c1e240bb",
   "clients": {
     "example-chatgpt-web": {
       "allowed_tools": [
@@ -82,6 +82,7 @@
         "rate_recall",
         "read_flagged_memories",
         "recall_context_memories",
+        "recall_history",
         "recall_memories",
         "recover_orphans",
         "relocate_artifact_source",
@@ -162,6 +163,7 @@
         "rate_recall",
         "read_flagged_memories",
         "recall_context_memories",
+        "recall_history",
         "recall_memories",
         "recover_orphans",
         "relocate_artifact_source",
@@ -206,6 +208,7 @@
     },
     "example-web-client-1": {
       "allowed_tools": [
+        "recall_history",
         "recall_memories"
       ],
       "denied_tools": [
@@ -316,6 +319,7 @@
         "rate_recall",
         "read_flagged_memories",
         "recall_context_memories",
+        "recall_history",
         "recall_memories",
         "recover_orphans",
         "relocate_artifact_source",
@@ -361,6 +365,7 @@
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
+        "recall_history",
         "recall_memories"
       ],
       "denied_tools": [
@@ -461,6 +466,7 @@
         "rate_recall",
         "read_flagged_memories",
         "recall_context_memories",
+        "recall_history",
         "recall_memories",
         "recover_orphans",
         "relocate_artifact_source",
@@ -506,6 +512,7 @@
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
+        "recall_history",
         "recall_memories"
       ],
       "denied_tools": [
@@ -606,6 +613,7 @@
         "rate_recall",
         "read_flagged_memories",
         "recall_context_memories",
+        "recall_history",
         "recall_memories",
         "recover_orphans",
         "relocate_artifact_source",
@@ -651,6 +659,7 @@
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
+        "recall_history",
         "recall_memories"
       ],
       "denied_tools": [
@@ -723,6 +732,7 @@
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
+        "recall_history",
         "recall_memories"
       ],
       "denied_tools": [
@@ -795,6 +805,7 @@
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
+        "recall_history",
         "recall_memories"
       ],
       "denied_tools": [
@@ -867,6 +878,7 @@
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
+        "recall_history",
         "recall_memories"
       ],
       "denied_tools": [
@@ -939,6 +951,7 @@
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
+        "recall_history",
         "recall_memories"
       ],
       "denied_tools": [
@@ -1039,6 +1052,7 @@
         "rate_recall",
         "read_flagged_memories",
         "recall_context_memories",
+        "recall_history",
         "recall_memories",
         "recover_orphans",
         "relocate_artifact_source",
@@ -1084,6 +1098,7 @@
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
+        "recall_history",
         "recall_memories"
       ],
       "denied_tools": [
@@ -1156,6 +1171,7 @@
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
+        "recall_history",
         "recall_memories"
       ],
       "denied_tools": [

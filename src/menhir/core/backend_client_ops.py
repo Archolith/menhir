@@ -120,6 +120,24 @@ class BackendClientOpsMixin:
             params["source_memory_limit"] = int(source_memory_limit)
         return await self._request("recall", params)
 
+    async def recall_history(
+        self,
+        query: str,
+        *,
+        namespace: str | None = None,
+        limit: int = 30,
+        pools: bool = True,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "recall_history",
+            {
+                "query": query,
+                "namespace": namespace,
+                "limit": int(limit),
+                "pools": bool(pools),
+            },
+        )
+
     async def view_entropy(
         self,
         *,

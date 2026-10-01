@@ -235,6 +235,19 @@ class SourceMemory:
 
 
 @dataclass(frozen=True)
+class RecallHistoryResult:
+    """Result of the recall_history drill-down: matching source memories, oldest first.
+
+    Read-only over the episode-embedding search; never touches access state. ``note``
+    is set (and ``memories`` empty) when nothing matched.
+    """
+
+    query: str
+    memories: tuple[SourceMemory, ...]
+    note: str | None = None
+
+
+@dataclass(frozen=True)
 class RecallResult:
     query: str
     preset: str

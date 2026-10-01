@@ -25,6 +25,7 @@ Use this file when the work is about tool selection, resource usage, bootstrap r
   - `mcp.tool.read_flagged_memories`
   - `mcp.tool.recall_context_memories`
   - `mcp.tool.recall_memories`
+  - `mcp.tool.recall_history`
 - Codex lean path:
   - use `memory_gateway(action="bootstrap_context", payload_json=...)` to perform the two-phase bootstrap without registering the full recall tool set in prompt context
 - then open:
@@ -42,6 +43,7 @@ receipt feature (#116) is deferred for MVP; these corrections do not add a scope
 - **Session start bootstrap** → `read_flagged_memories` then `recall_context_memories` (two-phase, returns flagged + relevant + recent)
 - **Codex token-light bootstrap** → `memory_gateway(action="bootstrap_context", payload_json=...)` on the Codex gateway server
 - **Mid-task targeted search** → `recall_memories` (standalone semantic search, no bootstrap dependency)
+- **How something changed / sequence of states** → `recall_history` (time-ordered drill-down, oldest first, optional pools)
 - **Token-budgeted context block** → `build_context` (packs memories + TODOs within a token limit)
 - **How long since last access** → `get_client_context` (no recall, just identity + elapsed time)
 

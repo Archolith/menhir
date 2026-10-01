@@ -50,6 +50,7 @@ AGENT_ALLOWED_TOOLS = frozenset(
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
+        "recall_history",
         "recall_memories",
     }
 )

@@ -150,6 +150,18 @@ class MemoryBackend(Protocol):
         """Search memory graph. Returns RecallResult-shaped dict."""
         ...
 
+    async def recall_history(
+        self,
+        query: str,
+        *,
+        namespace: str | None = None,
+        limit: int = 30,
+        pools: bool = True,
+    ) -> dict[str, Any]:
+        """Drill-down: matching source memories oldest first. Returns
+        RecallHistoryResult-shaped dict."""
+        ...
+
     async def build_context(
         self,
         query: str,

@@ -318,6 +318,19 @@ class RecallResponse(BaseModel):
     source_memories: list[SourceMemoryResponse] | None = None
 
 
+class RecallHistoryRequest(BaseModel):
+    query: str
+    namespace: str | None = None
+    limit: int = Field(default=30, ge=1, le=50)
+    pools: bool = True
+
+
+class RecallHistoryResponse(BaseModel):
+    query: str
+    memories: list[SourceMemoryResponse] = Field(default_factory=list)
+    note: str | None = None
+
+
 class BootstrapContextRequest(BaseModel):
     reader_id: str = "default"
     workspace: str | None = None
@@ -637,6 +650,7 @@ _BACKEND_METHODS = {
     "delete_namespace",
     "enqueue_pending_episode",
     "recall",
+    "recall_history",
     "build_context",
     "view_entropy",
     "fetch_memory_by_uuid",

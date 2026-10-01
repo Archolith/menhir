@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-30 - recall_history drill-down tool
+
+- New read-only `recall_history` drill-down: matching saved memories strictly in time
+  order (oldest first, then uuid), optionally pooled. Reuses the source-memory lane's
+  embed + episode-embedding read; never writes, no access updates. Works whether or
+  not `MENHIR_FRONTIER_SOURCE_MEMORIES` is on.
+- Surfaces: `RecallService.recall_history` (implementation `run_recall_history` in
+  `services/recall_pipeline.py`; limit clamped 1..50; empty query -> ValueError;
+  failures raise, never partial), backend protocol/runtime/client plumbing
+  (`recall_history`), REST `POST /api/recall/history` (`RecallHistoryRequest` /
+  `RecallHistoryResponse`, namespace resolution identical to `/api/recall`), and the
+  MCP `recall_history` tool (`mcp/tools/recall/recall_history.py`, registered in
+  `RECALL_TOOLS`, not in `always_visible`).
+- Registries: `AGENT_ALLOWED_TOOLS`, feature taxonomy `retrieve`,
+  `RATABLE_OPERATIONS`, `get_memory_stats` user ops, `.agent/concept-ids.yaml`
+  (`mcp.tool.recall_history`), `endpoints.md`, `tasks-mcp.md`.
+
 ## 2026-09-30 - Source-memory recall lane (step 1, default off)
 
 - New additive recall section `source_memories` (raw episode memories by cosine over

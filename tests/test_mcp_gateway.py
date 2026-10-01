@@ -65,6 +65,7 @@ EXPECTED_TOOL_NAMES = frozenset({
     "rate_recall",
     "read_flagged_memories",
     "recall_context_memories",
+    "recall_history",
     "recall_memories",
     "recover_orphans",
     "relocate_artifact_source",

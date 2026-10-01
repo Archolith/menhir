@@ -32,7 +32,7 @@ SCORE_SCALE: dict[str, float | None] = {
 
 # Recall operations that mint a ratable receipt.
 RATABLE_OPERATIONS: frozenset[str] = frozenset(
-    {"recall_memories", "recall_context_memories", "read_flagged_memories", "build_context"}
+    {"recall_memories", "recall_history", "recall_context_memories", "read_flagged_memories", "build_context"}
 )
 
 

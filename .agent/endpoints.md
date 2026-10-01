@@ -426,6 +426,17 @@ Search memories by semantic similarity. Returns ranked results with relevance sc
 - Gateway alias: `memory_gateway(action="search", payload_json="{...}")` dispatches to the same behavior as `action="recall"`.
 - Returns compact JSON with top results, short summaries, a compact score breakdown (`sim`, `adj`, `rec`, `prom`), and explicit `retrieval_score`, `retrieval_score_kind`, and `relevance_basis`. Legacy `relevance` is retained and explicitly labeled unvalidated.
 
+### `recall_history`
+Concept id: `mcp.tool.recall_history`
+
+List saved memories matching a subject in time order (oldest first), with optional pools.
+- **`query`** (str): Subject to match. Natural language works best.
+- **`namespace`** (str, optional): Silo to scope the operation to. Empty = default/global behavior.
+- **`limit`** (int, optional): Max memories to return (default: 30, max: 50).
+- **`pools`** (bool, optional): Group related memories into pools (default: true).
+- Read-only drill-down: no access updates, no ranking changes.
+- Returns compact JSON with `query`, `count`, and `memories[]` (`time`, `content`, `uuid`, `source`, plus `pool_id`/`pool_anchor` when pooled). A `note` is set (with empty `memories`) when no embedded memory matched — run `scripts/backfill_episode_embeddings.py` for pre-flag memories.
+
 ### `flag_memory`
 Concept id: `mcp.tool.flag_memory`
 
@@ -742,12 +753,15 @@ Close stale TODO items that have been open for too long.
 |-----------|------|
 | Session start — bootstrap pinned context | `read_flagged_memories` then `recall_context_memories` |
 | Mid-task targeted search for specific knowledge | `recall_memories` |
+| How something changed / sequence of states / what it was before | `recall_history` |
 | Building a token-budgeted context block for injection | `build_context` |
 | Knowing how long since last memory interaction | `get_client_context` |
 
 `recall_context_memories` is a two-phase bootstrap tool — it requires a prior `read_flagged_memories` call for the same `reader_id` and returns both `relevant[]` and `recent[]` arrays. Use it at session start to hydrate context efficiently.
 
 `recall_memories` is a standalone semantic search — no bootstrap dependency, returns ranked results with score breakdowns. Use it mid-task when you need targeted retrieval for a specific question.
+
+`recall_history` is a read-only drill-down over raw saved memories strictly in time order (oldest first), with optional pools. Use it after `recall_memories` when a question needs how something changed, the sequence of states, or what it was before.
 
 ### `build_context`
 Concept id: `mcp.tool.build_context`

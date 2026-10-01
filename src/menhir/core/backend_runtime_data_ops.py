@@ -355,6 +355,24 @@ class RuntimeProviderDataOpsMixin:
             payload.pop("source_memories", None)
         return payload
 
+    async def recall_history(
+        self,
+        query: str,
+        *,
+        namespace: str | None = None,
+        limit: int = 30,
+        pools: bool = True,
+    ) -> dict[str, Any]:
+        from dataclasses import asdict
+
+        result = await self.built.recall_service.recall_history(
+            query, namespace=namespace, limit=limit, pools=pools
+        )
+        payload = _to_jsonable(asdict(result))
+        if payload.get("note") is None:
+            payload.pop("note", None)
+        return payload
+
     async def view_entropy(
         self,
         *,
