@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-01 - #172 context packing: declare tiktoken, skip oversized memories
+
+- `tiktoken` is now a declared dependency (`tiktoken>=0.8,<1`), so standard installs
+  no longer fall back to the halved heuristic token budget in `build_context`/hooks.
+- Ranked-memory packing now skips a memory that does not fit and continues
+  (`continue` instead of `break`): one oversized memory no longer drops every
+  lower-ranked memory. `truncated` is still set, labels keep their recall rank
+  (a skipped rank leaves a gap), and stale memory + advisory remain atomic.
+
 ## 2026-09-30 - recall_history drill-down tool
 
 - New read-only `recall_history` drill-down: matching saved memories strictly in time
