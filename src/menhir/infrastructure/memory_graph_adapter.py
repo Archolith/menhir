@@ -898,6 +898,51 @@ class MemoryGraphAdapter:
             query_vector, limit=limit, namespace=namespace, model=model
         )
 
+    def timeline_page(
+        self,
+        *,
+        namespace: str | None,
+        subject_uuid: str | None = None,
+        after: tuple[str, str | None, str] | None = None,
+        before: tuple[str, str | None, str] | None = None,
+        window_from: str | None = None,
+        window_to: str | None = None,
+        limit: int,
+    ) -> list[dict[str, object]]:
+        """Recorded-time page over visible episodes (recall_timeline, read-only)."""
+        return self._memory_queries.timeline_page(
+            namespace=namespace, subject_uuid=subject_uuid, after=after, before=before,
+            window_from=window_from, window_to=window_to, limit=limit,
+        )
+
+    def timeline_anchor(
+        self,
+        *,
+        uuid: str,
+        namespace: str | None,
+        subject_uuid: str | None = None,
+    ) -> dict[str, object] | None:
+        """Visible anchor episode for `around` navigation (recall_timeline, read-only)."""
+        return self._memory_queries.timeline_anchor(
+            uuid=uuid, namespace=namespace, subject_uuid=subject_uuid
+        )
+
+    def timeline_facts(
+        self, *, episode_uuids: list[str], namespace: str | None
+    ) -> dict[str, list[dict[str, object]]]:
+        """RELATES_TO facts grouped per episode (recall_timeline, read-only)."""
+        return self._memory_queries.timeline_facts(
+            episode_uuids=episode_uuids, namespace=namespace
+        )
+
+    def resolve_timeline_subject(
+        self, *, subject: str, namespace: str | None
+    ) -> list[dict[str, object]]:
+        """Resolve a subject thread anchor to candidate `{uuid, name}` rows."""
+        return self._memory_queries.resolve_timeline_subject(
+            subject=subject, namespace=namespace
+        )
+
     def search_assertion_embeddings(
         self,
         query_vector: list[float],

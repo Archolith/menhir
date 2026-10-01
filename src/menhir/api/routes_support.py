@@ -331,6 +331,76 @@ class RecallHistoryResponse(BaseModel):
     note: str | None = None
 
 
+class RecallTimelineFactResponse(BaseModel):
+    fact: str
+    valid_at: str | None = None
+    invalid_at: str | None = None
+    expired_at: str | None = None
+    time_basis: str = "world"
+
+
+class RecallTimelineEntryResponse(BaseModel):
+    uuid: str
+    recorded_at: str
+    created_at: str | None = None
+    session_id: str | None = None
+    source: str | None = None
+    headline: str
+    content: str | None = None
+    facts: list[RecallTimelineFactResponse] = Field(default_factory=list)
+    is_anchor: bool = False
+
+
+class RecallTimelineHistoryEntryResponse(BaseModel):
+    valid_at: str
+    value: Any = None
+    operation: str | None = None
+    time_basis: str | None = None
+    quote: str | None = None
+    episode_uuid: str | None = None
+
+
+class RecallTimelineHistoryResponse(BaseModel):
+    kind: str
+    view_uuid: str
+    label: str
+    total: int
+    offset: int
+    entries: list[RecallTimelineHistoryEntryResponse] = Field(default_factory=list)
+    prev_offset: int | None = None
+    next_offset: int | None = None
+
+
+class RecallTimelineRequest(BaseModel):
+    namespace: str | None = None
+    query: str | None = None
+    subject: str | None = None
+    at: str | None = None
+    window_from: str | None = None
+    window_to: str | None = None
+    around: str | None = None
+    cursor: str | None = None
+    direction: str = Field(default="both", pattern="^(before|after|both)$")
+    limit: int = Field(default=10, ge=1, le=50)
+    detail: str = Field(default="headline", pattern="^(headline|full)$")
+    facts: bool = False
+    history_view: str | None = None
+    history_offset: int | None = Field(default=None, ge=0)
+    history_limit: int = Field(default=10, ge=1, le=50)
+
+
+class RecallTimelineResponse(BaseModel):
+    thread: str
+    subject_uuid: str | None = None
+    subject_name: str | None = None
+    entries: list[RecallTimelineEntryResponse] = Field(default_factory=list)
+    prev_cursor: str | None = None
+    next_cursor: str | None = None
+    histories: list[RecallTimelineHistoryResponse] = Field(default_factory=list)
+    note: str | None = None
+    time_basis: str = "recorded"
+
+
 class BootstrapContextRequest(BaseModel):
     reader_id: str = "default"
     workspace: str | None = None
@@ -651,6 +721,7 @@ _BACKEND_METHODS = {
     "enqueue_pending_episode",
     "recall",
     "recall_history",
+    "recall_timeline",
     "build_context",
     "view_entropy",
     "fetch_memory_by_uuid",

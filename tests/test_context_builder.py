@@ -919,21 +919,3 @@ def test_context_dedup_preserves_active_and_historical_same_instruction(historic
     assert {m.uuid for m in _deduplicate([old, active])} == {"active", "history"}
     almost_same = replace(active, uuid="similar", content="Submit the report by Friday")
     assert {m.uuid for m in _deduplicate([old, almost_same])} == {"similar", "history"}
-
-
-@pytest.mark.parametrize("state,note", [
-    ({"status": "completed"}, "not an outstanding obligation"),
-    ({"artifact_status": "historical"}, "not current guidance"),
-])
-def test_brief_lifecycle_note_survives_long_fact_clipping(state, note):
-    from menhir.domain.brief_builder import build_bundles, build_timeline_bundle
-    memory = replace(
-        _mem("history", "Task", "Submit report " * 80, 0.9), **state,
-        temporal_facts=(TemporalFact("Submit report " * 80, "2026-09-26", None, None, None,
-                                    True, "current_belief"),),
-    )
-    bundle = build_timeline_bundle([memory])
-    assert note in bundle.lines[0]
-    assert " (current)" not in bundle.lines[0]
-    flat = replace(memory, temporal_facts=())
-    assert note in build_bundles([flat])[0].lines[0]

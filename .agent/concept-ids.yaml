@@ -203,6 +203,9 @@ mcp:
   mcp.tool.recall_history:
     owner: endpoints.md
     meaning: Time-ordered matching memories (drill-down)
+  mcp.tool.recall_timeline:
+    owner: endpoints.md
+    meaning: On-demand time navigation over recorded memory time
   mcp.tool.flag_memory:
     owner: endpoints.md
     meaning: Permanently flag one memory

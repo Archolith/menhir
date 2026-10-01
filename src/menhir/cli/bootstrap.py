@@ -67,7 +67,6 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
         context_builder = ContextBuilderService(
             recall_service=recall_service,
             graph_adapter=graph_adapter,
-            brief_builder_enabled=settings.frontier_brief_builder,
             source_memory_limit=(
                 getattr(settings, "frontier_source_memory_limit", None)
                 if getattr(settings, "frontier_source_memories", False)

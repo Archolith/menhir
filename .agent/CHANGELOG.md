@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-10-01 - recall_timeline on-demand time navigation; brief timeline removed
+
+- New read-only `recall_timeline` tool: on-demand time navigation over RECORDED
+  memory time (episode `valid_at`). Start from `at` / `window_from`+`window_to` /
+  `around` / `cursor` / `query` (exactly one when any is given), optionally
+  restricted to one `subject` thread (subject alone = latest page of the thread).
+  Pages return headline/full entries with `prev_cursor`/`next_cursor`
+  (tenant/thread-bound opaque cursors), optional RELATES_TO `facts`, and typed
+  scalar/event history pages for subject threads. Read-only: no access updates,
+  failures raise, never partial.
+- Surfaces: `RecallService.recall_timeline` (implementation
+  `services/timeline_service.py::run_recall_timeline`, models
+  `domain/timeline.py`), backend protocol/runtime/client plumbing
+  (`recall_timeline`), REST `POST /api/recall/timeline`
+  (`RecallTimelineRequest` / `RecallTimelineResponse`, namespace resolution
+  identical to `/api/recall/history`, `ValueError` handled like the history
+  route), and the MCP `recall_timeline` tool
+  (`mcp/tools/recall/recall_timeline.py`, registered in `RECALL_TOOLS`, not in
+  `always_visible`).
+- Registries: `AGENT_ALLOWED_TOOLS`, feature taxonomy `retrieve`,
+  `RATABLE_OPERATIONS`, `get_memory_stats` user ops, `.agent/concept-ids.yaml`
+  (`mcp.tool.recall_timeline`), `endpoints.md`, `tasks-mcp.md`.
+- Removed the appended `build_context` brief timeline (default-off
+  `frontier_brief_builder` / `MENHIR_FRONTIER_BRIEF_BUILDER`), superseded by
+  `recall_timeline`: flag, env parse, both bootstraps' wiring,
+  `.env.example` lines, and `domain/brief_builder.py` are gone;
+  `include_invalidated=True` in build_context recall is kept (its own
+  documented reason).
+
 ## 2026-10-01 - Source-memory section passes the #168 latency limit (#171)
 
 - The episode search now leads with an index-friendly tenancy prefilter

@@ -26,6 +26,7 @@ PARENTS: dict[str, list[str]] = {
     "retrieve": [
         "recall_memories",
         "recall_history",
+        "recall_timeline",
         "recall_context_memories",
         "read_flagged_memories",
         "build_context",

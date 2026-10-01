@@ -162,6 +162,29 @@ class MemoryBackend(Protocol):
         RecallHistoryResult-shaped dict."""
         ...
 
+    async def recall_timeline(
+        self,
+        *,
+        namespace: str | None = None,
+        query: str | None = None,
+        subject: str | None = None,
+        at: str | None = None,
+        window_from: str | None = None,
+        window_to: str | None = None,
+        around: str | None = None,
+        cursor: str | None = None,
+        direction: str = "both",
+        limit: int = 10,
+        detail: str = "headline",
+        facts: bool = False,
+        history_view: str | None = None,
+        history_offset: int | None = None,
+        history_limit: int = 10,
+    ) -> dict[str, Any]:
+        """On-demand time navigation over recorded memory time. Returns
+        TimelineResult-shaped dict."""
+        ...
+
     async def build_context(
         self,
         query: str,
