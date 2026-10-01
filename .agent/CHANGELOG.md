@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-10-01 - #215 source-memory reads and backfill select only Menhir queue nodes
+
+- New `domain/episode_nodes.py::menhir_queue_episode_cypher` (`valid_at IS NULL`): Menhir's queue
+  `:Episodic` never carries `valid_at`; Graphiti's resolved episode always does. `processing_state`
+  could not tell them apart because the node-defaults migration stamps it on Graphiti's episodes at
+  bootstrap, so the source-memory section / `recall_history` (`search_episode_embeddings`) and the
+  embedding backfill (`list_episodes_missing_content_embedding`) matched both nodes of every memory.
+- Measured on the LME oracle copy (40 namespaces, top-10 searches): 200 of 400 returned slots were
+  duplicate content before, 0 after. Existing duplicate embeddings on Graphiti episodes become inert;
+  no data cleanup is required. The ingest-time embed step already targeted only the queue node.
+- Same assumption, not changed here (see #215): `reset_zero_extraction_episodes` (no callers), the
+  SESSION orphan cleanup, and READY counts in the explorer/overview.
+
 ## 2026-10-01 - Graphiti fork 0.30.2.post2; merge-lineage filter moves into the fork
 
 - Pin `archolith-graphiti-core==0.30.2.post2` (fork tag `v0.30.2.post2` at `7aaab9ca`; wheel SHA-256

@@ -14,6 +14,7 @@ from menhir.domain.namespace import (
     tenant_scope_params,
 )
 from menhir.domain.recall_visibility import default_recall_visibility_cypher
+from menhir.domain.episode_nodes import menhir_queue_episode_cypher
 from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.utils import source_confidence_for
@@ -223,8 +224,9 @@ class EpisodeLifecycleRepository:
 
         Same predicates as the source-memory read query: the shared structural and
         visibility predicates, the shared `tenant_scope_cypher` tenancy predicate ('' and
-        'default' are the same silo; None is unscoped), and the `processing_state` guard that
-        matches only Menhir's own queue nodes and excludes FAILED enrichments -- so
+        'default' are the same silo; None is unscoped), `menhir_queue_episode_cypher` (only
+        Menhir's own queue nodes -- never Graphiti's episodes, which the schema migration also
+        stamps with `processing_state`, #215), and the guard that excludes FAILED enrichments -- so
         the backfill writes embeddings only for episodes the recall lane would ever
         surface. Idempotent by construction: a node gains `content_embedding` and
         drops out of this listing.
@@ -233,6 +235,7 @@ class EpisodeLifecycleRepository:
         where = [
             "(n:Episodic)",
             "n.content_embedding IS NULL",
+            menhir_queue_episode_cypher("n"),
             "n.processing_state IS NOT NULL",
             "n.processing_state <> 'FAILED'",
             non_structural_memory_cypher("n"),
