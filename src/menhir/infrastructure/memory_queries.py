@@ -20,6 +20,7 @@ from menhir.domain.namespace import (
     namespace_to_group_ids,
     tenant_scope_cypher,
     tenant_scope_params,
+    tenant_scope_prefilter_cypher,
 )
 from menhir.domain.recall_visibility import default_recall_visibility_cypher
 from menhir.domain.structural_memory import non_structural_memory_cypher
@@ -422,6 +423,11 @@ class MemoryQueryRepository:
         if model is not None:
             where.append("coalesce(n.content_embedding_model, '') = $embedding_model")
             params["embedding_model"] = model
+        # menhir #171: when scoped, lead with the index-friendly prefilter so the planner can
+        # seek the :Episodic(namespace)/:Episodic(group_id) RANGE indexes. It is a superset;
+        # tenant_scope_cypher below still decides membership. Unscoped (None) is unchanged.
+        if namespace_spellings(namespace) is not None:
+            where.insert(0, tenant_scope_prefilter_cypher("n"))
         where.append(tenant_scope_cypher("n"))
         return self.neo4j.execute(
             f"""

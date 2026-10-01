@@ -168,6 +168,25 @@ def tenant_scope_cypher(variable: str = "n", *, scheme: TenancyScheme = TenancyS
     )
 
 
+def tenant_scope_prefilter_cypher(variable: str = "n") -> str:
+    """An index-friendly SUPERSET of :func:`tenant_scope_cypher` (menhir #171).
+
+    Returns ``({v}.namespace IN $tenant_namespaces OR {v}.group_id IN $tenant_namespaces)``.
+    Unlike :func:`tenant_scope_cypher` this fragment is NOT the tenancy decision: it is a
+    superset used only so the query planner can seek the existing ``:Episodic(namespace)`` and
+    ``:Episodic(group_id)`` RANGE indexes instead of filtering every node with the unindexable
+    ``coalesce`` form. ``tenant_scope_cypher`` still decides membership and must always appear
+    alongside it; this fragment never replaces it. Callers must only use it when the namespace
+    is scoped (:func:`tenant_scope_params` not None); it shares the same ``$tenant_namespaces``
+    parameter and the same identifier validation as :func:`tenant_scope_cypher`.
+    """
+    if not variable or not variable.isidentifier():
+        raise ValueError(f"variable must be a Cypher identifier, got {variable!r}")
+    return (
+        f"({variable}.namespace IN ${_TENANT_PARAM} OR {variable}.group_id IN ${_TENANT_PARAM})"
+    )
+
+
 def namespace_to_group_id(namespace: str | None) -> str:
     """Translate a menhir namespace to the graphiti ``group_id`` used on WRITE.
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-01 - Source-memory section passes the #168 latency limit (#171)
+
+- The episode search now leads with an index-friendly tenancy prefilter
+  (`domain/namespace.py::tenant_scope_prefilter_cypher`, a superset matching the existing
+  `:Episodic(namespace)`/`(group_id)` indexes). `tenant_scope_cypher` still decides membership.
+  Results were identical on 120/120 LongMemEval namespaces, and the query went from 32 ms to 10 ms median.
+- `run_recall` starts the section's search right after the vector search, so it overlaps the
+  metadata and adjacency phases. It is awaited where it was before, so results and return paths are unchanged.
+- Measured on the LongMemEval oracle copy (195 q x 2): recall p50 +28% -> +2.5%, p95 -1%
+  (#168 limits +15% / +25%).
+
 ## 2026-10-01 - #172 context packing: declare tiktoken, skip oversized memories
 
 - `tiktoken` is now a declared dependency (`tiktoken>=0.8,<1`), so standard installs
