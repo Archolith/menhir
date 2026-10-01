@@ -19,7 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PINNED_FIRST_PARTY = {
     "archolith-oauth": "0.3.1",
     "archolith-mcp-framework": "0.2.0",
-    "archolith-graphiti-core": "0.30.2.post1",
+    "archolith-graphiti-core": "0.30.2.post2",
 }
 
 

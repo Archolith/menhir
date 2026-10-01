@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-10-01 - Graphiti fork 0.30.2.post2; merge-lineage filter moves into the fork
+
+- Pin `archolith-graphiti-core==0.30.2.post2` (fork tag `v0.30.2.post2` at `7aaab9ca`; wheel SHA-256
+  `d7588bc9d75407495f859dffb2ff7400566d856a434698bfd68dcb9dce6ec8b9`). It carries graphiti #2 (merge lineage
+  kept out of dedup/summary/attribute-extraction prompts) and #3 (combined extraction prompt split so the static
+  instructions are a cacheable system prefix, ~13.5% of ingest spend on providers that cache by message).
+- Removed the Menhir-side stopgap from #205 (`_strip_merge_lineage` and helpers in
+  `infrastructure/graphiti_llm_adapter.py`); the fork owns the policy now.
+  `tests/infrastructure/test_merge_lineage_prompt_policy.py` now renders the real fork prompts with
+  lineage-carrying nodes and asserts the fork drops the keys.
+- Version/hash references updated: install hints, fork contract/pin tests, E2E-6/E2E-8, release-image
+  workflow, `docs/post-install.md`, `.agent/architecture.md`.
+
 ## 2026-09-30 - #155 ground event dates in source evidence
 
 - Event-history perception no longer trusts the model's bare `when`:
