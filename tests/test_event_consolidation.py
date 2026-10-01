@@ -203,7 +203,7 @@ def test_success_persists_rebuilds_advances_canonical_self_and_reference_time():
     t1 = _row(
         "t1",
         "I bought a notebook on 2026-07-18.",
-        valid_at="2026-07-01T00:00:00Z",
+        valid_at="2026-07-20T00:00:00Z",  # #155: reference must not precede the stated date
         cursor_at="2026-07-05T00:00:00Z",
     )
     t2 = _row(
@@ -253,6 +253,57 @@ def test_success_persists_rebuilds_advances_canonical_self_and_reference_time():
     assert metrics["event_namespaces_failed"] == 0
     assert metrics["event_llm_calls"] == llm.calls == 1
     assert metrics["event_namespaces_dirty"] == 1
+
+
+@pytest.mark.unit
+def test_temporal_note_lands_in_event_time_notes_not_drop_reasons():
+    # #155 K3: an ungrounded model when is a KEPT event with a note, not a drop
+    graph = FakeGraph(
+        pages=[
+            [
+                _row(
+                    "t1",
+                    "I bought a notebook.",
+                    valid_at="2026-07-20T00:00:00Z",
+                    cursor_at="2026-07-05T00:00:00Z",
+                ),
+            ]
+        ]
+    )
+    llm = FakeLlm(
+        responses=[
+            json.dumps(
+                [
+                    {
+                        "episode": 0,
+                        "events": [
+                            {
+                                "subject": "user",
+                                "predicate": "bought",
+                                "object": "a notebook",
+                                "object_display": "",
+                                "domain": "",
+                                "when": "2099-01-01",
+                                "stated_span": "I bought a notebook.",
+                            }
+                        ],
+                    }
+                ]
+            )
+        ]
+    )
+
+    metrics = run_event_consolidation(
+        graph,
+        event_targets=["ns1"],
+        counting_llm=llm,
+        call_budget=None,
+        config=_default_config(),
+    )
+
+    assert len(graph.records) == 1
+    assert metrics["event_time_notes"].get("ungrounded_when_ignored") == 1
+    assert metrics["event_drop_reasons"] == {}
 
 
 @pytest.mark.unit
@@ -306,7 +357,7 @@ def test_structurally_invalid_response_does_not_advance(response):
                 _row(
                     "t1",
                     "I bought a notebook on 2026-07-18.",
-                    valid_at="2026-07-01T00:00:00Z",
+                    valid_at="2026-07-20T00:00:00Z",  # #155: reference must not precede the stated date
                     cursor_at="2026-07-05T00:00:00Z",
                 ),
             ]
@@ -342,7 +393,7 @@ def test_non_self_subject_rejected_but_structurally_valid_page_advances():
                 _row(
                     "t1",
                     "I bought a notebook on 2026-07-18.",
-                    valid_at="2026-07-01T00:00:00Z",
+                    valid_at="2026-07-20T00:00:00Z",  # #155: reference must not precede the stated date
                     cursor_at="2026-07-05T00:00:00Z",
                 ),
             ]
@@ -397,7 +448,7 @@ def test_all_self_tokens_are_admitted_and_canonicalized(subject):
                 _row(
                     "t1",
                     "I bought a notebook on 2026-07-18.",
-                    valid_at="2026-07-01T00:00:00Z",
+                    valid_at="2026-07-20T00:00:00Z",  # #155: reference must not precede the stated date
                     cursor_at="2026-07-05T00:00:00Z",
                 ),
             ]
@@ -452,7 +503,7 @@ def test_binding_pending_does_not_advance():
                 _row(
                     "t1",
                     "I bought a notebook on 2026-07-18.",
-                    valid_at="2026-07-01T00:00:00Z",
+                    valid_at="2026-07-20T00:00:00Z",  # #155: reference must not precede the stated date
                     cursor_at="2026-07-05T00:00:00Z",
                 ),
             ]
@@ -509,7 +560,7 @@ def test_incomplete_rebuild_does_not_advance():
                 _row(
                     "t1",
                     "I bought a notebook on 2026-07-18.",
-                    valid_at="2026-07-01T00:00:00Z",
+                    valid_at="2026-07-20T00:00:00Z",  # #155: reference must not precede the stated date
                     cursor_at="2026-07-05T00:00:00Z",
                 ),
             ]
@@ -637,7 +688,7 @@ def test_extraction_exception_fails_page_no_persist_rebuild_cursor():
                 _row(
                     "t1",
                     "I bought a notebook on 2026-07-18.",
-                    valid_at="2026-07-01T00:00:00Z",
+                    valid_at="2026-07-20T00:00:00Z",  # #155: reference must not precede the stated date
                     cursor_at="2026-07-05T00:00:00Z",
                 ),
             ]
@@ -691,7 +742,7 @@ def test_cursor_advance_exception_marks_namespace_failed_no_crash():
                 _row(
                     "t1",
                     "I bought a notebook on 2026-07-18.",
-                    valid_at="2026-07-01T00:00:00Z",
+                    valid_at="2026-07-20T00:00:00Z",  # #155: reference must not precede the stated date
                     cursor_at="2026-07-05T00:00:00Z",
                 ),
             ]

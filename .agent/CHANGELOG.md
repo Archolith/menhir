@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-09-30 - #155 ground event dates in source evidence
+
+- Event-history perception no longer trusts the model's bare `when`:
+  `EventPerceptionProposal` gains `when_context` (the episode sentence containing the
+  claim span; NOT part of `source_key`/identity), and `_resolve_event_valid_time` now
+  grounds `valid_at` in that sentence — a fully-explicit source date (`2026-07-18`,
+  `July 18, 2026`) wins (`when_conflict_used_source` on model disagreement), a stated
+  month+day without a year resolves to the most recent year on/before the episode
+  reference when the model's month/day matches, supported relative phrases
+  (`today`/`tonight`, `yesterday`, `N day(s)/week(s) ago`) resolve deterministically from
+  the reference (`when_conflict_used_relative` on model disagreement), and with NO stated
+  date any model `when` is ignored (`ungrounded_when_ignored`) in favor of the episode
+  reference. A source date more than 1 day after the reference is ignored
+  (`future_source_date_ignored`; 1 day of timezone tolerance). A month+day without a year
+  must match the model's month/day (or stand alone when the model gave none).
+  Reuses `typed_scalar_rules.parse_source_date` / `same_calendar_day` (new public
+  aliases); the scalar expiration/disposition policy is NOT copied.
+- A malformed model `when` no longer drops the whole event: it is treated as absent and
+  reported as a NON-fatal `malformed_when_ignored` note through the new `on_note` seam
+  (`parse_event_row(note=...)`, `extract_events_once(on_note=...)`).
+- `EventAssertionBuildResult` gains `note` (temporal resolution note) and event
+  consolidation records it (and `malformed_when_ignored`) in a separate
+  `event_time_notes` counter -- kept events are never counted as drops.
+- Version/replay: default `personal_memory_event_history_perceiver_version` bumped
+  `v1` -> `v2`. The event consolidation cursor is keyed to the perceiver version and a
+  cursor stamped by a DIFFERENT version is treated as a reset
+  (`TurnEvidenceRepository.load_next_event_evidence_batch`), so with the new default all
+  existing evidence IS automatically re-perceived and v2 assertions supersede v1 via
+  strict `perceiver_rank` (verified `perceiver_rank("v2") > perceiver_rank("v1")`).
+  Deployments pinning `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_PERCEIVER_VERSION=v1` keep
+  v1 events until they replay under v2.
+
 ## 2026-09-30 - recall_history drill-down tool
 
 - New read-only `recall_history` drill-down: matching saved memories strictly in time
