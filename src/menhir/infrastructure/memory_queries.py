@@ -385,8 +385,12 @@ class MemoryQueryRepository:
         *,
         limit: int = 10,
         namespace: str | None = None,
+        model: str | None = None,
     ) -> list[dict[str, object]]:
         """Cosine hits over Menhir `:Episodic` content embeddings (source-memory lane).
+
+        With ``model``, only vectors stamped by that embedder are compared: a different model of
+        the same dimension lives in a different space (audit F2).
 
         Read-only; pairs with the ingest-side `set_episode_content_embedding` write.
         Uses the same shared structural/visibility predicates and the shared
@@ -415,6 +419,9 @@ class MemoryQueryRepository:
             "limit": safe_limit,
             **tenant_scope_params(namespace),
         }
+        if model is not None:
+            where.append("coalesce(n.content_embedding_model, '') = $embedding_model")
+            params["embedding_model"] = model
         where.append(tenant_scope_cypher("n"))
         return self.neo4j.execute(
             f"""

@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
 from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FAMILY
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
+from menhir.services.embedding_identity import comparable_model, embedder_model_name
 from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.recall import (
     CandidateData,
@@ -134,6 +135,7 @@ async def _build_source_memories(
             query_vector,
             limit=effective_limit,
             namespace=namespace,
+            **_embedding_model_kwargs(service),
         )
         section: list[SourceMemory] = []
         for row in rows:
@@ -169,6 +171,12 @@ async def _build_source_memories(
             exc_info=True,
         )
         return None, "Source-memory lane unavailable", int((perf_counter() - started) * 1000)
+
+
+def _embedding_model_kwargs(service: Any) -> dict[str, str]:
+    """``{'model': name}`` when the current embedder model resolves, else nothing (no filter)."""
+    model = comparable_model(embedder_model_name(service.graphiti_client))
+    return {"model": model} if model else {}
 
 
 #: recall_history drill-down: full content up to this many chars, then a trailing ellipsis.
@@ -208,6 +216,7 @@ async def run_recall_history(
         query_vector,
         limit=effective_limit,
         namespace=namespace,
+        **_embedding_model_kwargs(service),
     )
     memories: list[SourceMemory] = []
     for row in rows:
