@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-01 - Ended-state quotes never yield a current scalar value (#168 step-5)
+
+- `services/typed_scalar_rules.py`: new ended-state cue (`no longer`, `anymore`, `quit`, `stopped`,
+  `gave up`, `used to`; the habit idiom "I'm used to X" excluded; a current or restoration cue such as
+  "now" or "again" cancels it). Boolean source polarity reads an ended state as `false` ("no longer" and
+  "used to" were previously treated as uncertain, so a model `true` passed; "quit"/"stopped" were not
+  recognized). A non-boolean `absolute`/`delta` row whose quote is ended-state is dropped (`ended_state`);
+  `expire` -- the contract's form for an ended value -- is unchanged.
+- Measurement units: `lb` / `lbs` / `pound` / `pounds` -> `lb`.
+- Found by the #168 step-5 offline value probe: "I quit smoking" (model `smokes=true`) and
+  "I no longer have 3 cars" (model `cars=3`, absolute) were admitted as current values; both now rejected.
+
 ## 2026-10-01 - recall_timeline on-demand time navigation; brief timeline removed
 
 - New read-only `recall_timeline` tool: on-demand time navigation over RECORDED
