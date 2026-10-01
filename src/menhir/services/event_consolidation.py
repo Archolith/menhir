@@ -171,6 +171,7 @@ def run_event_consolidation(
     event_assertions_created = 0
     event_views_rebuilt = 0
     event_drop_reasons: Counter[str] = Counter()
+    event_time_notes: Counter[str] = Counter()
     event_errors: Counter[str] = Counter()
 
     event_history_service = None
@@ -222,15 +223,22 @@ def run_event_consolidation(
                 episodes, valid_at_by_uuid = _build_episodes(rows)
                 page_ok = True
                 page_drops: Counter[str] = Counter()
+                # #155 K3: temporal notes are NOT drops — a noted event is KEPT, so they are
+                # counted separately and never inflate event_drop_reasons.
+                page_notes: Counter[str] = Counter()
 
                 def _record_drop(reason: str) -> None:
                     page_drops[reason] += 1
+
+                def _record_note(reason: str) -> None:
+                    page_notes[reason] += 1
 
                 proposals: list[Any] = []
                 if episodes:
                     try:
                         proposals = extract_events_once(
-                            episodes, counting_llm, on_drop=_record_drop
+                            episodes, counting_llm, on_drop=_record_drop,
+                            on_note=_record_note,
                         )
                         event_proposals += len(proposals)
                     except Exception as exc:  # noqa: BLE001 - extraction failure fails the page
@@ -301,6 +309,12 @@ def run_event_consolidation(
                         if not result.built:
                             _record_drop("no_valid_time")
                             continue
+                        # #155 K3: surface the temporal-resolution note (e.g.
+                        # when_conflict_used_source / ungrounded_when_ignored) in the separate
+                        # event_time_notes accounting so the resolution is auditable per page
+                        # WITHOUT counting a KEPT event as dropped.
+                        if result.note:
+                            _record_note(result.note)
                         assertions.append(result.assertion)
 
                 recorded: list[Any] = []
@@ -347,6 +361,7 @@ def run_event_consolidation(
                             event_views_rebuilt += int(rebuild.get("lane_count", 0))
 
                 event_drop_reasons.update(page_drops)
+                event_time_notes.update(page_notes)
 
                 if not page_ok:
                     namespace_failed = True
@@ -394,6 +409,7 @@ def run_event_consolidation(
         "event_assertions_created": event_assertions_created,
         "event_views_rebuilt": event_views_rebuilt,
         "event_drop_reasons": dict(event_drop_reasons),
+        "event_time_notes": dict(event_time_notes),
         "event_errors": dict(event_errors),
         "event_llm_calls": counting_llm.calls - start_calls,
     }

@@ -381,7 +381,9 @@ class MemorySettings:
     # Event-history projection settings. All OFF by default; the perceiver version
     # stamps the projection cursor so bumping it revisits history.
     personal_memory_event_history_enabled: bool = False
-    personal_memory_event_history_perceiver_version: str = "v1"
+    # v2 grounds event dates in source evidence (#155); bumping the default resets the projection
+    # cursor, so existing evidence is re-perceived and v2 assertions supersede v1 by strict rank.
+    personal_memory_event_history_perceiver_version: str = "v2"
     personal_memory_event_history_authority_enabled: bool = False
 
     # Benchmark mode — when true, disables the background scheduler,

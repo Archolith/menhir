@@ -1954,6 +1954,14 @@ def _same_calendar_day(a: str | None, b: str | None) -> bool:
     return da is not None and db is not None and da.date() == db.date()
 
 
+#: #155 public aliases for the deterministic source-date helpers, so the event-history perception
+#: boundary can reuse the SAME parsing without importing privates (no behavior change here).
+parse_source_date = _parse_source_date
+same_calendar_day = _same_calendar_day
+SRC_MONTH_DAY_RE = _SRC_MONTH_DAY_RE
+MONTHS = _MONTHS
+
+
 def resolve_temporal_disposition(
     stated_span: str, model_when: str | None, operation: str,
     episode_reference: str | None = None,

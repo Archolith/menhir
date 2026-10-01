@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, Callable
 
 from menhir.domain.event_history import TypedEventAssertion
@@ -31,10 +32,14 @@ from menhir.domain.temporal import parse_iso8601
 from menhir.domain.typed_assertion import build_source_key
 from menhir.services.event_history_recall import _has_whole_token
 from menhir.services.typed_scalar_rules import (
+    MONTHS,
+    SRC_MONTH_DAY_RE,
     _ground_span,
     _opt_str,
     _req_episode_index,
     _req_str,
+    parse_source_date,
+    same_calendar_day,
 )
 from menhir.services.seam_types import LlmComplete
 
@@ -167,6 +172,64 @@ def _object_grounded(stated_span: str, object_key: str) -> bool:
     return bool(obj and span) and _has_whole_token(span, obj)
 
 
+#: Sentence terminators that delimit the grounding-context sentence (#155).
+_SENTENCE_BREAKS = ".!?\n"
+
+
+def _sentence_context(content: str, span_start: int, span_end: int) -> str:
+    """The sentence of ``content`` containing the located span (#155): from the last ``.``/``!``/``?``
+    /newline before ``span_start`` to the first one at/after ``span_end``, inclusive of the span;
+    whitespace-trimmed. Deterministic and span-local, so a date stated in a DIFFERENT sentence of the
+    same episode is never attributed to this claim."""
+    if not content:
+        return ""
+    start = 0
+    for i in range(span_start - 1, -1, -1):
+        if content[i] in _SENTENCE_BREAKS:
+            start = i + 1
+            break
+    end = len(content)
+    for i in range(span_end, len(content)):
+        if content[i] in _SENTENCE_BREAKS:
+            end = i + 1
+            break
+    return content[start:end].strip()
+
+
+#: Supported relative date phrases for grounded event resolution (#155). Word counts one..ten only;
+#: anything else ("last week", "recently") is deliberately unsupported -> no relative grounding.
+_RELATIVE_WORD_NUMBERS: dict[str, int] = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+}
+_RELATIVE_RE = re.compile(
+    r"\b(?:(?P<days_num>\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\s+days?\s+ago|"
+    r"(?P<weeks_num>\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\s+weeks?\s+ago|"
+    r"(?P<today>today|tonight)|(?P<yesterday>yesterday)\b)",
+    re.IGNORECASE,
+)
+
+
+def _relative_days_ago(text: str) -> int | None:
+    """Days before the reference date stated by a supported relative phrase, or None when the text
+    carries none. ``today``/``tonight`` -> 0, ``yesterday`` -> 1, ``N day(s) ago`` -> N,
+    ``N week(s) ago`` -> 7*N. N is a digit 1-60 or a word one..ten."""
+    m = _RELATIVE_RE.search(text or "")
+    if m is None:
+        return None
+    if m.group("today"):
+        return 0
+    if m.group("yesterday"):
+        return 1
+    raw = m.group("days_num") or m.group("weeks_num") or ""
+    count = _RELATIVE_WORD_NUMBERS.get(raw.lower())
+    if count is None:
+        count = int(raw)
+        if not 1 <= count <= 60:
+            return None
+    return count * 7 if m.group("weeks_num") else count
+
+
 def canonicalize_predicate(token: str) -> str | None:
     """Map a surface predicate to its canonical form, or None for an unknown predicate (fail closed).
 
@@ -253,6 +316,7 @@ class EventPerceptionProposal:
     span_end: int
     domain: str | None = None
     when: str | None = None   # validated ISO world-time, or None
+    when_context: str = ""    # source sentence containing the span; NOT part of source_key/identity
     claim_ordinal: int = 0    # disambiguates same-lane claims when offsets are absent (always 0 here)
 
     def __post_init__(self) -> None:
@@ -346,22 +410,30 @@ def _expand_episode_envelopes(
 
 def parse_event_row(
     row: Any, episodes: list[Any], drop: "Callable[[str], None]",
+    note: "Callable[[str], None] | None" = None,
 ) -> "EventPerceptionProposal | None":
     """Validate ONE raw model row into a grounded proposal, or None with a `drop` reason.
 
     Fail-closed admission: a row survives ONLY if it is a real object with every required field
     (``subject``, ``predicate``, ``object``, ``stated_span``), ``predicate`` canonicalizes through the
-    acquisition registry, ``episode`` is a real in-range integer, any supplied ``when`` parses as ISO,
-    ``stated_span`` occurs EXACTLY ONCE in the episode text (unique grounding -> located offsets;
-    zero/multiple -> dropped as ungrounded/ambiguous), and the quote itself carries completed-
-    acquisition evidence — an explicit acquisition verb (purchased/bought/got/acquired) or a
-    conservative possessive-new construction ("my new X") — so a hallucinated row over arbitrary prose
-    is rejected. Intent/modal/hypothetical and negation are vetoed BEFORE the evidence gate: a
-    cue-laden or negated quote is admitted only when it also clearly states a completed acquisition
-    (conservative). Everything else fails closed to omission; malformed model output never acquires a
-    semantic default.
+    acquisition registry, ``episode`` is a real in-range integer, ``stated_span`` occurs EXACTLY ONCE
+    in the episode text (unique grounding -> located offsets; zero/multiple -> dropped as
+    ungrounded/ambiguous), and the quote itself carries completed-acquisition evidence — an explicit
+    acquisition verb (purchased/bought/got/acquired) or a conservative possessive-new construction
+    ("my new X") — so a hallucinated row over arbitrary prose is rejected. Intent/modal/hypothetical
+    and negation are vetoed BEFORE the evidence gate: a cue-laden or negated quote is admitted only
+    when it also clearly states a completed acquisition (conservative). Everything else fails closed
+    to omission; malformed model output never acquires a semantic default.
 
-    Pure. ``drop`` is called at most once, immediately before returning None.
+    A NON-parseable ``when`` (#155) is treated as absent and reported through the separate NON-fatal
+    ``note`` seam as ``malformed_when_ignored`` — it no longer drops the whole event; the grounded
+    resolver decides later whether any time is usable. ``drop`` is still called at most once,
+    immediately before returning None; ``note`` is called at most once for a non-fatal observation
+    and never instead of a drop. The proposal also carries ``when_context`` — the sentence of the
+    episode content containing the located span — for grounded temporal resolution; it is NOT part of
+    ``source_key`` or any identity.
+
+    Pure.
     """
     if not isinstance(row, dict):
         drop("not_an_object")
@@ -404,9 +476,12 @@ def parse_event_row(
     if when:
         dt = parse_iso8601(when)
         if dt is None:
-            drop("malformed_when")
-            return None
-        when_parsed = dt.isoformat()
+            # #155: a malformed model `when` no longer drops the event — treat it as absent and
+            # report it as a non-fatal note; the grounded resolver owns the fallback.
+            if note is not None:
+                note("malformed_when_ignored")
+        else:
+            when_parsed = dt.isoformat()
 
     content = str(getattr(episodes[idx], "content", "") or "")
     span = _ground_span(content, stated_span)
@@ -455,6 +530,7 @@ def parse_event_row(
         span_end=span_end,
         domain=domain,
         when=when_parsed,
+        when_context=_sentence_context(content, span_start, span_end),
         claim_ordinal=0,
     )
 
@@ -462,6 +538,7 @@ def parse_event_row(
 def extract_events_once(
     episodes: list[Any], llm_complete: LlmComplete,
     *, on_drop: "Callable[[str], None] | None" = None,
+    on_note: "Callable[[str], None] | None" = None,
 ) -> list[EventPerceptionProposal]:
     """One event-perception pass: prose -> validated, grounded ``EventPerceptionProposal``s.
 
@@ -471,8 +548,10 @@ def extract_events_once(
     injected ``llm_complete``; writes nothing.
 
     ``on_drop`` is an OPTIONAL observability seam: called once per DISCARDED row with a short reason,
-    and ONCE for a whole-response parse failure. It is injected rather than emitted from here so the
-    function stays pure by default and so any audit emit lives with the other emits in the caller.
+    and ONCE for a whole-response parse failure. ``on_note`` (#155) is the separate NON-fatal seam:
+    called for observations that do NOT discard the row (e.g. ``malformed_when_ignored``). Both are
+    injected rather than emitted from here so the function stays pure by default and so any audit
+    emit lives with the other emits in the caller.
     """
     if not episodes:
         return []
@@ -480,6 +559,10 @@ def extract_events_once(
     def _drop(reason: str) -> None:
         if on_drop is not None:
             on_drop(reason)
+
+    def _note(reason: str) -> None:
+        if on_note is not None:
+            on_note(reason)
 
     log = "\n".join(f"[{i}] {getattr(e, 'content', '')}" for i, e in enumerate(episodes))
     raw_rows, parse_failure = _parse_json_array(llm_complete(EVENT_SYSTEM_PROMPT, log))
@@ -490,29 +573,115 @@ def extract_events_once(
 
     out: list[EventPerceptionProposal] = []
     for row in raw_rows:
-        proposal = parse_event_row(row, episodes, _drop)
+        proposal = parse_event_row(row, episodes, _drop, note=_note)
         if proposal is not None:
             out.append(proposal)
     return out
 
 
-def _resolve_event_valid_time(
-    when: str | None, episode_reference_time: str | None,
-) -> "tuple[str | None, str | None]":
-    """Choose (valid_at, time_basis) for the assertion, precision-first and NEVER using ingest time:
-      * an explicit validated ``when`` (from admission) -> (when, 'explicit');
-      * else the episode's own reference time when it parses -> (that time, 'episode_reference');
-      * else -> (None, None): abstention, because neither source nor world time is usable.
+def _stated_month_day(text: str) -> "tuple[int, int] | None":
+    """The (month, day) the text states as a specific date with NO year, reusing the scalar side's
+    month/day pattern so the two resolvers cannot drift; None when none is stated."""
+    m = SRC_MONTH_DAY_RE.search(text or "")
+    if m is None:
+        return None
+    parts = re.match(r"([A-Za-z]+)\.?\s+(\d{1,2})", m.group(0))
+    if parts is None:
+        return None
+    month = MONTHS.get(parts.group(1)[:3].lower())
+    if month is None:
+        return None
+    return month, int(parts.group(2))
 
-    ``learned_at`` is deliberately NOT a fallback — event authority orders by world/source time only,
-    and an ungrounded ingest stamp must never masquerade as an occurrence time."""
-    if when:
-        return when, "explicit"
-    if episode_reference_time:
-        dt = parse_iso8601(episode_reference_time)
-        if dt is not None:
-            return episode_reference_time, "episode_reference"
-    return None, None
+
+def _resolve_event_valid_time(
+    when: str | None, when_context: str, episode_reference_time: str | None,
+) -> "tuple[str | None, str | None, str | None]":
+    """Grounded (valid_at, time_basis, note) resolution (#155), precision-first and NEVER using ingest
+    time. ``when_context`` is the source sentence containing the claim span; all comparisons are by
+    calendar date in the episode reference's timezone. Rules, in order:
+
+      a. ``parse_source_date(when_context, ...)`` resolves a fully-explicit source date;
+      b. a full source date ON OR BEFORE the reference date (more than 1 day after the reference is
+         future; 1 day is timezone tolerance) wins -> (that date, 'explicit'), noting
+         ``when_conflict_used_source`` when the model gave a different day. A source date AFTER the
+         reference cannot be a completed acquisition -> treated as no source date, note
+         ``future_source_date_ignored``;
+      c. a month+day with no year: the stated month/day (extracted deterministically from
+         ``when_context``) is used when the model's ``when`` is absent OR carries the SAME month/day,
+         in the most recent year on or before the reference date -> 'explicit'; otherwise fall back,
+         note ``undated_month_day_unmatched``;
+      d. a supported relative phrase (today/tonight, yesterday, N day(s)/week(s) ago) computes the
+         date deterministically from the reference -> that date, 'explicit', noting
+         ``when_conflict_used_relative`` when the model gave a different day (a blank or matching
+         model ``when`` notes None);
+      e. no stated date: any model ``when`` is UNgrounded and ignored (note
+         ``ungrounded_when_ignored``) and we fall back.
+
+    Fallback is the prior behavior: the episode reference time -> ('episode_reference'); an
+    unparseable reference -> (None, None): abstention. ``learned_at`` is deliberately NOT a fallback —
+    event authority orders by world/source time only, and an ungrounded ingest stamp must never
+    masquerade as an occurrence time. The scalar side's expiration/temporal-disposition policy is NOT
+    copied here; only its deterministic date parsing is reused.
+    """
+    note: str | None = None
+    ref = parse_iso8601(episode_reference_time)
+    ref_date = ref.date() if ref else None
+
+    def _fallback() -> "tuple[str | None, str | None, str | None]":
+        if when and note is None:
+            return_note: str | None = "ungrounded_when_ignored"
+        else:
+            return_note = note
+        if episode_reference_time and ref is not None:
+            return episode_reference_time, "episode_reference", return_note
+        return None, None, return_note
+
+    src, unresolvable = parse_source_date(when_context, episode_reference_time)
+    if src is not None:
+        src_dt = parse_iso8601(src)
+        # #155 K2: more than 1 day after the reference is future (1 day is timezone tolerance)
+        if (
+            src_dt is not None and ref_date is not None
+            and src_dt.date() > ref_date + timedelta(days=1)
+        ):
+            note = "future_source_date_ignored"   # future dates cannot be completed acquisitions
+        else:
+            conflict = bool(when) and not same_calendar_day(when, src)
+            return src, "explicit", ("when_conflict_used_source" if conflict else None)
+
+    when_dt = parse_iso8601(when) if when else None
+    if unresolvable:
+        stated = _stated_month_day(when_context)
+        if (
+            ref is not None and ref_date is not None and stated is not None
+            and (when_dt is None or (when_dt.month, when_dt.day) == stated)
+        ):
+            candidate = None
+            base = when_dt or ref.replace(hour=0, minute=0, second=0, microsecond=0)
+            for year in (ref.year, ref.year - 1):
+                try:
+                    cand = base.replace(year=year, month=stated[0], day=stated[1])
+                except ValueError:
+                    break  # e.g. Feb 29 in a non-leap year: not resolvable
+                if cand.date() <= ref_date:
+                    candidate = cand
+                    break
+            if candidate is not None:
+                return candidate.isoformat(), "explicit", None
+        if note is None:
+            note = "undated_month_day_unmatched"
+        return _fallback()
+
+    days_ago = _relative_days_ago(when_context)
+    if days_ago is not None and ref is not None:
+        computed = ref.replace(hour=0, minute=0, second=0, microsecond=0)
+        computed = (computed - timedelta(days=days_ago)).isoformat()
+        if not when or same_calendar_day(when, computed):
+            return computed, "explicit", None
+        return computed, "explicit", "when_conflict_used_relative"
+
+    return _fallback()
 
 
 @dataclass(frozen=True)
@@ -520,10 +689,13 @@ class EventAssertionBuildResult:
     """Pure builder receipt. ``assertion`` is None EXACTLY when the builder abstained (no usable
     world/source time); ``reason`` explains that abstention and is None on success, so a caller can
     inspect and distinguish ``no_valid_time`` from any future abstention reason without string-matching
-    prose. ``built`` is True only when an assertion was produced."""
+    prose. ``built`` is True only when an assertion was produced. ``note`` (#155) is the temporal
+    resolution note (e.g. ``when_conflict_used_source``, ``ungrounded_when_ignored``) for audit, or
+    None when resolution needed no qualification."""
 
     assertion: TypedEventAssertion | None
     reason: str | None = None
+    note: str | None = None
 
     @property
     def built(self) -> bool:
@@ -540,16 +712,18 @@ def build_event_assertion(
     context. Returns an ``EventAssertionBuildResult``: ``built`` True with the assertion on success, or
     ``built`` False with an inspectable ``reason`` (``no_valid_time``) on explicit abstention.
 
-    ``valid_at`` uses the proposal's explicit world time when present (``explicit``), else the
-    episode reference time (``episode_reference``). ``learned_at`` is NEVER used as ``valid_at``. If
-    neither source nor world time is usable the builder abstains and returns no authority-eligible
-    data rather than creating it. Evidence tier is forced to ``agent`` (the lowest, advisory tier) —
-    probabilistic extraction can never grant itself authority. Pure; does not persist or project. The
-    proposal's span/episode flow through unchanged, so the assertion's binding-stable ``source_key`` is
-    IDENTICAL to the one the proposal predicted."""
-    valid_at, time_basis = _resolve_event_valid_time(proposal.when, episode_reference_time)
+    ``valid_at`` uses the grounded source date in the proposal's ``when_context`` when one resolves
+    (``explicit``), else the episode reference time (``episode_reference``); the model's bare ``when``
+    is only ever a cross-check, never the persisted value on its own (#155). ``learned_at`` is NEVER
+    used as ``valid_at``. If neither source nor world time is usable the builder abstains and returns
+    no authority-eligible data rather than creating it. Evidence tier is forced to ``agent`` (the
+    lowest, advisory tier) — probabilistic extraction can never grant itself authority. Pure; does not
+    persist or project. The proposal's span/episode flow through unchanged, so the assertion's
+    binding-stable ``source_key`` is IDENTICAL to the one the proposal predicted."""
+    valid_at, time_basis, note = _resolve_event_valid_time(
+        proposal.when, proposal.when_context, episode_reference_time)
     if valid_at is None:
-        return EventAssertionBuildResult(None, "no_valid_time")
+        return EventAssertionBuildResult(None, "no_valid_time", note)
     assertion = TypedEventAssertion(
         subject_uuid=subject_uuid,
         subject_display=proposal.subject_text,
@@ -570,4 +744,4 @@ def build_event_assertion(
         evidence_tier="agent",
         perceiver_version=perceiver_version,
     )
-    return EventAssertionBuildResult(assertion)
+    return EventAssertionBuildResult(assertion, note=note)
