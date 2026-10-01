@@ -23,6 +23,7 @@ from menhir.domain.namespace import (
 )
 from menhir.domain.recall_visibility import default_recall_visibility_cypher
 from menhir.domain.structural_memory import non_structural_memory_cypher
+from menhir.domain.episode_nodes import menhir_queue_episode_cypher
 from menhir.domain.recall import adjacency_edge_pattern
 from menhir.infrastructure.cypher import (
     Cypher,
@@ -392,8 +393,9 @@ class MemoryQueryRepository:
         `tenant_scope_cypher` tenancy predicate as the rest of the domain ('' and 'default' are
         the same silo; None is unscoped), so only memories generic recall could surface are
         searched. Only
-        Menhir's own queue nodes match (they carry `processing_state`; Graphiti's own
-        `:Episodic` resolution nodes do not) and FAILED enrichments are excluded. A
+        Menhir's own queue nodes match (`menhir_queue_episode_cypher`; `processing_state` alone
+        does not identify them -- the schema migration stamps it on Graphiti's episodes too, #215)
+        and FAILED enrichments are excluded. A
         stale-dimension embedding is skipped by the size guard instead of erroring
         the query. Evidence projections are excluded by
         `non_structural_memory_cypher`.
@@ -402,6 +404,7 @@ class MemoryQueryRepository:
         where = [
             "n.content_embedding IS NOT NULL",
             "size(n.content_embedding) = size($query_vector)",
+            menhir_queue_episode_cypher("n"),
             "n.processing_state IS NOT NULL",
             "n.processing_state <> 'FAILED'",
             non_structural_memory_cypher("n"),
