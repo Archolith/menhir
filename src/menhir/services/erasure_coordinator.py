@@ -91,17 +91,29 @@ class ErasureCoordinator:
 
     # ------------------------------------------------------------------ public entry points
     def erase_memory(self, node_uuid: str, *, dry_run: bool = False) -> dict[str, Any]:
-        """Erase one memory node and every sidecar row addressable to it."""
+        """Erase one memory -- the node, its `:Episodic` twin, and every sidecar row addressable to them.
+
+        A memory has two `:Episodic` nodes (Menhir's queue node and the Graphiti episode it resolves
+        to); both carry the verbatim content, so erasing either erases both (audit Q1 / #119). The
+        twins are resolved BEFORE prepare and recorded as subjects, so a crash after deleting one is
+        replayed for all of them; each node runs the unchanged single-node graph cascade. A twin
+        lookup failure propagates (fail closed) rather than erasing only half the memory.
+        """
         node_uuid = (node_uuid or "").strip()
         if not node_uuid:
             return {"reason": NOTHING_TO_ERASE, "subjects": 0}
+        twin_lookup = getattr(self.graph_adapter, "episodic_twin_uuids", None)
+        twins = [str(t) for t in (twin_lookup(node_uuid) if callable(twin_lookup) else []) if t]
+        targets = [node_uuid, *[t for t in twins if t != node_uuid]]
         return self._run(
-            subjects=[("NODE_UUID", node_uuid)],
-            purge=_subjects_for_uuids({node_uuid}),
-            request={"targets": [node_uuid], "namespace": None},
+            subjects=[("NODE_UUID", target) for target in targets],
+            purge=_subjects_for_uuids(set(targets)),
+            request={"targets": targets, "namespace": None},
             target_uuid=node_uuid,
             target_key=None,
-            delete_graph=lambda: 1 if self.graph_adapter.delete_memory(node_uuid) else 0,
+            delete_graph=lambda: sum(
+                1 if self.graph_adapter.delete_memory(target) else 0 for target in targets
+            ),
             dry_run=dry_run,
         )
 

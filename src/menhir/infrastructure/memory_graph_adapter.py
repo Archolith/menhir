@@ -399,6 +399,10 @@ class MemoryGraphAdapter:
             episode_uuid, embedding, model
         )
 
+    def episodic_twin_uuids(self, node_uuid: str) -> list[str]:
+        """See EpisodeLifecycleRepository.episodic_twin_uuids."""
+        return self._episodes.episodic_twin_uuids(node_uuid)
+
     def list_episodes_missing_content_embedding(
         self,
         namespace: str | None = None,

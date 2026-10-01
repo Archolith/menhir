@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-01 - Erasing a memory erases both of its :Episodic nodes (audit Q1, #119)
+
+- `erase_memory` (and `delete_memory`, which delegates to it) now resolves the memory's twin before
+  PREPARE: Menhir's queue node and the Graphiti episode it resolves to (`resolved_episode_uuid`) both
+  carry the verbatim content, so erasing either erases both. Twins are recorded as erasure subjects, so a
+  crash between the two deletes is replayed for both; each node runs the unchanged single-node graph
+  cascade and sidecar purge. A twin lookup failure fails closed (no PREPARE, nothing deleted).
+- New read-only `episodic_twin_uuids` (episode lifecycle + adapter): only same-namespace twins, compared
+  with `normalize_namespace` in Python.
+- Derived entities and fact edges built from the episode are unchanged (#119 derived-retention scope).
+
 ## 2026-10-01 - Source-memory backfill paging and embedding-model identity (delta audit F1/F2)
 
 - F1: `list_episodes_missing_content_embedding` filters blank content in Cypher (not after `LIMIT`)
