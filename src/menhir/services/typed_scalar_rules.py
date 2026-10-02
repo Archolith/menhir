@@ -102,6 +102,7 @@ _MEASUREMENT_UNIT_ALIASES: dict[str, str] = {
     "km": "km", "kilometer": "km", "kilometers": "km",
     "kilometre": "km", "kilometres": "km",
     "mi": "miles", "mile": "miles", "miles": "miles",
+    "lb": "lb", "lbs": "lb", "pound": "lb", "pounds": "lb",
     "%": "percent", "percent": "percent", "percentage": "percent",
 }
 _SOURCE_NUMBER = r"[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
@@ -119,7 +120,7 @@ _CLOCK_MERIDIEM_RE = re.compile(r"^\s*(?P<suffix>[ap](?:[.\s/:-]?m)[\w.]*)", re.
 _CLOCK_SUPPORTED_MERIDIEM_RE = re.compile(r"[ap]\.?m\.?", re.IGNORECASE)
 _USD_SOURCE_RE = re.compile(r"\$|\b(?:usd|dollars?)\b", re.IGNORECASE)
 _BOOLEAN_UNCERTAIN_RE = re.compile(
-    r"\b(?:no\s+longer|used\s+to|did(?:\s+not|n't)\s+use\s+to|might|may|could|perhaps)\b|"
+    r"\b(?:did(?:\s+not|n't)\s+use\s+to|might|may|could|perhaps)\b|"
     r"\b(?:do\s+not|don't)\s+think\b|\bnot\s+sure\b",
     re.IGNORECASE,
 )
@@ -127,6 +128,35 @@ _BOOLEAN_NEGATIVE_RE = re.compile(
     r"\b(?:do\s+not|don't|does\s+not|doesn't)\b|\b(?:am|is|are)\s+not\b",
     re.IGNORECASE,
 )
+#: ENDED-STATE framing: the quoted state held before and does not hold now ("I quit smoking",
+#: "I no longer have 3 cars", "I don't drive anymore", "I used to live in Dallas"). The extraction
+#: contract represents an ended value as operation=expire (or boolean false), so an ended-state quote
+#: must never yield a CURRENT value: booleans read false, absolute/delta values are dropped.
+_ENDED_STATE_RE = re.compile(
+    r"\b(?:no\s+longer|any\s*more|quit|quits|stopped|gave\s+up|given\s+up|used\s+to)\b",
+    re.IGNORECASE,
+)
+#: the habit idiom "I'm used to X" / "got used to X" is a CURRENT state, not an ended one.
+_USED_TO_HABIT_RE = re.compile(
+    r"(?:\b(?:am|is|are|was|were|be|been|being|get|gets|got|getting|become|became)|'(?:m|re|s))"
+    r"\s+used\s+to\b",
+    re.IGNORECASE,
+)
+#: restoration: the ended state came back ("I quit, but started again").
+_RESTORATION_RE = re.compile(
+    r"\b(?:again|resumed|started\s+back|back\s+to)\b",
+    re.IGNORECASE,
+)
+
+
+def _ended_state(stated_span: str) -> bool:
+    """True when the quote frames its state as ended, with no current or restoration cue."""
+    span = _USED_TO_HABIT_RE.sub(" ", stated_span or "")
+    if not _ENDED_STATE_RE.search(span):
+        return False
+    return not (_CURRENT_RE.search(span) or _RESTORATION_RE.search(span))
+
+
 _BOOLEAN_POSITIVE_RE = re.compile(
     r"\b(?:i|we|you|they|he|she|it)\s+(?:have|has)\b",
     re.IGNORECASE,
@@ -785,6 +815,8 @@ def _boolean_source_polarity(stated_span: str) -> bool | None:
     span = (stated_span or "").strip()
     if not span or _BOOLEAN_UNCERTAIN_RE.search(span):
         return None
+    if _ended_state(span):
+        return False
     if _BOOLEAN_NEGATIVE_RE.search(span):
         return False
     if _BOOLEAN_POSITIVE_RE.search(span):
@@ -1257,6 +1289,13 @@ def parse_scalar_row(
     # samples happened to agree on. A genuine [lo, hi] range value is exempt.
     if is_ambiguous_exact(stated_span, value, operation):
         drop("hedged_value")
+        return None
+
+    # Ended-state framing ("I no longer have 3 cars", "I used to weigh 90 kg") states a value that is
+    # NOT current. The contract for that is operation=expire (kept), never an absolute/delta current
+    # value; booleans are handled by source polarity above (ended -> false).
+    if value_kind != "boolean" and operation in ("absolute", "delta") and _ended_state(stated_span):
+        drop("ended_state")
         return None
 
     # When-discipline: deterministically resolve temporal grounding from the span. A past-only,
