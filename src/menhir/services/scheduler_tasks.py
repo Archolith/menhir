@@ -721,6 +721,7 @@ async def consolidate_personal_memory(
         # Scalar consolidation is independently dirty-tracked but shares this run's counting LLM,
         # so the configured budget remains global across counter and scalar phases.
         if enable_scalar_state:
+            scalar_start_calls = counting_llm.calls
             result.update(
                 run_scalar_consolidation(
                     graph_adapter,
@@ -751,6 +752,7 @@ async def consolidate_personal_memory(
                     ),
                 )
             )
+            result["scalar_llm_calls"] = counting_llm.calls - scalar_start_calls
         # Event-history consolidation is independently dirty-tracked but shares this run's counting
         # LLM, so the configured budget remains global across counter, scalar, and event phases.
         if enable_event_history:

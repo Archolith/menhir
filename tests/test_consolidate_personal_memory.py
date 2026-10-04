@@ -365,6 +365,7 @@ def test_flag_on_runs_independent_scalar_pass_and_advances_only_scalar_cursor() 
     assert out["scalar_states_written"] == 1 and out["scalar_advisory"] == 0
     assert out["scalar_namespaces_processed"] == 1
     assert out["llm_calls"] == 3                         # includes scalar-only LLM work
+    assert out["scalar_llm_calls"] == 3
     assert [a[0] for a in graph.advances] == ["lme-a"]   # scalar cursor advanced
     assert graph.counter_marked == []                    # counter watermark UNTOUCHED
     # CF-131: the episode says "I wake at 07:30", so the subject is FIRST PERSON and binds

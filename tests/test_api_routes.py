@@ -91,6 +91,7 @@ def fake_runtime_ctx():
     graph_adapter = SimpleNamespace(
         list_dirty_namespaces=lambda *, limit=500: ["ns-bench"],
         count_turn_evidence=lambda ns: 2,
+        load_next_event_evidence_batch=Mock(return_value=[]),
         list_counters=lambda *, namespace=None, limit=100: [
             {"subject": "movies", "counter": "watchlist", "value": 20,
              "valid_at": "2026-07-01T00:00:00Z"},
@@ -548,6 +549,7 @@ class TestPhase3:
                 "abstained": 0,
                 "corrections_applied": 0,
                 "llm_calls": 6,
+                "scalar_llm_calls": 3,
                 "scalar_namespaces_processed": 1,
                 "scalar_states_written": 2,
                 "scalar_advisory": 1,
@@ -568,6 +570,7 @@ class TestPhase3:
         assert data["phase3_selected"] is True
         assert data["views_written"] == 2
         assert data["llm_calls"] == 6
+        assert data["scalar_llm_calls"] == 3
         assert data["scalar_enabled"] is True
         assert data["scalar_states_written"] == 2
         assert consolidate.await_args.kwargs["namespaces"] == ["ns-bench"]
@@ -863,3 +866,32 @@ def test_rest_bootstrap_context_keeps_lifecycle_state(client, fake_backend):
     assert "not current guidance" in payload["relevant"][0]["lifecycle_note"]
     assert payload["recent"][0]["status"] == "completed"
     assert "not an outstanding obligation" in payload["recent"][0]["lifecycle_note"]
+
+
+@pytest.mark.parametrize("pending", [[], [{"uuid": "unprocessed-evidence"}]])
+def test_phase3_reports_event_watermark_completion(client, fake_runtime_ctx, pending):
+    fake_runtime_ctx.built.settings.personal_memory_event_history_enabled = True
+    fake_runtime_ctx.built.settings.personal_memory_event_history_perceiver_version = "v9"
+    fake_runtime_ctx.built.graph_adapter.load_next_event_evidence_batch.return_value = pending
+    with patch("menhir.infrastructure.sync_llm.make_sync_chat", return_value=lambda *args: "[]"), \
+         patch("menhir.infrastructure.view_embedder.make_view_embedder", return_value=None), \
+         patch("menhir.services.scheduler_tasks.consolidate_personal_memory", new=AsyncMock(return_value={})):
+        response = client.post("/api/phase3/run", json={"namespace": "ns-bench", "counter_state": False})
+    assert response.status_code == 200
+    assert response.json()["event_dirty_after"] is bool(pending)
+    fake_runtime_ctx.built.graph_adapter.load_next_event_evidence_batch.assert_called_once_with(
+        "ns-bench", perceiver_version="v9", limit=1,
+    )
+
+
+@pytest.mark.parametrize("configured,requested", [(False, False), (False, True), (True, False), (True, True)])
+def test_phase3_counter_enabled_reports_both_gates(client, fake_runtime_ctx, configured, requested):
+    fake_runtime_ctx.built.settings.personal_memory_consolidation_enabled = configured
+    consolidate = AsyncMock(return_value={})
+    with patch("menhir.infrastructure.sync_llm.make_sync_chat", return_value=lambda *args: "[]"), \
+         patch("menhir.infrastructure.view_embedder.make_view_embedder", return_value=None), \
+         patch("menhir.services.scheduler_tasks.consolidate_personal_memory", new=consolidate):
+        response = client.post("/api/phase3/run", json={"namespace": "ns-bench", "counter_state": requested})
+    assert response.status_code == 200
+    assert response.json()["counter_enabled"] is (configured and requested)
+    assert consolidate.await_args.kwargs["enable_counter_state"] is (configured and requested)
