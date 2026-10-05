@@ -12,7 +12,7 @@ live model call was made to produce this document.
 
 Owner decisions 2026-09-28: section 6 limits **ratified as written**; campaign model
 **GPT-6 Luna** (`openai/gpt-6-luna`); B1 cleared (`uv sync --frozen`); D1 filed as #193, but its
-fix is deferred. **No dollar ceiling is set and no paid run is authorized**: the owner
+fix was deferred at that baseline; the 2026-10-05 follow-up below repairs it. **No dollar ceiling is set and no paid run is authorized**: the owner
 questioned whether paid calls are needed at all, so every live run needs a fresh go-ahead.
 
 Scalar decisions (#170): agreement is **lenient** (threshold `2/3`, attribute/scope/subject
@@ -46,6 +46,34 @@ Record `importlib.metadata.version("archolith-graphiti-core")` in every run mani
 can't recur silently.
 
 ## 2. Supported fresh-install paths
+
+The tables below retain the 2026-09-28 baseline; the follow-up records candidate changes.
+
+### Package configuration follow-up (2026-10-05, #193)
+
+Audit the installed candidate wheel, source template and offline release-image configuration checks
+before the held ingest/qualification campaign. Reproduce blank generated OpenAI models in a clean
+non-editable install. Repair setup by filling missing/blank provider defaults from MemorySettings
+while preserving non-empty operator choices, secrets and explicit feature false values on rerun.
+Keep local embedding configuration manual where the product has no default. Do not normalize all
+empty settings globally or overwrite custom models by rerunning provider setup. Test fresh state,
+legacy blanks, custom settings and opt-outs; repeat the wheel probe after rebuilding. Record wheel
+hash/import origin and fork identity, and distinguish offline Dockerfile/builder checks from a real
+sealed-image build. No feature defaults, deployment, ingest, paid calls or RC freeze are authorized.
+
+Evidence: Python 3.12 non-editable wheel installed into a disposable clean venv; baseline
+wheel reproduced both blank OpenAI models. Rebuilt candidate wheel SHA256
+`1311f05b66b734a3b87e9c24e4b60a97ac2e5c0c6a6b9dd50481fead89e1da1b`
+imported from `package-config-venv/Lib/site-packages/menhir`, with
+`archolith-graphiti-core==0.30.2.post2`, upstream `graphiti-core` absent, and `pip check` clean.
+Candidate reinstall held those runtime dependencies fixed. Isolated installed-wheel probes
+passed fresh OpenAI/local defaults, preserved custom URL/models and a test secret, and byte-identical
+reruns. Explicit false values for Warden, belief, evidence-anchor, contradiction-interrupt and
+verifier-sync remained false in loaded settings. Focused setup/up/hook/readiness/package/image
+workflow/controller checks: **169 passed, 1 skipped**. The Dockerfile keeps feature defaults
+unchanged and installs verified wheelhouse artifacts without network resolution. This audit did
+not build or run a sealed release image: named-RC cold-container E2Es and frozen dependency/image
+provenance remain under #123; paid quality and ingest remain held until the end.
 
 | Path | Commands (README "Quick start") | Config it produces |
 |---|---|---|

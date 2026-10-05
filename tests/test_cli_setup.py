@@ -245,6 +245,55 @@ def test_apply_setup_rejects_unsupported_provider(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("provider,defaults", [
+    ("openai", {"OPENAI_CHAT_MODEL": "gpt-4o-mini", "OPENAI_EMBED_MODEL": "text-embedding-3-small"}),
+    ("local", {"LOCAL_LLM_BASE_URL": "http://127.0.0.1:8081/v1", "LOCAL_LLM_CHAT_MODEL": "qwen3.5-35b-a3b"}),
+])
+@pytest.mark.parametrize("initial", [None, "", '""', "custom-value"])
+def test_provider_defaults_fill_blanks_without_overwriting_choices_or_opt_outs(
+    tmp_path: Path, provider: str, defaults: dict[str, str], initial: str | None,
+) -> None:
+    state = tmp_path / "state"
+    state.mkdir()
+    opt_outs = ("MENHIR_FRONTIER_WARDEN_GATE=false\nMENHIR_FRONTIER_BELIEF_GATE=false\n"
+                "MENHIR_FRONTIER_EVIDENCE_ANCHOR=false\nMENHIR_FRONTIER_CONTRADICTION_INTERRUPT=false\n"
+                "MENHIR_VERIFIER_SYNC_ENABLED=false\n")
+    existing = opt_outs + "OPENAI_API_KEY=operator-secret\n"
+    if initial is not None:
+        existing += "".join(f"{key}={initial}\n" for key in defaults)
+    (state / ".env").write_text(existing, encoding="utf-8")
+    apply_setup(state, provider=provider, configure_git_hooks=False)
+    values = _env_map(state / ".env")
+    assert {key: values[key] for key in defaults} == {
+        key: "custom-value" if initial == "custom-value" else value for key, value in defaults.items()
+    }
+    assert values["OPENAI_API_KEY"] == "operator-secret"
+    assert opt_outs in (state / ".env").read_text(encoding="utf-8")
+    before = (state / ".env").read_bytes()
+    assert apply_setup(state, provider=provider, configure_git_hooks=False) == []
+    assert (state / ".env").read_bytes() == before
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("provider", ["openai", "local"])
+def test_provider_defaults_create_fresh_state_env(tmp_path: Path, provider: str) -> None:
+    state = tmp_path / "fresh-state"
+    state.mkdir()
+    apply_setup(state, provider=provider, configure_git_hooks=False)
+    values = _env_map(state / ".env")
+    if provider == "openai":
+        assert values["OPENAI_CHAT_MODEL"] == "gpt-4o-mini"
+        assert values["OPENAI_EMBED_MODEL"] == "text-embedding-3-small"
+    else:
+        assert values["LOCAL_LLM_BASE_URL"] == "http://127.0.0.1:8081/v1"
+        assert values["LOCAL_LLM_CHAT_MODEL"] == "qwen3.5-35b-a3b"
+        assert values["LOCAL_LLM_EMBED_MODEL"] == ""
+    before = (state / ".env").read_bytes()
+    assert apply_setup(state, provider=provider, configure_git_hooks=False) == []
+    assert (state / ".env").read_bytes() == before
+
+
+@pytest.mark.unit
 def test_setup_cli_accepts_provider_flags(tmp_path: Path) -> None:
     repo = _make_checkout(tmp_path / "menhir")
     result = CliRunner().invoke(
