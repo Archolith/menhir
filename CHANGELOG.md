@@ -1,5 +1,6 @@
 ## 2026-10-05 - Apply configured Warden profiles to context recall
 
+- `tests/test_warden_safety_matrix.py`: compare three Warden profiles across seven offline recall controls and independent optional guard runs; report harmful returns separately from warnings, useful refusals and unknown provenance in JUnit JSON. Document measured fixture limits in the existing verifier owner/index; no policy or default changes.
 - `domain/recall.py`, `services/recall_service.py`, `services/recall_pipeline.py`, `services/recall_support.py`: distinguish configured versus applied Warden checks, pending bypasses and metadata failures; expose detailed receipts only on request.
 - `core/backend_protocol.py`, `core/backend_runtime_data_ops.py`, `core/backend_client_ops.py`, `api/routes.py`, `api/routes_support.py`, `mcp/tools/recall/`: carry `include_warden_status=false` across canonical recall/context boundaries; preserve brief incomplete-check notices.
 - `services/context_builder.py`, `explorer/recall_lab.py`, `explorer/static/recall-lab.js`: budget optional diagnostics and mandatory notices with context; show execution receipts in Recall Lab details.
