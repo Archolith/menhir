@@ -1,5 +1,6 @@
 ## 2026-10-05 - Apply configured Warden profiles to context recall
 
+- `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: propose the merged #233 packaging/preflight baseline, current fork hash and defaults, isolated deterministic validation, pending image inputs, vulnerability triage and exact-source evidence sequence; preserve RC and paid-campaign holds.
 - `config/feature_flags.py`: add a 98-entry metadata inventory for boolean/mode settings, legacy settings readers and environment controls, with aliases, scoped prerequisites, observation markers and version requirements. Enforce inventory/default/binding/documentation consistency with AST and mutation controls; backfill 38 commented template entries without changing runtime behavior or defaults.
 - `.env.example`, `docs/post-install.md`, `.agent/default-off-features.md`: document bounded campaign controls, correct event-history variable names and explain upgrade precedence, explicit opt-outs and persisted-data limits; verify setup/template upgrades across 20 switches without changing defaults.
 - `src/menhir/cli/setup.py`: fill missing or blank provider model/URL settings from existing defaults in wheel and checkout setup (#193), preserving custom values, secrets and explicit feature opt-outs; add idempotence regression coverage.
