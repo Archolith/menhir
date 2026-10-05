@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
+    from menhir.domain.retrieval_tuning import RetrievalTuningConfig
     from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
     from menhir.services.recall_service import RecallService
 
@@ -234,9 +235,11 @@ class ContextBuilderService:
     recall_service: RecallService
     graph_adapter: MemoryGraphAdapter | None = None
     # Frontier: per-call size of the additive source-memory section inside build_context's
-    # recall. None = no section (build_context passes no tuning); bootstrap sets it from
-    # MENHIR_FRONTIER_SOURCE_MEMORIES / _SOURCE_MEMORY_LIMIT so the flag stays deployment-scoped.
+    # recall. None = no explicit per-call limit; retrieval tuning controls section enablement.
+    # Bootstrap supplies the configured limit when the deployment enables the section.
     source_memory_limit: int | None = None
+    # Use the same configured admission/ranking profile as ordinary backend recall.
+    retrieval_tuning: RetrievalTuningConfig | None = None
 
     async def build_context(
         self,
@@ -254,6 +257,8 @@ class ContextBuilderService:
         # invalidated candidates; it only prevents a recalled older fact from losing the
         # happened-at stamp needed to compare it with a later fact.
         recall_kwargs: dict[str, Any] = {}
+        if self.retrieval_tuning is not None:
+            recall_kwargs["tuning"] = self.retrieval_tuning
         if self.source_memory_limit is not None:
             recall_kwargs["source_memory_limit"] = self.source_memory_limit
         recall_result: RecallResult = await self.recall_service.recall(

@@ -240,6 +240,7 @@ def build_memory_services(
     context_builder = ContextBuilderService(
         recall_service=recall_service,
         graph_adapter=graph_adapter,
+        retrieval_tuning=settings.retrieval_tuning(),
         source_memory_limit=(
             getattr(settings, "frontier_source_memory_limit", None)
             if getattr(settings, "frontier_source_memories", False)

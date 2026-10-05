@@ -1,3 +1,13 @@
+## 2026-09-28 - Restore default-silo scalar owner lookup
+
+- `src/menhir/infrastructure/episode_lifecycle.py`: use the shared tenant-scope
+  predicate for exact fallback entity lookup, including both persisted default
+  namespace spellings while keeping named tenants scoped.
+- `tests/test_episode_lifecycle.py`: cover default and named namespace query
+  parameters and a disposable-graph regression for current, legacy, named,
+  and derived-View entities.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-28 - Schedule scalar-only personal memory
 
 - `src/menhir/core/runtime.py`, `src/menhir/services/maintenance_scheduler.py`:

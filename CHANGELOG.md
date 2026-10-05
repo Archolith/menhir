@@ -1,3 +1,10 @@
+## 2026-10-05 - Apply configured Warden profiles to context recall
+
+- `src/menhir/services/context_builder.py`, `src/menhir/core/bootstrap.py`, `src/menhir/cli/bootstrap.py`: pass the configured retrieval profile through runtime and direct-hook context recall, including Warden admission settings.
+- `tests/test_context_builder.py`, `tests/test_services_pipeline.py`: cover strict and conversational profiles, superseded and unknown-support controls, disabled-gate compatibility, and both production constructors.
+- `.agent/default-off-features.md`: explain strict versus conversational profiles and the limits of the scored-candidate gate; no defaults change.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-10-04 - Report Phase-3 lane completion for benchmark acceptance
 
 - `src/menhir/api/routes_handlers.py`, `src/menhir/api/routes_support.py`: report both counter gates, scalar-only model calls, and whether evidence remains beyond the event watermark.
@@ -57,14 +64,4 @@
 - `src/menhir/domain/typed_assertion.py`: canonical numeric form for voting and identity strips insignificant Decimal scale and signs zero (10, 10.0, 10.00 -> "10"; -0.00 -> "0"), without float (#152).
 - `src/menhir/infrastructure/typed_assertion_repair_repository.py`: stored `value_json` keeps the exact Decimal scale ("1200.50") instead of the canonical form.
 - `tests/test_scalar_decimal_equality.py`: gate, assertion-key and normalization regressions; `tests/test_money_currency_canonicalization.py`, `tests/test_typed_assertion_repository.py`: update the pinned normalized strings.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-09-28 - Restore default-silo scalar owner lookup
-
-- `src/menhir/infrastructure/episode_lifecycle.py`: use the shared tenant-scope
-  predicate for exact fallback entity lookup, including both persisted default
-  namespace spellings while keeping named tenants scoped.
-- `tests/test_episode_lifecycle.py`: cover default and named namespace query
-  parameters and a disposable-graph regression for current, legacy, named,
-  and derived-View entities.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
