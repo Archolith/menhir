@@ -1,5 +1,6 @@
 ## 2026-10-05 - Apply configured Warden profiles to context recall
 
+- `tests/test_consumer_session_e2e.py`: `_ingest_project` takes a graph-issued structure scan generation before the walk, as `scan_and_write_project` does, so the `needs_llm` session test no longer fails on the write fence with `StaleStructureScan`. Test-only.
 - `infrastructure/memory_queries.py`: `timeline_anchor` accepts a receipt (queue-node) uuid and resolves it to its Graphiti episode only through a visible, non-FAILED queue node in the caller's namespace; Graphiti uuids still anchor directly. Query mode and `around=<receipt>` no longer fail with "unknown or hidden memory" for live memories.
 - `services/timeline_service.py`: the query-mode seed search applies the current embedding-model filter (#220), so stale-model vectors cannot pick the anchor.
 - `tests/test_recall_timeline_receipt_anchor.py`, `tests/test_recall_timeline.py`: disposable-graph coverage for receipt/episode anchors, hidden/FAILED/pending receipts, cross-silo receipts, subject threads and the model filter; offline query-shape checks.

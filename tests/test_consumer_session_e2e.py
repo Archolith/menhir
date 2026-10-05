@@ -266,9 +266,13 @@ def _ingest_project(stack, root: Path, project: str, session_id: str) -> dict[st
         identity_action="new",
     )
     assert claim is not None, resolution.as_dict()
+    # As `scan_and_write_project` does: the write fence only accepts a graph-issued generation taken
+    # before the walk.
+    scan_generation = stack.graph_adapter.begin_structure_scan(claim)
     scan = ProjectScanner().scan(str(root), project)
     scan.project_id = claim.project_id
     scan.identity_generation = claim.generation
+    scan.scan_generation = scan_generation
     return stack.graph_adapter.write_project_structure(scan, session_id, "dev")
 
 
