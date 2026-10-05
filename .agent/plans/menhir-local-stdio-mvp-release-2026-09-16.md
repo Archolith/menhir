@@ -13,6 +13,62 @@ artifact_status: APPROVED
 
 **Current gate:** Gate B audit and pre-freeze Gate C acceptance are complete. The post-v0.2.3 fixes and the Opus review follow-up are merged through [PR #187](https://github.com/Archolith/menhir/pull/187); its four required checks passed on the reviewed head. Phase A inventory and the five-item Oracle harness preflight are recorded below. Phase D remains open for exact merged-commit checks, current release-container evidence, wheel identity, and configuration freeze before naming an RC. No RC, deployment, #119 repair, or final release is authorized by this status.
 
+## Proposed validation candidate — 2026-10-05
+
+This selects a bounded packaging/preflight baseline for review. It does not freeze
+`MVP_RC_COMMIT`, approve a release version, promote features, or authorize a paid campaign.
+Corpus ingest and paid qualification remain held until the end under the owner's sequencing.
+
+| Input | Proposed value / evidence requirement |
+|---|---|
+| Menhir source | Merged `cf9ff21e58b336780798f6dbcd15abe91fa39369` (#233); use the full SHA, not a moving branch. If later fixes change the selected source, record a replacement and rerun affected evidence. |
+| Package | Source declares `archolith-menhir==0.2.3`; this is not the published 0.2.3 artifact. Build from the selected committed source and record the resulting wheel SHA-256; no new candidate-wheel hash is claimed here. |
+| Dependencies | Use that source's frozen `uv.lock`, a complete hashed wheelhouse, and no upstream `graphiti-core` distribution. Record all resolved versions and the wheelhouse manifest digest. |
+| Graphiti | `archolith-graphiti-core==0.30.2.post2`; locked public wheel SHA-256 `d7588bc9d75407495f859dffb2ff7400566d856a434698bfd68dcb9dce6ec8b9`. |
+| Platforms / topology | Windows 11 AMD64 and Ubuntu Linux AMD64, Python 3.12+, stock MCP stdio client to loopback backend and isolated Neo4j 5/APOC. Container validation uses Linux AMD64. |
+| Preflight providers | Existing E2E deterministic fixtures; no external model spend. This is mechanism/package evidence, not answer-quality qualification. Product local-provider defaults and operator-configured local embedding remain as documented. |
+| Isolation | Use the existing E2E child-environment fence, fresh disposable state and graph; default E2E Bolt port is 7689, with backend ports reserved by the harness. Never reuse operator state or configuration. |
+| Image publication | `push=false`; retain sealed archive, identity, metadata, SBOM, vulnerability report and installed-fork probe. No registry publication or deployment. |
+
+The baseline preserves installed-code defaults: source memories are already on; canonical-self
+binding is `off`; scalar state/history/authority, event history/authority, Warden and optional
+guards, verifier sync, BM25, content vector, fact edges, Oracle ranking, intent, diversity and
+shadow paths remain off. Reconciliation settings may be configured while their producer is off;
+that is not evidence of active behavior. Experience counters retain their existing on default;
+that does not qualify the separate personal-state counter lane. Read the current registry and
+effective settings rather than applying historical "all Frontier off" baseline prose.
+
+Do not substitute the unqualified #168 combined profile for this baseline. Its per-option
+decisions, same-input comparisons, safety controls and final combination acceptance remain
+open. If an eventual promotion should affect fresh installs only, resolve upgrade preservation
+explicitly: an absent setting currently takes the installed-code default on upgrades too.
+
+Before a no-publish image run, supply a concrete image repository, valid validation label
+(`<major>.<minor>.<patch>-<sequence>`) and digest-pinned Python base. These values remain unset
+here rather than inventing a release identity. Scanner defaults are already digest-pinned in
+`.github/workflows/release-image.yml`; record the actual digests in the run receipt.
+
+The earlier [no-publish image run](https://github.com/Archolith/menhir/actions/runs/36469391462)
+passed on `0f8deac5` with fork post1 and both container criteria. Its scan reported zero
+Critical and 50 High findings; obtain and triage the selected candidate's fresh report rather
+than treating the old counts as current. Critical findings fail the current image policy;
+High findings require release-stage disposition even though the builder permits them.
+
+Validation sequence after the inputs are recorded:
+
+1. Build and seal without publishing on the selected full source SHA. Retain immutable hashes
+   and diagnostics; a failed scan is not container acceptance.
+2. On a clean checkout of that same SHA, point `MENHIR_E2E_RELEASE_IMAGE_BUNDLE` at its sealed
+   bundle and run the existing strict E2E-6 container verifier. It validates archive/evidence
+   identity, installed fork version, upstream absence and native hook wiring. It does not
+   independently perform container-backed ingest/recall; the installed-wheel lane supplies the
+   deterministic stdio ingest/recall evidence. Preserve that distinction in the receipt.
+3. Rerun the complete E2E pack on the selected candidate and inspect criterion-level manifests
+   for pending or unproven paths. Keep preflight separate from the later named-RC acceptance.
+4. Resolve #168 decisions and remaining supported-path blockers before RC freeze. Then retain
+   the canonical Oracle-500 and all eight frozen-RC E2E lanes on the same final identity. No
+   paid run proceeds without the required owner-approved budget and campaign configuration.
+
 ## 1. MVP contract
 
 The MVP is a **local, single-operator coding-agent service exposed to the agent through MCP stdio**.
