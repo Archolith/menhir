@@ -416,6 +416,61 @@ async def test_context_marks_memory_without_temporal_facts_source_time_unknown()
 
 
 # ---------------------------------------------------------------------------
+# Configured Warden profiles
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("warden,anchor,sources,expected", [
+    (False, False, ["claude-code"], {"entity-1", "entity-2"}),
+    (False, True, ["claude-code"], {"entity-1", "entity-2"}),
+    (True, True, ["claude-code"], set()),
+    (True, False, ["claude-code"], {"entity-1"}),
+    (True, True, ["user"], {"entity-1"}),
+    (True, True, [], set()),
+    (True, False, [], {"entity-1"}),
+])
+async def test_context_applies_configured_warden_profile(
+    stub_graphiti_client, stub_memory_graph_adapter, warden, anchor, sources, expected,
+) -> None:
+    from menhir.config import MemorySettings
+    from tests.test_recall_service import _build_recall_service, _two_cands
+
+    _two_cands(
+        stub_graphiti_client, stub_memory_graph_adapter,
+        c1="Alice currently lives in Leeds", c2="Alice formerly lived in York",
+        extra2={"expired_at": "2025-02-01", "created_at": "2025-01-01"},
+    )
+    for row in stub_memory_graph_adapter.candidate_metadata:
+        row["namespace"] = "conversation"
+    stub_memory_graph_adapter.candidate_provenance_rows = [
+        {"uuid": uuid, "evidence_node_kinds": [], "anchor_projects": [], "episode_sources": sources}
+        for uuid in ("entity-1", "entity-2")
+    ]
+    tuning = MemorySettings(
+        frontier_warden_gate=warden, frontier_evidence_anchor=anchor, frontier_source_memories=False,
+    ).retrieval_tuning()
+    recall = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+    recalled = await recall.recall("Where does Alice live?", namespace="conversation", tuning=tuning)
+    context = await ContextBuilderService(recall_service=recall, retrieval_tuning=tuning).build_context(
+        "Where does Alice live?", namespace="conversation", max_tokens=2000,
+    )
+    assert {row.uuid for row in recalled.results} == expected
+    assert set(context.memory_ids) == expected
+    assert context.memory_count == len(expected)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_context_without_tuning_preserves_existing_call_shape() -> None:
+    recall = AsyncMock()
+    recall.recall.return_value = _recall_result([])
+    await ContextBuilderService(recall_service=recall).build_context("test")
+    assert "tuning" not in recall.recall.await_args.kwargs
+
+
+# ---------------------------------------------------------------------------
 # Token estimation
 # ---------------------------------------------------------------------------
 

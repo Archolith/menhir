@@ -41,6 +41,22 @@ mapped into `RetrievalTuningConfig` at the recall entry via `retrieval_tuning()`
 | Brief builder (append temporal Timeline in build_context) | `frontier_brief_builder` | removed 2026-10-01, superseded by `recall_timeline` | — | brief-builder work |
 | Deterministic canonical-self binding | `canonical_self_binding_mode` / `MENHIR_CANONICAL_SELF_BINDING_MODE` (`off`/`observe`/`enforce`) | atomic projection claim plus `_run_graphiti_combined_extraction`, after relationless repair and before graphiti candidate acquisition | verified evidence projections have an exact subject-endpoint producer; default remains off pending repeated real-model corpus and persistence acceptance | `menhir-canonical-self-remediation-plan.md`; runbook `workflows/canonical-self-migration-runbook.md` |
 
+## Warden profiles and context wiring (2026-10-05)
+
+The Warden master switch and evidence-anchor guard are separate choices. The strict Recall Lab
+arm D enables both and intentionally refuses agent-only or unanchored candidates. Arm E disables
+the evidence-anchor guard while retaining scope and Oracle admission decisions; its results are
+not proof of externally verified truth. For conversational qualification, compare that profile
+with the Warden-off control, keeping ranking and sources fixed. Do not promote either profile
+from the earlier all-refused result.
+
+Runtime and direct-hook context builders carry the configured retrieval tuning into their recall
+call, matching ordinary backend recall. Constructors used without tuning retain their prior
+behavior. Warden settings remain opt-in. This gate covers the scored candidate set, not pending
+fallbacks, the additive source-memory section, or every authority output. Missing scope remains
+permissive, missing support is refused only by the enabled evidence-anchor guard, and existing
+frontier errors can fall back to baseline results. This is not universal enforcement.
+
 ## Activated (moved on default-on)
 
 _(none yet — add rows here with the activation date when a flag flips `True` or a gate is removed)_
