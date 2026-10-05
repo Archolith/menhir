@@ -23,6 +23,32 @@ are implemented; ranked recall/context now consume review flags as explicit sour
 >   load-bearing gap: the flag is produced but nothing reads it.
 
 ## Problem
+### Offline Warden safety controls (#173, 2026-10-05)
+
+`tests/test_warden_safety_matrix.py` runs the actual recall/guard path against existing stub
+adapters. Seven authored controls cover anchored and conversation-only valid memories, unknown
+provenance, wrong project, expired current and historical claims, and unresolved recorded conflict.
+Gold means useful or harmful **for the query's assertion context**; unknown evidence is scored
+separately. Each single-candidate pool and score stays fixed across Warden-off, strict (anchor on),
+and conversational (anchor off) profiles. Ranking/facet lanes and shadow execution stay off.
+Currentness and contradiction options are tested independently and together: 12 runs / 84 decisions.
+
+The report counts useful refusals, harmful refusals, harmful returns with/without warnings, and
+unknown returns/refusals. Negative controls prove both error counters detect injected failures.
+Warnings include actual Warden labels, the existing context conflict marker, and dated expired
+facts; a warning is never counted as a refusal. Execution receipts must match the bounded run.
+Run `pytest tests/test_warden_safety_matrix.py -o junit_family=legacy --junitxml=warden.xml`;
+the `warden_safety_report` JUnit property contains JSON after pytest removes scratch files.
+
+Observed controls: strict refuses one useful conversation-only memory; conversational preserves
+all three useful fixtures. Both gated profiles refuse the wrong-project fixture. Currentness alone
+returns the strongly anchored expired-current fixture labeled historical; enabling both optional
+guards refuses it while preserving historical recall. Recorded unresolved conflict remains returned
+with its existing context warning even with contradiction enabled: injected conflict-oracle tests
+prove the consumer, not this producer path. These are explicit known limitations, not zero-error
+qualification. Default activation, answer usefulness, corpus accuracy and deployed enforcement
+remain unqualified. No new production policy, ingest, model calls or paid bench is part of this panel.
+
 ### Optional Warden execution status (#173, 2026-10-05)
 
 Why: configured guards must not imply applied enforcement after an exception or on pending fallback
