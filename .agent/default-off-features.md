@@ -43,6 +43,14 @@ mapped into `RetrievalTuningConfig` at the recall entry via `retrieval_tuning()`
 
 ## Warden profiles and context wiring (2026-10-05)
 
+Detailed execution status is a per-call opt-in (`include_warden_status`, false by default), available
+without enabling the larger retrieval trace. It changes visibility only. Brief failed/unapplied or
+incomplete-check notices remain in default output; configured guard settings never certify checked
+results. Context diagnostics consume its normal token budget. Recall Lab requests detail explicitly.
+This receipt covers ranked Entity enforcement and labels pending bypasses; authority/source/TODO/
+recent bootstrap sections are outside its contract. No new-install default or activation decision is
+made by diagnostic tests. Ingest and paid usefulness qualification remain deferred.
+
 Verifier sync remains opt-in. When an enabled trusted verifier detects drift, linked same-namespace
 non-derived Entity beliefs retain a review flag through ranked recall, compact MCP, REST and context.
 The advisory is independent of Warden gates: verify the source before asserting current truth.

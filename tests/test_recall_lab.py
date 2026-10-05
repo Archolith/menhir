@@ -357,6 +357,7 @@ def test_recall_lab_runs_arms_concurrently_and_read_only() -> None:
     assert [arm["id"] for arm in payload["arms"]] == ["a", "b"]
     assert recall.max_active == 2
     assert all(call["trace"] is True for call in recall.calls)
+    assert all(call["include_warden_status"] is True for call in recall.calls)
     assert all(call["update_access"] is False for call in recall.calls)
     assert recall.calls[0]["tuning"].enable_bm25 is True
     assert recall.calls[1]["tuning"].enable_content_vector is True
@@ -747,3 +748,16 @@ def test_recall_lab_validates_bounds_and_requires_runtime() -> None:
 
     assert unavailable.status_code == 503
     assert invalid.status_code == 422
+
+
+def test_recall_lab_serializes_bounded_warden_execution_receipt():
+    from menhir.domain.recall import WardenExecutionStatus
+    from menhir.explorer.recall_lab import _serialize_result
+    result = RecallResult(query="config", preset="knowledge", results=[], candidates_evaluated=1, nodes_touched=0,
+        warden_status=WardenExecutionStatus(configured_guards=("scope",), master_enabled=True, state="failed"),
+        warden_notice="Warden checks failed.")
+    for reveal in (False, True):
+        row = _serialize_result(result, reveal=reveal)
+        assert row["warden_status"]["state"] == "failed"
+        assert row["warden_status"]["configured_guards"] == ("scope",)
+        assert row["warden_notice"] == "Warden checks failed."

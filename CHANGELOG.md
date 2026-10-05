@@ -1,5 +1,9 @@
 ## 2026-10-05 - Apply configured Warden profiles to context recall
 
+- `domain/recall.py`, `services/recall_service.py`, `services/recall_pipeline.py`, `services/recall_support.py`: distinguish configured versus applied Warden checks, pending bypasses and metadata failures; expose detailed receipts only on request.
+- `core/backend_protocol.py`, `core/backend_runtime_data_ops.py`, `core/backend_client_ops.py`, `api/routes.py`, `api/routes_support.py`, `mcp/tools/recall/`: carry `include_warden_status=false` across canonical recall/context boundaries; preserve brief incomplete-check notices.
+- `services/context_builder.py`, `explorer/recall_lab.py`, `explorer/static/recall-lab.js`: budget optional diagnostics and mandatory notices with context; show execution receipts in Recall Lab details.
+- `tests/test_warden_execution_status.py`, `tests/test_api_routes.py`, `tests/test_backend_roundtrip.py`, `tests/test_recall_lab.py`: cover visibility, fallback/error/metadata paths, concurrency, context budgets and protocol forwarding; update owner/index and data/API/default-off docs.
 - Verifier sync preserves last successful register evidence while recording separate probe attempts; incomplete or unconfirmed register links cannot claim a new success.
 - Ranked recall, compact/full MCP, REST and context expose same-namespace register observations, successful verification times and latest probe statuses, without changing ranking or defaults.
 - Freshness regression coverage includes restart, unavailable/failed probes, missing first success, duplicate links, atomic context budgets and disposable graph projections; update the existing #173 owner and reference docs.

@@ -708,3 +708,15 @@ class TestBackendRoundTrip:
         _push_client_warning("warning-one")
         assert drain_client_warnings() == ["warning-one"]
         assert drain_client_warnings() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("show", [False, True])
+async def test_warden_visibility_option_survives_remote_boundary(backend_client, show):
+    bc, ctx = backend_client
+    ctx.built.recall_service.recall.return_value.update(warden_status={"state": "disabled"})
+    result = await bc.recall("config", include_warden_status=show)
+    assert ("warden_status" in result) is show
+    assert ctx.built.recall_service.recall.call_args.kwargs.get("include_warden_status", False) is show
+    await bc.build_context("config", include_warden_status=show)
+    assert ctx.built.context_builder.build_context.call_args.kwargs.get("include_warden_status", False) is show

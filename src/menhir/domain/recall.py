@@ -303,6 +303,40 @@ class RecallHistoryResult:
     note: str | None = None
 
 
+@dataclass
+class WardenExecutionStatus:
+    """Request-local receipt for ranked Entity enforcement, separate from configuration."""
+
+    configured_guards: tuple[str, ...] = ()
+    master_enabled: bool = False
+    state: str = "disabled"
+    evaluated: int = 0
+    applied_guards: tuple[str, ...] = ()
+    refused: int = 0
+    flagged: int = 0
+    unchecked_pending: int = 0
+    unassessed: int = 0
+    missing_candidate_metadata: int = 0
+    metadata_gaps: tuple[str, ...] = ()
+    excluded_result_types: tuple[str, ...] = ("source_memories", "authority_layers", "todos", "bootstrap_rows")
+
+    def add_gap(self, gap: str) -> None:
+        self.metadata_gaps = tuple(sorted({*self.metadata_gaps, gap}))
+
+    def notice(self) -> str | None:
+        if not self.configured_guards:
+            return None
+        if self.state == "failed":
+            return "Warden checks failed; ranked results are unchecked."
+        if not self.master_enabled:
+            return "Configured Warden guards were not applied; master gate is off."
+        if self.unchecked_pending:
+            return "Pending memories bypass Warden checks."
+        if self.metadata_gaps or self.unassessed:
+            return "Warden coverage is incomplete; some checks lack metadata or verdicts."
+        return None
+
+
 @dataclass(frozen=True)
 class RecallResult:
     query: str
@@ -314,6 +348,8 @@ class RecallResult:
     # Set when candidate generation failed and recall returned a degraded result.
     # This distinguishes a backend failure from a legitimate zero-match search.
     search_error: str | None = None
+    warden_status: WardenExecutionStatus | None = None
+    warden_notice: str | None = None
     # R0 retrieval observability: populated only when recall(trace=True).
     trace: retrieval_trace_models.RetrievalTrace | None = None
     # Phase 4c/7.J: an explicit authority layer, separate from flat ranked candidates. None when the

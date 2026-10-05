@@ -312,6 +312,7 @@ class RuntimeProviderDataOpsMixin:
         include_invalidated: bool = False,
         trace: bool = False,
         source_memory_limit: int | None = None,
+        include_warden_status: bool = False,
     ) -> dict[str, Any]:
         # Map the env-driven frontier portions into the recall call. With no
         # MENHIR_FRONTIER_* set this is all-off -> today's ScoringService path; trace is
@@ -328,6 +329,8 @@ class RuntimeProviderDataOpsMixin:
             frontier_kwargs["tuning"] = tuning
         if trace:
             frontier_kwargs["trace"] = trace
+        if include_warden_status:
+            frontier_kwargs["include_warden_status"] = True
         if source_memory_limit is not None:
             frontier_kwargs["source_memory_limit"] = int(source_memory_limit)
         result = await self.built.recall_service.recall(
@@ -347,6 +350,10 @@ class RuntimeProviderDataOpsMixin:
         payload = _to_jsonable(result)
         # 7.J flag-off wire compatibility: RecallResult carries optional structured layers
         # internally, but disabled/no-verdict responses retain the historical JSON shape.
+        if not include_warden_status or payload.get("warden_status") is None:
+            payload.pop("warden_status", None)
+        if payload.get("warden_notice") is None:
+            payload.pop("warden_notice", None)
         if payload.get("authority_layer") is None:
             payload.pop("authority_layer", None)
         if payload.get("event_authority_layer") is None:
@@ -445,7 +452,9 @@ class RuntimeProviderDataOpsMixin:
         session_id: str | None = None,
         include_scores: bool = False,
         namespace: str | None = None,
+        include_warden_status: bool = False,
     ) -> dict[str, Any]:
+        context_kwargs = {"include_warden_status": True} if include_warden_status else {}
         result = await self.built.context_builder.build_context(
             query,
             max_tokens=max_tokens,
@@ -453,6 +462,7 @@ class RuntimeProviderDataOpsMixin:
             session_id=session_id or self._effective_session_id(),
             include_scores=include_scores,
             namespace=namespace,
+            **context_kwargs,
         )
         return _to_jsonable(result)
 

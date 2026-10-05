@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
 from menhir.domain.recall_visibility import memory_lifecycle_note
@@ -249,6 +250,7 @@ class ContextBuilderService:
         preset: QueryPreset = QueryPreset.KNOWLEDGE,
         session_id: str | None = None,
         include_scores: bool = False,
+        include_warden_status: bool = False,
         namespace: str | None = None,
     ) -> ContextResult:
         """Recall memories and pack them into a token-budget-limited string."""
@@ -257,6 +259,8 @@ class ContextBuilderService:
         # invalidated candidates; it only prevents a recalled older fact from losing the
         # happened-at stamp needed to compare it with a later fact.
         recall_kwargs: dict[str, Any] = {}
+        if include_warden_status:
+            recall_kwargs["include_warden_status"] = True
         if self.retrieval_tuning is not None:
             recall_kwargs["tuning"] = self.retrieval_tuning
         if self.source_memory_limit is not None:
@@ -321,6 +325,29 @@ class ContextBuilderService:
             if mode == "heuristic" and _is_structurally_dense(candidate_text):
                 tokens = math.ceil(tokens * 1.3)
             return tokens
+
+        # Reserve a brief coverage notice before ranked memories. If it cannot fit, suppress
+        # that lane rather than return unchecked memories with their notice dropped.
+        ranked_notice_fits = True
+        if recall_result.warden_notice:
+            notice_line = "Memory checks: " + recall_result.warden_notice
+            cost = _tokens_for(notice_line)
+            if cost <= effective_budget:
+                lines.append(notice_line)
+                running_tokens += cost
+            else:
+                ranked_notice_fits = False
+                truncated = True
+        if include_warden_status and recall_result.warden_status is not None:
+            diagnostic = "Warden status: " + json.dumps(asdict(recall_result.warden_status), separators=(",", ":"))
+            cost = _tokens_for(diagnostic)
+            if running_tokens + cost <= effective_budget:
+                lines.append(diagnostic)
+                running_tokens += cost
+            else:
+                truncated = True
+        if not ranked_notice_fits:
+            memories = []
 
         # Fail-closed determination, computed FIRST so it gates scalar authority too. Any event
         # advisory whose selection itself failed to resolve an object (explicit selection-failure

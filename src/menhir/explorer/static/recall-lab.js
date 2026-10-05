@@ -214,7 +214,8 @@
         </div>
         ${degraded ? `<div class="error-card">${escapeHtml(arm.note || arm.search_error || 'Recall search backend failed; results may be incomplete.')}</div>` : ''}
         <div class="memory-list">${arm.results.map(item => resultCard(item, baselineRanks, arm === baseline)).join('') || '<div class="empty-state">No results.</div>'}</div>
-        <details class="result-details"><summary>Timing phases and exact configuration</summary><pre>${escapeHtml(JSON.stringify({ phases: arm.phases, tuning: arm.tuning }, null, 2))}</pre></details>
+        ${arm.warden_notice ? `<div class="error-card">${escapeHtml(arm.warden_notice)}</div>` : ''}
+        <details class="result-details"><summary>Timing phases, Warden execution and exact configuration</summary><pre>${escapeHtml(JSON.stringify({ phases: arm.phases, tuning: arm.tuning, warden_status: arm.warden_status }, null, 2))}</pre></details>
       </article>`;
     }).join('');
     const saved = payload.saved_run_id ? `<span class="summary-chip">Saved run #${payload.saved_run_id}</span>` : '';

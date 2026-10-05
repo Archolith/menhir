@@ -20,6 +20,7 @@ from menhir.domain.recall import (
     CandidateData,
     QueryPreset,
     RecallResult,
+    WardenExecutionStatus,
     RetrievalScoreKind,
     ScalarAuthorityContributor,
     ScalarAuthorityVerdict,
@@ -616,6 +617,7 @@ class RecallSupportMixin:
         metadata_by_uuid: dict[str, Any],
         tuning: RetrievalTuningConfig,
         query_project: str | None = None,
+        warden_status: WardenExecutionStatus | None = None,
     ) -> tuple[list[ScoredMemory], str | None]:
         """Apply the ACTIVE frontier portions to the post-floor survivors.
 
@@ -713,6 +715,17 @@ class RecallSupportMixin:
                 )
                 logger.warning("recall frontier: %s query=%r", warn, query[:60])
                 note = f"{note} | {warn}" if note else warn
+            if warden_status is not None:
+                warden_status.state = (
+                    ("applied" if len(outcome.ranked) == len(scored) else "partial")
+                    if tuning.enable_warden_gate else "computed_not_applied"
+                )
+                warden_status.evaluated = len(outcome.ranked)
+                warden_status.unassessed = max(0, len(scored) - len(outcome.ranked))
+                if tuning.enable_warden_gate:
+                    warden_status.applied_guards = tuple(w.name for w in pipeline.wardens) if outcome.ranked else ()
+                    warden_status.refused = len(outcome.refused)
+                    warden_status.flagged = len(outcome.flagged)
             return result, note
         except Exception:  # active path: degrade to the old order, never break recall
             logger.exception(
@@ -725,12 +738,15 @@ class RecallSupportMixin:
                 result={"error": "frontier_apply_failed"},
                 success=False,
             )
+            if warden_status is not None:
+                warden_status.state = "failed"
             return scored, None
 
     async def _attach_frontier_metadata(
         self,
         uuids: list[str],
         metadata_by_uuid: dict[str, Any],
+        *, warden_status: WardenExecutionStatus | None = None,
     ) -> None:
         """Merge DERIVED ``evidence_kinds`` and ``project`` into candidate metadata.
 
@@ -751,8 +767,11 @@ class RecallSupportMixin:
                 self.graph_adapter.fetch_candidate_provenance, uuids
             )
         except Exception:
+            if warden_status is not None:
+                warden_status.add_gap("provenance_unavailable")
             logger.exception("Provenance fetch failed; candidates treated as unanchored/unscoped")
             return
+        seen: set[str] = set()
         for row in rows:
             try:
                 uuid = str(row.get("uuid") or "").strip()
@@ -771,6 +790,7 @@ class RecallSupportMixin:
                         kinds.add(evidence_kind_for_source(str(src)))
                 meta = metadata_by_uuid.get(uuid)
                 if meta is not None:
+                    seen.add(uuid)
                     meta["evidence_kinds"] = tuple(sorted(kinds))
                     if len(anchor_projects) == 1:
                         meta["project"] = next(iter(anchor_projects))
@@ -782,6 +802,8 @@ class RecallSupportMixin:
                     if len(anchor_projects) == 1:
                         meta["anchor_project"] = next(iter(anchor_projects))
             except Exception as exc:
+                if warden_status is not None:
+                    warden_status.add_gap("provenance_malformed_row")
                 logger.error(
                     "Recall skipped malformed provenance row uuid=%r keys=%s: %s: %s",
                     row.get("uuid"),
@@ -790,6 +812,9 @@ class RecallSupportMixin:
                     exc,
                     exc_info=True,
                 )
+
+        if warden_status is not None and set(uuids) - seen:
+            warden_status.add_gap("provenance_missing_rows")
 
     def _plan_view_authority_suppression(
         self, query: str, namespace: str, candidate_inputs: list[dict[str, object]]

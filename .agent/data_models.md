@@ -5,6 +5,16 @@ model section you need.
 
 ## Quick Index
 
+`RecallResult.warden_status` is an optional request-local `WardenExecutionStatus` execution receipt;
+it is populated only with `include_warden_status=true`. It carries configured/applied guard names,
+master-gate state, evaluated/refused/flagged counts, unassessed and pending counts, dropped missing
+candidate metadata count, metadata gaps, and excluded result types. `warden_notice` is a brief
+incomplete-check advisory independent of that option. Successful application may still have metadata
+gaps; applied does not imply complete inputs or verified truth. Counts refer to the pre-limit scored
+Entity pool; pending count refers to returned fallback rows. Missing candidate metadata is dropped
+before scoring rather than declared checked. Source-memory, authority, TODO and recent bootstrap
+lanes retain independent rules. No stored graph fields, query or configuration defaults change.
+
 Ranked `CandidateData`/`ScoredMemory` and REST `RecallMemory` carry the existing verifier node flags
 `needs_review` (default false), `review_reason`, and `review_flagged_at` (ISO timestamp). Compact MCP
 and REST add `review_advisory` for flagged results; context packs the warning with its memory.

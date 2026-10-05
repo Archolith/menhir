@@ -133,6 +133,8 @@ async def ready(request: Request) -> ReadyResponse:
 async def recall(request: Request, body: RecallRequest) -> RecallResponse:
     backend = _get_backend(request)
     recall_kwargs: dict[str, object] = {}
+    if body.include_warden_status:
+        recall_kwargs["include_warden_status"] = True
     if body.trace:
         recall_kwargs["trace"] = True
     if body.source_memory_limit is not None:
@@ -193,6 +195,8 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
             for m in result.get("results", []) or []
         ],
         candidates_evaluated=int(result.get("candidates_evaluated") or 0),
+        warden_status=result.get("warden_status") if body.include_warden_status else None,
+        warden_notice=result.get("warden_notice"),
         trace=result.get("trace"),
         authority_layer=result.get("authority_layer"),
         event_authority_layer=result.get("event_authority_layer"),
@@ -421,12 +425,14 @@ async def bootstrap_context(
 async def context(request: Request, body: ContextRequest) -> ContextResponse:
     backend = _get_backend(request)
     try:
+        context_kwargs = {"include_warden_status": True} if body.include_warden_status else {}
         result = await backend.build_context(
             body.query,
             max_tokens=body.max_tokens,
             preset=body.preset,
             include_scores=body.include_scores,
             namespace=_resolve_namespace(request, body.namespace),
+            **context_kwargs,
         )
     except InvalidQueryPresetError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -23,6 +23,32 @@ are implemented; ranked recall/context now consume review flags as explicit sour
 >   load-bearing gap: the flag is produced but nothing reads it.
 
 ## Problem
+### Optional Warden execution status (#173, 2026-10-05)
+
+Why: configured guards must not imply applied enforcement after an exception or on pending fallback
+results. Detailed diagnostic output should not add tokens to ordinary successful recall.
+Scope: ranked Entity recall, pending fallback, provenance/temporal/staleness metadata degradation,
+canonical runtime/client/API/MCP and context, plus Recall Lab. No guard policy/ranking/default changes,
+new store, deployed probe, ingest or paid qualification.
+Design: per-call `include_warden_status=False`; a structured execution receipt reports configured
+chain options, actual state/counts, metadata gaps and explicitly excluded result types. Produce the
+receipt from the current request's application path, never inferred from settings alone. Retain only
+a brief `warden_notice` by default for configured-but-unapplied, failed or incomplete coverage.
+Context packs that notice before ranked memories; insufficient budget suppresses those memories.
+Requested context diagnostics share the token budget. Recall Lab requests diagnostics and shows them
+in its existing details panel. Source/authority/TODO layers retain their existing independent rules.
+Alternative: always include diagnostics (rejected for token cost); change fallback policy (deferred
+because it changes admissions and requires usefulness evidence).
+Risks: status must survive all early returns; metadata absence must not be confused with successful
+checking; optional flags must reach remote and direct callers without altering older default calls.
+Invariants: visibility does not affect admissions, scores, labels or graph writes; failures never claim
+applied enforcement; no shared mutable per-request status. No data migration/atomic store is involved.
+Validation: direct positive/negative controls for applied/disabled/computed-not-applied/error/pending,
+metadata failure and missing rows; API/MCP/runtime/client flag-off omission and opt-in round trips;
+context budgets and Recall Lab diagnostics/redaction; focused neighbors and exact-head full CI.
+Docs: existing owner/index, data/API/default-off docs and changelog. Live enforcement remains unproven;
+this bounded receipt is diagnostic evidence, not a claim of universal enforcement.
+
 ### Freshness evidence follow-up (#173, 2026-10-05)
 
 Expose the existing last successfully verified register value/time beside linked ranked memories,
