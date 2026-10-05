@@ -264,3 +264,21 @@ against current code (details in `menhir-168-phase0-baseline-contract.md`):
 Scope for #168: P1-P3 (registry, tests, `.env.example` backfill) are the parts #168's final gate
 ("update settings/example descriptions") depends on. P4-P5 remain optional. Open decision 3
 (scheduler intervals wait for #81) is now unblocked: #81 landed as `24cedca2`.
+
+## Bounded release/upgrade audit (2026-10-05)
+
+The registry implementation remains proposed. This follow-up reuses its owner and backfills
+commented template entries for the 20 tested #168 campaign boolean switches plus canonical-self
+mode and event perceiver version. It does not claim a complete boolean/mode/env-only census.
+`tests/test_release_config_upgrade.py` checks actual checkout-template and generated wheel-state
+setup, explicit opt-outs after a changed template, byte-identical reruns, process/file precedence,
+and absent/blank/invalid/true/false parsing across that bounded set. The event ledger's unsupported
+short names were corrected to `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_*`.
+
+Existing `.env` is retained; absent values use current code defaults on upgrades as on fresh
+installs. Source memories already default on (#208); the other tested campaign switches remain
+off. A later new-install-only default change needs an explicit implementation/upgrade decision;
+this audit neither adds that discriminator nor promotes any option. `docs/post-install.md`
+records config precedence, accepted values, restart/opt-out behavior and persisted-data limits.
+Full registry enforcement, all aliases/modes/env-only controls, final package/container profile
+acceptance and ingest/paid qualification remain pending. Focused evidence: 65 passed, 1 skipped.

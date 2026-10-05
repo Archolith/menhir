@@ -1,6 +1,6 @@
 # Post-install setup
 
-`pip install` makes the Menhir CLI available. A usable installation also needs a configured checkout,
+`pip install` makes the Menhir CLI available. A usable installation also needs configuration,
 runtime dependencies, an MCP client connection, and whichever optional agent integrations the operator
 has explicitly chosen.
 
@@ -51,8 +51,46 @@ The command is idempotent. It:
   `--force-git-hooks`;
 - reports the remaining runtime, MCP, and optional capture steps.
 
-Use `--repo PATH` when running outside the checkout. The command needs a source checkout because the
-Git hooks, service launcher, and optional producer scripts are repository-managed assets.
+Use `--repo PATH` to select a source checkout explicitly. A plain wheel install uses
+`MENHIR_STATE_DIR` (default `~/.menhir`) for generated configuration and bundled Neo4j compose.
+Git hooks and repository-managed producer scripts require a checkout.
+
+## Configuration across upgrades and opt-outs
+
+Setup copies `.env.example` only when `.env` is absent. A package upgrade or setup rerun does
+not merge a newer template into an existing file. `--provider` explicitly selects the provider;
+missing or blank model/URL defaults are filled, while custom values and secrets are retained.
+
+For normal startup, process/service environment wins over the selected `.env`, then unset
+settings use the installed version's code defaults. `ENV_FILE` selects the file; `menhir up`
+otherwise selects its checkout/state `.env`. Removing a setting restores the current code
+default, not the previous release's behavior. Current code has no separate feature-default
+policy for fresh versus existing installs. Before any future new-install-only promotion, its
+owner must choose an implementation that distinguishes those paths or explicitly preserve the
+upgrade configuration. No promotion is authorized by this audit.
+
+To opt out, set explicit `false` in the selected configuration and remove any conflicting
+process/service override, then restart the backend and workers that captured the settings.
+For example, the already-shipped source-memory lane uses:
+
+```dotenv
+MENHIR_FRONTIER_SOURCE_MEMORIES=false
+```
+
+This disables its recall section and new ingest-side episode-content embedding step. It does
+not delete stored embeddings or undo earlier writes. Boolean switches accept `true`, `1`, or
+`yes` (case-insensitive); `false`, `0`, `no`, blank and unrecognized strings all load as false.
+Use explicit `false` rather than a blank or misspelled opt-out. Commented template lines do not
+set values; the evidence-anchor example is a code-corpus choice, not its code default.
+
+Scalar state, scalar/history authority, event history, Wardens and verifier sync remain opt-in.
+The canonical event variables are `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED` and
+`MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED`; the shorter `MENHIR_EVENT_HISTORY_*`
+names are not aliases. Disabling a feature stops its gated paths and leaves persisted data in
+place; this is not a database rollback. Scalar/event processing can revisit historical evidence
+when enabled or when perceiver versions change. Review namespace/version and historical-data
+obligations before activation; do not run a backfill or ingest simply to upgrade the package.
+Keep configuration and verified data backups for a separately approved deployment rollback.
 
 ## 1b. Or do it in one step
 
