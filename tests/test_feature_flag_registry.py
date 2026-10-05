@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import fields, make_dataclass, replace
 from pathlib import Path
 import re
+from typing import get_type_hints
 
 import pytest
 
@@ -24,8 +25,9 @@ def evidence():
 
 def inventory_errors(features, evidence, model_type=MemorySettings) -> list[str]:
     model = {f.name: f for f in fields(model_type)}
-    required = {name for name, f in model.items() if f.type in (bool, "bool") or
-                f.type in (str, "str") and name.endswith(MODE_SUFFIXES)}
+    annotations = get_type_hints(model_type)
+    required = {name for name in model if annotations[name] is bool or
+                annotations[name] is str and name.endswith(MODE_SUFFIXES)}
     errors = [f"missing setting {name}" for name in required - features.keys()]
     defaults = model_type()
     envs = {}
@@ -161,7 +163,8 @@ def nested():
 
 
 def test_new_boolean_or_mode_fields_cannot_bypass_the_inventory(evidence) -> None:
-    for name, annotation, default in (("new_enabled", bool, False), ("new_mode", str, "off")):
+    for name, annotation, default in (("new_enabled", bool, False),
+                                      ("quoted_enabled", "'bool'", False), ("new_mode", str, "off")):
         changed_model = make_dataclass("ChangedSettings", [(name, annotation, default)],
                                        bases=(MemorySettings,), frozen=True)
         assert f"missing setting {name}" in inventory_errors(FEATURES, evidence, changed_model)
