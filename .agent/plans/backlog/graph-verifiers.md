@@ -23,6 +23,36 @@ are implemented; ranked recall/context now consume review flags as explicit sour
 >   load-bearing gap: the flag is produced but nothing reads it.
 
 ## Problem
+### Offline Warden/verifier interactions (#173, 2026-10-05)
+
+Compare neither feature, Warden only, verifier sync only and both using the existing freshness
+repository/register stubs and actual sync, recall and context code. Fix the candidate, retrieval
+score and source observation per case; disable ranking/source/shadow expansion. Exercise anchored
+current prose, unanchored conversation, unresolved current conflict and historical conflict against
+unchanged, changed, unavailable and already-flagged source states. Start each arm from an identical
+last-success register snapshot. Recreate services/repositories for restart, with sync then disabled.
+Report actual refusals, Warden labels, review advisories and last-success/latest-probe evidence
+separately. Assert retained content/scores are unchanged, review flags persist, unavailable probes
+do not advance success, and register observations explicitly do not verify prose. This is a
+development interaction panel, not answer-quality, latency/cost or default qualification. No new
+production path, store, executor, ingest, paid test, activation or deployment. Reuse fixtures rather
+than build another benchmark; focused neighbors and exact-head full CI provide code acceptance.
+
+Implemented by `tests/test_warden_verifier_interactions.py`: 64 independently reset cases, each
+checked after the probe interval and after restart with sync disabled (128 recall/context decisions).
+The Warden arm pins strict evidence anchoring plus contradiction interrupt; belief/currentness is
+off. It does not claim coverage of every optional guard/profile combination.
+The panel seeds identical last-success state; arms explicitly invoke or skip sync, so it does not
+claim scheduler/configuration qualification. Database-read copies separate derived recall metadata
+from persisted state in the shared stub. Actual warnings/refusals and retained/stored register
+evidence are embedded per case in the JUnit `warden_verifier_control` JSON property. Run
+`pytest tests/test_warden_verifier_interactions.py -o junit_family=legacy --junitxml=interactions.xml`.
+No interaction defect was found: changed-source advisories persist regardless of Warden state;
+unavailable probes preserve prior success; Warden refusals hide the prose without erasing stored
+review flags; historical conflicts retain labels and verifier disclaimers. Production code/defaults
+remain unchanged. Real-corpus usefulness, latency, probe spend and final combined-profile acceptance
+still require the deferred qualification work.
+
 ### Recorded-conflict guard handoff (#173, 2026-10-05)
 
 Why: the offline panel found that persisted unresolved conflicts reach scoring/context but not
