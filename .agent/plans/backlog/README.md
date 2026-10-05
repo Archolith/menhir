@@ -27,7 +27,7 @@ This index routes all 15 backlog records exactly once.
 |---|---|---|
 | [`cessation-tombstone-primitive-plan.md`](cessation-tombstone-primitive-plan.md) | Scalar `expire` operation. | Generic cessation event, explicit closed lifecycle, and reason semantics. |
 | [`foundation-typed-admission-plan.md`](foundation-typed-admission-plan.md) | Foundation machinery in typed-scalar paths. | General main-ingest foundation boundary. |
-| [`graph-verifiers.md`](graph-verifiers.md) | Core executor, scheduler wiring, seeding, ranked recall/context advisories, register freshness, optional Warden execution receipts, offline profile controls and recorded-conflict guard handoff. | Measured usefulness and optional additional executor kinds. |
+| [`graph-verifiers.md`](graph-verifiers.md) | Core executor, scheduler wiring, seeding, recall/context advisories, register freshness, Warden receipts, offline safety/interaction controls and recorded-conflict guard handoff. | Measured usefulness, combined-profile qualification and optional additional executor kinds. |
 | [`identity-keying-layer-plan.md`](identity-keying-layer-plan.md) | Scalar identity composition and conservative binding. | Generic identity view/union-find and twin-probe merge guard. |
 | [`l3l4-semantic-overlay-sequencing-plan.md`](l3l4-semantic-overlay-sequencing-plan.md) | L4 artifact storage, governance, and read path. | L3 semantic types and proposer/runtime work. |
 | [`menhir-temporal-chronostratum-plan.md`](menhir-temporal-chronostratum-plan.md) | Pure-domain temporal rungs and bench evidence. | Gated production graph/recall wiring. |
