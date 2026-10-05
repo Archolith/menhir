@@ -5,6 +5,12 @@ tool or resource section you need.
 
 ## Quick Index
 
+Ranked recall returns verifier review state through REST and compact/full MCP: flagged results
+include `needs_review`, `review_reason`, `review_flagged_at`, and `review_advisory`. `build_context`
+renders an instruction to verify the source before asserting flagged prose as current truth, packed
+atomically with the memory. This is an advisory; ranking and content are unchanged. Raw source-memory
+sections and independent authority layers do not inherit Entity review flags.
+
 - Need ingest / queueing tools: read `mcp.tool.add_memory`, `mcp.tool.add_memory_and_track`, `mcp.tool.get_enrichment_status`, and `mcp.tool.list_enrichment_queue`
 - Need troubleshooting tools: read `mcp.tool.watch_enrichment`, `mcp.tool.get_episode_trace`, and `mcp.tool.repair_stale_enrichment`
 - Need recall / memory tools: read `mcp.tool.read_flagged_memories`, `mcp.tool.recall_context_memories`, and `mcp.tool.recall_memories`

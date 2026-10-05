@@ -1,5 +1,12 @@
 ## 2026-10-05 - Apply configured Warden profiles to context recall
 
+- `src/menhir/infrastructure/verifier_repository.py`, `src/menhir/services/verifier_sync.py`: scope bindings/register writes and review traversals by namespace; reject invalid observations and avoid writes after a failed register read.
+- `src/menhir/domain/recall.py`, `src/menhir/infrastructure/cypher.py`, `src/menhir/services/recall_pipeline.py`, `src/menhir/services/scoring_service.py`: carry existing verifier review flags through ranked recall without changing content or scores.
+- `src/menhir/services/context_builder.py`, `src/menhir/mcp/formatters.py`, `src/menhir/api/routes.py`, `src/menhir/api/routes_support.py`: preserve review warnings in context, compact/full MCP and REST.
+- `tests/test_verifier_currentness.py`, `tests/test_verifier_sync.py`, `tests/test_context_builder.py`, `tests/test_scoring_service.py`, `tests/test_api_routes.py`: add drift/restart, malformed-source, budget, protocol and disposable graph namespace controls.
+- `tests/test_milestone_three_contract.py`: extend the strict optional-field contract and assert inert defaults for review metadata.
+- `.agent/plans/backlog/graph-verifiers.md`, `.agent/plans/backlog/README.md`, `.agent/data_models.md`, `.agent/endpoints.md`, `.agent/default-off-features.md`: reconcile the stale unwired-consumer claim and document the bounded advisory contract and remaining qualification.
+
 - `src/menhir/services/context_builder.py`, `src/menhir/core/bootstrap.py`, `src/menhir/cli/bootstrap.py`: pass the configured retrieval profile through runtime and direct-hook context recall, including Warden admission settings.
 - `tests/test_context_builder.py`, `tests/test_services_pipeline.py`: cover strict and conversational profiles, superseded and unknown-support controls, disabled-gate compatibility, and both production constructors.
 - `.agent/default-off-features.md`: explain strict versus conversational profiles and the limits of the scored-candidate gate; no defaults change.

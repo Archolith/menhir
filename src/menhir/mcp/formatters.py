@@ -259,6 +259,11 @@ def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, obj
     warden_label = getattr(scored, "warden_label", None)
     if warden_label:
         item["warden_label"] = warden_label
+    if getattr(scored, "needs_review", False):
+        item["needs_review"] = True
+        item["review_reason"] = getattr(scored, "review_reason", None)
+        item["review_flagged_at"] = getattr(scored, "review_flagged_at", None)
+        item["review_advisory"] = "Verify the source before asserting this memory as current truth."
     # Phase 4a.4/4c: the deterministically-injected current scalar_state View is the authoritative
     # CURRENT value for a surfaced slot. Marked so the consumer leads with it (the other observations
     # are its history/provenance). Decision-relevant -> kept even in compact mode.

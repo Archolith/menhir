@@ -43,6 +43,12 @@ mapped into `RetrievalTuningConfig` at the recall entry via `retrieval_tuning()`
 
 ## Warden profiles and context wiring (2026-10-05)
 
+Verifier sync remains opt-in. When an enabled trusted verifier detects drift, linked same-namespace
+non-derived Entity beliefs retain a review flag through ranked recall, compact MCP, REST and context.
+The advisory is independent of Warden gates: verify the source before asserting current truth.
+It does not change scores, refuse prose, clear existing review markers, or certify new defaults.
+Invalid/unavailable observations leave the register and successful-verification timestamp untouched.
+
 The Warden master switch and evidence-anchor guard are separate choices. The strict Recall Lab
 arm D enables both and intentionally refuses agent-only or unanchored candidates. Arm E disables
 the evidence-anchor guard while retaining scope and Oracle admission decisions; its results are

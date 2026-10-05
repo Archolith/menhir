@@ -292,6 +292,18 @@ def _build_service(recall_result: RecallResult) -> ContextBuilderService:
     return ContextBuilderService(recall_service=mock_recall)
 
 
+@pytest.mark.asyncio
+async def test_verifier_warning_is_atomic_with_memory_budget() -> None:
+    memory = replace(_mem("review", "config", "The job is disabled.", .9), needs_review=True,
+                     review_reason="verifier changed to true")
+    service = _build_service(_recall_result([memory]))
+    for budget in (1, 25, 1000):
+        context = await service.build_context("config", max_tokens=budget)
+        assert ("The job is disabled." in context.context) == ("Review required:" in context.context)
+        if "review" in context.memory_ids:
+            assert "Verify the source before asserting this memory as current truth." in context.context
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_context_includes_fresh_session_scoped_memories() -> None:

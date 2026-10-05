@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol
 
 from menhir.infrastructure.view_repository import ViewRepository
+from menhir.domain.namespace import normalize_namespace
 from menhir.services.seam_types import Embed
 from menhir.clock import utc_now_iso as _utc_now_iso
 
@@ -67,9 +68,10 @@ def _coerce(raw: str, as_type: str) -> VerifierResult:
     if as_type == "int":
         try:
             return VerifierResult(value=float(int(raw)), display=raw)
-        except ValueError:
+        except (ValueError, OverflowError):
             return VerifierResult(value=0.0, display=raw, ok=False)
-    # default: boolean
+    if as_type != "bool" or raw.lower() not in ("1", "true", "yes", "on", "0", "false", "no", "off"):
+        return VerifierResult(value=0.0, display=raw, ok=False)
     truthy = raw.lower() in ("1", "true", "yes", "on")
     return VerifierResult(value=1.0 if truthy else 0.0, display=raw)
 
@@ -137,6 +139,10 @@ def sync_verifiers(
         kind = str(v.get("verifier_kind") or "")
         subject = str(v.get("register_subject") or "")
         counter = str(v.get("register_counter") or "")
+        # Persisted bindings own their silo. Legacy protocol callers may omit the stamp.
+        register_namespace = normalize_namespace(
+            v["namespace"] if v.get("namespace") is not None else namespace
+        )
         executor = executors.get(kind)
         if executor is None:
             # Unknown kind: the graph is data, execution is code — never run something untrusted.
@@ -156,9 +162,10 @@ def sync_verifiers(
         prev = None
         if hasattr(graph_adapter, "fetch_counter"):
             try:
-                prev = graph_adapter.fetch_counter(subject=subject, counter=counter, namespace=namespace)
-            except Exception:
-                prev = None
+                prev = graph_adapter.fetch_counter(subject=subject, counter=counter, namespace=register_namespace)
+            except Exception as exc:
+                results.append({"verifier": vid, "kind": kind, "status": "error", "error": str(exc)})
+                continue  # unknown stored state cannot justify a refresh or review flag
         changed = not (prev and prev.get("value") is not None and float(prev["value"]) == res.value)
 
         name_embedding = None
@@ -194,7 +201,7 @@ def sync_verifiers(
             subject=subject,
             counter=counter,
             value=res.value,
-            namespace=namespace,
+            namespace=register_namespace,
             source="verifier-sync",
             name_embedding=name_embedding,
         )

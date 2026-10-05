@@ -790,6 +790,9 @@ async def run_recall(
                     "status": meta.get("status"),
                     "artifact_status": meta.get("artifact_status"),
                     "superseded_by": meta.get("superseded_by"),
+                    "needs_review": meta.get("needs_review") is True,
+                    "review_reason": meta.get("review_reason"),
+                    "review_flagged_at": meta.get("review_flagged_at"),
                 }
             )
         except Exception as exc:
@@ -1455,6 +1458,9 @@ async def run_recall(
                 status=c.get("status"),
                 artifact_status=c.get("artifact_status"),
                 superseded_by=c.get("superseded_by"),
+                needs_review=c.get("needs_review") is True,
+                review_reason=c.get("review_reason"),
+                review_flagged_at=c.get("review_flagged_at"),
                 retrieval_score=float(c["similarity"]),
                 retrieval_score_kind=c.get("retrieval_score_kind")
                 or RetrievalScoreKind.GRAPHITI_RRF,  # type: ignore[arg-type]

@@ -1,9 +1,17 @@
 # Graph-native verifiers — keep derivable beliefs fresh against their source of truth
 
 Status: **PARTIAL / ACTIVE** (kept — not archivable). Core mechanism + scheduler wiring + seeding
-are shipped and live; the recall-side payoff is not yet wired.
+are implemented; ranked recall/context now consume review flags as explicit source-verification advisories.
 
-> **Status note 2026-07-11 (code-reconciled).** Verified against `src/menhir`:
+> **2026-10-05 reconciliation (#173):** the historical unwired-consumer finding below was reproduced
+> and fixed. Review flags survive ranked recall, compact/full MCP, REST and context with an atomic
+> warning. Namespace-scoped bindings and write fences prevent cross-silo drift flags. Invalid source
+> values are unavailable. Scores/content and default settings remain unchanged. This does not certify
+> prose as current, measure useful answers retained, expose verified-register age in context, or
+> qualify deployment/default activation. Additional executor kinds and string registers are optional
+> product decisions, not prerequisites for the bounded `env_key` path.
+
+> **Historical status note 2026-07-11 (superseded by the reconciliation above).** Verified then against `src/menhir`:
 > - DONE & live: `verifier_sync.py` + `verifier_repository.py`; scheduler wiring
 >   (`verifier_sync_interval_s`/`MENHIR_VERIFIER_SYNC_ENABLED` in `settings.py:193,394`,
 >   `runtime.py:216`); standard-verifier **seeding** (`verifier_sync.py:203-220`) — so the top-line
@@ -15,6 +23,33 @@ are shipped and live; the recall-side payoff is not yet wired.
 >   load-bearing gap: the flag is produced but nothing reads it.
 
 ## Problem
+### Bounded #173 implementation plan (2026-10-05)
+
+Trace the existing `env_key` observation → counter refresh → `REFERENCES` review flag →
+ranked recall/context path. Surface `needs_review`, `review_reason`, and `review_flagged_at`
+with an explicit instruction to verify the source before asserting current truth. Preserve
+content and ranking: a review flag indicates uncertainty, not proven contradiction; an arbitrary
+score penalty or refusal would need separate usefulness evidence. Keep sync and all defaults opt-in.
+
+Scope verifier identity and register writes to the binding's persisted namespace. Refuse cross-silo
+reference/verification edges and flag only same-silo non-derived beliefs. Preserve existing scoped
+bindings; legacy rows without namespace use the explicit sync namespace. Invalid boolean/type
+observations must be unavailable rather than freshly recorded false. Retain flag-before-write retry
+ordering. Test changed/unchanged/unavailable/unknown-kind, restart, namespace separation, derived
+register exclusion and actual recall/context plus compact/REST output. Disposable graph behavior
+belongs to CI; no production graph, ingest, paid run, new executor, or default promotion in this pass.
+
+Risks: persisted cross-silo edges require read-side fences; review markers remain until explicit
+correction (an unchanged probe cannot validate prose). Raw episode sources and independent authority
+layers are outside the linked-Entity contract. Freshness enrichment and measured down-ranking remain
+separate acceptance work. Update this owner, the routing index, data/API docs and changelog.
+
+The sync write sequence is not a transaction. Existing flag-before-write tests prove retry ordering
+for already-linked beliefs; concurrent reference creation or competing register writers remain an
+assumption, not a system-wide freshness guarantee. External/manual graph writers are outside this
+repository census. No stored data is backfilled or deleted; reverting the reader change restores the
+previous display behavior while persisted review markers remain available.
+
 Supersession / contradiction detection only fire when a *new* memory is written. If the world
 changes and nothing writes a correcting memory, a belief silently stays "current" and wrong
 (observed this session: an "experience-counter job is paused" belief survived after the job was
@@ -73,6 +108,6 @@ only when enabled AND a repo is present, so default behavior is unchanged.
    `file_fingerprint` (reuse the structure-scan pattern). Keep each in the trusted code registry.
 3. **String-valued registers** — current registers are numeric (bool->1/0, int). A typed/string
    register View kind would let verifiers maintain non-numeric config (URIs, model names).
-4. **Recall integration** — teach recall to surface "value from register X, verified Ns ago" and to
-   down-rank `needs_review` prose, so flagged beliefs stop being asserted as current truth.
-5. **Seeding** — a small bootstrap that upserts the standard config/status verifiers on startup.
+4. **Recall integration — partial:** review advisories are now consumed. Verified-register age and
+   measured down-ranking remain separate work; a review marker is not proof of false prose.
+5. **Seeding — implemented:** idempotent bootstrap upserts standard config/status bindings.

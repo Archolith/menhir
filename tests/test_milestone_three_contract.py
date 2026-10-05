@@ -117,6 +117,7 @@ def test_scored_memory_has_required_fields() -> None:
     #   is_scalar_authority — marks the slot-keyed injected View as the current value so the consumer
     #                        leads with it and treats other observations as history (Phase 4c; DATA only)
     #   status / artifact_status / superseded_by — stored completion and artifact history (#143)
+    #   needs_review / review_reason / review_flagged_at — verifier drift advisory, rank-inert (#173)
     assert fields - required == {
         "warden_label",
         "temporal_facts",
@@ -129,9 +130,13 @@ def test_scored_memory_has_required_fields() -> None:
         "status",
         "artifact_status",
         "superseded_by",
+        "needs_review",
+        "review_reason",
+        "review_flagged_at",
     }
-    for key in ("status", "artifact_status", "superseded_by"):
+    for key in ("status", "artifact_status", "superseded_by", "review_reason", "review_flagged_at"):
         assert ScoredMemory.__dataclass_fields__[key].default is None
+    assert ScoredMemory.__dataclass_fields__["needs_review"].default is False
 
 
 @pytest.mark.unit

@@ -149,6 +149,10 @@ class ScoredMemory:
     status: str | None = None
     artifact_status: str | None = None
     superseded_by: str | None = None
+    # Verifier drift is an advisory, not proof that the prose is false.
+    needs_review: bool = False
+    review_reason: str | None = None
+    review_flagged_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -308,3 +312,6 @@ class CandidateData:
     status: str | None = None
     artifact_status: str | None = None
     superseded_by: str | None = None
+    needs_review: bool = False
+    review_reason: str | None = None
+    review_flagged_at: str | None = None
