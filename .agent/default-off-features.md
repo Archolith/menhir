@@ -48,6 +48,10 @@ non-derived Entity beliefs retain a review flag through ranked recall, compact M
 The advisory is independent of Warden gates: verify the source before asserting current truth.
 It does not change scores, refuse prose, clear existing review markers, or certify new defaults.
 Invalid/unavailable observations leave the register and successful-verification timestamp untouched.
+Recall/context show linked register observations and absolute last-success timestamps alongside
+separate latest-probe status/time. Pending means an incomplete attempt; legacy missing status is
+unknown. Evidence adds no expiry cutoff or ranking effect. This is code-side coverage only: deployed
+qualification, mixed-version/concurrent writers, ingest, and paid usefulness runs remain pending.
 
 The Warden master switch and evidence-anchor guard are separate choices. The strict Recall Lab
 arm D enables both and intentionally refuses agent-only or unanchored candidates. Arm E disables

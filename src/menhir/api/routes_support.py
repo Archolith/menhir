@@ -12,6 +12,7 @@ from menhir.core.backend_impl import RuntimeProvider
 from menhir.core.backend_protocol import MemoryBackend
 from menhir.core.runtime import RuntimeContext
 from menhir.domain.session import MemorySession, new_session
+from menhir.domain.recall import VerifierEvidence
 from menhir.infrastructure.telemetry import record_destructive_op
 from menhir.mcp.service_access import (
     get_pinned_namespace,
@@ -216,6 +217,7 @@ class RecallTemporalFact(BaseModel):
 
 
 class RecallMemory(BaseModel):
+    verifier_evidence: list[VerifierEvidence] = Field(default_factory=list)
     needs_review: bool = False
     review_reason: str | None = None
     review_flagged_at: str | None = None

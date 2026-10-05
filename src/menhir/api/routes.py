@@ -155,6 +155,7 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
         preset=str(result.get("preset") or body.preset),
         results=[
             RecallMemory(
+                verifier_evidence=m.get("verifier_evidence") or [],
                 needs_review=m.get("needs_review") is True,
                 review_reason=m.get("review_reason"),
                 review_flagged_at=m.get("review_flagged_at"),

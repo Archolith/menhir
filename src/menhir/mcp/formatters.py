@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from time import monotonic, perf_counter
 from uuid import UUID
@@ -264,6 +265,9 @@ def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, obj
         item["review_reason"] = getattr(scored, "review_reason", None)
         item["review_flagged_at"] = getattr(scored, "review_flagged_at", None)
         item["review_advisory"] = "Verify the source before asserting this memory as current truth."
+    evidence = getattr(scored, "verifier_evidence", ())
+    if evidence:
+        item["verifier_evidence"] = [asdict(e) if is_dataclass(e) else dict(e) for e in evidence]
     # Phase 4a.4/4c: the deterministically-injected current scalar_state View is the authoritative
     # CURRENT value for a surfaced slot. Marked so the consumer leads with it (the other observations
     # are its history/provenance). Decision-relevant -> kept even in compact mode.

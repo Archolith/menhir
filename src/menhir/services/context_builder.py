@@ -478,6 +478,9 @@ class ContextBuilderService:
                     )
 
                 tokens = _tokens_for(line)
+                if mem.verifier_evidence:
+                    line += "\n" + "\n".join(e.context_line() for e in mem.verifier_evidence)
+                    tokens = _tokens_for(line)
 
                 # Stale-anchor advisory: atomic with the memory line.
                 # If the memory is stale, check memory + advisory combined budget.

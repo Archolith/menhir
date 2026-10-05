@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import math
 from typing import Any
 
 import menhir.domain.retrieval_trace_models as retrieval_trace_models
@@ -116,6 +117,56 @@ class TemporalFact:
 
 
 @dataclass(frozen=True)
+class VerifierEvidence:
+    """Last successful register observation plus the distinct latest probe status."""
+
+    verifier_uuid: str
+    register_subject: str
+    register_counter: str
+    value: float | None = None
+    display: str | None = None
+    last_verified_at: str | None = None
+    last_probe_at: str | None = None
+    last_probe_status: str | None = None
+
+    def context_line(self) -> str:
+        value = self.display or (str(self.value) if self.value is not None else "unknown")
+        if not self.last_verified_at:
+            value = "unverified"
+        return (
+            f"  Register observation: {self.register_subject}.{self.register_counter} = {value}; "
+            f"last successful verification: {self.last_verified_at or 'never'}; "
+            f"latest probe: {self.last_probe_status or 'unknown'} at {self.last_probe_at or 'unknown'}. "
+            "This observation does not verify the memory's prose."
+        )
+
+
+def parse_verifier_evidence(rows: object) -> tuple[VerifierEvidence, ...]:
+    """Normalize graph projections; superseded register fan-in repeats the same binding."""
+    if not isinstance(rows, (list, tuple)):
+        return ()
+    by_binding = {}
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("verifier_uuid"):
+            continue
+        try:
+            value = float(row["value"]) if row.get("value") is not None else None
+            if value is not None and not math.isfinite(value):
+                value = None
+        except (ValueError, TypeError, OverflowError):
+            value = None
+        evidence = VerifierEvidence(
+            verifier_uuid=str(row["verifier_uuid"]),
+            register_subject=str(row.get("register_subject") or "unknown"),
+            register_counter=str(row.get("register_counter") or "unknown"),
+            value=value, display=row.get("display"), last_verified_at=row.get("last_verified_at"),
+            last_probe_at=row.get("last_probe_at"), last_probe_status=row.get("last_probe_status"),
+        )
+        by_binding[evidence.verifier_uuid] = evidence
+    return tuple(by_binding[key] for key in sorted(by_binding))
+
+
+@dataclass(frozen=True)
 class ScoredMemory:
     uuid: str
     name: str
@@ -153,6 +204,7 @@ class ScoredMemory:
     needs_review: bool = False
     review_reason: str | None = None
     review_flagged_at: str | None = None
+    verifier_evidence: tuple[VerifierEvidence, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -315,3 +367,4 @@ class CandidateData:
     needs_review: bool = False
     review_reason: str | None = None
     review_flagged_at: str | None = None
+    verifier_evidence: tuple[VerifierEvidence, ...] = ()

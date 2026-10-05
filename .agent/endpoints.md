@@ -10,6 +10,11 @@ include `needs_review`, `review_reason`, `review_flagged_at`, and `review_adviso
 renders an instruction to verify the source before asserting flagged prose as current truth, packed
 atomically with the memory. This is an advisory; ranking and content are unchanged. Raw source-memory
 sections and independent authority layers do not inherit Entity review flags.
+Linked ranked memories include `verifier_evidence` in full MCP/REST and, when nonempty, compact MCP.
+Context packs each register observation, absolute successful-verification time, and latest probe
+status/time with the memory. Failed/unavailable probes retain earlier successful evidence; legacy
+probe state is unknown. An observation verifies the register value, not the memory prose, and has
+no automatic freshness cutoff or ranking effect.
 
 - Need ingest / queueing tools: read `mcp.tool.add_memory`, `mcp.tool.add_memory_and_track`, `mcp.tool.get_enrichment_status`, and `mcp.tool.list_enrichment_queue`
 - Need troubleshooting tools: read `mcp.tool.watch_enrichment`, `mcp.tool.get_episode_trace`, and `mcp.tool.repair_stale_enrichment`

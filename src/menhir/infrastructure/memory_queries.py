@@ -36,6 +36,7 @@ from menhir.infrastructure.cypher import (
     SHADOW_CANDIDATE_FACT_EDGE_FIELDS,
 )
 from menhir.infrastructure.neo4j import Neo4jRepository
+from menhir.infrastructure.verifier_repository import candidate_verifier_evidence_cypher
 
 logger = logging.getLogger(__name__)
 
@@ -743,7 +744,7 @@ class MemoryQueryRepository:
         query = (Cypher()
             .match("(n:Entity)")
             .where("n.uuid IN $uuids")
-            .return_fields(metadata_fields)
+            .return_fields((*metadata_fields, candidate_verifier_evidence_cypher()))
             .build())
         return self.neo4j.execute(
             query,

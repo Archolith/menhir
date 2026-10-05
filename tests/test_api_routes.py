@@ -87,6 +87,16 @@ def test_recall_preserves_verifier_review_warning(client, fake_backend) -> None:
     assert "current truth" in row["review_advisory"]
 
 
+def test_recall_preserves_verifier_observation_and_failed_probe(client, fake_backend) -> None:
+    evidence = dict(verifier_uuid="v1", register_subject="config", register_counter="enabled", value=0.0,
+                    display="false", last_verified_at="2026-10-05T00:00:00Z",
+                    last_probe_at="2026-10-05T01:00:00Z", last_probe_status="source_unavailable")
+    fake_backend.recall.return_value["results"][0]["verifier_evidence"] = [evidence]
+    response = client.post("/api/recall", json={"query": "config"})
+    assert response.status_code == 200
+    assert response.json()["results"][0]["verifier_evidence"] == [evidence]
+
+
 @pytest.fixture
 def fake_runtime_ctx():
     capabilities = SimpleNamespace(
