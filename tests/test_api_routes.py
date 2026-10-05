@@ -918,3 +918,21 @@ def test_phase3_counter_enabled_reports_both_gates(client, fake_runtime_ctx, con
     assert response.status_code == 200
     assert response.json()["counter_enabled"] is (configured and requested)
     assert consolidate.await_args.kwargs["enable_counter_state"] is (configured and requested)
+
+
+@pytest.mark.parametrize("show", [False, True])
+def test_recall_warden_status_is_opt_in_but_notice_is_always_visible(client, fake_backend, show):
+    fake_backend.recall.return_value.update(warden_status={"state": "failed"}, warden_notice="Warden checks failed.")
+    response = client.post("/api/recall", json={"query": "config", "include_warden_status": show})
+    assert response.status_code == 200
+    payload = response.json()
+    assert ("warden_status" in payload) is show
+    assert payload["warden_notice"] == "Warden checks failed."
+    assert fake_backend.recall.call_args.kwargs.get("include_warden_status", False) is show
+
+
+@pytest.mark.parametrize("show", [False, True])
+def test_context_forwards_optional_warden_status(client, fake_backend, show):
+    response = client.post("/api/context", json={"query": "config", "include_warden_status": show})
+    assert response.status_code == 200
+    assert fake_backend.build_context.call_args.kwargs.get("include_warden_status", False) is show

@@ -5,6 +5,17 @@ tool or resource section you need.
 
 ## Quick Index
 
+`recall_memories`, `build_context`, REST `/recall` and `/context`, and canonical backend calls accept
+`include_warden_status=false`. Set true for detailed configured/applied guard names, execution state
+(disabled/not_run/computed_not_applied/applied/partial/failed), counts and metadata gaps. This option
+controls output only, independent of `trace`; it does not activate guards or alter ranked admissions.
+Default recall omits the detail. A brief `warden_notice` survives compact/full MCP and REST when
+configured checks fail, are unapplied, or have incomplete metadata/verdict/pending coverage. Context
+reserves that notice before ranked memories; if it cannot fit, those memories are omitted. Requested
+context detail shares the budget and can be omitted with truncation. Recall Lab requests the detail
+for its execution/configuration panel. `recall_context_memories` reports `relevant_warden_status` only
+on request and keeps `relevant_warden_notice`; its recent bootstrap rows are outside Warden checking.
+
 Ranked recall returns verifier review state through REST and compact/full MCP: flagged results
 include `needs_review`, `review_reason`, `review_flagged_at`, and `review_advisory`. `build_context`
 renders an instruction to verify the source before asserting flagged prose as current truth, packed

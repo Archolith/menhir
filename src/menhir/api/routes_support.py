@@ -197,6 +197,7 @@ class RecallRequest(BaseModel):
     # This enriches returned memories with history; it does not add invalidated candidates.
     include_invalidated: bool = False
     trace: bool = False
+    include_warden_status: bool = False
     # Per-call source-memory section size override. None = deployment default
     # (MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT when MENHIR_FRONTIER_SOURCE_MEMORIES is on,
     # else off); 0 = off for this call; >0 = that limit, enabling the section for this
@@ -318,6 +319,8 @@ class RecallResponse(BaseModel):
     preset: str
     results: list[RecallMemory]
     candidates_evaluated: int
+    warden_status: dict[str, object] | None = None
+    warden_notice: str | None = None
     trace: dict[str, object] | None = None
     authority_layer: list[ScalarAuthorityVerdictResponse] | None = None
     event_authority_layer: list[EventAuthorityVerdictResponse] | None = None
@@ -417,6 +420,7 @@ class BootstrapContextRequest(BaseModel):
 
 
 class ContextRequest(BaseModel):
+    include_warden_status: bool = False
     query: str
     max_tokens: int = Field(default=2000, ge=100, le=10000)
     preset: str = "knowledge"

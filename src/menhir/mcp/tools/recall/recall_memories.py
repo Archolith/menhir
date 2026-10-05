@@ -30,6 +30,7 @@ async def recall_memories(
     compact: bool | None = None,
     trace: bool = False,
     source_memory_limit: int | None = None,
+    include_warden_status: bool = False,
 ) -> str:
     """Search memories by semantic similarity. Returns ranked results with relevance scores.
 
@@ -42,6 +43,7 @@ async def recall_memories(
         namespace: Optional silo to scope this operation to. Empty = default/global behavior.
         include_invalidated: When True, also return superseded/historical beliefs (expired facts). Default False = current beliefs only.
         compact: True to drop per-item explainability (breakdown sub-scores, type) and candidates_evaluated, keeping only the decision-relevant fields (name, scope, score, relevance, summary, uuid). None defers to the MENHIR_RECALL_COMPACT env default (off).
+        include_warden_status: Include detailed Warden execution diagnostics (default false). Brief incomplete-check notices remain visible.
         source_memory_limit: Per-call size of the additive source-memory section (raw episode memories with their time, kept NEXT TO the ranked results, never fused into them). None = deployment default (on with MENHIR_FRONTIER_SOURCE_MEMORIES, else off); 0 = off for this call; 1..50 = that many entries for this call, even when the deployment flag is off. The section carries SESSION-scoped raw episodes, so it is off whenever include_session is false (promoted knowledge only); this tool always recalls with include_session=true.
 
     Returns:
@@ -54,6 +56,7 @@ async def recall_memories(
         namespace=namespace,
         include_invalidated=include_invalidated,
         _compact=compact,
+        include_warden_status=include_warden_status,
         trace=trace,
         source_memory_limit=source_memory_limit,
     )
@@ -85,6 +88,7 @@ class RecallMemoriesTool(BaseJsonTool):
         compact: bool | None = None,
         trace: bool = False,
         source_memory_limit: int | None = None,
+        include_warden_status: bool = False,
     ) -> str:
         """Name the component and decision in query. Start with one focused query;
         rephrase if needed. limit defaults to 5. preset defaults to knowledge;
@@ -104,6 +108,7 @@ class RecallMemoriesTool(BaseJsonTool):
         compact=true omits per-item type/breakdown and candidates_evaluated;
         omitting it uses the server default. trace=true requests retrieval
         diagnostics when available; it does not retrieve source text.
+        include_warden_status=true shows configured versus applied guards and coverage gaps.
 
         Scores indicate retrieval relevance, not truth. Check dates, conflicts,
         stale-anchor warnings and response notes. Empty results do not establish
@@ -121,6 +126,7 @@ class RecallMemoriesTool(BaseJsonTool):
                 file_context_project=file_context_project or None,
                 namespace=namespace or None,
                 include_invalidated=include_invalidated,
+                **({"include_warden_status": True} if include_warden_status else {}),
                 trace=trace,
                 source_memory_limit=source_memory_limit,
             )
@@ -183,6 +189,10 @@ class RecallMemoriesTool(BaseJsonTool):
             # Decision-relevant (raw source text + its time) and bounded by limit, so compact
             # mode retains it alongside the ranked results.
             payload["source_memories"] = result.get("source_memories")
+        if include_warden_status and result.get("warden_status") is not None:
+            payload["warden_status"] = result["warden_status"]
+        if result.get("warden_notice"):
+            payload["warden_notice"] = result["warden_notice"]
         if trace and result.get("trace") is not None:
             payload["trace"] = result.get("trace")
         if elapsed_since_last_access is not None:

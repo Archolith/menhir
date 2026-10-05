@@ -146,6 +146,7 @@ class MemoryBackend(Protocol):
         include_invalidated: bool = False,
         trace: bool = False,
         source_memory_limit: int | None = None,
+        include_warden_status: bool = False,
     ) -> dict[str, Any]:
         """Search memory graph. Returns RecallResult-shaped dict."""
         ...
@@ -194,6 +195,7 @@ class MemoryBackend(Protocol):
         session_id: str | None = None,
         include_scores: bool = False,
         namespace: str | None = None,
+        include_warden_status: bool = False,
     ) -> dict[str, Any]:
         """Build token-budgeted context pack. Returns ContextResult-shaped dict."""
         ...

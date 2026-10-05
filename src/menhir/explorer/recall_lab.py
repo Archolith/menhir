@@ -557,6 +557,7 @@ def _serialize_result(result: object, *, reveal: bool) -> dict[str, Any]:
     # SourceMemoryResponse, so asdict round-trips cleanly).
     source_memories = _value(result, "source_memories")
 
+    warden_status = _value(result, "warden_status")
     return {
         "query": str(_value(result, "query", "")),
         "preset": str(_enum_value(_value(result, "preset", ""))),
@@ -564,6 +565,8 @@ def _serialize_result(result: object, *, reveal: bool) -> dict[str, Any]:
         "candidates_evaluated": int(_value(result, "candidates_evaluated", 0) or 0),
         "nodes_touched": int(_value(result, "nodes_touched", 0) or 0),
         "note": _value(result, "note"),
+        "warden_status": asdict(warden_status) if is_dataclass(warden_status) else warden_status,
+        "warden_notice": _value(result, "warden_notice"),
         "search_error": _value(result, "search_error"),
         "service_ms": _value(trace, "total_ms"),
         "phases": dict(_value(trace, "phases", {}) or {}),
@@ -606,6 +609,7 @@ async def _run_arm(
             namespace=request.namespace,
             tuning=arm.tuning.to_domain(),
             trace=True,
+            include_warden_status=True,
             update_access=False,
         )
     except Exception as exc:

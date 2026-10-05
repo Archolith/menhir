@@ -23,6 +23,7 @@ from menhir.domain.recall import (
     QueryPreset,
     RecallHistoryResult,
     RecallResult,
+    WardenExecutionStatus,
     RetrievalScoreKind,
     ScalarAuthorityContributor,
     ScalarAuthorityVerdict,
@@ -268,6 +269,7 @@ async def run_recall(
     namespace: str | None = None,
     include_invalidated: bool = False,
     tuning: RetrievalTuningConfig | None = None,
+    include_warden_status: bool = False,
     trace: bool = False,
     update_access: bool = True,
     source_memory_limit: int | None = None,
@@ -278,6 +280,16 @@ async def run_recall(
     _t_total = perf_counter()
     _t_phases: dict[str, int] = {}
     tuning = tuning or RetrievalTuningConfig()
+    configured_guards = tuple(name for name, enabled in (
+        ("scope", tuning.enable_warden_gate), ("oracle_admission", tuning.enable_warden_gate),
+        ("evidence_anchor", tuning.enable_evidence_anchor and tuning.enable_warden_gate),
+        ("currentness", tuning.enable_belief_gate),
+        ("contradiction", tuning.enable_contradiction_interrupt),
+    ) if enabled)
+    warden_status = WardenExecutionStatus(
+        configured_guards=configured_guards, master_enabled=tuning.enable_warden_gate,
+        state="not_run" if configured_guards else "disabled",
+    )
     authority_layer: list[ScalarAuthorityVerdict] = []
 
     # --- Pending episode wait ---
@@ -706,6 +718,7 @@ async def run_recall(
             continue
         metadata_by_uuid[uuid] = row
 
+    warden_status.missing_candidate_metadata = sum(u not in metadata_by_uuid for u in candidate_uuids)
     candidate_inputs: list[dict[str, object]] = []
     for uuid in candidate_uuids:
         meta = metadata_by_uuid.get(uuid)
@@ -1572,13 +1585,16 @@ async def run_recall(
                     if pending_note
                     else source_memory_note
                 )
+            pending_results = service._pending_fallback_results(
+                visible_pending_rows, preset, limit, include_session=include_session, session_id=session_id,
+            )
+            warden_status.unchecked_pending = len(pending_results)
             return RecallResult(
+                warden_status=warden_status if include_warden_status else None,
+                warden_notice=warden_status.notice(),
                 query=query,
                 preset=preset.value,
-                results=service._pending_fallback_results(
-                    visible_pending_rows, preset, limit,
-                    include_session=include_session, session_id=session_id,
-                ),
+                results=pending_results,
                 candidates_evaluated=0,
                 nodes_touched=0,
                 note=pending_note,
@@ -1598,6 +1614,8 @@ async def run_recall(
                 else source_memory_note
             )
         return RecallResult(
+            warden_status=warden_status if include_warden_status else None,
+            warden_notice=warden_status.notice(),
             query=query,
             preset=preset.value,
             results=[],
@@ -1621,7 +1639,7 @@ async def run_recall(
     )
     if frontier_active and candidate_inputs:
         _t = perf_counter()
-        await service._attach_frontier_metadata(eligible_uuids, metadata_by_uuid)
+        await service._attach_frontier_metadata(eligible_uuids, metadata_by_uuid, warden_status=warden_status)
         if tuning.enable_belief_gate:
             try:
                 fact_rows = await asyncio.to_thread(
@@ -1630,6 +1648,7 @@ async def run_recall(
                 for uuid, marks in _belief_markers_from_facts(fact_rows).items():
                     metadata_by_uuid.setdefault(uuid, {}).update(marks)
             except Exception:
+                warden_status.add_gap("temporal_facts_unavailable")
                 logger.exception(
                     "Belief-gate temporal fact fetch failed for %d uuids; "
                     "candidates treated as untimed", len(eligible_uuids),
@@ -1644,6 +1663,7 @@ async def run_recall(
                     if _ev:
                         _m["staleness_evidence"] = _ev
             except Exception:
+                warden_status.add_gap("staleness_unavailable")
                 logger.exception("Belief-gate staleness pass failed; continuing without staleness")
         _t_phases["frontier_metadata"] = int((perf_counter() - _t) * 1000)
 
@@ -1670,7 +1690,7 @@ async def run_recall(
         _t = perf_counter()
         scored, frontier_note = await service._apply_frontier(
             query, namespace, scored, metadata_by_uuid, tuning,
-            query_project=file_context_project,
+            query_project=file_context_project, warden_status=warden_status,
         )
         _t_phases["frontier"] = int((perf_counter() - _t) * 1000)
 
@@ -1678,6 +1698,7 @@ async def run_recall(
         visible_pending_rows, preset, limit, include_session=include_session, session_id=session_id,
     )
     top_results = pending_fallback + scored[:max(0, limit - len(pending_fallback))]
+    warden_status.unchecked_pending = len(pending_fallback)
 
     # Signal when all candidates were below the similarity floor
     note = None
@@ -1965,6 +1986,8 @@ async def run_recall(
         )
 
     return RecallResult(
+        warden_status=warden_status if include_warden_status else None,
+        warden_notice=warden_status.notice(),
         query=query,
         preset=preset.value,
         results=top_results,
