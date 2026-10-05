@@ -72,8 +72,10 @@ def test_report_negative_controls_detect_both_errors():
 
 @pytest.mark.asyncio
 async def test_offline_profile_safety_matrix(
-    stub_graphiti_client, stub_memory_graph_adapter, tmp_path, record_property,
+    stub_graphiti_client, stub_memory_graph_adapter, tmp_path, record_property, monkeypatch,
 ):
+    # A developer's oracle-ablation environment must not change this fixed panel.
+    monkeypatch.delenv("MENHIR_FRONTIER_ORACLE_SUBSET", raising=False)
     adapter = stub_memory_graph_adapter
     adapter.stale_anchored_memories = lambda **kwargs: []
     service = RecallService(graphiti_client=stub_graphiti_client, graph_adapter=adapter,
