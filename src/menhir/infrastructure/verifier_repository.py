@@ -39,7 +39,8 @@ def candidate_verifier_evidence_cypher() -> str:
     Read the binding's last successful observation even through an older referenced register
     version. This is evidence about the register, never a re-verification of the prose.
     """
-    return f"""[
+    return f"""
+    [
         (n)-[:REFERENCES]->(reg:Entity)-[:VERIFIED_BY]->(v:Entity)
         WHERE {non_derived_view_cypher('n')} AND reg.view_kind = 'counter'
           AND v.is_verifier = true
