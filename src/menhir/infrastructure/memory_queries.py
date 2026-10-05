@@ -578,6 +578,11 @@ class MemoryQueryRepository:
     ) -> dict[str, Any] | None:
         """The anchor episode for `around` navigation, only if it is visible (A3).
 
+        `uuid` may be the Graphiti episode uuid or the memory's receipt uuid (Menhir's
+        queue node, which is what add_memory, recall_history and the source-memory
+        search return). A receipt uuid resolves through `resolved_episode_uuid` only
+        when that queue node is itself visible, non-FAILED and in the caller's silo.
+
         Applies exactly the A2 predicates (and the MENTIONS join when a subject thread
         is requested), so a hidden or foreign episode is indistinguishable from a
         nonexistent one. Read-only.
@@ -588,8 +593,20 @@ class MemoryQueryRepository:
             "subject_uuid": subject_uuid,
         }
         where = self._timeline_episode_where(namespace=namespace, params=params)
-        where.append("n.uuid = $anchor_uuid")
+        # Receipt uuid -> Graphiti episode uuid, resolved in-query so both kinds share
+        # one visibility/tenancy check on the anchor itself.
+        resolve = " AND ".join([
+            "a.uuid = $anchor_uuid",
+            menhir_queue_episode_cypher("a"),
+            "coalesce(a.processing_state, '') <> 'FAILED'",
+            default_recall_visibility_cypher("a"),
+            tenant_scope_cypher("a"),
+        ])
+        where.append("n.uuid = target_uuid")
         query = f"""
+            OPTIONAL MATCH (a:Episodic) WHERE {resolve}
+            WITH coalesce(a.resolved_episode_uuid, $anchor_uuid) AS target_uuid
+            LIMIT 1
             MATCH {self._timeline_match(subject_uuid)}
             WHERE {" AND ".join(where)}
             RETURN {self._TIMELINE_RETURN}

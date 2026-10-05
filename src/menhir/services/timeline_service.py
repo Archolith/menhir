@@ -22,7 +22,10 @@ from menhir.domain.timeline import (
     decode_cursor,
     encode_cursor,
 )
-from menhir.services.recall_pipeline import _RECALL_HISTORY_MAX_CHARS
+from menhir.services.recall_pipeline import (
+    _RECALL_HISTORY_MAX_CHARS,
+    _embedding_model_kwargs,
+)
 
 #: Headline cap: whitespace-collapsed content, then a trailing ellipsis.
 _HEADLINE_MAX_CHARS = 160
@@ -373,8 +376,10 @@ async def run_recall_timeline(
     elif mode == "query":
         stripped = str(query).strip()
         query_vector = await service.graphiti_client.embed_query(stripped)
+        # The hit is a receipt (queue-node) uuid; `timeline_anchor` resolves it (T1).
         hits = await asyncio.to_thread(
-            adapter.search_episode_embeddings, query_vector, limit=1, namespace=namespace
+            adapter.search_episode_embeddings, query_vector, limit=1, namespace=namespace,
+            **_embedding_model_kwargs(service),
         )
         if not hits:
             return TimelineResult(
