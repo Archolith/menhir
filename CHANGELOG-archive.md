@@ -1,3 +1,13 @@
+## 2026-09-28 - Schedule scalar-only personal memory
+
+- `src/menhir/core/runtime.py`, `src/menhir/services/maintenance_scheduler.py`:
+  create the chat dependency and register the shared background job when scalar
+  state alone is enabled, while keeping counter and event lanes independent.
+- `tests/test_settings_event_history_runtime.py`, `tests/test_api_routes.py`:
+  cover all eight lane combinations, the unavailable-provider case, and scalar
+  parity with API-triggered consolidation.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-28 - Ground scalar clock times with dotted meridiems
 
 - `src/menhir/services/typed_scalar_rules.py`: normalize dotted AM/PM source

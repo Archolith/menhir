@@ -110,6 +110,14 @@ async def phase3_run_impl(
             settings, "personal_memory_event_history_batch_size", 500),
     )
     dirty_after = ns in await asyncio.to_thread(adapter.list_dirty_namespaces, limit=500)
+    event_dirty_after = None
+    if getattr(settings, "personal_memory_event_history_enabled", False):
+        event_dirty_after = bool(await asyncio.to_thread(
+            adapter.load_next_event_evidence_batch,
+            ns,
+            perceiver_version=getattr(settings, "personal_memory_event_history_perceiver_version", "v1"),
+            limit=1,
+        ))
     return Phase3RunResponse(
         namespace=ns,
         phase3_selected=selected,
@@ -120,6 +128,9 @@ async def phase3_run_impl(
         abstained=int(result.get("abstained", 0) or 0),
         corrections_applied=int(result.get("corrections_applied", 0) or 0),
         llm_calls=int(result.get("llm_calls", 0) or 0),
+        counter_enabled=bool(body.counter_state and getattr(settings, "personal_memory_consolidation_enabled", False)),
+        scalar_llm_calls=int(result.get("scalar_llm_calls", 0) or 0),
+        event_dirty_after=event_dirty_after,
         scalar_enabled=bool(getattr(settings, "personal_memory_scalar_state_enabled", False)),
         scalar_namespaces_processed=int(result.get("scalar_namespaces_processed", 0) or 0),
         scalar_states_written=int(result.get("scalar_states_written", 0) or 0),

@@ -1,3 +1,10 @@
+## 2026-10-04 - Report Phase-3 lane completion for benchmark acceptance
+
+- `src/menhir/api/routes_handlers.py`, `src/menhir/api/routes_support.py`: report both counter gates, scalar-only model calls, and whether evidence remains beyond the event watermark.
+- `src/menhir/services/scheduler_tasks.py`: attribute scalar calls before the shared event phase.
+- `tests/test_api_routes.py`, `tests/test_consolidate_personal_memory.py`: cover counter gates, event completion and partial processing, and scalar call attribution.
+- `.agent/endpoints.md`: document the additive response fields.
+
 ## 2026-09-30 - Keep merge lineage out of Graphiti prompts
 
 - `src/menhir/infrastructure/graphiti_llm_adapter.py`: the provider wrapper removes `merge_audit`, `merged_from` and `last_merge_op_id` from tagged JSON blocks before a Graphiti request is sent. The fork serializes entity attributes into its dedup and summary contexts, so the merge audit trail rode along and grew with every merge (64% of the dedup candidate block in AMA runs; one 131k-char NodeResolutions prompt). In a 60-call replay, dropping it matched the control consensus as often as a fresh control run and cut dedup input about 79%. Prompts without lineage are sent unchanged.
@@ -60,14 +67,4 @@
 - `tests/test_episode_lifecycle.py`: cover default and named namespace query
   parameters and a disposable-graph regression for current, legacy, named,
   and derived-View entities.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-09-28 - Schedule scalar-only personal memory
-
-- `src/menhir/core/runtime.py`, `src/menhir/services/maintenance_scheduler.py`:
-  create the chat dependency and register the shared background job when scalar
-  state alone is enabled, while keeping counter and event lanes independent.
-- `tests/test_settings_event_history_runtime.py`, `tests/test_api_routes.py`:
-  cover all eight lane combinations, the unavailable-provider case, and scalar
-  parity with API-triggered consolidation.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.

@@ -669,6 +669,9 @@ class Phase3RunResponse(BaseModel):
     abstained: int
     corrections_applied: int
     llm_calls: int
+    counter_enabled: bool = False
+    scalar_llm_calls: int = 0
+    event_dirty_after: bool | None = None
     scalar_enabled: bool = False
     scalar_namespaces_processed: int = 0
     scalar_states_written: int = 0
