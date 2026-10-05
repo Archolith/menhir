@@ -29,6 +29,7 @@ from menhir.domain.recall import (
     ScoredMemory,
     SourceMemory,
     TemporalFact,
+    parse_verifier_evidence,
 )
 from menhir.domain.retrieval_tuning import (
     SOURCE_PRIORS,
@@ -793,6 +794,7 @@ async def run_recall(
                     "needs_review": meta.get("needs_review") is True,
                     "review_reason": meta.get("review_reason"),
                     "review_flagged_at": meta.get("review_flagged_at"),
+                    "verifier_evidence": parse_verifier_evidence(meta.get("verifier_evidence")),
                 }
             )
         except Exception as exc:
@@ -1461,6 +1463,7 @@ async def run_recall(
                 needs_review=c.get("needs_review") is True,
                 review_reason=c.get("review_reason"),
                 review_flagged_at=c.get("review_flagged_at"),
+                verifier_evidence=c.get("verifier_evidence") or (),
                 retrieval_score=float(c["similarity"]),
                 retrieval_score_kind=c.get("retrieval_score_kind")
                 or RetrievalScoreKind.GRAPHITI_RRF,  # type: ignore[arg-type]

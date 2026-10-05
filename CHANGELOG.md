@@ -1,5 +1,8 @@
 ## 2026-10-05 - Apply configured Warden profiles to context recall
 
+- Verifier sync preserves last successful register evidence while recording separate probe attempts; incomplete or unconfirmed register links cannot claim a new success.
+- Ranked recall, compact/full MCP, REST and context expose same-namespace register observations, successful verification times and latest probe statuses, without changing ranking or defaults.
+- Freshness regression coverage includes restart, unavailable/failed probes, missing first success, duplicate links, atomic context budgets and disposable graph projections; update the existing #173 owner and reference docs.
 - `src/menhir/infrastructure/verifier_repository.py`, `src/menhir/services/verifier_sync.py`: scope bindings/register writes and review traversals by namespace; reject invalid observations and avoid writes after a failed register read.
 - `src/menhir/domain/recall.py`, `src/menhir/infrastructure/cypher.py`, `src/menhir/services/recall_pipeline.py`, `src/menhir/services/scoring_service.py`: carry existing verifier review flags through ranked recall without changing content or scores.
 - `src/menhir/services/context_builder.py`, `src/menhir/mcp/formatters.py`, `src/menhir/api/routes.py`, `src/menhir/api/routes_support.py`: preserve review warnings in context, compact/full MCP and REST.

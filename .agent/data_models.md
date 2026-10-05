@@ -9,6 +9,11 @@ Ranked `CandidateData`/`ScoredMemory` and REST `RecallMemory` carry the existing
 `needs_review` (default false), `review_reason`, and `review_flagged_at` (ISO timestamp). Compact MCP
 and REST add `review_advisory` for flagged results; context packs the warning with its memory.
 These fields label uncertainty and preserve content/ranking. They do not establish fresh truth.
+Ranked results also carry `verifier_evidence`: binding UUID, register subject/counter, last successful
+`value`/`display`/`last_verified_at`, and distinct `last_probe_at`/`last_probe_status`. The latter node
+properties record pending, error, source_unavailable, skipped_unknown_kind, or refreshed. Only the
+completed register/link/stamp sequence updates successful evidence. Missing legacy probe state is
+unknown. Same-namespace register fan-in is deduplicated by binding; derived memories are excluded.
 Verifier binding identity is `(verifier_key, namespace)`; reference and verification edges and the
 final belief flag write are fenced to matching namespaces. Existing scoped bindings are reused;
 legacy unstamped bindings are not automatically migrated. No graph cleanup occurs on startup.

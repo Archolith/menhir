@@ -33,6 +33,26 @@ def _namespace_of(alias: str) -> str:
     )
 
 
+def candidate_verifier_evidence_cypher() -> str:
+    """Same-silo register observations for a ranked Entity, in its metadata query.
+
+    Read the binding's last successful observation even through an older referenced register
+    version. This is evidence about the register, never a re-verification of the prose.
+    """
+    return f"""
+    [
+        (n)-[:REFERENCES]->(reg:Entity)-[:VERIFIED_BY]->(v:Entity)
+        WHERE {non_derived_view_cypher('n')} AND reg.view_kind = 'counter'
+          AND v.is_verifier = true
+          AND ({_namespace_of('n')}) = ({_namespace_of('reg')})
+          AND ({_namespace_of('n')}) = ({_namespace_of('v')})
+        | {{verifier_uuid: v.uuid, register_subject: v.register_subject,
+            register_counter: v.register_counter, value: v['last_value'],
+            display: v['last_display'], last_verified_at: toString(v['last_verified_at']),
+            last_probe_at: toString(v['last_probe_at']), last_probe_status: v['last_probe_status']}}
+    ] AS verifier_evidence"""
+
+
 class VerifierRepository:
     """Neo4j operations for graph-native verifiers and their dependents."""
 
@@ -115,18 +135,20 @@ class VerifierRepository:
         )
         return [dict(r) for r in rows]
 
-    def ensure_verified_edge(self, *, register_uuid: str, verifier_uuid: str) -> None:
+    def ensure_verified_edge(self, *, register_uuid: str, verifier_uuid: str) -> bool:
         """register -[:VERIFIED_BY]-> verifier. MERGE keeps it idempotent as the register supersedes
         (a fresh current-version register uuid links itself on the next sync)."""
-        self._neo4j.execute(
+        rows = self._neo4j.execute(
             f"""
             MATCH (r:Entity {{uuid: $register}}), (v:Entity {{uuid: $verifier}})
             WHERE ({_namespace_of('r')}) = ({_namespace_of('v')})
             MERGE (r)-[rel:VERIFIED_BY]->(v)
             ON CREATE SET rel.created_at = datetime()
+            RETURN r.uuid AS uuid
             """,
             params={"register": register_uuid, "verifier": verifier_uuid},
         )
+        return bool(rows)
 
     def stamp_verifier(self, *, verifier_uuid: str, value: float, display: str, at: str) -> None:
         """Record the last successful re-derivation on the verifier node (freshness provenance)."""
@@ -135,9 +157,23 @@ class VerifierRepository:
             MATCH (v:Entity {uuid: $uuid})
             SET v.last_verified_at = datetime($at),
                 v.last_value = $value,
-                v.last_display = $display
+                v.last_display = $display,
+                v.last_probe_at = datetime($at),
+                v.last_probe_status = 'refreshed'
             """,
             params={"uuid": verifier_uuid, "at": at, "value": float(value), "display": display},
+        )
+
+    def stamp_probe(self, *, verifier_uuid: str, status: str, at: str) -> None:
+        """Record an attempt independently of last successful verification; no values/errors."""
+        if status not in {"pending", "error", "source_unavailable", "skipped_unknown_kind"}:
+            raise ValueError("Probe status cannot assert successful verification")
+        self._neo4j.execute(
+            """
+            MATCH (v:Entity {uuid: $uuid})
+            SET v.last_probe_at = datetime($at), v.last_probe_status = $status
+            """,
+            params={"uuid": verifier_uuid, "at": at, "status": status},
         )
 
     def flag_referencing_beliefs(

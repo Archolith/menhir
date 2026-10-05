@@ -173,6 +173,7 @@ class ScoringService:
                     needs_review=c.needs_review,
                     review_reason=c.review_reason,
                     review_flagged_at=c.review_flagged_at,
+                    verifier_evidence=c.verifier_evidence,
                     is_scalar_authority=c.is_scalar_authority,
                 )
             )

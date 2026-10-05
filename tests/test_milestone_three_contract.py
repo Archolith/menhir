@@ -133,10 +133,12 @@ def test_scored_memory_has_required_fields() -> None:
         "needs_review",
         "review_reason",
         "review_flagged_at",
+        "verifier_evidence",
     }
     for key in ("status", "artifact_status", "superseded_by", "review_reason", "review_flagged_at"):
         assert ScoredMemory.__dataclass_fields__[key].default is None
     assert ScoredMemory.__dataclass_fields__["needs_review"].default is False
+    assert ScoredMemory.__dataclass_fields__["verifier_evidence"].default == ()
 
 
 @pytest.mark.unit

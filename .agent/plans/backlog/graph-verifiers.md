@@ -7,8 +7,8 @@ are implemented; ranked recall/context now consume review flags as explicit sour
 > and fixed. Review flags survive ranked recall, compact/full MCP, REST and context with an atomic
 > warning. Namespace-scoped bindings and write fences prevent cross-silo drift flags. Invalid source
 > values are unavailable. Scores/content and default settings remain unchanged. This does not certify
-> prose as current, measure useful answers retained, expose verified-register age in context, or
-> qualify deployment/default activation. Additional executor kinds and string registers are optional
+> prose as current, measure useful answers retained, or qualify deployment/default activation.
+> Linked register evidence now exposes the last successful value/time and distinct latest-probe status. Additional executor kinds and string registers are optional
 > product decisions, not prerequisites for the bounded `env_key` path.
 
 > **Historical status note 2026-07-11 (superseded by the reconciliation above).** Verified then against `src/menhir`:
@@ -23,6 +23,24 @@ are implemented; ranked recall/context now consume review flags as explicit sour
 >   load-bearing gap: the flag is produced but nothing reads it.
 
 ## Problem
+### Freshness evidence follow-up (#173, 2026-10-05)
+
+Expose the existing last successfully verified register value/time beside linked ranked memories,
+and persist a separate latest-probe time/status. Begin each probe as pending; only a completed
+register/link/success-stamp sequence records success. Unavailable, unknown-kind and failed probes
+must retain the previous successful value/time. A crash leaves an explicitly incomplete probe.
+Read same-silo `REFERENCES` → counter register → trusted binding evidence in the existing candidate
+metadata query, deduplicate bindings, and retain typed evidence through MCP/REST/context. Missing
+legacy probe stamps are unknown, not inferred successes. Use absolute UTC timestamps; no arbitrary
+freshness cutoff, score/rank change, review-marker clearing, source secrets, or default activation.
+
+Test changed/unchanged, failed/unavailable/unknown, first-failure without any success, restart, token
+budget, namespaces/legacy spellings, duplicate superseded register links and actual disposable graph
+queries. Preserve flag-before-write ordering. Concurrency/mixed-version writers and external graph
+mutation remain outside this bounded proof; successful register observations do not validate prose.
+Update data/API/default-off docs, the existing backlog owner/index, changelog and strict domain
+contract. No ingest, paid runs or deployed probes.
+
 ### Bounded #173 implementation plan (2026-10-05)
 
 Trace the existing `env_key` observation → counter refresh → `REFERENCES` review flag →
@@ -41,7 +59,7 @@ belongs to CI; no production graph, ingest, paid run, new executor, or default p
 
 Risks: persisted cross-silo edges require read-side fences; review markers remain until explicit
 correction (an unchanged probe cannot validate prose). Raw episode sources and independent authority
-layers are outside the linked-Entity contract. Freshness enrichment and measured down-ranking remain
+layers are outside the linked-Entity contract. Freshness evidence is now implemented below; measured down-ranking remains
 separate acceptance work. Update this owner, the routing index, data/API docs and changelog.
 
 The sync write sequence is not a transaction. Existing flag-before-write tests prove retry ordering
@@ -108,6 +126,8 @@ only when enabled AND a repo is present, so default behavior is unchanged.
    `file_fingerprint` (reuse the structure-scan pattern). Keep each in the trusted code registry.
 3. **String-valued registers** — current registers are numeric (bool->1/0, int). A typed/string
    register View kind would let verifiers maintain non-numeric config (URIs, model names).
-4. **Recall integration — partial:** review advisories are now consumed. Verified-register age and
-   measured down-ranking remain separate work; a review marker is not proof of false prose.
+4. **Recall integration — partial:** review advisories and linked-register freshness evidence are
+   consumed. Measured usefulness/down-ranking remains separate work; neither evidence nor a review
+   marker verifies prose. Freshness validation: 381 focused tests pass, with 7 graph tests reserved
+   for disposable CI; no ingest or paid qualification.
 5. **Seeding — implemented:** idempotent bootstrap upserts standard config/status bindings.
