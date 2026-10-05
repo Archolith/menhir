@@ -41,7 +41,10 @@ The command is idempotent. It:
 - creates `.env` from `.env.example` only when `.env` is absent;
 - with `--provider local|openai`, writes a consistent provider block (chat, Graphiti LLM, Graphiti
   embed) and makes sure the provider's URL/model/key lines are present without ever overwriting a
-  filled-in secret; with `--compose-neo4j`, points `NEO4J_*` at the root `docker-compose.yml`
+  filled-in secret or custom model. Missing or blank OpenAI models use `gpt-4o-mini` and
+  `text-embedding-3-small`; local URL/chat defaults match the settings model, while the local
+  embedding model still requires operator configuration. Explicit feature opt-outs are preserved.
+  With `--compose-neo4j`, points `NEO4J_*` at the root `docker-compose.yml`
   instance (`neo4j/password`).
 - configures `core.hooksPath=.githooks` so the repository's pre-push protection is active;
 - preserves an existing `.env` and refuses to replace a different Git hooks path without
