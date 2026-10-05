@@ -68,6 +68,14 @@ not proof of externally verified truth. For conversational qualification, compar
 with the Warden-off control, keeping ranking and sources fixed. Do not promote either profile
 from the earlier all-refused result.
 
+With both master Warden and contradiction interrupt enabled, ranked Entity candidates with an
+existing conflict group and exact `unresolved` status are refused for current queries, or retained
+with a conflict label for historical queries (subject to other guards). This metadata handoff does
+not require the belief gate or alter ranking. Missing/unknown/resolved status supplies no new
+contradiction signal; existing oracle/belief conflicts still apply independently. With contradiction
+off, the existing scoring/context advisory remains. The offline panel covers these transitions;
+corpus usefulness and default eligibility remain unqualified.
+
 Runtime and direct-hook context builders carry the configured retrieval tuning into their recall
 call, matching ordinary backend recall. Constructors used without tuning retain their prior
 behavior. Warden settings remain opt-in. This gate covers the scored candidate set, not pending

@@ -25,6 +25,7 @@ class Control:
     expired: bool = False
     historical: bool = False
     conflict: bool = False
+    resolved: bool = False
 
 
 # Gold describes the authored fixture, independently of what the guards decide.
@@ -37,6 +38,8 @@ CONTROLS = (
     Control("stale_current", "harmful", expired=True),
     Control("stale_historical", "useful", expired=True, historical=True),
     Control("recorded_conflict", "harmful", conflict=True),
+    Control("resolved_conflict", "useful", conflict=True, resolved=True),
+    Control("historical_conflict", "useful", conflict=True, historical=True),
 )
 PROFILES = {"off": (False, False), "strict": (True, True), "conversational": (True, False)}
 OPTIONAL_GUARDS = ((False, False), (True, False), (False, True), (True, True))
@@ -81,11 +84,12 @@ async def test_offline_profile_safety_matrix(
     service = RecallService(graphiti_client=stub_graphiti_client, graph_adapter=adapter,
                             scoring_service=ScoringService(), read_only=True)
     report = dict(schema_version=1, qualified_for_defaults=False,
-                  limits=["Seven authored single-candidate controls; no accuracy estimate",
+                  limits=["Nine authored single-candidate controls; no accuracy estimate",
                           "Fixed candidate pool; no retrieval/ranking or answer-quality qualification",
                           "Temporal/conflict warnings do not equal refusal",
                           "No ingest, graph, model calls or deployed enforcement evidence"],
                   controls=[asdict(c) for c in CONTROLS], runs=[])
+    baseline_scores = {}
     for currentness, contradiction in OPTIONAL_GUARDS:
         for profile, (gate, anchor) in PROFILES.items():
             tuning = RetrievalTuningConfig(enable_assertion_shadow=False,
@@ -99,7 +103,7 @@ async def test_offline_profile_safety_matrix(
                     content="Authored configuration control", namespace="tenant",
                     scope="PERSISTENT", type="SEMANTIC", freshness="ACTIVE",
                     conflict_group_id="conflict-1" if case.conflict else None,
-                    conflict_status="unresolved" if case.conflict else None)]
+                    conflict_status=("resolved" if case.resolved else "unresolved") if case.conflict else None)]
                 adapter.candidate_provenance_rows = [dict(uuid=case.name,
                     evidence_node_kinds=["git"] if case.evidence == "git" else [],
                     anchor_projects=[case.project] if case.project else [],
@@ -129,21 +133,30 @@ async def test_offline_profile_safety_matrix(
                     if any(f.expired_at for f in memory.temporal_facts):
                         warnings.append("temporal:expired_fact")
                 returned = bool(result.results)
+                score = result.results[0].final_score if returned else None
+                if profile == "off" and not currentness and not contradiction:
+                    baseline_scores[case.name] = score
+                elif returned:
+                    assert score == baseline_scores[case.name]
                 # Pin current behavior, including known gaps, without relabeling gold.
                 expected = not (gate and (case.name == "wrong_scope"
                     or (anchor and case.evidence != "git")
+                    or (contradiction and case.name == "recorded_conflict")
                     or (currentness and contradiction and case.name == "stale_current")))
                 assert returned == expected, (profile, currentness, contradiction, case.name, result)
                 if gate:
                     assert result.warden_status.evaluated == 1
                     assert result.warden_status.refused == int(not returned)
-                if case.conflict:
-                    assert "context:unresolved_conflict" in warnings
-                    assert result.warden_status.refused == 0
-                if gate and currentness and case.historical:
+                if case.conflict and returned:
+                    assert ("context:unresolved_conflict" in warnings) == (not case.resolved)
+                    if gate and contradiction and case.historical:
+                        assert "warden:conflict" in warnings
+                if case.resolved:
+                    assert not warnings
+                if gate and currentness and case.historical and case.expired:
                     assert "warden:historical" in warnings
                 rows.append(dict(control=case.name, query=query, gold=case.gold, returned=returned,
-                    warnings=warnings, warden=asdict(result.warden_status)))
+                    final_score=score, warnings=warnings, warden=asdict(result.warden_status)))
             report["runs"].append(dict(profile=profile, currentness=currentness,
                 contradiction=contradiction,
                 tuning=asdict(tuning), rows=rows, counts=summarize(rows)))
