@@ -155,6 +155,13 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
         preset=str(result.get("preset") or body.preset),
         results=[
             RecallMemory(
+                needs_review=m.get("needs_review") is True,
+                review_reason=m.get("review_reason"),
+                review_flagged_at=m.get("review_flagged_at"),
+                review_advisory=(
+                    "Verify the source before asserting this memory as current truth."
+                    if m.get("needs_review") is True else None
+                ),
                 status=m.get("status"),
                 artifact_status=m.get("artifact_status"),
                 superseded_by=m.get("superseded_by"),

@@ -74,6 +74,19 @@ def fake_backend():
     return backend
 
 
+def test_recall_preserves_verifier_review_warning(client, fake_backend) -> None:
+    memory = fake_backend.recall.return_value["results"][0]
+    memory.update(needs_review=True, review_reason="verifier value changed to false",
+                  review_flagged_at="2026-10-05T00:00:00Z")
+    response = client.post("/api/recall", json={"query": "config"})
+    assert response.status_code == 200
+    row = response.json()["results"][0]
+    assert row["needs_review"] is True
+    assert row["review_reason"] == memory["review_reason"]
+    assert row["review_flagged_at"] == memory["review_flagged_at"]
+    assert "current truth" in row["review_advisory"]
+
+
 @pytest.fixture
 def fake_runtime_ctx():
     capabilities = SimpleNamespace(

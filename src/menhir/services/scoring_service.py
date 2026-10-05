@@ -170,6 +170,9 @@ class ScoringService:
                     status=c.status,
                     artifact_status=c.artifact_status,
                     superseded_by=c.superseded_by,
+                    needs_review=c.needs_review,
+                    review_reason=c.review_reason,
+                    review_flagged_at=c.review_flagged_at,
                     is_scalar_authority=c.is_scalar_authority,
                 )
             )

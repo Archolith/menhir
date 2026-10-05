@@ -5,6 +5,14 @@ model section you need.
 
 ## Quick Index
 
+Ranked `CandidateData`/`ScoredMemory` and REST `RecallMemory` carry the existing verifier node flags
+`needs_review` (default false), `review_reason`, and `review_flagged_at` (ISO timestamp). Compact MCP
+and REST add `review_advisory` for flagged results; context packs the warning with its memory.
+These fields label uncertainty and preserve content/ranking. They do not establish fresh truth.
+Verifier binding identity is `(verifier_key, namespace)`; reference and verification edges and the
+final belief flag write are fenced to matching namespaces. Existing scoped bindings are reused;
+legacy unstamped bindings are not automatically migrated. No graph cleanup occurs on startup.
+
 Generic memory read results and `CandidateData`/`ScoredMemory` retain three optional existing node properties:
 `status` (TEMPORAL open/completed), `artifact_status` (L4 candidate/trusted/historical), and `superseded_by`
 (replacement L4 artifact identifier). Compact/full MCP and resource results include present values plus a derived

@@ -470,6 +470,12 @@ class ContextBuilderService:
                 else:
                     line = f"[Memory {idx}] {name_with_markers}: {content}"
                 line = "\n".join((line, *_source_time_lines(mem)))
+                if mem.needs_review:
+                    # Pack the warning atomically with its memory under the token budget.
+                    line += (
+                        "\n  Review required: " + (mem.review_reason or "source state changed")
+                        + ". Verify the source before asserting this memory as current truth."
+                    )
 
                 tokens = _tokens_for(line)
 

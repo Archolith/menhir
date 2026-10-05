@@ -216,6 +216,10 @@ class RecallTemporalFact(BaseModel):
 
 
 class RecallMemory(BaseModel):
+    needs_review: bool = False
+    review_reason: str | None = None
+    review_flagged_at: str | None = None
+    review_advisory: str | None = None
     status: str | None = None
     artifact_status: str | None = None
     superseded_by: str | None = None
