@@ -132,7 +132,23 @@ def test_timeline_anchor_uses_same_predicates() -> None:
     query, _params = neo4j.calls[0]
     assert PREFILTER in query
     assert TENANT_SCOPE.format(v="n") in query
-    assert "n.uuid = $anchor_uuid" in query
+    assert "n.uuid = target_uuid" in query
+
+
+def test_timeline_anchor_resolves_receipt_only_through_a_visible_scoped_queue_node() -> None:
+    # T1: a receipt (queue-node) uuid resolves to its Graphiti episode only when that queue node
+    # is itself a queue node, visible, non-FAILED and in the caller's silo.
+    repository, neo4j = _repository()
+    repository.timeline_anchor(uuid="receipt-1", namespace="tenant-a")
+    query, params = neo4j.calls[0]
+    assert params is not None and params["anchor_uuid"] == "receipt-1"
+    resolve = query[query.index("OPTIONAL MATCH (a:Episodic)"):query.index("WITH coalesce(")]
+    assert "a.uuid = $anchor_uuid" in resolve
+    assert "a.valid_at IS NULL" in resolve
+    assert "coalesce(a.processing_state, '') <> 'FAILED'" in resolve
+    assert "coalesce(a.scope, 'PERSISTENT') <> 'CANDIDATE'" in resolve
+    assert TENANT_SCOPE.format(v="a") in resolve
+    assert "coalesce(a.resolved_episode_uuid, $anchor_uuid) AS target_uuid" in query
 
 
 def test_timeline_facts_scopes_on_edge_and_caps_episodes() -> None:
@@ -469,6 +485,28 @@ async def test_query_mode_seeds_around() -> None:
     assert graphiti.embed_calls == ["auth"]
     assert [e.uuid for e in result.entries] == ["ep-2", "ep-3", "ep-4"]
     assert [e.is_anchor for e in result.entries] == [False, True, False]
+
+
+@pytest.mark.asyncio
+async def test_query_mode_seed_search_filters_on_current_embedding_model() -> None:
+    # T2: the seed search compares only vectors from the current embedder (#220).
+    calls: list[dict[str, Any]] = []
+
+    class _ModelAdapter(_StubAdapter):
+        def search_episode_embeddings(self, query_vector, *, limit=10, namespace=None,
+                                      model=None):
+            calls.append({"limit": limit, "namespace": namespace, "model": model})
+            return self.search_hits[:limit]
+
+    class _Embedder:
+        model = "text-embedding-3-small"
+
+    graphiti = _StubGraphiti()
+    graphiti.embedder_ref = _Embedder()  # type: ignore[attr-defined]
+    adapter = _ModelAdapter([_row("ep-1", "2026-01-01")])
+    adapter.search_hits = [_row("ep-1", "2026-01-01")]
+    await _svc(adapter, graphiti).recall_timeline(namespace="ns", query="auth", limit=1)
+    assert calls == [{"limit": 1, "namespace": "ns", "model": "text-embedding-3-small"}]
 
 
 @pytest.mark.asyncio

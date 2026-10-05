@@ -1,5 +1,9 @@
 ## 2026-10-05 - Apply configured Warden profiles to context recall
 
+- `infrastructure/memory_queries.py`: `timeline_anchor` accepts a receipt (queue-node) uuid and resolves it to its Graphiti episode only through a visible, non-FAILED queue node in the caller's namespace; Graphiti uuids still anchor directly. Query mode and `around=<receipt>` no longer fail with "unknown or hidden memory" for live memories.
+- `services/timeline_service.py`: the query-mode seed search applies the current embedding-model filter (#220), so stale-model vectors cannot pick the anchor.
+- `tests/test_recall_timeline_receipt_anchor.py`, `tests/test_recall_timeline.py`: disposable-graph coverage for receipt/episode anchors, hidden/FAILED/pending receipts, cross-silo receipts, subject threads and the model filter; offline query-shape checks.
+
 - `config/feature_flags.py`: add a 98-entry metadata inventory for boolean/mode settings, legacy settings readers and environment controls, with aliases, scoped prerequisites, observation markers and version requirements. Enforce inventory/default/binding/documentation consistency with AST and mutation controls; backfill 38 commented template entries without changing runtime behavior or defaults.
 - `.env.example`, `docs/post-install.md`, `.agent/default-off-features.md`: document bounded campaign controls, correct event-history variable names and explain upgrade precedence, explicit opt-outs and persisted-data limits; verify setup/template upgrades across 20 switches without changing defaults.
 - `src/menhir/cli/setup.py`: fill missing or blank provider model/URL settings from existing defaults in wheel and checkout setup (#193), preserving custom values, secrets and explicit feature opt-outs; add idempotence regression coverage.
