@@ -151,6 +151,8 @@ class AssertionPipeline:
                 belief_score=belief_score, evidence=evidence,
                 query_scope=q_scope, candidate_scope=_candidate_scope(candidate),
                 support_profile=_support_profile(candidate), oracle_packet=packet,
+                recorded_conflict=(bool(candidate.metadata.get("conflict_group_id"))
+                                   and candidate.metadata.get("conflict_status") == "unresolved"),
             )
             verdict = self.chain.evaluate(ctx)
             result = AdmissionResult(

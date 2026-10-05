@@ -23,15 +23,31 @@ are implemented; ranked recall/context now consume review flags as explicit sour
 >   load-bearing gap: the flag is produced but nothing reads it.
 
 ## Problem
+### Recorded-conflict guard handoff (#173, 2026-10-05)
+
+Why: the offline panel found that persisted unresolved conflicts reach scoring/context but not
+the optional contradiction guard. Pass a bounded `recorded_conflict` signal into WardenContext
+from candidate metadata when a conflict group exists and its status is exactly `unresolved`.
+ContradictionWarden consumes it alongside existing oracle/belief signals: current intent refuses;
+historical intent retains with a conflict label. Resolved, absent and unknown status do not invent
+a contradiction. Other guards still apply and may independently refuse historical memories.
+Keep master-gate and optional-guard dependencies, ranking, default labels and settings unchanged.
+Alternative: add a default conflict oracle (rejected here because it also changes ranking and the
+base admission profile). No new graph fields, migration, write path, ingest or paid qualification.
+Validate the real assertion producer with guard on/off and current/historical queries; expand the
+offline recall panel with resolved and historical conflict controls. Run focused guard/recall/context
+neighbors and exact-head CI. Remaining default/corpus/usefulness gates stay open.
+
 ### Offline Warden safety controls (#173, 2026-10-05)
 
 `tests/test_warden_safety_matrix.py` runs the actual recall/guard path against existing stub
-adapters. Seven authored controls cover anchored and conversation-only valid memories, unknown
-provenance, wrong project, expired current and historical claims, and unresolved recorded conflict.
+adapters. Nine authored controls cover anchored and conversation-only valid memories, unknown
+provenance, wrong project, expired current and historical claims, and unresolved/resolved/historical conflicts.
 Gold means useful or harmful **for the query's assertion context**; unknown evidence is scored
 separately. Each single-candidate pool and score stays fixed across Warden-off, strict (anchor on),
 and conversational (anchor off) profiles. Ranking/facet lanes and shadow execution stay off.
-Currentness and contradiction options are tested independently and together: 12 runs / 84 decisions.
+Currentness and contradiction options are tested independently and together: 12 runs / 108 decisions.
+Retained candidates keep the Warden-off final score.
 
 The report counts useful refusals, harmful refusals, harmful returns with/without warnings, and
 unknown returns/refusals. Negative controls prove both error counters detect injected failures.
@@ -41,11 +57,12 @@ Run `pytest tests/test_warden_safety_matrix.py -o junit_family=legacy --junitxml
 the `warden_safety_report` JUnit property contains JSON after pytest removes scratch files.
 
 Observed controls: strict refuses one useful conversation-only memory; conversational preserves
-all three useful fixtures. Both gated profiles refuse the wrong-project fixture. Currentness alone
+all five useful fixtures. Both gated profiles refuse the wrong-project fixture. Currentness alone
 returns the strongly anchored expired-current fixture labeled historical; enabling both optional
-guards refuses it while preserving historical recall. Recorded unresolved conflict remains returned
-with its existing context warning even with contradiction enabled: injected conflict-oracle tests
-prove the consumer, not this producer path. These are explicit known limitations, not zero-error
+guards refuses it while preserving historical recall. The initial seven-control panel in #228 exposed
+the recorded-conflict producer gap. The handoff fix above now refuses unresolved current conflicts
+when master and contradiction guards are on, preserves historical conflicts with a label, and leaves
+resolved conflicts and guard-off behavior intact. These are bounded controls, not zero-error
 qualification. Default activation, answer usefulness, corpus accuracy and deployed enforcement
 remain unqualified. No new production policy, ingest, model calls or paid bench is part of this panel.
 

@@ -225,6 +225,33 @@ async def test_contradiction_warden_default_off_does_not_refuse() -> None:
 # --- belief_gate tests --------------------------------------------------------
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("intent", ["current", "historical"])
+@pytest.mark.parametrize("group,status,unresolved", [
+    ("g", "unresolved", True), ("g", "resolved", False),
+    ("g", "unknown", False), ("g", None, False),
+    (None, "unresolved", False), ("", "unresolved", False),
+])
+async def test_recorded_conflict_reaches_optional_guard_without_mock_oracle(
+    enabled: bool, intent: str, group: str | None, status: str | None, unresolved: bool,
+) -> None:
+    pipe = AssertionPipeline(LogSpaceOracleCombiner(), auto_intent=False,
+                             contradiction_interrupt=enabled, belief_gate=False)
+    candidate = CandidateMemory(id="c", content="configuration fact", metadata={
+        "similarity": .85, "evidence_kinds": ("git",),
+        "conflict_group_id": group, "conflict_status": status,
+    })
+    outcome = await pipe.run(QueryContext(text="configuration", intent=intent), [candidate])
+    result = outcome.ranked[0]
+    expected = (WardenDecision.REFUSE if intent == "current" else WardenDecision.FLAG
+                ) if enabled and unresolved else WardenDecision.ADMIT
+    assert result.decision is expected
+    assert result.label == ("conflict" if expected is WardenDecision.FLAG else None)
+    if enabled and unresolved:
+        assert f"contradiction:{expected.value}" in result.reason
+
+
 def test_belief_gate_off_excludes_currentness_warden() -> None:
     p = AssertionPipeline(LogSpaceOracleCombiner(), belief_gate=False)
     assert not any(isinstance(w, CurrentnessWarden) for w in p.wardens)
