@@ -133,8 +133,7 @@ class RecallService(RecallSupportMixin):
         source_memory_limit: int | None = None,
     ) -> RecallResult:
         result = await run_recall(
-            self,
-            query,
+            self, query,
             preset=preset,
             limit=limit,
             candidate_k=candidate_k,
