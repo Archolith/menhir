@@ -106,6 +106,7 @@ Direction:
 - runtime preflight now produces an explicit capability snapshot (`neo4j_ready`, `embedder_ready`, `llm_ready`) that the HTTP surface exposes directly for readiness and debugging
 - `menhir serve` constructs one immutable `MemorySettings` snapshot and shares it with HTTP auth, the embedded OAuth AS, client-token storage, and the backend runtime; request handlers do not reread OAuth/HTTP environment variables
   - `config/oauth.py` owns `OAuthConfig` and its snapshot/legacy-environment builder
+  - `config/feature_flags.py` catalogs feature/control metadata without loading operator values or changing runtime settings. `tests/test_feature_flag_registry.py` and its AST helper enforce current settings/default/name/documentation consistency in the existing offline CI lane; consumer-reference checks are static wiring evidence.
   - `config/auth_mode.py` owns the OAuth > client-token > static > none precedence decision
   - `api/oauth.py` retains token verification and compatibility exports, while config never imports API
 - embedded-AS process dependencies (registered-client/code/refresh-token stores, signing key, and rate limiters) are configured from that snapshot before routes serve traffic
@@ -206,7 +207,7 @@ src/menhir/
 |- __main__.py        CLI entry point
 |- main.py            Startup dependency checks (Neo4j + LLM endpoint connectivity)
 |- core/              build_memory_services(), prepare_memory_runtime(), BuildArtifacts
-|- config/            MemorySettings, AuthMode, OAuthConfig (env-backed), MilestoneZeroScope
+|- config/            MemorySettings, AuthMode, OAuthConfig (env-backed), MilestoneZeroScope, feature/control metadata
 |- domain/            MemoryNode, Edge, MemorySession, IngestResult, recall types (QueryPreset, ScoredMemory, etc.)
 |   |- retrieval_trace_models.py  Neutral recall scoring/trace value contracts
 |   |- event_history.py  Event History Phase 1: immutable TypedEventAssertion/EventLane contract +

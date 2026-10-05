@@ -7,7 +7,43 @@ artifact_status: PROPOSED
 
 # menhir -- FeatureFlag registry: one declarative inventory, machine-enforced
 
-Status: **PROPOSED. No code written.**
+Status: **PARTIALLY IMPLEMENTED.** P1–P3 are implemented in the candidate branch;
+exact-head CI and merge review remain. P4–P5 are not implemented.
+
+### Approved P1–P3 execution (2026-10-05)
+
+Implement metadata without changing settings construction or parsing. Recount current booleans,
+string mode fields and direct environment readers, including named constants and reviewed helper
+calls. Registry defaults are explicit snapshots checked against the model, not derived at import
+time. Record canonical names, actual aliases, interactions, observation-only markers and version
+requirements. Tests enforce inventory/default/name/documentation consistency, consumer references,
+and retired-control absence; synthetic omissions and drift must fail the same detectors.
+
+Use AST checks for direct reads and explicit contracts for parameterized wrappers. Unknown dynamic
+reads fail for review; arbitrary verifier parameter keys remain an identified dynamic boundary,
+not an invented finite setting list. Static consumer references establish wiring, not quality or
+universal enforcement. Keep existing focused behavioral controls for Warden prerequisites.
+Backfill missing commented template entries; do not generate or replace explanatory prose.
+The optional configuration UI, wholesale numeric/secret inventory, runtime behavior changes,
+default activation, deployment, ingest and paid qualification remain outside this tranche.
+
+Current census: **45 booleans, 8 string modes, 25 additional settings referenced by legacy
+environment readers, and 20 env-only controls** (98 entries, including actual aliases).
+The original 44/~20 counts below are historical. Model defaults and canonical/alias bindings
+are independently checked; legacy wrapper bindings are checked against the same loader.
+Env-only metadata records raw absent-read values before consumer-specific fallbacks, not a
+new runtime default. Required/data-producer prerequisites carry scope notes; deterministic
+shadow audit emission has a separate prerequisite. No runtime dependency validator is added.
+
+The first documentation check failed on **38 missing entries**, then passed after commented
+backfill. Exemptions remain empty. Tests reject omissions, new booleans/modes, default/name/alias
+drift, legacy wrong-variable reads, missing documentation, env-only absent-default drift and
+new unreviewed dynamic reads. Literal, named-constant, imported-getter alias, keyword and
+subscript reads are covered. Consumer references and settings-to-tuning bridges are static
+wiring evidence and may overcount same-named attributes; they are not semantic enforcement
+proof. Five parameterized reader boundaries are explicit, with wrapper callers inventoried
+and arbitrary verifier keys kept outside the finite setting list. Future indirection still
+requires review rather than a claim of general Python data-flow analysis.
 
 Date: 2026-09-11. Derived from the 2026-09-11 full feature-flag scan (44 boolean settings +
 modes + ~20 env vars read outside `MemorySettings`, cross-referenced against `.env` and
