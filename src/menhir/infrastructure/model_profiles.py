@@ -105,23 +105,25 @@ _GPT6_EXTRACTION_INSTRUCTIONS = """\
 MODEL PRECISION (these rules override any pull toward exhaustive extraction):
 Entities
 - No possessive or relational words in entity names. Never start a name with `user's`, `my`,
-  `your` or `their`, and drop `new`, `old` and `favourite`: `black jeans`, not
-  `user's new black jeans`. Keep identifying details: `silver Honda Civic`. Ownership belongs in
-  the relationship.
-- One entity per real-world thing. If the text names one thing several ways (`car detailing`,
-  `wax and detailing`), pick one name and reuse it.
+  `your` or `their`, and drop `new`, `old` and `favourite`: `brass sextant`, not
+  `user's new brass sextant`. Keep identifying details: `dented green canoe`. Ownership belongs
+  in the relationship.
+- One entity per real-world thing. If the text names one thing several ways (`loom warping`,
+  `warping the loom`), pick one name and reuse it.
 Edges
 - Emit one edge per distinct fact, written once. Do not restate it from the other entity's side:
-  `user will try Mint and compare it with Personal Capital` is one edge, not two.
-- Do not emit a fact that another edge already states or implies. `user used their car to move
-  Emily's furniture` already implies `user owns a car`, `Emily moved` and `the furniture is
-  Emily's`; `premium fell $20 a month because of user's safe driving record` already implies
-  `user has a safe driving record`; `user plans to use the GPS system's lane departure warning`
-  already implies `GPS system has lane departure warning`. Emit only the fuller edge.
-- Keep a list given in one clause as one edge: `user will ask the detailer about interior
-  cleaning and paint protection`, not one edge per item.
-- Fold opinions, reasons and qualifiers into the fact they describe: `user bought black jeans
-  from Levi's and likes them` is one edge, not separate purchase, brand and opinion edges.
+  `user will trial Fernwick and compare it with Larkspur` is one edge, not two.
+- Do not emit a fact that another edge already states or implies. `user moved Odile's
+  harpsichord on their furniture dolly` already implies `user owns a furniture dolly` and `the
+  harpsichord is Odile's`; `user's rent rose $73 a month when the lease renewed` already implies
+  `the lease renewed`; `user plans to use the loom's dobby attachment` already implies `loom has
+  a dobby attachment`.
+- The edge with the most detail always stays. When two edges overlap, delete the one that adds
+  nothing; never delete the one carrying a date, amount, reason or comparison.
+- Keep a list given in one clause as one edge: `user will ask the luthier about refretting and a
+  new nut`, not one edge per item.
+- Fold opinions, reasons and qualifiers into the fact they describe: `user bought a brass sextant
+  from Halvard and loves it` is one edge, not separate purchase, brand and opinion edges.
 - Still give each new detail its own edge: a date, amount, comparison or plan that no other edge
   states.
 - Before answering, compare your edges pairwise and delete any edge whose information is fully
@@ -136,6 +138,9 @@ class Gpt6Profile(OpenAIReasoningProfile):
     first, two-rule block (b4), so gpt-6 needs the duplicate patterns named explicitly. On item
     gpt4_2655b836 the pattern-naming block took edges from 2.09x to 1.89x (b5); what remained were
     edges implied by a fuller edge, which the implication rule and pairwise check target.
+
+    Examples in the block are invented and must not come from LongMemEval or any eval set:
+    examples drawn from the benchmark inflate its score (b5/b6 used them and are not clean).
     """
 
     name = "gpt-6"
