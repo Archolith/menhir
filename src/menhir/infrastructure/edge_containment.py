@@ -1,0 +1,126 @@
+"""Drop edges whose fact is restated inside a fuller edge from the same extraction.
+
+Some models restate a sub-fact of a fuller edge on a different endpoint pair ("jeans are from
+Levi's" next to "user bought black jeans from Levi's"); Graphiti's exact-match and same-pair dedup
+cannot catch that. An edge is dropped only when every content token, including numbers, names and
+negations, appears in a surviving edge with compatible timestamps and attributes.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Collection
+from typing import Any
+
+from menhir.infrastructure.graphiti_helpers import SYNTHETIC_FACT_PREFIX
+
+_STOPWORDS = frozenset(
+    {
+        # articles, pronouns, possessive determiners
+        "a", "an", "the", "i", "me", "my", "you", "your", "he", "him", "his", "she", "her",
+        "it", "its", "we", "us", "our", "they", "them", "their", "this", "that", "these",
+        "those", "user",
+        # auxiliaries
+        "is", "are", "was", "were", "be", "been", "being", "am", "has", "have", "had", "do",
+        "does", "did", "will", "would", "can", "could", "should", "may", "might", "shall",
+        # prepositions and conjunctions
+        "and", "or", "but", "of", "to", "in", "on", "at", "by", "for", "with", "from", "as",
+        "into", "about", "than", "then", "so", "also", "which", "who", "whom", "what", "while",
+    }
+)  # fmt: skip
+_TOKEN = re.compile(r"[a-z0-9]+")
+_POSSESSIVE = re.compile(r"'s\b")
+
+
+def _normalize(token: str) -> str:
+    if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
+        return token[:-1]
+    return token
+
+
+def fact_tokens(fact: str) -> frozenset[str]:
+    """Content tokens of ``fact``; digits and negations are always content."""
+    text = (fact or "").lower().replace("’", "'").replace("‘", "'")
+    text = _POSSESSIVE.sub("", text)
+    out = set()
+    for raw in _TOKEN.findall(text):
+        norm = _normalize(raw)
+        if raw in _STOPWORDS or norm in _STOPWORDS:
+            continue
+        out.add(norm)
+    return frozenset(out)
+
+
+def _compatible(kept: Any, dropped: Any) -> bool:
+    # Word bags ignore roles: "Ann called user" must not be absorbed by "user called Ann".
+    kept_pair = (kept.source_node_uuid, kept.target_node_uuid)
+    dropped_pair = (dropped.source_node_uuid, dropped.target_node_uuid)
+    if dropped_pair != kept_pair and set(dropped_pair) == set(kept_pair):
+        return False
+    for attr in ("valid_at", "invalid_at"):
+        value = getattr(dropped, attr, None)
+        if value is not None and value != getattr(kept, attr, None):
+            return False
+    kept_attrs = getattr(kept, "attributes", None) or {}
+    dropped_attrs = getattr(dropped, "attributes", None) or {}
+    return all(key in kept_attrs and kept_attrs[key] == v for key, v in dropped_attrs.items())
+
+
+def _endpoints(edges: list[Any]) -> set[str]:
+    out: set[str] = set()
+    for edge in edges:
+        out.add(edge.source_node_uuid)
+        out.add(edge.target_node_uuid)
+    return out
+
+
+def prune_contained_edges(
+    nodes: list[Any],
+    edges: list[Any],
+    index_map: dict[str, list[int]],
+    protected_uuids: Collection[str] = (),
+) -> tuple[int, int]:
+    """Mutates nodes, edges and index_map in place; returns (edges_pruned, nodes_dropped)."""
+    if len(edges) < 2:
+        return 0, 0
+    facts = [getattr(edge, "fact", "") or "" for edge in edges]
+    toks = [fact_tokens(fact) for fact in facts]
+    # Richest first, so every kept edge is at least as rich as anything it absorbs.
+    order = sorted(range(len(edges)), key=lambda i: (-len(toks[i]), -len(facts[i]), i))
+    kept: list[int] = []
+    keeper_of: dict[int, int] = {}
+    for j in order:
+        if facts[j].startswith(SYNTHETIC_FACT_PREFIX):
+            continue  # structural membership edges are neither pruned nor keepers
+        keeper = next(
+            (
+                i
+                for i in kept
+                if toks[j]
+                and toks[j] <= toks[i]
+                and _compatible(edges[i], edges[j])
+            ),
+            None,
+        )
+        if keeper is None:
+            kept.append(j)
+        else:
+            keeper_of[j] = keeper
+    if not keeper_of:
+        return 0, 0
+
+    for j, i in keeper_of.items():
+        episodes = getattr(edges[i], "episodes", None)
+        if isinstance(episodes, list):
+            for uuid in getattr(edges[j], "episodes", None) or []:
+                if uuid not in episodes:
+                    episodes.append(uuid)
+
+    before = _endpoints(edges)
+    edges[:] = [edge for k, edge in enumerate(edges) if k not in keeper_of]
+    orphaned = (before - _endpoints(edges)) - set(protected_uuids)
+    node_count = len(nodes)
+    nodes[:] = [node for node in nodes if node.uuid not in orphaned]
+    for uuid in orphaned:
+        index_map.pop(uuid, None)
+    return len(keeper_of), node_count - len(nodes)

@@ -40,6 +40,8 @@ class ModelProfile:
 
     name: ClassVar[str] = "default"
     structured_output_mode: ClassVar[StructuredOutputMode] = "json_schema"
+    #: Drop edges restated inside a fuller edge of the same extraction (edge_containment).
+    prune_contained_edges: ClassVar[bool] = False
 
     def matches(self, model: str, endpoint: str) -> bool:
         return True
@@ -145,6 +147,8 @@ class Gpt6Profile(OpenAIReasoningProfile):
 
     name = "gpt-6"
     prefixes = ("gpt-6",)
+    #: b7 (item 0a995998) still restated sub-facts on other endpoint pairs despite the block.
+    prune_contained_edges = True
 
     def extraction_instructions(self) -> str:
         return _GPT6_EXTRACTION_INSTRUCTIONS

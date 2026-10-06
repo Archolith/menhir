@@ -49,6 +49,7 @@ from menhir.infrastructure.self_binding import (
     SelfBindResult,
     bind_canonical_self,
 )
+from menhir.infrastructure.edge_containment import prune_contained_edges
 from menhir.infrastructure.graphiti_helpers import SYNTHETIC_FACT_PREFIX
 from menhir.infrastructure.model_profiles import ModelProfile, resolve_model_profile
 
@@ -126,6 +127,9 @@ class CombinedExtractionReceipt:
     resolved_node_count: int = 0
     resolved_edge_count: int = 0
     orphan_nodes_dropped: int = 0
+    #: Edges restated inside a fuller edge, and the nodes that left orphaned (profile-gated).
+    contained_edges_pruned: int = 0
+    contained_orphans_dropped: int = 0
     #: Edges suppressed because they were `user -> X` ECHO on an assistant turn (the human already
     #: stated the fact first-hand in their own turn). When this accounts for every raw edge, the
     #: resulting empty extraction is a POLICY decision, not a collapse -- see
@@ -1546,6 +1550,26 @@ async def _run_graphiti_combined_extraction(
         + receipt.endpoints_synthesized
     )
     receipt.orphan_nodes_dropped = max(0, surviving_inputs - len(nodes))
+    if _model_profile_for_clients(clients).prune_contained_edges:
+        # After binding, so the bound author node is known and never pruned as an orphan.
+        protected = {
+            uuid
+            for uuid in (
+                getattr(receipt.self_bind_result, "self_uuid", None),
+                getattr(receipt.self_subject_node, "uuid", None),
+            )
+            if uuid
+        }
+        pruned, dropped = prune_contained_edges(nodes, edges, index_map, protected)
+        receipt.contained_edges_pruned = pruned
+        receipt.contained_orphans_dropped = dropped
+        receipt.resolved_node_count = len(nodes)
+        receipt.resolved_edge_count = len(edges)
+        if pruned:
+            logger.info(
+                "Pruned contained edges episode_id=%s edges=%d orphan_nodes=%d",
+                receipt.episode_key, pruned, dropped,
+            )
     return nodes, edges, index_map
 
 
