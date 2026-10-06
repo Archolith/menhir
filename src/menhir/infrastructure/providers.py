@@ -17,6 +17,7 @@ from menhir.infrastructure.observability import (
     fail_llm_usage_call,
     start_llm_usage_call,
 )
+from menhir.infrastructure.openai_request_policy import apply_openai_request_policy
 
 OpenAIClientFactory = Callable[..., Any]
 RetrySleep = Callable[[float], Awaitable[None]]
@@ -300,13 +301,18 @@ class OpenAIStyleChatBackend:
         )
         try:
             response = await client.chat.completions.create(
-                model=self.provider.chat_model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                max_tokens=max_tokens,
-                temperature=temperature,
+                **apply_openai_request_policy(
+                    {
+                        "model": self.provider.chat_model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "max_tokens": max_tokens,
+                        "temperature": temperature,
+                    },
+                    base_url=base_url,
+                )
             )
         except BaseException as exc:
             fail_llm_usage_call(handle, exc)

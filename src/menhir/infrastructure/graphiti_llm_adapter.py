@@ -51,6 +51,7 @@ from menhir.infrastructure.graphiti_helpers import (
     _normalize_graphiti_json_payload,
     _raw_preview,
 )
+from menhir.infrastructure.openai_request_policy import apply_openai_request_policy
 
 logger = logging.getLogger(__name__)
 
@@ -360,6 +361,7 @@ class _ProviderExtrasCompletions:
         extra: dict[str, Any] = _provider_extra_body(kwargs.get("model"), self._base_url)
         if extra:
             kwargs["extra_body"] = {**(kwargs.get("extra_body") or {}), **extra}
+        kwargs = apply_openai_request_policy(kwargs, base_url=self._base_url)
         # Merge lineage (merge_audit / merged_from / last_merge_op_id) is kept out of prompts by
         # the fork itself since archolith-graphiti-core 0.30.2.post2 (graphiti #2); see
         # tests/infrastructure/test_merge_lineage_prompt_policy.py.

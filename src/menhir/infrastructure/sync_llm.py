@@ -18,6 +18,7 @@ from menhir.infrastructure.observability import (
     fail_llm_usage_call,
     start_llm_usage_call,
 )
+from menhir.infrastructure.openai_request_policy import apply_openai_request_policy
 from menhir.infrastructure.providers import (
     DEFAULT_REQUEST_TIMEOUT_S,
     ProviderConfig,
@@ -103,14 +104,19 @@ def make_sync_chat(
         try:
             client = _resolve_client()
             resp = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                temperature=temperature,
-                max_tokens=max_tokens,
-                **extra,
+                **apply_openai_request_policy(
+                    {
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": user},
+                        ],
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                        **extra,
+                    },
+                    base_url=cfg.base_url,
+                )
             )
         except Exception as exc:
             fail_llm_usage_call(handle, exc)
