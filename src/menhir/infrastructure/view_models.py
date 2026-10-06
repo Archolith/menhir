@@ -44,8 +44,8 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from typing import Any
-from uuid import uuid4
 
+from menhir.domain.exact_json import dumps_exact
 from menhir.domain.temporal import parse_iso8601
 from menhir.domain.typed_assertion import VALUE_KINDS as DOMAIN_VALUE_KINDS, normalize_scalar
 
@@ -70,26 +70,8 @@ _SHARED_STAMPS = (
 
 
 def _dumps_payload(obj: Any) -> str:
-    """``json.dumps(obj, ensure_ascii=False)``, but Decimal values (typed money/number scalars)
-    become exact JSON numbers instead of raising. Output is unchanged when no Decimal is present."""
-    literals: dict[str, str] = {}
-    prefix = f"__menhir_decimal_{uuid4().hex}_"
-
-    def swap(value: Any) -> Any:
-        if isinstance(value, Decimal):
-            token = f"{prefix}{len(literals)}"
-            literals[token] = format(value, "f") if value.is_finite() else json.dumps(float(value))
-            return token
-        if isinstance(value, Mapping):
-            return {k: swap(v) for k, v in value.items()}
-        if isinstance(value, (list, tuple)):
-            return [swap(v) for v in value]
-        return value
-
-    text = json.dumps(swap(obj), ensure_ascii=False)
-    for token, literal in literals.items():
-        text = text.replace(f'"{token}"', literal)
-    return text
+    """View payload JSON: Decimal values (typed money/number scalars) as exact JSON numbers."""
+    return dumps_exact(obj, ensure_ascii=False)
 
 
 class ViewClass(Enum):
