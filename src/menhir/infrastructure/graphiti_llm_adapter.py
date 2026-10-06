@@ -51,9 +51,8 @@ from menhir.infrastructure.graphiti_helpers import (
     _normalize_graphiti_json_payload,
     _raw_preview,
 )
-from menhir.infrastructure.openai_rate_limit import acall_with_rate_limit_backoff
+from menhir.infrastructure.openai_calls import ResilientChatClient, acreate_chat_completion
 from menhir.infrastructure.model_profiles import resolve_model_profile
-from menhir.infrastructure.openai_request_policy import apply_openai_request_policy
 
 logger = logging.getLogger(__name__)
 
@@ -341,50 +340,8 @@ class _ProviderExtrasAsyncClient:
         return _ProviderExtrasChat(self._inner.chat, self._base_url)
 
 
-class RateLimitedChatClient:
-    """Retries 429s on ``chat.completions.create`` and changes nothing else about the request.
-
-    For the Graphiti reranker: it calls the shared instrumented client directly, whose chat is
-    deliberately unwrapped, and re-raises RateLimitError with no retry of its own.
-    """
-
-    def __init__(self, inner: Any, *, label: str) -> None:
-        self._inner = inner
-        self._label = label
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._inner, name)
-
-    @property
-    def chat(self) -> Any:
-        return _RateLimitedChat(self._inner.chat, self._label)
-
-
-class _RateLimitedChat:
-    def __init__(self, inner: Any, label: str) -> None:
-        self._inner = inner
-        self._label = label
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._inner, name)
-
-    @property
-    def completions(self) -> Any:
-        return _RateLimitedCompletions(self._inner.completions, self._label)
-
-
-class _RateLimitedCompletions:
-    def __init__(self, inner: Any, label: str) -> None:
-        self._inner = inner
-        self._label = label
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._inner, name)
-
-    async def create(self, **kwargs: Any) -> Any:
-        return await acall_with_rate_limit_backoff(
-            lambda: self._inner.create(**kwargs), label=self._label
-        )
+#: Kept for importers: the reranker wrapper now lives in ``openai_calls``.
+RateLimitedChatClient = ResilientChatClient
 
 
 class _ProviderExtrasChat:
@@ -409,13 +366,13 @@ class _ProviderExtrasCompletions:
         extra: dict[str, Any] = _provider_extra_body(kwargs.get("model"), self._base_url)
         if extra:
             kwargs["extra_body"] = {**(kwargs.get("extra_body") or {}), **extra}
-        kwargs = apply_openai_request_policy(kwargs, base_url=self._base_url)
         # Merge lineage (merge_audit / merged_from / last_merge_op_id) is kept out of prompts by
         # the fork itself since archolith-graphiti-core 0.30.2.post2 (graphiti #2); see
         # tests/infrastructure/test_merge_lineage_prompt_policy.py.
-        # 429 backoff lives here because generate_response re-raises RateLimitError unretried.
-        return await acall_with_rate_limit_backoff(
-            lambda: self._inner.create(**kwargs), label="graphiti"
+        # Shaping (model profile, Flex tier) and 429 backoff live here because generate_response
+        # re-raises RateLimitError unretried.
+        return await acreate_chat_completion(
+            self._inner.create, kwargs, base_url=self._base_url, label="graphiti"
         )
 
 

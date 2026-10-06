@@ -10,9 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import threading
 import traceback
-from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from time import perf_counter
@@ -47,7 +45,7 @@ from menhir.infrastructure.telemetry import (
     record_memory_revision,
 )
 from menhir.infrastructure.graphiti_helpers import SYNTHETIC_FACT_PREFIX, strip_synthetic_prefix
-from menhir.infrastructure.openai_rate_limit import RateLimitBackoffClock, bind_backoff_clock
+from menhir.infrastructure.openai_rate_limit import await_with_backoff_aware_timeout
 from menhir.infrastructure.graphiti_extraction_policy import (
     begin_extraction_receipt,
     is_policy_empty_extraction,
@@ -1521,50 +1519,6 @@ async def handle_enrichment_failure(
 # Dual-path helper — timeout-bounded Graphiti add_episode
 # ---------------------------------------------------------------------------
 
-#: How far 429 backoff may push the add_episode deadline, as a multiple of the configured
-#: timeout. Bounds an episode that stays throttled indefinitely.
-RATE_LIMIT_BACKOFF_MAX_EXTENSION = 3.0
-
-
-async def _await_excluding_rate_limit_backoff(coro: Awaitable[Any], *, timeout_s: float) -> Any:
-    """Await ``coro`` under a ``timeout_s`` deadline that pauses while any 429 backoff sleeps.
-
-    A 429 chain can sleep about five minutes per call, which alone used up the whole
-    add_episode timeout and parked a write-free episode as manual_review. Wall time is still
-    capped at ``timeout_s * (1 + RATE_LIMIT_BACKOFF_MAX_EXTENSION)``. Expiry raises
-    TimeoutError and outside cancellation propagates, as with ``asyncio.wait_for``.
-    """
-    loop = asyncio.get_running_loop()
-    loop_thread = threading.get_ident()
-    start = loop.time()
-    hard_deadline = start + timeout_s * (1.0 + RATE_LIMIT_BACKOFF_MAX_EXTENSION)
-    clock = RateLimitBackoffClock(now=loop.time)
-
-    async with asyncio.timeout_at(start + timeout_s) as scope:
-
-        def _reschedule() -> None:
-            # A queued call can land after the scope fired or the await returned.
-            if clock.on_change is None or scope.expired():
-                return
-            sleeping, paused_s = clock.snapshot()
-            when = hard_deadline if sleeping else start + timeout_s + paused_s
-            scope.reschedule(min(when, hard_deadline))
-
-        def _on_change() -> None:
-            # Timeout.reschedule must run on the loop thread; sync seams sleep on workers.
-            if threading.get_ident() == loop_thread:
-                _reschedule()
-            else:
-                loop.call_soon_threadsafe(_reschedule)
-
-        clock.on_change = _on_change
-        try:
-            with bind_backoff_clock(clock):
-                return await coro
-        finally:
-            clock.on_change = None
-
-
 async def add_episode_with_timeout(
     graphiti_client: GraphitiClient,
     *,
@@ -1669,7 +1623,7 @@ async def add_episode_with_timeout(
                 "timeout_s": timeout_s,
             },
         )
-        result = await _await_excluding_rate_limit_backoff(
+        result = await await_with_backoff_aware_timeout(
             graphiti_client.add_episode(
                 name=name,
                 episode_body=episode_body,

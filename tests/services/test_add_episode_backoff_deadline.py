@@ -16,13 +16,10 @@ from menhir.infrastructure.openai_rate_limit import (
     MAX_WAIT_ENV,
     RateLimitBackoffClock,
     acall_with_rate_limit_backoff,
+    await_with_backoff_aware_timeout,
     call_with_rate_limit_backoff,
 )
-from menhir.services import enrichment_steps
-from menhir.services.enrichment_steps import (
-    _await_excluding_rate_limit_backoff,
-    add_episode_with_timeout,
-)
+from menhir.services.enrichment_steps import add_episode_with_timeout
 
 pytestmark = pytest.mark.unit
 
@@ -77,7 +74,7 @@ def test_backoff_longer_than_the_timeout_does_not_time_out() -> None:
         await asyncio.sleep(0.1)
         return await _rate_limited_call()
 
-    result, elapsed = _run(_await_excluding_rate_limit_backoff(work(), timeout_s=TIMEOUT_S))
+    result, elapsed = _run(await_with_backoff_aware_timeout(work(), timeout_s=TIMEOUT_S))
 
     assert result == "ok"
     assert elapsed > TIMEOUT_S
@@ -85,7 +82,7 @@ def test_backoff_longer_than_the_timeout_does_not_time_out() -> None:
 
 def test_non_backoff_work_still_times_out() -> None:
     with pytest.raises(TimeoutError):
-        _run(_await_excluding_rate_limit_backoff(asyncio.sleep(BACKOFF_S), timeout_s=TIMEOUT_S))
+        _run(await_with_backoff_aware_timeout(asyncio.sleep(BACKOFF_S), timeout_s=TIMEOUT_S))
 
 
 def test_backoff_extends_the_deadline_only_by_the_time_slept() -> None:
@@ -95,14 +92,13 @@ def test_backoff_extends_the_deadline_only_by_the_time_slept() -> None:
 
     start = time.monotonic()
     with pytest.raises(TimeoutError):
-        asyncio.run(_await_excluding_rate_limit_backoff(work(), timeout_s=TIMEOUT_S))
+        asyncio.run(await_with_backoff_aware_timeout(work(), timeout_s=TIMEOUT_S))
     elapsed = time.monotonic() - start
 
     assert BACKOFF_S + TIMEOUT_S - 0.05 < elapsed < BACKOFF_S + TIMEOUT_S + 0.3
 
 
 def test_hard_cap_bounds_an_episode_that_stays_throttled(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(enrichment_steps, "RATE_LIMIT_BACKOFF_MAX_EXTENSION", 0.5)
     monkeypatch.setenv(MAX_WAIT_ENV, "5")
 
     async def work() -> str:
@@ -117,7 +113,9 @@ def test_hard_cap_bounds_an_episode_that_stays_throttled(monkeypatch: pytest.Mon
 
     start = time.monotonic()
     with pytest.raises(TimeoutError):
-        asyncio.run(_await_excluding_rate_limit_backoff(work(), timeout_s=TIMEOUT_S))
+        asyncio.run(
+            await_with_backoff_aware_timeout(work(), timeout_s=TIMEOUT_S, max_extension=0.5)
+        )
 
     assert time.monotonic() - start < TIMEOUT_S * 1.5 + 0.3
 
@@ -129,7 +127,7 @@ def test_parallel_backoffs_pause_the_deadline_once() -> None:
 
     start = time.monotonic()
     with pytest.raises(TimeoutError):
-        asyncio.run(_await_excluding_rate_limit_backoff(work(), timeout_s=TIMEOUT_S))
+        asyncio.run(await_with_backoff_aware_timeout(work(), timeout_s=TIMEOUT_S))
 
     # Two overlapping 0.6 s sleeps pause the clock for 0.6 s, not 1.2 s.
     assert time.monotonic() - start < BACKOFF_S + TIMEOUT_S + 0.3
@@ -160,7 +158,7 @@ def test_backoff_on_a_worker_thread_pauses_the_deadline() -> None:
         return call_with_rate_limit_backoff(_throttled_once(), label="test")
 
     result, elapsed = _run(
-        _await_excluding_rate_limit_backoff(asyncio.to_thread(sync_call), timeout_s=TIMEOUT_S)
+        await_with_backoff_aware_timeout(asyncio.to_thread(sync_call), timeout_s=TIMEOUT_S)
     )
 
     assert result == "ok"
@@ -170,7 +168,7 @@ def test_backoff_on_a_worker_thread_pauses_the_deadline() -> None:
 def test_outside_cancellation_is_not_turned_into_a_timeout() -> None:
     async def main() -> None:
         task = asyncio.create_task(
-            _await_excluding_rate_limit_backoff(asyncio.sleep(5), timeout_s=TIMEOUT_S * 10)
+            await_with_backoff_aware_timeout(asyncio.sleep(5), timeout_s=TIMEOUT_S * 10)
         )
         await asyncio.sleep(0.05)
         task.cancel()
@@ -189,7 +187,7 @@ def test_backoff_outliving_the_await_does_not_touch_the_closed_deadline() -> Non
             straggler = asyncio.create_task(_rate_limited_call())
             return "done"
 
-        result = await _await_excluding_rate_limit_backoff(work(), timeout_s=TIMEOUT_S)
+        result = await await_with_backoff_aware_timeout(work(), timeout_s=TIMEOUT_S)
         assert straggler is not None
         assert await straggler == "ok"
         return result

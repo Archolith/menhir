@@ -18,7 +18,8 @@ instrumented client is not wrapped, so the proxy's retry is never nested inside 
 ``LLMAdapter._chat_text`` retries remain for non-429 faults and wrap the inner 429 retry.
 
 Backoff sleeps are reported to the ``RateLimitBackoffClock`` bound in the current context, if
-any, so an enclosing deadline (``add_episode_with_timeout``) can exclude them.
+any. ``await_with_backoff_aware_timeout`` binds one, so an enclosing deadline (today
+``add_episode_with_timeout``) excludes them.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ import time
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, TypeVar
 
 import openai
 from tenacity import (
@@ -49,6 +50,9 @@ MAX_ATTEMPTS_ENV = "MENHIR_OPENAI_RATE_LIMIT_MAX_ATTEMPTS"
 MAX_WAIT_ENV = "MENHIR_OPENAI_RATE_LIMIT_MAX_WAIT_S"
 DEFAULT_MAX_ATTEMPTS = 6
 DEFAULT_MAX_WAIT_S = 60.0
+#: How far backoff may push a backoff-aware deadline, as a multiple of its timeout. Bounds an
+#: operation that stays throttled indefinitely.
+DEFAULT_BACKOFF_MAX_EXTENSION = 3.0
 _NOT_RETRYABLE_CODES = frozenset({"insufficient_quota"})
 
 
@@ -227,3 +231,51 @@ async def acall_with_rate_limit_backoff[T](
         return await fn()
 
     return await AsyncRetrying(**kwargs)(_attempt)
+
+
+_R = TypeVar("_R")
+
+
+async def await_with_backoff_aware_timeout(
+    awaitable: Awaitable[_R],
+    *,
+    timeout_s: float,
+    max_extension: float = DEFAULT_BACKOFF_MAX_EXTENSION,
+) -> _R:
+    """Await under a ``timeout_s`` deadline that pauses while any 429 backoff inside it sleeps.
+
+    Use instead of ``asyncio.wait_for`` around work that makes OpenAI calls: a 429 chain can
+    sleep about five minutes per call, which alone used up the 300 s add_episode timeout. Wall
+    time is still capped at ``timeout_s * (1 + max_extension)``. Expiry raises TimeoutError and
+    outside cancellation propagates, as with ``asyncio.wait_for``. The awaitable runs in the
+    current task; tasks and ``asyncio.to_thread`` workers it starts inherit the clock.
+    """
+    loop = asyncio.get_running_loop()
+    loop_thread = threading.get_ident()
+    start = loop.time()
+    hard_deadline = start + timeout_s * (1.0 + max_extension)
+    clock = RateLimitBackoffClock(now=loop.time)
+
+    async with asyncio.timeout_at(start + timeout_s) as scope:
+
+        def _reschedule() -> None:
+            # A queued call can land after the scope fired or the await returned.
+            if clock.on_change is None or scope.expired():
+                return
+            sleeping, paused_s = clock.snapshot()
+            when = hard_deadline if sleeping else start + timeout_s + paused_s
+            scope.reschedule(min(when, hard_deadline))
+
+        def _on_change() -> None:
+            # Timeout.reschedule must run on the loop thread; sync seams sleep on workers.
+            if threading.get_ident() == loop_thread:
+                _reschedule()
+            else:
+                loop.call_soon_threadsafe(_reschedule)
+
+        clock.on_change = _on_change
+        try:
+            with bind_backoff_clock(clock):
+                return await awaitable
+        finally:
+            clock.on_change = None

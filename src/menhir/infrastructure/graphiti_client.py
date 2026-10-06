@@ -51,11 +51,11 @@ from menhir.infrastructure.embedding_dimensions import expected_graphiti_embeddi
 from menhir.infrastructure.graphiti_extraction_policy import MenhirExtractionHook  # noqa: E402
 from menhir.infrastructure.graphiti_llm_adapter import (  # noqa: E402
     MenhirOpenAIGenericClient,
-    RateLimitedChatClient,
     _ProviderExtrasAsyncClient,
     build_menhir_request_guard,
 )
 from menhir.infrastructure.model_profiles import resolve_model_profile  # noqa: E402
+from menhir.infrastructure.openai_calls import ResilientChatClient  # noqa: E402
 from menhir.infrastructure.graphiti_resolution_policy import (  # noqa: E402
     MenhirCandidateFilterHook,
     MenhirIdentityGateHook,
@@ -323,7 +323,7 @@ class GraphitiClient:
                     base_url=reranker_base_url,
                     model=reranker_provider.chat_model,
                 ),
-                client=RateLimitedChatClient(reranker_client, label="reranker"),
+                client=ResilientChatClient(reranker_client, label="reranker"),
             )
         graph_driver = Neo4jDriver(
             uri=settings.neo4j_uri,
