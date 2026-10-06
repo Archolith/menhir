@@ -14,6 +14,7 @@ import httpx
 from openai import AsyncOpenAI
 
 from menhir.config import MemorySettings
+from menhir.infrastructure.openai_rate_limit import acall_with_rate_limit_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -403,10 +404,13 @@ def fail_llm_usage_call(handle: LLMCallHandle, error: BaseException) -> None:
 class _InstrumentedEndpoint:
     """Generic instrumented wrapper for any OpenAI-compatible async endpoint."""
 
-    def __init__(self, inner: Any, *, event_type: str, endpoint: str) -> None:
+    def __init__(
+        self, inner: Any, *, event_type: str, endpoint: str, retry_rate_limits: bool = False
+    ) -> None:
         self._inner = inner
         self._event_type = event_type
         self._endpoint = endpoint
+        self._retry_rate_limits = retry_rate_limits
 
     async def create(self, *args: Any, **kwargs: Any) -> Any:
         model = kwargs.get("model")
@@ -417,7 +421,12 @@ class _InstrumentedEndpoint:
             operation=self._endpoint,
         )
         try:
-            result = await self._inner.create(*args, **kwargs)
+            if self._retry_rate_limits:
+                result = await acall_with_rate_limit_backoff(
+                    lambda: self._inner.create(*args, **kwargs), label=self._endpoint
+                )
+            else:
+                result = await self._inner.create(*args, **kwargs)
         except Exception as exc:
             fail_llm_usage_call(handle, exc)
             raise
@@ -560,7 +569,11 @@ class _InstrumentedAsyncOpenAI:
             self.chat = _InstrumentedNamespace(chat)
         embeddings = getattr(inner, "embeddings", None)
         if embeddings is not None:
-            instrumented = _InstrumentedEndpoint(embeddings, event_type="embedding", endpoint="embeddings.create")
+            # Embeddings retry 429s here: Graphiti's embedder calls this client directly and no
+            # caller retries. Chat does not -- the Graphiti proxy and providers retry their own.
+            instrumented = _InstrumentedEndpoint(
+                embeddings, event_type="embedding", endpoint="embeddings.create", retry_rate_limits=True
+            )
             if embedding_cache is not None:
                 self.embeddings = _CachingEmbeddingsEndpoint(instrumented, embedding_cache)
             else:

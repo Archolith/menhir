@@ -141,18 +141,14 @@ def _local_chat_env(monkeypatch) -> None:
     monkeypatch.setenv("MENHIR_LOCAL_LLM_CHAT_MODEL", "test-model")
 
 
-def test_chat_backend_leaves_429_to_its_caller(monkeypatch) -> None:
-    """LLMAdapter._chat_text owns retry for this backend (compress/merge retry; judges pass
-    max_retries=0 to fail fast). A backoff here would multiply or override that budget."""
+def _chat_backend(monkeypatch, script: _Script, sleeps: list[float]) -> Any:
     from menhir.config import MemorySettings
     from menhir.infrastructure.providers import (
         OpenAIStyleChatBackend,
         ProviderConfig,
         ProviderRuntimeDependencies,
-        reset_client_cache,
     )
 
-    script, sleeps = _Script(_rate_limit()), []
     message = SimpleNamespace(content="answer")
 
     async def create(**kwargs: Any) -> Any:
@@ -166,25 +162,116 @@ def test_chat_backend_leaves_429_to_its_caller(monkeypatch) -> None:
 
     _local_chat_env(monkeypatch)
     settings = MemorySettings.from_env()
-    backend = OpenAIStyleChatBackend(
+    return OpenAIStyleChatBackend(
         provider=ProviderConfig.for_chat(settings),
         settings=settings,
         dependencies=ProviderRuntimeDependencies(
             openai_client_factory=lambda **_: client, retry_sleep=sleep
         ),
     )
+
+
+def _run_isolated(coro_factory: Any) -> Any:
+    from menhir.infrastructure.providers import reset_client_cache
+
     reset_client_cache()
     try:
-        with pytest.raises(openai.RateLimitError):
-            asyncio.run(
-                backend.create_chat_completion(
-                    system_prompt="s", user_prompt="u", operation="test", max_tokens=8,
-                    temperature=0.0,
-                )
-            )
+        return asyncio.run(coro_factory())
     finally:
         reset_client_cache()
+
+
+def _run_chat_backend(monkeypatch, script: _Script, sleeps: list[float]) -> str:
+    backend = _chat_backend(monkeypatch, script, sleeps)
+    return _run_isolated(
+        lambda: backend.create_chat_completion(
+            system_prompt="s", user_prompt="u", operation="identity_judgment", max_tokens=8,
+            temperature=0.0,
+        )
+    )
+
+
+def test_chat_backend_retries_429(monkeypatch) -> None:
+    """Judges call this backend with max_retries=0; a throttle must wait, not become a None verdict."""
+    script, sleeps = _Script(_rate_limit(), _rate_limit()), []
+    assert _run_chat_backend(monkeypatch, script, sleeps) == "answer"
+    assert script.calls == 3 and len(sleeps) == 2
+
+
+def test_chat_backend_does_not_retry_quota_429(monkeypatch) -> None:
+    script, sleeps = _Script(_rate_limit(code="insufficient_quota")), []
+    with pytest.raises(openai.RateLimitError):
+        _run_chat_backend(monkeypatch, script, sleeps)
     assert script.calls == 1 and sleeps == []
+
+
+def test_judge_survives_429_through_llm_adapter(monkeypatch) -> None:
+    """End to end: identity_judgment (max_retries=0) gets a verdict after a throttle."""
+    from menhir.infrastructure.llm import LLMAdapter
+
+    script, sleeps = _Script(_rate_limit()), []
+    backend = _chat_backend(monkeypatch, script, sleeps)
+    adapter = LLMAdapter(
+        base_url="http://localhost:1234/v1", api_key="k", chat_model="test-model", embed_model="",
+        backend=backend, dependencies=backend.dependencies,
+    )
+    text = _run_isolated(
+        lambda: adapter._chat_text(
+            system_prompt="s", user_prompt="u", operation="identity_judgment", max_retries=0,
+        )
+    )
+    assert text == "answer"
+    assert script.calls == 2 and len(sleeps) == 1
+
+
+def test_instrumented_embeddings_retry_429_but_chat_does_not(monkeypatch) -> None:
+    """Graphiti's embedder calls the instrumented client directly; chat retries live in the proxy."""
+    from menhir.infrastructure.observability import _InstrumentedAsyncOpenAI
+
+    monkeypatch.setenv(MAX_WAIT_ENV, "0")
+    embed_script, chat_script = _Script(_rate_limit()), _Script(_rate_limit())
+
+    async def embed_create(**kwargs: Any) -> str:
+        return embed_script(**kwargs)
+
+    async def chat_create(**kwargs: Any) -> str:
+        return chat_script(**kwargs)
+
+    inner = SimpleNamespace(
+        embeddings=SimpleNamespace(create=embed_create),
+        chat=SimpleNamespace(completions=SimpleNamespace(create=chat_create)),
+    )
+    client = _InstrumentedAsyncOpenAI(inner)
+    assert asyncio.run(client.embeddings.create(model="m", input=["x"])) == "ok"
+    assert embed_script.calls == 2
+    with pytest.raises(openai.RateLimitError):
+        asyncio.run(client.chat.completions.create(model="m", messages=[]))
+    assert chat_script.calls == 1
+
+
+def test_view_embedder_retries_429(monkeypatch) -> None:
+    from menhir.config import MemorySettings
+    from menhir.infrastructure import view_embedder
+
+    script = _Script(_rate_limit())
+
+    class _FakeOpenAI:
+        def __init__(self, **_: Any) -> None:
+            self.embeddings = SimpleNamespace(create=self._create)
+
+        def _create(self, **kwargs: Any) -> Any:
+            script(**kwargs)
+            return SimpleNamespace(data=[SimpleNamespace(embedding=[0.1, 0.2])], usage=None)
+
+    _local_chat_env(monkeypatch)
+    monkeypatch.setenv("GRAPHITI_EMBED_PROVIDER", "local")
+    monkeypatch.setenv("LOCAL_LLM_EMBED_MODEL", "test-embed")
+    monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
+    monkeypatch.setenv(MAX_WAIT_ENV, "0")
+    embed = view_embedder.make_view_embedder(MemorySettings.from_env())
+    assert embed is not None
+    assert embed("hello") == [0.1, 0.2]
+    assert script.calls == 2
 
 
 def test_sync_chat_seam_retries_429(monkeypatch) -> None:

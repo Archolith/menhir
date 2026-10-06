@@ -9,10 +9,12 @@ capped per attempt. Retrying a chat completion has no side effects beyond token 
 ``MENHIR_OPENAI_RATE_LIMIT_MAX_WAIT_S`` (default 60) bound the total: at most about five minutes
 of sleep per call, under the 900 s enrichment lease, which a heartbeat renews anyway.
 
-Applied only where no caller retries: the Graphiti proxy (``generate_response`` re-raises
-RateLimitError) and the sync chat seam (lane callers fail the page on any exception).
-``providers.OpenAIStyleChatBackend`` is deliberately excluded: ``LLMAdapter._chat_text`` owns
-its retry budget, including the judges' explicit ``max_retries=0``.
+Applied at each OpenAI call seam: the Graphiti proxy (``generate_response`` re-raises
+RateLimitError), the sync chat seam, ``providers.OpenAIStyleChatBackend`` (the judges call it
+with ``max_retries=0``, and a throttle there used to return a None verdict), the instrumented
+async embeddings endpoint (Graphiti's embedder), and the sync view embedder. Chat on the
+instrumented client is not wrapped, so the proxy's retry is never nested inside another.
+``LLMAdapter._chat_text`` retries remain for non-429 faults and wrap the inner 429 retry.
 """
 
 from __future__ import annotations
