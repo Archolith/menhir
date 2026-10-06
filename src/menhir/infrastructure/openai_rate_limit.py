@@ -16,14 +16,21 @@ async embeddings endpoint (Graphiti's embedder), the Graphiti reranker
 (``RateLimitedChatClient``), and the sync view embedder. Chat on the
 instrumented client is not wrapped, so the proxy's retry is never nested inside another.
 ``LLMAdapter._chat_text`` retries remain for non-429 faults and wrap the inner 429 retry.
+
+Backoff sleeps are reported to the ``RateLimitBackoffClock`` bound in the current context, if
+any, so an enclosing deadline (``add_episode_with_timeout``) can exclude them.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import threading
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 import openai
@@ -44,6 +51,67 @@ DEFAULT_MAX_ATTEMPTS = 6
 DEFAULT_MAX_WAIT_S = 60.0
 _NOT_RETRYABLE_CODES = frozenset({"insufficient_quota"})
 
+
+class RateLimitBackoffClock:
+    """Wall time during which at least one rate-limited call in this context is sleeping.
+
+    Overlapping sleeps (parallel calls backing off together) count once. Locked because the
+    sync seams sleep on worker threads. ``on_change`` runs on the sleeping thread after every
+    enter and exit.
+    """
+
+    def __init__(
+        self,
+        *,
+        now: Callable[[], float] = time.monotonic,
+        on_change: Callable[[], None] | None = None,
+    ) -> None:
+        self._now = now
+        self.on_change = on_change
+        self._lock = threading.Lock()
+        self._sleepers = 0
+        self._since = 0.0
+        self._total = 0.0
+
+    def snapshot(self) -> tuple[bool, float]:
+        """(any call sleeping now, total paused seconds so far)."""
+        with self._lock:
+            open_s = self._now() - self._since if self._sleepers else 0.0
+            return self._sleepers > 0, self._total + open_s
+
+    def enter(self) -> None:
+        with self._lock:
+            if self._sleepers == 0:
+                self._since = self._now()
+            self._sleepers += 1
+        self._notify()
+
+    def exit(self) -> None:
+        with self._lock:
+            self._sleepers -= 1
+            if self._sleepers == 0:
+                self._total += self._now() - self._since
+        self._notify()
+
+    def _notify(self) -> None:
+        callback = self.on_change
+        if callback is not None:
+            callback()
+
+
+_BACKOFF_CLOCK: ContextVar[RateLimitBackoffClock | None] = ContextVar(
+    "menhir_rate_limit_backoff_clock", default=None
+)
+
+
+@contextmanager
+def bind_backoff_clock(clock: RateLimitBackoffClock) -> Iterator[RateLimitBackoffClock]:
+    """Report backoff sleeps in this context (and tasks/threads it spawns) to ``clock``."""
+    token = _BACKOFF_CLOCK.set(clock)
+    try:
+        yield clock
+    finally:
+        _BACKOFF_CLOCK.reset(token)
 
 
 def is_retryable_rate_limit(exc: BaseException) -> bool:
@@ -117,7 +185,18 @@ def call_with_rate_limit_backoff[T](
     label: str = "chat.completions",
     sleep: Callable[[float], Any] = time.sleep,
 ) -> T:
-    return Retrying(sleep=sleep, **_retry_kwargs(label))(fn)
+    clock = _BACKOFF_CLOCK.get()
+    if clock is None:
+        return Retrying(sleep=sleep, **_retry_kwargs(label))(fn)
+
+    def _tracked_sleep(seconds: float) -> Any:
+        clock.enter()
+        try:
+            return sleep(seconds)
+        finally:
+            clock.exit()
+
+    return Retrying(sleep=_tracked_sleep, **_retry_kwargs(label))(fn)
 
 
 async def acall_with_rate_limit_backoff[T](
@@ -127,7 +206,19 @@ async def acall_with_rate_limit_backoff[T](
     sleep: Callable[[float], Awaitable[Any]] | None = None,
 ) -> T:
     kwargs = _retry_kwargs(label)
-    if sleep is not None:
+    clock = _BACKOFF_CLOCK.get()
+    if clock is not None:
+        inner_sleep = sleep or asyncio.sleep
+
+        async def _tracked_sleep(seconds: float) -> None:
+            clock.enter()
+            try:
+                await inner_sleep(seconds)
+            finally:
+                clock.exit()
+
+        kwargs["sleep"] = _tracked_sleep
+    elif sleep is not None:
         kwargs["sleep"] = sleep
 
     # tenacity awaits only callables it detects as coroutine functions; a lambda returning a
