@@ -276,7 +276,7 @@ def test_graphiti_client_from_settings_builds_expected_dependencies(monkeypatch:
     assert wrapper.client.cross_encoder.config.base_url == "http://local-llm:1234/v1"
     assert wrapper.client.cross_encoder.config.api_key == "local-key"
     assert wrapper.client.cross_encoder.config.model == "chat-model"
-    assert wrapper.client.cross_encoder.client is observed_client
+    assert wrapper.client.cross_encoder.client._inner is observed_client
     assert wrapper.reranker_provider_kind == "local"
 
 

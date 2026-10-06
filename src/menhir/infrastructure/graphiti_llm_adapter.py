@@ -341,6 +341,52 @@ class _ProviderExtrasAsyncClient:
         return _ProviderExtrasChat(self._inner.chat, self._base_url)
 
 
+class RateLimitedChatClient:
+    """Retries 429s on ``chat.completions.create`` and changes nothing else about the request.
+
+    For the Graphiti reranker: it calls the shared instrumented client directly, whose chat is
+    deliberately unwrapped, and re-raises RateLimitError with no retry of its own.
+    """
+
+    def __init__(self, inner: Any, *, label: str) -> None:
+        self._inner = inner
+        self._label = label
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    @property
+    def chat(self) -> Any:
+        return _RateLimitedChat(self._inner.chat, self._label)
+
+
+class _RateLimitedChat:
+    def __init__(self, inner: Any, label: str) -> None:
+        self._inner = inner
+        self._label = label
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    @property
+    def completions(self) -> Any:
+        return _RateLimitedCompletions(self._inner.completions, self._label)
+
+
+class _RateLimitedCompletions:
+    def __init__(self, inner: Any, label: str) -> None:
+        self._inner = inner
+        self._label = label
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    async def create(self, **kwargs: Any) -> Any:
+        return await acall_with_rate_limit_backoff(
+            lambda: self._inner.create(**kwargs), label=self._label
+        )
+
+
 class _ProviderExtrasChat:
     def __init__(self, inner: Any, base_url: str) -> None:
         self._inner = inner

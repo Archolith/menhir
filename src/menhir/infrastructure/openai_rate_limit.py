@@ -12,7 +12,8 @@ of sleep per call, under the 900 s enrichment lease, which a heartbeat renews an
 Applied at each OpenAI call seam: the Graphiti proxy (``generate_response`` re-raises
 RateLimitError), the sync chat seam, ``providers.OpenAIStyleChatBackend`` (the judges call it
 with ``max_retries=0``, and a throttle there used to return a None verdict), the instrumented
-async embeddings endpoint (Graphiti's embedder), and the sync view embedder. Chat on the
+async embeddings endpoint (Graphiti's embedder), the Graphiti reranker
+(``RateLimitedChatClient``), and the sync view embedder. Chat on the
 instrumented client is not wrapped, so the proxy's retry is never nested inside another.
 ``LLMAdapter._chat_text`` retries remain for non-429 faults and wrap the inner 429 retry.
 """
