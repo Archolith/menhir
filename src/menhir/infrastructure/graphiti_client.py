@@ -54,6 +54,7 @@ from menhir.infrastructure.graphiti_llm_adapter import (  # noqa: E402
     _ProviderExtrasAsyncClient,
     build_menhir_request_guard,
 )
+from menhir.infrastructure.model_profiles import resolve_model_profile  # noqa: E402
 from menhir.infrastructure.graphiti_resolution_policy import (  # noqa: E402
     MenhirCandidateFilterHook,
     MenhirIdentityGateHook,
@@ -258,11 +259,16 @@ class GraphitiClient:
             raw_llm_client = async_client
             # DeepSeek is configured through the OpenAI-compatible `local` provider,
             # so provider kind alone cannot identify its JSON-mode limitation.
-            is_deepseek = (
-                "deepseek" in (llama_base_url or "").lower()
-                or "deepseek" in llm_provider.chat_model.lower()
+            model_profile = resolve_model_profile(
+                llm_provider.chat_model, endpoint=llama_base_url
             )
-            structured_output_mode = "json_object" if is_deepseek else "json_schema"
+            structured_output_mode = model_profile.structured_output_mode
+            logger.info(
+                "Graphiti LLM model profile: %s (model=%s, structured_output_mode=%s)",
+                model_profile.name,
+                llm_provider.chat_model,
+                structured_output_mode,
+            )
             llm_client = MenhirOpenAIGenericClient(
                 config=LLMConfig(
                     api_key=llm_provider.api_key,

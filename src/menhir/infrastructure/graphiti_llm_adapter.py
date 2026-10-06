@@ -52,6 +52,7 @@ from menhir.infrastructure.graphiti_helpers import (
     _raw_preview,
 )
 from menhir.infrastructure.openai_rate_limit import acall_with_rate_limit_backoff
+from menhir.infrastructure.model_profiles import resolve_model_profile
 from menhir.infrastructure.openai_request_policy import apply_openai_request_policy
 
 logger = logging.getLogger(__name__)
@@ -375,16 +376,14 @@ class _ProviderExtrasCompletions:
 def _provider_extra_body(model: str | None, endpoint: str) -> dict[str, Any]:
     """Provider-specific request extras, decided per request from model + endpoint.
 
-    - deepseek-v4-flash "thinks" by default (~2.3x latency, ~3x output tokens), which
-      overruns the ingest wait window; `{"type": "disabled"}` is the only form the
-      DeepSeek API accepts.
+    - Model-family extras come from the model profile (DeepSeek: thinking off).
     - OpenRouter reasoning suppression is OPT-IN via MENHIR_GRAPHITI_DISABLE_REASONING,
       because suppressing reasoning is a quality decision that belongs to whoever
       configured the provider.
     """
-    model_str = (model or "").lower()
-    if "deepseek" in (endpoint or "").lower() or "deepseek" in model_str:
-        return {"thinking": {"type": "disabled"}}
+    profile_extra = resolve_model_profile(model, endpoint=endpoint).provider_extra_body()
+    if profile_extra:
+        return profile_extra
     if "openrouter" in (endpoint or "").lower() and os.getenv(
         "MENHIR_GRAPHITI_DISABLE_REASONING", ""
     ).strip().lower() in {"1", "true", "yes"}:

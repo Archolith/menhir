@@ -50,6 +50,7 @@ from menhir.infrastructure.self_binding import (
     bind_canonical_self,
 )
 from menhir.infrastructure.graphiti_helpers import SYNTHETIC_FACT_PREFIX
+from menhir.infrastructure.model_profiles import ModelProfile, resolve_model_profile
 
 logger = logging.getLogger(__name__)
 
@@ -1056,6 +1057,17 @@ def _combine_extraction_instructions(*parts: str | None) -> str:
     return "\n\n".join(part.strip() for part in parts if isinstance(part, str) and part.strip())
 
 
+def _model_profile_for_clients(clients: Any) -> ModelProfile:
+    """Profile of the extraction LLM; anything without a string model name gets the default."""
+    llm = getattr(clients, "llm_client", None)
+    model = getattr(llm, "model", None)
+    base_url = getattr(getattr(llm, "config", None), "base_url", None)
+    return resolve_model_profile(
+        model if isinstance(model, str) else None,
+        endpoint=base_url if isinstance(base_url, str) else None,
+    )
+
+
 def _load_relationless_repair_context(
     receipt: CombinedExtractionReceipt,
 ) -> tuple[str, ...]:
@@ -1410,10 +1422,12 @@ async def _run_graphiti_combined_extraction(
             )
     endpoint_instructions = _subject_endpoint_instructions(endpoint)
 
+    # The repair pass builds on effective_instructions, so the profile block reaches both passes.
     effective_instructions = _combine_extraction_instructions(
         custom_extraction_instructions,
         _relation_completeness_instructions(endpoint, receipt.episode_text),
         endpoint_instructions,
+        _model_profile_for_clients(clients).extraction_instructions(),
     )
 
     def _extract(
