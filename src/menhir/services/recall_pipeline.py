@@ -86,6 +86,8 @@ from menhir.services.recall_policies import (
     _query_wants_history,
     _render_scalar_history_content,
     _repo_path_for,
+    _scalar_history_evidence_days_ago,
+    _scalar_history_records_change,
     _select_candidate_content,
     _staleness_evidence_for,
 )
@@ -824,6 +826,8 @@ async def run_recall(
     # Pre-initialize: populated by the observation lane if it runs; read by the scalar_history
     # advisory lane below regardless of whether authority injection is enabled.
     _obs_slots_for_history: set[tuple[str, str, str, str, str]] = set()
+    # Best observation cosine per slot: the history lane's relevance score (#243).
+    _obs_slot_best_cosine: dict[tuple[str, str, str, str, str], float] = {}
 
     # --- Observation candidates (Phase 4a.2, flag-gated): inject :TypedAssertion observations ---
     # The recall pipeline is otherwise :Entity-only (fetch_candidate_metadata matches (n:Entity)),
@@ -874,7 +878,10 @@ async def run_recall(
                     _value_kind = str(hit.get("value_kind") or "")
                     _unit = str(hit.get("unit") or "")
                     if _subj and _attr and _value_kind:
-                        obs_slots.add((_subj, _attr, _scope, _value_kind, _unit))
+                        _slot = (_subj, _attr, _scope, _value_kind, _unit)
+                        obs_slots.add(_slot)
+                        _obs_slot_best_cosine[_slot] = max(
+                            float(cos), _obs_slot_best_cosine.get(_slot, float("-inf")))
                     # History-only mode deliberately collects the matched slot but does not inject
                     # the raw observation or run scalar-state authority/suppression work.
                     if not service.scalar_view_authority_enabled:
@@ -1350,6 +1357,8 @@ async def run_recall(
                 )
                 if not hv or not _projection_is_recall_eligible(hv):
                     continue
+                if not _scalar_history_records_change(hv):
+                    continue  # one restated value is not history (#243)
                 huuid = str(hv.get("uuid") or "").strip()
                 if not huuid or huuid in _sh_existing:
                     continue
@@ -1363,9 +1372,12 @@ async def run_recall(
                     "uuid": huuid, "name": hname, "content": hcontent,
                     "scope": str(NodeScope.PERSISTENT),
                     "memory_type": "SCALAR_HISTORY",
-                    # Below authority (1.0) but above generic floor — advisory rank.
-                    "similarity": 0.85,
-                    "last_accessed_days_ago": 0.0, "edge_count": 0,
+                    # The slot's best observation cosine, so an off-topic slot ranks (or floors)
+                    # as weakly as its match; a fixed prior outranked relevant facts (#243).
+                    "similarity": _obs_slot_best_cosine.get(
+                        (subj, attr, scp, vk, un), 0.0),
+                    "last_accessed_days_ago": _scalar_history_evidence_days_ago(hv),
+                    "edge_count": 0,
                     "freshness": str(FreshnessState.ACTIVE),
                     "has_conflict": False, "conflict_status": None,
                     "source": CandidateSource.OBSERVATION,

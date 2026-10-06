@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.telemetry import record_mcp_event
 from menhir.domain.utils import days_ago
+from datetime import datetime
 from menhir.services.scheduler_protocols import LifecycleServiceProtocol
 from menhir.services.scoring_service import (
     GRAPHITI_RRF_DUAL_METHOD_MAX,
@@ -267,6 +268,32 @@ def _build_temporal_facts(
             facts.append(fact)
         result[node_uuid] = tuple(facts)
     return result
+
+
+def _scalar_history_records_change(history_view: dict[str, object]) -> bool:
+    """True when a scalar_history View records an actual change: a non-absolute entry, or more
+    than one distinct absolute value. A slot that only restates one value is not history and
+    must not take an advisory recall slot (#243). Truncated payloads count as changing."""
+    if int(history_view.get("omitted_entry_count") or 0) > 0:
+        return True
+    values: set[str] = set()
+    for entry in history_view.get("entries") or []:
+        if str(entry.get("operation") or "").strip().lower() != "absolute":
+            return True
+        values.add(str(entry.get("value")).strip().casefold())
+    return len(values) > 1
+
+
+def _scalar_history_evidence_days_ago(history_view: dict[str, object]) -> float:
+    """Days since the View's newest entry (source time), for the recency term. An advisory row
+    has no access record, so it must not get the just-accessed bonus (#243)."""
+    raw = history_view.get("last_valid_at")
+    if isinstance(raw, str):
+        try:
+            raw = datetime.fromisoformat(raw.strip())
+        except ValueError:
+            raw = None
+    return days_ago(raw)
 
 
 def _render_scalar_history_content(history_view: dict[str, object]) -> str:
