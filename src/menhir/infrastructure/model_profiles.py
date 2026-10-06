@@ -113,12 +113,19 @@ Entities
 Edges
 - Emit one edge per distinct fact, written once. Do not restate it from the other entity's side:
   `user will try Mint and compare it with Personal Capital` is one edge, not two.
-- Do not emit a combined fact and also its parts. Either `GPS system has lane departure warning
-  and blind spot detection`, or one edge per feature; never both.
+- Do not emit a fact that another edge already states or implies. `user used their car to move
+  Emily's furniture` already implies `user owns a car`, `Emily moved` and `the furniture is
+  Emily's`; `premium fell $20 a month because of user's safe driving record` already implies
+  `user has a safe driving record`; `user plans to use the GPS system's lane departure warning`
+  already implies `GPS system has lane departure warning`. Emit only the fuller edge.
+- Keep a list given in one clause as one edge: `user will ask the detailer about interior
+  cleaning and paint protection`, not one edge per item.
 - Fold opinions, reasons and qualifiers into the fact they describe: `user bought black jeans
   from Levi's and likes them` is one edge, not separate purchase, brand and opinion edges.
 - Still give each new detail its own edge: a date, amount, comparison or plan that no other edge
   states.
+- Before answering, compare your edges pairwise and delete any edge whose information is fully
+  contained in another.
 """
 
 
@@ -126,7 +133,9 @@ class Gpt6Profile(OpenAIReasoningProfile):
     """gpt-6 family. Same request shaping; its extraction over-splits facts and prefixes owners.
 
     smoke6 vs gpt-4o-mini: 1.4x entities and 1.8x edges with no block; 1.36x and 1.72x with a
-    first, two-rule block (b4), so gpt-6 needs the duplicate patterns named explicitly.
+    first, two-rule block (b4), so gpt-6 needs the duplicate patterns named explicitly. On item
+    gpt4_2655b836 the pattern-naming block took edges from 2.09x to 1.89x (b5); what remained were
+    edges implied by a fuller edge, which the implication rule and pairwise check target.
     """
 
     name = "gpt-6"
