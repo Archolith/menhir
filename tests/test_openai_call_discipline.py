@@ -48,15 +48,9 @@ _LOW_LEVEL_ALLOWED = {
 _ENDPOINTS = {("chat", "completions", "create"), ("embeddings", "create"), ("responses", "create")}
 
 _TIMEOUT_FUNCS = {"wait_for", "timeout", "timeout_at"}
-#: Existing work timeouts, per file: (count, reason). OPENAI marks sites whose awaited work can
-#: make OpenAI calls -- candidates for await_with_backoff_aware_timeout, not yet converted.
+#: Work timeouts that cannot make OpenAI calls, per file: (count, reason).
 _TIMEOUTS_ALLOWED: dict[str, tuple[int, str]] = {
     INFRA + "openai_rate_limit.py": (1, "implements await_with_backoff_aware_timeout"),
-    "cli/hook.py": (2, "OPENAI: build_context (recall embeddings/reranker)"),
-    "mcp/telemetry/tracker.py": (1, "OPENAI: MCP tool runner (recall tools)"),
-    "services/enrichment_steps.py": (1, "OPENAI: source-memory embed_query"),
-    "services/oracle_executor.py": (1, "OPENAI if an oracle calls a model; per-oracle bound"),
-    "services/shadow_context_composition.py": (1, "OPENAI: shadow prediction LLM call"),
     "mcp/tools/ingest/ingest_document.py": (1, "enqueue only (queue_episode)"),
     "services/project_ingest.py": (1, "enqueue only (queue_episode)"),
     "core/runtime.py": (1, "startup resume of pending episodes (enqueue)"),

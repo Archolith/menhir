@@ -24,6 +24,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
+from menhir.infrastructure.openai_rate_limit import await_with_backoff_aware_timeout
 from menhir.domain.oracles import (
     CandidateMemory,
     OracleResult,
@@ -80,9 +81,9 @@ class OracleExecutor:
                 try:
                     # Oracles are sync pure functions; offload so a slow IO oracle does not
                     # block the loop. Determinism comes from the reduction sort, not order.
-                    result = await asyncio.wait_for(
+                    result = await await_with_backoff_aware_timeout(
                         asyncio.to_thread(oracle.evaluate, query, candidate),
-                        timeout=self.per_oracle_timeout_s,
+                        timeout_s=self.per_oracle_timeout_s,
                     )
                 except asyncio.TimeoutError:
                     logger.warning("oracle %s timed out on candidate %s -> neutral", oracle.name, candidate.id)

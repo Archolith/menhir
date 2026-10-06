@@ -815,9 +815,9 @@ async def embed_episode_content(ctx: EnrichmentContext) -> None:
         content = str(claimed.get("content") or "")[:_SOURCE_MEMORY_EMBED_MAX_CHARS]
         if not content.strip():
             return
-        embedding = await asyncio.wait_for(
+        embedding = await await_with_backoff_aware_timeout(
             ctx.graphiti_client.embed_query(content),
-            timeout=_SOURCE_MEMORY_EMBED_TIMEOUT_S,
+            timeout_s=_SOURCE_MEMORY_EMBED_TIMEOUT_S,
         )
         if not embedding:
             return
