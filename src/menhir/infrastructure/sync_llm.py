@@ -18,6 +18,7 @@ from menhir.infrastructure.observability import (
     fail_llm_usage_call,
     start_llm_usage_call,
 )
+from menhir.infrastructure.openai_rate_limit import call_with_rate_limit_backoff
 from menhir.infrastructure.openai_request_policy import apply_openai_request_policy
 from menhir.infrastructure.providers import (
     DEFAULT_REQUEST_TIMEOUT_S,
@@ -103,20 +104,22 @@ def make_sync_chat(
         )
         try:
             client = _resolve_client()
-            resp = client.chat.completions.create(
-                **apply_openai_request_policy(
-                    {
-                        "model": model,
-                        "messages": [
-                            {"role": "system", "content": system},
-                            {"role": "user", "content": user},
-                        ],
-                        "temperature": temperature,
-                        "max_tokens": max_tokens,
-                        **extra,
-                    },
-                    base_url=cfg.base_url,
-                )
+            request = apply_openai_request_policy(
+                {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    **extra,
+                },
+                base_url=cfg.base_url,
+            )
+            # 429 only; the CF-190 fail-fast bounds above still govern hangs and 5xx.
+            resp = call_with_rate_limit_backoff(
+                lambda: client.chat.completions.create(**request), label="sync_chat"
             )
         except Exception as exc:
             fail_llm_usage_call(handle, exc)

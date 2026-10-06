@@ -51,6 +51,7 @@ from menhir.infrastructure.graphiti_helpers import (
     _normalize_graphiti_json_payload,
     _raw_preview,
 )
+from menhir.infrastructure.openai_rate_limit import acall_with_rate_limit_backoff
 from menhir.infrastructure.openai_request_policy import apply_openai_request_policy
 
 logger = logging.getLogger(__name__)
@@ -365,7 +366,10 @@ class _ProviderExtrasCompletions:
         # Merge lineage (merge_audit / merged_from / last_merge_op_id) is kept out of prompts by
         # the fork itself since archolith-graphiti-core 0.30.2.post2 (graphiti #2); see
         # tests/infrastructure/test_merge_lineage_prompt_policy.py.
-        return await self._inner.create(**kwargs)
+        # 429 backoff lives here because generate_response re-raises RateLimitError unretried.
+        return await acall_with_rate_limit_backoff(
+            lambda: self._inner.create(**kwargs), label="graphiti"
+        )
 
 
 def _provider_extra_body(model: str | None, endpoint: str) -> dict[str, Any]:
