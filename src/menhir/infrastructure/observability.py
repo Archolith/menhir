@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
+import openai
 from openai import AsyncOpenAI
 
 from menhir.config import MemorySettings
@@ -620,6 +621,33 @@ def _build_http_client(base_url: str) -> httpx.AsyncClient | None:
     return httpx.AsyncClient(event_hooks={"request": [_strip_auth]})
 
 
+class _NoSdkRateLimitRetry:
+    """The SDK retries 429s (twice by default) before our backoff sees them, unlogged and even
+    for insufficient_quota. Every caller of this builder wraps 429s in openai_rate_limit, so the
+    SDK skips 429 only; 408/409/5xx/connection/timeout retries stay, since callers rely on them."""
+
+    def _should_retry(self, response: httpx.Response) -> bool:
+        if response.status_code == 429:
+            return False
+        return super()._should_retry(response)  # type: ignore[misc]
+
+
+_no_429_retry_classes: dict[type, type] = {}
+
+
+def _without_sdk_429_retry(client_cls: Any) -> Any:
+    """``client_cls`` with SDK 429 retry off; anything not an AsyncOpenAI subclass is unchanged."""
+    if not (isinstance(client_cls, type) and issubclass(client_cls, openai.AsyncOpenAI)):
+        return client_cls
+    if issubclass(client_cls, _NoSdkRateLimitRetry):
+        return client_cls
+    cls = _no_429_retry_classes.get(client_cls)
+    if cls is None:
+        cls = type(client_cls.__name__, (_NoSdkRateLimitRetry, client_cls), {})
+        _no_429_retry_classes[client_cls] = cls
+    return cls
+
+
 def build_async_openai_client(
     *,
     base_url: str,
@@ -630,7 +658,9 @@ def build_async_openai_client(
 ) -> Any:
     """Build an AsyncOpenAI-compatible client with optional Langfuse tracing and embedding cache."""
     http_client = _build_http_client(base_url)
-    client_cls: type[AsyncOpenAI] = _LocalAsyncOpenAI if _should_bypass_local_auth(base_url) else AsyncOpenAI
+    client_cls: type[AsyncOpenAI] = _without_sdk_429_retry(
+        _LocalAsyncOpenAI if _should_bypass_local_auth(base_url) else AsyncOpenAI
+    )
     client_kwargs: dict[str, Any] = {"base_url": base_url, "api_key": api_key, "http_client": http_client}
     if request_timeout_s is not None:
         client_kwargs["timeout"] = request_timeout_s
@@ -656,5 +686,5 @@ def build_async_openai_client(
         client = client_cls(**client_kwargs)
         return _InstrumentedAsyncOpenAI(client, embedding_cache=embedding_cache)
 
-    client = LangfuseAsyncOpenAI(**client_kwargs)
+    client = _without_sdk_429_retry(LangfuseAsyncOpenAI)(**client_kwargs)
     return _InstrumentedAsyncOpenAI(client, embedding_cache=embedding_cache)
