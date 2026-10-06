@@ -472,9 +472,10 @@ class MemoryQueryRepository:
             # The memory still exists: a visible Menhir queue node resolves to this episode. Deleting
             # or erasing a memory by its receipt (queue-node) uuid removes that twin, so the timeline
             # stops showing the raw text even though Graphiti's episode survives (audit Q1 / #119).
-            # `episodic_resolved_episode_uuid_idx` backs the lookup.
+            # `episodic_resolved_episode_uuid_idx` backs the lookup. Evidence projections carry their
+            # flag on the queue node only, so the twin must also be non-structural (ADR 0001).
             "EXISTS { MATCH (q:Episodic) WHERE q.resolved_episode_uuid = n.uuid AND "
-            + default_recall_visibility_cypher("q") + " }",
+            + default_recall_visibility_cypher("q") + " AND " + non_structural_memory_cypher("q") + " }",
         ]
         params.update(tenant_scope_params(namespace))
         if namespace_spellings(namespace) is not None:

@@ -1102,3 +1102,28 @@ def test_timeline_hides_episodes_whose_memory_receipt_is_gone() -> None:
             repository.timeline_anchor(uuid="ep-1", namespace="tenant-a")
         query, _params = neo4j.calls[0]
         assert "EXISTS { MATCH (q:Episodic) WHERE q.resolved_episode_uuid = n.uuid AND" in query
+
+
+def test_timeline_hides_evidence_projection_episodes() -> None:
+    from menhir.domain.recall_visibility import default_recall_visibility_cypher
+    from menhir.domain.structural_memory import non_structural_memory_cypher
+
+    # ADR 0001: an evidence projection gets its own Graphiti episode (same content as the real
+    # turn); its flag lives on the queue node only. The resolving twin must be non-structural so
+    # projections never list as duplicate timeline entries -- on pages and `around` anchors.
+    for call in ("page", "anchor"):
+        repository, neo4j = _repository()
+        if call == "page":
+            repository.timeline_page(namespace="tenant-a", limit=5)
+        else:
+            repository.timeline_anchor(uuid="ep-1", namespace="tenant-a")
+        query, _params = neo4j.calls[0]
+        twin = (
+            "EXISTS { MATCH (q:Episodic) WHERE q.resolved_episode_uuid = n.uuid AND "
+            + default_recall_visibility_cypher("q")
+            + " AND "
+            + non_structural_memory_cypher("q")
+            + " }"
+        )
+        assert twin in query
+        assert "NOT coalesce(q.is_evidence_projection, false)" in non_structural_memory_cypher("q")
