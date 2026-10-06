@@ -102,19 +102,31 @@ class OpenAIReasoningProfile(ModelProfile):
 
 
 _GPT6_EXTRACTION_INSTRUCTIONS = """\
-MODEL PRECISION:
-- Name an entity by the thing itself, without the speaker's possessive: `car`, not `user's car`;
-  `tops`, not `my tops`. Ownership belongs in the relationship, not in the entity name.
-- Emit one edge per distinct fact. Do not add a second edge that restates, narrows, or adds
-  sentiment to a fact you already emitted; put that detail in the one fact.
+MODEL PRECISION (these rules override any pull toward exhaustive extraction):
+Entities
+- No possessive or relational words in entity names. Never start a name with `user's`, `my`,
+  `your` or `their`, and drop `new`, `old` and `favourite`: `black jeans`, not
+  `user's new black jeans`. Keep identifying details: `silver Honda Civic`. Ownership belongs in
+  the relationship.
+- One entity per real-world thing. If the text names one thing several ways (`car detailing`,
+  `wax and detailing`), pick one name and reuse it.
+Edges
+- Emit one edge per distinct fact, written once. Do not restate it from the other entity's side:
+  `user will try Mint and compare it with Personal Capital` is one edge, not two.
+- Do not emit a combined fact and also its parts. Either `GPS system has lane departure warning
+  and blind spot detection`, or one edge per feature; never both.
+- Fold opinions, reasons and qualifiers into the fact they describe: `user bought black jeans
+  from Levi's and likes them` is one edge, not separate purchase, brand and opinion edges.
+- Still give each new detail its own edge: a date, amount, comparison or plan that no other edge
+  states.
 """
 
 
 class Gpt6Profile(OpenAIReasoningProfile):
     """gpt-6 family. Same request shaping; its extraction over-splits facts and prefixes owners.
 
-    Measured on the smoke6 fixture against gpt-4o-mini: 1.4x entities and 1.8x edges per episode,
-    and Graphiti spends about two follow-up calls per edge.
+    smoke6 vs gpt-4o-mini: 1.4x entities and 1.8x edges with no block; 1.36x and 1.72x with a
+    first, two-rule block (b4), so gpt-6 needs the duplicate patterns named explicitly.
     """
 
     name = "gpt-6"
