@@ -120,6 +120,15 @@ def test_hard_cap_bounds_an_episode_that_stays_throttled(monkeypatch: pytest.Mon
     assert time.monotonic() - start < TIMEOUT_S * 1.5 + 0.3
 
 
+def test_zero_extension_keeps_a_hard_deadline() -> None:
+    with pytest.raises(TimeoutError):
+        _run(
+            await_with_backoff_aware_timeout(
+                _rate_limited_call(), timeout_s=TIMEOUT_S, max_extension=0.0
+            )
+        )
+
+
 def test_parallel_backoffs_pause_the_deadline_once() -> None:
     async def work() -> None:
         await asyncio.gather(_rate_limited_call(), _rate_limited_call())

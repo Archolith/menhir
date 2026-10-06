@@ -231,6 +231,7 @@ def _run_prompt_impl(
                         namespace=workspace,
                     ),
                     timeout_s=CONTEXT_TIMEOUT_S,
+                    max_extension=0.0,  # latency budget: a throttled recall is skipped, not awaited
                 )
             )
             context_text = result.context
@@ -334,6 +335,7 @@ def _run_postcompact_impl(*, max_tokens: int, workspace: str | None = None) -> N
                         namespace=workspace,
                     ),
                     timeout_s=CONTEXT_TIMEOUT_S,
+                    max_extension=0.0,  # latency budget: a throttled recall is skipped, not awaited
                 )
             )
             context_text = result.context
