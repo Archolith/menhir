@@ -69,6 +69,29 @@ _SHARED_STAMPS = (
 )
 
 
+def _dumps_payload(obj: Any) -> str:
+    """``json.dumps(obj, ensure_ascii=False)``, but Decimal values (typed money/number scalars)
+    become exact JSON numbers instead of raising. Output is unchanged when no Decimal is present."""
+    literals: dict[str, str] = {}
+    prefix = f"__menhir_decimal_{uuid4().hex}_"
+
+    def swap(value: Any) -> Any:
+        if isinstance(value, Decimal):
+            token = f"{prefix}{len(literals)}"
+            literals[token] = format(value, "f") if value.is_finite() else json.dumps(float(value))
+            return token
+        if isinstance(value, Mapping):
+            return {k: swap(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [swap(v) for v in value]
+        return value
+
+    text = json.dumps(swap(obj), ensure_ascii=False)
+    for token, literal in literals.items():
+        text = text.replace(f'"{token}"', literal)
+    return text
+
+
 class ViewClass(Enum):
     """Storage class for a View node (Metric plan Part A).
 
@@ -303,7 +326,7 @@ class TimelineKind(ViewKind):
     def write_props(self, subject: str, key: str, payload: dict[str, Any]) -> dict[str, Any]:
         entries = payload["entries"]
         props = {"view_value": float(len(entries)),
-                 "view_payload": json.dumps(entries, ensure_ascii=False)}
+                 "view_payload": _dumps_payload(entries)}
         if _event_mode(payload):
             # Lane stamp: predicate always; domain only when present (None is dropped so legacy
             # subject-only write_props stays byte-identical).
@@ -743,10 +766,7 @@ class ScalarHistoryKind(ViewKind):
         op_counts = payload.get("operation_counts") or {}
 
         # Serialize entries for the bounded recall payload.
-        entries_json = json.dumps(
-            normalized_entries,
-            ensure_ascii=False,
-        ) if normalized_entries else "[]"
+        entries_json = _dumps_payload(normalized_entries) if normalized_entries else "[]"
 
         return {
             "view_value": float(entry_count),
