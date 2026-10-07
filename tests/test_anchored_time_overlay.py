@@ -36,9 +36,12 @@ def edge(valid_at=None, invalid_at=None, uuid="e0", fact="The user moved."):
         (LAST_MONTH, datetime(2024, 1, 20), None, "graphiti_inside_window", None),
         (LAST_MONTH, datetime(2024, 2, 1, 1, 0, tzinfo=timezone(timedelta(hours=5))), None,
          "graphiti_inside_window", None),
-        # Graphiti outside (e.g. the speech-date default): write the midpoint
+        # Graphiti at its speech-date default (in UTC or in the speech tz): write the midpoint
         (LAST_MONTH, utc("2024-02-14T10:00:00"), None, "written", MID),
-        (LAST_MONTH, utc("2023-12-31T23:00:00"), None, "written", MID),
+        (LAST_MONTH, datetime(2024, 2, 14, 23, 0, tzinfo=timezone(timedelta(hours=-5))), None, "written", MID),
+        # Graphiti resolved its own date outside the window: keep it (L3 L18.0, held-out 3 K19.0)
+        (LAST_MONTH, utc("2023-12-31T23:00:00"), None, "graphiti_resolved", None),
+        (LAST_MONTH, utc("2024-03-01T00:00:00"), utc("2024-03-05T00:00:00"), "graphiti_resolved", None),
         # plan: keep Graphiti
         ({**LAST_MONTH, "kind": "plan"}, None, None, "plan", None),
         # undated, vague, guard-dropped, no item: keep Graphiti (incl. None)
@@ -54,7 +57,18 @@ def edge(valid_at=None, invalid_at=None, uuid="e0", fact="The user moved."):
         (LAST_MONTH, None, MID, "would_invert_interval", None),
         (LAST_MONTH, None, datetime(2024, 1, 10), "would_invert_interval", None),
         (LAST_MONTH, None, utc("2024-01-16T00:00:01"), "written", MID),
-        (LAST_MONTH, utc("2024-03-01T00:00:00"), utc("2024-03-05T00:00:00"), "written", MID),
+        (LAST_MONTH, utc("2024-02-14T00:00:00"), utc("2024-03-05T00:00:00"), "written", MID),
+        # explicit date that drops or changes the month its expression names: unplaceable
+        ({"expression": "on February 10th", "basis": "explicit_date", "date": "---10"}, None, None,
+         "open_or_unplaceable", None),
+        ({"expression": "on Feb 10", "basis": "explicit_date", "date": "--03-10"}, None, None,
+         "open_or_unplaceable", None),
+        ({"expression": "on February 10th", "basis": "explicit_date", "date": "--02-10"}, None, None,
+         "written", datetime(2024, 2, 10, tzinfo=timezone.utc)),
+        ({"expression": "on the 10th", "basis": "explicit_date", "date": "---10"}, None, None,
+         "written", datetime(2024, 2, 10, tzinfo=timezone.utc)),
+        ({"expression": "in May 2019", "basis": "explicit_date", "date": "2019"}, None, None,
+         "written", datetime(2019, 7, 2, tzinfo=timezone.utc)),
     ],
 )
 def test_overlay_table(item, valid_at, invalid_at, reason, new_valid_at) -> None:

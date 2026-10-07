@@ -252,6 +252,35 @@ def _explicit(ref: date, value: str, kind: str) -> tuple[date, date] | None:
     return None
 
 
+_MONTH_NAMES = ("january", "february", "march", "april", "may", "june", "july", "august",
+                "september", "october", "november", "december")
+_MONTH_WORD = re.compile(r"\b(" + "|".join(_MONTH_NAMES) + r"|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\b",
+                         re.I)
+
+
+def _date_month(value: str) -> int | None:
+    for pattern in (r"\d{4}-(\d{2})(?:-\d{2})?", r"--(\d{2})", r"-*(\d{1,2})-\d{1,2}"):
+        m = re.fullmatch(pattern, value)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _contradicts_expression(item: dict) -> bool:
+    """An explicit date that drops or changes the one month its own expression names.
+
+    Seen live: "on February 10th" returned as ``---10`` (day of month only), which placed the fact
+    in the wrong month. Year-only dates claim no month.
+    """
+    prefixes = [n[:3] for n in _MONTH_NAMES]  # unique per month
+    named = {prefixes.index(w.group(1).lower()[:3]) + 1
+             for w in _MONTH_WORD.finditer(str(item.get("expression") or ""))}
+    value = str(item.get("date") or "").strip()
+    if len(named) != 1 or re.fullmatch(r"\d{4}", value):
+        return False
+    return _date_month(value) not in named
+
+
 def compute(ref: date, items: dict[int, dict], i: int, depth: int = 0):
     """Window (start, end) for fact i; either bound may be None (open). None if not placeable."""
     it = items.get(i)
@@ -260,6 +289,8 @@ def compute(ref: date, items: dict[int, dict], i: int, depth: int = 0):
     basis, kind = it.get("basis"), it.get("kind") or "point_event"
     off, cal = it.get("offset") or None, it.get("calendar") or None
     if basis == "explicit_date":
+        if _contradicts_expression(it):
+            return None
         return _explicit(ref, it.get("date"), kind)
     if basis == "speech_relative":
         if cal:
@@ -545,8 +576,9 @@ def plan_overlay(
     """Decide the ``valid_at`` overlay for every edge. Pure: same inputs, same decisions.
 
     ``valid_at`` = window midpoint at 00:00 UTC, written only when the basis is dated, the window
-    is closed, the fact is not a plan, Graphiti's value is missing or outside the window, and the
-    edge's ``invalid_at`` would stay after it. Everything else keeps Graphiti's value.
+    is closed, the fact is not a plan, Graphiti's value is missing or its speech-date default and
+    outside the window, and the edge's ``invalid_at`` would stay after it. Everything else keeps
+    Graphiti's value: a date Graphiti resolved itself is never overridden.
     """
     results: list[AnchoredTimeResult] = []
     for i, edge in enumerate(edges):
@@ -579,6 +611,9 @@ def plan_overlay(
             candidate = datetime(mid.year, mid.month, mid.day, tzinfo=timezone.utc)
             if edge.valid_at is not None and start <= _utc_date(edge.valid_at) <= end:
                 reason = "graphiti_inside_window"
+            elif edge.valid_at is not None and speech_date not in (edge.valid_at.date(), _utc_date(edge.valid_at)):
+                # Offline over 18 runs: overriding Graphiti's own dates only ever lost facts.
+                reason = "graphiti_resolved"
             elif edge.invalid_at is not None and _aware(edge.invalid_at) <= candidate:
                 reason = "would_invert_interval"
             else:

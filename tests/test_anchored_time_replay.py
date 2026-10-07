@@ -32,7 +32,8 @@ PINNED_O2 = {
     "heldout:fix": ("18/32, 0/73", "31/32, 0/73", "26/32, 0/73", 10, 19),
     "heldout2:frozen": ("12/23, 0/76", "22/23, 4/76", "19/23, 2/76", 11, 13),
     "heldout2:frozen_b": ("12/23, 0/76", "21/23, 2/76", "19/23, 0/76", 9, 14),
-    "heldout3:frozen": ("18/28, 0/93", "26/28, 0/93", "24/28, 0/93", 9, 16),
+    # 24/28 and 9 before the keep-Graphiti's-own-dates rule (K19.0 is no longer overridden).
+    "heldout3:frozen": ("18/28, 0/93", "26/28, 0/93", "25/28, 0/93", 8, 16),
 }
 EVAL_DIR = os.environ.get("MENHIR_ANCHORED_TIME_EVAL_DIR")
 needs_eval_dir = pytest.mark.skipif(not EVAL_DIR, reason="MENHIR_ANCHORED_TIME_EVAL_DIR not set")
