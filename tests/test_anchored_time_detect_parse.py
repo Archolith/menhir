@@ -105,6 +105,16 @@ def test_parse_items_keys_by_index_and_skips_bad_rows() -> None:
     assert missing == [{"event": "a", "expression": "b"}]
 
 
+def test_parse_items_rejects_non_integer_and_duplicated_indexes() -> None:
+    content = json.dumps({"facts": [
+        {"i": 1.7, "basis": "vague"}, {"i": True, "basis": "vague"}, {"i": -1, "basis": "vague"},
+        {"i": 3, "basis": "none"}, {"i": 3, "basis": "explicit_date", "date": "2024-01-01"},
+        {"i": 4, "basis": "none"},
+    ]})
+    items, _ = parse_items(content)
+    assert sorted(items) == [4]  # 3 appears twice: neither copy is trusted
+
+
 def test_parse_items_tolerates_missing_lists_and_rejects_non_objects() -> None:
     assert parse_items('{"facts": null, "missing_events": "none"}') == ({}, [])
     with pytest.raises(ValueError):

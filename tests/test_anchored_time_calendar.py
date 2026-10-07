@@ -58,7 +58,7 @@ def W(start: str | None, end: str | None):
         ({"which": "sometime", "unit": "day"}, None),
         ({"which": "last", "unit": "fortnight"}, None),
         ({"which": "last", "unit": "weekday", "name": "funday"}, None),
-        ({"which": "last", "unit": "week", "count": "many"}, W("2024-02-05", "2024-02-11")),
+        ({"which": "last", "unit": "week", "count": "many"}, None),  # unreadable count: not guessed as 1
     ],
 )
 def test_calendar_units(cal, expected) -> None:
@@ -151,9 +151,9 @@ def test_event_anchored_without_amount_is_open() -> None:
     assert compute(REF, after, 1) == (D("2024-02-08"), None)
 
 
-def test_event_anchored_unknown_unit_defaults_to_day() -> None:
+def test_event_anchored_unsupported_unit_is_unplaceable() -> None:
     items = {0: LAST_THURSDAY, 1: _anchored(0, offset={"amount": 1, "unit": "hour", "direction": "after"})}
-    assert compute(REF, items, 1) == W("2024-02-09", "2024-02-09")
+    assert compute(REF, items, 1) is None  # not one day: Graphiti's timestamp stays
 
 
 def test_event_anchored_calendar_relative_to_anchor() -> None:
@@ -166,10 +166,13 @@ def test_event_anchored_calendar_relative_to_anchor() -> None:
     assert compute(REF, bad, 1) is None
 
 
-def test_event_anchored_later_past_unit_end_runs_a_week() -> None:
+def test_event_anchored_later_with_no_days_left_is_unplaceable() -> None:
     anchor = {"basis": "explicit_date", "kind": "point_event", "date": "2024-02-11"}  # a Sunday
     items = {0: anchor, 1: _anchored(0, calendar={"which": "this", "unit": "week", "later": True})}
-    assert compute(REF, items, 1) == W("2024-02-12", "2024-02-18")
+    assert compute(REF, items, 1) is None  # "later that week" never spills into the next week
+    month_end = {0: {**anchor, "date": "2024-02-29"},
+                 1: _anchored(0, calendar={"which": "this", "unit": "month", "later": True})}
+    assert compute(REF, month_end, 1) is None
 
 
 def test_event_anchored_rejects_self_bad_and_open_anchors() -> None:

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone, tzinfo
 import functools
 import json
+import math
 import re
 from typing import Sequence
 
@@ -155,7 +156,7 @@ def _season(ref: date, name: str, which: str, count: int = 1) -> tuple[date, dat
     cands = [win(y) for y in range(ref.year - 6, ref.year + 2)]
     if which == "last":
         past = [w for w in cands if w[1] < ref]
-        return past[-count]
+        return past[-count] if count <= len(past) else None
     if which == "next":
         return [w for w in cands if w[0] > ref][0]
     cur = [w for w in cands if w[0] <= ref <= w[1]]
@@ -167,10 +168,16 @@ def _calendar(ref: date, cal: dict) -> tuple[date, date] | None:
     step = {"last": -1, "this": 0, "next": 1, "past": -1, "upcoming": 1}.get(which)
     if step is None:
         return None
-    try:
-        count = max(1, int(cal.get("count") or 1))
-    except (TypeError, ValueError):
+    raw = cal.get("count")
+    if raw in (None, ""):
         count = 1
+    elif isinstance(raw, bool) or (isinstance(raw, float) and not raw.is_integer()):
+        return None
+    else:
+        try:
+            count = max(1, int(raw))
+        except (TypeError, ValueError):  # an unreadable count is not guessed as 1
+            return None
     if unit == "weekday" and name in _WD and which in ("past", "upcoming"):  # bare weekday, by tense
         k = _WD.index(name)
         d = ref - timedelta(days=(ref.weekday() - k) % 7 or 7) if which == "past" \
@@ -341,37 +348,74 @@ def _us_holidays(year: int) -> dict[str, date]:
     return out
 
 
-def compute(ref: date, items: dict[int, dict], i: int, depth: int = 0):
-    """Window (start, end) for fact i; either bound may be None (open). None if not placeable."""
+def compute(ref: date, items: dict[int, dict], i: int, depth: int = 0, *, n_facts: int | None = None):
+    """Window (start, end) for fact i; either bound may be None (open). None if not placeable.
+
+    ``n_facts``: when given, fact indexes and anchors outside 0..n_facts-1 are unplaceable.
+    """
+    return _place(ref, items, i, n_facts, depth)[0]
+
+
+def _two_options_of(cal: dict | None, w) -> str | None:
+    return "two_options" if w and w[0] and w[1] and _two_options(cal, w[0], w[1]) else None
+
+
+def _place(ref: date, items: dict[int, dict], i: int, n_facts: int | None, depth: int = 0):
+    """(window, ambiguity) for fact i. ambiguity: None, "two_options" (its own calendar names two
+    candidate days) or "ambiguous_anchor" (a fact it is anchored to has two candidate days)."""
+    if n_facts is not None and not 0 <= i < n_facts:
+        return None, None
     it = items.get(i)
     if not it or depth > 3:
-        return None
+        return None, None
     basis, kind = it.get("basis"), it.get("kind") or "point_event"
     off, cal = it.get("offset") or None, it.get("calendar") or None
     if basis == "explicit_date":
         value = _checked_date(it)
-        return _explicit(ref, value, kind) if value is not None else None
+        return (_explicit(ref, value, kind) if value is not None else None), None
     if basis == "speech_relative":
         if cal:
-            return _calendar(ref, cal)
-        if off and off.get("amount") is not None and off.get("unit") in _TOL:
-            sign = 1 if off.get("direction") == "after" else -1
-            c = _shift(ref, float(off["amount"]), off["unit"], sign)
-            tol = (_TOL_APPROX if off.get("approx") else _TOL)[off["unit"]]
-            return c - timedelta(days=tol), c + timedelta(days=tol)
-        return None
+            w = _calendar(ref, cal)
+            return w, _two_options_of(cal, w)
+        amount, sign = (_amount(off), _sign(off)) if off else (None, None)
+        if amount is None or sign is None or off.get("unit") not in _TOL:
+            return None, None
+        c = _shift(ref, amount, off["unit"], sign)
+        tol = (_TOL_APPROX if off.get("approx") else _TOL)[off["unit"]]
+        return (c - timedelta(days=tol), c + timedelta(days=tol)), None
     if basis == "event_anchored":
         anchor = it.get("anchor") or {}
         anc = anchor.get("fact")
         if anc is None:
-            return _holiday_anchored(ref, anchor.get("event"), it.get("expression"), off, cal, kind)
-        if not isinstance(anc, int) or anc == i:
-            return None
-        aw = compute(ref, items, anc, depth + 1)
+            w = _holiday_anchored(ref, anchor.get("event"), it.get("expression"), off, cal, kind)
+            return w, _two_options_of(cal, w)
+        if isinstance(anc, bool) or not isinstance(anc, int) or anc == i:
+            return None, None
+        aw, anchor_ambiguity = _place(ref, items, anc, n_facts, depth + 1)
         if not aw or aw[0] is None or aw[1] is None:
-            return None
-        return _from_anchor(aw, off, cal)
-    return None
+            return None, None
+        w = _from_anchor(aw, off, cal)
+        if w is None:
+            return None, None
+        # a date derived from a two-candidate anchor is itself one of two candidates
+        return w, ("ambiguous_anchor" if anchor_ambiguity else _two_options_of(cal, w))
+    return None, None
+
+
+def _sign(off: dict) -> int | None:
+    return {"after": 1, "before": -1}.get(off.get("direction"))
+
+
+def _amount(off: dict) -> float | None:
+    """A finite, non-negative offset amount; anything else is unusable (never guessed)."""
+    a = off.get("amount")
+    if isinstance(a, bool):
+        return None
+    try:
+        a = float(a)
+    except (TypeError, ValueError):
+        return None
+    return a if math.isfinite(a) and a >= 0 else None
 
 
 def _from_anchor(aw: tuple[date, date], off: dict | None, cal: dict | None):
@@ -381,17 +425,21 @@ def _from_anchor(aw: tuple[date, date], off: dict | None, cal: dict | None):
             return None
         if cal.get("later"):
             s = aw[1] + timedelta(days=1)
-            # anchor at the end of its unit: "later that week" = the days right after it
-            return (s, w[1]) if w[1] >= s else (s, s + timedelta(days=6))
+            # "later that week" = the unit's days after the anchor; none left -> unplaceable
+            return (s, w[1]) if w[1] >= s else None
         return w
     if not off:
         return None
-    sign = 1 if off.get("direction") == "after" else -1
+    sign = _sign(off)
+    if sign is None:
+        return None
     if off.get("amount") is None:  # "before the trip" / "after the move": open interval
         return (aw[1], None) if sign > 0 else (None, aw[0])
-    unit = off.get("unit") if off.get("unit") in _TOL else "day"
+    amount, unit = _amount(off), off.get("unit")
+    if amount is None or unit not in _TOL:  # e.g. hours: keep Graphiti's timestamp
+        return None
     tol = (_TOL_APPROX if off.get("approx") else _TOL)[unit]
-    s, e = _shift(aw[0], float(off["amount"]), unit, sign), _shift(aw[1], float(off["amount"]), unit, sign)
+    s, e = _shift(aw[0], amount, unit, sign), _shift(aw[1], amount, unit, sign)
     return s - timedelta(days=tol), e + timedelta(days=tol)
 
 
@@ -591,19 +639,35 @@ def strip_user_prefix(text: str) -> str:
     return _ROLE_PREFIX.sub("", text or "", count=1)
 
 
+def _fact_index(value) -> int | None:
+    """A non-negative integer index (or its digit string); floats, bools and others are rejected."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
 def parse_items(content: str) -> tuple[dict[int, dict], list]:
     """Resolver items keyed by fact index, and ``missing_events``. Raises on unparseable output."""
     out = parse_output(content)
     if not isinstance(out, dict):
         raise ValueError("resolver output is not a JSON object")
     items: dict[int, dict] = {}
+    duplicated: set[int] = set()
     for it in out.get("facts") or []:
         if not isinstance(it, dict):
             continue
-        try:
-            items[int(it.get("i"))] = it
-        except (TypeError, ValueError):
-            pass
+        i = _fact_index(it.get("i"))
+        if i is None:
+            continue
+        if i in items:
+            duplicated.add(i)  # two items for one fact: neither is trusted
+        items[i] = it
+    for i in duplicated:
+        del items[i]
     missing = out.get("missing_events") or []
     return items, missing if isinstance(missing, list) else []
 
@@ -715,7 +779,8 @@ def plan_overlay(
 
     ``valid_at`` = window midpoint at 00:00 UTC, written only when the basis is dated, the window
     is closed, the fact is not a plan, Graphiti's value is missing or its speech-date default and
-    outside the window, the window is not two candidate days, and the edge's ``invalid_at`` would
+    outside the window, neither the window nor any anchor it derives from is two candidate days,
+    every fact index and anchor is within ``edges``, and the edge's ``invalid_at`` would
     stay after it. Everything else keeps
     Graphiti's value: a date Graphiti resolved itself is never overridden.
     """
@@ -724,7 +789,8 @@ def plan_overlay(
         item = items.get(i) or {}
         basis = str(item.get("basis") or "none")
         kind = str(item.get("kind") or "point_event")
-        window = compute(speech_date, items, i) if basis in DATED_BASES else None
+        window, ambiguity = (_place(speech_date, items, i, len(edges)) if basis in DATED_BASES
+                             else (None, None))
         start, end = window if window else (None, None)
         anchor = item.get("anchor") if isinstance(item.get("anchor"), dict) else None
         anchor_ref = None
@@ -754,8 +820,8 @@ def plan_overlay(
             elif g_dates and speech_date not in g_dates:
                 # Offline over 18 runs: overriding Graphiti's own dates only ever lost facts.
                 reason = "graphiti_resolved"
-            elif _two_options(cal, start, end):
-                reason = "two_options"
+            elif ambiguity:  # "two_options", or "ambiguous_anchor" when inherited from an anchor
+                reason = ambiguity
             elif edge.invalid_at is not None and _aware(edge.invalid_at) <= candidate:
                 reason = "would_invert_interval"
             else:

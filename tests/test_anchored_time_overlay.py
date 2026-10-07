@@ -101,10 +101,15 @@ def test_overlay_table(item, valid_at, invalid_at, reason, new_valid_at) -> None
         ({"which": "last", "unit": "month", "count": 2}, (date(2023, 12, 1), date(2023, 12, 31))),
         ({"which": "next", "unit": "month", "count": 2}, (date(2024, 4, 1), date(2024, 4, 30))),
         ({"which": "last", "unit": "year", "count": 2}, (date(2022, 1, 1), date(2022, 12, 31))),
-        # "this" ignores count; a missing or bad count is 1
+        # "this" ignores count; a missing count is 1; an unreadable one is not guessed
         ({"which": "this", "unit": "week", "count": 3}, (date(2024, 2, 12), date(2024, 2, 18))),
-        ({"which": "last", "unit": "week", "count": "x"}, (date(2024, 2, 5), date(2024, 2, 11))),
+        ({"which": "last", "unit": "week", "count": "x"}, None),
+        ({"which": "last", "unit": "week", "count": 1.5}, None),
+        ({"which": "last", "unit": "week", "count": True}, None),
+        ({"which": "last", "unit": "week", "count": "2"}, (date(2024, 1, 29), date(2024, 2, 4))),
         ({"which": "last", "unit": "week", "count": None}, (date(2024, 2, 5), date(2024, 2, 11))),
+        # more seasons back than the calendar holds: unplaceable, not an IndexError
+        ({"which": "last", "unit": "season", "name": "summer", "count": 40}, None),
     ],
 )
 def test_calendar_count(calendar, expected) -> None:
@@ -193,3 +198,73 @@ def test_overlay_is_pure_and_deterministic() -> None:
 def test_items_beyond_the_edge_list_are_ignored() -> None:
     results = plan_overlay([edge()], {0: dict(LAST_MONTH), 7: dict(LAST_MONTH)}, SPEECH)
     assert len(results) == 1 and results[0].written
+
+
+LAST_TUESDAY = {"expression": "last Tuesday", "basis": "speech_relative", "kind": "point_event",
+                "calendar": {"which": "last", "unit": "weekday", "name": "tuesday"}}  # 02-06 or 02-13
+
+
+def _after(anchor, amount=1, unit="day", **extra):
+    return {"expression": "after that", "basis": "event_anchored", "kind": "point_event",
+            "offset": {"amount": amount, "unit": unit, "direction": "after", "approx": False},
+            "anchor": {"fact": anchor, "event": None}, **extra}
+
+
+def test_ambiguity_propagates_through_anchors() -> None:
+    # review case 1: "one day after" a two-candidate "last Tuesday" is itself two candidates
+    items = {0: dict(LAST_TUESDAY), 1: _after(0), 2: _after(1, amount=2)}
+    r0, r1, r2 = plan_overlay([edge(uuid=f"e{i}") for i in range(3)], items, SPEECH)
+    assert (r0.reason, r1.reason, r2.reason) == ("two_options", "ambiguous_anchor", "ambiguous_anchor")
+    assert not (r0.written or r1.written or r2.written)
+    # a calendar step from the ambiguous anchor ("the following month") is not written either
+    items[1] = {**_after(0), "offset": None, "calendar": {"which": "this", "unit": "week", "later": True}}
+    assert plan_overlay([edge(uuid=f"e{i}") for i in range(2)], {0: items[0], 1: items[1]},
+                        SPEECH)[1].written is False
+    # an unambiguous anchor still writes ("last Friday" said on Wednesday = 02-09)
+    items = {0: {**LAST_TUESDAY, "calendar": {"which": "last", "unit": "weekday", "name": "friday"}},
+             1: _after(0)}
+    assert plan_overlay([edge(uuid="a"), edge(uuid="b")], items, SPEECH)[1].new_valid_at == \
+        datetime(2024, 2, 10, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("anchor", [99, 1, -1, True])
+def test_anchor_outside_the_fact_list_is_never_used(anchor) -> None:
+    # review case 2: a returned row 99 (or any index past the facts) must not date fact 0
+    items = {0: _after(anchor, amount=2), 1: {"basis": "explicit_date", "date": "2024-01-01"},
+             99: {"basis": "explicit_date", "date": "2024-01-01"},
+             -1: {"basis": "explicit_date", "date": "2024-01-01"}}
+    (result,) = plan_overlay([edge()], items, SPEECH)
+    assert result.reason == "open_or_unplaceable" and not result.written
+    assert compute(SPEECH, items, 0, n_facts=1) is None
+
+
+@pytest.mark.parametrize(
+    "offset",
+    [
+        {"amount": 1, "unit": "hour", "direction": "after"},      # review case 3
+        {"amount": 1, "unit": "minute", "direction": "before"},
+        {"amount": 1, "unit": None, "direction": "after"},
+        {"amount": 1, "unit": "day", "direction": "sideways"},
+        {"amount": 1, "unit": "day"},
+        {"amount": "two", "unit": "day", "direction": "after"},
+        {"amount": -2, "unit": "day", "direction": "after"},
+        {"amount": True, "unit": "day", "direction": "after"},
+        {"amount": float("nan"), "unit": "day", "direction": "after"},
+    ],
+)
+def test_unusable_offsets_keep_graphiti(offset) -> None:
+    yesterday = {"basis": "speech_relative", "kind": "point_event", "calendar": {"which": "last", "unit": "day"}}
+    anchored = {0: yesterday, 1: {**_after(0), "offset": offset}}
+    r = plan_overlay([edge(uuid="a"), edge(uuid="b")], anchored, SPEECH)[1]
+    assert r.reason == "open_or_unplaceable" and not r.written
+    (s,) = plan_overlay([edge()], {0: {"basis": "speech_relative", "kind": "point_event", "offset": offset}},
+                        SPEECH)
+    assert s.reason == "open_or_unplaceable" and not s.written
+
+
+def test_later_that_week_after_a_sunday_is_not_written() -> None:
+    # review case 4: Sunday 02-11 anchor; the week has no days left
+    items = {0: {"basis": "explicit_date", "kind": "point_event", "date": "2024-02-11"},
+             1: {**_after(0), "offset": None, "calendar": {"which": "this", "unit": "week", "later": True}}}
+    r = plan_overlay([edge(uuid="a"), edge(uuid="b")], items, SPEECH)[1]
+    assert r.reason == "open_or_unplaceable" and not r.written

@@ -184,7 +184,7 @@ def score_run(turns: list[dict], contents: dict[str, str | None]) -> SetScore:
             new = results[i].new_valid_at or base
             new_w = (new.date(), new.date()) if new else None
             out.baseline.add(base_w, gw, ref)
-            out.resolver.add(compute(ref, items, i), gw, ref)
+            out.resolver.add(compute(ref, items, i, n_facts=len(inputs)), gw, ref)
             out.written.add(new_w, gw, ref)
     return out
 
