@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from menhir.infrastructure.anchored_time import EdgeTimeInput, compute, plan_overlay
+from menhir.infrastructure.anchored_time import EdgeTimeInput, _place, compute, plan_overlay
 
 pytestmark = pytest.mark.unit
 
@@ -268,3 +268,62 @@ def test_later_that_week_after_a_sunday_is_not_written() -> None:
              1: {**_after(0), "offset": None, "calendar": {"which": "this", "unit": "week", "later": True}}}
     r = plan_overlay([edge(uuid="a"), edge(uuid="b")], items, SPEECH)[1]
     assert r.reason == "open_or_unplaceable" and not r.written
+
+
+def _on(expression, value, kind="point_event"):
+    return {"expression": expression, "basis": "explicit_date", "kind": kind, "date": value}
+
+
+@pytest.mark.parametrize(
+    ("item", "reason", "new_valid_at"),
+    [
+        # gate run 1 R29.2: "on February 5th" said Feb 3 as a past state -> was written a year back
+        (_on("on February 19th", "--02-19", "state"), "year_ambiguous", None),
+        # gate run 1 R17.1: "in June" said May 15 as a state -> was written as the prior June
+        (_on("in March", "--03", "state"), "year_ambiguous", None),
+        # other occurrence within a month (31 days) vs just beyond it (32 days)
+        (_on("on March 16th", "--03-16"), "year_ambiguous", None),
+        (_on("on March 17th", "--03-17"), "written", utc("2023-03-17T00:00:00")),
+        # far other occurrence: the kind's past placement stands (held-out 2 G08: May 1st said Nov 29)
+        (_on("on May 1st", "--05-01"), "written", utc("2023-05-01T00:00:00")),
+        # the past occurrence is the nearer one: unchanged
+        (_on("on January 20th", "--01-20"), "written", utc("2024-01-20T00:00:00")),
+        # day of month only: "on the 20th" as past said the 14th -> Jan 20 while Feb 20 is 6 days off
+        (_on("on the 20th", "---20"), "year_ambiguous", None),
+        # a full date is never year-ambiguous
+        (_on("on February 19th, 2023", "2023-02-19"), "written", utc("2023-02-19T00:00:00")),
+    ],
+)
+def test_yearless_date_with_a_near_other_occurrence_is_not_written(item, reason, new_valid_at) -> None:
+    (r,) = plan_overlay([edge()], {0: item}, SPEECH)
+    assert (r.reason, r.new_valid_at) == (reason, new_valid_at)
+    assert r.written is (reason == "written")
+
+
+def test_yearless_plan_with_a_just_past_occurrence_is_year_ambiguous() -> None:
+    assert _place(SPEECH, {0: _on("on February 10th", "--02-10", "plan")}, 0, 1)[1] == "year_ambiguous"
+    assert _place(SPEECH, {0: _on("on February 10th", "--02-10", "plan")}, 0, 1)[0] == \
+        (date(2025, 2, 10), date(2025, 2, 10))
+    assert _place(SPEECH, {0: _on("in December", "--12", "plan")}, 0, 1)[1] is None
+
+
+def test_yearless_holiday_with_a_near_other_occurrence_is_not_written() -> None:
+    # Presidents' Day 2024 is 02-19, five days after the speech date; past kind picks 2023-02-20
+    item = {"expression": "on Presidents Day", "basis": "event_anchored", "kind": "point_event",
+            "offset": {"amount": 0, "unit": "day", "direction": "after", "approx": False},
+            "anchor": {"fact": None, "event": "presidents day"}}
+    (r,) = plan_overlay([edge()], {0: item}, SPEECH)
+    assert r.reason == "year_ambiguous" and not r.written
+    # "last Presidents Day" names the year: written
+    (r,) = plan_overlay([edge()], {0: {**item, "anchor": {"fact": None, "event": "last presidents day"}}}, SPEECH)
+    assert r.written
+    # MLK Day (2024-01-15) is the nearer occurrence: written
+    (r,) = plan_overlay([edge()], {0: {**item, "anchor": {"fact": None, "event": "mlk day"}}}, SPEECH)
+    assert r.written and r.new_valid_at.date() == date(2024, 1, 15)
+
+
+def test_year_ambiguity_propagates_through_anchors() -> None:
+    items = {0: _on("on February 19th", "--02-19"), 1: _after(0)}
+    r0, r1 = plan_overlay([edge(uuid="a"), edge(uuid="b")], items, SPEECH)
+    assert (r0.reason, r1.reason) == ("year_ambiguous", "ambiguous_anchor")
+    assert not (r0.written or r1.written)

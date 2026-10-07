@@ -360,9 +360,40 @@ def _two_options_of(cal: dict | None, w) -> str | None:
     return "two_options" if w and w[0] and w[1] and _two_options(cal, w[0], w[1]) else None
 
 
+def _other_kind(kind: str) -> str:
+    return "point_event" if kind == "plan" else "plan"
+
+
+def _distance(ref: date, w) -> int | None:
+    """Days from the speech date to a closed window (0 when it contains the speech date)."""
+    if not w or w[0] is None or w[1] is None:
+        return None
+    if w[0] <= ref <= w[1]:
+        return 0
+    return (ref - w[1]).days if w[1] < ref else (w[0] - ref).days
+
+
+_NEAR_OTHER_DAYS = 31
+
+
+def _year_ambiguity(ref: date, chosen, other) -> str | None:
+    """"year_ambiguous" when a yearless date ("June", "Feb 5th", "on the 20th", "Thanksgiving") is
+    placed by the resolver's kind (past for events/states, ahead for plans) while its other occurrence
+    is nearer the speech date and within a month of it ("on February 5th" said Feb 3 as a past
+    event -> 2022). The kind label alone is not trusted for that move; a far other occurrence
+    ("on May 1st" said in November) leaves the kind's choice standing."""
+    if not chosen or not other or chosen == other:
+        return None
+    dc, do = _distance(ref, chosen), _distance(ref, other)
+    if dc is None or do is None:
+        return None
+    return "year_ambiguous" if do < dc and do <= _NEAR_OTHER_DAYS else None
+
+
 def _place(ref: date, items: dict[int, dict], i: int, n_facts: int | None, depth: int = 0):
     """(window, ambiguity) for fact i. ambiguity: None, "two_options" (its own calendar names two
-    candidate days) or "ambiguous_anchor" (a fact it is anchored to has two candidate days)."""
+    candidate days), "year_ambiguous" (a yearless date whose other occurrence is nearer the speech
+    date) or "ambiguous_anchor" (a fact it is anchored to is ambiguous)."""
     if n_facts is not None and not 0 <= i < n_facts:
         return None, None
     it = items.get(i)
@@ -372,7 +403,10 @@ def _place(ref: date, items: dict[int, dict], i: int, n_facts: int | None, depth
     off, cal = it.get("offset") or None, it.get("calendar") or None
     if basis == "explicit_date":
         value = _checked_date(it)
-        return (_explicit(ref, value, kind) if value is not None else None), None
+        if value is None:
+            return None, None
+        w = _explicit(ref, value, kind)
+        return w, _year_ambiguity(ref, w, _explicit(ref, value, _other_kind(kind)))
     if basis == "speech_relative":
         if cal:
             w = _calendar(ref, cal)
@@ -388,7 +422,8 @@ def _place(ref: date, items: dict[int, dict], i: int, n_facts: int | None, depth
         anc = anchor.get("fact")
         if anc is None:
             w = _holiday_anchored(ref, anchor.get("event"), it.get("expression"), off, cal, kind)
-            return w, _two_options_of(cal, w)
+            alt = _holiday_anchored(ref, anchor.get("event"), it.get("expression"), off, cal, _other_kind(kind))
+            return w, (_year_ambiguity(ref, w, alt) or _two_options_of(cal, w))
         if isinstance(anc, bool) or not isinstance(anc, int) or anc == i:
             return None, None
         aw, anchor_ambiguity = _place(ref, items, anc, n_facts, depth + 1)
@@ -820,7 +855,7 @@ def plan_overlay(
             elif g_dates and speech_date not in g_dates:
                 # Offline over 18 runs: overriding Graphiti's own dates only ever lost facts.
                 reason = "graphiti_resolved"
-            elif ambiguity:  # "two_options", or "ambiguous_anchor" when inherited from an anchor
+            elif ambiguity:  # "two_options", "year_ambiguous", or "ambiguous_anchor" from an anchor
                 reason = ambiguity
             elif edge.invalid_at is not None and _aware(edge.invalid_at) <= candidate:
                 reason = "would_invert_interval"
