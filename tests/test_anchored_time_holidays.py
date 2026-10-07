@@ -1,7 +1,7 @@
 """Event anchors that name a US holiday resolve to that holiday, year taken from the speech date."""
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -52,6 +52,31 @@ SINCE = {"amount": 0, "unit": "day", "direction": "after", "approx": False}
 )
 def test_holiday_anchor_window(ref, it, expected) -> None:
     assert compute(D(ref), {0: it}, 0) == expected
+
+
+@pytest.mark.parametrize(
+    ("ref", "event", "expression", "kind", "expected"),
+    [
+        # "next" = the first occurrence after the speech date, even for a past-tense fact
+        ("2023-11-20", "next Black Friday", "x", "point_event", D("2023-11-17")),
+        ("2023-11-20", "Black Friday", "a week before next Black Friday", "point_event", D("2023-11-17")),
+        # "last" = the latest occurrence before the speech date, even when one is closer ahead
+        ("2023-11-20", "last Black Friday", "x", "plan", D("2022-11-18")),
+        ("2023-12-25", "Christmas", "a week before last Christmas", "point_event", D("2022-12-18")),
+        # "this" = the speech date's year
+        ("2023-03-01", "this Christmas", "x", "plan", D("2023-12-18")),
+        # an explicit year wins
+        ("2024-06-01", "Christmas 2021", "x", "point_event", D("2021-12-18")),
+        ("2024-06-01", "Christmas", "a week before Christmas, 2021", "point_event", D("2021-12-18")),
+        # a modifier that is not attached to the holiday name is ignored
+        ("2024-06-01", "Christmas", "last week, before Christmas", "point_event", D("2023-12-18")),
+    ],
+)
+def test_holiday_modifier_picks_the_occurrence(ref, event, expression, kind, expected) -> None:
+    it = item(event, WEEK_BEFORE, kind=kind)
+    it["expression"] = expression
+    window = compute(D(ref), {0: it}, 0)
+    assert window == (expected - timedelta(days=3), expected + timedelta(days=3))
 
 
 @pytest.mark.parametrize(

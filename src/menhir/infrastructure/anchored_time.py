@@ -269,19 +269,25 @@ def _date_month(value: str) -> int | None:
     return None
 
 
-def _contradicts_expression(item: dict) -> bool:
-    """An explicit date that drops or changes the one month its own expression names.
+def _checked_date(item: dict) -> str | None:
+    """The explicit date, checked against the one month its own expression names.
 
-    Seen live: "on February 10th" returned as ``---10`` (day of month only), which placed the fact
-    in the wrong month. Year-only dates claim no month.
+    A dropped month is put back: "on February 10th" -> ``---10`` (seen live) becomes ``--02-10``,
+    and "in May 2019" -> ``2019`` becomes ``2019-05`` when the year is in the expression too. A date
+    with a different month is rejected (None). No named month, or several: the date as given.
     """
+    expression = str(item.get("expression") or "")
     prefixes = [n[:3] for n in _MONTH_NAMES]  # unique per month
-    named = {prefixes.index(w.group(1).lower()[:3]) + 1
-             for w in _MONTH_WORD.finditer(str(item.get("expression") or ""))}
+    named = {prefixes.index(w.group(1).lower()[:3]) + 1 for w in _MONTH_WORD.finditer(expression)}
     value = str(item.get("date") or "").strip()
-    if len(named) != 1 or re.fullmatch(r"\d{4}", value):
-        return False
-    return _date_month(value) not in named
+    if len(named) != 1:
+        return value
+    (month,) = named
+    if re.fullmatch(r"\d{4}", value):
+        return f"{value}-{month:02d}" if re.search(rf"\b{value}\b", expression) else value
+    if re.fullmatch(r"---\d{2}", value):
+        return f"--{month:02d}-{value[3:]}"
+    return value if _date_month(value) == month else None
 
 
 _HOLIDAY_NAMES = {
@@ -339,9 +345,8 @@ def compute(ref: date, items: dict[int, dict], i: int, depth: int = 0):
     basis, kind = it.get("basis"), it.get("kind") or "point_event"
     off, cal = it.get("offset") or None, it.get("calendar") or None
     if basis == "explicit_date":
-        if _contradicts_expression(it):
-            return None
-        return _explicit(ref, it.get("date"), kind)
+        value = _checked_date(it)
+        return _explicit(ref, value, kind) if value is not None else None
     if basis == "speech_relative":
         if cal:
             return _calendar(ref, cal)
@@ -355,7 +360,7 @@ def compute(ref: date, items: dict[int, dict], i: int, depth: int = 0):
         anchor = it.get("anchor") or {}
         anc = anchor.get("fact")
         if anc is None:
-            return _holiday_anchored(ref, anchor.get("event"), off, cal, kind)
+            return _holiday_anchored(ref, anchor.get("event"), it.get("expression"), off, cal, kind)
         if not isinstance(anc, int) or anc == i:
             return None
         aw = compute(ref, items, anc, depth + 1)
@@ -386,24 +391,55 @@ def _from_anchor(aw: tuple[date, date], off: dict | None, cal: dict | None):
     return s - timedelta(days=tol), e + timedelta(days=tol)
 
 
-def _holiday_anchored(ref: date, event, off: dict | None, cal: dict | None, kind: str):
+_HOLIDAY_WHICH = {"last": "last", "this past": "last", "next": "next", "this coming": "next", "this": "this"}
+_WHICH_RX = "this past|this coming|last|next|this"
+
+
+def _holiday_ref(event, expression) -> tuple[str, int, str | None, int | None] | None:
+    """(holidays.US name, days after it, last/next/this or None, year or None) for an anchor event.
+
+    "next Black Friday" / "Christmas 2022" in the event; else the same words around the holiday
+    name in the expression ("a week before last Christmas").
+    """
+    m = re.fullmatch(rf"(?:({_WHICH_RX}) )?(.+?)(?:,? (\d{{4}}))?", _norm_event(event))
+    if not m or m.group(2) not in _HOLIDAY_ALIASES:
+        return None
+    which, alias, year = m.groups()
+    if which is None and year is None:
+        expr = _norm_event(expression)
+        w = re.search(rf"\b({_WHICH_RX}) {re.escape(alias)}\b", expr)
+        y = re.search(rf"\b{re.escape(alias)},? (\d{{4}})\b", expr)
+        which, year = (w.group(1) if w else None), (y.group(1) if y else None)
+    name, days_after = _HOLIDAY_ALIASES[alias]
+    return name, days_after, _HOLIDAY_WHICH.get(which) if which else None, int(year) if year else None
+
+
+def _holiday_anchored(ref: date, event, expression, off: dict | None, cal: dict | None, kind: str):
     """Window for an offset from a named US holiday ("a week before Black Friday").
 
-    The year comes from the speech date: the latest occurrence whose window starts on or before
-    it, or for a plan the earliest whose window ends on or after it.
+    "last"/"next"/"this" or a year pick the occurrence (last = latest before the speech date,
+    next = earliest after it, this = the speech date's year). Otherwise the year comes from the
+    speech date: the latest occurrence whose window starts on or before it, or for a plan the
+    earliest whose window ends on or after it.
     """
-    target = _HOLIDAY_ALIASES.get(_norm_event(event))
-    if target is None:
+    ref_ = _holiday_ref(event, expression)
+    if ref_ is None:
         return None
-    name, days_after = target
-    wins = []
-    for year in (ref.year - 1, ref.year, ref.year + 1):
-        d = _us_holidays(year).get(name)
+    name, days_after, which, year = ref_
+    days = []
+    for y in (year,) if year else (ref.year - 1, ref.year, ref.year + 1):
+        d = _us_holidays(y).get(name)
         if d is not None:
-            d += timedelta(days=days_after)
-            w = _from_anchor((d, d), off, cal)
-            if w:
-                wins.append(w)
+            days.append(d + timedelta(days=days_after))
+    if which == "last":
+        days = [d for d in days if d < ref][-1:]
+    elif which == "next":
+        days = [d for d in days if d > ref][:1]
+    elif which == "this":
+        days = [d for d in days if d.year == ref.year]
+    wins = [w for w in (_from_anchor((d, d), off, cal) for d in days) if w]
+    if year or which:
+        return wins[0] if wins else None
     if kind == "plan":
         return next((w for w in wins if (w[1] or w[0]) >= ref), None)
     return next((w for w in reversed(wins) if (w[0] or w[1]) <= ref), None)
@@ -573,7 +609,7 @@ def granularity_of(item: dict | None) -> str | None:
         return None
     basis = item.get("basis")
     if basis == "explicit_date":
-        v = str(item.get("date") or "").strip()
+        v = _checked_date(item) or ""
         if re.fullmatch(r"\d{4}", v):
             return "year"
         if re.fullmatch(r"\d{4}-\d{2}|--\d{2}", v):
@@ -648,6 +684,12 @@ class AnchoredTimeReport:
     results: tuple[AnchoredTimeResult, ...] = field(default_factory=tuple)
 
 
+def _two_options(cal: dict | None, start: date, end: date) -> bool:
+    """"last Tue" said Wed/Thu, or "next Fri": two candidate days, and the midpoint is neither."""
+    return (bool(cal) and cal.get("unit") == "weekday" and cal.get("which") in ("last", "next")
+            and (end - start).days == 7)
+
+
 def plan_overlay(
     edges: Sequence[EdgeTimeInput],
     items: dict[int, dict],
@@ -657,7 +699,8 @@ def plan_overlay(
 
     ``valid_at`` = window midpoint at 00:00 UTC, written only when the basis is dated, the window
     is closed, the fact is not a plan, Graphiti's value is missing or its speech-date default and
-    outside the window, and the edge's ``invalid_at`` would stay after it. Everything else keeps
+    outside the window, the window is not two candidate days, and the edge's ``invalid_at`` would
+    stay after it. Everything else keeps
     Graphiti's value: a date Graphiti resolved itself is never overridden.
     """
     results: list[AnchoredTimeResult] = []
@@ -694,6 +737,8 @@ def plan_overlay(
             elif edge.valid_at is not None and speech_date not in (edge.valid_at.date(), _utc_date(edge.valid_at)):
                 # Offline over 18 runs: overriding Graphiti's own dates only ever lost facts.
                 reason = "graphiti_resolved"
+            elif _two_options(cal, start, end):
+                reason = "two_options"
             elif edge.invalid_at is not None and _aware(edge.invalid_at) <= candidate:
                 reason = "would_invert_interval"
             else:

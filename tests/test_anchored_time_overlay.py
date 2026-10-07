@@ -58,17 +58,27 @@ def edge(valid_at=None, invalid_at=None, uuid="e0", fact="The user moved."):
         (LAST_MONTH, None, datetime(2024, 1, 10), "would_invert_interval", None),
         (LAST_MONTH, None, utc("2024-01-16T00:00:01"), "written", MID),
         (LAST_MONTH, utc("2024-02-14T00:00:00"), utc("2024-03-05T00:00:00"), "written", MID),
-        # explicit date that drops or changes the month its expression names: unplaceable
-        ({"expression": "on February 10th", "basis": "explicit_date", "date": "---10"}, None, None,
-         "open_or_unplaceable", None),
+        # explicit date that changes the month its expression names: unplaceable
         ({"expression": "on Feb 10", "basis": "explicit_date", "date": "--03-10"}, None, None,
          "open_or_unplaceable", None),
+        # a month the date dropped is put back from the expression
+        ({"expression": "on February 10th", "basis": "explicit_date", "date": "---10"}, None, None,
+         "written", datetime(2024, 2, 10, tzinfo=timezone.utc)),
+        ({"expression": "in May 2019", "basis": "explicit_date", "date": "2019"}, None, None,
+         "written", datetime(2019, 5, 16, tzinfo=timezone.utc)),
+        # ...but only with the year in the expression too
+        ({"expression": "in May", "basis": "explicit_date", "date": "2019"}, None, None,
+         "written", datetime(2019, 7, 2, tzinfo=timezone.utc)),
         ({"expression": "on February 10th", "basis": "explicit_date", "date": "--02-10"}, None, None,
          "written", datetime(2024, 2, 10, tzinfo=timezone.utc)),
         ({"expression": "on the 10th", "basis": "explicit_date", "date": "---10"}, None, None,
          "written", datetime(2024, 2, 10, tzinfo=timezone.utc)),
-        ({"expression": "in May 2019", "basis": "explicit_date", "date": "2019"}, None, None,
-         "written", datetime(2019, 7, 2, tzinfo=timezone.utc)),
+        # two candidate days ("last Tuesday" said on Wednesday 02-14): no midpoint between them
+        ({"expression": "last Tuesday", "basis": "speech_relative", "kind": "point_event",
+          "calendar": {"which": "last", "unit": "weekday", "name": "tuesday"}}, None, None, "two_options", None),
+        ({"expression": "last Friday", "basis": "speech_relative", "kind": "point_event",
+          "calendar": {"which": "last", "unit": "weekday", "name": "friday"}}, None, None,
+         "written", datetime(2024, 2, 9, tzinfo=timezone.utc)),
     ],
 )
 def test_overlay_table(item, valid_at, invalid_at, reason, new_valid_at) -> None:
