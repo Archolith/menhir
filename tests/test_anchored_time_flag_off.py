@@ -74,7 +74,9 @@ def test_client_wires_the_resolver_only_when_enabled_and_llm_is_on(monkeypatch) 
     resolver = _captured_hook(monkeypatch, on)._anchored_time
     assert isinstance(resolver, resolver_module.AnchoredTimeResolver)
     assert resolver.model == "gpt-6-luna" and resolver._timeout_s == 7.0
-    assert type(resolver._client).__name__ == "_ProviderExtrasAsyncClient"
+    # Unwrapped client: a retrying wrapper here would nest a second 429 backoff layer.
+    assert type(resolver._client).__name__ not in {"_ProviderExtrasAsyncClient", "ResilientChatClient"}
+    assert resolver._base_url == ProviderConfig.for_graphiti_llm(on).base_url
     default_on = MemorySettings(anchored_time_resolver_enabled=True)
     default_model = _captured_hook(monkeypatch, default_on)._anchored_time
     assert default_model.model == ProviderConfig.for_graphiti_llm(default_on).chat_model

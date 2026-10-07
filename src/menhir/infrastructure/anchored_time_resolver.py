@@ -1,13 +1,13 @@
 """Anchored-time resolver: the one LLM call, its timeout, and a small result cache.
 
 ``resolve`` never raises except on cancellation: every failure becomes a status, and the caller
-keeps Graphiti's times. The request goes through the same provider-extras client Graphiti uses
-(shaping, Flex tier, 429 backoff, usage accounting) but not through MenhirOpenAIGenericClient,
-which appends a language instruction to the system prompt and would change the frozen prompt.
+keeps Graphiti's times. The request gets what Graphiti's provider proxy gives its calls (provider
+extras, then ``openai_calls`` shaping, Flex tier and 429 backoff, on the instrumented client for
+usage accounting) but not MenhirOpenAIGenericClient, which appends a language instruction to the
+system prompt and would change the frozen prompt.
 """
 from __future__ import annotations
 
-import asyncio
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date
@@ -18,7 +18,12 @@ import time
 from typing import Any
 
 from menhir.infrastructure.anchored_time import PROMPT_VERSION, build_messages, parse_items
+from menhir.infrastructure.graphiti_llm_adapter import _provider_extra_body
 from menhir.infrastructure.observability import LlmUsageControlSignal
+from menhir.infrastructure.openai_calls import (
+    acreate_chat_completion,
+    await_with_backoff_aware_timeout,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +63,15 @@ class AnchoredTimeResolver:
         self,
         client: Any,
         *,
+        base_url: str,
         model: str,
         timeout_s: float,
         cache_size: int = 256,
     ) -> None:
+        # ``client`` must be unwrapped (no retry of its own): acreate_chat_completion adds the
+        # one backoff layer, and a wrapped client would nest a second.
         self._client = client
+        self._base_url = base_url
         self.model = model
         self._timeout_s = float(timeout_s)
         self._cache_size = max(0, int(cache_size))
@@ -83,14 +92,21 @@ class AnchoredTimeResolver:
             items, missing = hit
             return ResolverOutcome("ok", items=_copy_items(items), missing_events=missing, cached=True)
         request = build_request(self.model, turn, speech_date, facts)
+        extra = _provider_extra_body(self.model, self._base_url)
+        if extra:
+            request["extra_body"] = extra
         started = time.monotonic()
         try:
-            # Plain wall-clock bound, deliberately not await_with_backoff_aware_timeout: nesting
-            # that would rebind the backoff clock and hide this call's 429 sleeps from the
-            # enclosing add_episode deadline. A long backoff here becomes "timeout" instead.
-            response = await asyncio.wait_for(
-                self._client.chat.completions.create(**request),
-                timeout=self._timeout_s,
+            # Backoff sleeps pause this deadline and the enclosing add_episode one (nested clocks
+            # forward); test_nested_backoff_deadline covers the resolver-inside-add_episode case.
+            response = await await_with_backoff_aware_timeout(
+                acreate_chat_completion(
+                    self._client.chat.completions.create,
+                    request,
+                    base_url=self._base_url,
+                    label="anchored_time",
+                ),
+                timeout_s=self._timeout_s,
             )
         except TimeoutError:
             return ResolverOutcome("timeout", latency_s=time.monotonic() - started)

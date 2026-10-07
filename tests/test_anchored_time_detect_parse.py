@@ -160,17 +160,22 @@ class _CapturingCompletions:
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="{}"))])
 
 
+async def _resolve_through(completions) -> None:
+    from menhir.infrastructure.anchored_time_resolver import AnchoredTimeResolver
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    resolver = AnchoredTimeResolver(
+        client, base_url="https://api.openai.com/v1", model="gpt-6-luna", timeout_s=5.0
+    )
+    await resolver.resolve("I left yesterday.", date(2024, 2, 14), ["The user left."])
+
+
 @pytest.mark.asyncio
 async def test_shaped_luna_request_equals_the_p0_body(monkeypatch) -> None:
-    """Through Menhir's provider client the request is exactly what P0 sent to gpt-6-luna."""
-    from menhir.infrastructure.graphiti_llm_adapter import _ProviderExtrasAsyncClient
-
+    """Through the resolver's request path the body is exactly what P0 sent to gpt-6-luna."""
     monkeypatch.delenv("MENHIR_OPENAI_SERVICE_TIER", raising=False)
     completions = _CapturingCompletions()
-    inner = SimpleNamespace(chat=SimpleNamespace(completions=completions))
-    client = _ProviderExtrasAsyncClient(inner, "https://api.openai.com/v1")
-    request = build_request("gpt-6-luna", "I left yesterday.", date(2024, 2, 14), ["The user left."])
-    await client.chat.completions.create(**request)
+    await _resolve_through(completions)
     p0_body = {
         "messages": build_messages("I left yesterday.", "2024-02-14", ["The user left."]),
         "max_completion_tokens": 3000,
@@ -180,16 +185,10 @@ async def test_shaped_luna_request_equals_the_p0_body(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_flex_tier_is_added_by_the_provider_client(monkeypatch) -> None:
-    from menhir.infrastructure.graphiti_llm_adapter import _ProviderExtrasAsyncClient
-
+async def test_flex_tier_is_added_on_the_resolver_path(monkeypatch) -> None:
     monkeypatch.setenv("MENHIR_OPENAI_SERVICE_TIER", "flex")
     completions = _CapturingCompletions()
-    inner = SimpleNamespace(chat=SimpleNamespace(completions=completions))
-    client = _ProviderExtrasAsyncClient(inner, "https://api.openai.com/v1")
-    await client.chat.completions.create(
-        **build_request("gpt-6-luna", "I left yesterday.", date(2024, 2, 14), ["The user left."])
-    )
+    await _resolve_through(completions)
     (call,) = completions.calls
     assert call["service_tier"] == "flex"
     assert call["max_completion_tokens"] == 3000

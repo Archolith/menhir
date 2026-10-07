@@ -61,7 +61,8 @@ class RateLimitBackoffClock:
 
     Overlapping sleeps (parallel calls backing off together) count once. Locked because the
     sync seams sleep on worker threads. ``on_change`` runs on the sleeping thread after every
-    enter and exit.
+    enter and exit. A ``parent`` (the enclosing deadline's clock) sees every enter and exit too,
+    so a nested deadline never hides its sleeps from the outer one.
     """
 
     def __init__(
@@ -69,9 +70,11 @@ class RateLimitBackoffClock:
         *,
         now: Callable[[], float] = time.monotonic,
         on_change: Callable[[], None] | None = None,
+        parent: RateLimitBackoffClock | None = None,
     ) -> None:
         self._now = now
         self.on_change = on_change
+        self._parent = parent
         self._lock = threading.Lock()
         self._sleepers = 0
         self._since = 0.0
@@ -88,6 +91,8 @@ class RateLimitBackoffClock:
             if self._sleepers == 0:
                 self._since = self._now()
             self._sleepers += 1
+        if self._parent is not None:
+            self._parent.enter()
         self._notify()
 
     def exit(self) -> None:
@@ -95,6 +100,8 @@ class RateLimitBackoffClock:
             self._sleepers -= 1
             if self._sleepers == 0:
                 self._total += self._now() - self._since
+        if self._parent is not None:
+            self._parent.exit()
         self._notify()
 
     def _notify(self) -> None:
@@ -248,13 +255,14 @@ async def await_with_backoff_aware_timeout(
     sleep about five minutes per call, which alone used up the 300 s add_episode timeout. Wall
     time is still capped at ``timeout_s * (1 + max_extension)``. Expiry raises TimeoutError and
     outside cancellation propagates, as with ``asyncio.wait_for``. The awaitable runs in the
-    current task; tasks and ``asyncio.to_thread`` workers it starts inherit the clock.
+    current task; tasks and ``asyncio.to_thread`` workers it starts inherit the clock. Nested
+    inside another such deadline, its sleeps pause the outer deadline as well.
     """
     loop = asyncio.get_running_loop()
     loop_thread = threading.get_ident()
     start = loop.time()
     hard_deadline = start + timeout_s * (1.0 + max_extension)
-    clock = RateLimitBackoffClock(now=loop.time)
+    clock = RateLimitBackoffClock(now=loop.time, parent=_BACKOFF_CLOCK.get())
 
     async with asyncio.timeout_at(start + timeout_s) as scope:
 

@@ -232,7 +232,6 @@ class _UsageTap:
 async def _live(args: argparse.Namespace, eval_dir: Path) -> int:
     from menhir.config.settings_model import MemorySettings
     from menhir.infrastructure.anchored_time_resolver import AnchoredTimeResolver
-    from menhir.infrastructure.graphiti_llm_adapter import _ProviderExtrasAsyncClient
     from menhir.infrastructure.observability import build_async_openai_client
     from menhir.infrastructure.providers import ProviderConfig
 
@@ -240,15 +239,16 @@ async def _live(args: argparse.Namespace, eval_dir: Path) -> int:
     provider = ProviderConfig.for_graphiti_llm(settings)
     model = args.model or settings.anchored_time_resolver_model or provider.chat_model
     raw = build_async_openai_client(base_url=provider.base_url, api_key=provider.api_key, settings=settings)
-    tap = _UsageTap(_ProviderExtrasAsyncClient(raw, provider.base_url), args.max_usd, LUNA_RATES)
+    # Raw client, as in graphiti_client.py: the resolver adds shaping and the one backoff layer.
+    tap = _UsageTap(raw, args.max_usd, LUNA_RATES)
     print(f"LIVE (paid): model={model} base={provider.base_url} cap=${args.max_usd:.2f}")
     sem = asyncio.Semaphore(args.workers)
     for run in range(1, args.runs + 1):
         for name in args.sets.split(","):
             turns = load_heldout(eval_dir, name)
             # Fresh resolver per run: its cache must not turn run 2 into a copy of run 1.
-            resolver = AnchoredTimeResolver(tap, model=model, timeout_s=settings.anchored_time_resolver_timeout_s,
-                                            cache_size=0)
+            resolver = AnchoredTimeResolver(tap, base_url=provider.base_url, model=model,
+                                            timeout_s=settings.anchored_time_resolver_timeout_s, cache_size=0)
             ckpt = eval_dir / f"ckpt_{name}_{args.tag}_r{run}.jsonl"
             latencies: list[float] = []
 

@@ -69,7 +69,10 @@ class _FakeCompletions:
 def _resolver(*outcomes, timeout_s: float = 5.0):
     completions = _FakeCompletions(outcomes or [LAST_MONTH_OUTPUT])
     client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
-    return AnchoredTimeResolver(client, model="gpt-6-luna", timeout_s=timeout_s), completions
+    resolver = AnchoredTimeResolver(
+        client, base_url="https://api.openai.com/v1", model="gpt-6-luna", timeout_s=timeout_s
+    )
+    return resolver, completions
 
 
 async def _apply(resolver, edges, text=TURN, valid_at=SPEECH):

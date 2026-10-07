@@ -288,10 +288,12 @@ class GraphitiClient:
             if settings.anchored_time_resolver_enabled:
                 from menhir.infrastructure.anchored_time_resolver import AnchoredTimeResolver
 
-                # Same provider-extras client (shaping, Flex, backoff, usage), but not the
-                # generic client: its language instruction would change the frozen prompt.
+                # Unwrapped client: the resolver adds provider extras, shaping and the one 429
+                # backoff layer itself. Not the generic client: its language instruction would
+                # change the frozen prompt.
                 anchored_time = AnchoredTimeResolver(
-                    _ProviderExtrasAsyncClient(raw_llm_client, llama_base_url),
+                    raw_llm_client,
+                    base_url=llama_base_url,
                     model=settings.anchored_time_resolver_model or llm_provider.chat_model,
                     timeout_s=settings.anchored_time_resolver_timeout_s,
                 )
