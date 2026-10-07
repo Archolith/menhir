@@ -29,12 +29,17 @@ HELDOUT = {"heldout:fix": ("heldout_turns.json", "ckpt_heldout_fix.jsonl"),
            "heldout3:frozen": ("heldout3_turns.json", "ckpt_heldout3_frozen.jsonl")}
 #: label -> (baseline, P0 resolver, P1 written) as "dated ok/n, false/n", overridden, kept inside.
 PINNED_O2 = {
-    "heldout:fix": ("18/32, 0/73", "31/32, 0/73", "26/32, 0/73", 10, 19),
+    # resolver 31/32 before d16485d: H19.6, see PROTOTYPE_DIVERGENCES
+    "heldout:fix": ("18/32, 0/73", "30/32, 0/73", "26/32, 0/73", 10, 19),
     "heldout2:frozen": ("12/23, 0/76", "22/23, 4/76", "19/23, 2/76", 11, 13),
     "heldout2:frozen_b": ("12/23, 0/76", "21/23, 2/76", "19/23, 0/76", 9, 14),
     # 24/28 and 9 before the keep-Graphiti's-own-dates rule (K19.0 is no longer overridden).
     "heldout3:frozen": ("18/28, 0/93", "26/28, 0/93", "25/28, 0/93", 8, 16),
 }
+#: Deliberate departures from the P0 prototype: (label, turn id, fact) -> window now expected.
+#: H19.6 "later that week" after Sunday 03-19: the week has no days left, so no date (d16485d,
+#: plan amendment 2); the prototype fell back to the next week.
+PROTOTYPE_DIVERGENCES = {("heldout:fix", "H19", 6): None}
 EVAL_DIR = os.environ.get("MENHIR_ANCHORED_TIME_EVAL_DIR")
 needs_eval_dir = pytest.mark.skipif(not EVAL_DIR, reason="MENHIR_ANCHORED_TIME_EVAL_DIR not set")
 
@@ -108,6 +113,10 @@ def test_heldout_replay_matches_the_prototype(label) -> None:
     eval_dir = Path(EVAL_DIR)
     turns_file, ckpt = HELDOUT[label]
     expected = _expected_sets(eval_dir / "prototype_expected_heldout.json")[label]
+    for (lbl, tid, i), window in PROTOTYPE_DIVERGENCES.items():
+        if lbl == label:
+            assert expected[tid]["windows"][i] is not None  # the pin still names a real divergence
+            expected[tid]["windows"][i] = window
     _assert_parity(_replay(eval_dir / turns_file, eval_dir / ckpt), expected)
 
 
