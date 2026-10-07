@@ -218,6 +218,13 @@ class MemorySettings:
     # entirely, which is a durable-write-semantics change.
     canonical_self_binding_mode: str = "off"
 
+    # Anchored-time resolver: one extra LLM call per user turn with a temporal cue, overlaying
+    # valid_at on extracted edges. Default off until the live eval gates (L1-L3) pass.
+    anchored_time_resolver_enabled: bool = False
+    #: Model for the resolver call; empty means the ingest chat model.
+    anchored_time_resolver_model: str = ""
+    anchored_time_resolver_timeout_s: float = 60.0
+
     # Personal-memory consolidation job (gated perception -> count/amount Views from user turns).
     # Short interval + dirty-namespace filter keeps it cheap; all bias guards pinned on. Default off.
     personal_memory_consolidation_enabled: bool = False
@@ -562,6 +569,10 @@ class MemorySettings:
         """Validate bounds on critical numeric settings."""
         if self.graphiti_add_episode_timeout_seconds <= 0:
             raise ValueError(f"graphiti_add_episode_timeout_seconds must be > 0, got {self.graphiti_add_episode_timeout_seconds}")
+        if not self.anchored_time_resolver_timeout_s > 0:
+            raise ValueError(
+                f"anchored_time_resolver_timeout_s must be > 0, got {self.anchored_time_resolver_timeout_s}"
+            )
         if self.api_port < 1 or self.api_port > 65535:
             raise ValueError(f"api_port must be 1-65535, got {self.api_port}")
         if self.max_llm_calls_per_session_window < 0:
@@ -843,6 +854,12 @@ class MemorySettings:
                 minimum=1.0,
             ),
             canonical_self_binding_mode=_getenv("MENHIR_CANONICAL_SELF_BINDING_MODE", default=cls.canonical_self_binding_mode),
+            anchored_time_resolver_enabled=parse_bool_env(_getenv("MENHIR_ANCHORED_TIME_RESOLVER", default=str(cls.anchored_time_resolver_enabled))),
+            anchored_time_resolver_model=(_getenv("MENHIR_ANCHORED_TIME_MODEL", default=cls.anchored_time_resolver_model) or "").strip(),
+            anchored_time_resolver_timeout_s=_parse_float(
+                _getenv("MENHIR_ANCHORED_TIME_TIMEOUT_S", default=str(cls.anchored_time_resolver_timeout_s)),
+                env_var="MENHIR_ANCHORED_TIME_TIMEOUT_S",
+            ),
             personal_memory_consolidation_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED", default=str(cls.personal_memory_consolidation_enabled))),
             personal_memory_consolidation_interval_s=_parse_float(
                 _getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_INTERVAL_S", default=str(cls.personal_memory_consolidation_interval_s)),

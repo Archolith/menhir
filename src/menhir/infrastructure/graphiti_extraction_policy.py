@@ -163,6 +163,9 @@ class CombinedExtractionReceipt:
     #: two independent passes agreed the content has nothing extractable
     #: (e.g. "Thanks again for your help!").
     repair_self_only_entities: bool = False
+    #: Anchored-time resolver telemetry (``AnchoredTimeReport``). ``None`` when the resolver is
+    #: off, which is the default.
+    anchored_time: Any | None = None
 
 
 _extraction_receipt: ContextVar[CombinedExtractionReceipt | None] = ContextVar(
@@ -1392,6 +1395,8 @@ async def _run_graphiti_combined_extraction(
     excluded_entity_types: Any,
     custom_extraction_instructions: str | None,
     receipt: CombinedExtractionReceipt | None = None,
+    *,
+    anchored_time: Any | None = None,
 ) -> tuple[list[Any], list[Any], dict[str, list[int]]]:
     """Run combined extraction under the active receipt's Menhir policy."""
     if receipt is None:
@@ -1570,7 +1575,101 @@ async def _run_graphiti_combined_extraction(
                 "Pruned contained edges episode_id=%s edges=%d orphan_nodes=%d",
                 receipt.episode_key, pruned, dropped,
             )
+    if anchored_time is not None:
+        # Final edges only, before Graphiti's dedupe, contradiction and expiry read valid_at.
+        await _apply_anchored_time(anchored_time, receipt, episode, edges)
     return nodes, edges, index_map
+
+
+#: Gate bounds: P0 validated chat turns of a few facts, not document-sized episodes.
+ANCHORED_TIME_MAX_EDGES = 40
+ANCHORED_TIME_MAX_TURN_CHARS = 4000
+
+
+async def _apply_anchored_time(
+    resolver: Any,
+    receipt: CombinedExtractionReceipt,
+    episode: Any,
+    edges: list[Any],
+) -> None:
+    """Overlay resolver-computed ``valid_at`` on final edges. Never fails the episode.
+
+    Every failure leaves Graphiti's values in place; only cancellation propagates. New values
+    are all computed before any edge is touched.
+    """
+    from menhir.infrastructure.anchored_time import (
+        AnchoredTimeReport,
+        EdgeTimeInput,
+        clause_guard,
+        detect,
+        plan_overlay,
+        strip_user_prefix,
+    )
+
+    report = AnchoredTimeReport(model=str(getattr(resolver, "model", "") or ""))
+    receipt.anchored_time = report
+    try:
+        speech_time = getattr(episode, "valid_at", None)
+        turn = strip_user_prefix(receipt.episode_text)
+        skip = (
+            "no_edges" if not edges
+            else "not_user_turn" if _episode_role(receipt.episode_text) != "user"
+            else "no_speech_time" if speech_time is None
+            else "too_many_edges" if len(edges) > ANCHORED_TIME_MAX_EDGES
+            else "turn_too_long" if len(turn) > ANCHORED_TIME_MAX_TURN_CHARS
+            else "no_cue" if not detect(turn)
+            else ""
+        )
+        if skip:
+            report.status, report.reason = "skipped", skip
+            return
+        speech_date = speech_time.date()
+        inputs = [
+            EdgeTimeInput(
+                uuid=str(getattr(edge, "uuid", "") or ""),
+                fact=str(getattr(edge, "fact", "") or ""),
+                valid_at=getattr(edge, "valid_at", None),
+                invalid_at=getattr(edge, "invalid_at", None),
+            )
+            for edge in edges
+        ]
+        facts = [item.fact for item in inputs]
+        report.facts = len(facts)
+        outcome = await resolver.resolve(turn, speech_date, facts)
+        report.latency_s, report.cached = outcome.latency_s, outcome.cached
+        if outcome.status != "ok" or outcome.items is None:
+            report.status, report.reason = outcome.status, outcome.error_class
+            logger.warning(
+                "Anchored-time resolver kept Graphiti times episode_id=%s status=%s error=%s",
+                receipt.episode_key, outcome.status, outcome.error_class or "-",
+            )
+            return
+        items = outcome.items
+        report.missing_events = outcome.missing_events
+        report.guard_drops = tuple(clause_guard(turn, facts, items))
+        results = plan_overlay(inputs, items, speech_date)
+        for edge, result in zip(edges, results):
+            if result.new_valid_at is not None:
+                edge.valid_at = result.new_valid_at
+        report.results = tuple(results)
+        report.overridden = sum(r.written for r in results)
+        report.kept_inside_window = sum(r.reason == "graphiti_inside_window" for r in results)
+        report.plan_not_written = sum(r.reason == "plan" for r in results)
+        report.status = "ok"
+        logger.info(
+            "Anchored-time resolver episode_id=%s prompt=%s model=%s facts=%d overridden=%d "
+            "kept_inside=%d plan_not_written=%d guard_drops=%d cached=%s latency_s=%s",
+            receipt.episode_key, report.prompt_version, report.model, report.facts,
+            report.overridden, report.kept_inside_window, report.plan_not_written,
+            len(report.guard_drops), report.cached,
+            "-" if report.latency_s is None else f"{report.latency_s:.2f}",
+        )
+    except Exception:
+        report.status, report.reason = "internal_error", "exception"
+        logger.exception(
+            "Anchored-time resolver internal error; Graphiti times kept episode_id=%s",
+            receipt.episode_key,
+        )
 
 
 class MenhirExtractionHook:
@@ -1583,6 +1682,10 @@ class MenhirExtractionHook:
     into native resolution as ``precomputed_edges``. Episodes with custom edge
     schemas keep the fork's SEPARATE compatibility route.
     """
+
+    def __init__(self, anchored_time: Any | None = None) -> None:
+        #: ``AnchoredTimeResolver`` when MENHIR_ANCHORED_TIME_RESOLVER is on, else ``None``.
+        self._anchored_time = anchored_time
 
     async def extract_single_episode(self, context: Any) -> Any:
         from menhir.infrastructure.graphiti_resolution_policy import (
@@ -1603,6 +1706,7 @@ class MenhirExtractionHook:
             context.excluded_entity_types,
             context.custom_extraction_instructions,
             receipt,
+            anchored_time=self._anchored_time,
         )
         return SingleEpisodeExtractionResult(
             nodes=nodes,
