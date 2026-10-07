@@ -28,7 +28,7 @@ def test_settings_default_off(monkeypatch) -> None:
     for settings in (MemorySettings(), MemorySettings.from_env()):
         assert settings.anchored_time_resolver_enabled is False
         assert settings.anchored_time_resolver_model == ""
-        assert settings.anchored_time_resolver_timeout_s == 60.0
+        assert settings.anchored_time_resolver_timeout_s == 120.0
 
 
 def test_settings_read_the_environment(monkeypatch) -> None:

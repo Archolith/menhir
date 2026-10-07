@@ -223,7 +223,7 @@ class MemorySettings:
     anchored_time_resolver_enabled: bool = False
     #: Model for the resolver call; empty means the ingest chat model.
     anchored_time_resolver_model: str = ""
-    anchored_time_resolver_timeout_s: float = 60.0
+    anchored_time_resolver_timeout_s: float = 120.0
 
     # Personal-memory consolidation job (gated perception -> count/amount Views from user turns).
     # Short interval + dirty-namespace filter keeps it cheap; all bias guards pinned on. Default off.
