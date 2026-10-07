@@ -10,9 +10,12 @@ from __future__ import annotations
 import calendar
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
+import functools
 import json
 import re
 from typing import Sequence
+
+import holidays
 
 PROMPT_VERSION = "a7797891"
 
@@ -281,6 +284,53 @@ def _contradicts_expression(item: dict) -> bool:
     return _date_month(value) not in named
 
 
+_HOLIDAY_NAMES = {
+    # holidays.US name -> normalized event texts that mean it (see _norm_event)
+    "Christmas Day": ("christmas", "christmas day", "xmas"),
+    "Christmas Eve": ("christmas eve", "xmas eve"),
+    "New Year's Day": ("new years", "new years day"),
+    "New Year's Eve": ("new years eve",),
+    "Independence Day": ("independence day", "4th of july", "fourth of july", "july 4th", "july fourth"),
+    "Thanksgiving Day": ("thanksgiving", "thanksgiving day"),
+    "Easter Sunday": ("easter", "easter sunday"),
+    "Good Friday": ("good friday",),
+    "Memorial Day": ("memorial day",),
+    "Labor Day": ("labor day",),
+    "Mother's Day": ("mothers day",),
+    "Father's Day": ("fathers day",),
+    "Valentine's Day": ("valentines day", "valentines"),
+    "Saint Patrick's Day": ("st patricks day", "saint patricks day", "st paddys day"),
+    "Halloween": ("halloween",),
+    "Martin Luther King Jr. Day": ("mlk day", "martin luther king day", "martin luther king jr day"),
+    "Washington's Birthday": ("presidents day", "washingtons birthday"),
+    "Juneteenth National Independence Day": ("juneteenth",),
+    "Veterans Day": ("veterans day",),
+    "Columbus Day": ("columbus day",),
+    "Groundhog Day": ("groundhog day",),
+}
+_HOLIDAY_ALIASES = {alias: (name, 0) for name, aliases in _HOLIDAY_NAMES.items() for alias in aliases}
+_HOLIDAY_ALIASES.update({"black friday": ("Thanksgiving Day", 1), "cyber monday": ("Thanksgiving Day", 4)})
+
+
+def _norm_event(text) -> str:
+    """Exact-match key: "Father John's sermon" must not become Father's Day."""
+    t = re.sub(r"['’.]", "", str(text or "").lower())
+    t = re.sub(r"\s+", " ", t).strip()
+    return t[4:] if t.startswith("the ") else t
+
+
+@functools.lru_cache(maxsize=64)
+def _us_holidays(year: int) -> dict[str, date]:
+    """Holiday name -> actual date (observed weekday shifts dropped). US: the LME data is US-centric."""
+    out: dict[str, date] = {}
+    days = holidays.US(years=year, categories=(holidays.PUBLIC, holidays.UNOFFICIAL))
+    for d in sorted(days):
+        for name in days.get_list(d):
+            if not name.endswith("(observed)"):
+                out.setdefault(name, d)
+    return out
+
+
 def compute(ref: date, items: dict[int, dict], i: int, depth: int = 0):
     """Window (start, end) for fact i; either bound may be None (open). None if not placeable."""
     it = items.get(i)
@@ -302,31 +352,61 @@ def compute(ref: date, items: dict[int, dict], i: int, depth: int = 0):
             return c - timedelta(days=tol), c + timedelta(days=tol)
         return None
     if basis == "event_anchored":
-        anc = (it.get("anchor") or {}).get("fact")
+        anchor = it.get("anchor") or {}
+        anc = anchor.get("fact")
+        if anc is None:
+            return _holiday_anchored(ref, anchor.get("event"), off, cal, kind)
         if not isinstance(anc, int) or anc == i:
             return None
         aw = compute(ref, items, anc, depth + 1)
         if not aw or aw[0] is None or aw[1] is None:
             return None
-        if cal:  # calendar unit relative to the anchor ("later that week", "the following month")
-            w = _calendar(aw[0], cal)
-            if not w:
-                return None
-            if cal.get("later"):
-                s = aw[1] + timedelta(days=1)
-                # anchor at the end of its unit: "later that week" = the days right after it
-                return (s, w[1]) if w[1] >= s else (s, s + timedelta(days=6))
-            return w
-        if not off:
-            return None
-        sign = 1 if off.get("direction") == "after" else -1
-        if off.get("amount") is None:  # "before the trip" / "after the move": open interval
-            return (aw[1], None) if sign > 0 else (None, aw[0])
-        unit = off.get("unit") if off.get("unit") in _TOL else "day"
-        tol = (_TOL_APPROX if off.get("approx") else _TOL)[unit]
-        s, e = _shift(aw[0], float(off["amount"]), unit, sign), _shift(aw[1], float(off["amount"]), unit, sign)
-        return s - timedelta(days=tol), e + timedelta(days=tol)
+        return _from_anchor(aw, off, cal)
     return None
+
+
+def _from_anchor(aw: tuple[date, date], off: dict | None, cal: dict | None):
+    if cal:  # calendar unit relative to the anchor ("later that week", "the following month")
+        w = _calendar(aw[0], cal)
+        if not w:
+            return None
+        if cal.get("later"):
+            s = aw[1] + timedelta(days=1)
+            # anchor at the end of its unit: "later that week" = the days right after it
+            return (s, w[1]) if w[1] >= s else (s, s + timedelta(days=6))
+        return w
+    if not off:
+        return None
+    sign = 1 if off.get("direction") == "after" else -1
+    if off.get("amount") is None:  # "before the trip" / "after the move": open interval
+        return (aw[1], None) if sign > 0 else (None, aw[0])
+    unit = off.get("unit") if off.get("unit") in _TOL else "day"
+    tol = (_TOL_APPROX if off.get("approx") else _TOL)[unit]
+    s, e = _shift(aw[0], float(off["amount"]), unit, sign), _shift(aw[1], float(off["amount"]), unit, sign)
+    return s - timedelta(days=tol), e + timedelta(days=tol)
+
+
+def _holiday_anchored(ref: date, event, off: dict | None, cal: dict | None, kind: str):
+    """Window for an offset from a named US holiday ("a week before Black Friday").
+
+    The year comes from the speech date: the latest occurrence whose window starts on or before
+    it, or for a plan the earliest whose window ends on or after it.
+    """
+    target = _HOLIDAY_ALIASES.get(_norm_event(event))
+    if target is None:
+        return None
+    name, days_after = target
+    wins = []
+    for year in (ref.year - 1, ref.year, ref.year + 1):
+        d = _us_holidays(year).get(name)
+        if d is not None:
+            d += timedelta(days=days_after)
+            w = _from_anchor((d, d), off, cal)
+            if w:
+                wins.append(w)
+    if kind == "plan":
+        return next((w for w in wins if (w[1] or w[0]) >= ref), None)
+    return next((w for w in reversed(wins) if (w[0] or w[1]) <= ref), None)
 
 
 def parse_output(text: str) -> dict:
