@@ -1647,7 +1647,7 @@ async def _apply_anchored_time(
         items = outcome.items
         report.missing_events = outcome.missing_events
         report.guard_drops = tuple(clause_guard(turn, facts, items))
-        results = plan_overlay(inputs, items, speech_date)
+        results = plan_overlay(inputs, items, speech_date, speech_time.tzinfo)
         for edge, result in zip(edges, results):
             if result.new_valid_at is not None:
                 edge.valid_at = result.new_valid_at

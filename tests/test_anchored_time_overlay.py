@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from menhir.infrastructure.anchored_time import EdgeTimeInput, plan_overlay
+from menhir.infrastructure.anchored_time import EdgeTimeInput, compute, plan_overlay
 
 pytestmark = pytest.mark.unit
 
@@ -88,6 +88,50 @@ def test_overlay_table(item, valid_at, invalid_at, reason, new_valid_at) -> None
     assert result.new_valid_at == new_valid_at
     assert result.written is (new_valid_at is not None)
     assert result.graphiti_valid_at == valid_at
+
+
+@pytest.mark.parametrize(
+    ("calendar", "expected"),
+    [
+        # count = the n-th unit back or ahead (SPEECH is Wed 2024-02-14, week of Mon 02-12)
+        ({"which": "last", "unit": "week", "count": 2}, (date(2024, 1, 29), date(2024, 2, 4))),
+        ({"which": "last", "unit": "week", "count": 6}, (date(2024, 1, 1), date(2024, 1, 7))),
+        ({"which": "last", "unit": "weekend", "count": 2}, (date(2024, 2, 3), date(2024, 2, 4))),
+        ({"which": "last", "unit": "day", "count": 3}, (date(2024, 2, 11), date(2024, 2, 11))),
+        ({"which": "last", "unit": "month", "count": 2}, (date(2023, 12, 1), date(2023, 12, 31))),
+        ({"which": "next", "unit": "month", "count": 2}, (date(2024, 4, 1), date(2024, 4, 30))),
+        ({"which": "last", "unit": "year", "count": 2}, (date(2022, 1, 1), date(2022, 12, 31))),
+        # "this" ignores count; a missing or bad count is 1
+        ({"which": "this", "unit": "week", "count": 3}, (date(2024, 2, 12), date(2024, 2, 18))),
+        ({"which": "last", "unit": "week", "count": "x"}, (date(2024, 2, 5), date(2024, 2, 11))),
+        ({"which": "last", "unit": "week", "count": None}, (date(2024, 2, 5), date(2024, 2, 11))),
+    ],
+)
+def test_calendar_count(calendar, expected) -> None:
+    it = {"expression": "x", "basis": "speech_relative", "kind": "point_event", "calendar": calendar}
+    assert compute(SPEECH, {0: it}, 0) == expected
+
+
+MINUS5 = timezone(timedelta(hours=-5))
+
+
+@pytest.mark.parametrize(
+    ("valid_at", "speech_tz", "reason"),
+    [
+        # speech 2024-02-14 22:00-05:00, stored by Graphiti as 02-15 03:00 UTC: its default, so write
+        (utc("2024-02-15T03:00:00"), MINUS5, "written"),
+        (utc("2024-02-15T03:00:00"), None, "graphiti_resolved"),  # no speech tz: UTC only, as before
+        # 2024-01-31 evening local, stored as 02-01 UTC: inside "last month" in the speech tz
+        (utc("2024-02-01T03:00:00"), MINUS5, "graphiti_inside_window"),
+        (utc("2024-02-01T03:00:00"), None, "graphiti_resolved"),
+        # a real other date stays Graphiti's
+        (utc("2024-02-16T12:00:00"), MINUS5, "graphiti_resolved"),
+    ],
+)
+def test_graphiti_value_read_in_the_speech_timezone(valid_at, speech_tz, reason) -> None:
+    (result,) = plan_overlay([edge(valid_at)], {0: dict(LAST_MONTH)}, SPEECH, speech_tz)
+    assert result.reason == reason
+    assert result.written is (reason == "written")
 
 
 def test_midpoint_is_midnight_utc_for_odd_and_single_day_windows() -> None:

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import calendar
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone, tzinfo
 import functools
 import json
 import re
@@ -183,6 +183,10 @@ def _calendar(ref: date, cal: dict) -> tuple[date, date] | None:
         return s, _add_months(s, 3) - timedelta(days=1)
     if unit == "season" and name in _SEASONS and which == "last" and count > 1:
         return _season(ref, name, "last", count)
+    if unit in ("day", "week", "weekend", "month", "year"):
+        # count = the n-th unit back or ahead, as for quarters and seasons ("the week before last"
+        # = 2; "in the last six weeks" = 6 places a state's start, the prompt's duration rule)
+        step *= count
     if unit == "day":
         d = ref + timedelta(days=step)
         return d, d
@@ -635,6 +639,17 @@ def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
+def _graphiti_dates(value: datetime, speech_tz: tzinfo | None) -> set[date]:
+    """Graphiti's value as a calendar date in UTC, in its own offset, and in the speech timezone.
+
+    Graphiti stores UTC, so speech at 23:00-05:00 comes back dated the next day in UTC.
+    """
+    dates = {_utc_date(value), value.date()}
+    if speech_tz is not None:
+        dates.add(_aware(value).astimezone(speech_tz).date())
+    return dates
+
+
 @dataclass(frozen=True)
 class EdgeTimeInput:
     uuid: str
@@ -694,6 +709,7 @@ def plan_overlay(
     edges: Sequence[EdgeTimeInput],
     items: dict[int, dict],
     speech_date: date,
+    speech_tz: tzinfo | None = None,
 ) -> list[AnchoredTimeResult]:
     """Decide the ``valid_at`` overlay for every edge. Pure: same inputs, same decisions.
 
@@ -732,9 +748,10 @@ def plan_overlay(
         else:
             mid = window_midpoint((start, end))
             candidate = datetime(mid.year, mid.month, mid.day, tzinfo=timezone.utc)
-            if edge.valid_at is not None and start <= _utc_date(edge.valid_at) <= end:
+            g_dates = _graphiti_dates(edge.valid_at, speech_tz) if edge.valid_at is not None else set()
+            if any(start <= d <= end for d in g_dates):
                 reason = "graphiti_inside_window"
-            elif edge.valid_at is not None and speech_date not in (edge.valid_at.date(), _utc_date(edge.valid_at)):
+            elif g_dates and speech_date not in g_dates:
                 # Offline over 18 runs: overriding Graphiti's own dates only ever lost facts.
                 reason = "graphiti_resolved"
             elif _two_options(cal, start, end):
