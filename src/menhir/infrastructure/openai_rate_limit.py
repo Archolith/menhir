@@ -150,22 +150,23 @@ def retry_after_seconds(exc: BaseException | None) -> float | None:
     return None
 
 
-def _env_int(name: str, default: int) -> int:
+# Callers pass os.getenv(<named constant>) so the feature-flag inventory can see each read.
+def _int_or(raw: str | None, default: int) -> int:
     try:
-        return max(1, int(os.getenv(name) or default))
+        return max(1, int(raw or default))
     except ValueError:
         return default
 
 
-def _env_float(name: str, default: float) -> float:
+def _float_or(raw: str | None, default: float) -> float:
     try:
-        return max(0.0, float(os.getenv(name) or default))
+        return max(0.0, float(raw or default))
     except ValueError:
         return default
 
 
 def _retry_kwargs(label: str) -> dict[str, Any]:
-    max_wait = _env_float(MAX_WAIT_ENV, DEFAULT_MAX_WAIT_S)
+    max_wait = _float_or(os.getenv(MAX_WAIT_ENV), DEFAULT_MAX_WAIT_S)
     jitter = wait_random_exponential(multiplier=1, max=max_wait)
 
     def _wait(state: RetryCallState) -> float:
@@ -183,7 +184,7 @@ def _retry_kwargs(label: str) -> dict[str, Any]:
 
     return {
         "retry": retry_if_exception(is_retryable_rate_limit),
-        "stop": stop_after_attempt(_env_int(MAX_ATTEMPTS_ENV, DEFAULT_MAX_ATTEMPTS)),
+        "stop": stop_after_attempt(_int_or(os.getenv(MAX_ATTEMPTS_ENV), DEFAULT_MAX_ATTEMPTS)),
         "wait": _wait,
         "before_sleep": _log,
         "reraise": True,
