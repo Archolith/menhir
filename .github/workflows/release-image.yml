@@ -356,7 +356,7 @@ jobs:
           }
           print(json.dumps(result, sort_keys=True))
           assert result == {
-              "fork_version": "0.30.2.post3",
+              "fork_version": "0.30.2.post4",
               "upstream_absent": True,
               "native_hook_parameters": True,
               "menhir_hooks_wired": True,

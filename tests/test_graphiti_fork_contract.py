@@ -30,11 +30,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_installed_fork_and_lock_match_the_immutable_dependency() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    assert "archolith-graphiti-core==0.30.2.post3" in project["project"]["dependencies"]
+    assert "archolith-graphiti-core==0.30.2.post4" in project["project"]["dependencies"]
     lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
     package = next(item for item in lock["package"] if item["name"] == "archolith-graphiti-core")
     assert package["source"] == {"registry": "https://pypi.org/simple"}
-    assert package["version"] == version("archolith-graphiti-core") == "0.30.2.post3"
+    assert package["version"] == version("archolith-graphiti-core") == "0.30.2.post4"
 
 
 def test_adapter_reports_missing_fork_symbol_as_mixed_install(monkeypatch) -> None:
@@ -53,7 +53,7 @@ def test_adapter_reports_missing_fork_symbol_as_mixed_install(monkeypatch) -> No
     monkeypatch.setattr(builtins, "__import__", import_without_fork_error)
     with pytest.raises(ImportError, match="graphiti_core.errors is missing") as exc_info:
         spec.loader.exec_module(adapter)
-    assert "archolith-graphiti-core==0.30.2.post3" in str(exc_info.value)
+    assert "archolith-graphiti-core==0.30.2.post4" in str(exc_info.value)
     assert "fresh virtual environment" in str(exc_info.value)
 
 
@@ -76,7 +76,7 @@ builtins.__import__ = mixed
 try:
     import menhir.infrastructure.graphiti_client
 except ImportError as exc:
-    assert 'archolith-graphiti-core==0.30.2.post3' in str(exc), str(exc)
+    assert 'archolith-graphiti-core==0.30.2.post4' in str(exc), str(exc)
     assert 'fresh virtual environment' in str(exc), str(exc)
 else:
     raise AssertionError('mixed installation was accepted')

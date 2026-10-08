@@ -14,7 +14,7 @@ requires-python = ">=3.12"
 dependencies = [
     # Archolith fork of stable Graphiti 0.30.2, with native Menhir extension hooks.
     # Its distribution name differs from the graphiti_core import package.
-    "archolith-graphiti-core==0.30.2.post3",
+    "archolith-graphiti-core==0.30.2.post4",
     "fastapi>=0.115,<1",
     "httpx>=0.27",
     "jinja2>=3.1,<4",

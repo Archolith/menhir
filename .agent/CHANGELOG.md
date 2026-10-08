@@ -2,7 +2,8 @@
 
 ## 2026-10-08 - Anchored-time P3: a fact's own end is world time, not supersession
 
-- Pin `archolith-graphiti-core==0.30.2.post3` (adds `Graphiti(edge_expiry_hook=...)`, fork PR #5).
+- Pin `archolith-graphiti-core==0.30.2.post4` (adds `Graphiti(edge_expiry_hook=...)`, fork PR #5;
+  reconciles copies of one stored edge before the save, fork PR #7).
 - `MENHIR_ANCHORED_TIME_EXPIRY` (default off): `_apply_anchored_time(expiry=True)` records the
   world end of point events / states with an item before resolve; `MenhirEdgeExpiryHook`
   (`graphiti_extraction_policy.py`) answers `WORLD_END` inside Graphiti's resolver for this

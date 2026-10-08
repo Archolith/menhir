@@ -5,7 +5,7 @@ runtime dependencies, an MCP client connection, and whichever optional agent int
 has explicitly chosen.
 
 If upgrading from Menhir v0.2.3, install into a fresh virtual environment. That version may have
-installed upstream `graphiti-core`; current Menhir uses `archolith-graphiti-core==0.30.2.post3`.
+installed upstream `graphiti-core`; current Menhir uses `archolith-graphiti-core==0.30.2.post4`.
 Both distributions write the `graphiti_core` package, so an in-place upgrade or later upstream
 reinstall can leave mixed files even when `pip check` reports no conflict. From the repository
 checkout, a fresh installation is:

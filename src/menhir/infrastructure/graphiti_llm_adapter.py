@@ -30,7 +30,7 @@ except ImportError as exc:
         raise
     raise ImportError(
         "graphiti_core.errors is missing GraphitiRequestTooLargeError. Menhir requires "
-        "archolith-graphiti-core==0.30.2.post3; an older graphiti-core install may have "
+        "archolith-graphiti-core==0.30.2.post4; an older graphiti-core install may have "
         "overwritten the fork's shared graphiti_core files. Use a fresh virtual environment "
         "or uninstall both graphiti-core distributions before reinstalling Menhir "
         "(see docs/post-install.md)."
