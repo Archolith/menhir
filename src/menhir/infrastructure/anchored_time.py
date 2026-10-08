@@ -467,7 +467,12 @@ def _place(ref: date, items: dict[int, dict], i: int, n_facts: int | None, depth
         w = _from_anchor(aw, off, cal)
         if w is None:
             return None, None
-        # a date derived from a two-candidate anchor is itself one of two candidates
+        if anchor_ambiguity == "two_options" and w[0] and w[1] and w[1] - w[0] == aw[1] - aw[0] \
+                and not cal and off and not off.get("approx") and off.get("unit") == "day":
+            # an exact day offset from two candidate days gives two candidate days, not a span
+            return w, "two_options"
+        # any other derivation from an ambiguous anchor (a year-ambiguous anchor, a tolerance,
+        # a calendar unit) is one of several readings: kept, never presented as the window
         return w, ("ambiguous_anchor" if anchor_ambiguity else _two_options_of(cal, w))
     return None, None
 

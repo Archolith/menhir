@@ -27,6 +27,9 @@ EVENT_TIME_PROPERTIES = (
     "time_ambiguity",
 )
 
+#: Ambiguities whose stored window is one reading among others, so it is never rendered.
+_UNRESOLVED_AMBIGUITY = frozenset({"year_ambiguous", "ambiguous_anchor"})
+
 #: Line breaks and other control characters in a stored expression (rendered as one space).
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]+")
 
@@ -49,9 +52,11 @@ class EventTime:
         source = f" (from '{expression}')" if expression else ""
         window = _window_text(self.window_start, self.window_end, self.granularity)
         recorded = _utc_date_text(valid_at)
-        if window and self.ambiguity == "two_options":
+        if self.ambiguity in _UNRESOLVED_AMBIGUITY:
+            window = None  # the window is one reading of several (another year, another anchor)
+        elif window and self.ambiguity == "two_options":
             # Two candidate days, not the days between them (e.g. "last Tuesday" said Wednesday).
-            if recorded in (self.window_start, self.window_end):
+            if recorded in (self.window_start, self.window_end) and recorded != self.speech_date:
                 window = recorded  # the candidate Graphiti picked independently
             else:
                 window = f"{self.window_start} or {self.window_end}"
