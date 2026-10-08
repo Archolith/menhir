@@ -226,6 +226,9 @@ class MemorySettings:
     anchored_time_resolver_timeout_s: float = 120.0
     #: Render persisted anchored-time contracts in recall and timeline facts (P2). Default off.
     anchored_time_render_enabled: bool = False
+    #: P3: a fact's own end (invalid_at) is world time, not supersession: un-expire edges Graphiti
+    #: expired only for that end, and label them "ended" in recall. Needs the resolver. Default off.
+    anchored_time_expiry_enabled: bool = False
 
     # Personal-memory consolidation job (gated perception -> count/amount Views from user turns).
     # Short interval + dirty-namespace filter keeps it cheap; all bias guards pinned on. Default off.
@@ -751,6 +754,7 @@ class MemorySettings:
             source_memory_max_chars=self.frontier_source_memory_max_chars,
             source_memory_pools=self.frontier_source_memory_pools,
             enable_anchored_time_render=self.anchored_time_render_enabled,
+            enable_anchored_time_expiry=self.anchored_time_expiry_enabled,
         )
 
     @classmethod
@@ -864,6 +868,7 @@ class MemorySettings:
                 env_var="MENHIR_ANCHORED_TIME_TIMEOUT_S",
             ),
             anchored_time_render_enabled=parse_bool_env(_getenv("MENHIR_ANCHORED_TIME_RENDER", default=str(cls.anchored_time_render_enabled))),
+            anchored_time_expiry_enabled=parse_bool_env(_getenv("MENHIR_ANCHORED_TIME_EXPIRY", default=str(cls.anchored_time_expiry_enabled))),
             personal_memory_consolidation_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED", default=str(cls.personal_memory_consolidation_enabled))),
             personal_memory_consolidation_interval_s=_parse_float(
                 _getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_INTERVAL_S", default=str(cls.personal_memory_consolidation_interval_s)),

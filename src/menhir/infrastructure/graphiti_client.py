@@ -358,7 +358,10 @@ class GraphitiClient:
                 llm_client=llm_client,
                 embedder=embedder,
                 cross_encoder=cross_encoder,
-                single_episode_extraction_hook=MenhirExtractionHook(anchored_time=anchored_time),
+                single_episode_extraction_hook=MenhirExtractionHook(
+                    anchored_time=anchored_time,
+                    anchored_time_expiry=bool(settings.anchored_time_expiry_enabled),
+                ),
                 identity_gate_hook=MenhirIdentityGateHook(),
                 candidate_filter_hook=MenhirCandidateFilterHook(),
                 node_pre_resolution_hook=MenhirNodePreResolutionHook(),

@@ -819,6 +819,9 @@ class AnchoredTimeResult:
     new_valid_at: datetime | None
     #: From the window placement: "two_options", "year_ambiguous", "ambiguous_anchor" or None.
     ambiguity: str | None = None
+    #: P3: the edge's own ``invalid_at`` at hook time, set only when MENHIR_ANCHORED_TIME_EXPIRY
+    #: is on and Graphiti will expire the edge for that end alone (not a contradiction).
+    world_end: datetime | None = None
 
 
 @dataclass
@@ -844,6 +847,10 @@ class AnchoredTimeReport:
     #: The add_episode invocation that produced this report (graphiti_extraction_policy
     #: anchored_time_owner); only that invocation may persist it.
     owner: str | None = None
+    #: P3: MENHIR_ANCHORED_TIME_EXPIRY was on for this episode; ``unexpired`` counts the edges
+    #: whose path-1 ``expired_at`` the persist step cleared.
+    expiry: bool = False
+    unexpired: int = 0
 
 
 def _two_options(cal: dict | None, start: date, end: date) -> bool:

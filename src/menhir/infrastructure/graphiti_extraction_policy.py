@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import logging
 import re
 from typing import Any, Callable
@@ -1404,6 +1404,7 @@ async def _run_graphiti_combined_extraction(
     receipt: CombinedExtractionReceipt | None = None,
     *,
     anchored_time: Any | None = None,
+    anchored_time_expiry: bool = False,
 ) -> tuple[list[Any], list[Any], dict[str, list[int]]]:
     """Run combined extraction under the active receipt's Menhir policy."""
     if receipt is None:
@@ -1584,7 +1585,8 @@ async def _run_graphiti_combined_extraction(
             )
     if anchored_time is not None:
         # Final edges only, before Graphiti's dedupe, contradiction and expiry read valid_at.
-        await _apply_anchored_time(anchored_time, receipt, episode, edges)
+        await _apply_anchored_time(anchored_time, receipt, episode, edges,
+                                   expiry=anchored_time_expiry)
     return nodes, edges, index_map
 
 
@@ -1598,8 +1600,14 @@ async def _apply_anchored_time(
     receipt: CombinedExtractionReceipt,
     episode: Any,
     edges: list[Any],
+    *,
+    expiry: bool = False,
 ) -> None:
     """Overlay resolver-computed ``valid_at`` on final edges. Never fails the episode.
+
+    With ``expiry`` (MENHIR_ANCHORED_TIME_EXPIRY) it also records, per classified point event or
+    state that arrives with its own ``invalid_at`` and no ``expired_at``, that ``invalid_at`` as
+    the world end; the persist step un-expires exactly those edges (P3).
 
     Every failure leaves Graphiti's values in place; only cancellation propagates. New values
     are all computed before any edge is touched.
@@ -1614,7 +1622,7 @@ async def _apply_anchored_time(
     )
 
     report = AnchoredTimeReport(model=str(getattr(resolver, "model", "") or ""),
-                                owner=anchored_time_owner.get())
+                                owner=anchored_time_owner.get(), expiry=expiry)
     receipt.anchored_time = report
     try:
         speech_time = getattr(episode, "valid_at", None)
@@ -1656,6 +1664,8 @@ async def _apply_anchored_time(
         report.missing_events = outcome.missing_events
         report.guard_drops = tuple(clause_guard(turn, facts, items))
         results = plan_overlay(inputs, items, speech_date, speech_time.tzinfo)
+        if expiry:
+            results = [_with_world_end(edge, result) for edge, result in zip(edges, results)]
         for edge, result in zip(edges, results):
             if result.new_valid_at is not None:
                 edge.valid_at = result.new_valid_at
@@ -1680,6 +1690,20 @@ async def _apply_anchored_time(
         )
 
 
+#: P3: kinds whose own end is world time, not supersession (a plan's end is not an event's end).
+WORLD_END_KINDS = ("point_event", "state")
+
+
+def _with_world_end(edge: Any, result: Any) -> Any:
+    """``result`` with ``world_end`` set when Graphiti's path-1 expiry will fire for a reason that
+    is not a contradiction: a classified point event or state carrying its own ``invalid_at``."""
+    invalid_at = getattr(edge, "invalid_at", None)
+    if (result.reason == "no_item" or result.kind not in WORLD_END_KINDS
+            or invalid_at is None or getattr(edge, "expired_at", None) is not None):
+        return result
+    return replace(result, world_end=invalid_at)
+
+
 class MenhirExtractionHook:
     """Menhir policy adapter on the fork's ``SingleEpisodeExtractionHook`` seam.
 
@@ -1691,9 +1715,11 @@ class MenhirExtractionHook:
     schemas keep the fork's SEPARATE compatibility route.
     """
 
-    def __init__(self, anchored_time: Any | None = None) -> None:
+    def __init__(self, anchored_time: Any | None = None, *, anchored_time_expiry: bool = False) -> None:
         #: ``AnchoredTimeResolver`` when MENHIR_ANCHORED_TIME_RESOLVER is on, else ``None``.
         self._anchored_time = anchored_time
+        #: MENHIR_ANCHORED_TIME_EXPIRY; only has an effect with a resolver.
+        self._anchored_time_expiry = anchored_time_expiry
 
     async def extract_single_episode(self, context: Any) -> Any:
         from menhir.infrastructure.graphiti_resolution_policy import (
@@ -1715,6 +1741,7 @@ class MenhirExtractionHook:
             context.custom_extraction_instructions,
             receipt,
             anchored_time=self._anchored_time,
+            anchored_time_expiry=self._anchored_time_expiry,
         )
         return SingleEpisodeExtractionResult(
             nodes=nodes,

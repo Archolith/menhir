@@ -10,12 +10,16 @@ Menhir-owned step after ``add_episode`` returns. Every write is bound to the cal
   no-op), and belong to this call's tenant.
 
 Failure never fails ingest: missing properties mean exactly the pre-P2 behavior.
+
+P3 (MENHIR_ANCHORED_TIME_EXPIRY): when a row carries ``time_world_end``, the same locked write
+also clears the ``expired_at`` Graphiti set because the fact had its own end, but only while
+``invalid_at`` is still that end. A contradiction that changed it keeps its expiry.
 """
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable
-from datetime import date
+from datetime import date, datetime, timezone
 import json
 import logging
 from typing import Any
@@ -74,6 +78,27 @@ PERSIST_CYPHER = (
     "RETURN count(r) AS written"
 )
 
+#: P3 (MENHIR_ANCHORED_TIME_EXPIRY): same lock and re-check, then clear the ``expired_at`` that
+#: Graphiti set only because the edge carried its own end (edge_operations.py path 1). Cleared
+#: only while ``invalid_at`` is still the instant the hook recorded: a contradiction changes
+#: ``invalid_at``, so it keeps its expiry (tests/test_anchored_time_expiry_live.py races this).
+EXPIRY_PERSIST_CYPHER = (
+    "UNWIND $rows AS row "
+    "MATCH ()-[r:RELATES_TO {uuid: row.uuid}]->() "
+    "WHERE " + _ELIGIBLE + " "
+    f"SET r.{LOCK_PROPERTY} = true "
+    f"REMOVE r.{LOCK_PROPERTY} "
+    "WITH r, row "
+    "WHERE " + _ELIGIBLE + " "
+    "SET " + ", ".join(f"r.{name} = row.{name}" for name in CONTRACT_PROPERTIES) + " "
+    "WITH r, row, (row.time_world_end_ms IS NOT NULL AND r.expired_at IS NOT NULL "
+    "AND r.invalid_at IS NOT NULL "
+    "AND datetime(r.invalid_at).epochMillis = row.time_world_end_ms) AS unexpire "
+    "FOREACH (_ IN CASE WHEN unexpire THEN [1] ELSE [] END | "
+    "SET r.expired_at = null, r.time_expiry = 'world_end', r.time_world_end = row.time_world_end) "
+    "RETURN count(r) AS written, sum(CASE WHEN unexpire THEN 1 ELSE 0 END) AS unexpired"
+)
+
 
 def _iso(value: date | None) -> str | None:
     return value.isoformat() if value is not None else None
@@ -108,7 +133,17 @@ def contract_rows(report: Any, edge_uuids: Iterable[str], speech_date: date | No
             "time_ambiguity": getattr(result, "ambiguity", None),
             "time_contract": contract,
         })
+        world_end = getattr(result, "world_end", None)
+        if world_end is not None and getattr(report, "expiry", False):
+            # Only P3 rows carry these keys, so a flag-off row is exactly the P2 row.
+            rows[-1]["time_world_end"] = world_end.isoformat()
+            rows[-1]["time_world_end_ms"] = _epoch_ms(world_end)
     return rows
+
+
+def _epoch_ms(value: datetime) -> int:
+    aware = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    return int(aware.timestamp() * 1000)
 
 
 def _namespace_of(group_id: str) -> str:
@@ -139,13 +174,17 @@ async def persist_anchored_time(
         "episode_uuid": episode_uuid,
         "tenant_namespaces": namespace_spellings(_namespace_of(group_id)),
     }
+    expiry = any("time_world_end_ms" in row for row in rows)
+    statement = EXPIRY_PERSIST_CYPHER if expiry else PERSIST_CYPHER
     try:
         result = await asyncio.wait_for(
-            driver.execute_query(PERSIST_CYPHER, params=params, routing_="w"),
+            driver.execute_query(statement, params=params, routing_="w"),
             timeout=PERSIST_TIMEOUT_S,
         )
         records = getattr(result, "records", None) or []
         report.persisted = int(records[0]["written"]) if records else 0
+        if expiry and records:
+            report.unexpired = int(records[0]["unexpired"] or 0)
         report.persist = "ok"
     except asyncio.CancelledError:
         raise
