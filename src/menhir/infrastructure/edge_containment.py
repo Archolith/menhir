@@ -3,7 +3,8 @@
 Some models restate a sub-fact of a fuller edge on a different endpoint pair ("jeans are from
 Levi's" next to "user bought black jeans from Levi's"); Graphiti's exact-match and same-pair dedup
 cannot catch that. An edge is dropped only when every content token, including numbers, names and
-negations, appears in a surviving edge with compatible timestamps and attributes.
+negations, appears in a surviving edge with compatible timestamps and attributes, and both facts
+carry the same polarity and modality words.
 """
 
 from __future__ import annotations
@@ -51,7 +52,40 @@ def fact_tokens(fact: str) -> frozenset[str]:
     return frozenset(out)
 
 
+# Words that change whether or how a fact holds. A keeper only implies the dropped fact when
+# both carry the same markers: "does not like jazz" must not absorb "likes jazz", and "might
+# buy" or "stopped playing" must not absorb the plain fact. Counted before stopword removal,
+# because the modal verbs are stopwords.
+_MARKERS = frozenset(
+    {
+        "not", "no", "never", "nor", "neither", "none", "nothing", "nobody", "nowhere",
+        "without", "cannot", "t",
+        "can", "could", "would", "should", "will", "may", "might", "shall", "must", "maybe",
+        "perhaps", "possibly", "probably", "likely", "unlikely", "if", "unless",
+        "plan", "plans", "planned", "planning", "intend", "intends", "intended", "want",
+        "wants", "wanted", "hope", "hopes", "hoped", "wish", "wishes", "wished", "consider",
+        "considering", "considered",
+        "stop", "stopped", "quit", "ceased", "former", "formerly", "ex", "anymore",
+        "previously", "used", "longer",
+    }
+)  # fmt: skip
+
+
+def fact_markers(fact: str) -> frozenset[str]:
+    """Polarity and modality words of ``fact`` ("n't" counts as "not")."""
+    text = (fact or "").lower().replace("’", "'").replace("‘", "'")
+    out = set()
+    for raw in _TOKEN.findall(text):
+        if raw in _MARKERS:
+            out.add("not" if raw in ("t", "cannot") else raw)
+            if raw == "cannot":
+                out.add("can")
+    return frozenset(out)
+
+
 def _compatible(kept: Any, dropped: Any) -> bool:
+    if fact_markers(getattr(kept, "fact", "")) != fact_markers(getattr(dropped, "fact", "")):
+        return False
     # Word bags ignore roles: "Ann called user" must not be absorbed by "user called Ann".
     kept_pair = (kept.source_node_uuid, kept.target_node_uuid)
     dropped_pair = (dropped.source_node_uuid, dropped.target_node_uuid)
