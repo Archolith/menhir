@@ -138,14 +138,16 @@ def _shift(d: date, amount: float, unit: str, sign: int) -> date:
         return d + timedelta(days=sign * amount)
     if unit == "week":
         return d + timedelta(days=sign * 7 * amount)
-    if unit == "month":
-        return _add_months(d, sign * int(round(amount)))
-    if unit == "year":
-        return _add_months(d, sign * 12 * int(round(amount)))
+    if unit in ("month", "year"):
+        months = amount * (12 if unit == "year" else 1)
+        if float(months).is_integer():
+            return _add_months(d, sign * int(months))
+        # "1.5 years" is 18 months; "half a month" has no whole-month form, so shift by days
+        return d + timedelta(days=sign * round(months * 30.4375))
     raise ValueError(unit)
 
 
-def _season(ref: date, name: str, which: str, count: int = 1) -> tuple[date, date]:
+def _season(ref: date, name: str, which: str, count: int = 1, kind: str = "point_event") -> tuple[date, date]:
     a, b = _SEASONS[name]
 
     def win(year: int) -> tuple[date, date]:  # season starting in `year`
@@ -160,7 +162,13 @@ def _season(ref: date, name: str, which: str, count: int = 1) -> tuple[date, dat
     if which == "next":
         return [w for w in cands if w[0] > ref][0]
     cur = [w for w in cands if w[0] <= ref <= w[1]]
-    return cur[0] if cur else [w for w in cands if w[1] < ref][-1]
+    if cur:
+        return cur[0]
+    # "this summer" outside summer: upcoming for a plan, the last one otherwise (the caller
+    # flags year_ambiguous when the other occurrence is nearer, as for yearless dates)
+    if kind == "plan":
+        return [w for w in cands if w[0] > ref][0]
+    return [w for w in cands if w[1] < ref][-1]
 
 
 def _calendar(ref: date, cal: dict) -> tuple[date, date] | None:
@@ -257,7 +265,13 @@ def _explicit(ref: date, value: str, kind: str) -> tuple[date, date] | None:
         m = re.fullmatch(r"-*(\d{1,2})-(\d{1,2})", v)  # month-day; tolerate any dash prefix
         if m:
             mo, dy = int(m.group(1)), int(m.group(2))
+            if not 1 <= mo <= 12:
+                return None
+            # An invalid candidate year (Feb 29 in 2025) is skipped, not fatal: said 2025-03-01 the
+            # past Feb 29 is 2024-02-29.
             for y in ((ref.year, ref.year + 1) if kind == "plan" else (ref.year, ref.year - 1)):
+                if dy > calendar.monthrange(y, mo)[1]:
+                    continue
                 d = date(y, mo, dy)
                 if (kind == "plan" and d >= ref) or (kind != "plan" and d <= ref):
                     return d, d
@@ -409,6 +423,10 @@ def _place(ref: date, items: dict[int, dict], i: int, n_facts: int | None, depth
         return w, _year_ambiguity(ref, w, _explicit(ref, value, _other_kind(kind)))
     if basis == "speech_relative":
         if cal:
+            name = str(cal.get("name") or "").lower()
+            if cal.get("unit") == "season" and cal.get("which") == "this" and name in _SEASONS:
+                w = _season(ref, name, "this", kind=kind)
+                return w, _year_ambiguity(ref, w, _season(ref, name, "this", kind=_other_kind(kind)))
             w = _calendar(ref, cal)
             return w, _two_options_of(cal, w)
         amount, sign = (_amount(off), _sign(off)) if off else (None, None)
