@@ -269,7 +269,7 @@ def test_rows_carry_world_end_only_when_recorded_and_flag_on() -> None:
     plain = _result("e1")
     rows = {r["uuid"]: r for r in contract_rows(_report(ended, plain), ["e0", "e1"], date(2024, 4, 10))}
     assert rows["e0"]["time_world_end"] == "2024-04-01T00:00:00+00:00"
-    assert rows["e0"]["time_world_end_ms"] == int(TRIP_END.timestamp() * 1000)
+    assert (rows["e0"]["time_world_end_s"], rows["e0"]["time_world_end_ns"]) == (int(TRIP_END.timestamp()), 0)
     assert set(rows["e1"]) == {"uuid", *CONTRACT_PROPERTIES}
     # Flag off: identical to the P2 row even if a result somehow carried a world end.
     off = contract_rows(_report(ended, plain, expiry=False), ["e0", "e1"], date(2024, 4, 10))
@@ -279,7 +279,7 @@ def test_rows_carry_world_end_only_when_recorded_and_flag_on() -> None:
 def test_naive_world_end_is_treated_as_utc() -> None:
     naive = _result("e0", world_end=datetime(2024, 4, 1))
     row = contract_rows(_report(naive), ["e0"], None)[0]
-    assert row["time_world_end_ms"] == int(TRIP_END.timestamp() * 1000)
+    assert (row["time_world_end_s"], row["time_world_end_ns"]) == (int(TRIP_END.timestamp()), 0)
 
 
 def test_world_end_row_dropped_for_duplicates() -> None:
@@ -292,7 +292,9 @@ def test_expiry_statement_shape() -> None:
     assert q.count("r.time_contract IS NULL") == 2  # eligibility before and after the lock
     assert q.index(f"SET r.{LOCK_PROPERTY} = true") < q.index("r.expired_at = null")
     assert "r.expired_at IS NOT NULL" in q
-    assert "datetime(r.invalid_at).epochMillis = row.time_world_end_ms" in q
+    assert "datetime(r.invalid_at).epochSeconds = row.time_world_end_s" in q
+    assert "datetime(r.invalid_at).nanosecond = row.time_world_end_ns" in q
+    assert "epochMillis" not in q
     assert "r.time_expiry = 'world_end'" in q
     assert "SET r.invalid_at" not in q and "r.valid_at" not in q
     assert q.startswith(PERSIST_CYPHER.split("RETURN")[0])  # P2 contract write unchanged
@@ -414,3 +416,14 @@ def test_result_default_has_no_world_end() -> None:
     # P1/P2 constructors (no world_end) keep working and compare equal to before.
     assert _result().world_end is None
     assert replace(_result(), world_end=None) == _result()
+
+
+def test_world_end_keeps_full_precision() -> None:
+    # Codex P3 review: epochMillis let a contradiction that moved invalid_at by 800 us pass.
+    end = TRIP_END + timedelta(microseconds=123456)
+    row = contract_rows(_report(_result("e0", world_end=end)), ["e0"], None)[0]
+    assert (row["time_world_end_s"], row["time_world_end_ns"]) == (int(TRIP_END.timestamp()), 123456000)
+    # Before the epoch Neo4j floors epochSeconds and keeps nanosecond-of-second non-negative.
+    old = datetime(1969, 12, 31, 23, 59, 59, 500000, tzinfo=timezone.utc)
+    row = contract_rows(_report(_result("e0", world_end=old)), ["e0"], None)[0]
+    assert (row["time_world_end_s"], row["time_world_end_ns"]) == (-1, 500000000)

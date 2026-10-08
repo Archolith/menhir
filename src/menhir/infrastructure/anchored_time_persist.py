@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import json
 import logging
 from typing import Any
@@ -91,9 +91,11 @@ EXPIRY_PERSIST_CYPHER = (
     "WITH r, row "
     "WHERE " + _ELIGIBLE + " "
     "SET " + ", ".join(f"r.{name} = row.{name}" for name in CONTRACT_PROPERTIES) + " "
-    "WITH r, row, (row.time_world_end_ms IS NOT NULL AND r.expired_at IS NOT NULL "
+    # Full precision: a contradiction that moved invalid_at by under 1 ms must still win.
+    "WITH r, row, (row.time_world_end_s IS NOT NULL AND r.expired_at IS NOT NULL "
     "AND r.invalid_at IS NOT NULL "
-    "AND datetime(r.invalid_at).epochMillis = row.time_world_end_ms) AS unexpire "
+    "AND datetime(r.invalid_at).epochSeconds = row.time_world_end_s "
+    "AND datetime(r.invalid_at).nanosecond = row.time_world_end_ns) AS unexpire "
     "FOREACH (_ IN CASE WHEN unexpire THEN [1] ELSE [] END | "
     "SET r.expired_at = null, r.time_expiry = 'world_end', r.time_world_end = row.time_world_end) "
     "RETURN count(r) AS written, sum(CASE WHEN unexpire THEN 1 ELSE 0 END) AS unexpired"
@@ -137,13 +139,18 @@ def contract_rows(report: Any, edge_uuids: Iterable[str], speech_date: date | No
         if world_end is not None and getattr(report, "expiry", False):
             # Only P3 rows carry these keys, so a flag-off row is exactly the P2 row.
             rows[-1]["time_world_end"] = world_end.isoformat()
-            rows[-1]["time_world_end_ms"] = _epoch_ms(world_end)
+            rows[-1]["time_world_end_s"], rows[-1]["time_world_end_ns"] = _epoch_s_ns(world_end)
     return rows
 
 
-def _epoch_ms(value: datetime) -> int:
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _epoch_s_ns(value: datetime) -> tuple[int, int]:
+    """(floor epoch seconds, nanosecond of second), as Neo4j's epochSeconds/nanosecond; exact."""
     aware = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
-    return int(aware.timestamp() * 1000)
+    seconds, rest = divmod(aware - _EPOCH, timedelta(seconds=1))
+    return seconds, rest // timedelta(microseconds=1) * 1000
 
 
 def _namespace_of(group_id: str) -> str:
@@ -174,7 +181,7 @@ async def persist_anchored_time(
         "episode_uuid": episode_uuid,
         "tenant_namespaces": namespace_spellings(_namespace_of(group_id)),
     }
-    expiry = any("time_world_end_ms" in row for row in rows)
+    expiry = any("time_world_end_s" in row for row in rows)
     statement = EXPIRY_PERSIST_CYPHER if expiry else PERSIST_CYPHER
     try:
         result = await asyncio.wait_for(

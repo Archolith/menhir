@@ -136,6 +136,28 @@ async def test_contradiction_committed_before_persist_keeps_expiry(driver, test_
     assert (rep.persisted, rep.unexpired) == (1, 0)
 
 
+async def test_sub_millisecond_contradiction_keeps_expiry(driver, test_neo4j_repo):
+    # Codex P3 review: a contradiction moved invalid_at by 800 us; epochMillis matched it.
+    g, ep = _ids()
+    end = TRIP_END + timedelta(microseconds=100)
+    uid = await _saved_edge(driver, test_neo4j_repo, group_id=g, episodes=[ep], invalid_at=end)
+    test_neo4j_repo.execute(
+        "MATCH ()-[r:RELATES_TO {uuid: $u}]->() SET r.invalid_at = $moved, r.expired_at = datetime()",
+        params={"u": uid, "moved": end + timedelta(microseconds=800)})
+    rep = _report(_result(uid, world_end=end))
+    await _persist(driver, rep, episode=ep, group=g, edges=[uid])
+    assert _state(test_neo4j_repo, uid)["expired_at"] is not None and rep.unexpired == 0
+
+
+async def test_microsecond_world_end_still_matches(driver, test_neo4j_repo):
+    g, ep = _ids()
+    end = TRIP_END + timedelta(microseconds=123456)
+    uid = await _saved_edge(driver, test_neo4j_repo, group_id=g, episodes=[ep], invalid_at=end)
+    rep = _report(_result(uid, world_end=end))
+    await _persist(driver, rep, episode=ep, group=g, edges=[uid])
+    assert _state(test_neo4j_repo, uid)["expired_at"] is None and rep.unexpired == 1
+
+
 async def test_no_path_one_expiry_means_nothing_to_clear(driver, test_neo4j_repo):
     # Graphiti returns early without candidates: the edge was never expired.
     g, ep = _ids()
@@ -197,7 +219,8 @@ PRE_LOCK_EXPIRY_CYPHER = (
     "MATCH ()-[r:RELATES_TO {uuid: row.uuid}]->() "
     "WHERE " + _ELIGIBLE + " "
     "WITH r, row, (r.expired_at IS NOT NULL "
-    "AND datetime(r.invalid_at).epochMillis = row.time_world_end_ms) AS unexpire "
+    "AND datetime(r.invalid_at).epochSeconds = row.time_world_end_s "
+    "AND datetime(r.invalid_at).nanosecond = row.time_world_end_ns) AS unexpire "
     f"SET r.{LOCK_PROPERTY} = true "
     f"REMOVE r.{LOCK_PROPERTY} "
     "SET " + ", ".join(f"r.{name} = row.{name}" for name in CONTRACT_PROPERTIES) + " "
