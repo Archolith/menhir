@@ -25,6 +25,7 @@ from menhir.domain.namespace import (
 from menhir.domain.recall_visibility import default_recall_visibility_cypher
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.episode_nodes import menhir_queue_episode_cypher
+from menhir.domain.event_time import EVENT_TIME_PROPERTIES
 from menhir.domain.recall import adjacency_edge_pattern
 from menhir.infrastructure.cypher import (
     Cypher,
@@ -617,17 +618,25 @@ class MemoryQueryRepository:
         return rows[0] if rows else None
 
     def timeline_facts(
-        self, *, episode_uuids: list[str], namespace: str | None
+        self, *, episode_uuids: list[str], namespace: str | None, event_time: bool = False
     ) -> dict[str, list[dict[str, Any]]]:
         """RELATES_TO facts attached to the page's episodes, grouped per episode (A3).
 
         Tenancy on the fact edge goes through `tenant_scope_cypher("r")` only. Bounded:
         at most 50 episodes (clamped here) and 20 facts per episode, ordered by
-        `r.valid_at`. Read-only.
+        `r.valid_at`. Read-only. With `event_time` (MENHIR_ANCHORED_TIME_RENDER) the anchored-time
+        contract is projected too and facts order by event-window start, falling back to valid_at.
         """
         safe_uuids = [u for u in episode_uuids if u][:50]
         if not safe_uuids:
             return {}
+        order_key = "r.valid_at"
+        contract_keys = ""
+        if event_time:
+            order_key = "coalesce(r.time_window_start, toString(r.valid_at))"
+            contract_keys = "".join(
+                f",\n                {name}: r.{name}" for name in EVENT_TIME_PROPERTIES
+            )
         query = f"""
             UNWIND $episode_uuids AS episode_uuid
             MATCH (ep:Episodic {{uuid: episode_uuid}})-[:MENTIONS]->(:Entity)
@@ -635,12 +644,12 @@ class MemoryQueryRepository:
             WHERE episode_uuid IN coalesce(r.episodes, [])
               AND {tenant_scope_cypher("r")}
             WITH DISTINCT episode_uuid, r
-            ORDER BY r.valid_at
+            ORDER BY {order_key}
             WITH episode_uuid, collect({{
                 fact: r.fact,
                 valid_at: toString(r.valid_at),
                 invalid_at: toString(r.invalid_at),
-                expired_at: toString(r.expired_at)
+                expired_at: toString(r.expired_at){contract_keys}
             }})[0..20] AS facts
             RETURN episode_uuid, facts
         """

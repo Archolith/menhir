@@ -29,6 +29,8 @@ class TimelineFact:
     invalid_at: str | None
     expired_at: str | None
     time_basis: str = "world"
+    #: Rendered anchored-time event time; only with MENHIR_ANCHORED_TIME_RENDER on.
+    event_time: str | None = None
 
 
 @dataclass(frozen=True)

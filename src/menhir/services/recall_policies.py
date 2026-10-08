@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
 from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FAMILY
+from menhir.domain.event_time import rendered_event_time
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
 from menhir.domain.recall import (
     CandidateData,
@@ -223,6 +224,8 @@ def _filter_to_current_beliefs(rows: list[dict[str, object]]) -> list[dict[str, 
 
 def _build_temporal_facts(
     rows: list[dict[str, object]],
+    *,
+    event_time: bool = False,
 ) -> dict[str, tuple[TemporalFact, ...]]:
     """Group fact-edge rows by node_uuid, cap to 5 most recent, and build TemporalFact tuples.
 
@@ -264,6 +267,7 @@ def _build_temporal_facts(
                 expired_at=expired_at,
                 is_current_belief=is_current,
                 temporal_role=temporal_role,
+                event_time=rendered_event_time(row) if event_time else None,
             )
             facts.append(fact)
         result[node_uuid] = tuple(facts)

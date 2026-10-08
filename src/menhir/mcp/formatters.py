@@ -296,7 +296,7 @@ def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, obj
     temporal_facts_raw = getattr(scored, "temporal_facts", None) or ()
     if temporal_facts_raw:
         item["temporal_facts"] = [
-            {
+            _with_event_time({
                 "fact": _tf(tf, "fact"),
                 "valid_at": _tf(tf, "valid_at"),
                 "invalid_at": _tf(tf, "invalid_at"),
@@ -306,7 +306,7 @@ def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, obj
                 "temporal_role": _tf(tf, "temporal_role"),
                 # Rung 1C: render happened-time (world) vs learned-time (belief) legibly.
                 "when": _format_when(tf),
-            }
+            }, tf)
             for tf in temporal_facts_raw
         ]
     if compact:
@@ -323,6 +323,14 @@ def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, obj
     return item
 
 
+def _with_event_time(item: dict, tf: object) -> dict:
+    """Adds ``event_time`` only when rendered (MENHIR_ANCHORED_TIME_RENDER), else unchanged."""
+    event_time = _tf(tf, "event_time")
+    if event_time:
+        item["event_time"] = event_time
+    return item
+
+
 def _format_when(tf: object) -> str:
     """Rung 1C: a compact happened-vs-learned phrase for one temporal fact.
 
@@ -335,7 +343,12 @@ def _format_when(tf: object) -> str:
     created_at = _tf(tf, "created_at")
     expired_at = _tf(tf, "expired_at")
 
-    if invalid_at:
+    event_time = _tf(tf, "event_time")
+    if event_time:
+        happened = f"happened {event_time}"
+        if invalid_at:
+            happened = f"{happened} until {invalid_at}"
+    elif invalid_at:
         happened = f"happened {valid_at or '?'} until {invalid_at}"
     elif valid_at:
         happened = f"happened from {valid_at}"

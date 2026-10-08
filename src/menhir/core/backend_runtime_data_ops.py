@@ -401,6 +401,8 @@ class RuntimeProviderDataOpsMixin:
     ) -> dict[str, Any]:
         from dataclasses import asdict
 
+        settings = getattr(self.built, "settings", None)
+        event_time = bool(getattr(settings, "anchored_time_render_enabled", False))
         result = await self.built.recall_service.recall_timeline(
             namespace=namespace,
             query=query,
@@ -417,10 +419,16 @@ class RuntimeProviderDataOpsMixin:
             history_view=history_view,
             history_offset=history_offset,
             history_limit=history_limit,
+            **({"event_time": True} if event_time else {}),
         )
         payload = _to_jsonable(asdict(result))
         if payload.get("note") is None:
             payload.pop("note", None)
+        # Flag-off payloads stay byte-identical: no null event_time key on any fact.
+        for entry in payload.get("entries") or ():
+            for fact in entry.get("facts") or ():
+                if isinstance(fact, dict) and fact.get("event_time") is None:
+                    fact.pop("event_time", None)
         return payload
 
     async def view_entropy(

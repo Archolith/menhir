@@ -12,6 +12,7 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
+from menhir.domain.event_time import rendered_event_time
 from menhir.domain.namespace import namespace_to_group_ids
 from menhir.domain.timeline import (
     TimelineEntry,
@@ -73,6 +74,7 @@ def _entry_from_row(
     detail: str,
     facts_map: dict[str, list[dict[str, Any]]],
     is_anchor: bool = False,
+    event_time: bool = False,
 ) -> TimelineEntry:
     raw = _collapse(row.get("content"))
     headline = raw[:_HEADLINE_MAX_CHARS] + "…" if len(raw) > _HEADLINE_MAX_CHARS else raw
@@ -89,6 +91,7 @@ def _entry_from_row(
             valid_at=f.get("valid_at"),
             invalid_at=f.get("invalid_at"),
             expired_at=f.get("expired_at"),
+            event_time=rendered_event_time(f) if event_time else None,
         )
         for f in (facts_map.get(str(row["uuid"])) or [])
     )
@@ -241,6 +244,7 @@ async def run_recall_timeline(
     history_view: str | None = None,
     history_offset: int | None = None,
     history_limit: int = 10,
+    event_time: bool = False,
 ) -> TimelineResult:
     """Navigate a recorded-time thread of visible memories on demand.
 
@@ -426,10 +430,12 @@ async def run_recall_timeline(
 
     facts_map: dict[str, list[dict[str, Any]]] = {}
     if facts and page_rows:
+        # The kwarg is passed only when on, so the flag-off adapter call is unchanged.
         facts_map = await asyncio.to_thread(
             adapter.timeline_facts,
             episode_uuids=[str(r["uuid"]) for r in page_rows],
             namespace=namespace,
+            **({"event_time": True} if event_time else {}),
         )
     entries = tuple(
         _entry_from_row(
@@ -437,6 +443,7 @@ async def run_recall_timeline(
             detail=detail,
             facts_map=facts_map,
             is_anchor=(anchor_uuid is not None and str(row["uuid"]) == anchor_uuid),
+            event_time=event_time,
         )
         for row in page_rows
     )

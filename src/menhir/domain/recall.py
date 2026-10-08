@@ -114,6 +114,9 @@ class TemporalFact:
     expired_at: str | None
     is_current_belief: bool
     temporal_role: str  # "current_belief" | "superseded_belief"
+    # Rendered anchored-time event time; set only when MENHIR_ANCHORED_TIME_RENDER is on and the
+    # edge carries a persisted contract.
+    event_time: str | None = None
 
 
 @dataclass(frozen=True)

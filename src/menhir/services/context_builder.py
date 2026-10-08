@@ -176,7 +176,11 @@ def _source_time_lines(memory: ScoredMemory) -> list[str]:
     for temporal_fact in facts:
         valid_at = temporal_fact.valid_at
         invalid_at = temporal_fact.invalid_at
-        if valid_at and invalid_at:
+        if temporal_fact.event_time:
+            happened = temporal_fact.event_time
+            if invalid_at:
+                happened = f"{happened} through {invalid_at}"
+        elif valid_at and invalid_at:
             happened = f"{valid_at} through {invalid_at}"
         elif valid_at:
             happened = valid_at
