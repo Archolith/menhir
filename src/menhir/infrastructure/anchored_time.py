@@ -796,6 +796,9 @@ class AnchoredTimeReport:
     latency_s: float | None = None
     cached: bool = False
     results: tuple[AnchoredTimeResult, ...] = field(default_factory=tuple)
+    #: P2 persist step outcome (anchored_time_persist): "" not attempted, else ok/error/no_rows/...
+    persist: str = ""
+    persisted: int = 0
 
 
 def _two_options(cal: dict | None, start: date, end: date) -> bool:

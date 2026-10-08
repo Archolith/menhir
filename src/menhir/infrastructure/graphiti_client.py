@@ -456,6 +456,9 @@ class GraphitiClient:
         from menhir.infrastructure.graphiti_extraction_policy import get_extraction_receipt
 
         receipt = get_extraction_receipt()
+        # A reused receipt may still hold an earlier call's report; only a report created during
+        # this call may be persisted (test_anchored_time_persist exercises the stale case).
+        prior_anchored_time = receipt.anchored_time if receipt is not None else None
         if receipt is not None and str(receipt.self_bind_mode) == "enforce":
             # A partial construction must not reopen probabilistic self resolution.
             # Check before the native add_episode call can perform any persistence.
@@ -512,6 +515,21 @@ class GraphitiClient:
                 },
             )
         )
+        report = receipt.anchored_time if receipt is not None else None
+        if report is not None and report is not prior_anchored_time and report.status == "ok":
+            from menhir.infrastructure.anchored_time import _utc_date
+            from menhir.infrastructure.anchored_time_persist import persist_anchored_time
+
+            episode = getattr(result, "episode", None)
+            await persist_anchored_time(
+                self.client.driver,
+                report,
+                episode_uuid=getattr(episode, "uuid", None),
+                group_id=group_id,
+                edge_uuids=[getattr(e, "uuid", None) for e in (getattr(result, "edges", None) or [])],
+                # UTC, like Graphiti's stored valid_at, so rendering can compare them exactly.
+                speech_date=_utc_date(reference_time),
+            )
         return result
 
     async def search(self, query: str, **kwargs: Any) -> Any:
