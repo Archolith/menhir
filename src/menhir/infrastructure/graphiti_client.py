@@ -485,15 +485,20 @@ class GraphitiClient:
     ) -> Any:
         """Delegate episode ingestion to Graphiti."""
         from menhir.infrastructure.graphiti_extraction_policy import (
+            AnchoredTimeSlot,
             anchored_time_owner,
+            anchored_time_slot,
             get_extraction_receipt,
         )
 
         receipt = get_extraction_receipt()
         # Only a report this invocation produced may be persisted: a reused receipt can hold an
         # earlier call's report, and a receipt shared by a concurrent call can hold that call's.
+        # The per-call slot keeps this call's report even after a concurrent call replaces the
+        # receipt's (P3b-3).
         owner = uuid4().hex
         owner_binding = anchored_time_owner.set(owner)
+        slot_binding = anchored_time_slot.set(AnchoredTimeSlot(owner=owner))
         try:
             return await self._add_episode_owned(
                 receipt, owner,
@@ -501,6 +506,7 @@ class GraphitiClient:
                 reference_time=reference_time, episode_uuid=episode_uuid, group_id=group_id,
             )
         finally:
+            anchored_time_slot.reset(slot_binding)
             anchored_time_owner.reset(owner_binding)
 
     async def _add_episode_owned(
@@ -571,8 +577,10 @@ class GraphitiClient:
                 },
             )
         )
-        report = receipt.anchored_time if receipt is not None else None
-        if report is not None and getattr(report, "owner", None) == owner and report.status == "ok":
+        from menhir.infrastructure.graphiti_extraction_policy import owned_anchored_time_report
+
+        report = owned_anchored_time_report(receipt, owner)
+        if report is not None and report.status == "ok":
             from menhir.infrastructure.anchored_time import _utc_date
             from menhir.infrastructure.anchored_time_persist import persist_anchored_time
 

@@ -12,8 +12,14 @@
 - `EXPIRY_PERSIST_CYPHER` stamps `time_expiry='world_end'` / `time_world_end` on live edges
   under the P2 lock only while `invalid_at` still equals the recorded end; it never un-expires.
 - Recall labels such live, ended facts `ended` (`_build_temporal_facts(ended=...)`).
+- The hook and the persist read this call's report from a per-call `AnchoredTimeSlot`, so a
+  concurrent call sharing the receipt cannot replace it (Codex P3b-3).
 - Known gap: a duplicate restatement re-saves the edge through Graphiti's full-replace save,
   which drops the stored P2 contract and the stamp (pre-existing P2 behavior).
+- Known gap (D1, Codex P3b-2): the new mention decides. A restatement the resolver does not
+  classify (no time cue, resolver error, plan) answers `EXPIRE`, so it expires a stored ended
+  fact that an earlier ingest kept live. Follow-up: workspace
+  `menhir-anchored-time-p3c-restatement-evidence-plan.md`.
 
 ## 2026-10-01 - Ended-state quotes never yield a current scalar value (#168 step-5)
 

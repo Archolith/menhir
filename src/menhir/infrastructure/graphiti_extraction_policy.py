@@ -394,6 +394,37 @@ def begin_extraction_receipt(
 anchored_time_owner: ContextVar[str | None] = ContextVar("menhir_anchored_time_owner", default=None)
 
 
+@dataclass
+class AnchoredTimeSlot:
+    """Per-call holder for one add_episode invocation's anchored-time report.
+
+    The receipt slot is shared by concurrent calls on one receipt, so a later call can replace
+    an earlier call's report there before that call's edge-expiry hook or persist reads it
+    (P3b-3). This holder is bound per call and handed to child tasks by reference.
+    """
+
+    owner: str
+    report: Any | None = None
+
+
+anchored_time_slot: ContextVar[AnchoredTimeSlot | None] = ContextVar(
+    "menhir_anchored_time_slot", default=None
+)
+
+
+def owned_anchored_time_report(receipt: Any | None, owner: str | None) -> Any | None:
+    """The report this call produced: its own slot first, else the owner-checked receipt."""
+    if owner is None:
+        return None
+    slot = anchored_time_slot.get()
+    report = slot.report if slot is not None and slot.owner == owner else None
+    if report is None:
+        report = getattr(receipt, "anchored_time", None) if receipt is not None else None
+    if report is None or getattr(report, "owner", None) != owner:
+        return None
+    return report
+
+
 def get_extraction_receipt() -> CombinedExtractionReceipt | None:
     """Return the active extraction receipt for this task, if any."""
     return _extraction_receipt.get()
@@ -1625,6 +1656,9 @@ async def _apply_anchored_time(
     report = AnchoredTimeReport(model=str(getattr(resolver, "model", "") or ""),
                                 owner=anchored_time_owner.get(), expiry=expiry)
     receipt.anchored_time = report
+    slot = anchored_time_slot.get()
+    if slot is not None and slot.owner == report.owner:
+        slot.report = report
     try:
         speech_time = getattr(episode, "valid_at", None)
         turn = strip_user_prefix(receipt.episode_text)
@@ -1737,11 +1771,8 @@ class MenhirEdgeExpiryHook:
 
 def _owned_expiry_report() -> Any | None:
     """This call's anchored-time report when it ran with expiry and succeeded, else ``None``."""
-    receipt = get_extraction_receipt()
-    report = getattr(receipt, "anchored_time", None) if receipt is not None else None
-    owner = anchored_time_owner.get()
-    if (report is None or owner is None or getattr(report, "owner", None) != owner
-            or report.status != "ok" or not report.expiry):
+    report = owned_anchored_time_report(get_extraction_receipt(), anchored_time_owner.get())
+    if report is None or report.status != "ok" or not report.expiry:
         return None
     return report
 
