@@ -46,12 +46,12 @@ def test_restated_sub_fact_on_another_pair_is_dropped_with_its_orphan() -> None:
 
 
 def test_edge_with_a_number_or_date_the_keeper_lacks_is_kept() -> None:
-    full = _edge("user", "premium", "The user's insurance premium went down.")
+    full = _edge("premium", "insurer", "The user's insurance premium went down.")
     detail = _edge("user", "premium", "The user's insurance premium went down by $20 in March.")
     nodes, edges, index_map = _graph(full, detail)
 
     # The detailed edge absorbs the bare one, never the other way round.
-    assert prune_contained_edges(nodes, edges, index_map) == (1, 0)
+    assert prune_contained_edges(nodes, edges, index_map, {"insurer"}) == (1, 0)
     assert edges == [detail]
 
 
@@ -89,11 +89,11 @@ def test_role_reversal_on_the_same_pair_is_kept() -> None:
 
 
 def test_equal_token_sets_keep_the_longer_fact_and_merge_episodes() -> None:
-    short = _edge("user", "loom", "User owns a loom.", episodes=["ep-2"])
+    short = _edge("self", "loom", "User owns a loom.", episodes=["ep-2"])
     longer = _edge("user", "loom", "The user owns the loom.", episodes=["ep-1"])
     nodes, edges, index_map = _graph(short, longer)
 
-    assert prune_contained_edges(nodes, edges, index_map) == (1, 0)
+    assert prune_contained_edges(nodes, edges, index_map, {"self"}) == (1, 0)
     assert edges == [longer]
     assert longer.episodes == ["ep-1", "ep-2"]
 
