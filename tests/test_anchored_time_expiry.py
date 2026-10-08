@@ -1,9 +1,9 @@
 """P3 expiry: a fact's own end (invalid_at) is world time, not supersession (offline).
 
-Covers the hook record, the persist rows and statement choice, Graphiti's real expiry paths on
-the recorded edges, the gates, the "ended" recall role and the flag-off identity. The graph
-counterexamples (contradiction between save and persist, replay, duplicate, lock) run against
-Neo4j in tests/test_anchored_time_expiry_live.py.
+Covers the hook record, MenhirEdgeExpiryHook on Graphiti's real resolver (P3b), the client
+wiring and version guard, the persist rows and statement choice, the gates, the "ended" recall
+role and the flag-off identity. The graph counterexamples (restated duplicate, contradiction,
+replay) run against Neo4j in tests/test_anchored_time_expiry_live.py.
 """
 from __future__ import annotations
 
@@ -199,14 +199,15 @@ async def test_extraction_hook_threads_the_flag(monkeypatch) -> None:
     assert receipt.anchored_time is None
 
 
-# --- Graphiti's own expiry paths on the recorded edges ------------------------------------------
+# --- MenhirEdgeExpiryHook on Graphiti's real resolver (P3b) -------------------------------------
 
 class _DedupeLLM:
-    def __init__(self, contradicted: list[int]) -> None:
+    def __init__(self, contradicted: list[int], duplicates: list[int] | None = None) -> None:
         self.contradicted = contradicted
+        self.duplicates = duplicates or []
 
     async def generate_response(self, *args, **kwargs):
-        return {"duplicate_facts": [], "contradicted_facts": self.contradicted}
+        return {"duplicate_facts": self.duplicates, "contradicted_facts": self.contradicted}
 
 
 def _episode() -> EpisodicNode:
@@ -214,47 +215,183 @@ def _episode() -> EpisodicNode:
                         source_description="chat", content=TURN, valid_at=SPEECH, created_at=SPEECH)
 
 
-@pytest.mark.asyncio
-async def test_graphiti_path_one_expires_the_recorded_edge_and_keeps_its_end() -> None:
-    edge = _edges()[0]
-    other = _edge("The user likes pasta.", "x0", valid_at=datetime(2020, 1, 1, tzinfo=timezone.utc))
-    resolved, invalidated, _ = await resolve_extracted_edge(_DedupeLLM([]), edge, [], [other], _episode())
-    assert resolved.uuid == edge.uuid and invalidated == []
-    # Path 1: expired only because it carries its own end; invalid_at is the recorded value, so
-    # the persist re-check (invalid_at == world end) holds.
-    assert resolved.expired_at is not None and resolved.invalid_at == TRIP_END
+OWNER = "owner-1"
+
+
+async def _resolve(edge, related, existing, llm, *, results=None, hook=True, owner=OWNER,
+                   report_owner=OWNER, status="ok", expiry=True):
+    """resolve_extracted_edge inside an add_episode-like scope: receipt + owner bound."""
+    receipt = policy.begin_extraction_receipt("ep-1", TURN)
+    binding = policy.anchored_time_owner.set(owner)
+    try:
+        receipt.anchored_time = AnchoredTimeReport(
+            status=status, model="m", owner=report_owner, expiry=expiry,
+            results=tuple(results if results is not None else [_result(edge.uuid)]))
+        kwargs = {"edge_expiry_hook": policy.MenhirEdgeExpiryHook()} if hook else {}
+        resolved, invalidated, _ = await resolve_extracted_edge(
+            llm, edge, related, existing, _episode(), **kwargs)
+        return resolved, invalidated, receipt.anchored_time
+    finally:
+        policy.anchored_time_owner.reset(binding)
+        policy.clear_extraction_receipt()
+
+
+def _other() -> EntityEdge:
+    return _edge("The user likes pasta.", "x0", valid_at=datetime(2020, 1, 1, tzinfo=timezone.utc))
 
 
 @pytest.mark.asyncio
-async def test_graphiti_without_candidates_never_expires_so_nothing_is_cleared() -> None:
-    edge = _edges()[0]
-    resolved, _, _ = await resolve_extracted_edge(_DedupeLLM([]), edge, [], [], _episode())
-    # Early return before path 1: expired_at stays None and the persist guard
-    # (r.expired_at IS NOT NULL) clears and stamps nothing.
+async def test_without_hook_path_one_expires_the_ended_edge() -> None:
+    # Baseline (flag off passes no hook): upstream expires an edge for carrying its own end.
+    resolved, invalidated, _ = await _resolve(_edges()[0], [], [_other()], _DedupeLLM([]), hook=False)
+    assert invalidated == [] and resolved.expired_at is not None and resolved.invalid_at == TRIP_END
+
+
+@pytest.mark.asyncio
+async def test_world_end_keeps_a_new_ended_edge_live() -> None:
+    resolved, invalidated, report = await _resolve(_edges()[0], [], [_other()], _DedupeLLM([]))
+    assert invalidated == [] and resolved.expired_at is None and resolved.invalid_at == TRIP_END
+    assert report.world_end_kept == 1
+
+
+@pytest.mark.asyncio
+async def test_world_end_keeps_a_restated_duplicate_live() -> None:
+    # P3-1: the restatement resolves to the stored ended edge; it is not re-expired.
+    stored = _edge("The user visited Rome.", "stored", valid_at=datetime(2024, 3, 27, tzinfo=timezone.utc),
+                   invalid_at=TRIP_END)
+    new = _edges()[0]
+    resolved, invalidated, report = await _resolve(new, [stored], [], _DedupeLLM([], [0]))
+    assert resolved.uuid == "stored" and invalidated == []
+    assert resolved.expired_at is None and resolved.invalid_at == TRIP_END
+    assert report.world_end_kept == 1
+    # Without the hook the same restatement expires the stored edge (the P3-1 bug).
+    stored2 = _edge("The user visited Rome.", "stored", valid_at=datetime(2024, 3, 27, tzinfo=timezone.utc),
+                    invalid_at=TRIP_END)
+    resolved, _, _ = await _resolve(_edges()[0], [stored2], [], _DedupeLLM([], [0]), hook=False)
+    assert resolved.expired_at is not None
+
+
+@pytest.mark.asyncio
+async def test_newer_contradiction_inside_the_window_truncates_and_expires() -> None:
+    # Residual 1 closed: path 1 no longer masks path 2.
+    newer = _edge("The user was in Milan instead.", "x2", valid_at=datetime(2024, 3, 28, tzinfo=timezone.utc))
+    resolved, invalidated, _ = await _resolve(_edges()[0], [], [newer], _DedupeLLM([0]))
+    assert resolved.expired_at is not None and resolved.invalid_at == newer.valid_at
+    assert invalidated == []
+
+
+@pytest.mark.asyncio
+async def test_contradiction_after_the_end_does_not_supersede() -> None:
+    later = _edge("The user is in Milan.", "x3", valid_at=datetime(2024, 4, 5, tzinfo=timezone.utc))
+    resolved, _, _ = await _resolve(_edges()[0], [], [later], _DedupeLLM([0]))
     assert resolved.expired_at is None and resolved.invalid_at == TRIP_END
 
 
 @pytest.mark.asyncio
-async def test_graphiti_path_three_on_older_overlapping_edge_is_unchanged() -> None:
-    edge = _edges()[0]
+async def test_path_three_on_older_overlapping_edge_is_unchanged() -> None:
     older = _edge("The user was in Milan.", "x1", valid_at=datetime(2024, 3, 1, tzinfo=timezone.utc))
-    resolved, invalidated, _ = await resolve_extracted_edge(_DedupeLLM([0]), edge, [], [older], _episode())
-    # The contradicted older edge is expired by path 3 exactly as without P3; it has another uuid
-    # and no recorded world end, so the persist step never clears it.
+    resolved, invalidated, _ = await _resolve(_edges()[0], [], [older], _DedupeLLM([0]))
     assert [e.uuid for e in invalidated] == ["x1"] and invalidated[0].expired_at is not None
-    assert resolved.invalid_at == TRIP_END
+    assert resolved.expired_at is None and resolved.invalid_at == TRIP_END
 
 
 @pytest.mark.asyncio
-async def test_known_gap_newer_contradiction_is_masked_by_path_one() -> None:
-    # Pinned residual (plan section 10): path 1 expires the edge first, so Graphiti never runs
-    # path 2 for it, and the persist step cannot see the contradiction verdict. With the flag on,
-    # this edge is un-expired although a newer contradicted fact exists.
+async def test_no_candidates_never_reaches_the_hook() -> None:
+    resolved, _, report = await _resolve(_edges()[0], [], [], _DedupeLLM([]))
+    assert resolved.expired_at is None and report.world_end_kept == 0
+
+
+@pytest.mark.parametrize("case", [
+    "plan", "no_item", "no_result", "owner_mismatch", "unowned_call", "status_not_ok",
+    "expiry_off", "broken_report",
+])
+@pytest.mark.asyncio
+async def test_adapter_answers_expire_unless_this_call_classified_an_ended_fact(case) -> None:
     edge = _edges()[0]
-    newer = _edge("The user was in Milan instead.", "x2", valid_at=datetime(2024, 3, 28, tzinfo=timezone.utc))
-    resolved, invalidated, _ = await resolve_extracted_edge(_DedupeLLM([0]), edge, [], [newer], _episode())
-    assert invalidated == []
-    assert resolved.expired_at is not None and resolved.invalid_at == TRIP_END  # path 2 skipped
+    kwargs: dict = {}
+    if case == "plan":
+        kwargs["results"] = [_result("e0", kind="plan")]
+    elif case == "no_item":
+        kwargs["results"] = [_result("e0", reason="no_item")]
+    elif case == "no_result":
+        kwargs["results"] = [_result("other")]
+    elif case == "owner_mismatch":
+        kwargs["report_owner"] = "another-call"  # a concurrent call's report on a shared receipt
+    elif case == "unowned_call":
+        kwargs["owner"], kwargs["report_owner"] = None, None
+    elif case == "status_not_ok":
+        kwargs["status"] = "skipped"
+    elif case == "expiry_off":
+        kwargs["expiry"] = False
+    elif case == "broken_report":
+        kwargs["results"] = [object()]  # attribute errors are caught: EXPIRE
+    resolved, _, report = await _resolve(edge, [], [_other()], _DedupeLLM([]), **kwargs)
+    assert resolved.expired_at is not None and report.world_end_kept == 0
+
+
+@pytest.mark.asyncio
+async def test_adapter_without_receipt_answers_expire() -> None:
+    from graphiti_core.edge_expiry import EdgeExpiryContext, EdgeExpiryDecision
+
+    edge = _edges()[0]
+    context = EdgeExpiryContext(extracted_edge=edge, resolved_edge=edge, is_duplicate=False,
+                                episode=_episode())
+    assert await policy.MenhirEdgeExpiryHook().decide_edge_expiry(context) is EdgeExpiryDecision.EXPIRE
+
+
+@pytest.mark.asyncio
+async def test_adapter_falls_back_to_the_resolved_edge_classification() -> None:
+    # Bulk pass 1 can resolve to another edge of the same episode (fork F4).
+    from graphiti_core.edge_expiry import EdgeExpiryContext, EdgeExpiryDecision
+
+    extracted, sibling = _edges()[0], _edges()[1]
+    receipt = policy.begin_extraction_receipt("ep-1", TURN)
+    binding = policy.anchored_time_owner.set(OWNER)
+    try:
+        receipt.anchored_time = AnchoredTimeReport(status="ok", model="m", owner=OWNER, expiry=True,
+                                                   results=(_result("e1", kind="state"),))
+        context = EdgeExpiryContext(extracted_edge=extracted, resolved_edge=sibling,
+                                    is_duplicate=True, episode=_episode())
+        assert (await policy.MenhirEdgeExpiryHook().decide_edge_expiry(context)
+                is EdgeExpiryDecision.WORLD_END)
+        # The new mention's own result wins when present.
+        receipt.anchored_time.results = (_result("e0", kind="plan"), _result("e1", kind="state"))
+        assert (await policy.MenhirEdgeExpiryHook().decide_edge_expiry(context)
+                is EdgeExpiryDecision.EXPIRE)
+    finally:
+        policy.anchored_time_owner.reset(binding)
+        policy.clear_extraction_receipt()
+
+
+# --- client wiring and version guard -------------------------------------------------------------
+
+def test_client_passes_the_hook_only_with_the_flag_on() -> None:
+    from graphiti_core import Graphiti
+
+    from menhir.infrastructure.graphiti_client import edge_expiry_hook_kwargs
+
+    assert edge_expiry_hook_kwargs(False, Graphiti) == {}
+    on = edge_expiry_hook_kwargs(True, Graphiti)
+    assert list(on) == ["edge_expiry_hook"]
+    assert isinstance(on["edge_expiry_hook"], policy.MenhirEdgeExpiryHook)
+
+
+def test_version_guard_refuses_the_flag_on_a_fork_without_the_hook() -> None:
+    from menhir.infrastructure.graphiti_client import edge_expiry_hook_kwargs
+
+    class OldGraphiti:
+        def __init__(self, uri=None, *, candidate_filter_hook=None):
+            pass
+
+    assert edge_expiry_hook_kwargs(False, OldGraphiti) == {}  # flag off: old fork is fine
+    with pytest.raises(RuntimeError, match=r"archolith-graphiti-core==0\.30\.2\.post3"):
+        edge_expiry_hook_kwargs(True, OldGraphiti)
+
+
+def test_installed_fork_accepts_the_hook() -> None:
+    from graphiti_core.edge_expiry import EdgeExpiryHook
+
+    assert isinstance(policy.MenhirEdgeExpiryHook(), EdgeExpiryHook)
 
 
 # --- persist rows and statement ------------------------------------------------------------------
@@ -290,8 +427,10 @@ def test_world_end_row_dropped_for_duplicates() -> None:
 def test_expiry_statement_shape() -> None:
     q = EXPIRY_PERSIST_CYPHER
     assert q.count("r.time_contract IS NULL") == 2  # eligibility before and after the lock
-    assert q.index(f"SET r.{LOCK_PROPERTY} = true") < q.index("r.expired_at = null")
-    assert "r.expired_at IS NOT NULL" in q
+    assert q.index(f"SET r.{LOCK_PROPERTY} = true") < q.index("r.time_expiry = 'world_end'")
+    # P3b: stamp only, on a still-live edge; nothing is ever un-expired.
+    assert "r.expired_at IS NULL" in q
+    assert "r.expired_at =" not in q and "expired_at = null" not in q
     assert "datetime(r.invalid_at).epochSeconds = row.time_world_end_s" in q
     assert "datetime(r.invalid_at).nanosecond = row.time_world_end_ns" in q
     assert "epochMillis" not in q
@@ -307,8 +446,8 @@ class _Driver:
     async def execute_query(self, query, params=None, **kwargs):
         self.calls.append((query, params))
         record = {"written": len(params["rows"])}
-        if "unexpired" in query:
-            record["unexpired"] = 1
+        if "stamped" in query:
+            record["stamped"] = 1
         return SimpleNamespace(records=[record])
 
 
@@ -318,20 +457,20 @@ async def test_persist_uses_p2_statement_unless_a_world_end_was_recorded() -> No
     rep = _report(_result("e0"))
     await persist_anchored_time(driver, rep, episode_uuid="ep-1", group_id="ns", edge_uuids=["e0"],
                                 speech_date=None)
-    assert driver.calls[0][0] == PERSIST_CYPHER and rep.unexpired == 0
+    assert driver.calls[0][0] == PERSIST_CYPHER and rep.stamped == 0
 
     driver = _Driver()
     rep = _report(_result("e0", world_end=TRIP_END))
     await persist_anchored_time(driver, rep, episode_uuid="ep-1", group_id="ns", edge_uuids=["e0"],
                                 speech_date=None)
     assert driver.calls[0][0] == EXPIRY_PERSIST_CYPHER
-    assert (rep.persist, rep.persisted, rep.unexpired) == ("ok", 1, 1)
+    assert (rep.persist, rep.persisted, rep.stamped) == ("ok", 1, 1)
 
     driver = _Driver()
     rep = _report(_result("e0", world_end=TRIP_END), expiry=False)
     await persist_anchored_time(driver, rep, episode_uuid="ep-1", group_id="ns", edge_uuids=["e0"],
                                 speech_date=None)
-    assert driver.calls[0][0] == PERSIST_CYPHER and rep.unexpired == 0
+    assert driver.calls[0][0] == PERSIST_CYPHER and rep.stamped == 0
 
 
 # --- settings -------------------------------------------------------------------------------------

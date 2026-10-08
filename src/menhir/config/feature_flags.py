@@ -46,7 +46,7 @@ _SETTINGS = (
     ('anchored_time_render_enabled', 'MENHIR_ANCHORED_TIME_RENDER', False, 'runtime',
         'Render persisted anchored-time contracts as fact event times in recall and timeline.', True, ()),
     ('anchored_time_expiry_enabled', 'MENHIR_ANCHORED_TIME_EXPIRY', False, 'runtime',
-        'Treat invalid_at as world time, not supersession: un-expire such facts, label them ended.', True, ()),
+        'Treat invalid_at as world time, not supersession: keep such facts live, label them ended.', True, ()),
     ('personal_memory_consolidation_enabled', 'MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED', False,
         'personal_memory', 'Enable personal-memory consolidation.', True, ()),
     ('personal_memory_consolidation_disable_reasoning', 'MENHIR_PERSONAL_MEMORY_CONSOLIDATION_DISABLE_REASONING',
@@ -219,7 +219,7 @@ _REQUIRES = {
 # These describe scoped prerequisites/data producers; they do not impose runtime validation.
 _REQUIREMENT_SCOPE = {
     "anchored_time_expiry_enabled": "The resolver records world ends at ingest; the recall label "
-        "reads whatever edges earlier ingests un-expired.",
+        "reads whatever edges earlier ingests kept live.",
     "personal_memory_scalar_view_authority_enabled": "Scalar state produces the Views; retained Views can outlive the writer gate.",
     "personal_memory_event_history_authority_enabled": "Event history produces the assertions; retained assertions can outlive the writer gate.",
     "frontier_belief_gate": "Warden verdict enforcement needs the master gate; belief scoring is independent.",

@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-08 - Anchored-time P3: a fact's own end is world time, not supersession
+
+- Pin `archolith-graphiti-core==0.30.2.post3` (adds `Graphiti(edge_expiry_hook=...)`, fork PR #5).
+- `MENHIR_ANCHORED_TIME_EXPIRY` (default off): `_apply_anchored_time(expiry=True)` records the
+  world end of point events / states with an item before resolve; `MenhirEdgeExpiryHook`
+  (`graphiti_extraction_policy.py`) answers `WORLD_END` inside Graphiti's resolver for this
+  call's own owner-checked report, so such edges stay live; anything else, including errors,
+  answers `EXPIRE` (upstream behavior). The flag on with an older Graphiti fails at client
+  construction.
+- `EXPIRY_PERSIST_CYPHER` stamps `time_expiry='world_end'` / `time_world_end` on live edges
+  under the P2 lock only while `invalid_at` still equals the recorded end; it never un-expires.
+- Recall labels such live, ended facts `ended` (`_build_temporal_facts(ended=...)`).
+- Known gap: a duplicate restatement re-saves the edge through Graphiti's full-replace save,
+  which drops the stored P2 contract and the stamp (pre-existing P2 behavior).
+
 ## 2026-10-01 - Ended-state quotes never yield a current scalar value (#168 step-5)
 
 - `services/typed_scalar_rules.py`: new ended-state cue (`no longer`, `anymore`, `quit`, `stopped`,

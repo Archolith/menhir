@@ -226,8 +226,9 @@ class MemorySettings:
     anchored_time_resolver_timeout_s: float = 120.0
     #: Render persisted anchored-time contracts in recall and timeline facts (P2). Default off.
     anchored_time_render_enabled: bool = False
-    #: P3: a fact's own end (invalid_at) is world time, not supersession: un-expire edges Graphiti
-    #: expired only for that end, and label them "ended" in recall. Needs the resolver. Default off.
+    #: P3: a fact's own end (invalid_at) is world time, not supersession: Graphiti does not expire
+    #: edges for that end alone (MenhirEdgeExpiryHook), and recall labels them "ended". Needs the
+    #: resolver and archolith-graphiti-core>=0.30.2.post3. Default off.
     anchored_time_expiry_enabled: bool = False
 
     # Personal-memory consolidation job (gated perception -> count/amount Views from user turns).

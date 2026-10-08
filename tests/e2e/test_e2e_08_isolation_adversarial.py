@@ -853,7 +853,7 @@ def test_e2e_08_missing_fork_refusal(
         timeout=120,
     )
     assert installed_fork.returncode == 0, installed_fork.stderr[-1500:]
-    assert "Version: 0.30.2.post2" in installed_fork.stdout, installed_fork.stdout
+    assert "Version: 0.30.2.post3" in installed_fork.stdout, installed_fork.stdout
     healthy_check = subprocess.run(
         [str(broken_python), "-m", "pip", "check"],
         capture_output=True,

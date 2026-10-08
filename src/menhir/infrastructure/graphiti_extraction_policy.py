@@ -1607,7 +1607,8 @@ async def _apply_anchored_time(
 
     With ``expiry`` (MENHIR_ANCHORED_TIME_EXPIRY) it also records, per classified point event or
     state that arrives with its own ``invalid_at`` and no ``expired_at``, that ``invalid_at`` as
-    the world end; the persist step un-expires exactly those edges (P3).
+    the world end. ``MenhirEdgeExpiryHook`` reads the classification so Graphiti does not expire
+    the edge for that end, and the persist step stamps it (P3).
 
     Every failure leaves Graphiti's values in place; only cancellation propagates. New values
     are all computed before any edge is touched.
@@ -1695,13 +1696,54 @@ WORLD_END_KINDS = ("point_event", "state")
 
 
 def _with_world_end(edge: Any, result: Any) -> Any:
-    """``result`` with ``world_end`` set when Graphiti's path-1 expiry will fire for a reason that
-    is not a contradiction: a classified point event or state carrying its own ``invalid_at``."""
+    """``result`` with ``world_end`` set for a classified point event or state that carries its
+    own ``invalid_at``: that end is world time, not a supersession."""
     invalid_at = getattr(edge, "invalid_at", None)
     if (result.reason == "no_item" or result.kind not in WORLD_END_KINDS
             or invalid_at is None or getattr(edge, "expired_at", None) is not None):
         return result
     return replace(result, world_end=invalid_at)
+
+
+class MenhirEdgeExpiryHook:
+    """Menhir policy adapter on the fork's ``EdgeExpiryHook`` seam (P3, D1).
+
+    Answers ``WORLD_END`` only when this ``add_episode`` call's own anchored-time report (owner
+    check: a shared receipt can hold a concurrent call's report) ran with expiry on and
+    classified the new mention as a point event or state with an item, and the resolved edge
+    carries ``invalid_at``. Anything else, including any error, answers ``EXPIRE``: upstream.
+    """
+
+    async def decide_edge_expiry(self, context: Any) -> Any:
+        from graphiti_core.edge_expiry import EdgeExpiryDecision
+
+        try:
+            report = _owned_expiry_report()
+            if report is None or getattr(context.resolved_edge, "invalid_at", None) is None:
+                return EdgeExpiryDecision.EXPIRE
+            by_uuid = {r.edge_uuid: r for r in report.results}
+            # The new mention decides; bulk dedupe can resolve to another edge of this
+            # episode (fork F4), so fall back to that edge's own classification.
+            result = (by_uuid.get(str(context.extracted_edge.uuid))
+                      or by_uuid.get(str(context.resolved_edge.uuid)))
+            if result is None or result.reason == "no_item" or result.kind not in WORLD_END_KINDS:
+                return EdgeExpiryDecision.EXPIRE
+            report.world_end_kept += 1
+            return EdgeExpiryDecision.WORLD_END
+        except Exception:
+            logger.exception("Edge-expiry hook failed; upstream expiry kept")
+            return EdgeExpiryDecision.EXPIRE
+
+
+def _owned_expiry_report() -> Any | None:
+    """This call's anchored-time report when it ran with expiry and succeeded, else ``None``."""
+    receipt = get_extraction_receipt()
+    report = getattr(receipt, "anchored_time", None) if receipt is not None else None
+    owner = anchored_time_owner.get()
+    if (report is None or owner is None or getattr(report, "owner", None) != owner
+            or report.status != "ok" or not report.expiry):
+        return None
+    return report
 
 
 class MenhirExtractionHook:

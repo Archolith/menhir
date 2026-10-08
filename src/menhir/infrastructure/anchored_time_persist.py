@@ -11,9 +11,10 @@ Menhir-owned step after ``add_episode`` returns. Every write is bound to the cal
 
 Failure never fails ingest: missing properties mean exactly the pre-P2 behavior.
 
-P3 (MENHIR_ANCHORED_TIME_EXPIRY): when a row carries ``time_world_end``, the same locked write
-also clears the ``expired_at`` Graphiti set because the fact had its own end, but only while
-``invalid_at`` is still that end. A contradiction that changed it keeps its expiry.
+P3 (MENHIR_ANCHORED_TIME_EXPIRY): Graphiti never expires a world-ended edge for its own end
+(``MenhirEdgeExpiryHook`` answers ``WORLD_END``), so nothing is ever un-expired here. When a row
+carries ``time_world_end``, the same locked write stamps ``time_expiry = 'world_end'`` on an
+edge that is still live and whose ``invalid_at`` is still that end. The stamp is informational.
 """
 from __future__ import annotations
 
@@ -78,10 +79,9 @@ PERSIST_CYPHER = (
     "RETURN count(r) AS written"
 )
 
-#: P3 (MENHIR_ANCHORED_TIME_EXPIRY): same lock and re-check, then clear the ``expired_at`` that
-#: Graphiti set only because the edge carried its own end (edge_operations.py path 1). Cleared
-#: only while ``invalid_at`` is still the instant the hook recorded: a contradiction changes
-#: ``invalid_at``, so it keeps its expiry (tests/test_anchored_time_expiry_live.py races this).
+#: P3 (MENHIR_ANCHORED_TIME_EXPIRY): same lock and re-check, then stamp the world end on a live
+#: edge whose ``invalid_at`` is still the instant recorded at extraction. Never touches
+#: ``expired_at``: a contradiction that expired or truncated the edge leaves it unstamped.
 EXPIRY_PERSIST_CYPHER = (
     "UNWIND $rows AS row "
     "MATCH ()-[r:RELATES_TO {uuid: row.uuid}]->() "
@@ -92,13 +92,13 @@ EXPIRY_PERSIST_CYPHER = (
     "WHERE " + _ELIGIBLE + " "
     "SET " + ", ".join(f"r.{name} = row.{name}" for name in CONTRACT_PROPERTIES) + " "
     # Full precision: a contradiction that moved invalid_at by under 1 ms must still win.
-    "WITH r, row, (row.time_world_end_s IS NOT NULL AND r.expired_at IS NOT NULL "
+    "WITH r, row, (row.time_world_end_s IS NOT NULL AND r.expired_at IS NULL "
     "AND r.invalid_at IS NOT NULL "
     "AND datetime(r.invalid_at).epochSeconds = row.time_world_end_s "
-    "AND datetime(r.invalid_at).nanosecond = row.time_world_end_ns) AS unexpire "
-    "FOREACH (_ IN CASE WHEN unexpire THEN [1] ELSE [] END | "
-    "SET r.expired_at = null, r.time_expiry = 'world_end', r.time_world_end = row.time_world_end) "
-    "RETURN count(r) AS written, sum(CASE WHEN unexpire THEN 1 ELSE 0 END) AS unexpired"
+    "AND datetime(r.invalid_at).nanosecond = row.time_world_end_ns) AS stamp "
+    "FOREACH (_ IN CASE WHEN stamp THEN [1] ELSE [] END | "
+    "SET r.time_expiry = 'world_end', r.time_world_end = row.time_world_end) "
+    "RETURN count(r) AS written, sum(CASE WHEN stamp THEN 1 ELSE 0 END) AS stamped"
 )
 
 
@@ -191,7 +191,7 @@ async def persist_anchored_time(
         records = getattr(result, "records", None) or []
         report.persisted = int(records[0]["written"]) if records else 0
         if expiry and records:
-            report.unexpired = int(records[0]["unexpired"] or 0)
+            report.stamped = int(records[0]["stamped"] or 0)
         report.persist = "ok"
     except asyncio.CancelledError:
         raise
