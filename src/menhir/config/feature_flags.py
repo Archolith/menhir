@@ -43,6 +43,8 @@ _SETTINGS = (
         'Configure canonical self binding mode.', True, ()),
     ('anchored_time_resolver_enabled', 'MENHIR_ANCHORED_TIME_RESOLVER', False, 'runtime',
         'Overlay anchored-time valid_at on edges from user turns with temporal cues.', True, ()),
+    ('anchored_time_render_enabled', 'MENHIR_ANCHORED_TIME_RENDER', False, 'runtime',
+        'Render persisted anchored-time contracts as fact event times in recall and timeline.', True, ()),
     ('personal_memory_consolidation_enabled', 'MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED', False,
         'personal_memory', 'Enable personal-memory consolidation.', True, ()),
     ('personal_memory_consolidation_disable_reasoning', 'MENHIR_PERSONAL_MEMORY_CONSOLIDATION_DISABLE_REASONING',

@@ -214,7 +214,12 @@ def test_ambiguity_propagates_through_anchors() -> None:
     # review case 1: "one day after" a two-candidate "last Tuesday" is itself two candidates
     items = {0: dict(LAST_TUESDAY), 1: _after(0), 2: _after(1, amount=2)}
     r0, r1, r2 = plan_overlay([edge(uuid=f"e{i}") for i in range(3)], items, SPEECH)
-    assert (r0.reason, r1.reason, r2.reason) == ("two_options", "ambiguous_anchor", "ambiguous_anchor")
+    # exact day offsets keep the two-candidate shape (R2-4); a tolerance makes it ambiguous_anchor
+    assert (r0.reason, r1.reason, r2.reason) == ("two_options", "two_options", "two_options")
+    items[2] = _after(1, amount=2) | {"offset": {"amount": 2, "unit": "day", "direction": "after",
+                                                 "approx": True}}
+    assert plan_overlay([edge(uuid=f"e{i}") for i in range(3)], items, SPEECH)[2].reason == \
+        "ambiguous_anchor"
     assert not (r0.written or r1.written or r2.written)
     # a calendar step from the ambiguous anchor ("the following month") is not written either
     items[1] = {**_after(0), "offset": None, "calendar": {"which": "this", "unit": "week", "later": True}}

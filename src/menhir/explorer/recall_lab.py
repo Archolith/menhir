@@ -490,7 +490,17 @@ def _redact_temporal_facts(facts: list[dict[str, Any]], *, reveal: bool) -> list
         f = dict(fact)
         if "fact" in f:
             f["fact"] = redact_text(f["fact"], reveal=False)
+        if f.get("event_time"):  # free text: it quotes the source expression
+            f["event_time"] = redact_text(f["event_time"], reveal=False)
         out.append(f)
+    return out
+
+
+def _temporal_fact_dict(fact: object) -> dict[str, Any]:
+    """asdict without an absent event_time, so render-off payloads keep their prior shape."""
+    out = asdict(fact)
+    if out.get("event_time") is None:
+        out.pop("event_time", None)
     return out
 
 
@@ -541,7 +551,7 @@ def _serialize_result(result: object, *, reveal: bool) -> dict[str, Any]:
             # reasoning the answer prompt depends on this for was uniformly unavailable
             # across every Recall Lab arm regardless of tuning.
             "temporal_facts": _redact_temporal_facts(
-                [asdict(t) for t in _value(memory, "temporal_facts", ()) or ()],
+                [_temporal_fact_dict(t) for t in _value(memory, "temporal_facts", ()) or ()],
                 reveal=reveal,
             ),
         }

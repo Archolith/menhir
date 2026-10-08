@@ -10,6 +10,7 @@ from functools import partial
 from datetime import datetime
 from time import perf_counter
 from typing import Any
+from uuid import uuid4
 
 
 logger = logging.getLogger(__name__)
@@ -453,9 +454,37 @@ class GraphitiClient:
         group_id: str = "",
     ) -> Any:
         """Delegate episode ingestion to Graphiti."""
-        from menhir.infrastructure.graphiti_extraction_policy import get_extraction_receipt
+        from menhir.infrastructure.graphiti_extraction_policy import (
+            anchored_time_owner,
+            get_extraction_receipt,
+        )
 
         receipt = get_extraction_receipt()
+        # Only a report this invocation produced may be persisted: a reused receipt can hold an
+        # earlier call's report, and a receipt shared by a concurrent call can hold that call's.
+        owner = uuid4().hex
+        owner_binding = anchored_time_owner.set(owner)
+        try:
+            return await self._add_episode_owned(
+                receipt, owner,
+                name=name, episode_body=episode_body, source_description=source_description,
+                reference_time=reference_time, episode_uuid=episode_uuid, group_id=group_id,
+            )
+        finally:
+            anchored_time_owner.reset(owner_binding)
+
+    async def _add_episode_owned(
+        self,
+        receipt: Any,
+        owner: str,
+        *,
+        name: str,
+        episode_body: str,
+        source_description: str,
+        reference_time: datetime,
+        episode_uuid: str | None,
+        group_id: str,
+    ) -> Any:
         if receipt is not None and str(receipt.self_bind_mode) == "enforce":
             # A partial construction must not reopen probabilistic self resolution.
             # Check before the native add_episode call can perform any persistence.
@@ -512,6 +541,21 @@ class GraphitiClient:
                 },
             )
         )
+        report = receipt.anchored_time if receipt is not None else None
+        if report is not None and getattr(report, "owner", None) == owner and report.status == "ok":
+            from menhir.infrastructure.anchored_time import _utc_date
+            from menhir.infrastructure.anchored_time_persist import persist_anchored_time
+
+            episode = getattr(result, "episode", None)
+            await persist_anchored_time(
+                self.client.driver,
+                report,
+                episode_uuid=getattr(episode, "uuid", None),
+                group_id=group_id,
+                edge_uuids=[getattr(e, "uuid", None) for e in (getattr(result, "edges", None) or [])],
+                # UTC, like Graphiti's stored valid_at, so rendering can compare them exactly.
+                speech_date=_utc_date(reference_time),
+            )
         return result
 
     async def search(self, query: str, **kwargs: Any) -> Any:

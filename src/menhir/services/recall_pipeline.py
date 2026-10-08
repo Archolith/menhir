@@ -1741,7 +1741,9 @@ async def run_recall(
             )
             if not include_invalidated:
                 fact_rows = _filter_to_current_beliefs(fact_rows)
-            facts_by_uuid = _build_temporal_facts(fact_rows)
+            facts_by_uuid = _build_temporal_facts(
+                fact_rows, event_time=tuning.enable_anchored_time_render
+            )
             enriched_results = []
             for sm in top_results:
                 if sm.memory_type == "EPISODIC_PENDING":
