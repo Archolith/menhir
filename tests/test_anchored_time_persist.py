@@ -41,7 +41,9 @@ def result(uuid: str, **overrides) -> AnchoredTimeResult:
 
 
 def report(*results: AnchoredTimeResult, status: str = "ok") -> AnchoredTimeReport:
-    return AnchoredTimeReport(status=status, model="gpt-x", results=tuple(results))
+    # Stamped like the real hook: with the add_episode invocation running in this context.
+    return AnchoredTimeReport(status=status, model="gpt-x", results=tuple(results),
+                              owner=extraction.anchored_time_owner.get())
 
 
 class FakeDriver:

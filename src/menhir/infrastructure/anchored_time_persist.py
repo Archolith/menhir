@@ -49,13 +49,26 @@ CONTRACT_PROPERTIES = (
     "time_contract",
 )
 
+_ELIGIBLE = (
+    tenant_scope_cypher("r") + " "
+    "AND r.group_id = $group_id "
+    "AND r.time_contract IS NULL "
+    "AND $episode_uuid IN coalesce(r.episodes, [])"
+)
+
+#: Read-committed reads do not lock, so two concurrent writers could both see
+#: ``time_contract IS NULL``. The dummy SET/REMOVE takes the edge's write lock (held to commit)
+#: and every condition is re-read under it; tests/test_anchored_time_persist_lock_live.py races it.
+LOCK_PROPERTY = "_menhir_time_lock"
+
 PERSIST_CYPHER = (
     "UNWIND $rows AS row "
     "MATCH ()-[r:RELATES_TO {uuid: row.uuid}]->() "
-    "WHERE " + tenant_scope_cypher("r") + " "
-    "AND r.group_id = $group_id "
-    "AND r.time_contract IS NULL "
-    "AND $episode_uuid IN coalesce(r.episodes, []) "
+    "WHERE " + _ELIGIBLE + " "
+    f"SET r.{LOCK_PROPERTY} = true "
+    f"REMOVE r.{LOCK_PROPERTY} "
+    "WITH r, row "
+    "WHERE " + _ELIGIBLE + " "
     "SET " + ", ".join(f"r.{name} = row.{name}" for name in CONTRACT_PROPERTIES) + " "
     "RETURN count(r) AS written"
 )

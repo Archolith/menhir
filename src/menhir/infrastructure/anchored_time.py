@@ -817,6 +817,9 @@ class AnchoredTimeReport:
     #: P2 persist step outcome (anchored_time_persist): "" not attempted, else ok/error/no_rows/...
     persist: str = ""
     persisted: int = 0
+    #: The add_episode invocation that produced this report (graphiti_extraction_policy
+    #: anchored_time_owner); only that invocation may persist it.
+    owner: str | None = None
 
 
 def _two_options(cal: dict | None, start: date, end: date) -> bool:

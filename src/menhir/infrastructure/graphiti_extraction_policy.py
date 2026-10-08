@@ -387,6 +387,13 @@ def begin_extraction_receipt(
     return receipt
 
 
+#: Token of the GraphitiClient.add_episode invocation running in this context. Bound by the
+#: caller before the native call, so the hook (a child task) inherits it and stamps it on the
+#: anchored-time report. A receipt shared by concurrent calls cannot hand one call's report to
+#: another (test_anchored_time_persist_owner.py).
+anchored_time_owner: ContextVar[str | None] = ContextVar("menhir_anchored_time_owner", default=None)
+
+
 def get_extraction_receipt() -> CombinedExtractionReceipt | None:
     """Return the active extraction receipt for this task, if any."""
     return _extraction_receipt.get()
@@ -1606,7 +1613,8 @@ async def _apply_anchored_time(
         strip_user_prefix,
     )
 
-    report = AnchoredTimeReport(model=str(getattr(resolver, "model", "") or ""))
+    report = AnchoredTimeReport(model=str(getattr(resolver, "model", "") or ""),
+                                owner=anchored_time_owner.get())
     receipt.anchored_time = report
     try:
         speech_time = getattr(episode, "valid_at", None)
