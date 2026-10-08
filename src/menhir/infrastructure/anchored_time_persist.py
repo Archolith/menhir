@@ -46,6 +46,7 @@ CONTRACT_PROPERTIES = (
     "time_planned_end",
     "time_outcome",
     "time_speech_date",
+    "time_ambiguity",
     "time_contract",
 )
 
@@ -104,6 +105,7 @@ def contract_rows(report: Any, edge_uuids: Iterable[str], speech_date: date | No
             "time_planned_end": _iso(planned[1]),
             "time_outcome": result.reason,
             "time_speech_date": _iso(speech_date),
+            "time_ambiguity": getattr(result, "ambiguity", None),
             "time_contract": contract,
         })
     return rows

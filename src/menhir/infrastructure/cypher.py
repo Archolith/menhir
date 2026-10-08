@@ -416,6 +416,7 @@ FACT_TEMPORAL_FIELDS = (
     "r.time_window_end AS time_window_end",
     "r.time_outcome AS time_outcome",
     "r.time_speech_date AS time_speech_date",
+    "r.time_ambiguity AS time_ambiguity",
 )
 
 # Fact-edge IDENTITY + both endpoints, for shadow-mode context composition (Stage 1,

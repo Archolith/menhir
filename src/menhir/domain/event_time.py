@@ -6,7 +6,9 @@ a speech date that Graphiti defaulted into ``valid_at`` is never shown as an occ
 from __future__ import annotations
 
 from dataclasses import dataclass
+import calendar
 from datetime import date, datetime, timezone
+import re
 from typing import Any, Mapping
 
 #: Resolver outcomes whose closed window is the event time (written, or Graphiti agreed).
@@ -22,7 +24,11 @@ EVENT_TIME_PROPERTIES = (
     "time_window_end",
     "time_outcome",
     "time_speech_date",
+    "time_ambiguity",
 )
+
+#: Line breaks and other control characters in a stored expression (rendered as one space).
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]+")
 
 
 @dataclass(frozen=True)
@@ -35,22 +41,30 @@ class EventTime:
     window_end: str | None = None
     outcome: str | None = None
     speech_date: str | None = None
+    ambiguity: str | None = None
 
     def render(self, valid_at: str | None) -> str:
         """One human line for the fact's event time. ``valid_at`` is the edge's stored value."""
-        source = f" (from '{self.expression}')" if self.expression else ""
+        expression = _one_line(self.expression)
+        source = f" (from '{expression}')" if expression else ""
         window = _window_text(self.window_start, self.window_end, self.granularity)
+        recorded = _utc_date_text(valid_at)
+        if window and self.ambiguity == "two_options":
+            # Two candidate days, not the days between them (e.g. "last Tuesday" said Wednesday).
+            if recorded in (self.window_start, self.window_end):
+                window = recorded  # the candidate Graphiti picked independently
+            else:
+                window = f"{self.window_start} or {self.window_end}"
         if self.kind == "plan":
             if window:
                 return f"planned {window}{source}"
-            return f"planned, time unknown{_said(self.speech_date, self.expression)}"
+            return f"planned, time unknown{_said(self.speech_date, expression)}"
         if window and self.outcome in _WINDOW_OUTCOMES:
             return f"{window}{source}"
-        recorded = _utc_date_text(valid_at)
         if recorded and (self.outcome == "graphiti_resolved"
                          or (self.speech_date and recorded != self.speech_date)):
             return f"{recorded}{source}"  # a date Graphiti resolved itself, not the speech date
-        return f"event time unknown{_said(self.speech_date, self.expression)}"
+        return f"event time unknown{_said(self.speech_date, expression)}"
 
 
 def event_time_from_row(row: Mapping[str, Any]) -> EventTime | None:
@@ -72,6 +86,7 @@ def event_time_from_row(row: Mapping[str, Any]) -> EventTime | None:
         window_end=text("time_window_end"),
         outcome=text("time_outcome"),
         speech_date=text("time_speech_date"),
+        ambiguity=text("time_ambiguity"),
     )
 
 
@@ -91,14 +106,27 @@ def _said(speech_date: str | None, expression: str | None) -> str:
     return f" ({'; '.join(parts)})" if parts else ""
 
 
+def _one_line(text: str | None) -> str | None:
+    """The stored expression on one line: control characters collapse to a space."""
+    if text is None:
+        return None
+    return _CONTROL.sub(" ", text).strip() or None
+
+
 def _window_text(start: str | None, end: str | None, granularity: str | None) -> str | None:
     if not start or not end:
         return None
     if start == end:
         return start if granularity in (None, "day") else f"~{start}"
-    if granularity == "month" and start[:7] == end[:7]:
+    # Abbreviate only a whole calendar month or year; a tolerance window keeps its real bounds.
+    try:
+        s, e = date.fromisoformat(start), date.fromisoformat(end)
+    except ValueError:
+        return f"~{start}..{end}"
+    if (granularity == "month" and (s.year, s.month) == (e.year, e.month) and s.day == 1
+            and e.day == calendar.monthrange(e.year, e.month)[1]):
         return f"~{start[:7]}"
-    if granularity == "year" and start[:4] == end[:4]:
+    if granularity == "year" and s == date(s.year, 1, 1) and e == date(s.year, 12, 31):
         return f"~{start[:4]}"
     return f"~{start}..{end}"
 

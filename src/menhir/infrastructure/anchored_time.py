@@ -795,6 +795,8 @@ class AnchoredTimeResult:
     reason: str
     graphiti_valid_at: datetime | None
     new_valid_at: datetime | None
+    #: From the window placement: "two_options", "year_ambiguous", "ambiguous_anchor" or None.
+    ambiguity: str | None = None
 
 
 @dataclass
@@ -903,5 +905,6 @@ def plan_overlay(
             reason=reason,
             graphiti_valid_at=edge.valid_at,
             new_valid_at=new_valid_at,
+            ambiguity=ambiguity,
         ))
     return results
