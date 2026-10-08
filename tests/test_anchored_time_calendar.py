@@ -82,7 +82,7 @@ def test_calendar_units(cal, expected) -> None:
         ("03-07", "plan", W("2024-03-07", "2024-03-07")),
         ("-03-07", "point_event", W("2023-03-07", "2023-03-07")),
         ("--02-29", "plan", W("2024-02-29", "2024-02-29")),
-        ("--02-29", "point_event", None),  # 2024-02-29 is after speech, 2023 has none
+        ("--02-29", "point_event", W("2020-02-29", "2020-02-29")),  # 2024's is after speech
         ("2023-02-30", "point_event", None),
         ("March", "point_event", None),
         ("", "point_event", None),

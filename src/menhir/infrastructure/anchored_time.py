@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import calendar
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone, tzinfo
+from datetime import MAXYEAR, MINYEAR, date, datetime, timedelta, timezone, tzinfo
 import functools
 import json
 import math
@@ -164,11 +164,25 @@ def _season(ref: date, name: str, which: str, count: int = 1, kind: str = "point
     cur = [w for w in cands if w[0] <= ref <= w[1]]
     if cur:
         return cur[0]
-    # "this summer" outside summer: upcoming for a plan, the last one otherwise (the caller
-    # flags year_ambiguous when the other occurrence is nearer, as for yearless dates)
+    # "this summer" outside summer: upcoming for a plan, the last one otherwise (_this_season
+    # flags the choice year_ambiguous unless it is the only occurrence in the speech year)
     if kind == "plan":
         return [w for w in cands if w[0] > ref][0]
     return [w for w in cands if w[1] < ref][-1]
+
+
+def _this_season(ref: date, name: str, kind: str) -> tuple[tuple[date, date], str | None]:
+    """("this <season>" window, ambiguity). The season containing the speech date; otherwise the
+    occurrence in the speech year, when it is also the one the kind points to (ahead for a plan,
+    past otherwise). Any other case ("this summer" said in April as a past event, or in September
+    as a plan, or "this winter" said in March) keeps the kind's choice flagged year_ambiguous."""
+    current = _season(ref, name, "this")
+    if current[0] <= ref <= current[1]:
+        return current, None
+    past, ahead = _season(ref, name, "last"), _season(ref, name, "next")
+    chosen = ahead if kind == "plan" else past
+    in_year = [w for w in (past, ahead) if w[0].year <= ref.year <= w[1].year]
+    return chosen, (None if in_year == [chosen] else "year_ambiguous")
 
 
 def _calendar(ref: date, cal: dict) -> tuple[date, date] | None:
@@ -267,9 +281,13 @@ def _explicit(ref: date, value: str, kind: str) -> tuple[date, date] | None:
             mo, dy = int(m.group(1)), int(m.group(2))
             if not 1 <= mo <= 12:
                 return None
-            # An invalid candidate year (Feb 29 in 2025) is skipped, not fatal: said 2025-03-01 the
-            # past Feb 29 is 2024-02-29.
-            for y in ((ref.year, ref.year + 1) if kind == "plan" else (ref.year, ref.year - 1)):
+            # Search year by year in the kind's direction, skipping years without the day: Feb 29
+            # recurs within 8 years (1896 -> 1904), so 9 years always reach it within date range.
+            step = 1 if kind == "plan" else -1
+            for k in range(9):
+                y = ref.year + step * k
+                if not MINYEAR <= y <= MAXYEAR:
+                    break
                 if dy > calendar.monthrange(y, mo)[1]:
                     continue
                 d = date(y, mo, dy)
@@ -425,8 +443,7 @@ def _place(ref: date, items: dict[int, dict], i: int, n_facts: int | None, depth
         if cal:
             name = str(cal.get("name") or "").lower()
             if cal.get("unit") == "season" and cal.get("which") == "this" and name in _SEASONS:
-                w = _season(ref, name, "this", kind=kind)
-                return w, _year_ambiguity(ref, w, _season(ref, name, "this", kind=_other_kind(kind)))
+                return _this_season(ref, name, kind)
             w = _calendar(ref, cal)
             return w, _two_options_of(cal, w)
         amount, sign = (_amount(off), _sign(off)) if off else (None, None)

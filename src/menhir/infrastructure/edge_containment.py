@@ -2,9 +2,9 @@
 
 Some models restate a sub-fact of a fuller edge on a different endpoint pair ("jeans are from
 Levi's" next to "user bought black jeans from Levi's"); Graphiti's exact-match and same-pair dedup
-cannot catch that. An edge is dropped only when every content token, including numbers, names and
-negations, appears in a surviving edge with compatible timestamps and attributes, and both facts
-carry the same polarity and modality words.
+cannot catch that. An edge is dropped only when it sits on a different endpoint pair, every content
+token, including numbers and names, appears in a surviving edge with compatible timestamps and
+attributes, and neither fact carries a negation, modality or clause-embedding word.
 """
 
 from __future__ import annotations
@@ -52,10 +52,12 @@ def fact_tokens(fact: str) -> frozenset[str]:
     return frozenset(out)
 
 
-# Words that change whether or how a fact holds. A keeper only implies the dropped fact when
-# both carry the same markers: "does not like jazz" must not absorb "likes jazz", and "might
-# buy" or "stopped playing" must not absorb the plain fact. Counted before stopword removal,
-# because the modal verbs are stopwords.
+# Words that change whether or how a fact holds, or embed it in a clause the speaker does not
+# assert. Word inclusion only suggests entailment for plain assertions: under negation it runs
+# backwards ("does not like jazz at clubs" does not imply "does not like jazz"), and "denies
+# that", "might" or "stopped" do not assert the inner fact. A pair where either fact carries one
+# is kept. The list cannot be exhaustive; same-pair facts never reach it (see _compatible).
+# Counted before stopword removal, because the modal verbs are stopwords.
 _MARKERS = frozenset(
     {
         "not", "no", "never", "nor", "neither", "none", "nothing", "nobody", "nowhere",
@@ -67,6 +69,19 @@ _MARKERS = frozenset(
         "considering", "considered",
         "stop", "stopped", "quit", "ceased", "former", "formerly", "ex", "anymore",
         "previously", "used", "longer",
+        # clause embedding and non-veridical predicates
+        "that", "whether",
+        "deny", "denies", "denied", "denying", "refuse", "refuses", "refused", "reject",
+        "rejects", "rejected", "dispute", "disputes", "disputed",
+        "claim", "claims", "claimed", "say", "says", "said", "tell", "tells", "told",
+        "believe", "believes", "believed", "think", "thinks", "thought", "doubt", "doubts",
+        "doubted", "suspect", "suspects", "suspected", "assume", "assumes", "assumed",
+        "suppose", "supposes", "supposed", "guess", "guesses", "guessed", "imagine",
+        "imagines", "imagined", "pretend", "pretends", "pretended", "dream", "dreams",
+        "dreamed", "dreamt", "wonder", "wonders", "wondered", "unsure", "uncertain",
+        "allegedly", "supposedly", "reportedly", "apparently", "seem", "seems", "seemed",
+        "rumor", "rumored", "false", "falsely", "untrue", "fake", "wrong", "wrongly",
+        "mistaken", "mistakenly", "lie", "lies", "lied",
     }
 )  # fmt: skip
 
@@ -84,12 +99,13 @@ def fact_markers(fact: str) -> frozenset[str]:
 
 
 def _compatible(kept: Any, dropped: Any) -> bool:
-    if fact_markers(getattr(kept, "fact", "")) != fact_markers(getattr(dropped, "fact", "")):
+    if fact_markers(getattr(kept, "fact", "")) or fact_markers(getattr(dropped, "fact", "")):
         return False
-    # Word bags ignore roles: "Ann called user" must not be absorbed by "user called Ann".
+    # Only cross-pair restatements are pruned. Facts on one pair (either direction, which word
+    # bags cannot tell apart) are left to Graphiti's edge resolution, which compares meaning.
     kept_pair = (kept.source_node_uuid, kept.target_node_uuid)
     dropped_pair = (dropped.source_node_uuid, dropped.target_node_uuid)
-    if dropped_pair != kept_pair and set(dropped_pair) == set(kept_pair):
+    if set(dropped_pair) == set(kept_pair):
         return False
     for attr in ("valid_at", "invalid_at"):
         value = getattr(dropped, attr, None)
