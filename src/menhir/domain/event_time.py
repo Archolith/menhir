@@ -99,6 +99,20 @@ def rendered_event_time(row: Mapping[str, Any]) -> str | None:
     return contract.render(str(valid_at) if valid_at is not None else None)
 
 
+def event_time_text(row: Mapping[str, Any]) -> str | None:
+    """Render-on text for any fact: its contract, else ``valid_at`` marked unverified.
+
+    Without a contract (no temporal cue, legacy edge, resolver or persist failure) ``valid_at``
+    may be Graphiti's speech-date default, so it is never presented as an occurrence date.
+    """
+    rendered = rendered_event_time(row)
+    if rendered is not None:
+        return rendered
+    valid_at = row.get("valid_at")
+    recorded = _utc_date_text(str(valid_at)) if valid_at is not None else None
+    return f"recorded {recorded} (time not verified)" if recorded else None
+
+
 def _said(speech_date: str | None, expression: str | None) -> str:
     parts = [f"said {speech_date}"] if speech_date else []
     if expression:

@@ -345,8 +345,9 @@ def _format_when(tf: object) -> str:
 
     event_time = _tf(tf, "event_time")
     if event_time:
-        # A plan has not happened: its rendered text already says "planned ...".
-        happened = (str(event_time) if str(event_time).startswith("planned")
+        # A plan has not happened, and an unverified recorded date is not an occurrence date:
+        # their text already says "planned ..." / "recorded ...".
+        happened = (str(event_time) if str(event_time).startswith(("planned", "recorded"))
                     else f"happened {event_time}")
         if invalid_at:
             happened = f"{happened} until {invalid_at}"

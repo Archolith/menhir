@@ -12,7 +12,7 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
-from menhir.domain.event_time import rendered_event_time
+from menhir.domain.event_time import event_time_text
 from menhir.domain.namespace import namespace_to_group_ids
 from menhir.domain.timeline import (
     TimelineEntry,
@@ -91,7 +91,7 @@ def _entry_from_row(
             valid_at=f.get("valid_at"),
             invalid_at=f.get("invalid_at"),
             expired_at=f.get("expired_at"),
-            event_time=rendered_event_time(f) if event_time else None,
+            event_time=event_time_text(f) if event_time else None,
         )
         for f in (facts_map.get(str(row["uuid"])) or [])
     )

@@ -152,7 +152,9 @@ def test_build_temporal_facts_flag_on_renders_contracts_only() -> None:
     facts = {f.fact: f for f in _build_temporal_facts(_fact_rows(), event_time=True)["n1"]}
     assert facts["moved"].event_time == "event time unknown (said 2023-05-14; 'a month ago')"
     assert facts["moved"].valid_at == SPEECH_VALID_AT  # stored value is never rewritten
-    assert facts["legacy"].event_time is None
+    # Review 245-3: no contract -> the stored date, marked unverified, never an occurrence date.
+    assert facts["legacy"].event_time == "recorded 2022-01-01 (time not verified)"
+    assert facts["legacy"].valid_at == "2022-01-01T00:00:00Z"
 
 
 def test_projection_carries_the_contract() -> None:

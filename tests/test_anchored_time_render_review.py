@@ -1,4 +1,4 @@
-"""Regressions for the Codex review of PR #245: 245-4, 245-5, 245-6, 245-7, 245-8 and X-1."""
+"""Regressions for the Codex review of PR #245: 245-3 through 245-8 and X-1."""
 from __future__ import annotations
 
 from dataclasses import asdict
@@ -134,3 +134,43 @@ def test_explorer_serialized_result_flag_off_has_no_event_time() -> None:
     out = _serialize_result(SimpleNamespace(trace=None, results=[memory]), reveal=False)
     (fact,) = out["results"][0]["temporal_facts"]
     assert "event_time" not in fact
+
+
+# --- 245-3: no contract never reads as an occurrence date -------------------------------------
+
+
+@pytest.mark.parametrize("valid_at", ["2024-07-01T00:00:00Z", "2024-06-30T22:00:00-05:00"])
+def test_no_contract_renders_recorded_unverified(valid_at) -> None:
+    from menhir.domain.event_time import event_time_text
+
+    # Both are 2024-07-01 in UTC.
+    assert event_time_text({"fact": "I like jazz", "valid_at": valid_at}) == (
+        "recorded 2024-07-01 (time not verified)")
+    assert event_time_text({"fact": "x", "valid_at": None}) is None
+    with_contract = {"valid_at": valid_at, "time_basis": "none", "time_outcome": "undated",
+                     "time_speech_date": "2024-07-01"}
+    assert event_time_text(with_contract) == "event time unknown (said 2024-07-01)"
+
+
+def test_no_contract_surfaces_never_say_happened() -> None:
+    from menhir.domain.event_time import event_time_text
+    from menhir.mcp.formatters import _format_when
+    from menhir.services.context_builder import _source_time_lines
+
+    text = event_time_text({"valid_at": "2024-07-01T00:00:00Z"})
+    when = _format_when(asdict(_fact("I like jazz", text)))
+    assert when.startswith("recorded 2024-07-01 (time not verified);")
+    assert "happened" not in when
+    lines = _source_time_lines(SimpleNamespace(temporal_facts=(_fact("I like jazz", text),)))
+    assert "recorded 2024-07-01 (time not verified)" in lines[1]
+
+
+def test_timeline_flag_on_marks_contractless_facts() -> None:
+    from menhir.services.timeline_service import _entry_from_row
+
+    row = {"uuid": "ep1", "content": "c", "valid_at": "2024-07-01T00:00:00Z"}
+    facts = {"ep1": [{"fact": "I like jazz", "valid_at": "2024-07-01T00:00:00Z"}]}
+    (on,) = _entry_from_row(row, detail="brief", facts_map=facts, event_time=True).facts
+    (off,) = _entry_from_row(row, detail="brief", facts_map=facts).facts
+    assert on.event_time == "recorded 2024-07-01 (time not verified)"
+    assert off.event_time is None

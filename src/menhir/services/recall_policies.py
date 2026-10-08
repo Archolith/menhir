@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
 from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FAMILY
-from menhir.domain.event_time import rendered_event_time
+from menhir.domain.event_time import event_time_text
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
 from menhir.domain.recall import (
     CandidateData,
@@ -267,7 +267,7 @@ def _build_temporal_facts(
                 expired_at=expired_at,
                 is_current_belief=is_current,
                 temporal_role=temporal_role,
-                event_time=rendered_event_time(row) if event_time else None,
+                event_time=event_time_text(row) if event_time else None,
             )
             facts.append(fact)
         result[node_uuid] = tuple(facts)
