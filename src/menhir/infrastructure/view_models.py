@@ -44,8 +44,8 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from typing import Any
-from uuid import uuid4
 
+from menhir.domain.exact_json import dumps_exact
 from menhir.domain.temporal import parse_iso8601
 from menhir.domain.typed_assertion import VALUE_KINDS as DOMAIN_VALUE_KINDS, normalize_scalar
 
@@ -67,6 +67,11 @@ _SHARED_STAMPS = (
     "type: 'SEMANTIC', scope: 'PERSISTENT', freshness: 'ACTIVE', user_flagged: false, "
     "edge_count: 0, sharpness: 0.0"
 )
+
+
+def _dumps_payload(obj: Any) -> str:
+    """View payload JSON: Decimal values (typed money/number scalars) as exact JSON numbers."""
+    return dumps_exact(obj, ensure_ascii=False)
 
 
 class ViewClass(Enum):
@@ -303,7 +308,7 @@ class TimelineKind(ViewKind):
     def write_props(self, subject: str, key: str, payload: dict[str, Any]) -> dict[str, Any]:
         entries = payload["entries"]
         props = {"view_value": float(len(entries)),
-                 "view_payload": json.dumps(entries, ensure_ascii=False)}
+                 "view_payload": _dumps_payload(entries)}
         if _event_mode(payload):
             # Lane stamp: predicate always; domain only when present (None is dropped so legacy
             # subject-only write_props stays byte-identical).
@@ -743,10 +748,7 @@ class ScalarHistoryKind(ViewKind):
         op_counts = payload.get("operation_counts") or {}
 
         # Serialize entries for the bounded recall payload.
-        entries_json = json.dumps(
-            normalized_entries,
-            ensure_ascii=False,
-        ) if normalized_entries else "[]"
+        entries_json = _dumps_payload(normalized_entries) if normalized_entries else "[]"
 
         return {
             "view_value": float(entry_count),

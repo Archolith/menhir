@@ -220,16 +220,18 @@ def _run_prompt_impl(
     if effective_query and svc.context_builder is not None:
         try:
             from menhir.domain.recall import QueryPreset
+            from menhir.infrastructure.openai_rate_limit import await_with_backoff_aware_timeout
 
             result = asyncio.run(
-                asyncio.wait_for(
+                await_with_backoff_aware_timeout(
                     svc.context_builder.build_context(
                         effective_query,
                         max_tokens=max_tokens,
                         preset=QueryPreset.KNOWLEDGE,
                         namespace=workspace,
                     ),
-                    timeout=CONTEXT_TIMEOUT_S,
+                    timeout_s=CONTEXT_TIMEOUT_S,
+                    max_extension=0.0,  # latency budget: a throttled recall is skipped, not awaited
                 )
             )
             context_text = result.context
@@ -322,16 +324,18 @@ def _run_postcompact_impl(*, max_tokens: int, workspace: str | None = None) -> N
     if svc.context_builder is not None:
         try:
             from menhir.domain.recall import QueryPreset
+            from menhir.infrastructure.openai_rate_limit import await_with_backoff_aware_timeout
 
             result = asyncio.run(
-                asyncio.wait_for(
+                await_with_backoff_aware_timeout(
                     svc.context_builder.build_context(
                         effective_query,
                         max_tokens=max_tokens,
                         preset=QueryPreset.KNOWLEDGE,
                         namespace=workspace,
                     ),
-                    timeout=CONTEXT_TIMEOUT_S,
+                    timeout_s=CONTEXT_TIMEOUT_S,
+                    max_extension=0.0,  # latency budget: a throttled recall is skipped, not awaited
                 )
             )
             context_text = result.context

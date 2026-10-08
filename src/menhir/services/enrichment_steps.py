@@ -45,6 +45,7 @@ from menhir.infrastructure.telemetry import (
     record_memory_revision,
 )
 from menhir.infrastructure.graphiti_helpers import SYNTHETIC_FACT_PREFIX, strip_synthetic_prefix
+from menhir.infrastructure.openai_rate_limit import await_with_backoff_aware_timeout
 from menhir.infrastructure.graphiti_extraction_policy import (
     begin_extraction_receipt,
     is_policy_empty_extraction,
@@ -814,9 +815,9 @@ async def embed_episode_content(ctx: EnrichmentContext) -> None:
         content = str(claimed.get("content") or "")[:_SOURCE_MEMORY_EMBED_MAX_CHARS]
         if not content.strip():
             return
-        embedding = await asyncio.wait_for(
+        embedding = await await_with_backoff_aware_timeout(
             ctx.graphiti_client.embed_query(content),
-            timeout=_SOURCE_MEMORY_EMBED_TIMEOUT_S,
+            timeout_s=_SOURCE_MEMORY_EMBED_TIMEOUT_S,
         )
         if not embedding:
             return
@@ -1595,8 +1596,8 @@ async def add_episode_with_timeout(
         },
     )
     # Activate the combined-extraction receipt in THIS (parent) task, BEFORE the
-    # asyncio.wait_for below. wait_for schedules graphiti_client.add_episode as a
-    # separate Task with its own COPIED context, so a receipt created inside that call
+    # bounded await below. If graphiti_client.add_episode runs as a separate Task it
+    # gets its own COPIED context, so a receipt created inside that call
     # (or the nested Graphiti add_episode task) would never be visible to the parent
     # task that later runs stamp_and_finalize. Setting the mutable receipt here means
     # both the wait_for child and Graphiti's own child task inherit the same object and
@@ -1622,7 +1623,7 @@ async def add_episode_with_timeout(
                 "timeout_s": timeout_s,
             },
         )
-        result = await asyncio.wait_for(
+        result = await await_with_backoff_aware_timeout(
             graphiti_client.add_episode(
                 name=name,
                 episode_body=episode_body,
@@ -1632,7 +1633,7 @@ async def add_episode_with_timeout(
                 attempt=attempt,
                 group_id=group_id,
             ),
-            timeout=timeout_s,
+            timeout_s=timeout_s,
         )
     except asyncio.TimeoutError as exc:
         # stamp_and_finalize will not run for this episode; drop the receipt so a reused

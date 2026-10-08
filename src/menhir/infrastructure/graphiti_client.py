@@ -54,6 +54,8 @@ from menhir.infrastructure.graphiti_llm_adapter import (  # noqa: E402
     _ProviderExtrasAsyncClient,
     build_menhir_request_guard,
 )
+from menhir.infrastructure.model_profiles import resolve_model_profile  # noqa: E402
+from menhir.infrastructure.openai_calls import ResilientChatClient  # noqa: E402
 from menhir.infrastructure.graphiti_resolution_policy import (  # noqa: E402
     MenhirCandidateFilterHook,
     MenhirIdentityGateHook,
@@ -246,6 +248,7 @@ class GraphitiClient:
         )
 
         llm_client = None
+        anchored_time = None
         if llm_enabled:
             # Pin temperature=0 for deterministic extraction and dedup.
             # Graphiti's DEFAULT_TEMPERATURE is 1, which permits high sampling
@@ -258,11 +261,16 @@ class GraphitiClient:
             raw_llm_client = async_client
             # DeepSeek is configured through the OpenAI-compatible `local` provider,
             # so provider kind alone cannot identify its JSON-mode limitation.
-            is_deepseek = (
-                "deepseek" in (llama_base_url or "").lower()
-                or "deepseek" in llm_provider.chat_model.lower()
+            model_profile = resolve_model_profile(
+                llm_provider.chat_model, endpoint=llama_base_url
             )
-            structured_output_mode = "json_object" if is_deepseek else "json_schema"
+            structured_output_mode = model_profile.structured_output_mode
+            logger.info(
+                "Graphiti LLM model profile: %s (model=%s, structured_output_mode=%s)",
+                model_profile.name,
+                llm_provider.chat_model,
+                structured_output_mode,
+            )
             llm_client = MenhirOpenAIGenericClient(
                 config=LLMConfig(
                     api_key=llm_provider.api_key,
@@ -277,6 +285,22 @@ class GraphitiClient:
                     int(settings.graphiti_request_max_estimated_tokens)
                 ),
             )
+            if settings.anchored_time_resolver_enabled:
+                from menhir.infrastructure.anchored_time_resolver import AnchoredTimeResolver
+
+                # Unwrapped client: the resolver adds provider extras, shaping and the one 429
+                # backoff layer itself. Not the generic client: its language instruction would
+                # change the frozen prompt.
+                anchored_time = AnchoredTimeResolver(
+                    raw_llm_client,
+                    base_url=llama_base_url,
+                    model=settings.anchored_time_resolver_model or llm_provider.chat_model,
+                    timeout_s=settings.anchored_time_resolver_timeout_s,
+                )
+                logger.info(
+                    "Anchored-time resolver enabled (model=%s, timeout_s=%s)",
+                    anchored_time.model, settings.anchored_time_resolver_timeout_s,
+                )
         embed_base_url = embed_provider.base_url
         embed_dimension = expected_graphiti_embedding_dimension(settings)
         embed_client = (
@@ -316,7 +340,7 @@ class GraphitiClient:
                     base_url=reranker_base_url,
                     model=reranker_provider.chat_model,
                 ),
-                client=reranker_client,
+                client=ResilientChatClient(reranker_client, label="reranker"),
             )
         graph_driver = Neo4jDriver(
             uri=settings.neo4j_uri,
@@ -333,7 +357,7 @@ class GraphitiClient:
                 llm_client=llm_client,
                 embedder=embedder,
                 cross_encoder=cross_encoder,
-                single_episode_extraction_hook=MenhirExtractionHook(),
+                single_episode_extraction_hook=MenhirExtractionHook(anchored_time=anchored_time),
                 identity_gate_hook=MenhirIdentityGateHook(),
                 candidate_filter_hook=MenhirCandidateFilterHook(),
                 node_pre_resolution_hook=MenhirNodePreResolutionHook(),

@@ -36,11 +36,15 @@ def legacy_structural_memory_cypher(variable: str = "n") -> str:
     # agent-written duplicate no longer says 'project-scan' there -- and without the list check it
     # would stop being recognised as structure and start surfacing in recall as if it were a memory.
     # The string check is kept for nodes written before `sources` existed.
+    # Callers embed this inside their own queries and EXISTS subqueries, where Neo4j 5 rejects a
+    # list variable that shadows an outer one (the timeline subject MATCH binds `s`); keep the
+    # comprehension names unusual. tests/test_structural_memory_variable_names.py pins this.
     return (
         f"(coalesce({variable}.source, '') CONTAINS 'project-scan' "
-        f"OR any(s IN coalesce({variable}.sources, []) WHERE s CONTAINS 'project-scan')) "
-        f"AND any(prefix IN [{prefixes}] WHERE "
-        f"toLower(trim(coalesce({variable}.content, ''))) STARTS WITH prefix)"
+        f"OR any(structural_src IN coalesce({variable}.sources, []) "
+        f"WHERE structural_src CONTAINS 'project-scan')) "
+        f"AND any(structural_prefix IN [{prefixes}] WHERE "
+        f"toLower(trim(coalesce({variable}.content, ''))) STARTS WITH structural_prefix)"
     )
 
 

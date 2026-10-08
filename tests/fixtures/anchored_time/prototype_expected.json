@@ -1,0 +1,695 @@
+{
+ "sets": {
+  "dev": {
+   "D1": {
+    "bases": [
+     "speech_relative",
+     "speech_relative"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2025-03-19",
+      "2025-05-18"
+     ],
+     [
+      "2025-07-01",
+      "2025-07-31"
+     ]
+    ]
+   },
+   "D10": {
+    "bases": [
+     "speech_relative",
+     "event_anchored"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2023-05-13",
+      "2023-05-13"
+     ],
+     [
+      "2023-05-12",
+      "2023-05-12"
+     ]
+    ]
+   },
+   "D11": {
+    "bases": [
+     "speech_relative",
+     "none"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2024-07-01",
+      "2024-09-30"
+     ],
+     null
+    ]
+   },
+   "D12": {
+    "bases": [
+     "vague",
+     "explicit_date",
+     "speech_relative"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     null,
+     [
+      "2025-07-01",
+      "2025-07-31"
+     ],
+     [
+      "2024-01-12",
+      "2024-05-11"
+     ]
+    ]
+   },
+   "D13": {
+    "bases": [
+     "speech_relative",
+     "vague",
+     "none"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2024-05-03",
+      "2024-05-09"
+     ],
+     null,
+     null
+    ]
+   },
+   "D2": {
+    "bases": [
+     "speech_relative",
+     "explicit_date",
+     "none"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2024-11-04",
+      "2024-11-04"
+     ],
+     [
+      "2024-09-01",
+      "2024-09-30"
+     ],
+     null
+    ]
+   },
+   "D3": {
+    "bases": [
+     "explicit_date",
+     "event_anchored"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2022-12-15",
+      "2022-12-15"
+     ],
+     [
+      "2022-09-05",
+      "2022-09-25"
+     ]
+    ]
+   },
+   "D4": {
+    "bases": [
+     "speech_relative",
+     "event_anchored",
+     "vague"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2023-03-01",
+      "2023-05-31"
+     ],
+     [
+      "2023-03-06",
+      "2023-03-12"
+     ],
+     null
+    ]
+   },
+   "D5": {
+    "bases": [
+     "event_anchored",
+     "explicit_date",
+     "explicit_date",
+     "none"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2024-10-01",
+      "2024-10-31"
+     ],
+     [
+      "2024-10-01",
+      "2024-10-31"
+     ],
+     [
+      "2025-02-20",
+      "2025-02-20"
+     ],
+     null
+    ]
+   },
+   "D6": {
+    "bases": [
+     "speech_relative",
+     "event_anchored",
+     "vague"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2023-08-19",
+      "2023-08-20"
+     ],
+     [
+      null,
+      "2023-08-19"
+     ],
+     null
+    ]
+   },
+   "D7": {
+    "bases": [
+     "explicit_date",
+     "event_anchored",
+     "speech_relative",
+     "speech_relative"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2024-06-28",
+      "2024-06-28"
+     ],
+     [
+      "2024-07-02",
+      "2024-07-02"
+     ],
+     [
+      "2003-07-09",
+      "2005-07-08"
+     ],
+     [
+      "2026-05-09",
+      "2026-09-06"
+     ]
+    ]
+   },
+   "D8": {
+    "bases": [
+     "speech_relative",
+     "event_anchored",
+     "none"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2025-09-23",
+      "2025-09-30"
+     ],
+     [
+      "2025-09-23",
+      "2025-09-30"
+     ],
+     null
+    ]
+   },
+   "D9": {
+    "bases": [
+     "explicit_date",
+     "speech_relative",
+     "event_anchored",
+     "explicit_date"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2019-01-01",
+      "2019-12-31"
+     ],
+     [
+      "2023-06-01",
+      "2023-08-31"
+     ],
+     [
+      "2023-06-01",
+      "2023-08-31"
+     ],
+     [
+      "2025-04-01",
+      "2025-04-30"
+     ]
+    ]
+   }
+  },
+  "dev2": {
+   "E1": {
+    "bases": [
+     "none",
+     "event_anchored",
+     "explicit_date"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     null,
+     [
+      "2025-01-31",
+      null
+     ],
+     [
+      "2025-01-01",
+      "2025-01-31"
+     ]
+    ]
+   },
+   "E10": {
+    "bases": [
+     "none",
+     "speech_relative",
+     "vague"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     null,
+     [
+      "2024-09-23",
+      "2024-09-29"
+     ],
+     null
+    ]
+   },
+   "E11": {
+    "bases": [
+     "speech_relative",
+     "event_anchored",
+     "explicit_date"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2022-11-20",
+      "2024-11-19"
+     ],
+     [
+      "2025-09-30",
+      null
+     ],
+     [
+      "2025-09-01",
+      "2025-09-30"
+     ]
+    ]
+   },
+   "E12": {
+    "bases": [
+     "none",
+     "event_anchored",
+     "explicit_date"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     null,
+     [
+      null,
+      "2023-08-01"
+     ],
+     [
+      "2023-08-01",
+      "2023-08-31"
+     ]
+    ]
+   },
+   "E2": {
+    "bases": [
+     "none",
+     "none",
+     "explicit_date"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     null,
+     null,
+     [
+      "2024-12-25",
+      "2024-12-25"
+     ]
+    ]
+   },
+   "E3": {
+    "bases": [
+     "none",
+     "speech_relative",
+     "none"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     null,
+     [
+      "2023-02-09",
+      "2023-02-16"
+     ],
+     null
+    ]
+   },
+   "E4": {
+    "bases": [
+     "explicit_date",
+     "event_anchored"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2025-06-01",
+      "2025-06-30"
+     ],
+     null
+    ]
+   },
+   "E5": {
+    "bases": [
+     "speech_relative",
+     "speech_relative",
+     "none"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2018-04-03",
+      "2020-04-02"
+     ],
+     [
+      "2023-12-24",
+      "2024-01-13"
+     ],
+     null
+    ]
+   },
+   "E6": {
+    "bases": [
+     "speech_relative",
+     "event_anchored",
+     "event_anchored"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2023-10-24",
+      "2023-10-24"
+     ],
+     [
+      "2023-10-25",
+      "2023-10-29"
+     ],
+     [
+      "2024-03-01",
+      "2024-05-31"
+     ]
+    ]
+   },
+   "E7": {
+    "bases": [
+     "explicit_date",
+     "event_anchored",
+     "event_anchored"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2025-01-06",
+      "2025-01-06"
+     ],
+     [
+      "2025-01-06",
+      "2025-01-06"
+     ],
+     [
+      "2025-01-10",
+      "2025-01-16"
+     ]
+    ]
+   },
+   "E8": {
+    "bases": [
+     "none",
+     "explicit_date",
+     "none"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     null,
+     [
+      "2024-04-01",
+      "2024-04-30"
+     ],
+     null
+    ]
+   },
+   "E9": {
+    "bases": [
+     "speech_relative",
+     "event_anchored",
+     "none"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2025-09-01",
+      "2025-11-30"
+     ],
+     [
+      "2025-09-01",
+      "2025-11-30"
+     ],
+     null
+    ]
+   }
+  },
+  "dev3": {
+   "F1": {
+    "bases": [
+     "none",
+     "none",
+     "speech_relative"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     null,
+     null,
+     [
+      "2024-03-17",
+      "2024-03-17"
+     ]
+    ]
+   },
+   "F2": {
+    "bases": [
+     "none",
+     "none",
+     "speech_relative",
+     "none"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     null,
+     null,
+     [
+      "2025-05-04",
+      "2025-05-11"
+     ],
+     null
+    ]
+   },
+   "F3": {
+    "bases": [
+     "explicit_date",
+     "none"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2023-08-01",
+      "2023-08-31"
+     ],
+     null
+    ]
+   },
+   "F4": {
+    "bases": [
+     "explicit_date",
+     "event_anchored",
+     "speech_relative"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2024-07-01",
+      "2024-07-31"
+     ],
+     [
+      "2024-07-08",
+      "2024-07-14"
+     ],
+     [
+      "2024-09-01",
+      "2024-09-30"
+     ]
+    ]
+   },
+   "F5": {
+    "bases": [
+     "explicit_date",
+     "explicit_date",
+     "speech_relative"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2025-10-01",
+      "2025-10-31"
+     ],
+     [
+      "2025-10-01",
+      "2025-10-31"
+     ],
+     [
+      "2025-10-16",
+      "2025-10-16"
+     ]
+    ]
+   },
+   "F6": {
+    "bases": [
+     "none",
+     "none",
+     "explicit_date"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     null,
+     null,
+     [
+      "2024-01-30",
+      "2024-01-30"
+     ]
+    ]
+   },
+   "F7": {
+    "bases": [
+     "speech_relative",
+     "speech_relative",
+     "speech_relative"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     [
+      "2023-05-01",
+      "2023-05-31"
+     ],
+     [
+      "2023-05-01",
+      "2023-05-31"
+     ],
+     [
+      "2023-05-01",
+      "2023-05-31"
+     ]
+    ]
+   },
+   "F8": {
+    "bases": [
+     "none",
+     "explicit_date"
+    ],
+    "guard_drops": [],
+    "items": null,
+    "parse": "ok",
+    "windows": [
+     null,
+     [
+      "2015-01-01",
+      "2015-12-31"
+     ]
+    ]
+   }
+  }
+ },
+ "source": "reich_lib.py a7797891eaab, clause_guard.py ec4472e916a8"
+}

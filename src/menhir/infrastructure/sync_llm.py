@@ -18,6 +18,7 @@ from menhir.infrastructure.observability import (
     fail_llm_usage_call,
     start_llm_usage_call,
 )
+from menhir.infrastructure.openai_calls import create_chat_completion
 from menhir.infrastructure.providers import (
     DEFAULT_REQUEST_TIMEOUT_S,
     ProviderConfig,
@@ -102,15 +103,21 @@ def make_sync_chat(
         )
         try:
             client = _resolve_client()
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                temperature=temperature,
-                max_tokens=max_tokens,
-                **extra,
+            # 429 only; the CF-190 fail-fast bounds above still govern hangs and 5xx.
+            resp = create_chat_completion(
+                client.chat.completions.create,
+                {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    **extra,
+                },
+                base_url=cfg.base_url,
+                label="sync_chat",
             )
         except Exception as exc:
             fail_llm_usage_call(handle, exc)

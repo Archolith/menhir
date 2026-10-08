@@ -51,6 +51,8 @@ from menhir.infrastructure.graphiti_helpers import (
     _normalize_graphiti_json_payload,
     _raw_preview,
 )
+from menhir.infrastructure.openai_calls import ResilientChatClient, acreate_chat_completion
+from menhir.infrastructure.model_profiles import resolve_model_profile
 
 logger = logging.getLogger(__name__)
 
@@ -338,6 +340,10 @@ class _ProviderExtrasAsyncClient:
         return _ProviderExtrasChat(self._inner.chat, self._base_url)
 
 
+#: Kept for importers: the reranker wrapper now lives in ``openai_calls``.
+RateLimitedChatClient = ResilientChatClient
+
+
 class _ProviderExtrasChat:
     def __init__(self, inner: Any, base_url: str) -> None:
         self._inner = inner
@@ -363,22 +369,24 @@ class _ProviderExtrasCompletions:
         # Merge lineage (merge_audit / merged_from / last_merge_op_id) is kept out of prompts by
         # the fork itself since archolith-graphiti-core 0.30.2.post2 (graphiti #2); see
         # tests/infrastructure/test_merge_lineage_prompt_policy.py.
-        return await self._inner.create(**kwargs)
+        # Shaping (model profile, Flex tier) and 429 backoff live here because generate_response
+        # re-raises RateLimitError unretried.
+        return await acreate_chat_completion(
+            self._inner.create, kwargs, base_url=self._base_url, label="graphiti"
+        )
 
 
 def _provider_extra_body(model: str | None, endpoint: str) -> dict[str, Any]:
     """Provider-specific request extras, decided per request from model + endpoint.
 
-    - deepseek-v4-flash "thinks" by default (~2.3x latency, ~3x output tokens), which
-      overruns the ingest wait window; `{"type": "disabled"}` is the only form the
-      DeepSeek API accepts.
+    - Model-family extras come from the model profile (DeepSeek: thinking off).
     - OpenRouter reasoning suppression is OPT-IN via MENHIR_GRAPHITI_DISABLE_REASONING,
       because suppressing reasoning is a quality decision that belongs to whoever
       configured the provider.
     """
-    model_str = (model or "").lower()
-    if "deepseek" in (endpoint or "").lower() or "deepseek" in model_str:
-        return {"thinking": {"type": "disabled"}}
+    profile_extra = resolve_model_profile(model, endpoint=endpoint).provider_extra_body()
+    if profile_extra:
+        return profile_extra
     if "openrouter" in (endpoint or "").lower() and os.getenv(
         "MENHIR_GRAPHITI_DISABLE_REASONING", ""
     ).strip().lower() in {"1", "true", "yes"}:

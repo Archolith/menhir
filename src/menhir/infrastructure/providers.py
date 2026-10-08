@@ -17,6 +17,7 @@ from menhir.infrastructure.observability import (
     fail_llm_usage_call,
     start_llm_usage_call,
 )
+from menhir.infrastructure.openai_calls import acreate_chat_completion
 
 OpenAIClientFactory = Callable[..., Any]
 RetrySleep = Callable[[float], Awaitable[None]]
@@ -298,15 +299,24 @@ class OpenAIStyleChatBackend:
             operation=operation,
             report_only=True,
         )
+        request = {
+            "model": self.provider.chat_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
         try:
-            response = await client.chat.completions.create(
-                model=self.provider.chat_model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                max_tokens=max_tokens,
-                temperature=temperature,
+            # 429s are retried here because the judges call with max_retries=0, and a None
+            # verdict from a throttle reads as "model unavailable" and changes merge decisions.
+            response = await acreate_chat_completion(
+                client.chat.completions.create,
+                request,
+                base_url=base_url,
+                label=operation,
+                sleep=self.dependencies.retry_sleep,
             )
         except BaseException as exc:
             fail_llm_usage_call(handle, exc)
