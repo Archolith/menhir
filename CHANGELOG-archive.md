@@ -1,3 +1,9 @@
+## 2026-09-29 - Require money and measurement quotes to state their value
+
+- `src/menhir/services/typed_scalar_rules.py`: a model-supplied money or measurement value drops with `value_not_in_span` unless its grounded quote states it as digits (thousands separators, decimals, k/million scale) or English number words; the check runs last so earlier drop reasons are unchanged, and counts, durations, frequencies and clock times keep their span-derived values (#89).
+- `tests/test_scalar_value_in_quote.py`: stated and missing money forms, measurement, scaled amounts, and unchanged count correction and multi-number abstention.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-29 - Treat equal Decimal amounts as one scalar value
 
 - `src/menhir/domain/typed_assertion.py`: canonical numeric form for voting and identity strips insignificant Decimal scale and signs zero (10, 10.0, 10.00 -> "10"; -0.00 -> "0"), without float (#152).

@@ -112,6 +112,31 @@ async def test_text_prefix_never_becomes_a_role() -> None:
     assert adapter.create_pending_episode.call_args.kwargs["turn_role"] == "user"
 
 
+# ---- IngestService.ingest_episode (review F11) ---------------------------------------------------
+
+
+class _EnabledIntake(IngestIntakeMixin):
+    def __init__(self):
+        self._enrichment_enabled = True
+        self.queue_episode_for_enrichment = AsyncMock(
+            return_value=SimpleNamespace(status="rejected")
+        )
+
+
+@pytest.mark.asyncio
+async def test_ingest_episode_forwards_role() -> None:
+    intake = _EnabledIntake()
+    await intake.ingest_episode("I moved", _session(), "smoke", role="user")
+    assert intake.queue_episode_for_enrichment.await_args.kwargs["role"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_ingest_episode_omits_role_when_not_set() -> None:
+    intake = _EnabledIntake()
+    await intake.ingest_episode("I moved", _session(), "smoke")
+    assert "role" not in intake.queue_episode_for_enrichment.await_args.kwargs
+
+
 # ---- RuntimeProviderDataOpsMixin.queue_episode ---------------------------------------------------
 
 

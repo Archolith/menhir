@@ -102,6 +102,22 @@ def test_agent_quoted_evidence_proves_nothing() -> None:
     assert resolve_turn_role({**quoted, "turn_role": "assistant"}) == "assistant"
 
 
+def test_evidence_from_another_namespace_proves_nothing() -> None:
+    # Review F6: same rule as subject_endpoint_eligible in the claim query.
+    foreign = _claimed(namespace="tenant-a", turn_evidence_namespace="tenant-b")
+    assert resolve_turn_role(foreign) == "unknown"
+    assert resolve_turn_role({**foreign, "turn_role": "assistant"}) == "assistant"
+
+
+@pytest.mark.parametrize(
+    ("episode_ns", "turn_ns"),
+    [("tenant-a", "tenant-a"), ("default", None), (None, "default"), ("", " "), (" tenant-a", "tenant-a ")],
+)
+def test_same_namespace_evidence_still_proves(episode_ns, turn_ns) -> None:
+    claimed = _claimed(namespace=episode_ns, turn_evidence_namespace=turn_ns)
+    assert resolve_turn_role(claimed) == "user"
+
+
 @pytest.mark.parametrize("kind", [None, "hook", "unknown", "claude-code"])
 def test_captured_evidence_of_any_other_kind_still_proves(kind) -> None:
     assert resolve_turn_role(_claimed(turn_evidence_source_kind=kind)) == "user"

@@ -59,16 +59,16 @@ async def main() -> None:
         # ingester.  The original short sentence passed but the full multi-topic
         # message failed because node resolution collapsed "the suburbs" into
         # the existing Chicago entity when other geographies were present.
-        episodes = ["user: My friend Rachel lives in Chicago."]
-        episodes.extend(f"user: Thanks for the information. Turn {index}." for index in range(12))
+        episodes = ["My friend Rachel lives in Chicago."]
+        episodes.extend(f"Thanks for the information. Turn {index}." for index in range(12))
         # Final LME message split into sentences (bench splits on `. [A-Z]`):
-        episodes.append("user: Miami Beach sounds fun, but I've been there before.")
-        episodes.append("user: I'm thinking of somewhere more relaxed.")
+        episodes.append("Miami Beach sounds fun, but I've been there before.")
+        episodes.append("I'm thinking of somewhere more relaxed.")
         episodes.append(
-            "user: My friend Rachel actually just moved back to the suburbs again,"
+            "My friend Rachel actually just moved back to the suburbs again,"
             " so I was thinking of somewhere not too far from a major city."
         )
-        episodes.append("user: Any suggestions?")
+        episodes.append("Any suggestions?")
 
         ingest_rows: list[dict[str, object]] = []
         for index, episode in enumerate(episodes):
@@ -77,6 +77,7 @@ async def main() -> None:
                 session=session,
                 source="suburbs-fix-smoke",
                 namespace=namespace,
+                role="user",
             )
             ingest_rows.append(
                 {

@@ -296,8 +296,8 @@ def is_policy_empty_extraction(receipt: "CombinedExtractionReceipt | None") -> b
     An assistant turn that only restates the human's own facts (`user -> X`) has every edge
     suppressed by design, which leaves nothing to persist. That is the CORRECT outcome, and it is
     deterministic. Real collapses remain visible because either every surviving raw edge must be
-    accounted for as echo, or every relationless entity must be a self label on an explicitly
-    prefixed assistant turn.
+    accounted for as echo, or every relationless entity must be a self label on a turn whose
+    structured role (receipt `turn_role`) is assistant.
     """
     if receipt is None:
         return False

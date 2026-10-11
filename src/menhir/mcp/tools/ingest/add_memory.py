@@ -6,6 +6,7 @@ from menhir.mcp.formatters import _queue_summary
 from menhir.mcp.service_access import get_mcp_session
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
+from menhir.domain.turn_role import TURN_ROLES
 
 
 async def add_memory(
@@ -19,6 +20,7 @@ async def add_memory(
     bootstrap_scope: str = "",
     turn_evidence_uuid: str | None = None,
     user_statement: str | None = None,
+    role: str | None = None,
 ) -> str:
     """Queue a memory for enrichment. Use this to remember facts, preferences, decisions, or anything worth keeping.
 
@@ -37,12 +39,13 @@ async def add_memory(
         turn_evidence_uuid: Optional UUID of the :TurnEvidence node for the turn this memory was written in the context of. For source='user'/'manual' it also grounds the user-tier claim (an ungrounded claim is downgraded). For every other source it draws the provenance edge only, which is what lets a typed-scalar assertion reach the entities extracted from this memory -- pass it whenever you know it.
                            Required for the user tier; omit to use agent_inference tier.
         user_statement: The user's exact words for the statement this memory is based on; verbatim only, never paraphrased, never a third party's words; omit when unsure. Mutually exclusive with turn_evidence_uuid.
+        role: Optional speaker of this text, exactly one of user, assistant, tool, agent, system. Declare it when the text is a raw conversation turn; never write the role into the text. A matching linked :TurnEvidence overrides it. Omit when unsure. Ignored for TEMPORAL + valid_at (no extraction).
 
     Returns:
         Confirmation with the episode ID and counts of nodes/edges created.
     """
 
-    return await AddMemoryTool().execute(text=text, source=source, diff=diff, type=type, valid_at=valid_at, namespace=namespace, flagged=flagged, bootstrap_scope=bootstrap_scope, turn_evidence_uuid=turn_evidence_uuid, user_statement=user_statement)
+    return await AddMemoryTool().execute(text=text, source=source, diff=diff, type=type, valid_at=valid_at, namespace=namespace, flagged=flagged, bootstrap_scope=bootstrap_scope, turn_evidence_uuid=turn_evidence_uuid, user_statement=user_statement, role=role)
 
 
 class AddMemoryTool(BaseTextTool):
@@ -67,6 +70,7 @@ class AddMemoryTool(BaseTextTool):
         bootstrap_scope: str = "",
         turn_evidence_uuid: str | None = None,
         user_statement: str | None = None,
+        role: str | None = None,
     ) -> str:
         """Queue a memory for enrichment. Use this to remember facts, preferences, decisions, or anything worth keeping.
 
@@ -84,6 +88,7 @@ class AddMemoryTool(BaseTextTool):
             bootstrap_scope: Optional startup pin: general or workspace:<registered-key>.
             turn_evidence_uuid: Optional UUID of the :TurnEvidence node for the turn this memory was written in the context of. For source='user'/'manual' it also grounds the user-tier claim (an ungrounded claim is downgraded). For every other source it draws the provenance edge only, which is what lets a typed-scalar assertion reach the entities extracted from this memory -- pass it whenever you know it.
             user_statement: The user's exact words for the statement this memory is based on; verbatim only, never paraphrased, never a third party's words; omit when unsure. Mutually exclusive with turn_evidence_uuid.
+            role: Optional speaker of this text, exactly one of user, assistant, tool, agent, system. Declare it when the text is a raw conversation turn; never write the role into the text. A matching linked :TurnEvidence overrides it. Omit when unsure. Ignored for TEMPORAL + valid_at (no extraction).
 
         Returns:
             Confirmation with the episode ID and counts of nodes/edges created.
@@ -95,6 +100,9 @@ class AddMemoryTool(BaseTextTool):
         namespace_error = namespace_group_id_error(namespace)
         if namespace_error is not None:
             return f"Cannot store memory: {namespace_error}"
+
+        if role is not None and (not isinstance(role, str) or role not in TURN_ROLES):
+            return f"Cannot store memory: invalid role {role!r}; use one of {', '.join(sorted(TURN_ROLES))}."
 
         if (user_statement or "").strip() and turn_evidence_uuid:
             return (
@@ -135,6 +143,8 @@ class AddMemoryTool(BaseTextTool):
             scope_kwargs["bootstrap_scope"] = normalized_bootstrap_scope
         if (user_statement or "").strip():
             scope_kwargs["user_statement"] = user_statement
+        if role is not None:
+            scope_kwargs["role"] = role
         result = await backend.queue_episode(
             text,
             user_id=session.user_id,

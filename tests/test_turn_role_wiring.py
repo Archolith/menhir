@@ -58,9 +58,19 @@ async def _role_passed_to_dispatch(monkeypatch: pytest.MonkeyPatch, claimed: dic
 async def test_extraction_passes_proven_evidence_role(monkeypatch) -> None:
     role = await _role_passed_to_dispatch(monkeypatch, {
         "content": _TEXT, "turn_evidence_count": 1, "turn_evidence_text": _TEXT,
-        "turn_evidence_role": "user",
+        "turn_evidence_role": "user", "turn_evidence_namespace": "tenant-a",
     })
     assert role == "user"
+
+
+@pytest.mark.asyncio
+async def test_extraction_ignores_evidence_from_another_namespace(monkeypatch) -> None:
+    # Review F6: the pipeline context claims namespace tenant-a.
+    role = await _role_passed_to_dispatch(monkeypatch, {
+        "content": _TEXT, "turn_evidence_count": 1, "turn_evidence_text": _TEXT,
+        "turn_evidence_role": "user", "turn_evidence_namespace": "tenant-b",
+    })
+    assert role == "unknown"
 
 
 @pytest.mark.asyncio

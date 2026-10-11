@@ -37,6 +37,9 @@ from openai import OpenAI
 from menhir.services.perception import Episode
 from menhir.services.typed_scalar_perception import extract_typed_scalars_once
 
+# Reads the legacy prefixed LME bench corpus (`user:`-prefixed Episodic content), which existing
+# frozen captures and replay_fold_flags.py index into. Production no longer selects Episodic
+# content at all (#271); freeze_scalar_samples.py has the production-shaped TurnEvidence source.
 EPISODES_Q = """
 MATCH (e:Episodic)
 WHERE e.content STARTS WITH 'user:' AND e.group_id = $ns
@@ -46,15 +49,20 @@ ORDER BY coalesce(e.created_at, e.valid_at), e.uuid
 """
 
 
-def build_episodes(rows: list[dict]) -> list[Episode]:
-    """Mirror of scheduler_tasks._build_episodes -- same prefix strip, 2000-char body cap, minimum
-    length, and (body, valid_at) exact-duplicate collapse (a661390). Kept in sync deliberately: if
-    this diverges, the probe measures a corpus production never sees."""
+def build_episodes(rows: list[dict], *, strip_legacy_prefix: bool = True) -> list[Episode]:
+    """Mirror of scheduler_tasks._build_episodes -- 2000-char body cap, minimum length, and
+    (body, valid_at) exact-duplicate collapse (a661390). Kept in sync deliberately: if this
+    diverges, the probe measures a corpus production never sees.
+
+    `strip_legacy_prefix` removes the `user:` marker of the legacy prefixed corpus that EPISODES_Q
+    reads. Production has no such strip (#271); pass False for raw TurnEvidence text."""
     eps: list[Episode] = []
     seen: set[tuple[str, str]] = set()
     for r in rows:
         raw = str(r.get("content") or "")
-        body = (raw[len("user:"):] if raw[:5].lower() == "user:" else raw).strip()[:2000]
+        if strip_legacy_prefix and raw[:5].lower() == "user:":
+            raw = raw[len("user:"):]
+        body = raw.strip()[:2000]
         if len(body) < 8:
             continue
         stamp = str(r.get("valid_at") or "")

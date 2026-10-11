@@ -8,9 +8,9 @@ resolves a `turn_id` to its episode through this edge (infrastructure/episode_li
 bind until the join is backfilled.
 
 THE JOIN IS EXACT, NOT FUZZY
-A `:TurnEvidence` carries the raw user text; the corresponding `:Episodic` stores it prefixed with
-the producer's role marker. The join is therefore exact string equality on
-`e.content = 'user: ' + t.text` within one namespace -- NOT similarity, NOT CONTAINS. Anything
+A `:TurnEvidence` carries the raw turn text, and the corresponding `:Episodic` stores the same raw
+text (Menhir never encodes the speaker in the text; #271). The join is therefore exact string
+equality on `e.content = t.text` within one namespace -- NOT similarity, NOT CONTAINS. Anything
 looser risks attaching an assertion's provenance to the wrong turn, which is worse than leaving it
 unbound: a wrong binding asserts authority the evidence never supported.
 
@@ -60,7 +60,7 @@ _SURVEY = """
 MATCH (t:TurnEvidence)
 WHERE $prefix IS NULL OR t.namespace STARTS WITH $prefix
 OPTIONAL MATCH (e:Episodic)
-  WHERE e.group_id = t.namespace AND e.content = 'user: ' + t.text
+  WHERE e.group_id = t.namespace AND e.content = t.text
 WITH t, count(e) AS matches
 OPTIONAL MATCH (t)<-[r:ADMITTED_ON]-(:Episodic)
 WITH t, matches, count(r) AS existing
@@ -78,7 +78,7 @@ MATCH (t:TurnEvidence)
 WHERE ($prefix IS NULL OR t.namespace STARTS WITH $prefix)
   AND NOT EXISTS { (t)<-[:ADMITTED_ON]-(:Episodic) }
 MATCH (e:Episodic)
-WHERE e.group_id = t.namespace AND e.content = 'user: ' + t.text
+WHERE e.group_id = t.namespace AND e.content = t.text
 WITH t, e ORDER BY e.created_at, e.uuid
 WITH t, head(collect(e)) AS chosen
 MERGE (chosen)-[:ADMITTED_ON]->(t)
@@ -90,7 +90,7 @@ MATCH (t:TurnEvidence)
 WHERE ($prefix IS NULL OR t.namespace STARTS WITH $prefix)
   AND NOT EXISTS { (t)<-[:ADMITTED_ON]-(:Episodic) }
   AND NOT EXISTS { MATCH (e:Episodic)
-                   WHERE e.group_id = t.namespace AND e.content = 'user: ' + t.text }
+                   WHERE e.group_id = t.namespace AND e.content = t.text }
 RETURN t.namespace AS ns, t.turn_id AS turn_id, substring(coalesce(t.text, ''), 0, 70) AS text
 LIMIT 10
 """

@@ -76,7 +76,7 @@ Public REST:
   - `GET /api/phase3/status` (readonly) — namespace dirty flag + `:TurnEvidence` count
   - `GET /api/views` (readonly) — current counter Views (each with value `history`/`superseded`) and `subject='perception'` abstention receipts, split
   - `POST /api/phase3/reset` (agent tier) — tear down a throwaway namespace: graphiti partition (Views + watermark) PLUS namespace-keyed `:TurnEvidence`; refuses the default/shared namespace
-  - public memory endpoints. `POST /api/memory` takes an optional `role` (`user`, `assistant`, `tool`, `agent`, `system`, matched exactly; anything else is a 422, or a 400 through the internal backend bridge) naming the speaker of `episode`. Menhir never infers the speaker from the text, so a `user:` prefix grants nothing; a grounded episode takes its role from its turn evidence (#271). The MCP `add_memory` tools do not expose `role`.
+  - public memory endpoints. `POST /api/memory` takes an optional `role` (`user`, `assistant`, `tool`, `agent`, `system`, matched exactly; anything else is a 422, or a 400 through the internal backend bridge) naming the speaker of `episode`. Menhir never infers the speaker from the text, so a `user:` prefix grants nothing; a grounded episode takes its role from its turn evidence (#271). The MCP `add_memory` and `add_memory_and_track` tools take the same `role` (an invalid value is refused with a `Cannot store memory` message before any write).
 - Internal backend transport:
   - `/api/internal/backend/*`
   - used by `BackendClient`
@@ -182,6 +182,7 @@ Queue a memory for enrichment. Use this to remember facts, preferences, decision
 - **`flagged`** (bool, optional): Permanent retention. **USER-ONLY — never set this unless the user
   explicitly asked in this session.** See the warning under `flag_memory`; the flag propagates to
   every entity extracted from the episode, including pre-existing shared ones. Default `false`.
+- **`role`** (str, optional): Speaker of `text`, exactly one of `user`, `assistant`, `tool`, `agent`, `system`. Same contract as `POST /api/memory` `role`; a matching linked turn evidence overrides it. An invalid value returns `Cannot store memory: invalid role ...` and nothing is written. Ignored for `type="TEMPORAL"` with `valid_at` (no extraction).
 - Response now appends a one-line queue snapshot: `queue_depth`, current `active_enriching` count, and scheduler state.
 
 **Gateway alias behavior**: `memory_gateway(action="add_memory", payload_json='{"text":"..."}')` accepts `text` (preferred), `content`, or `summary` for the memory content field.
@@ -195,6 +196,7 @@ Queue one memory and return enrichment status updates until `READY`, `FAILED`, o
 - **`diff`** (str, optional): Optional git diff attached to the episode as change context.
 - **`timeout_s`** (float, optional): Max seconds to wait for completion (default: 60).
 - **`poll_interval_s`** (float, optional): Status polling interval in seconds (default: 1).
+- **`role`** (str, optional): Speaker of `text`, exactly one of `user`, `assistant`, `tool`, `agent`, `system`. Same contract as `POST /api/memory` `role`; a matching linked turn evidence overrides it. An invalid value returns `Cannot store memory: invalid role ...` and nothing is written.
 - Output includes stage/progress/step telemetry plus live LLM task counters (`attempt` and `total`).
 - Output begins with `queued_summary` so callers can see queue depth, active enrichment count, and scheduler state immediately after enqueue.
 - Very large memories can now fail early with `episode_preflight_too_large` instead of spending retry budget inside Graphiti extraction.

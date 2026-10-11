@@ -1,10 +1,9 @@
-"""Neo4j queries for the personal-memory perception consolidation job.
+"""Neo4j watermark queries for the personal-memory perception consolidation job.
 
-The consolidation re-derives count/amount Views ("bike spend", "fish tanks owned") from a namespace's
-USER episodes. To keep a short-interval pass cheap it only touches DIRTY namespaces — those with user
-turns newer than the last consolidation. A per-namespace `(:ConsolidationWatermark)` records the last
-run so a namespace where perception *abstained* (wrote no View) is still debounced and not re-LLM'd
-every cycle until new user turns arrive.
+A per-namespace `(:ConsolidationWatermark)` records the last consolidation run, so a namespace where
+perception *abstained* (wrote no View) is still debounced and not re-LLM'd every cycle until new user
+turns arrive. Dirty-namespace discovery and loading of user turns read :TurnEvidence and live in
+turn_evidence_repository (#271).
 """
 
 from __future__ import annotations

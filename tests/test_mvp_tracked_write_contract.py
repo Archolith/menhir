@@ -243,7 +243,7 @@ def test_formatter_preserves_existing_fields_and_does_not_mutate_observation() -
 
 
 def test_tracked_write_signature_does_not_grow_permissions_or_invent_options() -> None:
-    expected = {"text", "source", "timeout_s", "poll_interval_s", "diff", "turn_evidence_uuid", "namespace"}
+    expected = {"text", "source", "timeout_s", "poll_interval_s", "diff", "turn_evidence_uuid", "namespace", "role"}
     assert set(inspect.signature(track.add_memory_and_track).parameters) == expected
     assert set(inspect.signature(track.AddMemoryAndTrackTool.endpoint).parameters) == expected | {"self"}
     assert track.AddMemoryAndTrackTool.oauth_scopes == ("menhir:write",)
