@@ -55,6 +55,9 @@ CONTRACT_PROPERTIES = (
     "time_contract",
 )
 
+#: Edge properties Graphiti must keep on a resolved duplicate (fork preserved_edge_attributes).
+PRESERVED_EDGE_ATTRIBUTES = CONTRACT_PROPERTIES + ("time_expiry", "time_world_end")
+
 _ELIGIBLE = (
     tenant_scope_cypher("r") + " "
     "AND r.group_id = $group_id "

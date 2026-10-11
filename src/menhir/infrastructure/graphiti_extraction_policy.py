@@ -1745,28 +1745,74 @@ class MenhirEdgeExpiryHook:
     Answers ``WORLD_END`` only when this ``add_episode`` call's own anchored-time report (owner
     check: a shared receipt can hold a concurrent call's report) ran with expiry on and
     classified the new mention as a point event or state with an item, and the resolved edge
-    carries ``invalid_at``. Anything else, including any error, answers ``EXPIRE``: upstream.
+    carries ``invalid_at``. Failing that, a stored world-end stamp on the resolved duplicate
+    (P3c, D2: written by an earlier ingest) also answers ``WORLD_END``, so a restatement with no
+    time evidence, a failed resolver or a ``plan`` classification does not override it.
+    Anything else, including any error, answers ``EXPIRE``: upstream.
     """
 
     async def decide_edge_expiry(self, context: Any) -> Any:
         from graphiti_core.edge_expiry import EdgeExpiryDecision
 
         try:
+            if getattr(context.resolved_edge, "invalid_at", None) is None:
+                return EdgeExpiryDecision.EXPIRE
             report = _owned_expiry_report()
-            if report is None or getattr(context.resolved_edge, "invalid_at", None) is None:
-                return EdgeExpiryDecision.EXPIRE
-            by_uuid = {r.edge_uuid: r for r in report.results}
-            # The new mention decides; bulk dedupe can resolve to another edge of this
-            # episode (fork F4), so fall back to that edge's own classification.
-            result = (by_uuid.get(str(context.extracted_edge.uuid))
-                      or by_uuid.get(str(context.resolved_edge.uuid)))
-            if result is None or result.reason == "no_item" or result.kind not in WORLD_END_KINDS:
-                return EdgeExpiryDecision.EXPIRE
-            report.world_end_kept += 1
-            return EdgeExpiryDecision.WORLD_END
+            result = None
+            if report is not None:
+                by_uuid = {r.edge_uuid: r for r in report.results}
+                # The new mention decides; bulk dedupe can resolve to another edge of this
+                # episode (fork F4), so fall back to that edge's own classification.
+                result = (by_uuid.get(str(context.extracted_edge.uuid))
+                          or by_uuid.get(str(context.resolved_edge.uuid)))
+            if (report is not None and result is not None and result.reason != "no_item"
+                    and result.kind in WORLD_END_KINDS):
+                report.world_end_kept += 1
+                return EdgeExpiryDecision.WORLD_END
+            if _stored_world_end_matches(context):
+                logger.debug("Edge-expiry hook kept a stored world end edge=%s",
+                             context.resolved_edge.uuid)
+                return EdgeExpiryDecision.WORLD_END
+            return EdgeExpiryDecision.EXPIRE
         except Exception:
             logger.exception("Edge-expiry hook failed; upstream expiry kept")
             return EdgeExpiryDecision.EXPIRE
+
+
+def _stored_world_end_matches(context: Any) -> bool:
+    """True when the stored duplicate carries a world-end stamp equal to its ``invalid_at``.
+
+    P3c: the stamp written by EXPIRY_PERSIST_CYPHER is evidence that an earlier ingest
+    classified this end as world time; a later mention with no time evidence (skipped, failed
+    or ``plan`` report) must not expire it. A moved ``invalid_at`` (a newer contradiction) no
+    longer matches the stamp, so ``EXPIRE`` stands.
+    """
+    from datetime import datetime, timezone
+
+    resolved = context.resolved_edge
+    if not context.is_duplicate or str(resolved.uuid) == str(context.extracted_edge.uuid):
+        return False
+    attrs = getattr(resolved, "attributes", None)
+    if not isinstance(attrs, dict) or attrs.get("time_expiry") != "world_end":
+        return False
+
+    def _aware(value: Any) -> datetime | None:
+        if isinstance(value, str):
+            try:
+                value = datetime.fromisoformat(value)
+            except ValueError:
+                return None
+        elif not isinstance(value, datetime) and hasattr(value, "to_native"):
+            value = value.to_native()
+        if not isinstance(value, datetime):
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    stamp = _aware(attrs.get("time_world_end"))
+    invalid_at = _aware(getattr(resolved, "invalid_at", None))
+    return stamp is not None and invalid_at is not None and stamp == invalid_at
 
 
 def _owned_expiry_report() -> Any | None:
