@@ -110,6 +110,20 @@ agent-quoted `add_memory` calls, not hooks. Before the run: add `gpt-6-luna` pri
 summarizer; override Bench's `MENHIR_BENCHMARK_MODE=1` for the scheduler-driven arm or drive consolidation
 explicitly. Report quote fidelity (does the quote contain the value) separately.
 
+**Corpora (owner choice 2026-09-29).** LongMemEval KU78 stays as the comparison with past results. Add:
+
+| Corpus | Tests | Status |
+|---|---|---|
+| [StateMemBench](https://arxiv.org/abs/2608.19652) (234 chat scenarios, 322 probes; research, shopping, finance) | Scalars and supersession: counts, balances, derived totals; status, sequence and "anti-trap" (old value still right) probes | **No public data or code found** (arXiv default license). Ask the authors, or rebuild the generator from the paper (symbolic event programs rendered to dialogue) |
+| [AMA-Bench](https://huggingface.co/datasets/AMA-bench/AMA-bench) State Updating (type `C`) | Agentic supersession in recall | Public, MIT, not gated. One file, `test/open_end_qa_set.jsonl` (about 50 MB): episodes with `trajectory` (`action`, `observation`) and 12 `qa_pairs` each (`type` A-D) |
+
+AMA-Bench trajectories have no user turns, so they never reach the scalar lane (user TurnEvidence only).
+Treat them as a recall/supersession check, not a scalar test. StateMemBench is the scalar test.
+
+**Cap (proposed, not approved).** $2 smoke first, then a $25 hard stop through Bench's budget proxy
+(`archolith_bench/ci/budget_proxy.py`). Basis: earlier one-question GPT-5.6 Luna runs cost $0.04-0.075
+at $0.20/$1.20 per million tokens. GPT-6 Luna pricing is not yet in Bench.
+
 ### 7. Flip the default
 Only if step 6 passes the ratified limits: `personal_memory_scalar_state_enabled` -> True, with docs,
 `.env.example`, opt-out note, and the limitation "agent-quoted facts are unverified and advisory".
