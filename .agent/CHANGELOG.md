@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-11 - Anchored-time P3c follow-ups: stale saves and the preserved-attributes guard
+
+- Pin `archolith-graphiti-core==0.30.2.post7` (fork PR #13: a Neo4j entity-edge save takes the
+  edge lock, then keeps a stored expiry; once the stored edge is expired, a save keeps the
+  earliest `expired_at` and earliest non-null `invalid_at`). Closes the P3c-1 known gap: a
+  concurrent writer's stale save no longer revives an edge another writer expired, and no
+  longer moves a truncated end later. Fork live tests cover the concurrent case.
+- `preserved_edge_attributes_kwargs`: a Graphiti constructor that cannot be inspected counts as
+  lacking the parameter, so with `MENHIR_ANCHORED_TIME_EXPIRY` on startup refuses (as the
+  edge-expiry hook guard does); with only the resolver on it warns.
+  `tests/test_anchored_time_preserved_guard.py`: NEW.
+- Not covered: the operator unmerge (`restore_merge_snapshot`) recreates relationships from the
+  merge-time snapshot and can recreate a live copy of an edge expired after the merge.
+
 ## 2026-10-10 - Anchored-time P3c: a restatement keeps a stored ended fact live
 
 - Pin `archolith-graphiti-core==0.30.2.post6` (adds `Graphiti(preserved_edge_attributes=...)`,
