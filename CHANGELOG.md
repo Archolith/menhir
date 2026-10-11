@@ -1,10 +1,10 @@
 ## 2026-10-11 - Take the speaker role from structured data, never from episode text
 
-- `domain/turn_role.py`: `resolve_turn_role` takes an episode's speaker from its single `ADMITTED_ON` turn when the content equals that turn's text, else from the declared `turn_role`, else `unknown` (#271).
-- `api/routes_support.py`, `api/routes.py`, `core/backend_*.py`, `services/ingest_intake.py`, `infrastructure/memory_graph_adapter.py`, `infrastructure/episode_lifecycle.py`: optional `role` on `POST /api/memory`, persisted ON CREATE as `Episodic.turn_role` and returned by the claim query; an invalid role is a 422 (400 through the bridge).
+- `domain/turn_role.py`: `resolve_turn_role` takes an episode's speaker from its single `ADMITTED_ON` turn when the content equals that turn's text (surrounding whitespace ignored) and the turn is not `agent_quoted`, else from the declared `turn_role`, else `unknown` (#271).
+- `api/routes_support.py`, `api/routes.py`, `core/backend_*.py`, `services/ingest_intake.py`, `infrastructure/memory_graph_adapter.py`, `infrastructure/episode_lifecycle.py`: optional `role` on `POST /api/memory`, persisted ON CREATE as `Episodic.turn_role` and returned by the claim query with the turn's `source_kind`; roles match exactly on every transport, and an invalid one is a 422 (400 through the bridge).
 - `infrastructure/graphiti_extraction_policy.py`, `infrastructure/anchored_time.py`, `services/enrichment_steps.py`: the anchored-time user gate, the assistant echo/self-label policy and self-like endpoint retention read the receipt's `turn_role`; `_episode_role`, `strip_user_prefix` and the titled-list prefix split are removed, and a titled list whose title is a speaker or self label is refused.
 - `infrastructure/memory_graph_adapter.py`, `infrastructure/personal_memory_queries.py`, `services/scheduler_tasks.py`, `services/correction_resolver.py`: personal-memory consolidation reads `:TurnEvidence` only; the `user:`-prefixed Episodic fallback and its two strips are removed.
-- Not compatible with graphs whose episodes carry their role only as a text prefix: those episodes now resolve to `unknown`. Rebuild them, or send `role`.
+- Not compatible with graphs whose episodes carry their role only as a text prefix: those episodes now resolve to `unknown`. Rebuild them, or send `role` for extraction; counter consolidation needs user `:TurnEvidence` and ignores `role`.
 - Tests: new `tests/test_turn_role_*.py`; prefix-encoding fixtures updated to structured roles in the anchored-time, closure, high-wave1, titled-list, cf193 and turn-evidence tests; `test_strip_user_prefix_removes_only_the_leading_role` removed with its helper.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
 

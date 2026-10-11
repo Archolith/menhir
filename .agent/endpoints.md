@@ -76,7 +76,7 @@ Public REST:
   - `GET /api/phase3/status` (readonly) — namespace dirty flag + `:TurnEvidence` count
   - `GET /api/views` (readonly) — current counter Views (each with value `history`/`superseded`) and `subject='perception'` abstention receipts, split
   - `POST /api/phase3/reset` (agent tier) — tear down a throwaway namespace: graphiti partition (Views + watermark) PLUS namespace-keyed `:TurnEvidence`; refuses the default/shared namespace
-  - public memory endpoints. `POST /api/memory` takes an optional `role` (`user`, `assistant`, `tool`, `agent`, `system`; anything else is a 422) naming the speaker of `episode`. Menhir never infers the speaker from the text, so a `user:` prefix grants nothing; a grounded episode takes its role from its turn evidence (#271). The MCP `add_memory` tools do not expose `role`.
+  - public memory endpoints. `POST /api/memory` takes an optional `role` (`user`, `assistant`, `tool`, `agent`, `system`, matched exactly; anything else is a 422, or a 400 through the internal backend bridge) naming the speaker of `episode`. Menhir never infers the speaker from the text, so a `user:` prefix grants nothing; a grounded episode takes its role from its turn evidence (#271). The MCP `add_memory` tools do not expose `role`.
 - Internal backend transport:
   - `/api/internal/backend/*`
   - used by `BackendClient`
