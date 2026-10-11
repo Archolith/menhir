@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-10-10 - Anchored-time P3c: a restatement keeps a stored ended fact live
+
+- Pin `archolith-graphiti-core==0.30.2.post6` (adds `Graphiti(preserved_edge_attributes=...)`,
+  fork PR #11: named edge properties survive the attribute recomputation on a paraphrased
+  duplicate and reach the edge-expiry hook).
+- `PRESERVED_EDGE_ATTRIBUTES` (`anchored_time_persist.py`): the P2 contract keys plus
+  `time_expiry` / `time_world_end`. `preserved_edge_attributes_kwargs` (`graphiti_client.py`)
+  passes them when the resolver or expiry is on. With `MENHIR_ANCHORED_TIME_EXPIRY` on, a
+  Graphiti without the parameter fails at client construction; with only the resolver on it
+  warns and passes nothing.
+- `MenhirEdgeExpiryHook`: when this call has no usable report (no cue, resolver error, plan),
+  a resolved duplicate whose stored `time_expiry` is `world_end` and whose stored
+  `time_world_end` is the same instant as `invalid_at` answers `WORLD_END`. Anything else,
+  including a new edge, a moved `invalid_at` or an unparsable stamp, answers `EXPIRE`. A
+  contradiction still expires the edge. The plan restatement does not override a stored
+  world end (D2); there is no backfill (D3).
+- Closes the P3 known gap D1 / Codex P3b-2 for stamped edges. Edges stored before P3 have no
+  stamp and keep upstream behavior.
+- `tests/test_anchored_time_restatement.py` (unit, real `resolve_extracted_edges`) and
+  `tests/test_anchored_time_restatement_live.py` (online): NEW.
+
 ## 2026-10-08 - Anchored-time P3: a fact's own end is world time, not supersession
 
 - Pin `archolith-graphiti-core==0.30.2.post5` (adds `Graphiti(edge_expiry_hook=...)`, fork PR #5;

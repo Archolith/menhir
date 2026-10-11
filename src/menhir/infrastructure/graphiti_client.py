@@ -38,7 +38,7 @@ except ImportError as exc:
         raise
     raise ImportError(
         "graphiti_core is missing GraphitiRequestTooLargeError. Menhir requires "
-        "archolith-graphiti-core==0.30.2.post5; an older graphiti-core install may have "
+        "archolith-graphiti-core==0.30.2.post6; an older graphiti-core install may have "
         "overwritten the fork's shared graphiti_core files. Use a fresh virtual environment "
         "or uninstall both graphiti-core distributions before reinstalling Menhir "
         "(see docs/post-install.md)."
@@ -141,6 +141,41 @@ def edge_expiry_hook_kwargs(enabled: bool, graphiti_cls: Any) -> dict[str, Any]:
             "edge_expiry_hook. Reinstall Menhir's pinned dependencies or turn the flag off."
         )
     return {"edge_expiry_hook": MenhirEdgeExpiryHook()}
+
+
+def preserved_edge_attributes_kwargs(
+    resolver_enabled: bool, expiry_enabled: bool, graphiti_cls: Any
+) -> dict[str, Any]:
+    """``Graphiti(...)`` kwargs that keep the anchored-time contract on duplicate restatements.
+
+    P3c: the contract properties and the world-end stamp survive a resolved duplicate, so a
+    restatement does not drop them and the expiry hook can read the stamp. With expiry on, a
+    fork without ``preserved_edge_attributes`` could expire a stored ended fact, so startup
+    refuses it; with only the resolver on, it warns and carries on.
+    """
+    if not resolver_enabled and not expiry_enabled:
+        return {}
+    try:
+        params = inspect.signature(graphiti_cls.__init__).parameters
+    except (TypeError, ValueError):
+        return {}
+    if "preserved_edge_attributes" not in params:
+        if expiry_enabled:
+            raise RuntimeError(
+                "MENHIR_ANCHORED_TIME_EXPIRY=true requires archolith-graphiti-core==0.30.2.post6 "
+                "or later (Graphiti(preserved_edge_attributes=...)); without it a restatement "
+                "can expire a stored ended fact. Reinstall Menhir's pinned dependencies or "
+                "turn the flag off."
+            )
+        logger.warning(
+            "Installed graphiti_core has no preserved_edge_attributes; the anchored-time "
+            "contract may be dropped by restatements. Upgrade to archolith-graphiti-core"
+            "==0.30.2.post6 or later."
+        )
+        return {}
+    from menhir.infrastructure.anchored_time_persist import PRESERVED_EDGE_ATTRIBUTES
+
+    return {"preserved_edge_attributes": PRESERVED_EDGE_ATTRIBUTES}
 
 
 @dataclass
@@ -392,6 +427,9 @@ class GraphitiClient:
                 candidate_filter_hook=MenhirCandidateFilterHook(),
                 node_pre_resolution_hook=MenhirNodePreResolutionHook(),
                 **edge_expiry_hook_kwargs(anchored_time_expiry, Graphiti),
+                **preserved_edge_attributes_kwargs(
+                    anchored_time is not None, anchored_time_expiry, Graphiti
+                ),
             ),
             llm_base_url=llama_base_url,
             embed_base_url=embed_base_url,
