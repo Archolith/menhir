@@ -266,7 +266,9 @@ def parse_titled_list(episode_text: str) -> tuple[str, list[str]] | None:
         return None
     # A speaker or self label is never a container: text a caller still sends as `user: a\nb\nc`
     # must not mint MEMBER_OF edges into the self entity (#271 removed the prefix strip).
-    if title.lower() in TURN_ROLES or title.lower() in _ASSISTANT_POLICY_SELF_LABELS:
+    # Whitespace-collapsed, as endpoint names are: "the  user" and "the\xa0user" are "the user".
+    label = " ".join(title.lower().split())
+    if label in TURN_ROLES or label in _ASSISTANT_POLICY_SELF_LABELS:
         return None
 
     # An item on the title line counts as the first item, not as part of the title.

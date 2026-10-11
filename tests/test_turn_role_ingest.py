@@ -68,12 +68,15 @@ async def test_given_role_is_passed_to_create_pending_episode() -> None:
 
 
 @pytest.mark.asyncio
-async def test_role_is_normalized_before_it_is_persisted() -> None:
+@pytest.mark.parametrize("role", [" Tool ", "Tool", "USER", ["user"]])
+async def test_role_must_match_exactly_like_the_rest_literal(role) -> None:
+    # Review F4: every transport accepts exactly the values the REST Literal accepts.
     adapter = MagicMock()
-    await _Intake(adapter).queue_episode_for_enrichment(
-        episode="x", session=_session(), source="claude-code", role=" Tool ",
-    )
-    assert adapter.create_pending_episode.call_args.kwargs["turn_role"] == "tool"
+    with pytest.raises(ValueError):
+        await _Intake(adapter).queue_episode_for_enrichment(
+            episode="x", session=_session(), source="claude-code", role=role,
+        )
+    adapter.create_pending_episode.assert_not_called()
 
 
 @pytest.mark.asyncio

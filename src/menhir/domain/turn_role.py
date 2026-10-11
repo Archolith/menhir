@@ -26,13 +26,16 @@ def resolve_turn_role(claimed: Mapping[str, Any]) -> str:
     content = claimed.get("content")
     text = claimed.get("turn_evidence_text")
     # A link alone does not prove the speaker (intake links a caller-supplied turn_evidence_uuid to
-    # non-user memories at face value); equality with the turn text does.
+    # non-user memories at face value); equality with the turn text does. Evidence text is stripped
+    # on write, so compare stripped. agent_quoted evidence is the agent's claim, not a captured
+    # turn, so it proves nothing (the admission gate refuses it for the same reason).
     if (
         type(count) is int
         and count == 1
         and isinstance(content, str)
         and isinstance(text, str)
-        and content == text
+        and content.strip() == text.strip()
+        and claimed.get("turn_evidence_source_kind") != "agent_quoted"
     ):
         proven = normalize_turn_role(claimed.get("turn_evidence_role"))
         if proven is not None:

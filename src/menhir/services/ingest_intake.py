@@ -85,11 +85,12 @@ class IngestIntakeMixin:
 
         validate_memory_payload(episode, diff)
 
-        from menhir.domain.turn_role import normalize_turn_role
+        from menhir.domain.turn_role import TURN_ROLES
 
-        turn_role = normalize_turn_role(role)
-        if role is not None and turn_role is None:
+        # Exact match, like the REST Literal, so every transport accepts the same values.
+        if role is not None and (not isinstance(role, str) or role not in TURN_ROLES):
             raise ValueError(f"invalid role: {role!r}")
+        turn_role = role
 
         from menhir.domain.namespace import stamped_namespace
         from menhir.domain.bootstrap_scope import normalize_bootstrap_scope_for_flag

@@ -149,7 +149,11 @@ def test_role_like_prefix_is_ordinary_text_not_stripped() -> None:
     assert parse_titled_list("user: agents names below:\nAdmon\nBeryl\nCoyle") is None
 
 
-@pytest.mark.parametrize("label", ["user", "User", "assistant", "the user", "me", "system"])
+@pytest.mark.parametrize(
+    "label",
+    ["user", "User", "assistant", "the user", "me", "system",
+     "the  user", "the\u00a0user", "the\tuser"],  # review F3: whitespace variants
+)
 def test_speaker_or_self_label_is_never_a_list_container(label) -> None:
     # Prefixed text a caller still sends must not mint MEMBER_OF edges into the self entity.
     assert parse_titled_list(f"{label}: agents\nAdmon\nBeryl\nCoyle") is None

@@ -792,6 +792,7 @@ class EpisodeLifecycleRepository:
                 "subject_turns[0].role AS turn_evidence_role",
                 "subject_turns[0].declarant AS turn_evidence_declarant",
                 "subject_turns[0].text AS turn_evidence_text",
+                "subject_turns[0].source_kind AS turn_evidence_source_kind",
                 "subject_turns[0].namespace AS turn_evidence_namespace",
                 "(coalesce(n.is_evidence_projection, false)"
                 " AND size(subject_turns) = 1"

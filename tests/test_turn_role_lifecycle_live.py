@@ -82,3 +82,30 @@ def test_turn_role_survives_a_requeue_and_reclaim(graph: MemoryGraphAdapter) -> 
     )
     again = _claim(graph, episode_uuid, worker_id="worker-2")
     assert again["turn_role"] == "tool"
+
+
+@pytest.mark.parametrize(("source_kind", "expected"), [("agent_quoted", "unknown"), ("hook", "user")])
+def test_only_captured_evidence_proves_the_speaker_through_a_real_claim(
+    graph: MemoryGraphAdapter, source_kind: str, expected: str,
+) -> None:
+    # Review F1: the claim must carry the turn's source_kind so agent_quoted evidence proves nothing.
+    from menhir.domain.turn_role import resolve_turn_role
+
+    text = f"I moved to Lisbon last month ({source_kind})"
+    turn_id = graph.record_turn_evidence(
+        text=text, role="user", declarant="user", session_id="session-live", source_kind=source_kind,
+    )["turn_id"]
+    episode_uuid = graph.create_pending_episode(
+        episode_uuid=f"pending-turn-role-evidence-{source_kind}",
+        name=f"episode-session-live-turn-role-evidence-{source_kind}",
+        content=text,
+        session_id="session-live",
+        user_id="user-1",
+        source="unit-test",
+        source_confidence=0.5,
+    )
+    assert graph.link_episode_admission(episode_uuid=episode_uuid, turn_evidence_uuid=turn_id)
+    claimed = _claim(graph, episode_uuid)
+    assert claimed["turn_evidence_count"] == 1
+    assert claimed["turn_evidence_source_kind"] == source_kind
+    assert resolve_turn_role(claimed) == expected

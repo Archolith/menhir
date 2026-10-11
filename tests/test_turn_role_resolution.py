@@ -84,9 +84,27 @@ def test_agent_paraphrase_falls_back_to_the_declared_role() -> None:
     assert resolve_turn_role(claimed) == "agent"
 
 
-@pytest.mark.parametrize("suffix", [" ", "\n", "."])
-def test_content_must_be_byte_equal_to_the_turn_text(suffix) -> None:
+@pytest.mark.parametrize("suffix", [".", " too", "!"])
+def test_content_must_equal_the_turn_text(suffix) -> None:
     assert resolve_turn_role(_claimed(content=TURN + suffix)) == "unknown"
+
+
+@pytest.mark.parametrize("pad", [" ", "\n", "\t\n "])
+def test_surrounding_whitespace_does_not_lose_the_proof(pad) -> None:
+    # Evidence text is stripped on write; episode content is stored raw (review F7).
+    assert resolve_turn_role(_claimed(content=pad + TURN + pad)) == "user"
+
+
+def test_agent_quoted_evidence_proves_nothing() -> None:
+    # Review F1: an agent's quote of the user is the agent's claim, not a captured turn.
+    quoted = _claimed(turn_evidence_source_kind="agent_quoted")
+    assert resolve_turn_role(quoted) == "unknown"
+    assert resolve_turn_role({**quoted, "turn_role": "assistant"}) == "assistant"
+
+
+@pytest.mark.parametrize("kind", [None, "hook", "unknown", "claude-code"])
+def test_captured_evidence_of_any_other_kind_still_proves(kind) -> None:
+    assert resolve_turn_role(_claimed(turn_evidence_source_kind=kind)) == "user"
 
 
 def test_two_linked_turns_with_equal_text_are_not_evidence_proven() -> None:
