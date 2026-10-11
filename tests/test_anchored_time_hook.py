@@ -26,7 +26,7 @@ pytestmark = pytest.mark.unit
 
 SPEECH = datetime(2024, 2, 14, 18, 30, tzinfo=timezone.utc)
 MID_JAN = datetime(2024, 1, 16, tzinfo=timezone.utc)
-TURN = "user: I moved to Denver last month and I still love hiking."
+TURN = "I moved to Denver last month and I still love hiking."
 LAST_MONTH_OUTPUT = json.dumps({
     "facts": [
         {"i": 0, "expression": "last month", "basis": "speech_relative", "kind": "point_event",
@@ -75,8 +75,8 @@ def _resolver(*outcomes, timeout_s: float = 5.0):
     return resolver, completions
 
 
-async def _apply(resolver, edges, text=TURN, valid_at=SPEECH):
-    receipt = policy.begin_extraction_receipt("ep-1", text)
+async def _apply(resolver, edges, text=TURN, valid_at=SPEECH, role="user"):
+    receipt = policy.begin_extraction_receipt("ep-1", text, turn_role=role)
     try:
         await policy._apply_anchored_time(resolver, receipt, SimpleNamespace(uuid="g-1", valid_at=valid_at), edges)
         return receipt.anchored_time
@@ -116,7 +116,7 @@ async def test_hook_overlays_valid_at_and_records_the_report(monkeypatch) -> Non
 
     monkeypatch.setattr(policy, "extract_nodes_and_edges", fake_extract)
     resolver, completions = _resolver()
-    receipt = policy.begin_extraction_receipt("ep-1", TURN)
+    receipt = policy.begin_extraction_receipt("ep-1", TURN, turn_role="user")
     try:
         hook = policy.MenhirExtractionHook(anchored_time=resolver)
         result = await hook.extract_single_episode(_context(SimpleNamespace(uuid="g-1", valid_at=SPEECH)))
@@ -137,7 +137,7 @@ async def test_hook_overlays_valid_at_and_records_the_report(monkeypatch) -> Non
     assert report.results[0].edge_uuid == "e0" and report.results[0].graphiti_valid_at == SPEECH
     assert report.model == "gpt-6-luna" and report.prompt_version == "a7797891"
     (call,) = completions.calls
-    assert "TURN: I moved to Denver last month" in call["messages"][1]["content"]  # prefix stripped
+    assert "TURN: I moved to Denver last month" in call["messages"][1]["content"]  # text as given
     assert "0. The user moved to Denver.\n1. The user loves hiking." in call["messages"][1]["content"]
     assert "SPEECH_TIME: 2024-02-14 (Wednesday)" in call["messages"][1]["content"]
 
@@ -222,25 +222,25 @@ async def test_cancellation_propagates() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("text", "edges", "valid_at", "reason"),
+    ("text", "role", "edges", "valid_at", "reason"),
     [
-        (TURN, [], SPEECH, "no_edges"),
-        ("assistant: You moved to Denver last month.", None, SPEECH, "not_user_turn"),
-        ("I moved to Denver last month.", None, SPEECH, "not_user_turn"),  # unprefixed note
-        (TURN, None, None, "no_speech_time"),
-        ("user: I moved to Denver and I love hiking.", None, SPEECH, "no_cue"),
-        ("user: I moved to Denver last month. " + "x" * 4000, None, SPEECH, "turn_too_long"),
-        (TURN, "many", SPEECH, "too_many_edges"),
+        (TURN, "user", [], SPEECH, "no_edges"),
+        ("You moved to Denver last month.", "assistant", None, SPEECH, "not_user_turn"),
+        ("I moved to Denver last month.", "unknown", None, SPEECH, "not_user_turn"),  # no role given
+        (TURN, "user", None, None, "no_speech_time"),
+        ("I moved to Denver and I love hiking.", "user", None, SPEECH, "no_cue"),
+        ("I moved to Denver last month. " + "x" * 4000, "user", None, SPEECH, "turn_too_long"),
+        (TURN, "user", "many", SPEECH, "too_many_edges"),
     ],
 )
-async def test_gates_skip_without_a_call(text, edges, valid_at, reason) -> None:
+async def test_gates_skip_without_a_call(text, role, edges, valid_at, reason) -> None:
     if edges is None:
         edges = _edges()
     elif edges == "many":
         edges = [_edge(f"fact {i}", f"e{i}") for i in range(policy.ANCHORED_TIME_MAX_EDGES + 1)]
     before = _dumps(edges)
     resolver, completions = _resolver()
-    report = await _apply(resolver, edges, text=text, valid_at=valid_at)
+    report = await _apply(resolver, edges, text=text, valid_at=valid_at, role=role)
     assert (report.status, report.reason) == ("skipped", reason)
     assert completions.calls == []
     assert _dumps(edges) == before
@@ -267,7 +267,7 @@ async def test_second_identical_episode_hits_the_cache() -> None:
 
 @pytest.mark.asyncio
 async def test_cache_survives_guard_mutation_and_is_bounded() -> None:
-    turn = "user: I read Dune and Emma, and finished Ulysses yesterday."
+    turn = "I read Dune and Emma, and finished Ulysses yesterday."
     facts = ["The user read Dune.", "The user read Emma.", "The user finished reading Ulysses."]
     output = json.dumps({"facts": [
         {"i": i, "expression": "yesterday", "basis": "speech_relative", "kind": "point_event",
@@ -283,7 +283,7 @@ async def test_cache_survives_guard_mutation_and_is_bounded() -> None:
     small, small_calls = _resolver()
     small._cache_size = 1
     await _apply(small, _edges())
-    await _apply(small, _edges(), text="user: I moved to Denver last month, and I love hiking.")
+    await _apply(small, _edges(), text="I moved to Denver last month, and I love hiking.")
     await _apply(small, _edges())
     assert len(small_calls.calls) == 3
 

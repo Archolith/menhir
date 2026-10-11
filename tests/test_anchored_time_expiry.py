@@ -36,7 +36,7 @@ pytestmark = pytest.mark.unit
 
 SPEECH = datetime(2024, 4, 10, 18, 30, tzinfo=timezone.utc)
 TRIP_END = datetime(2024, 4, 1, tzinfo=timezone.utc)
-TURN = "user: I was in Rome from March 27 to April 1 and I lived in Paris until 2021, planning Oslo."
+TURN = "I was in Rome from March 27 to April 1 and I lived in Paris until 2021, planning Oslo."
 OUTPUT = json.dumps({
     "facts": [
         {"i": 0, "expression": "from March 27 to April 1", "basis": "explicit_date",
@@ -83,7 +83,7 @@ def _resolver(content: str = OUTPUT) -> AnchoredTimeResolver:
 
 
 async def _apply(edges, *, expiry: bool, content: str = OUTPUT) -> AnchoredTimeReport:
-    receipt = policy.begin_extraction_receipt("ep-1", TURN)
+    receipt = policy.begin_extraction_receipt("ep-1", TURN, turn_role="user")
     try:
         await policy._apply_anchored_time(_resolver(content), receipt,
                                           SimpleNamespace(uuid="g-1", valid_at=SPEECH), edges,
@@ -149,7 +149,7 @@ async def test_hook_gates_unclassified_unended_and_already_expired_edges() -> No
 async def test_hook_failure_or_skip_records_nothing() -> None:
     report = await _apply(_edges(), expiry=True, content="not json")
     assert report.status != "ok" and report.results == ()
-    receipt = policy.begin_extraction_receipt("ep-1", "user: no time words here at all.")
+    receipt = policy.begin_extraction_receipt("ep-1", "no time words here at all.", turn_role="user")
     try:
         await policy._apply_anchored_time(_resolver(), receipt,
                                           SimpleNamespace(uuid="g-1", valid_at=SPEECH), _edges(),
@@ -182,7 +182,7 @@ async def test_extraction_hook_threads_the_flag(monkeypatch) -> None:
         custom_extraction_instructions=None,
     )
     for flag in (True, False):
-        receipt = policy.begin_extraction_receipt("ep-1", TURN)
+        receipt = policy.begin_extraction_receipt("ep-1", TURN, turn_role="user")
         try:
             hook = policy.MenhirExtractionHook(anchored_time=_resolver(), anchored_time_expiry=flag)
             await hook.extract_single_episode(context)
@@ -191,7 +191,7 @@ async def test_extraction_hook_threads_the_flag(monkeypatch) -> None:
         assert receipt.anchored_time.expiry is flag
         assert (receipt.anchored_time.results[0].world_end is not None) is flag
     # Without a resolver the flag has no effect: no report at all.
-    receipt = policy.begin_extraction_receipt("ep-1", TURN)
+    receipt = policy.begin_extraction_receipt("ep-1", TURN, turn_role="user")
     try:
         await policy.MenhirExtractionHook(anchored_time_expiry=True).extract_single_episode(context)
     finally:
@@ -221,7 +221,7 @@ OWNER = "owner-1"
 async def _resolve(edge, related, existing, llm, *, results=None, hook=True, owner=OWNER,
                    report_owner=OWNER, status="ok", expiry=True):
     """resolve_extracted_edge inside an add_episode-like scope: receipt + owner bound."""
-    receipt = policy.begin_extraction_receipt("ep-1", TURN)
+    receipt = policy.begin_extraction_receipt("ep-1", TURN, turn_role="user")
     binding = policy.anchored_time_owner.set(owner)
     try:
         receipt.anchored_time = AnchoredTimeReport(
@@ -345,7 +345,7 @@ async def test_adapter_falls_back_to_the_resolved_edge_classification() -> None:
     from graphiti_core.edge_expiry import EdgeExpiryContext, EdgeExpiryDecision
 
     extracted, sibling = _edges()[0], _edges()[1]
-    receipt = policy.begin_extraction_receipt("ep-1", TURN)
+    receipt = policy.begin_extraction_receipt("ep-1", TURN, turn_role="user")
     binding = policy.anchored_time_owner.set(OWNER)
     try:
         receipt.anchored_time = AnchoredTimeReport(status="ok", model="m", owner=OWNER, expiry=True,

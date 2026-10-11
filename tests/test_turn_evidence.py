@@ -369,12 +369,13 @@ def test_phase3_prefers_evidence_when_present():
 
 
 @pytest.mark.unit
-def test_phase3_falls_back_to_legacy_without_evidence():
+def test_phase3_never_falls_back_to_legacy_without_evidence():
+    # #271: the `user:`-prefixed Episodic fallback was removed; discovery is TurnEvidence-only.
     adapter = MemoryGraphAdapter(FakeNeo4j())
     adapter._turn_evidence = _StubEvidence(exists=False)
     adapter._personal_memory = _StubLegacy()
-    assert adapter.list_dirty_namespaces() == ["legacy-ns"]
-    assert adapter.load_user_episodes("proj")[0]["content"] == "user: legacy"
+    assert adapter.list_dirty_namespaces() == []
+    assert adapter.load_user_episodes("proj") == []
 
 
 # ----------------------------------------------------------------------------- triage (acceptance)

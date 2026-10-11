@@ -32,6 +32,7 @@ from graphiti_core.extraction_routing import (
 from graphiti_core.utils.maintenance.combined_extraction import extract_nodes_and_edges
 
 from menhir.domain.namespace import namespace_to_group_id
+from menhir.domain.turn_role import TURN_ROLES
 from menhir.domain.self_identity import (
     SUBJECT_ENDPOINT_MARKER_PREFIX,
     SelfEvidenceKind,
@@ -75,6 +76,8 @@ class CombinedExtractionReceipt:
 
     episode_key: str = ""
     episode_text: str = ""
+    # Speaker from structured data (domain/turn_role.py); never parsed from episode_text.
+    turn_role: str = "unknown"
     source_description: str = ""
     #: What the ingestion boundary actually PROVED about this episode's author, carried from the
     #: parent task so the binding seam never has to infer identity from extracted text. ``None``
@@ -249,7 +252,7 @@ def parse_titled_list(episode_text: str) -> tuple[str, list[str]] | None:
     text = str(episode_text or "")
     if ":" not in text or "\n" not in text:
         return None
-    body = text.split(":", 1)[1] if _episode_role(text) != "unknown" else text
+    body = text
     lines = [ln.strip() for ln in body.splitlines()]
     lines = [ln for ln in lines if ln]
     if len(lines) < 3:                      # title line + >= 2 more; item count is checked below
@@ -260,6 +263,10 @@ def parse_titled_list(episode_text: str) -> tuple[str, list[str]] | None:
         return None
     title = m.group("title").strip()
     if not title or len(title.split()) > 8:
+        return None
+    # A speaker or self label is never a container: text a caller still sends as `user: a\nb\nc`
+    # must not mint MEMBER_OF edges into the self entity (#271 removed the prefix strip).
+    if title.lower() in TURN_ROLES or title.lower() in _ASSISTANT_POLICY_SELF_LABELS:
         return None
 
     # An item on the title line counts as the first item, not as part of the title.
@@ -329,6 +336,7 @@ def begin_extraction_receipt(
     self_identity: SelfIdentityContext | None = None,
     self_subject_endpoint: SelfSubjectEndpointEnvelope | None = None,
     self_bind_mode: SelfBindMode = SelfBindMode.OFF,
+    turn_role: str = "unknown",
 ) -> CombinedExtractionReceipt:
     """Create and activate a fresh receipt for the current episode (call in the parent task).
 
@@ -362,6 +370,7 @@ def begin_extraction_receipt(
     receipt = CombinedExtractionReceipt(
         episode_key=normalized_episode_key,
         episode_text=str(episode_text or ""),
+        turn_role=turn_role,
         source_description=str(source_description or ""),
         relationless_repair_context_loader=relationless_repair_context_loader,
         self_identity=self_identity,
@@ -487,27 +496,23 @@ _SELF_FIRST_PERSON = frozenset({"i", "me", "my", "mine", "myself"})
 _ASSISTANT_POLICY_SELF_LABELS = _SELF_THIRD_PERSON | _SELF_FIRST_PERSON
 
 
-def _episode_role(episode_text: str) -> str:
-    """'user' | 'assistant' | 'unknown' from the turn prefix the ingest writes."""
-    head = str(episode_text or "").lstrip().lower()
-    if head.startswith("user:"):
-        return "user"
-    if head.startswith("assistant:"):
-        return "assistant"
-    return "unknown"
+def _receipt_turn_role(receipt: "CombinedExtractionReceipt | None") -> str:
+    """Structured turn role carried on the receipt, else 'unknown'."""
+    role = getattr(receipt, "turn_role", None) if receipt is not None else None
+    return role if isinstance(role, str) else "unknown"
 
 
-def _is_unresolved_self_like_endpoint(normalized_name: str, episode_text: str) -> bool:
+def _is_unresolved_self_like_endpoint(normalized_name: str, turn_role: str) -> bool:
     """True when endpoint closure may retain this as an ORDINARY self-like entity.
 
     This helper does **not** establish identity and does **not** assign the canonical UUID. It only
     rewrites equivalent endpoint spellings to the display name ``user`` and lets ordinary Graphiti
     resolution decide where that node goes.
 
-    ASSISTANT TURNS ARE EXCLUDED. A ``user -> X`` edge on an assistant turn is the model restating
-    what the human already said in their own turn.
+    ASSISTANT TURNS ARE EXCLUDED (structured ``turn_role``). A ``user -> X`` edge on an assistant
+    turn is the model restating what the human already said in their own turn.
     """
-    if _episode_role(episode_text) == "assistant":
+    if turn_role == "assistant":
         return False
     return normalized_name in _SELF_THIRD_PERSON or normalized_name in _SELF_FIRST_PERSON
 
@@ -786,7 +791,8 @@ def _sanitize_combined_payload(
 
     known = {_normalize_endpoint_name(e["name"]) for e in entities}
     self_key = _normalize_endpoint_name(_SELF_ENTITY_NAME)
-    is_assistant_turn = _episode_role(episode_text) == "assistant"
+    turn_role = _receipt_turn_role(receipt)
+    is_assistant_turn = turn_role == "assistant"
     _all_self_labels = bool(
         entities
         and not raw_edges
@@ -822,7 +828,7 @@ def _sanitize_combined_payload(
                 known.add(norm_key)
                 synthesized += 1
                 continue
-            if _is_unresolved_self_like_endpoint(norm_key, episode_text):
+            if _is_unresolved_self_like_endpoint(norm_key, turn_role):
                 # Normalize the endpoint spelling and materialize it ONCE per payload so Graphiti
                 # does not drop the edge. Availability recovery, not identity resolution.
                 edge[endpoint_key] = _SELF_ENTITY_NAME
@@ -1650,7 +1656,6 @@ async def _apply_anchored_time(
         clause_guard,
         detect,
         plan_overlay,
-        strip_user_prefix,
     )
 
     report = AnchoredTimeReport(model=str(getattr(resolver, "model", "") or ""),
@@ -1661,10 +1666,10 @@ async def _apply_anchored_time(
         slot.report = report
     try:
         speech_time = getattr(episode, "valid_at", None)
-        turn = strip_user_prefix(receipt.episode_text)
+        turn = receipt.episode_text or ""
         skip = (
             "no_edges" if not edges
-            else "not_user_turn" if _episode_role(receipt.episode_text) != "user"
+            else "not_user_turn" if _receipt_turn_role(receipt) != "user"
             else "no_speech_time" if speech_time is None
             else "too_many_edges" if len(edges) > ANCHORED_TIME_MAX_EDGES
             else "turn_too_long" if len(turn) > ANCHORED_TIME_MAX_TURN_CHARS

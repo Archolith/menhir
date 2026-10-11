@@ -22,6 +22,7 @@ class BackendClientOpsMixin:
         occurred_at: str | None = None,
         turn_evidence_uuid: str | None = None,
         user_statement: str | None = None,
+        role: str | None = None,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {
             "text": text,
@@ -38,6 +39,8 @@ class BackendClientOpsMixin:
         # Sent only when set, so a bridge talking to an older backend keeps working without it.
         if (user_statement or "").strip():
             params["user_statement"] = user_statement
+        if role is not None:
+            params["role"] = role
         return await self._request("queue_episode", params)
 
     async def flag_memory(

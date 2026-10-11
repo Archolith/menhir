@@ -119,6 +119,7 @@ class EpisodeLifecycleRepository:
         bootstrap_scope: str | None = None,
         namespace: str = "default",
         reference_time: datetime | None = None,
+        turn_role: str | None = None,
     ) -> str:
         self.neo4j.execute(
             """
@@ -134,6 +135,7 @@ class EpisodeLifecycleRepository:
                 n.content = $content,
                 n.diff = $diff,
                 n.source = $source,
+                n.turn_role = $turn_role,
                 n.source_confidence = $source_confidence,
                 n.user_flagged = $user_flagged,
                 n.bootstrap_scope = $bootstrap_scope,
@@ -172,6 +174,7 @@ class EpisodeLifecycleRepository:
                 "session_id": session_id,
                 "user_id": user_id,
                 "source": source,
+                "turn_role": turn_role,
                 "source_confidence": source_confidence,
                 "user_flagged": user_flagged,
                 "bootstrap_scope": bootstrap_scope,
@@ -774,6 +777,7 @@ class EpisodeLifecycleRepository:
                 "n.name AS name",
                 "n.content AS content",
                 "n.source AS source",
+                "n.turn_role AS turn_role",
                 "n.session_id AS session_id",
                 "n.user_id AS user_id",
                 "n.user_flagged AS user_flagged",

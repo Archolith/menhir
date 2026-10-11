@@ -667,8 +667,7 @@ async def consolidate_personal_memory(
             seen: set[tuple[str, str]] = set()
             for r in rows:
                 raw = str(r.get("content") or "")
-                # legacy Episodic turns are stored `user: <text>`; raw :Turn evidence has no prefix.
-                body = (raw[len("user:"):] if raw[:5].lower() == "user:" else raw).strip()[:2000]
+                body = raw.strip()[:2000]
                 if len(body) < 8:
                     continue
                 stamp = str(r.get("valid_at") or "")

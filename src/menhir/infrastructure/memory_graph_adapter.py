@@ -362,6 +362,7 @@ class MemoryGraphAdapter:
         bootstrap_scope: str | None = None,
         namespace: str = "default",
         reference_time: datetime | None = None,
+        turn_role: str | None = None,
     ) -> str:
         return self._episodes.create_pending_episode(
             episode_uuid=episode_uuid,
@@ -376,6 +377,7 @@ class MemoryGraphAdapter:
             bootstrap_scope=bootstrap_scope,
             namespace=namespace,
             reference_time=reference_time,
+            turn_role=turn_role,
         )
 
     def link_episode_admission(
@@ -1590,18 +1592,13 @@ class MemoryGraphAdapter:
         return self._structure.list_orphan_structure_projects()
 
     # --- personal-memory consolidation (perception) ---
-    # Prefer raw :Turn evidence (ADR 0001) when any user-authored Turn exists; otherwise fall back to
-    # the legacy `user:`-prefixed Episodic path (benchmark fixtures). The switch is per-call so a box
-    # that starts capturing Turns transitions with no restart.
+    # Discovery reads role=user :TurnEvidence only. The legacy `user:`-prefixed Episodic fallback
+    # was removed (#271, as #95 did for the scalar path).
     def list_dirty_namespaces(self, *, limit: int = 200) -> list[str]:
-        if self._turn_evidence.evidence_exists():
-            return self._turn_evidence.list_dirty_evidence_namespaces(limit=limit)
-        return self._personal_memory.list_dirty_namespaces(limit=limit)
+        return self._turn_evidence.list_dirty_evidence_namespaces(limit=limit)
 
     def load_user_episodes(self, namespace: str, *, limit: int = 500) -> list[dict[str, Any]]:
-        if self._turn_evidence.evidence_exists():
-            return self._turn_evidence.load_user_evidence(namespace, limit=limit)
-        return self._personal_memory.load_user_episodes(namespace, limit=limit)
+        return self._turn_evidence.load_user_evidence(namespace, limit=limit)
 
     def mark_consolidated(self, namespace: str, *, at: str) -> None:
         self._personal_memory.mark_consolidated(namespace, at=at)

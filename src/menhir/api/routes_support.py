@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
@@ -455,6 +455,9 @@ class MemoryRequest(BaseModel):
     #: The user's verbatim words, supplied by the agent. Recorded as agent_quoted TurnEvidence:
     #: scalar perception input only, never user-tier grounds. Exclusive with turn_evidence_uuid.
     user_statement: str | None = None
+    # Speaker of `episode`. Menhir never infers the speaker from the text (#271); grounded
+    # episodes take it from their turn evidence.
+    role: Literal["user", "assistant", "tool", "agent", "system"] | None = None
 
 
 class MemoryResponse(BaseModel):

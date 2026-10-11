@@ -31,8 +31,8 @@ from menhir.infrastructure.graphiti_extraction_policy import (
 @pytest.mark.parametrize(
     "turn",
     [
-        "user: Reminder:\nbuy milk\nwalk dog\ncall mom",
-        "user: Today I did:\nfixed the bug\nshipped release\nate lunch",
+        "Reminder:\nbuy milk\nwalk dog\ncall mom",
+        "Today I did:\nfixed the bug\nshipped release\nate lunch",
     ],
 )
 def test_the_executed_prose_blocks_are_refused(turn: str) -> None:
@@ -48,7 +48,7 @@ def test_one_prose_line_refuses_the_whole_block() -> None:
     partially accepted."""
     assert (
         parse_titled_list(
-            "user: agents:\nAdmon\nMagdy\nEhab\nwe are working today"
+            "agents:\nAdmon\nMagdy\nEhab\nwe are working today"
         )
         is None
     )
@@ -60,7 +60,7 @@ def test_one_prose_line_refuses_the_whole_block() -> None:
 @pytest.mark.unit
 def test_a_genuine_list_of_names_still_parses() -> None:
     parsed = parse_titled_list(
-        "user: Favourite bands:\nRadiohead\nPortishead\nMassive Attack"
+        "Favourite bands:\nRadiohead\nPortishead\nMassive Attack"
     )
     assert parsed == (
         "Favourite bands",
@@ -75,7 +75,7 @@ def test_a_genuine_list_of_names_still_parses() -> None:
 def test_an_overlong_item_still_refuses() -> None:
     assert (
         parse_titled_list(
-            "user: agents:\nAdmon\nMagdy\n"
+            "agents:\nAdmon\nMagdy\n"
             "the rest of the team will be assigned later this week somehow"
         )
         is None
@@ -85,7 +85,7 @@ def test_an_overlong_item_still_refuses() -> None:
 @pytest.mark.unit
 def test_sentence_punctuation_still_refuses() -> None:
     assert (
-        parse_titled_list("user: agents:\nAdmon\nMagdy\nEhab.\nSara") is None
+        parse_titled_list("agents:\nAdmon\nMagdy\nEhab.\nSara") is None
     )
 
 
@@ -107,7 +107,7 @@ def test_comment_and_implementation_agree_on_the_verb_guard() -> None:
         assert verb in _LIST_VERBS
 
     # Behavioral half: a verb item really is refused.
-    assert parse_titled_list("user: Reminder:\nbuy milk\nwalk dog\ncall mom") is None
+    assert parse_titled_list("Reminder:\nbuy milk\nwalk dog\ncall mom") is None
 
 
 # ---------------------------------------------------------------------------
@@ -124,13 +124,13 @@ def test_comment_and_implementation_agree_on_the_verb_guard() -> None:
 @pytest.mark.parametrize(
     ("label", "episode", "expected"),
     [
-        ("noun that is also a verb", "user: Tools:\nsaw\nhammer\ndrill",
+        ("noun that is also a verb", "Tools:\nsaw\nhammer\ndrill",
          ("Tools", ["saw", "hammer", "drill"])),
-        ("verb as a non-leading word", "user: Races:\nfun run\nnight run\ntrail run",
+        ("verb as a non-leading word", "Races:\nfun run\nnight run\ntrail run",
          ("Races", ["fun run", "night run", "trail run"])),
-        ("single-word title case", "user: Albums:\nWork\nRumours\nKid A",
+        ("single-word title case", "Albums:\nWork\nRumours\nKid A",
          ("Albums", ["Work", "Rumours", "Kid A"])),
-        ("plain names", "user: Team:\nAlice\nBob\nCarol",
+        ("plain names", "Team:\nAlice\nBob\nCarol",
          ("Team", ["Alice", "Bob", "Carol"])),
     ],
 )
@@ -141,4 +141,4 @@ def test_name_lists_are_still_accepted(label, episode, expected):
 def test_one_clause_among_names_still_refuses_the_whole_block():
     """The whole-block rule, with the clause NOT first -- a partial parse would be worse than none,
     per the module's own cost model."""
-    assert parse_titled_list("user: Stuff:\nRadiohead\nbuy milk\nPortishead") is None
+    assert parse_titled_list("Stuff:\nRadiohead\nbuy milk\nPortishead") is None

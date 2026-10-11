@@ -474,6 +474,8 @@ async def ingest_memory(
                 detail="user_statement and turn_evidence_uuid are mutually exclusive",
             )
         ingest_kwargs["user_statement"] = body.user_statement
+    if body.role is not None:
+        ingest_kwargs["role"] = body.role
     result = await backend.queue_episode(
         body.episode,
         user_id=session.user_id,

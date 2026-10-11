@@ -138,7 +138,7 @@ def test_cf197_echo_edge_is_dropped_even_when_the_model_lists_user() -> None:
         _sanitize_combined_payload,
     )
 
-    episode = "assistant: You mentioned you want to build a web scraper."
+    episode = "You mentioned you want to build a web scraper."
     payload = {
         "extracted_entities": [
             {"name": "user", "entity_type_id": -1},
@@ -154,7 +154,7 @@ def test_cf197_echo_edge_is_dropped_even_when_the_model_lists_user() -> None:
             }
         ],
     }
-    receipt = CombinedExtractionReceipt(episode_key="e1", episode_text=episode)
+    receipt = CombinedExtractionReceipt(episode_key="e1", episode_text=episode, turn_role="assistant")
     out = _sanitize_combined_payload(payload, receipt, episode)
 
     assert out["edges"] == []
@@ -167,7 +167,7 @@ def test_cf197_non_echo_edges_on_an_assistant_turn_survive() -> None:
         _sanitize_combined_payload,
     )
 
-    episode = "assistant: Redis and Postgres are both datastores."
+    episode = "Redis and Postgres are both datastores."
     payload = {
         "extracted_entities": [
             {"name": "Redis", "entity_type_id": -1},
@@ -183,7 +183,7 @@ def test_cf197_non_echo_edges_on_an_assistant_turn_survive() -> None:
             }
         ],
     }
-    receipt = CombinedExtractionReceipt(episode_key="e2", episode_text=episode)
+    receipt = CombinedExtractionReceipt(episode_key="e2", episode_text=episode, turn_role="assistant")
     out = _sanitize_combined_payload(payload, receipt, episode)
 
     assert len(out["edges"]) == 1

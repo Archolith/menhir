@@ -71,6 +71,7 @@ class IngestIntakeMixin:
         occurred_at: str | None = None,
         turn_evidence_uuid: str | None = None,
         user_statement: str | None = None,
+        role: str | None = None,
     ) -> IngestResult:
         """Durably record a raw episode and queue background enrichment.
 
@@ -83,6 +84,12 @@ class IngestIntakeMixin:
         """
 
         validate_memory_payload(episode, diff)
+
+        from menhir.domain.turn_role import normalize_turn_role
+
+        turn_role = normalize_turn_role(role)
+        if role is not None and turn_role is None:
+            raise ValueError(f"invalid role: {role!r}")
 
         from menhir.domain.namespace import stamped_namespace
         from menhir.domain.bootstrap_scope import normalize_bootstrap_scope_for_flag
@@ -156,6 +163,8 @@ class IngestIntakeMixin:
             pending_kwargs: dict[str, object] = {}
             if normalized_bootstrap_scope is not None:
                 pending_kwargs["bootstrap_scope"] = normalized_bootstrap_scope
+            if turn_role is not None:
+                pending_kwargs["turn_role"] = turn_role
             self.graph_adapter.create_pending_episode(
                 episode_uuid=episode_uuid,
                 name=episode_name,

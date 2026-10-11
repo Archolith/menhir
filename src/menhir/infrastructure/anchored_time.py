@@ -704,14 +704,8 @@ def clause_guard(turn: str, facts: list[str], items: dict[int, dict]) -> list[in
 
 # ---------------------------------------------------------------- Menhir integration (pure)
 DATED_BASES = frozenset({"explicit_date", "speech_relative", "event_anchored"})
-_ROLE_PREFIX = re.compile(r"^\s*user:\s*", re.I)
 _GRANULARITY = {"day": "day", "weekday": "day", "week": "week", "weekend": "week", "month": "month",
                 "quarter": "quarter", "season": "season", "year": "year"}
-
-
-def strip_user_prefix(text: str) -> str:
-    """The ingest writes ``user: ...``; P0 turns had no prefix (mechanical change, not wording)."""
-    return _ROLE_PREFIX.sub("", text or "", count=1)
 
 
 def _fact_index(value) -> int | None:
