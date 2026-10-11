@@ -262,6 +262,38 @@ def test_installed_graphiti_accepts_the_preserved_attributes_kwarg() -> None:
         "preserved_edge_attributes": PRESERVED_EDGE_ATTRIBUTES}
 
 
+@pytest.mark.parametrize(
+    ("flags", "preserved"),
+    [
+        ({}, False),
+        ({"anchored_time_resolver_enabled": True}, True),
+        ({"anchored_time_resolver_enabled": True, "anchored_time_expiry_enabled": True}, True),
+    ],
+)
+def test_client_passes_preserved_attributes_to_graphiti(monkeypatch, flags, preserved) -> None:
+    # Codex P3c-2: the production constructor, not only the helper, must forward the names.
+    import menhir.infrastructure.graphiti_client as graphiti_client
+    from menhir.config.settings_model import MemorySettings
+
+    seen: dict = {}
+
+    class _CapturingGraphiti:
+        def __init__(self, uri=None, *, edge_expiry_hook=None, preserved_edge_attributes=None,
+                     **kwargs) -> None:
+            seen.update(kwargs, uri=uri)
+            if edge_expiry_hook is not None:
+                seen["edge_expiry_hook"] = edge_expiry_hook
+            if preserved_edge_attributes is not None:
+                seen["preserved_edge_attributes"] = preserved_edge_attributes
+
+    monkeypatch.setattr(graphiti_client, "Graphiti", _CapturingGraphiti)
+    graphiti_client.GraphitiClient.from_settings_with_capabilities(MemorySettings(**flags))
+    if preserved:
+        assert seen["preserved_edge_attributes"] == PRESERVED_EDGE_ATTRIBUTES
+    else:
+        assert "preserved_edge_attributes" not in seen
+
+
 # --- Graphiti's real resolver ---------------------------------------------------------------------
 
 def _stored() -> EntityEdge:

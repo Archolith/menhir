@@ -18,8 +18,17 @@
   world end (D2); there is no backfill (D3).
 - Closes the P3 known gap D1 / Codex P3b-2 for stamped edges. Edges stored before P3 have no
   stamp and keep upstream behavior.
-- `tests/test_anchored_time_restatement.py` (unit, real `resolve_extracted_edges`) and
+- `tests/test_anchored_time_restatement.py` (unit, real `resolve_extracted_edges`, plus the
+  `GraphitiClient` constructor forwarding the names, Codex P3c-2) and
   `tests/test_anchored_time_restatement_live.py` (online): NEW.
+- Known gap (Codex P3c-1): Graphiti saves a resolved edge as a full replace of the copy it
+  fetched. If two writers ingest into one namespace at once, and one expires an edge (a
+  contradiction) before the other saves a restatement of it, the later save brings the edge
+  back live with the old end. `IngestGate` serializes a namespace only within one runtime;
+  ADR 0004 makes `menhir serve` the single runtime owner, but nothing durable stops a second
+  runtime from ingesting. The stale save predates P3c (upstream loses the truncation, and the
+  P3b report path revives the edge the same way); P3c adds unclassified restatements as a
+  route. Follow-up: a conditional save in the fork (never clear a stored `expired_at`).
 
 ## 2026-10-08 - Anchored-time P3: a fact's own end is world time, not supersession
 
