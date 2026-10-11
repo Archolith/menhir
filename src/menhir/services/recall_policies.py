@@ -50,7 +50,8 @@ if TYPE_CHECKING:
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.telemetry import record_mcp_event
 from menhir.domain.utils import days_ago
-from datetime import datetime
+from datetime import datetime, timezone
+from menhir.domain.temporal import parse_iso8601
 from menhir.services.scheduler_protocols import LifecycleServiceProtocol
 from menhir.services.scoring_service import (
     GRAPHITI_RRF_DUAL_METHOD_MAX,
@@ -226,13 +227,18 @@ def _build_temporal_facts(
     rows: list[dict[str, object]],
     *,
     event_time: bool = False,
+    ended: bool = False,
+    now: datetime | None = None,
 ) -> dict[str, tuple[TemporalFact, ...]]:
     """Group fact-edge rows by node_uuid, cap to 5 most recent, and build TemporalFact tuples.
 
     Sorts by created_at DESC (None last), caps to 5 most recent per node,
     and assigns temporal_role based on whether expired_at is None.
+    With ``ended`` (MENHIR_ANCHORED_TIME_EXPIRY) an unexpired fact whose own end (invalid_at)
+    is at or before ``now`` is "ended": still believed, no longer true in the world.
     Returns a dict mapping node_uuid -> tuple of TemporalFact.
     """
+    pivot = (now or datetime.now(timezone.utc)) if ended else None
     by_uuid: dict[str, list[dict[str, object]]] = {}
     for row in rows:
         node_uuid = str(row.get("node_uuid") or "")
@@ -259,6 +265,10 @@ def _build_temporal_facts(
             expired_at = row.get("expired_at")
             is_current = expired_at is None
             temporal_role = "current_belief" if is_current else "superseded_belief"
+            if pivot is not None and is_current:
+                world_end = parse_iso8601(row.get("invalid_at"))
+                if world_end is not None and world_end <= pivot:
+                    temporal_role = "ended"
             fact = TemporalFact(
                 fact=row.get("fact"),
                 valid_at=row.get("valid_at"),

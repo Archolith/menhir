@@ -1742,7 +1742,8 @@ async def run_recall(
             if not include_invalidated:
                 fact_rows = _filter_to_current_beliefs(fact_rows)
             facts_by_uuid = _build_temporal_facts(
-                fact_rows, event_time=tuning.enable_anchored_time_render
+                fact_rows, event_time=tuning.enable_anchored_time_render,
+                ended=tuning.enable_anchored_time_expiry,
             )
             enriched_results = []
             for sm in top_results:

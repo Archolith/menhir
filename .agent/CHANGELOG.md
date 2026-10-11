@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-10-08 - Anchored-time P3: a fact's own end is world time, not supersession
+
+- Pin `archolith-graphiti-core==0.30.2.post5` (adds `Graphiti(edge_expiry_hook=...)`, fork PR #5;
+  reconciles copies of one stored edge before the save, fork PR #7; reconciled copies take
+  the attributes resolution recomputed, never a fast-path copy's, fork PR #9).
+- `tests/test_anchored_time_edge_copies.py`: NEW. Real `resolve_extracted_edges` with
+  `MenhirEdgeExpiryHook`: a restated copy never overwrites a supersession found by another
+  mention (both orders, plus a no-reconcile control), and exact plus paraphrased mentions of
+  one stored edge save one attribute set.
+- `MENHIR_ANCHORED_TIME_EXPIRY` (default off): `_apply_anchored_time(expiry=True)` records the
+  world end of point events / states with an item before resolve; `MenhirEdgeExpiryHook`
+  (`graphiti_extraction_policy.py`) answers `WORLD_END` inside Graphiti's resolver for this
+  call's own owner-checked report, so such edges stay live; anything else, including errors,
+  answers `EXPIRE` (upstream behavior). The flag on with an older Graphiti fails at client
+  construction.
+- `EXPIRY_PERSIST_CYPHER` stamps `time_expiry='world_end'` / `time_world_end` on live edges
+  under the P2 lock only while `invalid_at` still equals the recorded end; it never un-expires.
+- Recall labels such live, ended facts `ended` (`_build_temporal_facts(ended=...)`).
+- The hook and the persist read this call's report from a per-call `AnchoredTimeSlot`, so a
+  concurrent call sharing the receipt cannot replace it (Codex P3b-3).
+- Known gap: a duplicate restatement re-saves the edge through Graphiti's full-replace save,
+  which drops the stored P2 contract and the stamp (pre-existing P2 behavior).
+- Known gap (D1, Codex P3b-2): the new mention decides. A restatement the resolver does not
+  classify (no time cue, resolver error, plan) answers `EXPIRE`, so it expires a stored ended
+  fact that an earlier ingest kept live. Follow-up: workspace
+  `menhir-anchored-time-p3c-restatement-evidence-plan.md`.
+
 ## 2026-10-01 - Ended-state quotes never yield a current scalar value (#168 step-5)
 
 - `services/typed_scalar_rules.py`: new ended-state cue (`no longer`, `anymore`, `quit`, `stopped`,

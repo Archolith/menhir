@@ -10,12 +10,17 @@ Menhir-owned step after ``add_episode`` returns. Every write is bound to the cal
   no-op), and belong to this call's tenant.
 
 Failure never fails ingest: missing properties mean exactly the pre-P2 behavior.
+
+P3 (MENHIR_ANCHORED_TIME_EXPIRY): Graphiti never expires a world-ended edge for its own end
+(``MenhirEdgeExpiryHook`` answers ``WORLD_END``), so nothing is ever un-expired here. When a row
+carries ``time_world_end``, the same locked write stamps ``time_expiry = 'world_end'`` on an
+edge that is still live and whose ``invalid_at`` is still that end. The stamp is informational.
 """
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 import json
 import logging
 from typing import Any
@@ -74,6 +79,28 @@ PERSIST_CYPHER = (
     "RETURN count(r) AS written"
 )
 
+#: P3 (MENHIR_ANCHORED_TIME_EXPIRY): same lock and re-check, then stamp the world end on a live
+#: edge whose ``invalid_at`` is still the instant recorded at extraction. Never touches
+#: ``expired_at``: a contradiction that expired or truncated the edge leaves it unstamped.
+EXPIRY_PERSIST_CYPHER = (
+    "UNWIND $rows AS row "
+    "MATCH ()-[r:RELATES_TO {uuid: row.uuid}]->() "
+    "WHERE " + _ELIGIBLE + " "
+    f"SET r.{LOCK_PROPERTY} = true "
+    f"REMOVE r.{LOCK_PROPERTY} "
+    "WITH r, row "
+    "WHERE " + _ELIGIBLE + " "
+    "SET " + ", ".join(f"r.{name} = row.{name}" for name in CONTRACT_PROPERTIES) + " "
+    # Full precision: a contradiction that moved invalid_at by under 1 ms must still win.
+    "WITH r, row, (row.time_world_end_s IS NOT NULL AND r.expired_at IS NULL "
+    "AND r.invalid_at IS NOT NULL "
+    "AND datetime(r.invalid_at).epochSeconds = row.time_world_end_s "
+    "AND datetime(r.invalid_at).nanosecond = row.time_world_end_ns) AS stamp "
+    "FOREACH (_ IN CASE WHEN stamp THEN [1] ELSE [] END | "
+    "SET r.time_expiry = 'world_end', r.time_world_end = row.time_world_end) "
+    "RETURN count(r) AS written, sum(CASE WHEN stamp THEN 1 ELSE 0 END) AS stamped"
+)
+
 
 def _iso(value: date | None) -> str | None:
     return value.isoformat() if value is not None else None
@@ -108,7 +135,22 @@ def contract_rows(report: Any, edge_uuids: Iterable[str], speech_date: date | No
             "time_ambiguity": getattr(result, "ambiguity", None),
             "time_contract": contract,
         })
+        world_end = getattr(result, "world_end", None)
+        if world_end is not None and getattr(report, "expiry", False):
+            # Only P3 rows carry these keys, so a flag-off row is exactly the P2 row.
+            rows[-1]["time_world_end"] = world_end.isoformat()
+            rows[-1]["time_world_end_s"], rows[-1]["time_world_end_ns"] = _epoch_s_ns(world_end)
     return rows
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _epoch_s_ns(value: datetime) -> tuple[int, int]:
+    """(floor epoch seconds, nanosecond of second), as Neo4j's epochSeconds/nanosecond; exact."""
+    aware = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    seconds, rest = divmod(aware - _EPOCH, timedelta(seconds=1))
+    return seconds, rest // timedelta(microseconds=1) * 1000
 
 
 def _namespace_of(group_id: str) -> str:
@@ -139,13 +181,17 @@ async def persist_anchored_time(
         "episode_uuid": episode_uuid,
         "tenant_namespaces": namespace_spellings(_namespace_of(group_id)),
     }
+    expiry = any("time_world_end_s" in row for row in rows)
+    statement = EXPIRY_PERSIST_CYPHER if expiry else PERSIST_CYPHER
     try:
         result = await asyncio.wait_for(
-            driver.execute_query(PERSIST_CYPHER, params=params, routing_="w"),
+            driver.execute_query(statement, params=params, routing_="w"),
             timeout=PERSIST_TIMEOUT_S,
         )
         records = getattr(result, "records", None) or []
         report.persisted = int(records[0]["written"]) if records else 0
+        if expiry and records:
+            report.stamped = int(records[0]["stamped"] or 0)
         report.persist = "ok"
     except asyncio.CancelledError:
         raise

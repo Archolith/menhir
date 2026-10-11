@@ -188,6 +188,8 @@ def _source_time_lines(memory: ScoredMemory) -> list[str]:
             happened = "unknown"
         fact = temporal_fact.fact or "(supporting fact text unavailable)"
         belief_role = temporal_fact.temporal_role.replace("_", " ")
+        if temporal_fact.temporal_role == "ended":
+            belief_role = f"current belief, ended {invalid_at}"
         lines.append(f"  - {happened} | {fact} | belief: {belief_role}")
     return lines
 

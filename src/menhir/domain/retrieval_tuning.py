@@ -309,6 +309,9 @@ class RetrievalTuningConfig:
     # Render persisted anchored-time contracts as fact event times (MENHIR_ANCHORED_TIME_RENDER).
     # Presentation only: ranking and admission are identical with it on or off.
     enable_anchored_time_render: bool = False
+    # Label unexpired facts whose own end (invalid_at) has passed as "ended" instead of
+    # "current_belief" (MENHIR_ANCHORED_TIME_EXPIRY). Presentation only, like the render flag.
+    enable_anchored_time_expiry: bool = False
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.hybrid_alpha <= 1.0:

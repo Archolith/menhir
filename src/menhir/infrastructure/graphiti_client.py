@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import logging
 from dataclasses import dataclass, field
 from functools import partial
@@ -37,7 +38,7 @@ except ImportError as exc:
         raise
     raise ImportError(
         "graphiti_core is missing GraphitiRequestTooLargeError. Menhir requires "
-        "archolith-graphiti-core==0.30.2.post2; an older graphiti-core install may have "
+        "archolith-graphiti-core==0.30.2.post5; an older graphiti-core install may have "
         "overwritten the fork's shared graphiti_core files. Use a fresh virtual environment "
         "or uninstall both graphiti-core distributions before reinstalling Menhir "
         "(see docs/post-install.md)."
@@ -49,7 +50,10 @@ from menhir.config import MemorySettings  # noqa: E402
 from menhir.infrastructure.circuit_breaker import CircuitBreaker  # noqa: E402
 from menhir.infrastructure.embedding_cache import get_embedding_cache  # noqa: E402
 from menhir.infrastructure.embedding_dimensions import expected_graphiti_embedding_dimension  # noqa: E402
-from menhir.infrastructure.graphiti_extraction_policy import MenhirExtractionHook  # noqa: E402
+from menhir.infrastructure.graphiti_extraction_policy import (  # noqa: E402
+    MenhirEdgeExpiryHook,
+    MenhirExtractionHook,
+)
 from menhir.infrastructure.graphiti_llm_adapter import (  # noqa: E402
     MenhirOpenAIGenericClient,
     _ProviderExtrasAsyncClient,
@@ -116,6 +120,27 @@ def _schedule_client_close(client: Any) -> asyncio.Task | None:
     except RuntimeError:
         return None
     return loop.create_task(aclose())
+
+
+def edge_expiry_hook_kwargs(enabled: bool, graphiti_cls: Any) -> dict[str, Any]:
+    """``Graphiti(...)`` kwargs for MENHIR_ANCHORED_TIME_EXPIRY: none when off.
+
+    With the flag on, an installed fork without ``edge_expiry_hook`` would silently keep
+    expiring ended facts, so startup refuses it instead.
+    """
+    if not enabled:
+        return {}
+    try:
+        params = inspect.signature(graphiti_cls.__init__).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if "edge_expiry_hook" not in params:
+        raise RuntimeError(
+            "MENHIR_ANCHORED_TIME_EXPIRY=true requires archolith-graphiti-core==0.30.2.post3 "
+            "or later (Graphiti(edge_expiry_hook=...)); the installed graphiti_core has no "
+            "edge_expiry_hook. Reinstall Menhir's pinned dependencies or turn the flag off."
+        )
+    return {"edge_expiry_hook": MenhirEdgeExpiryHook()}
 
 
 @dataclass
@@ -349,6 +374,7 @@ class GraphitiClient:
             password=settings.neo4j_password,
             database=settings.neo4j_database,
         )
+        anchored_time_expiry = bool(settings.anchored_time_expiry_enabled)
         return cls(
             client=Graphiti(
                 uri=settings.neo4j_uri,
@@ -358,10 +384,14 @@ class GraphitiClient:
                 llm_client=llm_client,
                 embedder=embedder,
                 cross_encoder=cross_encoder,
-                single_episode_extraction_hook=MenhirExtractionHook(anchored_time=anchored_time),
+                single_episode_extraction_hook=MenhirExtractionHook(
+                    anchored_time=anchored_time,
+                    anchored_time_expiry=anchored_time_expiry,
+                ),
                 identity_gate_hook=MenhirIdentityGateHook(),
                 candidate_filter_hook=MenhirCandidateFilterHook(),
                 node_pre_resolution_hook=MenhirNodePreResolutionHook(),
+                **edge_expiry_hook_kwargs(anchored_time_expiry, Graphiti),
             ),
             llm_base_url=llama_base_url,
             embed_base_url=embed_base_url,
@@ -455,15 +485,20 @@ class GraphitiClient:
     ) -> Any:
         """Delegate episode ingestion to Graphiti."""
         from menhir.infrastructure.graphiti_extraction_policy import (
+            AnchoredTimeSlot,
             anchored_time_owner,
+            anchored_time_slot,
             get_extraction_receipt,
         )
 
         receipt = get_extraction_receipt()
         # Only a report this invocation produced may be persisted: a reused receipt can hold an
         # earlier call's report, and a receipt shared by a concurrent call can hold that call's.
+        # The per-call slot keeps this call's report even after a concurrent call replaces the
+        # receipt's (P3b-3).
         owner = uuid4().hex
         owner_binding = anchored_time_owner.set(owner)
+        slot_binding = anchored_time_slot.set(AnchoredTimeSlot(owner=owner))
         try:
             return await self._add_episode_owned(
                 receipt, owner,
@@ -471,6 +506,7 @@ class GraphitiClient:
                 reference_time=reference_time, episode_uuid=episode_uuid, group_id=group_id,
             )
         finally:
+            anchored_time_slot.reset(slot_binding)
             anchored_time_owner.reset(owner_binding)
 
     async def _add_episode_owned(
@@ -541,8 +577,10 @@ class GraphitiClient:
                 },
             )
         )
-        report = receipt.anchored_time if receipt is not None else None
-        if report is not None and getattr(report, "owner", None) == owner and report.status == "ok":
+        from menhir.infrastructure.graphiti_extraction_policy import owned_anchored_time_report
+
+        report = owned_anchored_time_report(receipt, owner)
+        if report is not None and report.status == "ok":
             from menhir.infrastructure.anchored_time import _utc_date
             from menhir.infrastructure.anchored_time_persist import persist_anchored_time
 

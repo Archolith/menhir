@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import logging
 import re
 from typing import Any, Callable
@@ -392,6 +392,37 @@ def begin_extraction_receipt(
 #: anchored-time report. A receipt shared by concurrent calls cannot hand one call's report to
 #: another (test_anchored_time_persist_owner.py).
 anchored_time_owner: ContextVar[str | None] = ContextVar("menhir_anchored_time_owner", default=None)
+
+
+@dataclass
+class AnchoredTimeSlot:
+    """Per-call holder for one add_episode invocation's anchored-time report.
+
+    The receipt slot is shared by concurrent calls on one receipt, so a later call can replace
+    an earlier call's report there before that call's edge-expiry hook or persist reads it
+    (P3b-3). This holder is bound per call and handed to child tasks by reference.
+    """
+
+    owner: str
+    report: Any | None = None
+
+
+anchored_time_slot: ContextVar[AnchoredTimeSlot | None] = ContextVar(
+    "menhir_anchored_time_slot", default=None
+)
+
+
+def owned_anchored_time_report(receipt: Any | None, owner: str | None) -> Any | None:
+    """The report this call produced: its own slot first, else the owner-checked receipt."""
+    if owner is None:
+        return None
+    slot = anchored_time_slot.get()
+    report = slot.report if slot is not None and slot.owner == owner else None
+    if report is None:
+        report = getattr(receipt, "anchored_time", None) if receipt is not None else None
+    if report is None or getattr(report, "owner", None) != owner:
+        return None
+    return report
 
 
 def get_extraction_receipt() -> CombinedExtractionReceipt | None:
@@ -1404,6 +1435,7 @@ async def _run_graphiti_combined_extraction(
     receipt: CombinedExtractionReceipt | None = None,
     *,
     anchored_time: Any | None = None,
+    anchored_time_expiry: bool = False,
 ) -> tuple[list[Any], list[Any], dict[str, list[int]]]:
     """Run combined extraction under the active receipt's Menhir policy."""
     if receipt is None:
@@ -1584,7 +1616,8 @@ async def _run_graphiti_combined_extraction(
             )
     if anchored_time is not None:
         # Final edges only, before Graphiti's dedupe, contradiction and expiry read valid_at.
-        await _apply_anchored_time(anchored_time, receipt, episode, edges)
+        await _apply_anchored_time(anchored_time, receipt, episode, edges,
+                                   expiry=anchored_time_expiry)
     return nodes, edges, index_map
 
 
@@ -1598,8 +1631,15 @@ async def _apply_anchored_time(
     receipt: CombinedExtractionReceipt,
     episode: Any,
     edges: list[Any],
+    *,
+    expiry: bool = False,
 ) -> None:
     """Overlay resolver-computed ``valid_at`` on final edges. Never fails the episode.
+
+    With ``expiry`` (MENHIR_ANCHORED_TIME_EXPIRY) it also records, per classified point event or
+    state that arrives with its own ``invalid_at`` and no ``expired_at``, that ``invalid_at`` as
+    the world end. ``MenhirEdgeExpiryHook`` reads the classification so Graphiti does not expire
+    the edge for that end, and the persist step stamps it (P3).
 
     Every failure leaves Graphiti's values in place; only cancellation propagates. New values
     are all computed before any edge is touched.
@@ -1614,8 +1654,11 @@ async def _apply_anchored_time(
     )
 
     report = AnchoredTimeReport(model=str(getattr(resolver, "model", "") or ""),
-                                owner=anchored_time_owner.get())
+                                owner=anchored_time_owner.get(), expiry=expiry)
     receipt.anchored_time = report
+    slot = anchored_time_slot.get()
+    if slot is not None and slot.owner == report.owner:
+        slot.report = report
     try:
         speech_time = getattr(episode, "valid_at", None)
         turn = strip_user_prefix(receipt.episode_text)
@@ -1656,6 +1699,8 @@ async def _apply_anchored_time(
         report.missing_events = outcome.missing_events
         report.guard_drops = tuple(clause_guard(turn, facts, items))
         results = plan_overlay(inputs, items, speech_date, speech_time.tzinfo)
+        if expiry:
+            results = [_with_world_end(edge, result) for edge, result in zip(edges, results)]
         for edge, result in zip(edges, results):
             if result.new_valid_at is not None:
                 edge.valid_at = result.new_valid_at
@@ -1680,6 +1725,58 @@ async def _apply_anchored_time(
         )
 
 
+#: P3: kinds whose own end is world time, not supersession (a plan's end is not an event's end).
+WORLD_END_KINDS = ("point_event", "state")
+
+
+def _with_world_end(edge: Any, result: Any) -> Any:
+    """``result`` with ``world_end`` set for a classified point event or state that carries its
+    own ``invalid_at``: that end is world time, not a supersession."""
+    invalid_at = getattr(edge, "invalid_at", None)
+    if (result.reason == "no_item" or result.kind not in WORLD_END_KINDS
+            or invalid_at is None or getattr(edge, "expired_at", None) is not None):
+        return result
+    return replace(result, world_end=invalid_at)
+
+
+class MenhirEdgeExpiryHook:
+    """Menhir policy adapter on the fork's ``EdgeExpiryHook`` seam (P3, D1).
+
+    Answers ``WORLD_END`` only when this ``add_episode`` call's own anchored-time report (owner
+    check: a shared receipt can hold a concurrent call's report) ran with expiry on and
+    classified the new mention as a point event or state with an item, and the resolved edge
+    carries ``invalid_at``. Anything else, including any error, answers ``EXPIRE``: upstream.
+    """
+
+    async def decide_edge_expiry(self, context: Any) -> Any:
+        from graphiti_core.edge_expiry import EdgeExpiryDecision
+
+        try:
+            report = _owned_expiry_report()
+            if report is None or getattr(context.resolved_edge, "invalid_at", None) is None:
+                return EdgeExpiryDecision.EXPIRE
+            by_uuid = {r.edge_uuid: r for r in report.results}
+            # The new mention decides; bulk dedupe can resolve to another edge of this
+            # episode (fork F4), so fall back to that edge's own classification.
+            result = (by_uuid.get(str(context.extracted_edge.uuid))
+                      or by_uuid.get(str(context.resolved_edge.uuid)))
+            if result is None or result.reason == "no_item" or result.kind not in WORLD_END_KINDS:
+                return EdgeExpiryDecision.EXPIRE
+            report.world_end_kept += 1
+            return EdgeExpiryDecision.WORLD_END
+        except Exception:
+            logger.exception("Edge-expiry hook failed; upstream expiry kept")
+            return EdgeExpiryDecision.EXPIRE
+
+
+def _owned_expiry_report() -> Any | None:
+    """This call's anchored-time report when it ran with expiry and succeeded, else ``None``."""
+    report = owned_anchored_time_report(get_extraction_receipt(), anchored_time_owner.get())
+    if report is None or report.status != "ok" or not report.expiry:
+        return None
+    return report
+
+
 class MenhirExtractionHook:
     """Menhir policy adapter on the fork's ``SingleEpisodeExtractionHook`` seam.
 
@@ -1691,9 +1788,11 @@ class MenhirExtractionHook:
     schemas keep the fork's SEPARATE compatibility route.
     """
 
-    def __init__(self, anchored_time: Any | None = None) -> None:
+    def __init__(self, anchored_time: Any | None = None, *, anchored_time_expiry: bool = False) -> None:
         #: ``AnchoredTimeResolver`` when MENHIR_ANCHORED_TIME_RESOLVER is on, else ``None``.
         self._anchored_time = anchored_time
+        #: MENHIR_ANCHORED_TIME_EXPIRY; only has an effect with a resolver.
+        self._anchored_time_expiry = anchored_time_expiry
 
     async def extract_single_episode(self, context: Any) -> Any:
         from menhir.infrastructure.graphiti_resolution_policy import (
@@ -1715,6 +1814,7 @@ class MenhirExtractionHook:
             context.custom_extraction_instructions,
             receipt,
             anchored_time=self._anchored_time,
+            anchored_time_expiry=self._anchored_time_expiry,
         )
         return SingleEpisodeExtractionResult(
             nodes=nodes,
