@@ -76,11 +76,11 @@ Concept id: `runtime.stack`
 
 - Python 3.12+
 - Neo4j 5 (remote systemd service via bolt)
-- `archolith-graphiti-core==0.30.2.post4` (Archolith soft fork of `getzep/graphiti`,
+- `archolith-graphiti-core==0.30.2.post5` (Archolith soft fork of `getzep/graphiti`,
   baseline `v0.30.2`; it still imports as `graphiti_core`). Menhir policy uses its explicit
-  hooks without runtime monkeypatching. Published from fork tag `v0.30.2.post4` at
-  `000f2f8e9d635d0e5777eb8bf43907bbc8c13e48`; the locked PyPI wheel SHA-256 is
-  `fa4cc481ad64ad7cbb14819bd6964c163934cda5c2879b98e8c441f7793fcd4c`.
+  hooks without runtime monkeypatching. Published from fork tag `v0.30.2.post5` at
+  `cf92ad55a4f25e052d1a6314e1f61deadd04dc7c`; the locked PyPI wheel SHA-256 is
+  `ae5b7bc36abe36ae51d2dd8f9d6ead17859836592432abe36321314fedb0a4d0`.
 - llama.cpp (`llama-server`) via OpenAI-compatible API
 - provider scaffold for pluggable chat backends (`openai_compat`, `openai`; `anthropic` scaffolded only)
 - Langfuse (optional local tracing for OpenAI-compatible llama.cpp calls)
