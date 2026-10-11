@@ -191,7 +191,7 @@ async def test_bridge_omits_role_param_when_none() -> None:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_bridge_round_trip_delivers_role_to_ingest_service(backend_client_like_uvicorn) -> None:
+async def test_bridge_round_trip_delivers_role_to_ingest_service(backend_client_like_uvicorn) -> None:  # noqa: F811
     bc, ctx = backend_client_like_uvicorn
     ctx.built.ingest_service.queue_episode_for_enrichment = AsyncMock(return_value={"episode_id": "q"})
     await bc.queue_episode("t", user_id="u", session_id="s", role="assistant")
@@ -201,7 +201,7 @@ async def test_bridge_round_trip_delivers_role_to_ingest_service(backend_client_
 
 
 @pytest.mark.asyncio
-async def test_dispatch_maps_backend_role_value_error_to_400(backend_client_like_uvicorn) -> None:
+async def test_dispatch_maps_backend_role_value_error_to_400(backend_client_like_uvicorn) -> None:  # noqa: F811
     bc, ctx = backend_client_like_uvicorn
     ctx.built.ingest_service.queue_episode_for_enrichment = AsyncMock(
         side_effect=ValueError("invalid role: 'User'")
@@ -212,7 +212,7 @@ async def test_dispatch_maps_backend_role_value_error_to_400(backend_client_like
 
 
 @pytest.mark.asyncio
-async def test_real_intake_rejects_miscased_role_over_http(backend_client_like_uvicorn) -> None:
+async def test_real_intake_rejects_miscased_role_over_http(backend_client_like_uvicorn) -> None:  # noqa: F811
     bc, ctx = backend_client_like_uvicorn
     ctx.built.ingest_service = IngestIntakeMixin()
     with pytest.raises(ValueError, match="invalid role"):
