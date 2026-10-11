@@ -32,6 +32,7 @@ from menhir.infrastructure.self_binding import (
     SelfBindMode,
     resolve_bind_mode,
 )
+from menhir.domain.turn_role import resolve_turn_role
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import GraphitiClient, MemoryGraphAdapter
 from menhir.infrastructure.evidence_publication_intents import (
@@ -620,6 +621,7 @@ async def run_graphiti_extraction(
                     ctx.claimed.get("turn_evidence_uuid") or ""
                 ).strip() or None,
             )
+            turn_role = resolve_turn_role(ctx.claimed)
             graphiti_result = await add_episode_with_timeout(
                 ctx.graphiti_client,
                 name=episode_name,
@@ -634,6 +636,7 @@ async def run_graphiti_extraction(
                 self_identity=self_identity,
                 self_subject_endpoint=self_subject_endpoint,
                 self_bind_mode=self_bind_mode,
+                turn_role=turn_role,
             )
             if publication_intent is not None:
                 publication_transition = (
@@ -1534,6 +1537,7 @@ async def add_episode_with_timeout(
     self_identity: SelfIdentityContext | None = None,
     self_subject_endpoint: SelfSubjectEndpointEnvelope | None = None,
     self_bind_mode: SelfBindMode = SelfBindMode.OFF,
+    turn_role: str = "unknown",
 ) -> Any:
     """Bound one Graphiti add_episode call so stuck requests fail back into retry flow.
 
@@ -1611,6 +1615,7 @@ async def add_episode_with_timeout(
         self_identity=self_identity,
         self_subject_endpoint=self_subject_endpoint,
         self_bind_mode=self_bind_mode,
+        turn_role=turn_role,
     )
     try:
         record_lifecycle_event(

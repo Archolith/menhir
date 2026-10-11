@@ -197,8 +197,8 @@ def test_synthesized_endpoint_gets_generic_entity_type() -> None:
     assert alice.entity_type_id == -1
 
 
-def _one_edge_from(pronoun: str, episode_text: str):
-    patches.begin_extraction_receipt("ep5", episode_text)
+def _one_edge_from(pronoun: str, episode_text: str, turn_role: str = "user"):
+    patches.begin_extraction_receipt("ep5", episode_text, turn_role=turn_role)
     return _build(
         {
             "extracted_entities": [{"name": "coins", "entity_type_id": 0}],
@@ -247,7 +247,7 @@ def test_first_person_on_an_assistant_turn_is_not_bound_to_the_user(label: str) 
     No self-like endpoint is retained on an assistant turn; those edges are handled by the
     self-echo suppression policy below.
     """
-    obj = _one_edge_from(label, f"assistant: {label} am an AI trained on data.")
+    obj = _one_edge_from(label, f"{label} am an AI trained on data.", turn_role="assistant")
     assert all(e.name.lower() != "user" for e in obj.extracted_entities)
 
 
@@ -260,7 +260,7 @@ def test_no_self_binding_on_assistant_turns(label: str) -> None:
     Entity-to-entity facts on assistant turns are unaffected -- only the self-anchored echo is
     dropped -- so `single-session-assistant` answers (a recommended restaurant, etc.) still land.
     """
-    obj = _one_edge_from(label, f"assistant: {label} own 37 coins.")
+    obj = _one_edge_from(label, f"{label} own 37 coins.", turn_role="assistant")
     assert all(e.name.lower() != "user" for e in obj.extracted_entities)
 
 
@@ -294,7 +294,9 @@ def test_policy_empty_never_masks_a_real_collapse(
 
 def test_assistant_turn_entity_to_entity_facts_still_survive() -> None:
     """The exclusion must be surgical: a recommendation on an assistant turn is still ingested."""
-    patches.begin_extraction_receipt("ep9", "assistant: Roscioli is a great Italian restaurant.")
+    patches.begin_extraction_receipt(
+        "ep9", "Roscioli is a great Italian restaurant.", turn_role="assistant"
+    )
     obj = _build(
         {
             "extracted_entities": [
@@ -865,7 +867,8 @@ def test_assistant_self_only_payload_sets_policy_receipt() -> None:
     """The sanitizer recognizes the exact live response shape before the wrapper decides."""
     receipt = patches.begin_extraction_receipt(
         "ep-assistant-boilerplate-payload",
-        "assistant: Can you please share the tasks you need to prioritize?",
+        "Can you please share the tasks you need to prioritize?",
+        turn_role="assistant",
     )
     _build(
         {
@@ -882,7 +885,8 @@ def test_assistant_self_only_policy_does_not_mask_nonself_relationless_content()
     """Only canonical self labels qualify; a named entity with a missed relation still fails."""
     receipt = patches.begin_extraction_receipt(
         "ep-assistant-recommendation",
-        "assistant: You should try Roscioli.",
+        "You should try Roscioli.",
+        turn_role="assistant",
     )
     _build(
         {
@@ -899,7 +903,8 @@ def test_assistant_self_only_policy_never_applies_to_user_turn() -> None:
     """A first-hand user turn with a missed predicate must still take the repair/failure path."""
     receipt = patches.begin_extraction_receipt(
         "ep-user-self-only",
-        "user: I'm actually using a new app I recently downloaded.",
+        "I'm actually using a new app I recently downloaded.",
+        turn_role="user",
     )
     _build(
         {

@@ -312,6 +312,7 @@ Episode nodes are provenance anchors created by each ingestion call. Label: `Epi
 | `session_id` | string | Session that produced the ingest |
 | `user_id` | string | Owner of the ingest |
 | `source` | string | Origin of the episode text |
+| `turn_role` | string or null | Declared speaker from `POST /api/memory` `role` (`user`, `assistant`, `tool`, `agent`, `system`), set ON CREATE only. Extraction uses the linked turn's role instead when exactly one `ADMITTED_ON` turn has text equal to `content` (surrounding whitespace ignored) and that turn is not `agent_quoted`; otherwise this value, else `unknown`. Never parsed from `content` (#271). |
 | `scope` | string | Usually `SESSION` at ingest time |
 | `source_confidence` | float | Provenance trust level |
 | `user_flagged` | boolean | Defaults to `false` |

@@ -13,46 +13,10 @@ from typing import Any
 
 
 class PersonalMemoryRepository:
-    """Dirty-namespace detection, user-episode loading, and the consolidation watermark."""
+    """Consolidation watermarks. Dirty-namespace discovery reads :TurnEvidence (#271)."""
 
     def __init__(self, neo4j: Any) -> None:
         self._neo4j = neo4j
-
-    def list_dirty_namespaces(self, *, limit: int = 200) -> list[str]:
-        """Namespaces whose newest USER episode is newer than their consolidation watermark (or that
-        have never been consolidated). Only namespaces that actually contain user turns qualify, so
-        agent-* namespaces (no user turns) are naturally excluded."""
-        rows = self._neo4j.execute(
-            """
-            MATCH (e:Episodic)
-            WHERE e.content STARTS WITH 'user:' AND e.group_id IS NOT NULL
-            WITH e.group_id AS ns, max(coalesce(e.created_at, e.valid_at)) AS newest_ep
-            WHERE newest_ep IS NOT NULL
-            OPTIONAL MATCH (w:ConsolidationWatermark {group_id: ns})
-            WITH ns, newest_ep, w.last_run_at AS watermark
-            WHERE watermark IS NULL OR newest_ep > watermark
-            RETURN ns AS namespace
-            ORDER BY newest_ep DESC
-            LIMIT $limit
-            """,
-            params={"limit": int(limit)},
-        )
-        return [str(r["namespace"]) for r in rows]
-
-    def load_user_episodes(self, namespace: str, *, limit: int = 500) -> list[dict[str, Any]]:
-        """USER-turn episodes for a namespace (real uuids -> real MENTIONS provenance), oldest first,
-        so the fold sees the timeline in order. Returns raw rows; the caller formats Episode content."""
-        rows = self._neo4j.execute(
-            """
-            MATCH (e:Episodic {group_id: $ns})
-            WHERE e.content STARTS WITH 'user:'
-            RETURN e.uuid AS uuid, toString(e.valid_at) AS valid_at, e.content AS content
-            ORDER BY e.valid_at
-            LIMIT $limit
-            """,
-            params={"ns": namespace, "limit": int(limit)},
-        )
-        return [dict(r) for r in rows]
 
     def mark_consolidated(self, namespace: str, *, at: str) -> None:
         """Stamp the namespace's consolidation watermark so it is not re-processed until a newer user

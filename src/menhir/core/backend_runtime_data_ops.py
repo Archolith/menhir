@@ -39,6 +39,7 @@ class RuntimeProviderDataOpsMixin:
         occurred_at: str | None = None,
         turn_evidence_uuid: str | None = None,
         user_statement: str | None = None,
+        role: str | None = None,
     ) -> dict[str, Any]:
         session = new_session(user_id, session_id=session_id)
         queue_kwargs: dict[str, Any] = {
@@ -50,6 +51,8 @@ class RuntimeProviderDataOpsMixin:
         }
         if (user_statement or "").strip():
             queue_kwargs["user_statement"] = user_statement
+        if role is not None:
+            queue_kwargs["role"] = role
         if bootstrap_scope is not None:
             queue_kwargs["bootstrap_scope"] = bootstrap_scope
         result = await self.built.ingest_service.queue_episode_for_enrichment(

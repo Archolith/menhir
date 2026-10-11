@@ -70,7 +70,7 @@ async def _run_two_calls() -> tuple[dict, _Driver, object]:
 
     native.add_episode = add_episode
     client = GraphitiClient(client=native)
-    receipt = policy.begin_extraction_receipt("k", "user: I was in Rome from March 27 to April 1")
+    receipt = policy.begin_extraction_receipt("k", "I was in Rome from March 27 to April 1", turn_role="user")
     try:
         async def call(name: str):
             return await client.add_episode(name=name, episode_body="x", source_description="u",

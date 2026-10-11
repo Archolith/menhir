@@ -26,28 +26,28 @@ from menhir.infrastructure.graphiti_extraction_policy import (
 #: missing newline after the colon. An earlier version of this file invented `below:\nAdmon`, and
 #: every test passed against a shape that does not occur in the data while the parser returned None
 #: on the real thing. Take fixtures FROM the corpus; do not write them from memory.
-ROSTER = "user: agents names below:Admon\nMagdy\nEhab\nSara\nMostafa\nNemr\nAdam"
+ROSTER = "agents names below:Admon\nMagdy\nEhab\nSara\nMostafa\nNemr\nAdam"
 
 #: The same list typed with a line break after the colon. Both spellings must parse identically --
 #: whether a human pressed Enter is not a semantic difference.
-ROSTER_NEWLINE = "user: agents names below:\nAdmon\nMagdy\nEhab\nSara\nMostafa\nNemr\nAdam"
+ROSTER_NEWLINE = "agents names below:\nAdmon\nMagdy\nEhab\nSara\nMostafa\nNemr\nAdam"
 
 
 # --------------------------------------------------------------------- MUST NOT parse (the contract)
 
 @pytest.mark.parametrize("text", [
     # prose containing a colon -- the single most likely false positive
-    "user: here is the thing:\nI went to the store today and bought milk\nthen I came home\nit was fine",
+    "here is the thing:\nI went to the store today and bought milk\nthen I came home\nit was fine",
     # a colon with only two items: too few to distinguish from ordinary punctuation
-    "user: my picks:\nAdmon\nMagdy",
+    "my picks:\nAdmon\nMagdy",
     # sentence punctuation in an item => prose, refuse the WHOLE block even though most lines fit
-    "user: notes:\nAdmon\nMagdy\nI think Ehab is unavailable.\nSara",
+    "notes:\nAdmon\nMagdy\nI think Ehab is unavailable.\nSara",
     # an over-long item is a clause, not a name
-    "user: agents:\nAdmon\nMagdy\nthe rest of the team will be assigned later this week somehow",
+    "agents:\nAdmon\nMagdy\nthe rest of the team will be assigned later this week somehow",
     # no colon at all: nothing marks this as a list
-    "user: agents\nAdmon\nMagdy\nEhab\nSara",
+    "agents\nAdmon\nMagdy\nEhab\nSara",
     # single line: no items
-    "user: agents names below: Admon, Magdy, Ehab",
+    "agents names below: Admon, Magdy, Ehab",
     # empty
     "",
 ])
@@ -58,7 +58,7 @@ def test_refuses_non_lists(text):
 def test_one_bad_item_refuses_the_whole_block():
     """No partial parse: a half-read list would assert membership for some names and silently drop
     others, which is harder to notice than refusing outright."""
-    assert parse_titled_list("user: agents:\nAdmon\nMagdy\nEhab\nhe said he would call back later.") is None
+    assert parse_titled_list("agents:\nAdmon\nMagdy\nEhab\nhe said he would call back later.") is None
 
 
 # ------------------------------------------------------------------------------- MUST parse
@@ -88,16 +88,16 @@ def test_parses_the_string_read_from_the_actual_corpus_fixture():
     turns = [t["content"] for s in items[0]["haystack_sessions"] for t in s
              if "Admon" in str(t.get("content", ""))]
     roster_turn = next(t for t in turns if t.strip().lower().startswith("agents names"))
-    assert roster_turn == ROSTER.split("user: ", 1)[1], "literal drifted from the corpus"
+    assert roster_turn == ROSTER, "literal drifted from the corpus"
 
-    parsed = parse_titled_list(f"user: {roster_turn}")
+    parsed = parse_titled_list(roster_turn)
     assert parsed is not None
     assert parsed[1] == ["Admon", "Magdy", "Ehab", "Sara", "Mostafa", "Nemr", "Adam"]
 
 
 @pytest.mark.parametrize("bullet", ["- ", "* ", "1. ", "2) "])
 def test_bullet_and_number_decoration_is_stripped(bullet):
-    text = f"user: agents:\n{bullet}Admon\n{bullet}Magdy\n{bullet}Ehab"
+    text = f"agents:\n{bullet}Admon\n{bullet}Magdy\n{bullet}Ehab"
     parsed = parse_titled_list(text)
     assert parsed is not None
     assert parsed[1] == ["Admon", "Magdy", "Ehab"]
@@ -154,7 +154,7 @@ def test_never_competes_with_relations_the_model_did_state():
 
 def test_prose_produces_no_membership_edges_end_to_end():
     receipt = CombinedExtractionReceipt()
-    prose = "user: here is the thing:\nI went to the store and bought milk\nthen home\nit was fine"
+    prose = "here is the thing:\nI went to the store and bought milk\nthen home\nit was fine"
     out = _sanitize_combined_payload(_payload(["store", "milk"]), receipt, prose)
     assert receipt.list_membership_edges_added == 0
     assert out["edges"] == []
@@ -181,7 +181,7 @@ def test_synthetic_edge_has_the_same_field_set_as_a_model_edge():
     }]
     real = _sanitize_combined_payload(
         _payload(["Admon", "Night Shift"], model_row), CombinedExtractionReceipt(),
-        "user: Admon works nights",
+        "Admon works nights",
     )["edges"]
 
     assert synthetic and real

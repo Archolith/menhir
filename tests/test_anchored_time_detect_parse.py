@@ -15,7 +15,6 @@ from menhir.infrastructure.anchored_time import (
     granularity_of,
     parse_items,
     parse_output,
-    strip_user_prefix,
 )
 from menhir.infrastructure.anchored_time_resolver import build_request
 
@@ -68,14 +67,6 @@ def test_detect_ignores_non_temporal_text(text) -> None:
 def test_detect_is_recall_first_for_since_with_a_pronoun() -> None:
     # The gate over-fires here on purpose; the prompt's causal-"since" rule returns basis none.
     assert detect("Since I have a big dog, I need a bigger car.") == ["event_anchored"]
-
-
-def test_strip_user_prefix_removes_only_the_leading_role() -> None:
-    assert strip_user_prefix("user: I left yesterday.") == "I left yesterday."
-    assert strip_user_prefix("  USER:I left yesterday.") == "I left yesterday."
-    assert strip_user_prefix("I told the user: hi") == "I told the user: hi"
-    assert strip_user_prefix("assistant: ok") == "assistant: ok"
-    assert strip_user_prefix(None) == ""
 
 
 def test_parse_output_strips_code_fences() -> None:
