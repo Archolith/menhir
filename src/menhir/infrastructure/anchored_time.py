@@ -732,27 +732,24 @@ _QTY = (r"(?:\d+(?:\.\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten
         r"(?:\s+and\s+a\s+half)?")
 _RUNS_TO_NOW = re.compile(
     rf"\bnow\b|^\s*for\s+(?:(?:about|almost|nearly|over|around|roughly|just\s+over|more\s+than|"
-    rf"the\s+(?:past|last)|quite)\s+)?(?:(?:{_QTY})\s+(?:more\s+|long\s+|good\s+)?)?"
+    rf"the\s+(?:past|last)|quite)\s+)?(?:(?:{_QTY})\s+(?:long\s+|good\s+)?)?"
     rf"(?:years?|months?|weeks?|days?|decades?|hours?|while|ages|long\s+time)\b|^\s*for\s+so\s+long\b", re.I)
 _FROM_NOW = re.compile(r"\bfrom\s+now\b", re.I)
-#: A start whose subject points back to another clause ("it all started", "which started
-#: hurting"), not the dummy "it" with its own event ("it started raining", "it began to snow").
-_BACK_REF_START = re.compile(
-    r"\b(?:it\s+(?:all\s+|really\s+|first\s+)?(?:start|starts|started|began|begun|begins)\b"
-    r"(?!\s+(?:to\b|[a-z]+ing\b))|(?:this|that|which|everything)\s+(?:all\s+|really\s+|first\s+)?"
-    r"(?:start|starts|started|began|begun|begins)\b)", re.I)
+#: A start whose subject points back to another clause ("it all started", "that began"), not one
+#: with its own event after it ("it started raining", "which started offering yoga"): a gerund or
+#: "to" after the start names that event, so the back-reference is not to this fact.
+_BACK_REF_START = re.compile(r"\b(?:it|this|that|which|everything)\s+(?:all\s+|really\s+|first\s+)?"
+                             r"(?:start|starts|started|began|begun|begins)\b(?!\s+(?:to\b|[a-z]+ing\b))",
+                             re.I)
 #: Coordinate-clause boundaries inside a sentence. Every "and"/"but"/"so" cuts: "I started yoga
 #: and meditation last month" loses its date for yoga, but no other clause's start leaks in.
 _COORD = re.compile(r",|;|\s[-\u2013\u2014]+\s|\s(?:and|but|so)\s", re.I)
-#: After "since" + a time ("since March"), a word that shows no verb follows, so "since" is a
-#: preposition (temporal), unlike "Since February 20th is my deadline".
-_NO_VERB_AFTER = re.compile(r"\s*(?:[.,;:!?)]|$|(?:i|we|you|he|she|they|i've|i'm|we've|my|our|and|but|"
-                            r"so|when|until|till|or)\b)", re.I)
 #: A comma segment that opens a subordinate clause, never the main clause.
 _SUBORDINATE = re.compile(rf"\s*(?:{_REL}|as|because|although|though|while|if|that|like)\b", re.I)
 #: After a leading since-clause, an added "and"/"but"/"so" segment is part of it, not the main clause.
 _SIDE_CLAUSE = re.compile(rf"\s*(?:{_REL}|as|because|although|though|while|if|that|like|and|but|so|or)\b",
                           re.I)
+_AND = re.compile(r"(?:^|\s)(?:and|but|so)\s", re.I)
 #: Occurrences judged per item; past this the expression is too ambiguous to place (conservative).
 _MAX_OCCURRENCES = 8
 
@@ -788,21 +785,39 @@ def _since_operator(turn_low: str, pos: int, expr: str, basis) -> tuple[str, int
     return op, at
 
 
-def _main_clause(turn: str, low: str, at: int, pos: int, n: int) -> str:
-    """The sentence without the expression and without the "since" clause, which runs from "since"
-    to the next comma or the sentence end wherever it sits. A since-clause with no comma before
-    its main clause takes the main clause with it: no perfect is seen, a missed write at worst."""
+def _perfect_in_main_clause(turn: str, low: str, at: int, pos: int, n: int) -> bool:
+    """Whether a perfect sits in the one clause the "since" clause attaches to (the expression
+    blanked). A leading since-clause ("since" opens its comma clause, after at most "so"/"and"/
+    "but") runs to the next comma, and the main clause is the first clause after it that is not a
+    side clause (", as I've said", ", and I've been stressed,"), up to an "and"/"but"/"so". A
+    trailing "since" ("I've been using it every morning since then, ...") attaches to the last
+    non-subordinate clause before it. A perfect anywhere else belongs to another event. A leading
+    since-clause with no comma before its main clause takes the main clause with it: no perfect is
+    seen, a missed write."""
     s0, e0 = _sentence(turn, pos)
     sent = low[s0:pos] + " " * n + low[pos + n:e0]
     a = min(max(0, at - s0), len(sent))
+    opened = max(sent.rfind(",", 0, a), sent.rfind(";", 0, a)) + 1
+    span = (0, 0)
+    if all(w in _LEAD for w in _words(sent[opened:a])):  # leading since-clause
+        comma = sent.find(",", a)
+        after = [m for m in re.finditer(r"[^,]+", sent[comma + 1:] if comma >= 0 else "") if m.group().strip()]
+        main = [m for m in after if not _SIDE_CLAUSE.match(m.group())][:1]
+        if main:
+            cut = _AND.search(main[0].group())
+            span = (comma + 1 + main[0].start(), comma + 1 + (main[0].start() + cut.start() if cut else main[0].end()))
+    else:
+        before = [m for m in re.finditer(r"[^,;]+", sent[:a])
+                  if m.group().strip() and not _SUBORDINATE.match(m.group())][-1:]
+        span = before[0].span() if before else span
+    # A perfect counts only inside that clause, read with the text that really follows it (the
+    # since clause blanked as before), so "I have tired, sore legs" is not cut to "have tired".
     comma = sent.find(",", a)
-    # A perfect in a side clause (", as I've said", ", which I've done before") is not the main
-    # one. Before "since", ", and I've been ..." is a coordinated main clause; after a leading
-    # since-clause, ", and I've been stressed," still belongs to it.
-    head, *tail = sent[:a].split(",")  # the first segment may open with "So"/"And" in speech
-    before = [head] + [s for s in tail if not _SUBORDINATE.match(s)]
-    after = [s for s in (sent[comma + 1:].split(",") if comma >= 0 else []) if not _SIDE_CLAUSE.match(s)]
-    return ",".join(before + after)
+    while comma >= 0 and re.match(rf"\s*{_REL}\b", sent[comma + 1:]):  # ", which had run long,"
+        comma = sent.find(",", comma + 1)
+    end = comma + 1 if comma >= 0 else len(sent)
+    rest = sent[:a] + " " * (end - a) + sent[end:]
+    return any(span[0] <= m.start() and m.end() <= span[1] for m in _PERFECT.finditer(rest))
 
 
 def _segment(turn: str, low: str, pos: int, n: int) -> tuple[int, int]:
@@ -833,10 +848,8 @@ def _occurrences(low: str, expr: str) -> list[int]:
 def _start_reason(turn: str, low: str, pos: int, expr: str, it: dict, fact: str) -> str | None:
     n = len(expr)
     since, at = _since_operator(low, pos, expr, it.get("basis"))
-    if since:  # "ever since" is always temporal; so is "since" right before a time with no verb after
-        prepositional = at + len(since) <= pos and _NO_VERB_AFTER.match(low, pos + n)
-        if not (_EVER_SINCE.search(since) or prepositional
-                or _PERFECT.search(_main_clause(turn, low, at, pos, n))):
+    if since:  # "ever since" is always temporal
+        if not (_EVER_SINCE.search(since) or _perfect_in_main_clause(turn, low, at, pos, n)):
             return "causal_since"
     elif it.get("kind") != "state":
         return None
@@ -845,7 +858,8 @@ def _start_reason(turn: str, low: str, pos: int, expr: str, it: dict, fact: str)
         a, b = _segment(turn, low, pos, n)
         if not _content(c_text, exclude=_content(expr)):  # the clause is only the time
             c_text = turn[a:b]
-        if not (_STARTED.search(c_text) or _STARTED.search(expr)):
+        # The start word must be in the same coordinate clause that ties the time to the fact.
+        if not (_STARTED.search(expr) or (_STARTED.search(c_text) and _STARTED.search(low[a:b]))):
             return "state_start"
         about_fact = _content(fact, exclude=_content(expr)) & _content(low[a:b])
         if not (about_fact or _BACK_REF_START.search(c_text)):
