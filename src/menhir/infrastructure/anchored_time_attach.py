@@ -57,7 +57,10 @@ Rules:
 - A time belongs to the event of its own clause. Never give a fact the time of a different event, even in the same sentence. "I repainted the shed last month and the garden looks great": the garden looking great has relation "none".
 - A time when a state was seen, said or mentioned is not when it began. "Yesterday I noticed the roof leaks": the noticing happened yesterday; the leaking has no start.
 - For a state, a duration that runs up to now gives its start ("I've worked there for two years" -> "start", "for two years"). A time that only shows the state already held then is not its start.
-- "since" or "as" meaning "because" ("since you asked, I ...") is not a time.
+- "since" or "as" meaning "because" ("since you asked, I ...") is not a time. "since" followed by a clause gives a start only when the main clause says the state has held from then on: a perfect ("Since we met, I have lived here") or "ever since". With a present main clause it is a reason, relation "none" ("Since it rained, the road is closed"; "Since I switched teams, I'm hoping to travel more").
+- A perfect that reports a change ("Since spring she has quit", "I've repaired the roof since then") says the change happened at some unstated time after, not then: relation "none".
+- A vague phrase that cannot be placed ("recently", "lately", "for a while", "a long time ago") gives no time: relation "none".
+- Something done during or as part of a dated event (at that wedding, on that trip) happened at that event's time: "At the wedding on June 4th I gave a speech" -> the speech is "occurrence", "on June 4th".
 - A number that is part of a name, model or title ("a 1998 Volvo", "the 2021 edition") is not a time.
 - Requests, questions and wishes ("wants ideas for next month") get "none" for the asking.
 - Answer every fact, in order, exactly once.
