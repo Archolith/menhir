@@ -1,6 +1,6 @@
 """Integrity of the attach-check labeled sets (plan menhir-anchored-time-attachment-plan.md P1).
 
-Set 2 (the adversarial fixture) is checked here; set 1 is built offline by
+Set 2 (the adversarial fixture and its fresh blind third) is checked here; set 1 is built offline by
 ``scripts/build_attach_set.py`` from the workspace eval data and is not in the repo.
 """
 from __future__ import annotations
@@ -15,13 +15,16 @@ from menhir.infrastructure.anchored_time import _fold
 
 pytestmark = pytest.mark.unit
 
-FIXTURE = Path(__file__).parent / "fixtures" / "anchored_time" / "attach_adversarial.json"
-CASES = json.loads(FIXTURE.read_text(encoding="utf-8"))["cases"]
+FIXTURES = [Path(__file__).parent / "fixtures" / "anchored_time" / name
+            for name in ("attach_adversarial.json", "attach_adversarial_fresh.json")]
+CASES = [c for path in FIXTURES for c in json.loads(path.read_text(encoding="utf-8"))["cases"]]
 
 
-def test_set2_ids_are_unique_and_the_file_is_ascii() -> None:
-    assert len({c["id"] for c in CASES}) == len(CASES) > 0
-    FIXTURE.read_bytes().decode("ascii")
+@pytest.mark.parametrize("path", FIXTURES, ids=lambda p: p.name)
+def test_set2_ids_are_unique_and_the_file_is_ascii(path) -> None:
+    cases = json.loads(path.read_text(encoding="utf-8"))["cases"]
+    assert len({c["id"] for c in cases}) == len(cases) > 0
+    path.read_bytes().decode("ascii")
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c["id"] for c in CASES])
