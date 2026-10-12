@@ -17,8 +17,10 @@
   and `tests/fixtures/anchored_time/attach_adversarial.json` (set 2, 270 review reproducers).
 - New tests: `tests/test_anchored_time_attach.py`, `tests/test_anchored_time_attach_hook.py`,
   `tests/test_anchored_time_attach_sets.py`. No existing test changed.
-- Not done: the paid P3 gate runs (attach prompt tuning and G1-G4) and P5 (retiring the regex
-  attachment inference). The attach prompt is a first draft, unmeasured.
+- P3 (paid gate, `scripts/eval_attach.py`): the attach prompt was tuned twice and frozen, then run
+  once blind with the regex guards off. G1 and G2 failed, so P5 (retiring the regex attachment
+  inference) is not supported. The prompt now also answers "none" when the turn does not say the
+  fact is true (prompt e6ecd4d1): no loss on the tune sets, and it fixes the negation failures.
 
 ## 2026-10-11 - Anchored-time P3c follow-ups: stale saves and the preserved-attributes guard
 

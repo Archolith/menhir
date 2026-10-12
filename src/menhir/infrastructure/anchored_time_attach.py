@@ -49,7 +49,7 @@ relation:
 - "occurrence": the fact is a single event (bought, moved, met, finished, visited) and the TURN says when it happened.
 - "start": the fact is a state that holds over a period (owns, lives, works as, has been, feels, is learning) and the TURN says when that state BEGAN.
 - "plan": the fact is intended or in the future, and the TURN says when.
-- "none": the TURN says nothing about when THIS fact's event happened or when its state began.
+- "none": the TURN says nothing about when THIS fact's event happened or when its state began, or the TURN does not say the fact is true.
 
 expression: the shortest phrase copied character for character from the TURN that gives that time, or null when relation is "none". A time measured from another event counts ("two days after the move", "ever since").
 
