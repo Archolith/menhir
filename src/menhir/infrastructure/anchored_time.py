@@ -15,7 +15,7 @@ import functools
 import json
 import math
 import re
-from typing import Sequence
+from typing import Mapping, Sequence
 
 import holidays
 
@@ -999,6 +999,12 @@ def _graphiti_dates(value: datetime, speech_tz: tzinfo | None) -> set[date]:
     return dates
 
 
+#: Attach-check decisions (``anchored_time_attach``): only ``ATTACH_AGREE`` lets a candidate write.
+ATTACH_AGREE = "agree"
+ATTACH_REJECTED = "attach_rejected"
+ATTACH_UNVERIFIED = "attach_unverified"
+
+
 @dataclass(frozen=True)
 class EdgeTimeInput:
     uuid: str
@@ -1063,6 +1069,16 @@ class AnchoredTimeReport:
     expiry: bool = False
     world_end_kept: int = 0
     stamped: int = 0
+    #: MENHIR_ANCHORED_TIME_ATTACH: set when the blind check ran for this episode's decisions
+    #: (``attach_model`` non-empty means the persisted contract is ``at2``). ``attach_status`` is
+    #: "" (check off), "no_candidates", "ok", or the check call's failure status.
+    attach_prompt_version: str = ""
+    attach_model: str = ""
+    attach_status: str = ""
+    attach_candidates: int = 0
+    attach_rejected: int = 0
+    attach_unverified: int = 0
+    attach_latency_s: float | None = None
 
 
 def _two_options(cal: dict | None, start: date, end: date) -> bool:
@@ -1076,8 +1092,14 @@ def plan_overlay(
     items: dict[int, dict],
     speech_date: date,
     speech_tz: tzinfo | None = None,
+    attach: Mapping[int, str] | None = None,
 ) -> list[AnchoredTimeResult]:
     """Decide the ``valid_at`` overlay for every edge. Pure: same inputs, same decisions.
+
+    ``attach`` (MENHIR_ANCHORED_TIME_ATTACH) maps fact index to the blind check's decision. When
+    given, a fact that would be written is written only on ``ATTACH_AGREE``; otherwise its reason
+    is the decision (a missing index is ``ATTACH_UNVERIFIED``), and a state window past the speech
+    date gets its own reason ``state_future``. ``None`` is exactly the behavior without the check.
 
     ``valid_at`` = window midpoint at 00:00 UTC, written only when the basis is dated, the window
     is closed, the fact is not a plan, Graphiti's value is missing or its speech-date default and
@@ -1120,7 +1142,8 @@ def plan_overlay(
             if item.get("guard") == "state_start" or (kind == "state" and end > speech_date):
                 # The time dates another event, or a state not begun when it was said, so its window
                 # is not this fact's start even when Graphiti's date falls inside it.
-                reason = "state_start"
+                reason = ("state_future" if attach is not None and item.get("guard") != "state_start"
+                          else "state_start")
             elif any(start <= d <= end for d in g_dates):
                 reason = "graphiti_inside_window"
             elif g_dates and speech_date not in g_dates:
@@ -1130,6 +1153,9 @@ def plan_overlay(
                 reason = ambiguity
             elif edge.invalid_at is not None and _aware(edge.invalid_at) <= candidate:
                 reason = "would_invert_interval"
+            elif attach is not None and attach.get(i) != ATTACH_AGREE:
+                # V1-V3: the blind check did not point at the same words with the right relation.
+                reason = ATTACH_REJECTED if attach.get(i) == ATTACH_REJECTED else ATTACH_UNVERIFIED
             else:
                 reason = "written"
                 new_valid_at = candidate

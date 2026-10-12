@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-10-12 - Anchored-time blind attach check (default off) and its labeled sets
+
+- `MENHIR_ANCHORED_TIME_ATTACH` (default off, needs the resolver): after the regex guards and
+  `plan_overlay`, the facts it would write are candidates. One blind model call per episode with
+  candidates (`anchored_time_attach_client.AnchoredTimeAttacher`; the prompt never sees the
+  resolver's items) quotes, per fact, the phrase that dates its start or occurrence. A candidate
+  is written only when both phrases overlap at the same place in the turn (V1) and the relation
+  matches the kind (V2). A failed call or missing answer writes nothing (V3). New outcomes
+  `attach_rejected`, `attach_unverified` and, with the check on, `state_future`; all render like
+  `state_start`. `MENHIR_ANCHORED_TIME_ATTACH_MODEL` (empty = the resolver's model).
+- `time_contract` is `at2|<resolver version>|<model>|<attach version>|<attach model>` for
+  episodes the check decided; `at1` otherwise. Flag off: the offline replay of the 22 runs is
+  identical to a0a9814 for all 2374 facts.
+- Labeled sets (plan P1): `scripts/build_attach_set.py` (set 1, offline from the frozen runs)
+  and `tests/fixtures/anchored_time/attach_adversarial.json` (set 2, 270 review reproducers).
+- New tests: `tests/test_anchored_time_attach.py`, `tests/test_anchored_time_attach_hook.py`,
+  `tests/test_anchored_time_attach_sets.py`. No existing test changed.
+- P3 (paid gate, `scripts/eval_attach.py`): the attach prompt was tuned twice and frozen, then run
+  once blind with the regex guards off. G1 and G2 failed, so P5 (retiring the regex attachment
+  inference) is not supported. The prompt now also answers "none" when the turn does not say the
+  fact is true (prompt e6ecd4d1): no loss on the tune sets, and it fixes the negation failures.
+  It also dates something done on a dated occasion in the next clause, unless a word moves it
+  (prompt 3aec9649): it fixes H19.5 (1 tune call reused over 5 runs, plus 5 of 5 probe calls),
+  with no change with the guards on; with the guards off it adds 2 wrong writes on set 2.
+
 ## 2026-10-11 - Anchored-time P3c follow-ups: stale saves and the preserved-attributes guard
 
 - Pin `archolith-graphiti-core==0.30.2.post7` (fork PR #13: a Neo4j entity-edge save takes the

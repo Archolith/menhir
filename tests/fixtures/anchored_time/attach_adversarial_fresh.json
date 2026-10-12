@@ -1,0 +1,2640 @@
+{
+ "version": 1,
+ "note": "Fresh blind third of set 2, written without seeing the attach prompt or the other cases. Labels reviewed by the orchestrator before any attach answer was seen; f-052 marked [UNSURE].",
+ "cases": [
+  {
+   "id": "f-001",
+   "source": "fresh",
+   "speech_date": "2023-05-17",
+   "turn": "Last week I went hiking in the hills, and my sister adopted a dog.",
+   "facts": [
+    "User's sister adopted a dog"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Last week",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "week"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Last week modifies the hiking clause; the sister's adoption is a coordinated clause with no time of its own."
+  },
+  {
+   "id": "f-002",
+   "source": "fresh",
+   "speech_date": "2024-03-20",
+   "turn": "The car I bought in 2019 broke down on the highway.",
+   "facts": [
+    "User's car broke down on the highway"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in 2019",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "2019",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "2019 is inside a relative clause dating the purchase, not the breakdown."
+  },
+  {
+   "id": "f-003",
+   "source": "fresh",
+   "speech_date": "2023-09-13",
+   "turn": "My mom told me last Friday that she is moving to Spain.",
+   "facts": [
+    "User's mother is moving to Spain"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "last Friday",
+     "basis": "speech_relative",
+     "kind": "state",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "weekday",
+      "name": "friday"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Last Friday is when she said it, not when the move happens or started."
+  },
+  {
+   "id": "f-004",
+   "source": "fresh",
+   "speech_date": "2022-11-09",
+   "turn": "Since my landlord raised the rent in June, I am looking for a cheaper apartment.",
+   "facts": [
+    "User is looking for a cheaper apartment"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in June",
+     "basis": "explicit_date",
+     "kind": "state",
+     "offset": null,
+     "calendar": null,
+     "date": "--06",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "[UNSURE] Since is causal here; June dates the rent raise, and the search may have begun later."
+  },
+  {
+   "id": "f-005",
+   "source": "fresh",
+   "speech_date": "2023-08-16",
+   "turn": "I drive a 2018 Honda Civic and it has been great.",
+   "facts": [
+    "User drives a Honda Civic"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "2018",
+     "basis": "explicit_date",
+     "kind": "state",
+     "offset": null,
+     "calendar": null,
+     "date": "2018",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "2018 is the model year, not when the user started driving it."
+  },
+  {
+   "id": "f-006",
+   "source": "fresh",
+   "speech_date": "2024-01-17",
+   "turn": "I just finished reading 1984 again, and the ending still hits hard.",
+   "facts": [
+    "User finished rereading a novel"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "1984",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "1984",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "1984 is a book title, not a date."
+  },
+  {
+   "id": "f-007",
+   "source": "fresh",
+   "speech_date": "2022-09-14",
+   "turn": "My son is three years old and he loves trains.",
+   "facts": [
+    "User's son loves trains"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "three years",
+     "basis": "speech_relative",
+     "kind": "state",
+     "offset": {
+      "amount": 3,
+      "unit": "year",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Age is not the duration of the train fondness."
+  },
+  {
+   "id": "f-008",
+   "source": "fresh",
+   "speech_date": "2023-11-15",
+   "turn": "Yesterday I noticed that the front tire was flat.",
+   "facts": [
+    "User's front tire was flat"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Yesterday",
+     "basis": "speech_relative",
+     "kind": "state",
+     "offset": {
+      "amount": 1,
+      "unit": "day",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Yesterday is when it was noticed; the tire may have been flat earlier."
+  },
+  {
+   "id": "f-009",
+   "source": "fresh",
+   "speech_date": "2024-05-15",
+   "turn": "I told my boss on Monday that I am quitting at the end of the quarter.",
+   "facts": [
+    "User is quitting the job"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "on Monday",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "weekday",
+      "name": "monday"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Monday is when the user told the boss; quitting is later."
+  },
+  {
+   "id": "f-010",
+   "source": "fresh",
+   "speech_date": "2023-04-19",
+   "turn": "I booked a trip to Lisbon last week for the end of October.",
+   "facts": [
+    "User takes a trip to Lisbon"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "last week",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "week"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Last week dates the booking, not the trip."
+  },
+  {
+   "id": "f-011",
+   "source": "fresh",
+   "speech_date": "2022-06-22",
+   "turn": "It took me two weeks to paint the fence.",
+   "facts": [
+    "User painted the fence"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "two weeks",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": {
+      "amount": 2,
+      "unit": "week",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Two weeks is the duration of the job, not how long ago it was."
+  },
+  {
+   "id": "f-012",
+   "source": "fresh",
+   "speech_date": "2023-02-15",
+   "turn": "Sometime after 2020 my uncle sold the farm.",
+   "facts": [
+    "User's uncle sold the farm"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "2020",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "2020",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "The sale happened at an unknown time after 2020, not in 2020."
+  },
+  {
+   "id": "f-013",
+   "source": "fresh",
+   "speech_date": "2024-10-16",
+   "turn": "I go to the gym every Tuesday after work.",
+   "facts": [
+    "User goes to the gym after work"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "every Tuesday",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "weekday",
+      "name": "tuesday"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Recurring habit, not a single dated event."
+  },
+  {
+   "id": "f-014",
+   "source": "fresh",
+   "speech_date": "2023-08-16",
+   "turn": "The sign on the door said Closed since 1998, so we turned around and drove home.",
+   "facts": [
+    "User and companions drove home"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "since 1998",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "1998",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "1998 is text on a sign about the closure, not when they drove home."
+  },
+  {
+   "id": "f-015",
+   "source": "fresh",
+   "speech_date": "2022-11-09",
+   "turn": "If I had moved to Berlin in 2018, I would speak German by now.",
+   "facts": [
+    "User moved to Berlin"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in 2018",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "2018",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Counterfactual; the move never happened."
+  },
+  {
+   "id": "f-016",
+   "source": "fresh",
+   "speech_date": "2023-09-12",
+   "turn": "I did not go to the party last Saturday because I was sick.",
+   "facts": [
+    "User went to the party"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "last Saturday",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "weekday",
+      "name": "saturday"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Negated event; the user did not attend."
+  },
+  {
+   "id": "f-017",
+   "source": "fresh",
+   "speech_date": "2024-03-20",
+   "turn": "I have visited Rome in 2015, then Paris, and finally Vienna.",
+   "facts": [
+    "User visited Vienna"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in 2015",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "2015",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "2015 belongs to Rome, the first list item."
+  },
+  {
+   "id": "f-018",
+   "source": "fresh",
+   "speech_date": "2023-05-17",
+   "turn": "Did you finish the quarterly report last Friday?",
+   "facts": [
+    "User finished the quarterly report"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "last Friday",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "weekday",
+      "name": "friday"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "A question; nothing asserts the report was finished."
+  },
+  {
+   "id": "f-019",
+   "source": "fresh",
+   "speech_date": "2024-07-10",
+   "turn": "I got my promotion in 2020. My brother bought a house near the lake. He loves it.",
+   "facts": [
+    "User's brother bought a house near the lake"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in 2020",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "2020",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "2020 is in a different sentence about a different event."
+  },
+  {
+   "id": "f-020",
+   "source": "fresh",
+   "speech_date": "2023-02-15",
+   "turn": "I plan to start a bakery in 2025 once the kids are older.",
+   "facts": [
+    "User starts a bakery"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in 2025",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "2025",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "A future plan, not something that happened."
+  },
+  {
+   "id": "f-021",
+   "source": "fresh",
+   "speech_date": "2024-10-16",
+   "turn": "I bought the ticket three months ago for the concert next week.",
+   "facts": [
+    "User attends the concert"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "three months ago",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": {
+      "amount": 3,
+      "unit": "month",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Three months ago is the purchase; the concert is next week."
+  },
+  {
+   "id": "f-022",
+   "source": "fresh",
+   "speech_date": "2023-11-15",
+   "turn": "We were at Tom's wedding in June. A month after the wedding, he told me he had been unhappy for years.",
+   "facts": [
+    "Tom's wedding",
+    "Tom had been unhappy for years"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in June",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "--06",
+     "anchor": null
+    },
+    "1": {
+     "i": 1,
+     "expression": "A month after the wedding",
+     "basis": "event_anchored",
+     "kind": "state",
+     "offset": {
+      "amount": 1,
+      "unit": "month",
+      "direction": "after",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": {
+      "fact": 0,
+      "event": null
+     }
+    }
+   },
+   "target": 1,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "The month after the wedding dates the telling, not when the unhappiness began."
+  },
+  {
+   "id": "f-023",
+   "source": "fresh",
+   "speech_date": "2022-09-14",
+   "turn": "I read last week that the old bridge opened in 1932.",
+   "facts": [
+    "The old bridge opened"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "last week",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "week"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Last week is when the user read it; the opening was 1932."
+  },
+  {
+   "id": "f-024",
+   "source": "fresh",
+   "speech_date": "2023-04-19",
+   "turn": "On April 3rd I received a bill for the roof repair.",
+   "facts": [
+    "User's roof was repaired"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "April 3rd",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "--04-03",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "April 3rd is when the bill arrived; the repair was earlier."
+  },
+  {
+   "id": "f-025",
+   "source": "fresh",
+   "speech_date": "2024-05-15",
+   "turn": "The company announced on March 3rd that it will close its Dallas office.",
+   "facts": [
+    "The company closes its Dallas office"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "March 3rd",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "--03-03",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "March 3rd is the announcement; the closing is in the future."
+  },
+  {
+   "id": "f-026",
+   "source": "fresh",
+   "speech_date": "2023-08-16",
+   "turn": "Yesterday I remembered my grandfather's farm, where he raised goats.",
+   "facts": [
+    "User's grandfather raised goats on his farm"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Yesterday",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": {
+      "amount": 1,
+      "unit": "day",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Yesterday is when the user remembered, not when the goats were raised."
+  },
+  {
+   "id": "f-027",
+   "source": "fresh",
+   "speech_date": "2022-12-14",
+   "turn": "Last night I dreamed that I was back in Tokyo.",
+   "facts": [
+    "User was in Tokyo"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Last night",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": {
+      "amount": 1,
+      "unit": "day",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "A dream; the user was not in Tokyo."
+  },
+  {
+   "id": "f-028",
+   "source": "fresh",
+   "speech_date": "2023-09-12",
+   "turn": "I earn twice what I earned in 2019, which feels nice.",
+   "facts": [
+    "User earns twice their earlier salary"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in 2019",
+     "basis": "explicit_date",
+     "kind": "state",
+     "offset": null,
+     "calendar": null,
+     "date": "2019",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "2019 is a comparison baseline, not when the higher earning began."
+  },
+  {
+   "id": "f-029",
+   "source": "fresh",
+   "speech_date": "2024-01-17",
+   "turn": "My sister, who graduated five years ago, got me this job.",
+   "facts": [
+    "User's sister got the user this job"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "five years ago",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": {
+      "amount": 5,
+      "unit": "year",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Five years ago dates the graduation in a relative clause."
+  },
+  {
+   "id": "f-030",
+   "source": "fresh",
+   "speech_date": "2024-07-10",
+   "turn": "We adopted Max last year. My wife works at the children's hospital.",
+   "facts": [
+    "User's wife works at the children's hospital"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "last year",
+     "basis": "speech_relative",
+     "kind": "state",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "year"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Last year belongs to the adoption in the prior sentence."
+  },
+  {
+   "id": "f-031",
+   "source": "fresh",
+   "speech_date": "2022-06-22",
+   "turn": "From 2010 to 2015 I lived in Chicago, and now I work remotely.",
+   "facts": [
+    "User works remotely"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "2015",
+     "basis": "explicit_date",
+     "kind": "state",
+     "offset": null,
+     "calendar": null,
+     "date": "2015",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "2015 ends the Chicago period; remote work start is unstated."
+  },
+  {
+   "id": "f-032",
+   "source": "fresh",
+   "speech_date": "2023-11-15",
+   "turn": "My roommate from 2012 is now a surgeon in Denver.",
+   "facts": [
+    "User's former roommate is a surgeon in Denver"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "from 2012",
+     "basis": "explicit_date",
+     "kind": "state",
+     "offset": null,
+     "calendar": null,
+     "date": "2012",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "2012 identifies the roommate, not when the surgeon career started."
+  },
+  {
+   "id": "f-033",
+   "source": "fresh",
+   "speech_date": "2024-05-15",
+   "turn": "Last week I should have called the dentist, but I forgot.",
+   "facts": [
+    "User called the dentist"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Last week",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "week"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "The call did not happen."
+  },
+  {
+   "id": "f-034",
+   "source": "fresh",
+   "speech_date": "2023-09-12",
+   "turn": "I bought this jacket in 2019 and wore it to the wedding last Saturday.",
+   "facts": [
+    "User bought the jacket",
+    "User wore the jacket to the wedding"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "last Saturday",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "weekday",
+      "name": "saturday"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Last Saturday is the wedding; the purchase was in 2019."
+  },
+  {
+   "id": "f-035",
+   "source": "fresh",
+   "speech_date": "2022-11-09",
+   "turn": "A friend who moved here in 2018 recommended the bakery on Elm Street.",
+   "facts": [
+    "A friend recommended the bakery on Elm Street"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in 2018",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "2018",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "2018 dates the friend's move, not the recommendation."
+  },
+  {
+   "id": "f-036",
+   "source": "fresh",
+   "speech_date": "2023-08-16",
+   "turn": "In May I was in Rome, but in June I stayed home.",
+   "facts": [
+    "User stayed home"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "In May",
+     "basis": "explicit_date",
+     "kind": "state",
+     "offset": null,
+     "calendar": null,
+     "date": "--05",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "May belongs to the Rome clause; staying home is June."
+  },
+  {
+   "id": "f-037",
+   "source": "fresh",
+   "speech_date": "2022-12-30",
+   "turn": "It snowed on Christmas Eve, and the next day we left for the cabin.",
+   "facts": [
+    "User left for the cabin"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Christmas Eve",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "--12-24",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Christmas Eve is the snowfall; leaving was the next day."
+  },
+  {
+   "id": "f-038",
+   "source": "fresh",
+   "speech_date": "2024-03-20",
+   "turn": "My neighbor, who has lived here since 2005, complained about the noise.",
+   "facts": [
+    "User's neighbor complained about the noise"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "since 2005",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "2005",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Since 2005 is the neighbor's residence in a relative clause."
+  },
+  {
+   "id": "f-039",
+   "source": "fresh",
+   "speech_date": "2023-05-17",
+   "turn": "I am learning Spanish because I met someone in Madrid last month.",
+   "facts": [
+    "User is learning Spanish"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "last month",
+     "basis": "speech_relative",
+     "kind": "state",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "month"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Last month dates the meeting, the reason, not when learning started."
+  },
+  {
+   "id": "f-040",
+   "source": "fresh",
+   "speech_date": "2024-10-16",
+   "turn": "We talked at length on Sunday about the divorce, which was finalized in 2019.",
+   "facts": [
+    "User and someone talked at length"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in 2019",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "2019",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "2019 dates the divorce, not the conversation."
+  },
+  {
+   "id": "f-041",
+   "source": "fresh",
+   "speech_date": "2023-02-15",
+   "turn": "Each January we visit my in-laws in Aspen.",
+   "facts": [
+    "User visits in-laws in Aspen"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "January",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "--01",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Recurring yearly habit."
+  },
+  {
+   "id": "f-042",
+   "source": "fresh",
+   "speech_date": "2022-09-14",
+   "turn": "My passport expires in 2027, so I should renew it soon.",
+   "facts": [
+    "User has a passport"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in 2027",
+     "basis": "explicit_date",
+     "kind": "state",
+     "offset": null,
+     "calendar": null,
+     "date": "2027",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "2027 is an expiry date in the future, not the start of holding the passport."
+  },
+  {
+   "id": "f-043",
+   "source": "fresh",
+   "speech_date": "2023-11-15",
+   "turn": "The house was built in 1952 and we love it.",
+   "facts": [
+    "User loves the house"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in 1952",
+     "basis": "explicit_date",
+     "kind": "state",
+     "offset": null,
+     "calendar": null,
+     "date": "1952",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "1952 dates construction, not when the user began to love it."
+  },
+  {
+   "id": "f-044",
+   "source": "fresh",
+   "speech_date": "2024-07-10",
+   "turn": "My dad retired in 2015. Last month he took up golf.",
+   "facts": [
+    "User's dad retired"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Last month",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "month"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Last month belongs to taking up golf, in the next sentence."
+  },
+  {
+   "id": "f-045",
+   "source": "fresh",
+   "speech_date": "2024-01-17",
+   "turn": "My phone, which I got two years ago, finally died.",
+   "facts": [
+    "User's phone died"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "two years ago",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": {
+      "amount": 2,
+      "unit": "year",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Two years ago dates acquiring the phone; death is recent."
+  },
+  {
+   "id": "f-046",
+   "source": "fresh",
+   "speech_date": "2023-09-12",
+   "turn": "My cousin texted the day before yesterday to say she had twins.",
+   "facts": [
+    "User's cousin had twins"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "the day before yesterday",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": {
+      "amount": 2,
+      "unit": "day",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "That is when she texted; the births may be earlier."
+  },
+  {
+   "id": "f-047",
+   "source": "fresh",
+   "speech_date": "2022-06-22",
+   "turn": "He was born in 1985 and has been a teacher since 2010.",
+   "facts": [
+    "He is a teacher"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in 1985",
+     "basis": "explicit_date",
+     "kind": "state",
+     "offset": null,
+     "calendar": null,
+     "date": "1985",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "1985 dates the birth; teaching began in 2010."
+  },
+  {
+   "id": "f-048",
+   "source": "fresh",
+   "speech_date": "2024-03-20",
+   "turn": "My boss is moving to Singapore, and he sent the email on March 11th.",
+   "facts": [
+    "User's boss is moving to Singapore"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "March 11th",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "--03-11",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "March 11th is the email, not the move."
+  },
+  {
+   "id": "f-049",
+   "source": "fresh",
+   "speech_date": "2023-04-19",
+   "turn": "The article claims that in 1997 scientists found the cave, but I think it was found earlier.",
+   "facts": [
+    "Scientists found the cave"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in 1997",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "1997",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Reported claim the speaker disputes."
+  },
+  {
+   "id": "f-050",
+   "source": "fresh",
+   "speech_date": "2024-05-15",
+   "turn": "I might repaint the bedroom next weekend or maybe the one after.",
+   "facts": [
+    "User repainted the bedroom"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "next weekend",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "next",
+      "unit": "weekend"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Hypothetical future possibility."
+  },
+  {
+   "id": "f-051",
+   "source": "fresh",
+   "speech_date": "2023-02-15",
+   "turn": "Pat said that in 2016 she lived in Boston, and my guess is she still does.",
+   "facts": [
+    "Pat lives in Boston"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in 2016",
+     "basis": "explicit_date",
+     "kind": "state",
+     "offset": null,
+     "calendar": null,
+     "date": "2016",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "2016 only anchors a past report; the current residence start is unknown."
+  },
+  {
+   "id": "f-052",
+   "source": "fresh",
+   "speech_date": "2022-11-09",
+   "turn": "Our team lost the final in 2014, and I have worn this scarf ever since I bought it at the stadium.",
+   "facts": [
+    "User bought the scarf at the stadium"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in 2014",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "2014",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "[UNSURE] 2014 is the lost final; the scarf purchase date is not given. (Orchestrator review: the scarf may have been bought at the 2014 final.)"
+  },
+  {
+   "id": "f-053",
+   "source": "fresh",
+   "speech_date": "2024-10-16",
+   "turn": "After the first snow in November, the road to the cabin usually closes.",
+   "facts": [
+    "The road to the cabin closes"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in November",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "--11",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Generic seasonal habit with no single dated event."
+  },
+  {
+   "id": "f-054",
+   "source": "fresh",
+   "speech_date": "2023-08-16",
+   "turn": "I scheduled the surgery for September 5th, and my sister will drive me.",
+   "facts": [
+    "User has surgery",
+    "User's sister drives the user"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "September 5th",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "--09-05",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Scheduled for a future date; it has not happened by the speech date."
+  },
+  {
+   "id": "f-055",
+   "source": "fresh",
+   "speech_date": "2024-01-17",
+   "turn": "On Tuesday my neighbor mentioned that his basement flooded back in 2011.",
+   "facts": [
+    "User's neighbor's basement flooded"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "On Tuesday",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "weekday",
+      "name": "tuesday"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Tuesday is the mention; the flood was in 2011."
+  },
+  {
+   "id": "f-056",
+   "source": "fresh",
+   "speech_date": "2022-09-14",
+   "turn": "My grandmother, born in 1938, makes the best pierogi.",
+   "facts": [
+    "User's grandmother makes pierogi"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in 1938",
+     "basis": "explicit_date",
+     "kind": "state",
+     "offset": null,
+     "calendar": null,
+     "date": "1938",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "1938 is the birth year, not when she began making pierogi."
+  },
+  {
+   "id": "f-057",
+   "source": "fresh",
+   "speech_date": "2023-05-17",
+   "turn": "Last week the vet said the dog might have arthritis.",
+   "facts": [
+    "User's dog has arthritis"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Last week",
+     "basis": "speech_relative",
+     "kind": "state",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "week"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "no_write",
+   "correct_window": null,
+   "why": "Last week is when the vet spoke; the condition is uncertain and its onset unknown."
+  },
+  {
+   "id": "f-058",
+   "source": "fresh",
+   "speech_date": "2023-09-12",
+   "turn": "I went to the dentist last Friday.",
+   "facts": [
+    "User went to the dentist"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "last Friday",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "weekday",
+      "name": "friday"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2023-09-08",
+    "2023-09-08"
+   ],
+   "why": "Simple event with its own time."
+  },
+  {
+   "id": "f-059",
+   "source": "fresh",
+   "speech_date": "2023-05-17",
+   "turn": "I have lived in Leeds for four years now.",
+   "facts": [
+    "User lives in Leeds"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "for four years now",
+     "basis": "speech_relative",
+     "kind": "state",
+     "offset": {
+      "amount": 4,
+      "unit": "year",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2019-03-17",
+    "2019-07-17"
+   ],
+   "why": "A duration running up to now places the state's start."
+  },
+  {
+   "id": "f-060",
+   "source": "fresh",
+   "speech_date": "2023-08-16",
+   "turn": "Since 2021 I have lived in Oslo, and I like the winters.",
+   "facts": [
+    "User lives in Oslo"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Since 2021",
+     "basis": "explicit_date",
+     "kind": "state",
+     "offset": null,
+     "calendar": null,
+     "date": "2021",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2021-01-01",
+    "2021-12-31"
+   ],
+   "why": "Since a year with a state verb gives the start year."
+  },
+  {
+   "id": "f-061",
+   "source": "fresh",
+   "speech_date": "2022-12-01",
+   "turn": "On March 14, 2022 we closed on the house.",
+   "facts": [
+    "User closed on the house"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "On March 14, 2022",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "2022-03-14",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2022-03-14",
+    "2022-03-14"
+   ],
+   "why": "Explicit full date for the event."
+  },
+  {
+   "id": "f-062",
+   "source": "fresh",
+   "speech_date": "2024-03-20",
+   "turn": "My daughter was born on June 3rd, 2020, and she is now obsessed with dinosaurs.",
+   "facts": [
+    "User's daughter was born"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "June 3rd, 2020",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "2020-06-03",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2020-06-03",
+    "2020-06-03"
+   ],
+   "why": "Explicit date attached to the birth."
+  },
+  {
+   "id": "f-063",
+   "source": "fresh",
+   "speech_date": "2022-12-01",
+   "turn": "We moved to Austin on October 8th, 2022, and two days later the movers admitted they had lost our couch.",
+   "facts": [
+    "User moved to Austin",
+    "The movers admitted losing the couch"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "on October 8th, 2022",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "2022-10-08",
+     "anchor": null
+    },
+    "1": {
+     "i": 1,
+     "expression": "two days later",
+     "basis": "event_anchored",
+     "kind": "point_event",
+     "offset": {
+      "amount": 2,
+      "unit": "day",
+      "direction": "after",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": {
+      "fact": 0,
+      "event": null
+     }
+    }
+   },
+   "target": 1,
+   "label": "write",
+   "correct_window": [
+    "2022-10-10",
+    "2022-10-10"
+   ],
+   "why": "Anchored sub-event two days after the dated move."
+  },
+  {
+   "id": "f-064",
+   "source": "fresh",
+   "speech_date": "2024-03-20",
+   "turn": "Three weeks ago I started a new job at a logistics firm.",
+   "facts": [
+    "User started a new job"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Three weeks ago",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": {
+      "amount": 3,
+      "unit": "week",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2024-02-26",
+    "2024-03-02"
+   ],
+   "why": "Direct relative time on the starting event."
+  },
+  {
+   "id": "f-065",
+   "source": "fresh",
+   "speech_date": "2023-08-16",
+   "turn": "Last month my laptop died right in the middle of a meeting.",
+   "facts": [
+    "User's laptop died"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Last month",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "month"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2023-07-01",
+    "2023-07-31"
+   ],
+   "why": "Time adverbial belongs to this clause."
+  },
+  {
+   "id": "f-066",
+   "source": "fresh",
+   "speech_date": "2022-09-14",
+   "turn": "I graduated from nursing school in 2016.",
+   "facts": [
+    "User graduated from nursing school"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in 2016",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "2016",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2016-01-01",
+    "2016-12-31"
+   ],
+   "why": "Year attached to the graduation."
+  },
+  {
+   "id": "f-067",
+   "source": "fresh",
+   "speech_date": "2024-07-10",
+   "turn": "I got engaged last Saturday at the lake.",
+   "facts": [
+    "User got engaged"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "last Saturday",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "weekday",
+      "name": "saturday"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2024-07-06",
+    "2024-07-06"
+   ],
+   "why": "Weekday adverbial on the event."
+  },
+  {
+   "id": "f-068",
+   "source": "fresh",
+   "speech_date": "2022-09-14",
+   "turn": "My husband and I have been married for ten years.",
+   "facts": [
+    "User is married"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "for ten years",
+     "basis": "speech_relative",
+     "kind": "state",
+     "offset": {
+      "amount": 10,
+      "unit": "year",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2012-03-01",
+    "2013-03-31"
+   ],
+   "why": "Duration up to now places the marriage start."
+  },
+  {
+   "id": "f-069",
+   "source": "fresh",
+   "speech_date": "2023-11-15",
+   "turn": "Yesterday I repainted the kitchen a pale green.",
+   "facts": [
+    "User repainted the kitchen"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Yesterday",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": {
+      "amount": 1,
+      "unit": "day",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2023-11-14",
+    "2023-11-14"
+   ],
+   "why": "Simple yesterday event."
+  },
+  {
+   "id": "f-070",
+   "source": "fresh",
+   "speech_date": "2024-01-17",
+   "turn": "Last year I ran my first marathon in Chicago.",
+   "facts": [
+    "User ran their first marathon"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Last year",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "year"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2023-01-01",
+    "2023-12-31"
+   ],
+   "why": "Year adverbial on the event."
+  },
+  {
+   "id": "f-071",
+   "source": "fresh",
+   "speech_date": "2023-02-15",
+   "turn": "Ever since the flood in 2019 the basement has smelled of mildew.",
+   "facts": [
+    "There was a flood",
+    "The basement smells of mildew"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in 2019",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "2019",
+     "anchor": null
+    },
+    "1": {
+     "i": 1,
+     "expression": "Ever since the flood",
+     "basis": "event_anchored",
+     "kind": "state",
+     "offset": {
+      "amount": 0,
+      "unit": "day",
+      "direction": "after",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": {
+      "fact": 0,
+      "event": null
+     }
+    }
+   },
+   "target": 1,
+   "label": "write",
+   "correct_window": [
+    "2019-01-01",
+    "2019-12-31"
+   ],
+   "why": "Ever since an event starts the state at that event."
+  },
+  {
+   "id": "f-072",
+   "source": "fresh",
+   "speech_date": "2023-05-17",
+   "turn": "The outage hit last Thursday. Two days after the outage, I switched internet providers.",
+   "facts": [
+    "There was an outage",
+    "User switched internet providers"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "last Thursday",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "weekday",
+      "name": "thursday"
+     },
+     "date": null,
+     "anchor": null
+    },
+    "1": {
+     "i": 1,
+     "expression": "Two days after the outage",
+     "basis": "event_anchored",
+     "kind": "point_event",
+     "offset": {
+      "amount": 2,
+      "unit": "day",
+      "direction": "after",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": {
+      "fact": 0,
+      "event": null
+     }
+    }
+   },
+   "target": 1,
+   "label": "write",
+   "correct_window": [
+    "2023-05-13",
+    "2023-05-13"
+   ],
+   "why": "Anchored on a dated outage, two days later."
+  },
+  {
+   "id": "f-073",
+   "source": "fresh",
+   "speech_date": "2022-12-30",
+   "turn": "On Christmas Day the kids woke us at five to open presents.",
+   "facts": [
+    "The kids woke the user to open presents"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "On Christmas Day",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "--12-25",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2022-12-25",
+    "2022-12-25"
+   ],
+   "why": "Fixed-date holiday attached to the event; most recent December 25 before speech."
+  },
+  {
+   "id": "f-074",
+   "source": "fresh",
+   "speech_date": "2023-11-15",
+   "turn": "On October 21st I visited my grandmother in the care home.",
+   "facts": [
+    "User visited grandmother"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "On October 21st",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "--10-21",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2023-10-21",
+    "2023-10-21"
+   ],
+   "why": "Day-month attached to the visit; most recent past occurrence."
+  },
+  {
+   "id": "f-075",
+   "source": "fresh",
+   "speech_date": "2024-05-15",
+   "turn": "I started learning piano about six months ago and I can play two songs already.",
+   "facts": [
+    "User started learning piano"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "about six months ago",
+     "basis": "speech_relative",
+     "kind": "state",
+     "offset": {
+      "amount": 6,
+      "unit": "month",
+      "direction": "before",
+      "approx": true
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2023-10-15",
+    "2023-12-15"
+   ],
+   "why": "Approximate ago on the start of learning."
+  },
+  {
+   "id": "f-076",
+   "source": "fresh",
+   "speech_date": "2023-11-15",
+   "turn": "My wedding was on August 12, 2023. A week before the wedding, I caught a bad cold.",
+   "facts": [
+    "User's wedding",
+    "User caught a bad cold"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "on August 12, 2023",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "2023-08-12",
+     "anchor": null
+    },
+    "1": {
+     "i": 1,
+     "expression": "A week before the wedding",
+     "basis": "event_anchored",
+     "kind": "point_event",
+     "offset": {
+      "amount": 1,
+      "unit": "week",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": {
+      "fact": 0,
+      "event": null
+     }
+    }
+   },
+   "target": 1,
+   "label": "write",
+   "correct_window": [
+    "2023-08-05",
+    "2023-08-05"
+   ],
+   "why": "Anchored one week before a dated wedding."
+  },
+  {
+   "id": "f-077",
+   "source": "fresh",
+   "speech_date": "2024-10-16",
+   "turn": "Two years ago I broke my wrist skating.",
+   "facts": [
+    "User broke their wrist"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Two years ago",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": {
+      "amount": 2,
+      "unit": "year",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2022-09-16",
+    "2022-11-16"
+   ],
+   "why": "Relative ago on the injury; tolerance for imprecision."
+  },
+  {
+   "id": "f-078",
+   "source": "fresh",
+   "speech_date": "2022-06-22",
+   "turn": "Since 2018 I have kept bees in the back garden.",
+   "facts": [
+    "User keeps bees"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Since 2018",
+     "basis": "explicit_date",
+     "kind": "state",
+     "offset": null,
+     "calendar": null,
+     "date": "2018",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2018-01-01",
+    "2018-12-31"
+   ],
+   "why": "Since year with a state verb."
+  },
+  {
+   "id": "f-079",
+   "source": "fresh",
+   "speech_date": "2024-05-15",
+   "turn": "Last week we adopted a kitten, and it has already chewed through the sofa.",
+   "facts": [
+    "User adopted a kitten"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Last week",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "week"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2024-05-06",
+    "2024-05-12"
+   ],
+   "why": "Adverbial opens the clause about the adoption."
+  },
+  {
+   "id": "f-080",
+   "source": "fresh",
+   "speech_date": "2023-04-19",
+   "turn": "We saw The Cure on April 8th, and the encore was amazing.",
+   "facts": [
+    "User saw The Cure"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "on April 8th",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "--04-08",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2023-04-08",
+    "2023-04-08"
+   ],
+   "why": "Explicit day-month for the concert."
+  },
+  {
+   "id": "f-081",
+   "source": "fresh",
+   "speech_date": "2024-01-17",
+   "turn": "For six months now I have been vegetarian.",
+   "facts": [
+    "User is vegetarian"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "For six months now",
+     "basis": "speech_relative",
+     "kind": "state",
+     "offset": {
+      "amount": 6,
+      "unit": "month",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2023-06-17",
+    "2023-08-17"
+   ],
+   "why": "Duration to now gives the start of the state."
+  },
+  {
+   "id": "f-082",
+   "source": "fresh",
+   "speech_date": "2023-11-15",
+   "turn": "My trip to Peru was in 2017. While there, I climbed up to Machu Picchu at dawn.",
+   "facts": [
+    "User's trip to Peru",
+    "User climbed up to Machu Picchu"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "in 2017",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "2017",
+     "anchor": null
+    },
+    "1": {
+     "i": 1,
+     "expression": "While there",
+     "basis": "event_anchored",
+     "kind": "point_event",
+     "offset": {
+      "amount": 0,
+      "unit": "day",
+      "direction": "after",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": {
+      "fact": 0,
+      "event": null
+     }
+    }
+   },
+   "target": 1,
+   "label": "write",
+   "correct_window": [
+    "2017-01-01",
+    "2017-12-31"
+   ],
+   "why": "[UNSURE] A sub-event during a dated trip lies within that year, though the offset form is approximate."
+  },
+  {
+   "id": "f-083",
+   "source": "fresh",
+   "speech_date": "2023-09-13",
+   "turn": "My surgery was last Friday, and four days later the stitches came out.",
+   "facts": [
+    "User had surgery",
+    "User's stitches came out"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "last Friday",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "weekday",
+      "name": "friday"
+     },
+     "date": null,
+     "anchor": null
+    },
+    "1": {
+     "i": 1,
+     "expression": "four days later",
+     "basis": "event_anchored",
+     "kind": "point_event",
+     "offset": {
+      "amount": 4,
+      "unit": "day",
+      "direction": "after",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": {
+      "fact": 0,
+      "event": null
+     }
+    }
+   },
+   "target": 1,
+   "label": "write",
+   "correct_window": [
+    "2023-09-12",
+    "2023-09-12"
+   ],
+   "why": "Four days after the dated surgery."
+  },
+  {
+   "id": "f-084",
+   "source": "fresh",
+   "speech_date": "2022-11-09",
+   "turn": "I moved here nine years ago for a job in logistics.",
+   "facts": [
+    "User moved here"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "nine years ago",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": {
+      "amount": 9,
+      "unit": "year",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2013-05-01",
+    "2014-05-31"
+   ],
+   "why": "Relative ago on the move."
+  },
+  {
+   "id": "f-085",
+   "source": "fresh",
+   "speech_date": "2022-12-01",
+   "turn": "On July 4th, 2021 I proposed to Elena under the fireworks.",
+   "facts": [
+    "User proposed to Elena"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "On July 4th, 2021",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "2021-07-04",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2021-07-04",
+    "2021-07-04"
+   ],
+   "why": "Explicit date for the proposal."
+  },
+  {
+   "id": "f-086",
+   "source": "fresh",
+   "speech_date": "2024-03-20",
+   "turn": "Two weeks ago my brother started chemotherapy, and he is coping well.",
+   "facts": [
+    "User's brother started chemotherapy"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Two weeks ago",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": {
+      "amount": 2,
+      "unit": "week",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2024-03-04",
+    "2024-03-08"
+   ],
+   "why": "Relative ago on the start of treatment."
+  },
+  {
+   "id": "f-087",
+   "source": "fresh",
+   "speech_date": "2024-07-10",
+   "turn": "Last month I joined a community choir.",
+   "facts": [
+    "User joined a choir"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Last month",
+     "basis": "speech_relative",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": {
+      "which": "last",
+      "unit": "month"
+     },
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2024-06-01",
+    "2024-06-30"
+   ],
+   "why": "Month adverbial on the joining."
+  },
+  {
+   "id": "f-088",
+   "source": "fresh",
+   "speech_date": "2023-02-15",
+   "turn": "I have had this cough for three days and it is getting worse.",
+   "facts": [
+    "User has a cough"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "for three days",
+     "basis": "speech_relative",
+     "kind": "state",
+     "offset": {
+      "amount": 3,
+      "unit": "day",
+      "direction": "before",
+      "approx": false
+     },
+     "calendar": null,
+     "date": null,
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "2023-02-11",
+    "2023-02-13"
+   ],
+   "why": "Duration to now places the start of the cough."
+  },
+  {
+   "id": "f-089",
+   "source": "fresh",
+   "speech_date": "2022-09-14",
+   "turn": "Back in 1999 we got our first computer, a beige tower.",
+   "facts": [
+    "User's family got their first computer"
+   ],
+   "items": {
+    "0": {
+     "i": 0,
+     "expression": "Back in 1999",
+     "basis": "explicit_date",
+     "kind": "point_event",
+     "offset": null,
+     "calendar": null,
+     "date": "1999",
+     "anchor": null
+    }
+   },
+   "target": 0,
+   "label": "write",
+   "correct_window": [
+    "1999-01-01",
+    "1999-12-31"
+   ],
+   "why": "Year attached to the event."
+  }
+ ]
+}

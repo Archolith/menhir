@@ -310,6 +310,7 @@ class GraphitiClient:
 
         llm_client = None
         anchored_time = None
+        anchored_time_attach = None
         if llm_enabled:
             # Pin temperature=0 for deterministic extraction and dedup.
             # Graphiti's DEFAULT_TEMPERATURE is 1, which permits high sampling
@@ -362,6 +363,17 @@ class GraphitiClient:
                     "Anchored-time resolver enabled (model=%s, timeout_s=%s)",
                     anchored_time.model, settings.anchored_time_resolver_timeout_s,
                 )
+                if settings.anchored_time_attach_enabled:
+                    from menhir.infrastructure.anchored_time_attach_client import AnchoredTimeAttacher
+
+                    # Blind attach check: same unwrapped client and timeout as the resolver.
+                    anchored_time_attach = AnchoredTimeAttacher(
+                        raw_llm_client,
+                        base_url=llama_base_url,
+                        model=settings.anchored_time_attach_model or anchored_time.model,
+                        timeout_s=settings.anchored_time_resolver_timeout_s,
+                    )
+                    logger.info("Anchored-time attach check enabled (model=%s)", anchored_time_attach.model)
         embed_base_url = embed_provider.base_url
         embed_dimension = expected_graphiti_embedding_dimension(settings)
         embed_client = (
@@ -422,6 +434,7 @@ class GraphitiClient:
                 single_episode_extraction_hook=MenhirExtractionHook(
                     anchored_time=anchored_time,
                     anchored_time_expiry=anchored_time_expiry,
+                    anchored_time_attach=anchored_time_attach,
                 ),
                 identity_gate_hook=MenhirIdentityGateHook(),
                 candidate_filter_hook=MenhirCandidateFilterHook(),
