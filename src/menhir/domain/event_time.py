@@ -14,6 +14,9 @@ from typing import Any, Mapping
 #: Resolver outcomes whose closed window is the event time (written, or Graphiti agreed).
 _WINDOW_OUTCOMES = frozenset({"written", "graphiti_inside_window"})
 
+#: The window is not this fact's time: never rendered, and Graphiti's date inside it is the same copy.
+_BORROWED_OUTCOMES = frozenset({"state_start", "state_future", "attach_rejected", "attach_unverified"})
+
 #: Edge properties projected for rendering, as ``r.<name> AS <name>``.
 EVENT_TIME_PROPERTIES = (
     "time_basis",
@@ -64,7 +67,7 @@ class EventTime:
             if window:
                 return f"planned {window}{source}"
             return f"planned, time unknown{_said(self.speech_date, expression)}"
-        if self.outcome == "state_start":
+        if self.outcome in _BORROWED_OUTCOMES:
             # The expression and window date another event; Graphiti's date inside that window is
             # the same copy, so only a date of Graphiti's own outside it is shown.
             borrowed = _near_window(recorded, self.window_start, self.window_end)

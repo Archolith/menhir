@@ -1444,6 +1444,7 @@ async def _run_graphiti_combined_extraction(
     *,
     anchored_time: Any | None = None,
     anchored_time_expiry: bool = False,
+    anchored_time_attach: Any | None = None,
 ) -> tuple[list[Any], list[Any], dict[str, list[int]]]:
     """Run combined extraction under the active receipt's Menhir policy."""
     if receipt is None:
@@ -1625,7 +1626,7 @@ async def _run_graphiti_combined_extraction(
     if anchored_time is not None:
         # Final edges only, before Graphiti's dedupe, contradiction and expiry read valid_at.
         await _apply_anchored_time(anchored_time, receipt, episode, edges,
-                                   expiry=anchored_time_expiry)
+                                   expiry=anchored_time_expiry, attacher=anchored_time_attach)
     return nodes, edges, index_map
 
 
@@ -1641,8 +1642,12 @@ async def _apply_anchored_time(
     edges: list[Any],
     *,
     expiry: bool = False,
+    attacher: Any | None = None,
 ) -> None:
     """Overlay resolver-computed ``valid_at`` on final edges. Never fails the episode.
+
+    With ``attacher`` (MENHIR_ANCHORED_TIME_ATTACH) a time is written only when the blind attach
+    check agrees (``_attach_check``); a failed check writes nothing for this episode.
 
     With ``expiry`` (MENHIR_ANCHORED_TIME_EXPIRY) it also records, per classified point event or
     state that arrives with its own ``invalid_at`` and no ``expired_at``, that ``invalid_at`` as
@@ -1708,6 +1713,9 @@ async def _apply_anchored_time(
         drops = set(clause_guard(turn, facts, items)) | set(state_start_guard(turn, facts, items))
         report.guard_drops = tuple(sorted(drops))
         results = plan_overlay(inputs, items, speech_date, speech_time.tzinfo)
+        if attacher is not None:
+            results = await _attach_check(attacher, report, receipt, turn, speech_date, facts,
+                                          inputs, items, results, speech_time.tzinfo)
         if expiry:
             results = [_with_world_end(edge, result) for edge, result in zip(edges, results)]
         for edge, result in zip(edges, results):
@@ -1732,6 +1740,52 @@ async def _apply_anchored_time(
             "Anchored-time resolver internal error; Graphiti times kept episode_id=%s",
             receipt.episode_key,
         )
+
+
+async def _attach_check(
+    attacher: Any,
+    report: Any,
+    receipt: CombinedExtractionReceipt,
+    turn: str,
+    speech_date: Any,
+    facts: list[str],
+    inputs: list[Any],
+    items: dict[int, dict],
+    results: list[Any],
+    speech_tz: Any,
+) -> list[Any]:
+    """Plan 3.1: the candidates are the results the overlay would write; one blind call for the
+    episode decides them (V1-V3). No candidate, no call. A failed call leaves every candidate
+    ``attach_unverified``."""
+    from menhir.infrastructure.anchored_time import plan_overlay
+    from menhir.infrastructure.anchored_time_attach import decide_all
+
+    report.attach_prompt_version = str(getattr(attacher, "prompt_version", "") or "")
+    report.attach_model = str(getattr(attacher, "model", "") or "") or "unknown"
+    candidates = [r for r in results if r.written]
+    report.attach_candidates = len(candidates)
+    answers: dict[int, dict] | None = {}
+    if not candidates:
+        report.attach_status = "no_candidates"
+    else:
+        outcome = await attacher.attach(turn, speech_date, facts)
+        report.attach_status, report.attach_latency_s = outcome.status, outcome.latency_s
+        answers = outcome.answers if outcome.status == "ok" else None
+        if answers is None:
+            logger.warning(
+                "Anchored-time attach check failed; no time written episode_id=%s status=%s error=%s",
+                receipt.episode_key, outcome.status, outcome.error_class or "-",
+            )
+    final = plan_overlay(inputs, items, speech_date, speech_tz,
+                         attach=decide_all(turn, candidates, answers))
+    report.attach_rejected = sum(r.reason == "attach_rejected" for r in final)
+    report.attach_unverified = sum(r.reason == "attach_unverified" for r in final)
+    logger.info(
+        "Anchored-time attach episode_id=%s status=%s candidates=%d rejected=%d unverified=%d",
+        receipt.episode_key, report.attach_status, report.attach_candidates,
+        report.attach_rejected, report.attach_unverified,
+    )
+    return final
 
 
 #: P3: kinds whose own end is world time, not supersession (a plan's end is not an event's end).
@@ -1843,11 +1897,14 @@ class MenhirExtractionHook:
     schemas keep the fork's SEPARATE compatibility route.
     """
 
-    def __init__(self, anchored_time: Any | None = None, *, anchored_time_expiry: bool = False) -> None:
+    def __init__(self, anchored_time: Any | None = None, *, anchored_time_expiry: bool = False,
+                 anchored_time_attach: Any | None = None) -> None:
         #: ``AnchoredTimeResolver`` when MENHIR_ANCHORED_TIME_RESOLVER is on, else ``None``.
         self._anchored_time = anchored_time
         #: MENHIR_ANCHORED_TIME_EXPIRY; only has an effect with a resolver.
         self._anchored_time_expiry = anchored_time_expiry
+        #: ``AnchoredTimeAttacher`` when MENHIR_ANCHORED_TIME_ATTACH is on; only with a resolver.
+        self._anchored_time_attach = anchored_time_attach
 
     async def extract_single_episode(self, context: Any) -> Any:
         from menhir.infrastructure.graphiti_resolution_policy import (
@@ -1870,6 +1927,7 @@ class MenhirExtractionHook:
             receipt,
             anchored_time=self._anchored_time,
             anchored_time_expiry=self._anchored_time_expiry,
+            anchored_time_attach=self._anchored_time_attach,
         )
         return SingleEpisodeExtractionResult(
             nodes=nodes,

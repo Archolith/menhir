@@ -15,6 +15,9 @@ P3 (MENHIR_ANCHORED_TIME_EXPIRY): Graphiti never expires a world-ended edge for 
 (``MenhirEdgeExpiryHook`` answers ``WORLD_END``), so nothing is ever un-expired here. When a row
 carries ``time_world_end``, the same locked write stamps ``time_expiry = 'world_end'`` on an
 edge that is still live and whose ``invalid_at`` is still that end. The stamp is informational.
+
+The contract string is ``at1|...`` unless the blind attach check ran for the episode, then ``at2|...``
+with the attach prompt version and model appended.
 """
 from __future__ import annotations
 
@@ -34,6 +37,7 @@ from menhir.domain.namespace import (
 logger = logging.getLogger(__name__)
 
 CONTRACT_SCHEMA = "at1"
+CONTRACT_SCHEMA_ATTACH = "at2"
 EXPRESSION_MAX_CHARS = 120
 PERSIST_TIMEOUT_S = 5.0
 
@@ -113,6 +117,10 @@ def contract_rows(report: Any, edge_uuids: Iterable[str], speech_date: date | No
     """One parameter row per result whose edge is among ``edge_uuids``. Pure."""
     allowed = {str(u) for u in edge_uuids if u}
     contract = f"{CONTRACT_SCHEMA}|{report.prompt_version}|{report.model}"
+    attach_model = getattr(report, "attach_model", "")
+    if attach_model:
+        contract = (f"{CONTRACT_SCHEMA_ATTACH}|{report.prompt_version}|{report.model}|"
+                    f"{getattr(report, 'attach_prompt_version', '')}|{attach_model}")
     rows = []
     for result in report.results:
         if result.edge_uuid not in allowed:

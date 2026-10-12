@@ -230,6 +230,12 @@ class MemorySettings:
     #: edges for that end alone (MenhirEdgeExpiryHook), and recall labels them "ended". Needs the
     #: resolver and archolith-graphiti-core>=0.30.2.post3. Default off.
     anchored_time_expiry_enabled: bool = False
+    #: Blind attachment check (plan menhir-anchored-time-attachment-plan.md 3.1): a second model call
+    #: must quote the same words with the right relation before a resolver time is written.
+    #: Needs the resolver. Default off.
+    anchored_time_attach_enabled: bool = False
+    #: Model for the attach call; empty means the resolver's model.
+    anchored_time_attach_model: str = ""
 
     # Personal-memory consolidation job (gated perception -> count/amount Views from user turns).
     # Short interval + dirty-namespace filter keeps it cheap; all bias guards pinned on. Default off.
@@ -870,6 +876,8 @@ class MemorySettings:
             ),
             anchored_time_render_enabled=parse_bool_env(_getenv("MENHIR_ANCHORED_TIME_RENDER", default=str(cls.anchored_time_render_enabled))),
             anchored_time_expiry_enabled=parse_bool_env(_getenv("MENHIR_ANCHORED_TIME_EXPIRY", default=str(cls.anchored_time_expiry_enabled))),
+            anchored_time_attach_enabled=parse_bool_env(_getenv("MENHIR_ANCHORED_TIME_ATTACH", default=str(cls.anchored_time_attach_enabled))),
+            anchored_time_attach_model=(_getenv("MENHIR_ANCHORED_TIME_ATTACH_MODEL", default=cls.anchored_time_attach_model) or "").strip(),
             personal_memory_consolidation_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED", default=str(cls.personal_memory_consolidation_enabled))),
             personal_memory_consolidation_interval_s=_parse_float(
                 _getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_INTERVAL_S", default=str(cls.personal_memory_consolidation_interval_s)),
