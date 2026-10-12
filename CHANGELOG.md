@@ -1,3 +1,13 @@
+## 2026-10-11 - Finish the speaker-role follow-ups from the #272 review
+
+- `domain/turn_role.py`: turn evidence from another namespace no longer proves an episode's speaker; namespaces compare through `normalize_namespace`, as the claim query's `subject_endpoint_eligible` does (review F6).
+- `mcp/tools/ingest/add_memory.py`, `mcp/tools/ingest/add_memory_and_track.py`, `services/ingest_intake.py`: MCP `add_memory` and `add_memory_and_track` take the same optional `role` as `POST /api/memory`, refused before any write when it is not an exact speaker; `ingest_episode` forwards `role` (review F11). TEMPORAL direct writes check it but do not use it (no extraction).
+- `scripts/backfill_admitted_on.py`: the admission join links only captured user turns (never `agent_quoted`) to episodes whose declared `turn_role` is absent or `user`, on raw text or the legacy `'user: ' + t.text`, so a backfilled edge can never prove `user` for an episode declared otherwise (review R1/R2 of #273). `scripts/freeze_scalar_samples.py` and `scripts/probe_scalar_extraction.py` read user `:TurnEvidence` with the scheduler's query and no prefix strip; `scripts/measure_absence_band.py` and `scripts/replay_fold_flags.py` keep reading the legacy prefixed LME corpus their frozen captures index into, now labelled as such. The suburbs smokes send raw text with `role="user"` (review F9).
+- Stale docstrings about the removed Episodic fallback and prefixed assistant turns are corrected (review F10).
+- Docs: `.agent/endpoints.md` and `docs/agent-usage.md` list the MCP `role`.
+- Tests: new `tests/mcp/test_add_memory_role.py` and `tests/test_backfill_admitted_on_live.py` (online); F6, F11 and legacy-strip cases added to `tests/test_turn_role_resolution.py`, `tests/test_turn_role_wiring.py`, `tests/test_turn_role_ingest.py` and `tests/test_freeze_scalar_samples.py`. Changed because they pinned changed behavior: `test_extraction_passes_proven_evidence_role` (now supplies the turn's namespace), `test_tracked_write_signature_does_not_grow_permissions_or_invent_options` (expects `role`), and in `test_freeze_scalar_samples.py` the `_Session` helper, `test_graph_turn_evidence_source_matches_scheduler_and_uses_exact_namespace`, `test_graph_missing_exact_namespace_fails_closed` and `test_graph_duplicate_namespace_selection_fails_closed`; `test_graph_legacy_source_matches_scheduler_and_uses_exact_namespace` is replaced by `test_graph_source_is_turn_evidence_only_and_keeps_raw_text`.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-10-11 - Take the speaker role from structured data, never from episode text
 
 - `domain/turn_role.py`: `resolve_turn_role` takes an episode's speaker from its single `ADMITTED_ON` turn when the content equals that turn's text (surrounding whitespace ignored) and the turn is not `agent_quoted`, else from the declared `turn_role`, else `unknown` (#271).
@@ -86,10 +96,4 @@
 - `src/menhir/services/ingest_intake.py`: record it as `:TurnEvidence` with `source_kind='agent_quoted'` and link it provenance-only; failures never fail the ingest.
 - `src/menhir/domain/truth/admission_gate.py`, `src/menhir/infrastructure/scalar_view_repository.py`, `src/menhir/infrastructure/turn_evidence_repository.py`: agent-quoted evidence never grants user tier, never counts as user foundation, and never feeds the counter or event lanes; the scalar lane keeps it.
 - `tests/test_agent_quoted_evidence.py`, `tests/test_api_routes.py`: gate, foundation, lane, intake and REST coverage.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-09-29 - Require money and measurement quotes to state their value
-
-- `src/menhir/services/typed_scalar_rules.py`: a model-supplied money or measurement value drops with `value_not_in_span` unless its grounded quote states it as digits (thousands separators, decimals, k/million scale) or English number words; the check runs last so earlier drop reasons are unchanged, and counts, durations, frequencies and clock times keep their span-derived values (#89).
-- `tests/test_scalar_value_in_quote.py`: stated and missing money forms, measurement, scaled amounts, and unchanged count correction and multi-number abstention.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.

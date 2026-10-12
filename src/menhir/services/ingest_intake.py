@@ -374,8 +374,11 @@ class IngestIntakeMixin:
         session: MemorySession,
         source: str,
         namespace: str | None = None,
+        role: str | None = None,
     ) -> IngestResult:
         """Ingest an episode through Graphiti using a session-aware async interface.
+
+        ``role`` is the declared speaker, as on ``queue_episode_for_enrichment``.
 
         PART 3: Unified queue-backed path. This method now delegates to the background
         enrichment pipeline for consistency with the queued path. Synchronous callers
@@ -401,11 +404,13 @@ class IngestIntakeMixin:
 
         try:
             # Queue the episode for background enrichment (durably records it first)
+            role_kwargs = {"role": role} if role is not None else {}
             queue_result = await self.queue_episode_for_enrichment(
                 episode=episode,
                 session=session,
                 source=source,
                 namespace=namespace,
+                **role_kwargs,
             )
             if queue_result.status != IngestStatus.QUEUED:
                 # Queueing failed (likely preflight rejection)

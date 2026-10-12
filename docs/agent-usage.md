@@ -59,7 +59,7 @@ add_memory_and_track(
 
 The tool returns a text summary and observed transitions; it is not a streaming subscription.
 Its supported options are `text`, `source`, `timeout_s`, `poll_interval_s`, `diff`,
-`turn_evidence_uuid`, and `namespace`. It does not accept an existing episode ID, `type`,
+`turn_evidence_uuid`, `namespace`, and `role`. It does not accept an existing episode ID, `type`,
 `valid_at`, `flagged`, or `bootstrap_scope`. Do not invent those parameters.
 
 Preserve the returned `episode_id`. The status tools call that argument `episode_uuid`:

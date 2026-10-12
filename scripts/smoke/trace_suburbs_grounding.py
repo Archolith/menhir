@@ -119,15 +119,15 @@ async def run_trial(trial_num: int, total: int) -> TrialResult:
     session = new_session("grounding-trace", session_id=namespace)
 
     # Build episode list (same as bench fixture)
-    episodes_text = ["user: My friend Rachel lives in Chicago."]
-    episodes_text.extend(f"user: Thanks for the information. Turn {i}." for i in range(12))
-    episodes_text.append("user: Miami Beach sounds fun, but I've been there before.")
-    episodes_text.append("user: I'm thinking of somewhere more relaxed.")
+    episodes_text = ["My friend Rachel lives in Chicago."]
+    episodes_text.extend(f"Thanks for the information. Turn {i}." for i in range(12))
+    episodes_text.append("Miami Beach sounds fun, but I've been there before.")
+    episodes_text.append("I'm thinking of somewhere more relaxed.")
     episodes_text.append(
-        "user: My friend Rachel actually just moved back to the suburbs again,"
+        "My friend Rachel actually just moved back to the suburbs again,"
         " so I was thinking of somewhere not too far from a major city."
     )
-    episodes_text.append("user: Any suggestions?")
+    episodes_text.append("Any suggestions?")
 
     # --- Instrument the combined extraction ---
     import graphiti_core.utils.maintenance.combined_extraction as _ce_mod
@@ -370,7 +370,7 @@ async def run_trial(trial_num: int, total: int) -> TrialResult:
         for i, ep_text in enumerate(episodes_text):
             r = await built.ingest_service.ingest_episode(
                 episode=ep_text, session=session,
-                source="grounding-trace", namespace=namespace,
+                source="grounding-trace", namespace=namespace, role="user",
             )
             if r.status is not IngestStatus.INGESTED:
                 trace_log.warning("Episode %d status: %s", i, r.status.value)

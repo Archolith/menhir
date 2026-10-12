@@ -1642,8 +1642,8 @@ class MemoryGraphAdapter:
             perceiver_version=perceiver_version, at=at)
 
     def evidence_exists(self) -> bool:
-        """Whether any :TurnEvidence exists (scalar visibility gate; the counter lane also switches
-        on this)."""
+        """Whether any user :TurnEvidence exists (scalar visibility gate only; counter discovery
+        reads :TurnEvidence unconditionally since #271)."""
         return self._turn_evidence.evidence_exists()
 
     # --- event-consolidation cursor (Event History consolidation source) ---

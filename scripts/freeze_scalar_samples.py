@@ -2,9 +2,9 @@
 """Freeze k typed-scalar extraction samples to JSON (measurement only).
 
 The preferred input is a pre-registered static episode file.  It makes the first held-out
-measurement independent of whether a graph was populated with legacy ``Episodic`` nodes or raw
-``TurnEvidence``.  The graph path remains available for compatibility, but follows the same
-evidence-first source switch and exact namespace lookup as the scheduler.
+measurement independent of what a graph was populated with.  The graph path reads user
+``TurnEvidence`` only, with the same query and exact namespace lookup as the scheduler; it never
+selects ``Episodic`` content (#271).
 
 No result is written when the input contract is incomplete.  In particular, a missing namespace
 is an error rather than a warning followed by a partial capture.
@@ -36,26 +36,15 @@ STATIC_INPUT_REQUIRED_KEYS = frozenset({"schema_version", "fixture_id", "non_lme
 STATIC_NAMESPACE_REQUIRED_KEYS = frozenset({"purpose", "episodes"})
 STATIC_NAMESPACE_PURPOSES = frozenset({"fully_covered", "fallback_adversarial"})
 
-# These queries deliberately mirror the scheduler's two loaders.  The source choice is global,
-# just like MemoryGraphAdapter.{load_user_episodes,load_next_scalar_batch}: any user TurnEvidence
-# switches the box to evidence-first; otherwise the legacy user:-prefixed Episodic path is used.
-TURN_EVIDENCE_EXISTS_Q = (
-    "MATCH (t:TurnEvidence {role: 'user'}) RETURN count(t) AS c LIMIT 1"
-)
+# Deliberately the same query as TurnEvidenceRepository.load_user_evidence (the scheduler's loader).
 TURN_EVIDENCE_Q = """
 MATCH (t:TurnEvidence {namespace: $ns})
 WHERE t.role = 'user' AND t.declarant = 'user' AND t.text IS NOT NULL AND t.text <> ''
+      AND coalesce(t.source_kind, '') <> 'agent_quoted'
 RETURN t.turn_id AS uuid,
        toString(coalesce(t.occurred_at, t.recorded_at, datetime())) AS valid_at,
        t.text AS content
 ORDER BY coalesce(t.occurred_at, t.recorded_at), t.recorded_at, t.turn_id
-LIMIT $limit
-"""
-LEGACY_EPISODIC_Q = """
-MATCH (e:Episodic {group_id: $ns})
-WHERE e.content STARTS WITH 'user:'
-RETURN e.uuid AS uuid, toString(e.valid_at) AS valid_at, e.content AS content
-ORDER BY e.valid_at
 LIMIT $limit
 """
 
@@ -166,21 +155,14 @@ def _load_static_namespaces(path: str | Path) -> tuple[dict[str, list[Episode]],
     return namespaces, metadata
 
 
-def _graph_has_turn_evidence(session: Any) -> bool:
-    rows = session.run(TURN_EVIDENCE_EXISTS_Q).data()
-    count = rows[0].get("c", 0) if rows else 0
-    return bool(int(count or 0) > 0)
-
-
 def _load_graph_namespaces(
     session: Any, namespaces: list[str], *, limit: int = 500,
 ) -> tuple[dict[str, list[Episode]], dict[str, Any]]:
-    """Load exact namespaces using the same evidence-first source switch as the scheduler."""
+    """Load exact namespaces from user TurnEvidence, as the scheduler does."""
     if len(set(namespaces)) != len(namespaces):
         raise FreezeInputError("--ns must not contain duplicate exact namespaces")
-    use_turn_evidence = _graph_has_turn_evidence(session)
-    query = TURN_EVIDENCE_Q if use_turn_evidence else LEGACY_EPISODIC_Q
-    source = "turn_evidence" if use_turn_evidence else "episodic"
+    query = TURN_EVIDENCE_Q
+    source = "turn_evidence"
     loaded: dict[str, list[Episode]] = {}
     for namespace in namespaces:
         if not namespace.strip():
@@ -190,7 +172,7 @@ def _load_graph_namespaces(
             raise FreezeInputError(
                 f"no user episodes found for exact namespace {namespace!r} via {source}"
             )
-        episodes = build_episodes(rows)
+        episodes = build_episodes(rows, strip_legacy_prefix=False)
         if not episodes:
             raise FreezeInputError(
                 f"exact namespace {namespace!r} has no usable user episodes via {source}"

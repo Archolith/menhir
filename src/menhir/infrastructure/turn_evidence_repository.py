@@ -229,8 +229,8 @@ class TurnEvidenceRepository:
     # ---- read (Phase 3 consumption) ----------------------------------------------------------
 
     def evidence_exists(self) -> bool:
-        """True if any user-authored evidence exists — the switch Phase 3 uses to prefer evidence over
-        the legacy `user:`-prefix Episodic path."""
+        """True if any user-authored evidence exists. Only the scalar visibility gate reads it; no
+        path falls back to Episodic content any more (#271)."""
         rows = self._neo4j.execute(
             "MATCH (t:TurnEvidence {role: 'user'}) RETURN count(t) AS c LIMIT 1"
         )
@@ -344,8 +344,8 @@ class TurnEvidenceRepository:
     # ---- scalar-consolidation discovery (G14 bridge) -----------------------------------------
     # The typed-scalar path (ScalarStateView C.4.3) discovered work via :Episodic 'user:' ONLY, so in
     # a Turn-capturing production box it saw NO user input and its declarant foundation was unreachable
-    # (G14/F2). These mirror the counter-path switch: when :TurnEvidence exists, scalar discovery reads
-    # it, using the SAME per-namespace :ScalarConsolidationWatermark cursor (keyed by the namespace
+    # (G14/F2). Scalar discovery now reads :TurnEvidence only (#95; counter discovery likewise since
+    # #271), using the SAME per-namespace :ScalarConsolidationWatermark cursor (keyed by the namespace
     # string in `group_id`) as the Episodic path -- so a box transitions with no cursor reset. The
     # work-discovery key is `recorded_at` (monotonic capture time, always present). Imported/replayed
     # evidence may also carry `occurred_at` world time; it drives assertion validity while recorded_at
