@@ -182,8 +182,10 @@ def test_time_from_another_sentence_is_not_written_on_any_speech_date() -> None:
      _day(2023, 5, 1)),
     ("Three weeks ago, I started physical therapy.", "The user is doing physical therapy.", "three weeks ago",
      _ago(3, "week"), _day(2023, 5, 1)),
-    ("I started yoga and meditation last month.", "The user practices yoga.", "last month",
+    ("My back started hurting last month and it's still sore.", "The user's back hurts.", "last month",
      _ago(1, "month"), _day(2023, 4, 22)),
+    ("My knee, which started hurting three weeks ago, is still sore.", "The user's knee is sore.",
+     "three weeks ago", _ago(3, "week"), _day(2023, 5, 1)),
 ])
 def test_state_start_markers_keep_the_write(turn, fact, expr, offset, written) -> None:
     items = {0: _item(0, expr, "speech_relative", "state", offset=offset)}
@@ -280,7 +282,8 @@ def test_a_start_that_refers_back_still_dates_the_state() -> None:
 
 
 def test_a_repeated_expression_is_judged_at_every_occurrence() -> None:
-    turn = ("My knee started hurting two weeks ago. "
+    # The first occurrence alone would date the state; the second does not, so no write.
+    turn = ("The hens started laying again two weeks ago. "
             "I repaired the chicken coop two weeks ago, and the hens are laying again.")
     facts = ["The user repaired the chicken coop.", "The hens are laying again."]
     items = {
@@ -322,6 +325,13 @@ def test_for_and_now_mark_a_start_only_as_a_span_to_now(turn, expr, item) -> Non
     "I've got to drive an hour",
     "I have mixed feelings about it",
     "I have limited options at work",
+    "I have limited family time",
+    "I have assigned weekly chores",
+    "I have tired, sore legs",
+    "I have broken ribs",
+    "I have set hours at work",
+    "as I've said, I'm job hunting",
+    "I'm job hunting, which I've done before",
 ])
 def test_possession_and_ed_adjectives_are_not_perfect(main_clause) -> None:
     turn = f"Since the meeting on 3/4 went badly, {main_clause}."
@@ -365,7 +375,9 @@ def test_a_perfect_inside_the_since_clause_never_makes_it_temporal(turn) -> None
 @pytest.mark.parametrize(("turn", "fact"), [
     ("I started a new job last week. My back is sore.", "The user's back is sore."),
     ("It started raining last week, and my sister is visiting.", "The user's sister is visiting."),
-    ("I started a new job last week.", "The user is employed."),
+    ("I started a new job last week and now my back is sore.", "The user's back is sore."),
+    ("I started a new job last week but honestly my back is sore.", "The user's back is sore."),
+    ("Last week, I started a new job and now my back is sore.", "The user's back is sore."),
 ])
 def test_a_start_word_needs_to_be_about_the_fact(turn, fact) -> None:
     items = {0: _item(0, "last week", "speech_relative", "state", calendar={"which": "last", "unit": "week"})}
@@ -382,6 +394,69 @@ def test_durations_running_to_now_keep_the_write(expr) -> None:
     items = {0: _item(0, expr, "speech_relative", "state", offset=_ago(2, "week"))}
     marked, results = _run(turn, ["The user is learning Spanish."], items, date(2023, 6, 15))
     assert marked == [] and results[0].written
+
+
+@pytest.mark.parametrize("expr", ["for the next two weeks", "for next week", "for the coming weeks",
+                                  "for this week", "for the first two weeks"])
+def test_forward_spans_are_not_a_start(expr) -> None:
+    turn = f"My sister is staying with me {expr}."
+    after = {"amount": 1, "unit": "week", "direction": "after", "approx": False}
+    items = {0: _item(0, expr, "speech_relative", "state", offset=after)}
+    marked, results = _run(turn, ["The user's sister is staying with the user."], items, date(2023, 6, 15))
+    assert marked == [0] and not results[0].written
+
+
+@pytest.mark.parametrize(("turn", "expr", "item", "written"), [
+    ("I've practiced yoga since March.", "March", {"date_": "--03"}, _day(2023, 3, 16)),
+    ("Since March I've been vegan.", "March", {"date_": "--03"}, _day(2023, 3, 16)),
+    ("Since 2019 I have lived in Denver.", "2019", {"date_": "2019"}, _day(2019, 7, 2)),
+])
+def test_since_right_before_a_time_is_temporal(turn, expr, item, written) -> None:
+    items = {0: _item(0, expr, "explicit_date", "state", **item)}
+    marked, results = _run(turn, ["The user has a habit."], items, date(2023, 6, 15))
+    assert marked == [] and results[0].new_valid_at == written
+
+
+def test_a_coordinated_main_clause_before_since_is_the_main_clause() -> None:
+    turn = "I bought it three weeks ago, and I've been using it every morning since then."
+    facts = ["The user bought a coffee maker three weeks ago.", "The user uses the coffee maker every morning."]
+    items = {
+        0: _item(0, "three weeks ago", "speech_relative", "point_event", offset=_ago(3, "week")),
+        1: _item(1, "since then", "event_anchored", "state", offset=SINCE_0, anchor={"fact": 0, "event": None}),
+    }
+    marked, results = _run(turn, facts, items, date(2023, 6, 15))
+    assert marked == [] and results[1].new_valid_at == _day(2023, 5, 25)
+
+
+def test_a_perfect_in_a_side_clause_before_since_is_not_the_main_clause() -> None:
+    turn = "I'm job hunting, which I've done before, since the meeting on 3/4 went badly."
+    facts = ["The meeting on 3/4 went badly.", "The user is job hunting."]
+    items = {
+        0: _item(0, "on 3/4", "explicit_date", "point_event", date_="--03-04"),
+        1: _item(1, "since the meeting on 3/4 went badly", "event_anchored", "state", offset=SINCE_0,
+                 anchor={"fact": 0, "event": None}),
+    }
+    marked, results = _run(turn, facts, items, date(2023, 3, 20))
+    assert marked == [1] and items[1]["guard"] == "causal_since" and not results[1].written
+
+
+def test_since_before_a_time_that_is_the_subject_is_causal() -> None:
+    # Only a whole-word match exists ("2/15th"), so the substring occurrence is judged.
+    items = {0: _item(0, "2/15", "explicit_date", "state", date_="--02-15")}
+    marked, results = _run("Since 2/15th is my deadline, I need a plan.", ["The user needs a plan."], items,
+                           date(2023, 2, 1))
+    assert marked == [0] and items[0]["guard"] == "causal_since" and not results[0].written
+
+
+@pytest.mark.parametrize(("turn", "kind", "guard"), [
+    (" ".join(f"Note {k} is from 2023." for k in range(10)), "state", "state_start"),
+    ("I've lived here since 2023. " + " ".join(f"Note {k} is from 2023." for k in range(10)), "point_event",
+     "causal_since"),
+])
+def test_too_many_occurrences_are_treated_conservatively(turn, kind, guard) -> None:
+    items = {0: _item(0, "2023", "explicit_date", kind, date_="2023")}
+    marked, _ = _run(turn, ["The user has notes."], items, date(2023, 6, 15))
+    assert marked == [0] and items[0]["guard"] == guard
 
 
 @pytest.mark.parametrize(("turn", "expr", "item"), [
@@ -431,6 +506,7 @@ def test_many_repeated_occurrences_stay_cheap() -> None:
 
 @pytest.mark.parametrize(("valid_at", "shown"), [
     ("2023-05-25T00:00:00Z", "event time unknown (said 2023-06-15)"),  # Graphiti made the same copy
+    ("2023-05-28T21:00:00-06:00", "event time unknown (said 2023-06-15)"),  # the copy in local time
     ("2023-06-15T00:00:00Z", "event time unknown (said 2023-06-15)"),  # speech-date default
     ("2022-01-10T00:00:00Z", "2022-01-10"),  # Graphiti's own date, without the borrowed expression
 ])
