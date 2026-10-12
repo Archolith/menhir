@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import calendar
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import re
 from typing import Any, Mapping
 
@@ -64,6 +64,13 @@ class EventTime:
             if window:
                 return f"planned {window}{source}"
             return f"planned, time unknown{_said(self.speech_date, expression)}"
+        if self.outcome == "state_start":
+            # The expression and window date another event; Graphiti's date inside that window is
+            # the same copy, so only a date of Graphiti's own outside it is shown.
+            borrowed = _near_window(recorded, self.window_start, self.window_end)
+            if recorded and recorded != self.speech_date and not borrowed:
+                return recorded
+            return f"event time unknown{_said(self.speech_date, None)}"
         if window and self.outcome in _WINDOW_OUTCOMES:
             return f"{window}{source}"
         if recorded and (self.outcome == "graphiti_resolved"
@@ -116,6 +123,18 @@ def event_time_text(row: Mapping[str, Any]) -> str | None:
     valid_at = row.get("valid_at")
     recorded = _utc_date_text(str(valid_at)) if valid_at is not None else None
     return f"recorded {recorded} (time not verified)" if recorded else None
+
+
+def _near_window(recorded: str | None, start: str | None, end: str | None) -> bool:
+    """``recorded`` (a UTC date) is in the window or a day off it: a local-time copy of the
+    window's edge can land on the next or previous UTC day."""
+    if not (recorded and start and end):
+        return False
+    try:
+        day, s, e = date.fromisoformat(recorded), date.fromisoformat(start), date.fromisoformat(end)
+    except ValueError:
+        return start <= recorded <= end
+    return s - timedelta(days=1) <= day <= e + timedelta(days=1)
 
 
 def _said(speech_date: str | None, expression: str | None) -> str:

@@ -31,6 +31,7 @@ from menhir.infrastructure.anchored_time import (
     compute,
     parse_items,
     plan_overlay,
+    state_start_guard,
 )
 
 EVAL_DIR_ENV = "MENHIR_ANCHORED_TIME_EVAL_DIR"
@@ -164,7 +165,8 @@ def score_run(turns: list[dict], contents: dict[str, str | None]) -> SetScore:
             if not content:
                 raise ValueError("no output")
             items, _missing = parse_items(content)
-            drops = clause_guard(t["turn"], t["facts"], items)
+            drops = sorted(set(clause_guard(t["turn"], t["facts"], items))
+                           | set(state_start_guard(t["turn"], t["facts"], items)))
             if drops:
                 out.guard_drops.append(f"{t['id']}:{drops}")
         except (ValueError, TypeError, AttributeError):
