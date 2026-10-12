@@ -7,6 +7,7 @@ synchronous; the LLM call lives in ``anchored_time_resolver``.
 """
 from __future__ import annotations
 
+import bisect
 import calendar
 from dataclasses import dataclass, field
 from datetime import MAXYEAR, MINYEAR, date, datetime, timedelta, timezone, tzinfo
@@ -628,11 +629,15 @@ def _content(text: str, exclude: set[str] = frozenset()) -> set[str]:
     return {_stem(w) for w in _words(text) if w not in _STOP and len(w) > 2 and _stem(w) not in exclude}
 
 
+@functools.lru_cache(maxsize=16)
+def _sentence_ends(turn: str) -> tuple[int, ...]:
+    return tuple(m.end() for m in re.finditer(rf"{_ABBR}[.!?]+(?=\s|$)|[;\n]", turn))
+
+
 def _sentence(turn: str, pos: int) -> tuple[int, int]:
-    ends = [m.end() for m in re.finditer(rf"{_ABBR}[.!?]+(?=\s|$)|[;\n]", turn)]
-    s = max([e for e in ends if e <= pos], default=0)
-    e = min([e for e in ends if e > pos], default=len(turn))
-    return s, e
+    ends = _sentence_ends(turn)  # ascending; computed once per turn, not per lookup
+    k = bisect.bisect_right(ends, pos)
+    return (ends[k - 1] if k else 0), (ends[k] if k < len(ends) else len(turn))
 
 
 def _clause_start_and_text(turn: str, pos: int) -> tuple[int, str]:
@@ -704,26 +709,33 @@ def clause_guard(turn: str, facts: list[str], items: dict[int, dict]) -> list[in
 
 _SINCE = re.compile(r"\b(?:ever\s+)?since\b", re.I)
 _EVER_SINCE = re.compile(r"\bever\s+since\b", re.I)
-#: have/has/had + past participle ("have lived", "hasn't missed"), not "have a" or "have to".
-_PARTICIPLE = (r"(?:been|had|done|gone|got|gotten|known|seen|made|taken|given|kept|felt|left|lost|met|"
-               r"paid|said|sent|spent|told|won|written|begun|become|grown|held|led|meant|put|set|sat|"
-               r"slept|taught|brought|bought|built|caught|found|heard|run|stood|thought|understood|"
-               r"(?!(?:need|feed|seed|speed|breed|deed|weed|bleed|greed|shed)\b)[a-z]{2,}ed)")
-_PERFECT = re.compile(rf"(?:\b(?:have|has|had)(?:n't)?|'ve)(?:\s+(?:not|just|always|never|already|also|"
-                      rf"still|ever|really|finally|[a-z]+ly))?\s+{_PARTICIPLE}\b|'s\s+been\b|'d\s+been\b",
-                      re.I)
+#: have/has/had + past participle ("have lived", "hasn't missed"), not "have a", "have to",
+#: "'ve got" (possession) or "have mixed feelings" (an -ed adjective before its noun).
+_IRREGULAR = (r"been|had|done|gone|gotten|known|seen|made|taken|given|kept|felt|left|lost|met|paid|said|"
+              r"sent|spent|told|won|written|begun|become|come|grown|held|led|meant|put|set|sat|slept|"
+              r"taught|brought|bought|built|caught|found|heard|run|stood|thought|understood|driven|eaten|"
+              r"ridden|spoken|broken|chosen|fallen|forgotten|shown|thrown|drawn|flown|worn|torn|swum|sung|"
+              r"drunk|read")
+_AFTER_VERB = (r"the|a|an|my|our|your|his|her|their|its|this|that|these|those|it|them|him|me|us|you|to|in|"
+               r"on|at|for|with|about|from|of|by|up|out|over|into|every|each|all|some|any|more|most|since|"
+               r"so|and|but|or|here|there|back|again|lately|recently|together|well|hard|a\s+lot|[a-z]+ly")
+_PERFECT = re.compile(
+    rf"(?:\b(?:have|has|had)(?:n't)?|'ve)(?:\s+(?:not|just|always|never|already|also|still|ever|hardly|"
+    rf"barely|only|[a-z]+ly)){{0,2}}\s+(?:(?:{_IRREGULAR})\b|[a-z]{{2,}}ed(?=\s*(?:[.,;:!?)]|$)|"
+    rf"\s+(?:{_AFTER_VERB})\b))|'s\s+been\b|'d\s+been\b", re.I)
 _STARTED = re.compile(r"\b(?:start|starts|started|starting|begin|begins|began|begun|beginning)\b", re.I)
 _RUNS_TO_NOW = re.compile(
-    r"\bnow\b|^\s*for\s+(?:(?:about|almost|nearly|over|around|roughly|just\s+over|the\s+(?:past|last))\s+)?"
-    r"(?:(?:\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|several|many|some|"
-    r"a\s+few|a\s+couple(?:\s+of)?)\s+)?(?:(?:long|more|good|few)\s+)?"
-    r"(?:years?|months?|weeks?|days?|decades?|hours?|while|time|ages|long)\b", re.I)
+    r"\bnow\b|^\s*for\s+(?:[\w.'-]+\s+){0,4}?(?:years?|months?|weeks?|days?|decades?|hours?|while|ages|"
+    r"long\s+time|(?:so|too|that|this)\s+long)\b", re.I)
 _FROM_NOW = re.compile(r"\bfrom\s+now\b", re.I)
-#: A start whose subject points back to another clause ("it all started", "that began").
+#: A start whose subject points back to another clause ("it all started", "that began"), not a
+#: dummy subject with its own event ("it started raining", "it began to snow").
 _BACK_REF_START = re.compile(r"\b(?:it|this|that|which|everything)\s+(?:all\s+|really\s+|first\s+)?"
-                             r"(?:start|starts|started|began|begun|begins)\b", re.I)
-#: Coordinate-clause boundaries inside a sentence.
-_COORD = re.compile(r",|;|\s[-\u2013\u2014]+\s|\s(?:and|but|so)\s", re.I)
+                             r"(?:start|starts|started|began|begun|begins)\b(?!\s+(?:to\b|[a-z]+ing\b))",
+                             re.I)
+#: Coordinate-clause boundaries inside a sentence ("and"/"but"/"so" only before a new subject).
+_COORD = re.compile(r",|;|\s[-\u2013\u2014]+\s|\s(?:and|but|so)\s+(?=(?:i|we|you|he|she|they|it|its|my|our|"
+                    r"your|his|her|their|the|this|that|there)\b)", re.I)
 
 
 _SINCE_CLAUSE = re.compile(r"(?:ever\s+)?since\s+(?:i|we|you|he|she|they|it|my|our|his|her|their|the|a|an)\b")
@@ -748,33 +760,51 @@ def _since_operator(turn_low: str, pos: int, expr: str, basis) -> tuple[str, int
         if not m:
             return "", -1
         op, at = m.group(0), pos
-        ever = re.search(r"\bever\s+$", turn_low[max(0, pos - 8):pos])
-        if ever and not _EVER_SINCE.search(op):  # "ever" before an expression that starts at "since"
-            op, at = "ever " + op, pos - len(ever.group(0))
+        ever = re.search(r"\bever\s+$", turn_low[max(0, pos - 30):pos])
+        k = pos - len(ever.group(0)) if ever else 0
+        if ever and not (k and turn_low[k - 1].isalnum()) and not _EVER_SINCE.search(op):
+            op, at = "ever " + op, k
     if _SINCE_CLAUSE.match(expr) and basis != "event_anchored":
         return "", -1
     return op, at
 
 
 def _main_clause(turn: str, low: str, at: int, pos: int, n: int) -> str:
-    """The sentence without the expression, and without a leading "since" clause (up to its comma)."""
+    """The sentence without the expression and without the "since" clause, which runs from "since"
+    to the next comma or the sentence end wherever it sits. A since-clause with no comma before
+    its main clause takes the main clause with it: no perfect is seen, a missed write at worst."""
     s0, e0 = _sentence(turn, pos)
     sent = low[s0:pos] + " " * n + low[pos + n:e0]
-    if _sentence_initial(turn, at):
-        comma = sent.find(",", at - s0)
-        if comma >= 0:
-            return sent[comma + 1:]
-    return sent
+    a = min(max(0, at - s0), len(sent))
+    comma = sent.find(",", a)
+    while comma >= 0 and re.match(rf"\s*{_REL}\b", sent[comma + 1:]):  # ", which had run long,"
+        comma = sent.find(",", comma + 1)
+    return sent[:a] + (" " + sent[comma + 1:] if comma >= 0 else "")
 
 
-def _fact_elsewhere(turn: str, low: str, pos: int, n: int, fact: str, expr: str) -> bool:
-    """The fact's words are in another coordinate clause of the sentence, none in the expression's."""
+def _segment(turn: str, low: str, pos: int, n: int) -> tuple[int, int]:
+    """The expression's coordinate clause; a fronted time ("Three weeks ago, I started ...")
+    takes the clause after it."""
     s0, e0 = _sentence(turn, pos)
-    cuts = [s0, e0] + [m.end() for m in _COORD.finditer(low, s0, e0)]
+    cuts = sorted({s0, e0} | {m.end() for m in _COORD.finditer(low, s0, e0)})
     a = max(c for c in cuts if c <= pos)
     b = min([c for c in cuts if c >= pos + n] or [e0])
-    own = _content(fact, exclude=_content(expr))
-    return bool(own & _content(low[s0:a] + " " + low[b:e0])) and not own & _content(low[a:b])
+    if b < e0 and not _content(low[a:b], exclude=_content(low[pos:pos + n])):
+        b = min([c for c in cuts if c > b] or [e0])
+    return a, b
+
+
+def _occurrences(low: str, expr: str) -> list[int]:
+    """Start of every whole-word occurrence ("2/15" not inside "12/15"), else of every substring."""
+    pattern = ((r"(?<!\w)" if expr[:1].isalnum() else "") + re.escape(expr)
+               + (r"(?!\w)" if expr[-1:].isalnum() else ""))
+    found = [m.start() for m in re.finditer(pattern, low)]
+    if not found:
+        pos = low.find(expr)
+        while pos >= 0:
+            found.append(pos)
+            pos = low.find(expr, pos + 1)
+    return found
 
 
 def _start_reason(turn: str, low: str, pos: int, expr: str, it: dict, fact: str) -> str | None:
@@ -787,9 +817,13 @@ def _start_reason(turn: str, low: str, pos: int, expr: str, it: dict, fact: str)
         return None
     elif not (CUES["duration"].search(expr) or (_RUNS_TO_NOW.search(expr) and not _FROM_NOW.search(expr))):
         _, c_text = _clause_start_and_text(turn, pos)
+        a, b = _segment(turn, low, pos, n)
+        if not _content(c_text, exclude=_content(expr)):  # the clause is only the time
+            c_text = turn[a:b]
         if not (_STARTED.search(c_text) or _STARTED.search(expr)):
             return "state_start"
-        if not _BACK_REF_START.search(c_text) and _fact_elsewhere(turn, low, pos, n, fact, expr):
+        about_fact = _content(fact, exclude=_content(expr)) & _content(low[a:b])
+        if not (about_fact or _BACK_REF_START.search(c_text)):
             return "state_start"  # "I started fixing the fence ... and the goats are safe"
     return None
 
@@ -803,24 +837,25 @@ def state_start_guard(turn: str, facts: list[str], items: dict[int, dict]) -> li
 
     A state's ``valid_at`` is when it began, so a time on a state dates it only when the text says
     it marks the start: temporal "since", a duration running up to now, or start/begin in the
-    expression's clause (unless the fact's words are only in another coordinate clause). Otherwise
-    the time belongs to a co-mentioned event ("fixed the fence three weeks ago" for "the goats are
-    safe"); the item keeps its basis, so facts anchored on it still place, and gets guard
-    "state_start", which plan_overlay never writes. A repeated expression is judged at every
-    occurrence, the strictest wins. Items whose expression is not in the turn are left alone.
+    expression's clause that is about this fact (it shares a word with the clause, or the start
+    refers back: "it all started"). Otherwise the time belongs to a co-mentioned event ("fixed the
+    fence three weeks ago" for "the goats are safe"); the item keeps its basis, so facts anchored
+    on it still place, and gets guard "state_start", which plan_overlay never writes. A repeated
+    expression is judged at every occurrence, the strictest wins. Items whose expression is not
+    in the turn are left alone.
     """
     low = _fold(turn)
     rank = {None: 0, "state_start": 1, "causal_since": 2}
     dropped = []
     for i, it in items.items():
-        expr = _fold(_norm(it.get("expression")))
+        raw = it.get("expression")
+        expr = _fold(raw.strip().strip('"')) if isinstance(raw, str) else ""
         if not expr or it.get("basis") not in DATED_BASES or not (0 <= i < len(facts)):
             continue
-        reason, pos = None, low.find(expr)
-        while pos >= 0:
+        reason = None
+        for pos in _occurrences(low, expr):
             found = _start_reason(turn, low, pos, expr, it, facts[i])
             reason = max(reason, found, key=rank.get)
-            pos = low.find(expr, pos + 1)
         if reason == "causal_since":
             items[i] = {**it, "basis": "none", "offset": None, "calendar": None, "date": None,
                         "anchor": None, "guard": reason}

@@ -64,6 +64,14 @@ class EventTime:
             if window:
                 return f"planned {window}{source}"
             return f"planned, time unknown{_said(self.speech_date, expression)}"
+        if self.outcome == "state_start":
+            # The expression and window date another event; Graphiti's date inside that window is
+            # the same copy, so only a date of Graphiti's own outside it is shown.
+            borrowed = (self.window_start and self.window_end and recorded
+                        and self.window_start <= recorded <= self.window_end)
+            if recorded and recorded != self.speech_date and not borrowed:
+                return recorded
+            return f"event time unknown{_said(self.speech_date, None)}"
         if window and self.outcome in _WINDOW_OUTCOMES:
             return f"{window}{source}"
         if recorded and (self.outcome == "graphiti_resolved"
