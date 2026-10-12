@@ -203,11 +203,119 @@ def test_items_outside_the_turn_or_undated_are_left_alone() -> None:
     items = {
         0: _item(0, "In early May", "explicit_date", "state", date_="--05"),
         1: _item(1, None, "none", "state"),
-        7: _item(7, "for my sister", "explicit_date", "state", date_="--05"),
+        7: _item(7, "my sister", "explicit_date", "state", date_="--05"),
     }
     before = json.loads(json.dumps(items))
     assert state_start_guard(turn, facts, items) == []
     assert json.loads(json.dumps(items)) == before
+
+
+# ---------------------------------------------------------------- review counterexamples (PR #274)
+
+
+@pytest.mark.parametrize("main_clause", ["I have a long commute", "I have to drive an hour each way"])
+def test_have_without_a_participle_is_not_perfect(main_clause) -> None:
+    turn = f"Since I started at the clinic on 2/15, {main_clause}."
+    facts = ["The user started at the clinic on 2/15.", "The user commutes."]
+    items = {
+        0: _item(0, "on 2/15", "explicit_date", "point_event", date_="--02-15"),
+        1: _item(1, "Since I started at the clinic on 2/15", "event_anchored", "state", offset=SINCE_0,
+                 anchor={"fact": 0, "event": None}),
+    }
+    marked, results = _run(turn, facts, items, date(2023, 3, 20))
+    assert marked == [1] and items[1]["guard"] == "causal_since"
+    assert not results[1].written
+
+
+def test_a_perfect_inside_the_leading_since_clause_is_not_the_main_clause() -> None:
+    turn = "Since the workshop had ended early, I'm heading to the gym."
+    facts = ["The user is heading to the gym."]
+    items = {0: _item(0, "since the workshop", "event_anchored", "state", offset=SINCE_0,
+                      anchor={"fact": None, "event": "the workshop"})}
+    marked, _ = _run(turn, facts, items, date(2023, 3, 20))
+    assert marked == [0] and items[0]["guard"] == "causal_since"
+
+
+def test_ever_before_an_expression_that_starts_at_since() -> None:
+    turn = "My knee hurts ever since the half-marathon on April 2nd."
+    facts = ["The user ran a half-marathon on April 2nd.", "The user's knee hurts."]
+    items = {
+        0: _item(0, "on April 2nd", "explicit_date", "point_event", date_="--04-02"),
+        1: _item(1, "since the half-marathon", "event_anchored", "state", offset=SINCE_0,
+                 anchor={"fact": 0, "event": None}),
+    }
+    marked, results = _run(turn, facts, items, date(2023, 5, 1))
+    assert marked == [] and items[1]["basis"] == "event_anchored"
+    assert results[1].new_valid_at == _day(2023, 4, 2)
+
+
+def test_a_start_word_about_another_clause_event_does_not_date_the_state() -> None:
+    turn = "I started fixing the fence three weeks ago and the goats are safe now that it's done."
+    facts = ["The user started fixing the fence three weeks ago.", "The goats are safe."]
+    items = {
+        0: _item(0, "three weeks ago", "speech_relative", "point_event", offset=_ago(3, "week")),
+        1: _item(1, "three weeks ago", "speech_relative", "state", offset=_ago(3, "week")),
+    }
+    marked, results = _run(turn, facts, items, date(2023, 6, 15))
+    assert marked == [1] and items[1]["guard"] == "state_start"
+    assert results[0].written and not results[1].written
+
+
+def test_a_start_that_refers_back_still_dates_the_state() -> None:
+    turn = "I've been trying to get fitter lately, and it all started about 2 months ago when I joined a league."
+    facts = ["The user has been trying to get fitter lately."]
+    items = {0: _item(0, "about 2 months ago", "speech_relative", "state", offset=_ago(2, "month"))}
+    marked, results = _run(turn, facts, items, date(2023, 5, 22))
+    assert marked == []
+    assert results[0].new_valid_at == _day(2023, 3, 22)
+
+
+def test_a_repeated_expression_is_judged_at_every_occurrence() -> None:
+    turn = ("My knee started hurting two weeks ago. "
+            "I repaired the chicken coop two weeks ago, and the hens are laying again.")
+    facts = ["The user repaired the chicken coop.", "The hens are laying again."]
+    items = {
+        0: _item(0, "two weeks ago", "speech_relative", "point_event", offset=_ago(2, "week")),
+        1: _item(1, "two weeks ago", "speech_relative", "state", offset=_ago(2, "week")),
+    }
+    marked, results = _run(turn, facts, items, date(2023, 6, 15))
+    assert marked == [1] and not results[1].written
+
+
+def test_a_curly_apostrophe_in_the_turn_still_matches_the_expression() -> None:
+    turn = f"Since I started at Mike{chr(0x2019)}s shop on 2/15, I{chr(0x2019)}m hoping to learn welding."
+    facts = ["The user started at Mike's shop on 2/15.", "The user hopes to learn welding."]
+    items = {
+        0: _item(0, "on 2/15", "explicit_date", "point_event", date_="--02-15"),
+        1: _item(1, "Since I started at Mike's shop on 2/15", "event_anchored", "state", offset=SINCE_0,
+                 anchor={"fact": 0, "event": None}),
+    }
+    marked, results = _run(turn, facts, items, date(2023, 3, 20))
+    assert marked == [1] and items[1]["guard"] == "causal_since"
+    assert not results[1].written
+
+
+@pytest.mark.parametrize(("turn", "expr", "item"), [
+    ("We're hosting my parents for Christmas.", "for Christmas",
+     {"date_": "--12-25"}),
+    ("I'll have the new car a week from now.", "a week from now",
+     {"offset": {"amount": 1, "unit": "week", "direction": "after", "approx": False}}),
+])
+def test_for_and_now_mark_a_start_only_as_a_span_to_now(turn, expr, item) -> None:
+    basis = "explicit_date" if "date_" in item else "speech_relative"
+    items = {0: _item(0, expr, basis, "state", **item)}
+    marked, results = _run(turn, ["The user has a state."], items, date(2023, 6, 1))
+    assert marked == [0] and not results[0].written
+
+
+def test_overlay_never_shows_a_state_start_window_even_when_graphiti_agrees() -> None:
+    # Graphiti's own date inside the borrowed window must not turn it into graphiti_inside_window.
+    items = {0: {**_item(0, "two weeks ago", "speech_relative", "state", offset=_ago(2, "week")),
+                 "guard": "state_start"}}
+    edges = [EdgeTimeInput(uuid="e0", fact="The hens are laying again.", valid_at=_day(2023, 6, 1),
+                           invalid_at=None)]
+    (result,) = plan_overlay(edges, items, date(2023, 6, 15))
+    assert result.reason == "state_start" and not result.written
 
 
 # ---------------------------------------------------------------- production hook
