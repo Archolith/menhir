@@ -150,7 +150,7 @@ TURN_MAYJUNE = "In May I bought a bike and in June I sold it."
     ("I sold it last week.", "", "last week", False),
     ("I sold it last week.", "last week", "  ", False),
     ("I sold it Last Week.", "Last Week", "last week", True),
-    ("We met at Mom’s Last Week.", "Mom’s Last Week", "mom's last week", True),
+    ("We met at Mom\u2019s Last Week.", "Mom\u2019s Last Week", "mom's last week", True),
     ("I sold it last week and Monday was calm.", "last week and", "week and Monday", False),
 ])
 def test_agrees(turn, resolver, check, expected) -> None:
