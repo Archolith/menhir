@@ -182,7 +182,7 @@ Queue a memory for enrichment. Use this to remember facts, preferences, decision
 - **`flagged`** (bool, optional): Permanent retention. **USER-ONLY — never set this unless the user
   explicitly asked in this session.** See the warning under `flag_memory`; the flag propagates to
   every entity extracted from the episode, including pre-existing shared ones. Default `false`.
-- **`role`** (str, optional): Speaker of `text`, exactly one of `user`, `assistant`, `tool`, `agent`, `system`. Same contract as `POST /api/memory` `role`; a matching linked turn evidence overrides it. An invalid value returns `Cannot store memory: invalid role ...` and nothing is written. Ignored for `type="TEMPORAL"` with `valid_at` (no extraction).
+- **`role`** (str, optional): Speaker of `text`, exactly one of `user`, `assistant`, `tool`, `agent`, `system`. Same contract as `POST /api/memory` `role`; a matching linked turn evidence overrides it. An invalid value returns `Cannot store memory: invalid role ...` and nothing is written. Checked on every path, but has no effect for `type="TEMPORAL"` with `valid_at` (no extraction).
 - Response now appends a one-line queue snapshot: `queue_depth`, current `active_enriching` count, and scheduler state.
 
 **Gateway alias behavior**: `memory_gateway(action="add_memory", payload_json='{"text":"..."}')` accepts `text` (preferred), `content`, or `summary` for the memory content field.

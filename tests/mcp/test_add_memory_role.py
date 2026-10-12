@@ -77,6 +77,16 @@ async def test_temporal_write_ignores_a_valid_role(monkeypatch) -> None:
     assert "role" not in backend.create_temporal.await_args.kwargs
 
 
+async def test_temporal_write_still_refuses_an_invalid_role(monkeypatch) -> None:
+    backend = _fake_backend()
+    monkeypatch.setattr(AddMemoryTool, "get_backend", lambda self: backend)
+    result = await AddMemoryTool().endpoint(
+        text="dentist", type="TEMPORAL", valid_at="2027-02-16", role="human"
+    )
+    assert result.startswith("Cannot store memory: invalid role")
+    backend.create_temporal.assert_not_awaited()
+
+
 @pytest.mark.parametrize("tool_class", TOOLS)
 async def test_role_reaches_the_ingest_service_through_the_runtime_backend(
     monkeypatch, mcp_session, tool_class
