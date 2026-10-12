@@ -735,12 +735,6 @@ _RUNS_TO_NOW = re.compile(
     rf"the\s+(?:past|last)|quite)\s+)?(?:(?:{_QTY})\s+(?:long\s+|good\s+)?)?"
     rf"(?:years?|months?|weeks?|days?|decades?|hours?|while|ages|long\s+time)\b|^\s*for\s+so\s+long\b", re.I)
 _FROM_NOW = re.compile(r"\bfrom\s+now\b", re.I)
-#: A start whose subject points back to another clause ("it all started", "that began"), not one
-#: with its own event after it ("it started raining", "which started offering yoga"): a gerund or
-#: "to" after the start names that event, so the back-reference is not to this fact.
-_BACK_REF_START = re.compile(r"\b(?:it|this|that|which|everything)\s+(?:all\s+|really\s+|first\s+)?"
-                             r"(?:start|starts|started|began|begun|begins)\b(?!\s+(?:to\b|[a-z]+ing\b))",
-                             re.I)
 #: Coordinate-clause boundaries inside a sentence. Every "and"/"but"/"so" cuts: "I started yoga
 #: and meditation last month" loses its date for yoga, but no other clause's start leaks in.
 _COORD = re.compile(r",|;|\s[-\u2013\u2014]+\s|\s(?:and|but|so)\s", re.I)
@@ -749,7 +743,12 @@ _SUBORDINATE = re.compile(rf"\s*(?:{_REL}|as|because|although|though|while|if|th
 #: After a leading since-clause, an added "and"/"but"/"so" segment is part of it, not the main clause.
 _SIDE_CLAUSE = re.compile(rf"\s*(?:{_REL}|as|because|although|though|while|if|that|like|and|but|so|or)\b",
                           re.I)
-_AND = re.compile(r"(?:^|\s)(?:and|but|so)\s", re.I)
+_AND = re.compile(r"(?:^|\s)(?:and|but|so|or|yet|plus)\s|\s[-\u2013\u2014]+\s", re.I)
+#: Inside the clause before a trailing "since", where its own clause starts.
+_TRAIL_CUT = re.compile(rf"(?:^|\s)(?:and|but|so|or|yet|plus|{_REL}|as|because|although|though|while|if|that|"
+                        rf"like)\s|\s[-\u2013\u2014]+\s", re.I)
+#: All that may stand before the main clause's perfect: its subject ("I", "Mom", "my older sister").
+_SUBJECT = re.compile(r"\s*(?:[a-z]+|(?:my|our|his|her|their|your|the)(?:\s+[a-z]+){1,2})?\s*", re.I)
 #: Occurrences judged per item; past this the expression is too ambiguous to place (conservative).
 _MAX_OCCURRENCES = 8
 
@@ -785,15 +784,14 @@ def _since_operator(turn_low: str, pos: int, expr: str, basis) -> tuple[str, int
     return op, at
 
 
-def _perfect_in_main_clause(turn: str, low: str, at: int, pos: int, n: int) -> bool:
-    """Whether a perfect sits in the one clause the "since" clause attaches to (the expression
-    blanked). A leading since-clause ("since" opens its comma clause, after at most "so"/"and"/
-    "but") runs to the next comma, and the main clause is the first clause after it that is not a
-    side clause (", as I've said", ", and I've been stressed,"), up to an "and"/"but"/"so". A
-    trailing "since" ("I've been using it every morning since then, ...") attaches to the last
-    non-subordinate clause before it. A perfect anywhere else belongs to another event. A leading
-    since-clause with no comma before its main clause takes the main clause with it: no perfect is
-    seen, a missed write."""
+def _since_main_clause(turn: str, low: str, at: int, pos: int, n: int) -> tuple[str, bool]:
+    """The one clause the "since" clause attaches to (the expression blanked), and whether its verb
+    is a perfect right after its subject. A leading since-clause ("since" opens its comma clause,
+    after at most "so"/"and"/"but") runs to the next comma, and the main clause is the first clause
+    after it that is not a side clause (", as I've said"), up to a coordinator. A trailing "since"
+    ("I've been using it every morning since then") attaches to the last non-subordinate comma
+    clause before it, from its last coordinator or subordinator. Anything else, including a perfect
+    after other words ("I think I've told you"), is not seen: a missed write at worst."""
     s0, e0 = _sentence(turn, pos)
     sent = low[s0:pos] + " " * n + low[pos + n:e0]
     a = min(max(0, at - s0), len(sent))
@@ -809,7 +807,9 @@ def _perfect_in_main_clause(turn: str, low: str, at: int, pos: int, n: int) -> b
     else:
         before = [m for m in re.finditer(r"[^,;]+", sent[:a])
                   if m.group().strip() and not _SUBORDINATE.match(m.group())][-1:]
-        span = before[0].span() if before else span
+        if before:
+            s, e = before[0].span()
+            span = (max([m.end() for m in _TRAIL_CUT.finditer(sent, s, e)], default=s), e)
     # A perfect counts only inside that clause, read with the text that really follows it (the
     # since clause blanked as before), so "I have tired, sore legs" is not cut to "have tired".
     comma = sent.find(",", a)
@@ -817,7 +817,9 @@ def _perfect_in_main_clause(turn: str, low: str, at: int, pos: int, n: int) -> b
         comma = sent.find(",", comma + 1)
     end = comma + 1 if comma >= 0 else len(sent)
     rest = sent[:a] + " " * (end - a) + sent[end:]
-    return any(span[0] <= m.start() and m.end() <= span[1] for m in _PERFECT.finditer(rest))
+    perfect = any(span[0] <= m.start() and m.end() <= span[1] and _SUBJECT.fullmatch(rest, span[0], m.start())
+                  for m in _PERFECT.finditer(rest))
+    return rest[span[0]:span[1]], perfect
 
 
 def _segment(turn: str, low: str, pos: int, n: int) -> tuple[int, int]:
@@ -827,7 +829,8 @@ def _segment(turn: str, low: str, pos: int, n: int) -> tuple[int, int]:
     cuts = sorted({s0, e0} | {m.end() for m in _COORD.finditer(low, s0, e0)})
     a = max(c for c in cuts if c <= pos)
     b = min([c for c in cuts if c >= pos + n] or [e0])
-    if b < e0 and not _content(low[a:b], exclude=_content(low[pos:pos + n])):
+    opened = s0 + max([m.end() for m in re.finditer(r",|\s[-\u2013\u2014]+\s", low[s0:pos])], default=0)
+    if b < e0 and not _content(low[opened:pos]) and not _content(low[a:b], exclude=_content(low[pos:pos + n])):
         b = min([c for c in cuts if c > b] or [e0])
     return a, b
 
@@ -849,8 +852,11 @@ def _start_reason(turn: str, low: str, pos: int, expr: str, it: dict, fact: str)
     n = len(expr)
     since, at = _since_operator(low, pos, expr, it.get("basis"))
     if since:  # "ever since" is always temporal
-        if not (_EVER_SINCE.search(since) or _perfect_in_main_clause(turn, low, at, pos, n)):
+        main, perfect = _since_main_clause(turn, low, at, pos, n)
+        if not (_EVER_SINCE.search(since) or perfect):
             return "causal_since"
+        if not _content(fact, exclude=_content(expr)) & _content(main):
+            return "state_start"  # it dates the clause it attaches to, which is not this fact
     elif it.get("kind") != "state":
         return None
     elif not (CUES["duration"].search(expr) or (_RUNS_TO_NOW.search(expr) and not _FROM_NOW.search(expr))):
@@ -862,22 +868,24 @@ def _start_reason(turn: str, low: str, pos: int, expr: str, it: dict, fact: str)
         if not (_STARTED.search(expr) or (_STARTED.search(c_text) and _STARTED.search(low[a:b]))):
             return "state_start"
         about_fact = _content(fact, exclude=_content(expr)) & _content(low[a:b])
-        if not (about_fact or _BACK_REF_START.search(c_text)):
-            return "state_start"  # "I started fixing the fence ... and the goats are safe"
+        if not about_fact:  # "I started fixing the fence ... and the goats are safe"; "it all started"
+            return "state_start"
     return None
 
 
 def state_start_guard(turn: str, facts: list[str], items: dict[int, dict]) -> list[int]:
     """Mutates items: marks times that do not date the fact's own start. Returns marked indices.
 
-    "since" is temporal with "ever since" or a perfect-aspect main clause ("I've been focusing
-    ... since"); with any other ("Since I started on 2/15, I'm hoping ...") it means "because",
-    so the item is dropped like a clause-guard drop (guard "causal_since"), for every kind.
+    "since" is temporal with "ever since" or a perfect right after the subject of the clause it
+    attaches to ("I've been focusing ... since"); with any other ("Since I started on 2/15, I'm
+    hoping ...") it means "because", so the item is dropped like a clause-guard drop (guard
+    "causal_since"), for every kind. A temporal "since" dates only that clause: when the clause
+    shares no word with the fact, the item gets guard "state_start".
 
     A state's ``valid_at`` is when it began, so a time on a state dates it only when the text says
     it marks the start: temporal "since", a duration running up to now, or start/begin in the
-    expression's clause that is about this fact (it shares a word with the clause, or the start
-    refers back: "it all started"). Otherwise the time belongs to a co-mentioned event ("fixed the
+    expression's own coordinate clause that shares a word with the fact ("it all started" alone
+    is not enough). Otherwise the time belongs to a co-mentioned event ("fixed the
     fence three weeks ago" for "the goats are safe"); the item keeps its basis, so facts anchored
     on it still place, and gets guard "state_start", which plan_overlay never writes. A repeated
     expression is judged at every occurrence, the strictest wins; past ``_MAX_OCCURRENCES`` it is
@@ -1074,9 +1082,9 @@ def plan_overlay(
     ``valid_at`` = window midpoint at 00:00 UTC, written only when the basis is dated, the window
     is closed, the fact is not a plan, Graphiti's value is missing or its speech-date default and
     outside the window, neither the window nor any anchor it derives from is two candidate days,
-    every fact index and anchor is within ``edges``, the item has no ``state_start`` guard, and
-    the edge's ``invalid_at`` would stay after it. Everything else keeps
-    Graphiti's value: a date Graphiti resolved itself is never overridden.
+    every fact index and anchor is within ``edges``, the item has no ``state_start`` guard, a state's
+    window does not reach past the speech date, and the edge's ``invalid_at`` would stay after it.
+    Everything else keeps Graphiti's value: a date Graphiti resolved itself is never overridden.
     """
     results: list[AnchoredTimeResult] = []
     for i, edge in enumerate(edges):
@@ -1109,9 +1117,9 @@ def plan_overlay(
             mid = window_midpoint((start, end))
             candidate = datetime(mid.year, mid.month, mid.day, tzinfo=timezone.utc)
             g_dates = _graphiti_dates(edge.valid_at, speech_tz) if edge.valid_at is not None else set()
-            if item.get("guard") == "state_start":
-                # The time dates another event, so its window is not this fact's time even when
-                # Graphiti's date falls inside it (render shows the window for that outcome).
+            if item.get("guard") == "state_start" or (kind == "state" and end > speech_date):
+                # The time dates another event, or a state not begun when it was said, so its window
+                # is not this fact's start even when Graphiti's date falls inside it.
                 reason = "state_start"
             elif any(start <= d <= end for d in g_dates):
                 reason = "graphiti_inside_window"

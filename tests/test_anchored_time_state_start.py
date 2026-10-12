@@ -71,12 +71,11 @@ def test_causal_since_is_dropped_for_every_kind() -> None:
 @pytest.mark.parametrize("main_clause", [
     "I've been practicing my presentations every week",
     "I\u2019ve been practicing my presentations every week",
-    "I haven't missed a single practice session",
-    "my team has noticed the difference",
+    "I haven't missed a single presentations practice",
 ])
 def test_since_with_a_perfect_main_clause_is_temporal(main_clause) -> None:
     turn = f"Since I attended a speaking workshop on January 10th, {main_clause}."
-    facts = ["The user attended a speaking workshop on January 10th.", "The user practices presenting."]
+    facts = ["The user attended a speaking workshop on January 10th.", "The user practices presentations."]
     items = {
         0: _item(0, "on January 10th", "explicit_date", "point_event", date_="--01-10"),
         1: _item(1, "Since I attended a speaking workshop on January 10th", "event_anchored", "state",
@@ -85,6 +84,22 @@ def test_since_with_a_perfect_main_clause_is_temporal(main_clause) -> None:
     marked, results = _run(turn, facts, items, date(2023, 3, 1))
     assert marked == []
     assert results[1].written and results[1].new_valid_at == _day(2023, 1, 10)
+
+
+@pytest.mark.parametrize(("turn", "fact", "guard"), [
+    ("Since last week I told you my sister is a nurse, I've worried.", "The user's sister is a nurse.",
+     "state_start"),
+    ("I've been off caffeine since last week, and my back is sore.", "The user's back is sore.", "state_start"),
+    ("I'm job hunting because I've been stressed since last week.", "The user is job hunting.", "state_start"),
+    ("I've updated my CV and I'm job hunting since last week.", "The user is job hunting.", "causal_since"),
+    ("Since last week, my team has noticed the difference.", "The user practices presentations.", "state_start"),
+])
+def test_a_temporal_since_dates_only_the_clause_it_attaches_to(turn, fact, guard) -> None:
+    # A temporal since about another clause keeps the basis (state_start); a causal one drops it.
+    expr = "since last week" if "since last week" in turn else "Since last week"
+    items = {0: _item(0, expr, "speech_relative", "state", calendar={"which": "last", "unit": "week"})}
+    marked, results = _run(turn, [fact], items, date(2023, 6, 15))
+    assert marked == [0] and items[0]["guard"] == guard and not results[0].written
 
 
 def test_ever_since_is_temporal_without_a_perfect() -> None:
@@ -176,8 +191,6 @@ def test_time_from_another_sentence_is_not_written_on_any_speech_date() -> None:
      _day(2014, 5, 22)),
     ("I've been at Novalink about 4 years now.", "The user works at Novalink.", "about 4 years now",
      _ago(4, "year"), _day(2019, 5, 22)),
-    ("I think it all started about 2 months ago when I joined a league.", "The user is getting fitter.",
-     "about 2 months ago", _ago(2, "month"), _day(2023, 3, 22)),
     ("My knee started hurting three weeks ago.", "The user's knee hurts.", "three weeks ago", _ago(3, "week"),
      _day(2023, 5, 1)),
     ("Three weeks ago, I started physical therapy.", "The user is doing physical therapy.", "three weeks ago",
@@ -270,13 +283,13 @@ def test_a_start_word_about_another_clause_event_does_not_date_the_state() -> No
     assert results[0].written and not results[1].written
 
 
-def test_a_start_that_refers_back_still_dates_the_state() -> None:
+def test_a_start_that_refers_back_does_not_date_the_state() -> None:
+    # "it" may point at any earlier clause, so a back-reference alone is not this fact's start.
     turn = "I've been trying to get fitter lately, and it all started about 2 months ago when I joined a league."
     facts = ["The user has been trying to get fitter lately."]
     items = {0: _item(0, "about 2 months ago", "speech_relative", "state", offset=_ago(2, "month"))}
     marked, results = _run(turn, facts, items, date(2023, 5, 22))
-    assert marked == []
-    assert results[0].new_valid_at == _day(2023, 3, 22)
+    assert marked == [0] and items[0]["guard"] == "state_start" and not results[0].written
 
 
 def test_a_repeated_expression_is_judged_at_every_occurrence() -> None:
@@ -331,10 +344,42 @@ def test_for_and_now_mark_a_start_only_as_a_span_to_now(turn, expr, item) -> Non
     "as I've said, I'm job hunting",
     "I'm job hunting, which I've done before",
     "I'm job hunting and I've updated my resume",
+    "I'm job hunting - I've told my boss",
+    "I'm job hunting or I've left already",
+    "I think I've told you I'm job hunting",
+    "plus I've been stressed, I'm job hunting",
+    "which has been hard, I'm job hunting",
+    "that has been hard, I'm job hunting",
+    "I'm job hunting, I've told my boss",
+    "I've been stressed",
 ])
 def test_possession_and_ed_adjectives_are_not_perfect(main_clause) -> None:
+    # The fact is the whole main clause, so only the perfect test can drop the item.
     turn = f"Since the meeting on 3/4 went badly, {main_clause}."
-    facts = ["The meeting on 3/4 went badly.", "The user is unhappy at work."]
+    facts = ["The meeting on 3/4 went badly.", f"The user says {main_clause}."]
+    items = {
+        0: _item(0, "on 3/4", "explicit_date", "point_event", date_="--03-04"),
+        1: _item(1, "Since the meeting on 3/4 went badly", "event_anchored", "state", offset=SINCE_0,
+                 anchor={"fact": 0, "event": None}),
+    }
+    marked, results = _run(turn, facts, items, date(2023, 3, 20))
+    if main_clause == "I've been stressed":  # control: a perfect right after the subject
+        assert marked == [] and results[1].new_valid_at == _day(2023, 3, 4)
+    else:
+        assert marked == [1] and items[1]["guard"] == "causal_since" and not results[1].written
+
+
+@pytest.mark.parametrize("main_clause", [
+    "my boss has left, and the pay is low, I'm job hunting",
+    "after I've thought it over, I'm job hunting",
+    "I've been stressed plus I'm job hunting",
+    "I've updated my CV yet I'm job hunting",
+    "I've updated my CV or I'm job hunting",
+    "I've been stressed - I'm job hunting",
+])
+def test_a_perfect_in_another_clause_never_dates_the_fact(main_clause) -> None:
+    turn = f"Since the meeting on 3/4 went badly, {main_clause}."
+    facts = ["The meeting on 3/4 went badly.", "The user is job hunting."]
     items = {
         0: _item(0, "on 3/4", "explicit_date", "point_event", date_="--03-04"),
         1: _item(1, "Since the meeting on 3/4 went badly", "event_anchored", "state", offset=SINCE_0,
@@ -344,10 +389,13 @@ def test_possession_and_ed_adjectives_are_not_perfect(main_clause) -> None:
     assert marked == [1] and not results[1].written
 
 
-@pytest.mark.parametrize("main_clause", ["I've driven to the coast twice", "I've hardly ever missed a class"])
-def test_irregular_participles_and_two_adverbs_are_perfect(main_clause) -> None:
+@pytest.mark.parametrize(("main_clause", "fact"), [
+    ("I've driven to the coast twice", "The user has driven to the coast twice."),
+    ("I've hardly ever missed a class", "The user has hardly missed a class."),
+])
+def test_irregular_participles_and_two_adverbs_are_perfect(main_clause, fact) -> None:
     turn = f"Since I bought the car on 3/4, {main_clause}."
-    facts = ["The user bought a car on 3/4.", "The user drives a lot."]
+    facts = ["The user bought a car on 3/4.", fact]
     items = {
         0: _item(0, "on 3/4", "explicit_date", "point_event", date_="--03-04"),
         1: _item(1, "Since I bought the car on 3/4", "event_anchored", "state", offset=SINCE_0,
@@ -379,6 +427,11 @@ def test_a_perfect_inside_the_since_clause_never_makes_it_temporal(turn) -> None
     ("Last week, I started a new job and now my back is sore.", "The user's back is sore."),
     ("I started a new job and last week, my back was sore.", "The user's back is sore."),
     ("I joined a gym, which started offering yoga last week, and my back is sore.", "The user's back is sore."),
+    ("I started a new job and last week, I started seeing a doctor about my back.", "The user's back is sore."),
+    ("I began running so last week, the gym started offering yoga.", "The user does yoga."),
+    ("I started a new job and my back was sore last week.", "The user's back is sore."),
+    ("My sister moved in. It all started last week, and I'm tired.", "The user is tired."),
+    ("We hired a nanny, and that began last week, so I'm tired.", "The user is tired."),
 ])
 def test_a_start_word_needs_to_be_about_the_fact(turn, fact) -> None:
     items = {0: _item(0, "last week", "speech_relative", "state", calendar={"which": "last", "unit": "week"})}
@@ -405,6 +458,29 @@ def test_forward_spans_are_not_a_start(expr) -> None:
     items = {0: _item(0, expr, "speech_relative", "state", offset=after)}
     marked, results = _run(turn, ["The user's sister is staying with the user."], items, date(2023, 6, 15))
     assert marked == [0] and not results[0].written
+
+
+@pytest.mark.parametrize("expr", ["for about two and a half weeks", "for more than a couple of weeks",
+                                  "for two weeks from now", "next week for two weeks", "for two weeks"])
+def test_a_state_never_starts_after_the_speech_date(expr) -> None:
+    turn = f"My sister is staying with me {expr}."
+    after = {"amount": 17, "unit": "day", "direction": "after", "approx": False}
+    items = {0: _item(0, expr, "speech_relative", "state", offset=after)}
+    _, results = _run(turn, ["The user's sister is staying with the user."], items, date(2023, 6, 15))
+    assert not results[0].written and results[0].reason == "state_start"
+
+
+def test_a_state_window_that_runs_past_the_speech_date_is_not_written() -> None:
+    items = {0: _item(0, "this week", "speech_relative", "state", calendar={"which": "this", "unit": "week"})}
+    _, results = _run("I started yoga this week.", ["The user does yoga."], items, date(2023, 6, 15))
+    assert not results[0].written and results[0].reason == "state_start"
+
+
+def test_a_point_event_after_the_speech_date_is_not_blocked_as_a_state() -> None:
+    after = {"amount": 17, "unit": "day", "direction": "after", "approx": False}
+    items = {0: _item(0, "in 17 days", "speech_relative", "point_event", offset=after)}
+    _, results = _run("My sister arrives in 17 days.", ["The user's sister arrives."], items, date(2023, 6, 15))
+    assert results[0].reason != "state_start"
 
 
 @pytest.mark.parametrize("turn", [
@@ -442,12 +518,14 @@ def test_a_trailing_since_after_a_subordinate_perfect_is_not_the_fact() -> None:
     assert marked == [0] and items[0]["guard"] == "causal_since" and not results[0].written
 
 
-@pytest.mark.parametrize("turn", [
-    "I've been interested in birds since I volunteered at the refuge on June 3rd, where we counted herons.",
-    "I've been feeling more rested and focused since I volunteered at the refuge on June 3rd.",
+@pytest.mark.parametrize(("turn", "fact"), [
+    ("I've been interested in birds since I volunteered at the refuge on June 3rd, where we counted herons.",
+     "The user has been interested in birds."),
+    ("I've been feeling rested since I volunteered at the refuge on June 3rd.",
+     "The user has been feeling rested."),
 ])
-def test_a_trailing_since_attaches_to_the_clause_before_it(turn) -> None:
-    facts = ["The user volunteered at the refuge on June 3rd.", "The user has a state."]
+def test_a_trailing_since_attaches_to_the_clause_before_it(turn, fact) -> None:
+    facts = ["The user volunteered at the refuge on June 3rd.", fact]
     items = {
         0: _item(0, "on June 3rd", "explicit_date", "point_event", date_="--06-03"),
         1: _item(1, "since I volunteered at the refuge on June 3rd", "event_anchored", "state", offset=SINCE_0,
@@ -499,15 +577,16 @@ def test_too_many_occurrences_are_treated_conservatively(turn, kind, guard) -> N
     assert marked == [0] and items[0]["guard"] == guard
 
 
-@pytest.mark.parametrize(("turn", "expr", "item"), [
-    ("I've lived here since 2/15. My rent is due on 12/15.", "2/15", {"date_": "--02-15"}),
+@pytest.mark.parametrize(("turn", "expr", "item", "fact"), [
+    ("I've lived here since 2/15. My rent is due on 12/15.", "2/15", {"date_": "--02-15"},
+     "The user has lived here."),
     ("I've been on this diet since last week. I went hiking last weekend.", "last week",
-     {"calendar": {"which": "last", "unit": "week"}}),
+     {"calendar": {"which": "last", "unit": "week"}}, "The user has been on a diet."),
 ])
-def test_an_expression_inside_a_longer_word_is_not_an_occurrence(turn, expr, item) -> None:
+def test_an_expression_inside_a_longer_word_is_not_an_occurrence(turn, expr, item, fact) -> None:
     basis = "explicit_date" if "date_" in item else "speech_relative"
     items = {0: _item(0, expr, basis, "state", **item)}
-    marked, results = _run(turn, ["The user has a state."], items, date(2023, 6, 15))
+    marked, results = _run(turn, [fact], items, date(2023, 6, 15))
     assert marked == [] and results[0].written
 
 
