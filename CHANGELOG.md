@@ -1,3 +1,11 @@
+## 2026-10-12 - Write an anchored time only when it dates the fact's own start
+
+- `infrastructure/anchored_time.py`: new `state_start_guard`, run after `clause_guard`. A "since" phrase is temporal only with "ever since" or a perfect-aspect main clause; otherwise it means "because" and the item is dropped (guard `causal_since`), for every kind. A state takes a time only when the text marks its start (temporal "since", a duration running up to now, or start/begin in the expression's clause); otherwise the item keeps its basis, so facts anchored on it still place, and `plan_overlay` does not write it (outcome `state_start`). Graphiti's own dates are unchanged.
+- `infrastructure/graphiti_extraction_policy.py`, `scripts/eval_anchored_time.py`: run the guard on the production path and in the offline eval; `guard_drops` lists both guards' indices.
+- Offline over the 22 frozen and gate runs: wrong writes 4 -> 0 (K04.3, G17.1, G28.0 x2) and no correct write lost; R29.2 is blocked on any speech date, not only within the year rule's 31 days. Chosen after seeing these runs, so not blind.
+- Tests: new `tests/test_anchored_time_state_start.py`. Changed because it pinned changed behavior: the `heldout2:frozen` row of `PINNED_O2` in `tests/test_anchored_time_replay.py` (false dates 2/76 -> 0/76, overridden 11 -> 9).
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-10-11 - Finish the speaker-role follow-ups from the #272 review
 
 - `domain/turn_role.py`: turn evidence from another namespace no longer proves an episode's speaker; namespaces compare through `normalize_namespace`, as the claim query's `subject_endpoint_eligible` does (review F6).
@@ -88,12 +96,4 @@
 - `src/menhir/infrastructure/memory_graph_adapter.py`, `src/menhir/infrastructure/personal_memory_queries.py`: the typed-scalar lane always discovers and loads work from `:TurnEvidence`; the legacy `user:`-prefix Episodic selectors are removed (#95). The shared scalar cursor writer stays.
 - `src/menhir/services/scalar_consolidation.py`: warn once per process when scalar consolidation runs with no user-role evidence, naming `add_memory(user_statement=...)` and TurnEvidence hooks.
 - `tests/test_scalar_discovery_evidence_only.py`: evidence-only discovery and the warning; `tests/test_scalar_consolidation_cursor.py`: drop the two tests of the removed selectors.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-09-29 - Accept agent-quoted user statements for scalar perception
-
-- `src/menhir/mcp/tools/ingest/add_memory.py`, `src/menhir/core/backend_*.py`, `src/menhir/api/routes.py`, `src/menhir/api/routes_support.py`: new optional `user_statement` (verbatim user words) on `add_memory`, exclusive with `turn_evidence_uuid`, carried through MCP, in-process and REST and sent only when set. `add_memory_and_track` keeps its MVP signature.
-- `src/menhir/services/ingest_intake.py`: record it as `:TurnEvidence` with `source_kind='agent_quoted'` and link it provenance-only; failures never fail the ingest.
-- `src/menhir/domain/truth/admission_gate.py`, `src/menhir/infrastructure/scalar_view_repository.py`, `src/menhir/infrastructure/turn_evidence_repository.py`: agent-quoted evidence never grants user tier, never counts as user foundation, and never feeds the counter or event lanes; the scalar lane keeps it.
-- `tests/test_agent_quoted_evidence.py`, `tests/test_api_routes.py`: gate, foundation, lane, intake and REST coverage.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.

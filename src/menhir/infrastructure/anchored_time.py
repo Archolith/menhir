@@ -702,6 +702,71 @@ def clause_guard(turn: str, facts: list[str], items: dict[int, dict]) -> list[in
     return sorted(dropped)
 
 
+_SINCE = re.compile(r"\b(?:ever\s+)?since\b", re.I)
+_EVER_SINCE = re.compile(r"\bever\s+since\b", re.I)
+_PERFECT = re.compile(r"\b(?:have|has|had)(?:n't)?\b|'ve\b|'s\s+been\b|'d\s+been\b", re.I)
+_STARTED = re.compile(r"\b(?:start|starts|started|starting|begin|begins|began|begun|beginning)\b", re.I)
+_RUNS_TO_NOW = re.compile(r"\bnow\b|^\s*for\b", re.I)
+
+
+_SINCE_CLAUSE = re.compile(r"(?:ever\s+)?since\s+(?:i|we|you|he|she|they|it|my|our|his|her|their|the|a|an)\b")
+
+
+def _since_operator(turn_low: str, pos: int, expr: str, basis) -> str:
+    """The "since" that relates the item to its time, else "": "since" plus a time ("since
+    February 20th", "since then"), or an event-anchored "since X". An explicit or speech-relative
+    time inside a "since" clause ("Since I moved to Denver in May") dates the clause's own event."""
+    m = re.search(r"\b(?:ever\s+)?since\s*$", turn_low[max(0, pos - 12):pos]) or _SINCE.match(expr)
+    if m and _SINCE_CLAUSE.match(expr) and basis != "event_anchored":
+        return ""
+    return m.group(0) if m else ""
+
+
+def state_start_guard(turn: str, facts: list[str], items: dict[int, dict]) -> list[int]:
+    """Mutates items: marks times that do not date the fact's own start. Returns marked indices.
+
+    "since" is temporal with "ever since" or a perfect-aspect main clause ("I've been focusing
+    ... since"); with any other ("Since I started on 2/15, I'm hoping ...") it means "because",
+    so the item is dropped like a clause-guard drop (guard "causal_since"), for every kind.
+
+    A state's ``valid_at`` is when it began, so a time on a state dates it only when the text says
+    it marks the start: temporal "since", a duration running up to now, or start/begin in the
+    expression's clause. Otherwise the time belongs to a co-mentioned event ("fixed the fence three
+    weeks ago" for "the goats are safe"); the item keeps its basis, so facts anchored on it still
+    place, and gets guard "state_start", which plan_overlay never writes. Items whose expression is
+    not in the turn are left alone.
+    """
+    low = turn.lower()
+    dropped = []
+    for i, it in items.items():
+        expr = _norm(it.get("expression"))
+        if not expr or it.get("basis") not in DATED_BASES or not (0 <= i < len(facts)):
+            continue
+        pos = low.find(expr)
+        if pos < 0:
+            continue
+        s0, e0 = _sentence(turn, pos)
+        rest = (turn[s0:pos] + " " + turn[pos + len(expr):e0]).replace("\u2019", "'")
+        since = _since_operator(low, pos, expr, it.get("basis"))
+        if since:  # "ever since" is always temporal
+            reason = None if _EVER_SINCE.search(since) or _PERFECT.search(rest) else "causal_since"
+        elif it.get("kind") != "state":
+            reason = None
+        elif CUES["duration"].search(expr) or _RUNS_TO_NOW.search(expr):
+            reason = None
+        else:
+            _, c_text = _clause_start_and_text(turn, pos)
+            reason = None if _STARTED.search(c_text) or _STARTED.search(expr) else "state_start"
+        if reason == "causal_since":
+            items[i] = {**it, "basis": "none", "offset": None, "calendar": None, "date": None,
+                        "anchor": None, "guard": reason}
+        elif reason:
+            items[i] = {**it, "guard": reason}
+        if reason:
+            dropped.append(i)
+    return sorted(dropped)
+
+
 # ---------------------------------------------------------------- Menhir integration (pure)
 DATED_BASES = frozenset({"explicit_date", "speech_relative", "event_anchored"})
 _GRANULARITY = {"day": "day", "weekday": "day", "week": "week", "weekend": "week", "month": "month",
@@ -906,6 +971,8 @@ def plan_overlay(
             elif g_dates and speech_date not in g_dates:
                 # Offline over 18 runs: overriding Graphiti's own dates only ever lost facts.
                 reason = "graphiti_resolved"
+            elif item.get("guard") == "state_start":  # the time dates another event, not this state
+                reason = "state_start"
             elif ambiguity:  # "two_options", "year_ambiguous", or "ambiguous_anchor" from an anchor
                 reason = ambiguity
             elif edge.invalid_at is not None and _aware(edge.invalid_at) <= candidate:

@@ -31,7 +31,8 @@ HELDOUT = {"heldout:fix": ("heldout_turns.json", "ckpt_heldout_fix.jsonl"),
 PINNED_O2 = {
     # resolver 31/32 before d16485d: H19.6, see PROTOTYPE_DIVERGENCES
     "heldout:fix": ("18/32, 0/73", "30/32, 0/73", "26/32, 0/73", 10, 19),
-    "heldout2:frozen": ("12/23, 0/76", "22/23, 4/76", "19/23, 2/76", 11, 13),
+    # 2/76 false dates and 11 overridden before the state-start guard (G17.1, G28.0 not written).
+    "heldout2:frozen": ("12/23, 0/76", "22/23, 4/76", "19/23, 0/76", 9, 13),
     "heldout2:frozen_b": ("12/23, 0/76", "21/23, 2/76", "19/23, 0/76", 9, 14),
     # 24/28 and 9 before the keep-Graphiti's-own-dates rule (K19.0 is no longer overridden).
     "heldout3:frozen": ("18/28, 0/93", "26/28, 0/93", "25/28, 0/93", 8, 16),

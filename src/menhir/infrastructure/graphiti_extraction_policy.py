@@ -1658,6 +1658,7 @@ async def _apply_anchored_time(
         clause_guard,
         detect,
         plan_overlay,
+        state_start_guard,
     )
 
     report = AnchoredTimeReport(model=str(getattr(resolver, "model", "") or ""),
@@ -1704,7 +1705,8 @@ async def _apply_anchored_time(
             return
         items = outcome.items
         report.missing_events = outcome.missing_events
-        report.guard_drops = tuple(clause_guard(turn, facts, items))
+        drops = set(clause_guard(turn, facts, items)) | set(state_start_guard(turn, facts, items))
+        report.guard_drops = tuple(sorted(drops))
         results = plan_overlay(inputs, items, speech_date, speech_time.tzinfo)
         if expiry:
             results = [_with_world_end(edge, result) for edge, result in zip(edges, results)]
