@@ -124,11 +124,13 @@ docs/research/        forward research notes (this corpus): positioning, retriev
    with admission's trust-tier -> belief-layer assertion-confidence seam.
 
 7. Prior art (external comparisons — positioning/roadmap input, not menhir mechanism docs):
+   prior-art/anthropic-scion-source-control-comparison.md,
    prior-art/memtrace-comparison.md, prior-art/repowise-comparison.md,
    prior-art/fluxmem-connectivity-prior-art.md, prior-art/athena-public-comparison.md,
    prior-art/m3-memory-comparison.md, prior-art/atlaso-comparison.md,
    prior-art/tencentdb-agent-memory-comparison.md
    Athena, M3, and TencentDB pin analyzed revisions; FluxMem pins the paper version.
+   Scion is a dated proprietary design account (no released source code on 2026-10-13);
    Memtrace and Repowise remain unpinned, while Atlaso is a dated closed-system snapshot.
    Re-verify unpinned or closed-system claims before citing them in a decision.
 

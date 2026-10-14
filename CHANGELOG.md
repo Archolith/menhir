@@ -1,3 +1,10 @@
+## 2026-10-13 - Assess Anthropic Scion as prior art for revision intelligence
+
+- `docs/research/prior-art/anthropic-scion-source-control-comparison.md`: dated comparison of Anthropic's proprietary Scion, its open-source status, Git-compatible alternatives, Menhir overlap and risks; no VCS replacement proposed.
+- `.agent/plans/backlog/menhir-scion-exploration-2026-10-13.md`: proposed gated inventory, benchmark and limited-spike plan for Git revision metadata and content-addressed sync, with proof obligations and stop conditions.
+- `docs/research/prior-art/README.md`, `docs/research/README.md`, `.agent/plans/backlog/README.md`: route the research and plan in canonical indexes.
+- `CHANGELOG-archive.md`: retain the oldest dated current entry.
+
 ## 2026-10-12 - Write an anchored time only when it dates the fact's own start
 
 - `infrastructure/anchored_time.py`: new `state_start_guard`, run after `clause_guard`. A "since" phrase is temporal only with "ever since" or a perfect (have/has/had plus a participle, not "'ve got" or an -ed adjective before its noun) right after the subject of the one clause it attaches to: for a leading since-clause, the first clause after its comma that is not a side clause (", as I've said"), up to and/but/so/or/yet/plus or a dash; for a trailing "since", the last non-subordinate comma clause before it, from its last coordinator or subordinator. A temporal "since" dates only that clause: when the clause shares no word with the fact, the item keeps its basis and is not written (`state_start`); otherwise it means "because" and the item is dropped (guard `causal_since`), for every kind. A state takes a time only when the text marks its start (temporal "since", "for" + amount + unit running up to now, or start/begin in the expression's own coordinate clause, which shares a word with the fact; a fronted time takes the next clause only when it opens its comma clause, and a back-reference such as "it all started" is not enough); otherwise the item keeps its basis, so facts anchored on it still place, and `plan_overlay` does not write it (outcome `state_start`, checked before `graphiti_inside_window`). A state whose window reaches past the speech date is never written either (same outcome). Every whole-word occurrence of a repeated expression is judged, the strictest wins, up to 8 (past that, conservative); matching folds case and curly apostrophes without shifting positions. Sentence bounds are computed once per turn. Graphiti's own dates are unchanged. Accepted misses: coordinated objects ("I started yoga and meditation") or predicates before a trailing since ("more rested and focused since"), no-comma leading since-clauses, a comma right before a trailing since, "since March" with no perfect, a perfect after other words ("I think I've ..."), "it all started", states started this week, paraphrased facts.
@@ -90,11 +97,4 @@
 - `src/menhir/services/maintenance_scheduler.py`, `scheduler_tasks.py`, `scalar_consolidation.py`, `typed_scalar_service.py`: align the same knobs' fallback defaults.
 - `.env.example`: document the new defaults and that the gain is not yet re-measured on current Menhir.
 - `tests/test_scalar_lenient_defaults.py`: defaults, overrides and the k=3 two-vote commit; `tests/test_scalar_threshold_setting.py`, `tests/test_gate_relaxations.py`: update the pinned old defaults.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-09-29 - Read scalar input only from TurnEvidence
-
-- `src/menhir/infrastructure/memory_graph_adapter.py`, `src/menhir/infrastructure/personal_memory_queries.py`: the typed-scalar lane always discovers and loads work from `:TurnEvidence`; the legacy `user:`-prefix Episodic selectors are removed (#95). The shared scalar cursor writer stays.
-- `src/menhir/services/scalar_consolidation.py`: warn once per process when scalar consolidation runs with no user-role evidence, naming `add_memory(user_statement=...)` and TurnEvidence hooks.
-- `tests/test_scalar_discovery_evidence_only.py`: evidence-only discovery and the warning; `tests/test_scalar_consolidation_cursor.py`: drop the two tests of the removed selectors.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
