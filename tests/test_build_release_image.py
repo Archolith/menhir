@@ -375,6 +375,9 @@ def test_scanners_read_the_sealed_archive_without_invoking_real_docker(
         assert "--read-only" in command
         assert "no-new-privileges=true" in command
         assert scanner_image in command
+        assert command[command.index("--mount") + 1] == (
+            f"type=bind,src={archive},dst=/candidate/{archive.name},readonly"
+        )
         assert f"docker-archive:/candidate/{archive.name}" in command
         assert kwargs == {"check": False, "capture_output": True}
     assert "none" in scanner_calls[0][0]

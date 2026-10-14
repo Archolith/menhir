@@ -102,6 +102,18 @@ state dir; filed as #193. Any default-promotion E2E on path W must either fix th
 operator step explicitly. Also seen: `up --check` reports an empty `OPENAI_API_KEY` as "key
 REJECTED (401/403)" rather than "missing" (cosmetic).
 
+### Release-container prerequisite audit (2026-10-14)
+
+The [container audit](../reviews/menhir-release-container-audit-2026-10-14.md)
+built an unpublished diagnostic image from `93285d2` and its locked wheelhouse.
+Installed dependency/fork checks passed. Scanning reproduced a private-output-directory
+bind-mount failure; mounting only the public archive repairs it without opening the
+directory. Real Syft then succeeded. Grype rejected the upstream audit base with 14
+Critical matches, including Python 3.12.14 (report fix: 3.12.15). This is not a scan of
+the separately patched production base. Sealed fixed-commit bundle, release-base
+selection, named-RC acceptance and final qualification remain open. Defaults are
+unchanged, and the ingest/paid-run hold remains in place.
+
 ## 3. Provider and model contract
 
 - Product defaults: provider `local` (`http://127.0.0.1:8081/v1`, `qwen3.5-35b-a3b`, embed model
