@@ -8,13 +8,14 @@ the source document's gate before acting and consult the
 dependency-ordered rung. Reference-only records no longer live here; use the
 [reference library](../../reference/README.md).
 
-This index routes all 15 backlog records exactly once.
+This index routes all 16 backlog records exactly once.
 
 ## Active or proposed
 
 | Document | Current ownership |
 |---|---|
 | [`deferred-verification.md`](deferred-verification.md) | Living checklist of tests and benches owed when the required environment is available. |
+| [`menhir-scion-exploration-2026-10-13.md`](menhir-scion-exploration-2026-10-13.md) | Gated, evidence-first exploration of revision-indexed Git metadata and content-addressed snapshot sync; no VCS replacement or production change authorized. |
 | [`menhir-hyperedge-ready-storage.md`](menhir-hyperedge-ready-storage.md) | Unscheduled hyperedge-ready logical/storage seam. |
 | [`menhir-rung1-temporal-intent-reconciliation.md`](menhir-rung1-temporal-intent-reconciliation.md) | Wire the temporal-intent classifier and canonical fact filter into recall. |
 | [`menhir-temporal-bulk-ingest.md`](menhir-temporal-bulk-ingest.md) | Temporally correct bulk-ingest optimization. |
