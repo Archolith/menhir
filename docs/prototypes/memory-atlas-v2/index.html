@@ -24,6 +24,8 @@
         <a class="side-link" data-nav="evidence" href="#evidence"><span class="side-glyph">◈</span> Evidence trail</a>
         <a class="side-link" data-nav="timeline" href="#timeline"><span class="side-glyph">◷</span> Temporal history</a>
         <a class="side-link" data-nav="graph" href="#graph"><span class="side-glyph">⌘</span> Relationships</a>
+        <a class="side-link" href="./views-scalars.html#views"><span class="side-glyph">✧</span> View Studio <span class="side-count">NEW</span></a>
+        <a class="side-link" href="./views-scalars.html#scalars"><span class="side-glyph">∑</span> Scalar Explorer <span class="side-count">NEW</span></a>
       </nav>
       <div class="side-heading subheading">QUICK ACCESS</div>
       <button type="button" class="saved-memory" data-memory="identity"><span class="memory-swatch mint"></span><span>Stable entity identity<small>Current · 3 connections</small></span></button>
@@ -32,7 +34,7 @@
       <div class="side-bottom"><span class="pulse"></span> Design study <span class="version">v0.2</span><p>Read-only interactions. No backend or LLM connected.</p></div>
     </aside>
     <div class="main-stage" id="mainStage">
-      <div class="mobile-nav"><select id="mobilePage" aria-label="Choose prototype page"><option value="browse">Overview</option><option value="inspect">Memory reader</option><option value="evidence">Evidence trail</option><option value="timeline">Temporal history</option><option value="graph">Relationships</option></select><span>Five page examples</span></div>
+      <div class="mobile-nav"><select id="mobilePage" aria-label="Choose prototype page"><option value="browse">Overview</option><option value="inspect">Memory reader</option><option value="evidence">Evidence trail</option><option value="timeline">Temporal history</option><option value="graph">Relationships</option></select><a href="./views-scalars.html#views" style="color:var(--aqua);font-weight:650">Views & Scalars ↗</a></div>
       <main class="page active" id="page-browse" data-page="browse">
         <div class="reading-width">
           <div class="page-kicker">ATLAS / HOME</div>
@@ -47,6 +49,7 @@
           </div>
           <div class="surface-section"><div class="section-row"><h2>Browse knowledge</h2><div class="filter-tabs" role="group" aria-label="Filter sample memories"><button class="filter active" data-filter="all">All</button><button class="filter" data-filter="current">Current</button><button class="filter" data-filter="historical">Historical</button></div></div>
             <div id="memoryResults" class="memory-results" aria-live="polite"></div>
+            <div class="notice" style="margin-top:19px"><strong>Specialized inspectors:</strong> Views and typed scalars can be explored with purpose-built interfaces. <a href="./views-scalars.html#views" style="color:var(--aqua);text-decoration:underline">Open View Studio ↗</a> · <a href="./views-scalars.html#scalars" style="color:var(--aqua);text-decoration:underline">Open Scalar Explorer ↗</a></div>
             <p class="faint-note">Example records are illustrative and not an export of a real Menhir namespace.</p>
           </div>
         </div>
