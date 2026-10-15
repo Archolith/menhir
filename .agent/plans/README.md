@@ -44,7 +44,7 @@ This index routes the current execution owners listed below exactly once.
 
 | Document | Decision |
 |---|---|
-| [`menhir-progressive-memory-inspector-2026-10-14.md`](menhir-progressive-memory-inspector-2026-10-14.md) | Approve Explorer-first, lazy, read-only progressive memory drilldown and define raw-source/history authorization before implementation. |
+| [`menhir-progressive-memory-inspector-2026-10-14.md`](menhir-progressive-memory-inspector-2026-10-14.md) | Approve phased Memory Atlas delivery: scoped memory exploration, typed View Studio, Scalar Explorer, provenance/navigation and security/rollout gates; project briefing stays separate. |
 | [`menhir-context-composition-production-integration.md`](menhir-context-composition-production-integration.md) | Decide whether Stages 2–4 remain wanted after Stage 1's negative result and the later independent fix of the motivating extraction failure. |
 
 ## Maintenance rule
