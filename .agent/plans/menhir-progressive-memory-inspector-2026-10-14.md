@@ -18,6 +18,10 @@ The Explorer already shows node details, a small neighbor list, linked episodes,
 
 The Menhir-specific opportunity is to use existing structured evidence and graph edges rather than precompute long-form prose. **Expand** (inspect the same memory) and **Traverse** (follow another memory) are distinct actions. Both are read-only, lazy, and deterministic by default.
 
+## Experience prototype
+
+The initial one-page reader prototype is now accompanied by the [five-page Memory Atlas experience study](../../docs/prototypes/memory-atlas-v2/index.html) ([walkthrough](../../docs/prototypes/memory-atlas-v2/README.md)): Overview, Memory Reader, Evidence Trail, Temporal History and Relationships. This is a proposed *greenfield layout*, with synthetic records and no runtime/backend connection. Review layout, state semantics, cross-view navigation and accessibility before treating any current Explorer screen as a constraint.
+
 ## Scope
 
 **MVP: Menhir-backed Memory Atlas, with a greenfield visual frontend.** The existing Explorer was an early prototype: its three-column graph-first arrangement, templates, and styling are not binding. Only Menhir's canonical runtime/read contracts, governance, privacy, and essential operator capabilities are constraints. See the [grounded UX study](../../docs/design/memory-atlas-ux-research-2026-10-14.md) and [interactive concept](../../docs/prototypes/progressive-memory-inspector.html).
