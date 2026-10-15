@@ -79,6 +79,7 @@
 @media(max-width:990px){.special-grid{grid-template-columns:1fr 250px}.s-attributes{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:780px){.special-grid,.s-scalar-hero{grid-template-columns:1fr}.s-scalar-hero .side{border-left:0;border-top:1px solid var(--line)}.s-ledger-row{grid-template-columns:95px 75px 1fr}.s-ledger-row>div:nth-child(4){display:none}}
 @media(max-width:590px){.special-wrap{padding:26px 16px 65px}.special-header h1{font-size:30px}.s-hero{padding:24px 20px}.s-hero h2{font-size:23px}.s-value{font-size:42px}.s-steps{display:block}.s-step{margin:6px 0}.s-arrow{display:block;text-align:center;transform:rotate(90deg);padding:3px}.s-picker button{padding:7px 9px}.s-ledger-row{grid-template-columns:80px 67px 1fr;padding:11px 8px;gap:6px;font-size:10px}.s-legend{gap:9px}}
+.s-ledger-expanded{grid-column:1/-1;background:#1c3141;border-bottom:1px solid var(--line);color:#b7d3df;font-size:11px;line-height:1.75;padding:13px 17px}.s-ledger-expanded[hidden]{display:none!important}
 </style>
 </head>
 <body>
@@ -103,7 +104,7 @@
     <div class="s-audit-note"><strong>View integrity:</strong> “current” is not the same as “source-verified.” A View's audience and class control where it may surface; deleted evidence and superseded versions must not silently appear in ordinary recall.</div>
   </main>
   <main id="scalarPage" hidden>
-    <div class="s-picker" role="group" aria-label="Choose scalar case"><button data-sample="anchored" class="active">Anchored current value</button><button data-sample="delta">Delta-only history · no anchor</button></div>
+    <div class="s-picker" role="group" aria-label="Choose scalar case"><button data-sample="anchored" class="active">Anchored current value</button><button data-sample="delta">Delta-only · no anchor</button><button data-sample="ambiguous">Conflicting anchors</button><button data-sample="expired">Ended state</button></div>
     <div class="s-scalar-hero"><div class="primary">
       <div class="label-line"><span class="label-kind">◇ TYPED SCALAR SLOT</span><span class="s-pill" id="scalarState">CURRENT</span></div>
       <h2 id="scalarTitle">Workshop inventory · active devices</h2>
@@ -136,8 +137,10 @@ const viewData={
  metric:{name:"Explorer diagnostics · active queue",value:"3",unit:"items",tag:"OPERATOR",explanation:"An illustrative operator-only Metric. Operational telemetry must not appear in semantic recall as a factual memory.",kind:"metric",viewClass:"METRIC",audience:"OPERATOR",time:"Not applicable",sources:[["Operational sample","Example of a non-recallable metric source"]],governance:[["Class",":Metric (not :Entity)"],["Audience","Operator"],["Semantic recall","Excluded"],["Evidence","Operator-specific; not a user claim"]]}
 };
 const scalarData={
- anchored:{title:"Workshop inventory · active devices",value:"25",unit:"devices",tag:"CURRENT",date:"2026-09-20",status:"An absolute anchor (18 devices) and a later admitted delta (+7) produce this example folded value.",entries:[["2026-09-01","Absolute","18 devices","TurnEvidence · original snapshot"],["2026-09-20","Delta","+7 devices","TurnEvidence · adjustment"]],anchor:true},
- delta:{title:"Workshop inventory · adjustments",value:"Unknown",unit:"",tag:"NO ANCHOR",date:"Unknown",status:"Only changes are known: +7 and −2. Without an absolute anchor, a current inventory total cannot be justified.",entries:[["2026-09-01","Delta","+7 devices","TurnEvidence · adjustment"],["2026-09-20","Delta","−2 devices","TurnEvidence · adjustment"]],anchor:false}
+"anchored":{"title":"Workshop inventory · active devices","value":"25","unit":"devices","tag":"CURRENT","date":"2026-09-20","status":"The latest absolute anchor (18) plus a strictly later admitted delta (+7) produces a folded current value of 25.","reason":"Folded current scalar_state available","authority":"current","chart":"anchored","chartCaption":"Latest absolute anchor plus subsequent delta. Lines illustrate the fold, not observations between events.","entries":[["2026-09-01","Absolute","18 devices","TurnEvidence · snapshot","Example assertion a-101; source quote: “We have 18 devices in the workshop.”"],["2026-09-20","Delta","+7 devices","TurnEvidence · adjustment","Example assertion a-102; source quote: “Added another seven workshop devices.”"]]},
+"delta":{"title":"Workshop inventory · adjustments","value":"Unknown","unit":"","tag":"NO ANCHOR","date":"Unknown","status":"Only two deltas are known (+7 and −2). Without any absolute anchor, the current inventory value must remain unknown.","reason":"no_anchor · authoritative scalar_state abstains","authority":"abstain","chart":"delta","chartCaption":"Changes are plotted as separate assertions, not an accumulated inventory total.","entries":[["2026-09-01","Delta","+7 devices","TurnEvidence · adjustment","Example assertion a-201; “Added seven workshop devices.”"],["2026-09-20","Delta","−2 devices","TurnEvidence · adjustment","Example assertion a-202; “Removed two workshop devices.”"]]},
+"ambiguous":{"title":"Workshop inventory · conflicting readings","value":"Unknown","unit":"","tag":"AMBIGUOUS","date":"2026-09-20","status":"Two different absolute values are asserted at the same latest world time. Neither is an explicit correction, so Menhir refuses to select a current value.","reason":"ambiguous_anchor · authoritative scalar_state abstains","authority":"abstain","chart":"ambiguous","chartCaption":"Distinct absolute values at equal latest valid_at; the display must not pick a winner without a valid correction.","entries":[["2026-09-20","Absolute","18 devices","TurnEvidence · source A","Example assertion a-301; “There are eighteen active devices.”"],["2026-09-20","Absolute","25 devices","TurnEvidence · source B","Example assertion a-302; “There are twenty-five active devices.”"]]},
+"expired":{"title":"Workshop inventory · ended state","value":"Ended","unit":"","tag":"EXPIRED","date":"2026-09-20","status":"A later expiry says the formerly asserted state has ended without providing a replacement. Menhir retires the current View; the past value remains historical, not zero.","reason":"expiry · no current scalar_state View","authority":"expired","chart":"expired","chartCaption":"Earlier absolute state, followed by an explicit end. No new numerical state is derived.","entries":[["2026-09-01","Absolute","18 devices","TurnEvidence · earlier value","Example assertion a-401; “There are eighteen active workshop devices.”"],["2026-09-20","Expire","Prior state ended","TurnEvidence · expiry","Example assertion a-402; “That earlier inventory is no longer current.”"]]}
 };
 let kind="scalar_state",sample="anchored";
 function property(holder,k,v){const row=make("div","","s-property");row.append(make("span",k),make("strong",v));holder.append(row)}
@@ -157,31 +160,50 @@ function renderView(){
  d.sources.forEach(([title,desc])=>{const card=make("div","","s-contributor");card.append(make("strong",title),make("small",desc));const b=make("button","Review source trail →");b.onclick=()=>{window.location.href="./index.html#evidence"};card.append(b);list.append(card)});
  const gov=$("viewGovernance");gov.replaceChildren();d.governance.forEach(([k,v])=>property(gov,k,v));$("fromViewToScalar").hidden=!(kind==="scalar_state"||kind==="scalar_history");
 }
-function svgString(anchor){
- const line=anchor?'<path d="M75 116 L387 45" class="line"/><circle cx="75" cy="116" r="6" class="point"/><circle cx="387" cy="45" r="6" class="point"/>':'<path d="M75 102 L387 144" class="delta"/><circle cx="75" cy="102" r="6" class="change"/><circle cx="387" cy="144" r="6" class="change"/>';
- return '<svg viewBox="0 0 540 210" aria-hidden="true" role="presentation"><defs><pattern id="g" width="100%" height="48" patternUnits="userSpaceOnUse"><path d="M0 0H540" stroke="#425e6c" stroke-width="1" opacity=".4"/></pattern></defs><rect width="540" height="180" fill="url(#g)"/><path d="M50 18V169H496" fill="none" stroke="#5e7d8b"/>'+line+'<text x="64" y="190">Sep 1</text><text x="365" y="190">Sep 20</text>'+ (anchor?'<text x="80" y="99" fill="#dcebf3">18 absolute</text><text x="369" y="31" fill="#dcebf3">+7 → 25</text>':'<text x="72" y="86" fill="#f0c98d">+7</text><text x="390" y="160" fill="#f0c98d">−2</text>')+'</svg>';
+function svgString(mode){
+ const pre='<svg viewBox="0 0 540 210" aria-hidden="true" role="presentation"><path d="M50 20V170H497" fill="none" stroke="#658495" stroke-width="1"/><path d="M50 60H497 M50 112H497" fill="none" stroke="#466373" stroke-opacity=".42" stroke-dasharray="4 5"/>';
+ const post='<text x="65" y="195">Sep 1</text><text x="375" y="195">Sep 20</text></svg>';
+ let mid='';
+ if(mode==="anchored")mid='<path d="M80 118 L395 44" class="line"/><circle cx="80" cy="118" r="6" class="point"/><circle cx="395" cy="44" r="6" class="point"/><text x="82" y="104">18 absolute</text><text x="365" y="29">+7 → 25</text>';
+ if(mode==="delta")mid='<circle cx="80" cy="91" r="7" class="change"/><circle cx="395" cy="135" r="7" class="change"/><text x="89" y="81">+7 change</text><text x="398" y="155">−2 change</text><text x="196" y="42">No absolute baseline</text>';
+ if(mode==="ambiguous")mid='<path d="M393 64 L393 135" class="delta"/><circle cx="393" cy="64" r="7" class="change"/><circle cx="393" cy="135" r="7" class="change"/><text x="310" y="52">25 absolute</text><text x="309" y="151">18 absolute</text><text x="110" y="44">Equal valid time → conflict</text>';
+ if(mode==="expired")mid='<path d="M80 79 H365" class="line"/><path d="M365 79 V138" class="delta"/><circle cx="80" cy="79" r="7" class="point"/><path d="M388 119 L408 139 M408 119 L388 139" stroke="#f0c98d" stroke-width="3"/><text x="89" y="65">18 absolute</text><text x="343" y="159">Ended</text>';
+ return pre+mid+post;
 }
 function renderScalar(){
- const d=scalarData[sample];all("[data-sample]").forEach(b=>b.classList.toggle("active",b.dataset.sample===sample));
- text("scalarTitle",d.title);$("scalarValue").replaceChildren(document.createTextNode(d.value+" "),make("span",d.unit));
- text("scalarState",d.tag);$("scalarState").className="s-pill"+(d.anchor?"":" warning");$("scalarValue").classList.toggle("s-value-unknown",!d.anchor);
+ const d=scalarData[sample],isCurrent=d.authority==="current";
+ all("[data-sample]").forEach(b=>{b.classList.toggle("active",b.dataset.sample===sample);b.setAttribute("aria-pressed",String(b.dataset.sample===sample))});
+ text("scalarTitle",d.title);
+ $("scalarValue").replaceChildren(document.createTextNode(d.value+" "),make("span",d.unit));
+ text("scalarState",d.tag);$("scalarState").className="s-pill"+(isCurrent?"":" warning");
+ $("scalarValue").classList.toggle("s-value-unknown",!isCurrent);
  text("scalarStatus",d.status);
  const ident=$("scalarIdentity");ident.replaceChildren();
- [["Subject","Workshop inventory"],["Attribute","Active devices"],["Scope","Primary workshop"],["Value kind","Count"],["Canonical unit","devices"],["World-time as-of",d.date]].forEach(x=>property(ident,...x));
- $("scalarSeries").innerHTML=svgString(d.anchor);
- $("scalarSeries").setAttribute("aria-label",d.anchor?"Example absolute 18 on Sep 1 followed by delta +7 on Sep 20, giving a folded value 25.":"Example delta-only +7 and -2 with no absolute anchor; current value unknown.");
+ [["Subject","Workshop inventory"],["Attribute","Active devices"],["Scope","Primary workshop"],["Value kind","count"],["Canonical unit","devices"],["Current valid_at",isCurrent?d.date:"Not available"]].forEach(x=>property(ident,...x));
+ $("scalarSeries").innerHTML=svgString(d.chart);
+ $("scalarSeries").setAttribute("aria-label",d.chartCaption);
+ text("chartCaption",d.chartCaption);
  const checks=$("scalarChecks");checks.replaceChildren();
- [["Absolute anchor",d.anchor?"Present":"Missing — abstain"],["scalar_state",d.anchor?"Current folded value available":"No authoritative value"],["scalar_history","Advisory entries available"],["World-time basis","As recorded; not inferred"],["Source chain","TypedAssertion + TurnEvidence"]].forEach(x=>property(checks,...x));
+ [["Fold outcome",d.reason],["Scalar state",isCurrent?"Current value available":"Not available"],["Scalar history","Advisory entries listed below"],["World time","Assertion valid_at; not learned_at"],["Provenance","Exact TypedAssertion → TurnEvidence links"],["Current display",!isCurrent?"Abstain; no inferred value":"Only if authority and evidence gates pass"]].forEach(x=>property(checks,...x));
  const ledger=$("scalarLedger");ledger.replaceChildren();
  const head=make("div","","s-ledger-row head");["Valid at","Operation","Stated value","Grounding"].forEach(x=>head.append(make("div",x)));ledger.append(head);
- d.entries.forEach(([date,op,value,source])=>{const row=make("div","","s-ledger-row");[date,op,value,source].forEach((v,i)=>row.append(make(i===2?"strong":"div",v)));ledger.append(row)});
- $("scalarWarning").textContent=d.anchor?"Demonstration: 25 is a fixture fold from an absolute 18 and later +7. Verify real authoritative fold output before displaying a current value.":"No-anchor safety: +7 and −2 are historical deltas, not an asserted current total. The UI intentionally abstains.";
+ d.entries.forEach(([date,op,value,source,quote],i)=>{
+  const row=make("div","","s-ledger-row");
+  [date,op,value].forEach((v,j)=>row.append(make(j===2?"strong":"div",v)));
+  const controls=make("div");const btn=make("button","Inspect ↗","s-btn");btn.type="button";btn.setAttribute("aria-expanded","false");btn.setAttribute("aria-label","Inspect source for "+op+" on "+date);
+  const details=make("div",quote+" · "+source,"s-ledger-expanded");details.hidden=true;details.id="scalar-source-"+i;btn.setAttribute("aria-controls",details.id);
+  btn.onclick=()=>{details.hidden=!details.hidden;btn.setAttribute("aria-expanded",String(!details.hidden));btn.textContent=details.hidden?"Inspect ↗":"Collapse ↑"};
+  controls.append(btn);row.append(controls);ledger.append(row,details);
+ });
+ $("scalarWarning").textContent=d.reason+". This is a fixture demonstration; production must determine authority and currentness from the canonical fold and live evidence.";
+ $("fromScalarToView").textContent=isCurrent?"Inspect current View →":"Inspect advisory history View →";
 }
+
 document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>selectTab(b.dataset.tab));
 document.querySelectorAll("[data-kind]").forEach(b=>b.onclick=()=>{kind=b.dataset.kind;renderView()});
 document.querySelectorAll("[data-sample]").forEach(b=>b.onclick=()=>{sample=b.dataset.sample;renderScalar()});
 $("fromViewToScalar").onclick=()=>{sample=kind==="scalar_history"?"delta":"anchored";renderScalar();selectTab("scalars")};
-$("fromScalarToView").onclick=()=>{kind=sample==="delta"?"scalar_history":"scalar_state";renderView();selectTab("views")};
+$("fromScalarToView").onclick=()=>{kind=scalarData[sample].authority==="current"?"scalar_state":"scalar_history";renderView();selectTab("views")};
 window.addEventListener("hashchange",()=>{const t=location.hash.replace("#","");if(t==="views"||t==="scalars")selectTab(t)});
 renderView();renderScalar();selectTab(location.hash==="#scalars"?"scalars":"views");
 })();
