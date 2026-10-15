@@ -34,7 +34,7 @@
 .s-attributes small{display:block;color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.06em}
 .s-attributes strong{display:block;font-size:12px;font-weight:650;margin-top:5px;overflow-wrap:anywhere}
 .s-steps{display:flex;align-items:stretch;gap:8px;margin:25px 0}
-.s-step{flex:1;padding:16px;background:#172838;border:1px solid var(--line);border-radius:10px;font-size:11px}
+.s-step{flex:1;padding:16px;background:#172838;border:1px solid var(--line);border-radius:10px;font-size:11px;text-align:left;color:var(--ink)}.s-step:hover{border-color:#578d9e}.s-step.selected{background:#1a3948;border-color:var(--aqua)}.s-derivation{border:1px solid #3d5a6b;background:#142735;border-radius:10px;margin:-9px 0 24px;padding:14px 18px;font-size:12px;color:#b8d2dd;line-height:1.7}.s-derivation strong{color:var(--ink)}
 .s-step span{display:block;font-size:9px;color:var(--aqua);font-weight:750;letter-spacing:.05em;margin-bottom:9px}
 .s-step strong{display:block;font-size:13px;margin-bottom:4px}
 .s-step p{margin:0;font-size:11px;color:var(--muted);line-height:1.6}
@@ -79,7 +79,7 @@
 @media(max-width:990px){.special-grid{grid-template-columns:1fr 250px}.s-attributes{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:780px){.special-grid,.s-scalar-hero{grid-template-columns:1fr}.s-scalar-hero .side{border-left:0;border-top:1px solid var(--line)}.s-ledger-row{grid-template-columns:95px 75px 1fr}.s-ledger-row>div:nth-child(4){display:none}}
 @media(max-width:590px){.special-wrap{padding:26px 16px 65px}.special-header h1{font-size:30px}.s-hero{padding:24px 20px}.s-hero h2{font-size:23px}.s-value{font-size:42px}.s-steps{display:block}.s-step{margin:6px 0}.s-arrow{display:block;text-align:center;transform:rotate(90deg);padding:3px}.s-picker button{padding:7px 9px}.s-ledger-row{grid-template-columns:80px 67px 1fr;padding:11px 8px;gap:6px;font-size:10px}.s-legend{gap:9px}}
-.s-ledger-expanded{grid-column:1/-1;background:#1c3141;border-bottom:1px solid var(--line);color:#b7d3df;font-size:11px;line-height:1.75;padding:13px 17px}.s-ledger-expanded[hidden]{display:none!important}
+ .s-ledger-expanded{grid-column:1/-1;background:#1c3141;border-bottom:1px solid var(--line);color:#b7d3df;font-size:11px;line-height:1.75;padding:13px 17px}.s-ledger-expanded[hidden]{display:none!important}
 </style>
 </head>
 <body>
@@ -90,13 +90,13 @@
   <main id="viewPage">
     <div class="s-picker" role="group" aria-label="Choose View kind"><button class="active" data-kind="scalar_state">Scalar state</button><button data-kind="scalar_history">Scalar history</button><button data-kind="timeline">Event timeline</button><button data-kind="counter">Counter</button><button data-kind="metric">Metric</button></div>
     <section class="s-hero">
-      <div class="label-line"><span class="label-kind" id="viewKindLabel">◇ SCALAR STATE</span><span class="s-pill" id="viewState">CURRENT</span></div>
+      <div class="label-line"><span class="label-kind" id="viewKindLabel">◇ SCALAR STATE</span><span class="s-pill" id="viewState">CURRENT</span><span class="quiet-label" id="viewAuthorityNote">CURRENT PROJECTION · VERIFIED SOURCES REQUIRED</span></div>
       <h2 id="viewTitle">Workshop inventory · active devices</h2>
       <div class="s-value" id="viewValue">25 <span>devices</span></div>
       <p class="s-explanation" id="viewExplanation">Current folded value with an absolute anchor. Historical changes remain available as separate assertions.</p>
       <div class="s-attributes"><div><small>Kind</small><strong id="viewKindValue">scalar_state</strong></div><div><small>Class</small><strong id="viewClass">FACT</strong></div><div><small>Audience</small><strong id="viewAudience">RECALL</strong></div><div><small>World time</small><strong id="viewTime">2026-09-20</strong></div></div>
     </section>
-    <div class="s-steps" aria-label="Illustrative derivation layers"><div class="s-step"><span>01 · OBSERVE</span><strong>Evidence & assertions</strong><p>Stored inputs, not inferred prose.</p></div><span class="s-arrow">→</span><div class="s-step"><span>02 · FOLD</span><strong>Kind-specific reducer</strong><p>Typed and deterministic when available.</p></div><span class="s-arrow">→</span><div class="s-step"><span>03 · PROJECT</span><strong>Versioned View</strong><p>Current, historical, or operator-only.</p></div></div>
+    <div class="s-steps" role="group" aria-label="Inspect derivation layers"><button type="button" class="s-step selected" data-view-stage="observe" aria-pressed="true"><span>01 · OBSERVE</span><strong>Evidence & assertions</strong><p>Stored inputs, not inferred prose.</p></button><span class="s-arrow">→</span><button type="button" class="s-step" data-view-stage="fold" aria-pressed="false"><span>02 · FOLD</span><strong>Kind-specific reducer</strong><p>How the result is derived.</p></button><span class="s-arrow">→</span><button type="button" class="s-step" data-view-stage="project" aria-pressed="false"><span>03 · PROJECT</span><strong>Versioned View</strong><p>Authority, visibility and lifecycle.</p></button></div><div class="s-derivation" id="viewDerivationDetail" role="status" aria-live="polite"></div>
     <div class="special-grid">
       <section class="s-card"><div class="s-panel-heading"><h2>Evidence & contributors</h2><small id="viewEvidenceCount">2 RECORDS</small></div><div id="viewEvidence"></div></section>
       <section class="s-card"><div class="s-panel-heading"><h2>Identity & governance</h2></div><div id="viewGovernance"></div><button type="button" class="s-inline-link" style="margin-top:17px" id="fromViewToScalar">Explore this scalar slot →</button></section>
@@ -149,16 +149,51 @@ function selectTab(tab){
  all("[data-tab]").forEach(b=>{b.classList.toggle("active",b.dataset.tab===tab);b.setAttribute("aria-pressed",String(b.dataset.tab===tab))});
  location.hash=tab;
 }
+
+const derivations={
+ scalar_state:{
+ observe:"An anchored TypedAssertion and subsequent admitted deltas supply the value. Each assertion has its own source and time.",
+ fold:"ScalarStateFold: select the latest world-time absolute; apply only later deltas; refuse ties, invalid ranges, missing anchors and ended state.",
+ project:"The resulting scalar_state FACT View is current only while its evidence and authority requirements remain satisfied. Retired versions do not re-enter normal recall."
+ },
+ scalar_history:{
+ observe:"All materializable typed assertions for the exact canonical slot, including absolute, delta and expiry operations.",
+ fold:"Chronologically order assertions into an advisory scalar_history View. Do not calculate a current value or suppress original evidence.",
+ project:"This history projection may be current as a version, but its assertion authority remains advisory. Its default audience is OPERATOR."
+ },
+ timeline:{
+ observe:"Grounded event assertions with source spans and valid world times for one predicate/domain lane.",
+ fold:"Normalize and order completed occurrences by world time, retaining source identities. These events do not infer a present value.",
+ project:"The event timeline is a separate View kind. Its RECALL audience, if allowed, conveys occurrence history rather than current ownership."
+ },
+ counter:{
+ observe:"Counter-relevant source episodes are the evidence for an observed count-like register.",
+ fold:"Apply the counter kind's registered reduction and time semantics. Do not treat it as a typed scalar slot without exact typed identity.",
+ project:"The current counter View is versioned and may be retired when superseded by typed scalar state, under the canonical policy."
+ },
+ metric:{
+ observe:"Operator-domain operational data, not evidence for a user-facing semantic claim.",
+ fold:"Materialize an operational metric in the METRIC class; do not add a user-recall claim.",
+ project:"METRIC/OPERATOR is an inspectable diagnostic surface, excluded from semantic recall by class and audience."
+ }
+};
+let derivationStage="observe";
+function renderDerivation(){
+ all("[data-view-stage]").forEach(b=>{const active=b.dataset.viewStage===derivationStage;b.classList.toggle("selected",active);b.setAttribute("aria-pressed",String(active))});
+ const stageName={observe:"Inputs",fold:"Transformation",project:"Materialization"}[derivationStage];
+ const box=$("viewDerivationDetail");box.replaceChildren(make("strong",stageName+" · "),document.createTextNode(derivations[kind][derivationStage]));
+}
 function renderView(){
  const d=viewData[kind];all("[data-kind]").forEach(b=>b.classList.toggle("active",b.dataset.kind===kind));
  text("viewKindLabel","◇ "+d.kind.toUpperCase());text("viewState",d.tag);
  $("viewState").className="s-pill"+(["ADVISORY","HISTORY","OPERATOR"].includes(d.tag)?" history":"");
+ text("viewAuthorityNote",d.tag==="ADVISORY"?"CURRENT MATERIALIZATION · ADVISORY ONLY":d.viewClass==="METRIC"?"OPERATOR SURFACE · NOT SEMANTIC RECALL":d.tag==="HISTORY"?"OCCURRENCE HISTORY · NOT CURRENT STATE":"CURRENT VIEW · LIVE EVIDENCE REQUIRED");
  text("viewTitle",d.name);$("viewValue").replaceChildren(document.createTextNode(d.value+" "),make("span",d.unit));
  text("viewExplanation",d.explanation);text("viewKindValue",d.kind);text("viewClass",d.viewClass);text("viewAudience",d.audience);text("viewTime",d.time);
  text("viewEvidenceCount",d.sources.length+" RECORD"+(d.sources.length!==1?"S":""));
  const list=$("viewEvidence");list.replaceChildren();
- d.sources.forEach(([title,desc])=>{const card=make("div","","s-contributor");card.append(make("strong",title),make("small",desc));const b=make("button","Review source trail →");b.onclick=()=>{window.location.href="./index.html#evidence"};card.append(b);list.append(card)});
- const gov=$("viewGovernance");gov.replaceChildren();d.governance.forEach(([k,v])=>property(gov,k,v));$("fromViewToScalar").hidden=!(kind==="scalar_state"||kind==="scalar_history");
+ d.sources.forEach(([title,desc],i)=>{const card=make("div","","s-contributor");card.append(make("strong",title),make("small",desc));const detail=make("div","Fixture source identity: "+kind+"-source-"+(i+1)+". This is an illustrative record, not a live Menhir citation.","s-source-excerpt");detail.id="view-source-"+i;detail.hidden=true;const b=make("button","Inspect source record ↓");b.type="button";b.setAttribute("aria-controls",detail.id);b.setAttribute("aria-expanded","false");b.onclick=()=>{detail.hidden=!detail.hidden;b.setAttribute("aria-expanded",String(!detail.hidden));b.textContent=detail.hidden?"Inspect source record ↓":"Hide source record ↑"};card.append(b,detail);list.append(card)});
+ const gov=$("viewGovernance");gov.replaceChildren();d.governance.forEach(([k,v])=>property(gov,k,v));$("fromViewToScalar").hidden=!(kind==="scalar_state"||kind==="scalar_history");renderDerivation();
 }
 function svgString(mode){
  const pre='<svg viewBox="0 0 540 210" aria-hidden="true" role="presentation"><path d="M50 20V170H497" fill="none" stroke="#658495" stroke-width="1"/><path d="M50 60H497 M50 112H497" fill="none" stroke="#466373" stroke-opacity=".42" stroke-dasharray="4 5"/>';
@@ -200,7 +235,8 @@ function renderScalar(){
 }
 
 document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>selectTab(b.dataset.tab));
-document.querySelectorAll("[data-kind]").forEach(b=>b.onclick=()=>{kind=b.dataset.kind;renderView()});
+document.querySelectorAll("[data-kind]").forEach(b=>b.onclick=()=>{kind=b.dataset.kind;derivationStage="observe";renderView()});
+document.querySelectorAll("[data-view-stage]").forEach(b=>b.onclick=()=>{derivationStage=b.dataset.viewStage;renderDerivation()});
 document.querySelectorAll("[data-sample]").forEach(b=>b.onclick=()=>{sample=b.dataset.sample;renderScalar()});
 $("fromViewToScalar").onclick=()=>{sample=kind==="scalar_history"?"delta":"anchored";renderScalar();selectTab("scalars")};
 $("fromScalarToView").onclick=()=>{kind=scalarData[sample].authority==="current"?"scalar_state":"scalar_history";renderView();selectTab("views")};
@@ -208,6 +244,6 @@ window.addEventListener("hashchange",()=>{const t=location.hash.replace("#","");
 renderView();renderScalar();selectTab(location.hash==="#scalars"?"scalars":"views");
 })();
 </script>
-<style>.s-series svg .line{stroke:#96dccf;stroke-width:3;fill:none}.s-series svg .point{stroke:#dffcf4;stroke-width:2;fill:#73bfae}.s-series svg .delta{stroke:#f0c98d;stroke-width:2;fill:none;stroke-dasharray:6 5}.s-series svg .change{fill:#f0c98d}</style>
+<style>.s-source-excerpt{margin-top:9px;background:#172d3a;border-left:2px solid #75afbd;padding:10px;color:#b9d5df;font-size:11px;line-height:1.7}.s-source-excerpt[hidden]{display:none!important}.s-series svg .line{stroke:#96dccf;stroke-width:3;fill:none}.s-series svg .point{stroke:#dffcf4;stroke-width:2;fill:#73bfae}.s-series svg .delta{stroke:#f0c98d;stroke-width:2;fill:none;stroke-dasharray:6 5}.s-series svg .change{fill:#f0c98d}</style>
 </body>
 </html>
