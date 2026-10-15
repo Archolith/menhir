@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Menhir Atlas / Experience studies</title>
+<link rel="stylesheet" href="./atlas.css">
+</head>
+<body>
+<div class="app" id="app">
+  <header class="topbar">
+    <a class="brand" href="#browse" aria-label="Menhir Atlas overview"><span class="brand-symbol">✧</span><span>menhir <span class="brand-light">/ atlas</span></span></a>
+    <label class="global-search"><svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="10.8" cy="10.8" r="6.6"/><path d="m16 16 5 5"/></svg><input id="globalSearch" type="search" placeholder="Search memories, entities, or sources…" autocomplete="off" aria-label="Search memory fixtures"><kbd>/</kbd></label>
+    <div class="top-actions"><span class="top-dot"></span><span class="top-label">Local concept</span><span class="fixture">SYNTHETIC DATA</span></div>
+  </header>
+  <div class="app-body">
+    <aside class="sidebar">
+      <div class="workspace"><div class="workspace-icon">M</div><div><strong>Memory Atlas</strong><small>Knowledge workspace</small></div><span class="workspace-chevron">⌄</span></div>
+      <div class="side-heading">EXPLORE</div>
+      <nav id="navigation" aria-label="Atlas pages">
+        <a class="side-link" data-nav="browse" href="#browse"><span class="side-glyph">▦</span> Overview <span class="side-count">6</span></a>
+        <a class="side-link" data-nav="inspect" href="#inspect"><span class="side-glyph">▤</span> Memory reader</a>
+        <a class="side-link" data-nav="evidence" href="#evidence"><span class="side-glyph">◈</span> Evidence trail</a>
+        <a class="side-link" data-nav="timeline" href="#timeline"><span class="side-glyph">◷</span> Temporal history</a>
+        <a class="side-link" data-nav="graph" href="#graph"><span class="side-glyph">⌘</span> Relationships</a>
+      </nav>
+      <div class="side-heading subheading">QUICK ACCESS</div>
+      <button type="button" class="saved-memory" data-memory="identity"><span class="memory-swatch mint"></span><span>Stable entity identity<small>Current · 3 connections</small></span></button>
+      <button type="button" class="saved-memory" data-memory="merge"><span class="memory-swatch blue"></span><span>Canonical merge rules<small>Current · 2 sources</small></span></button>
+      <button type="button" class="saved-memory" data-memory="legacy"><span class="memory-swatch violet"></span><span>Legacy merge approach<small>Historical · superseded</small></span></button>
+      <div class="side-bottom"><span class="pulse"></span> Design study <span class="version">v0.2</span><p>Read-only interactions. No backend or LLM connected.</p></div>
+    </aside>
+    <div class="main-stage" id="mainStage">
+      <div class="mobile-nav"><select id="mobilePage" aria-label="Choose prototype page"><option value="browse">Overview</option><option value="inspect">Memory reader</option><option value="evidence">Evidence trail</option><option value="timeline">Temporal history</option><option value="graph">Relationships</option></select><span>Five page examples</span></div>
+      <main class="page active" id="page-browse" data-page="browse">
+        <div class="reading-width">
+          <div class="page-kicker">ATLAS / HOME</div>
+          <div class="intro-row"><div><h1>What does Menhir know?</h1><p class="lede">Explore memories with their sources, uncertainty, history, and relationships intact.</p></div><span class="muted-swatch" aria-hidden="true">✳</span></div>
+          <div class="stat-grid">
+            <div class="stat-card"><div class="stat-label">Visible memories</div><div class="stat-number">06 <span>records</span></div><div class="stat-detail"><span class="little-dot mint"></span>Scoped sample</div></div>
+            <div class="stat-card"><div class="stat-label">Grounded claims</div><div class="stat-number">04 <span>with receipts</span></div><div class="stat-detail"><span class="little-dot blue"></span>Linked source records</div></div>
+            <div class="stat-card"><div class="stat-label">Needs attention</div><div class="stat-number">02 <span>review items</span></div><div class="stat-detail"><span class="little-dot amber"></span>Historical or unresolved</div></div>
+          </div>
+          <div class="surface-section"><div class="section-row"><h2>Start here</h2><span class="section-sub">Featured memory</span></div>
+            <button type="button" class="featured" data-memory="identity"><div><div class="label-line"><span class="label-kind">◈ DERIVED VIEW</span><span class="state-tag current">CURRENT</span></div><h3>Stable entity identity</h3><p>Stable UUIDs prevent accidental entity duplication across ingestion and reconciliation.</p><span class="featured-meta">2 supporting sources <span>·</span> 3 connections <span>·</span> updated Sep 2026</span></div><span class="featured-arrow">↗</span></button>
+          </div>
+          <div class="surface-section"><div class="section-row"><h2>Browse knowledge</h2><div class="filter-tabs" role="group" aria-label="Filter sample memories"><button class="filter active" data-filter="all">All</button><button class="filter" data-filter="current">Current</button><button class="filter" data-filter="historical">Historical</button></div></div>
+            <div id="memoryResults" class="memory-results" aria-live="polite"></div>
+            <p class="faint-note">Example records are illustrative and not an export of a real Menhir namespace.</p>
+          </div>
+        </div>
+      </main>
+      <main class="page" id="page-inspect" data-page="inspect">
+        <div class="reading-width">
+          <div class="breadcrumb"><button data-go="browse">← Overview</button><span>/</span><span>Memory reader</span><span>/</span><span id="readerCrumb">Stable entity identity</span></div>
+          <div class="reader-top"><div class="mode-tabs" role="group" aria-label="Open related views"><button class="mode-tab active" data-go="inspect">Read</button><button class="mode-tab" data-go="evidence">Evidence</button><button class="mode-tab" data-go="timeline">History</button><button class="mode-tab" data-go="graph">Graph</button></div><button id="copyId" class="subtle-button">⌁ Copy ID</button></div>
+          <section class="reader-hero"><div class="label-line"><span class="label-kind" id="readerKind">◈ DERIVED VIEW</span><span class="state-tag current" id="readerState">CURRENT</span><span id="readerSources" class="quiet-label">2 sources linked</span></div>
+            <h1 id="readerTitle">Stable entity identity</h1>
+            <p id="readerStatement" class="reader-statement">Menhir uses <button class="inline-expand" id="inlineAnchor" aria-controls="inlineInsertion" aria-expanded="false">stable UUIDs <span class="inline-plus">+</span></button><span class="inline-insertion" id="inlineInsertion" hidden> as canonical identifiers shared across repeated observations</span> to prevent entities from being duplicated during ingestion.</p>
+            <button class="expand-description" id="readerExpand" aria-controls="readerExplanation" aria-expanded="false">⌄ <span>Expand explanation</span></button>
+            <div class="expanded-copy" id="readerExplanation" hidden></div>
+            <div class="record-meta"><span>◷ <span id="readerDate">Learned Sep 2026</span></span><span>◇ <span id="readerSourceType">Architecture decision</span></span><span>⌁ <span id="readerIdShort">6fa3…</span></span></div>
+          </section>
+          <div class="trust-strip"><span class="trust-icon">✓</span><div><strong>Keep the source separate from the interpretation.</strong><p>Expand each layer to see what this memory is based on. Derived Views and primary episodes are labeled differently.</p></div></div>
+          <div class="section-row minor"><h2>Explore this memory</h2><span class="section-sub">Open only what you need</span></div>
+          <div class="disclosure-stack">
+            <section class="disclosure"><button aria-expanded="false" aria-controls="inspectorEvidence" data-disclosure="inspectorEvidence"><span class="disclosure-icon">◈</span><span class="disclosure-label"><strong>Supporting evidence</strong><small>Source episodes and proof of origin</small></span><span class="chevron">⌄</span></button><div class="disclosure-content" id="inspectorEvidence" hidden></div></section>
+            <section class="disclosure"><button aria-expanded="false" aria-controls="inspectorHistory" data-disclosure="inspectorHistory"><span class="disclosure-icon">◷</span><span class="disclosure-label"><strong>What changed?</strong><small>Distinguish previous from current state</small></span><span class="chevron">⌄</span></button><div class="disclosure-content" id="inspectorHistory" hidden></div></section>
+            <section class="disclosure"><button aria-expanded="false" aria-controls="inspectorRelations" data-disclosure="inspectorRelations"><span class="disclosure-icon">⌘</span><span class="disclosure-label"><strong>Related memories</strong><small>Follow typed graph connections</small></span><span class="chevron">⌄</span></button><div class="disclosure-content" id="inspectorRelations" hidden></div></section>
+          </div>
+          <div class="next-card"><div><div class="mini-label">ANOTHER WAY IN</div><strong>Prefer to see the chain of evidence?</strong><p>Inspect the actual claim → episode → source relationship.</p></div><button class="outline-button" data-go="evidence">Open evidence trail →</button></div>
+        </div>
+      </main>
+      <main class="page" id="page-evidence" data-page="evidence">
+        <div class="reading-width wide">
+          <div class="breadcrumb"><button data-go="inspect">← Memory reader</button><span>/</span><span>Evidence trail</span></div>
+          <div class="page-kicker">INSPECT / PROVENANCE</div><h1>Show me the evidence.</h1><p class="lede">Trace the current claim back through its derivation to the original observations. No invented citations.</p>
+          <div class="trace-heading"><span class="small-title">LINEAGE PATH</span><span class="meta-right">Observed → recorded → derived</span></div>
+          <div class="lineage" aria-label="Provenance stages">
+            <button class="lineage-step selected" data-stage="claim"><span class="stage-index">01</span><span><small>DERIVED VIEW</small><strong>Canonical identity</strong><em>Current claim</em></span></button>
+            <span class="lineage-arrow">→</span>
+            <button class="lineage-step" data-stage="episode"><span class="stage-index">02</span><span><small>EPISODE</small><strong>Ingestion receipt</strong><em>Supporting record</em></span></button>
+            <span class="lineage-arrow">→</span>
+            <button class="lineage-step" data-stage="source"><span class="stage-index">03</span><span><small>SOURCE</small><strong>Original note</strong><em>Observed text</em></span></button>
+          </div>
+          <div class="evidence-layout"><section class="evidence-detail"><div class="label-line"><span class="label-kind" id="stageType">◈ DERIVED VIEW</span><span class="state-tag current" id="stageState">CURRENT</span></div><h2 id="stageTitle">Canonical identity</h2><p class="stage-summary" id="stageDescription"></p><div class="quote-pane"><div class="mini-label">SELECTED EXCERPT</div><blockquote id="stageQuote"></blockquote></div><div class="stage-properties" id="stageProperties"></div></section>
+          <aside class="evidence-aside"><div class="mini-label">TRUST & COVERAGE</div><div class="coverage"><span class="coverage-check">✓</span> Two example evidence records linked</div><p>One view can reference multiple episodes. An unavailable receipt does not automatically become a confirmed claim.</p><div class="thin-line"></div><div class="mini-label">SOURCE ALTERNATIVES</div><button class="aside-link" data-stage="episode">◈ Ingestion receipt <span>↗</span></button><button class="aside-link" data-stage="source">▤ Architecture note <span>↗</span></button><button class="aside-link" data-go="timeline">◷ Previous interpretation <span>↗</span></button></aside></div>
+          <div class="notice"><strong>Design note.</strong> The original Menhir receipt UUID and the resolved Graphiti episode UUID can differ. This page gives them separate places instead of flattening them into one “source”.</div>
+        </div>
+      </main>
+      <main class="page" id="page-timeline" data-page="timeline">
+        <div class="reading-width wide">
+          <div class="breadcrumb"><button data-go="inspect">← Memory reader</button><span>/</span><span>Temporal history</span></div>
+          <div class="page-kicker">INSPECT / TEMPORAL</div><h1>How did this memory evolve?</h1><p class="lede">World time and learned time are different. Explore both without accidentally promoting a former belief into a current fact.</p>
+          <div class="timeline-toolbar"><div class="segment" role="group" aria-label="Timeline perspective"><button class="selected" data-time="learned">When Menhir learned it</button><button data-time="world">When it happened</button></div><div class="time-legend"><span class="dot green"></span>Current <span class="dot lavender"></span>Superseded</div></div>
+          <div class="timeline-frame"><div class="timeline-left" id="timelineEvents"></div><div class="timeline-right"><div class="mini-label" id="timeDetailsCaption">SELECTED MEMORY STATE</div><h2 id="timeDetailsTitle">Current identity policy</h2><p id="timeDetailsCopy">A stable canonical UUID identifies the same entity over repeated observations.</p><span id="timeDetailsTag" class="state-tag current">CURRENT</span><div class="thin-line"></div><div class="time-subnote" id="timeDetailsMeta">Learned Sep 2026 · current derived view</div><button class="outline-button" data-go="evidence">View supporting evidence →</button></div></div>
+          <div class="comparison"><div class="section-row"><h2>Compare memory versions</h2><span class="section-sub">Explicitly labeled status</span></div><div class="comparison-grid"><div class="compare-card"><div class="label-line"><span class="state-tag historical">SUPERSEDED</span><span class="quiet-label">Previous</span></div><h3>Merge by observed names</h3><p>Earlier exploratory merge behavior could allow distinct observations to be treated as separate identities.</p></div><div class="compare-card new"><div class="label-line"><span class="state-tag current">CURRENT</span><span class="quiet-label">Revised</span></div><h3>Merge by stable identity</h3><p>Resolved canonical UUIDs consistently associate future observations with an existing entity.</p></div></div></div>
+          <div class="notice"><strong>Temporal caveat.</strong> These are illustrative events. If a source has no valid-at date, the real Explorer must say “world time unknown” instead of guessing from ingestion time.</div>
+        </div>
+      </main>
+      <main class="page" id="page-graph" data-page="graph">
+        <div class="reading-width widest">
+          <div class="breadcrumb"><button data-go="inspect">← Memory reader</button><span>/</span><span>Relationships</span></div>
+          <div class="page-kicker">EXPLORE / LOCAL GRAPH</div><h1>Follow the relationships.</h1><p class="lede">Start from one memory. Expand its neighborhood only when it helps answer a question.</p>
+          <div class="graph-toolbar"><div class="segment" role="group" aria-label="Graph depth"><button class="selected" data-depth="1">1 hop</button><button data-depth="2">2 hops</button></div><label class="graph-toggle"><input type="checkbox" id="showHistorical"> Show historical links</label><button class="outline-button" id="resetGraph">⟲ Reset view</button></div>
+          <div class="graph-workspace"><div class="graph-area" id="graphArea"><div class="graph-grid"></div><svg id="graphLines" viewBox="0 0 740 460" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg><div class="graph-nodes" id="graphNodes"></div><div class="graph-hint">Select a node to inspect its connections</div></div><aside class="graph-detail"><div class="mini-label">SELECTED NODE</div><div class="graph-detail-icon" id="graphFocusIcon">◇</div><h2 id="graphFocusTitle">Stable entity identity</h2><p id="graphFocusCopy"></p><div class="thin-line"></div><div class="mini-label">RELATION TYPE</div><div id="graphRelationType" class="graph-relation-label">Current focal memory</div><button class="outline-button" id="graphOpenMemory">Read this memory →</button></aside></div>
+          <div class="graph-footer"><span><span class="dot green"></span>Current view</span><span><span class="dot blue"></span>Source episode</span><span><span class="dot lavender"></span>Historical</span><span class="last">Edges are typed, directional and bounded</span></div>
+          <div class="notice"><strong>Not a replacement for evidence.</strong> Graph proximity alone does not prove that a claim is supported. Traverse to the source trail to inspect the actual provenance.</div>
+        </div>
+      </main>
+    </div>
+  </div>
+</div>
+<script src="./atlas.js"></script>
+</body>
+</html>
