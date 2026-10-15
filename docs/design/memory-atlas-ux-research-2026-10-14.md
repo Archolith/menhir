@@ -66,3 +66,18 @@ The standalone [Memory Atlas concept](../prototypes/progressive-memory-inspector
 - Should the context rail float, slide in on demand, or be persistent above desktop width?
 - Should graph exploration become its own tab/route or retain an optional split-screen?
 - Should “History” require a privileged audit mode when it includes superseded records? Decide with product authorization policy, not CSS.
+
+
+## Multi-page concept study (2026-10-14)
+
+A second [interactive five-page prototype](../prototypes/memory-atlas-v2/index.html) explores the experience beyond a single detail view:
+
+| Scenario | Screen and affordance |
+| --- | --- |
+| Discovery | Overview with current/historical filters, searchable sample records, and a featured memory |
+| Progressive attention | Memory reader with real DOM inline phrase expansion plus independent evidence/history/relations disclosures |
+| Provenance | Evidence trail with three selectable identities: derived claim, Menhir ingestion receipt/resolved episode, original source note |
+| Time | Learned/world-time views, explicit unknown effective dates, labeled superseded-to-current comparison |
+| Structure | Optional local graph view with one-hop/two-hop depth, historical-toggle, and selected-node detail |
+
+All contents are synthetic examples, not production authority measurements; the prototype has no backend requests. See its [walkthrough and scope boundaries](../prototypes/memory-atlas-v2/README.md). The original single-page study remains useful as an earlier direction, but no longer defines layout constraints. This study does **not** constitute implementation approval. Next step is compare workflows and use case coverage with representative operators, then agree on one contract before writing backend/production UI code.
