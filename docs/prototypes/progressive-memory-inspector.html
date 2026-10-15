@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Menhir / Memory Atlas — concept</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg:#0a1018;--nav:#0f1721;--panel:#121d2a;--panel-hi:#172433;--line:#283648;
+  --ink:#eef4f7;--muted:#93a7b8;--dim:#6e8396;--teal:#8ed3df;--mint:#94dcc0;
+  --violet:#bca9f3;--amber:#f2c58f;--radius:14px;
+  font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;color:var(--ink);background:var(--bg);font-size:14px;-webkit-font-smoothing:antialiased}
+button,input{font:inherit}
+button{cursor:pointer}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid var(--teal);outline-offset:3px}
+a{color:var(--teal)}
+.shell{display:flex;flex-direction:column;min-height:100vh}
+.header{height:66px;flex:none;display:flex;align-items:center;gap:24px;padding:0 24px;border-bottom:1px solid var(--line);background:var(--nav);position:sticky;top:0;z-index:5}
+.brand{display:flex;align-items:center;gap:11px;font-weight:750;font-size:18px;letter-spacing:-.04em;white-space:nowrap}
+.mark{display:grid;place-items:center;width:33px;height:33px;border-radius:10px;border:1px solid #417280;background:#17303b;color:var(--teal)}
+.wordmark-muted{font-weight:450;color:var(--muted)}
+.search{display:flex;align-items:center;gap:10px;max-width:420px;width:100%;padding:10px 14px;border:1px solid var(--line);background:#0c141d;border-radius:9px;color:var(--muted)}
+.search input{border:0;outline:0;color:var(--ink);background:transparent;width:100%;min-width:0}
+.search input::placeholder{color:#7e92a3}
+.kbd{border:1px solid #394a5c;border-radius:4px;font-size:11px;padding:2px 5px;color:var(--dim)}
+.header-right{margin-left:auto;display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px;white-space:nowrap}
+.online-dot{width:7px;height:7px;border-radius:50%;background:var(--mint)}
+.pill{font-size:11px;border:1px solid var(--line);border-radius:5px;color:var(--muted);padding:5px 8px;white-space:nowrap}
+.layout{display:grid;grid-template-columns:250px minmax(0,1fr) 304px;min-height:calc(100vh - 66px)}
+.sidebar{padding:27px 15px 24px;border-right:1px solid var(--line);background:var(--nav)}
+.context{padding:33px 22px;border-left:1px solid var(--line);background:var(--nav)}
+.side-caption{color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:.13em;font-weight:750;padding:0 12px;margin:25px 0 12px}
+.side-caption:first-child{margin-top:0}
+.nav-row{width:100%;display:flex;align-items:flex-start;gap:10px;text-align:left;border:1px solid transparent;border-radius:9px;padding:11px 11px;color:var(--muted);background:transparent;line-height:1.4}
+.nav-row:hover{background:var(--panel)}
+.nav-row.selected{color:var(--ink);background:#19303d;border-color:#34525e}
+.nav-dot{height:8px;width:8px;flex:none;margin-top:5px;border-radius:50%;background:var(--teal)}
+.nav-dot.episode{background:var(--amber)}.nav-dot.historical{background:var(--violet)}
+.nav-name{font-size:12px;font-weight:600}
+.nav-meta{font-size:10px;color:var(--dim);margin-top:4px}
+.main{padding:38px clamp(24px,5vw,90px) 110px;min-width:0}
+.main-inner{max-width:790px;margin:auto}
+.overline{display:flex;align-items:center;flex-wrap:wrap;gap:9px;color:var(--muted);font-size:12px;margin-bottom:20px}
+.overline button{color:var(--muted);background:none;border:0;padding:0}
+.overline button:hover{color:var(--teal)}
+.sep{color:#516676}
+.section-top{display:flex;gap:15px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:23px}
+.modes{display:inline-flex;border:1px solid var(--line);border-radius:9px;padding:4px;background:#111a26}
+.mode{border:0;border-radius:6px;background:transparent;color:var(--muted);padding:9px 14px;font-size:12px;font-weight:650}
+.mode.active{background:#233648;color:var(--ink)}
+.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:8px 11px;font-size:12px}
+.ghost:hover{color:var(--ink);border-color:#4a6073}
+.hero{padding:27px 0 34px;border-bottom:1px solid var(--line)}
+.badges{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:17px}
+.tag{display:inline-flex;align-items:center;gap:7px;font-size:10px;font-weight:780;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.status{padding:5px 9px;border-radius:6px;font-size:10px;font-weight:730;letter-spacing:.07em;text-transform:uppercase;background:#183329;color:var(--mint)}
+.status.historical{background:#29263b;color:var(--violet)}
+.hero h1{font-size:clamp(27px,3.5vw,39px);letter-spacing:-.046em;line-height:1.18;margin:0 0 21px;font-weight:710;max-width:730px}
+.lead{font-size:16px;color:#b7c9d4;line-height:1.75;max-width:670px;margin:0}
+.meta-row{display:flex;gap:17px;align-items:center;flex-wrap:wrap;margin-top:23px;color:var(--muted);font-size:12px}
+.meta-dot{width:4px;height:4px;border-radius:50%;background:var(--dim)}
+.expand{display:inline-flex;gap:8px;align-items:center;margin-top:19px;border:0;padding:0;color:var(--teal);background:transparent;font-size:13px;font-weight:650}
+.expand .chev{transition:transform .2s ease}
+.expand[aria-expanded="true"] .chev{transform:rotate(90deg)}
+.stretch{overflow:hidden;display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .22s ease,opacity .18s ease}
+.stretch.open{grid-template-rows:1fr;opacity:1}
+.stretch>div{overflow:hidden}
+.more-content{max-width:670px;line-height:1.78;color:#bdcdd8;padding-top:12px;font-size:15px}
+.more-content strong{color:var(--ink)}
+.lens{padding:27px 0 0}
+.lens-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;gap:12px}
+.lens-head h2{font-size:15px;margin:0;font-weight:720;letter-spacing:-.013em}
+.counter{font-size:11px;color:var(--dim)}
+.fold{border:1px solid var(--line);background:var(--panel);border-radius:12px;margin-bottom:11px;overflow:hidden}
+.fold-head{width:100%;border:0;background:transparent;color:var(--ink);display:flex;align-items:center;text-align:left;gap:12px;padding:18px}
+.fold-head:hover{background:#1a2736}
+.fold-symbol{font-size:19px;color:var(--teal);width:24px;text-align:center}
+.fold-title{flex:1;font-weight:650;font-size:13px}
+.fold-sub{display:block;color:var(--muted);font-weight:450;font-size:11px;margin-top:4px}
+.fold-chevron{color:var(--muted);transition:transform .18s ease}
+.fold-head[aria-expanded="true"] .fold-chevron{transform:rotate(90deg)}
+.fold-body{border-top:1px solid var(--line);padding:17px 19px 19px}
+.fold-body[hidden]{display:none}
+.evidence-item{border:1px solid #2d3c4b;border-radius:10px;padding:13px 14px;margin-bottom:11px;background:#0f1924}
+.evidence-item:last-child{margin-bottom:0}
+.evidence-title{display:flex;align-items:center;gap:9px;font-weight:680;font-size:12px;margin-bottom:8px}
+.evidence-desc{color:var(--muted);font-size:12px;line-height:1.65}
+.small-btn{border:0;background:none;color:var(--teal);font-weight:680;font-size:12px;padding:8px 0 0}
+.source-excerpt{border-left:2px solid #487784;padding-left:12px;margin:12px 0 0;color:#c7d8e2;line-height:1.6;font-size:12px}
+.source-excerpt[hidden]{display:none}
+.rel-item{display:flex;align-items:center;text-align:left;gap:11px;width:100%;background:#0e1924;border:1px solid #2e3e4e;border-radius:10px;padding:13px;color:var(--ink);margin-bottom:8px}
+.rel-item:hover{border-color:#578ba0}
+.rel-item:last-child{margin-bottom:0}
+.rel-copy{flex:1;font-size:12px;font-weight:620}
+.rel-kind{display:block;margin-top:4px;font-size:10px;font-weight:450;color:var(--muted)}
+.timeline{border-left:1px solid #466477;margin-left:7px;padding-left:19px}
+.time-event{position:relative;margin-bottom:19px}
+.time-event:before{content:"";position:absolute;left:-24px;top:6px;width:9px;height:9px;border-radius:50%;background:var(--teal);outline:5px solid var(--panel)}
+.time-event:last-child{margin-bottom:0}
+.time-date{color:var(--muted);font-size:11px}
+.time-copy{font-size:12px;margin-top:6px;line-height:1.65}
+.local-title{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.local-title h2{font-size:14px;margin:0;font-weight:730}
+.local-caption{font-size:12px;line-height:1.65;color:var(--muted);margin:7px 0 22px}
+.map{height:244px;border:1px solid var(--line);border-radius:13px;background:radial-gradient(circle at 50% 45%,#1d3543 0%,#121d2b 55%,#101923 100%);position:relative;overflow:hidden}
+.map-lines{position:absolute;width:100%;height:100%;inset:0;pointer-events:none}
+.map-node{position:absolute;transform:translate(-50%,-50%);border:1px solid #4c6271;border-radius:9px;color:var(--ink);background:#17293a;font-size:10px;font-weight:620;line-height:1.25;text-align:center;padding:9px;max-width:112px;box-shadow:0 6px 14px #050a1055}
+.map-node:focus-visible{z-index:3}.map-node.central{left:50%;top:47%;background:#214855;border-color:#78c4d4;color:#dffbff;cursor:default}
+.map-node.n1{left:24%;top:16%}.map-node.n2{left:77%;top:22%}.map-node.n3{left:65%;top:79%}
+.context-section{margin-top:30px;border-top:1px solid var(--line);padding-top:22px}
+.context-section h3{font-size:11px;text-transform:uppercase;color:var(--dim);letter-spacing:.1em;margin:0 0 17px}
+.stat{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:15px;font-size:12px}
+.stat span{color:var(--muted)}
+.stat strong{font-weight:620}
+.footnote{margin-top:20px;padding:12px;border:1px dashed #395268;border-radius:9px;color:var(--muted);font-size:11px;line-height:1.7}
+.graph-stage{min-height:340px;border:1px solid var(--line);background:radial-gradient(circle at 50% 50%,#1a3040,#0e1620 60%);border-radius:15px;position:relative;margin:22px 0;display:none}
+.graph-stage .map{height:330px;background:none;border:0}
+.graph-intro{color:var(--muted);font-size:13px;line-height:1.7;margin:0 0 18px}
+#graphPanel[hidden],#timelinePanel[hidden],#readPanel[hidden]{display:none}
+.notice{border:1px solid #39516a;background:#14212c;color:#b2cad9;padding:14px;border-radius:10px;font-size:12px;line-height:1.6;margin-top:20px}
+.footer{padding:24px 0;color:var(--dim);font-size:11px}
+@media(max-width:1150px){.layout{grid-template-columns:225px minmax(0,1fr)}.context{display:none}.main{padding:32px clamp(20px,5vw,70px)}}
+@media(max-width:700px){.header{padding:0 16px;gap:13px}.header-right{display:none}.search{max-width:none}.kbd{display:none}.layout{display:block}.sidebar{display:flex;gap:6px;overflow:auto;padding:12px 12px;border-bottom:1px solid var(--line);border-right:0}.side-caption{display:none}.nav-row{min-width:155px;max-width:195px;flex:none;padding:9px}.nav-meta{display:none}.main{padding:25px 19px 55px}.hero{padding:10px 0 28px}.hero h1{font-size:30px}.lead{font-size:15px}.section-top{margin-bottom:20px}.brand{font-size:16px}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="shell">
+<header class="header">
+  <div class="brand"><div class="mark" aria-hidden="true">✧</div><span>menhir <span class="wordmark-muted">/ atlas</span></span></div>
+  <label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Find a memory…" aria-label="Find a memory"><span class="kbd">/</span></label>
+  <div class="header-right"><span class="online-dot"></span> Read-only exploration <span class="pill">DESIGN PROTOTYPE</span></div>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Example memories">
+    <div class="side-caption">Recent memories</div>
+    <button class="nav-row selected" data-id="uuid"><span class="nav-dot"></span><span><span class="nav-name">Stable entity identity</span><span class="nav-meta">Current view · 3 relations</span></span></button>
+    <button class="nav-row" data-id="merge"><span class="nav-dot"></span><span><span class="nav-name">Canonical merge strategy</span><span class="nav-meta">Current view · 2 sources</span></span></button>
+    <button class="nav-row" data-id="receipts"><span class="nav-dot episode"></span><span><span class="nav-name">Ingestion receipt</span><span class="nav-meta">Episode · primary source</span></span></button>
+    <div class="side-caption">History</div>
+    <button class="nav-row" data-id="old"><span class="nav-dot historical"></span><span><span class="nav-name">Previous merge strategy</span><span class="nav-meta">Historical · superseded</span></span></button>
+  </nav>
+  <main class="main">
+    <div class="main-inner">
+      <div class="overline"><button id="back" type="button">‹ Back</button><span class="sep">/</span><span>Knowledge</span><span class="sep">/</span><span id="crumb">Stable entity identity</span></div>
+      <div class="section-top">
+        <div class="modes" role="group" aria-label="Exploration mode">
+          <button class="mode active" type="button" data-mode="read" aria-pressed="true">Read</button>
+          <button class="mode" type="button" data-mode="graph" aria-pressed="false">Graph</button>
+          <button class="mode" type="button" data-mode="timeline" aria-pressed="false">Timeline</button>
+        </div>
+        <button class="ghost" type="button" id="copy" aria-label="Copy memory identifier">⌁ Copy ID</button>
+      </div>
+      <div class="hero">
+        <div class="badges"><span class="tag" id="kind">◇ DERIVED VIEW</span><span class="status" id="status">CURRENT</span><span class="tag" id="reliability">2 sources available</span></div>
+        <h1 id="title">Stable entity identity</h1>
+        <p class="lead" id="short">Stable UUIDs prevent accidental entity duplication.</p>
+        <button class="expand" type="button" id="expand" aria-expanded="false" aria-controls="stretch">Read the explanation <span class="chev" aria-hidden="true">›</span></button>
+        <div class="stretch" id="stretch"><div><div class="more-content" id="more"></div></div></div>
+        <div class="meta-row"><span id="learned">Recorded Sep 2026</span><span class="meta-dot"></span><span id="origin">Menhir memory</span><span class="meta-dot"></span><span id="short-id">ID · 6fa3…</span></div>
+      </div>
+      <div id="readPanel">
+        <section class="lens" aria-labelledby="layersLabel">
+          <div class="lens-head"><h2 id="layersLabel">Explore this memory</h2><span class="counter">Open what matters</span></div>
+          <div class="fold">
+            <button type="button" class="fold-head" aria-expanded="false" aria-controls="evidenceBody" data-fold="evidence">
+              <span class="fold-symbol" aria-hidden="true">⊕</span><span class="fold-title">Supporting evidence<span class="fold-sub" id="evidenceHint">2 source records with provenance</span></span><span class="fold-chevron" aria-hidden="true">›</span>
+            </button>
+            <div id="evidenceBody" class="fold-body" hidden></div>
+          </div>
+          <div class="fold">
+            <button type="button" class="fold-head" aria-expanded="false" aria-controls="historyBody" data-fold="history">
+              <span class="fold-symbol" aria-hidden="true">◷</span><span class="fold-title">Memory history<span class="fold-sub">Changes, revisions, and time basis</span></span><span class="fold-chevron" aria-hidden="true">›</span>
+            </button>
+            <div id="historyBody" class="fold-body" hidden></div>
+          </div>
+          <div class="fold">
+            <button type="button" class="fold-head" aria-expanded="false" aria-controls="relatedBody" data-fold="related">
+              <span class="fold-symbol" aria-hidden="true">⌘</span><span class="fold-title">Related memories<span class="fold-sub" id="relatedHint">3 typed relationships</span></span><span class="fold-chevron" aria-hidden="true">›</span>
+            </button>
+            <div id="relatedBody" class="fold-body" hidden></div>
+          </div>
+        </section>
+      </div>
+      <div id="graphPanel" hidden><div class="lens"><div class="lens-head"><h2>Local memory graph</h2><span class="counter">One hop · selected memory</span></div><p class="graph-intro">An optional spatial view. The memory remains the source of truth; the graph helps you follow relationships.</p><div class="graph-stage" style="display:block"><div class="map" id="largeMap"></div></div><div class="notice">Graph positions are illustrative. The eventual implementation should reuse authorized, bounded relationship queries, not preload the global graph.</div></div></div>
+      <div id="timelinePanel" hidden><div class="lens"><div class="lens-head"><h2>Chronology</h2><span class="counter">World time ≠ learned time</span></div><p class="graph-intro">Separate the time an event happened from when Menhir learned it. Historical or superseded values must be clearly labeled.</p><div class="fold-body" id="bigHistory" style="border:1px solid var(--line);border-radius:12px;background:var(--panel)"></div></div></div>
+      <div class="footer">Concept study · synthetic demonstration memories · no connection to a live Menhir instance.</div>
+    </div>
+  </main>
+  <aside class="context" aria-label="Memory context">
+    <div class="local-title"><h2>Neighborhood</h2><span class="pill">1 HOP</span></div>
+    <p class="local-caption">Explore what's connected to the selected memory, without leaving the page.</p>
+    <div id="localMap" class="map"></div>
+    <section class="context-section"><h3>At a glance</h3>
+      <div class="stat"><span>Authority</span><strong id="asideStatus">Current view</strong></div>
+      <div class="stat"><span>Sources</span><strong id="asideSources">2 available</strong></div>
+      <div class="stat"><span>Relationships</span><strong id="asideRelations">3 connected</strong></div>
+    </section>
+    <div class="footnote">This interface is intentionally reading-first. The full graph is a tool you can open, not something you must decode to understand a memory.</div>
+  </aside>
+</div>
+</div>
+<script>
+(function(){
+"use strict";
+const DB = {
+ uuid:{name:"Stable entity identity",kind:"Derived view",state:"Current",short:"Stable UUIDs prevent accidental entity duplication.",more:"A canonical identifier stays stable as the same entity is encountered in later ingestion. Source evidence and merge receipts can then be reconciled without treating two observations as unrelated entities. This is an illustrative derived summary; inspect the linked source records to distinguish observed facts from an interpreted architectural decision.",learned:"Recorded Sep 2026",origin:"Architecture decision",id:"6fa3-view-uuid",evidence:[{name:"Architecture decision record",subtitle:"Design note · primary source",quote:"The identity of an entity is independent of its observation and must remain stable across ingestion.",target:"merge"},{name:"Ingestion reconciliation event",subtitle:"Episode · observed event",quote:"The reconciliation step records the canonical identifier associated with this episode.",target:"receipts"}],history:[["Sep 2026 · learned","Canonical identity rule recorded as a current derived view."],["Aug 2026 · learned","Earlier merge flow marked as historical; no longer authoritative."]],related:[["merge","SUPPORTED BY → architecture choice"],["receipts","MENTIONED IN ← source episode"],["old","SUPERSEDES → old approach"]]},
+ merge:{name:"Canonical merge strategy",kind:"Derived view",state:"Current",short:"Canonical merges use one stable identifier.",more:"New observations should resolve to one canonical entity rather than creating duplicate nodes. The exact write contract remains a matter for the underlying design and source code; this prototype does not verify the implementation.",learned:"Recorded Aug 2026",origin:"Architecture decision",id:"05ce-merge-view",evidence:[{name:"Source design note",subtitle:"Decision · available",quote:"Prefer one canonical identity path for graph writes.",target:"uuid"}],history:[["Aug 2026 · learned","Merge strategy recorded."],["Jul 2026 · world time unknown","Preceding exploratory approach; no world-time claim."]],related:[["uuid","SUPPORTS → identity"],["old","REPLACES → historical choice"]]},
+ receipts:{name:"Ingestion receipt",kind:"Source episode",state:"Current",short:"An ingestion episode records the source identity used during enrichment.",more:"The receipt and the resolved Graphiti episode can have different UUIDs. Preserve both identifiers and their mapping when drilling into evidence. This record is a synthetic example and not an actual production receipt.",learned:"Recorded Sep 2026",origin:"Ingest event",id:"889f-episode-receipt",evidence:[{name:"Episode observation",subtitle:"Direct source · example",quote:"Observed canonical identity during enrichment. Receipt UUID and resolved episode UUID are separately tracked.",target:"uuid"}],history:[["Sep 2026 · learned","Source episode recorded and enriched."]],related:[["uuid","MENTIONS → derived view"],["merge","INFORMS → decision"]]},
+ old:{name:"Previous merge strategy",kind:"Historical view",state:"Historical",short:"An earlier merge approach was replaced by stable-identifier merging.",more:"Historical information remains inspectable only when authorization permits it; it must not be represented as the currently accepted architecture. This text is illustrative, not a real production-memory snapshot.",learned:"Recorded Jul 2026",origin:"Historical design note",id:"114e-old-view",evidence:[],history:[["Aug 2026 · learned","Superseded by the canonical merge strategy."],["Jul 2026 · learned","Original historical view recorded."]],related:[["merge","SUPERSEDED BY ← newer choice"],["uuid","SUPERSEDED BY ← current view"]]}
+};
+let current="uuid";let stack=[];let mode="read";let query="";
+const $=id=>document.getElementById(id);
+const el=(tag,cls,content)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(content!==undefined)node.textContent=content;return node};
+function relabel(id,text){$(id).textContent=text}
+function foldReset(){document.querySelectorAll("[data-fold]").forEach(b=>{b.setAttribute("aria-expanded","false");$(b.getAttribute("aria-controls")).hidden=true;$(b.getAttribute("aria-controls")).replaceChildren()})}
+function render(){
+ const item=DB[current];
+ relabel("crumb",item.name);relabel("title",item.name);relabel("short",item.short);relabel("more",item.more);
+ relabel("kind","◇ "+item.kind.toUpperCase());relabel("status",item.state.toUpperCase());$("status").classList.toggle("historical",item.state==="Historical");
+ relabel("reliability",item.evidence.length+" sources available");relabel("learned",item.learned);relabel("origin",item.origin);relabel("short-id","ID · "+item.id);
+ relabel("evidenceHint",item.evidence.length+" source records"+(item.evidence.length?" with provenance":" available"));
+ relabel("relatedHint",item.related.length+" typed relationships");
+ relabel("asideStatus",item.kind+" · "+item.state);relabel("asideSources",item.evidence.length+" available");relabel("asideRelations",item.related.length+" connected");
+ $("expand").setAttribute("aria-expanded","false");$("stretch").classList.remove("open");$("expand").firstChild.textContent="Read the explanation ";
+ foldReset();relabel("back",stack.length?"‹ Back":"‹ Browse");
+ document.querySelectorAll("[data-id]").forEach(b=>{b.classList.toggle("selected",b.dataset.id===current)});
+ renderMap("localMap");renderMap("largeMap");renderHistory($("bigHistory"));setMode(mode,false);
+}
+function visit(id){if(!DB[id]||id===current)return;stack.push(current);current=id;render();window.scrollTo({top:0,behavior:"instant"})}
+function setMode(next,scroll){mode=next;document.querySelectorAll("[data-mode]").forEach(b=>{const active=b.dataset.mode===mode;b.classList.toggle("active",active);b.setAttribute("aria-pressed",String(active))});$("readPanel").hidden=mode!=="read";$("graphPanel").hidden=mode!=="graph";$("timelinePanel").hidden=mode!=="timeline";if(scroll)document.querySelector(".section-top").scrollIntoView({block:"start",behavior:"smooth"})}
+function renderHistory(target){target.replaceChildren();const timeline=el("div","timeline");DB[current].history.forEach(pair=>{const row=el("div","time-event"),date=el("div","time-date",pair[0]),body=el("div","time-copy",pair[1]);row.append(date,body);timeline.append(row)});target.append(timeline)}
+function renderEvidence(target){
+ target.replaceChildren();const items=DB[current].evidence;
+ if(!items.length){target.append(el("p","evidence-desc","No supporting source is available in this demonstration. A production inspector must not invent one."));return}
+ items.forEach((s,i)=>{const card=el("article","evidence-item"),head=el("div","evidence-title","◈  "+s.name),caption=el("div","evidence-desc",s.subtitle),excerpt=el("blockquote","source-excerpt",s.quote);
+ excerpt.id="excerpt-"+current+"-"+i;excerpt.hidden=true;
+ const reveal=el("button","small-btn","Show excerpt");reveal.type="button";reveal.setAttribute("aria-expanded","false");reveal.setAttribute("aria-controls",excerpt.id);
+ reveal.onclick=()=>{excerpt.hidden=!excerpt.hidden;reveal.setAttribute("aria-expanded",String(!excerpt.hidden));reveal.textContent=excerpt.hidden?"Show excerpt":"Hide excerpt"};
+ const go=el("button","small-btn","  ·  Open related record ↗");go.type="button";go.style.marginLeft="10px";go.onclick=()=>visit(s.target);
+ card.append(head,caption,reveal,go,excerpt);target.append(card)
+ })
+}
+function renderRelated(target){target.replaceChildren();const relations=DB[current].related;if(!relations.length)target.append(el("p","evidence-desc","No visible related memories."));relations.forEach(pair=>{const row=el("button","rel-item"),copy=el("span","rel-copy",DB[pair[0]].name),kind=el("span","rel-kind",pair[1]);copy.append(kind);row.append(el("span","fold-symbol","◇"),copy,el("span","","↗"));row.onclick=()=>visit(pair[0]);target.append(row)})}
+function renderMap(id){
+ const target=$(id);target.replaceChildren();const data=DB[current],near=data.related.slice(0,3);
+ const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.setAttribute("class","map-lines");svg.setAttribute("viewBox","0 0 300 244");svg.setAttribute("preserveAspectRatio","none");
+ [[72,39],[231,54],[195,193]].slice(0,near.length).forEach(p=>{const line=document.createElementNS("http://www.w3.org/2000/svg","line");line.setAttribute("x1","150");line.setAttribute("y1","115");line.setAttribute("x2",p[0]);line.setAttribute("y2",p[1]);line.setAttribute("stroke","#5c8791");line.setAttribute("stroke-width","1.3");line.setAttribute("opacity",".65");svg.append(line)});
+ target.append(svg);
+ const center=el("span","map-node central",data.name);target.append(center);
+ near.forEach((p,i)=>{const btn=el("button","map-node n"+(i+1),DB[p[0]].name);btn.type="button";btn.setAttribute("aria-label","Open related memory: "+DB[p[0]].name);btn.onclick=()=>visit(p[0]);target.append(btn)});
+}
+$("expand").onclick=()=>{const open=$("expand").getAttribute("aria-expanded")==="true";$("expand").setAttribute("aria-expanded",String(!open));$("stretch").classList.toggle("open",!open);$("expand").firstChild.textContent=open?"Read the explanation ":"Collapse explanation "};
+document.querySelectorAll("[data-fold]").forEach(button=>button.addEventListener("click",()=>{const target=$(button.getAttribute("aria-controls")),open=button.getAttribute("aria-expanded")==="true";button.setAttribute("aria-expanded",String(!open));target.hidden=open;if(!open){if(button.dataset.fold==="evidence")renderEvidence(target);if(button.dataset.fold==="history")renderHistory(target);if(button.dataset.fold==="related")renderRelated(target)}}));
+document.querySelectorAll("[data-id]").forEach(b=>b.addEventListener("click",()=>visit(b.dataset.id)));
+document.querySelectorAll("[data-mode]").forEach(b=>b.addEventListener("click",()=>setMode(b.dataset.mode,true)));
+$("back").onclick=()=>{if(stack.length){current=stack.pop();render();window.scrollTo({top:0,behavior:"instant"})}};
+$("copy").onclick=async()=>{try{await navigator.clipboard.writeText(DB[current].id);$("copy").textContent="✓ Copied";setTimeout(()=>{$("copy").textContent="⌁ Copy ID"},1100)}catch(e){$("copy").textContent=DB[current].id}};
+$("search").addEventListener("input",event=>{query=event.target.value.toLowerCase();document.querySelectorAll("[data-id]").forEach(b=>b.hidden=!DB[b.dataset.id].name.toLowerCase().includes(query))});
+document.addEventListener("keydown",event=>{if(event.key==="/"&&document.activeElement.tagName!=="INPUT"){event.preventDefault();$("search").focus()}if(event.key==="Escape"&&document.activeElement===$("search"))$("search").blur()});
+render();
+})();
+</script>
+</body>
+</html>
