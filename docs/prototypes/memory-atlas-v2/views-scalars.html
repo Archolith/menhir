@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Menhir Atlas / Views & Scalars</title>
+<link rel="stylesheet" href="./atlas.css">
+<style>
+.special-wrap{max-width:1150px;margin:auto;padding:35px clamp(20px,5vw,62px) 90px}
+.special-nav{display:flex;align-items:center;gap:14px;color:var(--muted);font-size:12px;margin-bottom:27px}
+.special-nav a{color:var(--aqua)}
+.special-header{display:flex;align-items:flex-start;justify-content:space-between;gap:25px;margin-bottom:26px}
+.special-header .lede{margin:0}
+.special-tabs{display:inline-flex;gap:5px;border:1px solid var(--line);background:#111f2d;padding:5px;border-radius:10px;margin-top:26px}
+.special-tabs button{border:0;background:none;color:var(--muted);font-size:12px;padding:10px 17px;border-radius:7px;font-weight:650}
+.special-tabs button.active{background:#264356;color:var(--ink)}
+.special-grid{display:grid;grid-template-columns:1fr 310px;gap:16px}
+.s-card{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:22px}
+.s-card h2{font-size:16px;letter-spacing:-.02em;margin:0}
+.s-card p{font-size:12px;color:var(--muted);line-height:1.75}
+.s-label{font-size:10px;color:var(--aqua);font-weight:740;letter-spacing:.1em;text-transform:uppercase}
+.s-picker{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:20px 0}
+.s-picker button{border:1px solid var(--line);color:var(--muted);background:#11202e;padding:8px 12px;border-radius:7px;font-size:11px}
+.s-picker button.active{border-color:#7dbecc;background:#213e4b;color:var(--ink)}
+.s-hero{padding:30px 34px;background:linear-gradient(125deg,#193443,#132232);border:1px solid #486d7a;border-radius:14px}
+.s-hero h2{font-size:27px;line-height:1.25;letter-spacing:-.035em;margin:17px 0 15px}
+.s-pill{font-size:10px;color:var(--mint);background:#1f4036;padding:5px 9px;border-radius:5px;font-weight:720}
+.s-pill.history{color:var(--violet);background:#372e48}.s-pill.warning{color:var(--amber);background:#443625}
+.s-value{font-size:54px;letter-spacing:-.07em;font-weight:700;line-height:1.2;margin:10px 0 10px}
+.s-value span{color:var(--muted);font-size:16px;font-weight:480;letter-spacing:0;margin-left:8px}
+.s-explanation{font-size:13px;color:#b4cad6;line-height:1.7;max-width:680px}
+.s-attributes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;border-top:1px solid #486777;margin-top:23px;padding-top:23px}
+.s-attributes small{display:block;color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.06em}
+.s-attributes strong{display:block;font-size:12px;font-weight:650;margin-top:5px;overflow-wrap:anywhere}
+.s-steps{display:flex;align-items:stretch;gap:8px;margin:25px 0}
+.s-step{flex:1;padding:16px;background:#172838;border:1px solid var(--line);border-radius:10px;font-size:11px}
+.s-step span{display:block;font-size:9px;color:var(--aqua);font-weight:750;letter-spacing:.05em;margin-bottom:9px}
+.s-step strong{display:block;font-size:13px;margin-bottom:4px}
+.s-step p{margin:0;font-size:11px;color:var(--muted);line-height:1.6}
+.s-arrow{align-self:center;color:#86a5b6}
+.s-panel-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:15px}
+.s-panel-heading small{font-size:10px;color:var(--dim)}
+.s-contributor{border:1px solid #385063;background:#112130;border-radius:9px;padding:13px 15px;margin:9px 0}
+.s-contributor strong{font-size:12px;display:block}
+.s-contributor small{display:block;font-size:10px;color:var(--muted);margin-top:5px}
+.s-contributor button{border:0;background:none;color:var(--aqua);padding:10px 0 0;font-size:11px;font-weight:650}
+.s-property{display:flex;justify-content:space-between;gap:15px;font-size:11px;border-bottom:1px solid var(--line);padding:12px 0}
+.s-property:last-child{border-bottom:0}.s-property span{color:var(--muted)}.s-property strong{font-weight:640;text-align:right;max-width:70%}
+.s-audit-note{background:#1e313d;border:1px solid #3e6473;border-radius:9px;padding:15px 18px;color:#c2d9e2;font-size:12px;line-height:1.8;margin-top:21px}
+.s-audit-note strong{color:var(--ink)}
+.s-scalar-hero{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(260px,.75fr);gap:0;border-radius:14px;overflow:hidden;border:1px solid #476a76;background:#172b37;margin:22px 0}
+.s-scalar-hero .primary{padding:32px}
+.s-scalar-hero .primary h2{font-size:21px;margin:19px 0 8px;letter-spacing:-.03em}
+.s-scalar-hero .side{padding:26px;background:#11232e;border-left:1px solid #385363}
+.s-status{font-size:12px;line-height:1.7;color:#b7cbd5;max-width:550px}
+.s-times{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.s-series{height:230px;position:relative;padding:18px;border:1px solid #2c4759;border-radius:10px;background:radial-gradient(ellipse at center,#233e4d,#0f1d2b);margin:17px 0 12px;overflow:hidden}
+.s-series svg{width:100%;height:100%;overflow:visible}
+.s-series .gridline{stroke:#476172;stroke-opacity:.35;stroke-dasharray:4 5}
+.s-series .segment-line{stroke:#8ed4df;stroke-width:3;fill:none}
+.s-series .marker{stroke:#dcf8ef;stroke-width:2;fill:#7fc2c9}
+.s-series .delta-line{stroke:#cfb786;stroke-width:2;stroke-dasharray:5 5;fill:none}
+.s-series text{fill:#a6becc;font-size:11px}
+.s-value-unknown{color:var(--amber)}
+.s-ledger{width:100%;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.s-ledger-row{display:grid;grid-template-columns:110px 95px 1fr 135px;gap:13px;align-items:center;background:#142231;border-bottom:1px solid var(--line);padding:13px 16px;font-size:11px}
+.s-ledger-row:last-child{border-bottom:0}
+.s-ledger-row.head{background:#1a2c3c;font-size:10px;font-weight:750;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.s-ledger-row strong{font-weight:670}.s-ledger-row small{font-size:10px;color:var(--muted)}
+.s-mini{color:var(--muted);font-size:11px}
+.s-btn{color:var(--aqua);background:none;border:0;font-size:11px;padding:5px;text-align:left;font-weight:650}
+.s-inline-link{background:#1c3744;border:1px solid #417185;border-radius:7px;padding:10px 13px;color:#bce6ee;font-size:11px;font-weight:650;cursor:pointer}
+.s-inline-link:hover{border-color:#8ed4df}
+.s-legend{display:flex;gap:18px;align-items:center;font-size:10px;color:var(--muted);flex-wrap:wrap}
+.s-legend i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--mint);margin-right:6px}.s-legend i.b{background:var(--amber)}
+.s-breadcrumbs{font-size:11px;color:var(--dim);margin-top:8px}
+.s-see{color:var(--aqua);text-decoration:underline;text-underline-offset:3px}
+@media(max-width:990px){.special-grid{grid-template-columns:1fr 250px}.s-attributes{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:780px){.special-grid,.s-scalar-hero{grid-template-columns:1fr}.s-scalar-hero .side{border-left:0;border-top:1px solid var(--line)}.s-ledger-row{grid-template-columns:95px 75px 1fr}.s-ledger-row>div:nth-child(4){display:none}}
+@media(max-width:590px){.special-wrap{padding:26px 16px 65px}.special-header h1{font-size:30px}.s-hero{padding:24px 20px}.s-hero h2{font-size:23px}.s-value{font-size:42px}.s-steps{display:block}.s-step{margin:6px 0}.s-arrow{display:block;text-align:center;transform:rotate(90deg);padding:3px}.s-picker button{padding:7px 9px}.s-ledger-row{grid-template-columns:80px 67px 1fr;padding:11px 8px;gap:6px;font-size:10px}.s-legend{gap:9px}}
+</style>
+</head>
+<body>
+<header class="topbar"><a class="brand" href="./index.html#browse"><span class="brand-symbol">✧</span><span>menhir <span class="brand-light">/ atlas</span></span></a><div class="top-actions" style="margin-left:auto"><span class="top-dot"></span> UI study <span class="fixture">SYNTHETIC DATA</span></div></header>
+<div class="special-wrap">
+  <div class="special-nav"><a href="./index.html#browse">← All Atlas pages</a><span>/</span><span>Specialized inspector</span></div>
+  <div class="special-header"><div><div class="page-kicker">ATLAS / SPECIALIZED MEMORIES</div><h1>Views and scalars.</h1><p class="lede">Derived knowledge deserves a richer interface than a generic node inspector.</p><div class="special-tabs" role="group" aria-label="Choose inspector"><button class="active" id="viewTab" data-tab="views">✧ View Studio</button><button id="scalarTab" data-tab="scalars">∑ Scalar Explorer</button></div></div></div>
+  <main id="viewPage">
+    <div class="s-picker" role="group" aria-label="Choose View kind"><button class="active" data-kind="scalar_state">Scalar state</button><button data-kind="scalar_history">Scalar history</button><button data-kind="timeline">Event timeline</button><button data-kind="counter">Counter</button><button data-kind="metric">Metric</button></div>
+    <section class="s-hero">
+      <div class="label-line"><span class="label-kind" id="viewKindLabel">◇ SCALAR STATE</span><span class="s-pill" id="viewState">CURRENT</span></div>
+      <h2 id="viewTitle">Workshop inventory · active devices</h2>
+      <div class="s-value" id="viewValue">25 <span>devices</span></div>
+      <p class="s-explanation" id="viewExplanation">Current folded value with an absolute anchor. Historical changes remain available as separate assertions.</p>
+      <div class="s-attributes"><div><small>Kind</small><strong id="viewKindValue">scalar_state</strong></div><div><small>Class</small><strong id="viewClass">FACT</strong></div><div><small>Audience</small><strong id="viewAudience">RECALL</strong></div><div><small>World time</small><strong id="viewTime">2026-09-20</strong></div></div>
+    </section>
+    <div class="s-steps" aria-label="Illustrative derivation layers"><div class="s-step"><span>01 · OBSERVE</span><strong>Evidence & assertions</strong><p>Stored inputs, not inferred prose.</p></div><span class="s-arrow">→</span><div class="s-step"><span>02 · FOLD</span><strong>Kind-specific reducer</strong><p>Typed and deterministic when available.</p></div><span class="s-arrow">→</span><div class="s-step"><span>03 · PROJECT</span><strong>Versioned View</strong><p>Current, historical, or operator-only.</p></div></div>
+    <div class="special-grid">
+      <section class="s-card"><div class="s-panel-heading"><h2>Evidence & contributors</h2><small id="viewEvidenceCount">2 RECORDS</small></div><div id="viewEvidence"></div></section>
+      <section class="s-card"><div class="s-panel-heading"><h2>Identity & governance</h2></div><div id="viewGovernance"></div><button type="button" class="s-inline-link" style="margin-top:17px" id="fromViewToScalar">Explore this scalar slot →</button></section>
+    </div>
+    <div class="s-audit-note"><strong>View integrity:</strong> “current” is not the same as “source-verified.” A View's audience and class control where it may surface; deleted evidence and superseded versions must not silently appear in ordinary recall.</div>
+  </main>
+  <main id="scalarPage" hidden>
+    <div class="s-picker" role="group" aria-label="Choose scalar case"><button data-sample="anchored" class="active">Anchored current value</button><button data-sample="delta">Delta-only history · no anchor</button></div>
+    <div class="s-scalar-hero"><div class="primary">
+      <div class="label-line"><span class="label-kind">◇ TYPED SCALAR SLOT</span><span class="s-pill" id="scalarState">CURRENT</span></div>
+      <h2 id="scalarTitle">Workshop inventory · active devices</h2>
+      <div class="s-value" id="scalarValue">25 <span>devices</span></div>
+      <p class="s-status" id="scalarStatus">An absolute anchor plus recorded changes; the source history remains inspectable.</p>
+      <div class="s-legend"><span><i></i> Absolute source</span><span><i class="b"></i> Change / delta</span></div>
+    </div><aside class="side"><div class="s-label" style="margin-bottom:19px">CANONICAL SLOT IDENTITY</div><div id="scalarIdentity"></div></aside></div>
+    <div class="special-grid">
+      <section class="s-card"><div class="s-panel-heading"><h2>Recorded assertions</h2><small>WORLD TIME</small></div><div id="scalarSeries" class="s-series" role="img" aria-label="Illustrative typed scalar observation sequence"></div><p id="chartCaption">An example series with one absolute anchor and a later delta; not inferred observations between points.</p></section>
+      <section class="s-card"><div class="s-panel-heading"><h2>Authority checks</h2></div><div id="scalarChecks"></div><button class="s-inline-link" style="margin-top:22px" id="fromScalarToView">Inspect View materialization →</button></section>
+    </div>
+    <div class="s-panel-heading" style="margin:29px 0 15px"><h2>Assertion ledger</h2><small>Advisory history · original source entries</small></div>
+    <div class="s-ledger" id="scalarLedger"></div>
+    <div class="s-audit-note" id="scalarWarning"><strong>No-anchor rule:</strong> deltas can be listed and inspected without claiming they establish an absolute current value.</div>
+  </main>
+  <p class="s-breadcrumbs">All data is illustrative. <a class="s-see" href="./index.html#evidence">Return to the general evidence trail</a> or <a class="s-see" href="./index.html#graph">open the relationship prototype</a>.</p>
+</div>
+<script>
+(function(){
+"use strict";
+const $=id=>document.getElementById(id);
+const all=q=>Array.from(document.querySelectorAll(q));
+const make=(tag,text,cls)=>{const x=document.createElement(tag);x.textContent=text||"";if(cls)x.className=cls;return x};
+const text=(id,value)=>$(id).textContent=String(value);
+const viewData={
+ scalar_state:{name:"Workshop inventory · active devices",value:"25",unit:"devices",tag:"CURRENT",explanation:"A current typed value with an absolute anchor and a subsequent admitted change. The value is a derived projection, not a verbatim quote.",kind:"scalar_state",viewClass:"FACT",audience:"RECALL",time:"2026-09-20",sources:[["TypedAssertion: absolute 18","2026-09-01 · evidence via TurnEvidence"],["TypedAssertion: delta +7","2026-09-20 · episode-scoped contributor"]],governance:[["Authority","Current scalar projection"],["Slot identity","subject + attribute + scope + kind + unit"],["Currentness","view_current = true"],["History View","Separate advisory projection"]]},
+ scalar_history:{name:"Workshop inventory · changes",value:"2",unit:"entries",tag:"ADVISORY",explanation:"An ordered history of typed assertions. It does not independently establish an absolute present value or suppress raw evidence.",kind:"scalar_history",viewClass:"FACT",audience:"OPERATOR",time:"2026-09-20",sources:[["HISTORY_ENTRY #0 · absolute 18","2026-09-01 · assertion ID preserved"],["HISTORY_ENTRY #1 · delta +7","2026-09-20 · quote and episode retained"]],governance:[["Authority","Advisory, never a scalar head"],["Source link","HISTORY_ENTRY → TypedAssertion"],["Default audience","Operator unless explicitly opted into recall"],["History payload","Bounded; full page from contributors"]]},
+ timeline:{name:"Workshop inventory · recorded updates",value:"2",unit:"occurrences",tag:"HISTORY",explanation:"An event-lane timeline describes occurrences and their world dates. It does not claim what inventory is owned now.",kind:"timeline (event)",viewClass:"FACT",audience:"RECALL",time:"2026-09-20",sources:[["Occurrence · inventory snapshot","2026-09-01 · original event key"],["Occurrence · inventory adjustment","2026-09-20 · source-anchored episode"]],governance:[["Authority","Occurrences, not current state"],["Subtype","Event timeline (predicate-scoped)"],["Mode","Not legacy subject-only timeline"],["Time basis","World time from events"]]},
+ counter:{name:"Workshop inventory · record count",value:"2",unit:"events",tag:"CURRENT",explanation:"A counter View stores a current-total register. It is distinct from a typed scalar_state slot and must not bypass scalar identity or authority rules.",kind:"counter",viewClass:"FACT",audience:"RECALL",time:"2026-09-20",sources:[["Source episode A","First observed event"],["Source episode B","Second observed event"]],governance:[["Kind","counter (QuantState)"],["Rebuild","Kind-specific reducer"],["Currentness","Newer valid_at wins"],["Relationship","Can be retired when superseded by scalar state"]]},
+ metric:{name:"Explorer diagnostics · active queue",value:"3",unit:"items",tag:"OPERATOR",explanation:"An illustrative operator-only Metric. Operational telemetry must not appear in semantic recall as a factual memory.",kind:"metric",viewClass:"METRIC",audience:"OPERATOR",time:"Not applicable",sources:[["Operational sample","Example of a non-recallable metric source"]],governance:[["Class",":Metric (not :Entity)"],["Audience","Operator"],["Semantic recall","Excluded"],["Evidence","Operator-specific; not a user claim"]]}
+};
+const scalarData={
+ anchored:{title:"Workshop inventory · active devices",value:"25",unit:"devices",tag:"CURRENT",date:"2026-09-20",status:"An absolute anchor (18 devices) and a later admitted delta (+7) produce this example folded value.",entries:[["2026-09-01","Absolute","18 devices","TurnEvidence · original snapshot"],["2026-09-20","Delta","+7 devices","TurnEvidence · adjustment"]],anchor:true},
+ delta:{title:"Workshop inventory · adjustments",value:"Unknown",unit:"",tag:"NO ANCHOR",date:"Unknown",status:"Only changes are known: +7 and −2. Without an absolute anchor, a current inventory total cannot be justified.",entries:[["2026-09-01","Delta","+7 devices","TurnEvidence · adjustment"],["2026-09-20","Delta","−2 devices","TurnEvidence · adjustment"]],anchor:false}
+};
+let kind="scalar_state",sample="anchored";
+function property(holder,k,v){const row=make("div","","s-property");row.append(make("span",k),make("strong",v));holder.append(row)}
+function selectTab(tab){
+ const view=tab==="views";$("viewPage").hidden=!view;$("scalarPage").hidden=view;
+ all("[data-tab]").forEach(b=>{b.classList.toggle("active",b.dataset.tab===tab);b.setAttribute("aria-pressed",String(b.dataset.tab===tab))});
+ location.hash=tab;
+}
+function renderView(){
+ const d=viewData[kind];all("[data-kind]").forEach(b=>b.classList.toggle("active",b.dataset.kind===kind));
+ text("viewKindLabel","◇ "+d.kind.toUpperCase());text("viewState",d.tag);
+ $("viewState").className="s-pill"+(["ADVISORY","HISTORY","OPERATOR"].includes(d.tag)?" history":"");
+ text("viewTitle",d.name);$("viewValue").replaceChildren(document.createTextNode(d.value+" "),make("span",d.unit));
+ text("viewExplanation",d.explanation);text("viewKindValue",d.kind);text("viewClass",d.viewClass);text("viewAudience",d.audience);text("viewTime",d.time);
+ text("viewEvidenceCount",d.sources.length+" RECORD"+(d.sources.length!==1?"S":""));
+ const list=$("viewEvidence");list.replaceChildren();
+ d.sources.forEach(([title,desc])=>{const card=make("div","","s-contributor");card.append(make("strong",title),make("small",desc));const b=make("button","Review source trail →");b.onclick=()=>{window.location.href="./index.html#evidence"};card.append(b);list.append(card)});
+ const gov=$("viewGovernance");gov.replaceChildren();d.governance.forEach(([k,v])=>property(gov,k,v));$("fromViewToScalar").hidden=!(kind==="scalar_state"||kind==="scalar_history");
+}
+function svgString(anchor){
+ const line=anchor?'<path d="M75 116 L387 45" class="line"/><circle cx="75" cy="116" r="6" class="point"/><circle cx="387" cy="45" r="6" class="point"/>':'<path d="M75 102 L387 144" class="delta"/><circle cx="75" cy="102" r="6" class="change"/><circle cx="387" cy="144" r="6" class="change"/>';
+ return '<svg viewBox="0 0 540 210" aria-hidden="true" role="presentation"><defs><pattern id="g" width="100%" height="48" patternUnits="userSpaceOnUse"><path d="M0 0H540" stroke="#425e6c" stroke-width="1" opacity=".4"/></pattern></defs><rect width="540" height="180" fill="url(#g)"/><path d="M50 18V169H496" fill="none" stroke="#5e7d8b"/>'+line+'<text x="64" y="190">Sep 1</text><text x="365" y="190">Sep 20</text>'+ (anchor?'<text x="80" y="99" fill="#dcebf3">18 absolute</text><text x="369" y="31" fill="#dcebf3">+7 → 25</text>':'<text x="72" y="86" fill="#f0c98d">+7</text><text x="390" y="160" fill="#f0c98d">−2</text>')+'</svg>';
+}
+function renderScalar(){
+ const d=scalarData[sample];all("[data-sample]").forEach(b=>b.classList.toggle("active",b.dataset.sample===sample));
+ text("scalarTitle",d.title);$("scalarValue").replaceChildren(document.createTextNode(d.value+" "),make("span",d.unit));
+ text("scalarState",d.tag);$("scalarState").className="s-pill"+(d.anchor?"":" warning");$("scalarValue").classList.toggle("s-value-unknown",!d.anchor);
+ text("scalarStatus",d.status);
+ const ident=$("scalarIdentity");ident.replaceChildren();
+ [["Subject","Workshop inventory"],["Attribute","Active devices"],["Scope","Primary workshop"],["Value kind","Count"],["Canonical unit","devices"],["World-time as-of",d.date]].forEach(x=>property(ident,...x));
+ $("scalarSeries").innerHTML=svgString(d.anchor);
+ $("scalarSeries").setAttribute("aria-label",d.anchor?"Example absolute 18 on Sep 1 followed by delta +7 on Sep 20, giving a folded value 25.":"Example delta-only +7 and -2 with no absolute anchor; current value unknown.");
+ const checks=$("scalarChecks");checks.replaceChildren();
+ [["Absolute anchor",d.anchor?"Present":"Missing — abstain"],["scalar_state",d.anchor?"Current folded value available":"No authoritative value"],["scalar_history","Advisory entries available"],["World-time basis","As recorded; not inferred"],["Source chain","TypedAssertion + TurnEvidence"]].forEach(x=>property(checks,...x));
+ const ledger=$("scalarLedger");ledger.replaceChildren();
+ const head=make("div","","s-ledger-row head");["Valid at","Operation","Stated value","Grounding"].forEach(x=>head.append(make("div",x)));ledger.append(head);
+ d.entries.forEach(([date,op,value,source])=>{const row=make("div","","s-ledger-row");[date,op,value,source].forEach((v,i)=>row.append(make(i===2?"strong":"div",v)));ledger.append(row)});
+ $("scalarWarning").textContent=d.anchor?"Demonstration: 25 is a fixture fold from an absolute 18 and later +7. Verify real authoritative fold output before displaying a current value.":"No-anchor safety: +7 and −2 are historical deltas, not an asserted current total. The UI intentionally abstains.";
+}
+document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>selectTab(b.dataset.tab));
+document.querySelectorAll("[data-kind]").forEach(b=>b.onclick=()=>{kind=b.dataset.kind;renderView()});
+document.querySelectorAll("[data-sample]").forEach(b=>b.onclick=()=>{sample=b.dataset.sample;renderScalar()});
+$("fromViewToScalar").onclick=()=>{sample=kind==="scalar_history"?"delta":"anchored";renderScalar();selectTab("scalars")};
+$("fromScalarToView").onclick=()=>{kind=sample==="delta"?"scalar_history":"scalar_state";renderView();selectTab("views")};
+window.addEventListener("hashchange",()=>{const t=location.hash.replace("#","");if(t==="views"||t==="scalars")selectTab(t)});
+renderView();renderScalar();selectTab(location.hash==="#scalars"?"scalars":"views");
+})();
+</script>
+<style>.s-series svg .line{stroke:#96dccf;stroke-width:3;fill:none}.s-series svg .point{stroke:#dffcf4;stroke-width:2;fill:#73bfae}.s-series svg .delta{stroke:#f0c98d;stroke-width:2;fill:none;stroke-dasharray:6 5}.s-series svg .change{fill:#f0c98d}</style>
+</body>
+</html>
