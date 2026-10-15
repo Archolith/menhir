@@ -240,10 +240,14 @@ class IngestWorkerMixin:
                 episode_uuid,
                 exc,
             )
+            retry_after_s = 30.0
+            if exc.snapshot.get("reason"):
+                # Hard-open (quota): wait out the long cooldown instead of polling every 30 s.
+                retry_after_s = max(30.0, min(900.0, float(exc.snapshot.get("cooldown_remaining_s") or 0.0)))
             await asyncio.to_thread(
                 self.graph_adapter.mark_episode_pending,
                 episode_uuid,
-                retry_after_s=30.0,
+                retry_after_s=retry_after_s,
                 worker_id=self._worker_id,
                 transient_requeue=True,
                 claim_started_at=claimed.get("processing_started_at"),

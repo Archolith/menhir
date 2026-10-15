@@ -15,7 +15,10 @@ import openai
 from openai import AsyncOpenAI
 
 from menhir.config import MemorySettings
-from menhir.infrastructure.openai_rate_limit import acall_with_rate_limit_backoff
+from menhir.infrastructure.openai_rate_limit import (
+    acall_with_rate_limit_backoff,
+    find_quota_exhaustion,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +289,7 @@ def complete_llm_usage_call(
     usage: Any = None,
 ) -> None:
     clear_provider_auth_failure()
+    clear_provider_quota_exhaustion(handle.kind)
     try:
         normalized = _normalized_usage(usage if usage is not None else _value(result, "usage"))
         _emit_llm_usage_event(
@@ -386,9 +390,53 @@ def last_provider_auth_failure() -> ProviderAuthFailure | None:
     return _provider_auth_failure
 
 
+@dataclass(frozen=True)
+class ProviderQuotaExhaustion:
+    """The most recent insufficient_quota 429 from an LLM provider, process-wide."""
+
+    kind: str
+    endpoint: str | None
+    model: str | None
+    at: str  # ISO-8601 UTC
+
+    def summary(self) -> str:
+        return (
+            f"provider_quota_exhausted: the LLM provider returned 429 insufficient_quota at "
+            f"{self.at} on {self.endpoint or self.kind}{f' ({self.model})' if self.model else ''}"
+        )
+
+
+_provider_quota_exhaustion: ProviderQuotaExhaustion | None = None
+
+
+def record_provider_quota_exhaustion(handle: LLMCallHandle) -> None:
+    global _provider_quota_exhaustion
+    from datetime import datetime, timezone
+
+    _provider_quota_exhaustion = ProviderQuotaExhaustion(
+        kind=handle.kind,
+        endpoint=handle.endpoint,
+        model=handle.model,
+        at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    )
+
+
+def clear_provider_quota_exhaustion(kind: str | None = None) -> None:
+    """Clear the standing quota flag; a given ``kind`` clears it only if that kind recorded it."""
+    global _provider_quota_exhaustion
+    if kind is None or (_provider_quota_exhaustion is not None and _provider_quota_exhaustion.kind == kind):
+        _provider_quota_exhaustion = None
+
+
+def last_provider_quota_exhaustion() -> ProviderQuotaExhaustion | None:
+    return _provider_quota_exhaustion
+
+
 def fail_llm_usage_call(handle: LLMCallHandle, error: BaseException) -> None:
     if is_provider_auth_error(error):
         record_provider_auth_failure(handle, error)
+    if find_quota_exhaustion(error) is not None:
+        record_provider_quota_exhaustion(handle)
     _emit_llm_usage_event(
         handle.kind,
         phase="failed",
