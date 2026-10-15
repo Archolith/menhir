@@ -93,3 +93,11 @@ All contents are synthetic examples, not production authority measurements; the 
 Relevant shipped contracts: ViewClass/ViewAudience and ViewKind implementations in src/menhir/infrastructure/view_models.py; scalar contributors CURRENT_ANCHOR, CONTRIBUTED_TO, SUPERSEDED_ANCHOR and paginated HISTORY_ENTRY in src/menhir/infrastructure/scalar_view_repository.py; typed Recall Lab packets in src/menhir/explorer/recall_packet_prototype.py. Do not duplicate these contracts in a parallel datastore or frontend-derived authority heuristic.
 
 Before implementation distinguish not-yet-materialized, feature-disabled, unauthorized/redacted, no-absolute-anchor, superseded and erased-source states. All queries must recheck authorization, namespace and evidence currentness.
+
+### Refinements to specialized inspectors
+
+- View Studio's **Observe → Fold → Project** stages are now interactive. “Current materialization” is not a substitute for assertion authority; synthetic contributor identifiers are inspectable inline instead of incorrectly redirecting to an unrelated generic evidence example.
+- Scalar Explorer presents four fold outcomes: current anchored value, delta-only `no_anchor` abstention, conflicting latest absolutes (`ambiguous_anchor`), and a later `Expiry` with no replacement. These follow the pure `fold_assertions` behavior, including strictly-after-anchor deltas and explicit retirement of expired current Views.
+- Inline fixture excerpts and an assertion ledger separate what was observed from a derived current value. The chart is explanatory and not an interpolation of actual truth.
+- A future project-state interface is explicitly a separate product surface. Do not add `CurrentPlanView` or `ImplementationProgressView` just to serve this screen; Menhir's WorkArtifact lineage merits independent design.
+
