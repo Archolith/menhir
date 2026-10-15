@@ -28,6 +28,25 @@ Examples: stable identity, canonical merge decision, ingestion receipt, supersed
 - In Relationships enable **Show historical links**, switch 1 ↔ 2 hops and click nodes. The graph is intentionally bounded.
 - Press / to focus search; navigate with Tab/Enter; inspect at mobile/tablet widths or with reduced-motion enabled.
 
+
+## Specialized View Studio and Scalar Explorer
+
+The [Views & Scalars concept](views-scalars.html) adds two purpose-built modes:
+
+- [View Studio](views-scalars.html#views) lets readers inspect scalar state, scalar history, event-lane timelines, counters and an operator-only Metric. It distinguishes kind, class (FACT/METRIC), audience (RECALL/OPERATOR), world-time metadata, derived value, and contributor receipts.
+- [Scalar Explorer](views-scalars.html#scalars) focuses on a canonical scalar slot (subject UUID, attribute, scope, value kind, unit), current folded state or abstention, source-time assertion history, and the evidence chain.
+- Two sample scalar cases intentionally contrast anchored current state (absolute 18 followed by delta +7; example folded value 25) with delta-only history (+7 and −2; current absolute value UNKNOWN).
+- Current scalar state and advisory scalar history are different authority surfaces. History never justifies fabricating a total; operator-only Views must not leak into general recall.
+
+These are interactive synthetic examples, not evidence of production deployment or enabled feature flags. Offline, read-only, no model calls.
+
+### Code contracts informing the specialized pages
+
+- src/menhir/infrastructure/view_models.py — ViewClass, ViewAudience, ScalarStateKind, ScalarHistoryKind, CounterKind and TimelineKind.
+- src/menhir/infrastructure/scalar_view_repository.py — canonical scalar slots, authority contributors, paginated HISTORY_ENTRY edges.
+- src/menhir/explorer/recall_packet_prototype.py — current state versus advisory history, time and evidence.
+- .agent/plans/menhir-view-evidence-lifecycle-2026-08-28.md — current, recallable FACT Views require valid supporting evidence.
+
 ## Design questions
 
 1. Is a reading-first view more useful than the old center-graph/right-inspector layout?
