@@ -81,3 +81,15 @@ A second [interactive five-page prototype](../prototypes/memory-atlas-v2/index.h
 | Structure | Optional local graph view with one-hop/two-hop depth, historical-toggle, and selected-node detail |
 
 All contents are synthetic examples, not production authority measurements; the prototype has no backend requests. See its [walkthrough and scope boundaries](../prototypes/memory-atlas-v2/README.md). The original single-page study remains useful as an earlier direction, but no longer defines layout constraints. This study does **not** constitute implementation approval. Next step is compare workflows and use case coverage with representative operators, then agree on one contract before writing backend/production UI code.
+
+## Typed View and Scalar-specific interfaces
+
+[View Studio](../prototypes/memory-atlas-v2/views-scalars.html#views) and [Scalar Explorer](../prototypes/memory-atlas-v2/views-scalars.html#scalars) are two additional domain-specific Atlas screen examples. These are fixture-only; neither assumes projection feature flags are on in production.
+
+**View Studio:** emphasize View kind, FACT/METRIC class, RECALL/OPERATOR audience, present-versus-historical status, world-time basis and contributor evidence. A scalar_history View is advisory even when currently materialized. An event timeline describes past occurrences rather than current ownership. A Metric is operational, not a semantic memory.
+
+**Scalar Explorer:** identify each typed series with the canonical subject UUID plus attribute, scope, value kind and unit, then place authoritative current scalar_state separate from advisory scalar_history. Show assertion operation (absolute/delta), world time, linked episode/TurnEvidence and whether a validated absolute anchor exists. No anchor means abstention, not a zero value and not a sum of deltas. Treat learned time separately from world time.
+
+Relevant shipped contracts: ViewClass/ViewAudience and ViewKind implementations in src/menhir/infrastructure/view_models.py; scalar contributors CURRENT_ANCHOR, CONTRIBUTED_TO, SUPERSEDED_ANCHOR and paginated HISTORY_ENTRY in src/menhir/infrastructure/scalar_view_repository.py; typed Recall Lab packets in src/menhir/explorer/recall_packet_prototype.py. Do not duplicate these contracts in a parallel datastore or frontend-derived authority heuristic.
+
+Before implementation distinguish not-yet-materialized, feature-disabled, unauthorized/redacted, no-absolute-anchor, superseded and erased-source states. All queries must recheck authorization, namespace and evidence currentness.
