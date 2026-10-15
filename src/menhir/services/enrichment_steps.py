@@ -46,7 +46,10 @@ from menhir.infrastructure.telemetry import (
     record_memory_revision,
 )
 from menhir.infrastructure.graphiti_helpers import SYNTHETIC_FACT_PREFIX, strip_synthetic_prefix
-from menhir.infrastructure.openai_rate_limit import await_with_backoff_aware_timeout
+from menhir.infrastructure.openai_rate_limit import (
+    await_with_backoff_aware_timeout,
+    quota_exhausted_error,
+)
 from menhir.infrastructure.graphiti_extraction_policy import (
     begin_extraction_receipt,
     is_policy_empty_extraction,
@@ -1451,6 +1454,8 @@ async def handle_enrichment_failure(
     """
 
     duration_ms = int((perf_counter() - ctx.started) * 1000)
+    # A Graphiti-wrapped insufficient_quota 429 reads "Rate limit exceeded"; record the real cause.
+    exc = quota_exhausted_error(exc) or exc
     error_type = type(exc).__name__
     classification = classify_enrichment_failure(exc, error_type=error_type)
     failed = ctx.graph_adapter.mark_episode_failed(

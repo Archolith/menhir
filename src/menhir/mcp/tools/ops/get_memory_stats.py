@@ -178,7 +178,8 @@ class GetMemoryStatsTool(BaseTextTool):
         if tripped:
             lines.append("### Circuit Breakers")
             for kind, snap in tripped.items():
-                lines.append(f"  {kind}: {snap['state'].upper()} ({snap['failures']} failures)")
+                reason = f" [{snap['reason']}]" if snap.get("reason") else ""
+                lines.append(f"  {kind}: {snap['state'].upper()} ({snap['failures']} failures){reason}")
             lines.append("")
 
         return "\n".join(lines)

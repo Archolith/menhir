@@ -82,6 +82,7 @@ from .routes_support import (
     _resolve_caller_session,
     _resolve_namespace,
     _provider_auth_failure_text,
+    _provider_quota_exhausted_text,
     _service_payload,
     _try_record_destructive_op_rest,
 )
@@ -104,6 +105,7 @@ async def health(request: Request) -> HealthResponse:
         startup_mode=capabilities.startup_mode if capabilities is not None else None,
         instance_id=str(settings.instance_id) or None if settings is not None else None,
         provider_auth_failure=_provider_auth_failure_text(),
+        provider_quota_exhausted=_provider_quota_exhausted_text(),
     )
 
 
@@ -119,13 +121,19 @@ async def ready(request: Request) -> ReadyResponse:
             failures=["runtime not initialized"],
         )
     auth_failure = _provider_auth_failure_text()
-    status = "ready" if capabilities.enrichment_ready and auth_failure is None else "degraded"
+    quota_exhausted = _provider_quota_exhausted_text()
+    status = (
+        "ready"
+        if capabilities.enrichment_ready and auth_failure is None and quota_exhausted is None
+        else "degraded"
+    )
     return ReadyResponse(
         status=status,
         startup_mode=capabilities.startup_mode,
         capabilities=_capability_payload(runtime_ctx),
         failures=list(capabilities.failures),
         provider_auth_failure=auth_failure,
+        provider_quota_exhausted=quota_exhausted,
     )
 
 

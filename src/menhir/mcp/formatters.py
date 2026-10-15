@@ -653,6 +653,14 @@ async def _queue_summary(backend: object) -> str:
             "enriched or recalled until the provider credential (e.g. OPENAI_API_KEY) is fixed; "
             "failed episodes are retried automatically once a call succeeds."
         )
+    from menhir.infrastructure.observability import last_provider_quota_exhaustion
+
+    quota_exhaustion = last_provider_quota_exhaustion()
+    if quota_exhaustion is not None:
+        summary += (
+            f"\nWARNING: {quota_exhaustion.summary()}. Enrichment cannot progress until provider "
+            "credits are added; stop waiting on queued episodes."
+        )
     unrecallable = await _standing_unrecallable_count(backend)
     if unrecallable > 0:
         summary += (

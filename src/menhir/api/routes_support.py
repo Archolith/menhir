@@ -99,6 +99,13 @@ def _provider_auth_failure_text() -> str | None:
     return failure.summary() if failure is not None else None
 
 
+def _provider_quota_exhausted_text() -> str | None:
+    from menhir.infrastructure.observability import last_provider_quota_exhaustion
+
+    exhaustion = last_provider_quota_exhaustion()
+    return exhaustion.summary() if exhaustion is not None else None
+
+
 def _service_payload(runtime_ctx: RuntimeContext | None) -> dict[str, str]:
     if runtime_ctx is None:
         return {"runtime": "starting"}
@@ -631,6 +638,9 @@ class HealthResponse(BaseModel):
     # Set when the LLM provider has rejected our credentials since the last successful
     # call: a server can be "ok" and "full" and still unable to enrich anything.
     provider_auth_failure: str | None = None
+    # Set after an insufficient_quota 429 until a call of that kind succeeds: enrichment cannot
+    # progress until credits are added, so a polling driver should stop instead of waiting.
+    provider_quota_exhausted: str | None = None
     startup_mode: str | None = None
     # Echoes MENHIR_INSTANCE_ID when set, so a client (e.g. a smoke launcher) can
     # confirm it is talking to the exact server it started and not a different
@@ -644,6 +654,7 @@ class ReadyResponse(BaseModel):
     capabilities: dict[str, bool]
     failures: list[str]
     provider_auth_failure: str | None = None
+    provider_quota_exhausted: str | None = None
 
 
 class StatsResponse(BaseModel):
