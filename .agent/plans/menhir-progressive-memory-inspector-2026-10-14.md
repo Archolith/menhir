@@ -18,6 +18,19 @@ The Explorer already shows node details, a small neighbor list, linked episodes,
 
 The Menhir-specific opportunity is to use existing structured evidence and graph edges rather than precompute long-form prose. **Expand** (inspect the same memory) and **Traverse** (follow another memory) are distinct actions. Both are read-only, lazy, and deterministic by default.
 
+
+## Typed View and Scalar specialization
+
+The general memory reader does not replace purpose-built [View Studio](../../docs/prototypes/memory-atlas-v2/views-scalars.html#views) and [Scalar Explorer](../../docs/prototypes/memory-atlas-v2/views-scalars.html#scalars) screens (synthetic prototypes only).
+
+- **Views:** preserve view_kind, view_class, view_audience, view_current, view_key, version/supersession and live provenance. A current history View is not current-state authority; operator-only Metrics cannot become recallable claims.
+- **Scalars:** show canonical slot identity (subject_uuid, attribute, scope, value_kind, unit), the current scalar_state if anchored, separate advisory scalar_history, typed operations, source-time/learned-time and actual contributor assertion/TurnEvidence/episode links.
+- **Abstention:** delta-only histories must show unknown current value, never a fabricated absolute total. Distinguish disabled/unmaterialized, absent anchor, redacted evidence, expired source and genuine empty result.
+- **Reuse:** draw on ViewKind and ScalarViewRepositoryMixin read contracts, and the existing Recall Lab projection, not a new durable View type, storage system, or read-time LLM. Do not enable default-off lanes for presentation.
+- **UI acceptance cases:** anchored value, delta-only history, scalar-history operator audience, FACT View with live support, unsupported/orphaned View, superseded View, event occurrence-only semantics and operator METRIC.
+
+The two new screens require an explicit backend security/data contract review before being connected to production.
+
 ## Experience prototype
 
 The initial one-page reader prototype is now accompanied by the [five-page Memory Atlas experience study](../../docs/prototypes/memory-atlas-v2/index.html) ([walkthrough](../../docs/prototypes/memory-atlas-v2/README.md)): Overview, Memory Reader, Evidence Trail, Temporal History and Relationships. This is a proposed *greenfield layout*, with synthetic records and no runtime/backend connection. Review layout, state semantics, cross-view navigation and accessibility before treating any current Explorer screen as a constraint.
