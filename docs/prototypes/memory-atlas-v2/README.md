@@ -47,6 +47,26 @@ These are interactive synthetic examples, not evidence of production deployment 
 - src/menhir/explorer/recall_packet_prototype.py — current state versus advisory history, time and evidence.
 - .agent/plans/menhir-view-evidence-lifecycle-2026-08-28.md — current, recallable FACT Views require valid supporting evidence.
 
+
+### Four scalar-state outcomes
+
+The specialized prototype now includes four selectable cases grounded in the actual `fold_assertions` contract in `src/menhir/domain/scalar_state_fold.py`:
+
+| Case | Expected UI | Domain outcome |
+| --- | --- | --- |
+| Absolute 18, then later delta +7 | Current **25 devices**, with contributing source ledger | Folded state (latest anchor plus later deltas) |
+| Delta +7, then delta −2; no anchor | **Unknown** current value; advisory ledger remains | `no_anchor` abstention |
+| Two differing absolute values at identical latest valid_at | **Unknown** current value; show both conflicting observations | `ambiguous_anchor` (unless an explicit valid correction resolves the tie) |
+| Absolute 18, then later expiry with no replacement | **Ended**, not 0 or 18; retained historical record | `Expiry`, current View retired |
+
+Each ledger row now expands to show a synthetic source identity and a representative quotation. The View Studio has an interactive **Observe → Fold → Project** inspector and expandable source records, plus explicit labeling of current materialization versus advisory authority.
+
+Treat chart line segments as a visual aid, **not a reconstructed factual time series**. Do not imply that missing source dates or interpolated values are known. These cases should become contract/UI regression fixtures for the implementation phase.
+
+### Scope separation
+
+A later *project-status briefing* could compose plans, reviews, implementation reports, open decisions and their status history, but it is a **separate product interface** and is not included in these memory/View/scalar exploration prototypes. Menhir's `WorkArtifact` semantics and still-unbuilt `CurrentPlanView` would require their own design and authorization work.
+
 ## Design questions
 
 1. Is a reading-first view more useful than the old center-graph/right-inspector layout?
