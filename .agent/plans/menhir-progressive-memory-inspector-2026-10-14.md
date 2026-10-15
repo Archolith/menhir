@@ -19,6 +19,10 @@ The Explorer already shows node details, a small neighbor list, linked episodes,
 The Menhir-specific opportunity is to use existing structured evidence and graph edges rather than precompute long-form prose. **Expand** (inspect the same memory) and **Traverse** (follow another memory) are distinct actions. Both are read-only, lazy, and deterministic by default.
 
 
+## Scope boundary: future project overview
+
+A possible future project-level interface would summarize a project's current state and trace plans, reviews, implementation reports, decisions, and steps taken to reach it. That is **not** part of this Memory Atlas feature. Keep this branch focused on individual-memory exploration and specialized View/scalar inspection; do not synthesize project state from inferred artifact relationships. The `CurrentPlanView`/progress projections proposed in the WorkArtifact plan are separate, unfinished work with their own authority rules.
+
 ## Typed View and Scalar specialization
 
 The general memory reader does not replace purpose-built [View Studio](../../docs/prototypes/memory-atlas-v2/views-scalars.html#views) and [Scalar Explorer](../../docs/prototypes/memory-atlas-v2/views-scalars.html#scalars) screens (synthetic prototypes only).
