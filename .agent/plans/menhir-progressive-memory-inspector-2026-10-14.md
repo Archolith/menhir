@@ -1,0 +1,116 @@
+---
+artifact_schema: 1
+artifact_uuid: 294fc49b-707b-450b-8910-1ae88db2b331
+artifact_type: plan
+artifact_status: PROPOSED
+---
+
+# Progressive Memory Inspector — on-demand memory drilldown
+
+Date: 2026-10-14
+Repository: `Archolith/menhir`
+Planning branch: `feat/progressive-memory-inspector`
+Status: proposed; no implementation authorized by this document.
+
+## Why
+
+The Explorer already shows node details, a small neighbor list, linked episodes, and a graph, but it does not provide a cohesive path from a compact memory statement through supporting evidence, belief history, and related memories. Users must switch context or accept a flat information dump. Borrow the **interaction idea** of [cc-stretch](https://github.com/pro-vi/cc-stretch): keep the initial answer compact; expand its supporting detail *in place*.
+
+The Menhir-specific opportunity is to use existing structured evidence and graph edges rather than precompute long-form prose. **Expand** (inspect the same memory) and **Traverse** (follow another memory) are distinct actions. Both are read-only, lazy, and deterministic by default.
+
+## Scope
+
+**MVP: Explorer-first.**
+- A compact memory card with a stable identity and type/authority indicators; inline expansion to full details, chronology, source episodes/receipts, and evidence links when available.
+- Clickable relationship previews with explicit direction, relationship type, and target identity; follow to a new card with breadcrumb/back navigation.
+- Layer-level loading/error/empty/redacted states; collapse/re-expand without losing the current navigation path.
+- Support Entity and Episodic nodes first; detect current/historical View nodes and label their authority correctly rather than treating a materialized View as original testimony.
+- Stable deep links to authorized memory UUIDs; pointer and keyboard interaction; reduced-motion animation preference.
+- No LLM invocation on opening or traversing a memory.
+
+**Not MVP:** writing or fixing memories, new graph labels/edges/storage, public MCP/REST surface changes outside Explorer, unbounded graph visualization, cross-client UI protocols, auto-generated explanations, or retrieval-ranking changes. Extending Recall Lab and MCP clients is a later, separately reviewed phase.
+
+## Proposed Design
+
+### 1. Reuse existing runtime and provenance
+
+- Extend `src/menhir/explorer/` and its existing `/explorer` router mounted by `explorer/integration.py`; reuse the shared runtime repository, auth, and privacy handling. Do **not** start a second graph pool or service.
+- Add a small inspect projection/service over canonical infrastructure, not custom Cypher embedded in route handlers. Reuse or extend `MemoryGraphAdapter`, `memory_queries.py`, and existing `fetch_node_receipts` for source evidence. Verify the true shape of View contributors, temporal metadata, and Graphiti episode UUID versus Menhir receipt UUID before implementation.
+- Explicitly distinguish original episode content, derived entity summary, View assertion, historical/superseded value, and source evidence. Unknown or missing evidence is `unavailable`, never silently reconstructed.
+- Preserve original UUID, source kind, supporting UUIDs, timestamps with world-time vs learned-time meaning, and available reference/commit path. Link only to sources the caller may access.
+
+### 2. Bounded read contract
+
+An Explorer-internal versioned `memory-inspector/v1` response, with two distinct read shapes:
+- `GET /explorer/api/inspect/{uuid}?layer=summary|detail|evidence`: one requested layer; type, authority/currentness, provenance and temporal metadata according to authorization. A summary must not fetch or serialize the full graph.
+- `GET /explorer/api/inspect/{uuid}/relations?cursor=...&limit=10`: one page of related nodes with typed/directed edges and stable ordering; cursor is scoped to requester, namespace, source UUID, and query shape.
+
+Contract details to finalize in the API design review: exact field names, handling of duplicate edges, edge types eligible for traversal, and authorized historical/audit inspection. Do not invent an alternative ownership or visibility model for the inspector.
+
+Hard limits: max 10 relation/evidence items per default page (server cap 50), one-hop requests, no recursive fan-out, parameterized queries, index-backed UUID lookups, no retrieval-score or last-accessed mutation. Clicking a related memory begins a new one-hop query. Invalid/mismatched cursors fail closed. Limit payload bytes and prevent N+1 queries.
+
+### 3. Security and correctness gates (before UI work)
+
+- Apply existing Explorer readonly-tier auth and the canonical namespace/tenant predicates at **every** node and edge expansion; never trust a client-provided UUID to authorize graph access. Cross-namespace edges must not reveal target names, existence, counts, or content.
+- Reconcile current Explorer `_node_detail`'s raw UUID lookup with canonical visibility rules before reusing it. Generic user-facing views exclude candidates, retired/internal/orphaned Views; any historical/audit reveal requires explicit higher privilege and a separate reviewed policy.
+- Honor `privacy_redact` and loopback-only reveal behavior for JSON, HTML, previews, source excerpts, nested records, and deep links. A collapsed card must not leak a hidden long form in markup, logs, telemetry, hover text, or browser history.
+- Explicit erasure/supersession must invalidate previously reachable details; a live read rechecks current evidence rather than treating stale receipt UUID strings as proof. Avoid persistent client-side caching in MVP.
+
+### 4. UI integration
+
+- Adapt `_detail.html` and `static/explorer.js` so the current node remains a small readable card; add expandable sections: **Details**, **Evidence**, **History**, **Related memories**.
+- Separate **Expand** from **Follow**. Expand maintains the current card identity; Follow changes the focal memory and pushes breadcrumb history. Include visible source/authority badges and a concise “no supporting evidence found” state.
+- Load a section only upon expansion (AbortController/cancel stale requests when switching nodes); render text safely, without injecting untrusted memory content as HTML. Offer loading, retry, permission-denied, deleted, and unavailable states.
+- Keep existing Cytoscape graph selection functional. Respect keyboard access, focus return, narrow screens and `prefers-reduced-motion`. Motion is an enhancement, not a dependency.
+
+### 5. Delivery slices
+
+1. **Contract/security spike:** verify actual current View/evidence shapes and authorization predicates, examine `_node_detail` and `fetch_node_receipts` limits, define fixtures for Entity/Episodic/View, historical, erased and cross-tenant cases. Record unresolved policy choices.
+2. **Read-only service + routes:** deterministic, bounded inspect and relation pages, schema tests, privacy/auth/tenant regression tests, no LLM or graph mutations.
+3. **Explorer interaction:** progressive sections, follow/back, keyboard/reduced-motion, request cancellation; maintain existing graph and candidate controls.
+4. **Validation and review:** focused tests, disposable Neo4j integration checks by explicit opt-in, browser walkthroughs using representative records, before/after timing and payload measurements; propose separate Recall Lab/MCP adaptation only after the Explorer contract stabilizes.
+
+## Alternatives Considered
+
+- **Pre-generate long-form text with an LLM, cc-stretch-style:** fast to prototype but costs inference even for unopened sections and weakens source traceability. Reject for default behavior.
+- **Fork/use cc-stretch directly:** its TypeScript renderer hooks Claude Code's UI, not Menhir's FastAPI/Explorer. Reuse the stretchtext interaction concept, not the Claude Code runtime dependency.
+- **Build a new standalone front end or graph service:** duplicates existing runtime, auth and Explorer responsibilities. Reject.
+- **Expose a generic new MCP tool immediately:** premature API support burden. Defer until the read projection is tested and cross-client demand is concrete.
+
+## Risks
+
+- Current Explorer node detail and graph queries can expose raw graph shape by UUID; blindly adding new layers magnifies a pre-existing security boundary. Authorization/namespace review is a prerequisite.
+- Graphiti episodes, Menhir ingestion receipts, and derived Views are not interchangeable IDs or authorities.
+- The same source can support several statements; cycles and large neighborhoods require cursors and explicit query budgets.
+- Evidence deleted by privacy erasure may leave historical receipts; never represent a missing source as verified.
+- Inline animation and partial updates can cause accessibility regressions or race conditions under rapid navigation.
+
+## Invariants
+
+1. All MVP reads are deterministic, read-only, and model-call-free; production recall, ingest and lifecycle output remain unchanged.
+2. Same effective identity, tier, namespace, privacy and visibility restrictions as canonical Menhir surfaces; no cross-tenant hints.
+3. A View's derived claim is never displayed as if it were direct source testimony; historical state is never labeled current.
+4. Missing, invalidated or erased provenance is explicitly marked; no invented sources or times.
+5. Read work is bounded by one-hop limits, stable ordering, pagination, and response budgets.
+6. Existing Explorer graph, candidate moderation, and privacy-toggle functionality do not regress.
+
+## Validation
+
+- Unit/contract tests for all four expansion levels and every memory shape, absent source and empty relation page, mixed/tied edge ordering, invalid cursor and stale navigation response.
+- Auth, tier, redaction and namespace tests: direct UUID guess, cross-tenant link, anonymous/insufficient tier, masked nested evidence, non-loopback reveal, stale/erased and historical View.
+- Neo4j integration tests (explicit opt-in) asserting bounded reads, no graph writes, correct Menhir receipt vs Graphiti UUID mapping and stable pagination.
+- UI tests for expand/collapse/follow/back, keyboard/focus, reduced motion, rapid node switch, loading/error, and safe escaping of hostile memory text.
+- Track query count, p50/p95 latency and payload sizes per layer with no memory-text telemetry; require a bounded one-hop budget before release.
+- Follow `.agent/workflows/run_and_test.md`: focused tests + matching lint locally, then required CI on exact published SHA; do not claim unrun tests passed.
+
+## Docs To Update
+
+`.agent/architecture.md` (Explorer integration), `.agent/endpoints.md` (internal route contract), `.agent/data_models.md` only if introducing a shared projection DTO, `docs/` operator Explorer usage, `CHANGELOG.md`, and this plan/index. No migration or public API contract is anticipated for MVP.
+
+## Decisions Needed Before Implementation
+
+- Decide whether this is a read-only operator debugging view alone, or whether an ordinary readonly-tier user may inspect raw episodes/source evidence; explicitly separate audited history from normal recall visibility.
+- Finalize namespace context selection and permission handling for deep links.
+- Decide whether to show derived View history in the same card or behind a separately labeled **Historical** expansion; preserve time-basis semantics either way.
+
+Source inspiration: [pro-vi/cc-stretch](https://github.com/pro-vi/cc-stretch) (MIT-licensed). This plan borrows the interaction model only; no source code is copied.
