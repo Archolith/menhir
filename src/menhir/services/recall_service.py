@@ -97,12 +97,12 @@ class RecallService(RecallSupportMixin):
     #: OFF -> today's behavior (a View never suppresses a fact).
     scalar_view_authority_enabled: bool = False
     scalar_view_collapse_enabled: bool = False  # Views hide their items (drill-down tool); off = unchanged
+    scalar_view_echo_drop_enabled: bool = False  # only drop observations echoing a verdict slot
     #: True: scalar_history Views form an advisory recall lane; False: excluded (real rollback).
     scalar_history_enabled: bool = False
     counting_enabled: bool = False  # False hides counted scalar_state Views (read-side kill switch)
-    #: When True, a recognized conservative first-person event recall query (with a non-None
-    #: namespace) surfaces a leading/advisory event-history authority layer. Default OFF -> today's
-    #: behavior (no event authority and no event-assertion repository read).
+    #: When True, a recognized conservative first-person event recall query (non-None namespace) surfaces
+    #: a leading/advisory event-history authority layer. Default OFF: no event authority or assertion read.
     event_history_authority_enabled: bool = False
     #: Candidate-readonly: never reinforce retrieval via access timestamps, edge weights or lifecycle.
     read_only: bool = False

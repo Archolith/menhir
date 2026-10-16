@@ -1476,8 +1476,10 @@ async def run_recall(
     # The verdict states the value/count; an observation echoing the same slot repeats the quote and
     # crowds other memories out of recall. Only emitted verdicts count as covering a slot, so an
     # observation whose View was skipped is kept. Only OBSERVATION candidates are ever dropped.
+    # Runs under collapse (which also hides counted items) or echo-drop alone (counted items stay).
     if (
-        getattr(service, "scalar_view_collapse_enabled", False)
+        (getattr(service, "scalar_view_collapse_enabled", False)
+         or getattr(service, "scalar_view_echo_drop_enabled", False))
         and service.scalar_view_authority_enabled
         and namespace is not None
         and authority_layer
