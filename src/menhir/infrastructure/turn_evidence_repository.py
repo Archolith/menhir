@@ -512,6 +512,124 @@ class TurnEvidenceRepository:
                     "pv": str(perceiver_version), "at": at},
         )
 
+    # ---- counting-consolidation discovery (counting lane, builds on scalars) -------------------
+    # The counting lane has its OWN cursor (:CountingConsolidationWatermark, keyed by the namespace
+    # string in `group_id`) but may only read turns the scalar lane has FINISHED: a turn is eligible
+    # only when it is at or before the namespace's :ScalarConsolidationWatermark cursor stamped with
+    # the scalar perceiver_version in effect. No scalar watermark, or one stamped by another version
+    # (a scalar reset in progress), makes every turn ineligible, so counting pauses until scalars
+    # catch up. Same turn filter as the scalar loader (agent_quoted included).
+
+    def list_counting_dirty_evidence_namespaces(
+        self, *, perceiver_version: str, scalar_perceiver_version: str, limit: int = 200,
+    ) -> list[str]:
+        """Namespaces with at least one role=user :TurnEvidence that the scalar lane has finished
+        (at or before its cursor for `scalar_perceiver_version`) and the counting lane has not
+        (beyond the counting cursor for `perceiver_version`, or no/other-version counting cursor)."""
+        rows = self._neo4j.execute(
+            """
+            MATCH (t:TurnEvidence)
+            WHERE t.role = 'user' AND t.declarant = 'user' AND t.namespace IS NOT NULL
+                  AND t.text IS NOT NULL AND t.text <> ''
+            MATCH (s:ScalarConsolidationWatermark {group_id: t.namespace})
+            WHERE s.perceiver_version = $spv AND s.cursor_at IS NOT NULL
+                  AND (t.recorded_at < s.cursor_at
+                       OR (t.recorded_at = s.cursor_at AND t.turn_id <= s.cursor_uuid))
+            OPTIONAL MATCH (w:CountingConsolidationWatermark {group_id: t.namespace})
+            WITH t.namespace AS ns, w, t.recorded_at AS ckey, t.turn_id AS tuuid
+            WITH ns,
+                 max(CASE
+                     WHEN w IS NULL OR w.perceiver_version IS NULL
+                          OR w.perceiver_version <> $pv OR w.cursor_at IS NULL
+                          OR ckey > w.cursor_at
+                          OR (ckey = w.cursor_at AND tuuid > w.cursor_uuid)
+                     THEN 1 ELSE 0 END) AS unprocessed
+            WHERE unprocessed = 1
+            RETURN ns AS namespace
+            ORDER BY ns
+            LIMIT $limit
+            """,
+            params={"pv": str(perceiver_version), "spv": str(scalar_perceiver_version),
+                    "limit": int(limit)},
+        )
+        return [str(r["namespace"]) for r in rows]
+
+    def load_next_counting_evidence_batch(
+        self, namespace: str, *, perceiver_version: str, scalar_perceiver_version: str,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        """The next page of role=user :TurnEvidence AFTER the counting cursor and AT OR BEFORE the
+        scalar cursor for `scalar_perceiver_version`, oldest first by (recorded_at, turn_id). Row shape
+        matches load_next_scalar_evidence_batch. Returns nothing when the scalar watermark is missing
+        or stamped by another version (pause, never read ahead of scalars). A counting cursor stamped
+        by another counting version is ignored (reset)."""
+        rows = self._neo4j.execute(
+            """
+            MATCH (s:ScalarConsolidationWatermark {group_id: $ns})
+            WHERE s.perceiver_version = $spv AND s.cursor_at IS NOT NULL
+            OPTIONAL MATCH (w:CountingConsolidationWatermark {group_id: $ns})
+            WITH s, w, (w IS NULL OR w.perceiver_version IS NULL OR w.perceiver_version <> $pv) AS reset
+            WITH s.cursor_at AS sca, s.cursor_uuid AS su,
+                 CASE WHEN reset THEN null ELSE w.cursor_at END AS cca,
+                 CASE WHEN reset THEN null ELSE w.cursor_uuid END AS cu
+            MATCH (t:TurnEvidence {namespace: $ns})
+            WHERE t.role = 'user' AND t.declarant = 'user' AND t.text IS NOT NULL AND t.text <> ''
+            WITH t, sca, su, cca, cu, t.recorded_at AS ckey
+            WHERE (cca IS NULL OR ckey > cca OR (ckey = cca AND t.turn_id > cu))
+                  AND (ckey < sca OR (ckey = sca AND t.turn_id <= su))
+            RETURN t.turn_id AS uuid,
+                   toString(coalesce(t.occurred_at, t.recorded_at)) AS valid_at,
+                   toString(ckey) AS cursor_at,
+                   t.text AS content
+            ORDER BY ckey, t.turn_id
+            LIMIT $limit
+            """,
+            params={"ns": namespace, "pv": str(perceiver_version),
+                    "spv": str(scalar_perceiver_version), "limit": int(limit)},
+        )
+        return [dict(r) for r in rows]
+
+    def advance_counting_cursor(
+        self, namespace: str, *, cursor_at: str, cursor_uuid: str,
+        perceiver_version: str, at: str,
+    ) -> None:
+        """Advance the namespace's counting cursor to the last TurnEvidence actually processed
+        (monotonic recorded_at, never world time), stamping the counting perceiver_version."""
+        self._neo4j.execute(
+            """
+            MERGE (w:CountingConsolidationWatermark {group_id: $ns})
+            SET w.cursor_at = datetime($cursor_at), w.cursor_uuid = $cu,
+                w.perceiver_version = $pv, w.last_run_at = datetime($at)
+            """,
+            params={"ns": namespace, "cursor_at": cursor_at, "cu": cursor_uuid,
+                    "pv": str(perceiver_version), "at": at},
+        )
+
+    def scalar_claims_for_turns(
+        self, namespace: str, turn_ids: list[str], *, limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Current scalar-lane claims (claim_ordinal 0, operation absolute|delta|expire) already
+        stored for these turns, so the counting lane can be told what scalars captured. Bounded."""
+        ids = [str(i) for i in (turn_ids or []) if i]
+        if not ids:
+            return []
+        rows = self._neo4j.execute(
+            """
+            MATCH (h:TypedAssertionHead)-[:CURRENT]->(a:TypedAssertion)
+            WHERE a.episode_uuid IN $ids AND """ + tenant_scope_cypher("a") + """
+                  AND coalesce(a.claim_ordinal, 0) = 0
+                  AND a.operation IN ['absolute', 'delta', 'expire']
+            RETURN a.episode_uuid AS episode_uuid, a.subject_display AS subject,
+                   a.attribute AS attribute, a.scope AS scope, a.unit AS unit,
+                   a.operation AS operation, a.value_json AS value_json,
+                   a.stated_span AS stated_span
+            ORDER BY a.episode_uuid, a.span_start, a.attribute
+            LIMIT $limit
+            """,
+            params={"ids": ids, "limit": int(limit), **tenant_scope_params(namespace)},
+        )
+        return [dict(r) for r in rows]
+
     def count_namespace(self, namespace: str) -> int:
         """Count `:TurnEvidence` nodes captured for a namespace (throwaway-eval observability)."""
         rows = self._neo4j.execute(
@@ -693,7 +811,7 @@ class TurnEvidenceRepository:
                 UNWIND namespaces AS ns
                 OPTIONAL MATCH (w)
                 WHERE (w:ConsolidationWatermark OR w:ScalarConsolidationWatermark
-                       OR w:EventConsolidationWatermark)
+                       OR w:EventConsolidationWatermark OR w:CountingConsolidationWatermark)
                   AND (coalesce(w.group_id, w.namespace, '') = ns
                        OR (ns = 'default'
                            AND coalesce(w.group_id, w.namespace, '') = ''))

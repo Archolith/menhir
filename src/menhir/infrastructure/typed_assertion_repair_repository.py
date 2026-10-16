@@ -103,6 +103,7 @@ class TypedAssertionRepairMixin:
                    a.stated_span AS stated_span, a.episode_uuid AS episode_uuid,
                    a.span_start AS span_start, a.span_end AS span_end,
                    a.claim_ordinal AS claim_ordinal,
+                   coalesce(a.importance, '') AS importance,
                    toString(a.valid_at) AS valid_at, toString(a.learned_at) AS learned_at,
                    a.time_basis AS time_basis, a.perceiver_version AS perceiver_version,
                    a.namespace AS namespace

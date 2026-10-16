@@ -98,6 +98,7 @@ class MaintenanceScheduler:
     personal_memory_llm: Callable[[str, str], str] | None = None
     personal_memory_k: int = 3
     event_history_enabled: bool = False
+    counting_enabled: bool = False
     event_history_perceiver_version: str = "v1"
     event_history_batch_size: int = 500
     personal_memory_call_budget: int | None = None
@@ -185,7 +186,8 @@ class MaintenanceScheduler:
         if self.verifier_sync_enabled and self.verifier_repo is not None:
             self._jobs["sync_verifiers"] = _JobState(interval_s=self.verifier_sync_interval_s)
         if (
-            (self.personal_memory_enabled or self.event_history_enabled or self.scalar_state_enabled)
+            (self.personal_memory_enabled or self.event_history_enabled or self.scalar_state_enabled
+             or self.counting_enabled)
             and self.personal_memory_llm is not None
         ):
             self._jobs["consolidate_personal_memory"] = _JobState(interval_s=self.personal_memory_interval_s)
@@ -839,6 +841,7 @@ class MaintenanceScheduler:
             scalar_deterministic_router_promoted_classes=self.scalar_deterministic_router_promoted_classes,
             enable_counter_state=self.personal_memory_enabled,
             enable_event_history=self.event_history_enabled,
+            enable_counting=self.counting_enabled,
             event_history_perceiver_version=self.event_history_perceiver_version,
             event_batch_size=self.event_history_batch_size,
         )

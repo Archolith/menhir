@@ -404,6 +404,7 @@ class MemorySettings:
     # cursor, so existing evidence is re-perceived and v2 assertions supersede v1 by strict rank.
     personal_memory_event_history_perceiver_version: str = "v2"
     personal_memory_event_history_authority_enabled: bool = False
+    personal_memory_counting_enabled: bool = False
 
     # Benchmark mode — when true, disables the background scheduler,
     # consolidation/decay, and orphan recovery so the store is never mutated
@@ -945,6 +946,10 @@ class MemorySettings:
             personal_memory_event_history_authority_enabled=parse_bool_env(_getenv(
                 "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED",
                 default=str(cls.personal_memory_event_history_authority_enabled),
+            )),
+            personal_memory_counting_enabled=parse_bool_env(_getenv(
+                "MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED",
+                default=str(cls.personal_memory_counting_enabled),
             )),
             # Benchmark mode (LongMemEval Mode B isolation)
             benchmark_mode=parse_bool_env(_getenv("MENHIR_BENCHMARK_MODE", default=str(cls.benchmark_mode))),
