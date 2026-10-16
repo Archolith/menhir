@@ -71,7 +71,7 @@ class MemorySettings:
 
     # OpenAI
     openai_api_key: str = field(default="", repr=False)
-    openai_chat_model: str = "gpt-4o-mini"
+    openai_chat_model: str = "gpt-6-luna"
     openai_embed_model: str = "text-embedding-3-small"
 
     # Provider selection — applies to chat backend and all Graphiti components
