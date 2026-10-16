@@ -96,6 +96,7 @@ class RecallService(RecallSupportMixin):
     #: graph fact for an explicit current-state query (all six authority gates must pass). Default
     #: OFF -> today's behavior (a View never suppresses a fact).
     scalar_view_authority_enabled: bool = False
+    scalar_view_collapse_enabled: bool = False  # Views hide their items (drill-down tool); off = unchanged
     #: True: scalar_history Views form an advisory recall lane; False: excluded (real rollback).
     scalar_history_enabled: bool = False
     counting_enabled: bool = False  # False hides counted scalar_state Views (read-side kill switch)
@@ -103,8 +104,7 @@ class RecallService(RecallSupportMixin):
     #: namespace) surfaces a leading/advisory event-history authority layer. Default OFF -> today's
     #: behavior (no event authority and no event-assertion repository read).
     event_history_authority_enabled: bool = False
-    #: Candidate-readonly instances must not reinforce retrieval by touching graph
-    #: access timestamps, edge weights, or lifecycle state.
+    #: Candidate-readonly: never reinforce retrieval via access timestamps, edge weights or lifecycle.
     read_only: bool = False
     _rehydration_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     _change_log_provider: ChangeLogProvider = field(default_factory=CachedGitChangeLog)

@@ -165,6 +165,17 @@ class MemoryBackend(Protocol):
         RecallHistoryResult-shaped dict."""
         ...
 
+    async def get_scalar_view_items(
+        self,
+        *,
+        view_uuid: str,
+        namespace: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """Drill-down: page the items a scalar View was built from."""
+        ...
+
     async def recall_timeline(
         self,
         *,

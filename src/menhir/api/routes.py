@@ -310,6 +310,28 @@ async def scalar_authority_contributors(
     return {"view_uuid": view_uuid, **payload}
 
 
+@router.get("/scalar-views/{view_uuid}/items")
+async def scalar_view_items(
+    request: Request,
+    view_uuid: str,
+    namespace: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, object]:
+    """Page the items a scalar View (count or current value) was built from."""
+    _require_tier("readonly")
+    runtime_ctx = _require_runtime_context(request)
+    adapter = getattr(runtime_ctx.built, "graph_adapter", None)
+    if adapter is None:
+        raise HTTPException(status_code=503, detail="scalar view items unavailable")
+    resolved = _resolve_namespace(request, namespace)
+    from menhir.services.scalar_view_items import fetch_scalar_view_items
+    return await asyncio.to_thread(
+        fetch_scalar_view_items, adapter,
+        view_uuid=view_uuid, namespace=resolved, offset=offset, limit=limit,
+    )
+
+
 @router.get("/bootstrap/flagged")
 async def bootstrap_flagged(
     request: Request,

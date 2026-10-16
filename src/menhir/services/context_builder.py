@@ -386,7 +386,17 @@ class ContextBuilderService:
                         f"  - {contributor.relation}: {contributor.stated_span} "
                         f"(valid {contributor.valid_at or 'unknown'})"
                     )
-                if verdict.contributors_truncated:
+                if (
+                    verdict.contributors_truncated
+                    and not verdict.contributors
+                    and verdict.contributors_total > 0
+                    and verdict.view_uuid
+                ):
+                    authority_lines.append(
+                        f"  - built from {verdict.contributors_total} items; "
+                        f"drill down: get_scalar_view_items(view_uuid={verdict.view_uuid})"
+                    )
+                elif verdict.contributors_truncated:
                     authority_lines.append(
                         f"  - provenance truncated: {verdict.contributors_total} total; "
                         f"continue at offset {verdict.next_offset} for View {verdict.view_uuid or 'synthetic'}"
