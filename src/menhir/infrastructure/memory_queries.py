@@ -1473,7 +1473,6 @@ class MemoryQueryRepository:
                OR (n:ScalarConsolidationWatermark AND n.namespace = $namespace)
                OR (n:TurnEvidence AND n.namespace = $namespace)
                OR (n:EventConsolidationWatermark AND n.group_id = $namespace)
-               OR (n:CountingConsolidationWatermark AND n.group_id = $namespace)
                OR (n:TypedEventAssertion AND n.namespace = $namespace)
                OR (n:TypedEventAssertionHead
                    AND EXISTS { MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion)

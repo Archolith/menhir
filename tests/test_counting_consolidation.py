@@ -517,8 +517,10 @@ _SRC = Path(cc.__file__).resolve().parents[1] / "infrastructure"
 
 def _wipe_label_counts(path: Path) -> tuple[int, int]:
     text = path.read_text(encoding="utf-8")
-    # a label test used as a node predicate (`w:X`, `n:X`), not a `{group_id: ...}` read/MERGE pattern
-    pat = r"\b[wn]:{label}\b(?!\s*\{{)"
+    # the watermark-reset blocks (`w:X` predicates), not a `{group_id: ...}` read/MERGE pattern. The
+    # namespace cascade's `n:` doomed list is not counted: its reset block already deletes every
+    # watermark keyed by the namespace, counting included.
+    pat = r"\bw:{label}\b(?!\s*\{{)"
     return (len(re.findall(pat.format(label="EventConsolidationWatermark"), text)),
             len(re.findall(pat.format(label="CountingConsolidationWatermark"), text)))
 

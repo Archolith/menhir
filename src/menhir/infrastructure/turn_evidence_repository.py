@@ -616,7 +616,7 @@ class TurnEvidenceRepository:
         rows = self._neo4j.execute(
             """
             MATCH (h:TypedAssertionHead)-[:CURRENT]->(a:TypedAssertion)
-            WHERE a.namespace = $ns AND a.episode_uuid IN $ids
+            WHERE a.episode_uuid IN $ids AND """ + tenant_scope_cypher("a") + """
                   AND coalesce(a.claim_ordinal, 0) = 0
                   AND a.operation IN ['absolute', 'delta', 'expire']
             RETURN a.episode_uuid AS episode_uuid, a.subject_display AS subject,
@@ -626,7 +626,7 @@ class TurnEvidenceRepository:
             ORDER BY a.episode_uuid, a.span_start, a.attribute
             LIMIT $limit
             """,
-            params={"ns": namespace, "ids": ids, "limit": int(limit)},
+            params={"ids": ids, "limit": int(limit), **tenant_scope_params(namespace)},
         )
         return [dict(r) for r in rows]
 

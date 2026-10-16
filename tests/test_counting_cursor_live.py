@@ -146,6 +146,32 @@ def test_identical_recorded_at_tie_breaks_on_turn_id(env):
 
 
 @pytest.mark.online
+def test_namespace_delete_removes_the_counting_cursor(env):
+    # The cascade's watermark-reset block must take the counting cursor with the namespace, or a
+    # re-created namespace would look already counted. Another namespace's cursor survives.
+    from menhir.infrastructure.memory_queries import MemoryQueryRepository
+
+    repo, adapter, ns = env
+    other = f"{ns}-keep"
+    for name in (ns, other):
+        adapter.advance_counting_cursor(
+            name, cursor_at=_iso(3), cursor_uuid="t3", perceiver_version="v1", at=_AT)
+    try:
+        # A group_id that differs from the namespace, so only the reset block (keyed on the
+        # namespace) can remove the cursor -- not the partition's `n.group_id = $group_id` match.
+        MemoryQueryRepository(repo).delete_namespace_with_scalar_cascade(
+            f"{ns}-gid", ns, operation_id=f"op-{ns}")
+        left = repo.execute(
+            "MATCH (w:CountingConsolidationWatermark) WHERE w.group_id IN [$a, $b] "
+            "RETURN w.group_id AS g", {"a": ns, "b": other})
+        assert [r["g"] for r in left] == [other]
+    finally:
+        repo.execute(
+            "MATCH (n) WHERE n.group_id = $b OR n.namespace_key = $a DETACH DELETE n",
+            {"a": ns, "b": other})
+
+
+@pytest.mark.online
 def test_scalar_claims_for_turns_returns_only_current_scalar_lane_claims(env):
     repo, adapter, ns = env
     other = f"{ns}-other"
