@@ -407,6 +407,10 @@ class MemorySettings:
     personal_memory_event_history_authority_enabled: bool = False
     personal_memory_counting_enabled: bool = False
     personal_memory_counting_perceiver_version: str = "v1"
+    # Unit 3a.9: negation/modal guard anchored at the verb, attribute split before overlap grouping,
+    # fenced ALREADY CAPTURED block. Turning it on or off changes the effective counting perceiver
+    # version (configured + "+x2"), so the lane re-reads history.
+    personal_memory_counting_extract_v2: bool = False
     personal_memory_counting_lease_seconds: int = 900
 
     # Benchmark mode — when true, disables the background scheduler,
@@ -959,6 +963,10 @@ class MemorySettings:
                 "MENHIR_PERSONAL_MEMORY_COUNTING_PERCEIVER_VERSION",
                 default=cls.personal_memory_counting_perceiver_version,
             ),
+            personal_memory_counting_extract_v2=parse_bool_env(_getenv(
+                "MENHIR_PERSONAL_MEMORY_COUNTING_EXTRACT_V2",
+                default=str(cls.personal_memory_counting_extract_v2),
+            )),
             personal_memory_counting_lease_seconds=max(1, int(_getenv(
                 "MENHIR_PERSONAL_MEMORY_COUNTING_LEASE_SECONDS",
                 default=str(cls.personal_memory_counting_lease_seconds),

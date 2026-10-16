@@ -28,6 +28,7 @@ from menhir.services.enrichment_failures import (
 from menhir.services.enrichment_steps import record_retention_sources
 from menhir.services.counting_consolidation import (
     CountingConsolidationConfig,
+    effective_counting_perceiver_version,
     run_counting_consolidation,
     sweep_counting_flag_state,
 )
@@ -568,6 +569,7 @@ async def consolidate_personal_memory(
     enable_counting: bool = False,
     counting_perceiver_version: str = "v1",
     counting_lease_seconds: int = 900,
+    counting_extract_v2: bool = False,
 ) -> dict[str, object]:
     """Re-derive count/amount Views from each DIRTY namespace's user turns via the gated perception
     boundary, pinning ALL bias guards on (cross-check + coref + verify) so an automatic write never
@@ -600,7 +602,8 @@ async def consolidate_personal_memory(
     enable_counting = bool(enable_counting and enable_scalar_state)
     if enable_counting:
         pass_details["counting"] = True
-        pass_details["counting_perceiver_version"] = counting_perceiver_version
+        pass_details["counting_perceiver_version"] = effective_counting_perceiver_version(
+            counting_perceiver_version, counting_extract_v2)
     _audit.audit("pass", "start", details=pass_details)
     from menhir.services.perception import Episode, perceive_and_fold
 
@@ -807,6 +810,7 @@ async def consolidate_personal_memory(
                     embed=embed,
                     config=CountingConsolidationConfig(
                         perceiver_version=counting_perceiver_version,
+                        extract_v2=counting_extract_v2,
                         scalar_perceiver_version=scalar_state_perceiver_version,
                         batch_size=scalar_batch_size,
                         max_namespaces=max_namespaces,
