@@ -989,6 +989,7 @@ def extract_typed_scalars_once(
     allowed_operations: "frozenset[str] | None" = OPERATIONS,
     claim_ordinal: int = 0,
     context: str = "",
+    counting_v2: bool = False,
 ) -> list[TypedScalarProposal]:
     """One typed-scalar extraction pass: prose -> validated, grounded `TypedScalarProposal`s.
 
@@ -1035,7 +1036,8 @@ def extract_typed_scalars_once(
     for row in raw_rows:
         proposal = parse_scalar_row(
             row, episodes, _drop,
-            allowed_operations=allowed_operations, claim_ordinal=claim_ordinal)
+            allowed_operations=allowed_operations, claim_ordinal=claim_ordinal,
+            counting_v2=counting_v2)
         if proposal is not None:
             out.append(proposal)
     return out
@@ -1149,6 +1151,7 @@ def _interpretation_label(
 def parse_scalar_row(
     row: Any, episodes: list[Any], drop: "Callable[[str], None]",
     *, allowed_operations: frozenset[str] = OPERATIONS, claim_ordinal: int = 0,
+    counting_v2: bool = False,
 ) -> "TypedScalarProposal | None":
     """Validate ONE raw model row into a grounded proposal, or None with a `drop` reason.
 
@@ -1332,9 +1335,14 @@ def parse_scalar_row(
     # the model emitted. Fails closed: a dropped row can only undercount.
     if operation == "occurrence":
         occurrence_context = _activity_source_context(content, span_start, span_end)
-        if (_ACTIVITY_MODAL_RE.search(occurrence_context)
+        if counting_v2:
+            not_happened = _occurrence_vetoed_v2(content, span_start, span_end)
+        else:
+            not_happened = bool(
+                _ACTIVITY_MODAL_RE.search(occurrence_context)
                 or _FUTURE_REL_RE.search(occurrence_context)
-                or _OCCURRENCE_NEGATED_RE.search(occurrence_context)):
+                or _OCCURRENCE_NEGATED_RE.search(occurrence_context))
+        if not_happened:
             drop("occurrence_not_happened")
             return None
 
@@ -1440,6 +1448,7 @@ def _reconciled_attribute(members: "list[TypedScalarProposal]") -> str:
 
 def _claim_groups(
     samples: "list[list[TypedScalarProposal]]", *, align_spans: bool,
+    split_by_attribute: bool = False,
 ) -> "list[list[tuple[int, TypedScalarProposal]]]":
     """Partition the k samples' proposals into CLAIM groups, in deterministic first-seen order.
 
@@ -1497,26 +1506,36 @@ def _claim_groups(
                         stack.append(nb)
             if len(component) < 2:
                 continue
-            spans = [(flat[i][1].span_start, flat[i][1].span_end) for i in component]
-            sample_ids = [flat[i][0] for i in component]
-            if max(s for s, _ in spans) >= min(e for _, e in spans):
-                continue  # no span common to ALL members
-            if len(set(sample_ids)) != len(sample_ids):
-                continue  # a sample appears twice -- ambiguous, leave it alone
-            common_start = max(s for s, _ in spans)
-            common_end = min(e for _, e in spans)
-            verifiable_text: str | None = None
-            for i in component:
-                proposal = flat[i][1]
-                if len(proposal.stated_span) != proposal.span_end - proposal.span_start:
-                    continue
-                offset = common_start - proposal.span_start
-                verifiable_text = proposal.stated_span[offset:offset + (common_end - common_start)]
-                break
-            if verifiable_text is not None and not re.search(r"\w", verifiable_text, re.UNICODE):
-                continue  # punctuation/whitespace overlap is not a grounded claim anchor
-            groups.append([(flat[i][0], flat[i][1]) for i in sorted(component)])
-            grouped.update(component)
+            parts = [component]
+            if split_by_attribute and len({flat[i][0] for i in component}) != len(component):
+                # v2 (F12): one sample read the span as two happenings. Split the component by
+                # attribute so each reading is its own claim, instead of leaving all ungrouped.
+                by_attr: dict[str, list[int]] = {}
+                for i in component:
+                    by_attr.setdefault(flat[i][1].attribute, []).append(i)
+                if len(by_attr) > 1:
+                    parts = [p for p in by_attr.values() if len(p) >= 2]
+            for part in parts:
+                spans = [(flat[i][1].span_start, flat[i][1].span_end) for i in part]
+                sample_ids = [flat[i][0] for i in part]
+                if max(s for s, _ in spans) >= min(e for _, e in spans):
+                    continue  # no span common to ALL members
+                if len(set(sample_ids)) != len(sample_ids):
+                    continue  # a sample appears twice -- ambiguous, leave it alone
+                common_start = max(s for s, _ in spans)
+                common_end = min(e for _, e in spans)
+                verifiable_text: str | None = None
+                for i in part:
+                    proposal = flat[i][1]
+                    if len(proposal.stated_span) != proposal.span_end - proposal.span_start:
+                        continue
+                    offset = common_start - proposal.span_start
+                    verifiable_text = proposal.stated_span[offset:offset + (common_end - common_start)]
+                    break
+                if verifiable_text is not None and not re.search(r"\w", verifiable_text, re.UNICODE):
+                    continue  # punctuation/whitespace overlap is not a grounded claim anchor
+                groups.append([(flat[i][0], flat[i][1]) for i in sorted(part)])
+                grouped.update(part)
     for i, (si, p) in enumerate(flat):
         if i not in grouped:
             groups.append([(si, p)])
@@ -1589,7 +1608,7 @@ def gate_typed_scalars(
     samples: list[list[TypedScalarProposal]], *, threshold: float = 1.0,
     reconcile_attribute: bool = False, reconcile_scope: bool = False,
     reconcile_subject: bool = False, canonical_self: bool = False,
-    align_spans: bool = False,
+    align_spans: bool = False, counting_v2: bool = False,
 ) -> list[TypedScalarDecision]:
     """SOURCE-CLAIM-FIRST k-sample consistency gate. For each distinct `source_key` seen across the k
     proposal samples, commit ONE interpretation only if it is concentrated:
@@ -1660,7 +1679,7 @@ def gate_typed_scalars(
     # interpretation labels. rep maps (group index, label) -> every proposal that read it, first-seen
     # first, so the committed representative is deterministic regardless of value type (37 vs 37.0
     # normalize equal) and attribute reconciliation has the full candidate set to choose from.
-    groups = _claim_groups(samples, align_spans=align_spans)
+    groups = _claim_groups(samples, align_spans=align_spans, split_by_attribute=counting_v2)
     # The identity fields dropped from the vote, in label order, reconciled together afterwards.
     reconciled_fields = tuple(field for field, enabled in (
         ("subject_text", reconcile_subject),
@@ -1881,6 +1900,86 @@ def _activity_source_context(content: str, span_start: int, span_end: int) -> st
     left_candidates = [text.rfind(mark, 0, span_start) for mark in ".?!;,:\n"]
     left = max(left_candidates, default=-1) + 1
     return text[left:span_end].strip()
+
+
+#: unit 3a.9 (counting extraction v2): words of the clause prefix / grounded span, hyphen- and
+#: apostrophe-joined parts kept whole ("can't", "must-see").
+_V2_WORD_RE = re.compile(r"[^\W\d_]+(?:['’-][^\W\d_]+)*", re.UNICODE)
+_V2_NEGATOR_WORDS = frozenset({"not", "never", "cannot"})
+_V2_MODAL_WORDS = frozenset({
+    "if", "unless", "maybe", "perhaps", "possibly", "might", "could", "would", "should", "will",
+    "shall", "can", "must", "gonna"})
+#: veto only when followed by "to" ("going to", "want to", "plan to", "hope to", "expect to").
+_V2_INTENT_WORDS = frozenset({
+    "want", "wants", "wanted", "plan", "plans", "planned", "planning", "hope", "hopes", "hoped",
+    "hoping", "expect", "expects", "expected", "going"})
+#: adverbs that do not count toward the 3-word window before the span.
+_V2_SKIP_WORDS = frozenset({
+    "really", "actually", "even", "ever", "yet", "still", "finally", "just", "also", "already",
+    "again", "now", "then", "quite", "truly", "totally", "definitely", "probably", "certainly",
+    "always"})
+#: words that may sit between a negator/modal and the happening verb without breaking its scope.
+_V2_LINK_WORDS = frozenset({
+    "i", "we", "you", "he", "she", "they", "it", "i'm", "i've", "i'd", "we're", "we've", "we'd",
+    "you're", "you've", "they're", "they've", "he's", "she's", "it's", "to",
+    "do", "does", "did", "have", "has", "had", "am", "is", "are", "was", "were", "be", "been",
+    "being"})
+
+
+def _v2_is_veto(word: str, following: str) -> bool:
+    if word in _V2_NEGATOR_WORDS or word in _V2_MODAL_WORDS:
+        return True
+    if word.endswith(("n't", "n’t", "'ll", "’ll")):
+        return True
+    if word in _V2_INTENT_WORDS and following == "to":
+        return True
+    base = re.split(r"['’]", word)[0]
+    return base != word and base in _V2_MODAL_WORDS  # would've, could've, should've
+
+
+def _v2_is_transparent(word: str, following: str) -> bool:
+    return word in _V2_SKIP_WORDS or word in _V2_LINK_WORDS or _v2_is_veto(word, following)
+
+
+def _occurrence_vetoed_v2(content: str, span_start: int, span_end: int) -> bool:
+    """Counting extraction v2: True when negation/modal/future wording GOVERNS the happening verb.
+
+    A veto word counts only when it lies inside the grounded span before its first content word, or
+    within the 3 words (adverbs like really/actually/even/ever/yet/still not counted) immediately
+    before the span with only pronouns/auxiliaries/adverbs between it and the span. A bare
+    not/can/will elsewhere in the clause ("I can't believe I finally visited", "Will and I went",
+    "Not only did I finish") does not veto. Relative-future phrases ("next week") stay clause-wide.
+    """
+    prefix = _activity_source_context(content, span_start, span_start)
+    inside = content[span_start:span_end]
+    if _FUTURE_REL_RE.search(f"{prefix} {inside}"):
+        return True
+    before = [w.lower() for w in _V2_WORD_RE.findall(prefix)]
+    within = [w.lower() for w in _V2_WORD_RE.findall(inside)]
+    words = before + within
+    for i in range(len(before), len(words)):
+        nxt = words[i + 1] if i + 1 < len(words) else ""
+        if _v2_is_veto(words[i], nxt):
+            return True
+        if not _v2_is_transparent(words[i], nxt):
+            break
+    counted = 0
+    for i in range(len(before) - 1, -1, -1):
+        word = words[i]
+        if word in _V2_SKIP_WORDS:
+            continue
+        counted += 1
+        if counted > 3:
+            break
+        nxt = words[i + 1] if i + 1 < len(words) else ""
+        if _v2_is_veto(word, nxt):
+            if all(_v2_is_transparent(words[j], words[j + 1] if j + 1 < len(words) else "")
+                   for j in range(i + 1, len(before))):
+                return True
+            break
+        if not _v2_is_transparent(word, nxt):
+            break
+    return False
 
 
 def _activity_clause_context(content: str, span_start: int, span_end: int) -> str:

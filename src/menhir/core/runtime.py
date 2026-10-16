@@ -444,6 +444,8 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         counting_enabled=counting_enabled,
         counting_perceiver_version=getattr(
             settings, "personal_memory_counting_perceiver_version", "v1"),
+        counting_extract_v2=bool(getattr(
+            settings, "personal_memory_counting_extract_v2", False)),
         counting_lease_seconds=getattr(
             settings, "personal_memory_counting_lease_seconds", 900),
         event_history_perceiver_version=getattr(
