@@ -1280,7 +1280,7 @@ class MemoryQueryRepository:
                                 THEN [null] ELSE namespaces END AS ns
                     OPTIONAL MATCH (w)
                     WHERE (w:ConsolidationWatermark OR w:ScalarConsolidationWatermark
-                           OR w:EventConsolidationWatermark)
+                           OR w:EventConsolidationWatermark OR w:CountingConsolidationWatermark)
                       AND (coalesce(w.group_id, w.namespace, '') = ns
                            OR (ns = 'default'
                                AND coalesce(w.group_id, w.namespace, '') = ''))
@@ -1473,6 +1473,7 @@ class MemoryQueryRepository:
                OR (n:ScalarConsolidationWatermark AND n.namespace = $namespace)
                OR (n:TurnEvidence AND n.namespace = $namespace)
                OR (n:EventConsolidationWatermark AND n.group_id = $namespace)
+               OR (n:CountingConsolidationWatermark AND n.group_id = $namespace)
                OR (n:TypedEventAssertion AND n.namespace = $namespace)
                OR (n:TypedEventAssertionHead
                    AND EXISTS { MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion)
@@ -1591,7 +1592,7 @@ class MemoryQueryRepository:
                 UNWIND namespaces AS ns
                 OPTIONAL MATCH (w)
                 WHERE (w:ConsolidationWatermark OR w:ScalarConsolidationWatermark
-                       OR w:EventConsolidationWatermark)
+                       OR w:EventConsolidationWatermark OR w:CountingConsolidationWatermark)
                   AND (coalesce(w.group_id, w.namespace, '') = ns
                        OR (ns = 'default'
                            AND coalesce(w.group_id, w.namespace, '') = ''))

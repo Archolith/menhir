@@ -396,8 +396,10 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
     personal_memory_enabled = getattr(settings, "personal_memory_consolidation_enabled", False)
     event_history_enabled = getattr(settings, "personal_memory_event_history_enabled", False)
     scalar_state_enabled = getattr(settings, "personal_memory_scalar_state_enabled", False)
+    counting_enabled = getattr(settings, "personal_memory_counting_enabled", False)
     personal_memory_llm = None
-    if (personal_memory_enabled or event_history_enabled or scalar_state_enabled) and settings is not None:
+    if (personal_memory_enabled or event_history_enabled or scalar_state_enabled
+            or counting_enabled) and settings is not None:
         from menhir.infrastructure.sync_llm import make_sync_chat
 
         pm_model = getattr(settings, "personal_memory_consolidation_chat_model", "") or None
@@ -435,6 +437,7 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         verifier_context=verifier_context,
         personal_memory_enabled=personal_memory_enabled,
         event_history_enabled=event_history_enabled,
+        counting_enabled=counting_enabled,
         event_history_perceiver_version=getattr(
             settings, "personal_memory_event_history_perceiver_version", "v1"),
         personal_memory_interval_s=getattr(settings, "personal_memory_consolidation_interval_s", 300.0),

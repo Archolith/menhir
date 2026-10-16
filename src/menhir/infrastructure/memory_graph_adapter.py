@@ -1670,6 +1670,35 @@ class MemoryGraphAdapter:
             namespace, cursor_at=cursor_at, cursor_uuid=cursor_uuid,
             perceiver_version=perceiver_version, at=at)
 
+    # --- counting-consolidation cursor (counting lane; never reads past the scalar cursor) ---
+    def list_counting_dirty_namespaces(
+        self, *, perceiver_version: str, scalar_perceiver_version: str, limit: int = 200,
+    ) -> list[str]:
+        return self._turn_evidence.list_counting_dirty_evidence_namespaces(
+            perceiver_version=perceiver_version,
+            scalar_perceiver_version=scalar_perceiver_version, limit=limit)
+
+    def load_next_counting_batch(
+        self, namespace: str, *, perceiver_version: str, scalar_perceiver_version: str,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        return self._turn_evidence.load_next_counting_evidence_batch(
+            namespace, perceiver_version=perceiver_version,
+            scalar_perceiver_version=scalar_perceiver_version, limit=limit)
+
+    def advance_counting_cursor(
+        self, namespace: str, *, cursor_at: str, cursor_uuid: str,
+        perceiver_version: str, at: str,
+    ) -> None:
+        self._turn_evidence.advance_counting_cursor(
+            namespace, cursor_at=cursor_at, cursor_uuid=cursor_uuid,
+            perceiver_version=perceiver_version, at=at)
+
+    def scalar_claims_for_turns(
+        self, namespace: str, turn_ids: list[str], *, limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        return self._turn_evidence.scalar_claims_for_turns(namespace, turn_ids, limit=limit)
+
     # --- selective :TurnEvidence capture (ADR 0001) ---
     def record_turn_evidence(self, **kwargs: Any) -> dict[str, Any]:
         return self._turn_evidence.record_turn_evidence(**kwargs)

@@ -14,6 +14,8 @@ from enum import Enum
 from typing import Any, Callable
 
 from menhir.domain.typed_assertion import (
+    COUNTABLE_KINDS,
+    IMPORTANCE_LEVELS,
     NUMERIC_KINDS,
     OPERATIONS,
     TypedAssertion,
@@ -432,6 +434,7 @@ class TypedScalarProposal:
     when: str | None = None
     display: str = ""
     claim_ordinal: int = 0
+    importance: str = ""
 
     @property
     def slot_key(self) -> tuple[str, str, str, str]:
@@ -982,6 +985,10 @@ def _span_states_value(value: Any, stated_span: str) -> bool:
 def extract_typed_scalars_once(
     episodes: list[Any], llm_complete: LlmComplete,
     *, on_drop: "Callable[[str], None] | None" = None,
+    system_prompt: "str | None" = TYPED_SCALAR_SYSTEM_PROMPT,
+    allowed_operations: "frozenset[str] | None" = OPERATIONS,
+    claim_ordinal: int = 0,
+    context: str = "",
 ) -> list[TypedScalarProposal]:
     """One typed-scalar extraction pass: prose -> validated, grounded `TypedScalarProposal`s.
 
@@ -1007,12 +1014,18 @@ def extract_typed_scalars_once(
     audit emit lives with the other emits in the caller."""
     if not episodes:
         return []
+    # None means "scalar lane defaults" (callers forward optional lane selectors unchanged).
+    if system_prompt is None:
+        system_prompt = TYPED_SCALAR_SYSTEM_PROMPT
+    if allowed_operations is None:
+        allowed_operations = OPERATIONS
 
     def _drop(reason: str) -> None:
         if on_drop is not None:
             on_drop(reason)
     log = "\n".join(f"[{i}] {getattr(e, 'content', '')}" for i, e in enumerate(episodes))
-    raw_rows, parse_failure = _parse_json_array(llm_complete(TYPED_SCALAR_SYSTEM_PROMPT, log))
+    user_message = f"{context}\n\n{log}" if context else log
+    raw_rows, parse_failure = _parse_json_array(llm_complete(system_prompt, user_message))
     if parse_failure is not None:
         _drop(parse_failure)
     else:
@@ -1020,7 +1033,9 @@ def extract_typed_scalars_once(
 
     out: list[TypedScalarProposal] = []
     for row in raw_rows:
-        proposal = parse_scalar_row(row, episodes, _drop)
+        proposal = parse_scalar_row(
+            row, episodes, _drop,
+            allowed_operations=allowed_operations, claim_ordinal=claim_ordinal)
         if proposal is not None:
             out.append(proposal)
     return out
@@ -1133,6 +1148,7 @@ def _interpretation_label(
 
 def parse_scalar_row(
     row: Any, episodes: list[Any], drop: "Callable[[str], None]",
+    *, allowed_operations: frozenset[str] = OPERATIONS, claim_ordinal: int = 0,
 ) -> "TypedScalarProposal | None":
     """Validate ONE raw model row into a grounded proposal, or None with a `drop` reason.
 
@@ -1158,7 +1174,7 @@ def parse_scalar_row(
         return None
     attribute = attribute.lower()
     operation = operation.lower()
-    if not _SNAKE_RE.match(attribute) or operation not in OPERATIONS:
+    if not _SNAKE_RE.match(attribute) or operation not in allowed_operations:
         drop("bad_attribute_or_operation")
         return None
     attribute = _canon_attribute(attribute, stated_span)
@@ -1186,12 +1202,41 @@ def parse_scalar_row(
         return None  # unresolvable provenance -> cannot ground
 
     count_value_unresolved = False
+    importance = ""
     normalized_frequency = (
         _normalize_interval_frequency(stated_span)
         if value_kind == "frequency" and operation != "delta"
         else None
     )
-    if normalized_frequency is not None:
+    if operation == "occurrence":
+        if value_kind not in COUNTABLE_KINDS:
+            drop("occurrence_kind_not_countable")
+            return None
+        raw_importance = row.get("importance")
+        importance = raw_importance.strip().lower() if isinstance(raw_importance, str) else ""
+        if importance not in IMPORTANCE_LEVELS:
+            drop("bad_importance")
+            return None
+        raw_value = row.get("value")
+        if value_kind == "count":
+            unit = ""
+            if raw_value is None:
+                value = 1
+            else:
+                value = _occurrence_count_value(raw_value)
+                if value is None:
+                    drop("value_failed_validation")
+                    return None
+                if value != 1 and not _span_states_value(value, stated_span):
+                    drop("value_not_in_span")
+                    return None
+        else:
+            unit = _money_currency_from_source(stated_span)
+            if unit is None:
+                drop("money_currency_unresolved")
+                return None
+            value = _money_value(raw_value, "delta")
+    elif normalized_frequency is not None:
         value, unit = normalized_frequency
     elif value_kind == "duration":
         normalized_duration = _duration_value(row.get("value"), unit, operation)
@@ -1272,7 +1317,7 @@ def parse_scalar_row(
     # typed schema for a hypothetical total or a single event, but those are not durable cumulative
     # scalars.  Use only the punctuation-delimited clause prefix ending at the grounded span so a
     # modal in trailing text cannot veto an otherwise valid observation.
-    activity_rejection = _activity_scalar_admission_reason(
+    activity_rejection = None if operation == "occurrence" else _activity_scalar_admission_reason(
         attribute=attribute,
         value_kind=value_kind,
         operation=operation,
@@ -1282,6 +1327,16 @@ def parse_scalar_row(
     if activity_rejection is not None:
         drop(activity_rejection)
         return None
+    # An occurrence must be a happening that took place. Planned, hypothetical or negated wording in
+    # the grounded clause ("I'm going to visit", "if I visit", "I didn't visit") is not one, whatever
+    # the model emitted. Fails closed: a dropped row can only undercount.
+    if operation == "occurrence":
+        occurrence_context = _activity_source_context(content, span_start, span_end)
+        if (_ACTIVITY_MODAL_RE.search(occurrence_context)
+                or _FUTURE_REL_RE.search(occurrence_context)
+                or _OCCURRENCE_NEGATED_RE.search(occurrence_context)):
+            drop("occurrence_not_happened")
+            return None
 
     # Hedged-value abstention: an underdetermined statement ("about 30 or 40", "around 7, sometimes
     # 7:30") must not become an exact scalar. Drop it here (span-local + deterministic) so the gate
@@ -1329,8 +1384,26 @@ def parse_scalar_row(
         span_end=span_end,
         when=when,
         display=display,
-        claim_ordinal=0,
+        claim_ordinal=claim_ordinal,
+        importance=importance,
     )
+
+
+def _occurrence_count_value(raw: Any) -> "int | None":
+    """A model-stated occurrence count as an int >= 1, or None when it is not one."""
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        number = raw
+    elif isinstance(raw, float):
+        if not math.isfinite(raw) or raw != int(raw):
+            return None
+        number = int(raw)
+    elif isinstance(raw, str) and re.fullmatch(r"\d+", raw.strip()):
+        number = int(raw.strip())
+    else:
+        return None
+    return number if number >= 1 else None
 
 
 def _reconciled_identity(
@@ -1658,6 +1731,11 @@ def gate_typed_scalars(
             )
         if align_spans:
             proposal = _canonical_aligned_proposal(proposal, candidates)
+        if proposal.operation == "occurrence":
+            levels = Counter(c.importance for c in candidates)
+            rank = {"tracked": 2, "notable": 1, "routine": 0}
+            best = max(levels, key=lambda lv: (levels[lv], rank.get(lv, -1)))
+            proposal = replace(proposal, importance=best)
         # Under span alignment the proposal is grounded to the deterministic common source span, so
         # the durable identity is independent of which sample happened to be seen first.
         sk = proposal.source_key
@@ -1773,6 +1851,10 @@ _ACTIVITY_MODAL_RE = re.compile(
     r"want(?:s|ed)?\s+to|plan(?:s|ned|ning)?\s+to|hope(?:s|d|ing)?\s+to|"
     r"expect(?:s|ed)?\s+to|going\s+to|gonna)\b",
     re.I,
+)
+#: grammatical negation of a happening ("I didn't go", "I never visited", "I haven't been").
+_OCCURRENCE_NEGATED_RE = re.compile(
+    r"\b(?:didn['’]t|did\s+not|never|haven['’]t|have\s+not|hasn['’]t|has\s+not|not)\b", re.I,
 )
 _ACTIVITY_EXACT_COUNT_CUE_RE = re.compile(
     r"\b(?:\d+(?:\.\d+)?|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|"
@@ -2335,4 +2417,5 @@ def _assertion_from_proposal(
         # deterministic, span-local correction classification (NOT an LLM field; out of identity keys)
         absolute_semantics=classify_absolute_semantics(p.stated_span, p.operation),
         name_embedding=name_embedding, embed_version=embed_version,
+        importance=p.importance,
     )

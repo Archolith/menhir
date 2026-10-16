@@ -295,13 +295,21 @@ class ScalarStateService:
             # lie or double up. Guarded on the View uuid + an anchor; a mid-rebuild crash self-heals on
             # the next rebuild's redraw. Best-effort: an edge-draw failure must not fail the rebuild
             # (the View + its stamped provenance list are already durable).
+            # A counted View (basis="counted") has no anchor: its contributing occurrences are drawn
+            # as CONTRIBUTED_TO and the absorbed ones (double-count guard) as SUPERSEDED_ANCHOR.
+            # Stated Views pass empty occurrence lists, so their edges are unchanged.
             view_uuid = res.get("uuid")
-            if view_uuid and state.anchor_id and hasattr(self._views, "draw_scalar_state_provenance_edges"):
+            occurrence_ids = list(getattr(state, "contributed_occurrence_ids", ()) or ())
+            if (view_uuid and (state.anchor_id or occurrence_ids)
+                    and hasattr(self._views, "draw_scalar_state_provenance_edges")):
                 try:
                     self._views.draw_scalar_state_provenance_edges(
                         view_uuid=str(view_uuid), anchor_id=state.anchor_id,
-                        contributed_delta_ids=list(state.contributed_delta_ids),
-                        superseded_anchor_ids=list(state.superseded_anchor_ids),
+                        contributed_delta_ids=(list(state.contributed_delta_ids)
+                                               + occurrence_ids),
+                        superseded_anchor_ids=(
+                            list(state.superseded_anchor_ids)
+                            + list(getattr(state, "absorbed_occurrence_ids", ()) or ())),
                     )
                 except Exception:  # noqa: BLE001 - provenance edges are advisory; never fail a rebuild
                     logger.exception(

@@ -104,6 +104,7 @@ async def phase3_run_impl(
             settings, "personal_memory_scalar_deterministic_classes", ()),
         enable_event_history=getattr(
             settings, "personal_memory_event_history_enabled", False),
+        enable_counting=getattr(settings, "personal_memory_counting_enabled", False),
         event_history_perceiver_version=getattr(
             settings, "personal_memory_event_history_perceiver_version", "v1"),
         event_batch_size=getattr(
@@ -138,6 +139,7 @@ async def phase3_run_impl(
         scalar_repair_pending=int(result.get("scalar_repair_pending", 0) or 0),
         event_history_enabled=bool(
             getattr(settings, "personal_memory_event_history_enabled", False)),
+        counting_enabled=bool(getattr(settings, "personal_memory_counting_enabled", False)),
         event_namespaces_processed=int(
             result.get("event_namespaces_processed", 0) or 0),
         event_namespaces_failed=int(

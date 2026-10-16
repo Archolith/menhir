@@ -702,8 +702,16 @@ class TypedScalarPerceptionService:
         reconcile_scope: bool = True,
         reconcile_subject: bool = True,
         canonical_self: bool = False,
+        system_prompt: str | None = None,
+        allowed_operations: frozenset[str] | None = None,
+        claim_ordinal: int = 0,
+        context: str = "",
     ) -> dict[str, Any]:
         """Perceive typed scalars from `episodes` and durably persist the committed, bound ones.
+
+        `system_prompt` / `allowed_operations` / `claim_ordinal` / `context` select the lane: the
+        defaults are the scalar lane; the counting lane passes its own prompt, occurrence-only
+        operations, claim ordinal 1 and the page's already-stored scalar claims as context.
         Activation is enforced FIRST â€” if it is refused (legacy store) or the schema is not ready, we
         raise and record nothing. `k` must be a real integer >= 1 (bool/zero/negative fail closed
         rather than silently collapsing to one sample); k samples require temp>0 in `llm_complete` to
@@ -841,7 +849,10 @@ class TypedScalarPerceptionService:
                     logger.exception("deterministic router audit emit failed (best-effort)")
 
         samples = [
-            extract_typed_scalars_once(llm_episodes, llm_complete, on_drop=_note_drop)
+            extract_typed_scalars_once(
+                llm_episodes, llm_complete, on_drop=_note_drop,
+                system_prompt=system_prompt, allowed_operations=allowed_operations,
+                claim_ordinal=claim_ordinal, context=context)
             for _ in range(k)
         ] if llm_episodes or not router_enabled else []
         kept = sum(len(s) for s in samples)

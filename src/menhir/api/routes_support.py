@@ -704,6 +704,7 @@ class Phase3RunResponse(BaseModel):
     scalar_advisory: int = 0
     scalar_repair_pending: int = 0
     event_history_enabled: bool = False
+    counting_enabled: bool = False
     event_namespaces_processed: int = 0
     event_namespaces_failed: int = 0
     event_assertions_recorded: int = 0

@@ -1,3 +1,14 @@
+## 2026-10-15 - Add a counting lane that records single happenings after the scalar phase
+
+- New flag `personal_memory_counting_enabled` (`MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED`), default off, requires scalar state. Plumbed through `config/feature_flags.py`, `config/settings_model.py`, `core/runtime.py`, `services/maintenance_scheduler.py`, `api/routes_handlers.py`, `api/routes_support.py` and `.env.example`.
+- `services/counting_consolidation.py` (new): runs in `scheduler_tasks.consolidate_personal_memory` right after the scalar phase, sharing its call counter and budget, so counting goes without when the budget runs out. It stores `occurrence` claims only, with its own prompt and claim ordinal 1, so a counting claim never shares a head with a scalar claim on the same span. Each page's prompt lists the scalar claims already stored for those turns ("already captured"). Off: no calls, no counting watermark, no `counting_*` result keys or audit fields.
+- `infrastructure/turn_evidence_repository.py` + adapter: own `:CountingConsolidationWatermark` cursor whose loader only returns turns at or before the scalar cursor for the scalar version in effect; no scalar cursor or another scalar version pauses counting. New bounded `scalar_claims_for_turns`. The label is added to every watermark wipe (namespace delete, merge/unmerge resets, scalar purge).
+- `services/typed_scalar_rules.py`: lane parameters on `extract_typed_scalars_once` / `parse_scalar_row` (defaults keep the scalar lane unchanged); occurrence rows parsed with an importance; a planned, hypothetical or negated clause is dropped as `occurrence_not_happened`; the gate takes the majority importance among agreeing samples, ties to the higher level.
+- `services/typed_scalar_service.py`: `perceive_and_persist` forwards the lane parameters. `typed_assertion_repair_repository.py` / `typed_scalar_persistence.py`: pending-binding repair keeps `importance`.
+- `services/scalar_state_service.py`: a counted View (no anchor) now gets provenance edges: its occurrences as `CONTRIBUTED_TO`, absorbed ones as `SUPERSEDED_ANCHOR`. Stated Views are unchanged. Counted Views stay advisory in recall.
+- Tests: new `tests/test_counting_extraction.py`, `tests/test_counting_consolidation.py`, `tests/test_counting_cursor_live.py` (online).
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-10-15 - Store single happenings as scalar occurrences and count them where no total was stated
 
 - `domain/typed_assertion.py`: new operation `occurrence` (one happening on a `count` or `money` slot; value a positive integer or a positive amount) with an `importance` of `tracked`, `notable` or `routine`, kept out of every identity key. `OPERATIONS` is unchanged, so the scalar parser still drops an occurrence row; stored assertions validate against the new `ASSERTION_OPERATIONS`.
@@ -97,10 +108,4 @@
 
 - `src/menhir/infrastructure/graphiti_llm_adapter.py`: the provider wrapper removes `merge_audit`, `merged_from` and `last_merge_op_id` from tagged JSON blocks before a Graphiti request is sent. The fork serializes entity attributes into its dedup and summary contexts, so the merge audit trail rode along and grew with every merge (64% of the dedup candidate block in AMA runs; one 131k-char NodeResolutions prompt). In a 60-call replay, dropping it matched the control consensus as often as a fresh control run and cut dedup input about 79%. Prompts without lineage are sent unchanged.
 - `tests/infrastructure/test_merge_lineage_prompt_policy.py`: renders the real fork dedup and summary prompts with lineage-carrying nodes; only lineage is removed and the rest of the prompt is byte-identical.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-09-29 - Give verdict LLM calls room to answer on reasoning models
-
-- `src/menhir/infrastructure/llm.py`: the identity judge, contradiction check and shadow tie-break use a shared `_VERDICT_MAX_TOKENS` (1024) instead of 64/64/128. On reasoning models `max_tokens` also covers hidden reasoning, so most identity-judge calls ended empty and became `None` votes that route merges to conflict (#203). `_chat_text` now warns when a completion comes back empty, naming the operation and budget.
-- `tests/infrastructure/test_verdict_budget_203.py`: a simulated reasoning model that answers only above a reasoning budget, the empty-completion warning, and the unchanged fail-safe `None` for a real empty answer.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
