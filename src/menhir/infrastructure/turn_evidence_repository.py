@@ -728,7 +728,24 @@ class TurnEvidenceRepository:
     def counting_flag_sweep_targets(
         self, *, enabled: bool, namespaces: list[str] | None, limit: int,
     ) -> list[str]:
-        """Namespaces whose recorded flag state differs from `enabled` (need a rebuild sweep)."""
+        """Namespaces whose recorded flag state differs from `enabled` (need a rebuild sweep).
+        First records a create-only enabled=true marker for any namespace that holds current
+        occurrence assertions but no marker (counted before markers existed), so the off-sweep
+        can find it. Uses the TypedAssertion(operation) index."""
+        params = {"namespaces": None if namespaces is None else [str(n) for n in namespaces]}
+        self._neo4j.execute(
+            """
+            MATCH (h:TypedAssertionHead)-[:CURRENT]->(a:TypedAssertion {operation: 'occurrence'})
+            WHERE coalesce(a.claim_ordinal, 0) = 1
+            WITH DISTINCT a.namespace AS ns
+            WHERE ns IS NOT NULL AND ns <> ''
+              AND ($namespaces IS NULL OR ns IN $namespaces)
+              AND NOT EXISTS { MATCH (:CountingFlagState {namespace_key: ns}) }
+            MERGE (m:CountingFlagState {namespace_key: ns})
+            ON CREATE SET m.group_id = ns, m.enabled = true, m.updated_at = datetime()
+            """,
+            params=params,
+        )
         rows = self._neo4j.execute(
             """
             MATCH (m:CountingFlagState)

@@ -389,6 +389,7 @@ ENTITY_METADATA_FIELDS = (
     "n.view_audience AS view_audience",
     # Counted scalar Views are hidden from recall when the counting flag is off.
     "n['scalar_basis'] AS scalar_basis",
+    "n['sh_op_counts'] AS sh_op_counts",
     "coalesce(n.retired, false) AS retired",
     "coalesce(n.is_view, false) AS is_view",
     "n.episode_uuids AS episode_uuids",

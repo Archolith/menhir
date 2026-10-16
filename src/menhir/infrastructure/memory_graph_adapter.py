@@ -2320,6 +2320,8 @@ class MemoryGraphAdapter:
 
     def fetch_scalar_authority_contributors(self, **kwargs: Any) -> dict[str, Any]:
         """Bounded labeled provenance for the structured authority layer (Phase 4c/7.J)."""
+        # Counting off: occurrence contributors stay hidden on every read (kill switch).
+        kwargs.setdefault("include_occurrences", bool(self.counting_enabled))
         return self._views.fetch_scalar_authority_contributors(**kwargs)
 
     def scalar_view_has_user_foundation(self, **kwargs: Any) -> bool:
@@ -2373,6 +2375,7 @@ class MemoryGraphAdapter:
         return self._views.draw_scalar_history_entries(**kwargs)
 
     def list_scalar_history_entries(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.setdefault("include_occurrences", bool(self.counting_enabled))  # kill switch
         return self._views.list_scalar_history_entries(**kwargs)
 
     def record_timeline(self, **kwargs: Any) -> dict[str, Any]:

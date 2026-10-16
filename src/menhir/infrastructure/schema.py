@@ -413,6 +413,9 @@ def get_scalar_state_activation_queries() -> list[str]:
         "FOR (w:CountingConsolidationWatermark) REQUIRE w.group_id IS UNIQUE",
         "CREATE CONSTRAINT counting_flag_state_namespace_unique IF NOT EXISTS "
         "FOR (m:CountingFlagState) REQUIRE m.namespace_key IS UNIQUE",
+        # The flag sweep finds namespaces holding occurrence assertions with this index each pass.
+        "CREATE INDEX typed_assertion_operation_idx IF NOT EXISTS "
+        "FOR (a:TypedAssertion) ON (a.operation)",
     ]
 
 

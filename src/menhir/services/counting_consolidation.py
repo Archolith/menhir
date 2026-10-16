@@ -284,15 +284,21 @@ def run_counting_consolidation(
                         run_id=run_id, incarnation=incarnation, epoch=epoch,
                     )
                     for subject in retired_subjects:
-                        state_service.rebuild_scalar_state(subject, namespace=namespace)
-                    # Fence check + fresh lease before the slow LLM step and its writes.
-                    if not graph_adapter.renew_counting_claim(
-                        namespace, run_id=run_id, incarnation=incarnation, epoch=epoch,
-                        lease_seconds=config.lease_seconds,
-                        now=datetime.now(timezone.utc).isoformat(),
-                    ):
-                        raise CountingFenceLost(
-                            f"counting claim for {namespace} was lost before perception")
+                        _rebuild_subject(state_service, subject, namespace,
+                                         history=config.scalar_history_enabled)
+
+                    def _fence(ns: str = namespace, inc: str = incarnation, ep: int = epoch) -> None:
+                        # Renew-as-check: refuses unless this run still owns the same watermark.
+                        if not graph_adapter.renew_counting_claim(
+                            ns, run_id=run_id, incarnation=inc, epoch=ep,
+                            lease_seconds=config.lease_seconds,
+                            now=datetime.now(timezone.utc).isoformat(),
+                        ):
+                            raise CountingFenceLost(f"counting claim for {ns} was lost")
+
+                    # Fence check + fresh lease before the slow LLM step, then again before every
+                    # occurrence write (write_guard) so a lease lost mid-LLM stores nothing.
+                    _fence()
                     episodes = build_episodes(rows)
                     if episodes:
                         claims = graph_adapter.scalar_claims_for_turns(
@@ -316,6 +322,7 @@ def run_counting_consolidation(
                             allowed_operations=COUNTING_OPERATIONS,
                             claim_ordinal=COUNTING_CLAIM_ORDINAL,
                             context=build_counting_context(episodes, claims),
+                            write_guard=_fence,
                         )
                         occurrences_stored += int(perception.get("bound", 0))
                         advisory += int(perception.get("advisory", 0))
@@ -378,6 +385,15 @@ def run_counting_consolidation(
     }
 
 
+def _rebuild_subject(state_service: Any, subject: str, namespace: str, *, history: bool) -> None:
+    """Rebuild one subject's projections; history Views too when that lane is on, since they also
+    list occurrences."""
+    if history:
+        state_service.rebuild_scalar_projections(subject, namespace=namespace, history_enabled=True)
+    else:
+        state_service.rebuild_scalar_state(subject, namespace=namespace)
+
+
 def sweep_counting_flag_state(
     graph_adapter: CountingConsolidationGraph,
     *,
@@ -404,7 +420,7 @@ def sweep_counting_flag_state(
                 subjects = graph_adapter.counting_sweep_subjects(
                     namespace, limit=subject_limit, after=after)
                 for subject in subjects:
-                    svc.rebuild_scalar_state(subject, namespace=namespace)
+                    _rebuild_subject(svc, subject, namespace, history=scalar_history_enabled)
                     rebuilt += 1
                 if len(subjects) < subject_limit:
                     break

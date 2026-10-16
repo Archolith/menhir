@@ -138,16 +138,28 @@ def _money_decimal(value: Any) -> Decimal | None:
     return result if result.is_finite() else None
 
 
+def _turn_key(row: dict[str, Any]) -> str:
+    """The turn a row was read from. `grounding_id` is the raw grounding (the TurnEvidence turn_id for
+    turn-grounded rows); `episode_uuid` is only the admitting Episodic and is empty for most hook
+    turns, so it cannot identify the turn."""
+    return str(row.get("grounding_id") or row.get("episode_uuid") or "")
+
+
+def _source_keys(row: dict[str, Any]) -> set[str]:
+    """Every id the row's source is known by: raw grounding and admitting Episodic."""
+    return {str(row.get("grounding_id") or ""), str(row.get("episode_uuid") or "")} - {""}
+
+
 def _dedup_occurrences_per_turn(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep at most one occurrence per (subject, attribute, value_kind, unit, episode), ignoring scope.
+    """Keep at most one occurrence per (subject, attribute, value_kind, unit, turn), ignoring scope.
     Survivor: largest value, then scope == "", then smallest assertion_id. Other rows pass through."""
     groups: dict[tuple, list[dict[str, Any]]] = {}
     for row in rows:
-        episode = str(row.get("episode_uuid") or "")
-        if str(row.get("operation")) != "occurrence" or not episode:
+        turn = _turn_key(row)
+        if str(row.get("operation")) != "occurrence" or not turn:
             continue
         s = _slot_of(row)
-        groups.setdefault((s[0], s[1], s[3], s[4], episode), []).append(row)
+        groups.setdefault((s[0], s[1], s[3], s[4], turn), []).append(row)
     dropped: set[int] = set()
     for members in groups.values():
         if len(members) < 2:
@@ -364,10 +376,12 @@ def _fold_counted(
     if value_kind not in COUNTABLE_KINDS:
         result.abstentions.append(Abstention(slot_key, NOT_COUNTABLE, subject_uuid))
         return
-    claimed_turns = {str(d.get("episode_uuid") or "") for d in deltas} - {""}
+    # A delta claims every id its source is known by (raw grounding AND admitting Episodic), so an
+    # episode-grounded delta still absorbs a turn-grounded occurrence of the same admitted turn.
+    claimed_turns = {k for d in deltas for k in _source_keys(d)}
     applied = [
         o for o in occurrences
-        if str(o.get("episode_uuid") or "") not in claimed_turns and _is_number(o.get("value"))
+        if not (_source_keys(o) & claimed_turns) and _is_number(o.get("value"))
     ]
     applied_ids = {str(o.get("assertion_id") or "") for o in applied}
     absorbed_ids = sorted(

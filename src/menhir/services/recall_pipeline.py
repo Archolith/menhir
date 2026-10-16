@@ -87,6 +87,7 @@ from menhir.services.recall_policies import (
     _render_scalar_history_content,
     _repo_path_for,
     _scalar_history_evidence_days_ago,
+    _scalar_history_has_occurrences,
     _scalar_history_records_change,
     _select_candidate_content,
     _staleness_evidence_for,
@@ -766,11 +767,11 @@ async def run_recall(
         # through vector/entity retrieval.
         if meta.get("view_kind") == "scalar_history" and not service.scalar_history_enabled:
             continue
-        # Counted scalar_state Views are hidden when counting is OFF (read-side kill switch).
-        if (
-            meta.get("view_kind") == "scalar_state"
-            and meta.get("scalar_basis") == "counted"
-            and not service.counting_enabled
+        # Counted scalar_state Views, and history Views listing occurrences, are hidden when
+        # counting is OFF (read-side kill switch).
+        if not service.counting_enabled and (
+            (meta.get("view_kind") == "scalar_state" and meta.get("scalar_basis") == "counted")
+            or (meta.get("view_kind") == "scalar_history" and _scalar_history_has_occurrences(meta))
         ):
             continue
         # Defense-in-depth: if namespace is explicitly set, filter candidates by namespace.
@@ -862,6 +863,8 @@ async def run_recall(
                 service.graph_adapter.search_assertion_embeddings,
                 obs_vec, limit=10, namespaces=[stamped_namespace(namespace)],
             )
+            if not service.counting_enabled:  # counting off: occurrence rows never enter recall
+                obs_hits = [h for h in obs_hits if str(h.get("operation")) != "occurrence"]
             existing_uuids = (
                 {str(c["uuid"]) for c in candidate_inputs}
                 if service.scalar_view_authority_enabled else set()
@@ -1373,6 +1376,8 @@ async def run_recall(
                 )
                 if not hv or not _projection_is_recall_eligible(hv):
                     continue
+                if not service.counting_enabled and _scalar_history_has_occurrences(hv):
+                    continue  # built with counting on; stale until the flag sweep rebuilds it
                 if not _scalar_history_records_change(hv):
                     continue  # one restated value is not history (#243)
                 huuid = str(hv.get("uuid") or "").strip()

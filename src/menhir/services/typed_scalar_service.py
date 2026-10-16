@@ -706,6 +706,7 @@ class TypedScalarPerceptionService:
         allowed_operations: frozenset[str] | None = None,
         claim_ordinal: int = 0,
         context: str = "",
+        write_guard: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         """Perceive typed scalars from `episodes` and durably persist the committed, bound ones.
 
@@ -917,10 +918,17 @@ class TypedScalarPerceptionService:
         else:
             _rebuild = lambda u: self._service.rebuild_scalar_state(
                 u, namespace=namespace, as_of=as_of)
+        record_assertion = self._adapter.record_typed_assertion
+        if write_guard is not None:
+            # Counting lane: re-check the namespace fence before every assertion write, so a run
+            # whose lease or watermark was lost during the LLM step stores nothing.
+            def record_assertion(*args: Any, _record=record_assertion, **kwargs: Any) -> Any:
+                write_guard()
+                return _record(*args, **kwargs)
         out = bind_and_persist_typed_scalars(
             decisions,
             linked_entities_for_episode=self._adapter.fetch_linked_entities_for_episode,
-            record_assertion=self._adapter.record_typed_assertion,
+            record_assertion=record_assertion,
             rebuild_scalar_state=_rebuild,
             episode_reference_time=episode_reference_time,
             namespace=namespace, perceiver_version=self._perceiver_version,
