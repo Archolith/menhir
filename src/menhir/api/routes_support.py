@@ -761,6 +761,7 @@ _BACKEND_METHODS = {
     "recall",
     "recall_history",
     "recall_timeline",
+    "get_scalar_view_items",
     "build_context",
     "view_entropy",
     "fetch_memory_by_uuid",

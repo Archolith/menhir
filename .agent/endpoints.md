@@ -480,6 +480,17 @@ Navigate a recorded-time thread of saved memories on demand: page around an inst
 - Read-only: no access updates, no ranking changes.
 - Returns compact JSON with `thread`, `count`, and `entries[]` (`recorded_at`, `headline`, `uuid`, `source`, `is_anchor`, optional `content`/`facts`), plus `prev_cursor`/`next_cursor` when more pages exist, the `subject` when resolved, and `histories[]` (typed scalar/event pages) for subject threads. A `note` is set when a `query` seed matched nothing.
 
+### `get_scalar_view_items`
+Concept id: `mcp.tool.get_scalar_view_items`
+
+Drill into a scalar View from recall's `authority_layer` (a count or a current value) and page the items it was built from. With `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_COLLAPSE_ENABLED` on, counted Views omit their items from recall and render `built from N items; drill down: get_scalar_view_items(view_uuid=...)`.
+- **`view_uuid`** (str, required): The verdict's `view_uuid`.
+- **`offset`** (int, optional): Offset into the items (default: 0).
+- **`limit`** (int, optional): Max items per page (default: 20, max: 50).
+- Namespace-scoped (subject to the client pin); a View in another silo returns no items. Occurrences stay hidden when counting is off.
+- Read-only: no access updates, no ranking changes. REST: `GET /api/scalar-views/{view_uuid}/items`.
+- Returns `view_uuid`, `kind` (`scalar_state`, `scalar_history`, or null when nothing is found), `total`, `offset`, `next_offset`, and `items[]` (`assertion_id`, `relation`, `operation`, `value`, `quote`, `valid_at`, `evidence_tier`, `episode_uuid`).
+
 ### `flag_memory`
 Concept id: `mcp.tool.flag_memory`
 

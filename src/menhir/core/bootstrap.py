@@ -239,6 +239,7 @@ def build_memory_services(
         ingest_service=ingest_service,
         lifecycle_service=lifecycle_service,
         scalar_view_authority_enabled=settings.personal_memory_scalar_view_authority_enabled,
+        scalar_view_collapse_enabled=settings.personal_memory_scalar_view_collapse_enabled,
         scalar_history_enabled=settings.personal_memory_scalar_history_enabled,
         event_history_authority_enabled=settings.personal_memory_event_history_authority_enabled,
         counting_enabled=bool(

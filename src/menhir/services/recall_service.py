@@ -96,6 +96,10 @@ class RecallService(RecallSupportMixin):
     #: graph fact for an explicit current-state query (all six authority gates must pass). Default
     #: OFF -> today's behavior (a View never suppresses a fact).
     scalar_view_authority_enabled: bool = False
+    #: When True (requires scalar_view_authority_enabled), counted View verdicts drop their inline
+    #: contributors (drill down via get_scalar_view_items) and observations echoing a verdict slot
+    #: are removed from recall. Default OFF -> recall unchanged.
+    scalar_view_collapse_enabled: bool = False
     #: True: scalar_history Views form an advisory recall lane; False: excluded (real rollback).
     scalar_history_enabled: bool = False
     counting_enabled: bool = False  # False hides counted scalar_state Views (read-side kill switch)

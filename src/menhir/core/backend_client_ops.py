@@ -144,6 +144,24 @@ class BackendClientOpsMixin:
             },
         )
 
+    async def get_scalar_view_items(
+        self,
+        *,
+        view_uuid: str,
+        namespace: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "get_scalar_view_items",
+            {
+                "view_uuid": view_uuid,
+                "namespace": namespace,
+                "offset": int(offset),
+                "limit": int(limit),
+            },
+        )
+
     async def recall_timeline(
         self,
         *,

@@ -383,6 +383,26 @@ class RuntimeProviderDataOpsMixin:
             payload.pop("note", None)
         return payload
 
+    async def get_scalar_view_items(
+        self,
+        *,
+        view_uuid: str,
+        namespace: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        import asyncio
+
+        from menhir.services.scalar_view_items import fetch_scalar_view_items
+
+        adapter = getattr(self.built, "graph_adapter", None)
+        if adapter is None:
+            raise RuntimeError("scalar view items unavailable: no graph adapter")
+        return await asyncio.to_thread(
+            fetch_scalar_view_items, adapter,
+            view_uuid=view_uuid, namespace=namespace, offset=offset, limit=limit,
+        )
+
     async def recall_timeline(
         self,
         *,

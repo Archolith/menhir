@@ -59,6 +59,8 @@ _SETTINGS = (
         'personal_memory', 'Enable personal memory scalar state enabled.', True, ()),
     ('personal_memory_scalar_view_authority_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED',
         False, 'personal_memory', 'Enable personal memory scalar view authority enabled.', True, ()),
+    ('personal_memory_scalar_view_collapse_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_COLLAPSE_ENABLED',
+        False, 'personal_memory', 'Collapse scalar View items into the verdict and drop echoed observations.', True, ()),
     ('personal_memory_scalar_reconcile_attribute', 'MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_ATTRIBUTE', True,
         'personal_memory', 'Enable personal memory scalar reconcile attribute.', True, ()),
     ('personal_memory_scalar_reconcile_scope', 'MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_SCOPE', True,
@@ -211,6 +213,7 @@ _ENV_ONLY = (
 
 _REQUIRES = {
     "personal_memory_scalar_view_authority_enabled": ("personal_memory_scalar_state_enabled",),
+    "personal_memory_scalar_view_collapse_enabled": ("personal_memory_scalar_view_authority_enabled",),
     "personal_memory_event_history_authority_enabled": ("personal_memory_event_history_enabled",),
     "personal_memory_counting_enabled": ("personal_memory_scalar_state_enabled",),
     "frontier_belief_gate": ("frontier_warden_gate",),
@@ -228,6 +231,7 @@ _REQUIREMENT_SCOPE = {
         "reads whatever edges earlier ingests kept live.",
     "anchored_time_attach_enabled": "The attach check only vets resolver writes; without the resolver it never runs.",
     "personal_memory_scalar_view_authority_enabled": "Scalar state produces the Views; retained Views can outlive the writer gate.",
+    "personal_memory_scalar_view_collapse_enabled": "Collapse only acts on the verdicts the scalar view authority lane emits.",
     "personal_memory_event_history_authority_enabled": "Event history produces the assertions; retained assertions can outlive the writer gate.",
     "personal_memory_counting_enabled": "The counting lane runs after the scalar phase and reads scalar state.",
     "frontier_belief_gate": "Warden verdict enforcement needs the master gate; belief scoring is independent.",

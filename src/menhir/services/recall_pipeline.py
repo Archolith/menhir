@@ -1288,15 +1288,30 @@ async def run_recall(
                     "tier_foundation": tier_foundation, "user_foundation": user_foundation,
                 }
                 contributor_payload = await _view_contributor_payload(vuuid)
+                if (
+                    getattr(service, "scalar_view_collapse_enabled", False)
+                    and view.get("scalar_basis") == "counted"
+                ):
+                    # Collapse: a counted View states the count; its items are fetched on demand.
+                    _collapsed_total = int(contributor_payload.get("total", 0))
+                    _verdict_contributors = ()
+                    _verdict_total = _collapsed_total
+                    _verdict_truncated = _collapsed_total > 0
+                    _verdict_next_offset = 0 if _collapsed_total > 0 else None
+                else:
+                    _verdict_contributors = _authority_contributors(contributor_payload)
+                    _verdict_total = int(contributor_payload.get("total", 0))
+                    _verdict_truncated = (contributor_payload.get("next_offset") is not None)
+                    _verdict_next_offset = contributor_payload.get("next_offset")
                 authority_layer.append(ScalarAuthorityVerdict(
                     kind="current", status="leads" if has_foundation else "advisory",
                     subject_uuid=subj, attribute=attr, scope=scp, value_kind=vk, unit=un,
                     value=view.get("value"), valid_at=view.get("valid_at"), view_uuid=vuuid,
                     has_foundation=has_foundation,
-                    contributors=_authority_contributors(contributor_payload),
-                    contributors_total=int(contributor_payload.get("total", 0)),
-                    contributors_truncated=(contributor_payload.get("next_offset") is not None),
-                    next_offset=contributor_payload.get("next_offset"),
+                    contributors=_verdict_contributors,
+                    contributors_total=_verdict_total,
+                    contributors_truncated=_verdict_truncated,
+                    next_offset=_verdict_next_offset,
                 ))
                 _authority_audit.audit(
                     "authority_annotation", "leads" if has_foundation else "advisory",
@@ -1456,6 +1471,45 @@ async def run_recall(
                 query[:60],
             )
         _t_phases["scalar_history_lane"] = int((perf_counter() - _t) * 1000)
+
+    # --- Scalar View collapse: drop observations a verdict already carries (flag-gated) ---
+    # The verdict states the value/count; an observation echoing the same slot repeats the quote and
+    # crowds other memories out of recall. Only emitted verdicts count as covering a slot, so an
+    # observation whose View was skipped is kept. Only OBSERVATION candidates are ever dropped.
+    if (
+        getattr(service, "scalar_view_collapse_enabled", False)
+        and service.scalar_view_authority_enabled
+        and namespace is not None
+        and authority_layer
+    ):
+        try:
+            def _slot_key(subject, attribute, scope, value_kind, unit):
+                return tuple(str(x or "") for x in (subject, attribute, scope, value_kind, unit))
+
+            _covered_slots = {
+                _slot_key(v.subject_uuid, v.attribute, v.scope, v.value_kind, v.unit)
+                for v in authority_layer
+                if v.kind in ("current", "expired", "as_of", "history")
+            }
+            _kept_inputs = []
+            for _c in candidate_inputs:
+                if _c.get("memory_type") == "OBSERVATION":
+                    _m = metadata_by_uuid.get(str(_c["uuid"])) or {}
+                    if _slot_key(
+                        _m.get("subject_uuid"), _m.get("ss_attribute"), _m.get("ss_scope"),
+                        _m.get("ss_value_kind"), _m.get("ss_unit"),
+                    ) in _covered_slots:
+                        continue
+                _kept_inputs.append(_c)
+            logger.debug(
+                "scalar-view collapse dropped %d echoed observations",
+                len(candidate_inputs) - len(_kept_inputs),
+            )
+            candidate_inputs = _kept_inputs
+        except Exception:
+            logger.exception(
+                "scalar-view collapse failed query=%r; leaving recall unchanged", query[:60]
+            )
 
     # --- Step 7 canary: current-state View authority suppression (flag-gated) ---
     # When enabled, a current scalar_state View may suppress an older PROVENANCE-LINKED graph
