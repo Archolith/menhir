@@ -151,6 +151,7 @@ class TypedAssertionWriteMixin:
                    toString(a.learned_at) AS learned_at, a.time_basis AS time_basis,
                    a.evidence_tier AS evidence_tier, a.perceiver_version AS perceiver_version,
                    coalesce(a.absolute_semantics, 'ordinary') AS absolute_semantics,
+                   coalesce(a.importance, '') AS importance,
                    coalesce(a.superseded, false) AS superseded,
                    coalesce(a.binding_pending, false) AS binding_pending
             ORDER BY a.valid_at ASC, a.learned_at ASC

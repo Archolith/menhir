@@ -90,6 +90,9 @@ MERGE (a:TypedAssertion {assertion_key: $assertion_key})
     a.perceiver_version = $perceiver_version, a.perceiver_rank = $perceiver_rank,
     a.namespace = $namespace, a.metadata = $metadata_json,
     a.absolute_semantics = $absolute_semantics,
+    // occurrences only (tracked|notable|routine); null for every other operation, so existing
+    // assertion nodes are written byte-identically.
+    a.importance = CASE WHEN $importance = '' THEN null ELSE $importance END,
     // G19: a future-dated assertion needs a durable wake-up bit because the ingestion cursor will
     // advance before valid_at arrives. The scheduler atomically converts this into a projection
     // repair receipt when due. Historical/current writes stay false and add no work.

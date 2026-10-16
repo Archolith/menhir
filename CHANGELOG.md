@@ -1,3 +1,13 @@
+## 2026-10-15 - Store single happenings as scalar occurrences and count them where no total was stated
+
+- `domain/typed_assertion.py`: new operation `occurrence` (one happening on a `count` or `money` slot; value a positive integer or a positive amount) with an `importance` of `tracked`, `notable` or `routine`, kept out of every identity key. `OPERATIONS` is unchanged, so the scalar parser still drops an occurrence row; stored assertions validate against the new `ASSERTION_OPERATIONS`.
+- `domain/scalar_state_fold.py`: a slot with no stated absolute folds its occurrences into a lower-bound value with `basis="counted"`. It materializes only when an applied occurrence is `tracked` or `notable` (else abstains `routine_only`). An occurrence from a turn that also gave the slot a delta is absorbed, so "three more times" is not counted twice. A slot with a stated absolute is unchanged: occurrences are neither contributors nor superseded anchors.
+- `infrastructure/typed_assertion_models.py`, `typed_assertion_repair_repository.py`, `typed_assertion_write_repository.py`, `projection_coverage_repository.py`: persist and read `importance` (null for every non-occurrence, so existing nodes are written as before).
+- `services/scalar_state_service.py`: a counted View's audit carries `scalar_basis`; stated Views' audit is unchanged.
+- Nothing writes occurrences yet; the counting lane that will is a separate, flagged change (#170).
+- Tests: new `tests/test_scalar_occurrence_fold.py`.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-10-15 - Default the OpenAI chat model to gpt-6-luna
 
 - `config/settings_model.py`: `openai_chat_model` defaults to `gpt-6-luna` (was `gpt-4o-mini`). It resolves to the existing gpt-6 profile (reasoning request shaping, extraction precision block, contained-edge pruning), the model the LongMemEval builds already run. Only OpenAI deployments with `OPENAI_CHAT_MODEL` unset or blank change; `chat_provider` still defaults to `local`.
@@ -93,10 +103,4 @@
 
 - `src/menhir/infrastructure/llm.py`: the identity judge, contradiction check and shadow tie-break use a shared `_VERDICT_MAX_TOKENS` (1024) instead of 64/64/128. On reasoning models `max_tokens` also covers hidden reasoning, so most identity-judge calls ended empty and became `None` votes that route merges to conflict (#203). `_chat_text` now warns when a completion comes back empty, naming the operation and budget.
 - `tests/infrastructure/test_verdict_budget_203.py`: a simulated reasoning model that answers only above a reasoning budget, the empty-completion warning, and the unchanged fail-safe `None` for a real empty answer.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-09-29 - Read multi-word numbers whole in scalar counts and frequencies
-
-- `src/menhir/services/typed_scalar_rules.py`: counts read thirteen to nineteen, the tens, and tens compounds ("twenty-five", "twenty five") as one number, so "twenty-five postcards" is 25, not 5. A count, range bound or frequency count joined to another number word, digit or scale word ("two hundred", "2 thousand") now gives no value instead of a piece of the number, and a frequency with a multi-word number before "every" no longer defaults to a count of 1 (#200).
-- `tests/test_scalar_compound_number_words.py`: compound, scaled, range, delta and frequency cases, plus unchanged single-word readings.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
