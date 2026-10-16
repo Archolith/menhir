@@ -41,7 +41,11 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
         user=settings.neo4j_user,
         password=settings.neo4j_password,
     )
-    graph_adapter = MemoryGraphAdapter(neo4j=neo4j)
+    counting_enabled = bool(
+        getattr(settings, "personal_memory_counting_enabled", False)
+        and getattr(settings, "personal_memory_scalar_state_enabled", False)
+    )
+    graph_adapter = MemoryGraphAdapter(neo4j=neo4j, counting_enabled=counting_enabled)
 
     # Attempt full path for context recall.
     # Always prefer the direct Graphiti path — the hook is designed to bypass HTTP.
@@ -63,6 +67,7 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
             lifecycle_service=None,
             scalar_view_authority_enabled=settings.personal_memory_scalar_view_authority_enabled,
             event_history_authority_enabled=settings.personal_memory_event_history_authority_enabled,
+            counting_enabled=counting_enabled,
         )
         context_builder = ContextBuilderService(
             recall_service=recall_service,

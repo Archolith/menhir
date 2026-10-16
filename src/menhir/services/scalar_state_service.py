@@ -169,11 +169,16 @@ class ScalarStateService:
 
     def __init__(
         self, assertions: _AssertionSource, views: _ViewSink, *,
-        scalar_history_enabled: bool = False,
+        scalar_history_enabled: bool = False, counting_enabled: bool = True,
     ) -> None:
         self._assertions = assertions
         self._views = views
         self._scalar_history_enabled = scalar_history_enabled
+        self._counting_enabled = counting_enabled
+
+    @property
+    def counting_enabled(self) -> bool:
+        return self._counting_enabled
 
     def fold_entity(
         self, subject_uuid: str, *, namespace: str | None = None, as_of: datetime | None = None,
@@ -184,7 +189,7 @@ class ScalarStateService:
         tenants' assertions sharing a subject_uuid; None = all (unchanged behavior). `as_of` (Phase B)
         is the evaluation time: future assertions (`valid_at > as_of`) are ignored; None = now(UTC)."""
         rows = self._assertions.materializable_assertions_for_entity(subject_uuid, namespace=namespace)
-        return fold_assertions(rows, as_of=as_of)
+        return fold_assertions(rows, as_of=as_of, include_occurrences=self._counting_enabled)
 
     def current_authority(
         self, subject_uuid: str, *, namespace: str | None = None, as_of: datetime | None = None,
@@ -243,9 +248,10 @@ class ScalarStateService:
                 "scalar_anchor_value": str(state.anchor_value),
                 "scalar_delta_total": state.delta_total,
             }
-            if state.basis != "stated":
-                # only counted states carry the key, so a stated View's audit stays byte-identical.
-                audit["scalar_basis"] = state.basis
+            # Counted states carry the key. Stated states pass None: the create path drops None (new
+            # stated Views stay byte-identical) and the unchanged-value refresh (`SET n += $refresh`)
+            # removes a stale 'counted' mark left by an earlier counted version of the same value.
+            audit["scalar_basis"] = state.basis if state.basis != "stated" else None
             res = self._views.record_scalar_state(
                 subject=state.subject_display, subject_uuid=state.subject_uuid,
                 attribute=state.attribute, scope=state.scope, value_kind=state.value_kind,
@@ -388,6 +394,9 @@ class ScalarStateService:
         try:
             rows = self._assertions.materializable_assertions_for_entity(
                 subject_uuid, namespace=namespace)
+            if not self._counting_enabled:
+                # Counting off: history must not list occurrences either (same rule as fold_entity).
+                rows = [r for r in rows if str(r.get("operation")) != "occurrence"]
             result = build_history(rows, as_of=as_of, max_entries=max_entries)
         except Exception as exc:  # noqa: BLE001 - durable marker must remain retryable
             logger.exception("scalar_history source/build failed for %s", subject_uuid)

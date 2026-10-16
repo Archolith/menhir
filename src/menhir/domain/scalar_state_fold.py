@@ -138,8 +138,49 @@ def _money_decimal(value: Any) -> Decimal | None:
     return result if result.is_finite() else None
 
 
+def _turn_key(row: dict[str, Any]) -> str:
+    """The turn a row was read from. `grounding_id` is the raw grounding (the TurnEvidence turn_id for
+    turn-grounded rows); `episode_uuid` is only the admitting Episodic and is empty for most hook
+    turns, so it cannot identify the turn."""
+    return str(row.get("grounding_id") or row.get("episode_uuid") or "")
+
+
+def _source_keys(row: dict[str, Any]) -> set[str]:
+    """Every id the row's source is known by: raw grounding and admitting Episodic."""
+    return {str(row.get("grounding_id") or ""), str(row.get("episode_uuid") or "")} - {""}
+
+
+def _dedup_occurrences_per_turn(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep at most one occurrence per (subject, attribute, value_kind, unit, turn), ignoring scope.
+    Survivor: largest value, then scope == "", then smallest assertion_id. Other rows pass through."""
+    groups: dict[tuple, list[dict[str, Any]]] = {}
+    for row in rows:
+        turn = _turn_key(row)
+        if str(row.get("operation")) != "occurrence" or not turn:
+            continue
+        s = _slot_of(row)
+        groups.setdefault((s[0], s[1], s[3], s[4], turn), []).append(row)
+    dropped: set[int] = set()
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        def _num(m: dict[str, Any]) -> Decimal:
+            v = _money_decimal(m.get("value"))
+            return Decimal("-Infinity") if v is None else v
+
+        keep = min(members, key=lambda m: (
+            -_num(m),
+            str(m.get("scope") or "").strip() != "",
+            str(m.get("assertion_id") or ""),
+        ))
+        dropped.update(id(m) for m in members if m is not keep)
+    if not dropped:
+        return rows
+    return [r for r in rows if id(r) not in dropped]
+
+
 def fold_assertions(
-    rows: list[dict[str, Any]], *, as_of: datetime | None = None,
+    rows: list[dict[str, Any]], *, as_of: datetime | None = None, include_occurrences: bool = True,
 ) -> FoldResult:
     """Fold current assertion rows (shape of TypedAssertionRepository.assertions_for_entity) into
     one FoldedScalarState per slot, or an Abstention. Deterministic given the input set AND `as_of`.
@@ -154,8 +195,11 @@ def fold_assertions(
     rows + same `as_of` always fold identically (live == rebuild); a later real-time evaluation MAY differ
     because future assertions have since activated -- temporal evolution, not a parity break. A row with
     an unparseable/absent `valid_at` sorts as epoch (always <= as_of), i.e. included."""
+    if not include_occurrences:
+        rows = [r for r in rows if str(r.get("operation")) != "occurrence"]
     if as_of is not None:
         rows = [r for r in rows if (_parse_dt(r.get("valid_at")) or _EPOCH) <= as_of]
+    rows = _dedup_occurrences_per_turn(rows)
     slots: dict[tuple, list[dict[str, Any]]] = {}
     for row in rows:
         slots.setdefault(_slot_of(row), []).append(row)
@@ -332,10 +376,12 @@ def _fold_counted(
     if value_kind not in COUNTABLE_KINDS:
         result.abstentions.append(Abstention(slot_key, NOT_COUNTABLE, subject_uuid))
         return
-    claimed_turns = {str(d.get("episode_uuid") or "") for d in deltas} - {""}
+    # A delta claims every id its source is known by (raw grounding AND admitting Episodic), so an
+    # episode-grounded delta still absorbs a turn-grounded occurrence of the same admitted turn.
+    claimed_turns = {k for d in deltas for k in _source_keys(d)}
     applied = [
         o for o in occurrences
-        if str(o.get("episode_uuid") or "") not in claimed_turns and _is_number(o.get("value"))
+        if not (_source_keys(o) & claimed_turns) and _is_number(o.get("value"))
     ]
     applied_ids = {str(o.get("assertion_id") or "") for o in applied}
     absorbed_ids = sorted(

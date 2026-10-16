@@ -705,6 +705,15 @@ class Phase3RunResponse(BaseModel):
     scalar_repair_pending: int = 0
     event_history_enabled: bool = False
     counting_enabled: bool = False
+    counting_namespaces_processed: int = 0
+    counting_batches: int = 0
+    counting_occurrences_stored: int = 0
+    counting_advisory: int = 0
+    counting_llm_calls: int = 0
+    counting_namespaces_failed: int = 0
+    counting_namespaces_busy: int = 0
+    counting_namespaces_fenced: int = 0
+    counting_dirty_after: bool | None = None
     event_namespaces_processed: int = 0
     event_namespaces_failed: int = 0
     event_assertions_recorded: int = 0

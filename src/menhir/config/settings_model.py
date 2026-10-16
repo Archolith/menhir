@@ -405,6 +405,8 @@ class MemorySettings:
     personal_memory_event_history_perceiver_version: str = "v2"
     personal_memory_event_history_authority_enabled: bool = False
     personal_memory_counting_enabled: bool = False
+    personal_memory_counting_perceiver_version: str = "v1"
+    personal_memory_counting_lease_seconds: int = 900
 
     # Benchmark mode — when true, disables the background scheduler,
     # consolidation/decay, and orphan recovery so the store is never mutated
@@ -951,6 +953,14 @@ class MemorySettings:
                 "MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED",
                 default=str(cls.personal_memory_counting_enabled),
             )),
+            personal_memory_counting_perceiver_version=_getenv(
+                "MENHIR_PERSONAL_MEMORY_COUNTING_PERCEIVER_VERSION",
+                default=cls.personal_memory_counting_perceiver_version,
+            ),
+            personal_memory_counting_lease_seconds=max(1, int(_getenv(
+                "MENHIR_PERSONAL_MEMORY_COUNTING_LEASE_SECONDS",
+                default=str(cls.personal_memory_counting_lease_seconds),
+            ))),
             # Benchmark mode (LongMemEval Mode B isolation)
             benchmark_mode=parse_bool_env(_getenv("MENHIR_BENCHMARK_MODE", default=str(cls.benchmark_mode))),
             # Frontier portions (default off)

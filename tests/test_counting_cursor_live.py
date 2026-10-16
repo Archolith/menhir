@@ -49,6 +49,17 @@ def _scalar_cursor(adapter, ns, turn_id, minute, pv="v1"):
         ns, cursor_at=_iso(minute), cursor_uuid=turn_id, perceiver_version=pv, at=_AT)
 
 
+def _advance(adapter, ns, *, cursor_at, cursor_uuid, perceiver_version, at):
+    # The counting cursor is fenced: a write needs a live claim on the namespace.
+    run_id = f"run-{uuidlib.uuid4().hex[:8]}"
+    claim = adapter.claim_counting_namespace(ns, run_id=run_id, lease_seconds=60, now=at)
+    assert claim is not None
+    adapter.advance_counting_cursor(
+        ns, cursor_at=cursor_at, cursor_uuid=cursor_uuid, perceiver_version=perceiver_version,
+        at=at, run_id=run_id, incarnation=claim["incarnation"], epoch=claim["epoch"])
+    adapter.release_counting_claim(ns, run_id=run_id, incarnation=claim["incarnation"])
+
+
 def _load(adapter, ns, *, pv="v1", spv="v1", limit=500):
     return adapter.load_next_counting_batch(
         ns, perceiver_version=pv, scalar_perceiver_version=spv, limit=limit)
@@ -74,8 +85,9 @@ def test_never_reads_past_the_scalar_cursor_and_follows_it(env):
     assert _dirty(adapter, ns)
 
     last = rows[-1]
-    adapter.advance_counting_cursor(
-        ns, cursor_at=last["cursor_at"], cursor_uuid=last["uuid"], perceiver_version="v1", at=_AT)
+    _advance(
+        adapter, ns, cursor_at=last["cursor_at"], cursor_uuid=last["uuid"], perceiver_version="v1",
+        at=_AT)
     assert _load(adapter, ns) == []
     assert not _dirty(adapter, ns)
 
@@ -106,8 +118,7 @@ def test_counting_version_change_resets_the_counting_cursor(env):
     repo, adapter, ns = env
     _seed_turns(repo, ns, [(f"t{i}", i) for i in range(1, 6)])
     _scalar_cursor(adapter, ns, "t3", 3)
-    adapter.advance_counting_cursor(
-        ns, cursor_at=_iso(3), cursor_uuid="t3", perceiver_version="v0", at=_AT)
+    _advance(adapter, ns, cursor_at=_iso(3), cursor_uuid="t3", perceiver_version="v0", at=_AT)
 
     assert _ids(_load(adapter, ns, pv="v1")) == ["t1", "t2", "t3"]
     assert _dirty(adapter, ns, pv="v1")
@@ -123,8 +134,8 @@ def test_second_page_continues_at_turn_501(env):
 
     first = _load(adapter, ns, limit=500)
     assert len(first) == 500 and first[0]["uuid"] == "t0001" and first[-1]["uuid"] == "t0500"
-    adapter.advance_counting_cursor(
-        ns, cursor_at=first[-1]["cursor_at"], cursor_uuid=first[-1]["uuid"],
+    _advance(
+        adapter, ns, cursor_at=first[-1]["cursor_at"], cursor_uuid=first[-1]["uuid"],
         perceiver_version="v1", at=_AT)
 
     second = _load(adapter, ns, limit=500)
@@ -154,8 +165,7 @@ def test_namespace_delete_removes_the_counting_cursor(env):
     repo, adapter, ns = env
     other = f"{ns}-keep"
     for name in (ns, other):
-        adapter.advance_counting_cursor(
-            name, cursor_at=_iso(3), cursor_uuid="t3", perceiver_version="v1", at=_AT)
+        _advance(adapter, name, cursor_at=_iso(3), cursor_uuid="t3", perceiver_version="v1", at=_AT)
     try:
         # A group_id that differs from the namespace, so only the reset block (keyed on the
         # namespace) can remove the cursor -- not the partition's `n.group_id = $group_id` match.

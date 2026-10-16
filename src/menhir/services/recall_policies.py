@@ -298,6 +298,16 @@ def _scalar_history_records_change(history_view: dict[str, object]) -> bool:
     return len(values) > 1
 
 
+def _scalar_history_has_occurrences(history_view: dict[str, object]) -> bool:
+    """True when a stored scalar_history View lists counting-lane occurrence rows: parsed
+    `operation_counts` (fetch_scalar_history) or raw `sh_op_counts` JSON (candidate metadata).
+    Such a View was built with counting on; with counting off it is stale and hidden."""
+    counts = history_view.get("operation_counts")
+    if isinstance(counts, dict) and counts.get("occurrence"):
+        return True
+    return '"occurrence"' in str(history_view.get("sh_op_counts") or "")
+
+
 def _scalar_history_evidence_days_ago(history_view: dict[str, object]) -> float:
     """Days since the View's newest entry (source time), for the recency term. An advisory row
     has no access record, so it must not get the just-accessed bonus (#243)."""

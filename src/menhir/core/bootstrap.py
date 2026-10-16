@@ -193,7 +193,13 @@ def build_memory_services(
             llm = UnavailableLLMAdapter(f"{llm_reason} ({exc})")
     else:
         llm = UnavailableLLMAdapter(llm_reason)
-    graph_adapter = MemoryGraphAdapter(neo4j=neo4j)
+    graph_adapter = MemoryGraphAdapter(
+        neo4j=neo4j,
+        counting_enabled=bool(
+            settings.personal_memory_counting_enabled
+            and settings.personal_memory_scalar_state_enabled
+        ),
+    )
     scoring_service = ScoringService()
     lifecycle_service = LifecycleService(
         graph_adapter=graph_adapter,
@@ -235,6 +241,10 @@ def build_memory_services(
         scalar_view_authority_enabled=settings.personal_memory_scalar_view_authority_enabled,
         scalar_history_enabled=settings.personal_memory_scalar_history_enabled,
         event_history_authority_enabled=settings.personal_memory_event_history_authority_enabled,
+        counting_enabled=bool(
+            settings.personal_memory_counting_enabled
+            and settings.personal_memory_scalar_state_enabled
+        ),
         read_only=read_only,
     )
     context_builder = ContextBuilderService(

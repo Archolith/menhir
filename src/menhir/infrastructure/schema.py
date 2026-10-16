@@ -401,6 +401,21 @@ def get_scalar_state_activation_queries() -> list[str]:
         # constraint can come online over an existing single-current store.
         "MATCH (n:Entity {view_kind: 'scalar_state'}) WHERE coalesce(n.view_current, true) AND n.ss_view_key_current IS NULL SET n.ss_view_key_current = n.view_key",
         "CREATE CONSTRAINT scalar_state_view_current_key_unique IF NOT EXISTS FOR (n:Entity) REQUIRE n.ss_view_key_current IS UNIQUE",
+        # Counting-lane fence: one watermark per namespace, or concurrent claims split the fence.
+        # Pre-constraint stores may hold duplicates from the old unconstrained MERGE; delete every
+        # copy (a reset: turns are re-read and the per-turn fold collapse absorbs repeats) so the
+        # constraint can come online instead of failing activation for the whole scalar lane.
+        "MATCH (w:CountingConsolidationWatermark) WITH w.group_id AS g, collect(w) AS ws "
+        "WHERE size(ws) > 1 UNWIND ws AS d DETACH DELETE d",
+        "MATCH (m:CountingFlagState) WITH m.namespace_key AS k, collect(m) AS ms "
+        "WHERE size(ms) > 1 UNWIND ms AS d DETACH DELETE d",
+        "CREATE CONSTRAINT counting_watermark_group_unique IF NOT EXISTS "
+        "FOR (w:CountingConsolidationWatermark) REQUIRE w.group_id IS UNIQUE",
+        "CREATE CONSTRAINT counting_flag_state_namespace_unique IF NOT EXISTS "
+        "FOR (m:CountingFlagState) REQUIRE m.namespace_key IS UNIQUE",
+        # The flag sweep finds namespaces holding occurrence assertions with this index each pass.
+        "CREATE INDEX typed_assertion_operation_idx IF NOT EXISTS "
+        "FOR (a:TypedAssertion) ON (a.operation)",
     ]
 
 

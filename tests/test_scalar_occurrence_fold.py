@@ -262,5 +262,7 @@ def test_counted_view_audit_carries_basis_and_stated_audit_is_unchanged():
     ScalarStateService(_Assertions(rows), views).rebuild_scalar_state("ent-self")
     by_attr = {c["attribute"]: c["audit"] for c in views.calls}
     assert by_attr["yoga_count"]["scalar_basis"] == BASIS_COUNTED
-    assert set(by_attr["owned"]) == {
+    # Stated: no basis value (None is dropped on create and clears a stale 'counted' on refresh).
+    assert by_attr["owned"]["scalar_basis"] is None
+    assert {k for k, v in by_attr["owned"].items() if v is not None} == {
         "scalar_contributors", "scalar_effective_tier", "scalar_anchor_value", "scalar_delta_total"}

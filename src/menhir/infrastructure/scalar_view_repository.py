@@ -235,7 +235,7 @@ class ScalarViewRepositoryMixin:
               AND coalesce(n.ss_scope, '') = $scope AND coalesce(n.ss_unit, '') = $unit
             RETURN n.uuid AS uuid, n.ss_value AS value, n.name AS name, n.view_key AS view_key,
                    n.ss_attribute AS attribute, n.view_subject_uuid AS subject_uuid,
-                   toString(n.valid_at) AS valid_at,
+                   toString(n.valid_at) AS valid_at, n.scalar_basis AS scalar_basis,
                    CASE WHEN {default_recall_visibility_cypher("n")}
                         THEN true ELSE false END AS recall_eligible
             LIMIT 1
@@ -247,9 +247,11 @@ class ScalarViewRepositoryMixin:
 
     def fetch_scalar_authority_contributors(
         self, *, view_uuid: str, limit: int = 8, offset: int = 0,
-        namespace: str | None = None,
+        namespace: str | None = None, include_occurrences: bool = True,
     ) -> dict[str, Any]:
         """Return a bounded, relation-labeled provenance window for one scalar View (7.J).
+
+        ``include_occurrences=False`` (counting off) hides counting-lane occurrence contributors.
 
         Ordering is narration-safe: current anchor first, live deltas chronologically, then excluded
         prior anchors newest-first. ``total`` + ``next_offset`` form the expand-by-View cursor without
@@ -266,17 +268,20 @@ class ScalarViewRepositoryMixin:
             """
             MATCH (v:Entity {uuid: $view_uuid})
                   -[r:CURRENT_ANCHOR|CONTRIBUTED_TO|SUPERSEDED_ANCHOR]->(a:TypedAssertion)
-            WHERE $namespace IS NULL OR v.group_id = $namespace
+            WHERE ($namespace IS NULL OR v.group_id = $namespace)
+              AND ($include_occurrences OR coalesce(a.operation, '') <> 'occurrence')
             RETURN count(*) AS total
             """,
-            params={"view_uuid": view_uuid, "namespace": namespace},
+            params={"view_uuid": view_uuid, "namespace": namespace,
+                    "include_occurrences": bool(include_occurrences)},
         )
         total = int(total_rows[0].get("total") or 0) if total_rows else 0
         rows = self.neo4j.execute(
             """
             MATCH (v:Entity {uuid: $view_uuid})
                   -[r:CURRENT_ANCHOR|CONTRIBUTED_TO|SUPERSEDED_ANCHOR]->(a:TypedAssertion)
-            WHERE $namespace IS NULL OR v.group_id = $namespace
+            WHERE ($namespace IS NULL OR v.group_id = $namespace)
+              AND ($include_occurrences OR coalesce(a.operation, '') <> 'occurrence')
             WITH r, a,
                  CASE type(r) WHEN 'CURRENT_ANCHOR' THEN 0
                               WHEN 'CONTRIBUTED_TO' THEN 1 ELSE 2 END AS relation_rank
@@ -295,7 +300,7 @@ class ScalarViewRepositoryMixin:
             RETURN contributors
             """,
             params={"view_uuid": view_uuid, "limit": safe_limit, "offset": safe_offset,
-                    "namespace": namespace},
+                    "namespace": namespace, "include_occurrences": bool(include_occurrences)},
         )
         row = dict(rows[0]) if rows else {}
         end = safe_offset + len(row.get("contributors") or [])
@@ -588,11 +593,12 @@ class ScalarViewRepositoryMixin:
 
     def list_scalar_history_entries(
         self, *, view_uuid: str, offset: int = 0, limit: int = 16,
-        namespace: str | None = None,
+        namespace: str | None = None, include_occurrences: bool = True,
     ) -> dict[str, Any]:
         """Paginated HISTORY_ENTRY contributors for one scalar_history View.
 
-        Ordered by ordinal (chronological). Returns {entries, total, next_offset}."""
+        Ordered by ordinal (chronological). Returns {entries, total, next_offset}.
+        ``include_occurrences=False`` (counting off) hides occurrence entries of a stale View."""
         safe_limit = max(1, min(int(limit), 50))
         safe_offset = max(0, int(offset))
         # CF-113: push SKIP/LIMIT before collect() so only the page is materialised. `he.ordinal` is
@@ -602,17 +608,20 @@ class ScalarViewRepositoryMixin:
             """
             MATCH (v:Entity {uuid: $view_uuid})
                   -[he:HISTORY_ENTRY]->(a:TypedAssertion)
-            WHERE $namespace IS NULL OR v.group_id = $namespace
+            WHERE ($namespace IS NULL OR v.group_id = $namespace)
+              AND ($include_occurrences OR coalesce(he.operation, '') <> 'occurrence')
             RETURN count(*) AS total
             """,
-            {"view_uuid": view_uuid, "namespace": namespace},
+            {"view_uuid": view_uuid, "namespace": namespace,
+             "include_occurrences": bool(include_occurrences)},
         )
         total = int(total_rows[0].get("total") or 0) if total_rows else 0
         rows = self.neo4j.execute(
             """
             MATCH (v:Entity {uuid: $view_uuid})
                   -[he:HISTORY_ENTRY]->(a:TypedAssertion)
-            WHERE $namespace IS NULL OR v.group_id = $namespace
+            WHERE ($namespace IS NULL OR v.group_id = $namespace)
+              AND ($include_occurrences OR coalesce(he.operation, '') <> 'occurrence')
             OPTIONAL MATCH (te:TurnEvidence {turn_id: a.episode_uuid})
             OPTIONAL MATCH (source_ep:Episodic)-[:ADMITTED_ON]->(te)
             WITH he, a, te, collect(DISTINCT source_ep.uuid) AS admitted_episode_uuids
@@ -633,7 +642,7 @@ class ScalarViewRepositoryMixin:
             RETURN entries
             """,
             {"view_uuid": view_uuid, "offset": safe_offset, "limit": safe_limit,
-             "namespace": namespace},
+             "namespace": namespace, "include_occurrences": bool(include_occurrences)},
         )
         row = dict(rows[0]) if rows else {}
         end = safe_offset + len(row.get("entries") or [])
