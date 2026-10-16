@@ -67,6 +67,7 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
             lifecycle_service=None,
             scalar_view_authority_enabled=settings.personal_memory_scalar_view_authority_enabled,
             scalar_view_collapse_enabled=settings.personal_memory_scalar_view_collapse_enabled,
+            scalar_view_echo_drop_enabled=settings.personal_memory_scalar_view_echo_drop_enabled,
             event_history_authority_enabled=settings.personal_memory_event_history_authority_enabled,
             counting_enabled=counting_enabled,
         )
