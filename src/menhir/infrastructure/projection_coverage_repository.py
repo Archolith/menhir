@@ -66,6 +66,7 @@ class ProjectionCoverageRepository:
                    a.episode_uuid AS episode_uuid, a.evidence_tier AS evidence_tier,
                    a.perceiver_version AS perceiver_version,
                    coalesce(a.absolute_semantics, 'ordinary') AS absolute_semantics,
+                   coalesce(a.importance, '') AS importance,
                    coalesce(a.superseded, false) AS superseded,
                    a.superseded_by AS superseded_by,
                    coalesce(a.binding_pending, false) AS binding_pending,

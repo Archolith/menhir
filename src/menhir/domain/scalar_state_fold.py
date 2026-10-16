@@ -30,6 +30,8 @@ from typing import Any
 
 from menhir.domain.temporal import parse_iso8601
 from menhir.domain.typed_assertion import (
+    COUNTABLE_KINDS,
+    MATERIALIZING_IMPORTANCE,
     evidence_rank,
     normalize_scalar,
     slot_of as _slot_of,
@@ -39,6 +41,12 @@ from menhir.domain.typed_assertion import (
 NO_ANCHOR = "no_anchor"
 AMBIGUOUS_ANCHOR = "ambiguous_anchor"
 DELTA_ON_RANGE = "delta_on_range"
+ROUTINE_ONLY = "routine_only"
+NOT_COUNTABLE = "not_countable"
+INVALID_AMOUNT = "invalid_amount"
+
+BASIS_STATED = "stated"
+BASIS_COUNTED = "counted"
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
@@ -67,6 +75,10 @@ class FoldedScalarState:
     anchor_id: str = ""
     contributed_delta_ids: list[str] = field(default_factory=list)
     superseded_anchor_ids: list[str] = field(default_factory=list)
+    # stated: anchored on a stated absolute. counted: a lower bound folded from occurrences only.
+    basis: str = "stated"
+    contributed_occurrence_ids: list[str] = field(default_factory=list)
+    absorbed_occurrence_ids: list[str] = field(default_factory=list)
 
     @property
     def slot_key(self) -> tuple[str, str, str, str, str]:
@@ -157,6 +169,7 @@ def fold_assertions(
         absolutes = [m for m in members if str(m.get("operation")) == "absolute"]
         deltas = [m for m in members if str(m.get("operation")) == "delta"]
         expires = [m for m in members if str(m.get("operation")) == "expire"]
+        occurrences = [m for m in members if str(m.get("operation")) == "occurrence"]
 
         # Expiry reconciliation (owner spec: "used to X" ends X as a current fact but need not supply a
         # replacement). If the latest expire is STRICTLY after every absolute (or there is no absolute),
@@ -190,8 +203,14 @@ def fold_assertions(
             # else: expires are subsumed by a newer absolute -> fall through to normal absolute fold.
 
         if not absolutes:
-            result.abstentions.append(Abstention(slot_key, NO_ANCHOR, subject_uuid))
+            if occurrences:
+                _fold_counted(result, slot_key, subject_uuid, value_kind, occurrences, deltas)
+            else:
+                result.abstentions.append(Abstention(slot_key, NO_ANCHOR, subject_uuid))
             continue
+        # A stated absolute exists: occurrences do not touch it (adding them onto a stated total is a
+        # separate, separately-flagged step). They are not contributors and not superseded anchors, so
+        # this slot's state is byte-identical to a fold without them.
 
         # latest absolute by valid_at; tie on distinct values -> ambiguous UNLESS exactly one distinct
         # value was explicitly stated as a CORRECTION of the others (an equal-time-only tiebreak).
@@ -291,3 +310,72 @@ def fold_assertions(
             superseded_anchor_ids=superseded_anchor_ids,
         ))
     return result
+
+
+def _fold_counted(
+    result: FoldResult,
+    slot_key: tuple[str, str, str, str, str],
+    subject_uuid: str,
+    value_kind: str,
+    occurrences: list[dict[str, Any]],
+    deltas: list[dict[str, Any]],
+) -> None:
+    """Fold a slot with NO stated absolute from its occurrences: a lower bound ("at least N you
+    mentioned"), basis=counted. Appends one state or one abstention to `result`.
+
+    * Double-count guard: an occurrence from a turn that already gave this slot a delta is absorbed
+      (that turn's change is the delta's, e.g. "visited three more times").
+    * Importance: the slot materializes only if at least one applied occurrence is tracked or
+      notable; routine-only (or unlabelled) slots abstain.
+    * Deltas themselves are not added here (no anchor to apply them to); they stay unapplied.
+    """
+    if value_kind not in COUNTABLE_KINDS:
+        result.abstentions.append(Abstention(slot_key, NOT_COUNTABLE, subject_uuid))
+        return
+    claimed_turns = {str(d.get("episode_uuid") or "") for d in deltas} - {""}
+    applied = [
+        o for o in occurrences
+        if str(o.get("episode_uuid") or "") not in claimed_turns and _is_number(o.get("value"))
+    ]
+    applied_ids = {str(o.get("assertion_id") or "") for o in applied}
+    absorbed_ids = sorted(
+        str(o.get("assertion_id") or "") for o in occurrences
+        if str(o.get("assertion_id") or "") not in applied_ids
+    )
+    if not applied:
+        result.abstentions.append(Abstention(slot_key, NO_ANCHOR, subject_uuid))
+        return
+    if not any(str(o.get("importance") or "") in MATERIALIZING_IMPORTANCE for o in applied):
+        result.abstentions.append(Abstention(slot_key, ROUTINE_ONLY, subject_uuid))
+        return
+
+    applied.sort(key=lambda o: (
+        _parse_dt(o.get("valid_at")) or _EPOCH, str(o.get("assertion_id") or "")))
+    if value_kind == "money":
+        amounts = [_money_decimal(o.get("value")) for o in applied]
+        if any(a is None for a in amounts):
+            result.abstentions.append(Abstention(slot_key, INVALID_AMOUNT, subject_uuid))
+            return
+        value: Any = sum((a for a in amounts if a is not None), Decimal("0"))
+    else:
+        total = sum(float(o.get("value")) for o in applied)
+        value = int(total) if total == int(total) else total
+
+    tiers = [str(o.get("evidence_tier") or "agent") for o in applied]
+    episode_uuids: list[str] = []
+    for o in applied:
+        eu = str(o.get("episode_uuid") or "")
+        if eu and eu not in episode_uuids:
+            episode_uuids.append(eu)
+    first = applied[0]
+    result.states.append(FoldedScalarState(
+        subject_uuid=subject_uuid,
+        subject_display=str(first.get("subject_display", "") or subject_uuid),
+        attribute=slot_key[1], scope=slot_key[2], value_kind=value_kind, unit=slot_key[4],
+        value=value, valid_at=str(applied[-1].get("valid_at") or ""),
+        contributor_ids=[str(o.get("assertion_id") or "") for o in applied],
+        effective_tier=min(tiers, key=evidence_rank), episode_uuids=episode_uuids,
+        anchor_value=None, basis=BASIS_COUNTED,
+        contributed_occurrence_ids=[str(o.get("assertion_id") or "") for o in applied],
+        absorbed_occurrence_ids=absorbed_ids,
+    ))

@@ -336,6 +336,7 @@ class TypedAssertionRepairMixin:
             "perceiver_version": a.perceiver_version, "perceiver_rank": a.perceiver_rank,
             "namespace": a.namespace,
             "absolute_semantics": (a.absolute_semantics or "ordinary").strip().lower(),
+            "importance": (a.importance or "").strip().lower(),
             "metadata_json": json.dumps(a.metadata or {}, ensure_ascii=False),
             "name_embedding": a.name_embedding,
             "embed_version": a.embed_version,

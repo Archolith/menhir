@@ -243,6 +243,9 @@ class ScalarStateService:
                 "scalar_anchor_value": str(state.anchor_value),
                 "scalar_delta_total": state.delta_total,
             }
+            if state.basis != "stated":
+                # only counted states carry the key, so a stated View's audit stays byte-identical.
+                audit["scalar_basis"] = state.basis
             res = self._views.record_scalar_state(
                 subject=state.subject_display, subject_uuid=state.subject_uuid,
                 attribute=state.attribute, scope=state.scope, value_kind=state.value_kind,
