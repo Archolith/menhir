@@ -18,6 +18,7 @@ from menhir.config import MemorySettings
 from menhir.infrastructure.openai_rate_limit import (
     acall_with_rate_limit_backoff,
     find_quota_exhaustion,
+    provider_error_code,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,8 @@ class LLMUsageEvent:
     reasoning_output_tokens: int | None = None
     provider_usage: dict[str, Any] | None = None
     error: str | None = None
+    #: Content-free failure label (``provider_error_code``), persisted where ``error`` is redacted.
+    error_code: str | None = None
     #: This call is being MEASURED, not governed: a budget callback must count it and let it
     #: proceed rather than refusing it (CF-234). Set by the announcement site, never inferred, so
     #: a surface that does not opt in keeps whatever enforcement it has today.
@@ -127,6 +130,7 @@ def _emit_llm_usage_event(
     reasoning_output_tokens: int | None = None,
     provider_usage: dict[str, Any] | None = None,
     error: str | None = None,
+    error_code: str | None = None,
     report_only: bool = False,
 ) -> None:
     callback = _llm_usage_callback.get() or _default_llm_usage_callback
@@ -149,6 +153,7 @@ def _emit_llm_usage_event(
                 reasoning_output_tokens=reasoning_output_tokens,
                 provider_usage=provider_usage,
                 error=error,
+                error_code=error_code,
                 report_only=report_only,
             )
         )
@@ -446,6 +451,7 @@ def fail_llm_usage_call(handle: LLMCallHandle, error: BaseException) -> None:
         call_id=handle.call_id,
         duration_ms=int((perf_counter() - handle.started_at) * 1000),
         error=str(error),
+        error_code=provider_error_code(error),
         report_only=handle.report_only,
     )
 

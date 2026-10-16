@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from typing import Any
+
+#: ``Class[:status[:code]]`` as built by openai_rate_limit.provider_error_code.
+_ERROR_CODE_SHAPE = re.compile(r"[A-Za-z0-9_.-]{1,64}(?::[0-9]{1,3}(?::[A-Za-z0-9_.:-]{1,64})?)?")
 
 
 def initialize_llm_usage_schema(conn: sqlite3.Connection) -> None:
@@ -26,10 +30,15 @@ def initialize_llm_usage_schema(conn: sqlite3.Connection) -> None:
             cached_input_tokens INTEGER,
             reasoning_output_tokens INTEGER,
             provider_usage_json TEXT,
-            error TEXT
+            error TEXT,
+            error_code TEXT
         )
         """
     )
+    # A sidecar created before error_code existed keeps its old column set under IF NOT EXISTS.
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(llm_usage_events)")}
+    if "error_code" not in columns:
+        conn.execute("ALTER TABLE llm_usage_events ADD COLUMN error_code TEXT")
     conn.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_llm_usage_run_recorded
@@ -67,7 +76,12 @@ class TelemetryLLMUsageStoreMixin:
         reasoning_output_tokens: int | None,
         provider_usage_json: str | None,
         error: str | None,
+        error_code: str | None = None,
     ) -> bool:
+        # error_code is inventoried as non-content; a direct caller must not be able to put free
+        # text there, so anything outside the identifier shape is dropped.
+        if error_code is not None and not _ERROR_CODE_SHAPE.fullmatch(error_code):
+            error_code = None
         self._ensure_ready()
         with self._connect() as conn:
             cursor = conn.execute(
@@ -76,8 +90,8 @@ class TelemetryLLMUsageStoreMixin:
                     call_id, recorded_at, run_id, episode_uuid, operation, kind,
                     model, endpoint, status, duration_ms, input_tokens, output_tokens,
                     total_tokens, cached_input_tokens, reasoning_output_tokens,
-                    provider_usage_json, error
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    provider_usage_json, error, error_code
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     call_id,
@@ -97,6 +111,7 @@ class TelemetryLLMUsageStoreMixin:
                     reasoning_output_tokens,
                     provider_usage_json,
                     error,
+                    error_code,
                 ),
             )
             conn.commit()
@@ -140,7 +155,19 @@ class TelemetryLLMUsageStoreMixin:
                 """,
                 params,
             ).fetchall()
+            failed_where = f"{where} AND status = 'failed'" if where else "WHERE status = 'failed'"
+            failures = conn.execute(
+                f"""
+                SELECT COALESCE(error_code, 'unrecorded') AS error_code, COUNT(*) AS calls
+                FROM llm_usage_events
+                {failed_where}
+                GROUP BY COALESCE(error_code, 'unrecorded')
+                ORDER BY calls DESC
+                """,
+                params,
+            ).fetchall()
         summary = dict(totals) if totals is not None else {}
         summary["run_id"] = run_id
         summary["by_model"] = [dict(row) for row in rows]
+        summary["failed_by_error_code"] = {row["error_code"]: row["calls"] for row in failures}
         return summary

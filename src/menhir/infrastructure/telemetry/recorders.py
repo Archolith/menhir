@@ -63,6 +63,8 @@ def record_llm_usage_event(
             reasoning_output_tokens=event.reasoning_output_tokens,
             provider_usage_json=provider_usage_json,
             error="[redacted]" if event.error else None,
+            # Content-free by construction (provider_error_code); the free text stays redacted.
+            error_code=getattr(event, "error_code", None),
         )
     except Exception as exc:  # pragma: no cover - telemetry must never break the caller
         _log_telemetry_persist_failure(f"record_llm_usage_event:{event.call_id}", exc)
