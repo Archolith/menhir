@@ -1,3 +1,11 @@
+## 2026-09-29 - Default the scalar agreement gate to lenient
+
+- `src/menhir/config/settings_model.py`: `personal_memory_scalar_threshold` defaults to `2/3` and attribute/scope/subject reconciliation to on; scalar state itself stays off.
+- `src/menhir/services/maintenance_scheduler.py`, `scheduler_tasks.py`, `scalar_consolidation.py`, `typed_scalar_service.py`: align the same knobs' fallback defaults.
+- `.env.example`: document the new defaults and that the gain is not yet re-measured on current Menhir.
+- `tests/test_scalar_lenient_defaults.py`: defaults, overrides and the k=3 two-vote commit; `tests/test_scalar_threshold_setting.py`, `tests/test_gate_relaxations.py`: update the pinned old defaults.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-09-29 - Read scalar input only from TurnEvidence
 
 - `src/menhir/infrastructure/memory_graph_adapter.py`, `src/menhir/infrastructure/personal_memory_queries.py`: the typed-scalar lane always discovers and loads work from `:TurnEvidence`; the legacy `user:`-prefix Episodic selectors are removed (#95). The shared scalar cursor writer stays.

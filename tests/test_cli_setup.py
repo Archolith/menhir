@@ -246,7 +246,7 @@ def test_apply_setup_rejects_unsupported_provider(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize("provider,defaults", [
-    ("openai", {"OPENAI_CHAT_MODEL": "gpt-4o-mini", "OPENAI_EMBED_MODEL": "text-embedding-3-small"}),
+    ("openai", {"OPENAI_CHAT_MODEL": "gpt-6-luna", "OPENAI_EMBED_MODEL": "text-embedding-3-small"}),
     ("local", {"LOCAL_LLM_BASE_URL": "http://127.0.0.1:8081/v1", "LOCAL_LLM_CHAT_MODEL": "qwen3.5-35b-a3b"}),
 ])
 @pytest.mark.parametrize("initial", [None, "", '""', "custom-value"])
@@ -282,7 +282,7 @@ def test_provider_defaults_create_fresh_state_env(tmp_path: Path, provider: str)
     apply_setup(state, provider=provider, configure_git_hooks=False)
     values = _env_map(state / ".env")
     if provider == "openai":
-        assert values["OPENAI_CHAT_MODEL"] == "gpt-4o-mini"
+        assert values["OPENAI_CHAT_MODEL"] == "gpt-6-luna"
         assert values["OPENAI_EMBED_MODEL"] == "text-embedding-3-small"
     else:
         assert values["LOCAL_LLM_BASE_URL"] == "http://127.0.0.1:8081/v1"
