@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from menhir.domain.recall import InvalidQueryPresetError
 from menhir.core.tenancy import require_namespace_target, resolve_namespace_filter
 from menhir.mcp.service_access import get_pinned_namespace
+from menhir.services.counting_consolidation import effective_counting_perceiver_version
 
 from .routes_support import (
     ClientSummary,
@@ -107,6 +108,8 @@ async def phase3_run_impl(
         enable_counting=getattr(settings, "personal_memory_counting_enabled", False),
         counting_perceiver_version=getattr(
             settings, "personal_memory_counting_perceiver_version", "v1"),
+        counting_extract_v2=bool(getattr(
+            settings, "personal_memory_counting_extract_v2", False)),
         counting_lease_seconds=getattr(
             settings, "personal_memory_counting_lease_seconds", 900),
         event_history_perceiver_version=getattr(
@@ -129,8 +132,9 @@ async def phase3_run_impl(
         counting_dirty_after = bool(await asyncio.to_thread(
             adapter.load_next_counting_batch,
             ns,
-            perceiver_version=getattr(
-                settings, "personal_memory_counting_perceiver_version", "v1"),
+            perceiver_version=effective_counting_perceiver_version(
+                getattr(settings, "personal_memory_counting_perceiver_version", "v1"),
+                bool(getattr(settings, "personal_memory_counting_extract_v2", False))),
             scalar_perceiver_version=getattr(
                 settings, "personal_memory_scalar_state_perceiver_version", "v1"),
             limit=1,

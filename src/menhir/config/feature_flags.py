@@ -83,6 +83,8 @@ _SETTINGS = (
         False, 'personal_memory', 'Enable personal memory event history authority enabled.', True, ()),
     ('personal_memory_counting_enabled', 'MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED', False,
         'personal_memory', 'Count single happenings ("went to yoga") as scalar occurrences after the scalar phase; builds on scalar state.', True, ()),
+    ('personal_memory_counting_extract_v2', 'MENHIR_PERSONAL_MEMORY_COUNTING_EXTRACT_V2', False,
+        'personal_memory', 'Counting extraction v2: verb-anchored negation guard, per-attribute claim split, fenced captured block.', True, ()),
     ('benchmark_mode', 'MENHIR_BENCHMARK_MODE', False, 'runtime', 'Enable benchmark mode.', False, ()),
     ('frontier_bm25', 'MENHIR_FRONTIER_BM25', False, 'frontier', 'Enable frontier bm25.', True, ()),
     ('frontier_content_vector', 'MENHIR_FRONTIER_CONTENT_VECTOR', False, 'frontier',
@@ -213,6 +215,7 @@ _REQUIRES = {
     "personal_memory_scalar_view_authority_enabled": ("personal_memory_scalar_state_enabled",),
     "personal_memory_event_history_authority_enabled": ("personal_memory_event_history_enabled",),
     "personal_memory_counting_enabled": ("personal_memory_scalar_state_enabled",),
+    "personal_memory_counting_extract_v2": ("personal_memory_counting_enabled",),
     "frontier_belief_gate": ("frontier_warden_gate",),
     "frontier_evidence_anchor": ("frontier_warden_gate",),
     "frontier_contradiction_interrupt": ("frontier_warden_gate",),
@@ -230,6 +233,7 @@ _REQUIREMENT_SCOPE = {
     "personal_memory_scalar_view_authority_enabled": "Scalar state produces the Views; retained Views can outlive the writer gate.",
     "personal_memory_event_history_authority_enabled": "Event history produces the assertions; retained assertions can outlive the writer gate.",
     "personal_memory_counting_enabled": "The counting lane runs after the scalar phase and reads scalar state.",
+    "personal_memory_counting_extract_v2": "Only the counting lane's extraction changes; with counting off it never runs.",
     "frontier_belief_gate": "Warden verdict enforcement needs the master gate; belief scoring is independent.",
     "frontier_evidence_anchor": "Ranked Warden admission only; not every recall/context section.",
     "frontier_contradiction_interrupt": "Ranked Warden admission only; independent advisories remain.",
@@ -238,7 +242,8 @@ _REQUIREMENT_SCOPE = {
         "personal_memory_scalar_reconcile_subject")},
 }
 _VERSIONED = frozenset({"personal_memory_scalar_reconcile_attribute",
-    "personal_memory_scalar_reconcile_scope", "personal_memory_scalar_reconcile_subject"})
+    "personal_memory_scalar_reconcile_scope", "personal_memory_scalar_reconcile_subject",
+    "personal_memory_counting_extract_v2"})
 _OBSERVATION = frozenset({"shadow_context_composition", "frontier_shadow",
     "personal_memory_consolidation_audit_enabled", "personal_memory_recall_audit_enabled",
     "personal_memory_scalar_deterministic_shadow", "MENHIR_FRONTIER_TRACE",

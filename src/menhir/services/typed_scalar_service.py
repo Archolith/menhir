@@ -707,8 +707,13 @@ class TypedScalarPerceptionService:
         claim_ordinal: int = 0,
         context: str = "",
         write_guard: Callable[[], None] | None = None,
+        counting_v2: bool = False,
     ) -> dict[str, Any]:
         """Perceive typed scalars from `episodes` and durably persist the committed, bound ones.
+
+        `counting_v2` (counting lane only, unit 3a.9) selects the verb-anchored occurrence guard and
+        the per-attribute claim split; it is forwarded only when True, so every other caller is
+        unchanged.
 
         `system_prompt` / `allowed_operations` / `claim_ordinal` / `context` select the lane: the
         defaults are the scalar lane; the counting lane passes its own prompt, occurrence-only
@@ -849,11 +854,12 @@ class TypedScalarPerceptionService:
                 except Exception:
                     logger.exception("deterministic router audit emit failed (best-effort)")
 
+        v2_kwargs: dict[str, Any] = {"counting_v2": True} if counting_v2 else {}
         samples = [
             extract_typed_scalars_once(
                 llm_episodes, llm_complete, on_drop=_note_drop,
                 system_prompt=system_prompt, allowed_operations=allowed_operations,
-                claim_ordinal=claim_ordinal, context=context)
+                claim_ordinal=claim_ordinal, context=context, **v2_kwargs)
             for _ in range(k)
         ] if llm_episodes or not router_enabled else []
         kept = sum(len(s) for s in samples)
@@ -886,7 +892,7 @@ class TypedScalarPerceptionService:
         llm_decisions = gate_typed_scalars(
             samples, threshold=threshold, reconcile_attribute=reconcile_attribute,
             reconcile_scope=reconcile_scope, reconcile_subject=reconcile_subject,
-            canonical_self=canonical_self, align_spans=True) if samples else []
+            canonical_self=canonical_self, align_spans=True, **v2_kwargs) if samples else []
         decisions = self._merge_router_decisions(
             episodes, deterministic_decisions, llm_decisions
         ) if router_enabled and router_failure is None else llm_decisions
