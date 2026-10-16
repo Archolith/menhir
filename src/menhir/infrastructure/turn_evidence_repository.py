@@ -25,6 +25,10 @@ from menhir.domain.namespace import (
     tenant_scope_params,
 )
 
+class CountingFenceLost(RuntimeError):
+    """The run no longer owns the namespace's counting fence (wiped, reclaimed, or lease taken)."""
+
+
 #: role values evidence may carry. Only 'user' is captured in the Claude MVP; the rest are reserved so
 #: a later assistant/tool producer needs no schema change.
 EVIDENCE_ROLES = ("user", "assistant", "tool", "agent")
@@ -589,21 +593,185 @@ class TurnEvidenceRepository:
         )
         return [dict(r) for r in rows]
 
-    def advance_counting_cursor(
-        self, namespace: str, *, cursor_at: str, cursor_uuid: str,
-        perceiver_version: str, at: str,
-    ) -> None:
-        """Advance the namespace's counting cursor to the last TurnEvidence actually processed
-        (monotonic recorded_at, never world time), stamping the counting perceiver_version."""
-        self._neo4j.execute(
+    def claim_counting_namespace(
+        self, namespace: str, *, run_id: str, lease_seconds: int, now: str,
+    ) -> dict[str, Any] | None:
+        """Claim the namespace's counting fence (owner + lease on the watermark node). Returns
+        {"incarnation", "epoch"} or None when another live owner holds it. Never sets the cursor."""
+        rows = self._neo4j.execute(
             """
             MERGE (w:CountingConsolidationWatermark {group_id: $ns})
+            ON CREATE SET w.incarnation = randomUUID(), w.epoch = 0, w.created_at = datetime($now)
+            SET w.last_claim_attempt_at = datetime($now)
+            WITH w
+            WHERE w.owner IS NULL OR w.lease_expires_at IS NULL
+                  OR w.lease_expires_at < datetime($now) OR w.owner = $run_id
+            SET w.incarnation = coalesce(w.incarnation, randomUUID()), w.owner = $run_id,
+                w.epoch = coalesce(w.epoch, 0) + 1,
+                w.lease_expires_at = datetime($now) + duration({seconds: $lease})
+            RETURN w.incarnation AS incarnation, w.epoch AS epoch
+            """,
+            params={"ns": namespace, "run_id": str(run_id), "lease": int(lease_seconds),
+                    "now": now},
+        )
+        if not rows:
+            return None
+        return {"incarnation": str(rows[0]["incarnation"]), "epoch": int(rows[0]["epoch"])}
+
+    def renew_counting_claim(
+        self, namespace: str, *, run_id: str, incarnation: str, epoch: int,
+        lease_seconds: int, now: str,
+    ) -> bool:
+        """Extend the lease; True iff this run still owns the exact (incarnation, epoch) fence."""
+        rows = self._neo4j.execute(
+            """
+            MATCH (w:CountingConsolidationWatermark {group_id: $ns})
+            WHERE w.owner = $run_id AND w.incarnation = $inc AND w.epoch = $epoch
+            SET w.lease_expires_at = datetime($now) + duration({seconds: $lease})
+            RETURN count(w) AS c
+            """,
+            params={"ns": namespace, "run_id": str(run_id), "inc": str(incarnation),
+                    "epoch": int(epoch), "lease": int(lease_seconds), "now": now},
+        )
+        return bool(rows) and int(rows[0]["c"]) > 0
+
+    def release_counting_claim(
+        self, namespace: str, *, run_id: str, incarnation: str,
+    ) -> None:
+        """Drop ownership if this run still holds it; a no-op when the fence is gone or taken."""
+        self._neo4j.execute(
+            """
+            MATCH (w:CountingConsolidationWatermark {group_id: $ns})
+            WHERE w.owner = $run_id AND w.incarnation = $inc
+            SET w.owner = null, w.lease_expires_at = null
+            """,
+            params={"ns": namespace, "run_id": str(run_id), "inc": str(incarnation)},
+        )
+
+    def advance_counting_cursor(
+        self, namespace: str, *, cursor_at: str, cursor_uuid: str,
+        perceiver_version: str, at: str, run_id: str, incarnation: str, epoch: int,
+    ) -> None:
+        """Advance the namespace's counting cursor to the last TurnEvidence actually processed
+        (monotonic recorded_at, never world time), stamping the counting perceiver_version.
+        Fenced: raises CountingFenceLost unless this run still owns the watermark node."""
+        rows = self._neo4j.execute(
+            """
+            MATCH (w:CountingConsolidationWatermark {group_id: $ns})
+            WHERE w.owner = $run_id AND w.incarnation = $inc AND w.epoch = $epoch
             SET w.cursor_at = datetime($cursor_at), w.cursor_uuid = $cu,
                 w.perceiver_version = $pv, w.last_run_at = datetime($at)
+            RETURN count(w) AS c
             """,
             params={"ns": namespace, "cursor_at": cursor_at, "cu": cursor_uuid,
-                    "pv": str(perceiver_version), "at": at},
+                    "pv": str(perceiver_version), "at": at, "run_id": str(run_id),
+                    "inc": str(incarnation), "epoch": int(epoch)},
         )
+        if not rows or int(rows[0]["c"]) < 1:
+            raise CountingFenceLost(
+                f"counting fence lost for namespace {namespace!r} during advance_counting_cursor")
+
+    def retire_prior_version_occurrences(
+        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
+        run_id: str, incarnation: str, epoch: int,
+    ) -> list[str]:
+        """Retire current occurrence claims on these turns stamped by another counting version,
+        in one fenced query. Returns the affected subject_uuids (callers rebuild them)."""
+        ids = [str(i) for i in (turn_ids or []) if i]
+        rows = self._neo4j.execute(
+            """
+            OPTIONAL MATCH (w:CountingConsolidationWatermark {group_id: $ns})
+            WHERE w.owner = $run_id AND w.incarnation = $inc AND w.epoch = $epoch
+            SET w.last_retire_at = datetime()
+            WITH w IS NOT NULL AS fence_ok
+            OPTIONAL MATCH (h:TypedAssertionHead)-[cr:CURRENT]->(a:TypedAssertion)
+            WHERE fence_ok AND """ + tenant_scope_cypher("a") + """
+                  AND a.operation = 'occurrence' AND coalesce(a.claim_ordinal, 0) = 1
+                  AND a.episode_uuid IN $turn_ids
+                  AND coalesce(a.perceiver_version, '') <> $pv
+            SET a.superseded = true, a.expired_at = datetime(),
+                a.retired_reason = 'counting_reversion'
+            DELETE cr
+            WITH fence_ok, collect(DISTINCT a.subject_uuid) AS subjects
+            RETURN fence_ok, subjects
+            """,
+            params={"ns": namespace, "run_id": str(run_id), "inc": str(incarnation),
+                    "epoch": int(epoch), "turn_ids": ids, "pv": str(perceiver_version),
+                    **tenant_scope_params(namespace)},
+        )
+        if not rows or not rows[0]["fence_ok"]:
+            raise CountingFenceLost(
+                f"counting fence lost for namespace {namespace!r} during "
+                "retire_prior_version_occurrences")
+        return [str(s) for s in (rows[0]["subjects"] or []) if s]
+
+    def mark_counting_flag_state(
+        self, namespace: str, *, enabled: bool, at: str, create_only: bool = False,
+    ) -> None:
+        """Record the counting flag value last applied to this namespace (for the flag sweep).
+        create_only: set it only if no marker exists; only a completed sweep may flip one."""
+        if create_only:
+            query = """
+            MERGE (m:CountingFlagState {namespace_key: $ns})
+            ON CREATE SET m.group_id = $ns, m.enabled = $enabled, m.updated_at = datetime($at)
+            """
+        else:
+            query = """
+            MERGE (m:CountingFlagState {namespace_key: $ns})
+            SET m.group_id = $ns, m.enabled = $enabled, m.updated_at = datetime($at)
+            """
+        self._neo4j.execute(
+            query,
+            params={"ns": namespace, "enabled": bool(enabled), "at": at},
+        )
+
+    def counting_flag_sweep_targets(
+        self, *, enabled: bool, namespaces: list[str] | None, limit: int,
+    ) -> list[str]:
+        """Namespaces whose recorded flag state differs from `enabled` (need a rebuild sweep)."""
+        rows = self._neo4j.execute(
+            """
+            MATCH (m:CountingFlagState)
+            WHERE m.enabled <> $enabled AND ($namespaces IS NULL OR m.namespace_key IN $namespaces)
+            RETURN m.namespace_key AS namespace
+            ORDER BY m.namespace_key
+            LIMIT $limit
+            """,
+            params={"enabled": bool(enabled),
+                    "namespaces": None if namespaces is None else [str(n) for n in namespaces],
+                    "limit": int(limit)},
+        )
+        return [str(r["namespace"]) for r in rows]
+
+    def counting_sweep_subjects(
+        self, namespace: str, *, limit: int, after: str = "",
+    ) -> list[str]:
+        """Subjects with current counted occurrences or a current counted scalar_state View,
+        ordered, strictly after `after` (keyset paging)."""
+        rows = self._neo4j.execute(
+            """
+            CALL {
+                MATCH (h:TypedAssertionHead)-[:CURRENT]->(a:TypedAssertion)
+                WHERE """ + tenant_scope_cypher("a") + """
+                      AND a.operation = 'occurrence' AND coalesce(a.claim_ordinal, 0) = 1
+                      AND a.subject_uuid IS NOT NULL
+                RETURN DISTINCT a.subject_uuid AS subject_uuid
+                UNION
+                MATCH (n:Entity {view_kind: 'scalar_state', group_id: $ns})
+                WHERE coalesce(n.view_current, true) AND n.scalar_basis = 'counted'
+                      AND n.view_subject_uuid IS NOT NULL
+                RETURN DISTINCT n.view_subject_uuid AS subject_uuid
+            }
+            WITH DISTINCT subject_uuid
+            WHERE subject_uuid > $after
+            RETURN subject_uuid
+            ORDER BY subject_uuid
+            LIMIT $limit
+            """,
+            params={"ns": namespace, "limit": int(limit), "after": str(after or ""),
+                    **tenant_scope_params(namespace)},
+        )
+        return [str(r["subject_uuid"]) for r in rows]
 
     def scalar_claims_for_turns(
         self, namespace: str, turn_ids: list[str], *, limit: int = 200,

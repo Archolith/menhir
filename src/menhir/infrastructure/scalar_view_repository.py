@@ -235,7 +235,7 @@ class ScalarViewRepositoryMixin:
               AND coalesce(n.ss_scope, '') = $scope AND coalesce(n.ss_unit, '') = $unit
             RETURN n.uuid AS uuid, n.ss_value AS value, n.name AS name, n.view_key AS view_key,
                    n.ss_attribute AS attribute, n.view_subject_uuid AS subject_uuid,
-                   toString(n.valid_at) AS valid_at,
+                   toString(n.valid_at) AS valid_at, n.scalar_basis AS scalar_basis,
                    CASE WHEN {default_recall_visibility_cypher("n")}
                         THEN true ELSE false END AS recall_eligible
             LIMIT 1

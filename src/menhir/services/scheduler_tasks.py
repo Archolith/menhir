@@ -29,6 +29,7 @@ from menhir.services.enrichment_steps import record_retention_sources
 from menhir.services.counting_consolidation import (
     CountingConsolidationConfig,
     run_counting_consolidation,
+    sweep_counting_flag_state,
 )
 from menhir.services.event_consolidation import (
     EventConsolidationConfig,
@@ -566,6 +567,7 @@ async def consolidate_personal_memory(
     event_batch_size: int = 500,
     enable_counting: bool = False,
     counting_perceiver_version: str = "v1",
+    counting_lease_seconds: int = 900,
 ) -> dict[str, object]:
     """Re-derive count/amount Views from each DIRTY namespace's user turns via the gated perception
     boundary, pinning ALL bias guards on (cross-check + coref + verify) so an automatic write never
@@ -763,34 +765,17 @@ async def consolidate_personal_memory(
                 )
             )
             result["scalar_llm_calls"] = counting_llm.calls - scalar_start_calls
-            # The counting lane builds on scalars: it runs after the scalar phase, only over turns
-            # the scalar cursor has passed, and shares the budget (scalars first, counting after).
-            # Off: no calls, no counting watermark, no counting_* result keys.
-            if enable_counting:
-                result.update(
-                    run_counting_consolidation(
-                        graph_adapter,
-                        namespaces=namespaces,
-                        counting_llm=counting_llm,
-                        build_episodes=_build_episodes,
-                        k=k,
-                        threshold=(threshold if scalar_threshold is None else scalar_threshold),
-                        call_budget=call_budget,
-                        embed=embed,
-                        config=CountingConsolidationConfig(
-                            perceiver_version=counting_perceiver_version,
-                            scalar_perceiver_version=scalar_state_perceiver_version,
-                            batch_size=scalar_batch_size,
-                            max_namespaces=max_namespaces,
-                            embed_version=scalar_embed_version,
-                            scalar_history_enabled=scalar_history_enabled,
-                            reconcile_attribute=scalar_reconcile_attribute,
-                            reconcile_scope=scalar_reconcile_scope,
-                            reconcile_subject=scalar_reconcile_subject,
-                            canonical_self=scalar_canonical_self,
-                        ),
-                    )
-                )
+            # Kill switch / re-enable: rebuild Views for namespaces whose counting flag marker
+            # disagrees with the flag now. No LLM calls; no markers means nothing to do.
+            sweep = sweep_counting_flag_state(
+                graph_adapter,
+                enabled=enable_counting,
+                namespaces=namespaces,
+                scalar_history_enabled=scalar_history_enabled,
+            )
+            # Keys only when the sweep did something, so the counting-off payload is unchanged.
+            if any(sweep.values()):
+                result.update(sweep)
         # Event-history consolidation is independently dirty-tracked but shares this run's counting
         # LLM, so the configured budget remains global across counter, scalar, and event phases.
         if enable_event_history:
@@ -803,6 +788,35 @@ async def consolidate_personal_memory(
                     config=EventConsolidationConfig(
                         perceiver_version=event_history_perceiver_version,
                         batch_size=event_batch_size,
+                    ),
+                )
+            )
+        # The counting lane builds on scalars: it runs after the scalar and event phases, only over
+        # turns the scalar cursor has passed, and shares the budget (scalars first, counting last).
+        # Off: no calls, no counting watermark, no counting_* result keys.
+        if enable_counting:
+            result.update(
+                run_counting_consolidation(
+                    graph_adapter,
+                    namespaces=namespaces,
+                    counting_llm=counting_llm,
+                    build_episodes=_build_episodes,
+                    k=k,
+                    threshold=(threshold if scalar_threshold is None else scalar_threshold),
+                    call_budget=call_budget,
+                    embed=embed,
+                    config=CountingConsolidationConfig(
+                        perceiver_version=counting_perceiver_version,
+                        scalar_perceiver_version=scalar_state_perceiver_version,
+                        batch_size=scalar_batch_size,
+                        max_namespaces=max_namespaces,
+                        embed_version=scalar_embed_version,
+                        scalar_history_enabled=scalar_history_enabled,
+                        reconcile_attribute=scalar_reconcile_attribute,
+                        reconcile_scope=scalar_reconcile_scope,
+                        reconcile_subject=scalar_reconcile_subject,
+                        canonical_self=scalar_canonical_self,
+                        lease_seconds=counting_lease_seconds,
                     ),
                 )
             )

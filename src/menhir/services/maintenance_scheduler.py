@@ -99,6 +99,8 @@ class MaintenanceScheduler:
     personal_memory_k: int = 3
     event_history_enabled: bool = False
     counting_enabled: bool = False
+    counting_perceiver_version: str = "v1"
+    counting_lease_seconds: int = 900
     event_history_perceiver_version: str = "v1"
     event_history_batch_size: int = 500
     personal_memory_call_budget: int | None = None
@@ -842,6 +844,8 @@ class MaintenanceScheduler:
             enable_counter_state=self.personal_memory_enabled,
             enable_event_history=self.event_history_enabled,
             enable_counting=self.counting_enabled,
+            counting_perceiver_version=self.counting_perceiver_version,
+            counting_lease_seconds=self.counting_lease_seconds,
             event_history_perceiver_version=self.event_history_perceiver_version,
             event_batch_size=self.event_history_batch_size,
         )

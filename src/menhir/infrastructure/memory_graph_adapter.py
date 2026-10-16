@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import uuid as uuidlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -67,6 +67,8 @@ class MemoryGraphAdapter:
     """Thin façade over graph storage; delegates to focused sub-repositories."""
 
     neo4j: Neo4jRepository
+    # keyword-only dataclass field (a same-named property would clobber the init default)
+    counting_enabled: bool = field(default=False, kw_only=True)
 
     def __post_init__(self) -> None:
         from menhir.infrastructure.memory_queries import MemoryQueryRepository
@@ -257,13 +259,16 @@ class MemoryGraphAdapter:
         the fairness frontier (ScalarStateView C.4.4)."""
         return self._typed_assertions.mark_orphan_repair_attempted(work_items, at=at)
 
-    def scalar_state_service(self, *, scalar_history_enabled: bool = False) -> Any:
+    def scalar_state_service(
+        self, *, scalar_history_enabled: bool = False, counting_enabled: bool | None = None,
+    ) -> Any:
         """Build a `ScalarStateService` bound to this adapter's typed-assertion store (fold input) and
         its scalar-state View sink. Used by the C.4.3 perception path to rebuild Views after persist."""
         from menhir.services.scalar_state_service import ScalarStateService
         return ScalarStateService(
             self._typed_assertions, self,
-            scalar_history_enabled=scalar_history_enabled)
+            scalar_history_enabled=scalar_history_enabled,
+            counting_enabled=self.counting_enabled if counting_enabled is None else counting_enabled)
 
     # -------------------------------------------------------------------------
     # Typed-event assertion delegates → TypedEventAssertionRepository
@@ -1688,11 +1693,57 @@ class MemoryGraphAdapter:
 
     def advance_counting_cursor(
         self, namespace: str, *, cursor_at: str, cursor_uuid: str,
-        perceiver_version: str, at: str,
+        perceiver_version: str, at: str, run_id: str, incarnation: str, epoch: int,
     ) -> None:
         self._turn_evidence.advance_counting_cursor(
             namespace, cursor_at=cursor_at, cursor_uuid=cursor_uuid,
-            perceiver_version=perceiver_version, at=at)
+            perceiver_version=perceiver_version, at=at,
+            run_id=run_id, incarnation=incarnation, epoch=epoch)
+
+    def claim_counting_namespace(
+        self, namespace: str, *, run_id: str, lease_seconds: int, now: str,
+    ) -> dict[str, Any] | None:
+        return self._turn_evidence.claim_counting_namespace(
+            namespace, run_id=run_id, lease_seconds=lease_seconds, now=now)
+
+    def renew_counting_claim(
+        self, namespace: str, *, run_id: str, incarnation: str, epoch: int,
+        lease_seconds: int, now: str,
+    ) -> bool:
+        return self._turn_evidence.renew_counting_claim(
+            namespace, run_id=run_id, incarnation=incarnation, epoch=epoch,
+            lease_seconds=lease_seconds, now=now)
+
+    def release_counting_claim(
+        self, namespace: str, *, run_id: str, incarnation: str,
+    ) -> None:
+        self._turn_evidence.release_counting_claim(
+            namespace, run_id=run_id, incarnation=incarnation)
+
+    def retire_prior_version_occurrences(
+        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
+        run_id: str, incarnation: str, epoch: int,
+    ) -> list[str]:
+        return self._turn_evidence.retire_prior_version_occurrences(
+            namespace, turn_ids, perceiver_version=perceiver_version,
+            run_id=run_id, incarnation=incarnation, epoch=epoch)
+
+    def mark_counting_flag_state(
+        self, namespace: str, *, enabled: bool, at: str, create_only: bool = False,
+    ) -> None:
+        self._turn_evidence.mark_counting_flag_state(
+            namespace, enabled=enabled, at=at, create_only=create_only)
+
+    def counting_flag_sweep_targets(
+        self, *, enabled: bool, namespaces: list[str] | None, limit: int,
+    ) -> list[str]:
+        return self._turn_evidence.counting_flag_sweep_targets(
+            enabled=enabled, namespaces=namespaces, limit=limit)
+
+    def counting_sweep_subjects(
+        self, namespace: str, *, limit: int, after: str = "",
+    ) -> list[str]:
+        return self._turn_evidence.counting_sweep_subjects(namespace, limit=limit, after=after)
 
     def scalar_claims_for_turns(
         self, namespace: str, turn_ids: list[str], *, limit: int = 200,

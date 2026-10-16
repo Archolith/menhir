@@ -105,6 +105,10 @@ async def phase3_run_impl(
         enable_event_history=getattr(
             settings, "personal_memory_event_history_enabled", False),
         enable_counting=getattr(settings, "personal_memory_counting_enabled", False),
+        counting_perceiver_version=getattr(
+            settings, "personal_memory_counting_perceiver_version", "v1"),
+        counting_lease_seconds=getattr(
+            settings, "personal_memory_counting_lease_seconds", 900),
         event_history_perceiver_version=getattr(
             settings, "personal_memory_event_history_perceiver_version", "v1"),
         event_batch_size=getattr(
@@ -117,6 +121,18 @@ async def phase3_run_impl(
             adapter.load_next_event_evidence_batch,
             ns,
             perceiver_version=getattr(settings, "personal_memory_event_history_perceiver_version", "v1"),
+            limit=1,
+        ))
+    counting_dirty_after = None
+    if (getattr(settings, "personal_memory_counting_enabled", False)
+            and getattr(settings, "personal_memory_scalar_state_enabled", False)):
+        counting_dirty_after = bool(await asyncio.to_thread(
+            adapter.load_next_counting_batch,
+            ns,
+            perceiver_version=getattr(
+                settings, "personal_memory_counting_perceiver_version", "v1"),
+            scalar_perceiver_version=getattr(
+                settings, "personal_memory_scalar_state_perceiver_version", "v1"),
             limit=1,
         ))
     return Phase3RunResponse(
@@ -140,6 +156,20 @@ async def phase3_run_impl(
         event_history_enabled=bool(
             getattr(settings, "personal_memory_event_history_enabled", False)),
         counting_enabled=bool(getattr(settings, "personal_memory_counting_enabled", False)),
+        counting_namespaces_processed=int(
+            result.get("counting_namespaces_processed", 0) or 0),
+        counting_batches=int(result.get("counting_batches", 0) or 0),
+        counting_occurrences_stored=int(
+            result.get("counting_occurrences_stored", 0) or 0),
+        counting_advisory=int(result.get("counting_advisory", 0) or 0),
+        counting_llm_calls=int(result.get("counting_llm_calls", 0) or 0),
+        counting_namespaces_failed=int(
+            result.get("counting_namespaces_failed", 0) or 0),
+        counting_namespaces_busy=int(
+            result.get("counting_namespaces_busy", 0) or 0),
+        counting_namespaces_fenced=int(
+            result.get("counting_namespaces_fenced", 0) or 0),
+        counting_dirty_after=counting_dirty_after,
         event_namespaces_processed=int(
             result.get("event_namespaces_processed", 0) or 0),
         event_namespaces_failed=int(

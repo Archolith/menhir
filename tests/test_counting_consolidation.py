@@ -47,8 +47,14 @@ class _CounterGraph:
 
     def __init__(self):
         self.counting_calls: list[str] = []
+        self.sweep_reads: list[dict] = []
         for name in _COUNTING_METHODS:
             setattr(self, name, self._recorder(name))
+
+    def counting_flag_sweep_targets(self, **kw):
+        # The kill-switch sweep's one read; no markers -> nothing else is touched.
+        self.sweep_reads.append(kw)
+        return []
 
     def _recorder(self, name):
         def _rec(*_a, **_kw):
@@ -188,6 +194,24 @@ class _RunnerGraph:
 
     def advance_counting_cursor(self, namespace, **kw):
         self._log("advance_counting_cursor", namespace, **kw)
+
+    def claim_counting_namespace(self, namespace, **kw):
+        self._log("claim_counting_namespace", namespace, **kw)
+        return {"incarnation": "inc-1", "epoch": 1}
+
+    def renew_counting_claim(self, namespace, **kw):
+        self._log("renew_counting_claim", namespace, **kw)
+        return True
+
+    def release_counting_claim(self, namespace, **kw):
+        self._log("release_counting_claim", namespace, **kw)
+
+    def retire_prior_version_occurrences(self, namespace, turn_ids, **kw):
+        self._log("retire_prior_version_occurrences", namespace, list(turn_ids), **kw)
+        return []
+
+    def mark_counting_flag_state(self, namespace, **kw):
+        self._log("mark_counting_flag_state", namespace, **kw)
 
     def scalar_claims_for_turns(self, namespace, turn_ids, **kw):
         self._log("scalar_claims_for_turns", namespace, list(turn_ids), **kw)

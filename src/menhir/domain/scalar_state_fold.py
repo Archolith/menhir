@@ -138,8 +138,37 @@ def _money_decimal(value: Any) -> Decimal | None:
     return result if result.is_finite() else None
 
 
+def _dedup_occurrences_per_turn(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep at most one occurrence per (subject, attribute, value_kind, unit, episode), ignoring scope.
+    Survivor: largest value, then scope == "", then smallest assertion_id. Other rows pass through."""
+    groups: dict[tuple, list[dict[str, Any]]] = {}
+    for row in rows:
+        episode = str(row.get("episode_uuid") or "")
+        if str(row.get("operation")) != "occurrence" or not episode:
+            continue
+        s = _slot_of(row)
+        groups.setdefault((s[0], s[1], s[3], s[4], episode), []).append(row)
+    dropped: set[int] = set()
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        def _num(m: dict[str, Any]) -> Decimal:
+            v = _money_decimal(m.get("value"))
+            return Decimal("-Infinity") if v is None else v
+
+        keep = min(members, key=lambda m: (
+            -_num(m),
+            str(m.get("scope") or "").strip() != "",
+            str(m.get("assertion_id") or ""),
+        ))
+        dropped.update(id(m) for m in members if m is not keep)
+    if not dropped:
+        return rows
+    return [r for r in rows if id(r) not in dropped]
+
+
 def fold_assertions(
-    rows: list[dict[str, Any]], *, as_of: datetime | None = None,
+    rows: list[dict[str, Any]], *, as_of: datetime | None = None, include_occurrences: bool = True,
 ) -> FoldResult:
     """Fold current assertion rows (shape of TypedAssertionRepository.assertions_for_entity) into
     one FoldedScalarState per slot, or an Abstention. Deterministic given the input set AND `as_of`.
@@ -154,8 +183,11 @@ def fold_assertions(
     rows + same `as_of` always fold identically (live == rebuild); a later real-time evaluation MAY differ
     because future assertions have since activated -- temporal evolution, not a parity break. A row with
     an unparseable/absent `valid_at` sorts as epoch (always <= as_of), i.e. included."""
+    if not include_occurrences:
+        rows = [r for r in rows if str(r.get("operation")) != "occurrence"]
     if as_of is not None:
         rows = [r for r in rows if (_parse_dt(r.get("valid_at")) or _EPOCH) <= as_of]
+    rows = _dedup_occurrences_per_turn(rows)
     slots: dict[tuple, list[dict[str, Any]]] = {}
     for row in rows:
         slots.setdefault(_slot_of(row), []).append(row)

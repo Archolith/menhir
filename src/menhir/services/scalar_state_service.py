@@ -169,11 +169,16 @@ class ScalarStateService:
 
     def __init__(
         self, assertions: _AssertionSource, views: _ViewSink, *,
-        scalar_history_enabled: bool = False,
+        scalar_history_enabled: bool = False, counting_enabled: bool = True,
     ) -> None:
         self._assertions = assertions
         self._views = views
         self._scalar_history_enabled = scalar_history_enabled
+        self._counting_enabled = counting_enabled
+
+    @property
+    def counting_enabled(self) -> bool:
+        return self._counting_enabled
 
     def fold_entity(
         self, subject_uuid: str, *, namespace: str | None = None, as_of: datetime | None = None,
@@ -184,7 +189,7 @@ class ScalarStateService:
         tenants' assertions sharing a subject_uuid; None = all (unchanged behavior). `as_of` (Phase B)
         is the evaluation time: future assertions (`valid_at > as_of`) are ignored; None = now(UTC)."""
         rows = self._assertions.materializable_assertions_for_entity(subject_uuid, namespace=namespace)
-        return fold_assertions(rows, as_of=as_of)
+        return fold_assertions(rows, as_of=as_of, include_occurrences=self._counting_enabled)
 
     def current_authority(
         self, subject_uuid: str, *, namespace: str | None = None, as_of: datetime | None = None,

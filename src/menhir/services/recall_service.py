@@ -96,9 +96,9 @@ class RecallService(RecallSupportMixin):
     #: graph fact for an explicit current-state query (all six authority gates must pass). Default
     #: OFF -> today's behavior (a View never suppresses a fact).
     scalar_view_authority_enabled: bool = False
-    #: When True, scalar_history Views are surfaced as advisory context via a dedicated recall lane.
-    #: When False, scalar_history Entities are excluded from generic recall (real rollback).
+    #: True: scalar_history Views form an advisory recall lane; False: excluded (real rollback).
     scalar_history_enabled: bool = False
+    counting_enabled: bool = False  # False hides counted scalar_state Views (read-side kill switch)
     #: When True, a recognized conservative first-person event recall query (with a non-None
     #: namespace) surfaces a leading/advisory event-history authority layer. Default OFF -> today's
     #: behavior (no event authority and no event-assertion repository read).

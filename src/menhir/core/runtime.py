@@ -397,6 +397,10 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
     event_history_enabled = getattr(settings, "personal_memory_event_history_enabled", False)
     scalar_state_enabled = getattr(settings, "personal_memory_scalar_state_enabled", False)
     counting_enabled = getattr(settings, "personal_memory_counting_enabled", False)
+    if counting_enabled and not scalar_state_enabled:
+        logger.warning(
+            "personal-memory counting enabled but scalar state is disabled; "
+            "counting needs scalar state and will do nothing")
     personal_memory_llm = None
     if (personal_memory_enabled or event_history_enabled or scalar_state_enabled
             or counting_enabled) and settings is not None:
@@ -438,6 +442,10 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         personal_memory_enabled=personal_memory_enabled,
         event_history_enabled=event_history_enabled,
         counting_enabled=counting_enabled,
+        counting_perceiver_version=getattr(
+            settings, "personal_memory_counting_perceiver_version", "v1"),
+        counting_lease_seconds=getattr(
+            settings, "personal_memory_counting_lease_seconds", 900),
         event_history_perceiver_version=getattr(
             settings, "personal_memory_event_history_perceiver_version", "v1"),
         personal_memory_interval_s=getattr(settings, "personal_memory_consolidation_interval_s", 300.0),
@@ -719,7 +727,13 @@ async def _initialize_services(
     if candidate_readonly:
         from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 
-        graph_adapter = MemoryGraphAdapter(neo4j=built.neo4j)
+        graph_adapter = MemoryGraphAdapter(
+            neo4j=built.neo4j,
+            counting_enabled=bool(
+                getattr(settings, "personal_memory_counting_enabled", False)
+                and getattr(settings, "personal_memory_scalar_state_enabled", False)
+            ),
+        )
         schema_ready = await asyncio.to_thread(graph_adapter.phase_one_schema_ready)
         if not schema_ready:
             raise RuntimeError(

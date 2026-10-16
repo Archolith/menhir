@@ -38,6 +38,10 @@ class _FakeGraph:
     def record_counter(self, **kwargs):
         return {"uuid": "u", "view_key": "k", "created": True}
 
+    def counting_flag_sweep_targets(self, **kwargs):
+        # Counting kill-switch sweep read (runs whenever scalars are on); no markers here.
+        return []
+
 
 def _eps(*bodies):
     return [{"uuid": f"e{i}", "valid_at": "2026-07-01T00:00:00Z", "content": f"user: {b}"}

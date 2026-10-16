@@ -12,6 +12,9 @@ Order and authority:
   scalar cursor for the scalar perceiver_version in effect. No scalar cursor, or one from another
   version, returns nothing (pause).
 - A page advances the counting cursor only after it ran, exactly like the scalar runner.
+- Each namespace is claimed with a fenced lease (claim, renew per page, release); a lost fence stops
+  that namespace. Prior-version occurrences are retired and their Views rebuilt before perception.
+- sweep_counting_flag_state rebuilds Views after the counting flag flips, with no LLM calls.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Protocol
+from uuid import uuid4
 
 from menhir.domain.typed_assertion import COUNTING_OPERATIONS
 from menhir.services.scalar_consolidation import CountingLlm
@@ -92,14 +96,46 @@ class CountingConsolidationGraph(Protocol):
 
     def advance_counting_cursor(
         self, namespace: str, *, cursor_at: str, cursor_uuid: str,
-        perceiver_version: str, at: str,
+        perceiver_version: str, at: str, run_id: str, incarnation: str, epoch: int,
     ) -> None: ...
+
+    def claim_counting_namespace(
+        self, namespace: str, *, run_id: str, lease_seconds: int, now: str,
+    ) -> dict[str, Any] | None: ...
+
+    def renew_counting_claim(
+        self, namespace: str, *, run_id: str, incarnation: str, epoch: int,
+        lease_seconds: int, now: str,
+    ) -> bool: ...
+
+    def release_counting_claim(
+        self, namespace: str, *, run_id: str, incarnation: str,
+    ) -> None: ...
+
+    def retire_prior_version_occurrences(
+        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
+        run_id: str, incarnation: str, epoch: int,
+    ) -> list[str]: ...
+
+    def mark_counting_flag_state(
+        self, namespace: str, *, enabled: bool, at: str, create_only: bool = False,
+    ) -> None: ...
+
+    def counting_flag_sweep_targets(
+        self, *, enabled: bool, namespaces: list[str] | None, limit: int,
+    ) -> list[str]: ...
+
+    def counting_sweep_subjects(
+        self, namespace: str, *, limit: int, after: str = "",
+    ) -> list[str]: ...
 
     def scalar_claims_for_turns(
         self, namespace: str, turn_ids: list[str], *, limit: int,
     ) -> list[dict[str, Any]]: ...
 
-    def scalar_state_service(self, *, scalar_history_enabled: bool = False) -> Any: ...
+    def scalar_state_service(
+        self, *, scalar_history_enabled: bool = False, counting_enabled: bool | None = None,
+    ) -> Any: ...
 
 
 @dataclass(frozen=True)
@@ -118,6 +154,8 @@ class CountingConsolidationConfig:
     reconcile_subject: bool = True
     canonical_self: bool = False
     scalar_history_enabled: bool = False
+    #: per-namespace claim lease; renewed after every page.
+    lease_seconds: int = 900
 
 
 def build_counting_context(
@@ -162,6 +200,7 @@ def run_counting_consolidation(
 ) -> dict[str, object]:
     """Run the counting lane over turns the scalar lane has finished, sharing the run's budget."""
 
+    from menhir.infrastructure.turn_evidence_repository import CountingFenceLost
     from menhir.infrastructure.typed_assertion_repository import ScalarStateActivationError
     from menhir.services.typed_scalar_perception import (
         ScalarStateNotActivatedError,
@@ -172,6 +211,9 @@ def run_counting_consolidation(
     occurrences_stored = 0
     advisory = 0
     processed = 0
+    failed = 0
+    busy = 0
+    fenced = 0
     batches = 0
     targets: list[str] = []
     service = None
@@ -203,79 +245,180 @@ def run_counting_consolidation(
                 scalar_perceiver_version=config.scalar_perceiver_version,
                 limit=config.max_namespaces,
             )
+        run_id = uuid4().hex
         for namespace in targets:
             if call_budget is not None and counting_llm.calls >= call_budget:
                 break
-            namespace_touched = False
-            while True:
-                if call_budget is not None and counting_llm.calls >= call_budget:
-                    break
-                rows = graph_adapter.load_next_counting_batch(
-                    namespace,
-                    perceiver_version=config.perceiver_version,
-                    scalar_perceiver_version=config.scalar_perceiver_version,
-                    limit=config.batch_size,
-                )
-                if not rows:
-                    break
-                episodes = build_episodes(rows)
-                if episodes:
-                    claims = graph_adapter.scalar_claims_for_turns(
-                        namespace, [str(e.uuid) for e in episodes], limit=_CONTEXT_CLAIM_LIMIT)
-                    reference_by_uuid = {
-                        str(row["uuid"]): (str(row.get("valid_at") or "") or None)
-                        for row in rows
-                    }
-                    perception = service.perceive_and_persist(
-                        episodes,
-                        counting_llm,
-                        k=k,
-                        threshold=threshold,
-                        namespace=namespace,
-                        episode_reference_time=reference_by_uuid.get,
-                        reconcile_attribute=config.reconcile_attribute,
-                        reconcile_scope=config.reconcile_scope,
-                        reconcile_subject=config.reconcile_subject,
-                        canonical_self=config.canonical_self,
-                        system_prompt=COUNTING_SYSTEM_PROMPT,
-                        allowed_operations=COUNTING_OPERATIONS,
-                        claim_ordinal=COUNTING_CLAIM_ORDINAL,
-                        context=build_counting_context(episodes, claims),
-                    )
-                    occurrences_stored += int(perception.get("bound", 0))
-                    advisory += int(perception.get("advisory", 0))
-                batches += 1
-                namespace_touched = True
-
-                # Same fail-closed cursor rule as the scalar runner: advance on the monotonic
-                # ingestion key only; a wholly timeless page leaves the namespace dirty.
-                advanceable = [row for row in rows if str(row.get("cursor_at") or "")]
-                if not advanceable:
-                    logger.warning(
-                        "counting: page for %s has no orderable timestamp; not advancing cursor",
+            claim = graph_adapter.claim_counting_namespace(
+                namespace, run_id=run_id, lease_seconds=config.lease_seconds,
+                now=datetime.now(timezone.utc).isoformat())
+            if claim is None:
+                busy += 1
+                continue
+            incarnation = str(claim["incarnation"])
+            epoch = int(claim["epoch"])
+            namespace_advanced = False
+            try:
+                # Create-only: a marker left at False by a failed re-enable sweep must stay so the
+                # sweep retries; only a completed sweep flips it.
+                graph_adapter.mark_counting_flag_state(
+                    namespace, enabled=True, at=datetime.now(timezone.utc).isoformat(),
+                    create_only=True)
+                while True:
+                    if call_budget is not None and counting_llm.calls >= call_budget:
+                        break
+                    rows = graph_adapter.load_next_counting_batch(
                         namespace,
+                        perceiver_version=config.perceiver_version,
+                        scalar_perceiver_version=config.scalar_perceiver_version,
+                        limit=config.batch_size,
                     )
-                    break
-                cursor = advanceable[-1]
-                graph_adapter.advance_counting_cursor(
-                    namespace,
-                    cursor_at=str(cursor["cursor_at"]),
-                    cursor_uuid=str(cursor.get("uuid") or ""),
-                    perceiver_version=config.perceiver_version,
-                    at=datetime.now(timezone.utc).isoformat(),
-                )
-                if len(rows) < config.batch_size:
-                    break
-            if namespace_touched:
+                    if not rows:
+                        break
+                    turn_ids = [str(row["uuid"]) for row in rows]
+                    # Retire this turn set's prior-version occurrences and rebuild the affected
+                    # Views before perceiving, so no View keeps counting a retired head.
+                    retired_subjects = graph_adapter.retire_prior_version_occurrences(
+                        namespace, turn_ids,
+                        perceiver_version=config.perceiver_version,
+                        run_id=run_id, incarnation=incarnation, epoch=epoch,
+                    )
+                    for subject in retired_subjects:
+                        state_service.rebuild_scalar_state(subject, namespace=namespace)
+                    # Fence check + fresh lease before the slow LLM step and its writes.
+                    if not graph_adapter.renew_counting_claim(
+                        namespace, run_id=run_id, incarnation=incarnation, epoch=epoch,
+                        lease_seconds=config.lease_seconds,
+                        now=datetime.now(timezone.utc).isoformat(),
+                    ):
+                        raise CountingFenceLost(
+                            f"counting claim for {namespace} was lost before perception")
+                    episodes = build_episodes(rows)
+                    if episodes:
+                        claims = graph_adapter.scalar_claims_for_turns(
+                            namespace, [str(e.uuid) for e in episodes], limit=_CONTEXT_CLAIM_LIMIT)
+                        reference_by_uuid = {
+                            str(row["uuid"]): (str(row.get("valid_at") or "") or None)
+                            for row in rows
+                        }
+                        perception = service.perceive_and_persist(
+                            episodes,
+                            counting_llm,
+                            k=k,
+                            threshold=threshold,
+                            namespace=namespace,
+                            episode_reference_time=reference_by_uuid.get,
+                            reconcile_attribute=config.reconcile_attribute,
+                            reconcile_scope=config.reconcile_scope,
+                            reconcile_subject=config.reconcile_subject,
+                            canonical_self=config.canonical_self,
+                            system_prompt=COUNTING_SYSTEM_PROMPT,
+                            allowed_operations=COUNTING_OPERATIONS,
+                            claim_ordinal=COUNTING_CLAIM_ORDINAL,
+                            context=build_counting_context(episodes, claims),
+                        )
+                        occurrences_stored += int(perception.get("bound", 0))
+                        advisory += int(perception.get("advisory", 0))
+                    batches += 1
+
+                    # Same fail-closed cursor rule as the scalar runner: advance on the monotonic
+                    # ingestion key only; a wholly timeless page leaves the namespace dirty.
+                    advanceable = [row for row in rows if str(row.get("cursor_at") or "")]
+                    if not advanceable:
+                        logger.warning(
+                            "counting: page for %s has no orderable timestamp; not advancing cursor",
+                            namespace,
+                        )
+                        break
+                    cursor = advanceable[-1]
+                    graph_adapter.advance_counting_cursor(
+                        namespace,
+                        cursor_at=str(cursor["cursor_at"]),
+                        cursor_uuid=str(cursor.get("uuid") or ""),
+                        perceiver_version=config.perceiver_version,
+                        at=datetime.now(timezone.utc).isoformat(),
+                        run_id=run_id, incarnation=incarnation, epoch=epoch,
+                    )
+                    namespace_advanced = True
+                    if not graph_adapter.renew_counting_claim(
+                        namespace, run_id=run_id, incarnation=incarnation, epoch=epoch,
+                        lease_seconds=config.lease_seconds,
+                        now=datetime.now(timezone.utc).isoformat(),
+                    ):
+                        raise CountingFenceLost(
+                            f"counting claim for {namespace} was lost before renewal")
+                    if len(rows) < config.batch_size:
+                        break
+            except CountingFenceLost as exc:
+                fenced += 1
+                logger.warning("counting: namespace %s fenced; stopping it: %s", namespace, exc)
+            except Exception:
+                failed += 1
+                logger.exception("counting: namespace %s failed; cursor left as last advanced",
+                                 namespace)
+            finally:
+                try:
+                    graph_adapter.release_counting_claim(
+                        namespace, run_id=run_id, incarnation=incarnation)
+                except Exception:
+                    logger.exception("counting: releasing claim for %s failed", namespace)
+            if namespace_advanced:
                 processed += 1
 
     return {
         "counting_namespaces_dirty": len(targets),
         "counting_namespaces_processed": processed,
+        "counting_namespaces_failed": failed,
+        "counting_namespaces_busy": busy,
+        "counting_namespaces_fenced": fenced,
         "counting_batches": batches,
         "counting_occurrences_stored": occurrences_stored,
         "counting_advisory": advisory,
         "counting_llm_calls": counting_llm.calls - start_calls,
+    }
+
+
+def sweep_counting_flag_state(
+    graph_adapter: CountingConsolidationGraph,
+    *,
+    enabled: bool,
+    namespaces: list[str] | None,
+    scalar_history_enabled: bool,
+    limit: int = 50,
+    subject_limit: int = 500,
+) -> dict[str, int]:
+    """Rebuild Views for namespaces whose counting flag marker disagrees with the current flag.
+    Subjects are paged (`subject_limit` per page) until exhausted; the marker is set only after
+    every page rebuilt, so a crash leaves it for the next pass. Makes no LLM calls."""
+    swept = 0
+    rebuilt = 0
+    failed = 0
+    targets = graph_adapter.counting_flag_sweep_targets(
+        enabled=enabled, namespaces=namespaces, limit=limit)
+    for namespace in targets:
+        try:
+            svc = graph_adapter.scalar_state_service(
+                scalar_history_enabled=scalar_history_enabled, counting_enabled=enabled)
+            after = ""
+            while True:
+                subjects = graph_adapter.counting_sweep_subjects(
+                    namespace, limit=subject_limit, after=after)
+                for subject in subjects:
+                    svc.rebuild_scalar_state(subject, namespace=namespace)
+                    rebuilt += 1
+                if len(subjects) < subject_limit:
+                    break
+                after = subjects[-1]
+            graph_adapter.mark_counting_flag_state(
+                namespace, enabled=enabled, at=datetime.now(timezone.utc).isoformat())
+            swept += 1
+        except Exception:
+            failed += 1
+            logger.exception("counting: flag sweep failed for %s", namespace)
+    return {
+        "counting_sweep_namespaces": swept,
+        "counting_sweep_subjects_rebuilt": rebuilt,
+        "counting_sweep_failed": failed,
     }
 
 
@@ -286,4 +429,5 @@ __all__ = [
     "CountingConsolidationGraph",
     "build_counting_context",
     "run_counting_consolidation",
+    "sweep_counting_flag_state",
 ]

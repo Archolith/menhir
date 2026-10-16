@@ -766,6 +766,13 @@ async def run_recall(
         # through vector/entity retrieval.
         if meta.get("view_kind") == "scalar_history" and not service.scalar_history_enabled:
             continue
+        # Counted scalar_state Views are hidden when counting is OFF (read-side kill switch).
+        if (
+            meta.get("view_kind") == "scalar_state"
+            and meta.get("scalar_basis") == "counted"
+            and not service.counting_enabled
+        ):
+            continue
         # Defense-in-depth: if namespace is explicitly set, filter candidates by namespace.
         # The candidate's metadata namespace property (or "default" if missing/None)
         # must match the target namespace.
@@ -1219,6 +1226,8 @@ async def run_recall(
                     continue
                 if not _projection_is_recall_eligible(view):
                     continue
+                if view.get("scalar_basis") == "counted" and not service.counting_enabled:
+                    continue
                 vuuid = str(view.get("uuid") or "").strip()
                 if not vuuid:
                     continue
@@ -1347,7 +1356,14 @@ async def run_recall(
                         value_kind=vk, unit=un,
                         namespace=stamped_namespace(namespace),
                     )
-                    if _state_view and _projection_is_recall_eligible(_state_view):
+                    if (
+                        _state_view
+                        and _projection_is_recall_eligible(_state_view)
+                        and not (
+                            _state_view.get("scalar_basis") == "counted"
+                            and not service.counting_enabled
+                        )
+                    ):
                         continue  # scalar_state leads; history stays off
                 hv = await asyncio.to_thread(
                     service.graph_adapter.fetch_scalar_history,
