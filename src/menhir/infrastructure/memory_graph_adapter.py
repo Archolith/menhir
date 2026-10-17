@@ -974,10 +974,11 @@ class MemoryGraphAdapter:
         node_uuids: list[str],
         *,
         query_vector: list[float] | None = None,
+        namespace: str | None = None,
     ) -> list[dict[str, object]]:
         """Fetch bi-temporal fact-edge state for candidate nodes."""
         return self._memory_queries.fetch_temporal_facts(
-            node_uuids, query_vector=query_vector
+            node_uuids, query_vector=query_vector, namespace=namespace
         )
 
     def search_facts_by_keywords(

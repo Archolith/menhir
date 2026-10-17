@@ -102,16 +102,31 @@ from menhir.services.event_history_authority import event_authority_for_query
 from menhir.services.event_history_recall import classify_event_query
 
 
-def _observation_dedup_skip_ids(obs_hits: list[dict[str, Any]]) -> set[str]:
-    """Assertion ids to skip so identical stated text injects one observation.
+def _valid_at_sort_key(raw: object) -> float:
+    """valid_at as epoch seconds for ordering; unparsable or missing sorts lowest."""
+    from datetime import datetime, timezone
+    try:
+        parsed = datetime.fromisoformat(str(raw).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return float("-inf")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
 
-    Non-occurrence hits are grouped by normalized stated_span (strip, collapse whitespace,
-    casefold); per group the highest cosine wins, then latest valid_at, then lowest
-    assertion_id. Occurrence rows are counted happenings and are never deduped.
+
+def _observation_dedup_skip_ids(obs_hits: list[dict[str, Any]]) -> set[str]:
+    """Assertion ids to skip so identical stated text injects one observation per slot.
+
+    Hits are grouped by slot (subject, attribute, scope, value kind, unit) plus normalized
+    stated_span (strip, collapse whitespace, casefold); per group the highest cosine wins,
+    then latest valid_at, then lowest assertion_id. Grouping per slot keeps every slot's
+    own observation, so a later per-slot drop (echo drop, verdict gate) cannot remove the
+    only copy of a text. Occurrence rows (counted happenings) and delta rows (separate
+    increments) are never deduped.
     """
-    groups: dict[str, list[tuple[float, str, str]]] = {}
+    groups: dict[tuple[str, ...], list[tuple[float, float, str]]] = {}
     for hit in obs_hits:
-        if str(hit.get("operation")) == "occurrence":
+        if str(hit.get("operation")) in ("occurrence", "delta"):
             continue
         aid = str(hit.get("assertion_id") or "").strip()
         span = " ".join(str(hit.get("stated_span") or "").split()).casefold()
@@ -121,12 +136,15 @@ def _observation_dedup_skip_ids(obs_hits: list[dict[str, Any]]) -> set[str]:
             continue
         if not aid or not span or not math.isfinite(cos):
             continue
-        groups.setdefault(span, []).append((cos, str(hit.get("valid_at") or ""), aid))
+        slot = tuple(str(hit.get(k) or "") for k in ("subject_uuid", "attribute", "scope",
+                                                     "value_kind", "unit"))
+        groups.setdefault((*slot, span), []).append(
+            (cos, _valid_at_sort_key(hit.get("valid_at")), aid))
     skip: set[str] = set()
     for members in groups.values():
         if len(members) < 2:
             continue
-        # Best first: cosine desc, valid_at desc (None -> "" lowest), assertion_id asc.
+        # Best first: cosine desc, valid_at desc (missing lowest), assertion_id asc.
         ranked = sorted(members, key=lambda m: m[2])
         ranked.sort(key=lambda m: (m[0], m[1]), reverse=True)
         skip.update(m[2] for m in ranked[1:])
@@ -2005,17 +2023,26 @@ async def run_recall(
                     fact_query_vector = content_query_vector or obs_query_vector
                     if fact_query_vector is None:
                         fact_query_vector = await service.graphiti_client.embed_query(query)
+                except _PROGRAMMING_ERRORS:
+                    raise
                 except Exception:  # recall must not break: fall back to newest-5 facts
                     logger.exception("Fact relevance query embedding failed; using newest facts")
                     fact_query_vector = None
             if fact_query_vector is not None:
-                fact_rows = await asyncio.to_thread(
-                    partial(
-                        service.graph_adapter.fetch_temporal_facts,
-                        result_uuids_for_facts, query_vector=fact_query_vector,
+                try:
+                    fact_rows = await asyncio.to_thread(
+                        partial(
+                            service.graph_adapter.fetch_temporal_facts,
+                            result_uuids_for_facts, query_vector=fact_query_vector,
+                            namespace=namespace,
+                        )
                     )
-                )
-            else:
+                except _PROGRAMMING_ERRORS:
+                    raise
+                except Exception:  # fall back to the newest-5 query rather than no facts
+                    logger.exception("Fact relevance query failed; using newest facts")
+                    fact_query_vector = None
+            if fact_query_vector is None:
                 fact_rows = await asyncio.to_thread(
                     service.graph_adapter.fetch_temporal_facts, result_uuids_for_facts
                 )

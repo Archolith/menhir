@@ -89,6 +89,18 @@ def test_fetch_temporal_facts_query_vector_adds_similarity_field_and_param():
 
 
 @pytest.mark.unit
+def test_fetch_temporal_facts_relevance_query_is_tenant_scoped():
+    from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
+
+    neo = _FakeNeo4j()
+    MemoryQueryRepository(neo).fetch_temporal_facts(["a"], query_vector=[0.1], namespace="proj")
+    query, params = neo.calls[-1]
+    assert tenant_scope_cypher("r") in query
+    for key, value in tenant_scope_params("proj").items():
+        assert params[key] == value
+
+
+@pytest.mark.unit
 def test_fact_relevance_flag_registered_and_reaches_tuning(monkeypatch):
     feature = FEATURES["frontier_fact_relevance"]
     assert feature.env_var == "MENHIR_FRONTIER_FACT_RELEVANCE"
@@ -120,18 +132,62 @@ async def test_pipeline_flag_on_passes_query_vector_and_keeps_old_relevant_fact(
     stub_graphiti_client, stub_memory_graph_adapter,
 ):
     _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
+    for row in stub_memory_graph_adapter.candidate_metadata:
+        row["namespace"] = "proj"
     seen = []
+    namespaces = []
 
-    def fake(node_uuids, *, query_vector=None):
+    def fake(node_uuids, *, query_vector=None, namespace=None):
         seen.append(query_vector)
+        namespaces.append(namespace)
+        return _fact_rows()
+
+    stub_memory_graph_adapter.fetch_temporal_facts = fake
+    res = await _svc(stub_graphiti_client, stub_memory_graph_adapter).recall(
+        "q", namespace="proj", tuning=RetrievalTuningConfig(enable_fact_relevance=True))
+    assert seen and seen[-1] == stub_graphiti_client.embed_query_result
+    assert namespaces[-1] == "proj"
+    facts = {f.fact for r in res.results if r.uuid == "entity-1" for f in r.temporal_facts}
+    assert "fact-0" in facts
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_relevance_query_failure_falls_back_to_newest_facts(
+    stub_graphiti_client, stub_memory_graph_adapter,
+):
+    _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
+
+    def fake(node_uuids, *, query_vector=None, namespace=None):
+        if query_vector is not None:
+            raise RuntimeError("vector index unavailable")
         return _fact_rows()
 
     stub_memory_graph_adapter.fetch_temporal_facts = fake
     res = await _svc(stub_graphiti_client, stub_memory_graph_adapter).recall(
         "q", tuning=RetrievalTuningConfig(enable_fact_relevance=True))
-    assert seen and seen[-1] == stub_graphiti_client.embed_query_result
     facts = {f.fact for r in res.results if r.uuid == "entity-1" for f in r.temporal_facts}
-    assert "fact-0" in facts
+    assert facts and "fact-7" in facts and "fact-0" not in facts
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_relevance_query_programming_error_skips_the_fallback(
+    stub_graphiti_client, stub_memory_graph_adapter,
+):
+    # A bug is not masked by the newest-5 fallback; the enrichment's outer handler logs it
+    # and recall continues with no attached facts.
+    _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
+
+    def fake(node_uuids, *, query_vector=None, namespace=None):
+        if query_vector is not None:
+            raise TypeError("bad call")
+        return _fact_rows()
+
+    stub_memory_graph_adapter.fetch_temporal_facts = fake
+    res = await _svc(stub_graphiti_client, stub_memory_graph_adapter).recall(
+        "q", tuning=RetrievalTuningConfig(enable_fact_relevance=True))
+    assert res.results and all(not r.temporal_facts for r in res.results)
 
 
 @pytest.mark.unit

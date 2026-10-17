@@ -807,11 +807,14 @@ class MemoryQueryRepository:
         node_uuids: list[str],
         *,
         query_vector: list[float] | None = None,
+        namespace: str | None = None,
     ) -> list[dict[str, object]]:
         """Fetch bi-temporal fact-edge state for candidate entity nodes.
 
         With ``query_vector`` each row also carries ``fact_similarity`` (cosine of the
-        fact embedding to the query; null when the embedding is missing or mis-sized).
+        fact embedding to the query; null when the embedding is missing or mis-sized), and
+        the edges are tenant-scoped to ``namespace``: ranking by query similarity can pull
+        any edge on a hub node into the top slots, so it must not reach another silo's edge.
         """
         if not node_uuids:
             return []
@@ -830,11 +833,13 @@ class MemoryQueryRepository:
         )
         query = (Cypher()
             .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
-            .where("n.uuid IN $uuids")
+            .where(f"n.uuid IN $uuids AND {tenant_scope_cypher('r')}")
             .return_fields([*FACT_TEMPORAL_FIELDS, similarity_field])
             .build())
         return self.neo4j.execute(
-            query, params={"uuids": node_uuids, "query_vector": query_vector}
+            query,
+            params={"uuids": node_uuids, "query_vector": query_vector,
+                    **tenant_scope_params(namespace)},
         )
 
     def search_facts_by_keywords(
