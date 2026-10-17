@@ -262,6 +262,7 @@ def _memory_admitted(
 
 
 _VERB_FACET_MAX = 3
+_VERB_FACET_MAX_SEARCHES = 5
 
 
 async def _admitted_fact_rows(
@@ -271,15 +272,17 @@ async def _admitted_fact_rows(
     include_session: bool,
     session_id: str | None,
     namespace: str | None,
+    endpoint_keys: tuple[str, str] = ("source_uuid", "target_uuid"),
 ) -> list[dict[str, object]]:
     """Keep a fact only when both endpoint memories pass ranked recall's admission.
 
-    Required because the keyword search matches the edge alone: without this a fact from a
+    Required because fact search matches the edge alone: without this a fact from a
     SESSION-scoped, other-session, GONE or CANDIDATE memory would bypass recall's filters.
     Missing endpoint metadata fails closed.
     """
+    src_key, dst_key = endpoint_keys
     endpoints = sorted({
-        str(row.get(key) or "") for row in rows for key in ("source_uuid", "target_uuid")
+        str(row.get(key) or "") for row in rows for key in endpoint_keys
     } - {""})
     if not endpoints:
         return []
@@ -294,8 +297,8 @@ async def _admitted_fact_rows(
     }
     return [
         row for row in rows
-        if str(row.get("source_uuid") or "") in admitted
-        and str(row.get("target_uuid") or "") in admitted
+        if str(row.get(src_key) or "") in admitted
+        and str(row.get(dst_key) or "") in admitted
     ]
 
 
@@ -322,7 +325,9 @@ async def _append_verb_facet_facts(
             if text is not None and str(text).strip():
                 seen_texts.add(str(text).strip())
     appended: list[ScoredMemory] = []
-    for facet in facets:
+    # The cap counts appended facts; also bound the searches, so a long verb list that
+    # matches nothing cannot run one graph query per verb.
+    for facet in facets[:_VERB_FACET_MAX_SEARCHES]:
         if len(appended) >= _VERB_FACET_MAX:
             break
         rows = await asyncio.to_thread(
@@ -352,7 +357,10 @@ async def _append_verb_facet_facts(
                     content=fact,
                     scope=str(NodeScope.SESSION),
                     memory_type="SEMANTIC",
-                    final_score=score,
+                    # Unranked append: the raw fulltext score (often 5-15) is not on the ranked
+                    # 0-1 scale, and a high final_score would let context dedup prefer this item
+                    # over a ranked memory. The raw score stays in retrieval_score.
+                    final_score=0.0,
                     breakdown=RelevanceBreakdown(
                         semantic_similarity=0.0, adjacency_bonus=0.0, recency_bonus=0.0,
                         prominence_bonus=0.0, conflict_bonus=0.0, type_boost=0.0,
@@ -1738,7 +1746,20 @@ async def run_recall(
     if tuning.enable_fact_edges and tuning.fact_edge_mode == "standalone":
         existing_uuids = {c.uuid for c in candidates}
         edges_added = 0
-        for hit in edge_hits:
+        # Same endpoint admission as the verb-facet lane: an edge is injected only when both
+        # endpoint memories would themselves be admitted. Fails closed if metadata is unavailable.
+        try:
+            standalone_hits = await _admitted_fact_rows(
+                service, list(edge_hits), include_session=include_session,
+                session_id=session_id, namespace=namespace,
+                endpoint_keys=("source_node_uuid", "target_node_uuid"),
+            )
+        except _PROGRAMMING_ERRORS:
+            raise
+        except Exception:
+            logger.exception("Standalone fact-edge endpoint check failed; injecting no edges")
+            standalone_hits = []
+        for hit in standalone_hits:
             try:
                 edge_uuid = str(hit.get("uuid") or "").strip()
                 score = float(hit["score"])
@@ -2087,6 +2108,8 @@ async def run_recall(
                 service, query, top_results, namespace, include_invalidated, preset, tuning,
                 include_session=include_session, session_id=session_id,
             )
+        except _PROGRAMMING_ERRORS:
+            raise
         except Exception:
             logger.exception("Verb-facet fact append failed; continuing without it")
         _t_phases["verb_facets"] = int((perf_counter() - _t) * 1000)

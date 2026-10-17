@@ -53,6 +53,8 @@ class RecallLabTuning(BaseModel):
     source_memory_limit: int = Field(default=10, ge=1, le=50)
     source_memory_max_chars: int = Field(default=600, ge=100, le=4000)
     source_memory_pools: bool = False
+    enable_verb_facets: bool = False
+    scalar_verdict_min_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
 
     def to_domain(self) -> RetrievalTuningConfig:
         return RetrievalTuningConfig(**self.model_dump())
