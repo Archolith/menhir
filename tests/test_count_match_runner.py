@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from menhir.domain.count_decide import DECIDE_K
 from menhir.domain.count_match import RELATED_POOL_LIMIT, UNDECIDED_SWEEP_LIMIT
 from menhir.services.counting_consolidation import (
     COUNTING_MATCH_PROMPT_ADDENDUM,
@@ -67,12 +68,15 @@ class _Svc:
 
 
 class _Graph:
-    def __init__(self, pages=None, *, occ_by_id=None, pool=None, undecided=None, fence_ok=True):
+    def __init__(self, pages=None, *, occ_by_id=None, pool=None, undecided=None, fence_ok=True,
+                 redecide=None, cosine_hits=None):
         self.pages = list(pages or [])
         self.occ_by_id = occ_by_id or {}
         self.pool = pool or []
         self.undecided = undecided or {}
         self.fence_ok = fence_ok
+        self.redecide = list(redecide or [])
+        self.cosine_hits = list(cosine_hits or [])
         self.calls: list[tuple[str, tuple, dict]] = []
 
     def _log(self, name, *a, **kw):
@@ -134,6 +138,14 @@ class _Graph:
         self._log("undecided_count_occurrences", namespace, **kw)
         return list(self.undecided.get(namespace, []))
 
+    def redecide_count_occurrences(self, namespace, **kw):
+        self._log("redecide_count_occurrences", namespace, **kw)
+        return list(self.redecide)
+
+    def cosine_related_counted(self, namespace, probes, **kw):
+        self._log("cosine_related_counted", namespace, list(probes), **kw)
+        return list(self.cosine_hits)
+
     def record_count_decisions(self, namespace, decisions, **kw):
         self._log("record_count_decisions", namespace, list(decisions), **kw)
         return {"fence_ok": self.fence_ok}
@@ -149,8 +161,21 @@ class _Graph:
 
 
 class _Llm:
-    def __init__(self):
+    """Callable (system, user) -> str with a scripted answer; `calls` counts every call."""
+
+    def __init__(self, response="[]"):
         self.calls = 0
+        self.response = response
+        self.prompts: list[tuple[str, str]] = []
+
+    def __call__(self, system, user):
+        self.calls += 1
+        self.prompts.append((system, user))
+        return self.response
+
+
+# N1 is the only candidate that needs the decide call (a1 has no related counts, so it is R1).
+_REPEAT_R1 = '[{"new": "N1", "decision": "repeat", "target": "R1", "family": "model kit"}]'
 
 
 class _Perception:
@@ -182,13 +207,17 @@ def perception(monkeypatch):
     return _Perception
 
 
-def _run(graph, *, match, extract_v2=False, namespaces=("ns-1",), pv="cv1"):
+def _run(graph, *, match, extract_v2=False, namespaces=("ns-1",), pv="cv1", llm=None,
+         call_budget=None, embed=None, embed_version=None):
+    cfg = dict(perceiver_version=pv, scalar_perceiver_version="sv1", batch_size=500,
+               match=match, extract_v2=extract_v2)
+    if embed_version is not None:
+        cfg["embed_version"] = embed_version
     return run_counting_consolidation(
-        graph, namespaces=list(namespaces), counting_llm=_Llm(), build_episodes=_build_episodes,
-        k=1, threshold=1.0, call_budget=None, embed=None,
-        config=CountingConsolidationConfig(
-            perceiver_version=pv, scalar_perceiver_version="sv1", batch_size=500,
-            match=match, extract_v2=extract_v2))
+        graph, namespaces=list(namespaces), counting_llm=llm if llm is not None else _Llm(),
+        build_episodes=_build_episodes,
+        k=1, threshold=1.0, call_budget=call_budget, embed=embed,
+        config=CountingConsolidationConfig(**cfg))
 
 
 def _two_kit_graph(**kw):
@@ -238,7 +267,8 @@ def test_match_on_decides_records_then_rebuilds(perception, extract_v2, version)
     # wrong claim identity, if the rebuild happens before the record, or the tally is wrong.
     perception.results = list(_TWO_RESULTS)
     graph = _two_kit_graph()
-    out = _run(graph, match=True, extract_v2=extract_v2)
+    llm = _Llm(_REPEAT_R1)
+    out = _run(graph, match=True, extract_v2=extract_v2, llm=llm)
 
     inst, = perception.instances
     assert inst.init_kwargs["perceiver_version"] == version
@@ -261,14 +291,18 @@ def test_match_on_decides_records_then_rebuilds(perception, extract_v2, version)
     assert kw["perceiver_version"] == version
     decisions = {d["assertion_id"]: d for d in rec[1][1]}
     assert decisions["a1"]["status"] == "counted" and decisions["a1"]["reason"] == "no_related"
-    assert decisions["a2"]["status"] == "uncertain" and decisions["a2"]["reason"] == "related_undecided"
+    # PR 2: a2 is related to a1, so one decide round (DECIDE_K samples) settles it as a repeat of a1.
+    assert llm.calls == DECIDE_K
+    assert decisions["a2"]["status"] == "repeat" and decisions["a2"]["target_id"] == "a1"
+    assert decisions["a2"]["reason"] == "decided_repeat" and decisions["a2"]["vote"] == f"{DECIDE_K}/{DECIDE_K}"
 
     names = graph.names()
     assert names.index("record_count_decisions") < names.index("rebuild")
     # rebuilt after the record, before the cursor moved
     assert names.index("rebuild") < names.index("advance_counting_cursor")
     assert graph.of("rebuild")[0][1] == ("s1",) and graph.of("rebuild")[0][2]["namespace"] == "ns-1"
-    assert out["counting_decided_counted"] == 1 and out["counting_decided_uncertain"] == 1
+    assert out["counting_decided_counted"] == 1 and out["counting_decided_uncertain"] == 0
+    assert out["counting_decided_repeat"] == 1
     assert out["counting_namespaces_processed"] == 1
 
 
@@ -308,7 +342,7 @@ def test_fence_not_ok_on_record_fences_namespace_and_holds_the_cursor(perception
     # Fails if a refused record still advances the cursor, rebuilds, or counts as processed/failed.
     perception.results = list(_TWO_RESULTS)
     graph = _two_kit_graph(fence_ok=False)
-    out = _run(graph, match=True)
+    out = _run(graph, match=True, llm=_Llm(_REPEAT_R1))
     assert out["counting_namespaces_fenced"] == 1
     assert out["counting_namespaces_failed"] == 0
     assert out["counting_namespaces_processed"] == 0
@@ -343,7 +377,7 @@ def test_undecided_sweep_runs_once_per_namespace_even_with_no_new_pages(percepti
 def test_undecided_sweep_runs_after_the_page_loop_in_a_pass_with_pages(perception):
     perception.results = list(_TWO_RESULTS)
     graph = _two_kit_graph(undecided={"ns-1": [_occ("u1", 3, subject="s9")]})
-    _run(graph, match=True)
+    _run(graph, match=True, llm=_Llm(_REPEAT_R1))
     recs = graph.of("record_count_decisions")
     assert [[d["assertion_id"] for d in c[1][1]] for c in recs] == [["a1", "a2"], ["u1"]]
     names = graph.names()

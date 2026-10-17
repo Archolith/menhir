@@ -150,12 +150,15 @@ def related_sets(
     candidates: list[dict[str, Any]], pool: list[dict[str, Any]], *,
     pool_truncated: bool = False,
     per_candidate: int = RELATED_PER_CANDIDATE, per_page: int = RELATED_PER_PAGE,
+    cosine: dict[tuple[str, str], float] | None = None, min_cosine: float = 1.0,
 ) -> list[RelatedSet]:
     """Relate each candidate to the counted pool and to the page's EARLIER candidates (by
-    valid_at, then turn, then id). Related = same subject, same value_kind, at least one shared
-    relation token. Ranked by shared tokens, then assertion_id. A candidate past `per_candidate`
-    related rows, or past the page's remaining `per_page` budget, is truncated."""
+    valid_at, then turn, then id). Related = same subject, same value_kind, and at least one shared
+    relation token or a `cosine[(candidate_id, other_id)]` of at least `min_cosine`. Ranked by
+    shared tokens, then cosine, then assertion_id. A candidate past `per_candidate` related rows,
+    or past the page's remaining `per_page` budget, is truncated."""
     ordered = sorted(candidates, key=_order_key)
+    cosine = cosine or {}
     remaining = int(per_page)
     out: list[RelatedSet] = []
     for i, cand in enumerate(ordered):
@@ -163,7 +166,7 @@ def related_sets(
         cand_tokens = relation_tokens(cand)
         subject = str(cand.get("subject_uuid") or "")
         kind = str(cand.get("value_kind") or "").strip().lower()
-        scored: list[tuple[int, str, dict[str, Any]]] = []
+        scored: list[tuple[int, float, str, dict[str, Any]]] = []
         seen: set[str] = {cand_id}
         for other in list(pool) + ordered[:i]:
             other_id = str(other.get("assertion_id") or "")
@@ -174,11 +177,12 @@ def related_sets(
                     or str(other.get("value_kind") or "").strip().lower() != kind):
                 continue
             score = related_score(cand_tokens, relation_tokens(other))
-            if score > 0:
-                scored.append((score, other_id, other))
-        scored.sort(key=lambda t: (-t[0], t[1]))
+            cos = float(cosine.get((cand_id, other_id), 0.0))
+            if score > 0 or cos >= min_cosine:
+                scored.append((score, cos, other_id, other))
+        scored.sort(key=lambda t: (-t[0], -t[1], t[2]))
         truncated = bool(pool_truncated) or len(scored) > per_candidate
-        sent = [row for _, _, row in scored[:per_candidate]]
+        sent = [row for _, _, _, row in scored[:per_candidate]]
         if len(sent) > remaining:
             sent = sent[:max(remaining, 0)]
             truncated = True

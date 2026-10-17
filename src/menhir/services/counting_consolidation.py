@@ -21,18 +21,32 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Protocol
 from uuid import uuid4
 
+from menhir.domain.count_decide import (
+    COSINE_MIN,
+    DECIDE_K,
+    DECIDE_SYSTEM_PROMPT,
+    MAX_DECIDE_ATTEMPTS,
+    REDECIDE_LIMIT,
+    apply_decide_rules,
+    build_decide_prompt,
+    key_text,
+    parse_decide_response,
+    vote,
+)
 from menhir.domain.count_match import (
     MATCH_VERSION_SUFFIX,
+    RELATED_PER_CANDIDATE,
     RELATED_POOL_LIMIT,
     UNDECIDED_SWEEP_LIMIT,
-    conservative_decisions,
     related_sets,
+    relation_tokens,
 )
 from menhir.domain.typed_assertion import COUNTING_OPERATIONS
 from menhir.services.scalar_consolidation import CountingLlm
@@ -200,9 +214,20 @@ class CountMatchGraph(Protocol):
         self, namespace: str, *, perceiver_version: str, limit: int,
     ) -> list[dict[str, Any]]: ...
 
+    def cosine_related_counted(
+        self, namespace: str, probes: list[dict[str, Any]], *, embed_version: str,
+        min_cosine: float, per_probe: int,
+    ) -> list[dict[str, Any]]: ...
+
+    def redecide_count_occurrences(
+        self, namespace: str, *, perceiver_version: str, max_attempts: int, limit: int,
+        exclude_run_id: str = "",
+    ) -> list[dict[str, Any]]: ...
+
     def record_count_decisions(
         self, namespace: str, decisions: list[dict[str, Any]], *, perceiver_version: str,
         run_id: str, incarnation: str, epoch: int,
+        swaps: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -358,6 +383,12 @@ def run_counting_consolidation(
                 ):
                     raise CountingFenceLost(f"counting claim for {ns} was lost")
 
+            decide_ctx = _DecideContext(
+                graph=graph_adapter, state_service=state_service, namespace=namespace,
+                perceiver_version=perceiver_version, run_id=run_id, incarnation=incarnation,
+                epoch=epoch, fence=_fence, history=config.scalar_history_enabled, tally=decided,
+                llm=counting_llm, call_budget=call_budget, embed=embed,
+                embed_version=config.embed_version)
             try:
                 # Create-only: a marker left at False by a failed re-enable sweep must stay so the
                 # sweep retries; only a completed sweep flips it.
@@ -427,12 +458,9 @@ def run_counting_consolidation(
                                         for r in perception.get("results") or []
                                         if r.get("bound") and r.get("assertion_id")]
                             _decide_and_rebuild(
-                                graph_adapter, state_service, namespace,
+                                decide_ctx,
                                 graph_adapter.count_occurrences_by_ids(
-                                    namespace, page_ids, perceiver_version=perceiver_version),
-                                perceiver_version=perceiver_version, run_id=run_id,
-                                incarnation=incarnation, epoch=epoch, fence=_fence,
-                                history=config.scalar_history_enabled, tally=decided)
+                                    namespace, page_ids, perceiver_version=perceiver_version))
                     batches += 1
 
                     # Same fail-closed cursor rule as the scalar runner: advance on the monotonic
@@ -467,13 +495,19 @@ def run_counting_consolidation(
                     # Undecided leftovers (a crash between persist and decide, or a binding repaired
                     # later) are decided here; until then they fold as uncertain, never counted.
                     _decide_and_rebuild(
-                        graph_adapter, state_service, namespace,
+                        decide_ctx,
                         graph_adapter.undecided_count_occurrences(
                             namespace, perceiver_version=perceiver_version,
-                            limit=UNDECIDED_SWEEP_LIMIT),
-                        perceiver_version=perceiver_version, run_id=run_id,
-                        incarnation=incarnation, epoch=epoch, fence=_fence,
-                        history=config.scalar_history_enabled, tally=decided)
+                            limit=UNDECIDED_SWEEP_LIMIT))
+                    # Re-decide (R3-2/R3-8/R3-16): uncertain rows and rows whose target died,
+                    # oldest first, inside the shared budget, at most MAX_DECIDE_ATTEMPTS each.
+                    _decide_and_rebuild(
+                        decide_ctx,
+                        graph_adapter.redecide_count_occurrences(
+                            namespace, perceiver_version=perceiver_version,
+                            max_attempts=MAX_DECIDE_ATTEMPTS, limit=REDECIDE_LIMIT,
+                            exclude_run_id=run_id),
+                        redecide=True)
             except CountingFenceLost as exc:
                 fenced += 1
                 logger.warning("counting: namespace %s fenced; stopping it: %s", namespace, exc)
@@ -502,39 +536,134 @@ def run_counting_consolidation(
         "counting_llm_calls": counting_llm.calls - start_calls,
     }
     if match:  # off: the result keys are exactly as before
-        result["counting_decided_counted"] = decided["counted"]
-        result["counting_decided_uncertain"] = decided["uncertain"]
+        for key in ("counted", "uncertain", "repeat", "same_event", "swapped", "deferred"):
+            result[f"counting_decided_{key}"] = decided.get(key, 0)
     return result
 
 
+def _cosine(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    return dot / (na * nb) if na and nb else 0.0
+
+
+@dataclass
+class _DecideContext:
+    """What every decide step of one namespace shares."""
+
+    graph: Any
+    state_service: Any
+    namespace: str
+    perceiver_version: str
+    run_id: str
+    incarnation: str
+    epoch: int
+    fence: Callable[[], None]
+    history: bool
+    tally: dict[str, int]
+    llm: Any
+    call_budget: int | None
+    embed: Callable[[str], list[float] | None] | None
+    embed_version: str | None
+
+
+def _key_vectors(ctx: _DecideContext, rows: list[dict[str, Any]]) -> dict[str, list[float]]:
+    """count_key_embedding per candidate ("object action item"); none without an embedder/version.
+    A failed embed only drops the cosine signal for that row."""
+    if ctx.embed is None or not ctx.embed_version:
+        return {}
+    out: dict[str, list[float]] = {}
+    for row in rows:
+        text = key_text(row)
+        if not text:
+            continue
+        try:
+            vec = ctx.embed(text)
+        except Exception:
+            logger.warning("counting: key embedding failed; relating by tokens only")
+            vec = None
+        if vec:
+            out[str(row["assertion_id"])] = [float(x) for x in vec]
+    return out
+
+
 def _decide_and_rebuild(
-    graph_adapter: Any, state_service: Any, namespace: str, rows: list[dict[str, Any]], *,
-    perceiver_version: str, run_id: str, incarnation: str, epoch: int,
-    fence: Callable[[], None], history: bool, tally: dict[str, int],
+    ctx: _DecideContext, rows: list[dict[str, Any]], *, redecide: bool = False,
 ) -> None:
-    """Decide undecided occurrences with the PR 1 code-only rule, record the decisions under the
-    counting fence (re-checked in the write statement) and rebuild the affected subjects.
-    Rows that already carry a decision are skipped (a replay keeps its decision, R3-20)."""
+    """Decide occurrences, record the decisions under the counting fence (re-checked in the write
+    statement) and rebuild the affected subjects. Page and sweep rows that already carry a decision
+    are skipped (a replay keeps its decision, R3-20); `redecide` rows are decided again.
+    Candidates with related counts need the decide call; when the shared budget cannot cover it they
+    are left as they are (undecided or uncertain, never counted) for a later pass."""
     from menhir.infrastructure.turn_evidence_repository import CountingFenceLost
 
-    candidates = [r for r in rows if not str(r.get("count_status") or "")]
+    candidates = list(rows) if redecide else [r for r in rows if not str(r.get("count_status") or "")]
     if not candidates:
         return
+    ns = ctx.namespace
     subjects = sorted({str(r.get("subject_uuid") or "") for r in candidates} - {""})
-    pool = graph_adapter.counted_occurrences_for_subjects(
-        namespace, subjects, limit=RELATED_POOL_LIMIT)
-    decisions = conservative_decisions(
-        related_sets(candidates, pool, pool_truncated=len(pool) >= RELATED_POOL_LIMIT))
-    fence()
-    written = graph_adapter.record_count_decisions(
-        namespace, decisions, perceiver_version=perceiver_version,
-        run_id=run_id, incarnation=incarnation, epoch=epoch)
+    pool = list(ctx.graph.counted_occurrences_for_subjects(ns, subjects, limit=RELATED_POOL_LIMIT))
+    pool_truncated = len(pool) >= RELATED_POOL_LIMIT
+    vectors = _key_vectors(ctx, candidates)
+    cosine: dict[tuple[str, str], float] = {}
+    if vectors:
+        by_id = {str(c["assertion_id"]): c for c in candidates}
+        hits = ctx.graph.cosine_related_counted(
+            ns, [{"id": cid, "subject_uuid": by_id[cid].get("subject_uuid"),
+                  "value_kind": by_id[cid].get("value_kind"), "vector": vec}
+                 for cid, vec in vectors.items()],
+            embed_version=str(ctx.embed_version), min_cosine=COSINE_MIN,
+            per_probe=RELATED_PER_CANDIDATE + 1)
+        known = {str(r.get("assertion_id") or "") for r in pool}
+        for hit in hits:
+            hid = str(hit.get("assertion_id") or "")
+            cosine[(str(hit.get("probe_id")), hid)] = float(hit.get("cosine") or 0.0)
+            if hid not in known:
+                known.add(hid)
+                pool.append({k: v for k, v in hit.items() if k not in ("probe_id", "cosine")})
+        ids = list(vectors)
+        for i, a in enumerate(ids):
+            for b in ids[i + 1:]:
+                cosine[(a, b)] = cosine[(b, a)] = _cosine(vectors[a], vectors[b])
+    sets = related_sets(candidates, pool, pool_truncated=pool_truncated, cosine=cosine,
+                        min_cosine=COSINE_MIN)
+    need = [rs for rs in sets if rs.related and relation_tokens(rs.candidate)]
+    voted: dict[str, tuple[str, str, str, str]] = {}
+    decided = True
+    if need:
+        if ctx.call_budget is not None and ctx.llm.calls + DECIDE_K > ctx.call_budget:
+            decided = False
+        else:
+            prompt = build_decide_prompt(need)
+            samples = [parse_decide_response(ctx.llm(DECIDE_SYSTEM_PROMPT, prompt.user), prompt)
+                       for _ in range(DECIDE_K)]
+            voted = vote(samples, [str(rs.candidate["assertion_id"]) for rs in need], k=DECIDE_K)
+    outcome = apply_decide_rules(sets, voted, decided=decided,
+                                 current_version=ctx.perceiver_version)
+    for d in outcome.decisions:
+        d["key_embedding"] = vectors.get(d["assertion_id"])
+        d["embed_version"] = ctx.embed_version
+        d["redecide"] = redecide
+    for s in outcome.swaps:
+        s["key_embedding"] = vectors.get(s["candidate_id"])
+        s["embed_version"] = ctx.embed_version
+        s["redecide"] = redecide
+    ctx.tally["deferred"] = ctx.tally.get("deferred", 0) + len(outcome.skipped)
+    if not outcome.decisions and not outcome.swaps:
+        return
+    ctx.fence()
+    written = ctx.graph.record_count_decisions(
+        ns, outcome.decisions, perceiver_version=ctx.perceiver_version,
+        run_id=ctx.run_id, incarnation=ctx.incarnation, epoch=ctx.epoch,
+        **({"swaps": outcome.swaps} if outcome.swaps else {}))
     if not written.get("fence_ok"):
-        raise CountingFenceLost(f"counting fence lost for {namespace!r} while recording decisions")
-    for d in decisions:
-        tally[str(d["status"])] = tally.get(str(d["status"]), 0) + 1
+        raise CountingFenceLost(f"counting fence lost for {ns!r} while recording decisions")
+    for d in outcome.decisions:
+        ctx.tally[str(d["status"])] = ctx.tally.get(str(d["status"]), 0) + 1
+    ctx.tally["swapped"] = ctx.tally.get("swapped", 0) + int(written.get("swapped") or 0)
     for subject in subjects:
-        _rebuild_subject(state_service, subject, namespace, history=history)
+        _rebuild_subject(ctx.state_service, subject, ns, history=ctx.history)
 
 
 def _rebuild_subject(state_service: Any, subject: str, namespace: str, *, history: bool) -> None:

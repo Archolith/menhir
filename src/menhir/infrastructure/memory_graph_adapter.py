@@ -1785,14 +1785,33 @@ class MemoryGraphAdapter:
         return CountDecisionRepository(self.neo4j).undecided_occurrences(
             namespace, perceiver_version=perceiver_version, limit=limit)
 
+    def cosine_related_counted(
+        self, namespace: str, probes: list[dict[str, Any]], *, embed_version: str,
+        min_cosine: float, per_probe: int,
+    ) -> list[dict[str, Any]]:
+        from menhir.infrastructure.count_decision_repository import CountDecisionRepository
+        return CountDecisionRepository(self.neo4j).cosine_related_counted(
+            namespace, probes, embed_version=embed_version, min_cosine=min_cosine,
+            per_probe=per_probe)
+
+    def redecide_count_occurrences(
+        self, namespace: str, *, perceiver_version: str, max_attempts: int, limit: int,
+        exclude_run_id: str = "",
+    ) -> list[dict[str, Any]]:
+        from menhir.infrastructure.count_decision_repository import CountDecisionRepository
+        return CountDecisionRepository(self.neo4j).redecide_occurrences(
+            namespace, perceiver_version=perceiver_version, max_attempts=max_attempts,
+            limit=limit, exclude_run_id=exclude_run_id)
+
     def record_count_decisions(
         self, namespace: str, decisions: list[dict[str, Any]], *, perceiver_version: str,
         run_id: str, incarnation: str, epoch: int,
+        swaps: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         from menhir.infrastructure.count_decision_repository import CountDecisionRepository
         return CountDecisionRepository(self.neo4j).record_count_decisions(
             namespace, decisions, perceiver_version=perceiver_version,
-            run_id=run_id, incarnation=incarnation, epoch=epoch)
+            run_id=run_id, incarnation=incarnation, epoch=epoch, swaps=swaps)
 
     def counting_sweep_subjects(
         self, namespace: str, *, limit: int, after: str = "",

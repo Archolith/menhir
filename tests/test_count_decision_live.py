@@ -80,9 +80,11 @@ def _decision(ns, rid, status="counted", **kw):
 
 
 def _record(adapter, ns, claim, run_id, decisions, pv=_PV):
-    return adapter.record_count_decisions(
+    out = adapter.record_count_decisions(
         ns, decisions, perceiver_version=pv, run_id=run_id,
         incarnation=claim["incarnation"], epoch=claim["epoch"])
+    # Plain decisions only here; swaps are covered in test_count_decide_live.py.
+    return {"fence_ok": out["fence_ok"], "written": out["written"]}
 
 
 # --------------------------------------------------------------------------- fenced decision write
