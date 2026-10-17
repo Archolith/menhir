@@ -9,6 +9,7 @@ from menhir.config.settings_model import MemorySettings
 from menhir.domain.namespace import tenant_scope_cypher
 from menhir.domain.recall import RetrievalScoreKind
 from menhir.domain.retrieval_tuning import RetrievalTuningConfig
+from menhir.domain.verb_facets import verb_facets
 from menhir.infrastructure.memory_queries import (
     MemoryQueryRepository,
     fact_keyword_lucene_query,
@@ -119,7 +120,9 @@ async def test_appends_one_fact_per_facet_after_ranked_results(
         assert item.name == item.content
         assert item.memory_type == "SEMANTIC"
     assert res.results[2].content == "User picked up the blazer from the tailor"
-    assert res.results[2].final_score == 5.0
+    # Raw fulltext score is kept off the ranked scale so context dedup never prefers it.
+    assert res.results[2].retrieval_score == 5.0
+    assert res.results[2].final_score == 0.0
     assert res.results[2].temporal_facts[0].valid_at == "2023-05-01T00:00:00Z"
     assert res.results[2].stale_anchor_info == {"stale_anchor": False}
 
@@ -245,6 +248,26 @@ async def test_fact_with_unknown_endpoint_fails_closed(
                                   _row("f2", "User picked up the scarf")]})
     res = await _recall(stub_graphiti_client, stub_memory_graph_adapter, CLOTHING_Q, search)
     assert [r.uuid for r in res.results[2:]] == ["f2"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_searches_are_bounded_when_nothing_matches(stub_graphiti_client, stub_memory_graph_adapter):
+    q = ("How many items did I buy, sell, fix, paint, wash, fold, sew or iron in the past few months?")
+    assert len(verb_facets(q)) > 5
+    search = _Search()
+    await _recall(stub_graphiti_client, stub_memory_graph_adapter, q, search)
+    assert len(search.calls) == 5
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_programming_errors_are_not_swallowed(stub_graphiti_client, stub_memory_graph_adapter):
+    def broken(phrases, namespace, limit=50):
+        raise TypeError("bad call")
+
+    with pytest.raises(TypeError):
+        await _recall(stub_graphiti_client, stub_memory_graph_adapter, CLOTHING_Q, broken)
 
 
 @pytest.mark.unit

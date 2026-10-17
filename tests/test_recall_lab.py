@@ -750,6 +750,20 @@ def test_recall_lab_validates_bounds_and_requires_runtime() -> None:
     assert invalid.status_code == 422
 
 
+@pytest.mark.unit
+def test_recall_lab_tunes_verb_facets_and_verdict_gate() -> None:
+    from pydantic import ValidationError
+
+    from menhir.explorer.recall_lab import RecallLabTuning
+
+    default = RecallLabTuning().to_domain()
+    assert default.enable_verb_facets is False and default.scalar_verdict_min_similarity == 0.0
+    tuned = RecallLabTuning(enable_verb_facets=True, scalar_verdict_min_similarity=0.675).to_domain()
+    assert tuned.enable_verb_facets is True and tuned.scalar_verdict_min_similarity == 0.675
+    with pytest.raises(ValidationError):
+        RecallLabTuning(scalar_verdict_min_similarity=1.5)
+
+
 def test_recall_lab_serializes_bounded_warden_execution_receipt():
     from menhir.domain.recall import WardenExecutionStatus
     from menhir.explorer.recall_lab import _serialize_result
