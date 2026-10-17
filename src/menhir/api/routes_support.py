@@ -281,6 +281,8 @@ class ScalarAuthorityVerdictResponse(BaseModel):
     contributors_total: int = 0
     contributors_truncated: bool = False
     next_offset: int | None = None
+    basis: str | None = None
+    lower_bound: bool = False
 
 
 class EventAuthorityVerdictResponse(BaseModel):

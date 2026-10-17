@@ -374,9 +374,13 @@ class ContextBuilderService:
         # when an event verdict failed closed (current-state scalar must not answer a temporal query).
         if not fail_closed:
             for verdict in recall_result.authority_layer or ():
+                shown_value = (
+                    f"at least {verdict.value} you mentioned" if verdict.lower_bound
+                    else verdict.value
+                )
                 heading = (
                     f"[Scalar authority: {verdict.status.upper()}] {verdict.attribute} = "
-                    f"{verdict.value} ({verdict.kind}"
+                    f"{shown_value} ({verdict.kind}"
                     + (f", valid {verdict.valid_at}" if verdict.valid_at else "")
                     + ")"
                 )
