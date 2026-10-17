@@ -280,7 +280,7 @@ def test_count_match_audit_serializes_decimals_and_none():
 
     out = _count_match_audit(_S())
     assert out["count_uncertain"] == 2.5
-    assert out["count_actions"] == json.dumps({"a": 2, "b": "1.5"})
+    assert out["count_actions"] == '{"a": 2, "b": 1.5}'  # exact JSON number, sorted keys
     assert out["count_items"] == '["x"]'
 
     class _Off:

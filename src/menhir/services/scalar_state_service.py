@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Protocol
 
+from menhir.domain.exact_json import dumps_exact
 from menhir.domain.scalar_history import MALFORMED_VALID_AT, build_history
 from menhir.domain.scalar_state_fold import Expiry, FoldResult, fold_assertions
 from menhir.infrastructure import consolidation_audit as _audit
@@ -166,9 +167,9 @@ def _count_match_audit(state: Any) -> dict[str, Any]:
     actions = getattr(state, "count_actions", None) or {}
     return {
         "count_uncertain": float(uncertain) if isinstance(uncertain, Decimal) else uncertain,
-        "count_actions": json.dumps(
-            {k: (str(v) if isinstance(v, Decimal) else v) for k, v in sorted(actions.items())}),
-        "count_items": json.dumps(list(getattr(state, "count_items", None) or [])),
+        # Exact JSON numbers for money sums (exact_json discipline), keys sorted.
+        "count_actions": dumps_exact(dict(sorted(actions.items()))),
+        "count_items": dumps_exact(list(getattr(state, "count_items", None) or [])),
     }
 
 
