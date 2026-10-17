@@ -225,36 +225,42 @@ def test_fact_queries_require_fact_text():
 
 @pytest.mark.online
 def test_link_edges_without_fact_text_do_not_take_fact_slots(test_neo4j_repo):
-    # Link edges (no fact) and blank facts are newest, so without the filter they would fill
-    # all five per-node slots and push the real facts out.
+    # Link edges (written like correlation/bridge links: no fact, uuid or namespace) are
+    # newest, so without the filter they would fill all five per-node slots and push the real
+    # facts out. Blank and non-string facts must be skipped without failing the query.
     from uuid import uuid4
 
     neo4j = test_neo4j_repo
     tag = "facttext-" + uuid4().hex
-    edges = (
-        [{"fact": None, "day": 20 + i} for i in range(5)]
-        + [{"fact": "", "day": 18}, {"fact": "   ", "day": 19}]
-        + [{"fact": f"{tag}-real-{i}", "day": 1 + i} for i in range(3)]
-    )
-    for i, edge in enumerate(edges):
-        edge["m"] = f"{tag}-m{i}"
+    links = [{"type": "correlation"}] * 3 + [{"type": "bridged", "group_id": ""}] * 2
+    graphiti = [{"fact": f} for f in ("", "   ", [1, 2], 7)] + [
+        {"fact": f"{tag}-real-{i}"} for i in range(3)]
+    edges = []
+    for i, props in enumerate(links + graphiti):
+        props = dict(props)
+        if "fact" in props:
+            props.update(uuid=f"{tag}-r{i}", namespace=tag, group_id=tag)
+        edges.append({"m": f"{tag}-m{i}", "day": 30 - i, "props": props})
     hub = tag + "-hub"
     try:
         neo4j.execute("""
             CREATE (n:Entity {uuid:$hub, name:$hub, namespace:$ns, group_id:$ns})
             WITH n UNWIND $edges AS e
             CREATE (m:Entity {uuid:e.m, name:e.m, namespace:$ns, group_id:$ns})
-            CREATE (n)-[r:RELATES_TO {namespace:$ns, group_id:$ns,
-                created_at:datetime('2025-01-01T00:00:00Z') + duration({days:e.day})}]->(m)
-            SET r.fact = e.fact
+            CREATE (n)-[r:RELATES_TO]->(m)
+            SET r += e.props,
+                r.created_at = datetime('2025-01-01T00:00:00Z') + duration({days:e.day})
         """, {"hub": hub, "ns": tag, "edges": edges})
         repo = MemoryQueryRepository(neo4j)
         real = {f"{tag}-real-{i}" for i in range(3)}
         plain = repo.fetch_temporal_facts([hub])
-        ranked = repo.fetch_temporal_facts([hub], query_vector=[0.1, 0.2], namespace=tag)
+        # namespace=None is the unscoped case, where the tenant filter lets link edges through.
+        ranked = repo.fetch_temporal_facts([hub], query_vector=[0.1, 0.2], namespace=None)
+        scoped = repo.fetch_temporal_facts([hub], query_vector=[0.1, 0.2], namespace=tag)
         shadow = repo.fetch_candidate_fact_edges([hub])
         assert {row["fact"] for row in plain} == real
         assert {row["fact"] for row in ranked} == real
+        assert {row["fact"] for row in scoped} == real
         assert {row["fact_text"] for row in shadow} == real
         assert set(_facts(_build_temporal_facts(plain), node=hub)) == real
     finally:

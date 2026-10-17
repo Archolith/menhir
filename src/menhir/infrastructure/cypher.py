@@ -424,8 +424,11 @@ FACT_TEMPORAL_FIELDS = (
 )
 
 # Menhir's own similarity/bridge links are RELATES_TO edges with no fact text. Queries that read
-# edges as facts need this, or those links take fact slots and caps meant for real facts.
-FACT_TEXT_PRESENT = "r.fact IS NOT NULL AND trim(r.fact) <> ''"
+# edges as facts need this, or those links take fact slots meant for real facts.
+# CASE so a non-string fact is skipped instead of trim() failing the whole query.
+FACT_TEXT_PRESENT = (
+    "CASE WHEN r.fact IS :: STRING NOT NULL THEN trim(r.fact) <> '' ELSE false END"
+)
 
 # Fact-edge IDENTITY + both endpoints, for shadow-mode context composition (Stage 1,
 # .agent/plans/menhir-context-composition-production-integration.md). FACT_TEMPORAL_FIELDS
