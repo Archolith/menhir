@@ -110,6 +110,8 @@ async def phase3_run_impl(
             settings, "personal_memory_counting_perceiver_version", "v1"),
         counting_extract_v2=bool(getattr(
             settings, "personal_memory_counting_extract_v2", False)),
+        counting_match=bool(getattr(
+            settings, "personal_memory_counting_match_enabled", False)),
         counting_lease_seconds=getattr(
             settings, "personal_memory_counting_lease_seconds", 900),
         event_history_perceiver_version=getattr(
@@ -134,7 +136,8 @@ async def phase3_run_impl(
             ns,
             perceiver_version=effective_counting_perceiver_version(
                 getattr(settings, "personal_memory_counting_perceiver_version", "v1"),
-                bool(getattr(settings, "personal_memory_counting_extract_v2", False))),
+                bool(getattr(settings, "personal_memory_counting_extract_v2", False)),
+                match=bool(getattr(settings, "personal_memory_counting_match_enabled", False))),
             scalar_perceiver_version=getattr(
                 settings, "personal_memory_scalar_state_perceiver_version", "v1"),
             limit=1,
@@ -174,6 +177,9 @@ async def phase3_run_impl(
         counting_namespaces_fenced=int(
             result.get("counting_namespaces_fenced", 0) or 0),
         counting_dirty_after=counting_dirty_after,
+        counting_decided_counted=result.get("counting_decided_counted"),
+        counting_decided_uncertain=result.get("counting_decided_uncertain"),
+        counting_gate_dropped=result.get("counting_gate_dropped"),
         event_namespaces_processed=int(
             result.get("event_namespaces_processed", 0) or 0),
         event_namespaces_failed=int(

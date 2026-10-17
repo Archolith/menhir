@@ -226,6 +226,9 @@ def _assertion_from_pending_row(row: dict[str, Any], *, subject_uuid: str, subje
         perceiver_version=str(row.get("perceiver_version") or "v1"),
         namespace=row.get("namespace"),
         importance=str(row.get("importance") or ""),
+        count_object=str(row.get("count_object") or ""),
+        count_item=str(row.get("count_item") or ""),
+        count_action=str(row.get("count_action") or ""),
         # re-derive deterministically from the stored span (same result as the original write); the
         # monotone write never downgrades a correction already persisted on the node.
         absolute_semantics=classify_absolute_semantics(

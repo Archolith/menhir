@@ -45,7 +45,12 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
         getattr(settings, "personal_memory_counting_enabled", False)
         and getattr(settings, "personal_memory_scalar_state_enabled", False)
     )
-    graph_adapter = MemoryGraphAdapter(neo4j=neo4j, counting_enabled=counting_enabled)
+    graph_adapter = MemoryGraphAdapter(
+        neo4j=neo4j,
+        counting_enabled=counting_enabled,
+        counting_match_enabled=bool(
+            getattr(settings, "personal_memory_counting_match_enabled", False)),
+    )
 
     # Attempt full path for context recall.
     # Always prefer the direct Graphiti path — the hook is designed to bypass HTTP.

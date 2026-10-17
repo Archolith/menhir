@@ -910,7 +910,8 @@ def test_build_memory_services_applies_graphiti_timeout_setting(monkeypatch: pyt
             return None
 
     class FakeMemoryGraphAdapter:
-        def __init__(self, neo4j: object, counting_enabled: bool = False) -> None:
+        def __init__(self, neo4j: object, counting_enabled: bool = False,
+                     counting_match_enabled: bool = False) -> None:
             self.neo4j = neo4j
 
     class FakeLifecycleService:
@@ -950,7 +951,8 @@ def test_build_memory_services_wires_event_history_authority_flag(
             return None
 
     class FakeMemoryGraphAdapter:
-        def __init__(self, neo4j: object, counting_enabled: bool = False) -> None:
+        def __init__(self, neo4j: object, counting_enabled: bool = False,
+                     counting_match_enabled: bool = False) -> None:
             self.neo4j = neo4j
 
     class FakeGraphitiClient:

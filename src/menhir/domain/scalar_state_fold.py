@@ -28,6 +28,13 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from menhir.domain.count_match import (
+    COUNTED,
+    TARGETED_STATUSES,
+    UNCERTAIN,
+    match_slot_row,
+    status_of,
+)
 from menhir.domain.temporal import parse_iso8601
 from menhir.domain.typed_assertion import (
     COUNTABLE_KINDS,
@@ -79,6 +86,13 @@ class FoldedScalarState:
     basis: str = "stated"
     contributed_occurrence_ids: list[str] = field(default_factory=list)
     absorbed_occurrence_ids: list[str] = field(default_factory=list)
+    # Match mode (unit 4R) only; None/empty otherwise. `count_uncertain` sums the happenings that may
+    # be repeats (not in `value`); `count_actions` sums counted happenings per action; `count_items`
+    # lists the distinct counted items.
+    count_uncertain: Any = None
+    count_actions: dict[str, Any] | None = None
+    count_items: list[str] | None = None
+    uncertain_occurrence_ids: list[str] = field(default_factory=list)
 
     @property
     def slot_key(self) -> tuple[str, str, str, str, str]:
@@ -150,16 +164,31 @@ def _source_keys(row: dict[str, Any]) -> set[str]:
     return {str(row.get("grounding_id") or ""), str(row.get("episode_uuid") or "")} - {""}
 
 
-def _dedup_occurrences_per_turn(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+_STATUS_RANK = {COUNTED: 0, UNCERTAIN: 1}
+
+
+def _item_key(row: dict[str, Any]) -> str:
+    return " ".join(str(row.get("count_item") or "").lower().split())
+
+
+def _dedup_occurrences_per_turn(
+    rows: list[dict[str, Any]], *, count_match: bool = False,
+) -> list[dict[str, Any]]:
     """Keep at most one occurrence per (subject, attribute, value_kind, unit, turn), ignoring scope.
-    Survivor: largest value, then scope == "", then smallest assertion_id. Other rows pass through."""
+    Survivor: largest value, then scope == "", then smallest assertion_id. Other rows pass through.
+    Match mode (rows already family-keyed): the key adds the item, so two kits bought in one turn
+    stay two; the survivor prefers a counted row, then an uncertain one, so a dedup never turns a
+    counted happening into an excluded one."""
     groups: dict[tuple, list[dict[str, Any]]] = {}
     for row in rows:
         turn = _turn_key(row)
         if str(row.get("operation")) != "occurrence" or not turn:
             continue
         s = _slot_of(row)
-        groups.setdefault((s[0], s[1], s[3], s[4], turn), []).append(row)
+        key: tuple = (s[0], s[1], s[3], s[4], turn)
+        if count_match:
+            key = key + (_item_key(row),)
+        groups.setdefault(key, []).append(row)
     dropped: set[int] = set()
     for members in groups.values():
         if len(members) < 2:
@@ -169,6 +198,7 @@ def _dedup_occurrences_per_turn(rows: list[dict[str, Any]]) -> list[dict[str, An
             return Decimal("-Infinity") if v is None else v
 
         keep = min(members, key=lambda m: (
+            _STATUS_RANK.get(status_of(m), 2) if count_match else 0,
             -_num(m),
             str(m.get("scope") or "").strip() != "",
             str(m.get("assertion_id") or ""),
@@ -181,6 +211,7 @@ def _dedup_occurrences_per_turn(rows: list[dict[str, Any]]) -> list[dict[str, An
 
 def fold_assertions(
     rows: list[dict[str, Any]], *, as_of: datetime | None = None, include_occurrences: bool = True,
+    count_match: bool = False,
 ) -> FoldResult:
     """Fold current assertion rows (shape of TypedAssertionRepository.assertions_for_entity) into
     one FoldedScalarState per slot, or an Abstention. Deterministic given the input set AND `as_of`.
@@ -199,7 +230,16 @@ def fold_assertions(
         rows = [r for r in rows if str(r.get("operation")) != "occurrence"]
     if as_of is not None:
         rows = [r for r in rows if (_parse_dt(r.get("valid_at")) or _EPOCH) <= as_of]
-    rows = _dedup_occurrences_per_turn(rows)
+    # Match mode (unit 4R): occurrences fold by object family and by their stored decision; only
+    # `counted` rows add to the value (see _fold_counted_match). Off -> unchanged.
+    counted_ids: set[str] = set()
+    if count_match:
+        counted_ids = {
+            str(r.get("assertion_id") or "") for r in rows
+            if str(r.get("operation")) == "occurrence" and status_of(r) == COUNTED
+        } - {""}
+        rows = [match_slot_row(r) if str(r.get("operation")) == "occurrence" else r for r in rows]
+    rows = _dedup_occurrences_per_turn(rows, count_match=count_match)
     slots: dict[tuple, list[dict[str, Any]]] = {}
     for row in rows:
         slots.setdefault(_slot_of(row), []).append(row)
@@ -247,7 +287,10 @@ def fold_assertions(
             # else: expires are subsumed by a newer absolute -> fall through to normal absolute fold.
 
         if not absolutes:
-            if occurrences:
+            if occurrences and count_match:
+                _fold_counted_match(result, slot_key, subject_uuid, value_kind, occurrences, deltas,
+                                    counted_ids)
+            elif occurrences:
                 _fold_counted(result, slot_key, subject_uuid, value_kind, occurrences, deltas)
             else:
                 result.abstentions.append(Abstention(slot_key, NO_ANCHOR, subject_uuid))
@@ -424,4 +467,118 @@ def _fold_counted(
         anchor_value=None, basis=BASIS_COUNTED,
         contributed_occurrence_ids=[str(o.get("assertion_id") or "") for o in applied],
         absorbed_occurrence_ids=absorbed_ids,
+    ))
+
+
+#: bound on the item list stamped on a match-mode View.
+_COUNT_ITEMS_MAX = 20
+
+
+def _sum_values(rows: list[dict[str, Any]], value_kind: str) -> Any:
+    if value_kind == "money":
+        return sum((_money_decimal(o.get("value")) or Decimal("0") for o in rows), Decimal("0"))
+    total = sum(float(o.get("value")) for o in rows)
+    return int(total) if total == int(total) else total
+
+
+def _fold_counted_match(
+    result: FoldResult,
+    slot_key: tuple[str, str, str, str, str],
+    subject_uuid: str,
+    value_kind: str,
+    occurrences: list[dict[str, Any]],
+    deltas: list[dict[str, Any]],
+    counted_ids: set[str],
+) -> None:
+    """Match-mode counted fold (unit 4R). Safety: the value is the sum of `counted` rows only, so a
+    retelling decided repeat/same_event never adds twice; every other live row (uncertain, no
+    decision, or a repeat whose target is not a current counted row of this subject) is reported in
+    `count_uncertain`, so no happening drops out of both.
+
+    `counted_ids` are the current counted occurrences of the whole fold input (one subject, one
+    namespace), so a repeat may target a counted row in another family slot. The delta absorb and
+    the importance gate are as in `_fold_counted`."""
+    if value_kind not in COUNTABLE_KINDS:
+        result.abstentions.append(Abstention(slot_key, NOT_COUNTABLE, subject_uuid))
+        return
+    claimed_turns = {k for d in deltas for k in _source_keys(d)}
+    live = [
+        o for o in occurrences
+        if not (_source_keys(o) & claimed_turns) and _is_number(o.get("value"))
+    ]
+    live_ids = {str(o.get("assertion_id") or "") for o in live}
+    absorbed = [str(o.get("assertion_id") or "") for o in occurrences
+                if str(o.get("assertion_id") or "") not in live_ids]
+
+    counted: list[dict[str, Any]] = []
+    excluded: list[dict[str, Any]] = []
+    uncertain: list[dict[str, Any]] = []
+    for o in live:
+        status = status_of(o)
+        own_id = str(o.get("assertion_id") or "")
+        target = str(o.get("count_target_id") or "")
+        if status == COUNTED:
+            counted.append(o)
+        elif status in TARGETED_STATUSES and target and target != own_id and target in counted_ids:
+            excluded.append(o)
+        else:
+            uncertain.append(o)
+
+    shown = counted + uncertain
+    if not shown:
+        result.abstentions.append(Abstention(slot_key, NO_ANCHOR, subject_uuid))
+        return
+    if not any(str(o.get("importance") or "") in MATERIALIZING_IMPORTANCE for o in shown):
+        result.abstentions.append(Abstention(slot_key, ROUTINE_ONLY, subject_uuid))
+        return
+    if value_kind == "money" and any(_money_decimal(o.get("value")) is None for o in shown):
+        result.abstentions.append(Abstention(slot_key, INVALID_AMOUNT, subject_uuid))
+        return
+
+    def _order(o: dict[str, Any]) -> tuple:
+        return (_parse_dt(o.get("valid_at")) or _EPOCH, str(o.get("assertion_id") or ""))
+
+    counted.sort(key=_order)
+    uncertain.sort(key=_order)
+    basis_rows = counted or uncertain
+
+    actions: dict[str, Any] = {}
+    for o in counted:
+        action = " ".join(str(o.get("count_action") or "").lower().split())
+        if action:
+            actions[action] = _sum_values(
+                [o], value_kind) + actions.get(action, 0)
+    items: list[str] = []
+    seen_items: set[str] = set()
+    for o in counted:
+        item = " ".join(str(o.get("count_item") or "").split())
+        if item and item.lower() not in seen_items and len(items) < _COUNT_ITEMS_MAX:
+            seen_items.add(item.lower())
+            items.append(item)
+
+    episode_uuids: list[str] = []
+    for o in counted + uncertain:
+        eu = str(o.get("episode_uuid") or "")
+        if eu and eu not in episode_uuids:
+            episode_uuids.append(eu)
+    counted_ids_here = [str(o.get("assertion_id") or "") for o in counted]
+    first = basis_rows[0]
+    result.states.append(FoldedScalarState(
+        subject_uuid=subject_uuid,
+        subject_display=str(first.get("subject_display", "") or subject_uuid),
+        attribute=slot_key[1], scope=slot_key[2], value_kind=value_kind, unit=slot_key[4],
+        value=_sum_values(counted, value_kind),
+        valid_at=str(basis_rows[-1].get("valid_at") or ""),
+        contributor_ids=counted_ids_here,
+        effective_tier=min((str(o.get("evidence_tier") or "agent") for o in shown),
+                           key=evidence_rank),
+        episode_uuids=episode_uuids,
+        anchor_value=None, basis=BASIS_COUNTED,
+        contributed_occurrence_ids=counted_ids_here,
+        absorbed_occurrence_ids=sorted(absorbed + [str(o.get("assertion_id") or "")
+                                                   for o in excluded]),
+        count_uncertain=_sum_values(uncertain, value_kind),
+        count_actions=actions,
+        count_items=items,
+        uncertain_occurrence_ids=[str(o.get("assertion_id") or "") for o in uncertain],
     ))

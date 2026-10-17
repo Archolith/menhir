@@ -91,6 +91,8 @@ _SETTINGS = (
         'personal_memory', 'Count single happenings ("went to yoga") as scalar occurrences after the scalar phase; builds on scalar state.', True, ()),
     ('personal_memory_counting_extract_v2', 'MENHIR_PERSONAL_MEMORY_COUNTING_EXTRACT_V2', False,
         'personal_memory', 'Counting extraction v2: verb-anchored negation guard, per-attribute claim split, fenced captured block.', True, ()),
+    ('personal_memory_counting_match_enabled', 'MENHIR_PERSONAL_MEMORY_COUNTING_MATCH_ENABLED', False,
+        'personal_memory', 'Unit 4R related-count matching in the counting lane.', True, ()),
     ('personal_memory_counting_recall_authority_only', 'MENHIR_PERSONAL_MEMORY_COUNTING_RECALL_AUTHORITY_ONLY', False,
         'personal_memory', 'Counted Views appear only as verdicts, not ranked memories; their occurrence observations leave recall.', True, ()),
     ('personal_memory_counting_wording_enabled', 'MENHIR_PERSONAL_MEMORY_COUNTING_WORDING_ENABLED', False,
@@ -231,6 +233,7 @@ _REQUIRES = {
     "personal_memory_event_history_authority_enabled": ("personal_memory_event_history_enabled",),
     "personal_memory_counting_enabled": ("personal_memory_scalar_state_enabled",),
     "personal_memory_counting_extract_v2": ("personal_memory_counting_enabled",),
+    "personal_memory_counting_match_enabled": ("personal_memory_counting_enabled",),
     "personal_memory_counting_recall_authority_only": (
         "personal_memory_counting_enabled", "personal_memory_scalar_view_authority_enabled"),
     "personal_memory_counting_wording_enabled": (
@@ -256,6 +259,7 @@ _REQUIREMENT_SCOPE = {
     "personal_memory_event_history_authority_enabled": "Event history produces the assertions; retained assertions can outlive the writer gate.",
     "personal_memory_counting_enabled": "The counting lane runs after the scalar phase and reads scalar state.",
     "personal_memory_counting_extract_v2": "Only the counting lane's extraction changes; with counting off it never runs.",
+    "personal_memory_counting_match_enabled": "Related-count matching only changes the counting lane; with counting off it never runs.",
     "personal_memory_counting_recall_authority_only": "Acts on counted verdicts, which exist only with counting and scalar view authority on.",
     "personal_memory_counting_wording_enabled": "Acts on counted verdicts, which exist only with counting and scalar view authority on.",
     "frontier_belief_gate": "Warden verdict enforcement needs the master gate; belief scoring is independent.",
@@ -267,7 +271,7 @@ _REQUIREMENT_SCOPE = {
 }
 _VERSIONED = frozenset({"personal_memory_scalar_reconcile_attribute",
     "personal_memory_scalar_reconcile_scope", "personal_memory_scalar_reconcile_subject",
-    "personal_memory_counting_extract_v2"})
+    "personal_memory_counting_extract_v2", "personal_memory_counting_match_enabled"})
 _OBSERVATION = frozenset({"shadow_context_composition", "frontier_shadow",
     "personal_memory_consolidation_audit_enabled", "personal_memory_recall_audit_enabled",
     "personal_memory_scalar_deterministic_shadow", "MENHIR_FRONTIER_TRACE",

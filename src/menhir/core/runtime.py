@@ -446,6 +446,8 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
             settings, "personal_memory_counting_perceiver_version", "v1"),
         counting_extract_v2=bool(getattr(
             settings, "personal_memory_counting_extract_v2", False)),
+        counting_match=bool(getattr(
+            settings, "personal_memory_counting_match_enabled", False)),
         counting_lease_seconds=getattr(
             settings, "personal_memory_counting_lease_seconds", 900),
         event_history_perceiver_version=getattr(
@@ -735,6 +737,8 @@ async def _initialize_services(
                 getattr(settings, "personal_memory_counting_enabled", False)
                 and getattr(settings, "personal_memory_scalar_state_enabled", False)
             ),
+            counting_match_enabled=bool(
+                getattr(settings, "personal_memory_counting_match_enabled", False)),
         )
         schema_ready = await asyncio.to_thread(graph_adapter.phase_one_schema_ready)
         if not schema_ready:
