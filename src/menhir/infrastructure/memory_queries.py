@@ -32,6 +32,7 @@ from menhir.infrastructure.cypher import (
     Cypher,
     ENTITY_METADATA_FIELDS,
     FACT_TEMPORAL_FIELDS,
+    FACT_TEXT_PRESENT,
     MEMORY_RETURN_FIELDS,
     memory_recency_cypher,
     non_derived_view_cypher,
@@ -811,6 +812,8 @@ class MemoryQueryRepository:
     ) -> list[dict[str, object]]:
         """Fetch bi-temporal fact-edge state for candidate entity nodes.
 
+        Only edges with fact text count: link edges without it would take the per-node slots
+        (and mark a node as having temporal facts for the belief gate).
         With ``query_vector`` each row also carries ``fact_similarity`` (cosine of the
         fact embedding to the query; null when the embedding is missing or mis-sized), and
         the edges are tenant-scoped to ``namespace``: ranking by query similarity can pull
@@ -821,7 +824,7 @@ class MemoryQueryRepository:
         if query_vector is None:
             query = (Cypher()
                 .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
-                .where("n.uuid IN $uuids")
+                .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT}")
                 .return_fields(FACT_TEMPORAL_FIELDS)
                 .build())
             return self.neo4j.execute(query, params={"uuids": node_uuids})
@@ -833,7 +836,7 @@ class MemoryQueryRepository:
         )
         query = (Cypher()
             .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
-            .where(f"n.uuid IN $uuids AND {tenant_scope_cypher('r')}")
+            .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT} AND {tenant_scope_cypher('r')}")
             .return_fields([*FACT_TEMPORAL_FIELDS, similarity_field])
             .build())
         return self.neo4j.execute(
@@ -900,7 +903,7 @@ class MemoryQueryRepository:
             return []
         query = (Cypher()
             .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
-            .where("n.uuid IN $uuids")
+            .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT}")
             .return_fields(SHADOW_CANDIDATE_FACT_EDGE_FIELDS)
             .build())
         return self.neo4j.execute(query, params={"uuids": node_uuids})

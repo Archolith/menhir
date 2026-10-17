@@ -16,6 +16,7 @@ __all__ = [
     "EPISODE_PROCESSING_FIELDS",
     "EPISODE_RETRY_FIELDS",
     "FACT_TEMPORAL_FIELDS",
+    "FACT_TEXT_PRESENT",
     "SHADOW_CANDIDATE_FACT_EDGE_FIELDS",
     "LLM_RESET_SET",
     "build_reset_or_fail_query",
@@ -421,6 +422,10 @@ FACT_TEMPORAL_FIELDS = (
     "r.time_speech_date AS time_speech_date",
     "r.time_ambiguity AS time_ambiguity",
 )
+
+# Menhir's own similarity/bridge links are RELATES_TO edges with no fact text. Queries that read
+# edges as facts need this, or those links take fact slots and caps meant for real facts.
+FACT_TEXT_PRESENT = "r.fact IS NOT NULL AND trim(r.fact) <> ''"
 
 # Fact-edge IDENTITY + both endpoints, for shadow-mode context composition (Stage 1,
 # .agent/plans/menhir-context-composition-production-integration.md). FACT_TEMPORAL_FIELDS

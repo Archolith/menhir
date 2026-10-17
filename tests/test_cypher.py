@@ -1117,6 +1117,7 @@ class TestExports:
             "EPISODE_PROCESSING_FIELDS",
             "EPISODE_RETRY_FIELDS",
             "FACT_TEMPORAL_FIELDS",
+            "FACT_TEXT_PRESENT",
             "SHADOW_CANDIDATE_FACT_EDGE_FIELDS",
             "LLM_RESET_SET",
             "build_reset_or_fail_query",
