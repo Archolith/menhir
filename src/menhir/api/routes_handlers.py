@@ -177,6 +177,9 @@ async def phase3_run_impl(
         counting_namespaces_fenced=int(
             result.get("counting_namespaces_fenced", 0) or 0),
         counting_dirty_after=counting_dirty_after,
+        counting_decided_counted=result.get("counting_decided_counted"),
+        counting_decided_uncertain=result.get("counting_decided_uncertain"),
+        counting_gate_dropped=result.get("counting_gate_dropped"),
         event_namespaces_processed=int(
             result.get("event_namespaces_processed", 0) or 0),
         event_namespaces_failed=int(
