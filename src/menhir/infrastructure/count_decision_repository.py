@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
+from menhir.domain.namespace import normalize_namespace, tenant_scope_cypher, tenant_scope_params
 
 _OCCURRENCE_FIELDS = """
        a.assertion_id AS assertion_id, a.subject_uuid AS subject_uuid,
@@ -40,6 +40,27 @@ def _current(v: str) -> str:
 
 _LIVE_OCCURRENCE = _live("a")
 _CURRENT_OCCURRENCE = _current("a")
+
+#: no decision yet (the undecided sweep's set).
+_UNDECIDED = " a.count_status IS NULL "
+def _redecide(target_scope: str) -> str:
+    """Uncertain, or repeat/same_event whose target is no longer a current counted row of the same
+    subject in scope; under $max attempts (the re-decide set). Shared by the per-namespace read and
+    the namespace listing so the two cannot drift; only the target's scope predicate differs."""
+    return """ coalesce(a.count_attempts, 0) < $max
+      AND (a.count_status = 'uncertain'
+           OR (a.count_status IN ['repeat', 'same_event'] AND NOT EXISTS {
+                 MATCH (t:TypedAssertion {assertion_id: a.count_target_id})
+                 WHERE t.count_status = 'counted' AND t.subject_uuid = a.subject_uuid
+                       AND """ + target_scope + " AND " + _live("t") + """
+               })) """
+
+
+_REDECIDE = _redecide(tenant_scope_cypher("t"))
+#: listing: the target must share the row's namespace. A spelling mismatch can only over-list (the
+#: scoped per-namespace read then decides), never hide a namespace.
+_REDECIDE_ANY_NAMESPACE = _redecide(
+    "coalesce(t.namespace, t.group_id, '') = coalesce(a.namespace, a.group_id, '')")
 
 #: the decision SET shared by plain decisions (d) on node a.
 _SET_DECISION = """
@@ -149,7 +170,7 @@ class CountDecisionRepository:
         binding repaired later), oldest first."""
         rows = self._neo4j.execute(
             "MATCH (a:TypedAssertion) WHERE " + tenant_scope_cypher("a") + " AND "
-            + _CURRENT_OCCURRENCE + " AND a.count_status IS NULL RETURN " + _OCCURRENCE_FIELDS
+            + _CURRENT_OCCURRENCE + " AND " + _UNDECIDED + " RETURN " + _OCCURRENCE_FIELDS
             + " ORDER BY a.valid_at ASC, a.assertion_id ASC LIMIT $limit",
             params={"pv": str(perceiver_version), "limit": int(limit),
                     **tenant_scope_params(namespace)},
@@ -168,14 +189,8 @@ class CountDecisionRepository:
         rows = self._neo4j.execute(
             "MATCH (a:TypedAssertion) WHERE " + tenant_scope_cypher("a") + " AND "
             + _CURRENT_OCCURRENCE + """
-              AND coalesce(a.count_attempts, 0) < $max
               AND coalesce(a.count_run_id, '') <> $exclude_run_id
-              AND (a.count_status = 'uncertain'
-                   OR (a.count_status IN ['repeat', 'same_event'] AND NOT EXISTS {
-                         MATCH (t:TypedAssertion {assertion_id: a.count_target_id})
-                         WHERE t.count_status = 'counted' AND t.subject_uuid = a.subject_uuid
-                               AND """ + tenant_scope_cypher("t") + " AND " + _live("t") + """
-                       }))
+              AND """ + _REDECIDE + """
             RETURN """ + _OCCURRENCE_FIELDS
             + " ORDER BY a.valid_at ASC, a.assertion_id ASC LIMIT $limit",
             params={"pv": str(perceiver_version), "max": int(max_attempts), "limit": int(limit),
@@ -183,6 +198,19 @@ class CountDecisionRepository:
                     **tenant_scope_params(namespace)},
         )
         return [dict(r) for r in rows]
+
+    def pending_decision_namespaces(
+        self, *, perceiver_version: str, max_attempts: int, limit: int,
+    ) -> list[str]:
+        """Namespaces holding a current occurrence of this counting version that the undecided
+        sweep or the re-decide pass would pick up. Unscoped on purpose: it lists namespaces."""
+        rows = self._neo4j.execute(
+            "MATCH (a:TypedAssertion) WHERE " + _CURRENT_OCCURRENCE
+            + " AND (" + _UNDECIDED + " OR (" + _REDECIDE_ANY_NAMESPACE + "))"
+            + " RETURN DISTINCT a.namespace AS namespace ORDER BY namespace LIMIT $limit",
+            params={"pv": str(perceiver_version), "max": int(max_attempts), "limit": int(limit)},
+        )
+        return list(dict.fromkeys(normalize_namespace(r.get("namespace")) for r in rows))
 
     def record_count_decisions(
         self, namespace: str, decisions: list[dict[str, Any]], *, perceiver_version: str,

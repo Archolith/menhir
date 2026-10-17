@@ -227,6 +227,10 @@ class CountMatchGraph(Protocol):
         exclude_run_id: str = "",
     ) -> list[dict[str, Any]]: ...
 
+    def pending_decision_namespaces(
+        self, *, perceiver_version: str, max_attempts: int, limit: int,
+    ) -> list[str]: ...
+
     def record_count_decisions(
         self, namespace: str, decisions: list[dict[str, Any]], *, perceiver_version: str,
         run_id: str, incarnation: str, epoch: int,
@@ -364,6 +368,13 @@ def run_counting_consolidation(
                 scalar_perceiver_version=config.scalar_perceiver_version,
                 limit=config.max_namespaces,
             )
+            if match and len(targets) < config.max_namespaces:
+                # A namespace with no new turns is never dirty, so its undecided and re-decide
+                # rows would wait for a new turn. List those too, after the dirty ones.
+                pending = graph_adapter.pending_decision_namespaces(
+                    perceiver_version=perceiver_version, max_attempts=MAX_DECIDE_ATTEMPTS,
+                    limit=config.max_namespaces)
+                targets = list(dict.fromkeys(targets + pending))[:config.max_namespaces]
         run_id = uuid4().hex
         for namespace in targets:
             if call_budget is not None and counting_llm.calls >= call_budget:
