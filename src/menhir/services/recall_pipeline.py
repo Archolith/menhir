@@ -7,6 +7,7 @@ import logging
 import math
 import os
 from dataclasses import dataclass, field, replace
+from functools import partial
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
@@ -73,6 +74,9 @@ logger = logging.getLogger(__name__)
 # once surfaced as a wrong answer (swallowed into `assert 0 == 1`) instead of an error. Split them.
 _PROGRAMMING_ERRORS = (TypeError, AttributeError, NameError, KeyError)
 
+# Facts per entity chosen by query similarity when MENHIR_FRONTIER_FACT_RELEVANCE is on.
+_FACT_RELEVANCE_K = 3
+
 
 from menhir.services.recall_policies import (
     FILE_LINKED_BASELINE_SIMILARITY,
@@ -96,6 +100,55 @@ from menhir.services.recall_policies import (
 
 from menhir.services.event_history_authority import event_authority_for_query
 from menhir.services.event_history_recall import classify_event_query
+
+
+def _valid_at_sort_key(raw: object) -> float:
+    """valid_at as epoch seconds for ordering; unparsable or missing sorts lowest."""
+    from datetime import datetime, timezone
+    try:
+        parsed = datetime.fromisoformat(str(raw).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return float("-inf")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def _observation_dedup_skip_ids(obs_hits: list[dict[str, Any]]) -> set[str]:
+    """Assertion ids to skip so identical stated text injects one observation per slot.
+
+    Hits are grouped by slot (subject, attribute, scope, value kind, unit) plus normalized
+    stated_span (strip, collapse whitespace, casefold); per group the highest cosine wins,
+    then latest valid_at, then lowest assertion_id. Grouping per slot keeps every slot's
+    own observation, so a later per-slot drop (echo drop, verdict gate) cannot remove the
+    only copy of a text. Occurrence rows (counted happenings) and delta rows (separate
+    increments) are never deduped.
+    """
+    groups: dict[tuple[str, ...], list[tuple[float, float, str]]] = {}
+    for hit in obs_hits:
+        if str(hit.get("operation")) in ("occurrence", "delta"):
+            continue
+        aid = str(hit.get("assertion_id") or "").strip()
+        span = " ".join(str(hit.get("stated_span") or "").split()).casefold()
+        try:
+            cos = float(hit.get("cosine"))
+        except (TypeError, ValueError):
+            continue
+        if not aid or not span or not math.isfinite(cos):
+            continue
+        slot = tuple(str(hit.get(k) or "") for k in ("subject_uuid", "attribute", "scope",
+                                                     "value_kind", "unit"))
+        groups.setdefault((*slot, span), []).append(
+            (cos, _valid_at_sort_key(hit.get("valid_at")), aid))
+    skip: set[str] = set()
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        # Best first: cosine desc, valid_at desc (missing lowest), assertion_id asc.
+        ranked = sorted(members, key=lambda m: m[2])
+        ranked.sort(key=lambda m: (m[0], m[1]), reverse=True)
+        skip.update(m[2] for m in ranked[1:])
+    return skip
 
 
 def _projection_is_recall_eligible(view: dict[str, Any]) -> bool:
@@ -517,6 +570,8 @@ async def run_recall(
     # Query embedding computed by the content-vector lane; the source-memory lane
     # reuses it so the query is embedded at most once per recall.
     content_query_vector: list[float] | None = None
+    # Query embedding from the observation lane, reused by fact-relevance enrichment.
+    obs_query_vector: list[float] | None = None
     try:
         if tuning.enable_content_vector:
             methods: list[str] = []
@@ -994,6 +1049,7 @@ async def run_recall(
             _authority_audit.begin()
         try:
             obs_vec = await service.graphiti_client.embed_query(query)
+            obs_query_vector = obs_vec
             obs_hits = await asyncio.to_thread(
                 service.graph_adapter.search_assertion_embeddings,
                 obs_vec, limit=10, namespaces=[stamped_namespace(namespace)],
@@ -1010,6 +1066,9 @@ async def run_recall(
             # resolve the QUERY's subject INDEPENDENTLY of the injection's provenance row (a named
             # third party the query mentions is rescued by matching its display in the query text).
             obs_subject_displays: dict[str, str] = {}
+            obs_dedup_skip: set[str] = (
+                _observation_dedup_skip_ids(obs_hits) if tuning.enable_observation_dedup else set()
+            )
             for hit in obs_hits:
                 try:
                     aid = str(hit.get("assertion_id") or "").strip()
@@ -1030,6 +1089,8 @@ async def run_recall(
                     # History-only mode deliberately collects the matched slot but does not inject
                     # the raw observation or run scalar-state authority/suppression work.
                     if not service.scalar_view_authority_enabled:
+                        continue
+                    if aid in obs_dedup_skip:
                         continue
                     if aid in existing_uuids:
                         continue
@@ -1977,14 +2038,41 @@ async def run_recall(
             r.uuid for r in top_results if r.memory_type != "EPISODIC_PENDING"
         ]
         if result_uuids_for_facts:
-            fact_rows = await asyncio.to_thread(
-                service.graph_adapter.fetch_temporal_facts, result_uuids_for_facts
-            )
+            fact_query_vector: list[float] | None = None
+            if tuning.enable_fact_relevance:
+                try:
+                    fact_query_vector = content_query_vector or obs_query_vector
+                    if fact_query_vector is None:
+                        fact_query_vector = await service.graphiti_client.embed_query(query)
+                except _PROGRAMMING_ERRORS:
+                    raise
+                except Exception:  # recall must not break: fall back to newest-5 facts
+                    logger.exception("Fact relevance query embedding failed; using newest facts")
+                    fact_query_vector = None
+            if fact_query_vector is not None:
+                try:
+                    fact_rows = await asyncio.to_thread(
+                        partial(
+                            service.graph_adapter.fetch_temporal_facts,
+                            result_uuids_for_facts, query_vector=fact_query_vector,
+                            namespace=namespace,
+                        )
+                    )
+                except _PROGRAMMING_ERRORS:
+                    raise
+                except Exception:  # fall back to the newest-5 query rather than no facts
+                    logger.exception("Fact relevance query failed; using newest facts")
+                    fact_query_vector = None
+            if fact_query_vector is None:
+                fact_rows = await asyncio.to_thread(
+                    service.graph_adapter.fetch_temporal_facts, result_uuids_for_facts
+                )
             if not include_invalidated:
                 fact_rows = _filter_to_current_beliefs(fact_rows)
             facts_by_uuid = _build_temporal_facts(
                 fact_rows, event_time=tuning.enable_anchored_time_render,
                 ended=tuning.enable_anchored_time_expiry,
+                relevance_k=_FACT_RELEVANCE_K if fact_query_vector is not None else 0,
             )
             enriched_results = []
             for sm in top_results:

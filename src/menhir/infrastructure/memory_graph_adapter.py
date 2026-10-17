@@ -970,10 +970,16 @@ class MemoryGraphAdapter:
         return self._memory_queries.fetch_assertion_candidate_metadata(assertion_ids)
 
     def fetch_temporal_facts(
-        self, node_uuids: list[str]
+        self,
+        node_uuids: list[str],
+        *,
+        query_vector: list[float] | None = None,
+        namespace: str | None = None,
     ) -> list[dict[str, object]]:
         """Fetch bi-temporal fact-edge state for candidate nodes."""
-        return self._memory_queries.fetch_temporal_facts(node_uuids)
+        return self._memory_queries.fetch_temporal_facts(
+            node_uuids, query_vector=query_vector, namespace=namespace
+        )
 
     def search_facts_by_keywords(
         self,
