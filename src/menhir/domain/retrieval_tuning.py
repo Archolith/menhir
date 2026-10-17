@@ -73,6 +73,7 @@ class RetrievalScoreKind(str, Enum):
     WEIGHTED_RRF_NORMALIZED = "weighted_rrf_normalized"
     SOURCE_PRIOR = "source_prior"
     FACT_EDGE_RRF = "fact_edge_rrf"
+    VERB_FACET = "verb_facet"
 
 
 # Candidates below this score are noise and should be filtered before scoring.
@@ -246,6 +247,9 @@ class RetrievalTuningConfig:
     # edge RRF reranker). Kept modest so edges augment rather than swamp the node
     # pool; the combiner/floor still rank the merged set.
     fact_edge_k: int = 20
+    # Minimum query similarity (best per slot) for a scalar verdict to be emitted; 0 = off.
+    # Neo4j vector.similarity.cosine scale, (1+cos)/2. MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY.
+    scalar_verdict_min_similarity: float = 0.0
     # How a retrieved fact edge enters the candidate pool:
     #   "standalone" — inject the terse EntityEdge.fact as its own CandidateData (edge-as-
     #     answer). Measured net-NEGATIVE at N=30 (rung A′, 0.300->0.033): terse floor-exempt
@@ -316,11 +320,19 @@ class RetrievalTuningConfig:
     enable_fact_relevance: bool = False
     # One observation per identical stated text in the observation lane (MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED).
     enable_observation_dedup: bool = False
+    # Append one keyword-matched fact per question verb after ranking (MENHIR_FRONTIER_VERB_FACETS).
+    enable_verb_facets: bool = False
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.hybrid_alpha <= 1.0:
             raise ValueError(
                 f"hybrid_alpha must be in [0.0, 1.0], got {self.hybrid_alpha!r}"
+            )
+        # NaN fails this too: it would otherwise silently disable the gate.
+        if not 0.0 <= self.scalar_verdict_min_similarity <= 1.0:
+            raise ValueError(
+                "scalar_verdict_min_similarity must be in [0.0, 1.0], "
+                f"got {self.scalar_verdict_min_similarity!r}"
             )
         if self.similarity_scale not in ("rrf", "normalized"):
             raise ValueError(

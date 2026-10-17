@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import uuid as uuidlib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -978,6 +979,15 @@ class MemoryGraphAdapter:
         return self._memory_queries.fetch_temporal_facts(
             node_uuids, query_vector=query_vector
         )
+
+    def search_facts_by_keywords(
+        self,
+        phrases: Sequence[str],
+        namespace: str | None,
+        limit: int = 50,
+    ) -> list[dict[str, object]]:
+        """Keyword search over fact-edge text, scoped to the namespace's silo."""
+        return self._memory_queries.search_facts_by_keywords(phrases, namespace, limit)
 
     def fetch_candidate_fact_edges(
         self, node_uuids: list[str]

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from collections.abc import Sequence
 from typing import Any
 from uuid import uuid4
 
@@ -50,6 +51,29 @@ ADMISSION_NO_TURNS = "no_turns"
 
 _OPAQUE_DIGEST_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,256}$")
 _DIGEST_KEY_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+def _lucene_quote(text: str) -> str:
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def fact_keyword_lucene_query(
+    phrases: Sequence[str], group_ids: list[str] | None
+) -> str | None:
+    """Lucene string for the edge fulltext index: OR of quoted phrases, optionally scoped by group.
+
+    Returns None when no non-empty phrase remains. The group clause is added only when every
+    group id is a non-empty string (Lucene cannot match an empty value); the caller still
+    filters group_id in Cypher.
+    """
+    quoted = [_lucene_quote(p) for p in phrases if p and p.strip()]
+    if not quoted:
+        return None
+    query = "(" + " OR ".join(quoted) + ")"
+    if group_ids and all(isinstance(g, str) and g for g in group_ids):
+        clause = " OR ".join(f"group_id:{_lucene_quote(g)}" for g in group_ids)
+        query = f"({clause}) AND {query}"
+    return query
 
 
 def _validated_evidence_tombstone_params(
@@ -811,6 +835,47 @@ class MemoryQueryRepository:
             .build())
         return self.neo4j.execute(
             query, params={"uuids": node_uuids, "query_vector": query_vector}
+        )
+
+    def search_facts_by_keywords(
+        self,
+        phrases: Sequence[str],
+        namespace: str | None,
+        limit: int = 50,
+    ) -> list[dict[str, object]]:
+        """Keyword (Lucene) search over RELATES_TO fact text; rows feed _build_temporal_facts.
+
+        Tenancy is decided by tenant_scope_cypher (both default spellings); the Lucene group
+        clause is only a pre-filter so other tenants cannot crowd the fulltext limit.
+        """
+        lucene = fact_keyword_lucene_query(phrases, namespace_spellings(namespace))
+        if lucene is None:
+            return []
+        safe_limit = max(1, min(limit, 500))
+        return self.neo4j.execute(
+            f"""
+            CALL db.index.fulltext.queryRelationships('edge_name_and_fact', $q, {{limit: $limit}})
+            YIELD relationship AS r, score
+            WHERE {tenant_scope_cypher("r")}
+            RETURN r.uuid AS uuid, r.fact AS fact, score,
+                   startNode(r).uuid AS source_uuid, endNode(r).uuid AS target_uuid,
+                   toString(r.valid_at) AS valid_at,
+                   toString(r.invalid_at) AS invalid_at,
+                   toString(r.created_at) AS created_at,
+                   toString(r.expired_at) AS expired_at,
+                   r.group_id AS group_id,
+                   r.time_basis AS time_basis,
+                   r.time_expression AS time_expression,
+                   r.time_kind AS time_kind,
+                   r.time_granularity AS time_granularity,
+                   r.time_window_start AS time_window_start,
+                   r.time_window_end AS time_window_end,
+                   r.time_outcome AS time_outcome,
+                   r.time_speech_date AS time_speech_date,
+                   r.time_ambiguity AS time_ambiguity
+            ORDER BY score DESC
+            """,
+            params={"q": lucene, "limit": safe_limit, **tenant_scope_params(namespace)},
         )
 
     def fetch_candidate_fact_edges(self, node_uuids: list[str]) -> list[dict[str, object]]:
