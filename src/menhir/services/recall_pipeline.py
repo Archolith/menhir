@@ -197,7 +197,106 @@ _RECALL_HISTORY_EMPTY_NOTE = (
 )
 
 
+def _memory_admitted(
+    service: Any,
+    meta: dict[str, object],
+    *,
+    include_session: bool,
+    session_id: str | None,
+    namespace: str | None,
+) -> bool:
+    """Node-level recall admission, shared by ranked candidates and appended fact endpoints."""
+    # Structural graph nodes (project-scan Directory/File/Project entities) carry a
+    # structure_role. They exist for query_structure, never semantic recall, but leak in
+    # here via BM25 token collisions (e.g. "rules" -> the .continue/rules directory node).
+    # Drop them before scoring, mirroring fetch_recent_memories' structural exclusion.
+    if meta.get("structure_role") is not None:
+        return False
+    scope = str(meta.get("scope") or NodeScope.SESSION)
+    freshness = str(meta.get("freshness") or FreshnessState.ACTIVE)
+    # CANDIDATE is the human-review tier: never recalled until approved
+    # (which promotes it to PERSISTENT). This is the load-bearing guarantee
+    # of staged review - candidates must not influence ranking or results.
+    if scope == NodeScope.CANDIDATE:
+        return False
+    if freshness == FreshnessState.GONE:
+        return False
+    if not service._session_scope_admitted(
+        scope, meta.get("session_id"), include_session=include_session, session_id=session_id,
+    ):
+        return False
+    # Materialized Views have a fail-closed context contract. Historical/debug inspection uses
+    # direct getters and operator listings; ``include_superseded`` must not turn ordinary recall
+    # into an inspection API. Missing lifecycle stamps, OPERATOR audience, retirement, or a
+    # receipt/MENTIONS mismatch therefore excludes the View unconditionally. Ordinary memories
+    # have ``is_view`` unset/false and pass through untouched.
+    if bool(meta.get("is_view")) and (
+        meta.get("view_class") != "FACT"
+        or meta.get("view_audience") != "RECALL"
+        or meta.get("view_current") is not True
+        or bool(meta.get("retired"))
+        or not bool(meta.get("view_provenance_live"))
+    ):
+        return False
+    # scalar_history exclusion: when the feature flag is OFF, stored scalar_history
+    # Entities must be excluded from generic recall — not merely omitted from the
+    # dedicated lane. This makes rollback real and prevents an old View from leaking
+    # through vector/entity retrieval.
+    if meta.get("view_kind") == "scalar_history" and not service.scalar_history_enabled:
+        return False
+    # Counted scalar_state Views, and history Views listing occurrences, are hidden when
+    # counting is OFF (read-side kill switch).
+    if not service.counting_enabled and (
+        (meta.get("view_kind") == "scalar_state" and meta.get("scalar_basis") == "counted")
+        or (meta.get("view_kind") == "scalar_history" and _scalar_history_has_occurrences(meta))
+    ):
+        return False
+    # Defense-in-depth: if namespace is explicitly set, filter candidates by namespace.
+    # The candidate's metadata namespace property (or "default" if missing/None)
+    # must match the target namespace.
+    if namespace is not None:
+        candidate_namespace = meta.get("namespace") or stamped_namespace(None)
+        if candidate_namespace != stamped_namespace(namespace):
+            return False
+    return True
+
+
 _VERB_FACET_MAX = 3
+
+
+async def _admitted_fact_rows(
+    service: Any,
+    rows: list[dict[str, object]],
+    *,
+    include_session: bool,
+    session_id: str | None,
+    namespace: str | None,
+) -> list[dict[str, object]]:
+    """Keep a fact only when both endpoint memories pass ranked recall's admission.
+
+    Required because the keyword search matches the edge alone: without this a fact from a
+    SESSION-scoped, other-session, GONE or CANDIDATE memory would bypass recall's filters.
+    Missing endpoint metadata fails closed.
+    """
+    endpoints = sorted({
+        str(row.get(key) or "") for row in rows for key in ("source_uuid", "target_uuid")
+    } - {""})
+    if not endpoints:
+        return []
+    meta_rows = await asyncio.to_thread(service.graph_adapter.fetch_candidate_metadata, endpoints)
+    meta_by_uuid = {str(m.get("uuid") or ""): m for m in meta_rows}
+    admitted = {
+        uuid for uuid in endpoints
+        if uuid in meta_by_uuid and _memory_admitted(
+            service, meta_by_uuid[uuid], include_session=include_session,
+            session_id=session_id, namespace=namespace,
+        )
+    }
+    return [
+        row for row in rows
+        if str(row.get("source_uuid") or "") in admitted
+        and str(row.get("target_uuid") or "") in admitted
+    ]
 
 
 async def _append_verb_facet_facts(
@@ -208,6 +307,9 @@ async def _append_verb_facet_facts(
     include_invalidated: bool,
     preset: QueryPreset,
     tuning: RetrievalTuningConfig,
+    *,
+    include_session: bool,
+    session_id: str | None,
 ) -> list[ScoredMemory]:
     """Append at most one keyword-matched fact per question verb (max 3), never reordering."""
     facets = verb_facets(query)
@@ -228,6 +330,10 @@ async def _append_verb_facet_facts(
         )
         if not include_invalidated:
             rows = _filter_to_current_beliefs(rows)
+        rows = await _admitted_fact_rows(
+            service, rows, include_session=include_session, session_id=session_id,
+            namespace=namespace,
+        )
         for row in rows:
             uuid = str(row.get("uuid") or "")
             fact = str(row.get("fact") or "").strip()
@@ -795,61 +901,14 @@ async def run_recall(
         meta = metadata_by_uuid.get(uuid)
         if meta is None:
             continue
-        # Structural graph nodes (project-scan Directory/File/Project entities) carry a
-        # structure_role. They exist for query_structure, never semantic recall, but leak in
-        # here via BM25 token collisions (e.g. "rules" -> the .continue/rules directory node).
-        # Drop them before scoring, mirroring fetch_recent_memories' structural exclusion.
-        if meta.get("structure_role") is not None:
+        if not _memory_admitted(
+            service, meta, include_session=include_session, session_id=session_id,
+            namespace=namespace,
+        ):
             continue
         scope = str(meta.get("scope") or NodeScope.SESSION)
         freshness = str(meta.get("freshness") or FreshnessState.ACTIVE)
-        # CANDIDATE is the human-review tier: never recalled until approved
-        # (which promotes it to PERSISTENT). This is the load-bearing guarantee
-        # of staged review - candidates must not influence ranking or results.
-        if scope == NodeScope.CANDIDATE:
-            continue
-        if freshness == FreshnessState.GONE:
-            continue
-        if not service._session_scope_admitted(
-            scope, meta.get("session_id"), include_session=include_session, session_id=session_id,
-        ):
-            continue
-        # Materialized Views have a fail-closed context contract. Historical/debug inspection uses
-        # direct getters and operator listings; ``include_superseded`` must not turn ordinary recall
-        # into an inspection API. Missing lifecycle stamps, OPERATOR audience, retirement, or a
-        # receipt/MENTIONS mismatch therefore excludes the View unconditionally. Ordinary memories
-        # have ``is_view`` unset/false and pass through untouched.
-        is_view = bool(meta.get("is_view"))
-        is_superseded_view = is_view and meta.get("view_current") is not True
-        if is_view and (
-            meta.get("view_class") != "FACT"
-            or meta.get("view_audience") != "RECALL"
-            or meta.get("view_current") is not True
-            or bool(meta.get("retired"))
-            or not bool(meta.get("view_provenance_live"))
-        ):
-            continue
-        # scalar_history exclusion: when the feature flag is OFF, stored scalar_history
-        # Entities must be excluded from generic recall — not merely omitted from the
-        # dedicated lane. This makes rollback real and prevents an old View from leaking
-        # through vector/entity retrieval.
-        if meta.get("view_kind") == "scalar_history" and not service.scalar_history_enabled:
-            continue
-        # Counted scalar_state Views, and history Views listing occurrences, are hidden when
-        # counting is OFF (read-side kill switch).
-        if not service.counting_enabled and (
-            (meta.get("view_kind") == "scalar_state" and meta.get("scalar_basis") == "counted")
-            or (meta.get("view_kind") == "scalar_history" and _scalar_history_has_occurrences(meta))
-        ):
-            continue
-        # Defense-in-depth: if namespace is explicitly set, filter candidates by namespace.
-        # The candidate's metadata namespace property (or "default" if missing/None)
-        # must match the target namespace.
-        if namespace is not None:
-            candidate_namespace = meta.get("namespace") or stamped_namespace(None)
-            target_namespace = stamped_namespace(namespace)
-            if candidate_namespace != target_namespace:
-                continue
+        is_superseded_view = bool(meta.get("is_view")) and meta.get("view_current") is not True
         try:
             edge_count = int(meta.get("edge_count") or 0)
             similarity = float(similarity_map.get(uuid, 0.0))
@@ -2009,7 +2068,8 @@ async def run_recall(
         _t = perf_counter()
         try:
             top_results = await _append_verb_facet_facts(
-                service, query, top_results, namespace, include_invalidated, preset, tuning
+                service, query, top_results, namespace, include_invalidated, preset, tuning,
+                include_session=include_session, session_id=session_id,
             )
         except Exception:
             logger.exception("Verb-facet fact append failed; continuing without it")

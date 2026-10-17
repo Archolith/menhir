@@ -88,11 +88,67 @@ def _lemma(word: str) -> str:
     return w
 
 
-def _forms(word: str, particle: str) -> list[str]:
+_VOWELS = "aeiou"
+
+
+def _single_vowel_consonant_end(b: str) -> bool:
+    """'stop', 'complet', 'bak': one vowel then one consonant (not w/x/y) at the end."""
+    return (len(b) >= 3 and b[-1] not in _VOWELS + "wxy" and b[-2] in _VOWELS
+            and b[-3] not in _VOWELS)
+
+
+def _suffix_stripped(w: str) -> str | None:
+    """The part before a regular -ed/-ing suffix, or None when the word has none."""
+    if w in _IRREGULAR or w.endswith(("ied", "ies")):
+        return None
+    if w.endswith("ing") and len(w) > 5:
+        return w[:-3]
+    if w.endswith("ed") and len(w) > 4:
+        return w[:-2]
+    return None
+
+
+def _doubled(stripped: str | None) -> bool:
+    """'stopp' (stopped) doubled its final consonant; 'call' and 'dress' end that way anyway."""
+    return (stripped is not None and len(stripped) > 2 and stripped[-1] == stripped[-2]
+            and stripped[-1] not in "lsz")
+
+
+def _bases(word: str) -> set[str]:
+    """Candidate base forms. Suffix stripping cannot tell 'completed' (complete) from
+    'returned' (return) or 'focused' (focus) from 'danced' (dance), so search both."""
     base = _lemma(word)
+    stripped = _suffix_stripped(word.lower())
+    if stripped is None or (len(stripped) > 2 and stripped[-1] == stripped[-2]):
+        return {base}  # no regular suffix, or a double letter ("stopped", "called") that settles it
+    if base.endswith("e"):
+        return {base, base[:-1]}
+    if _single_vowel_consonant_end(base) or (base[-1] in "cgsvz" and base[-2] not in _VOWELS + base[-1]):
+        return {base, base + "e"}
+    return {base}
+
+
+def _inflections(base: str, *, double: bool) -> set[str]:
     stem = base[:-1] if base.endswith("e") else base
-    words = {word.lower(), base, base + "s", stem + "ed", stem + "ing"} | _IRREGULAR_PAST.get(base, set())
-    return sorted(f"{w} {particle}".strip() for w in words)
+    out = {base, base + "s", stem + "ed", stem + "ing"}
+    if base.endswith(("s", "x", "z", "sh", "ch")):
+        out.add(base + "es")  # fixes, dresses
+    if len(base) > 2 and base[-1] == "y" and base[-2] not in _VOWELS:
+        out |= {base[:-1] + "ies", base[:-1] + "ied"}  # tries, tried
+    if double:
+        out |= {base + base[-1] + "ed", base + base[-1] + "ing"}  # stop -> stopped, stopping
+    return out
+
+
+def _forms(word: str, particle: str) -> list[str]:
+    w = word.lower()
+    stripped = _suffix_stripped(w)
+    doubled = _doubled(stripped)
+    words = {w} | _IRREGULAR_PAST.get(_lemma(word), set())
+    for base in _bases(word):
+        double = doubled or (stripped is None and w == base and _single_vowel_consonant_end(base))
+        words |= _inflections(base, double=double and not base.endswith("e"))
+    return sorted(f"{x} {particle}".strip() for x in words)
 
 
 def _frame(toks: list[str]):

@@ -23,10 +23,13 @@ NOUN_Q = "How many days did I spend on camping trips in the United States this y
 ON = RetrievalTuningConfig(enable_verb_facets=True)
 
 
-def _row(uuid, fact, score=5.0, expired_at=None, valid_at="2023-05-01T00:00:00Z"):
+def _row(uuid, fact, score=5.0, expired_at=None, valid_at="2023-05-01T00:00:00Z",
+         source="entity-1", target="entity-2"):
+    # Endpoints default to the two admitted PERSISTENT entities from _setup_search_and_metadata.
     return {
         "uuid": uuid, "fact": fact, "score": score, "valid_at": valid_at, "invalid_at": None,
         "created_at": "2023-05-02T00:00:00Z", "expired_at": expired_at, "group_id": "proj",
+        "source_uuid": source, "target_uuid": target,
     }
 
 
@@ -48,8 +51,9 @@ class _Search:
         return list(self.by_first_form.get(phrases[0], self.default))
 
 
-async def _recall(client, adapter, query, search, tuning=ON, **kwargs):
+async def _recall(client, adapter, query, search, tuning=ON, endpoints=(), **kwargs):
     _setup_search_and_metadata(client, adapter)
+    adapter.candidate_metadata.extend(dict(e) for e in endpoints)
     for meta in adapter.candidate_metadata:
         meta["namespace"] = "proj"
     adapter.search_facts_by_keywords = search
@@ -185,6 +189,64 @@ async def test_appended_uuids_never_reach_access_updates(
     assert touched and all("e1" not in batch for batch in touched)
 
 
+def _endpoint(uuid, **fields):
+    return {"uuid": uuid, "name": uuid, "scope": "PERSISTENT", "type": "SEMANTIC",
+            "content": uuid, "freshness": "ACTIVE", **fields}
+
+
+# A fact is admitted only when both endpoint memories pass ranked recall's admission.
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("endpoint", "kwargs", "kept"),
+    [
+        (_endpoint("n"), {}, True),
+        (_endpoint("n", scope="SESSION", session_id="s1"), {}, False),  # include_session default off
+        (_endpoint("n", scope="SESSION", session_id="s1"),
+         {"include_session": True, "session_id": "s1"}, True),
+        (_endpoint("n", scope="SESSION", session_id="s2"),
+         {"include_session": True, "session_id": "s1"}, False),         # another session
+        (_endpoint("n", freshness="GONE"), {}, False),
+        (_endpoint("n", scope="CANDIDATE"), {}, False),
+        (_endpoint("n", structure_role="directory"), {}, False),
+    ],
+)
+@pytest.mark.parametrize("side", ["source", "target"])
+async def test_fact_needs_both_endpoints_admitted(
+    stub_graphiti_client, stub_memory_graph_adapter, endpoint, kwargs, kept, side,
+):
+    row = _row("f1", "User picked up the blazer", **{side: "n"})
+    res = await _recall(stub_graphiti_client, stub_memory_graph_adapter, CLOTHING_Q,
+                        _Search({"pick up": [row]}), endpoints=[endpoint], **kwargs)
+    assert ("f1" in [r.uuid for r in res.results]) is kept
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_fact_from_other_namespace_endpoint_dropped(stub_graphiti_client, stub_memory_graph_adapter):
+    search = _Search({"pick up": [_row("f1", "User picked up the blazer", target="n")]})
+    _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
+    for meta in stub_memory_graph_adapter.candidate_metadata:
+        meta["namespace"] = "proj"
+    stub_memory_graph_adapter.candidate_metadata.append(_endpoint("n", namespace="elsewhere"))
+    stub_memory_graph_adapter.search_facts_by_keywords = search
+    res = await _svc(stub_graphiti_client, stub_memory_graph_adapter).recall(
+        CLOTHING_Q, namespace="proj", limit=2, tuning=ON)
+    assert "f1" not in [r.uuid for r in res.results]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("row_kw", [{"target": "no-metadata"}, {"source": None}])
+async def test_fact_with_unknown_endpoint_fails_closed(
+    stub_graphiti_client, stub_memory_graph_adapter, row_kw,
+):
+    search = _Search({"pick up": [_row("f1", "User picked up the blazer", **row_kw),
+                                  _row("f2", "User picked up the scarf")]})
+    res = await _recall(stub_graphiti_client, stub_memory_graph_adapter, CLOTHING_Q, search)
+    assert [r.uuid for r in res.results[2:]] == ["f2"]
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_adapter_failure_keeps_ranked_results(stub_graphiti_client, stub_memory_graph_adapter):
@@ -245,6 +307,7 @@ def test_search_facts_by_keywords_query_and_params():
     query, params = neo.calls[-1]
     assert "queryRelationships('edge_name_and_fact', $q, {limit: $limit})" in query
     assert tenant_scope_cypher("r") in query
+    assert "startNode(r).uuid AS source_uuid, endNode(r).uuid AS target_uuid" in query
     assert params == {"q": '("pick up")', "limit": 7, "tenant_namespaces": ["default", ""]}
     # A named silo also pre-filters in Lucene so other tenants cannot fill the fulltext limit.
     repo.search_facts_by_keywords(["pick up"], "lme-1")

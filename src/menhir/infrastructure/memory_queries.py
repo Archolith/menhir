@@ -834,6 +834,7 @@ class MemoryQueryRepository:
             YIELD relationship AS r, score
             WHERE {tenant_scope_cypher("r")}
             RETURN r.uuid AS uuid, r.fact AS fact, score,
+                   startNode(r).uuid AS source_uuid, endNode(r).uuid AS target_uuid,
                    toString(r.valid_at) AS valid_at,
                    toString(r.invalid_at) AS invalid_at,
                    toString(r.created_at) AS created_at,

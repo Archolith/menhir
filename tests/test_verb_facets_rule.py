@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from menhir.domain.verb_facets import VerbFacet, _lemma, is_verb_centric, verb_facets
+from menhir.domain.verb_facets import VerbFacet, _forms, _lemma, is_verb_centric, verb_facets
 
 VERB_QUESTIONS = [
     "How many projects have I completed since starting painting classes?",
@@ -89,3 +89,31 @@ def test_particle_and_irregular_facets():
 )
 def test_lemma(word, base):
     assert _lemma(word) == base
+
+
+# The fulltext index does not stem, so the base and 3rd-person forms must be searched explicitly.
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("word", "needed"),
+    [
+        ("completed", {"complete", "completes", "completed", "completing"}),
+        ("completing", {"complete", "completes", "completed"}),
+        ("donated", {"donate", "donates"}),
+        ("baked", {"bake", "bakes", "baking"}),
+        ("dancing", {"dance", "dances", "danced"}),
+        ("focused", {"focus", "focuses", "focusing"}),
+        ("stop", {"stopped", "stopping", "stops"}),
+        ("stopped", {"stop", "stops", "stopping"}),
+        ("fix", {"fixes", "fixed", "fixing"}),
+        ("try", {"tries", "tried", "trying"}),
+        ("returned", {"return", "returns", "returning"}),
+    ],
+)
+def test_forms_cover_base_and_inflections(word, needed):
+    assert needed <= set(_forms(word, ""))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("word", ["returned", "worked", "called", "attended"])
+def test_forms_add_no_silent_e_after_consonant_clusters(word):
+    assert not any(f.endswith("e") or f.endswith("es") for f in _forms(word, "") if f != word)
