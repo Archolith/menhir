@@ -778,16 +778,40 @@ class MemoryQueryRepository:
             params={"uuids": node_uuids, "belief_commit_key": "belief_commit"},
         )
 
-    def fetch_temporal_facts(self, node_uuids: list[str]) -> list[dict[str, object]]:
-        """Fetch bi-temporal fact-edge state for candidate entity nodes."""
+    def fetch_temporal_facts(
+        self,
+        node_uuids: list[str],
+        *,
+        query_vector: list[float] | None = None,
+    ) -> list[dict[str, object]]:
+        """Fetch bi-temporal fact-edge state for candidate entity nodes.
+
+        With ``query_vector`` each row also carries ``fact_similarity`` (cosine of the
+        fact embedding to the query; null when the embedding is missing or mis-sized).
+        """
         if not node_uuids:
             return []
+        if query_vector is None:
+            query = (Cypher()
+                .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
+                .where("n.uuid IN $uuids")
+                .return_fields(FACT_TEMPORAL_FIELDS)
+                .build())
+            return self.neo4j.execute(query, params={"uuids": node_uuids})
+        similarity_field = (
+            "CASE WHEN r.fact_embedding IS NOT NULL "
+            "AND size(r.fact_embedding) = size($query_vector) "
+            "THEN vector.similarity.cosine(r.fact_embedding, $query_vector) "
+            "ELSE null END AS fact_similarity"
+        )
         query = (Cypher()
             .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
             .where("n.uuid IN $uuids")
-            .return_fields(FACT_TEMPORAL_FIELDS)
+            .return_fields([*FACT_TEMPORAL_FIELDS, similarity_field])
             .build())
-        return self.neo4j.execute(query, params={"uuids": node_uuids})
+        return self.neo4j.execute(
+            query, params={"uuids": node_uuids, "query_vector": query_vector}
+        )
 
     def fetch_candidate_fact_edges(self, node_uuids: list[str]) -> list[dict[str, object]]:
         """Fetch fact-EDGE identity (not just node state) for candidate entity nodes.
