@@ -450,6 +450,8 @@ def _redact_authority_verdicts(verdicts: list[dict[str, Any]], *, reveal: bool) 
     ``value`` is masked unconditionally (not via redact_text) because it is often non-string
     (a spend amount, a duration, a count) -- redact_text only masks strings, so routing a
     numeric authority value through it would silently leak the exact figure in redacted mode.
+    The match-audit fields ``count_uncertain``/``count_actions``/``count_items`` (item names, action
+    words and an exact figure) are memory content too and are masked the same way.
     """
     if reveal:
         return verdicts
@@ -458,6 +460,9 @@ def _redact_authority_verdicts(verdicts: list[dict[str, Any]], *, reveal: bool) 
         v = dict(verdict)
         if "value" in v and v["value"] not in (None, ""):
             v["value"] = MASK
+        for _audit_key in ("count_uncertain", "count_actions", "count_items"):
+            if _audit_key in v and v[_audit_key] not in (None, ""):
+                v[_audit_key] = MASK
         if "object_display" in v:
             v["object_display"] = redact_text(v["object_display"], reveal=False)
         # EventAuthorityVerdict carries its own top-level stated_span (no contributors list);

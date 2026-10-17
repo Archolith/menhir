@@ -283,6 +283,9 @@ class ScalarAuthorityVerdictResponse(BaseModel):
     next_offset: int | None = None
     basis: str | None = None
     lower_bound: bool = False
+    count_uncertain: float | None = None
+    count_actions: str | None = None
+    count_items: str | None = None
 
 
 class EventAuthorityVerdictResponse(BaseModel):

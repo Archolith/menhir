@@ -220,6 +220,33 @@ def _event_selection_failed(verdict: EventAuthorityVerdict) -> bool:
     )
 
 
+def _fmt_count(n: Any) -> str:
+    """Format a count as an int when integral, otherwise as-is."""
+    if isinstance(n, float) and n.is_integer():
+        return str(int(n))
+    return str(n)
+
+
+def _count_match_lines(verdict: Any) -> list[str]:
+    """Unit 4R match audit lines (per-action sums, item names) for a lower-bound counted View.
+
+    Malformed JSON or wrong types skip the corresponding line silently."""
+    lines: list[str] = []
+    try:
+        actions = json.loads(verdict.count_actions) if verdict.count_actions else None
+    except (TypeError, ValueError):
+        actions = None
+    if isinstance(actions, dict) and actions:
+        lines.append("  - per action: " + ", ".join(f"{k} {_fmt_count(n)}" for k, n in actions.items()))
+    try:
+        items = json.loads(verdict.count_items) if verdict.count_items else None
+    except (TypeError, ValueError):
+        items = None
+    if isinstance(items, list) and items:
+        lines.append("  - items: " + ", ".join(str(x) for x in items))
+    return lines
+
+
 @dataclass(frozen=True)
 class ContextResult:
     query: str
@@ -378,6 +405,17 @@ class ContextBuilderService:
                     f"at least {verdict.value} you mentioned" if verdict.lower_bound
                     else verdict.value
                 )
+                if verdict.lower_bound:
+                    _uncertain = verdict.count_uncertain
+                    if (
+                        isinstance(_uncertain, (int, float))
+                        and not isinstance(_uncertain, bool)
+                        and _uncertain > 0
+                    ):
+                        shown_value = (
+                            f"at least {verdict.value} you mentioned, plus "
+                            f"{_fmt_count(_uncertain)} more that may be repeats"
+                        )
                 heading = (
                     f"[Scalar authority: {verdict.status.upper()}] {verdict.attribute} = "
                     f"{shown_value} ({verdict.kind}"
@@ -385,6 +423,8 @@ class ContextBuilderService:
                     + ")"
                 )
                 authority_lines = [heading]
+                if verdict.lower_bound:
+                    authority_lines.extend(_count_match_lines(verdict))
                 for contributor in verdict.contributors:
                     authority_lines.append(
                         f"  - {contributor.relation}: {contributor.stated_span} "

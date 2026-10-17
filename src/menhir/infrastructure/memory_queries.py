@@ -743,7 +743,9 @@ class MemoryQueryRepository:
                    a.subject_uuid AS subject_uuid, a.subject_display AS subject_display,
                    a.attribute AS attribute, a.scope AS scope, a.value_kind AS value_kind,
                    a.unit AS unit, a.namespace AS namespace, a.evidence_tier AS evidence_tier,
-                   a.operation AS operation, a.value AS value, toString(a.valid_at) AS valid_at
+                   a.operation AS operation, a.value AS value, toString(a.valid_at) AS valid_at,
+                   coalesce(a.count_object, '') AS count_object,
+                   coalesce(a.count_family, '') AS count_family
             ORDER BY cosine DESC, a.assertion_id
             LIMIT $limit
             """,
