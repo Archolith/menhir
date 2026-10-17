@@ -1803,6 +1803,13 @@ class MemoryGraphAdapter:
             namespace, perceiver_version=perceiver_version, max_attempts=max_attempts,
             limit=limit, exclude_run_id=exclude_run_id)
 
+    def pending_decision_namespaces(
+        self, *, perceiver_version: str, max_attempts: int, limit: int,
+    ) -> list[str]:
+        from menhir.infrastructure.count_decision_repository import CountDecisionRepository
+        return CountDecisionRepository(self.neo4j).pending_decision_namespaces(
+            perceiver_version=perceiver_version, max_attempts=max_attempts, limit=limit)
+
     def record_count_decisions(
         self, namespace: str, decisions: list[dict[str, Any]], *, perceiver_version: str,
         run_id: str, incarnation: str, epoch: int,
