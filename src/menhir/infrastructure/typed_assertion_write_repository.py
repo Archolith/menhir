@@ -152,6 +152,12 @@ class TypedAssertionWriteMixin:
                    a.evidence_tier AS evidence_tier, a.perceiver_version AS perceiver_version,
                    coalesce(a.absolute_semantics, 'ordinary') AS absolute_semantics,
                    coalesce(a.importance, '') AS importance,
+                   coalesce(a.count_object, '') AS count_object,
+                   coalesce(a.count_item, '') AS count_item,
+                   coalesce(a.count_action, '') AS count_action,
+                   coalesce(a.count_status, '') AS count_status,
+                   coalesce(a.count_target_id, '') AS count_target_id,
+                   coalesce(a.count_family, '') AS count_family,
                    coalesce(a.superseded, false) AS superseded,
                    coalesce(a.binding_pending, false) AS binding_pending
             ORDER BY a.valid_at ASC, a.learned_at ASC

@@ -27,6 +27,13 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Protocol
 from uuid import uuid4
 
+from menhir.domain.count_match import (
+    MATCH_VERSION_SUFFIX,
+    RELATED_POOL_LIMIT,
+    UNDECIDED_SWEEP_LIMIT,
+    conservative_decisions,
+    related_sets,
+)
 from menhir.domain.typed_assertion import COUNTING_OPERATIONS
 from menhir.services.scalar_consolidation import CountingLlm
 
@@ -92,15 +99,30 @@ COUNTING_SYSTEM_PROMPT_V2 = COUNTING_SYSTEM_PROMPT + (
 )
 
 
-def effective_counting_perceiver_version(configured: str, extract_v2: bool) -> str:
+#: appended under the 4R match flag: each happening also names its object family, item and action.
+COUNTING_MATCH_PROMPT_ADDENDUM = (
+    " Each observation ALSO carries: \"object\": <the kind of thing the happening is about, as a "
+    "short plain noun phrase with no verb, e.g. 'model kit', 'museum', 'concert ticket'; use the "
+    "same phrase every time the same kind of thing comes up>, \"item\": <the specific thing if the "
+    "episode names it, e.g. 'Tamiya 1/48 Spitfire', else \"\">, \"action\": <one plain verb for "
+    "what was done, e.g. 'finished', 'bought', 'started', 'visited'>."
+)
+
+
+def effective_counting_perceiver_version(
+    configured: str, extract_v2: bool, match: bool = False,
+) -> str:
     """The counting perceiver version used for writes, the re-version check and the watermark:
-    the configured value, or `<configured>+x2` under extraction v2. The one place it is computed,
-    so flipping v2 on or off is a perceiver-version change and re-reads history (3a.2)."""
-    return f"{configured}+x2" if extract_v2 else configured
+    the configured value, plus `+x2` under extraction v2 and `+m` under the 4R match flag. The one
+    place it is computed, so flipping either flag is a perceiver-version change and re-reads
+    history (3a.2)."""
+    version = f"{configured}+x2" if extract_v2 else configured
+    return f"{version}{MATCH_VERSION_SUFFIX}" if match else version
 
 
-def counting_system_prompt(extract_v2: bool) -> str:
-    return COUNTING_SYSTEM_PROMPT_V2 if extract_v2 else COUNTING_SYSTEM_PROMPT
+def counting_system_prompt(extract_v2: bool, match: bool = False) -> str:
+    prompt = COUNTING_SYSTEM_PROMPT_V2 if extract_v2 else COUNTING_SYSTEM_PROMPT
+    return prompt + COUNTING_MATCH_PROMPT_ADDENDUM if match else prompt
 
 
 def _new_fence_nonce() -> str:
@@ -163,6 +185,27 @@ class CountingConsolidationGraph(Protocol):
     ) -> Any: ...
 
 
+class CountMatchGraph(Protocol):
+    """Extra graph capabilities used only under the 4R match flag."""
+
+    def count_occurrences_by_ids(
+        self, namespace: str, assertion_ids: list[str], *, perceiver_version: str,
+    ) -> list[dict[str, Any]]: ...
+
+    def counted_occurrences_for_subjects(
+        self, namespace: str, subject_uuids: list[str], *, limit: int,
+    ) -> list[dict[str, Any]]: ...
+
+    def undecided_count_occurrences(
+        self, namespace: str, *, perceiver_version: str, limit: int,
+    ) -> list[dict[str, Any]]: ...
+
+    def record_count_decisions(
+        self, namespace: str, decisions: list[dict[str, Any]], *, perceiver_version: str,
+        run_id: str, incarnation: str, epoch: int,
+    ) -> dict[str, Any]: ...
+
+
 @dataclass(frozen=True)
 class CountingConsolidationConfig:
     """Counting-lane settings passed through the scheduler facade."""
@@ -183,6 +226,8 @@ class CountingConsolidationConfig:
     lease_seconds: int = 900
     #: unit 3a.9 extraction v2 (own flag); the effective version becomes `<perceiver_version>+x2`.
     extract_v2: bool = False
+    #: unit 4R related-count matching (own flag); the effective version gains `+m`.
+    match: bool = False
 
 
 def build_counting_context(
@@ -246,7 +291,12 @@ def run_counting_consolidation(
 
     start_calls = counting_llm.calls
     extract_v2 = bool(config.extract_v2)
-    perceiver_version = effective_counting_perceiver_version(config.perceiver_version, extract_v2)
+    match = bool(config.match)
+    perceiver_version = effective_counting_perceiver_version(
+        config.perceiver_version, extract_v2, match)
+    # Match-only keywords: with match off every graph call is exactly as before.
+    match_kwargs: dict[str, Any] = {"match": True} if match else {}
+    decided = {"counted": 0, "uncertain": 0}
     occurrences_stored = 0
     advisory = 0
     processed = 0
@@ -259,7 +309,8 @@ def run_counting_consolidation(
 
     try:
         state_service = graph_adapter.scalar_state_service(
-            scalar_history_enabled=config.scalar_history_enabled)
+            scalar_history_enabled=config.scalar_history_enabled,
+            **({"count_match": True} if match else {}))
         # Router and shadow stay off: both are scalar-lane instruments with no occurrence support.
         service = TypedScalarPerceptionService(
             graph_adapter,
@@ -297,12 +348,22 @@ def run_counting_consolidation(
             incarnation = str(claim["incarnation"])
             epoch = int(claim["epoch"])
             namespace_advanced = False
+
+            def _fence(ns: str = namespace, inc: str = incarnation, ep: int = epoch) -> None:
+                # Renew-as-check: refuses unless this run still owns the same watermark.
+                if not graph_adapter.renew_counting_claim(
+                    ns, run_id=run_id, incarnation=inc, epoch=ep,
+                    lease_seconds=config.lease_seconds,
+                    now=datetime.now(timezone.utc).isoformat(),
+                ):
+                    raise CountingFenceLost(f"counting claim for {ns} was lost")
+
             try:
                 # Create-only: a marker left at False by a failed re-enable sweep must stay so the
                 # sweep retries; only a completed sweep flips it.
                 graph_adapter.mark_counting_flag_state(
                     namespace, enabled=True, at=datetime.now(timezone.utc).isoformat(),
-                    create_only=True)
+                    create_only=True, **match_kwargs)
                 while True:
                     if call_budget is not None and counting_llm.calls >= call_budget:
                         break
@@ -325,15 +386,6 @@ def run_counting_consolidation(
                     for subject in retired_subjects:
                         _rebuild_subject(state_service, subject, namespace,
                                          history=config.scalar_history_enabled)
-
-                    def _fence(ns: str = namespace, inc: str = incarnation, ep: int = epoch) -> None:
-                        # Renew-as-check: refuses unless this run still owns the same watermark.
-                        if not graph_adapter.renew_counting_claim(
-                            ns, run_id=run_id, incarnation=inc, epoch=ep,
-                            lease_seconds=config.lease_seconds,
-                            now=datetime.now(timezone.utc).isoformat(),
-                        ):
-                            raise CountingFenceLost(f"counting claim for {ns} was lost")
 
                     # Fence check + fresh lease before the slow LLM step, then again before every
                     # occurrence write (write_guard) so a lease lost mid-LLM stores nothing.
@@ -359,7 +411,7 @@ def run_counting_consolidation(
                             reconcile_scope=config.reconcile_scope,
                             reconcile_subject=config.reconcile_subject,
                             canonical_self=config.canonical_self,
-                            system_prompt=counting_system_prompt(extract_v2),
+                            system_prompt=counting_system_prompt(extract_v2, match),
                             allowed_operations=COUNTING_OPERATIONS,
                             claim_ordinal=COUNTING_CLAIM_ORDINAL,
                             context=build_counting_context(episodes, claims, fenced=extract_v2),
@@ -368,6 +420,19 @@ def run_counting_consolidation(
                         )
                         occurrences_stored += int(perception.get("bound", 0))
                         advisory += int(perception.get("advisory", 0))
+                        if match:
+                            # Rows were stored undecided (they fold as uncertain); decide them now,
+                            # before the cursor moves, so a crash here leaves the page to re-read.
+                            page_ids = [str(r.get("assertion_id") or "")
+                                        for r in perception.get("results") or []
+                                        if r.get("bound") and r.get("assertion_id")]
+                            _decide_and_rebuild(
+                                graph_adapter, state_service, namespace,
+                                graph_adapter.count_occurrences_by_ids(
+                                    namespace, page_ids, perceiver_version=perceiver_version),
+                                perceiver_version=perceiver_version, run_id=run_id,
+                                incarnation=incarnation, epoch=epoch, fence=_fence,
+                                history=config.scalar_history_enabled, tally=decided)
                     batches += 1
 
                     # Same fail-closed cursor rule as the scalar runner: advance on the monotonic
@@ -398,6 +463,17 @@ def run_counting_consolidation(
                             f"counting claim for {namespace} was lost before renewal")
                     if len(rows) < config.batch_size:
                         break
+                if match:
+                    # Undecided leftovers (a crash between persist and decide, or a binding repaired
+                    # later) are decided here; until then they fold as uncertain, never counted.
+                    _decide_and_rebuild(
+                        graph_adapter, state_service, namespace,
+                        graph_adapter.undecided_count_occurrences(
+                            namespace, perceiver_version=perceiver_version,
+                            limit=UNDECIDED_SWEEP_LIMIT),
+                        perceiver_version=perceiver_version, run_id=run_id,
+                        incarnation=incarnation, epoch=epoch, fence=_fence,
+                        history=config.scalar_history_enabled, tally=decided)
             except CountingFenceLost as exc:
                 fenced += 1
                 logger.warning("counting: namespace %s fenced; stopping it: %s", namespace, exc)
@@ -414,7 +490,7 @@ def run_counting_consolidation(
             if namespace_advanced:
                 processed += 1
 
-    return {
+    result: dict[str, object] = {
         "counting_namespaces_dirty": len(targets),
         "counting_namespaces_processed": processed,
         "counting_namespaces_failed": failed,
@@ -425,6 +501,40 @@ def run_counting_consolidation(
         "counting_advisory": advisory,
         "counting_llm_calls": counting_llm.calls - start_calls,
     }
+    if match:  # off: the result keys are exactly as before
+        result["counting_decided_counted"] = decided["counted"]
+        result["counting_decided_uncertain"] = decided["uncertain"]
+    return result
+
+
+def _decide_and_rebuild(
+    graph_adapter: Any, state_service: Any, namespace: str, rows: list[dict[str, Any]], *,
+    perceiver_version: str, run_id: str, incarnation: str, epoch: int,
+    fence: Callable[[], None], history: bool, tally: dict[str, int],
+) -> None:
+    """Decide undecided occurrences with the PR 1 code-only rule, record the decisions under the
+    counting fence (re-checked in the write statement) and rebuild the affected subjects.
+    Rows that already carry a decision are skipped (a replay keeps its decision, R3-20)."""
+    from menhir.infrastructure.turn_evidence_repository import CountingFenceLost
+
+    candidates = [r for r in rows if not str(r.get("count_status") or "")]
+    if not candidates:
+        return
+    subjects = sorted({str(r.get("subject_uuid") or "") for r in candidates} - {""})
+    pool = graph_adapter.counted_occurrences_for_subjects(
+        namespace, subjects, limit=RELATED_POOL_LIMIT)
+    decisions = conservative_decisions(
+        related_sets(candidates, pool, pool_truncated=len(pool) >= RELATED_POOL_LIMIT))
+    fence()
+    written = graph_adapter.record_count_decisions(
+        namespace, decisions, perceiver_version=perceiver_version,
+        run_id=run_id, incarnation=incarnation, epoch=epoch)
+    if not written.get("fence_ok"):
+        raise CountingFenceLost(f"counting fence lost for {namespace!r} while recording decisions")
+    for d in decisions:
+        tally[str(d["status"])] = tally.get(str(d["status"]), 0) + 1
+    for subject in subjects:
+        _rebuild_subject(state_service, subject, namespace, history=history)
 
 
 def _rebuild_subject(state_service: Any, subject: str, namespace: str, *, history: bool) -> None:
@@ -442,21 +552,26 @@ def sweep_counting_flag_state(
     enabled: bool,
     namespaces: list[str] | None,
     scalar_history_enabled: bool,
+    match: bool = False,
     limit: int = 50,
     subject_limit: int = 500,
 ) -> dict[str, int]:
-    """Rebuild Views for namespaces whose counting flag marker disagrees with the current flag.
-    Subjects are paged (`subject_limit` per page) until exhausted; the marker is set only after
-    every page rebuilt, so a crash leaves it for the next pass. Makes no LLM calls."""
+    """Rebuild Views for namespaces whose counting flag marker disagrees with the current flag
+    or match fold mode. Subjects are paged (`subject_limit` per page) until exhausted; the marker
+    is set only after every page rebuilt, so a crash leaves it for the next pass. Makes no LLM
+    calls. With match off every graph call is exactly as before (the defaults mean match off)."""
     swept = 0
     rebuilt = 0
     failed = 0
+    match = bool(match and enabled)
+    match_kwargs: dict[str, Any] = {"match": True} if match else {}
     targets = graph_adapter.counting_flag_sweep_targets(
-        enabled=enabled, namespaces=namespaces, limit=limit)
+        enabled=enabled, namespaces=namespaces, limit=limit, **match_kwargs)
     for namespace in targets:
         try:
             svc = graph_adapter.scalar_state_service(
-                scalar_history_enabled=scalar_history_enabled, counting_enabled=enabled)
+                scalar_history_enabled=scalar_history_enabled, counting_enabled=enabled,
+                **({"count_match": True} if match else {}))
             after = ""
             while True:
                 subjects = graph_adapter.counting_sweep_subjects(
@@ -468,7 +583,8 @@ def sweep_counting_flag_state(
                     break
                 after = subjects[-1]
             graph_adapter.mark_counting_flag_state(
-                namespace, enabled=enabled, at=datetime.now(timezone.utc).isoformat())
+                namespace, enabled=enabled, at=datetime.now(timezone.utc).isoformat(),
+                **match_kwargs)
             swept += 1
         except Exception:
             failed += 1
@@ -482,8 +598,10 @@ def sweep_counting_flag_state(
 
 __all__ = [
     "COUNTING_CLAIM_ORDINAL",
+    "COUNTING_MATCH_PROMPT_ADDENDUM",
     "COUNTING_SYSTEM_PROMPT",
     "COUNTING_SYSTEM_PROMPT_V2",
+    "CountMatchGraph",
     "CountingConsolidationConfig",
     "CountingConsolidationGraph",
     "build_counting_context",

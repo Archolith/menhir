@@ -435,6 +435,9 @@ class TypedScalarProposal:
     display: str = ""
     claim_ordinal: int = 0
     importance: str = ""
+    count_object: str = ""
+    count_item: str = ""
+    count_action: str = ""
 
     @property
     def slot_key(self) -> tuple[str, str, str, str]:
@@ -1148,6 +1151,13 @@ def _interpretation_label(
     return "\x1f".join(fields)
 
 
+def _clean_count_text(raw: Any) -> str:
+    """Occurrence object/item/action: str only, whitespace-collapsed, capped at 120 chars."""
+    if not isinstance(raw, str):
+        return ""
+    return " ".join(raw.split())[:120]
+
+
 def parse_scalar_row(
     row: Any, episodes: list[Any], drop: "Callable[[str], None]",
     *, allowed_operations: frozenset[str] = OPERATIONS, claim_ordinal: int = 0,
@@ -1206,6 +1216,7 @@ def parse_scalar_row(
 
     count_value_unresolved = False
     importance = ""
+    count_object = count_item = count_action = ""
     normalized_frequency = (
         _normalize_interval_frequency(stated_span)
         if value_kind == "frequency" and operation != "delta"
@@ -1220,6 +1231,8 @@ def parse_scalar_row(
         if importance not in IMPORTANCE_LEVELS:
             drop("bad_importance")
             return None
+        count_object, count_item, count_action = (
+            _clean_count_text(row.get(k)) for k in ("object", "item", "action"))
         raw_value = row.get("value")
         if value_kind == "count":
             unit = ""
@@ -1394,6 +1407,7 @@ def parse_scalar_row(
         display=display,
         claim_ordinal=claim_ordinal,
         importance=importance,
+        count_object=count_object, count_item=count_item, count_action=count_action,
     )
 
 
@@ -1754,7 +1768,13 @@ def gate_typed_scalars(
             levels = Counter(c.importance for c in candidates)
             rank = {"tracked": 2, "notable": 1, "routine": 0}
             best = max(levels, key=lambda lv: (levels[lv], rank.get(lv, -1)))
-            proposal = replace(proposal, importance=best)
+            modal: dict[str, str] = {}
+            for fname in ("count_object", "count_item", "count_action"):
+                vals = Counter(v for v in (getattr(c, fname) for c in candidates) if v)
+                # Counter preserves first-insertion order and max() keeps the first max,
+                # so ties break by first appearance in sample order.
+                modal[fname] = max(vals, key=lambda v: vals[v]) if vals else ""
+            proposal = replace(proposal, importance=best, **modal)
         # Under span alignment the proposal is grounded to the deterministic common source span, so
         # the durable identity is independent of which sample happened to be seen first.
         sk = proposal.source_key
@@ -2517,4 +2537,5 @@ def _assertion_from_proposal(
         absolute_semantics=classify_absolute_semantics(p.stated_span, p.operation),
         name_embedding=name_embedding, embed_version=embed_version,
         importance=p.importance,
+        count_object=p.count_object, count_item=p.count_item, count_action=p.count_action,
     )

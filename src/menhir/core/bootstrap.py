@@ -199,6 +199,7 @@ def build_memory_services(
             settings.personal_memory_counting_enabled
             and settings.personal_memory_scalar_state_enabled
         ),
+        counting_match_enabled=bool(settings.personal_memory_counting_match_enabled),
     )
     scoring_service = ScoringService()
     lifecycle_service = LifecycleService(

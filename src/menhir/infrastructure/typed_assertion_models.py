@@ -93,6 +93,9 @@ MERGE (a:TypedAssertion {assertion_key: $assertion_key})
     // occurrences only (tracked|notable|routine); null for every other operation, so existing
     // assertion nodes are written byte-identically.
     a.importance = CASE WHEN $importance = '' THEN null ELSE $importance END,
+    a.count_object = CASE WHEN $count_object = '' THEN null ELSE $count_object END,
+    a.count_item = CASE WHEN $count_item = '' THEN null ELSE $count_item END,
+    a.count_action = CASE WHEN $count_action = '' THEN null ELSE $count_action END,
     // G19: a future-dated assertion needs a durable wake-up bit because the ingestion cursor will
     // advance before valid_at arrives. The scheduler atomically converts this into a projection
     // repair receipt when due. Historical/current writes stay false and add no work.

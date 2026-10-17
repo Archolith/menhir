@@ -70,6 +70,8 @@ class MemoryGraphAdapter:
     neo4j: Neo4jRepository
     # keyword-only dataclass field (a same-named property would clobber the init default)
     counting_enabled: bool = field(default=False, kw_only=True)
+    # unit 4R: counted Views fold by count decision; only effective with counting on.
+    counting_match_enabled: bool = field(default=False, kw_only=True)
 
     def __post_init__(self) -> None:
         from menhir.infrastructure.memory_queries import MemoryQueryRepository
@@ -262,14 +264,17 @@ class MemoryGraphAdapter:
 
     def scalar_state_service(
         self, *, scalar_history_enabled: bool = False, counting_enabled: bool | None = None,
+        count_match: bool | None = None,
     ) -> Any:
         """Build a `ScalarStateService` bound to this adapter's typed-assertion store (fold input) and
-        its scalar-state View sink. Used by the C.4.3 perception path to rebuild Views after persist."""
+        its scalar-state View sink. Used by the C.4.3 perception path to rebuild Views after persist.
+        Every fold path builds its service here, so the counting and match fold modes are set once."""
         from menhir.services.scalar_state_service import ScalarStateService
         return ScalarStateService(
             self._typed_assertions, self,
             scalar_history_enabled=scalar_history_enabled,
-            counting_enabled=self.counting_enabled if counting_enabled is None else counting_enabled)
+            counting_enabled=self.counting_enabled if counting_enabled is None else counting_enabled,
+            count_match=self.counting_match_enabled if count_match is None else count_match)
 
     # -------------------------------------------------------------------------
     # Typed-event assertion delegates → TypedEventAssertionRepository
@@ -1746,15 +1751,48 @@ class MemoryGraphAdapter:
 
     def mark_counting_flag_state(
         self, namespace: str, *, enabled: bool, at: str, create_only: bool = False,
+        match: bool = False,
     ) -> None:
         self._turn_evidence.mark_counting_flag_state(
-            namespace, enabled=enabled, at=at, create_only=create_only)
+            namespace, enabled=enabled, at=at, create_only=create_only, match=match)
 
     def counting_flag_sweep_targets(
-        self, *, enabled: bool, namespaces: list[str] | None, limit: int,
+        self, *, enabled: bool, namespaces: list[str] | None, limit: int, match: bool = False,
     ) -> list[str]:
         return self._turn_evidence.counting_flag_sweep_targets(
-            enabled=enabled, namespaces=namespaces, limit=limit)
+            enabled=enabled, namespaces=namespaces, limit=limit, match=match)
+
+    # ---- unit 4R count decisions -> CountDecisionRepository ----
+
+    def count_occurrences_by_ids(
+        self, namespace: str, assertion_ids: list[str], *, perceiver_version: str,
+    ) -> list[dict[str, Any]]:
+        from menhir.infrastructure.count_decision_repository import CountDecisionRepository
+        return CountDecisionRepository(self.neo4j).occurrences_by_ids(
+            namespace, assertion_ids, perceiver_version=perceiver_version)
+
+    def counted_occurrences_for_subjects(
+        self, namespace: str, subject_uuids: list[str], *, limit: int,
+    ) -> list[dict[str, Any]]:
+        from menhir.infrastructure.count_decision_repository import CountDecisionRepository
+        return CountDecisionRepository(self.neo4j).counted_occurrences_for_subjects(
+            namespace, subject_uuids, limit=limit)
+
+    def undecided_count_occurrences(
+        self, namespace: str, *, perceiver_version: str, limit: int,
+    ) -> list[dict[str, Any]]:
+        from menhir.infrastructure.count_decision_repository import CountDecisionRepository
+        return CountDecisionRepository(self.neo4j).undecided_occurrences(
+            namespace, perceiver_version=perceiver_version, limit=limit)
+
+    def record_count_decisions(
+        self, namespace: str, decisions: list[dict[str, Any]], *, perceiver_version: str,
+        run_id: str, incarnation: str, epoch: int,
+    ) -> dict[str, Any]:
+        from menhir.infrastructure.count_decision_repository import CountDecisionRepository
+        return CountDecisionRepository(self.neo4j).record_count_decisions(
+            namespace, decisions, perceiver_version=perceiver_version,
+            run_id=run_id, incarnation=incarnation, epoch=epoch)
 
     def counting_sweep_subjects(
         self, namespace: str, *, limit: int, after: str = "",

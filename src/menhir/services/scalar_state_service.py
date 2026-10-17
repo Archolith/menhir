@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Protocol
 
 from menhir.domain.scalar_history import MALFORMED_VALID_AT, build_history
@@ -156,6 +157,21 @@ def _blocked_slots(result: FoldResult) -> set[tuple[str, str, str, str]]:
     }
 
 
+def _count_match_audit(state: Any) -> dict[str, Any]:
+    """View properties for a counted state: the uncertain total, per-action counts and items (match
+    mode), all None otherwise. JSON strings so they are plain node properties."""
+    uncertain = getattr(state, "count_uncertain", None)
+    if uncertain is None:
+        return {"count_uncertain": None, "count_actions": None, "count_items": None}
+    actions = getattr(state, "count_actions", None) or {}
+    return {
+        "count_uncertain": float(uncertain) if isinstance(uncertain, Decimal) else uncertain,
+        "count_actions": json.dumps(
+            {k: (str(v) if isinstance(v, Decimal) else v) for k, v in sorted(actions.items())}),
+        "count_items": json.dumps(list(getattr(state, "count_items", None) or [])),
+    }
+
+
 def _projection_complete(result: Any) -> bool:
     """Return whether a rebuild result is safe to use as a durable completion proof."""
     if not isinstance(result, dict) or result.get("complete") is False:
@@ -170,15 +186,23 @@ class ScalarStateService:
     def __init__(
         self, assertions: _AssertionSource, views: _ViewSink, *,
         scalar_history_enabled: bool = False, counting_enabled: bool = True,
+        count_match: bool = False,
     ) -> None:
         self._assertions = assertions
         self._views = views
         self._scalar_history_enabled = scalar_history_enabled
         self._counting_enabled = counting_enabled
+        # Unit 4R fold mode. Every rebuild path builds this service through the adapter, so one
+        # setting decides how every counted View is folded.
+        self._count_match = bool(count_match) and counting_enabled
 
     @property
     def counting_enabled(self) -> bool:
         return self._counting_enabled
+
+    @property
+    def count_match(self) -> bool:
+        return self._count_match
 
     def fold_entity(
         self, subject_uuid: str, *, namespace: str | None = None, as_of: datetime | None = None,
@@ -189,7 +213,8 @@ class ScalarStateService:
         tenants' assertions sharing a subject_uuid; None = all (unchanged behavior). `as_of` (Phase B)
         is the evaluation time: future assertions (`valid_at > as_of`) are ignored; None = now(UTC)."""
         rows = self._assertions.materializable_assertions_for_entity(subject_uuid, namespace=namespace)
-        return fold_assertions(rows, as_of=as_of, include_occurrences=self._counting_enabled)
+        return fold_assertions(rows, as_of=as_of, include_occurrences=self._counting_enabled,
+                               count_match=self._count_match)
 
     def current_authority(
         self, subject_uuid: str, *, namespace: str | None = None, as_of: datetime | None = None,
@@ -252,6 +277,10 @@ class ScalarStateService:
             # stated Views stay byte-identical) and the unchanged-value refresh (`SET n += $refresh`)
             # removes a stale 'counted' mark left by an earlier counted version of the same value.
             audit["scalar_basis"] = state.basis if state.basis != "stated" else None
+            if state.basis == "counted" and self._counting_enabled:
+                # Unit 4R fields; None outside match mode, so a match on->off rebuild clears them
+                # through the refresh path instead of leaving a stale uncertain count.
+                audit.update(_count_match_audit(state))
             res = self._views.record_scalar_state(
                 subject=state.subject_display, subject_uuid=state.subject_uuid,
                 attribute=state.attribute, scope=state.scope, value_kind=state.value_kind,
