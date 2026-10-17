@@ -978,11 +978,11 @@ class MemoryGraphAdapter:
     def search_facts_by_keywords(
         self,
         phrases: Sequence[str],
-        group_ids: list[str] | None,
+        namespace: str | None,
         limit: int = 50,
     ) -> list[dict[str, object]]:
-        """Keyword search over fact-edge text, scoped to the given group ids."""
-        return self._memory_queries.search_facts_by_keywords(phrases, group_ids, limit)
+        """Keyword search over fact-edge text, scoped to the namespace's silo."""
+        return self._memory_queries.search_facts_by_keywords(phrases, namespace, limit)
 
     def fetch_candidate_fact_edges(
         self, node_uuids: list[str]

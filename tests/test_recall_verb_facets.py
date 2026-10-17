@@ -6,6 +6,7 @@ import pytest
 
 from menhir.config.feature_flags import FEATURES
 from menhir.config.settings_model import MemorySettings
+from menhir.domain.namespace import tenant_scope_cypher
 from menhir.domain.recall import RetrievalScoreKind
 from menhir.domain.retrieval_tuning import RetrievalTuningConfig
 from menhir.infrastructure.memory_queries import (
@@ -42,8 +43,8 @@ class _Search:
         self.by_first_form = by_first_form or {}
         self.default = default or []
 
-    def __call__(self, phrases, group_ids, limit=50):
-        self.calls.append((tuple(phrases), group_ids))
+    def __call__(self, phrases, namespace, limit=50):
+        self.calls.append((tuple(phrases), namespace))
         return list(self.by_first_form.get(phrases[0], self.default))
 
 
@@ -105,8 +106,8 @@ async def test_appends_one_fact_per_facet_after_ranked_results(
     })
     res = await _recall(stub_graphiti_client, stub_memory_graph_adapter, CLOTHING_Q, search)
     assert search.calls == [
-        (("pick up", "picked up", "picking up", "picks up"), ["proj"]),
-        (("return", "returned", "returning", "returns"), ["proj"]),
+        (("pick up", "picked up", "picking up", "picks up"), "proj"),
+        (("return", "returned", "returning", "returns"), "proj"),
     ]
     assert [r.uuid for r in res.results] == ["entity-1", "entity-2", "e1", "e2"]
     for item in res.results[2:]:
@@ -187,7 +188,7 @@ async def test_appended_uuids_never_reach_access_updates(
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_adapter_failure_keeps_ranked_results(stub_graphiti_client, stub_memory_graph_adapter):
-    def boom(phrases, group_ids, limit=50):
+    def boom(phrases, namespace, limit=50):
         raise RuntimeError("neo4j down")
 
     res = await _recall(stub_graphiti_client, stub_memory_graph_adapter, CLOTHING_Q, boom)
@@ -236,10 +237,21 @@ class _FakeNeo4j:
 def test_search_facts_by_keywords_query_and_params():
     neo = _FakeNeo4j()
     repo = MemoryQueryRepository(neo)
-    assert repo.search_facts_by_keywords([""], ["g"]) == []
+    assert repo.search_facts_by_keywords([""], "g") == []
     assert neo.calls == []
-    repo.search_facts_by_keywords(["pick up"], [""], limit=7)
+    # Default silo: tenancy via tenant_scope_cypher with both spellings; no Lucene group clause
+    # because '' cannot be matched by Lucene.
+    repo.search_facts_by_keywords(["pick up"], "default", limit=7)
     query, params = neo.calls[-1]
-    assert "queryRelationships('edge_name_and_fact'" in query
-    assert "r.group_id IN $group_ids" in query
-    assert params == {"q": '("pick up")', "limit": 7, "group_ids": [""]}
+    assert "queryRelationships('edge_name_and_fact', $q, {limit: $limit})" in query
+    assert tenant_scope_cypher("r") in query
+    assert params == {"q": '("pick up")', "limit": 7, "tenant_namespaces": ["default", ""]}
+    # A named silo also pre-filters in Lucene so other tenants cannot fill the fulltext limit.
+    repo.search_facts_by_keywords(["pick up"], "lme-1")
+    _, params = neo.calls[-1]
+    assert params["q"] == '(group_id:"lme-1") AND ("pick up")'
+    assert params["tenant_namespaces"] == ["lme-1"]
+    # Unscoped (None): no Lucene group clause and the tenancy predicate is a no-op.
+    repo.search_facts_by_keywords(["pick up"], None)
+    _, params = neo.calls[-1]
+    assert params["q"] == '("pick up")' and params["tenant_namespaces"] is None

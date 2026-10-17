@@ -204,7 +204,7 @@ async def _append_verb_facet_facts(
     service: Any,
     query: str,
     top_results: list[ScoredMemory],
-    group_ids: list[str] | None,
+    namespace: str | None,
     include_invalidated: bool,
     preset: QueryPreset,
     tuning: RetrievalTuningConfig,
@@ -224,7 +224,7 @@ async def _append_verb_facet_facts(
         if len(appended) >= _VERB_FACET_MAX:
             break
         rows = await asyncio.to_thread(
-            service.graph_adapter.search_facts_by_keywords, facet.forms, group_ids
+            service.graph_adapter.search_facts_by_keywords, facet.forms, namespace
         )
         if not include_invalidated:
             rows = _filter_to_current_beliefs(rows)
@@ -2009,7 +2009,7 @@ async def run_recall(
         _t = perf_counter()
         try:
             top_results = await _append_verb_facet_facts(
-                service, query, top_results, group_ids, include_invalidated, preset, tuning
+                service, query, top_results, namespace, include_invalidated, preset, tuning
             )
         except Exception:
             logger.exception("Verb-facet fact append failed; continuing without it")

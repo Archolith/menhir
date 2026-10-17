@@ -816,19 +816,23 @@ class MemoryQueryRepository:
     def search_facts_by_keywords(
         self,
         phrases: Sequence[str],
-        group_ids: list[str] | None,
+        namespace: str | None,
         limit: int = 50,
     ) -> list[dict[str, object]]:
-        """Keyword (Lucene) search over RELATES_TO fact text; rows feed _build_temporal_facts."""
-        lucene = fact_keyword_lucene_query(phrases, group_ids)
+        """Keyword (Lucene) search over RELATES_TO fact text; rows feed _build_temporal_facts.
+
+        Tenancy is decided by tenant_scope_cypher (both default spellings); the Lucene group
+        clause is only a pre-filter so other tenants cannot crowd the fulltext limit.
+        """
+        lucene = fact_keyword_lucene_query(phrases, namespace_spellings(namespace))
         if lucene is None:
             return []
         safe_limit = max(1, min(limit, 500))
         return self.neo4j.execute(
-            """
-            CALL db.index.fulltext.queryRelationships('edge_name_and_fact', $q, {limit: $limit})
+            f"""
+            CALL db.index.fulltext.queryRelationships('edge_name_and_fact', $q, {{limit: $limit}})
             YIELD relationship AS r, score
-            WHERE ($group_ids IS NULL OR r.group_id IN $group_ids)
+            WHERE {tenant_scope_cypher("r")}
             RETURN r.uuid AS uuid, r.fact AS fact, score,
                    toString(r.valid_at) AS valid_at,
                    toString(r.invalid_at) AS invalid_at,
@@ -846,7 +850,7 @@ class MemoryQueryRepository:
                    r.time_ambiguity AS time_ambiguity
             ORDER BY score DESC
             """,
-            params={"q": lucene, "limit": safe_limit, "group_ids": group_ids},
+            params={"q": lucene, "limit": safe_limit, **tenant_scope_params(namespace)},
         )
 
     def fetch_candidate_fact_edges(self, node_uuids: list[str]) -> list[dict[str, object]]:
