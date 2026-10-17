@@ -73,6 +73,7 @@ class RetrievalScoreKind(str, Enum):
     WEIGHTED_RRF_NORMALIZED = "weighted_rrf_normalized"
     SOURCE_PRIOR = "source_prior"
     FACT_EDGE_RRF = "fact_edge_rrf"
+    VERB_FACET = "verb_facet"
 
 
 # Candidates below this score are noise and should be filtered before scoring.
@@ -315,6 +316,8 @@ class RetrievalTuningConfig:
     # Label unexpired facts whose own end (invalid_at) has passed as "ended" instead of
     # "current_belief" (MENHIR_ANCHORED_TIME_EXPIRY). Presentation only, like the render flag.
     enable_anchored_time_expiry: bool = False
+    # Append one keyword-matched fact per question verb after ranking (MENHIR_FRONTIER_VERB_FACETS).
+    enable_verb_facets: bool = False
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.hybrid_alpha <= 1.0:
