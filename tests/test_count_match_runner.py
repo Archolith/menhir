@@ -258,6 +258,14 @@ def test_match_off_touches_none_of_the_new_surface(perception):
     assert "rebuild" not in graph.names()
 
 
+@pytest.mark.unit
+def test_bridge_resolution_reaches_perception_only_under_match(perception):
+    _run(_two_kit_graph(), match=False)
+    assert "counting_match" not in perception.instances[-1].persisted[0]
+    _run(_two_kit_graph(), match=True)
+    assert perception.instances[-1].persisted[0]["counting_match"] is True
+
+
 # ------------------------------------------------------------------ C.2 match on
 
 @pytest.mark.unit

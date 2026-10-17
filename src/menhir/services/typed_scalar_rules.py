@@ -1460,9 +1460,77 @@ def _reconciled_attribute(members: "list[TypedScalarProposal]") -> str:
     return _reconciled_identity(members, ("attribute",))[0]
 
 
+def _overlap_components(
+    flat: "list[tuple[int, TypedScalarProposal]]", idxs: list[int],
+) -> list[list[int]]:
+    """Connected components of `idxs` under span overlap between DIFFERENT samples, in first-seen
+    order. A sample never overlaps itself into one claim."""
+    edges: dict[int, set[int]] = defaultdict(set)
+    for a in idxs:
+        sa, pa = flat[a]
+        for b in idxs:
+            if b <= a:
+                continue
+            sb, pb = flat[b]
+            if sa == sb:
+                continue
+            if pa.span_start < pb.span_end and pb.span_start < pa.span_end:
+                edges[a].add(b)
+                edges[b].add(a)
+    seen: set[int] = set()
+    components: list[list[int]] = []
+    for start in idxs:
+        if start in seen:
+            continue
+        stack, component = [start], []
+        seen.add(start)
+        while stack:
+            cur = stack.pop()
+            component.append(cur)
+            for nb in edges.get(cur, ()):
+                if nb not in seen:
+                    seen.add(nb)
+                    stack.append(nb)
+        components.append(component)
+    return components
+
+
+def _drop_bridges(
+    flat: "list[tuple[int, TypedScalarProposal]]", part: list[int],
+) -> list[list[int]]:
+    """Split an ambiguous overlap component by setting aside its widest BRIDGE, repeatedly.
+
+    A bridge is a proposal that overlaps two or more proposals of ONE other sample: it cannot say
+    which of them it votes for, so it votes for none. Removing it only splits the component, and
+    every resulting part still faces the unchanged one-per-sample and common-span checks, so this
+    never forms a group those checks would refuse. Widest first, because a long quote that spans
+    several narrow ones is the least specific reading. Removed bridges fall through as singletons."""
+    if len({flat[i][0] for i in part}) == len(part):
+        return [part]
+
+    def _overlap(a: int, b: int) -> bool:
+        pa, pb = flat[a][1], flat[b][1]
+        return pa.span_start < pb.span_end and pb.span_start < pa.span_end
+
+    bridges = []
+    for i in part:
+        hits: Counter[int] = Counter(flat[j][0] for j in part
+                                     if flat[j][0] != flat[i][0] and _overlap(i, j))
+        if any(n >= 2 for n in hits.values()):
+            bridges.append(i)
+    if not bridges:
+        return [part]  # ambiguous without a bridge: left to the caller's fail-closed checks
+    widest = min(bridges, key=lambda i: (
+        -(flat[i][1].span_end - flat[i][1].span_start), flat[i][1].span_start,
+        flat[i][1].span_end, flat[i][1].source_key, flat[i][0]))
+    rest = [i for i in part if i != widest]
+    return [sub for comp in _overlap_components(flat, rest) if len(comp) >= 2
+            for sub in _drop_bridges(flat, comp)]
+
+
 def _claim_groups(
     samples: "list[list[TypedScalarProposal]]", *, align_spans: bool,
-    split_by_attribute: bool = False,
+    split_by_attribute: bool = False, resolve_bridges: bool = False,
 ) -> "list[list[tuple[int, TypedScalarProposal]]]":
     """Partition the k samples' proposals into CLAIM groups, in deterministic first-seen order.
 
@@ -1474,7 +1542,11 @@ def _claim_groups(
     sample. Common intersection rather than chained pairwise overlap -- chaining drags
     non-overlapping A and C together through a long B that touches both. Ambiguous groups (two
     proposals from ONE sample in the same component) are left ungrouped, so the worst case is the
-    status quo, never a wrong merge. Singletons pass through unchanged."""
+    status quo, never a wrong merge. Singletons pass through unchanged.
+
+    `resolve_bridges=True` (counting match lane): an ambiguous component first sets aside its
+    bridges (`_drop_bridges`), so one sample's list-wide quote no longer vetoes the item-level
+    agreement the other samples reached."""
     flat = [(si, p) for si, sample in enumerate(samples) for p in sample]
     if not align_spans:
         order: list[str] = []
@@ -1493,31 +1565,7 @@ def _claim_groups(
     groups: list[list[tuple[int, TypedScalarProposal]]] = []
     grouped: set[int] = set()
     for _episode, idxs in by_episode.items():
-        edges: dict[int, set[int]] = defaultdict(set)
-        for a in idxs:
-            sa, pa = flat[a]
-            for b in idxs:
-                if b <= a:
-                    continue
-                sb, pb = flat[b]
-                if sa == sb:  # a sample never overlaps itself into one claim
-                    continue
-                if pa.span_start < pb.span_end and pb.span_start < pa.span_end:
-                    edges[a].add(b)
-                    edges[b].add(a)
-        seen: set[int] = set()
-        for start in idxs:
-            if start in seen:
-                continue
-            stack, component = [start], []
-            seen.add(start)
-            while stack:
-                cur = stack.pop()
-                component.append(cur)
-                for nb in edges.get(cur, ()):
-                    if nb not in seen:
-                        seen.add(nb)
-                        stack.append(nb)
+        for component in _overlap_components(flat, idxs):
             if len(component) < 2:
                 continue
             parts = [component]
@@ -1529,6 +1577,8 @@ def _claim_groups(
                     by_attr.setdefault(flat[i][1].attribute, []).append(i)
                 if len(by_attr) > 1:
                     parts = [p for p in by_attr.values() if len(p) >= 2]
+            if resolve_bridges:
+                parts = [sub for part in parts for sub in _drop_bridges(flat, part)]
             for part in parts:
                 spans = [(flat[i][1].span_start, flat[i][1].span_end) for i in part]
                 sample_ids = [flat[i][0] for i in part]
@@ -1622,7 +1672,7 @@ def gate_typed_scalars(
     samples: list[list[TypedScalarProposal]], *, threshold: float = 1.0,
     reconcile_attribute: bool = False, reconcile_scope: bool = False,
     reconcile_subject: bool = False, canonical_self: bool = False,
-    align_spans: bool = False, counting_v2: bool = False,
+    align_spans: bool = False, counting_v2: bool = False, resolve_bridges: bool = False,
 ) -> list[TypedScalarDecision]:
     """SOURCE-CLAIM-FIRST k-sample consistency gate. For each distinct `source_key` seen across the k
     proposal samples, commit ONE interpretation only if it is concentrated:
@@ -1693,7 +1743,8 @@ def gate_typed_scalars(
     # interpretation labels. rep maps (group index, label) -> every proposal that read it, first-seen
     # first, so the committed representative is deterministic regardless of value type (37 vs 37.0
     # normalize equal) and attribute reconciliation has the full candidate set to choose from.
-    groups = _claim_groups(samples, align_spans=align_spans, split_by_attribute=counting_v2)
+    groups = _claim_groups(samples, align_spans=align_spans, split_by_attribute=counting_v2,
+                           resolve_bridges=resolve_bridges)
     # The identity fields dropped from the vote, in label order, reconciled together afterwards.
     reconciled_fields = tuple(field for field, enabled in (
         ("subject_text", reconcile_subject),

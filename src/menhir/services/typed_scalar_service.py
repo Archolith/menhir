@@ -708,12 +708,14 @@ class TypedScalarPerceptionService:
         context: str = "",
         write_guard: Callable[[], None] | None = None,
         counting_v2: bool = False,
+        counting_match: bool = False,
     ) -> dict[str, Any]:
         """Perceive typed scalars from `episodes` and durably persist the committed, bound ones.
 
         `counting_v2` (counting lane only, unit 3a.9) selects the verb-anchored occurrence guard and
         the per-attribute claim split; it is forwarded only when True, so every other caller is
-        unchanged.
+        unchanged. `counting_match` (counting lane under 4R match) lets the gate set aside bridge
+        quotes (`resolve_bridges`); off everywhere else.
 
         `system_prompt` / `allowed_operations` / `claim_ordinal` / `context` select the lane: the
         defaults are the scalar lane; the counting lane passes its own prompt, occurrence-only
@@ -892,7 +894,8 @@ class TypedScalarPerceptionService:
         llm_decisions = gate_typed_scalars(
             samples, threshold=threshold, reconcile_attribute=reconcile_attribute,
             reconcile_scope=reconcile_scope, reconcile_subject=reconcile_subject,
-            canonical_self=canonical_self, align_spans=True, **v2_kwargs) if samples else []
+            canonical_self=canonical_self, align_spans=True, resolve_bridges=counting_match,
+            **v2_kwargs) if samples else []
         decisions = self._merge_router_decisions(
             episodes, deterministic_decisions, llm_decisions
         ) if router_enabled and router_failure is None else llm_decisions
