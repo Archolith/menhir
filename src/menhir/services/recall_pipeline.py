@@ -1373,8 +1373,13 @@ async def run_recall(
             )
             _sh_existing = {str(c["uuid"]) for c in candidate_inputs}
             _sh_added = 0
+            _sh_min_sim = float(tuning.scalar_verdict_min_similarity or 0.0)
             for (subj, attr, scp, vk, un) in _obs_slots_for_history:
                 if not subj or not attr or not vk:
+                    continue
+                # Same relevance gate as the authority loop: a history verdict is a verdict too.
+                if _sh_min_sim > 0 and _obs_slot_best_cosine.get(
+                        (subj, attr, scp, vk, un), float("-inf")) < _sh_min_sim:
                     continue
                 # Read gate: history/comparison → always; current-state → only when
                 # no scalar_state View exists (bounded support for unanchored slots).

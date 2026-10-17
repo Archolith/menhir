@@ -321,6 +321,12 @@ class RetrievalTuningConfig:
             raise ValueError(
                 f"hybrid_alpha must be in [0.0, 1.0], got {self.hybrid_alpha!r}"
             )
+        # NaN fails this too: it would otherwise silently disable the gate.
+        if not 0.0 <= self.scalar_verdict_min_similarity <= 1.0:
+            raise ValueError(
+                "scalar_verdict_min_similarity must be in [0.0, 1.0], "
+                f"got {self.scalar_verdict_min_similarity!r}"
+            )
         if self.similarity_scale not in ("rrf", "normalized"):
             raise ValueError(
                 f'similarity_scale must be "rrf" or "normalized", '
