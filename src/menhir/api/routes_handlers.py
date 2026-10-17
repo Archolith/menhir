@@ -179,6 +179,10 @@ async def phase3_run_impl(
         counting_dirty_after=counting_dirty_after,
         counting_decided_counted=result.get("counting_decided_counted"),
         counting_decided_uncertain=result.get("counting_decided_uncertain"),
+        counting_decided_repeat=result.get("counting_decided_repeat"),
+        counting_decided_same_event=result.get("counting_decided_same_event"),
+        counting_decided_swapped=result.get("counting_decided_swapped"),
+        counting_decided_deferred=result.get("counting_decided_deferred"),
         counting_gate_dropped=result.get("counting_gate_dropped"),
         event_namespaces_processed=int(
             result.get("event_namespaces_processed", 0) or 0),

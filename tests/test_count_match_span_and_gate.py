@@ -156,7 +156,14 @@ def perception(monkeypatch):
 
 
 class _Llm:
-    calls = 0
+    """Callable (system, user) -> str: the decide step (PR 2) calls it; "[]" votes nothing."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(self, system, user):
+        self.calls += 1
+        return "[]"
 
 
 def _run(graph, *, match):
