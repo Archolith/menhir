@@ -680,9 +680,13 @@ async def test_standalone_fact_edges_run_after_empty_node_pool(
     from unittest.mock import AsyncMock
 
     stub_graphiti_client.search_scored_results = [("hidden", "Hidden", 0.9)] if filtered_base else []
-    stub_memory_graph_adapter.candidate_metadata = [{**_meta("hidden", "Hidden"), "scope": "CANDIDATE"}]
+    stub_memory_graph_adapter.candidate_metadata = [
+        {**_meta("hidden", "Hidden"), "scope": "CANDIDATE"},
+        *_endpoint_metas(),
+    ]
     stub_graphiti_client.search_edges_scored = AsyncMock(return_value=[
-        {"uuid": "edge", "fact": "Recorded edge fact", "score": 0.8},
+        {"uuid": "edge", "fact": "Recorded edge fact", "score": 0.8,
+         "source_node_uuid": "end-a", "target_node_uuid": "end-b"},
     ])
     svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
     result = await svc.recall("recorded fact", namespace="proj", update_access=False,
@@ -691,6 +695,44 @@ async def test_standalone_fact_edges_run_after_empty_node_pool(
     stub_graphiti_client.search_edges_scored.assert_awaited_once_with(
         "recorded fact", num_results=20, group_ids=["proj"],
     )
+
+
+def _endpoint_metas(**b_fields) -> list[dict]:
+    return [{**_meta("end-a", "A"), "namespace": "proj"},
+            {**_meta("end-b", "B"), "namespace": "proj", **b_fields}]
+
+
+# A standalone edge is injected only when both endpoint memories would be admitted themselves.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("b_fields", "edge_kw", "recall_kw", "kept"),
+    [
+        ({}, {}, {}, True),
+        ({"scope": "SESSION", "session_id": "s1"}, {}, {}, False),
+        ({"scope": "SESSION", "session_id": "s1"}, {}, {"include_session": True, "session_id": "s1"}, True),
+        ({"scope": "SESSION", "session_id": "s2"}, {}, {"include_session": True, "session_id": "s1"}, False),
+        ({"freshness": "GONE"}, {}, {}, False),
+        ({"scope": "CANDIDATE"}, {}, {}, False),
+        ({"namespace": "elsewhere"}, {}, {}, False),
+        ({}, {"target_node_uuid": "no-metadata"}, {}, False),
+        ({}, {"source_node_uuid": None}, {}, False),
+    ],
+)
+async def test_standalone_fact_edge_needs_both_endpoints_admitted(
+    stub_graphiti_client, stub_memory_graph_adapter, b_fields, edge_kw, recall_kw, kept,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    stub_graphiti_client.search_scored_results = []
+    stub_memory_graph_adapter.candidate_metadata = _endpoint_metas(**b_fields)
+    edge = {"uuid": "edge", "fact": "Recorded edge fact", "score": 0.8,
+            "source_node_uuid": "end-a", "target_node_uuid": "end-b", **edge_kw}
+    stub_graphiti_client.search_edges_scored = AsyncMock(return_value=[edge])
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+    result = await svc.recall("recorded fact", namespace="proj", update_access=False,
+                              tuning=RetrievalTuningConfig(enable_fact_edges=True, fact_edge_mode="standalone"),
+                              **recall_kw)
+    assert ("edge" in [row.uuid for row in result.results]) is kept
 
 
 @pytest.mark.asyncio
