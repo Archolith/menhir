@@ -92,15 +92,15 @@ class RecallService(RecallSupportMixin):
     scoring_service: ScoringService
     ingest_service: IngestService | None = None
     lifecycle_service: LifecycleServiceProtocol | None = None
-    #: Step 7 canary: when True, a current scalar_state View may suppress an older provenance-linked
-    #: graph fact for an explicit current-state query (all six authority gates must pass). Default
-    #: OFF -> today's behavior (a View never suppresses a fact).
+    #: Step 7 canary: a current View may suppress an older provenance-linked fact (six gates); off.
     scalar_view_authority_enabled: bool = False
     scalar_view_collapse_enabled: bool = False  # Views hide their items (drill-down tool); off = unchanged
     scalar_view_echo_drop_enabled: bool = False  # only drop observations echoing a verdict slot
     #: True: scalar_history Views form an advisory recall lane; False: excluded (real rollback).
     scalar_history_enabled: bool = False
     counting_enabled: bool = False  # False hides counted scalar_state Views (read-side kill switch)
+    counting_recall_authority_only: bool = False  # unit R: counted Views only as verdicts
+    counting_wording_enabled: bool = False  # unit 6: "at least N you mentioned", never leads
     #: When True, a recognized conservative first-person event recall query (non-None namespace) surfaces
     #: a leading/advisory event-history authority layer. Default OFF: no event authority or assertion read.
     event_history_authority_enabled: bool = False

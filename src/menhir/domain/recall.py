@@ -245,6 +245,10 @@ class ScalarAuthorityVerdict:
     contributors_total: int = 0
     contributors_truncated: bool = False
     next_offset: int | None = None
+    # The View's scalar_basis ("counted" for a counting-lane View), on current verdicts.
+    basis: str | None = None
+    # Counting wording flag: the value is a lower bound of the happenings the user mentioned.
+    lower_bound: bool = False
 
 
 @dataclass(frozen=True)

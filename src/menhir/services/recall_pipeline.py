@@ -314,6 +314,38 @@ def _memory_admitted(
     return True
 
 
+def _drop_counted_occurrence_observations(
+    candidate_inputs: list[dict[str, Any]],
+    metadata_by_uuid: dict[str, dict[str, Any]],
+    authority_layer: list[ScalarAuthorityVerdict],
+    occurrence_ids: set[str],
+) -> list[dict[str, Any]]:
+    """Unit R: drop injected occurrence observations whose slot has a counted current verdict.
+
+    Runs after the authority layer is built, so an occurrence whose View was skipped (no verdict)
+    stays as the only carrier of that slot.
+    """
+    def _key(subject, attribute, scope, value_kind, unit):
+        return tuple(str(x or "") for x in (subject, attribute, scope, value_kind, unit))
+
+    counted_slots = {
+        _key(v.subject_uuid, v.attribute, v.scope, v.value_kind, v.unit)
+        for v in authority_layer if v.kind == "current" and v.basis == "counted"
+    }
+    if not counted_slots or not occurrence_ids:
+        return candidate_inputs
+    kept = []
+    for c in candidate_inputs:
+        uuid = str(c.get("uuid") or "")
+        if uuid in occurrence_ids:
+            m = metadata_by_uuid.get(uuid) or {}
+            if _key(m.get("subject_uuid"), m.get("ss_attribute"), m.get("ss_scope"),
+                    m.get("ss_value_kind"), m.get("ss_unit")) in counted_slots:
+                continue
+        kept.append(c)
+    return kept
+
+
 _VERB_FACET_MAX = 3
 _VERB_FACET_MAX_SEARCHES = 5
 
@@ -1026,6 +1058,12 @@ async def run_recall(
     _obs_slots_for_history: set[tuple[str, str, str, str, str]] = set()
     # Best observation cosine per slot: the history lane's relevance score (#243).
     _obs_slot_best_cosine: dict[tuple[str, str, str, str, str], float] = {}
+    # Counted authority only (unit R): counted Views and their occurrences stay out of the ranked
+    # list. _occurrence_obs_ids are the injected occurrence observations, dropped below when their
+    # slot gets a counted verdict.
+    _counted_authority_only = bool(
+        getattr(service, "counting_recall_authority_only", False) and service.counting_enabled)
+    _occurrence_obs_ids: set[str] = set()
 
     # --- Observation candidates (Phase 4a.2, flag-gated): inject :TypedAssertion observations ---
     # The recall pipeline is otherwise :Entity-only (fetch_candidate_metadata matches (n:Entity)),
@@ -1069,6 +1107,7 @@ async def run_recall(
             obs_dedup_skip: set[str] = (
                 _observation_dedup_skip_ids(obs_hits) if tuning.enable_observation_dedup else set()
             )
+            _occurrence_slots_injected: set[tuple[str, str, str, str, str]] = set()
             for hit in obs_hits:
                 try:
                     aid = str(hit.get("assertion_id") or "").strip()
@@ -1094,6 +1133,14 @@ async def run_recall(
                         continue
                     if aid in existing_uuids:
                         continue
+                    if (_counted_authority_only and str(hit.get("operation")) == "occurrence"
+                            and _subj and _attr and _value_kind):
+                        # At most one occurrence per slot; hits arrive best cosine first.
+                        _occ_slot = (_subj, _attr, _scope, _value_kind, _unit)
+                        if _occ_slot in _occurrence_slots_injected:
+                            continue
+                        _occurrence_slots_injected.add(_occ_slot)
+                        _occurrence_obs_ids.add(aid)
                     existing_uuids.add(aid)
                     candidate_inputs.append({
                         "uuid": aid, "name": span, "content": span,
@@ -1463,6 +1510,11 @@ async def run_recall(
                         logger.exception(
                             "foundation-gate FOUNDS read failed view=%r; advisory", vuuid)
                 has_foundation = tier_foundation or user_foundation
+                view_counted = view.get("scalar_basis") == "counted"
+                # Wording flag: a counted View is a lower bound and never leads (F10).
+                count_wording = view_counted and bool(
+                    getattr(service, "counting_wording_enabled", False))
+                view_leads = has_foundation and not count_wording
                 authority_candidate = {
                     "uuid": vuuid, "name": vname, "content": vname,
                     "scope": str(NodeScope.PERSISTENT), "memory_type": "SCALAR_STATE",
@@ -1475,9 +1527,14 @@ async def run_recall(
                     "content_cosine": None, "is_superseded_view": False,
                     "view_kind": "scalar_state",
                     # Phase 4b: lead ONLY on a foundation; else injected but advisory.
-                    "is_scalar_authority": has_foundation,
+                    "is_scalar_authority": view_leads,
                 }
-                if view_already_ranked:
+                if view_counted and _counted_authority_only:
+                    # Unit R: the counted View is stated by its verdict only, never ranked.
+                    if view_already_ranked:
+                        candidate_inputs[:] = [
+                            c for c in candidate_inputs if str(c.get("uuid") or "") != vuuid]
+                elif view_already_ranked:
                     # A View can win ordinary vector search before the deterministic slot lookup.
                     # Do not let UUID dedup skip its authority annotation (the wake_time e2e case):
                     # upgrade that same candidate in place and still emit the structured verdict.
@@ -1511,7 +1568,7 @@ async def run_recall(
                     _verdict_truncated = (contributor_payload.get("next_offset") is not None)
                     _verdict_next_offset = contributor_payload.get("next_offset")
                 authority_layer.append(ScalarAuthorityVerdict(
-                    kind="current", status="leads" if has_foundation else "advisory",
+                    kind="current", status="leads" if view_leads else "advisory",
                     subject_uuid=subj, attribute=attr, scope=scp, value_kind=vk, unit=un,
                     value=view.get("value"), valid_at=view.get("valid_at"), view_uuid=vuuid,
                     has_foundation=has_foundation,
@@ -1519,9 +1576,11 @@ async def run_recall(
                     contributors_total=_verdict_total,
                     contributors_truncated=_verdict_truncated,
                     next_offset=_verdict_next_offset,
+                    basis=view.get("scalar_basis") or None,
+                    lower_bound=count_wording,
                 ))
                 _authority_audit.audit(
-                    "authority_annotation", "leads" if has_foundation else "advisory",
+                    "authority_annotation", "leads" if view_leads else "advisory",
                     namespace=stamped_namespace(namespace), subject_uuid=subj,
                     slot=[attr, scp, vk, un],
                     details={"kind": "current", "value": str(view.get("value")),
@@ -1683,6 +1742,15 @@ async def run_recall(
                 query[:60],
             )
         _t_phases["scalar_history_lane"] = int((perf_counter() - _t) * 1000)
+
+    # --- Counted authority only (unit R, flag-gated): a counted slot's occurrences leave recall ---
+    if _counted_authority_only and authority_layer:
+        try:
+            candidate_inputs = _drop_counted_occurrence_observations(
+                candidate_inputs, metadata_by_uuid, authority_layer, _occurrence_obs_ids)
+        except Exception:
+            logger.exception(
+                "counted-occurrence drop failed query=%r; leaving recall unchanged", query[:60])
 
     # --- Scalar View collapse: drop observations a verdict already carries (flag-gated) ---
     # The verdict states the value/count; an observation echoing the same slot repeats the quote and
