@@ -55,6 +55,7 @@ if TYPE_CHECKING:
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.telemetry import record_mcp_event
 from menhir.domain.utils import days_ago
+from menhir.domain.verb_facets import verb_facets
 from menhir.services.scheduler_protocols import LifecycleServiceProtocol
 from menhir.services.scoring_service import (
     GRAPHITI_RRF_DUAL_METHOD_MAX,
@@ -194,6 +195,73 @@ _RECALL_HISTORY_EMPTY_NOTE = (
     "MENHIR_FRONTIER_SOURCE_MEMORIES is on; run scripts/backfill_episode_embeddings.py "
     "for older memories."
 )
+
+
+_VERB_FACET_MAX = 3
+
+
+async def _append_verb_facet_facts(
+    service: Any,
+    query: str,
+    top_results: list[ScoredMemory],
+    group_ids: list[str] | None,
+    include_invalidated: bool,
+    preset: QueryPreset,
+    tuning: RetrievalTuningConfig,
+) -> list[ScoredMemory]:
+    """Append at most one keyword-matched fact per question verb (max 3), never reordering."""
+    facets = verb_facets(query)
+    if not facets:
+        return top_results
+    seen_uuids = {r.uuid for r in top_results}
+    seen_texts: set[str] = set()
+    for r in top_results:
+        for text in (r.name, r.content, *(tf.fact for tf in r.temporal_facts)):
+            if text is not None and str(text).strip():
+                seen_texts.add(str(text).strip())
+    appended: list[ScoredMemory] = []
+    for facet in facets:
+        if len(appended) >= _VERB_FACET_MAX:
+            break
+        rows = await asyncio.to_thread(
+            service.graph_adapter.search_facts_by_keywords, facet.forms, group_ids
+        )
+        if not include_invalidated:
+            rows = _filter_to_current_beliefs(rows)
+        for row in rows:
+            uuid = str(row.get("uuid") or "")
+            fact = str(row.get("fact") or "").strip()
+            if not uuid or uuid in seen_uuids or not fact or fact in seen_texts:
+                continue
+            score = float(row.get("score") or 0.0)
+            facts = _build_temporal_facts(
+                [dict(row, node_uuid=uuid)],
+                event_time=tuning.enable_anchored_time_render,
+                ended=tuning.enable_anchored_time_expiry,
+            )
+            appended.append(
+                ScoredMemory(
+                    uuid=uuid,
+                    name=fact,
+                    content=fact,
+                    scope=str(NodeScope.SESSION),
+                    memory_type="SEMANTIC",
+                    final_score=score,
+                    breakdown=RelevanceBreakdown(
+                        semantic_similarity=0.0, adjacency_bonus=0.0, recency_bonus=0.0,
+                        prominence_bonus=0.0, conflict_bonus=0.0, type_boost=0.0,
+                        preset=preset.value, alpha=0.0, beta=0.0, gamma=0.0, delta=0.0,
+                    ),
+                    retrieval_score=score,
+                    retrieval_score_kind=RetrievalScoreKind.VERB_FACET,
+                    temporal_facts=facts.get(uuid, ()),
+                    stale_anchor_info={"stale_anchor": False},
+                )
+            )
+            seen_uuids.add(uuid)
+            seen_texts.add(fact)
+            break
+    return [*top_results, *appended]
 
 
 async def run_recall_history(
@@ -1933,6 +2001,19 @@ async def run_recall(
                 len(top_results),
             )
     _t_phases["post_updates"] = int((perf_counter() - _t) * 1000)
+
+    # --- Verb-facet facts (APPENDED, after post-recall updates) ---
+    # Placed here so appended edge uuids never reach _post_recall_updates (access-stat writes),
+    # the temporal-facts enrichment, or the stale-anchor blocks above.
+    if tuning.enable_verb_facets:
+        _t = perf_counter()
+        try:
+            top_results = await _append_verb_facet_facts(
+                service, query, top_results, group_ids, include_invalidated, preset, tuning
+            )
+        except Exception:
+            logger.exception("Verb-facet fact append failed; continuing without it")
+        _t_phases["verb_facets"] = int((perf_counter() - _t) * 1000)
 
     _t_phases["total"] = int((perf_counter() - _t_total) * 1000)
     logger.info(

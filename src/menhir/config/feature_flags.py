@@ -112,6 +112,7 @@ _SETTINGS = (
     ('frontier_evidence_anchor', 'MENHIR_FRONTIER_EVIDENCE_ANCHOR', False, 'frontier',
         'Enable frontier evidence anchor.', True, ()),
     ('frontier_fact_edges', 'MENHIR_FRONTIER_FACT_EDGES', False, 'frontier', 'Enable frontier fact edges.', True, ()),
+    ('frontier_verb_facets', 'MENHIR_FRONTIER_VERB_FACETS', False, 'frontier', 'Append one keyword-matched fact per question verb after ranking, for verb-centric questions.', True, ()),
     ('frontier_fact_edge_mode', 'MENHIR_FRONTIER_FACT_EDGE_MODE', 'standalone', 'frontier',
         'Configure frontier fact edge mode.', True, ()),
     ('frontier_similarity_scale', 'MENHIR_FRONTIER_SIMILARITY_SCALE', 'rrf', 'frontier',
