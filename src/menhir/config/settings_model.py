@@ -327,7 +327,7 @@ class MemorySettings:
     personal_memory_scalar_view_authority_enabled: bool = False
     personal_memory_scalar_view_collapse_enabled: bool = False
     personal_memory_scalar_view_echo_drop_enabled: bool = False
-    personal_memory_scalar_verdict_min_similarity: float = 0.0  # 0 = off; else min query cosine per verdict slot
+    personal_memory_scalar_verdict_min_similarity: float = 0.0  # 0 = off; else min (1+cos)/2 per verdict slot
     # Attribute reconciliation in the k-sample consistency gate. ON by default (lenient-agreement
     # defaults, 2026-09). When on, the samples
     # vote WITHOUT the free-text attribute name and the name is chosen modally afterwards (ties to the

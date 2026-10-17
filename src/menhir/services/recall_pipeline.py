@@ -1074,7 +1074,8 @@ async def run_recall(
                     continue
                 # Relevance gate (MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY, 0 = off): the
                 # lane takes the 10 nearest assertions with no floor, so in a small namespace an
-                # unrelated count (a gym visit for a clothing question) becomes a verdict.
+                # unrelated count (a gym visit for a clothing question) becomes a verdict. Scale is
+                # Neo4j vector.similarity.cosine, (1+cos)/2: 0.5 means orthogonal.
                 _best = _obs_slot_best_cosine.get((subj, attr, scp, vk, un), float("-inf"))
                 if _verdict_min_sim > 0 and _best < _verdict_min_sim:
                     logger.debug(

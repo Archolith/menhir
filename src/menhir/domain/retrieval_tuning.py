@@ -246,8 +246,8 @@ class RetrievalTuningConfig:
     # edge RRF reranker). Kept modest so edges augment rather than swamp the node
     # pool; the combiner/floor still rank the merged set.
     fact_edge_k: int = 20
-    # Minimum query cosine (best per slot) for a scalar verdict to be emitted; 0 = off.
-    # MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY.
+    # Minimum query similarity (best per slot) for a scalar verdict to be emitted; 0 = off.
+    # Neo4j vector.similarity.cosine scale, (1+cos)/2. MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY.
     scalar_verdict_min_similarity: float = 0.0
     # How a retrieved fact edge enters the candidate pool:
     #   "standalone" — inject the terse EntityEdge.fact as its own CandidateData (edge-as-
