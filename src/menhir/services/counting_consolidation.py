@@ -433,8 +433,10 @@ def run_counting_consolidation(
                             str(row["uuid"]): (str(row.get("valid_at") or "") or None)
                             for row in rows
                         }
-                        # v2-only keyword: the v1 call stays exactly as before.
+                        # v2/match-only keywords: the v1 call stays exactly as before.
                         v2_kwargs = {"counting_v2": True} if extract_v2 else {}
+                        if match:
+                            v2_kwargs["counting_match"] = True
                         perception = service.perceive_and_persist(
                             episodes,
                             counting_llm,
