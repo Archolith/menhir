@@ -249,6 +249,10 @@ class ScalarAuthorityVerdict:
     basis: str | None = None
     # Counting wording flag: the value is a lower bound of the happenings the user mentioned.
     lower_bound: bool = False
+    # unit 4R match audit: JSON strings from the counted View; None outside match mode.
+    count_uncertain: float | None = None
+    count_actions: str | None = None
+    count_items: str | None = None
 
 
 @dataclass(frozen=True)

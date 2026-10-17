@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from menhir.services.ingest_service import IngestService
 
+from menhir.domain.count_match import match_slot_row
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
 from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FAMILY
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
@@ -1108,6 +1109,8 @@ async def run_recall(
                 _observation_dedup_skip_ids(obs_hits) if tuning.enable_observation_dedup else set()
             )
             _occurrence_slots_injected: set[tuple[str, str, str, str, str]] = set()
+            _count_match = bool(service.counting_enabled) and bool(
+                getattr(service.graph_adapter, "counting_match_enabled", False))
             for hit in obs_hits:
                 try:
                     aid = str(hit.get("assertion_id") or "").strip()
@@ -1118,6 +1121,11 @@ async def run_recall(
                     _subj = str(hit.get("subject_uuid") or "")
                     _attr = str(hit.get("attribute") or "")
                     _scope = str(hit.get("scope") or "")
+                    _shaped = _count_match and str(hit.get("operation")) == "occurrence"
+                    if _shaped:
+                        _m = match_slot_row(hit)
+                        _attr = str(_m.get("attribute") or "")
+                        _scope = str(_m.get("scope") or "")
                     _value_kind = str(hit.get("value_kind") or "")
                     _unit = str(hit.get("unit") or "")
                     if _subj and _attr and _value_kind:
@@ -1158,7 +1166,8 @@ async def run_recall(
                     metadata_by_uuid[aid] = {
                         "name": span, "content": span, "namespace": hit.get("namespace"),
                         "valid_at": hit.get("valid_at"),
-                        "ss_attribute": hit.get("attribute"), "ss_scope": hit.get("scope"),
+                        "ss_attribute": _attr if _shaped else hit.get("attribute"),
+                        "ss_scope": _scope if _shaped else hit.get("scope"),
                         "ss_value_kind": hit.get("value_kind"), "ss_unit": hit.get("unit"),
                         "subject_uuid": hit.get("subject_uuid"),
                     }
@@ -1578,6 +1587,9 @@ async def run_recall(
                     next_offset=_verdict_next_offset,
                     basis=view.get("scalar_basis") or None,
                     lower_bound=count_wording,
+                    count_uncertain=view.get("count_uncertain"),
+                    count_actions=view.get("count_actions"),
+                    count_items=view.get("count_items"),
                 ))
                 _authority_audit.audit(
                     "authority_annotation", "leads" if view_leads else "advisory",

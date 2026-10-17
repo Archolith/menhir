@@ -236,6 +236,8 @@ class ScalarViewRepositoryMixin:
             RETURN n.uuid AS uuid, n.ss_value AS value, n.name AS name, n.view_key AS view_key,
                    n.ss_attribute AS attribute, n.view_subject_uuid AS subject_uuid,
                    toString(n.valid_at) AS valid_at, n.scalar_basis AS scalar_basis,
+                   n.count_uncertain AS count_uncertain, n.count_actions AS count_actions,
+                   n.count_items AS count_items,
                    CASE WHEN {default_recall_visibility_cypher("n")}
                         THEN true ELSE false END AS recall_eligible
             LIMIT 1
