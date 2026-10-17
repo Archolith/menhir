@@ -1059,6 +1059,7 @@ async def run_recall(
                     return {"contributors": [], "total": 0, "next_offset": None}
 
             auth_added = 0
+            _verdict_min_sim = float(tuning.scalar_verdict_min_similarity or 0.0)
             _authority_slots = obs_slots if service.scalar_view_authority_enabled else set()
             for (subj, attr, scp, vk, un) in _authority_slots:
                 if not subj or not attr or not vk:
@@ -1070,6 +1071,16 @@ async def run_recall(
                     logger.debug(
                         "scalar-authority injection skipped cross-subject subj=%r (query subjects=%r)",
                         subj, query_subjects)
+                    continue
+                # Relevance gate (MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY, 0 = off): the
+                # lane takes the 10 nearest assertions with no floor, so in a small namespace an
+                # unrelated count (a gym visit for a clothing question) becomes a verdict. Scale is
+                # Neo4j vector.similarity.cosine, (1+cos)/2: 0.5 means orthogonal.
+                _best = _obs_slot_best_cosine.get((subj, attr, scp, vk, un), float("-inf"))
+                if _verdict_min_sim > 0 and _best < _verdict_min_sim:
+                    logger.debug(
+                        "scalar-authority injection skipped low similarity slot=%r cosine=%.3f",
+                        (subj, attr), _best)
                     continue
                 if _intent == QueryIntent.COMPARISON and _as_of_dt is None:
                     # The as-of date matched _AS_OF_RE (so intent is COMPARISON) but did not resolve
@@ -1362,8 +1373,13 @@ async def run_recall(
             )
             _sh_existing = {str(c["uuid"]) for c in candidate_inputs}
             _sh_added = 0
+            _sh_min_sim = float(tuning.scalar_verdict_min_similarity or 0.0)
             for (subj, attr, scp, vk, un) in _obs_slots_for_history:
                 if not subj or not attr or not vk:
+                    continue
+                # Same relevance gate as the authority loop: a history verdict is a verdict too.
+                if _sh_min_sim > 0 and _obs_slot_best_cosine.get(
+                        (subj, attr, scp, vk, un), float("-inf")) < _sh_min_sim:
                     continue
                 # Read gate: history/comparison → always; current-state → only when
                 # no scalar_state View exists (bounded support for unanchored slots).
