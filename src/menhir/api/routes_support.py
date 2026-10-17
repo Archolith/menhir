@@ -719,6 +719,14 @@ class Phase3RunResponse(BaseModel):
     counting_namespaces_busy: int = 0
     counting_namespaces_fenced: int = 0
     counting_dirty_after: bool | None = None
+    # 4R match only (None otherwise): decide outcomes and rows the k samples did not agree on.
+    counting_decided_counted: int | None = None
+    counting_decided_uncertain: int | None = None
+    counting_decided_repeat: int | None = None
+    counting_decided_same_event: int | None = None
+    counting_decided_swapped: int | None = None
+    counting_decided_deferred: int | None = None
+    counting_gate_dropped: int | None = None
     event_namespaces_processed: int = 0
     event_namespaces_failed: int = 0
     event_assertions_recorded: int = 0

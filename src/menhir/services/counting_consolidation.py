@@ -119,7 +119,10 @@ COUNTING_MATCH_PROMPT_ADDENDUM = (
     "short plain noun phrase with no verb, e.g. 'model kit', 'museum', 'concert ticket'; use the "
     "same phrase every time the same kind of thing comes up>, \"item\": <the specific thing if the "
     "episode names it, e.g. 'Tamiya 1/48 Spitfire', else \"\">, \"action\": <one plain verb for "
-    "what was done, e.g. 'finished', 'bought', 'started', 'visited'>."
+    "what was done, e.g. 'finished', 'bought', 'started', 'visited'>. These fields never widen "
+    "stated_span: when one sentence lists several things ('I watched A, B and C'), emit one "
+    "observation per thing, each with stated_span quoting only that thing's own words ('A'), exactly "
+    "as you would without these fields."
 )
 
 
@@ -324,6 +327,7 @@ def run_counting_consolidation(
     decided = {"counted": 0, "uncertain": 0}
     occurrences_stored = 0
     advisory = 0
+    gate_dropped = 0
     processed = 0
     failed = 0
     busy = 0
@@ -451,6 +455,9 @@ def run_counting_consolidation(
                         )
                         occurrences_stored += int(perception.get("bound", 0))
                         advisory += int(perception.get("advisory", 0))
+                        # Rows the k samples did not agree on; a re-version that loses rows shows here.
+                        gate_dropped += max(0, int(perception.get("decisions", 0) or 0)
+                                            - int(perception.get("committed", 0) or 0))
                         if match:
                             # Rows were stored undecided (they fold as uncertain); decide them now,
                             # before the cursor moves, so a crash here leaves the page to re-read.
@@ -538,6 +545,7 @@ def run_counting_consolidation(
     if match:  # off: the result keys are exactly as before
         for key in ("counted", "uncertain", "repeat", "same_event", "swapped", "deferred"):
             result[f"counting_decided_{key}"] = decided.get(key, 0)
+        result["counting_gate_dropped"] = gate_dropped
     return result
 
 
