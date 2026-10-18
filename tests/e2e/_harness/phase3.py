@@ -214,6 +214,7 @@ def typed_assertions(config: E2EConfig, namespace: str) -> list[dict]:
         "       a.value AS value, a.claim_ordinal AS claim_ordinal, a.count_status AS status, "
         "       a.count_target_id AS target, a.perceiver_version AS perceiver_version, "
         "       a.stated_span AS span, a.binding_pending AS binding_pending, "
+        "       a.evidence_tier AS evidence_tier, "
         "       h IS NOT NULL AS current "
         "ORDER BY a.valid_at, a.stated_span",
         ns=namespace,

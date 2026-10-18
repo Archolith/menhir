@@ -1796,12 +1796,20 @@ class MemoryGraphAdapter:
 
     def redecide_count_occurrences(
         self, namespace: str, *, perceiver_version: str, max_attempts: int, limit: int,
-        exclude_run_id: str = "",
+        exclude_run_id: str = "", cooldown_s: int | None = None,
     ) -> list[dict[str, Any]]:
         from menhir.infrastructure.count_decision_repository import CountDecisionRepository
         return CountDecisionRepository(self.neo4j).redecide_occurrences(
             namespace, perceiver_version=perceiver_version, max_attempts=max_attempts,
-            limit=limit, exclude_run_id=exclude_run_id)
+            limit=limit, exclude_run_id=exclude_run_id, cooldown_s=cooldown_s)
+
+    def pending_decision_namespaces(
+        self, *, perceiver_version: str, max_attempts: int, limit: int, cooldown_s: int,
+    ) -> list[str]:
+        from menhir.infrastructure.count_decision_repository import CountDecisionRepository
+        return CountDecisionRepository(self.neo4j).pending_decision_namespaces(
+            perceiver_version=perceiver_version, max_attempts=max_attempts, limit=limit,
+            cooldown_s=cooldown_s)
 
     def record_count_decisions(
         self, namespace: str, decisions: list[dict[str, Any]], *, perceiver_version: str,

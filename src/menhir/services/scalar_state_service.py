@@ -427,7 +427,8 @@ class ScalarStateService:
             if not self._counting_enabled:
                 # Counting off: history must not list occurrences either (same rule as fold_entity).
                 rows = [r for r in rows if str(r.get("operation")) != "occurrence"]
-            result = build_history(rows, as_of=as_of, max_entries=max_entries)
+            result = build_history(rows, as_of=as_of, max_entries=max_entries,
+                                   **({"count_match": True} if self._count_match else {}))
         except Exception as exc:  # noqa: BLE001 - durable marker must remain retryable
             logger.exception("scalar_history source/build failed for %s", subject_uuid)
             return {
