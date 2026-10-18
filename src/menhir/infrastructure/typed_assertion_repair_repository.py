@@ -107,6 +107,7 @@ class TypedAssertionRepairMixin:
                    coalesce(a.count_object, '') AS count_object,
                    coalesce(a.count_item, '') AS count_item,
                    coalesce(a.count_action, '') AS count_action,
+                   coalesce(a.count_family, '') AS count_family,
                    toString(a.valid_at) AS valid_at, toString(a.learned_at) AS learned_at,
                    a.time_basis AS time_basis, a.perceiver_version AS perceiver_version,
                    a.namespace AS namespace

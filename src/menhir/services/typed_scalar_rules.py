@@ -2390,6 +2390,48 @@ def _is_self_reference(subject_text: str) -> bool:
     return subject_text.strip().lower() in SELF_TOKENS
 
 
+_POSSESSIVE_LEAD_WORDS = frozenset({"my", "our", "his", "her", "their", "your", "its"})
+_ARTICLE_LEAD_WORDS = frozenset({"the", "a", "an", "this", "that"})
+
+
+def _normalize_phrase(text: str) -> str:
+    return " ".join(str(text or "").lower().split())
+
+
+def _strip_article(text: str) -> str:
+    words = _normalize_phrase(text).split(" ")
+    if len(words) > 1 and words[0] in _ARTICLE_LEAD_WORDS:
+        words = words[1:]
+    return " ".join(words)
+
+
+def counting_subject_echoes_object(
+    subject_text: str, *, count_object: str, count_item: str, count_family: str, attribute: str,
+) -> bool:
+    """True when a counting row's subject is just the counted thing restated ("the museum" for a
+    museum visit) rather than a person: the row then belongs to the user. Never true for a blank or
+    self-token subject, nor a possessive one ("my sister", "David's baby"). Otherwise true when the
+    subject's tokens overlap the row's relation tokens (family, else object, else attribute), or the
+    subject minus a leading determiner equals the item minus a leading determiner."""
+    from menhir.domain.count_match import family_tokens, relation_tokens
+
+    normalized = _normalize_phrase(subject_text)
+    if not normalized or _is_self_reference(normalized):
+        return False
+    if normalized.split(" ")[0] in _POSSESSIVE_LEAD_WORDS:
+        return False
+    if "'s" in normalized or "’s" in normalized or "s'" in normalized or "s’" in normalized:
+        return False
+    row = {
+        "count_family": count_family, "count_object": count_object, "attribute": attribute,
+    }
+    row_tokens = set(relation_tokens(row))
+    if row_tokens and row_tokens & set(family_tokens(normalized)):
+        return True
+    item = _strip_article(count_item)
+    return bool(item) and _strip_article(normalized) == item
+
+
 #: Leading determiners the perceiver sometimes keeps on an extracted subject where the resolved
 #: entity does not carry them ("my boots" against an entity named "boots"). Stripped only as a
 #: FALLBACK spelling of the query, never on the first attempt, and never enough on its own to make a
@@ -2554,8 +2596,13 @@ def _resolve_subject(
     subject_text: str, entities: list[dict[str, Any]], namespace: str | None,
     resolve_self_subject: ResolveSelfSubject | None,
     lookup_namespace_entities: LookupNamespaceEntities | None = None,
+    *, self_echo: bool = False,
 ) -> tuple[str | None, str | None]:
     """Resolve a subject to (subject_uuid, subject_display), preferring the canonical self identity.
+
+    `self_echo` (a counting row whose subject merely restates the counted thing, see
+    `counting_subject_echoes_object`) routes through the self seam BEFORE any entity-name matching and
+    fails closed to (None, None) when the seam yields nothing.
 
     Ordering is deliberately conservative and additive:
       1. CANONICAL SELF first: a first-person subject binds to the namespace's ONE stable self entity
@@ -2574,6 +2621,13 @@ def _resolve_subject(
     When the self seam is absent, unavailable, or the subject is not first-person, and neither the
     local nor (when enabled) namespace pass yields a unique match, binding abstains to (None, None) —
     the caller records an advisory, never an unverified owner."""
+    if self_echo:
+        if resolve_self_subject is None:
+            return None, None
+        bound = resolve_self_subject(namespace)
+        if bound is not None and bound[0]:
+            return bound
+        return None, None
     if resolve_self_subject is not None and _is_self_reference(subject_text):
         bound = resolve_self_subject(namespace)
         if bound is not None and bound[0]:
