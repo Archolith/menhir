@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from menhir.domain.count_match import COUNTED, TARGETED_STATUSES, match_slot_row, status_of
 from menhir.domain.temporal import parse_iso8601
 from menhir.domain.typed_assertion import normalize_scalar, slot_of as _slot_of
 
@@ -154,13 +155,38 @@ def _make_entry(row: dict[str, Any]) -> HistoryEntry | None:
     )
 
 
+def _match_history_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Occurrences as the match fold sees them: family-keyed, minus repeats of a counted row."""
+    def _occ(r: dict[str, Any]) -> bool:
+        return str(r.get("operation")) == "occurrence"
+
+    counted_ids = {str(r.get("assertion_id") or "") for r in rows
+                   if _occ(r) and status_of(r) == COUNTED} - {""}
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        if not _occ(r):
+            out.append(r)
+            continue
+        target = str(r.get("count_target_id") or "")
+        if (status_of(r) in TARGETED_STATUSES and target
+                and target != str(r.get("assertion_id") or "") and target in counted_ids):
+            continue
+        out.append(match_slot_row(r))
+    return out
+
+
 def build_history(
     rows: list[dict[str, Any]],
     *,
     as_of: datetime | None = None,
     max_entries: int = 16,
+    count_match: bool = False,
 ) -> HistoryResult:
     """Build ordered scalar history projections from materializable assertion rows.
+
+    `count_match` (unit 4R) keys occurrences by object family, as the match fold does, and leaves
+    out a repeat/same_event row whose target is a current counted row (the fold excludes exactly
+    those); every other occurrence, uncertain or undecided, stays listed.
 
     Groups by canonical slot, orders by (valid_at, assertion_id), and produces one
     `ScalarHistoryProjection` per slot that has at least one valid entry.
@@ -184,6 +210,9 @@ def build_history(
             if _parse_dt(r.get("valid_at")) is None
             or (_parse_dt(r.get("valid_at")) <= as_of)
         ]
+
+    if count_match:
+        rows = _match_history_rows(rows)
 
     # Group by canonical slot.
     slots: dict[tuple, list[dict[str, Any]]] = {}
