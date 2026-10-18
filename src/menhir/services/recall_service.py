@@ -130,7 +130,7 @@ class RecallService(RecallSupportMixin):
         include_warden_status: bool = False,
         trace: bool = False,
         update_access: bool = True,
-        source_memory_limit: int | None = None,
+        source_memory_limit: int | None = None, counted_verdict_limit: int | None = None,
     ) -> RecallResult:
         result = await run_recall(
             self, query,
@@ -151,7 +151,7 @@ class RecallService(RecallSupportMixin):
             include_warden_status=include_warden_status,
             trace=trace,
             update_access=update_access and not self.read_only,
-            source_memory_limit=source_memory_limit,
+            source_memory_limit=source_memory_limit, counted_verdict_limit=counted_verdict_limit,
         )
         return await apply_event_history_authority_layer(self, result, query, namespace)
 

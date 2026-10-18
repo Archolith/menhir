@@ -315,6 +315,7 @@ class RuntimeProviderDataOpsMixin:
         include_invalidated: bool = False,
         trace: bool = False,
         source_memory_limit: int | None = None,
+        counted_verdict_limit: int | None = None,
         include_warden_status: bool = False,
     ) -> dict[str, Any]:
         # Map the env-driven frontier portions into the recall call. With no
@@ -336,6 +337,8 @@ class RuntimeProviderDataOpsMixin:
             frontier_kwargs["include_warden_status"] = True
         if source_memory_limit is not None:
             frontier_kwargs["source_memory_limit"] = int(source_memory_limit)
+        if counted_verdict_limit is not None:
+            frontier_kwargs["counted_verdict_limit"] = int(counted_verdict_limit)
         result = await self.built.recall_service.recall(
             query,
             preset=parse_query_preset(preset),

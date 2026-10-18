@@ -560,6 +560,7 @@ async def run_recall(
     trace: bool = False,
     update_access: bool = True,
     source_memory_limit: int | None = None,
+    counted_verdict_limit: int | None = None,
 ) -> RecallResult:
     # update_access=False makes recall a pure read: no last_accessed touches, no
     # edge-weight reinforcement, no rehydration scheduling. For measurement probes
@@ -1327,6 +1328,7 @@ async def run_recall(
                     return {"contributors": [], "total": 0, "next_offset": None}
 
             auth_added = 0
+            _counted_verdicts_emitted = 0
             _verdict_min_sim = float(tuning.scalar_verdict_min_similarity or 0.0)
             _authority_slots = obs_slots if service.scalar_view_authority_enabled else set()
             for (subj, attr, scp, vk, un) in _relevance_ordered_slots(
@@ -1514,6 +1516,20 @@ async def run_recall(
                 vuuid = str(view.get("uuid") or "").strip()
                 if not vuuid:
                     continue
+                # The client renders only N counted verdicts; a verdict past N would drop its
+                # slot's occurrence evidence and show nothing, so skip it and keep the evidence.
+                if (
+                    _counted_authority_only
+                    and view.get("scalar_basis") == "counted"
+                    and counted_verdict_limit is not None
+                    and _counted_verdicts_emitted >= counted_verdict_limit
+                ):
+                    candidate_inputs[:] = [
+                        c for c in candidate_inputs if str(c.get("uuid") or "") != vuuid]
+                    logger.debug(
+                        "counted verdict past client limit=%d; slot kept as evidence view=%r",
+                        counted_verdict_limit, vuuid)
+                    continue
                 view_already_ranked = vuuid in existing_uuids
                 if not view_already_ranked:
                     existing_uuids.add(vuuid)
@@ -1608,6 +1624,8 @@ async def run_recall(
                     count_actions=view.get("count_actions"),
                     count_items=view.get("count_items"),
                 ))
+                if _counted_authority_only and view.get("scalar_basis") == "counted":
+                    _counted_verdicts_emitted += 1
                 _authority_audit.audit(
                     "authority_annotation", "leads" if view_leads else "advisory",
                     namespace=stamped_namespace(namespace), subject_uuid=subj,
