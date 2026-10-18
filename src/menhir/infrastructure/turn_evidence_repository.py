@@ -671,12 +671,39 @@ class TurnEvidenceRepository:
             raise CountingFenceLost(
                 f"counting fence lost for namespace {namespace!r} during advance_counting_cursor")
 
+    def prior_version_occurrences(
+        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
+    ) -> list[dict[str, Any]]:
+        """Current occurrence claims on these turns stamped by another counting version (the rows
+        a re-read may replace), with their spans. Read-only."""
+        ids = [str(i) for i in (turn_ids or []) if i]
+        if not ids:
+            return []
+        rows = self._neo4j.execute(
+            """
+            MATCH (h:TypedAssertionHead)-[:CURRENT]->(a:TypedAssertion)
+            WHERE """ + tenant_scope_cypher("a") + """
+                  AND a.operation = 'occurrence' AND coalesce(a.claim_ordinal, 0) = 1
+                  AND a.episode_uuid IN $turn_ids
+                  AND coalesce(a.perceiver_version, '') <> $pv
+            RETURN a.assertion_id AS assertion_id, h.source_key AS source_key,
+                   a.episode_uuid AS episode_uuid, a.span_start AS span_start,
+                   a.span_end AS span_end, a.subject_uuid AS subject_uuid
+            ORDER BY a.episode_uuid, a.span_start, a.assertion_id
+            """,
+            params={"turn_ids": ids, "pv": str(perceiver_version),
+                    **tenant_scope_params(namespace)},
+        )
+        return [dict(r) for r in rows]
+
     def retire_prior_version_occurrences(
         self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
         run_id: str, incarnation: str, epoch: int,
+        keep_ids: list[str] | None = None, source_keys: list[str] | None = None,
     ) -> list[str]:
         """Retire current occurrence claims on these turns stamped by another counting version,
-        in one fenced query. Returns the affected subject_uuids (callers rebuild them)."""
+        in one fenced query. `keep_ids` are left current; `source_keys` (when given) limits the
+        retire to those heads. Returns the affected subject_uuids (callers rebuild them)."""
         ids = [str(i) for i in (turn_ids or []) if i]
         rows = self._neo4j.execute(
             """
@@ -689,6 +716,8 @@ class TurnEvidenceRepository:
                   AND a.operation = 'occurrence' AND coalesce(a.claim_ordinal, 0) = 1
                   AND a.episode_uuid IN $turn_ids
                   AND coalesce(a.perceiver_version, '') <> $pv
+                  AND NOT a.assertion_id IN $keep
+                  AND ($source_keys IS NULL OR h.source_key IN $source_keys)
             SET a.superseded = true, a.expired_at = datetime(),
                 a.retired_reason = 'counting_reversion'
             DELETE cr
@@ -697,6 +726,9 @@ class TurnEvidenceRepository:
             """,
             params={"ns": namespace, "run_id": str(run_id), "inc": str(incarnation),
                     "epoch": int(epoch), "turn_ids": ids, "pv": str(perceiver_version),
+                    "keep": [str(k) for k in (keep_ids or []) if k],
+                    "source_keys": (None if source_keys is None
+                                    else [str(s) for s in source_keys if s]),
                     **tenant_scope_params(namespace)},
         )
         if not rows or not rows[0]["fence_ok"]:

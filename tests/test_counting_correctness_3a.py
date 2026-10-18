@@ -268,6 +268,12 @@ class _FenceGraph:
         queue = self.pages.get(namespace, [])
         return queue.pop(0) if queue else []
 
+    def prior_version_occurrences(self, namespace, turn_ids, **kw):
+        return []
+
+    def mark_projection_complete(self, assertion_ids):
+        return len(assertion_ids)
+
     def retire_prior_version_occurrences(self, namespace, turn_ids, **kw):
         self._log("retire", namespace, **kw)
         return list(self.retired)
@@ -387,19 +393,17 @@ def test_perception_failure_in_one_namespace_does_not_stop_the_next(fake_percept
 
 
 @pytest.mark.unit
-def test_retired_subjects_are_rebuilt_in_namespace_before_perception(fake_perception):
+def test_retired_subjects_are_rebuilt_in_namespace_after_the_new_reading(fake_perception):
     # Fails if prior-version retirement is not followed by a Views rebuild scoped to the namespace,
-    # or if the rebuild happens after (not before) perception, leaving a View counting a dead head.
+    # or if retire runs before the new reading is stored (re-version safety A: a failed LLM step
+    # must leave the old rows counted).
     graph = _FenceGraph(pages={"ns-1": [[_row(1)]]}, retired=["s1", "s2"])
     fake_perception.timeline = graph.events          # one shared timeline: graph + perception
     _run(graph, ["ns-1"])
     assert graph.rebuilds == [("s1", "ns-1"), ("s2", "ns-1")]
     order = [e[0] for e in graph.events]
-    assert order.index("retire") < order.index("rebuild") < order.index("perceive")
-    assert order.index("rebuild", order.index("rebuild") + 1) < order.index("perceive")
-    # and the fence is re-checked after the rebuild, before the LLM step
-    assert order.index("renew") > order.index("rebuild")
-    assert order.index("renew") < order.index("perceive")
+    assert order.index("renew") < order.index("perceive") < order.index("retire")
+    assert order.index("retire") < order.index("rebuild")
 
 
 @pytest.mark.unit

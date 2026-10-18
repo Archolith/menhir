@@ -13,7 +13,8 @@ Order and authority:
   version, returns nothing (pause).
 - A page advances the counting cursor only after it ran, exactly like the scalar runner.
 - Each namespace is claimed with a fenced lease (claim, renew per page, release); a lost fence stops
-  that namespace. Prior-version occurrences are retired and their Views rebuilt before perception.
+  that namespace. Prior-version occurrences stay counted until the new reading of their turn is
+  stored; one the new samples proposed over but did not agree on is carried (rule B).
 - sweep_counting_flag_state rebuilds Views after the counting flag flips, with no LLM calls.
 """
 
@@ -176,10 +177,17 @@ class CountingConsolidationGraph(Protocol):
         self, namespace: str, *, run_id: str, incarnation: str,
     ) -> None: ...
 
+    def prior_version_occurrences(
+        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
+    ) -> list[dict[str, Any]]: ...
+
     def retire_prior_version_occurrences(
         self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
         run_id: str, incarnation: str, epoch: int,
+        keep_ids: list[str] | None = None, source_keys: list[str] | None = None,
     ) -> list[str]: ...
+
+    def mark_projection_complete(self, assertion_ids: list[str]) -> Any: ...
 
     def mark_counting_flag_state(
         self, namespace: str, *, enabled: bool, at: str, create_only: bool = False,
@@ -328,6 +336,7 @@ def run_counting_consolidation(
     occurrences_stored = 0
     advisory = 0
     gate_dropped = 0
+    carried = 0
     processed = 0
     failed = 0
     busy = 0
@@ -411,21 +420,32 @@ def run_counting_consolidation(
                     if not rows:
                         break
                     turn_ids = [str(row["uuid"]) for row in rows]
-                    # Retire this turn set's prior-version occurrences and rebuild the affected
-                    # Views before perceiving, so no View keeps counting a retired head.
-                    retired_subjects = graph_adapter.retire_prior_version_occurrences(
-                        namespace, turn_ids,
-                        perceiver_version=perceiver_version,
-                        run_id=run_id, incarnation=incarnation, epoch=epoch,
-                    )
-                    for subject in retired_subjects:
-                        _rebuild_subject(state_service, subject, namespace,
-                                         history=config.scalar_history_enabled)
+                    # Re-version: prior-version rows stay counted until the new reading is stored.
+                    # One sharing a head with a new row is retired just before that write (a
+                    # rank-0 version cannot supersede it in place); the rest after persist (B).
+                    prior = graph_adapter.prior_version_occurrences(
+                        namespace, turn_ids, perceiver_version=perceiver_version)
+                    prior_by_head = {str(r.get("source_key") or ""): r for r in prior}
+                    retired_subjects: set[str] = set()
+
+                    def _retire_head(assertion: Any, ns: str = namespace,
+                                     inc: str = incarnation, ep: int = epoch,
+                                     heads: dict[str, Any] = prior_by_head,
+                                     out: set[str] = retired_subjects) -> None:
+                        row = heads.pop(str(getattr(assertion, "source_key", "") or ""), None)
+                        if row is not None:
+                            out.update(graph_adapter.retire_prior_version_occurrences(
+                                ns, [str(row.get("episode_uuid") or "")],
+                                perceiver_version=perceiver_version, run_id=run_id,
+                                incarnation=inc, epoch=ep,
+                                source_keys=[str(row.get("source_key") or "")]))
 
                     # Fence check + fresh lease before the slow LLM step, then again before every
                     # occurrence write (write_guard) so a lease lost mid-LLM stores nothing.
                     _fence()
                     episodes = build_episodes(rows)
+                    spans: dict[str, Any] = {}
+                    page_rows: list[dict[str, Any]] = []
                     if episodes:
                         claims = graph_adapter.scalar_claims_for_turns(
                             namespace, [str(e.uuid) for e in episodes], limit=_CONTEXT_CLAIM_LIMIT)
@@ -451,6 +471,8 @@ def run_counting_consolidation(
                             claim_ordinal=COUNTING_CLAIM_ORDINAL,
                             context=build_counting_context(episodes, claims, fenced=extract_v2),
                             write_guard=_fence,
+                            before_record=_retire_head,
+                            defer_rebuild=True,
                             **v2_kwargs,
                         )
                         occurrences_stored += int(perception.get("bound", 0))
@@ -458,16 +480,28 @@ def run_counting_consolidation(
                         # Rows the k samples did not agree on; a re-version that loses rows shows here.
                         gate_dropped += max(0, int(perception.get("decisions", 0) or 0)
                                             - int(perception.get("committed", 0) or 0))
-                        if match:
-                            # Rows were stored undecided (they fold as uncertain); decide them now,
-                            # before the cursor moves, so a crash here leaves the page to re-read.
-                            page_ids = [str(r.get("assertion_id") or "")
-                                        for r in perception.get("results") or []
-                                        if r.get("bound") and r.get("assertion_id")]
-                            _decide_and_rebuild(
-                                decide_ctx,
-                                graph_adapter.count_occurrences_by_ids(
-                                    namespace, page_ids, perceiver_version=perceiver_version))
+                        spans = dict(perception.get("spans") or {})
+                        page_rows = [r for r in perception.get("results") or []
+                                     if r.get("bound") and r.get("assertion_id")]
+                    # B: keep a prior row the new samples proposed something over but the gate
+                    # vetoed (or a sample could not read); retire the rest. Before decide, so decide
+                    # never relates a new row to a replaced same-turn row.
+                    carry = reversion_carried(prior, spans)
+                    carried += len(carry)
+                    retired_subjects.update(graph_adapter.retire_prior_version_occurrences(
+                        namespace, turn_ids, perceiver_version=perceiver_version,
+                        run_id=run_id, incarnation=incarnation, epoch=epoch, keep_ids=carry))
+                    # One rebuild per subject, after retire, so no View counts old and new together.
+                    _rebuild_page(graph_adapter, state_service, namespace, retired_subjects,
+                                  page_rows, history=config.scalar_history_enabled)
+                    if match and episodes:
+                        # Rows were stored undecided (they fold as uncertain); decide them now,
+                        # before the cursor moves, so a crash here leaves the page to re-read.
+                        _decide_and_rebuild(
+                            decide_ctx,
+                            graph_adapter.count_occurrences_by_ids(
+                                namespace, [str(r["assertion_id"]) for r in page_rows],
+                                perceiver_version=perceiver_version))
                     batches += 1
 
                     # Same fail-closed cursor rule as the scalar runner: advance on the monotonic
@@ -541,6 +575,7 @@ def run_counting_consolidation(
         "counting_occurrences_stored": occurrences_stored,
         "counting_advisory": advisory,
         "counting_llm_calls": counting_llm.calls - start_calls,
+        "counting_reversion_carried": carried,
     }
     if match:  # off: the result keys are exactly as before
         for key in ("counted", "uncertain", "repeat", "same_event", "swapped", "deferred"):
@@ -674,13 +709,61 @@ def _decide_and_rebuild(
         _rebuild_subject(ctx.state_service, subject, ns, history=ctx.history)
 
 
-def _rebuild_subject(state_service: Any, subject: str, namespace: str, *, history: bool) -> None:
+def _rebuild_subject(state_service: Any, subject: str, namespace: str, *, history: bool) -> Any:
     """Rebuild one subject's projections; history Views too when that lane is on, since they also
     list occurrences."""
     if history:
-        state_service.rebuild_scalar_projections(subject, namespace=namespace, history_enabled=True)
-    else:
-        state_service.rebuild_scalar_state(subject, namespace=namespace)
+        return state_service.rebuild_scalar_projections(
+            subject, namespace=namespace, history_enabled=True)
+    return state_service.rebuild_scalar_state(subject, namespace=namespace)
+
+
+def _overlaps(row: dict[str, Any], span: Any) -> bool:
+    """A claim span (episode, start, end) overlaps a prior row on the same turn; a row with no
+    stored span overlaps any claim on its turn."""
+    episode, start, end = span
+    if str(row.get("episode_uuid") or "") != str(episode or ""):
+        return False
+    r_start, r_end = row.get("span_start"), row.get("span_end")
+    if r_start is None or r_end is None:
+        return True
+    return int(r_start) < int(end) and int(start) < int(r_end)
+
+
+def reversion_carried(prior: list[dict[str, Any]], spans: dict[str, Any]) -> list[str]:
+    """Re-version rule B: the prior-version rows on a re-read page that stay current. A row is
+    replaced when a committed new claim on its turn overlaps it, and dropped when every sample read
+    its turn in full and none proposed anything overlapping it. Otherwise (a gate veto, or a sample
+    that could not read the turn) it is carried with its old version stamp."""
+    committed = list(spans.get("committed") or [])
+    proposed = list(spans.get("proposed") or [])
+    clean = {str(t) for t in spans.get("clean_turns") or []}
+    carry: list[str] = []
+    for row in prior:
+        if any(_overlaps(row, s) for s in committed):
+            continue
+        if str(row.get("episode_uuid") or "") in clean and not any(
+                _overlaps(row, s) for s in proposed):
+            continue
+        carry.append(str(row.get("assertion_id") or ""))
+    return [c for c in carry if c]
+
+
+def _rebuild_page(
+    graph: Any, state_service: Any, namespace: str, retired_subjects: set[str],
+    page_rows: list[dict[str, Any]], *, history: bool,
+) -> None:
+    """Rebuild every subject a page touched, once, then clear projection_pending on its new rows.
+    A failed rebuild leaves the marker for the repair pass."""
+    from menhir.services.typed_scalar_persistence import _rebuild_succeeded
+
+    new_ids: dict[str, list[str]] = {}
+    for r in page_rows:
+        new_ids.setdefault(str(r.get("subject_uuid") or ""), []).append(str(r["assertion_id"]))
+    for subject in sorted((set(retired_subjects) | set(new_ids)) - {""}):
+        result = _rebuild_subject(state_service, subject, namespace, history=history)
+        if new_ids.get(subject) and _rebuild_succeeded(result):
+            graph.mark_projection_complete(new_ids[subject])
 
 
 def sweep_counting_flag_state(
@@ -744,6 +827,7 @@ __all__ = [
     "build_counting_context",
     "counting_system_prompt",
     "effective_counting_perceiver_version",
+    "reversion_carried",
     "run_counting_consolidation",
     "sweep_counting_flag_state",
 ]

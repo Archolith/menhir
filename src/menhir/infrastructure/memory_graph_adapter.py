@@ -1741,13 +1741,21 @@ class MemoryGraphAdapter:
         self._turn_evidence.release_counting_claim(
             namespace, run_id=run_id, incarnation=incarnation)
 
+    def prior_version_occurrences(
+        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
+    ) -> list[dict[str, Any]]:
+        return self._turn_evidence.prior_version_occurrences(
+            namespace, turn_ids, perceiver_version=perceiver_version)
+
     def retire_prior_version_occurrences(
         self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
         run_id: str, incarnation: str, epoch: int,
+        keep_ids: list[str] | None = None, source_keys: list[str] | None = None,
     ) -> list[str]:
         return self._turn_evidence.retire_prior_version_occurrences(
             namespace, turn_ids, perceiver_version=perceiver_version,
-            run_id=run_id, incarnation=incarnation, epoch=epoch)
+            run_id=run_id, incarnation=incarnation, epoch=epoch,
+            keep_ids=keep_ids, source_keys=source_keys)
 
     def mark_counting_flag_state(
         self, namespace: str, *, enabled: bool, at: str, create_only: bool = False,
