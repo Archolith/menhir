@@ -294,11 +294,19 @@ class ScalarViewRepositoryMixin:
                      a.assertion_id ASC
             SKIP $offset
             LIMIT $limit
+            CALL {
+                WITH a
+                OPTIONAL MATCH (t:TurnEvidence {turn_id: a.episode_uuid})
+                WHERE t.namespace = a.namespace
+                RETURN t.text AS turn_text
+                LIMIT 1
+            }
             WITH collect({
                 assertion_id: a.assertion_id, relation: type(r), operation: a.operation,
                 value: coalesce(a.value, a.value_json), stated_span: a.stated_span,
                 valid_at: toString(a.valid_at), evidence_tier: a.evidence_tier,
-                episode_uuid: a.episode_uuid
+                episode_uuid: a.episode_uuid,
+                time_basis: a.time_basis, turn_text: turn_text
             }) AS contributors
             RETURN contributors
             """,

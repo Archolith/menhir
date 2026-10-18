@@ -220,6 +220,17 @@ def _event_selection_failed(verdict: EventAuthorityVerdict) -> bool:
     )
 
 
+def _occurrence_contributor_line(contributor: Any) -> str:
+    """Occurrence line: the event date when grounded, else only when it was mentioned (never 'valid')."""
+    line = f"  - {contributor.relation}: {contributor.stated_span}"
+    if contributor.source_sentence:
+        line += f' -- "{contributor.source_sentence}"'
+    mentioned = (contributor.mentioned_at or "")[:10] or "unknown"
+    if contributor.event_at:
+        return f"{line} (event {contributor.event_at[:10]}; mentioned {mentioned})"
+    return f"{line} (mentioned {mentioned})"
+
+
 def _fmt_count(n: Any) -> str:
     """Format a count as an int when integral, otherwise as-is."""
     if isinstance(n, float) and n.is_integer():
@@ -426,6 +437,9 @@ class ContextBuilderService:
                 if verdict.lower_bound:
                     authority_lines.extend(_count_match_lines(verdict))
                 for contributor in verdict.contributors:
+                    if contributor.operation == "occurrence":
+                        authority_lines.append(_occurrence_contributor_line(contributor))
+                        continue
                     authority_lines.append(
                         f"  - {contributor.relation}: {contributor.stated_span} "
                         f"(valid {contributor.valid_at or 'unknown'})"

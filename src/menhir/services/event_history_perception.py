@@ -684,6 +684,11 @@ def _resolve_event_valid_time(
     return _fallback()
 
 
+#: Public aliases of the #155 grounding helpers, shared with read-time occurrence event timing.
+sentence_context = _sentence_context
+resolve_event_valid_time = _resolve_event_valid_time
+
+
 @dataclass(frozen=True)
 class EventAssertionBuildResult:
     """Pure builder receipt. ``assertion`` is None EXACTLY when the builder abstained (no usable

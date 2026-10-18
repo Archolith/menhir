@@ -265,10 +265,18 @@ class TypedAssertionWriteMixin:
             """
             UNWIND range(0, size($ids) - 1) AS ordinal
             MATCH (a:TypedAssertion {assertion_id: $ids[ordinal]})
+            CALL {
+                WITH a
+                OPTIONAL MATCH (t:TurnEvidence {turn_id: a.episode_uuid})
+                WHERE t.namespace = a.namespace
+                RETURN t.text AS turn_text
+                LIMIT 1
+            }
             RETURN a.assertion_id AS assertion_id, a.operation AS operation,
                    coalesce(a.value, a.value_json) AS value, a.stated_span AS stated_span,
                    toString(a.valid_at) AS valid_at, a.evidence_tier AS evidence_tier,
-                   a.episode_uuid AS episode_uuid, ordinal
+                   a.episode_uuid AS episode_uuid, a.time_basis AS time_basis,
+                   turn_text AS turn_text, ordinal
             ORDER BY ordinal
             """,
             params={"ids": bounded},
