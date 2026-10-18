@@ -401,6 +401,14 @@ def get_scalar_state_activation_queries() -> list[str]:
         # constraint can come online over an existing single-current store.
         "MATCH (n:Entity {view_kind: 'scalar_state'}) WHERE coalesce(n.view_current, true) AND n.ss_view_key_current IS NULL SET n.ss_view_key_current = n.view_key",
         "CREATE CONSTRAINT scalar_state_view_current_key_unique IF NOT EXISTS FOR (n:Entity) REQUIRE n.ss_view_key_current IS UNIQUE",
+        # Scalar Views keep their text out of the :Entity full-text index (ScalarStateKind /
+        # ScalarHistoryKind keyword_indexed=False). Move any indexed text -- pre-change nodes, or an
+        # older writer during a rolling deploy -- into view_name/view_summary. Newer text wins.
+        "MATCH (n:Entity) WHERE n.view_kind IN ['scalar_state', 'scalar_history'] "
+        "AND (coalesce(n.name, '') <> '' OR coalesce(n.summary, '') <> '') "
+        "SET n.view_name = CASE WHEN coalesce(n.name, '') <> '' THEN n.name ELSE n.view_name END, "
+        "n.view_summary = CASE WHEN coalesce(n.summary, '') <> '' THEN n.summary "
+        "ELSE n.view_summary END, n.name = '', n.summary = ''",
         # Counting-lane fence: one watermark per namespace, or concurrent claims split the fence.
         # Pre-constraint stores may hold duplicates from the old unconstrained MERGE; delete every
         # copy (a reset: turns are re-read and the per-turn fold collapse absorbs repeats) so the

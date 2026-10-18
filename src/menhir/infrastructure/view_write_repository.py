@@ -226,6 +226,12 @@ class ViewWriteRepositoryMixin:
         payload["episode_uuids"] = eps
         name, summary = kind.surface(subject, payload)
         props = kind.write_props(subject, key, payload)
+        # A kind kept out of the :Entity full-text index carries its text in view_name/view_summary
+        # (readers coalesce them over name/summary). content is not indexed and keeps the summary.
+        index_name, index_summary = name, summary
+        if not kind.keyword_indexed:
+            props = {**props, "view_name": name[:300], "view_summary": summary[:1000]}
+            index_name, index_summary = "", ""
         # Authoritative rebuild replaces the projection with the deterministic result of the full
         # current log, so (a) it BYPASSES the LWW guard — a correction that moves the current value
         # backward in valid_at must install, not be rejected as a "late arrival"; and (b) on the
@@ -236,13 +242,14 @@ class ViewWriteRepositoryMixin:
         if authoritative:
             effective_refresh = {
                 "view_subject": subject.strip(),
-                "name": name[:300], "summary": summary[:1000], "content": summary[:1000],
+                "name": index_name[:300], "summary": index_summary[:1000],
+                "content": summary[:1000],
                 **props,
                 **(refresh_props or {}),
             }
         res = self._write_version(
             kind=kind.name, key=key, subject=subject, subject_uuid=subject_uuid,
-            name=name, summary=summary,
+            name=index_name, summary=index_summary, content=summary,
             sig=kind.signature(payload), extra_props=props, audit_props=audit_props,
             namespace=namespace, valid_at=kind.valid_at(payload) or _now(),
             source=source, source_confidence=source_confidence,
@@ -279,7 +286,7 @@ class ViewWriteRepositoryMixin:
         view_class: ViewClass = ViewClass.FACT, node_uuid: str | None = None,
         refresh_props: dict[str, Any] | None = None, summary_template: str | None = None,
         subject_uuid: str | None = None, replace_provenance: bool = False,
-        lifecycle_props: dict[str, str] | None = None,
+        lifecycle_props: dict[str, str] | None = None, content: str | None = None,
     ) -> dict[str, Any]:
         """The one place a View version is written. Idempotent on `sig`: unchanged -> refresh
         provenance/access only; changed -> create a fresh current version and supersede the prior
@@ -478,7 +485,7 @@ class ViewWriteRepositoryMixin:
                 {clear_current_key})
             WITH f, old, evidence
             CREATE (n:{label} {{
-                uuid: $uuid, name: $name, summary: $summary, content: $summary,
+                uuid: $uuid, name: $name, summary: $summary, content: $content,
                 group_id: $ns, namespace: $ns_stamped, {_SHARED_STAMPS},
                 source: $source, source_confidence: $sc,
                 valid_at: datetime($valid_at), created_at: datetime($now), last_accessed: datetime($now)
@@ -494,6 +501,7 @@ class ViewWriteRepositoryMixin:
             RETURN n.uuid AS uuid
             """
         params = {"uuid": new_uuid, "name": name[:300], "summary": summary[:1000],
+                  "content": (summary if content is None else content)[:1000],
                   "ns": (namespace or ""), "ns_stamped": ns_stamped,
                   "namespace_key": namespace_key, **tenant_scope_params(namespace_key),
                   "operation_id": new_uuid, "key": key, "eps": eps,

@@ -233,7 +233,8 @@ class ScalarViewRepositoryMixin:
                               ss_attribute:$attr, ss_kind:$vk}})
             WHERE coalesce(n.view_current, true) {ns_filter}
               AND coalesce(n.ss_scope, '') = $scope AND coalesce(n.ss_unit, '') = $unit
-            RETURN n.uuid AS uuid, n.ss_value AS value, n.name AS name, n.view_key AS view_key,
+            RETURN n.uuid AS uuid, n.ss_value AS value,
+                   coalesce(n['view_name'], n.name) AS name, n.view_key AS view_key,
                    n.ss_attribute AS attribute, n.view_subject_uuid AS subject_uuid,
                    toString(n.valid_at) AS valid_at, n.scalar_basis AS scalar_basis,
                    n.count_uncertain AS count_uncertain, n.count_actions AS count_actions,
