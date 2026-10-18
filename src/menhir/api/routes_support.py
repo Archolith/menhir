@@ -263,6 +263,10 @@ class ScalarAuthorityContributorResponse(BaseModel):
     valid_at: str | None = None
     evidence_tier: str | None = None
     episode_uuid: str | None = None
+    source_sentence: str | None = None
+    event_at: str | None = None
+    event_basis: str | None = None
+    mentioned_at: str | None = None
 
 
 class ScalarAuthorityVerdictResponse(BaseModel):

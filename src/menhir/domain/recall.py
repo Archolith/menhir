@@ -224,6 +224,12 @@ class ScalarAuthorityContributor:
     valid_at: str | None
     evidence_tier: str | None
     episode_uuid: str | None
+    # Read-time event timing for counting occurrences only (None elsewhere). ``valid_at`` of an
+    # occurrence is the session time, not the event time; these carry the grounded event date.
+    source_sentence: str | None = None
+    event_at: str | None = None
+    event_basis: str | None = None
+    mentioned_at: str | None = None
 
 
 @dataclass(frozen=True)

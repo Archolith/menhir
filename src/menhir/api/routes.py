@@ -307,6 +307,13 @@ async def scalar_authority_contributors(
         view_uuid=view_uuid, limit=limit, offset=offset,
         namespace=stamped_namespace(resolved),
     )
+    payload = {
+        **payload,
+        "contributors": [
+            {k: v for k, v in dict(c).items() if k != "turn_text"}
+            for c in (payload.get("contributors") or [])
+        ],
+    }
     return {"view_uuid": view_uuid, **payload}
 
 

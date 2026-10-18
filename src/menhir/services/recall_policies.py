@@ -135,20 +135,41 @@ def _query_wants_history(query_text: str) -> bool:
 def _authority_contributors(payload: dict[str, Any]) -> tuple[ScalarAuthorityContributor, ...]:
     """Hydrate the stable public contributor contract from repository dictionaries."""
     return tuple(
-        ScalarAuthorityContributor(
-            assertion_id=str(row.get("assertion_id") or ""),
-            relation=str(row.get("relation") or "CONTRIBUTOR"),
-            operation=str(row.get("operation") or ""),
-            value=row.get("value"),
-            stated_span=str(row.get("stated_span") or ""),
-            valid_at=(str(row["valid_at"]) if row.get("valid_at") is not None else None),
-            evidence_tier=(
-                str(row["evidence_tier"]) if row.get("evidence_tier") is not None else None),
-            episode_uuid=(
-                str(row["episode_uuid"]) if row.get("episode_uuid") is not None else None),
-        )
+        _hydrate_contributor(row)
         for row in payload.get("contributors", [])
         if row.get("assertion_id")
+    )
+
+
+def _hydrate_contributor(row: dict[str, Any]) -> ScalarAuthorityContributor:
+    operation = str(row.get("operation") or "")
+    valid_at = str(row["valid_at"]) if row.get("valid_at") is not None else None
+    stated_span = str(row.get("stated_span") or "")
+    extra: dict[str, Any] = {}
+    if operation == "occurrence":
+        from menhir.services.occurrence_event_time import occurrence_event_time
+
+        # mentioned_at is the row's own session time; never recorded/ingest time.
+        mentioned_at = valid_at if row.get("time_basis") == "episode_reference" else None
+        timing = occurrence_event_time(stated_span, row.get("turn_text"), mentioned_at)
+        extra = {
+            "source_sentence": timing.sentence,
+            "event_at": timing.event_at,
+            "event_basis": timing.event_basis,
+            "mentioned_at": mentioned_at,
+        }
+    return ScalarAuthorityContributor(
+        assertion_id=str(row.get("assertion_id") or ""),
+        relation=str(row.get("relation") or "CONTRIBUTOR"),
+        operation=operation,
+        value=row.get("value"),
+        stated_span=stated_span,
+        valid_at=valid_at,
+        evidence_tier=(
+            str(row["evidence_tier"]) if row.get("evidence_tier") is not None else None),
+        episode_uuid=(
+            str(row["episode_uuid"]) if row.get("episode_uuid") is not None else None),
+        **extra,
     )
 
 # Source priors now live in domain/retrieval_tuning.py (SOURCE_PRIORS), keyed by
