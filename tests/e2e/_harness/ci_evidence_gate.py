@@ -33,6 +33,7 @@ REQUIRED_LANES = frozenset(
         "test_e2e_10_family_view_recall[mvp_default]",
         "test_e2e_11_count_match_history[mvp_default]",
         "test_e2e_11_count_pending_sweep[mvp_default]",
+        "test_e2e_11_count_match_bridges[mvp_default]",
         "test_e2e_10_counting_flag_sweep[mvp_default]",
         CONTAINER_LANE,
         "test_e2e_08_missing_fork_refusal",
