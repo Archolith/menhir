@@ -115,6 +115,22 @@ def _valid_at_sort_key(raw: object) -> float:
     return parsed.timestamp()
 
 
+def _relevance_ordered_slots(slots, best_cosine) -> list[tuple[str, str, str, str, str]]:
+    """Slots ordered by best observation cosine descending, ties by slot tuple ascending.
+
+    Clients cap how many verdicts they render, and set iteration order is hash-random, so
+    the authority and history lanes iterate in this deterministic relevance order instead.
+    A slot missing from best_cosine sorts last.
+    """
+    return sorted(
+        slots,
+        key=lambda s: (
+            -best_cosine.get(s, float("-inf")),
+            tuple(str(x or "") for x in s),
+        ),
+    )
+
+
 def _observation_dedup_skip_ids(obs_hits: list[dict[str, Any]]) -> set[str]:
     """Assertion ids to skip so identical stated text injects one observation per slot.
 
@@ -1313,7 +1329,8 @@ async def run_recall(
             auth_added = 0
             _verdict_min_sim = float(tuning.scalar_verdict_min_similarity or 0.0)
             _authority_slots = obs_slots if service.scalar_view_authority_enabled else set()
-            for (subj, attr, scp, vk, un) in _authority_slots:
+            for (subj, attr, scp, vk, un) in _relevance_ordered_slots(
+                    _authority_slots, _obs_slot_best_cosine):
                 if not subj or not attr or not vk:
                     continue
                 # G17 subject safety: skip the authority injection for a subject the query is NOT
@@ -1641,7 +1658,8 @@ async def run_recall(
             _sh_existing = {str(c["uuid"]) for c in candidate_inputs}
             _sh_added = 0
             _sh_min_sim = float(tuning.scalar_verdict_min_similarity or 0.0)
-            for (subj, attr, scp, vk, un) in _obs_slots_for_history:
+            for (subj, attr, scp, vk, un) in _relevance_ordered_slots(
+                    _obs_slots_for_history, _obs_slot_best_cosine):
                 if not subj or not attr or not vk:
                     continue
                 # Same relevance gate as the authority loop: a history verdict is a verdict too.
