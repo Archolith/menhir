@@ -41,6 +41,13 @@ def _current(v: str) -> str:
 _LIVE_OCCURRENCE = _live("a")
 _CURRENT_OCCURRENCE = _current("a")
 
+
+def _counted(v: str) -> str:
+    """Counted in the match fold: decided `counted`, or undecided under a pre-match version
+    (`status_of`'s rule), so a carried pre-match row is still a target a retelling relates to."""
+    return (f" ({v}.count_status = 'counted' OR ({v}.count_status IS NULL"
+            f" AND NOT coalesce({v}.perceiver_version, '+m') ENDS WITH '+m')) ")
+
 #: the decision SET shared by plain decisions (d) on node a.
 _SET_DECISION = """
     a.count_status = d.status, a.count_target_id = d.target_id,
@@ -103,7 +110,7 @@ class CountDecisionRepository:
         rows = self._neo4j.execute(
             "MATCH (a:TypedAssertion) WHERE a.subject_uuid IN $subjects AND "
             + tenant_scope_cypher("a") + " AND " + _LIVE_OCCURRENCE
-            + " AND a.count_status = 'counted' RETURN " + _OCCURRENCE_FIELDS
+            + " AND " + _counted("a") + " RETURN " + _OCCURRENCE_FIELDS
             + " ORDER BY a.valid_at ASC, a.assertion_id ASC LIMIT $limit",
             params={"subjects": subjects, "limit": int(limit), **tenant_scope_params(namespace)},
         )
@@ -173,7 +180,7 @@ class CountDecisionRepository:
               AND (a.count_status = 'uncertain'
                    OR (a.count_status IN ['repeat', 'same_event'] AND NOT EXISTS {
                          MATCH (t:TypedAssertion {assertion_id: a.count_target_id})
-                         WHERE t.count_status = 'counted' AND t.subject_uuid = a.subject_uuid
+                         WHERE """ + _counted("t") + """ AND t.subject_uuid = a.subject_uuid
                                AND """ + tenant_scope_cypher("t") + " AND " + _live("t") + """
                        }))
             RETURN """ + _OCCURRENCE_FIELDS

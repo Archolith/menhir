@@ -708,7 +708,6 @@ class TypedScalarPerceptionService:
         context: str = "",
         write_guard: Callable[[], None] | None = None,
         counting_v2: bool = False,
-        before_record: Callable[[Any], None] | None = None,
         defer_rebuild: bool = False,
     ) -> dict[str, Any]:
         """Perceive typed scalars from `episodes` and durably persist the committed, bound ones.
@@ -717,10 +716,10 @@ class TypedScalarPerceptionService:
         the per-attribute claim split; it is forwarded only when True, so every other caller is
         unchanged.
 
-        Counting re-version (both default off): `before_record(assertion)` runs after `write_guard`
-        and before each write. `defer_rebuild` skips the per-row rebuild, so bound rows keep
-        `projection_pending` until the caller rebuilds and marks them; the result then also carries
-        `spans` = {"proposed": every sample's (episode, start, end), "committed": the gate's}.
+        Counting re-version (default off): `defer_rebuild` skips the per-row rebuild, so bound rows
+        keep `projection_pending` until the caller rebuilds and marks them; the result then also
+        carries `spans` = {"clean_turns": turns every sample read in full, "proposed": every
+        sample's (episode, start, end), "committed": the gate's}.
 
         `system_prompt` / `allowed_operations` / `claim_ordinal` / `context` select the lane: the
         defaults are the scalar lane; the counting lane passes its own prompt, occurrence-only
@@ -945,16 +944,12 @@ class TypedScalarPerceptionService:
             _rebuild = lambda u: self._service.rebuild_scalar_state(
                 u, namespace=namespace, as_of=as_of)
         record_assertion = self._adapter.record_typed_assertion
-        if write_guard is not None or before_record is not None:
+        if write_guard is not None:
             # Counting lane: re-check the namespace fence before every assertion write, so a run
             # whose lease or watermark was lost during the LLM step stores nothing.
-            def record_assertion(assertion: Any, *args: Any, _record=record_assertion,
-                                 **kwargs: Any) -> Any:
-                if write_guard is not None:
-                    write_guard()
-                if before_record is not None:
-                    before_record(assertion)
-                return _record(assertion, *args, **kwargs)
+            def record_assertion(*args: Any, _record=record_assertion, **kwargs: Any) -> Any:
+                write_guard()
+                return _record(*args, **kwargs)
         out = bind_and_persist_typed_scalars(
             decisions,
             linked_entities_for_episode=self._adapter.fetch_linked_entities_for_episode,

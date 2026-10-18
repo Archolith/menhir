@@ -597,7 +597,9 @@ class TurnEvidenceRepository:
         self, namespace: str, *, run_id: str, lease_seconds: int, now: str,
     ) -> dict[str, Any] | None:
         """Claim the namespace's counting fence (owner + lease on the watermark node). Returns
-        {"incarnation", "epoch"} or None when another live owner holds it. Never sets the cursor."""
+        {"incarnation", "epoch", "rebuild_subjects"} or None when another live owner holds it.
+        `rebuild_subjects` are subjects a re-version retire left for rebuild (an earlier owner
+        stopped before rebuilding them). Never sets the cursor."""
         rows = self._neo4j.execute(
             """
             MERGE (w:CountingConsolidationWatermark {group_id: $ns})
@@ -609,14 +611,16 @@ class TurnEvidenceRepository:
             SET w.incarnation = coalesce(w.incarnation, randomUUID()), w.owner = $run_id,
                 w.epoch = coalesce(w.epoch, 0) + 1,
                 w.lease_expires_at = datetime($now) + duration({seconds: $lease})
-            RETURN w.incarnation AS incarnation, w.epoch AS epoch
+            RETURN w.incarnation AS incarnation, w.epoch AS epoch,
+                   coalesce(w.rebuild_subjects, []) AS rebuild_subjects
             """,
             params={"ns": namespace, "run_id": str(run_id), "lease": int(lease_seconds),
                     "now": now},
         )
         if not rows:
             return None
-        return {"incarnation": str(rows[0]["incarnation"]), "epoch": int(rows[0]["epoch"])}
+        return {"incarnation": str(rows[0]["incarnation"]), "epoch": int(rows[0]["epoch"]),
+                "rebuild_subjects": [str(s) for s in (rows[0].get("rebuild_subjects") or []) if s]}
 
     def renew_counting_claim(
         self, namespace: str, *, run_id: str, incarnation: str, epoch: int,
@@ -637,15 +641,20 @@ class TurnEvidenceRepository:
 
     def release_counting_claim(
         self, namespace: str, *, run_id: str, incarnation: str,
+        rebuilt_subjects: list[str] | None = None,
     ) -> None:
-        """Drop ownership if this run still holds it; a no-op when the fence is gone or taken."""
+        """Drop ownership if this run still holds it; a no-op when the fence is gone or taken.
+        `rebuilt_subjects` (rebuilt after this owner's last retire of them) leave the watermark's
+        rebuild list; only the owner appends to it, so nothing was added behind this owner."""
         self._neo4j.execute(
             """
             MATCH (w:CountingConsolidationWatermark {group_id: $ns})
             WHERE w.owner = $run_id AND w.incarnation = $inc
-            SET w.owner = null, w.lease_expires_at = null
+            SET w.owner = null, w.lease_expires_at = null,
+                w.rebuild_subjects = [s IN coalesce(w.rebuild_subjects, []) WHERE NOT s IN $done]
             """,
-            params={"ns": namespace, "run_id": str(run_id), "inc": str(incarnation)},
+            params={"ns": namespace, "run_id": str(run_id), "inc": str(incarnation),
+                    "done": [str(s) for s in (rebuilt_subjects or []) if s]},
         )
 
     def advance_counting_cursor(
@@ -696,39 +705,83 @@ class TurnEvidenceRepository:
         )
         return [dict(r) for r in rows]
 
+    def current_version_occurrence_spans(
+        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
+        include_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Spans of the bound occurrences of this counting version stored on these turns: the
+        current ones (by any run, including a partial earlier one) and `include_ids` (this run's
+        rows waiting for their head). What a re-read actually stored, for rule B. Read-only."""
+        ids = [str(i) for i in (turn_ids or []) if i]
+        if not ids:
+            return []
+        rows = self._neo4j.execute(
+            """
+            MATCH (a:TypedAssertion)
+            WHERE """ + tenant_scope_cypher("a") + """
+                  AND a.operation = 'occurrence' AND coalesce(a.claim_ordinal, 0) = 1
+                  AND a.episode_uuid IN $turn_ids AND a.perceiver_version = $pv
+                  AND NOT coalesce(a.binding_pending, false)
+                  AND (EXISTS { MATCH (:TypedAssertionHead)-[:CURRENT]->(a) }
+                       OR a.assertion_id IN $include)
+            RETURN a.assertion_id AS assertion_id, a.episode_uuid AS episode_uuid,
+                   a.span_start AS span_start, a.span_end AS span_end
+            ORDER BY a.episode_uuid, a.span_start, a.assertion_id
+            """,
+            params={"turn_ids": ids, "pv": str(perceiver_version),
+                    "include": [str(i) for i in (include_ids or []) if i],
+                    **tenant_scope_params(namespace)},
+        )
+        return [dict(r) for r in rows]
+
     def retire_prior_version_occurrences(
         self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
         run_id: str, incarnation: str, epoch: int,
-        keep_ids: list[str] | None = None, source_keys: list[str] | None = None,
+        keep_ids: list[str] | None = None, promote_ids: list[str] | None = None,
     ) -> list[str]:
         """Retire current occurrence claims on these turns stamped by another counting version,
-        in one fenced query. `keep_ids` are left current; `source_keys` (when given) limits the
-        retire to those heads. Returns the affected subject_uuids (callers rebuild them)."""
+        in one fenced query. `keep_ids` are left current. A retired row's head passes CURRENT to
+        its new-version row among `promote_ids` in the same statement: the record stores a rank-0
+        re-version non-current next to the old row, so the head is never left without its count.
+        The retired subjects are added to the watermark's rebuild list in the same statement (the
+        owner clears them on release once rebuilt). Returns those subject_uuids."""
         ids = [str(i) for i in (turn_ids or []) if i]
         rows = self._neo4j.execute(
             """
             OPTIONAL MATCH (w:CountingConsolidationWatermark {group_id: $ns})
             WHERE w.owner = $run_id AND w.incarnation = $inc AND w.epoch = $epoch
             SET w.last_retire_at = datetime()
-            WITH w IS NOT NULL AS fence_ok
+            WITH w, w IS NOT NULL AS fence_ok
             OPTIONAL MATCH (h:TypedAssertionHead)-[cr:CURRENT]->(a:TypedAssertion)
             WHERE fence_ok AND """ + tenant_scope_cypher("a") + """
                   AND a.operation = 'occurrence' AND coalesce(a.claim_ordinal, 0) = 1
                   AND a.episode_uuid IN $turn_ids
                   AND coalesce(a.perceiver_version, '') <> $pv
                   AND NOT a.assertion_id IN $keep
-                  AND ($source_keys IS NULL OR h.source_key IN $source_keys)
             SET a.superseded = true, a.expired_at = datetime(),
                 a.retired_reason = 'counting_reversion'
             DELETE cr
-            WITH fence_ok, collect(DISTINCT a.subject_uuid) AS subjects
+            WITH w, fence_ok, h, a
+            OPTIONAL MATCH (h)-[:HAS_VERSION]->(n:TypedAssertion)
+            WHERE a IS NOT NULL AND n.assertion_id IN $promote AND n.perceiver_version = $pv
+                  AND NOT coalesce(n.binding_pending, false)
+            WITH w, fence_ok, h, a, n ORDER BY n.recorded_at ASC, n.assertion_id ASC
+            WITH w, fence_ok, h, a, collect(n)[0] AS n
+            FOREACH (_ IN CASE WHEN n IS NULL THEN [] ELSE [1] END |
+                SET n.superseded = false, a.superseded_by = n.assertion_id
+                MERGE (h)-[:CURRENT]->(n)
+                MERGE (n)-[:SUPERSEDES]->(a))
+            WITH w, fence_ok, collect(DISTINCT a.subject_uuid) AS subjects
+            FOREACH (_ IN CASE WHEN fence_ok AND size(subjects) > 0 THEN [1] ELSE [] END |
+                SET w.rebuild_subjects = reduce(
+                    acc = [], s IN coalesce(w.rebuild_subjects, []) + subjects |
+                    CASE WHEN s IN acc THEN acc ELSE acc + s END))
             RETURN fence_ok, subjects
             """,
             params={"ns": namespace, "run_id": str(run_id), "inc": str(incarnation),
                     "epoch": int(epoch), "turn_ids": ids, "pv": str(perceiver_version),
                     "keep": [str(k) for k in (keep_ids or []) if k],
-                    "source_keys": (None if source_keys is None
-                                    else [str(s) for s in source_keys if s]),
+                    "promote": [str(p) for p in (promote_ids or []) if p],
                     **tenant_scope_params(namespace)},
         )
         if not rows or not rows[0]["fence_ok"]:

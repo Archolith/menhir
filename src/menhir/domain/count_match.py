@@ -113,9 +113,16 @@ def match_slot_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def status_of(row: dict[str, Any]) -> str:
-    """A row's decision; anything unknown or missing is uncertain."""
+    """A row's decision; anything unknown or missing is uncertain, except a row with no decision
+    stamped by a version without the match suffix: it was counted under its own version (a row a
+    re-version carried, or one on a page not re-read yet), and decide never revisits it."""
     status = str(row.get("count_status") or "").strip().lower()
-    return status if status in COUNT_STATUSES else UNCERTAIN
+    if status in COUNT_STATUSES:
+        return status
+    version = str(row.get("perceiver_version") or "")
+    if not status and version and not version.endswith(MATCH_VERSION_SUFFIX):
+        return COUNTED
+    return UNCERTAIN
 
 
 def relation_tokens(row: dict[str, Any]) -> tuple[str, ...]:

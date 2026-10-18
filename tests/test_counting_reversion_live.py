@@ -1,6 +1,7 @@
-"""Live proof of the counting re-version Cypher: the prior-version read, the head- and keep-scoped
-retire, and why a same-head replacement must retire before it writes (counting versions such as
-"cv1+m" are not SemVer, so they rank 0 and can never supersede the old current row in place).
+"""Live proof of the counting re-version Cypher: the prior-version read, the stored-span read, and
+the keep-scoped retire that hands a head to its new row in the same statement (counting versions
+such as "cv1+m" are not SemVer, so they rank 0 and a re-version is stored non-current next to the
+old current row until then).
 
 Runs online against the TEST instance; every test uses fresh namespaces and removes what it made.
 """
@@ -34,9 +35,9 @@ def env(test_neo4j_repo):
         "OR n.namespace_key IN $names DETACH DELETE n", {"names": [ns, other]})
 
 
-def _occ(ns, ep, start, end, pv, *, op="occurrence", ordinal=1, value=1):
+def _occ(ns, ep, start, end, pv, *, op="occurrence", ordinal=1, value=1, subject="s1"):
     return TypedAssertion(
-        subject_uuid="s1", subject_display="me", attribute="gym_visit_count", scope="",
+        subject_uuid=subject, subject_display="me", attribute="gym_visit_count", scope="",
         value_kind="count", unit="", operation=op, value=value, stated_span="x" * (end - start),
         span_start=start, span_end=end, claim_ordinal=ordinal, episode_uuid=ep,
         valid_at=_NOW, learned_at=_NOW, evidence_tier="agent", perceiver_version=pv,
@@ -86,7 +87,7 @@ def test_prior_read_returns_only_current_other_version_occurrences_on_the_turns(
     _record(adapter, _occ(other, "t1", 0, 5, _OLD))                   # other namespace
     gone = _occ(ns, "t1", 40, 45, _OLD)
     _record(adapter, gone)
-    _retire(adapter, ns, claim, ["t1"], source_keys=[gone.source_key])
+    _retire(adapter, ns, claim, ["t1"], keep_ids=[ids["a"], ids["b"]])
 
     rows = adapter.prior_version_occurrences(ns, ["t1"], perceiver_version=_NEW)
     assert [(r["assertion_id"], r["source_key"], r["episode_uuid"], r["span_start"],
@@ -96,45 +97,144 @@ def test_prior_read_returns_only_current_other_version_occurrences_on_the_turns(
     assert adapter.prior_version_occurrences(ns, [], perceiver_version=_NEW) == []
 
 
+def _bind(repo, ns, subjects, turns):
+    """Entity and TurnEvidence nodes so records bind (an unbound row is never promoted or read as
+    stored). Ids are namespaced: the record looks them up globally."""
+    repo.execute(
+        "UNWIND $s AS s CREATE (:Entity {uuid: s, namespace: $ns, group_id: $ns}) "
+        "WITH count(*) AS _ UNWIND $t AS t "
+        "CREATE (:TurnEvidence {turn_id: t, namespace: $ns, group_id: $ns})",
+        {"s": [f"{ns}:{s}" for s in subjects], "t": [f"{ns}:{t}" for t in turns], "ns": ns})
+    return ({s: f"{ns}:{s}" for s in subjects}, {t: f"{ns}:{t}" for t in turns})
+
+
+def _rebuild_list(repo, ns):
+    rows = repo.execute(
+        "MATCH (w:CountingConsolidationWatermark {group_id: $ns}) "
+        "RETURN coalesce(w.rebuild_subjects, []) AS s", {"ns": ns})
+    return list(rows[0]["s"])
+
+
 @pytest.mark.online
-def test_same_head_write_is_lost_unless_the_old_row_is_retired_first(env):
-    # The counterexample: written over a current old row, the new rank-0 row is stored non-current
-    # (and a later retire would leave the head with no current row). Retiring the head first makes
-    # the same write current; exactly one row is current afterwards.
+def test_the_retire_hands_the_head_to_its_stored_new_row_in_the_same_statement(env):
+    # F-03: written over a current old row, the rank-0 new row is stored non-current, so the old
+    # row is still counted if the run stops here. The retire then moves CURRENT to it: exactly one
+    # row is current afterwards and the head is never empty. Fails if the head ends with no current
+    # row, two current rows, or if the subject is not recorded as owed a rebuild.
     repo, adapter, ns, _, claim = env
-    old = _occ(ns, "t1", 0, 5, _OLD)
+    (s,), (t,) = (list(m.values()) for m in _bind(repo, ns, ["s1"], ["t1"]))
+    old = _occ(ns, t, 0, 5, _OLD, subject=s)
     _record(adapter, old)
-    new = _occ(ns, "t1", 0, 5, _NEW)
-    _record(adapter, new)
+    new = _occ(ns, t, 0, 5, _NEW, subject=s)
+    new_id = _record(adapter, new)
     assert _heads(repo, old.source_key) == [(_OLD, False, None, 1), (_NEW, True, None, 0)]
 
-    assert _retire(adapter, ns, claim, ["t1"], source_keys=[old.source_key]) == ["s1"]
-    _record(adapter, new)                                             # the retried write
+    assert _retire(adapter, ns, claim, [t], promote_ids=[new_id]) == [s]
+    assert _heads(repo, old.source_key) == [
+        (_OLD, True, "counting_reversion", 0), (_NEW, False, None, 1)]
+    assert [dict(r) for r in repo.execute(
+        "MATCH (n:TypedAssertion {assertion_id: $id})-[:SUPERSEDES]->(o:TypedAssertion) "
+        "RETURN o.perceiver_version AS pv, o.superseded_by AS by", {"id": new_id})] == [
+        {"pv": _OLD, "by": new_id}]
+    assert _rebuild_list(repo, ns) == [s]
+    _record(adapter, new)                                             # an idempotent re-write
     assert _heads(repo, old.source_key) == [
         (_OLD, True, "counting_reversion", 0), (_NEW, False, None, 1)]
 
 
 @pytest.mark.online
-def test_retire_honours_head_scope_and_keep_ids_and_the_fence(env):
-    # Fails if a head-scoped retire reaches another head, if a kept (carried) row is retired, or if
-    # either form writes under a lost fence.
+def test_promotion_needs_the_old_row_retired_on_that_head(env):
+    # Fails if a kept (carried) head or another head's id is promoted (two current rows on a head).
     repo, adapter, ns, _, claim = env
-    a, b, c = (_occ(ns, "t1", s, s + 5, _OLD) for s in (0, 10, 20))
+    (s,), (t,) = (list(m.values()) for m in _bind(repo, ns, ["s1"], ["t1"]))
+    a, b = _occ(ns, t, 0, 5, _OLD, subject=s), _occ(ns, t, 10, 15, _OLD, subject=s)
     keep = _record(adapter, a)
     _record(adapter, b)
+    a_new = _record(adapter, _occ(ns, t, 0, 5, _NEW, subject=s))
+    _retire(adapter, ns, claim, [t], keep_ids=[keep], promote_ids=[a_new])
+    assert _heads(repo, a.source_key) == [(_OLD, False, None, 1), (_NEW, True, None, 0)]
+    assert _heads(repo, b.source_key) == [(_OLD, True, "counting_reversion", 0)]
+
+
+@pytest.mark.online
+def test_rebuild_list_is_returned_by_the_claim_and_cleared_only_by_its_owner(env):
+    # F-02: fails if a lost owner's list is dropped, if a stale owner can clear it, or if a clear
+    # removes subjects it did not rebuild.
+    repo, adapter, ns, _, claim = env
+    _record(adapter, _occ(ns, "t1", 0, 5, _OLD))
+    _record(adapter, _occ(ns, "t2", 0, 5, _OLD, subject="s2"))
+    _retire(adapter, ns, claim, ["t1", "t2"])
+    assert sorted(_rebuild_list(repo, ns)) == ["s1", "s2"]
+    adapter.release_counting_claim(ns, run_id="run-stale", incarnation=claim["incarnation"],
+                                   rebuilt_subjects=["s1", "s2"])
+    assert sorted(_rebuild_list(repo, ns)) == ["s1", "s2"]
+    adapter.release_counting_claim(ns, run_id="run-a", incarnation=claim["incarnation"],
+                                   rebuilt_subjects=["s1"])
+    assert _rebuild_list(repo, ns) == ["s2"]
+    again = adapter.claim_counting_namespace(ns, run_id="run-c", lease_seconds=600, now=_NOW)
+    assert again["rebuild_subjects"] == ["s2"]
+
+
+@pytest.mark.online
+def test_stored_spans_are_bound_current_version_rows_or_the_included_ids(env):
+    # Rule B's "what was stored" read. Fails if it misses a current row (from any run), returns a
+    # non-current row it was not asked for, or returns another version.
+    repo, adapter, ns, _, claim = env
+    (s,), (t,) = (list(m.values()) for m in _bind(repo, ns, ["s1"], ["t1"]))
+    _record(adapter, _occ(ns, t, 0, 5, _OLD, subject=s))
+    waiting = _record(adapter, _occ(ns, t, 0, 5, _NEW, subject=s))   # non-current: old holds it
+    current = _record(adapter, _occ(ns, t, 10, 15, _NEW, subject=s))
+    _record(adapter, _occ(ns, t, 20, 25, _OLD, subject=s))
+    _record(adapter, _occ(ns, t, 30, 35, _NEW, subject="s-unbound"))  # binding_pending
+
+    def spans(include):
+        rows = adapter.current_version_occurrence_spans(
+            ns, [t], perceiver_version=_NEW, include_ids=include)
+        return sorted((r["assertion_id"], r["span_start"]) for r in rows)
+
+    assert spans([]) == [(current, 10)]
+    assert spans([waiting]) == sorted([(waiting, 0), (current, 10)])
+
+
+@pytest.mark.online
+def test_retire_honours_keep_ids_and_the_fence(env):
+    # Fails if a kept (carried) row is retired, or if the retire writes under a lost fence.
+    repo, adapter, ns, _, claim = env
+    a, c = (_occ(ns, "t1", s, s + 5, _OLD) for s in (0, 20))
+    keep = _record(adapter, a)
     _record(adapter, c)
 
     with pytest.raises(CountingFenceLost):
         adapter.retire_prior_version_occurrences(
             ns, ["t1"], perceiver_version=_NEW, run_id="run-b",
             incarnation=claim["incarnation"], epoch=claim["epoch"], keep_ids=[keep])
-    assert [_heads(repo, x.source_key) for x in (a, b, c)] == [[(_OLD, False, None, 1)]] * 3
-
-    _retire(adapter, ns, claim, ["t1"], source_keys=[b.source_key])
-    assert _heads(repo, a.source_key) == [(_OLD, False, None, 1)]
-    assert _heads(repo, b.source_key) == [(_OLD, True, "counting_reversion", 0)]
-    assert _heads(repo, c.source_key) == [(_OLD, False, None, 1)]
+    assert [_heads(repo, x.source_key) for x in (a, c)] == [[(_OLD, False, None, 1)]] * 2
+    assert _rebuild_list(repo, ns) == []
 
     _retire(adapter, ns, claim, ["t1"], keep_ids=[keep])
     assert _heads(repo, a.source_key) == [(_OLD, False, None, 1)]       # carried
     assert _heads(repo, c.source_key) == [(_OLD, True, "counting_reversion", 0)]
+
+
+@pytest.mark.online
+def test_a_carried_pre_match_row_is_a_counted_target_for_decide(test_neo4j_repo):
+    # F-05: an undecided row stamped by a pre-match version was counted under that version. Fails
+    # if the decide pool leaves it out (a later retelling would count twice), or if a repeat of it
+    # is treated as having a dead target and re-decided.
+    from tests.test_count_decide_live import _PV, _seed
+
+    ns = f"crev-{uuidlib.uuid4().hex[:10]}"
+    adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
+    try:
+        _seed(test_neo4j_repo, ns, [
+            {"id": "legacy", "pv": "v1"},
+            {"id": "undecided-match"},
+            {"id": "r", "status": "repeat", "target": "legacy", "attempts": 1},
+        ])
+        pool = adapter.counted_occurrences_for_subjects(ns, ["self"], limit=10)
+        assert [p["assertion_id"] for p in pool] == [f"{ns}:legacy"]
+        assert adapter.redecide_count_occurrences(
+            ns, perceiver_version=_PV, max_attempts=3, limit=10, exclude_run_id="x") == []
+    finally:
+        test_neo4j_repo.execute(
+            "MATCH (n) WHERE n.namespace = $ns OR n.group_id = $ns DETACH DELETE n", {"ns": ns})

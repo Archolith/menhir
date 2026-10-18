@@ -112,16 +112,21 @@ def test_deferred_rebuild_stores_rows_pending_and_returns_the_spans():
 
 
 @pytest.mark.unit
-def test_before_record_runs_after_the_fence_check_and_before_each_write():
-    # Fails if the same-head retire could run without a fresh fence check, or after the write.
+def test_a_rule_rejection_of_the_quoted_span_still_counts_as_reading_the_turn():
+    # F-04: every sample quotes a plan ("going to go to the gym tomorrow") and the parser drops it
+    # as not happened. That is the new version reading the turn and finding nothing, so the turn is
+    # clean and rule B can retire an old row there. Fails if the rejection marks the turn unread.
+    episodes = [SimpleNamespace(uuid="t1", content="I'm going to go to the gym tomorrow")]
+    reply = json.dumps([{"episode": 0, "observations": [_obs("go to the gym")]}])
     log: list[tuple] = []
-    out, perception_log, _ = _perceive(
-        _SeqLlm(_CLEAN), defer_rebuild=True,
-        write_guard=lambda: log.append(("guard",)),
-        before_record=lambda a: log.append(("before", a.source_key)))
-    (record,) = [e for e in perception_log if e[0] == "record"]
-    assert log == [("guard",), ("before", record[1])]
-    assert out["committed"] == 1
+    service = TypedScalarPerceptionService(_Adapter(log), _State(log), perceiver_version="cv1+m")
+    out = service.perceive_and_persist(
+        episodes, _SeqLlm(reply), k=2, threshold=1.0, namespace="ns-1",
+        system_prompt=COUNTING_SYSTEM_PROMPT, allowed_operations=COUNTING_OPERATIONS,
+        claim_ordinal=1, defer_rebuild=True)
+    assert out["spans"] == {"clean_turns": ["t1"], "proposed": [], "committed": []}
+    old = [_prior("plan", "t1", 0, 30)]
+    assert reversion_carried(old, out["spans"], []) == []
 
 
 @pytest.mark.unit
@@ -169,50 +174,132 @@ def test_rule_b_keeps_only_rows_the_new_reading_could_not_settle():
     spans = {"clean_turns": ["t1", "t2", "t3"],
              "proposed": [("t1", 5, 15), ("t2", 30, 40), ("t3", 2, 4)],
              "committed": [("t3", 2, 4)]}
-    assert reversion_carried(prior, spans) == ["veto", "dark"]
+    assert reversion_carried(prior, spans, [_stored("t3", 2, 4)]) == ["veto", "dark"]
+
+
+def _stored(turn, start, end):
+    return {"assertion_id": f"n-{turn}-{start}", "episode_uuid": turn,
+            "span_start": start, "span_end": end}
 
 
 @pytest.mark.unit
 def test_rule_b_treats_a_row_without_a_span_as_covering_its_turn():
     prior = [{"assertion_id": "a", "episode_uuid": "t1"}, {"assertion_id": "b", "episode_uuid": "t2"}]
     spans = {"clean_turns": ["t1", "t2"], "proposed": [("t1", 0, 3)], "committed": []}
-    assert reversion_carried(prior, spans) == ["a"]
-    assert reversion_carried(prior, {}) == ["a", "b"]                 # no reading: keep all
+    assert reversion_carried(prior, spans, []) == ["a"]
+    assert reversion_carried(prior, {}, []) == ["a", "b"]             # no reading: keep all
+
+
+@pytest.mark.unit
+def test_rule_b_replaces_only_with_what_was_stored_not_what_the_gate_committed():
+    # Fails if a committed claim that was never stored (mismatch, advisory, a failed write) retires
+    # the old row: the happening would count nowhere.
+    prior = [_prior("old", "t1", 0, 10)]
+    spans = {"clean_turns": ["t1"], "proposed": [("t1", 0, 10)], "committed": [("t1", 0, 10)]}
+    assert reversion_carried(prior, spans, []) == ["old"]
+
+
+@pytest.mark.unit
+def test_rule_b_a_current_row_from_a_partial_earlier_run_replaces_the_old_row():
+    # F-01: run 1 stored N over O and stopped before retiring O; run 2 vetoes. Fails if O is
+    # carried next to N (both counted for good once the cursor passes the page).
+    prior = [_prior("O", "t1", 10, 30)]
+    spans = {"clean_turns": ["t1"], "proposed": [("t1", 12, 20)], "committed": []}
+    assert reversion_carried(prior, spans, [_stored("t1", 10, 25)]) == []
+
+
+# ------------------------------------------------------------------ F-05: carried pre-match rows
+
+@pytest.mark.unit
+@pytest.mark.parametrize("row, status", [
+    ({"count_status": "", "perceiver_version": "cv1"}, "counted"),       # counted under its version
+    ({"count_status": None, "perceiver_version": "cv1+x2"}, "counted"),
+    ({"count_status": "", "perceiver_version": "cv1+m"}, "uncertain"),   # match row not decided yet
+    ({"count_status": ""}, "uncertain"),                                 # no version: unknown
+    ({"count_status": "repeat", "perceiver_version": "cv1"}, "repeat"),
+])
+def test_status_of_an_undecided_pre_match_row_is_counted(row, status):
+    from menhir.domain.count_match import status_of
+
+    assert status_of(row) == status
+
+
+@pytest.mark.unit
+def test_match_fold_still_counts_a_carried_pre_match_row():
+    # Fails if a re-version to match turns a carried row (counted under its old version, never
+    # decided again) into a permanent uncertain one: the count drops though nothing was retired.
+    from menhir.domain.scalar_state_fold import fold_assertions
+    from tests.test_count_match_decide import _occ as _match_occ
+
+    rows = [dict(_match_occ("carried", 1, perceiver_version="cv1"), operation="occurrence",
+                 value=1, scope="", unit="", evidence_tier="agent", importance="tracked"),
+            dict(_match_occ("new", 5, count_status="counted"), operation="occurrence", value=1,
+                 scope="", unit="", evidence_tier="agent", importance="tracked")]
+    (state,) = [s for s in fold_assertions(rows, count_match=True).states
+                if s.attribute == "model_kit_count"]
+    assert sorted(state.contributed_occurrence_ids) == ["carried", "new"]
+    assert state.count_uncertain == 0
+
+
+@pytest.mark.unit
+def test_a_retelling_of_a_carried_pre_match_row_is_its_repeat_and_never_swaps_it():
+    # Fails if decide treats the carried row as an uncertain target (the retelling would stay
+    # uncertain), or swaps it (a swap may only demote a row of the current version).
+    from tests.test_count_match_decide import _occ as _match_occ
+    from tests.test_count_match_decide import _rules, _v
+
+    pool = [_match_occ("carried", 9, perceiver_version="cv1")]
+    out = _rules([_match_occ("c1", 5)], pool, {"c1": _v("repeat", "carried")})
+    (d,) = out.decisions
+    assert (d["status"], d["target_id"]) == ("repeat", "carried")
+    assert out.swaps == []
 
 
 # ------------------------------------------------------------------ runner page order
 
 class _CompleteSvc:
-    """Rebuilds log into the graph and report complete, as the real service does."""
+    """Rebuilds log into the graph and report complete, as the real service does; subjects in
+    `fail_rebuild` report an incomplete rebuild."""
 
     def __init__(self, graph):
         self._graph = graph
 
     def rebuild_scalar_state(self, subject, *, namespace=None, **kw):
         self._graph.calls.append(("rebuild", (subject,), {"namespace": namespace}))
-        return {"complete": True}
+        return {"complete": subject not in self._graph.fail_rebuild}
 
     rebuild_scalar_projections = rebuild_scalar_state
 
 
 class _RevGraph(_Graph):
-    def __init__(self, *, prior=(), retire_subjects=None, **kw):
+    def __init__(self, *, prior=(), retire_subjects=(), stored=(), owed=(), fail_rebuild=(),
+                 **kw):
         super().__init__(**kw)
         self.prior = list(prior)
-        self.retire_subjects = retire_subjects or {}
+        self.retire_subjects = list(retire_subjects)
+        self.stored = list(stored)
+        self.owed = list(owed)
+        self.fail_rebuild = set(fail_rebuild)
 
     def scalar_state_service(self, **kw):
         self._log("scalar_state_service", **kw)
         return _CompleteSvc(self)
 
+    def claim_counting_namespace(self, namespace, **kw):
+        self._log("claim_counting_namespace", namespace, **kw)
+        return {"incarnation": "inc-1", "epoch": 7, "rebuild_subjects": list(self.owed)}
+
     def prior_version_occurrences(self, namespace, turn_ids, **kw):
         self._log("prior_version_occurrences", namespace, list(turn_ids), **kw)
         return [p for p in self.prior if p["episode_uuid"] in turn_ids]
 
+    def current_version_occurrence_spans(self, namespace, turn_ids, **kw):
+        self._log("current_version_occurrence_spans", namespace, list(turn_ids), **kw)
+        return [s for s in self.stored if s["episode_uuid"] in turn_ids]
+
     def retire_prior_version_occurrences(self, namespace, turn_ids, **kw):
         self._log("retire_prior_version_occurrences", namespace, list(turn_ids), **kw)
-        key = "head" if kw.get("source_keys") is not None else "rest"
-        return list(self.retire_subjects.get(key, []))
+        return list(self.retire_subjects)
 
     def mark_projection_complete(self, assertion_ids):
         self._log("mark_projection_complete", list(assertion_ids))
@@ -236,7 +323,6 @@ class _RevPerception:
             raise s["raise"]
         for sk in s.get("writes", []):
             kwargs["write_guard"]()
-            kwargs["before_record"](SimpleNamespace(source_key=sk))
             self.graph._log("record", sk)
         results = list(s.get("results", []))
         return {"bound": sum(1 for r in results if r.get("bound")), "advisory": 0,
@@ -293,28 +379,76 @@ def test_budget_stop_reads_and_retires_nothing_on_the_unread_page(rev):
 
 
 @pytest.mark.unit
-def test_same_head_is_retired_just_before_its_write_and_the_rest_after_persist(rev):
-    # Fails if the shared head is not freed before the write (a rank-0 version would be stored
-    # non-current and then lost), or if leftovers are retired before persist or ignore rule B.
+def test_one_retire_after_every_write_hands_heads_to_the_stored_rows(rev):
+    # F-03: fails if anything is retired before a write (a failed write would then leave the head
+    # with no current row and the re-read could not carry it), or if the retire does not hand the
+    # old row's head to the stored new row in the same call, or if rule B ignores what was stored.
     rev.script = {
         "writes": ["sk-old-1", "sk-new"],
         "results": [{"bound": True, "assertion_id": "n1", "subject_uuid": "s1"}],
         "spans": {"clean_turns": ["t1"], "proposed": [("t1", 0, 10), ("t1", 22, 25)],
                   "committed": [("t1", 0, 10)]},
     }
-    graph = _RevGraph(pages=[[_row(1)]], prior=_OLD)
+    graph = _RevGraph(pages=[[_row(1)]], prior=_OLD, stored=[_stored("t1", 0, 10)])
     out = _run(graph)
     names = graph.names()
-    retires = graph.of("retire_prior_version_occurrences")
-    assert [r[2].get("source_keys") for r in retires] == [["sk-old-1"], None]
-    assert retires[0][1] == ("ns-1", ["t1"])
-    assert retires[1][2]["keep_ids"] == ["old-2"]                     # vetoed overlap carried
-    first_record = names.index("record")
-    assert names.index("retire_prior_version_occurrences") < first_record
-    assert names.index("perceive") < first_record
-    rest = len(names) - 1 - names[::-1].index("retire_prior_version_occurrences")
-    assert rest > len(names) - 1 - names[::-1].index("record")
+    (retire,) = graph.of("retire_prior_version_occurrences")
+    assert retire[1] == ("ns-1", ["t1"])
+    assert retire[2]["keep_ids"] == ["old-2"]                         # vetoed overlap carried
+    assert retire[2]["promote_ids"] == ["n1"]
+    assert names.index("retire_prior_version_occurrences") > len(names) - 1 - names[::-1].index(
+        "record")
+    (read,) = graph.of("current_version_occurrence_spans")
+    assert read[2]["include_ids"] == ["n1"]
     assert out["counting_reversion_carried"] == 1
+
+
+@pytest.mark.unit
+def test_a_page_with_no_prior_rows_reads_nothing_back_and_promotes_nothing(rev):
+    rev.script = {"results": [{"bound": True, "assertion_id": "n1", "subject_uuid": "s1"}],
+                  "spans": {"clean_turns": ["t1"], "proposed": [], "committed": []}}
+    graph = _RevGraph(pages=[[_row(1)]])
+    _run(graph)
+    assert graph.of("current_version_occurrence_spans") == []
+    (retire,) = graph.of("retire_prior_version_occurrences")
+    assert "promote_ids" not in retire[2]
+
+
+def _released(graph):
+    (call,) = graph.of("release_counting_claim")
+    return call[2].get("rebuilt_subjects")
+
+
+@pytest.mark.unit
+def test_subjects_an_earlier_owner_retired_are_rebuilt_first_and_cleared_on_release(rev):
+    # F-02: the watermark lists s9 (an earlier owner retired its row and stopped before the
+    # rebuild). Fails if this owner does not rebuild it before reading pages, or never clears it.
+    rev.script = {"spans": {"clean_turns": ["t1"], "proposed": [], "committed": []}}
+    graph = _RevGraph(pages=[[_row(1)]], owed=["s9"])
+    _run(graph)
+    names = graph.names()
+    assert graph.calls[names.index("rebuild")][1] == ("s9",)
+    assert names.index("rebuild") < names.index("load_next_counting_batch")
+    assert _released(graph) == ["s9"]
+
+
+@pytest.mark.unit
+def test_a_subject_whose_rebuild_failed_stays_owed(rev):
+    # F-02: fails if a retired subject whose rebuild did not complete is cleared from the
+    # watermark (its View would keep counting the retired row with nothing left to rebuild it).
+    rev.script = {"spans": {"clean_turns": ["t1"], "proposed": [], "committed": []}}
+    graph = _RevGraph(pages=[[_row(1)]], prior=_OLD, retire_subjects=["s1", "s2"],
+                      fail_rebuild={"s2"})
+    _run(graph)
+    assert _released(graph) == ["s1"]
+
+
+@pytest.mark.unit
+def test_no_rebuild_owed_releases_without_clearing(rev):
+    rev.script = {"spans": {"clean_turns": ["t1"], "proposed": [], "committed": []}}
+    graph = _RevGraph(pages=[[_row(1)]])
+    _run(graph)
+    assert _released(graph) is None
 
 
 @pytest.mark.unit
@@ -328,7 +462,7 @@ def test_one_rebuild_per_subject_after_retire_then_decide(rev, match):
                     {"bound": True, "assertion_id": "n2", "subject_uuid": "s2"}],
         "spans": {"clean_turns": ["t1"], "proposed": [], "committed": []},
     }
-    graph = _RevGraph(pages=[[_row(1)]], prior=_OLD, retire_subjects={"rest": ["s1", "s3"]})
+    graph = _RevGraph(pages=[[_row(1)]], prior=_OLD, retire_subjects=["s1", "s3"])
     _run(graph, match=match)
     names = graph.names()
     rest = len(names) - 1 - names[::-1].index("retire_prior_version_occurrences")

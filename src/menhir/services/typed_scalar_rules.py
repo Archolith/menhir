@@ -1001,13 +1001,20 @@ def _span_states_value(value: Any, stated_span: str) -> bool:
     return True
 
 
+#: drop reasons that judge a well-formed row's quoted span (temporal and shape drops stay unclean).
+_SPAN_JUDGEMENT_DROPS = frozenset({"occurrence_not_happened", "hedged_value", "ended_state"})
+
+
 def _attributed_drop(
     drop: "Callable[[str], None]", unclean: "Callable[[int | None], None]", index: int | None,
 ) -> "Callable[[str], None]":
-    """A row's drop seam that also marks its episode as not fully read."""
+    """A row's drop seam that also marks its episode as not fully read, except for a rejection the
+    rules make on the quoted span itself: the sample did read the turn, and the new version says
+    nothing countable is there, so a re-version may retire an old row it covers."""
     def _row_drop(reason: str) -> None:
         drop(reason)
-        unclean(index)
+        if reason not in _SPAN_JUDGEMENT_DROPS:
+            unclean(index)
     return _row_drop
 
 
