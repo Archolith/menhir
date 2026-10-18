@@ -311,8 +311,9 @@ class OpenAIStyleChatBackend:
         try:
             # 429s are retried here because the judges call with max_retries=0, and a None
             # verdict from a throttle reads as "model unavailable" and changes merge decisions.
+            # Use the raw endpoint: this backend's handle is the only one, else the call is recorded twice.
             response = await acreate_chat_completion(
-                client.chat.completions.create,
+                getattr(client, "_inner", client).chat.completions.create,
                 request,
                 base_url=base_url,
                 label=operation,

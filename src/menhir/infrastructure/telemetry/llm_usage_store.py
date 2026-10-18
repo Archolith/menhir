@@ -10,6 +10,9 @@ from typing import Any
 _ERROR_CODE_SHAPE = re.compile(r"[A-Za-z0-9_.-]{1,64}(?::[0-9]{1,3}(?::[A-Za-z0-9_.:-]{1,64})?)?")
 
 
+_SERVICE_TIER_SHAPE = re.compile(r"[A-Za-z0-9_.-]{1,32}")
+
+
 def initialize_llm_usage_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -31,7 +34,9 @@ def initialize_llm_usage_schema(conn: sqlite3.Connection) -> None:
             reasoning_output_tokens INTEGER,
             provider_usage_json TEXT,
             error TEXT,
-            error_code TEXT
+            error_code TEXT,
+            cache_write_input_tokens INTEGER,
+            service_tier TEXT
         )
         """
     )
@@ -39,6 +44,10 @@ def initialize_llm_usage_schema(conn: sqlite3.Connection) -> None:
     columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(llm_usage_events)")}
     if "error_code" not in columns:
         conn.execute("ALTER TABLE llm_usage_events ADD COLUMN error_code TEXT")
+    if "cache_write_input_tokens" not in columns:
+        conn.execute("ALTER TABLE llm_usage_events ADD COLUMN cache_write_input_tokens INTEGER")
+    if "service_tier" not in columns:
+        conn.execute("ALTER TABLE llm_usage_events ADD COLUMN service_tier TEXT")
     conn.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_llm_usage_run_recorded
@@ -77,11 +86,15 @@ class TelemetryLLMUsageStoreMixin:
         provider_usage_json: str | None,
         error: str | None,
         error_code: str | None = None,
+        cache_write_input_tokens: int | None = None,
+        service_tier: str | None = None,
     ) -> bool:
         # error_code is inventoried as non-content; a direct caller must not be able to put free
         # text there, so anything outside the identifier shape is dropped.
         if error_code is not None and not _ERROR_CODE_SHAPE.fullmatch(error_code):
             error_code = None
+        if service_tier is not None and not _SERVICE_TIER_SHAPE.fullmatch(service_tier):
+            service_tier = None
         self._ensure_ready()
         with self._connect() as conn:
             cursor = conn.execute(
@@ -90,8 +103,9 @@ class TelemetryLLMUsageStoreMixin:
                     call_id, recorded_at, run_id, episode_uuid, operation, kind,
                     model, endpoint, status, duration_ms, input_tokens, output_tokens,
                     total_tokens, cached_input_tokens, reasoning_output_tokens,
-                    provider_usage_json, error, error_code
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    provider_usage_json, error, error_code,
+                    cache_write_input_tokens, service_tier
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     call_id,
@@ -112,6 +126,8 @@ class TelemetryLLMUsageStoreMixin:
                     provider_usage_json,
                     error,
                     error_code,
+                    cache_write_input_tokens,
+                    service_tier,
                 ),
             )
             conn.commit()
@@ -134,7 +150,8 @@ class TelemetryLLMUsageStoreMixin:
                        COALESCE(SUM(output_tokens), 0) AS output_tokens,
                        COALESCE(SUM(total_tokens), 0) AS total_tokens,
                        COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
-                       COALESCE(SUM(reasoning_output_tokens), 0) AS reasoning_output_tokens
+                       COALESCE(SUM(reasoning_output_tokens), 0) AS reasoning_output_tokens,
+                       COALESCE(SUM(cache_write_input_tokens), 0) AS cache_write_input_tokens
                 FROM llm_usage_events
                 {where}
                 """,
@@ -147,7 +164,8 @@ class TelemetryLLMUsageStoreMixin:
                        COALESCE(SUM(output_tokens), 0) AS output_tokens,
                        COALESCE(SUM(total_tokens), 0) AS total_tokens,
                        COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
-                       COALESCE(SUM(reasoning_output_tokens), 0) AS reasoning_output_tokens
+                       COALESCE(SUM(reasoning_output_tokens), 0) AS reasoning_output_tokens,
+                       COALESCE(SUM(cache_write_input_tokens), 0) AS cache_write_input_tokens
                 FROM llm_usage_events
                 {where}
                 GROUP BY kind, model, endpoint

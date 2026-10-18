@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 import logging
+import re
 from time import perf_counter
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -45,6 +46,10 @@ class LLMUsageEvent:
     total_tokens: int | None = None
     cached_input_tokens: int | None = None
     reasoning_output_tokens: int | None = None
+    #: Subset of input_tokens written to the provider cache (billed above the plain input rate).
+    cache_write_input_tokens: int | None = None
+    #: Billing tier the provider reports on the response (e.g. "flex", "default").
+    service_tier: str | None = None
     provider_usage: dict[str, Any] | None = None
     error: str | None = None
     #: Content-free failure label (``provider_error_code``), persisted where ``error`` is redacted.
@@ -128,6 +133,8 @@ def _emit_llm_usage_event(
     total_tokens: int | None = None,
     cached_input_tokens: int | None = None,
     reasoning_output_tokens: int | None = None,
+    cache_write_input_tokens: int | None = None,
+    service_tier: str | None = None,
     provider_usage: dict[str, Any] | None = None,
     error: str | None = None,
     error_code: str | None = None,
@@ -151,6 +158,8 @@ def _emit_llm_usage_event(
                 total_tokens=total_tokens,
                 cached_input_tokens=cached_input_tokens,
                 reasoning_output_tokens=reasoning_output_tokens,
+                cache_write_input_tokens=cache_write_input_tokens,
+                service_tier=service_tier,
                 provider_usage=provider_usage,
                 error=error,
                 error_code=error_code,
@@ -169,6 +178,10 @@ def _emit_llm_usage_event(
             endpoint,
             exc_info=True,
         )
+
+
+#: Content-free provider tier identifier (e.g. "flex", "default").
+_SERVICE_TIER_SHAPE = re.compile(r"[A-Za-z0-9_.-]{1,32}")
 
 
 def _value(source: Any, *names: str) -> Any:
@@ -243,12 +256,14 @@ def _normalized_usage(usage: Any) -> dict[str, Any]:
     reasoning_output_tokens = _nonnegative_int(_value(usage, "thoughtsTokenCount"))
     if reasoning_output_tokens is None:
         reasoning_output_tokens = _nonnegative_int(_value(completion_details, "reasoning_tokens"))
+    cache_write_input_tokens = _nonnegative_int(_value(prompt_details, "cache_write_tokens"))
     return {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
         "cached_input_tokens": cached_input_tokens,
         "reasoning_output_tokens": reasoning_output_tokens,
+        "cache_write_input_tokens": cache_write_input_tokens,
         "provider_usage": raw,
     }
 
@@ -297,6 +312,9 @@ def complete_llm_usage_call(
     clear_provider_quota_exhaustion(handle.kind)
     try:
         normalized = _normalized_usage(usage if usage is not None else _value(result, "usage"))
+        service_tier = _value(result, "service_tier") if result is not None else None
+        if not (isinstance(service_tier, str) and _SERVICE_TIER_SHAPE.fullmatch(service_tier)):
+            service_tier = None
         _emit_llm_usage_event(
             handle.kind,
             phase="completed",
@@ -305,6 +323,7 @@ def complete_llm_usage_call(
             operation=handle.operation,
             call_id=handle.call_id,
             duration_ms=int((perf_counter() - handle.started_at) * 1000),
+            service_tier=service_tier,
             **normalized,
             report_only=handle.report_only,
         )
