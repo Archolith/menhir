@@ -212,6 +212,7 @@ class RecallRequest(BaseModel):
     # raw episodes, so it is off whenever include_session is False (promoted
     # knowledge only).
     source_memory_limit: int | None = Field(default=None, ge=0, le=50)
+    counted_verdict_limit: int | None = Field(default=None, ge=0, le=50)
 
 
 class RecallTemporalFact(BaseModel):

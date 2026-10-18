@@ -105,6 +105,7 @@ class BackendClientOpsMixin:
         file_context_project: str | None = None,
         namespace: str | None = None,
         source_memory_limit: int | None = None,
+        counted_verdict_limit: int | None = None,
         include_warden_status: bool = False,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {
@@ -124,6 +125,8 @@ class BackendClientOpsMixin:
             params["include_warden_status"] = True
         if source_memory_limit is not None:
             params["source_memory_limit"] = int(source_memory_limit)
+        if counted_verdict_limit is not None:
+            params["counted_verdict_limit"] = int(counted_verdict_limit)
         return await self._request("recall", params)
 
     async def recall_history(
