@@ -34,6 +34,9 @@ DECIDE_K = 3
 DECIDE_THRESHOLD = 2 / 3
 #: a row is re-decided at most this many times in total (R3-8).
 MAX_DECIDE_ATTEMPTS = 3
+#: a namespace with no new turns re-decides a row only this long after its last decision, so the
+#: scheduler's quiet-namespace sweep cannot spend every attempt in a few ticks on unchanged input.
+REDECIDE_COOLDOWN_S = 3600
 #: re-decide candidates per namespace pass, oldest first.
 REDECIDE_LIMIT = 100
 #: cosine on `count_key_embedding` at or above which two happenings are related (after token hits).

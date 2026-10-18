@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
+from menhir.domain.namespace import normalize_namespace, tenant_scope_cypher, tenant_scope_params
 
 _OCCURRENCE_FIELDS = """
        a.assertion_id AS assertion_id, a.subject_uuid AS subject_uuid,
@@ -47,6 +47,36 @@ def _counted(v: str) -> str:
     (`status_of`'s rule), so a carried pre-match row is still a target a retelling relates to."""
     return (f" ({v}.count_status = 'counted' OR ({v}.count_status IS NULL"
             f" AND NOT coalesce({v}.perceiver_version, '+m') ENDS WITH '+m')) ")
+
+
+#: no decision yet (the undecided sweep's set).
+_UNDECIDED = " a.count_status IS NULL "
+#: last decided at least $cooldown seconds ago (the quiet-namespace re-decide gate).
+_COOLED = (" AND (a.count_decided_at IS NULL"
+           " OR a.count_decided_at < datetime() - duration({seconds: $cooldown})) ")
+
+
+def _redecide(target_scope: str, *, cooled: bool = False) -> str:
+    """Uncertain, or repeat/same_event whose target is no longer a current counted row of the same
+    subject in scope; under $max attempts (the re-decide set). Shared by the per-namespace read and
+    the namespace listing so the two cannot drift; only the target's scope predicate differs.
+    `cooled` adds the $cooldown gate."""
+    return " coalesce(a.count_attempts, 0) < $max " + (_COOLED if cooled else "") + """
+      AND (a.count_status = 'uncertain'
+           OR (a.count_status IN ['repeat', 'same_event'] AND NOT EXISTS {
+                 MATCH (t:TypedAssertion {assertion_id: a.count_target_id})
+                 WHERE """ + _counted("t") + """ AND t.subject_uuid = a.subject_uuid
+                       AND """ + target_scope + " AND " + _live("t") + """
+               })) """
+
+
+_REDECIDE = _redecide(tenant_scope_cypher("t"))
+_REDECIDE_COOLED = _redecide(tenant_scope_cypher("t"), cooled=True)
+#: listing: the target must share the row's namespace. A spelling mismatch can only over-list (the
+#: scoped per-namespace read then decides), never hide a namespace. Always cooled: it is the
+#: quiet-namespace path.
+_REDECIDE_ANY_NAMESPACE = _redecide(
+    "coalesce(t.namespace, t.group_id, '') = coalesce(a.namespace, a.group_id, '')", cooled=True)
 
 #: the decision SET shared by plain decisions (d) on node a.
 _SET_DECISION = """
@@ -156,7 +186,7 @@ class CountDecisionRepository:
         binding repaired later), oldest first."""
         rows = self._neo4j.execute(
             "MATCH (a:TypedAssertion) WHERE " + tenant_scope_cypher("a") + " AND "
-            + _CURRENT_OCCURRENCE + " AND a.count_status IS NULL RETURN " + _OCCURRENCE_FIELDS
+            + _CURRENT_OCCURRENCE + " AND " + _UNDECIDED + " RETURN " + _OCCURRENCE_FIELDS
             + " ORDER BY a.valid_at ASC, a.assertion_id ASC LIMIT $limit",
             params={"pv": str(perceiver_version), "limit": int(limit),
                     **tenant_scope_params(namespace)},
@@ -165,31 +195,43 @@ class CountDecisionRepository:
 
     def redecide_occurrences(
         self, namespace: str, *, perceiver_version: str, max_attempts: int, limit: int,
-        exclude_run_id: str = "",
+        exclude_run_id: str = "", cooldown_s: int | None = None,
     ) -> list[dict[str, Any]]:
         """Current occurrences to decide again, oldest first: `uncertain` rows, and repeat or
         same_event rows whose target is no longer a current counted row of the same subject in this
         namespace (deleted, superseded, swapped). Rows already decided `max_attempts` times are left
         as they are (they fold as uncertain), and rows decided by `exclude_run_id` (this run) wait
-        for a later pass, so one pass cannot spend every attempt."""
+        for a later pass, so one pass cannot spend every attempt. With `cooldown_s`, only rows last
+        decided at least that long ago (the quiet-namespace sweep)."""
+        cooled = cooldown_s is not None
         rows = self._neo4j.execute(
             "MATCH (a:TypedAssertion) WHERE " + tenant_scope_cypher("a") + " AND "
             + _CURRENT_OCCURRENCE + """
-              AND coalesce(a.count_attempts, 0) < $max
               AND coalesce(a.count_run_id, '') <> $exclude_run_id
-              AND (a.count_status = 'uncertain'
-                   OR (a.count_status IN ['repeat', 'same_event'] AND NOT EXISTS {
-                         MATCH (t:TypedAssertion {assertion_id: a.count_target_id})
-                         WHERE """ + _counted("t") + """ AND t.subject_uuid = a.subject_uuid
-                               AND """ + tenant_scope_cypher("t") + " AND " + _live("t") + """
-                       }))
+              AND """ + (_REDECIDE_COOLED if cooled else _REDECIDE) + """
             RETURN """ + _OCCURRENCE_FIELDS
             + " ORDER BY a.valid_at ASC, a.assertion_id ASC LIMIT $limit",
             params={"pv": str(perceiver_version), "max": int(max_attempts), "limit": int(limit),
                     "exclude_run_id": str(exclude_run_id or ""),
+                    **({"cooldown": int(cooldown_s)} if cooled else {}),
                     **tenant_scope_params(namespace)},
         )
         return [dict(r) for r in rows]
+
+    def pending_decision_namespaces(
+        self, *, perceiver_version: str, max_attempts: int, limit: int, cooldown_s: int,
+    ) -> list[str]:
+        """Namespaces holding a current occurrence of this counting version that the undecided
+        sweep or the cooled re-decide pass would pick up. Unscoped on purpose: it lists
+        namespaces."""
+        rows = self._neo4j.execute(
+            "MATCH (a:TypedAssertion) WHERE " + _CURRENT_OCCURRENCE
+            + " AND (" + _UNDECIDED + " OR (" + _REDECIDE_ANY_NAMESPACE + "))"
+            + " RETURN DISTINCT a.namespace AS namespace ORDER BY namespace LIMIT $limit",
+            params={"pv": str(perceiver_version), "max": int(max_attempts), "limit": int(limit),
+                    "cooldown": int(cooldown_s)},
+        )
+        return list(dict.fromkeys(normalize_namespace(r.get("namespace")) for r in rows))
 
     def record_count_decisions(
         self, namespace: str, decisions: list[dict[str, Any]], *, perceiver_version: str,
