@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -132,8 +134,10 @@ async def test_e2e_09_scalar_state(
                 lane_evidence.record(
                     "assertions_are_current_and_agent_tier",
                     passed=ops == [("absolute", 37.0), ("delta", 5.0)]
-                    and all(r["claim_ordinal"] == 0 for r in rows),
-                    detail={"current_ops": ops, "rows": len(rows)},
+                    and all(r["claim_ordinal"] == 0 for r in rows)
+                    and all(r["evidence_tier"] == "agent" for r in rows),
+                    detail={"current_ops": ops, "rows": len(rows),
+                            "tiers": sorted({str(r["evidence_tier"]) for r in rows})},
                 )
 
                 recalled = _text(await client.call_tool(
@@ -166,6 +170,21 @@ STAMPS = [Obs("I have 12 stamps", {"attribute": "stamps", "value_kind": "count",
                                    "operation": "absolute", "value": 12})]
 
 
+def _shadow_events(db: Path) -> list[dict]:
+    """The deterministic-shadow audit events the backend recorded (read-only)."""
+    if not db.exists():
+        return []
+    conn = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
+    try:
+        rows = conn.execute(
+            "SELECT status, details_json FROM lifecycle_events "
+            "WHERE event = 'deterministic_shadow' ORDER BY id").fetchall()
+    finally:
+        conn.close()
+    return [{"status": status, "details": json.loads(details) if details else None}
+            for status, details in rows]
+
+
 async def test_e2e_09_scalar_router_and_shadow(
     e2e_config: E2EConfig,
     e2e_installed,
@@ -179,11 +198,16 @@ async def test_e2e_09_scalar_router_and_shadow(
     # must still reach the model.
     namespace = f"e2e9r-{uuid4().hex[:12]}"
     script = Script([Rule("scalar", SCALAR_PROMPT, envelope_reply(STAMPS))])
+    # The shadow's only success signal is a consolidation-audit event, so audit is on and its
+    # telemetry DB is this lane's own file.
+    telemetry_db = lane_evidence.directory / "telemetry.db"
     with scripted_model(script) as model:
         env = {**feature_env, **model.env, **SCALAR_ON,
                "MENHIR_PERSONAL_MEMORY_SCALAR_DETERMINISTIC_ROUTER": "true",
                "MENHIR_PERSONAL_MEMORY_SCALAR_DETERMINISTIC_CLASSES": "c_measurement",
-               "MENHIR_SCALAR_DETERMINISTIC_SHADOW": "true"}
+               "MENHIR_SCALAR_DETERMINISTIC_SHADOW": "true",
+               "MENHIR_PERSONAL_MEMORY_CONSOLIDATION_AUDIT_ENABLED": "true",
+               "MENHIR_MCP_TELEMETRY_DB": str(telemetry_db)}
         with lane_backend(e2e_config, e2e_installed, lane_evidence, env):
             async with stdio_session(e2e_config, e2e_installed.venv_python, lane_evidence,
                                      feature_env=env) as client:
@@ -218,10 +242,14 @@ async def test_e2e_09_scalar_router_and_shadow(
             log = (lane_evidence.directory / "backend.log").read_text(encoding="utf-8",
                                                                       errors="replace")
             failed = "deterministic scalar shadow failed" in log
+            shadow = _shadow_events(telemetry_db)
+            lane_evidence.attach("shadow-events.json", json.dumps(shadow, indent=2, default=str))
             lane_evidence.record(
                 "shadow_compares_without_changing_the_result",
-                passed=not failed and len(views) == 2,
-                detail={"shadow_failed_in_log": failed},
+                passed=not failed and len(views) == 2 and bool(shadow)
+                and all(e["status"] == "ok" for e in shadow),
+                detail={"shadow_failed_in_log": failed,
+                        "shadow_events": [e["status"] for e in shadow]},
             )
 
     lane_evidence.record("no_unscripted_model_prompt", passed=_no_unmatched(script, lane_evidence),
