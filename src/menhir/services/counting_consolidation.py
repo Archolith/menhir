@@ -33,6 +33,7 @@ from menhir.domain.count_decide import (
     DECIDE_K,
     DECIDE_SYSTEM_PROMPT,
     MAX_DECIDE_ATTEMPTS,
+    REDECIDE_COOLDOWN_S,
     REDECIDE_LIMIT,
     apply_decide_rules,
     build_decide_prompt,
@@ -224,11 +225,11 @@ class CountMatchGraph(Protocol):
 
     def redecide_count_occurrences(
         self, namespace: str, *, perceiver_version: str, max_attempts: int, limit: int,
-        exclude_run_id: str = "",
+        exclude_run_id: str = "", cooldown_s: int | None = None,
     ) -> list[dict[str, Any]]: ...
 
     def pending_decision_namespaces(
-        self, *, perceiver_version: str, max_attempts: int, limit: int,
+        self, *, perceiver_version: str, max_attempts: int, limit: int, cooldown_s: int,
     ) -> list[str]: ...
 
     def record_count_decisions(
@@ -338,6 +339,8 @@ def run_counting_consolidation(
     fenced = 0
     batches = 0
     targets: list[str] = []
+    #: listed only because rows wait for a decision (no new turns).
+    pending_only: set[str] = set()
     service = None
 
     try:
@@ -370,15 +373,25 @@ def run_counting_consolidation(
             )
             if match and len(targets) < config.max_namespaces:
                 # A namespace with no new turns is never dirty, so its undecided and re-decide
-                # rows would wait for a new turn. List those too, after the dirty ones.
-                pending = graph_adapter.pending_decision_namespaces(
-                    perceiver_version=perceiver_version, max_attempts=MAX_DECIDE_ATTEMPTS,
-                    limit=config.max_namespaces)
+                # rows would wait for a new turn. List those too, after the dirty ones. Optional:
+                # a failed listing must not stop the dirty namespaces.
+                try:
+                    pending = graph_adapter.pending_decision_namespaces(
+                        perceiver_version=perceiver_version, max_attempts=MAX_DECIDE_ATTEMPTS,
+                        limit=config.max_namespaces, cooldown_s=REDECIDE_COOLDOWN_S)
+                except Exception:
+                    logger.exception("counting: pending-decision listing failed; dirty only")
+                    pending = []
+                pending_only = set(pending) - set(targets)
                 targets = list(dict.fromkeys(targets + pending))[:config.max_namespaces]
         run_id = uuid4().hex
         for namespace in targets:
             if call_budget is not None and counting_llm.calls >= call_budget:
                 break
+            if (namespace in pending_only and call_budget is not None
+                    and call_budget - counting_llm.calls < DECIDE_K):
+                # Nothing to read, and too little budget for one decide: a claim would only embed.
+                continue
             claim = graph_adapter.claim_counting_namespace(
                 namespace, run_id=run_id, lease_seconds=config.lease_seconds,
                 now=datetime.now(timezone.utc).isoformat())
@@ -524,7 +537,11 @@ def run_counting_consolidation(
                         graph_adapter.redecide_count_occurrences(
                             namespace, perceiver_version=perceiver_version,
                             max_attempts=MAX_DECIDE_ATTEMPTS, limit=REDECIDE_LIMIT,
-                            exclude_run_id=run_id),
+                            exclude_run_id=run_id,
+                            # Quiet namespace: no new input since the last decision, so wait out
+                            # the cooldown instead of spending an attempt every tick.
+                            **({"cooldown_s": REDECIDE_COOLDOWN_S}
+                               if namespace in pending_only else {})),
                         redecide=True)
             except CountingFenceLost as exc:
                 fenced += 1
