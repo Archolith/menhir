@@ -4,6 +4,7 @@ agreement the other samples reached. Shapes come from the audited model-kit run 
 
 from __future__ import annotations
 
+import itertools
 import random
 
 import pytest
@@ -135,6 +136,38 @@ def test_random_spans_commit_the_same_spans_in_any_sample_order():
         base = _committed_spans(samples, resolve_bridges=True)
         for order in ((1, 2, 0), (2, 0, 1), (2, 1, 0)):
             assert _committed_spans([samples[i] for i in order], resolve_bridges=True) == base
+
+
+_ORDERS = list(itertools.permutations(range(3)))
+
+
+@pytest.mark.unit
+def test_identical_span_bridges_from_two_samples_commit_the_same_in_every_order():
+    # Both samples quote [0,10] and both quotes are bridges. Setting aside only one of them, chosen
+    # by sample position, committed (9,10) in one order and (2,4) in another.
+    samples = [[_prop(0, 10), _prop(9, 12)], [], [_prop(0, 10), _prop(2, 4)]]
+    got = {tuple(_committed_spans([samples[i] for i in o], resolve_bridges=True))
+           for o in _ORDERS}
+    assert len(got) == 1, got
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("v2", [False, True])
+def test_coarse_grid_spans_commit_the_same_spans_in_all_six_orders(v2):
+    # Coarse offsets make samples quote identical spans, the shape continuous random spans miss.
+    rng = random.Random(30711 + v2)
+    kw = {"resolve_bridges": True, **({"counting_v2": True} if v2 else {})}
+    for _ in range(2000):
+        samples = []
+        for _ in range(3):
+            sample = []
+            for _ in range(rng.randint(0, 3)):
+                start = rng.randint(0, 6)
+                sample.append(_prop(start, start + rng.randint(1, 5)))
+            samples.append(sample)
+        base = _committed_spans(samples, **kw)
+        for order in _ORDERS[1:]:
+            assert _committed_spans([samples[i] for i in order], **kw) == base, samples
 
 
 @pytest.mark.unit

@@ -1504,7 +1504,9 @@ def _drop_bridges(
     which of them it votes for, so it votes for none. Removing it only splits the component, and
     every resulting part still faces the unchanged one-per-sample and common-span checks, so this
     never forms a group those checks would refuse. Widest first, because a long quote that spans
-    several narrow ones is the least specific reading. Removed bridges fall through as singletons."""
+    several narrow ones is the least specific reading. Bridges tied on (width, start, end) are set
+    aside together: picking one by sample position would make the result depend on sample order.
+    Removed bridges fall through as singletons."""
     if len({flat[i][0] for i in part}) == len(part):
         return [part]
 
@@ -1520,10 +1522,12 @@ def _drop_bridges(
             bridges.append(i)
     if not bridges:
         return [part]  # ambiguous without a bridge: left to the caller's fail-closed checks
-    widest = min(bridges, key=lambda i: (
-        -(flat[i][1].span_end - flat[i][1].span_start), flat[i][1].span_start,
-        flat[i][1].span_end, flat[i][1].source_key, flat[i][0]))
-    rest = [i for i in part if i != widest]
+    def _rank(i: int) -> tuple[int, int, int]:
+        p = flat[i][1]
+        return (-(p.span_end - p.span_start), p.span_start, p.span_end)
+
+    widest = min(_rank(i) for i in bridges)
+    rest = [i for i in part if not (i in bridges and _rank(i) == widest)]
     return [sub for comp in _overlap_components(flat, rest) if len(comp) >= 2
             for sub in _drop_bridges(flat, comp)]
 
