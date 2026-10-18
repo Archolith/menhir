@@ -90,6 +90,30 @@ def test_history_lists_what_the_counted_view_counts_or_reports_uncertain():
     assert set(history) == {"a1", "a2"} | {"d1", "u1", "n1"}
 
 
+def _same_turn(row, turn, item):
+    return {**row, "turn_id": turn, "episode_uuid": turn, "count_item": item}
+
+
+@pytest.mark.unit
+def test_match_history_collapses_one_happening_per_turn_like_the_fold():
+    # "I bought and finished the Gundam kit" is one turn, one item, two family-keyed rows: the
+    # fold counts it once, so history must list it once. A counted row and an uncertain row for
+    # the same turn and item likewise collapse to the counted one. Fails without the collapse.
+    rows = [
+        _same_turn(_occ("b1", 1, attribute="kit_bought_count", status="counted"), "t1", "gundam"),
+        _same_turn(_occ("f1", 1, status="counted"), "t1", "gundam"),
+        _same_turn(_occ("c2", 2, status="counted"), "t2", "zaku"),
+        _same_turn(_occ("u2", 2, status="uncertain"), "t2", "zaku"),
+        _same_turn(_occ("k3", 3, status="counted"), "t3", "rx78"),
+    ]
+    fold = fold_assertions(rows, count_match=True)
+    (state,) = [s for s in fold.states if s.attribute == "model_kit_count"]
+    history = _slots(build_history(rows, count_match=True))[("model_kit_count", "")]
+    assert len(history) == len(state.contributed_occurrence_ids) + state.count_uncertain == 3
+    assert set(history) == set(state.contributed_occurrence_ids)
+    assert "u2" not in history
+
+
 @pytest.mark.unit
 def test_service_rebuild_under_match_writes_family_views_and_retires_raw_slot_ones():
     # Fails if a match rebuild keeps the old raw-slot history Views current next to the family View.

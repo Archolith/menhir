@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from menhir.domain.count_match import COUNTED, TARGETED_STATUSES, match_slot_row, status_of
+from menhir.domain.scalar_state_fold import _dedup_occurrences_per_turn
 from menhir.domain.temporal import parse_iso8601
 from menhir.domain.typed_assertion import normalize_scalar, slot_of as _slot_of
 
@@ -162,8 +163,13 @@ def _match_history_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     counted_ids = {str(r.get("assertion_id") or "") for r in rows
                    if _occ(r) and status_of(r) == COUNTED} - {""}
+    # Same order as the match fold: family-key, collapse one occurrence per (slot, turn, item),
+    # then drop repeats of a counted row. Without the collapse, "bought and finished the kit" in
+    # one turn is one counted happening but two history entries.
+    keyed = _dedup_occurrences_per_turn(
+        [match_slot_row(r) if _occ(r) else r for r in rows], count_match=True)
     out: list[dict[str, Any]] = []
-    for r in rows:
+    for r in keyed:
         if not _occ(r):
             out.append(r)
             continue
@@ -171,7 +177,7 @@ def _match_history_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if (status_of(r) in TARGETED_STATUSES and target
                 and target != str(r.get("assertion_id") or "") and target in counted_ids):
             continue
-        out.append(match_slot_row(r))
+        out.append(r)
     return out
 
 
