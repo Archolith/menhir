@@ -28,6 +28,7 @@ REQUIRED_LANES = frozenset(
         "test_e2e_09_scalar_binding_repair[mvp_default]",
         "test_e2e_09_scalar_history[mvp_default]",
         "test_e2e_10_counting[mvp_default]",
+        "test_e2e_11_count_match_bridges[mvp_default]",
         "test_e2e_10_counting_extract_v2[mvp_default]",
         "test_e2e_10_count_match_decide[mvp_default]",
         "test_e2e_10_family_view_recall[mvp_default]",
