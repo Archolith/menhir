@@ -317,7 +317,9 @@ def test_record_scalar_state_persists_canonical_duration_with_elapsed_display():
     assert extra["ss_value"] == "1550"
     assert extra["ss_unit"] == "seconds"
     assert extra["ss_display"] == "25:50"
-    assert "personal best time: 25:50" in create_params["name"]
+    # The surface lives in view_name; name stays empty so the full-text index sees no terms.
+    assert "personal best time: 25:50" in extra["view_name"]
+    assert create_params["name"] == ""
 
 
 # --- C.2 same-value authority refresh + slot retirement ----------------------------
@@ -380,7 +382,8 @@ def test_same_signature_fold_fully_refreshes_projection():
     assert refresh["scalar_contributors"] == ["anc", "d1"]
     assert refresh["view_subject"] == "coin collection"         # surface fields refreshed too
     assert refresh["ss_display"] == "38 coins"
-    assert "coin collection" in refresh["name"]
+    assert "coin collection" in refresh["view_name"]
+    assert refresh["name"] == "" and refresh["summary"] == ""
 
 
 @pytest.mark.unit

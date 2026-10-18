@@ -320,11 +320,12 @@ _PROCESSING_DETAIL_FIELDS = (
 MEMORY_RETURN_FIELDS = (
     "labels(n) AS labels",
     "n.uuid AS uuid",
-    "n.name AS name",
+    # Scalar Views keep their text in view_name/view_summary, out of the full-text index.
+    "coalesce(n['view_name'], n.name) AS name",
     "n.type AS type",
     "n.scope AS scope",
     "n.content AS content",
-    "n.summary AS summary",
+    "coalesce(n['view_summary'], n.summary) AS summary",
     "n.status AS status",
     "n.artifact_status AS artifact_status",
     "n.superseded_by AS superseded_by",
@@ -354,11 +355,11 @@ MEMORY_RETURN_FIELDS = (
 # Entity metadata for scoring/recall.
 ENTITY_METADATA_FIELDS = (
     "n.uuid AS uuid",
-    "n.name AS name",
+    "coalesce(n['view_name'], n.name) AS name",
     "n.scope AS scope",
     "n.type AS type",
     "n.content AS content",
-    "n.summary AS summary",
+    "coalesce(n['view_summary'], n.summary) AS summary",
     "n.status AS status",
     "n.artifact_status AS artifact_status",
     "n.superseded_by AS superseded_by",

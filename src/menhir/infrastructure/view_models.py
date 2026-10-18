@@ -133,6 +133,11 @@ class ViewKind(ABC):
     #: supersession is driven by the signature (the whole set changed), not by which arrived latest.
     lww_register: bool = False
 
+    #: False: the surface text goes to view_name/view_summary and name/summary stay empty, so the
+    #: node adds no terms to Graphiti's shared :Entity full-text index (node_name_and_summary).
+    #: Every version stays an :Entity; only its keyword-index footprint changes.
+    keyword_indexed: bool = True
+
     @abstractmethod
     def key_discriminator(self, payload: dict[str, Any]) -> str:
         """The per-subject key segment (`ns::subject::<this>`). Constant for single-slot kinds
@@ -519,6 +524,9 @@ class ScalarStateKind(ViewKind):
 
     name = "scalar_state"
     lww_register = True  # register semantics; rebuild writes bypass it (authoritative replacement)
+    # Recall reaches these by slot/uuid, not keyword search; indexed, every version shifted BM25
+    # ranks of ordinary entities (LME counting A/B, 2026-10-17).
+    keyword_indexed = False
     read_fields = (
         "n.uuid AS uuid, n.view_subject AS subject, n.view_subject_uuid AS subject_uuid, "
         "n.ss_attribute AS attribute, n.ss_scope AS scope, n.ss_kind AS value_kind, "
@@ -639,6 +647,7 @@ class ScalarHistoryKind(ViewKind):
 
     name = "scalar_history"
     lww_register = False  # set semantics: signature-driven supersession, not LWW
+    keyword_indexed = False  # same as scalar_state: read through the history lane, not search
 
     read_fields = (
         "n.uuid AS uuid, n.view_subject AS subject, n.view_subject_uuid AS subject_uuid, "
