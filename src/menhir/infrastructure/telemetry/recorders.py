@@ -61,6 +61,8 @@ def record_llm_usage_event(
             total_tokens=event.total_tokens,
             cached_input_tokens=event.cached_input_tokens,
             reasoning_output_tokens=event.reasoning_output_tokens,
+            cache_write_input_tokens=getattr(event, "cache_write_input_tokens", None),
+            service_tier=getattr(event, "service_tier", None),
             provider_usage_json=provider_usage_json,
             error="[redacted]" if event.error else None,
             # Content-free by construction (provider_error_code); the free text stays redacted.
