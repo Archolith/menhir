@@ -27,6 +27,7 @@ from menhir.domain.count_match import (
     normalize_family,
     relation_tokens,
     row_family,
+    status_of,
 )
 
 DECIDE_K = 3
@@ -262,8 +263,8 @@ def _rule_one(
     if target in swapped_to:
         return _decision(cid, decision, target=swapped_to[target], family=family, vote_=tally,
                          reason="decided_" + decision, truncated=rs.truncated)
-    # A pool row: the pool holds only current counted rows.
-    if str(row.get("count_status") or "").strip().lower() != COUNTED:
+    # A pool row: the pool holds only current counted rows (a pre-match row counts undecided).
+    if status_of(row) != COUNTED:
         return _decision(cid, UNCERTAIN, family=family, vote_=tally, reason="target_uncertain",
                          truncated=rs.truncated)
     cand_at, target_at = str(cand.get("valid_at") or ""), str(row.get("valid_at") or "")

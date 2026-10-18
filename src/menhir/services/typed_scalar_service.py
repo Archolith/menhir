@@ -709,6 +709,7 @@ class TypedScalarPerceptionService:
         write_guard: Callable[[], None] | None = None,
         counting_v2: bool = False,
         counting_match: bool = False,
+        defer_rebuild: bool = False,
     ) -> dict[str, Any]:
         """Perceive typed scalars from `episodes` and durably persist the committed, bound ones.
 
@@ -716,6 +717,11 @@ class TypedScalarPerceptionService:
         the per-attribute claim split; it is forwarded only when True, so every other caller is
         unchanged. `counting_match` (counting lane under 4R match) lets the gate set aside bridge
         quotes (`resolve_bridges`); off everywhere else.
+
+        Counting re-version (default off): `defer_rebuild` skips the per-row rebuild, so bound rows
+        keep `projection_pending` until the caller rebuilds and marks them; the result then also
+        carries `spans` = {"clean_turns": turns every sample read in full, "proposed": every
+        sample's (episode, start, end), "committed": the gate's}.
 
         `system_prompt` / `allowed_operations` / `claim_ordinal` / `context` select the lane: the
         defaults are the scalar lane; the counting lane passes its own prompt, occurrence-only
@@ -857,13 +863,22 @@ class TypedScalarPerceptionService:
                     logger.exception("deterministic router audit emit failed (best-effort)")
 
         v2_kwargs: dict[str, Any] = {"counting_v2": True} if counting_v2 else {}
-        samples = [
-            extract_typed_scalars_once(
+        # Per sample, the episode indexes it did not fully read (None = the whole sample); only
+        # collected for the counting re-version (defer_rebuild).
+        unclean: list[set[int | None]] = []
+
+        def _extract_once() -> list[TypedScalarProposal]:
+            extra: dict[str, Any] = {}
+            if defer_rebuild:
+                marks: set[int | None] = set()
+                unclean.append(marks)
+                extra["on_unclean"] = marks.add
+            return extract_typed_scalars_once(
                 llm_episodes, llm_complete, on_drop=_note_drop,
                 system_prompt=system_prompt, allowed_operations=allowed_operations,
-                claim_ordinal=claim_ordinal, context=context, **v2_kwargs)
-            for _ in range(k)
-        ] if llm_episodes or not router_enabled else []
+                claim_ordinal=claim_ordinal, context=context, **v2_kwargs, **extra)
+
+        samples = [_extract_once() for _ in range(k)] if llm_episodes or not router_enabled else []
         kept = sum(len(s) for s in samples)
         sample_details: list[dict[str, Any]] = []
         if _audit.is_enabled():
@@ -921,7 +936,11 @@ class TypedScalarPerceptionService:
             )
         # When scalar_history is enabled, the rebuild lambda calls the coordinator
         # (which rebuilds both state and history projections) instead of state-only.
-        if self._scalar_history_enabled:
+        if defer_rebuild:
+            # The caller rebuilds once per subject after its own retire step; an incomplete
+            # result keeps projection_pending set, so a crash before that rebuild is repairable.
+            _rebuild = lambda u: {"complete": False, "deferred": True}
+        elif self._scalar_history_enabled:
             _rebuild = lambda u: self._service.rebuild_scalar_projections(
                 u, namespace=namespace, as_of=as_of, history_enabled=True)
         else:
@@ -949,6 +968,20 @@ class TypedScalarPerceptionService:
         )
         out["decisions"] = len(decisions)
         out["committed"] = sum(1 for d in decisions if d.committed)
+        if defer_rebuild:
+            # Turns every sample read in full: only there is "no sample proposed anything" evidence.
+            uuids = [str(getattr(e, "uuid", "") or "") for e in llm_episodes]
+            clean = set(uuids) if samples and len(unclean) == len(samples) else set()
+            for marks in unclean:
+                clean = set() if None in marks else clean - {
+                    uuids[i] for i in marks if i is not None and 0 <= i < len(uuids)}
+            out["spans"] = {
+                "clean_turns": sorted(clean - {""}),
+                "proposed": [(p.episode_uuid, p.span_start, p.span_end)
+                             for sample in samples for p in sample],
+                "committed": [(d.proposal.episode_uuid, d.proposal.span_start, d.proposal.span_end)
+                              for d in decisions if d.committed and d.proposal is not None],
+            }
         return out
 
     def _run_deterministic_shadow(

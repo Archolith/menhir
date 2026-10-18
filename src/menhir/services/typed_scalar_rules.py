@@ -501,15 +501,24 @@ def _expand_episode_envelopes(
     rows: list[Any],
     episode_count: int,
     drop: "Callable[[str], None]",
+    unclean: "Callable[[int | None], None] | None" = None,
 ) -> list[Any]:
     """Flatten the completeness-enforcing response shape while accepting legacy flat rows.
 
     Envelope mode is machine-checkable: one object per input episode, including an explicit empty
     list when no scalar exists. Legacy flat arrays remain valid for frozen captures, experiments,
     and callers using the parser boundary directly.
+
+    `unclean` (optional) is told which episode a sample did not fully read: an index, or None for
+    the whole sample. A flat array proves no per-episode coverage, so it marks the whole sample.
     """
+    def _unclean(index: int | None) -> None:
+        if unclean is not None:
+            unclean(index)
+
     envelope_mode = any(isinstance(row, dict) and "observations" in row for row in rows)
     if not envelope_mode:
+        _unclean(None)
         return rows
 
     expanded: list[Any] = []
@@ -517,14 +526,17 @@ def _expand_episode_envelopes(
     for envelope in rows:
         if not isinstance(envelope, dict):
             drop("bad_episode_envelope")
+            _unclean(None)
             continue
         index = _req_episode_index(envelope, episode_count)
         observations = envelope.get("observations")
         if index is None or not isinstance(observations, list):
             drop("bad_episode_envelope")
+            _unclean(index)
             continue
         if index in seen:
             drop("duplicate_episode_envelope")
+            _unclean(index)
             continue
         seen.add(index)
         for observation in observations:
@@ -535,12 +547,16 @@ def _expand_episode_envelopes(
             supplied = row.get("episode")
             if supplied is not None and supplied != index:
                 drop("episode_envelope_mismatch")
+                _unclean(index)
                 continue
             row["episode"] = index
             expanded.append(row)
 
     for _missing in range(episode_count - len(seen)):
         drop("missing_episode_envelope")
+    for index in range(episode_count):
+        if index not in seen:
+            _unclean(index)
     return expanded
 
 
@@ -985,6 +1001,23 @@ def _span_states_value(value: Any, stated_span: str) -> bool:
     return True
 
 
+#: drop reasons that judge a well-formed row's quoted span (temporal and shape drops stay unclean).
+_SPAN_JUDGEMENT_DROPS = frozenset({"occurrence_not_happened", "hedged_value", "ended_state"})
+
+
+def _attributed_drop(
+    drop: "Callable[[str], None]", unclean: "Callable[[int | None], None]", index: int | None,
+) -> "Callable[[str], None]":
+    """A row's drop seam that also marks its episode as not fully read, except for a rejection the
+    rules make on the quoted span itself: the sample did read the turn, and the new version says
+    nothing countable is there, so a re-version may retire an old row it covers."""
+    def _row_drop(reason: str) -> None:
+        drop(reason)
+        if reason not in _SPAN_JUDGEMENT_DROPS:
+            unclean(index)
+    return _row_drop
+
+
 def extract_typed_scalars_once(
     episodes: list[Any], llm_complete: LlmComplete,
     *, on_drop: "Callable[[str], None] | None" = None,
@@ -993,8 +1026,12 @@ def extract_typed_scalars_once(
     claim_ordinal: int = 0,
     context: str = "",
     counting_v2: bool = False,
+    on_unclean: "Callable[[int | None], None] | None" = None,
 ) -> list[TypedScalarProposal]:
     """One typed-scalar extraction pass: prose -> validated, grounded `TypedScalarProposal`s.
+
+    `on_unclean` (optional, counting re-version) is called with each episode index this pass did not
+    fully read (a dropped row, a missing or bad envelope), or None when the whole pass is unreadable.
 
     `episodes` are objects with `.uuid` and `.content` (e.g. `perception.Episode`). A row survives
     ONLY if every required field is an actual non-blank string (`subject`, `attribute`, `operation`,
@@ -1032,13 +1069,18 @@ def extract_typed_scalars_once(
     raw_rows, parse_failure = _parse_json_array(llm_complete(system_prompt, user_message))
     if parse_failure is not None:
         _drop(parse_failure)
+        if on_unclean is not None:
+            on_unclean(None)
     else:
-        raw_rows = _expand_episode_envelopes(raw_rows, len(episodes), _drop)
+        raw_rows = _expand_episode_envelopes(raw_rows, len(episodes), _drop, on_unclean)
 
     out: list[TypedScalarProposal] = []
     for row in raw_rows:
+        row_drop = _drop if on_unclean is None else _attributed_drop(
+            _drop, on_unclean,
+            _req_episode_index(row, len(episodes)) if isinstance(row, dict) else None)
         proposal = parse_scalar_row(
-            row, episodes, _drop,
+            row, episodes, row_drop,
             allowed_operations=allowed_operations, claim_ordinal=claim_ordinal,
             counting_v2=counting_v2)
         if proposal is not None:

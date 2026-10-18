@@ -114,6 +114,12 @@ class _Graph:
     def release_counting_claim(self, namespace, **kw):
         self._log("release_counting_claim", namespace, **kw)
 
+    def prior_version_occurrences(self, namespace, turn_ids, **kw):
+        return []
+
+    def mark_projection_complete(self, assertion_ids):
+        return len(assertion_ids)
+
     def retire_prior_version_occurrences(self, namespace, turn_ids, **kw):
         self._log("retire_prior_version_occurrences", namespace, list(turn_ids), **kw)
         return []
