@@ -167,6 +167,8 @@ def run_event_consolidation(
     event_namespaces_failed = 0
     event_batches = 0
     event_proposals = 0
+    event_evidence_rows = 0
+    event_proposals_admitted = 0  # self-subject proposals, the event lane's binding stage
     event_assertions_recorded = 0
     event_assertions_created = 0
     event_views_rebuilt = 0
@@ -215,6 +217,7 @@ def run_event_consolidation(
                 if not rows:
                     break
                 event_batches += 1
+                event_evidence_rows += len(rows)
                 namespace_touched = True
 
                 # Build episodes from raw trimmed user content ONLY (no date prefix); preserve the
@@ -266,6 +269,7 @@ def run_event_consolidation(
                             )
                         else:
                             _record_drop("non_self_subject")
+                    event_proposals_admitted += len(admitted)
 
                     if admitted and not self_resolved:
                         try:
@@ -405,6 +409,8 @@ def run_event_consolidation(
         "event_namespaces_failed": event_namespaces_failed,
         "event_batches": event_batches,
         "event_proposals": event_proposals,
+        "event_evidence_rows": event_evidence_rows,
+        "event_proposals_admitted": event_proposals_admitted,
         "event_assertions_recorded": event_assertions_recorded,
         "event_assertions_created": event_assertions_created,
         "event_views_rebuilt": event_views_rebuilt,

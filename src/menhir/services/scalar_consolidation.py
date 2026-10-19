@@ -142,8 +142,16 @@ def run_scalar_consolidation(
         TypedScalarPerceptionService,
     )
 
-    scalar_states_written = 0
+    scalar_states_written = 0  # bound assertions (the key predates the stage split)
     scalar_advisory = 0
+    # Stage counts (#170 item 4): rows read, gate decisions, committed, persisted, binding
+    # mismatches, Views rebuilt. Bound is scalar_states_written.
+    scalar_evidence_rows = 0
+    scalar_decisions = 0
+    scalar_committed = 0
+    scalar_persisted = 0
+    scalar_mismatched = 0
+    scalar_views_rebuilt = 0
     scalar_processed = 0
     scalar_counters_retired = 0
     scalar_batches = 0
@@ -191,6 +199,7 @@ def run_scalar_consolidation(
                 )
                 if not rows:
                     break
+                scalar_evidence_rows += len(rows)
                 episodes = build_episodes(rows)
                 if episodes:
                     reference_by_uuid = {
@@ -211,6 +220,11 @@ def run_scalar_consolidation(
                     )
                     scalar_states_written += int(perception.get("bound", 0))
                     scalar_advisory += int(perception.get("advisory", 0))
+                    scalar_decisions += int(perception.get("decisions", 0) or 0)
+                    scalar_committed += int(perception.get("committed", 0) or 0)
+                    scalar_persisted += int(perception.get("persisted", 0) or 0)
+                    scalar_mismatched += int(perception.get("mismatched", 0) or 0)
+                    scalar_views_rebuilt += int(perception.get("rebuilt", 0) or 0)
                 scalar_batches += 1
                 namespace_touched = True
 
@@ -317,6 +331,12 @@ def run_scalar_consolidation(
         "scalar_batches": scalar_batches,
         "scalar_states_written": scalar_states_written,
         "scalar_advisory": scalar_advisory,
+        "scalar_evidence_rows": scalar_evidence_rows,
+        "scalar_decisions": scalar_decisions,
+        "scalar_assertions_committed": scalar_committed,
+        "scalar_assertions_persisted": scalar_persisted,
+        "scalar_binding_mismatched": scalar_mismatched,
+        "scalar_views_rebuilt": scalar_views_rebuilt,
         "scalar_counters_retired": scalar_counters_retired,
         "scalar_repaired": scalar_repaired,
         "scalar_repair_pending": scalar_repair_pending,

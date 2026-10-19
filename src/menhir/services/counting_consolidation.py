@@ -346,6 +346,7 @@ def run_counting_consolidation(
     match_kwargs: dict[str, Any] = {"match": True} if match else {}
     decided = {"counted": 0, "uncertain": 0}
     occurrences_stored = 0
+    evidence_rows = 0
     advisory = 0
     gate_dropped = 0
     carried = 0
@@ -459,6 +460,7 @@ def run_counting_consolidation(
                     )
                     if not rows:
                         break
+                    evidence_rows += len(rows)
                     turn_ids = [str(row["uuid"]) for row in rows]
                     # Re-version: prior-version rows stay current until the new reading is stored.
                     # A new row on an old row's head is stored non-current (a rank-0 version cannot
@@ -618,6 +620,7 @@ def run_counting_consolidation(
         "counting_namespaces_fenced": fenced,
         "counting_batches": batches,
         "counting_occurrences_stored": occurrences_stored,
+        "counting_evidence_rows": evidence_rows,
         "counting_advisory": advisory,
         "counting_llm_calls": counting_llm.calls - start_calls,
         "counting_reversion_carried": carried,

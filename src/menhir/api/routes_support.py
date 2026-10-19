@@ -738,6 +738,8 @@ class Phase3RunResponse(BaseModel):
     event_assertions_created: int = 0
     event_views_rebuilt: int = 0
     event_llm_calls: int = 0
+    # Per-lane stage counts and no_output/stalled flags (#170 item 4); None on a counter-only pass.
+    lane_outcomes: dict[str, dict[str, Any]] | None = None
 
 
 class Phase3StatusResponse(BaseModel):
