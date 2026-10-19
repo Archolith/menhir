@@ -41,6 +41,7 @@ REQUIRED_LANES = frozenset(
         "test_e2e_13_scalar_semantics[mvp_default]",
         "test_e2e_13_event_semantics[mvp_default]",
         "test_e2e_13_numberless_stop[mvp_default]",
+        "test_e2e_13_event_corrections[mvp_default]",
         "test_e2e_14_replay[mvp_default]",
         "test_e2e_14_deletion[mvp_default]",
         "test_e2e_15_restart_and_isolation[mvp_default]",
