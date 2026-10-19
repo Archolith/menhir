@@ -427,12 +427,24 @@ class ContextBuilderService:
                             f"at least {verdict.value} you mentioned, plus "
                             f"{_fmt_count(_uncertain)} more that may be repeats"
                         )
-                heading = (
-                    f"[Scalar authority: {verdict.status.upper()}] {verdict.attribute} = "
-                    f"{shown_value} ({verdict.kind}"
-                    + (f", valid {verdict.valid_at}" if verdict.valid_at else "")
-                    + ")"
-                )
+                if verdict.kind == "history":
+                    _history_n = (
+                        verdict.contributors_total if verdict.contributors_total > 0
+                        else len(verdict.contributors)
+                    )
+                    heading = (
+                        f"[Scalar authority: {verdict.status.upper()}] {verdict.attribute} "
+                        f"history, {_history_n} entries (history"
+                        + (f", valid {verdict.valid_at}" if verdict.valid_at else "")
+                        + ")"
+                    )
+                else:
+                    heading = (
+                        f"[Scalar authority: {verdict.status.upper()}] {verdict.attribute} = "
+                        f"{shown_value} ({verdict.kind}"
+                        + (f", valid {verdict.valid_at}" if verdict.valid_at else "")
+                        + ")"
+                    )
                 authority_lines = [heading]
                 if verdict.lower_bound:
                     authority_lines.extend(_count_match_lines(verdict))
