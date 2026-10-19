@@ -448,6 +448,10 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
             settings, "personal_memory_counting_extract_v2", False)),
         counting_match=bool(getattr(
             settings, "personal_memory_counting_match_enabled", False)),
+        counting_span_rule=bool(getattr(
+            settings, "personal_memory_counting_span_rule_enabled", False)),
+        counting_captured_states=bool(getattr(
+            settings, "personal_memory_counting_captured_states_enabled", False)),
         counting_lease_seconds=getattr(
             settings, "personal_memory_counting_lease_seconds", 900),
         event_history_perceiver_version=getattr(

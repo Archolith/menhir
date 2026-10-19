@@ -416,6 +416,12 @@ class MemorySettings:
     personal_memory_counting_extract_v2: bool = False
     # Unit 4R related-count matching; needs counting.
     personal_memory_counting_match_enabled: bool = False
+    # Counting extraction span rule (shortest verb-first quote, one observation per companion
+    # thing); versioned (+"+s"). Needs counting.
+    personal_memory_counting_span_rule_enabled: bool = False
+    # Counting extraction captured-states rule (kind= in the captured block; only captured
+    # count/money blocks a happening); versioned (+"+c"). Needs counting.
+    personal_memory_counting_captured_states_enabled: bool = False
     # Unit R: counted Views appear only as verdicts; their occurrence observations leave recall.
     personal_memory_counting_recall_authority_only: bool = False
     # Unit 6: counted verdicts read "at least N you mentioned" and never lead.
@@ -988,6 +994,14 @@ class MemorySettings:
             personal_memory_counting_match_enabled=parse_bool_env(_getenv(
                 "MENHIR_PERSONAL_MEMORY_COUNTING_MATCH_ENABLED",
                 default=str(cls.personal_memory_counting_match_enabled),
+            )),
+            personal_memory_counting_span_rule_enabled=parse_bool_env(_getenv(
+                "MENHIR_PERSONAL_MEMORY_COUNTING_SPAN_RULE_ENABLED",
+                default=str(cls.personal_memory_counting_span_rule_enabled),
+            )),
+            personal_memory_counting_captured_states_enabled=parse_bool_env(_getenv(
+                "MENHIR_PERSONAL_MEMORY_COUNTING_CAPTURED_STATES_ENABLED",
+                default=str(cls.personal_memory_counting_captured_states_enabled),
             )),
             personal_memory_counting_recall_authority_only=parse_bool_env(_getenv(
                 "MENHIR_PERSONAL_MEMORY_COUNTING_RECALL_AUTHORITY_ONLY",

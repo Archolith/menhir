@@ -129,20 +129,61 @@ COUNTING_MATCH_PROMPT_ADDENDUM = (
 )
 
 
+#: appended under the span-rule flag: quote each thing's own happening, shortest, verb first.
+COUNTING_SPAN_RULE_ADDENDUM = (
+    " Quote the SHORTEST phrase that states each thing's own happening, starting at its verb, "
+    "without leading words such as 'which', 'that', 'my', 'I' or 'and', and quote it the same way "
+    "every time. When a sentence adds further things to one happening with words like 'along "
+    "with', 'together with', 'as well as', 'plus' or 'and also' ('I picked up A at the store along "
+    "with B'), emit one observation per thing, each with stated_span quoting only that thing's own "
+    "words ('picked up A', 'along with B')."
+)
+
+#: appended under the captured-states flag: only a captured count or money fact blocks a happening.
+COUNTING_CAPTURED_STATES_ADDENDUM = (
+    " Each ALREADY CAPTURED line shows kind=<value kind>. Only a captured kind=count or kind=money "
+    "fact (a stated total or a change to a total) stops you from emitting a happening for that "
+    "clause. A captured state or property of any other kind (status, boolean, measurement, "
+    "duration, ...) does NOT: still emit the happening the clause states, e.g. a captured 'repair "
+    "status = fixed' for 'I fixed the leg' still lets you emit the fixing."
+)
+
+SPAN_RULE_VERSION_SUFFIX = "+s"
+CAPTURED_STATES_VERSION_SUFFIX = "+c"
+
+
 def effective_counting_perceiver_version(
     configured: str, extract_v2: bool, match: bool = False,
+    span_rule: bool = False, captured_states: bool = False,
 ) -> str:
     """The counting perceiver version used for writes, the re-version check and the watermark:
-    the configured value, plus `+x2` under extraction v2 and `+m` under the 4R match flag. The one
-    place it is computed, so flipping either flag is a perceiver-version change and re-reads
-    history (3a.2)."""
+    the configured value, plus `+x2` under extraction v2, `+s` under the span-rule flag, `+c`
+    under the captured-states flag, and `+m` LAST under the 4R match flag. The one place it is
+    computed, so flipping any flag is a perceiver-version change and re-reads history (3a.2).
+    `+m` must stay last: status_of and count_decision_repository._counted detect a match-stamped
+    row by the version ending in `+m`."""
     version = f"{configured}+x2" if extract_v2 else configured
-    return f"{version}{MATCH_VERSION_SUFFIX}" if match else version
+    if span_rule:
+        version = f"{version}{SPAN_RULE_VERSION_SUFFIX}"
+    if captured_states:
+        version = f"{version}{CAPTURED_STATES_VERSION_SUFFIX}"
+    if match:
+        version = f"{version}{MATCH_VERSION_SUFFIX}"
+    return version
 
 
-def counting_system_prompt(extract_v2: bool, match: bool = False) -> str:
+def counting_system_prompt(
+    extract_v2: bool, match: bool = False,
+    span_rule: bool = False, captured_states: bool = False,
+) -> str:
     prompt = COUNTING_SYSTEM_PROMPT_V2 if extract_v2 else COUNTING_SYSTEM_PROMPT
-    return prompt + COUNTING_MATCH_PROMPT_ADDENDUM if match else prompt
+    if match:
+        prompt = prompt + COUNTING_MATCH_PROMPT_ADDENDUM
+    if span_rule:
+        prompt = prompt + COUNTING_SPAN_RULE_ADDENDUM
+    if captured_states:
+        prompt = prompt + COUNTING_CAPTURED_STATES_ADDENDUM
+    return prompt
 
 
 def _new_fence_nonce() -> str:
@@ -276,11 +317,16 @@ class CountingConsolidationConfig:
     extract_v2: bool = False
     #: unit 4R related-count matching (own flag); the effective version gains `+m`.
     match: bool = False
+    #: span-rule prompt addendum (own flag); the effective version gains `+s`.
+    span_rule: bool = False
+    #: captured-states prompt addendum + `kind=` in the captured block (own flag); gains `+c`.
+    captured_states: bool = False
 
 
 def build_counting_context(
     episodes: list[Any], claims: list[dict[str, Any]],
     *, fenced: bool = False, nonce_fn: Callable[[], str] = _new_fence_nonce,
+    kinds: bool = False,
 ) -> str:
     """The "already captured" block for one page: the scalar claims stored for these turns, keyed by
     the episode number the model sees. Empty when there are none (the user message is then exactly
@@ -297,10 +343,11 @@ def build_counting_context(
             value = json.loads(value) if isinstance(value, str) else value
         except ValueError:
             pass
+        kind_part = f" kind={claim.get('value_kind') or ''!s}" if kinds else ""
         lines.append(
             f"[{idx}] subject={claim.get('subject') or ''!s} "
             f"attribute={claim.get('attribute') or ''!s} "
-            f"operation={claim.get('operation') or ''!s} value={value!s} "
+            f"operation={claim.get('operation') or ''!s}{kind_part} value={value!s} "
             f"quote={json.dumps(str(claim.get('stated_span') or ''))}"
         )
     if not lines:
@@ -340,8 +387,10 @@ def run_counting_consolidation(
     start_calls = counting_llm.calls
     extract_v2 = bool(config.extract_v2)
     match = bool(config.match)
+    span_rule = bool(config.span_rule)
+    captured_states = bool(config.captured_states)
     perceiver_version = effective_counting_perceiver_version(
-        config.perceiver_version, extract_v2, match)
+        config.perceiver_version, extract_v2, match, span_rule, captured_states)
     # Match-only keywords: with match off every graph call is exactly as before.
     match_kwargs: dict[str, Any] = {"match": True} if match else {}
     decided = {"counted": 0, "uncertain": 0}
@@ -494,10 +543,12 @@ def run_counting_consolidation(
                             reconcile_scope=config.reconcile_scope,
                             reconcile_subject=config.reconcile_subject,
                             canonical_self=config.canonical_self,
-                            system_prompt=counting_system_prompt(extract_v2, match),
+                            system_prompt=counting_system_prompt(
+                                extract_v2, match, span_rule, captured_states),
                             allowed_operations=COUNTING_OPERATIONS,
                             claim_ordinal=COUNTING_CLAIM_ORDINAL,
-                            context=build_counting_context(episodes, claims, fenced=extract_v2),
+                            context=build_counting_context(
+                                episodes, claims, fenced=extract_v2, kinds=captured_states),
                             write_guard=_fence,
                             defer_rebuild=True,
                             **v2_kwargs,
