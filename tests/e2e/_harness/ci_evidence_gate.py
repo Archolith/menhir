@@ -38,6 +38,8 @@ REQUIRED_LANES = frozenset(
         "test_e2e_11_count_reversion_hands_over_heads[mvp_default]",
         "test_e2e_10_counting_flag_sweep[mvp_default]",
         "test_e2e_12_lane_outcomes[mvp_default]",
+        "test_e2e_13_scalar_semantics[mvp_default]",
+        "test_e2e_13_event_semantics[mvp_default]",
         CONTAINER_LANE,
         "test_e2e_08_missing_fork_refusal",
     }
