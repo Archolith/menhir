@@ -209,7 +209,7 @@ def test_evidence_queries_filter_user_and_only_touch_evidence_nodes():
 
 @pytest.mark.unit
 def test_load_user_evidence_returns_raw_text():
-    fake = FakeNeo4j(routes=[("MATCH (t:TurnEvidence {namespace:",
+    fake = FakeNeo4j(routes=[("AS newest_recorded_at",
                               [{"uuid": "u1", "valid_at": "2026-07-07T00:00:00Z",
                                 "content": "I have 25 movies on my watch list."}])])
     rows = TurnEvidenceRepository(fake).load_user_evidence("proj")

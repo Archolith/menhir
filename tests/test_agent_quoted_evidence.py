@@ -196,19 +196,21 @@ def _repo():
 
 
 class TestLaneExclusions:
-    def test_counter_lane_excludes_agent_quoted(self):
+    # #170: agent_quoted is the fresh-install input route, so every lane reads it. Authority is
+    # gated downstream (scalar foundation, event-lead foundation guard), not at discovery.
+    def test_counter_lane_keeps_agent_quoted(self):
         repo = _repo()
         repo.list_dirty_evidence_namespaces()
         repo.load_user_evidence("ns")
         for query, _ in repo._neo4j.executed:
-            assert "coalesce(t.source_kind, '') <> 'agent_quoted'" in query
+            assert "agent_quoted" not in query
 
-    def test_event_lane_excludes_agent_quoted(self):
+    def test_event_lane_keeps_agent_quoted(self):
         repo = _repo()
         repo.list_event_dirty_evidence_namespaces(perceiver_version="v1")
         repo.load_next_event_evidence_batch("ns", perceiver_version="v1")
         for query, _ in repo._neo4j.executed:
-            assert "coalesce(t.source_kind, '') <> 'agent_quoted'" in query
+            assert "agent_quoted" not in query
 
     def test_scalar_lane_keeps_agent_quoted(self):
         repo = _repo()

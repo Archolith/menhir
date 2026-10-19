@@ -20,10 +20,118 @@ from typing import Any
 from uuid import uuid4
 
 from menhir.domain.namespace import (
+    TURN_EVIDENCE_NULL_NAMESPACE_KEY,
     normalize_namespace,
+    stamped_namespace,
     tenant_scope_cypher,
     tenant_scope_params,
+    turn_evidence_cursor_keys,
 )
+
+# Discovery over the stored spellings of a silo (#170). A row's silo: null and '' are the default
+# silo (namespace_spellings). A row's cursor key: its stored spelling (null -> $null_key), so each
+# spelling keeps its own watermark. __IN_KEYS__ selects a silo's rows (null coalesces to '').
+_TE_SILO = "CASE WHEN coalesce(t.namespace, '') IN ['', 'default'] THEN 'default' ELSE t.namespace END"
+_TE_CURSOR_KEY = "coalesce(t.namespace, $null_key)"
+_TE_IN_KEYS = tenant_scope_cypher("t")
+
+
+def _silo_query(query: str) -> str:
+    return (query.replace("__SILO__", _TE_SILO).replace("__CKEY__", _TE_CURSOR_KEY)
+            .replace("__IN_KEYS__", _TE_IN_KEYS))
+
+
+def _silo_params(namespace: str | None = None) -> dict[str, Any]:
+    # Stamped first: tenant_scope_params(None) means "no filter", never "the default silo".
+    return {"null_key": TURN_EVIDENCE_NULL_NAMESPACE_KEY,
+            "keys": turn_evidence_cursor_keys(namespace),
+            **tenant_scope_params(stamped_namespace(namespace))}
+
+
+# Advance every cursor key of a silo to the processed position, never backward (#170). A batch is
+# the (recorded_at, turn_id)-ordered prefix of the silo's unprocessed rows across all spellings, so
+# every unprocessed row of any spelling at or before the position was in it. A key stamped with
+# another perceiver_version was read as reset, so it moves to the position unconditionally.
+def advance_keys_cypher(carry: str = "") -> str:
+    """SET clause moving watermark `w` to ($cursor_at, $cu) under $pv; `carry` keeps extra vars."""
+    keep = f"{carry}, " if carry else ""
+    return f"""
+    WITH {keep}w, datetime($cursor_at) AS pos
+    WITH {keep}w, pos, (w.cursor_at IS NULL OR w.perceiver_version IS NULL
+                  OR w.perceiver_version <> $pv OR pos > w.cursor_at
+                  OR (pos = w.cursor_at AND $cu > coalesce(w.cursor_uuid, ''))) AS forward
+    SET w.cursor_at = CASE WHEN forward THEN pos ELSE w.cursor_at END,
+        w.cursor_uuid = CASE WHEN forward THEN $cu ELSE w.cursor_uuid END,
+        w.perceiver_version = $pv, w.last_run_at = datetime($at)
+"""
+
+# Only rows the scalar lane has finished, judged against the scalar cursor of the row's own spelling.
+_SCALAR_GATE = """
+    MATCH (s:ScalarConsolidationWatermark {group_id: ck})
+    WHERE s.perceiver_version = $spv AND s.cursor_at IS NOT NULL
+          AND (t.recorded_at < s.cursor_at
+               OR (t.recorded_at = s.cursor_at AND t.turn_id <= s.cursor_uuid))
+    WITH __CARRY__
+"""
+
+# A silo is dirty when any of its user rows lies beyond the cursor of that row's own spelling.
+_DIRTY_TEMPLATE = """
+    MATCH (t:TurnEvidence)
+    WHERE t.role = 'user' AND t.declarant = 'user'
+          AND t.text IS NOT NULL AND t.text <> ''
+    WITH t, __SILO__ AS ns, __CKEY__ AS ck
+    __GATE__
+    OPTIONAL MATCH (w:__WM__ {group_id: ck})
+    WITH ns, w, t.recorded_at AS ckey, t.turn_id AS tuuid
+    WITH ns,
+         max(CASE
+             WHEN w IS NULL OR w.perceiver_version IS NULL
+                  OR w.perceiver_version <> $pv OR w.cursor_at IS NULL
+                  OR ckey > w.cursor_at
+                  OR (ckey = w.cursor_at AND tuuid > w.cursor_uuid)
+             THEN 1 ELSE 0 END) AS unprocessed
+    WHERE unprocessed = 1
+    RETURN ns AS namespace
+    ORDER BY ns
+    LIMIT $limit
+"""
+
+# The next page of a silo's user rows past each row's own spelling cursor, in (recorded_at, turn_id)
+# order. A spelling cursor stamped by another perceiver_version is ignored (reset).
+_BATCH_TEMPLATE = """
+    MATCH (t:TurnEvidence)
+    WHERE __IN_KEYS__
+          AND t.role = 'user' AND t.declarant = 'user' AND t.text IS NOT NULL AND t.text <> ''
+    WITH t, __CKEY__ AS ck
+    __GATE__
+    OPTIONAL MATCH (w:__WM__ {group_id: ck})
+    WITH t, w, (w IS NULL OR w.perceiver_version IS NULL OR w.perceiver_version <> $pv) AS reset
+    WITH t, t.recorded_at AS ckey,
+         CASE WHEN reset THEN null ELSE w.cursor_at END AS cca,
+         CASE WHEN reset THEN null ELSE w.cursor_uuid END AS cu
+    WHERE cca IS NULL OR ckey > cca OR (ckey = cca AND t.turn_id > cu)
+    RETURN t.turn_id AS uuid,
+           toString(coalesce(t.occurred_at, t.recorded_at)) AS valid_at,
+           toString(ckey) AS cursor_at,
+           t.text AS content__EXTRA__
+    ORDER BY ckey, t.turn_id
+    LIMIT $limit
+"""
+
+
+def _cursor_dirty_query(watermark_label: str, *, scalar_gated: bool = False) -> str:
+    gate = _SCALAR_GATE.replace("__CARRY__", "t, ns, ck") if scalar_gated else ""
+    return _silo_query(_DIRTY_TEMPLATE.replace("__GATE__", gate)
+                       .replace("__WM__", watermark_label))
+
+
+def _cursor_batch_query(watermark_label: str, *, extra_return: str = "",
+                        scalar_gated: bool = False) -> str:
+    gate = _SCALAR_GATE.replace("__CARRY__", "t, ck") if scalar_gated else ""
+    return _silo_query(_BATCH_TEMPLATE.replace("__GATE__", gate)
+                       .replace("__WM__", watermark_label)
+                       .replace("__EXTRA__", extra_return))
+
 
 class CountingFenceLost(RuntimeError):
     """The run no longer owns the namespace's counting fence (wiped, reclaimed, or lease taken)."""
@@ -207,7 +315,9 @@ class TurnEvidenceRepository:
                 "text": text[:8000],
                 "session_id": session_id,
                 "occurred_at": normalized_occurred_at,
-                "namespace": namespace,
+                # Stamped so an unspecified namespace lands in 'default' (#170). turn_key stays
+                # derived from the raw value so a retried pre-stamp turn still merges onto its node.
+                "namespace": stamped_namespace(namespace),
                 "source_kind": source_kind,
                 "source_id": source_id,
                 "source_client": source_client,
@@ -242,14 +352,14 @@ class TurnEvidenceRepository:
 
     def list_dirty_evidence_namespaces(self, *, limit: int = 200) -> list[str]:
         """Namespaces whose newest role=user evidence is newer than their consolidation watermark (or
-        never consolidated). Keys on evidence metadata, not a text prefix; assistant/tool excluded."""
+        never consolidated). Keys on evidence metadata, not a text prefix; assistant/tool excluded.
+        agent_quoted is included (#170): it is the only user input a hookless install produces."""
         rows = self._neo4j.execute(
-            """
+            _silo_query("""
             MATCH (t:TurnEvidence)
-            WHERE t.role = 'user' AND t.declarant = 'user' AND t.namespace IS NOT NULL
+            WHERE t.role = 'user' AND t.declarant = 'user'
                   AND t.text IS NOT NULL AND t.text <> ''
-                  AND coalesce(t.source_kind, '') <> 'agent_quoted'
-            WITH t.namespace AS ns, max(t.recorded_at) AS newest
+            WITH __SILO__ AS ns, max(t.recorded_at) AS newest
             WHERE newest IS NOT NULL
             OPTIONAL MATCH (w:ConsolidationWatermark {group_id: ns})
             WITH ns, newest, w.last_run_at AS watermark
@@ -257,7 +367,7 @@ class TurnEvidenceRepository:
             RETURN ns AS namespace
             ORDER BY newest DESC
             LIMIT $limit
-            """,
+            """),
             params={"limit": int(limit)},
         )
         return [str(r["namespace"]) for r in rows]
@@ -329,19 +439,27 @@ class TurnEvidenceRepository:
     def load_user_evidence(self, namespace: str, *, limit: int = 500) -> list[dict[str, Any]]:
         """User-authored evidence for a namespace, oldest first (timeline order for the fold). Rows are
         shaped like the Episodic loader (uuid, valid_at, content) so the consolidation path is
-        unchanged. `content` is the RAW prompt text (no `user:` prefix)."""
+        unchanged. `content` is the RAW prompt text (no `user:` prefix).
+
+        Every row also carries `newest_recorded_at`: the newest recorded_at among ALL the silo's user
+        rows at load time, past the `limit` window too. The counter lane stamps its watermark with it
+        (DB clock, #170), so a turn recorded after this load stays dirty. Turns past the window are
+        never folded -- the counter lane's known limit; the counting lane is the one that pages."""
         rows = self._neo4j.execute(
-            """
-            MATCH (t:TurnEvidence {namespace: $ns})
-            WHERE t.role = 'user' AND t.declarant = 'user' AND t.text IS NOT NULL AND t.text <> ''
-                  AND coalesce(t.source_kind, '') <> 'agent_quoted'
+            _silo_query("""
+            MATCH (t:TurnEvidence)
+            WHERE __IN_KEYS__
+                  AND t.role = 'user' AND t.declarant = 'user' AND t.text IS NOT NULL AND t.text <> ''
+            WITH collect(t) AS ts, max(t.recorded_at) AS newest
+            UNWIND ts AS t
             RETURN t.turn_id AS uuid,
                    toString(coalesce(t.occurred_at, t.recorded_at, datetime())) AS valid_at,
-                   t.text AS content
+                   t.text AS content,
+                   toString(newest) AS newest_recorded_at
             ORDER BY coalesce(t.occurred_at, t.recorded_at), t.recorded_at, t.turn_id
             LIMIT $limit
-            """,
-            params={"ns": namespace, "limit": int(limit)},
+            """),
+            params={"limit": int(limit), **_silo_params(namespace)},
         )
         return [dict(r) for r in rows]
 
@@ -364,25 +482,8 @@ class TurnEvidenceRepository:
         the stored `cursor_at`). The :TurnEvidence analogue of PersonalMemoryRepository.
         list_scalar_dirty_namespaces; independent of counter consolidation."""
         rows = self._neo4j.execute(
-            """
-            MATCH (t:TurnEvidence)
-            WHERE t.role = 'user' AND t.declarant = 'user' AND t.namespace IS NOT NULL
-                  AND t.text IS NOT NULL AND t.text <> ''
-            OPTIONAL MATCH (w:ScalarConsolidationWatermark {group_id: t.namespace})
-            WITH t.namespace AS ns, w, t.recorded_at AS ckey, t.turn_id AS tuuid
-            WITH ns,
-                 max(CASE
-                     WHEN w IS NULL OR w.perceiver_version IS NULL
-                          OR w.perceiver_version <> $pv OR w.cursor_at IS NULL
-                          OR ckey > w.cursor_at
-                          OR (ckey = w.cursor_at AND tuuid > w.cursor_uuid)
-                     THEN 1 ELSE 0 END) AS unprocessed
-            WHERE unprocessed = 1
-            RETURN ns AS namespace
-            ORDER BY ns
-            LIMIT $limit
-            """,
-            params={"pv": str(perceiver_version), "limit": int(limit)},
+            _cursor_dirty_query("ScalarConsolidationWatermark"),
+            params={"pv": str(perceiver_version), "limit": int(limit), **_silo_params()},
         )
         return [str(r["namespace"]) for r in rows]
 
@@ -404,23 +505,9 @@ class TurnEvidenceRepository:
         materializes on the first (and, absent a re-dirtying event, only) consolidation pass. Both the
         source time and receive-time fallback precede consolidation, so either folds normally."""
         rows = self._neo4j.execute(
-            """
-            OPTIONAL MATCH (w:ScalarConsolidationWatermark {group_id: $ns})
-            WITH w, (w IS NULL OR w.perceiver_version IS NULL OR w.perceiver_version <> $pv) AS reset
-            WITH CASE WHEN reset THEN null ELSE w.cursor_at END AS cca,
-                 CASE WHEN reset THEN null ELSE w.cursor_uuid END AS cu
-            MATCH (t:TurnEvidence {namespace: $ns})
-            WHERE t.role = 'user' AND t.declarant = 'user' AND t.text IS NOT NULL AND t.text <> ''
-            WITH t, cca, cu, t.recorded_at AS ckey
-            WHERE cca IS NULL OR ckey > cca OR (ckey = cca AND t.turn_id > cu)
-            RETURN t.turn_id AS uuid,
-                   toString(coalesce(t.occurred_at, t.recorded_at)) AS valid_at,
-                   toString(ckey) AS cursor_at,
-                   t.text AS content
-            ORDER BY ckey, t.turn_id
-            LIMIT $limit
-            """,
-            params={"ns": namespace, "pv": str(perceiver_version), "limit": int(limit)},
+            _cursor_batch_query("ScalarConsolidationWatermark"),
+            params={"pv": str(perceiver_version), "limit": int(limit),
+                    **_silo_params(namespace)},
         )
         return [dict(r) for r in rows]
 
@@ -438,28 +525,11 @@ class TurnEvidenceRepository:
     ) -> list[str]:
         """Namespaces with at least one role=user :TurnEvidence BEYOND the event cursor for
         `perceiver_version` (never event-consolidated, a different perceiver_version, or evidence past
-        the stored `cursor_at`). Independent of scalar and counter consolidation."""
+        the stored `cursor_at`). Independent of scalar and counter consolidation. agent_quoted is
+        included (#170); event authority demotes a lead founded on it to advisory."""
         rows = self._neo4j.execute(
-            """
-            MATCH (t:TurnEvidence)
-            WHERE t.role = 'user' AND t.declarant = 'user' AND t.namespace IS NOT NULL
-                  AND t.text IS NOT NULL AND t.text <> ''
-                  AND coalesce(t.source_kind, '') <> 'agent_quoted'
-            OPTIONAL MATCH (w:EventConsolidationWatermark {group_id: t.namespace})
-            WITH t.namespace AS ns, w, t.recorded_at AS ckey, t.turn_id AS tuuid
-            WITH ns,
-                 max(CASE
-                     WHEN w IS NULL OR w.perceiver_version IS NULL
-                          OR w.perceiver_version <> $pv OR w.cursor_at IS NULL
-                          OR ckey > w.cursor_at
-                          OR (ckey = w.cursor_at AND tuuid > w.cursor_uuid)
-                     THEN 1 ELSE 0 END) AS unprocessed
-            WHERE unprocessed = 1
-            RETURN ns AS namespace
-            ORDER BY ns
-            LIMIT $limit
-            """,
-            params={"pv": str(perceiver_version), "limit": int(limit)},
+            _cursor_dirty_query("EventConsolidationWatermark"),
+            params={"pv": str(perceiver_version), "limit": int(limit), **_silo_params()},
         )
         return [str(r["namespace"]) for r in rows]
 
@@ -474,26 +544,12 @@ class TurnEvidenceRepository:
         plus generic source fields (source_kind, session_id) genuinely useful to future Episode
         construction. Bounded by `limit` — a full page means more may remain."""
         rows = self._neo4j.execute(
-            """
-            OPTIONAL MATCH (w:EventConsolidationWatermark {group_id: $ns})
-            WITH w, (w IS NULL OR w.perceiver_version IS NULL OR w.perceiver_version <> $pv) AS reset
-            WITH CASE WHEN reset THEN null ELSE w.cursor_at END AS cca,
-                 CASE WHEN reset THEN null ELSE w.cursor_uuid END AS cu
-            MATCH (t:TurnEvidence {namespace: $ns})
-            WHERE t.role = 'user' AND t.declarant = 'user' AND t.text IS NOT NULL AND t.text <> ''
-                  AND coalesce(t.source_kind, '') <> 'agent_quoted'
-            WITH t, cca, cu, t.recorded_at AS ckey
-            WHERE cca IS NULL OR ckey > cca OR (ckey = cca AND t.turn_id > cu)
-            RETURN t.turn_id AS uuid,
-                   toString(coalesce(t.occurred_at, t.recorded_at)) AS valid_at,
-                   toString(ckey) AS cursor_at,
-                   t.text AS content,
-                   t.source_kind AS source_kind,
-                   t.session_id AS session_id
-            ORDER BY ckey, t.turn_id
-            LIMIT $limit
-            """,
-            params={"ns": namespace, "pv": str(perceiver_version), "limit": int(limit)},
+            _cursor_batch_query(
+                "EventConsolidationWatermark",
+                extra_return=",\n           t.source_kind AS source_kind,"
+                             "\n           t.session_id AS session_id"),
+            params={"pv": str(perceiver_version), "limit": int(limit),
+                    **_silo_params(namespace)},
         )
         return [dict(r) for r in rows]
 
@@ -505,15 +561,14 @@ class TurnEvidenceRepository:
         its monotonic `cursor_at` (recorded_at, NOT world-time), stamping the perceiver_version. The
         watermark is :EventConsolidationWatermark, keyed by the namespace string in `group_id` — fully
         independent of the scalar/counter cursors. Called after each processed batch so a partial
-        backfill resumes exactly where it stopped."""
+        backfill resumes exactly where it stopped. Every spelling key of the silo moves (#170)."""
         self._neo4j.execute(
             """
-            MERGE (w:EventConsolidationWatermark {group_id: $ns})
-            SET w.cursor_at = datetime($cursor_at), w.cursor_uuid = $cu,
-                w.perceiver_version = $pv, w.last_run_at = datetime($at)
-            """,
-            params={"ns": namespace, "cursor_at": cursor_at, "cu": cursor_uuid,
-                    "pv": str(perceiver_version), "at": at},
+            UNWIND $keys AS k
+            MERGE (w:EventConsolidationWatermark {group_id: k})
+            """ + advance_keys_cypher(),
+            params={"cursor_at": cursor_at, "cu": cursor_uuid,
+                    "pv": str(perceiver_version), "at": at, **_silo_params(namespace)},
         )
 
     # ---- counting-consolidation discovery (counting lane, builds on scalars) -------------------
@@ -531,30 +586,9 @@ class TurnEvidenceRepository:
         (at or before its cursor for `scalar_perceiver_version`) and the counting lane has not
         (beyond the counting cursor for `perceiver_version`, or no/other-version counting cursor)."""
         rows = self._neo4j.execute(
-            """
-            MATCH (t:TurnEvidence)
-            WHERE t.role = 'user' AND t.declarant = 'user' AND t.namespace IS NOT NULL
-                  AND t.text IS NOT NULL AND t.text <> ''
-            MATCH (s:ScalarConsolidationWatermark {group_id: t.namespace})
-            WHERE s.perceiver_version = $spv AND s.cursor_at IS NOT NULL
-                  AND (t.recorded_at < s.cursor_at
-                       OR (t.recorded_at = s.cursor_at AND t.turn_id <= s.cursor_uuid))
-            OPTIONAL MATCH (w:CountingConsolidationWatermark {group_id: t.namespace})
-            WITH t.namespace AS ns, w, t.recorded_at AS ckey, t.turn_id AS tuuid
-            WITH ns,
-                 max(CASE
-                     WHEN w IS NULL OR w.perceiver_version IS NULL
-                          OR w.perceiver_version <> $pv OR w.cursor_at IS NULL
-                          OR ckey > w.cursor_at
-                          OR (ckey = w.cursor_at AND tuuid > w.cursor_uuid)
-                     THEN 1 ELSE 0 END) AS unprocessed
-            WHERE unprocessed = 1
-            RETURN ns AS namespace
-            ORDER BY ns
-            LIMIT $limit
-            """,
+            _cursor_dirty_query("CountingConsolidationWatermark", scalar_gated=True),
             params={"pv": str(perceiver_version), "spv": str(scalar_perceiver_version),
-                    "limit": int(limit)},
+                    "limit": int(limit), **_silo_params()},
         )
         return [str(r["namespace"]) for r in rows]
 
@@ -568,28 +602,9 @@ class TurnEvidenceRepository:
         or stamped by another version (pause, never read ahead of scalars). A counting cursor stamped
         by another counting version is ignored (reset)."""
         rows = self._neo4j.execute(
-            """
-            MATCH (s:ScalarConsolidationWatermark {group_id: $ns})
-            WHERE s.perceiver_version = $spv AND s.cursor_at IS NOT NULL
-            OPTIONAL MATCH (w:CountingConsolidationWatermark {group_id: $ns})
-            WITH s, w, (w IS NULL OR w.perceiver_version IS NULL OR w.perceiver_version <> $pv) AS reset
-            WITH s.cursor_at AS sca, s.cursor_uuid AS su,
-                 CASE WHEN reset THEN null ELSE w.cursor_at END AS cca,
-                 CASE WHEN reset THEN null ELSE w.cursor_uuid END AS cu
-            MATCH (t:TurnEvidence {namespace: $ns})
-            WHERE t.role = 'user' AND t.declarant = 'user' AND t.text IS NOT NULL AND t.text <> ''
-            WITH t, sca, su, cca, cu, t.recorded_at AS ckey
-            WHERE (cca IS NULL OR ckey > cca OR (ckey = cca AND t.turn_id > cu))
-                  AND (ckey < sca OR (ckey = sca AND t.turn_id <= su))
-            RETURN t.turn_id AS uuid,
-                   toString(coalesce(t.occurred_at, t.recorded_at)) AS valid_at,
-                   toString(ckey) AS cursor_at,
-                   t.text AS content
-            ORDER BY ckey, t.turn_id
-            LIMIT $limit
-            """,
-            params={"ns": namespace, "pv": str(perceiver_version),
-                    "spv": str(scalar_perceiver_version), "limit": int(limit)},
+            _cursor_batch_query("CountingConsolidationWatermark", scalar_gated=True),
+            params={"pv": str(perceiver_version), "spv": str(scalar_perceiver_version),
+                    "limit": int(limit), **_silo_params(namespace)},
         )
         return [dict(r) for r in rows]
 
@@ -663,18 +678,21 @@ class TurnEvidenceRepository:
     ) -> None:
         """Advance the namespace's counting cursor to the last TurnEvidence actually processed
         (monotonic recorded_at, never world time), stamping the counting perceiver_version.
-        Fenced: raises CountingFenceLost unless this run still owns the watermark node."""
+        Fenced: raises CountingFenceLost unless this run still owns the watermark node. The fence is
+        the `namespace` node; every spelling key of the silo moves, in the same statement (#170)."""
         rows = self._neo4j.execute(
             """
-            MATCH (w:CountingConsolidationWatermark {group_id: $ns})
-            WHERE w.owner = $run_id AND w.incarnation = $inc AND w.epoch = $epoch
-            SET w.cursor_at = datetime($cursor_at), w.cursor_uuid = $cu,
-                w.perceiver_version = $pv, w.last_run_at = datetime($at)
-            RETURN count(w) AS c
+            MATCH (f:CountingConsolidationWatermark {group_id: $ns})
+            WHERE f.owner = $run_id AND f.incarnation = $inc AND f.epoch = $epoch
+            UNWIND $keys AS k
+            MERGE (w:CountingConsolidationWatermark {group_id: k})
+            """ + advance_keys_cypher("f") + """
+            RETURN count(DISTINCT f) AS c
             """,
             params={"ns": namespace, "cursor_at": cursor_at, "cu": cursor_uuid,
                     "pv": str(perceiver_version), "at": at, "run_id": str(run_id),
-                    "inc": str(incarnation), "epoch": int(epoch)},
+                    "inc": str(incarnation), "epoch": int(epoch),
+                    **_silo_params(namespace)},
         )
         if not rows or int(rows[0]["c"]) < 1:
             raise CountingFenceLost(
@@ -1090,7 +1108,7 @@ class TurnEvidenceRepository:
                        OR w:EventConsolidationWatermark OR w:CountingConsolidationWatermark)
                   AND (coalesce(w.group_id, w.namespace, '') = ns
                        OR (ns = 'default'
-                           AND coalesce(w.group_id, w.namespace, '') = ''))
+                           AND coalesce(w.group_id, w.namespace, '') IN ['', '\\u0000null']))
                 WITH collect(DISTINCT w) AS watermarks
                 FOREACH (w IN watermarks | DETACH DELETE w)
                 RETURN size([w IN watermarks WHERE w IS NOT NULL]) AS watermarks_reset

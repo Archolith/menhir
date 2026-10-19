@@ -1382,7 +1382,7 @@ class MemoryQueryRepository:
                            OR w:EventConsolidationWatermark OR w:CountingConsolidationWatermark)
                       AND (coalesce(w.group_id, w.namespace, '') = ns
                            OR (ns = 'default'
-                               AND coalesce(w.group_id, w.namespace, '') = ''))
+                               AND coalesce(w.group_id, w.namespace, '') IN ['', '\\u0000null']))
                     WITH collect(DISTINCT w) AS watermarks
                     FOREACH (w IN watermarks | DETACH DELETE w)
                     RETURN size([w IN watermarks WHERE w IS NOT NULL]) AS watermarks_reset
@@ -1693,7 +1693,7 @@ class MemoryQueryRepository:
                        OR w:EventConsolidationWatermark OR w:CountingConsolidationWatermark)
                   AND (coalesce(w.group_id, w.namespace, '') = ns
                        OR (ns = 'default'
-                           AND coalesce(w.group_id, w.namespace, '') = ''))
+                           AND coalesce(w.group_id, w.namespace, '') IN ['', '\\u0000null']))
                 WITH collect(DISTINCT w) AS watermarks
                 FOREACH (w IN watermarks | DETACH DELETE w)
                 RETURN size([w IN watermarks WHERE w IS NOT NULL]) AS watermarks_reset
