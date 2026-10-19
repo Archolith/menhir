@@ -275,6 +275,59 @@ class EpisodeLifecycleRepository:
             twins.append(str(twin))
         return twins
 
+    def erasure_evidence_uuids(self, node_uuid: str) -> list[str]:
+        """The captured evidence that carries an erased memory's words (read-only).
+
+        For an `:Episodic`: the turns it is `ADMITTED_ON`. For a `:TurnEvidence` (addressed by
+        `turn_id`): itself. For each such turn: its evidence projection (a verbatim copy of the turn)
+        and that projection's Graphiti twin. Returned as turn ids, then episode uuids; never
+        `node_uuid` itself, and nothing outside the target's canonical namespace.
+
+        Without these, erasing a memory left its turn behind and the next Phase 3 pass re-perceived
+        it, so the deleted claim came back (#170 item 5). A turn admitted by several memories is
+        erased with any of them: the cascade already retracts that turn's assertions in that case.
+        """
+        rows = self.neo4j.execute(
+            """
+            MATCH (n)
+            WHERE (n:Episodic AND n.uuid = $uuid) OR (n:TurnEvidence AND n.turn_id = $uuid)
+            OPTIONAL MATCH (n)-[:ADMITTED_ON]->(admitted:TurnEvidence)
+            WITH n, [t IN collect(DISTINCT admitted) WHERE t IS NOT NULL]
+                    + CASE WHEN n:TurnEvidence THEN [n] ELSE [] END AS turns
+            UNWIND CASE WHEN size(turns) = 0 THEN [null] ELSE turns END AS t
+            OPTIONAL MATCH (p:Episodic)
+            WHERE t IS NOT NULL AND p.evidence_projection_of = t.turn_id
+            RETURN n.namespace AS n_namespace, n.group_id AS n_group_id,
+                   t.turn_id AS turn_id, t.namespace AS t_namespace,
+                   p.uuid AS projection_uuid, p.namespace AS p_namespace,
+                   p.group_id AS p_group_id
+            """,
+            params={"uuid": node_uuid},
+        )
+
+        def silo(namespace: object, group_id: object = None) -> str:
+            return normalize_namespace(namespace if namespace is not None else group_id)
+
+        turn_ids: list[str] = []
+        projections: list[str] = []
+        for row in rows:
+            home = silo(row.get("n_namespace"), row.get("n_group_id"))
+            turn_id = row.get("turn_id")
+            if not turn_id or silo(row.get("t_namespace")) != home:
+                continue
+            if turn_id != node_uuid and turn_id not in turn_ids:
+                turn_ids.append(str(turn_id))
+            projection = row.get("projection_uuid")
+            if (projection and projection != node_uuid and projection not in projections
+                    and silo(row.get("p_namespace"), row.get("p_group_id")) == home):
+                projections.append(str(projection))
+        episodes = list(projections)
+        for projection in projections:
+            for twin in self.episodic_twin_uuids(projection):
+                if twin != node_uuid and twin not in episodes:
+                    episodes.append(twin)
+        return turn_ids + episodes
+
     def list_episodes_missing_content_embedding(
         self,
         namespace: str | None = None,

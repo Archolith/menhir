@@ -336,6 +336,21 @@ class MemoryGraphAdapter:
         from menhir.services.event_history_service import EventHistoryService
         return EventHistoryService(self._typed_event_assertions, self)
 
+    def run_view_projection_repairs(
+        self, namespaces: list[str], *, owner_id: str, scalar_history_enabled: bool = False,
+        limit: int = 25,
+    ) -> dict[str, Any]:
+        """One bounded pass over `namespaces`' View projection-repair receipts."""
+        from menhir.infrastructure.view_projection_repair import ViewProjectionRepairRepository
+        from menhir.services.view_projection_repair import ViewProjectionRepairService
+        service = ViewProjectionRepairService(
+            ViewProjectionRepairRepository(self.neo4j),
+            scalar_rebuilder=self.scalar_state_service(
+                scalar_history_enabled=scalar_history_enabled),
+            event_rebuilder=self.event_history_service(),
+        )
+        return service.run_pending(owner_id=owner_id, limit=limit, namespaces=namespaces)
+
     def bootstrap_phase_one(self) -> PhaseOneSchemaResult:
         """Apply phase-1 schema fields and indexes in an idempotent manner."""
         queries = get_phase1_bootstrap_queries()
@@ -415,6 +430,10 @@ class MemoryGraphAdapter:
     def episodic_twin_uuids(self, node_uuid: str) -> list[str]:
         """See EpisodeLifecycleRepository.episodic_twin_uuids."""
         return self._episodes.episodic_twin_uuids(node_uuid)
+
+    def erasure_evidence_uuids(self, node_uuid: str) -> list[str]:
+        """See EpisodeLifecycleRepository.erasure_evidence_uuids."""
+        return self._episodes.erasure_evidence_uuids(node_uuid)
 
     def list_episodes_missing_content_embedding(
         self,
