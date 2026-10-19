@@ -80,12 +80,16 @@ class ViewProjectionRepairRepository:
         owner_id: str,
         limit: int = 25,
         lease_seconds: int = 300,
+        namespaces: list[str] | None = None,
     ) -> list[ViewProjectionRepairClaim]:
         """Atomically lease retryable receipts and return their fenced projection identities.
 
         ``blocked`` is accepted as a legacy producer status.  It is not treated as terminal: an
         empty deterministic rebuild is meaningful because it confirms that the retired View must
         remain absent.  The first claim migrates such a row into the approved state machine.
+
+        ``namespaces`` limits the claim to receipts of those namespaces, so a consolidation pass
+        rebuilds only the Views of the namespaces it owns for that pass.
         """
         clean_owner = str(owner_id or "").strip()
         if not clean_owner:
@@ -95,13 +99,27 @@ class ViewProjectionRepairRepository:
         if lease_seconds < 1:
             raise ValueError("lease_seconds must be positive")
 
+        params: dict[str, Any] = {
+            "owner_id": clean_owner,
+            "limit": int(limit),
+            "lease_seconds": int(lease_seconds),
+        }
+        namespace_filter = ""
+        if namespaces is not None:
+            namespace_filter = (
+                "\n              AND coalesce(r.namespace_key, r.namespace, 'default')"
+                " IN $namespaces"
+            )
+            params["namespaces"] = [str(n).strip() or "default" for n in namespaces]
         rows = self._neo4j.execute(
             """
             // view_projection_repair:claim
             MATCH (r:ViewProjectionRepair)
-            WHERE r.status IN ['pending', 'failed', 'blocked']
-               OR (r.status = 'claimed'
-                   AND (r.lease_expires_at IS NULL OR r.lease_expires_at <= datetime()))
+            WHERE (r.status IN ['pending', 'failed', 'blocked']
+                   OR (r.status = 'claimed'
+                       AND (r.lease_expires_at IS NULL OR r.lease_expires_at <= datetime())))"""
+            + namespace_filter
+            + """
             WITH r
             ORDER BY coalesce(r.last_attempt_at, r.started_at, datetime({epochMillis: 0})),
                      r.repair_key
@@ -161,11 +179,7 @@ class ViewProjectionRepairRepository:
                    r.attempt_count AS attempt_count
             ORDER BY repair_key
             """,
-            params={
-                "owner_id": clean_owner,
-                "limit": int(limit),
-                "lease_seconds": int(lease_seconds),
-            },
+            params=params,
         )
         return [ViewProjectionRepairClaim.from_row(dict(row)) for row in rows]
 

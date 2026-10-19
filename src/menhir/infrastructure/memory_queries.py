@@ -1231,6 +1231,8 @@ class MemoryQueryRepository:
             "dependent_views_scrubbed": 0,
             "view_repairs_created": 0,
             "watermarks_reset": 0,
+            "event_assertions_deleted": 0,
+            "event_heads_deleted": 0,
             "repairs": [],
         }
 
@@ -1275,6 +1277,12 @@ class MemoryQueryRepository:
                           MATCH (evidence)-[:MENTIONS]->(v)
                           WHERE (evidence:Episodic AND evidence.uuid = $node_uuid)
                              OR (evidence:TurnEvidence AND evidence.turn_id = $node_uuid)
+                      }
+                      // An event timeline shows its entries' text; the events below are deleted.
+                      OR EXISTS {
+                          MATCH (v)-[:EVENT_HISTORY_ENTRY]->(entry:TypedEventAssertion)
+                          WHERE entry.episode_uuid = $node_uuid
+                             OR entry.turn_evidence_uuid = $node_uuid
                       }
                   )
                 WITH fences, collect(DISTINCT v) AS dependent_views
@@ -1428,6 +1436,32 @@ class MemoryQueryRepository:
                 FOREACH (rb IN stale_rebinds | DETACH DELETE rb)
                 RETURN repairs, source_keys, assertions_deleted
             }
+            // Event assertions grounded on the target itself. Left in place they outlive their
+            // evidence and the lane's timeline rebuild fails closed on them (#170 item 5). Not
+            // via ADMITTED_ON: an admitted turn is erased by its own call, under its own fence.
+            CALL {
+                OPTIONAL MATCH (event:TypedEventAssertion)
+                WHERE event.episode_uuid = $node_uuid
+                   OR event.turn_evidence_uuid = $node_uuid
+                   OR EXISTS {
+                       MATCH (source)-[:FOUNDS|GROUNDS]->(event)
+                       WHERE (source:TurnEvidence AND source.turn_id = $node_uuid)
+                          OR (source:Episodic AND source.uuid = $node_uuid)
+                   }
+                WITH collect(DISTINCT event) AS doomed_events
+                OPTIONAL MATCH (event_head:TypedEventAssertionHead)
+                      -[:HAS_VERSION]->(head_event:TypedEventAssertion)
+                WHERE head_event IN doomed_events
+                  AND NOT EXISTS {
+                      MATCH (event_head)-[:HAS_VERSION]->(outside:TypedEventAssertion)
+                      WHERE NOT outside IN doomed_events
+                  }
+                WITH doomed_events, collect(DISTINCT event_head) AS event_heads
+                FOREACH (event IN doomed_events | DETACH DELETE event)
+                FOREACH (head IN event_heads | DETACH DELETE head)
+                RETURN size(doomed_events) AS event_assertions_deleted,
+                       size(event_heads) AS event_heads_deleted
+            }
             CALL {
                 OPTIONAL MATCH (n)
                 WHERE ((n:Entity OR n:Episodic) AND n.uuid = $node_uuid)
@@ -1455,6 +1489,8 @@ class MemoryQueryRepository:
                         n.processing_llm_active_kind = null,
                         n.processing_llm_active_model = null,
                         n.processing_llm_active_endpoint = null
+                    // The node is kept so the queue stops; the erased text is not.
+                    REMOVE n.content, n.content_embedding, n.content_embedding_model
                     RETURN 1 AS touched
                     UNION
                     WITH n
@@ -1472,18 +1508,21 @@ class MemoryQueryRepository:
             }
             WITH repairs, source_keys, assertions_deleted, memory_touched,
                  dependent_views_retired, dependent_views_scrubbed,
-                 view_repairs_created, watermarks_reset
+                 view_repairs_created, watermarks_reset,
+                 event_assertions_deleted, event_heads_deleted
             UNWIND CASE WHEN size(source_keys) = 0 THEN [null] ELSE source_keys END AS source_key
             OPTIONAL MATCH (h:TypedAssertionHead {source_key: source_key})
             WHERE source_key IS NOT NULL AND NOT (h)-[:HAS_VERSION]->(:TypedAssertion)
             WITH repairs, assertions_deleted, memory_touched, collect(h) AS orphan_heads,
                  dependent_views_retired, dependent_views_scrubbed,
-                 view_repairs_created, watermarks_reset
+                 view_repairs_created, watermarks_reset,
+                 event_assertions_deleted, event_heads_deleted
             FOREACH (h IN orphan_heads | DETACH DELETE h)
             RETURN assertions_deleted, memory_touched, repairs,
                    size([h IN orphan_heads WHERE h IS NOT NULL]) AS heads_deleted,
                    dependent_views_retired, dependent_views_scrubbed,
-                   view_repairs_created, watermarks_reset
+                   view_repairs_created, watermarks_reset,
+                   event_assertions_deleted, event_heads_deleted
             """,
             params={
                 "node_uuid": node_uuid,
@@ -1504,6 +1543,8 @@ class MemoryQueryRepository:
             "dependent_views_scrubbed": int(row.get("dependent_views_scrubbed", 0) or 0),
             "view_repairs_created": int(row.get("view_repairs_created", 0) or 0),
             "watermarks_reset": int(row.get("watermarks_reset", 0) or 0),
+            "event_assertions_deleted": int(row.get("event_assertions_deleted", 0) or 0),
+            "event_heads_deleted": int(row.get("event_heads_deleted", 0) or 0),
             "repairs": [dict(r) for r in (row.get("repairs") or [])],
         }
 
