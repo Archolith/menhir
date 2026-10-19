@@ -276,9 +276,14 @@ class CountingConsolidationConfig:
     extract_v2: bool = False
     #: unit 4R related-count matching (own flag); the effective version gains `+m`.
     match: bool = False
-    #: counted-View selection (own flag); not a perceiver-version flag. It only stamps the flag
-    #: marker so a flip sweeps (rebuilds) counted Views.
-    view_selection: bool = False
+
+
+def adapter_view_selection(graph_adapter: Any) -> bool:
+    """Counted-View selection is on for this adapter: bootstrap gave it a View embedder version
+    (only when the flag and its prerequisites are on). The one switch for the View write, the
+    recall read and the flag marker, so no caller can stamp a marker its Views do not match."""
+    version = getattr(graph_adapter, "counting_view_embed_version", None)
+    return isinstance(version, str) and bool(version)
 
 
 def build_counting_context(
@@ -348,7 +353,7 @@ def run_counting_consolidation(
     # Match-only keywords: with match off every graph call is exactly as before.
     match_kwargs: dict[str, Any] = {"match": True} if match else {}
     view_selection_kwargs: dict[str, Any] = (
-        {"view_selection": True} if config.view_selection else {})
+        {"view_selection": True} if adapter_view_selection(graph_adapter) else {})
     decided = {"counted": 0, "uncertain": 0}
     occurrences_stored = 0
     advisory = 0
@@ -845,19 +850,18 @@ def sweep_counting_flag_state(
     match: bool = False,
     limit: int = 50,
     subject_limit: int = 500,
-    view_selection: bool = False,
 ) -> dict[str, int]:
     """Rebuild Views for namespaces whose counting flag marker disagrees with the current flag,
-    match fold mode or counted-View selection mode. Subjects are paged (`subject_limit` per page) until exhausted; the marker
-    is set only after every page rebuilt, so a crash leaves it for the next pass. Makes no LLM
-    calls. With match off every graph call is exactly as before (the defaults mean match off)."""
+    match fold mode or counted-View selection mode (read from the adapter, see
+    adapter_view_selection). Subjects are paged (`subject_limit` per page) until exhausted; the
+    marker is set only after every page rebuilt, so a crash leaves it for the next pass. Makes no
+    LLM calls. With match off every graph call is exactly as before (the defaults mean match off)."""
     swept = 0
     rebuilt = 0
     failed = 0
     match = bool(match and enabled)
     match_kwargs: dict[str, Any] = {"match": True} if match else {}
-    view_selection = bool(view_selection and enabled)
-    if view_selection:
+    if enabled and adapter_view_selection(graph_adapter):
         match_kwargs["view_selection"] = True
     targets = graph_adapter.counting_flag_sweep_targets(
         enabled=enabled, namespaces=namespaces, limit=limit, **match_kwargs)

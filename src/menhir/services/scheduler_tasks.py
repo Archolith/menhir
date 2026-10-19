@@ -571,7 +571,6 @@ async def consolidate_personal_memory(
     counting_lease_seconds: int = 900,
     counting_extract_v2: bool = False,
     counting_match: bool = False,
-    counting_view_selection: bool = False,
 ) -> dict[str, object]:
     """Re-derive count/amount Views from each DIRTY namespace's user turns via the gated perception
     boundary, pinning ALL bias guards on (cross-check + coref + verify) so an automatic write never
@@ -778,8 +777,6 @@ async def consolidate_personal_memory(
                 namespaces=namespaces,
                 scalar_history_enabled=scalar_history_enabled,
                 match=bool(enable_counting and counting_match),
-                **({"view_selection": True}
-                   if enable_counting and counting_view_selection else {}),
             )
             # Keys only when the sweep did something, so the counting-off payload is unchanged.
             if any(sweep.values()):
@@ -817,7 +814,6 @@ async def consolidate_personal_memory(
                         perceiver_version=counting_perceiver_version,
                         extract_v2=counting_extract_v2,
                         match=counting_match,
-                        view_selection=counting_view_selection,
                         scalar_perceiver_version=scalar_state_perceiver_version,
                         batch_size=scalar_batch_size,
                         max_namespaces=max_namespaces,

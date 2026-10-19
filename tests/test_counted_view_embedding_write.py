@@ -204,8 +204,9 @@ def test_marker_write_and_sweep_targets_carry_view_selection():
 
 
 class _SweepGraph:
-    def __init__(self):
+    def __init__(self, version=None):
         self.target_kw, self.mark_kw, self.svc_kw = None, None, None
+        self.counting_view_embed_version = version
 
     def counting_flag_sweep_targets(self, **kw):
         self.target_kw = kw
@@ -223,18 +224,23 @@ class _SweepGraph:
 
 
 @pytest.mark.unit
-def test_sweep_threads_view_selection_only_when_on():
-    g = _SweepGraph()
-    sweep_counting_flag_state(g, enabled=True, namespaces=None, scalar_history_enabled=False,
-                              view_selection=True)
+def test_sweep_reads_view_selection_from_the_adapter_only():
+    # Required because every caller (scheduler, phase3 route, CLI) must stamp the same marker; a
+    # caller-threaded flag let one path flip the marker the other set, re-sweeping every pass.
+    g = _SweepGraph(version="http://embed|model-x")
+    sweep_counting_flag_state(g, enabled=True, namespaces=None, scalar_history_enabled=False)
     assert g.target_kw["view_selection"] is True and g.mark_kw["view_selection"] is True
     g = _SweepGraph()
     sweep_counting_flag_state(g, enabled=True, namespaces=None, scalar_history_enabled=False)
     assert "view_selection" not in g.target_kw and "view_selection" not in g.mark_kw
-    g = _SweepGraph()
-    sweep_counting_flag_state(g, enabled=False, namespaces=None, scalar_history_enabled=False,
-                              view_selection=True)
+    g = _SweepGraph(version="http://embed|model-x")
+    sweep_counting_flag_state(g, enabled=False, namespaces=None, scalar_history_enabled=False)
     assert "view_selection" not in g.target_kw
+    from unittest.mock import MagicMock
+    g = MagicMock()  # a non-str attribute never enables it
+    g.counting_flag_sweep_targets.return_value = []
+    sweep_counting_flag_state(g, enabled=True, namespaces=None, scalar_history_enabled=False)
+    assert "view_selection" not in g.counting_flag_sweep_targets.call_args.kwargs
 
 
 @pytest.mark.unit
