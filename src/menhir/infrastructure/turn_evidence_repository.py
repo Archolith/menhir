@@ -792,33 +792,37 @@ class TurnEvidenceRepository:
 
     def mark_counting_flag_state(
         self, namespace: str, *, enabled: bool, at: str, create_only: bool = False,
-        match: bool = False,
+        match: bool = False, view_selection: bool = False,
     ) -> None:
-        """Record the counting flag value (and the 4R match fold mode) last applied to this
-        namespace, for the flag sweep. create_only: set it only if no marker exists; only a
-        completed sweep may flip one. A marker with no `match` reads as match off."""
+        """Record the counting flag value (and the 4R match fold mode and the counted-View
+        selection mode) last applied to this namespace, for the flag sweep. create_only: set it
+        only if no marker exists; only a completed sweep may flip one. A marker with no `match`
+        or `view_selection` reads as off."""
         if create_only:
             query = """
             MERGE (m:CountingFlagState {namespace_key: $ns})
             ON CREATE SET m.group_id = $ns, m.enabled = $enabled, m.match = $match,
-                          m.updated_at = datetime($at)
+                          m.view_selection = $view_selection, m.updated_at = datetime($at)
             """
         else:
             query = """
             MERGE (m:CountingFlagState {namespace_key: $ns})
             SET m.group_id = $ns, m.enabled = $enabled, m.match = $match,
-                m.updated_at = datetime($at)
+                m.view_selection = $view_selection, m.updated_at = datetime($at)
             """
         self._neo4j.execute(
             query,
-            params={"ns": namespace, "enabled": bool(enabled), "match": bool(match), "at": at},
+            params={"ns": namespace, "enabled": bool(enabled), "match": bool(match),
+                    "view_selection": bool(view_selection), "at": at},
         )
 
     def counting_flag_sweep_targets(
         self, *, enabled: bool, namespaces: list[str] | None, limit: int, match: bool = False,
+        view_selection: bool = False,
     ) -> list[str]:
         """Namespaces whose recorded flag state differs from `enabled` or whose match fold mode
-        differs from `match` (need a rebuild sweep).
+        or counted-View selection mode differs from `match` / `view_selection` (need a rebuild
+        sweep).
         First records a create-only enabled=true marker for any namespace that holds current
         occurrence assertions but no marker (counted before markers existed), so the off-sweep
         can find it. Uses the TypedAssertion(operation) index."""
@@ -839,13 +843,15 @@ class TurnEvidenceRepository:
         rows = self._neo4j.execute(
             """
             MATCH (m:CountingFlagState)
-            WHERE (m.enabled <> $enabled OR coalesce(m.match, false) <> $match)
+            WHERE (m.enabled <> $enabled OR coalesce(m.match, false) <> $match
+                   OR coalesce(m.view_selection, false) <> $view_selection)
                   AND ($namespaces IS NULL OR m.namespace_key IN $namespaces)
             RETURN m.namespace_key AS namespace
             ORDER BY m.namespace_key
             LIMIT $limit
             """,
             params={"enabled": bool(enabled), "match": bool(match),
+                    "view_selection": bool(view_selection),
                     "namespaces": None if namespaces is None else [str(n) for n in namespaces],
                     "limit": int(limit)},
         )

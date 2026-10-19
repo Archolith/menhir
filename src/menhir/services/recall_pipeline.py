@@ -1199,6 +1199,49 @@ async def run_recall(
             logger.debug("observation injection query=%r added=%d (k=10)", query[:60], obs_added)
             _obs_slots_for_history = obs_slots  # share with scalar_history lane below
 
+            # Counted-View selection (flag-gated): rank current counted Views directly by cosine of
+            # the question to the View text, so a counted slot whose occurrences missed the top-10
+            # assertions still gets its verdict. Kept in SEPARATE structures: the history lane above
+            # keeps seeing obs_slots only, and a failure here leaves assertion verdicts untouched.
+            view_slots: set[tuple[str, str, str, str, str]] = set()
+            view_cos: dict[tuple[str, str, str, str, str], float] = {}
+            # One switch for write and read: bootstrap sets the adapter's embed version only when
+            # the view-selection flag and its prerequisites are on.
+            _view_version = getattr(service.graph_adapter, "counting_view_embed_version", None)
+            if (
+                service.counting_enabled
+                and service.scalar_view_authority_enabled
+                and isinstance(_view_version, str) and _view_version
+            ):
+                try:
+                    _view_search = getattr(
+                        service.graph_adapter, "search_counted_view_embeddings", None)
+                    if _view_search is not None:
+                        _view_hits = await asyncio.to_thread(
+                            _view_search, obs_vec, stamped_namespace(namespace),
+                            embed_version=_view_version, limit=10)
+                        for _vh in _view_hits or []:
+                            _vc = _vh.get("cosine")
+                            _vslot = (
+                                str(_vh.get("view_subject_uuid") or ""),
+                                str(_vh.get("ss_attribute") or ""),
+                                str(_vh.get("ss_scope") or ""),
+                                str(_vh.get("ss_kind") or ""),
+                                str(_vh.get("ss_unit") or ""),
+                            )
+                            if (_vc is None or not math.isfinite(float(_vc))
+                                    or not _vslot[0] or not _vslot[1] or not _vslot[3]):
+                                continue
+                            view_slots.add(_vslot)
+                            view_cos[_vslot] = max(
+                                float(_vc), view_cos.get(_vslot, float("-inf")))
+                except Exception:
+                    logger.warning(
+                        "counted-View selection failed query=%r; assertion verdicts unchanged",
+                        query[:60], exc_info=True)
+                    view_slots = set()
+                    view_cos = {}
+
             # Phase 4a.4: for each SURFACED slot, DETERMINISTICALLY inject the current scalar_state
             # View by slot-keyed lookup (NOT embedding rank), so the authoritative CURRENT value
             # surfaces even when its View did not win ranking -- the G5 stale-value fix (the "how
@@ -1331,8 +1374,16 @@ async def run_recall(
             _counted_verdicts_emitted = 0
             _verdict_min_sim = float(tuning.scalar_verdict_min_similarity or 0.0)
             _authority_slots = obs_slots if service.scalar_view_authority_enabled else set()
+            _authority_cos = _obs_slot_best_cosine
+            if view_slots and service.scalar_view_authority_enabled:
+                # Merged relevance: a slot found by both paths ranks by its better cosine.
+                _authority_slots = obs_slots | view_slots
+                _authority_cos = {
+                    s: max(_obs_slot_best_cosine.get(s, float("-inf")),
+                           view_cos.get(s, float("-inf")))
+                    for s in _authority_slots}
             for (subj, attr, scp, vk, un) in _relevance_ordered_slots(
-                    _authority_slots, _obs_slot_best_cosine):
+                    _authority_slots, _authority_cos):
                 if not subj or not attr or not vk:
                     continue
                 # G17 subject safety: skip the authority injection for a subject the query is NOT
@@ -1347,7 +1398,7 @@ async def run_recall(
                 # lane takes the 10 nearest assertions with no floor, so in a small namespace an
                 # unrelated count (a gym visit for a clothing question) becomes a verdict. Scale is
                 # Neo4j vector.similarity.cosine, (1+cos)/2: 0.5 means orthogonal.
-                _best = _obs_slot_best_cosine.get((subj, attr, scp, vk, un), float("-inf"))
+                _best = _authority_cos.get((subj, attr, scp, vk, un), float("-inf"))
                 if _verdict_min_sim > 0 and _best < _verdict_min_sim:
                     logger.debug(
                         "scalar-authority injection skipped low similarity slot=%r cosine=%.3f",

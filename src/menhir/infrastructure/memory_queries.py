@@ -756,6 +756,46 @@ class MemoryQueryRepository:
             },
         )
 
+    def search_counted_view_embeddings(
+        self,
+        query_vector: list[float],
+        namespace: str,
+        *,
+        embed_version: str,
+        limit: int = 10,
+    ) -> list[dict[str, object]]:
+        """Cosine hits over the embedded text of current counted scalar_state Views (counted-View
+        selection). Brute force like `search_assertion_embeddings` (no vector index). Only a View whose
+        stored vector was written by the active embedder (`count_view_embed_version`) is a candidate.
+        Returns the slot identity a slot-keyed View lookup needs, plus the cosine."""
+        safe_limit = max(1, min(limit, 500))
+        if namespace_spellings(namespace) is None:
+            return []  # never an unscoped (cross-tenant) scan
+        return self.neo4j.execute(
+            """
+            MATCH (v:Entity {view_kind: 'scalar_state'})
+            WHERE """ + tenant_scope_prefilter_cypher("v") + " AND " + tenant_scope_cypher("v") + """
+              AND v.scalar_basis = 'counted'
+              AND coalesce(v.view_current, true)
+              AND v.expired_at IS NULL
+              AND v.count_view_embedding IS NOT NULL
+              AND v.count_view_embed_version = $version
+            WITH v, vector.similarity.cosine(v.count_view_embedding, $query_vector) AS cosine
+            WHERE cosine IS NOT NULL
+            RETURN v.view_subject_uuid AS view_subject_uuid, v.ss_attribute AS ss_attribute,
+                   coalesce(v.ss_scope, '') AS ss_scope, v.ss_kind AS ss_kind,
+                   coalesce(v.ss_unit, '') AS ss_unit, cosine
+            ORDER BY cosine DESC, v.view_key
+            LIMIT $limit
+            """,
+            params={
+                "version": embed_version,
+                "query_vector": query_vector,
+                "limit": safe_limit,
+                **tenant_scope_params(namespace),
+            },
+        )
+
     def fetch_assertion_candidate_metadata(
         self, assertion_ids: list[str]
     ) -> list[dict[str, object]]:

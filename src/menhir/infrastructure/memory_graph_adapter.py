@@ -72,6 +72,10 @@ class MemoryGraphAdapter:
     counting_enabled: bool = field(default=False, kw_only=True)
     # unit 4R: counted Views fold by count decision; only effective with counting on.
     counting_match_enabled: bool = field(default=False, kw_only=True)
+    # Counted-View selection: sync embedder + its version stamp. Set at bootstrap only when the
+    # view-selection flag is on; None keeps every counted View write and recall read unchanged.
+    counting_view_embed: Any = field(default=None, kw_only=True)
+    counting_view_embed_version: str | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         from menhir.infrastructure.memory_queries import MemoryQueryRepository
@@ -274,7 +278,9 @@ class MemoryGraphAdapter:
             self._typed_assertions, self,
             scalar_history_enabled=scalar_history_enabled,
             counting_enabled=self.counting_enabled if counting_enabled is None else counting_enabled,
-            count_match=self.counting_match_enabled if count_match is None else count_match)
+            count_match=self.counting_match_enabled if count_match is None else count_match,
+            view_embed=self.counting_view_embed,
+            view_embed_version=self.counting_view_embed_version)
 
     # -------------------------------------------------------------------------
     # Typed-event assertion delegates → TypedEventAssertionRepository
@@ -966,6 +972,19 @@ class MemoryGraphAdapter:
         """Observation-lane candidate search over :TypedAssertion embeddings (Phase 4a.2)."""
         return self._memory_queries.search_assertion_embeddings(
             query_vector, limit=limit, namespaces=namespaces
+        )
+
+    def search_counted_view_embeddings(
+        self,
+        query_vector: list[float],
+        namespace: str,
+        *,
+        embed_version: str,
+        limit: int = 10,
+    ) -> list[dict[str, object]]:
+        """Counted-View selection: cosine hits over current counted scalar_state View embeddings."""
+        return self._memory_queries.search_counted_view_embeddings(
+            query_vector, namespace, embed_version=embed_version, limit=limit
         )
 
     def fetch_assertion_candidate_metadata(
@@ -1767,16 +1786,19 @@ class MemoryGraphAdapter:
 
     def mark_counting_flag_state(
         self, namespace: str, *, enabled: bool, at: str, create_only: bool = False,
-        match: bool = False,
+        match: bool = False, view_selection: bool = False,
     ) -> None:
         self._turn_evidence.mark_counting_flag_state(
-            namespace, enabled=enabled, at=at, create_only=create_only, match=match)
+            namespace, enabled=enabled, at=at, create_only=create_only, match=match,
+            view_selection=view_selection)
 
     def counting_flag_sweep_targets(
         self, *, enabled: bool, namespaces: list[str] | None, limit: int, match: bool = False,
+        view_selection: bool = False,
     ) -> list[str]:
         return self._turn_evidence.counting_flag_sweep_targets(
-            enabled=enabled, namespaces=namespaces, limit=limit, match=match)
+            enabled=enabled, namespaces=namespaces, limit=limit, match=match,
+            view_selection=view_selection)
 
     # ---- unit 4R count decisions -> CountDecisionRepository ----
 
