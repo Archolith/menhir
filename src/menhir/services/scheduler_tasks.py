@@ -38,6 +38,7 @@ from menhir.services.event_consolidation import (
     select_event_targets,
 )
 from menhir.services.failure_counter_bridge import sync_failure_counters
+from menhir.services.lane_outcomes import lane_outcomes
 from menhir.services.instability_counter_bridge import sync_instability_counters
 from menhir.services.scalar_consolidation import (
     ScalarConsolidationConfig,
@@ -655,6 +656,7 @@ async def consolidate_personal_memory(
         abstained = 0
         corrections_applied = 0
         processed = 0
+        counter_evidence_rows = 0
 
         def _build_episodes(rows: list) -> "list[Episode]":
             """Rows -> Episodes, collapsing EXACT duplicate observations.
@@ -698,6 +700,7 @@ async def consolidate_personal_memory(
             if call_budget is not None and counting_llm.calls >= call_budget:
                 break
             rows = graph_adapter.load_user_episodes(ns)
+            counter_evidence_rows += len(rows)
             episodes = _build_episodes(rows)
             if episodes:
                 res = perceive_and_fold(
@@ -836,6 +839,20 @@ async def consolidate_personal_memory(
         # Refresh the shared call count here so API callers see the total work actually spent;
         # otherwise a scalar/event-only run reports zero calls even after consuming k samples.
         result["llm_calls"] = counting_llm.calls
+        # Per-lane report (#170 item 4) so one lane's output cannot hide another's inactivity.
+        # Only with a non-counter lane on: a counter-only pass has one lane and keeps its shape.
+        if enable_scalar_state or enable_event_history:
+            outcomes = lane_outcomes(
+                result,
+                enabled={"counter": bool(enable_counter_state), "scalar": enable_scalar_state,
+                         "event": enable_event_history, "counting": enable_counting},
+                counter_evidence_rows=counter_evidence_rows,
+            )
+            result["lane_outcomes"] = outcomes
+            quiet = sorted(f"{lane}:{flag}" for lane, rep in outcomes.items()
+                           for flag in ("no_output", "stalled") if rep.get(flag))
+            if quiet:
+                logger.info("consolidation pass: lanes without output: %s", ", ".join(quiet))
         return result
 
     result = await asyncio.to_thread(_run)
