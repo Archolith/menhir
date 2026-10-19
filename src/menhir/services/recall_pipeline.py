@@ -1684,24 +1684,25 @@ async def run_recall(
                 if _sh_min_sim > 0 and _obs_slot_best_cosine.get(
                         (subj, attr, scp, vk, un), float("-inf")) < _sh_min_sim:
                     continue
-                # Read gate: history/comparison → always; current-state → only when
-                # no scalar_state View exists (bounded support for unanchored slots).
-                if not _sh_wants_history:
-                    _state_view = await asyncio.to_thread(
-                        service.graph_adapter.fetch_current_scalar_view_for_slot,
-                        subject_uuid=subj, attribute=attr, scope=scp,
-                        value_kind=vk, unit=un,
-                        namespace=stamped_namespace(namespace),
+                # Read gate: history/comparison → unless the slot's View is counted; current-state
+                # → only when no scalar_state View exists (bounded support for unanchored slots).
+                _state_view = await asyncio.to_thread(
+                    service.graph_adapter.fetch_current_scalar_view_for_slot,
+                    subject_uuid=subj, attribute=attr, scope=scp,
+                    value_kind=vk, unit=un,
+                    namespace=stamped_namespace(namespace),
+                )
+                if (
+                    _state_view
+                    and _projection_is_recall_eligible(_state_view)
+                    and not (
+                        _state_view.get("scalar_basis") == "counted"
+                        and not service.counting_enabled
                     )
-                    if (
-                        _state_view
-                        and _projection_is_recall_eligible(_state_view)
-                        and not (
-                            _state_view.get("scalar_basis") == "counted"
-                            and not service.counting_enabled
-                        )
-                    ):
-                        continue  # scalar_state leads; history stays off
+                    # A counted slot is stated by its counted verdict; its history would repeat it.
+                    and (not _sh_wants_history or _state_view.get("scalar_basis") == "counted")
+                ):
+                    continue  # scalar_state leads; history stays off
                 hv = await asyncio.to_thread(
                     service.graph_adapter.fetch_scalar_history,
                     subject_uuid=subj, attribute=attr, scope=scp,
