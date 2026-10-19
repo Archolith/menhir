@@ -10,6 +10,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from menhir.domain.namespace import turn_evidence_cursor_keys
+from menhir.infrastructure.turn_evidence_repository import advance_keys_cypher
+
 
 class PersonalMemoryRepository:
     """Consolidation watermarks. Dirty-namespace discovery reads :TurnEvidence (#271)."""
@@ -36,14 +39,14 @@ class PersonalMemoryRepository:
         monotonic work-discovery `cursor_at` (NOT world-time), stamping the perceiver_version. Called
         after each processed batch -- never on activation refusal -- so a partial backfill resumes
         exactly where it stopped and never skips the untouched tail. The TurnEvidence discovery and
-        batch queries read this same :ScalarConsolidationWatermark."""
+        batch queries read this same :ScalarConsolidationWatermark. Every stored spelling of the
+        silo keeps its own key and moves together, never backward (#170)."""
         self._neo4j.execute(
             """
-            MERGE (w:ScalarConsolidationWatermark {group_id: $ns})
-            SET w.cursor_at = datetime($cursor_at), w.cursor_uuid = $cu,
-                w.perceiver_version = $pv, w.last_run_at = datetime($at)
-            """,
-            params={"ns": namespace, "cursor_at": cursor_at, "cu": cursor_uuid,
-                    "pv": str(perceiver_version), "at": at},
+            UNWIND $keys AS k
+            MERGE (w:ScalarConsolidationWatermark {group_id: k})
+            """ + advance_keys_cypher(),
+            params={"keys": turn_evidence_cursor_keys(namespace), "cursor_at": cursor_at,
+                    "cu": cursor_uuid, "pv": str(perceiver_version), "at": at},
         )
 

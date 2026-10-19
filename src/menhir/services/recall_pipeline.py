@@ -2478,6 +2478,25 @@ async def run_recall(
     )
 
 
+def _event_lead_has_user_foundation(service: Any, verdict: Any) -> bool:
+    """A lead must rest on captured user words (#170). The event lane reads agent_quoted evidence,
+    which is never user foundation, so a lead founded on it (or on a non-user declarant) is
+    demoted to advisory. A failed or empty lookup fails closed. Episode-grounded leads (no
+    turn_evidence_uuid) and adapters without the lookup (test doubles) keep their prior behavior."""
+    turn_id = str(getattr(verdict, "turn_evidence_uuid", None) or "").strip()
+    fetch = getattr(service.graph_adapter, "fetch_turn_evidence", None)
+    if not turn_id or fetch is None:
+        return True
+    try:
+        evidence = fetch(turn_id)
+    except Exception:
+        logger.warning("event lead foundation lookup failed turn=%r; advisory", turn_id,
+                       exc_info=True)
+        return False
+    return bool(evidence) and evidence.get("declarant") == "user" and (
+        str(evidence.get("source_kind") or "") != "agent_quoted")
+
+
 async def apply_event_history_authority_layer(
     service: Any,
     result: RecallResult,
@@ -2511,6 +2530,11 @@ async def apply_event_history_authority_layer(
         verdict = event_authority_for_query(
             query, assertions, subject_uuid=subject_uuid, namespace=stamped,
             foundation_verified=True)
+        if (verdict is not None and verdict.status == "leads"
+                and not _event_lead_has_user_foundation(service, verdict)):
+            verdict = event_authority_for_query(
+                query, assertions, subject_uuid=subject_uuid, namespace=stamped,
+                foundation_verified=False)
         if verdict is not None:
             return replace(result, event_authority_layer=(verdict,))
     except Exception:

@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
 from menhir.domain.recall_visibility import default_recall_visibility_cypher
 
 try:  # neo4j is a hard runtime dep; guard the import so unit imports without the driver still load.
@@ -335,15 +336,14 @@ class ScalarViewRepositoryMixin:
         an `agent` extraction with no user admission (e.g. an Episodic fixture, no FOUNDS edge) does NOT.
         Namespace-scoped so a foundation never leaks across tenants. Returns False when the View has no
         CURRENT_ANCHOR (edges undrawn) or no user FOUNDS -- the safe advisory default."""
-        ns_filter = "AND te.namespace = $ns" if namespace is not None else ""
         rows = self.neo4j.execute(
             f"""
             MATCH (v:Entity {{uuid: $view_uuid}})-[:CURRENT_ANCHOR]->(a:TypedAssertion)
             MATCH (te:TurnEvidence {{declarant: 'user'}})-[:FOUNDS]->(a)
-            WHERE coalesce(te.source_kind, '') <> 'agent_quoted' {ns_filter}
+            WHERE coalesce(te.source_kind, '') <> 'agent_quoted' AND {tenant_scope_cypher('te')}
             RETURN count(te) > 0 AS founded
             """,
-            {"view_uuid": view_uuid, "ns": namespace or ""},
+            {"view_uuid": view_uuid, **tenant_scope_params(namespace)},
         )
         return bool(rows and rows[0].get("founded"))
 
@@ -357,15 +357,15 @@ class ScalarViewRepositoryMixin:
         directly off the expiry's contributor assertions. Namespace-scoped; False on empty input."""
         if not assertion_ids:
             return False
-        ns_filter = "AND te.namespace = $ns" if namespace is not None else ""
         rows = self.neo4j.execute(
             f"""
             MATCH (te:TurnEvidence {{declarant: 'user'}})-[:FOUNDS]->(a:TypedAssertion)
             WHERE a.assertion_id IN $ids
-                  AND coalesce(te.source_kind, '') <> 'agent_quoted' {ns_filter}
+                  AND coalesce(te.source_kind, '') <> 'agent_quoted'
+                  AND {tenant_scope_cypher('te')}
             RETURN count(te) > 0 AS founded
             """,
-            {"ids": list(assertion_ids), "ns": namespace or ""},
+            {"ids": list(assertion_ids), **tenant_scope_params(namespace)},
         )
         return bool(rows and rows[0].get("founded"))
 

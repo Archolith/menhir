@@ -723,7 +723,12 @@ async def consolidate_personal_memory(
                     run_tally=run_tally)
                 corrections_applied += int(corr["corrections_applied"])
             processed += 1
-            graph_adapter.mark_consolidated(ns, at=datetime.now(timezone.utc).isoformat())
+            # Watermark on the DB's own clock (#170): the newest recorded_at as of the load, so a
+            # turn recorded during this run stays dirty. now() here is a different clock, and on a
+            # same-host install it stamps past every mid-run turn.
+            newest = str((rows[0].get("newest_recorded_at") if rows else None) or "")
+            graph_adapter.mark_consolidated(
+                ns, at=newest or datetime.now(timezone.utc).isoformat())
 
         result: dict[str, object] = {
             "namespaces_dirty": len(targets),
