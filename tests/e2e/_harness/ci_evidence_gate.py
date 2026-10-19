@@ -40,6 +40,7 @@ REQUIRED_LANES = frozenset(
         "test_e2e_12_lane_outcomes[mvp_default]",
         "test_e2e_13_scalar_semantics[mvp_default]",
         "test_e2e_13_event_semantics[mvp_default]",
+        "test_e2e_14_replay[mvp_default]",
         CONTAINER_LANE,
         "test_e2e_08_missing_fork_refusal",
     }
