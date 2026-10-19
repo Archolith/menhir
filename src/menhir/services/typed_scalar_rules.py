@@ -832,6 +832,21 @@ def _count_value_from_source(stated_span: str, operation: str, model_value: Any)
     return -magnitude if isinstance(coerced_model, (int, float)) and coerced_model < 0 else magnitude
 
 
+#: a stop that only shrinks the count ("not as many cats anymore") does not state zero.
+_COUNT_PARTIAL_RE = re.compile(
+    r"\b(?:as\s+many|as\s+much|fewer|less|more|most|some|several|few|only|half|part)\b",
+    re.IGNORECASE,
+)
+
+
+def _numberless_count_stop(stated_span: str) -> bool:
+    """True for a stop that states no number ("I don't have cats anymore"): the count is now 0."""
+    if not _ended_state(stated_span) or _COUNT_PARTIAL_RE.search(stated_span or ""):
+        return False
+    span = _SRC_ISO_RE.sub(" ", _SRC_MONTH_DAY_YEAR_RE.sub(" ", stated_span or ""))
+    return _COUNT_TOKEN_RE.search(span) is None and _COUNT_RANGE_RE.search(span) is None
+
+
 def _boolean_source_polarity(stated_span: str) -> bool | None:
     """Classify only closed, unambiguous present boolean forms; otherwise abstain."""
     span = (stated_span or "").strip()
@@ -1257,6 +1272,7 @@ def parse_scalar_row(
         return None  # unresolvable provenance -> cannot ground
 
     count_value_unresolved = False
+    numberless_stop = False
     importance = ""
     count_object = count_item = count_action = ""
     normalized_frequency = (
@@ -1320,6 +1336,11 @@ def parse_scalar_row(
         if value is None:
             drop("clock_time_unresolved")
             return None
+    elif (value_kind == "count" and operation in ("absolute", "expire")
+          and "absolute" in allowed_operations and _numberless_count_stop(stated_span)):
+        # "I don't have cats anymore" states no number, so the count is now 0. Whatever number the
+        # model supplied is ignored: it is not in the source (#170 item 5).
+        operation, value, unit, numberless_stop = "absolute", 0, "", True
     elif value_kind == "count":
         model_value = _coerce_value(value_kind, operation, row.get("value"))
         try:
@@ -1412,7 +1433,8 @@ def parse_scalar_row(
     # Ended-state framing ("I no longer have 3 cars", "I used to weigh 90 kg") states a value that is
     # NOT current. The contract for that is operation=expire (kept), never an absolute/delta current
     # value; booleans are handled by source polarity above (ended -> false).
-    if value_kind != "boolean" and operation in ("absolute", "delta") and _ended_state(stated_span):
+    if (value_kind != "boolean" and operation in ("absolute", "delta") and not numberless_stop
+            and _ended_state(stated_span)):
         drop("ended_state")
         return None
 
