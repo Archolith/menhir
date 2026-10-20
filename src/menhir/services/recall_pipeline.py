@@ -1556,7 +1556,12 @@ async def run_recall(
                 # Wording flag: a counted View is a lower bound and never leads (F10).
                 count_wording = view_counted and bool(
                     getattr(service, "counting_wording_enabled", False))
-                view_leads = has_foundation and not count_wording
+                # A history question ("did I have before") is not answered by the current value, so
+                # the current View is shown but never leads it (#170).
+                view_leads = (
+                    has_foundation and not count_wording
+                    and _intent != QueryIntent.PREVIOUS_VALUE
+                )
                 authority_candidate = {
                     "uuid": vuuid, "name": vname, "content": vname,
                     "scope": str(NodeScope.PERSISTENT), "memory_type": "SCALAR_STATE",
