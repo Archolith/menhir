@@ -1038,6 +1038,16 @@ class TurnEvidenceRepository:
                 REMOVE v.ss_view_key_current
             )
             FOREACH (repair IN stale_repairs | DETACH DELETE repair)
+            WITH f, doomed, doomed_ids, scalar_assertions, event_assertions, scalar_heads,
+                 event_heads, stale_repairs, dependent_views, current_views, namespaces
+            // #170 D1 read markers of the erased turns (reversion_repository).
+            OPTIONAL MATCH (rm:TypedReadMarker)
+            WHERE rm.marker_key IN [i IN doomed_ids | 'scalar:' + i]
+                                   + [i IN doomed_ids | 'event:' + i]
+            WITH f, doomed, scalar_assertions, event_assertions, scalar_heads, event_heads,
+                 stale_repairs, dependent_views, current_views, namespaces,
+                 collect(rm) AS read_markers
+            FOREACH (m IN read_markers | DETACH DELETE m)
             WITH f, doomed, scalar_assertions, event_assertions, scalar_heads, event_heads,
                  stale_repairs, dependent_views, current_views, namespaces,
                  [v IN current_views | {
