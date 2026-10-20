@@ -39,7 +39,7 @@ _SETTINGS = (
         'Enable background experience counters.', False, ()),
     ('verifier_sync_enabled', 'MENHIR_VERIFIER_SYNC_ENABLED', False, 'runtime', 'Enable verifier sync enabled.',
         False, ()),
-    ('canonical_self_binding_mode', 'MENHIR_CANONICAL_SELF_BINDING_MODE', 'off', 'runtime',
+    ('canonical_self_binding_mode', 'MENHIR_CANONICAL_SELF_BINDING_MODE', 'enforce', 'runtime',
         'Configure canonical self binding mode.', True, ()),
     ('anchored_time_resolver_enabled', 'MENHIR_ANCHORED_TIME_RESOLVER', False, 'runtime',
         'Overlay anchored-time valid_at on edges from user turns with temporal cues.', True, ()),

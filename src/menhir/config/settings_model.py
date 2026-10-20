@@ -214,9 +214,10 @@ class MemorySettings:
 
     # Deterministic canonical-self binding rollout. "off" preserves pre-change behavior exactly;
     # "observe" evaluates and records the decision without rewriting the payload; "enforce" binds.
-    # Default off until the plan's acceptance gates pass -- a proven self bypasses graphiti dedup
-    # entirely, which is a durable-write-semantics change.
-    canonical_self_binding_mode: str = "off"
+    # Default enforce since #169 (owner decision 2026-10-19). A proven self bypasses graphiti dedup
+    # entirely, a durable-write-semantics change; set "off" to opt out (safe while no consolidation
+    # migration has run, see workflows/canonical-self-migration-runbook.md).
+    canonical_self_binding_mode: str = "enforce"
 
     # Anchored-time resolver: one extra LLM call per user turn with a temporal cue, overlaying
     # valid_at on extracted edges. Default off until the live eval gates (L1-L3) pass.
