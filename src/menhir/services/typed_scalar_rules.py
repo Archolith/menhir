@@ -1791,7 +1791,7 @@ def gate_typed_scalars(
     two are complementary rather than alternatives. It is not free: commits rise 64 -> 298 while the
     share matching the benchmark's labelled current value falls 41% -> 32%, and slots holding two
     contradictory values in one pass rise 22 -> 68. `threshold` is a validated caller argument,
-    supplied by `personal_memory_scalar_threshold` (default 1.0).
+    supplied by `personal_memory_scalar_threshold` (default 2/3; see docs/agreement-settings.md).
 
       * `reconcile_attribute` â€” drop the free-text attribute NAME from the vote and choose it after
         grouping (`_reconciled_attribute`). Samples routinely agree on subject/slot/value/when and
