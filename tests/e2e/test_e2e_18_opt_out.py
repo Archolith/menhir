@@ -3,16 +3,16 @@
 One namespace on one graph goes through four backends, each a restart with different flags:
 
 1. **on**: scalar, event and counter lanes with both authority paths.
-2. **lanes off, authority on**: the writers stop, but recall still reads what is stored.
+2. **lanes off, authority on**: the writers stop, and authority stops with them.
 3. **all off**: recall falls back to ordinary memories.
 4. **back on**: the lanes catch up on the turns captured while they were off.
 
 Turns captured while a lane is off are not lost. The re-enabled lanes read them from their
 durable cursors without re-reading turns they already finished.
 
-With a lane off and its authority flag on, recall keeps serving the stored values as leads.
-Those values no longer update. This is the documented "retained Views can outlive the writer
-gate" behavior (config/feature_flags.py), so a full opt-out turns off both flags.
+Authority requires its lane (config/authority_gates.py). A lane that is off no longer updates
+its Views or events, so serving them as current would be false-current. With the lane off,
+recall serves ordinary memories even when the authority flag is still on.
 """
 
 from __future__ import annotations
@@ -102,7 +102,7 @@ CRITERIA = [
     "lanes_build_state_while_on",
     "lane_off_does_no_model_work",
     "lane_off_keeps_stored_state",
-    "authority_on_with_lane_off_serves_the_frozen_state",
+    "authority_requires_its_lane",
     "full_opt_out_falls_back_to_ordinary_recall",
     "re_enable_reads_only_the_backlog",
     "re_enabled_lanes_catch_up",
@@ -202,7 +202,8 @@ async def test_e2e_18_opt_out_and_back(
                 off_views, off_counters = scalar_views(e2e_config, namespace), counters(e2e_config, namespace)
                 off_coins, off_coins_ctx = await _ask(client, namespace, coins_q, lane_evidence,
                                                       "coins-lanes-off")
-                off_kayak, _ = await _ask(client, namespace, kayak_q, lane_evidence, "kayak-lanes-off")
+                off_kayak, off_kayak_ctx = await _ask(client, namespace, kayak_q, lane_evidence,
+                                                      "kayak-lanes-off")
 
         # 3. all off
         with lane_backend(e2e_config, e2e_installed, lane_evidence, env(ALL_OFF), name="backend-all-off"):
@@ -250,11 +251,14 @@ async def test_e2e_18_opt_out_and_back(
         passed=_coins(off_views) == [37.0] and mug_values["off"] == mug_values["on"],
         detail={"coins": _coins(off_views), "counters": mug_values["off"]},
     )
+    # The newer turns say 42 coins and a green kayak; the frozen 37 and blue kayak must not lead.
     lane_evidence.record(
-        "authority_on_with_lane_off_serves_the_frozen_state",
-        passed=lead(off_coins) == ("37", "leads") and kayak(off_kayak) == ("blue kayak", "leads")
-        and "[Scalar authority: LEADS]" in off_coins_ctx,
-        detail={"coins": lead(off_coins), "kayak": kayak(off_kayak)},
+        "authority_requires_its_lane",
+        passed="authority_layer" not in off_coins and "event_authority_layer" not in off_kayak
+        and "i have 37 coins in my jar." in _sources_text(off_coins)
+        and "i bought a blue kayak at the marina." in _sources_text(off_kayak)
+        and "authority:" not in off_coins_ctx and "authority:" not in off_kayak_ctx,
+        detail={"coins_keys": sorted(off_coins), "kayak_keys": sorted(off_kayak)},
     )
     lane_evidence.record(
         "full_opt_out_falls_back_to_ordinary_recall",

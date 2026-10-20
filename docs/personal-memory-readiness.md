@@ -17,7 +17,7 @@ off. For the agreement settings and the perceiver-version rules, see `agreement-
    event, counting.
 3. **Recall.** Once the View exists, `recall_memories` returns a verdict in `authority_layer` or
    `event_authority_layer`, and `build_context` renders it as `[Scalar authority: ...]` or
-   `[Event authority: ...]`. A lane's verdicts appear only while its authority flag is on.
+   `[Event authority: ...]`. A lane's verdicts appear only while both its lane flag and its authority flag are on.
 
 ## When a pass runs
 
@@ -73,8 +73,9 @@ Gaps:
 
 ## Opting out
 
-To turn a lane off, set its flag to `false`. To stop it from answering recall as well, also set
-its authority flag to `false`. Then restart the backend and the stdio bridge.
+To turn a lane off, set its flag to `false`, then restart the backend and the stdio bridge. Its
+authority stops too, whatever the authority flag says. Setting the authority flag to `false` as
+well keeps the configuration readable, but is not required.
 
 | Lane | Lane flag | Authority flag |
 |---|---|---|
@@ -86,10 +87,10 @@ its authority flag to `false`. Then restart the backend and the stdio bridge.
 What happens (E2E-18):
 - **The lane stops.** A pass makes no model calls for it, and its stored Views and assertions
   stay as they were. Turning a lane off is not a rollback.
-- **Authority keeps reading stored state if left on.** The retained Views and events can still
-  lead, but they no longer update. A value the user changed while the lane was off is served
-  with its old number as current. This is by design ("retained Views can outlive the writer
-  gate", `config/feature_flags.py`). For a full opt-out, turn off both flags.
+- **Authority stops with its lane.** Authority is applied only while its lane flag is on
+  (`config/authority_gates.py`), even if the authority flag is left on. The stored Views and
+  events no longer update, so serving them as current would give a changed value its old
+  number. Recall serves ordinary memories instead.
 - **With both off,** recall returns ordinary memories and `source_memories`, with no verdicts.
 - **Turning the lane back on.**
   - **Scalar and event:** they read the turns captured while they were off, from their

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from menhir.config import MemorySettings
+from menhir.config.authority_gates import event_history_authority_effective, scalar_view_authority_effective
 from menhir.core.runtime_preflight import RuntimeCapabilities
 from menhir.infrastructure import GraphitiClient, LLMAdapter, MemoryGraphAdapter, Neo4jRepository
 from menhir.services import CandidateService, ContextBuilderService, IngestService, RecallService, ScoringService, LifecycleService
@@ -239,13 +240,13 @@ def build_memory_services(
         scoring_service=scoring_service,
         ingest_service=ingest_service,
         lifecycle_service=lifecycle_service,
-        scalar_view_authority_enabled=settings.personal_memory_scalar_view_authority_enabled,
+        scalar_view_authority_enabled=scalar_view_authority_effective(settings),
         scalar_view_collapse_enabled=settings.personal_memory_scalar_view_collapse_enabled,
         scalar_view_echo_drop_enabled=settings.personal_memory_scalar_view_echo_drop_enabled,
         counting_recall_authority_only=settings.personal_memory_counting_recall_authority_only,
         counting_wording_enabled=settings.personal_memory_counting_wording_enabled,
         scalar_history_enabled=settings.personal_memory_scalar_history_enabled,
-        event_history_authority_enabled=settings.personal_memory_event_history_authority_enabled,
+        event_history_authority_enabled=event_history_authority_effective(settings),
         counting_enabled=bool(
             settings.personal_memory_counting_enabled
             and settings.personal_memory_scalar_state_enabled
