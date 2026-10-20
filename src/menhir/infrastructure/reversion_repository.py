@@ -48,10 +48,9 @@ _SCALAR_SCOPE = (
     tenant_scope_cypher("a")
     + " AND coalesce(a.claim_ordinal, 0) = 0 AND a.episode_uuid IN $turn_ids"
 )
-# Event rows carry the lowercased namespace (typed_event_repository._norm).
-_EVENT_SCOPE = (
-    "toLower(trim(coalesce(a.namespace, ''))) = $ns_norm AND a.episode_uuid IN $turn_ids"
-)
+# Event rows carry the lowercased namespace (typed_event_repository._norm), so the scope params
+# are built from that spelling (_event_scope_params).
+_EVENT_SCOPE = tenant_scope_cypher("a") + " AND a.episode_uuid IN $turn_ids"
 _RETIRABLE = (
     " AND coalesce(a.evidence_tier, 'agent') = 'agent'"
     " AND coalesce(a.perceiver_rank, 0) < $rank"
@@ -159,7 +158,7 @@ class PerceptionReversionRepository:
             + " RETURN " + _EVENT_ROW
             + " ORDER BY a.episode_uuid, a.span_start, a.assertion_id",
             params={"turn_ids": ids, "rank": int(perceiver_rank),
-                    "ns_norm": _norm(namespace)},
+                    **_event_scope_params(namespace)},
         )
         return [dict(r) for r in rows]
 
@@ -175,7 +174,7 @@ class PerceptionReversionRepository:
             + " AND a.perceiver_version = $pv AND NOT coalesce(a.binding_pending, false)"
             " RETURN " + _EVENT_ROW
             + " ORDER BY a.episode_uuid, a.span_start, a.assertion_id",
-            params={"turn_ids": ids, "pv": str(perceiver_version), "ns_norm": _norm(namespace)},
+            params={"turn_ids": ids, "pv": str(perceiver_version), **_event_scope_params(namespace)},
         )
         return [dict(r) for r in rows]
 
@@ -193,7 +192,7 @@ class PerceptionReversionRepository:
             " RETURN DISTINCT a.subject_uuid AS subject_uuid, a.predicate AS predicate,"
             " a.domain AS domain",
             params={"turn_ids": ids, "rank": int(perceiver_rank), "reason": EVENT_RETIRED_REASON,
-                    "ns_norm": _norm(namespace)},
+                    **_event_scope_params(namespace)},
         )
         return [dict(r) for r in rows]
 
@@ -211,7 +210,7 @@ class PerceptionReversionRepository:
             + _EVENT_SCOPE + _RETIRABLE + _RETIRE_TAIL_EVENT,
             params={"turn_ids": ids, "rank": int(perceiver_rank), "pv": str(perceiver_version),
                     "keep": _ids(keep_ids), "reason": EVENT_RETIRED_REASON,
-                    "ns_norm": _norm(namespace)},
+                    **_event_scope_params(namespace)},
         )
         if not rows:
             return {"retired": 0, "lanes": []}
@@ -219,8 +218,9 @@ class PerceptionReversionRepository:
         return {"retired": int(rows[0].get("retired") or 0), "lanes": lanes}
 
 
-def _norm(value: str | None) -> str:
-    return (value or "").strip().lower()
+def _event_scope_params(namespace: str | None) -> dict[str, Any]:
+    # Event rows store typed_event_repository._norm(namespace); scope on that spelling.
+    return tenant_scope_params((namespace or "").strip().lower())
 
 
 def _retired(rows: list[Any]) -> dict[str, Any]:
