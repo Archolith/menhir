@@ -252,11 +252,11 @@ _REQUIREMENT_SCOPE = {
     "anchored_time_expiry_enabled": "The resolver records world ends at ingest; the recall label "
         "reads whatever edges earlier ingests kept live.",
     "anchored_time_attach_enabled": "The attach check only vets resolver writes; without the resolver it never runs.",
-    "personal_memory_scalar_view_authority_enabled": "Scalar state produces the Views; retained Views can outlive the writer gate.",
+    "personal_memory_scalar_view_authority_enabled": "Scalar state produces the Views; recall applies authority only while scalar state is on.",
     "personal_memory_scalar_view_collapse_enabled": "Collapse only acts on the verdicts the scalar view authority lane emits.",
     "personal_memory_scalar_view_echo_drop_enabled": "Echo drop only acts on the verdicts the scalar view authority lane emits.",
     "personal_memory_observation_dedup_enabled": "Dedup only acts on observations the scalar view authority lane injects.",
-    "personal_memory_event_history_authority_enabled": "Event history produces the assertions; retained assertions can outlive the writer gate.",
+    "personal_memory_event_history_authority_enabled": "Event history produces the assertions; recall applies authority only while event history is on.",
     "personal_memory_counting_enabled": "The counting lane runs after the scalar phase and reads scalar state.",
     "personal_memory_counting_extract_v2": "Only the counting lane's extraction changes; with counting off it never runs.",
     "personal_memory_counting_match_enabled": "Related-count matching only changes the counting lane; with counting off it never runs.",
