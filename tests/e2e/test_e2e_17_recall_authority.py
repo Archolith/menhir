@@ -243,9 +243,10 @@ async def test_e2e_17_scalar_authority(
         detail={"0702": _scalar(coins_early, "owned_coin_count"),
                 "0705": _scalar(coins_late, "owned_coin_count")},
     )
-    # A history question gets the slot's history as an advisory verdict. The current View still
-    # leads alongside it, labeled "current" (verdict status follows foundation, not intent).
+    # A history question gets the slot's history as an advisory verdict. The current View is still
+    # shown, but advisory: today's 42 is not the answer to a question about the past.
     hist = _scalar(coins_hist, "owned_coin_count", "history")
+    hist_current = _scalar(coins_hist, "owned_coin_count", "current")
     hist_entries = [str(c.get("stated_span")) for c in (hist[0].get("contributors") if hist else [])
                     if c.get("relation") == "HISTORY_ENTRY"]
     lane_evidence.record(
@@ -253,7 +254,10 @@ async def test_e2e_17_scalar_authority(
         passed=len(hist) == 1 and hist[0].get("status") == "advisory" and hist[0].get("value") is None
         and hist_entries == ["I have 37 coins", "I bought 5 more coins"]
         and "owned_coin_count history, 2 entries" in coins_hist_ctx
-        and not _scalar(coins_now, "owned_coin_count", "history"),
+        and not _scalar(coins_now, "owned_coin_count", "history")
+        and len(hist_current) == 1 and hist_current[0].get("status") == "advisory"
+        and "[Scalar authority: ADVISORY] owned_coin_count = 42" in coins_hist_ctx
+        and "[Scalar authority: LEADS] owned_coin_count" not in coins_hist_ctx,
         detail={"verdicts": _scalar(coins_hist, "owned_coin_count"),
                 "context": coins_hist_ctx[:2000]},
     )
