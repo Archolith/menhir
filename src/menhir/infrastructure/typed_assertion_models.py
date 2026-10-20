@@ -58,6 +58,19 @@ MERGE (h:TypedAssertionHead {source_key: $source_key})
   ON CREATE SET h.created_at = datetime(), h.namespace = $namespace,
                 h.subject_uuid = $subject_uuid, h.claim_key = $claim_key,
                 h.identity_version = $identity_version
+// #170 D1 read marker (scalar lane, ordinal 0): the highest perceiver rank that re-read this turn.
+// Locked before it is read, so this write and that version's retire (reversion_repository)
+// serialize. An agent-tier write ranked below it is stored non-current.
+WITH h
+FOREACH (_ IN CASE WHEN coalesce($claim_ordinal, 0) = 0 AND coalesce($episode_uuid, '') <> ''
+                   THEN [1] ELSE [] END |
+    MERGE (rm:TypedReadMarker {marker_key: 'scalar:' + $episode_uuid})
+      ON CREATE SET rm.rank = -1, rm.turn_id = $episode_uuid
+    SET rm.write_at = datetime())
+WITH h
+OPTIONAL MATCH (rm:TypedReadMarker {marker_key: 'scalar:' + coalesce($episode_uuid, '')})
+WITH h, ($evidence_tier <> 'agent' OR coalesce($claim_ordinal, 0) <> 0
+         OR $perceiver_rank >= coalesce(rm.rank, -1)) AS read_current
 // already-bound identity-mismatch (ScalarStateView C.4.4) — decided from the head's EXISTING current
 // owner, BEFORE any node create / CURRENT move / supersession. The durable invariant belongs to the
 // SOURCE CLAIM (head), across every assertion VERSION and interpretation: once a claim is durably
@@ -66,9 +79,9 @@ MERGE (h:TypedAssertionHead {source_key: $source_key})
 // merge path's job (`rebind_assertions`), never a record's. Note: NOT gated on the presented entity
 // existing (a sentinel counts as "different"), and computed from `cur` (the pre-existing current), so
 // a brand-new higher-version node cannot escape the guard by lacking a binding_pending property yet.
-WITH h
+WITH h, read_current
 OPTIONAL MATCH (h)-[cr:CURRENT]->(cur:TypedAssertion)
-WITH h, cr, cur,
+WITH h, cr, cur, read_current,
      (cur IS NOT NULL AND NOT coalesce(cur.binding_pending, true)
       AND cur.subject_uuid <> $subject_uuid) AS binding_mismatch
 MERGE (a:TypedAssertion {assertion_key: $assertion_key})
@@ -117,14 +130,17 @@ FOREACH (_ IN CASE WHEN (NOT binding_mismatch) AND $absolute_semantics = 'correc
 FOREACH (_ IN CASE WHEN (NOT binding_mismatch) AND $evidence_rank > coalesce(a.evidence_rank, -1)
                    THEN [1] ELSE [] END |
     SET a.evidence_tier = $evidence_tier, a.evidence_rank = $evidence_rank)
-WITH h, a, cr, cur, binding_mismatch,
+WITH h, a, cr, cur, binding_mismatch, read_current,
      ((NOT binding_mismatch) AND cur IS NOT NULL AND cur.assertion_key <> $assertion_key
-      AND $perceiver_rank > coalesce(cur.perceiver_rank, -1)) AS will_supersede
+      AND $perceiver_rank > coalesce(cur.perceiver_rank, -1) AND read_current) AS will_supersede
 // a becomes current: no prior current, OR it strictly out-ranks it, OR it IS the current (idempotent)
-// — but NEVER on a binding_mismatch (a mismatched version stays a non-current, superseded audit node).
+// — but NEVER on a binding_mismatch (a mismatched version stays a non-current, superseded audit node),
+// and a new current never ranks below the turn's read marker (read_current; the idempotent case
+// leaves an existing current alone).
 FOREACH (_ IN CASE WHEN (NOT binding_mismatch)
                         AND (cur IS NULL OR will_supersede
                              OR (cur IS NOT NULL AND cur.assertion_key = $assertion_key))
+                        AND (read_current OR (cur IS NOT NULL AND cur.assertion_key = $assertion_key))
                    THEN [1] ELSE [] END |
     SET a.superseded = false
     MERGE (h)-[:CURRENT]->(a))

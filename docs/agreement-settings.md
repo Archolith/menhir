@@ -85,11 +85,26 @@ To go back to the strict profile, set `..._SCALAR_THRESHOLD=1` and the three rec
 3. **Re-fold.** The rebuild folds every non-superseded assertion for the subject. It retires Views
    whose slot is no longer produced, so a higher-rank reading that moves a fact to a new slot on
    the same head moves the View with it.
-4. **Counting.** The counting lane compares versions for equality, so suffixed versions (`v1+x2`)
+4. **Retire (scalar and event, #170 decision 1).** After a page is stored at a higher rank, the
+   older CURRENT agent-tier readings on its turns that the new version did not reproduce are
+   retired (`retired_reason` `scalar_reversion` / `event_reversion`). The keep rule is counting's
+   rule B:
+   - **Replaced:** a stored new reading overlaps the old one's span.
+   - **Kept:** the new samples proposed something over it but nothing was stored (a gate veto), or
+     a sample could not read the turn in full. For events, any parse drop on the page counts as
+     not read in full.
+   - **Retired:** everything else.
+
+   The same statement raises the turn's read marker (`:TypedReadMarker`) to the new rank. Records
+   lock that marker, and an agent-tier reading ranked below it is stored non-current, so a slower
+   lower-version runner cannot make a reading current on that turn again. A downgrade and a
+   rank-0 version retire nothing. If a retired reading's View fails to rebuild, the cursor does
+   not move past the page, and the next read rebuilds it.
+5. **Counting.** The counting lane compares versions for equality, so suffixed versions (`v1+x2`)
    are fine there. Prior-version occurrences stay counted until the new reading of their turn is
    stored, and are then retired. Counting reads only turns the scalar lane has finished at the
    scalar version in effect, so a scalar bump pauses counting until the scalar re-read catches up.
-5. **Same version, different behavior.** Changing reconciliation, canonicalization or the threshold
+6. **Same version, different behavior.** Changing reconciliation, canonicalization or the threshold
    without a bump leaves the old readings current. The settings comments say to bump. Nothing
    enforces it.
 
@@ -103,14 +118,10 @@ self.
 2. Never roll back by lowering the version. Ship the old behavior under a higher version instead.
 3. Do not change span selection or span alignment with only a bump. A different span is a
    different head, so nothing supersedes the old reading.
-4. Before any slot-identity change ships, add a scalar and event step that retires prior-version
-   readings. Counting already has the equivalent step.
-   - **Why it is needed:** a version bump can only replace an old reading that the new version
-     reproduces on the same head. If the new version abstains on a turn, or quotes a different
-     span, the old reading stays CURRENT and stays in the fold.
-   - **Where to look:** `materializable_assertions_for_entity` filters on `superseded`,
-     `binding_pending` and the tenant only, with no version filter.
-   - **Status:** this step is not implemented.
+4. The prior-version retire (step 4 above) is what makes a bump safe when the new version abstains
+   on a turn or quotes a different span. Without it the old reading would stay CURRENT and in the
+   fold, because `materializable_assertions_for_entity` has no version filter. It needs strictly
+   higher SemVer ranks, which is rule 1.
 
 A version bump costs a full re-read of every namespace with the lane on: k calls per turn,
 limited by the per-pass budget. #334 measures backlog recovery.

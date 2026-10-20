@@ -107,6 +107,8 @@ class MemoryGraphAdapter:
         self._typed_assertions = TypedAssertionRepository(self.neo4j)
         from menhir.infrastructure.typed_event_repository import TypedEventAssertionRepository
         self._typed_event_assertions = TypedEventAssertionRepository(self.neo4j)
+        from menhir.infrastructure.reversion_repository import PerceptionReversionRepository
+        self._reversion = PerceptionReversionRepository(self.neo4j)
 
     # -------------------------------------------------------------------------
     # Schema bootstrap (stays here — uses SHOW INDEXES admin query)
@@ -1783,6 +1785,60 @@ class MemoryGraphAdapter:
             namespace, turn_ids, perceiver_version=perceiver_version,
             run_id=run_id, incarnation=incarnation, epoch=epoch,
             keep_ids=keep_ids, promote_ids=promote_ids)
+
+    # --- prior-version retirement, scalar + event lanes (#170 D1; reversion_repository) ---
+    def scalar_prior_version_rows(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+    ) -> list[dict[str, Any]]:
+        return self._reversion.scalar_prior_version_rows(
+            namespace, turn_ids, perceiver_rank=perceiver_rank)
+
+    def scalar_current_version_spans(
+        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
+        include_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        return self._reversion.scalar_current_version_spans(
+            namespace, turn_ids, perceiver_version=perceiver_version, include_ids=include_ids)
+
+    def scalar_owed_subjects(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+    ) -> list[str]:
+        return self._reversion.scalar_owed_subjects(
+            namespace, turn_ids, perceiver_rank=perceiver_rank)
+
+    def retire_scalar_prior_version(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+        perceiver_version: str, keep_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self._reversion.retire_scalar_prior_version(
+            namespace, turn_ids, perceiver_rank=perceiver_rank,
+            perceiver_version=perceiver_version, keep_ids=keep_ids)
+
+    def event_prior_version_rows(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+    ) -> list[dict[str, Any]]:
+        return self._reversion.event_prior_version_rows(
+            namespace, turn_ids, perceiver_rank=perceiver_rank)
+
+    def event_current_version_spans(
+        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
+    ) -> list[dict[str, Any]]:
+        return self._reversion.event_current_version_spans(
+            namespace, turn_ids, perceiver_version=perceiver_version)
+
+    def event_owed_lanes(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+    ) -> list[dict[str, Any]]:
+        return self._reversion.event_owed_lanes(
+            namespace, turn_ids, perceiver_rank=perceiver_rank)
+
+    def retire_event_prior_version(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+        perceiver_version: str, keep_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self._reversion.retire_event_prior_version(
+            namespace, turn_ids, perceiver_rank=perceiver_rank,
+            perceiver_version=perceiver_version, keep_ids=keep_ids)
 
     def mark_counting_flag_state(
         self, namespace: str, *, enabled: bool, at: str, create_only: bool = False,
