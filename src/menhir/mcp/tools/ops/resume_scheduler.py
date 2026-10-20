@@ -40,5 +40,7 @@ class ResumeSchedulerTool(BaseTextTool):
             f"scheduler_running: {snapshot.get('running')}",
             f"lease_acquired: {lease.get('acquired')}",
             f"lease_blocked_reason: {lease.get('blocked_reason')}",
+            # True: not running yet, but retrying the lease until it is free.
+            f"lease_standby: {lease.get('standby')}",
         ]
         return "\n".join(lines)
