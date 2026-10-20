@@ -62,10 +62,13 @@ Gaps:
 - **Unclean exit.** The scheduler lease lives in SQLite and lasts 90 s, renewed every 30 s. After
   a crash, the dead process's lease stays valid until it expires.
   - **Default deployment.** The PID-namespace assertion is not set, so a backend restarted within
-    those 90 s cannot take the lease. Its scheduler does not start, and nothing retries it
-    later. Consolidation stays stopped in that process until one of these:
-    - an operator calls `resume_scheduler` or `force_scheduler_takeover`;
-    - the backend restarts again after the lease has expired.
+    those 90 s cannot take the lease at first. Its scheduler stands by and retries every
+    heartbeat (30 s). It takes the lease once the dead owner's lease expires, within about 90 s,
+    with no operator action (#170 decision 4).
+    - While it waits, `resume_scheduler` reports `lease_standby: True`.
+    - `stop()` or pausing the scheduler withdraws the standby.
+    - A process that loses the lease while running does not stand by. It stays stopped until an
+      operator calls `resume_scheduler` or `force_scheduler_takeover`.
     - `POST /api/phase3/run` still works.
   - **With the PID-namespace assertion set,** a dead local owner's lease is reclaimed at once.
 - **Scheduler state.** Job timing is held in memory, so after a restart every job counts as
