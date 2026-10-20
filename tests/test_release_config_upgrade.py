@@ -20,8 +20,6 @@ CAMPAIGN_FLAGS = {
     "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED": "personal_memory_event_history_authority_enabled",
     "MENHIR_FRONTIER_BM25": "frontier_bm25",
     "MENHIR_FRONTIER_CONTENT_VECTOR": "frontier_content_vector",
-    "MENHIR_FRONTIER_ORACLE_RANKING": "frontier_oracle_ranking",
-    "MENHIR_FRONTIER_INTENT_LENS": "frontier_intent_lens",
     "MENHIR_FRONTIER_WARDEN_GATE": "frontier_warden_gate",
     "MENHIR_FRONTIER_DIVERSITY_GATE": "frontier_diversity_gate",
     "MENHIR_FRONTIER_CONTRADICTION_INTERRUPT": "frontier_contradiction_interrupt",

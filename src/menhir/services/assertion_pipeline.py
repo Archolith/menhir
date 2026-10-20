@@ -130,6 +130,11 @@ class AssertionPipeline:
     async def run(self, query: QueryContext, candidates: list[CandidateMemory]) -> AssertionOutcome:
         query = self._resolve_intent(query)
         grouped = await self.executor.evaluate(query, candidates)
+        # The executor keys by candidate id; the combiner breaks score ties by incoming order.
+        # Re-key in the caller's order so ties (and an all-neutral oracle outage) keep the
+        # caller's ranking instead of id order.
+        caller_order = {c.id: grouped[c.id] for c in candidates if c.id in grouped}
+        grouped = caller_order | {cid: r for cid, r in grouped.items() if cid not in caller_order}
         ranked_ids, packets = self.combiner.rank(query, grouped)
         by_id = {c.id: c for c in candidates}
         intent = _INTENT.get(query.intent, QueryIntent.CURRENT)

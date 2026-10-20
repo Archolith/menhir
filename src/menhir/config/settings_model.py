@@ -428,20 +428,16 @@ class MemorySettings:
     benchmark_mode: bool = False
 
     # Frontier retrieval portions, mapped into a RetrievalTuningConfig at the recall entry
-    # point via retrieval_tuning(). ALL portions default OFF so the shipped recall path is
-    # byte-for-byte today's ScoringService behavior (merge-to-main neutrality gate + the
-    # 2026-07-04 read-side bench verdict: the oracle stack is neutral-to-negative on
-    # LongMemEval, so it does not earn being on by default). Enable any portion per
-    # deployment via MENHIR_FRONTIER_BM25 / _ORACLE_RANKING / _INTENT_LENS / _WARDEN_GATE /
-    # _SHADOW / etc. (This also resolves audit DOC-05: code defaults now match .env.example.)
+    # point via retrieval_tuning(). These portions default OFF; enable any per deployment via
+    # MENHIR_FRONTIER_BM25 / _WARDEN_GATE / _SHADOW / etc. (code defaults match .env.example,
+    # audit DOC-05). Oracle ranking and the intent lens are always on since #172 and have no
+    # setting; see RetrievalTuningConfig.
     frontier_bm25: bool = False            # attributed hybrid (vector+BM25) candidate gen
     frontier_content_vector: bool = False  # add menhir-owned content-embedding cosine lane
     frontier_content_vector_replace_name: bool = False
     frontier_content_vector_k: int = 100
     frontier_content_vector_weight: float = 0.5
     frontier_fusion_admission_policy: str = "attributed"
-    frontier_oracle_ranking: bool = False  # reorder survivors by the oracle combiner
-    frontier_intent_lens: bool = False     # derive temporal lens from query text
     frontier_warden_gate: bool = False     # drop REFUSED / label FLAGGED (opt-in; aggressive)
     frontier_diversity_gate: bool = False  # reorder by evidence family to prevent spiral (opt-in)
     frontier_contradiction_interrupt: bool = False  # append ContradictionWarden to default chain (opt-in)
@@ -764,8 +760,6 @@ class MemorySettings:
             content_vector_k=self.frontier_content_vector_k,
             content_vector_weight=self.frontier_content_vector_weight,
             fusion_admission_policy=self.frontier_fusion_admission_policy,
-            enable_oracle_ranking=self.frontier_oracle_ranking,
-            enable_intent_lens=self.frontier_intent_lens,
             enable_warden_gate=self.frontier_warden_gate,
             enable_diversity_gate=self.frontier_diversity_gate,
             enable_contradiction_interrupt=self.frontier_contradiction_interrupt,
@@ -1020,8 +1014,6 @@ class MemorySettings:
                 "MENHIR_FRONTIER_FUSION_ADMISSION_POLICY",
                 default=cls.frontier_fusion_admission_policy,
             ).strip().lower(),
-            frontier_oracle_ranking=parse_bool_env(_getenv("MENHIR_FRONTIER_ORACLE_RANKING", default=str(cls.frontier_oracle_ranking))),
-            frontier_intent_lens=parse_bool_env(_getenv("MENHIR_FRONTIER_INTENT_LENS", default=str(cls.frontier_intent_lens))),
             frontier_warden_gate=parse_bool_env(_getenv("MENHIR_FRONTIER_WARDEN_GATE", default=str(cls.frontier_warden_gate))),
             frontier_diversity_gate=parse_bool_env(_getenv("MENHIR_FRONTIER_DIVERSITY_GATE", default=str(cls.frontier_diversity_gate))),
             frontier_contradiction_interrupt=parse_bool_env(_getenv("MENHIR_FRONTIER_CONTRADICTION_INTERRUPT", default=str(cls.frontier_contradiction_interrupt))),

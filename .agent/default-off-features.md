@@ -25,8 +25,6 @@ mapped into `RetrievalTuningConfig` at the recall entry via `retrieval_tuning()`
 | Feature | Flag / env | Gate location | Bench status | Source plan |
 |---|---|---|---|---|
 | Attributed hybrid (vector+BM25) candidate gen | `frontier_bm25` / `MENHIR_FRONTIER_BM25` | recall tuning | neutral-to-negative on LME | `r1-hybrid-candidate-generation.md` |
-| Reorder survivors by oracle combiner | `frontier_oracle_ranking` / `MENHIR_FRONTIER_ORACLE_RANKING` | recall tuning | neutral-to-negative on LME | oracle stack (R4-R7) |
-| **IntentOracle** temporal lens from query text | `frontier_intent_lens` / `MENHIR_FRONTIER_INTENT_LENS` | `AssertionPipeline(auto_intent=tuning.enable_intent_lens)`, `recall_service.py:567,702` | bench-graduated (real embedder), off by default | `menhir-intent-oracle-plan.md` (archived 2026-07-11) |
 | Warden gate: drop REFUSED / label FLAGGED | `frontier_warden_gate` / `MENHIR_FRONTIER_WARDEN_GATE` | recall tuning | opt-in; aggressive | R8 rails |
 | Diversity gate (Guard 4, set-level anti-spiral) | `frontier_diversity_gate` / `MENHIR_FRONTIER_DIVERSITY_GATE` | recall tuning | opt-in | `menhir-r8-control-rails-plan.md` |
 | Contradiction interrupt (Guard 7) | `frontier_contradiction_interrupt` / `MENHIR_FRONTIER_CONTRADICTION_INTERRUPT` | recall tuning | opt-in | `menhir-r8-control-rails-plan.md` |
@@ -96,6 +94,15 @@ _(none yet — add rows here with the activation date when a flag flips `True` o
 | Feature | Flag / env | Gate location | Evidence | Source plan |
 |---|---|---|---|---|
 | Source-memory recall lane (additive raw-episode section next to ranked results, never fused; ingest-side episode-content embedding + `scripts/backfill_episode_embeddings.py` backfill; optional anchor pools via `frontier_source_memory_pools`) | `frontier_source_memories` / `MENHIR_FRONTIER_SOURCE_MEMORIES` (+ `_SOURCE_MEMORY_LIMIT`, `_SOURCE_MEMORY_MAX_CHARS`, `_SOURCE_MEMORY_POOLS`; per-call `source_memory_limit` on REST/MCP/recall) | recall tuning (`enable_source_memories`) + ingest gate (`source_memories_enabled`). Recall Lab exposes it as opt-in arm tunings only — no default arms | AMA-Bench live A/B (505 q x 2: limit 10 fixed 104 / broke 52 vs off; non-state types improved) and LongMemEval oracle 500 q x 2 (0.340 -> 0.711 correct, knowledge-update 0.365 -> 0.782, every type improved, consistent fixed 183 / broke 4) | `menhir-source-memory-lane-plan.md` |
+
+### Graduated to always-on 2026-10-20: Oracle ranking and intent lens (flags removed)
+
+| Feature | Former flag / env | Gate location | Evidence | Source plan |
+|---|---|---|---|---|
+| Blend the oracle combiner order into survivors (weight 0.25) | `frontier_oracle_ranking` / `MENHIR_FRONTIER_ORACLE_RANKING` (retired) | always on; per-request `RetrievalTuningConfig.enable_oracle_ranking` remains for Recall Lab | LME copy graph 500 q x 3, server path: top-10 hit delta 0.000, MRR delta +0.0000 [-0.0004, +0.0004]; p50 +8.2%, p95 +10.7%; outage now order-neutral (tie-break fix) | #172 |
+| **IntentOracle** temporal lens from query text | `frontier_intent_lens` / `MENHIR_FRONTIER_INTENT_LENS` (retired) | always on; per-request `enable_intent_lens` | with Oracle: MRR delta -0.0001 [-0.0004, +0.0001]; p50 +8.4%, p95 +16.1% | #172 |
+
+Not yet measured (non-blocking, #345): AMA stale-before-current and answer-level quality.
 
 ---
 

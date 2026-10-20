@@ -1602,15 +1602,36 @@ def _two_cands(stub_graphiti_client, stub_memory_graph_adapter, *, c1, c2, extra
 async def test_recall_frontier_off_by_default_is_old_order(
     stub_graphiti_client, stub_memory_graph_adapter
 ) -> None:
-    """Default tuning runs no frontier portion: similarity order, no label, no note."""
+    """With every frontier portion off: similarity order, no label, no note."""
     _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
     svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
 
-    result = await svc.recall("test query")
+    result = await svc.recall("test query", tuning=RetrievalTuningConfig(
+        enable_oracle_ranking=False, enable_intent_lens=False))
 
     assert [r.uuid for r in result.results] == ["entity-1", "entity-2"]
     assert all(r.warden_label is None for r in result.results)
     assert "frontier" not in (result.note or "")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_recall_default_runs_oracle_ranking_without_warden_receipt(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    """Default tuning runs Oracle ranking + intent lens (#172) without touching the Warden
+    receipt: no guard is configured, so the state stays "disabled" with no notice."""
+    _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+
+    result = await svc.recall("test query", include_warden_status=True)
+
+    assert sorted(r.uuid for r in result.results) == ["entity-1", "entity-2"]
+    assert "oracle_ranking" in (result.note or "") and "intent_lens" in (result.note or "")
+    assert all(r.warden_label is None for r in result.results)
+    assert result.warden_status.state == "disabled"
+    assert result.warden_status.evaluated == 0 and not result.warden_status.metadata_gaps
+    assert result.warden_notice is None
 
 
 @pytest.mark.unit

@@ -32,9 +32,9 @@ class RecallLabTuning(BaseModel):
     enable_facet_shadow: bool = False
     enable_facet_candidates: bool = False
     facet_weight: float = Field(default=0.5, ge=0.0, le=10.0)
-    enable_oracle_ranking: bool = False
+    enable_oracle_ranking: bool = True
     oracle_rank_weight: float = Field(default=0.25, ge=0.0, le=2.0)
-    enable_intent_lens: bool = False
+    enable_intent_lens: bool = True
     enable_warden_gate: bool = False
     enable_diversity_gate: bool = False
     enable_contradiction_interrupt: bool = False
@@ -379,6 +379,8 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
             enable_assertion_shadow=False,
             enable_facet_candidates=True,
             facet_weight=0.5,
+            enable_oracle_ranking=False,
+            enable_intent_lens=False,
         ),
     },
     {

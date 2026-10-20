@@ -2073,9 +2073,12 @@ async def run_recall(
         or tuning.enable_belief_gate
         or (trace and tuning.enable_assertion_shadow)
     )
+    # Oracle ranking is not a Warden: with no guard configured, running the frontier must not
+    # change the Warden receipt (state, counts, gaps). Only configured guards get a receipt.
+    guard_status = warden_status if warden_status.configured_guards else None
     if frontier_active and candidate_inputs:
         _t = perf_counter()
-        await service._attach_frontier_metadata(eligible_uuids, metadata_by_uuid, warden_status=warden_status)
+        await service._attach_frontier_metadata(eligible_uuids, metadata_by_uuid, warden_status=guard_status)
         if tuning.enable_belief_gate:
             try:
                 fact_rows = await asyncio.to_thread(
@@ -2120,13 +2123,13 @@ async def run_recall(
 
     # --- Frontier portions (active): reorder by combiner / gate by wardens ---
     # Applied to the survivors BEFORE the limit slice so it shapes which make the cut.
-    # OFF by default -> this block is skipped and the path is byte-for-byte the old one.
+    # Oracle ranking is on by default (#172); with every portion off this block is skipped.
     frontier_note: str | None = None
     if scored and (tuning.enable_oracle_ranking or tuning.enable_warden_gate or tuning.enable_belief_gate):
         _t = perf_counter()
         scored, frontier_note = await service._apply_frontier(
             query, namespace, scored, metadata_by_uuid, tuning,
-            query_project=file_context_project, warden_status=warden_status,
+            query_project=file_context_project, warden_status=guard_status,
         )
         _t_phases["frontier"] = int((perf_counter() - _t) * 1000)
 
