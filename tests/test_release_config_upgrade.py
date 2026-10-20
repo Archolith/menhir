@@ -63,7 +63,7 @@ def test_fresh_setup_uses_code_defaults_without_enabling_campaign(
     for key, attr in CAMPAIGN_FLAGS.items():
         # Source memories already shipped on in #208; this audit does not promote them.
         assert getattr(settings, attr) is (key == "MENHIR_FRONTIER_SOURCE_MEMORIES")
-    assert settings.canonical_self_binding_mode == "off"
+    assert settings.canonical_self_binding_mode == "enforce"  # default since #169
 
 
 @pytest.mark.parametrize("checkout", [False, True], ids=["wheel-state", "checkout"])
@@ -80,6 +80,25 @@ def test_upgrade_with_unset_flags_uses_current_defaults(
     settings = MemorySettings.from_env()
     for key, attr in CAMPAIGN_FLAGS.items():
         assert getattr(settings, attr) is (key == "MENHIR_FRONTIER_SOURCE_MEMORIES")
+
+
+@pytest.mark.parametrize("pinned,expected", [(None, "enforce"), ("off", "off"),
+                                              ("observe", "observe")])
+def test_upgrade_canonical_self_mode_follows_default_unless_pinned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_campaign_env: None,
+    pinned: str | None, expected: str,
+) -> None:
+    """Upgrades without the key get enforce (#169); an explicit value is kept as the opt-out."""
+    home = _home(tmp_path, checkout=False)
+    original = "# existing configuration\n"
+    if pinned is not None:
+        original += f"MENHIR_CANONICAL_SELF_BINDING_MODE={pinned}\n"
+    (home / ".env").write_text(original)
+    apply_setup(home, provider="openai", configure_git_hooks=False)
+    assert (home / ".env").read_text().startswith(original)
+    monkeypatch.setenv("ENV_FILE", str(home / ".env"))
+    env_file.load_menhir_env()
+    assert MemorySettings.from_env().canonical_self_binding_mode == expected
 
 
 @pytest.mark.parametrize("checkout", [False, True], ids=["wheel-state", "checkout"])
