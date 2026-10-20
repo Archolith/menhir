@@ -144,12 +144,6 @@ FEATURE_REGISTRY: tuple[FeatureFlag, ...] = (
         summary="FACT-edge expansion during retrieval.",
     ),
     FeatureFlag(
-        "frontier_intent_lens",
-        "MENHIR_FRONTIER_INTENT_LENS",
-        default=False,
-        summary="Intent-lens reranking.",
-    ),
-    FeatureFlag(
         "frontier_shadow",
         "MENHIR_FRONTIER_SHADOW",
         default=False,
@@ -295,7 +289,6 @@ PRESETS: dict[str, dict[str, bool]] = {
         frontier_bm25=True,
         frontier_content_vector=True,
         frontier_fact_edges=True,
-        frontier_intent_lens=True,
         scalar_state=True,
         scalar_history=True,
         event_history=True,

@@ -1,3 +1,14 @@
+## 2026-10-20 - Turn Oracle ranking and the intent lens on and remove their flags
+
+- `domain/retrieval_tuning.py`: `enable_oracle_ranking` and `enable_intent_lens` default true. They stay per-request knobs for Recall Lab comparisons; there is no deployment flag.
+- `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: remove `frontier_oracle_ranking` / `MENHIR_FRONTIER_ORACLE_RANKING` and `frontier_intent_lens` / `MENHIR_FRONTIER_INTENT_LENS`; both are listed in `RETIRED`. A deployment that still sets them gets the new default.
+- `services/assertion_pipeline.py`: score ties keep the caller's order instead of candidate-id order, so an oracle outage (every oracle neutral) leaves recall order unchanged.
+- `services/recall_pipeline.py`: the frontier only writes the Warden receipt when a guard is configured, so default recall still reports `disabled` with no notice. With only the contradiction or currentness guard configured, the receipt now reads `computed_not_applied` (the chain runs because Oracle ranking does).
+- `explorer/recall_lab.py`: the Production arm follows the new default; the facet-only arm turns Oracle ranking and the intent lens off explicitly.
+- Tests: `tests/test_settings.py`, `tests/test_release_config_upgrade.py`, `tests/test_warden_safety_matrix.py`, `tests/test_recall_service.py` and `tests/e2e/_harness/features.py` updated for the new default; new tests for default recall's Warden receipt and for tie order.
+- Evidence and follow-ups: #172; remaining AMA checks in #345; diversity gate stays opt-in (#344).
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-10-18 - Keep scalar View text out of the shared keyword index
 
 - Scalar Views (`scalar_state`, `scalar_history`) are `:Entity` nodes, so their text sat in Graphiti's `node_name_and_summary` full-text index. Lucene weighs terms across the whole index, so every View version shifted the keyword ranks of ordinary entities in every namespace. In the LME counting A/B the 4R count pass added 16 of them and pushed a summary entity from keyword rank 5 to 7, below the 0.15 similarity floor, and the answer went from 5 to 4.
@@ -107,10 +118,3 @@
 - `tests/test_context_builder.py`, `tests/test_services_pipeline.py`: cover strict and conversational profiles, superseded and unknown-support controls, disabled-gate compatibility, and both production constructors.
 - `.agent/default-off-features.md`: explain strict versus conversational profiles and the limits of the scored-candidate gate; no defaults change.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-10-04 - Report Phase-3 lane completion for benchmark acceptance
-
-- `src/menhir/api/routes_handlers.py`, `src/menhir/api/routes_support.py`: report both counter gates, scalar-only model calls, and whether evidence remains beyond the event watermark.
-- `src/menhir/services/scheduler_tasks.py`: attribute scalar calls before the shared event phase.
-- `tests/test_api_routes.py`, `tests/test_consolidate_personal_memory.py`: cover counter gates, event completion and partial processing, and scalar call attribution.
-- `.agent/endpoints.md`: document the additive response fields.

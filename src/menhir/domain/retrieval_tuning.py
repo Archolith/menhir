@@ -208,18 +208,21 @@ class RetrievalTuningConfig:
     # and final ranking. Default OFF preserves production behavior.
     enable_facet_candidates: bool = False
     facet_weight: float = 0.5
-    # --- Frontier portions (active; each OFF == today's ScoringService behavior) ---
+    # --- Frontier portions (active; each OFF == plain ScoringService order) ---
     # Oracle ranking: run oracles+combiner over the post-floor survivors and blend its
     # order into the upstream ScoringService/facet order. The upstream rank remains the
     # baseline so a secondary trust/temporal signal cannot erase an exact semantic hit.
-    enable_oracle_ranking: bool = False
+    # On by default since #172 (retrieval-neutral on LME, within latency limits); kept as a
+    # per-request knob for Recall Lab comparisons. There is no deployment flag.
+    enable_oracle_ranking: bool = True
     # Reciprocal-rank residual weight for the Oracle order. 0 preserves the upstream
     # order exactly; 0.25 lets Oracle adjust close/lower-ranked candidates without
     # becoming a second replacement ranker.
     oracle_rank_weight: float = 0.25
     # Intent auto-lens: derive the temporal lens (current/historical/any) from the query
     # text for the oracle/warden path. No effect unless oracle_ranking or warden_gate is on.
-    enable_intent_lens: bool = False
+    # On by default since #172, like oracle ranking.
+    enable_intent_lens: bool = True
     # Warden gate: drop REFUSED candidates from results and label FLAGGED ones.
     enable_warden_gate: bool = False
     # Diversity gate: reorder results by evidence family to prevent any single source from dominating.

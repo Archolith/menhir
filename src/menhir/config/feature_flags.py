@@ -105,10 +105,6 @@ _SETTINGS = (
         'Enable frontier content vector replace name.', True, ()),
     ('frontier_fusion_admission_policy', 'MENHIR_FRONTIER_FUSION_ADMISSION_POLICY', 'attributed', 'frontier',
         'Configure frontier fusion admission policy.', True, ()),
-    ('frontier_oracle_ranking', 'MENHIR_FRONTIER_ORACLE_RANKING', False, 'frontier',
-        'Enable frontier oracle ranking.', True, ()),
-    ('frontier_intent_lens', 'MENHIR_FRONTIER_INTENT_LENS', False, 'frontier', 'Enable frontier intent lens.',
-        True, ()),
     ('frontier_warden_gate', 'MENHIR_FRONTIER_WARDEN_GATE', False, 'frontier', 'Enable frontier warden gate.',
         True, ()),
     ('frontier_diversity_gate', 'MENHIR_FRONTIER_DIVERSITY_GATE', False, 'frontier',
@@ -298,4 +294,8 @@ EXEMPT: dict[str, str] = {}
 RETIRED = {
     "frontier_brief_builder": "2026-10-01: replaced by the on-demand recall_timeline tool",
     "MENHIR_FRONTIER_BRIEF_BUILDER": "2026-10-01: replaced by the on-demand recall_timeline tool",
+    "frontier_oracle_ranking": "2026-10-20: oracle ranking is always on (#172)",
+    "MENHIR_FRONTIER_ORACLE_RANKING": "2026-10-20: oracle ranking is always on (#172)",
+    "frontier_intent_lens": "2026-10-20: intent lens is always on (#172)",
+    "MENHIR_FRONTIER_INTENT_LENS": "2026-10-20: intent lens is always on (#172)",
 }
