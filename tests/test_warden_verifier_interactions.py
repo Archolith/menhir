@@ -82,7 +82,7 @@ async def test_warden_verifier_effects_and_sync_disabled_restart(
     stub_graphiti_client.search_scored_results = [("belief", "configuration", .85)]
     tuning = RetrievalTuningConfig(enable_assertion_shadow=False,
         enable_warden_gate=warden, enable_evidence_anchor=True,
-        enable_contradiction_interrupt=warden, enable_intent_lens=True)
+        enable_contradiction_interrupt=warden, enable_belief_gate=False, enable_intent_lens=True)
     query = "have we already tried this configuration" if historical else "configuration"
     report = dict(schema_version=1, qualified_for_defaults=False, arm=arm, case=case,
         source=source, tuning=asdict(tuning), probes=probes, stored_evidence=deepcopy(stored),
@@ -102,7 +102,8 @@ async def test_warden_verifier_effects_and_sync_disabled_restart(
                                 scoring_service=ScoringService(), read_only=True)
         common = dict(namespace="conversation", source_memory_limit=0, update_access=False)
         baseline_recall = await service.recall(query, **common, tuning=RetrievalTuningConfig(
-            enable_assertion_shadow=False, enable_intent_lens=True))
+            enable_assertion_shadow=False, enable_intent_lens=True, enable_warden_gate=False,
+            enable_contradiction_interrupt=False, enable_belief_gate=False))
         result = await service.recall(query, **common, tuning=tuning, include_warden_status=True)
         assert bool(result.results) is expected_returned
         assert result.warden_status.state == ("applied" if warden else "disabled")

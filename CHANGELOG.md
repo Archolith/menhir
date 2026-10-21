@@ -1,3 +1,14 @@
+## 2026-10-20 - Turn the Warden gate and its contradiction guard on by default
+
+- `config/settings_model.py`, `config/feature_flags.py`, `domain/retrieval_tuning.py`, `.env.example`: `frontier_warden_gate` and `frontier_contradiction_interrupt` default true (#173). Installs that leave them unset, fresh or upgraded, get scope and Oracle admission and the contradiction interrupt on recall; set either to false to opt out.
+- The belief gate stays opt-in. It marks an Entity superseded when any of its fact edges expired; with git, test or log evidence that scores as a conflict, and the contradiction guard then refuses the entity under the current lens, including for history questions the Warden's lens reads as current. Follow-up: #350.
+- The evidence anchor stays opt-in, and `RetrievalTuningConfig.enable_evidence_anchor` now defaults false to match the setting (it was true). It reads provenance from the client label, so it refuses ordinary conversation; reimplementation is #349.
+- `explorer/recall_lab.py`: `RecallLabTuning` follows the new defaults; arms D-H pin their guards explicitly so their meaning does not change (D stays the strict profile with the anchor on).
+- Verifier sync is not a Warden and stays opt-in.
+- `.agent/default-off-features.md`: the two settings move to a "graduated to default-on" section; the belief-gate row records why it stays opt-in; the evidence-anchor row cites #349.
+- Tests: `tests/test_settings.py`, `tests/test_release_config_upgrade.py` and `tests/test_recall_service.py` assert the new defaults; new tests that each Warden default opts out through its env var, and that default recall keeps a git-backed entity with one expired fact edge (the belief gate refuses it). Tests that relied on the old defaults now pin them explicitly: `tests/test_recall_service.py`, `tests/test_warden_execution_status.py` (which also checks that default recall is `applied` without the anchor), `tests/test_warden_verifier_interactions.py` and `tests/test_git_staleness_recall_e2e.py`.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-10-20 - Default canonical-self binding to enforce
 
 - `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: `canonical_self_binding_mode` defaults to `enforce` (owner decision for #169). Installs that leave it unset, fresh or upgraded, now bind declared user subjects to the canonical self; pin `off` to opt out. An unrecognized value still falls back to `off`.
@@ -84,14 +95,4 @@
 - Stale docstrings about the removed Episodic fallback and prefixed assistant turns are corrected (review F10).
 - Docs: `.agent/endpoints.md` and `docs/agent-usage.md` list the MCP `role`.
 - Tests: new `tests/mcp/test_add_memory_role.py` and `tests/test_backfill_admitted_on_live.py` (online); F6, F11 and legacy-strip cases added to `tests/test_turn_role_resolution.py`, `tests/test_turn_role_wiring.py`, `tests/test_turn_role_ingest.py` and `tests/test_freeze_scalar_samples.py`. Changed because they pinned changed behavior: `test_extraction_passes_proven_evidence_role` (now supplies the turn's namespace), `test_tracked_write_signature_does_not_grow_permissions_or_invent_options` (expects `role`), and in `test_freeze_scalar_samples.py` the `_Session` helper, `test_graph_turn_evidence_source_matches_scheduler_and_uses_exact_namespace`, `test_graph_missing_exact_namespace_fails_closed` and `test_graph_duplicate_namespace_selection_fails_closed`; `test_graph_legacy_source_matches_scheduler_and_uses_exact_namespace` is replaced by `test_graph_source_is_turn_evidence_only_and_keeps_raw_text`.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-10-11 - Take the speaker role from structured data, never from episode text
-
-- `domain/turn_role.py`: `resolve_turn_role` takes an episode's speaker from its single `ADMITTED_ON` turn when the content equals that turn's text (surrounding whitespace ignored) and the turn is not `agent_quoted`, else from the declared `turn_role`, else `unknown` (#271).
-- `api/routes_support.py`, `api/routes.py`, `core/backend_*.py`, `services/ingest_intake.py`, `infrastructure/memory_graph_adapter.py`, `infrastructure/episode_lifecycle.py`: optional `role` on `POST /api/memory`, persisted ON CREATE as `Episodic.turn_role` and returned by the claim query with the turn's `source_kind`; roles match exactly on every transport, and an invalid one is a 422 (400 through the bridge).
-- `infrastructure/graphiti_extraction_policy.py`, `infrastructure/anchored_time.py`, `services/enrichment_steps.py`: the anchored-time user gate, the assistant echo/self-label policy and self-like endpoint retention read the receipt's `turn_role`; `_episode_role`, `strip_user_prefix` and the titled-list prefix split are removed, and a titled list whose title is a speaker or self label is refused.
-- `infrastructure/memory_graph_adapter.py`, `infrastructure/personal_memory_queries.py`, `services/scheduler_tasks.py`, `services/correction_resolver.py`: personal-memory consolidation reads `:TurnEvidence` only; the `user:`-prefixed Episodic fallback and its two strips are removed.
-- Not compatible with graphs whose episodes carry their role only as a text prefix: those episodes now resolve to `unknown`. Rebuild them, or send `role` for extraction; counter consolidation needs user `:TurnEvidence` and ignores `role`.
-- Tests: new `tests/test_turn_role_*.py`; prefix-encoding fixtures updated to structured roles in the anchored-time, closure, high-wave1, titled-list, cf193 and turn-evidence tests; `test_strip_user_prefix_removes_only_the_leading_role` removed with its helper.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.

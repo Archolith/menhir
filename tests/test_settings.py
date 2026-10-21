@@ -79,14 +79,16 @@ def test_client_tokens_enabled_from_env(monkeypatch: pytest.MonkeyPatch, raw: st
 
 
 @pytest.mark.unit
-def test_frontier_portions_default_all_off_recall_is_neutral() -> None:
-    """Oracle ranking and the intent lens are always on (#172); every other frontier portion
-    defaults OFF and is opt-in via MENHIR_FRONTIER_* (audit DOC-05)."""
+def test_frontier_portion_defaults() -> None:
+    """Oracle ranking and the intent lens are always on (#172); the Warden gate and its
+    contradiction guard are on by default (#173); the belief gate, the evidence anchor and the
+    other frontier portions default OFF and are opt-in via MENHIR_FRONTIER_* (audit DOC-05)."""
     t = MemorySettings().retrieval_tuning()
     assert t.enable_oracle_ranking is True
     assert t.enable_intent_lens is True
     assert t.enable_assertion_shadow is False
-    assert t.enable_warden_gate is False
+    assert t.enable_warden_gate is True
+    assert t.enable_contradiction_interrupt is True
     assert t.enable_belief_gate is False
     assert t.enable_evidence_anchor is False
     assert t.enable_bm25 is False
@@ -96,12 +98,22 @@ def test_frontier_portions_default_all_off_recall_is_neutral() -> None:
 @pytest.mark.unit
 def test_frontier_portions_env_can_enable_default_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """A default-OFF portion can be turned ON via env (the opt-in toggle works)."""
-    monkeypatch.setenv("MENHIR_FRONTIER_WARDEN_GATE", "1")
+    monkeypatch.setenv("MENHIR_FRONTIER_EVIDENCE_ANCHOR", "1")
     monkeypatch.setenv("MENHIR_FRONTIER_SHADOW", "true")
     t = MemorySettings.from_env().retrieval_tuning()
-    assert t.enable_warden_gate is True
+    assert t.enable_evidence_anchor is True
     assert t.enable_assertion_shadow is True
-    assert t.enable_belief_gate is False   # untouched default stays off
+    assert t.enable_bm25 is False   # untouched default stays off
+
+
+@pytest.mark.unit
+def test_warden_defaults_can_be_turned_off_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The #173 default-on Warden settings each opt out independently."""
+    monkeypatch.setenv("MENHIR_FRONTIER_WARDEN_GATE", "false")
+    monkeypatch.setenv("MENHIR_FRONTIER_CONTRADICTION_INTERRUPT", "0")
+    t = MemorySettings.from_env().retrieval_tuning()
+    assert t.enable_warden_gate is False
+    assert t.enable_contradiction_interrupt is False
 
 
 @pytest.mark.unit

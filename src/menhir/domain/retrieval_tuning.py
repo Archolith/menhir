@@ -223,22 +223,22 @@ class RetrievalTuningConfig:
     # text for the oracle/warden path. No effect unless oracle_ranking or warden_gate is on.
     # On by default since #172, like oracle ranking.
     enable_intent_lens: bool = True
-    # Warden gate: drop REFUSED candidates from results and label FLAGGED ones.
-    enable_warden_gate: bool = False
+    # Warden gate: drop REFUSED candidates from results and label FLAGGED ones. On since #173.
+    enable_warden_gate: bool = True
     # Diversity gate: reorder results by evidence family to prevent any single source from dominating.
     enable_diversity_gate: bool = False
-    # Contradiction interrupt: append ContradictionWarden to the default warden chain.
-    enable_contradiction_interrupt: bool = False
+    # Contradiction interrupt: append ContradictionWarden to the default warden chain. On since #173.
+    enable_contradiction_interrupt: bool = True
     # Belief gate: append CurrentnessWarden + populate belief_score/evidence from
-    # candidate metadata temporal markers. Default OFF; only belief-bearing candidates
-    # are scored (warden ADMITs the rest permissively).
+    # candidate metadata temporal markers. Default OFF (#173, #350): an Entity is marked superseded
+    # when any of its fact edges expired, and with the contradiction guard an anchored one is
+    # then refused under the current lens. Only belief-bearing candidates are scored.
     enable_belief_gate: bool = False
     # Evidence-anchor gate (Guard 5 / EvidenceAnchorWarden): refuse candidates whose support is
-    # synthetic-only / has no external anchor (user/log/test/git/file). ON = today's behavior.
-    # Turn OFF for ANECDOTAL corpora (personal conversation) where every recalled fact is
-    # LLM-extracted from chat with no code/test/git anchor — otherwise Guard 5 refuses the whole
-    # result set. See MENHIR_FRONTIER_EVIDENCE_ANCHOR.
-    enable_evidence_anchor: bool = True
+    # synthetic-only / has no external anchor (user/log/test/git/file). OFF by default, matching
+    # MENHIR_FRONTIER_EVIDENCE_ANCHOR: provenance comes from the client label, so ordinary
+    # conversation stored via MCP/REST looks agent-written and is refused (#349).
+    enable_evidence_anchor: bool = False
     # Fact-edge retrieval: in addition to the entity-node candidate pool, run a
     # graphiti EDGE_HYBRID search and inject the top RELATES_TO fact edges as
     # CandidateSource.FACT_EDGE candidates (content == EntityEdge.fact). Default

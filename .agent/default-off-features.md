@@ -25,11 +25,9 @@ mapped into `RetrievalTuningConfig` at the recall entry via `retrieval_tuning()`
 | Feature | Flag / env | Gate location | Bench status | Source plan |
 |---|---|---|---|---|
 | Attributed hybrid (vector+BM25) candidate gen | `frontier_bm25` / `MENHIR_FRONTIER_BM25` | recall tuning | neutral-to-negative on LME | `r1-hybrid-candidate-generation.md` |
-| Warden gate: drop REFUSED / label FLAGGED | `frontier_warden_gate` / `MENHIR_FRONTIER_WARDEN_GATE` | recall tuning | opt-in; aggressive | R8 rails |
-| Diversity gate (Guard 4, set-level anti-spiral) | `frontier_diversity_gate` / `MENHIR_FRONTIER_DIVERSITY_GATE` | recall tuning | opt-in | `menhir-r8-control-rails-plan.md` |
-| Contradiction interrupt (Guard 7) | `frontier_contradiction_interrupt` / `MENHIR_FRONTIER_CONTRADICTION_INTERRUPT` | recall tuning | opt-in | `menhir-r8-control-rails-plan.md` |
-| Belief gate (CurrentnessWarden + belief scoring; incl. git/structure staleness feed) | `frontier_belief_gate` | requires `frontier_warden_gate` | opt-in; aggressive | `menhir-belief-gate-activation.md` + `menhir-belief-gate-git-staleness.md` |
-| Evidence-anchor warden (Guard 5) | `frontier_evidence_anchor` | under `warden_gate`; TRUE for code corpora | corpus-dependent | R8 rails |
+| Diversity gate (Guard 4, set-level anti-spiral) | `frontier_diversity_gate` / `MENHIR_FRONTIER_DIVERSITY_GATE` | recall tuning | opt-in (#344) | `menhir-r8-control-rails-plan.md` |
+| Belief gate (CurrentnessWarden + belief scoring; incl. git/structure staleness feed) | `frontier_belief_gate` / `MENHIR_FRONTIER_BELIEF_GATE` | requires `frontier_warden_gate` | opt-in (#173): marks an Entity superseded when any fact edge expired; with git/test/log evidence that scores CONFLICT_SET and the contradiction guard refuses it under the current lens, and the Warden lens ignores "before/previously/used to" history cues. LME 500 q x 3 with it on: quality delta 0, p50 +1.8%, p95 +12.6%, 40% of candidates flagged. Follow-up: #350 | `menhir-belief-gate-activation.md` + `menhir-belief-gate-git-staleness.md` |
+| Evidence-anchor warden (Guard 5) | `frontier_evidence_anchor` / `MENHIR_FRONTIER_EVIDENCE_ANCHOR` | under `warden_gate` | opt-in: provenance comes from the client label, so 3 of 33,861 LME copy-graph entities pass and the strict profile refused all 205 AMA questions; reimplementation in #349 | R8 rails |
 | Fact-edge injection (RELATES_TO into candidate pool) | `frontier_fact_edges` (+ `frontier_fact_edge_mode`) | recall tuning | standalone net-negative at N=30; "pointer" preferred | retrieval fact-edge work |
 | Similarity lane scale | `frontier_similarity_scale` (`rrf` default / `normalized`) | recall tuning | ranking change; A/B before flip | `retrieval-scale-contract-and-gap-remediation.md` (1a/1b) |
 | Shadow pass (observe-only oracle/warden trace) | `frontier_shadow` / `MENHIR_FRONTIER_SHADOW` | recall tuning | observe-only | oracle stack |
@@ -108,6 +106,17 @@ Not yet measured (non-blocking, #345): AMA stale-before-current and answer-level
 | Feature | Flag / env | Gate location | Evidence | Source plan |
 |---|---|---|---|---|
 | Deterministic canonical-self binding | `canonical_self_binding_mode` / `MENHIR_CANONICAL_SELF_BINDING_MODE` (`off`/`observe`/`enforce`, default `enforce`; pin `off` to opt out) | atomic projection claim plus `_run_graphiti_combined_extraction`, after relationless repair and before graphiti candidate acquisition | 22-case corpus: 0 false-positive rewrites across off/observe/enforce. Held-out third-party panel (40 LongMemEval turns per mode, gpt-6-luna): no third-party fact attached to the user; 99/99 projection facts bound to the canonical self. Known cost: agent-written memories duplicate user facts on a separate "user" entity (#343). Eval: `scripts/canonical_self_attribution_eval.py` (#342) | `menhir-canonical-self-remediation-plan.md`; runbook `workflows/canonical-self-migration-runbook.md` (activation canary; existing forks stay until a consolidation tool exists) |
+
+### Graduated to default-on 2026-10-20: Warden gate with the contradiction guard
+
+| Feature | Flag / env | Gate location | Evidence | Source plan |
+|---|---|---|---|---|
+| Warden gate: drop REFUSED / label FLAGGED (scope + Oracle admission) | `frontier_warden_gate` / `MENHIR_FRONTIER_WARDEN_GATE` (default true; set false to opt out) | recall tuning; ranked Entity candidates only (see "Warden profiles" above) | LME copy graph 500 q x 3, server path: top-10 hit and MRR delta 0.0000 [0.0000, 0.0000]; p50 +0.3%, p95 +1.5%; 0 refused (LME has no scoped or agent-only rows) | R8 rails; #173 |
+| Contradiction interrupt (Guard 7) | `frontier_contradiction_interrupt` / `MENHIR_FRONTIER_CONTRADICTION_INTERRUPT` (default true) | requires `frontier_warden_gate` | with the gate: hit and MRR delta 0.0000; p50 +0.2%, p95 -0.4%; offline panel 108 decisions (#228, #229) | `menhir-r8-control-rails-plan.md`; #173 |
+
+The belief gate (see the opt-in table) and the evidence anchor (#349) stay opt-in. Recall Lab arm
+D pins the anchor on as the strict profile; arms E-H pin the guards they were defined with.
+Verifier sync is not a Warden and stays opt-in.
 
 ---
 
