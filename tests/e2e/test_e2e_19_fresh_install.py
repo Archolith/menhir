@@ -24,7 +24,8 @@ the default `enforce` and does not under `off`. Binding needs the model to use t
 Menhir puts in the extraction prompt; the deterministic provider does that for this lane's fixture
 sentence only. For a real-model pass, set MENHIR_E2E_CHAT_BASE_URL (and MENHIR_E2E_CHAT_MODEL)
 to send chat and extraction there while embeddings stay on the deterministic provider; Atlas
-criteria then depend on that model's extraction.
+criteria then depend on that model's extraction. MENHIR_E2E_EPISODE_WAIT_S raises the lane's
+per-episode wait and, for that pass, the backend's add_episode timeout (default 300 s).
 """
 
 from __future__ import annotations
@@ -54,8 +55,8 @@ from tests.e2e._harness.fresh_install import (
     stock_client_session,
     tool_json,
     tool_text,
-    wait_episode_state,
 )
+from tests.e2e._harness.fresh_install import wait_episode_state as _wait_episode_state
 from tests.e2e._harness.phase3 import admit_turn, close_pass, record_turn
 from tests.e2e._harness.providers import (
     SELF_POSTCARD_TEXT,
@@ -71,7 +72,10 @@ from tests.e2e.test_e2e_02_memory_lifecycle import (
     ORIGINAL_AMOUNT,
 )
 
-pytestmark = [pytest.mark.e2e, pytest.mark.timeout(2400)]
+# Per-episode wait; raise it (MENHIR_E2E_EPISODE_WAIT_S) for a real-model pass.
+EPISODE_WAIT_S = float(os.environ.get("MENHIR_E2E_EPISODE_WAIT_S", "") or 300)
+
+pytestmark = [pytest.mark.e2e, pytest.mark.timeout(max(2400, int(EPISODE_WAIT_S * 10)))]
 
 CRITERIA = [
     "fresh_setup_from_wheel",
@@ -97,6 +101,10 @@ OPT_OUT = {
 
 QUERY = "Atlas Lantern refund approval threshold"
 SELF_TEXT = SELF_POSTCARD_TEXT
+
+
+def wait_episode_state(config: E2EConfig, episode_uuid: str) -> str:
+    return _wait_episode_state(config, episode_uuid, timeout=EPISODE_WAIT_S)
 SELF_AT = "2026-07-01T10:00:00+00:00"
 
 
@@ -180,20 +188,29 @@ def _self_binding(config: E2EConfig, ns: str, state: str) -> dict:
         "MATCH ()-[r]->() WHERE r.group_id = $g AND (coalesce(r.fact, '') CONTAINS $p "
         "OR coalesce(r.name, '') CONTAINS $p) RETURN count(r) AS c",
         g=group, p=SUBJECT_ENDPOINT_MARKER_PREFIX)
+    # Same-named "user" nodes that are not the canonical self (the #343 fork).
+    forks = graph_query(
+        config,
+        "MATCH (n:Entity {name:'user'}) WHERE n.group_id = $g AND n.uuid <> $uuid "
+        "OPTIONAL MATCH (n)-[r:RELATES_TO]-() WHERE r.fact IS NOT NULL "
+        "RETURN n.uuid AS uuid, collect(r.fact) AS facts",
+        g=group, uuid=uuid)
     return {
         "projection_state": state,
         "group_id": group,
         "self_rows": _self_rows(config, ns),
         "self_edges": edges,
+        "fork_user_nodes": forks,
         "marker_leaks": leaked_nodes[0]["c"] + leaked_facts[0]["c"],
     }
 
 
 def _bound(probe: dict) -> bool:
+    # A fact edge, not Menhir's similarity link (which has no fact).
     return (
         probe["projection_state"] == "READY"
         and probe["self_rows"] == [{"name": "user", "group_id": probe["group_id"]}]
-        and any("cobalt postcards" in f"{e.get('other')} {e.get('fact')}" for e in probe["self_edges"])
+        and any("cobalt postcards" in (e.get("fact") or "") for e in probe["self_edges"])
         and probe["marker_leaks"] == 0
     )
 
@@ -205,6 +222,8 @@ def _provider_env(base_url: str) -> dict[str, str]:
     if chat_url:
         env["LOCAL_LLM_BASE_URL"] = chat_url
         env["LOCAL_LLM_CHAT_MODEL"] = os.environ.get("MENHIR_E2E_CHAT_MODEL", "").strip() or "local"
+        # A slow local model needs more than the 300 s default per episode, as a user would set.
+        env["MEMORY_GRAPHITI_ADD_EPISODE_TIMEOUT_SECONDS"] = str(int(EPISODE_WAIT_S))
     return env
 
 
