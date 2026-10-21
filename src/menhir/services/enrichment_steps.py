@@ -23,6 +23,7 @@ from menhir.domain.self_identity import (
     SelfEvidenceKind,
     SelfIdentityContext,
     SelfSubjectEndpointEnvelope,
+    inferred_subject_endpoint_for_claim,
     normalize_logical_namespace,
     self_context_for_pending_episode,
     self_subject_endpoint_for_claim,
@@ -31,6 +32,7 @@ from menhir.infrastructure.self_binding import (
     InvalidSelfSubjectDeclarationError,
     SelfBindMode,
     resolve_bind_mode,
+    resolve_inferred_mode,
 )
 from menhir.domain.turn_role import resolve_turn_role
 from menhir.domain.utils import source_confidence_for
@@ -131,6 +133,8 @@ class EnrichmentContext:
     #: Canonical-self binding rollout: "off" (default), "observe" or "enforce". Defaulted so every
     #: construction site predating this field keeps pre-change behavior.
     canonical_self_binding_mode: str = "off"
+    #: Two-tier self identity rollout (agent-inferred node): "off" (default), "observe" or "enforce".
+    inferred_self_mode: str = "off"
     #: Source-memory lane (MENHIR_FRONTIER_SOURCE_MEMORIES). Defaulted so every construction
     #: site predating this field keeps pre-change behavior: no episode-content embedding call.
     source_memories_enabled: bool = False
@@ -482,8 +486,11 @@ async def run_graphiti_extraction(
     # None means genuinely ineligible. A collision in an eligible projection raises and is
     # parked by the worker's existing failure path; it must not disable self-fork prevention.
     # The endpoint changes behavior, so off/observe still do not construct one.
+    inferred_mode = resolve_inferred_mode(getattr(ctx, "inferred_self_mode", None))
     self_subject_endpoint = (
-        self_subject_endpoint_for_claim(ctx.claimed)
+        self_subject_endpoint_for_claim(
+            ctx.claimed, exclude_agent_quoted=inferred_mode is SelfBindMode.ENFORCE
+        )
         if self_bind_mode is SelfBindMode.ENFORCE
         else None
     )
@@ -625,6 +632,23 @@ async def run_graphiti_extraction(
                 ).strip() or None,
             )
             turn_role = resolve_turn_role(ctx.claimed)
+            inferred_subject_endpoint = None
+            if inferred_mode is not SelfBindMode.OFF:
+                inferred_candidate = inferred_subject_endpoint_for_claim(
+                    ctx.claimed,
+                    turn_role=turn_role,
+                    anchored_endpoint=self_subject_endpoint,
+                )
+                if inferred_mode is SelfBindMode.ENFORCE:
+                    inferred_subject_endpoint = inferred_candidate
+                else:
+                    record_lifecycle_event(
+                        component="self_binding",
+                        event="inferred_self_decision",
+                        state="would_offer" if inferred_candidate else "not_offered",
+                        episode_uuid=ctx.episode_uuid,
+                        details={"namespace": namespace},
+                    )
             graphiti_result = await add_episode_with_timeout(
                 ctx.graphiti_client,
                 name=episode_name,
@@ -640,6 +664,8 @@ async def run_graphiti_extraction(
                 self_subject_endpoint=self_subject_endpoint,
                 self_bind_mode=self_bind_mode,
                 turn_role=turn_role,
+                inferred_subject_endpoint=inferred_subject_endpoint,
+                inferred_bind_mode=inferred_mode,
             )
             if publication_intent is not None:
                 publication_transition = (
@@ -1103,6 +1129,22 @@ async def stamp_and_finalize(
         )
         return
 
+    if receipt is not None and resolve_inferred_mode(
+        getattr(ctx, "inferred_self_mode", None)
+    ) is not SelfBindMode.OFF and (
+        getattr(getattr(receipt, "self_bind_result", None), "bound", False)
+        or getattr(getattr(receipt, "inferred_bind_result", None), "bound", False)
+    ):
+        # Best-effort two-tier self link; never fails the episode.
+        link_self_tiers = getattr(ctx.graph_adapter, "link_self_tiers", None)
+        if link_self_tiers is not None:
+            try:
+                link_self_tiers(str(ctx.claimed.get("namespace") or "default"))
+            except Exception:
+                logger.debug(
+                    "link_self_tiers failed episode_id=%s", ctx.episode_uuid, exc_info=True
+                )
+
     if not extracted_nodes and not extracted_edges:
         if raw_extraction_nonempty and is_policy_empty_extraction(receipt):
             # Policy-empty: the extraction produced entities but no persistable content.
@@ -1543,6 +1585,8 @@ async def add_episode_with_timeout(
     self_subject_endpoint: SelfSubjectEndpointEnvelope | None = None,
     self_bind_mode: SelfBindMode = SelfBindMode.OFF,
     turn_role: str = "unknown",
+    inferred_subject_endpoint: Any | None = None,
+    inferred_bind_mode: SelfBindMode = SelfBindMode.OFF,
 ) -> Any:
     """Bound one Graphiti add_episode call so stuck requests fail back into retry flow.
 
@@ -1575,6 +1619,17 @@ async def add_episode_with_timeout(
             raise InvalidSelfSubjectDeclarationError(
                 "self-subject endpoint turn does not match its identity context"
             )
+    if inferred_subject_endpoint is not None and (
+        not receipt_episode_key
+        or inferred_subject_endpoint.episode_uuid != receipt_episode_key
+        or (
+            self_identity is not None
+            and inferred_subject_endpoint.namespace != self_identity.namespace
+        )
+    ):
+        raise InvalidSelfSubjectDeclarationError(
+            "inferred endpoint scope does not match its extraction"
+        )
     if (
         self_identity is not None
         and self_identity.evidence_kind is SelfEvidenceKind.EXPLICIT_SELF_SUBJECT
@@ -1621,6 +1676,8 @@ async def add_episode_with_timeout(
         self_subject_endpoint=self_subject_endpoint,
         self_bind_mode=self_bind_mode,
         turn_role=turn_role,
+        inferred_subject_endpoint=inferred_subject_endpoint,
+        inferred_bind_mode=inferred_bind_mode,
     )
     try:
         record_lifecycle_event(

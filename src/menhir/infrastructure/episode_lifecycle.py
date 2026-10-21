@@ -17,6 +17,7 @@ from menhir.domain.namespace import (
 from menhir.domain.recall_visibility import default_recall_visibility_cypher
 from menhir.domain.episode_nodes import menhir_queue_episode_cypher
 from menhir.domain.self_identity import self_uuid_for_namespace
+from menhir.domain.self_identity import inferred_self_uuid_for_namespace
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure.cypher import (
@@ -986,6 +987,120 @@ class EpisodeLifecycleRepository:
         )
         return bool(rows and int(rows[0].get("updated", 0)) > 0)
 
+    def mark_episode_verbatim_skipped(
+        self, episode_uuid: str, *, worker_id: str, claim_started_at: object | None,
+    ) -> str | None:
+        """Finish a client episode WITHOUT extraction when its text is exactly its admitted
+        turn's text and that turn's evidence projection (same text, same namespace, not FAILED)
+        will extract it. Returns the projection uuid, or None when nothing was written.
+
+        Fenced like a transient requeue: this claim's owner and start instant. Records
+        ``extraction_skipped_for``; ``reenable_verbatim_skips`` returns the client to PENDING if
+        that projection fails or disappears. ``verbatim_skip_revoked`` forbids a second skip.
+        """
+        if not worker_id or claim_started_at is None:
+            return None
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $episode_uuid})
+            WHERE n.processing_state = 'ENRICHING' AND n.processing_owner = $worker_id
+              AND n.processing_started_at IS NOT NULL
+              AND n.processing_started_at.epochSeconds = datetime($claim_started_at).epochSeconds
+              AND n.processing_started_at.nanosecond = datetime($claim_started_at).nanosecond
+              AND NOT coalesce(n.is_evidence_projection, false)
+              AND n.evidence_projection_of IS NULL
+              AND n.diff IS NULL
+              AND n.resolved_episode_uuid IS NULL
+              AND NOT coalesce(n.verbatim_skip_revoked, false)
+              AND n.content IS NOT NULL AND trim(n.content) <> ''
+            WITH n, [(n)-[:ADMITTED_ON]->(t:TurnEvidence) | t] AS turns
+            WHERE size(turns) = 1 AND n.content = turns[0].text
+            WITH n, turns[0] AS t
+            MATCH (p:Episodic {evidence_projection_of: t.turn_id})-[:ADMITTED_ON]->(t)
+            WHERE p.uuid <> n.uuid
+              AND coalesce(p.is_evidence_projection, false)
+              AND p.content = n.content
+              AND p.diff IS NULL
+              AND p.processing_state IN ['PENDING', 'ENRICHING', 'READY']
+              AND CASE WHEN trim(coalesce(p.namespace, '')) = '' THEN 'default'
+                  ELSE trim(p.namespace) END
+                = CASE WHEN trim(coalesce(n.namespace, '')) = '' THEN 'default'
+                  ELSE trim(n.namespace) END
+            WITH n, collect(p) AS ps
+            WHERE size(ps) = 1
+            WITH n, ps[0] AS p
+            SET n.processing_state = 'READY',
+                n.processing_stage = 'ready',
+                n.processing_substage = 'verbatim_skipped',
+                n.processing_substage_started_at = datetime(),
+                n.processing_progress = 100.0,
+                n.processing_steps_completed = coalesce(toInteger(n.processing_steps_total), 5),
+                n.processing_completed_at = datetime(),
+                n.processing_owner = null,
+                n.processing_lease_expires_at = null,
+                n.processing_heartbeat_at = datetime(),
+                n.processing_error = null,
+                n.processing_llm_active_task = null,
+                n.processing_llm_active_kind = null,
+                n.processing_llm_active_model = null,
+                n.processing_llm_active_endpoint = null,
+                n.enriched_nodes_touched = 0,
+                n.enriched_edges_touched = 0,
+                n.extraction_skipped_for = p.uuid
+            RETURN p.uuid AS projection_uuid
+            """,
+            params={
+                "episode_uuid": episode_uuid,
+                "worker_id": worker_id,
+                "claim_started_at": claim_started_at,
+            },
+        )
+        if not rows or not rows[0].get("projection_uuid"):
+            return None
+        return str(rows[0]["projection_uuid"])
+
+    def reenable_verbatim_skips(
+        self, *, projection_uuid: str | None = None, limit: int = 100,
+    ) -> list[str]:
+        """Return skipped clients to PENDING when their projection is FAILED or gone.
+
+        A FAILED projection may still be retried; re-enabling eagerly can extract the text twice
+        (the pre-feature behavior, collapsed at recall) but never leaves it unextracted.
+        Returns the re-enabled client uuids for enqueueing.
+        """
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic)
+            WHERE n.extraction_skipped_for IS NOT NULL
+              AND ($projection_uuid IS NULL OR n.extraction_skipped_for = $projection_uuid)
+              AND n.processing_state = 'READY'
+            OPTIONAL MATCH (p:Episodic {uuid: n.extraction_skipped_for})
+            WITH n, p
+            WHERE p IS NULL OR p.processing_state = 'FAILED'
+            WITH n LIMIT $limit
+            SET n.verbatim_skip_revoked = true,
+                n.verbatim_skip_revoked_for = n.extraction_skipped_for,
+                n.extraction_skipped_for = null,
+                n.processing_state = 'PENDING',
+                n.processing_stage = 'queued',
+                n.processing_substage = 'verbatim_skip_revoked',
+                n.processing_substage_started_at = datetime(),
+                n.processing_progress = 0.0,
+                n.processing_steps_completed = 0,
+                n.processing_attempts = 0,
+                n.processing_owner = null,
+                n.processing_lease_expires_at = null,
+                n.processing_heartbeat_at = datetime(),
+                n.processing_started_at = null,
+                n.processing_completed_at = null,
+                n.processing_error = null,
+                n.retry_after = null
+            RETURN n.uuid AS uuid
+            """,
+            params={"projection_uuid": projection_uuid, "limit": max(1, min(int(limit), 500))},
+        )
+        return [str(row["uuid"]) for row in rows if row.get("uuid")]
+
     def mark_episode_failed(
         self,
         episode_uuid: str,
@@ -1283,6 +1398,32 @@ NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If
             )
         return self_uuid
 
+    def link_self_tiers(self, namespace: str) -> bool:
+        """Link the anchored self to the inferred self with an INFERRED_VIEW_OF edge.
+
+        Structural link only: created only when BOTH tiers already exist (MATCH-only, never
+        creates either node), and it carries no fact and no authority. Returns True when the
+        link exists after the call."""
+        if not namespace:
+            raise ValueError("link_self_tiers requires a non-empty namespace")
+        rows = self.neo4j.execute(
+            """
+            MATCH (a:Entity {uuid: $anchored})
+            WHERE a.group_id = $group_id AND coalesce(a.is_self, false)
+            MATCH (i:Entity {uuid: $inferred})
+            WHERE i.group_id = $group_id AND toLower(coalesce(i.entity_role, '')) = 'inferred_self'
+            MERGE (a)-[r:INFERRED_VIEW_OF]->(i)
+            ON CREATE SET r.created_at = datetime()
+            RETURN count(r) AS linked
+            """,
+            params={
+                "anchored": self_uuid_for_namespace(namespace),
+                "inferred": inferred_self_uuid_for_namespace(namespace),
+                "group_id": namespace_to_group_id(namespace),
+            },
+        )
+        return any(int(row.get("linked") or 0) > 0 for row in rows)
+
     def detect_self_forks(self, *, namespace: str, self_uuid: str) -> list[str]:
         """Return the uuids of same-named self forks in `namespace`. READ ONLY.
 
@@ -1310,6 +1451,7 @@ NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If
                 MATCH (f:Entity)
                 WHERE f.group_id IN $group_ids AND f.uuid <> $self_uuid
                       AND toLower(f.name) = $name
+                      AND f.self_tier IS NULL AND toLower(coalesce(f.entity_role, '')) <> 'inferred_self'
                       AND {non_derived_view_cypher("f")}
                 RETURN f.uuid AS uuid
                 """,

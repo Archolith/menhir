@@ -10,7 +10,8 @@ typed extension points instead of runtime symbol rebinding:
 - #14 structural/View candidate exclusion on the fork's ``CandidateFilterHook``;
 - #16 canonical-self pre-resolution, candidate protection, and resolution
       telemetry on the fork's ``NodePreResolutionHook`` plus the independent
-      node-pre-resolution edge channel;
+      node-pre-resolution edge channel; the lower-trust inferred-self tier is
+      pre-resolved when bound and otherwise always excluded/refused;
 - #13 dedupe branch telemetry, re-homed onto the supported hook callbacks and
       flushed per ``add_episode`` call.
 """
@@ -192,6 +193,114 @@ async def _existing_canonical_node(clients: Any, extracted: Any, identity: Any) 
 
 
 # ---------------------------------------------------------------------------
+# Inferred-self (lower-trust tier) helpers
+# ---------------------------------------------------------------------------
+
+
+def _pre_resolved_inferred_uuid() -> str | None:
+    """The inferred-self uuid bound for the current episode, only when the bind succeeded."""
+    try:
+        receipt = get_extraction_receipt()
+    except Exception:  # noqa: BLE001
+        return None
+    result = getattr(receipt, "inferred_bind_result", None) if receipt is not None else None
+    if result is None or getattr(result, "bound", False) is not True:
+        return None
+    return getattr(result, "self_uuid", None) or None
+
+
+def _active_namespace() -> str | None:
+    """Logical namespace of the current episode, from the inferred endpoint or self identity."""
+    try:
+        receipt = get_extraction_receipt()
+    except Exception:  # noqa: BLE001
+        return None
+    if receipt is None:
+        return None
+    endpoint = getattr(receipt, "inferred_subject_endpoint", None)
+    namespace = getattr(endpoint, "namespace", None) if endpoint is not None else None
+    if not namespace:
+        identity = getattr(receipt, "self_identity", None)
+        namespace = getattr(identity, "namespace", None) if identity is not None else None
+    return str(namespace) if namespace else None
+
+
+def _is_inferred_self_candidate(node: Any) -> bool:
+    """True for any node carrying inferred-self markers or the deterministic inferred uuid."""
+    from menhir.domain.self_identity import (
+        inferred_self_uuid_for_namespace,
+        is_inferred_self_attributes,
+    )
+
+    if is_inferred_self_attributes(getattr(node, "attributes", None)):
+        return True
+    namespace = _active_namespace()
+    return bool(namespace) and str(getattr(node, "uuid", "") or "") == str(
+        inferred_self_uuid_for_namespace(namespace)
+    )
+
+
+def _stamp_inferred_self(node: Any, namespace: str | None) -> Any:
+    """Put the inferred-tier markers on the node. Never writes ``is_self``."""
+    from menhir.domain.self_identity import (
+        INFERRED_SELF_ENTITY_ROLE,
+        INFERRED_SELF_TIER,
+    )
+
+    try:
+        attributes = getattr(node, "attributes", None)
+        if attributes is None:
+            return node
+        attributes["entity_role"] = INFERRED_SELF_ENTITY_ROLE
+        attributes["self_tier"] = INFERRED_SELF_TIER
+        if namespace:
+            attributes["namespace"] = namespace
+    except Exception:  # noqa: BLE001 - never fail resolution on a metadata stamp
+        logger.exception("Could not stamp inferred-self markers")
+    return node
+
+
+async def _existing_inferred_node(clients: Any, extracted: Any, namespace: str | None) -> Any:
+    """Return the persisted inferred-self node, or a stamped *extracted* when none exists yet.
+
+    Same contract as ``_existing_canonical_node``; additionally a stored node holding the
+    inferred uuid without inferred markers is refused rather than overwritten.
+    """
+    from graphiti_core.errors import NodeNotFoundError
+    from graphiti_core.nodes import EntityNode
+
+    from menhir.domain.self_identity import is_inferred_self_attributes
+
+    driver = getattr(clients, "driver", None)
+    if driver is None:
+        raise RuntimeError(
+            "inferred-self resolution requires a graph driver; refusing to substitute the "
+            "extracted node for an unread inferred node"
+        )
+    try:
+        stored = await EntityNode.get_by_uuid(driver, extracted.uuid)
+    except NodeNotFoundError:
+        return _stamp_inferred_self(extracted, namespace)
+    if namespace:
+        from menhir.domain.namespace import namespace_to_group_id
+
+        expected_group = namespace_to_group_id(namespace)
+        actual_group = getattr(stored, "group_id", None)
+        if actual_group is None or str(actual_group) != expected_group:
+            raise RuntimeError(
+                f"stored inferred-self node {extracted.uuid!r} belongs to physical group "
+                f"{actual_group!r}, expected {expected_group!r} for logical namespace "
+                f"{namespace!r}; refusing cross-namespace resolution"
+            )
+    if not is_inferred_self_attributes(getattr(stored, "attributes", None)):
+        raise RuntimeError(
+            f"stored node {extracted.uuid!r} holds the inferred-self uuid without inferred "
+            "markers; refusing to overwrite it"
+        )
+    return stored
+
+
+# ---------------------------------------------------------------------------
 # Identity-gate policy (Menhir half of installer #12)
 # ---------------------------------------------------------------------------
 
@@ -323,7 +432,7 @@ class MenhirIdentityGateHook:
 
 
 class MenhirCandidateFilterHook:
-    """Exclude structural/View nodes (and, in enforce mode, canonical self) from dedupe pools.
+    """Exclude structural/View nodes, inferred self (always) and canonical self (enforce) from pools.
 
     Graphiti's semantic candidate search has no knowledge of Menhir's structural/semantic
     boundary or of Views. An extracted project or file name could resolve onto a structure
@@ -344,6 +453,8 @@ class MenhirCandidateFilterHook:
                 if _is_view_graphiti_candidate(candidate)
                 else "structural"
             )
+        elif _is_inferred_self_candidate(candidate):
+            excluded_reason = "inferred_self"
         elif (
             _canonical_self_candidate_filter_enabled()
             and _is_canonical_self_candidate(candidate, _active_self_identity())
@@ -377,6 +488,9 @@ class MenhirNodePreResolutionHook:
     without being the declaration-bound node is refused outright: endpoint closure can
     retain an ordinary node named `user`, and without this guard a unique exact match
     would silently turn that name back into identity authority.
+
+    The lower-trust inferred-self node is handled the same way, unconditionally: only the
+    bound inferred node resolves to its uuid; any other node carrying inferred identity is refused.
     """
 
     async def pre_resolve_node(self, context: Any) -> PreResolutionResult:
@@ -397,6 +511,21 @@ class MenhirNodePreResolutionHook:
             return PreResolutionResult(
                 decision=PreResolutionDecision.RESOLVE, resolved_node=resolved
             )
+        inferred_uuid = _pre_resolved_inferred_uuid()
+        if inferred_uuid and str(getattr(node, "uuid", "") or "") == inferred_uuid:
+            resolved = await _existing_inferred_node(
+                context.clients, node, _active_namespace()
+            )
+            collector = _resolution_telemetry.get()
+            if collector is not None:
+                collector.extracted_node_count += 1
+                collector.pre_resolved_inferred += 1
+            logger.info(
+                "Inferred-self resolver pre-resolved uuid=%s", inferred_uuid
+            )
+            return PreResolutionResult(
+                decision=PreResolutionDecision.RESOLVE, resolved_node=resolved
+            )
         if (
             _canonical_self_candidate_filter_enabled()
             and _is_canonical_self_candidate(node, _active_self_identity())
@@ -404,6 +533,11 @@ class MenhirNodePreResolutionHook:
             raise RuntimeError(
                 "undeclared extracted node carries canonical-self identity in enforce "
                 "mode; refusing ordinary Graphiti resolution"
+            )
+        if _is_inferred_self_candidate(node):
+            raise RuntimeError(
+                "undeclared extracted node carries inferred-self identity; refusing "
+                "ordinary Graphiti resolution"
             )
         collector = _resolution_telemetry.get()
         if collector is not None:
@@ -434,6 +568,8 @@ class ResolutionTelemetry:
 
     extracted_node_count: int = 0
     pre_resolved_self: int = 0
+    pre_resolved_inferred: int = 0
+    inferred_self_excluded: int = 0
     candidate_pool_max: int = 0
     nodes_with_no_candidates: int = 0
     structural_excluded: int = 0
@@ -458,6 +594,8 @@ class ResolutionTelemetry:
             self.view_excluded += 1
         elif excluded_reason == "canonical_self":
             self.canonical_self_excluded += 1
+        elif excluded_reason == "inferred_self":
+            self.inferred_self_excluded += 1
 
     def as_details(self) -> dict[str, Any]:
         pools = [count for count in self._pool_counts.values()]
@@ -466,6 +604,8 @@ class ResolutionTelemetry:
         return {
             "extracted_node_count": self.extracted_node_count,
             "pre_resolved_self": self.pre_resolved_self,
+            "pre_resolved_inferred": self.pre_resolved_inferred,
+            "inferred_self_excluded": self.inferred_self_excluded,
             "candidate_count_max": self.candidate_pool_max,
             "no_candidates_new": self.nodes_with_no_candidates,
             "structural_excluded": self.structural_excluded,
