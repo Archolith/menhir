@@ -429,21 +429,22 @@ class MemorySettings:
     benchmark_mode: bool = False
 
     # Frontier retrieval portions, mapped into a RetrievalTuningConfig at the recall entry
-    # point via retrieval_tuning(). These portions default OFF; enable any per deployment via
-    # MENHIR_FRONTIER_BM25 / _WARDEN_GATE / _SHADOW / etc. (code defaults match .env.example,
-    # audit DOC-05). Oracle ranking and the intent lens are always on since #172 and have no
-    # setting; see RetrievalTuningConfig.
+    # point via retrieval_tuning(). Most portions default OFF; enable any per deployment via
+    # MENHIR_FRONTIER_BM25 / _SHADOW / etc. (code defaults match .env.example, audit DOC-05).
+    # Oracle ranking and the intent lens are always on since #172 and have no setting; see
+    # RetrievalTuningConfig. The Warden gate and its contradiction guard are on by default since
+    # #173 (set each to false to opt out); the belief gate and evidence anchor (#349) stay opt-in.
     frontier_bm25: bool = False            # attributed hybrid (vector+BM25) candidate gen
     frontier_content_vector: bool = False  # add menhir-owned content-embedding cosine lane
     frontier_content_vector_replace_name: bool = False
     frontier_content_vector_k: int = 100
     frontier_content_vector_weight: float = 0.5
     frontier_fusion_admission_policy: str = "attributed"
-    frontier_warden_gate: bool = False     # drop REFUSED / label FLAGGED (opt-in; aggressive)
+    frontier_warden_gate: bool = True      # drop REFUSED / label FLAGGED (on since #173)
     frontier_diversity_gate: bool = False  # reorder by evidence family to prevent spiral (opt-in)
-    frontier_contradiction_interrupt: bool = False  # append ContradictionWarden to default chain (opt-in)
-    frontier_belief_gate: bool = False     # add CurrentnessWarden + belief scoring to the chain; REQUIRES frontier_warden_gate to apply its verdicts (opt-in; aggressive)
-    frontier_evidence_anchor: bool = False  # Guard 5 EvidenceAnchorWarden (only applies under warden_gate); set TRUE for code corpora, FALSE for anecdotal/conversational
+    frontier_contradiction_interrupt: bool = True  # append ContradictionWarden to default chain (on since #173)
+    frontier_belief_gate: bool = False     # add CurrentnessWarden + belief scoring to the chain; REQUIRES frontier_warden_gate to apply its verdicts (opt-in; see #350)
+    frontier_evidence_anchor: bool = False  # Guard 5 EvidenceAnchorWarden (only applies under warden_gate); opt-in: it reads the client label, not the speaker, and refuses ordinary conversation (#349)
     frontier_fact_edges: bool = False      # inject RELATES_TO fact edges (EntityEdge.fact) into the candidate pool; set TRUE for episodic/"what happened" corpora where the answer is a dated edge fact, not an entity name
     frontier_fact_relevance: bool = False  # attach the facts most similar to the query (plus the newest) instead of only the 5 newest
     frontier_verb_facets: bool = False     # append one keyword-matched fact per question verb after ranking (verb-centric questions only)

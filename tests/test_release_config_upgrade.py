@@ -34,6 +34,15 @@ CAMPAIGN_FLAGS = {
 }
 
 
+# Campaign switches that ship on by default: source memories (#208) and the Warden gate with
+# its contradiction guard (#173).
+DEFAULT_ON = {
+    "MENHIR_FRONTIER_SOURCE_MEMORIES",
+    "MENHIR_FRONTIER_WARDEN_GATE",
+    "MENHIR_FRONTIER_CONTRADICTION_INTERRUPT",
+}
+
+
 @pytest.fixture
 def clean_campaign_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in CAMPAIGN_FLAGS:
@@ -61,8 +70,7 @@ def test_fresh_setup_uses_code_defaults_without_enabling_campaign(
     env_file.load_menhir_env()
     settings = MemorySettings.from_env()
     for key, attr in CAMPAIGN_FLAGS.items():
-        # Source memories already shipped on in #208; this audit does not promote them.
-        assert getattr(settings, attr) is (key == "MENHIR_FRONTIER_SOURCE_MEMORIES")
+        assert getattr(settings, attr) is (key in DEFAULT_ON), key
     assert settings.canonical_self_binding_mode == "enforce"  # default since #169
 
 
@@ -79,7 +87,7 @@ def test_upgrade_with_unset_flags_uses_current_defaults(
     env_file.load_menhir_env()
     settings = MemorySettings.from_env()
     for key, attr in CAMPAIGN_FLAGS.items():
-        assert getattr(settings, attr) is (key == "MENHIR_FRONTIER_SOURCE_MEMORIES")
+        assert getattr(settings, attr) is (key in DEFAULT_ON), key
 
 
 @pytest.mark.parametrize("pinned,expected", [(None, "enforce"), ("off", "off"),
