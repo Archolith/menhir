@@ -1,3 +1,15 @@
+## 2026-09-24 - explicit staging is a Beacon guardrail
+
+The rule was only in `.agent/maintenance.md` and the startup list, so agents working from Beacon
+missed it: in the Beacon agent-task evaluation, two plans for archiving a Menhir plan proposed
+`git add -A -- <paths>`.
+
+- `AGENTS.md`: a new `<!-- beacon:guardrail id=explicit-staging severity=medium -->` bullet, "Stage
+  files explicitly by path; never `git add .` or `git add -A`. Leave unrelated changes unstaged.",
+  after the existing implementation rules (no existing line moves). Checked locally: `beacon build`
+  serves it as the guardrail `explicit-staging`.
+- `CHANGELOG-archive.md`: the oldest 2026-09-17 entry moved there (10-entry limit).
+
 ## 2026-10-14 - Scan release archives from private output directories
 
 - `deploy/build_release_image.py`: bind only the public image archive into each scanner, keeping private parent directories and sibling artifacts inaccessible.
@@ -86,15 +98,4 @@
 - `infrastructure/schema.py`: scalar activation moves indexed text on existing scalar Views (pre-change nodes, or an older writer during a rolling deploy) into `view_name` / `view_summary`. Idempotent; newer text wins.
 - Recall no longer finds scalar Views through keyword search. In the A/B outputs it never had: they reached answers only through the authority lane. Each View still counts toward its namespace's `group_id` term, which shifts every score in that namespace equally and leaves ranks alone.
 - Tests: new `tests/test_scalar_view_keyword_index_live.py` (online; fails on the old writer). `tests/test_scalar_state_view.py`: two assertions moved from `name` to `view_name`, because they pinned where the surface is stored.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-10-15 - Add a counting lane that records single happenings after the scalar phase
-
-- New flag `personal_memory_counting_enabled` (`MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED`), default off, requires scalar state. Plumbed through `config/feature_flags.py`, `config/settings_model.py`, `core/runtime.py`, `services/maintenance_scheduler.py`, `api/routes_handlers.py`, `api/routes_support.py` and `.env.example`.
-- `services/counting_consolidation.py` (new): runs in `scheduler_tasks.consolidate_personal_memory` right after the scalar phase, sharing its call counter and budget, so counting goes without when the budget runs out. It stores `occurrence` claims only, with its own prompt and claim ordinal 1, so a counting claim never shares a head with a scalar claim on the same span. Each page's prompt lists the scalar claims already stored for those turns ("already captured"). Off: no calls, no counting watermark, no `counting_*` result keys or audit fields.
-- `infrastructure/turn_evidence_repository.py` + adapter: own `:CountingConsolidationWatermark` cursor whose loader only returns turns at or before the scalar cursor for the scalar version in effect; no scalar cursor or another scalar version pauses counting. New bounded `scalar_claims_for_turns`. The label is added to every watermark wipe (namespace delete, merge/unmerge resets, scalar purge).
-- `services/typed_scalar_rules.py`: lane parameters on `extract_typed_scalars_once` / `parse_scalar_row` (defaults keep the scalar lane unchanged); occurrence rows parsed with an importance; a planned, hypothetical or negated clause is dropped as `occurrence_not_happened`; the gate takes the majority importance among agreeing samples, ties to the higher level.
-- `services/typed_scalar_service.py`: `perceive_and_persist` forwards the lane parameters. `typed_assertion_repair_repository.py` / `typed_scalar_persistence.py`: pending-binding repair keeps `importance`.
-- `services/scalar_state_service.py`: a counted View (no anchor) now gets provenance edges: its occurrences as `CONTRIBUTED_TO`, absorbed ones as `SUPERSEDED_ANCHOR`. Stated Views are unchanged. Counted Views stay advisory in recall.
-- Tests: new `tests/test_counting_extraction.py`, `tests/test_counting_consolidation.py`, `tests/test_counting_cursor_live.py` (online).
 - `CHANGELOG-archive.md`: retain the oldest former current entry.

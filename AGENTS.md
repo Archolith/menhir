@@ -49,6 +49,9 @@ These instructions apply to the entire repository.
 - Live Neo4j/LLM tests require explicit opt-in and the documented environment.
 <!-- /beacon -->
 - Report commands actually run and distinguish failures from tests that were not run.
+<!-- beacon:guardrail id=explicit-staging severity=medium -->
+- Stage files explicitly by path; never `git add .` or `git add -A`. Leave unrelated changes unstaged.
+<!-- /beacon -->
 
 For instructions that consumer agents can copy into repositories using Menhir, see
 `docs/templates/AGENTS.menhir.md` and `docs/agent-usage.md`.
