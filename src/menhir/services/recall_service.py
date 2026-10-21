@@ -104,6 +104,7 @@ class RecallService(RecallSupportMixin):
     #: When True, a recognized conservative first-person event recall query (non-None namespace) surfaces
     #: a leading/advisory event-history authority layer. Default OFF: no event authority or assertion read.
     event_history_authority_enabled: bool = False
+    inferred_self_mode: str = "off"  # MENHIR_INFERRED_SELF_MODE; not "off": recall reads both self tiers
     #: Candidate-readonly: never reinforce retrieval via access timestamps, edge weights or lifecycle.
     read_only: bool = False
     _rehydration_tasks: set[asyncio.Task[None]] = field(default_factory=set)
@@ -155,6 +156,5 @@ class RecallService(RecallSupportMixin):
         )
         return await apply_event_history_authority_layer(self, result, query, namespace)
 
-    # Drill-down; delegates to run_recall_history, which takes the service first.
-    recall_history = run_recall_history
+    recall_history = run_recall_history  # drill-down; run_recall_history takes the service first
     recall_timeline = run_recall_timeline  # on-demand recorded-time navigation (same delegation)

@@ -67,6 +67,10 @@ REFUND_CORRECTED_AMOUNT = "3840"
 # E2E-19's first-person fixture; the fake binds it to the speaker marker (see _self_subject_facts).
 SELF_POSTCARD_TEXT = "I own exactly 37 cobalt postcards in the north cabinet."
 _SELF_MARKER = re.compile(r"MenhirCurrentSpeaker_[0-9a-f]{24}")
+# E2E-19's two-tier fixture: an agent-written memory about the user, with no captured turn. The
+# fake binds it to the inferred-user marker (see _inferred_subject_facts).
+INFERRED_AGENT_TEXT = "The user prefers oolong tea over coffee in the mornings."
+_INFERRED_MARKER = re.compile(r"MenhirInferredUser_[0-9a-f]{24}")
 
 #: Provider variables carried through to a child when a lane uses a live model.
 _PROVIDER_KEYS = {
@@ -307,6 +311,33 @@ class DeterministicProviderHandler(BaseHTTPRequestHandler):
             ],
         )
 
+    @staticmethod
+    def _inferred_subject_facts(prompt: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Answer the inferred-user marker for E2E-19's agent-written fixture only.
+
+        The marker reaches the prompt only under MENHIR_INFERRED_SELF_MODE=enforce, for an
+        episode that cannot reach the anchored marker.
+        """
+        match = _INFERRED_MARKER.search(prompt)
+        if match is None or INFERRED_AGENT_TEXT not in prompt:
+            return [], []
+        marker = match.group(0)
+        return (
+            [
+                {"name": marker, "entity_type_id": 0},
+                {"name": "oolong tea", "entity_type_id": 0},
+            ],
+            [
+                {
+                    "source_entity_name": marker,
+                    "target_entity_name": "oolong tea",
+                    "relation_type": "PREFERS",
+                    "fact": f"{marker} prefers oolong tea over coffee in the mornings.",
+                    "episode_indices": [0],
+                }
+            ],
+        )
+
     @classmethod
     def _structured_response(
         cls, schema_name: str, prompt: str, schema: dict[str, Any]
@@ -319,7 +350,9 @@ class DeterministicProviderHandler(BaseHTTPRequestHandler):
         ]
         if schema_name in {"CombinedExtraction", "PatchedCombinedExtraction"}:
             self_entities, self_edges = cls._self_subject_facts(prompt)
-            return {"extracted_entities": entities + self_entities, "edges": edges + self_edges}
+            inf_entities, inf_edges = cls._inferred_subject_facts(prompt)
+            return {"extracted_entities": entities + self_entities + inf_entities,
+                    "edges": edges + self_edges + inf_edges}
         if schema_name == "ExtractedEntities":
             return {
                 "extracted_entities": [

@@ -219,6 +219,9 @@ class MemorySettings:
     # migration has run, see workflows/canonical-self-migration-runbook.md).
     canonical_self_binding_mode: str = "enforce"
 
+    # Two-tier self identity: off | observe | enforce. Agent-inferred "user-inferred" node.
+    inferred_self_mode: str = "off"
+
     # Anchored-time resolver: one extra LLM call per user turn with a temporal cue, overlaying
     # valid_at on extracted edges. Default off until the live eval gates (L1-L3) pass.
     anchored_time_resolver_enabled: bool = False
@@ -887,6 +890,7 @@ class MemorySettings:
                 minimum=1.0,
             ),
             canonical_self_binding_mode=_getenv("MENHIR_CANONICAL_SELF_BINDING_MODE", default=cls.canonical_self_binding_mode),
+            inferred_self_mode=_getenv("MENHIR_INFERRED_SELF_MODE", default=cls.inferred_self_mode),
             anchored_time_resolver_enabled=parse_bool_env(_getenv("MENHIR_ANCHORED_TIME_RESOLVER", default=str(cls.anchored_time_resolver_enabled))),
             anchored_time_resolver_model=(_getenv("MENHIR_ANCHORED_TIME_MODEL", default=cls.anchored_time_resolver_model) or "").strip(),
             anchored_time_resolver_timeout_s=_parse_float(

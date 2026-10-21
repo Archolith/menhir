@@ -14,6 +14,10 @@ Steps:
 7. A restart through `menhir up` keeps state and settings.
 8. Explicit opt-outs survive `menhir setup` re-runs, `menhir serve` from another cwd reads the
    same state-dir .env, and the opt-outs take effect; removing them restores the defaults.
+9. Opted in to MENHIR_INFERRED_SELF_MODE=enforce (not a shipped default): a hook turn's fact
+   lands on the anchored self, an agent-written memory about the user lands on the inferred
+   self, the verbatim client copy of the hook turn skips extraction, no ordinary "user" node
+   forms, and no marker of either prefix is persisted.
 
 Each stock-client launch is a new MCP session, and a fresh write is SESSION-scoped until it is
 promoted, so a later session gets no ranked items for it; only the source-memory section carries
@@ -33,13 +37,19 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import time
 from uuid import uuid4
 
 import pytest
 
 from menhir.domain.namespace import namespace_to_group_id
-from menhir.domain.self_identity import SUBJECT_ENDPOINT_MARKER_PREFIX, self_uuid_for_namespace
+from menhir.domain.self_identity import (
+    INFERRED_ENDPOINT_MARKER_PREFIX,
+    SUBJECT_ENDPOINT_MARKER_PREFIX,
+    inferred_self_uuid_for_namespace,
+    self_uuid_for_namespace,
+)
 from tests.e2e._harness.config import E2EConfig
 from tests.e2e._harness.evidence import LaneEvidence
 from tests.e2e._harness.fresh_install import (
@@ -59,6 +69,7 @@ from tests.e2e._harness.fresh_install import (
 from tests.e2e._harness.fresh_install import wait_episode_state as _wait_episode_state
 from tests.e2e._harness.phase3 import admit_turn, close_pass, record_turn
 from tests.e2e._harness.providers import (
+    INFERRED_AGENT_TEXT,
     SELF_POSTCARD_TEXT,
     deterministic_provider,
     local_provider_environment,
@@ -90,7 +101,12 @@ CRITERIA = [
     "serve_from_other_cwd_reads_state_env",
     "opt_out_takes_effect_after_restart",
     "canonical_self_binds",
+    "two_tier_self",
 ]
+
+TWO_TIER = {"MENHIR_INFERRED_SELF_MODE": "enforce"}
+# `add_memory` answers "Queued. episode_id=<uuid>"; the tracked write uses "episode_id: <uuid>".
+ADMITTED_EPISODE_ID = re.compile(r"episode_id[=:]\s*([0-9a-f-]{36})")
 
 OPT_OUT = {
     "MENHIR_FRONTIER_WARDEN_GATE": "false",
@@ -212,6 +228,79 @@ def _bound(probe: dict) -> bool:
         and probe["self_rows"] == [{"name": "user", "group_id": probe["group_id"]}]
         and any("cobalt postcards" in (e.get("fact") or "") for e in probe["self_edges"])
         and probe["marker_leaks"] == 0
+    )
+
+
+def _facts_of(config: E2EConfig, uuid: str) -> list[str]:
+    rows = graph_query(
+        config,
+        "MATCH (s:Entity {uuid:$uuid})-[r:RELATES_TO]-(:Entity) WHERE r.fact IS NOT NULL "
+        "RETURN r.fact AS fact",
+        uuid=uuid)
+    return sorted(str(r["fact"]) for r in rows)
+
+
+def _two_tier_probe(config: E2EConfig, ns: str, client_uuid: str | None,
+                    projection_uuid: str | None) -> dict:
+    """Both self tiers, ordinary "user" forks, marker leaks of either prefix, and the client skip."""
+    anchored, inferred = self_uuid_for_namespace(ns), inferred_self_uuid_for_namespace(ns)
+    group = namespace_to_group_id(ns)
+    inferred_rows = graph_query(
+        config,
+        "MATCH (i:Entity {uuid:$uuid}) RETURN i.name AS name, i.entity_role AS role, "
+        "i.self_tier AS tier, coalesce(i.is_self, false) AS is_self, i.group_id AS group_id",
+        uuid=inferred)
+    forks = graph_query(
+        config,
+        "MATCH (n:Entity) WHERE n.group_id = $g AND toLower(trim(n.name)) = 'user' "
+        "AND n.uuid <> $uuid RETURN n.uuid AS uuid",
+        g=group, uuid=anchored)
+    leaks = 0
+    for prefix in (SUBJECT_ENDPOINT_MARKER_PREFIX, INFERRED_ENDPOINT_MARKER_PREFIX):
+        leaks += graph_query(
+            config,
+            "MATCH (n) WHERE n.group_id = $g AND (coalesce(n.name, '') CONTAINS $p "
+            "OR coalesce(n.summary, '') CONTAINS $p) RETURN count(n) AS c",
+            g=group, p=prefix)[0]["c"]
+        leaks += graph_query(
+            config,
+            "MATCH ()-[r]->() WHERE r.group_id = $g AND (coalesce(r.fact, '') CONTAINS $p "
+            "OR coalesce(r.name, '') CONTAINS $p) RETURN count(r) AS c",
+            g=group, p=prefix)[0]["c"]
+    link = graph_query(
+        config,
+        "MATCH (:Entity {uuid:$a})-[r:INFERRED_VIEW_OF]->(:Entity {uuid:$i}) RETURN count(r) AS c",
+        a=anchored, i=inferred)[0]["c"]
+    client = graph_query(
+        config,
+        "MATCH (n:Episodic {uuid:$uuid}) RETURN n.processing_state AS state, "
+        "n.extraction_skipped_for AS skipped_for",
+        uuid=client_uuid or "") if client_uuid else []
+    return {
+        "anchored_facts": _facts_of(config, anchored),
+        "inferred_facts": _facts_of(config, inferred),
+        "inferred_node": inferred_rows,
+        "fork_user_nodes": [r["uuid"] for r in forks],
+        "marker_leaks": leaks,
+        "tier_link_edges": link,
+        "client": client,
+        "projection_uuid": projection_uuid,
+        "group_id": group,
+    }
+
+
+def _two_tier_ok(p: dict) -> bool:
+    anchored, inferred = " ".join(p["anchored_facts"]), " ".join(p["inferred_facts"])
+    return (
+        "cobalt postcards" in anchored and "oolong tea" not in anchored
+        and "oolong tea" in inferred and "cobalt postcards" not in inferred
+        and p["inferred_node"] == [{"name": "user-inferred", "role": "inferred_self",
+                                    "tier": "inferred", "is_self": False,
+                                    "group_id": p["group_id"]}]
+        and p["fork_user_nodes"] == []
+        and p["marker_leaks"] == 0
+        and p["tier_link_edges"] == 1
+        and p["client"] == [{"state": "READY", "skipped_for": p["projection_uuid"]}]
     )
 
 
@@ -441,6 +530,35 @@ async def test_e2e_19_fresh_install_shipped_defaults(
                               "binding_mode": opted_out.get("MENHIR_CANONICAL_SELF_BINDING_MODE")},
                 "restored": {"ok": part_b, "episode_state": state_e, "warden_status": ws_on,
                              "settings_equal_defaults": restored == code_defaults()}})
+            stop(backend)
+
+            # 13. two-tier self, opted in (not a shipped default; removed again afterwards)
+            edit_env(home.env_path, set_values=TWO_TIER)
+            backend = start("up", home.cwd, "up-two-tier")
+            ns_tier = f"e2e19-tier-{uuid4().hex[:12]}"
+            async with _session(home, cfg, inst, ev, "client-two-tier") as client:
+                turn = record_turn(cfg, ns_tier, SELF_TEXT, occurred_at=SELF_AT)
+                admitted = ADMITTED_EPISODE_ID.search(
+                    await admit_turn(client, ns_tier, SELF_TEXT, turn))
+                client_uuid = admitted.group(1) if admitted else None
+                deadline = time.monotonic() + 60
+                proj_t = projection_for_turn(cfg, turn)
+                while proj_t is None and time.monotonic() < deadline:
+                    await asyncio.sleep(2)
+                    proj_t = projection_for_turn(cfg, turn)
+                proj_state = wait_episode_state(cfg, proj_t["uuid"]) if proj_t else "NO_PROJECTION"
+                client_state = wait_episode_state(cfg, client_uuid) if client_uuid else "NO_EPISODE"
+                agent_episode = await _track(client, INFERRED_AGENT_TEXT, ns_tier)
+                agent_state = wait_episode_state(cfg, agent_episode)
+            probe_tier = _two_tier_probe(cfg, ns_tier, client_uuid,
+                                         proj_t["uuid"] if proj_t else None)
+            ev.record("two_tier_self", passed=(
+                proj_state == "READY" and client_state == "READY" and agent_state == "READY"
+                and _two_tier_ok(probe_tier)),
+                detail={"projection_state": proj_state, "client_state": client_state,
+                        "agent_state": agent_state, "probe": probe_tier})
+            stop(backend)
+            edit_env(home.env_path, remove=TWO_TIER.keys())
         finally:
             for backend_proc in live:
                 try:
