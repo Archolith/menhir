@@ -163,7 +163,10 @@ def main() -> int:
 
     if result.get("restored"):
         print(f"UNMERGED (op={result.get('op_id')}):")
-        for k in ("out_restored", "in_restored", "bridges_removed", "mentions_removed"):
+        # facts_recreated > 0: a moved fact was gone from the survivor, so it came back from the
+        # PREPARE snapshot (its post-merge changes, including a deletion, are not reflected).
+        for k in ("out_restored", "in_restored", "facts_moved_back", "facts_recreated",
+                  "bridges_removed", "mentions_removed"):
             if k in result:
                 print(f"  {k}: {result[k]}")
         return 0
