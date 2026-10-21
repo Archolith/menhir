@@ -225,6 +225,33 @@ async def test_contradiction_warden_default_off_does_not_refuse() -> None:
 # --- belief_gate tests --------------------------------------------------------
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("intent", ["current", "historical"])
+@pytest.mark.parametrize("group,status,unresolved", [
+    ("g", "unresolved", True), ("g", "resolved", False),
+    ("g", "unknown", False), ("g", None, False),
+    (None, "unresolved", False), ("", "unresolved", False),
+])
+async def test_recorded_conflict_reaches_optional_guard_without_mock_oracle(
+    enabled: bool, intent: str, group: str | None, status: str | None, unresolved: bool,
+) -> None:
+    pipe = AssertionPipeline(LogSpaceOracleCombiner(), auto_intent=False,
+                             contradiction_interrupt=enabled, belief_gate=False)
+    candidate = CandidateMemory(id="c", content="configuration fact", metadata={
+        "similarity": .85, "evidence_kinds": ("git",),
+        "conflict_group_id": group, "conflict_status": status,
+    })
+    outcome = await pipe.run(QueryContext(text="configuration", intent=intent), [candidate])
+    result = outcome.ranked[0]
+    expected = (WardenDecision.REFUSE if intent == "current" else WardenDecision.FLAG
+                ) if enabled and unresolved else WardenDecision.ADMIT
+    assert result.decision is expected
+    assert result.label == ("conflict" if expected is WardenDecision.FLAG else None)
+    if enabled and unresolved:
+        assert f"contradiction:{expected.value}" in result.reason
+
+
 def test_belief_gate_off_excludes_currentness_warden() -> None:
     p = AssertionPipeline(LogSpaceOracleCombiner(), belief_gate=False)
     assert not any(isinstance(w, CurrentnessWarden) for w in p.wardens)
@@ -244,3 +271,39 @@ async def test_belief_gate_on_refuses_superseded_under_current_intent() -> None:
     outcome = await p.run(q, cands)
     # a superseded belief must not land in admitted-as-current
     assert all(r.candidate_id != "u1" for r in outcome.admitted)
+
+
+# --- tie order: ties keep the caller's order, not candidate-id order ---------
+
+class _FailingOracle:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def evaluate(self, query, candidate):
+        raise RuntimeError("oracle down")
+
+
+_UNSORTED_IDS = ["m7", "m2", "m9", "m0", "m5", "m3"]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_oracle_outage_keeps_caller_order() -> None:
+    """Every oracle failing degrades to neutral; the ranking must equal the caller's order."""
+    from menhir.services.oracle_executor import OracleExecutor
+
+    executor = OracleExecutor([_FailingOracle(o.name) for o in default_oracles()])
+    pipe = AssertionPipeline(LogSpaceOracleCombiner(), executor=executor, auto_intent=False)
+    cands = [CandidateMemory(id=i, content=f"memory {i}", metadata={"similarity": 0.5})
+             for i in _UNSORTED_IDS]
+    out = await pipe.run(QueryContext(text="what did I say"), cands)
+    assert [r.candidate_id for r in out.ranked] == _UNSORTED_IDS
+
+
+@pytest.mark.asyncio
+async def test_pipeline_score_ties_keep_caller_order() -> None:
+    """Candidates the oracles score identically keep the caller's relative order."""
+    pipe = AssertionPipeline(LogSpaceOracleCombiner(), auto_intent=False)
+    cands = [CandidateMemory(id=i, content="same text", metadata={"similarity": 0.5})
+             for i in _UNSORTED_IDS]
+    out = await pipe.run(QueryContext(text="what did I say"), cands)
+    assert [r.candidate_id for r in out.ranked] == _UNSORTED_IDS

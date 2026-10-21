@@ -7,6 +7,7 @@ import sys
 from dataclasses import dataclass
 
 from menhir.config import MemorySettings
+from menhir.config.authority_gates import event_history_authority_effective, scalar_view_authority_effective
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.neo4j import Neo4jRepository
 
@@ -41,7 +42,16 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
         user=settings.neo4j_user,
         password=settings.neo4j_password,
     )
-    graph_adapter = MemoryGraphAdapter(neo4j=neo4j)
+    counting_enabled = bool(
+        getattr(settings, "personal_memory_counting_enabled", False)
+        and getattr(settings, "personal_memory_scalar_state_enabled", False)
+    )
+    graph_adapter = MemoryGraphAdapter(
+        neo4j=neo4j,
+        counting_enabled=counting_enabled,
+        counting_match_enabled=bool(
+            getattr(settings, "personal_memory_counting_match_enabled", False)),
+    )
 
     # Attempt full path for context recall.
     # Always prefer the direct Graphiti path — the hook is designed to bypass HTTP.
@@ -61,13 +71,25 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
             scoring_service=scoring_service,
             ingest_service=None,
             lifecycle_service=None,
-            scalar_view_authority_enabled=settings.personal_memory_scalar_view_authority_enabled,
-            event_history_authority_enabled=settings.personal_memory_event_history_authority_enabled,
+            scalar_view_authority_enabled=scalar_view_authority_effective(settings),
+            scalar_view_collapse_enabled=settings.personal_memory_scalar_view_collapse_enabled,
+            scalar_view_echo_drop_enabled=settings.personal_memory_scalar_view_echo_drop_enabled,
+            counting_recall_authority_only=getattr(
+                settings, "personal_memory_counting_recall_authority_only", False),
+            counting_wording_enabled=getattr(
+                settings, "personal_memory_counting_wording_enabled", False),
+            event_history_authority_enabled=event_history_authority_effective(settings),
+            counting_enabled=counting_enabled,
         )
         context_builder = ContextBuilderService(
             recall_service=recall_service,
             graph_adapter=graph_adapter,
-            brief_builder_enabled=settings.frontier_brief_builder,
+            retrieval_tuning=settings.retrieval_tuning(),
+            source_memory_limit=(
+                getattr(settings, "frontier_source_memory_limit", None)
+                if getattr(settings, "frontier_source_memories", False)
+                else None
+            ),
         )
     except Exception:
         logger.debug("Direct recall path unavailable, trying backend", exc_info=True)

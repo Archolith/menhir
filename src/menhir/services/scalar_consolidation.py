@@ -10,6 +10,27 @@ from typing import Any, Callable, Protocol
 
 logger = logging.getLogger(__name__)
 
+_warned_no_scalar_evidence = False
+
+
+def _warn_once_if_no_scalar_evidence(graph_adapter: Any) -> None:
+    """One warning per process when the scalar lane runs but the graph holds no user :TurnEvidence
+    at all (issue #95: the Episodic `user:`-prefix fallback is gone, so nothing would ever be
+    discovered). Never raises."""
+    global _warned_no_scalar_evidence
+    if _warned_no_scalar_evidence:
+        return
+    try:
+        if not graph_adapter.evidence_exists():
+            _warned_no_scalar_evidence = True
+            logger.warning(
+                "typed-scalar consolidation found no role='user' TurnEvidence in the graph; "
+                "it will discover no work until evidence is recorded via "
+                "add_memory(user_statement=...) or a TurnEvidence producer hook"
+            )
+    except Exception:  # noqa: BLE001 - visibility must never fail target selection
+        logger.exception("typed-scalar evidence visibility check failed (non-fatal)")
+
 
 class CountingLlm(Protocol):
     """Callable LLM seam whose invocation count is shared across consolidation phases."""
@@ -51,6 +72,29 @@ class ScalarConsolidationGraph(Protocol):
 
     def retire_counters_superseded_by_scalar(self, *, namespace: str) -> int: ...
 
+    def evidence_exists(self) -> bool: ...
+
+    # #170 D1 prior-version retirement (reversion_repository).
+    def scalar_prior_version_rows(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+    ) -> list[dict[str, Any]]: ...
+
+    def scalar_current_version_spans(
+        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
+        include_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]: ...
+
+    def scalar_owed_subjects(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+    ) -> list[str]: ...
+
+    def retire_scalar_prior_version(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+        perceiver_version: str, keep_ids: list[str] | None = None,
+    ) -> dict[str, Any]: ...
+
+    def mark_projection_complete(self, assertion_ids: list[str]) -> int: ...
+
 
 @dataclass(frozen=True)
 class ScalarConsolidationConfig:
@@ -62,12 +106,13 @@ class ScalarConsolidationConfig:
     lineage_limit: int = 5000
     embed_version: str | None = None
     # Drop the free-text attribute name from the k-sample vote and reconcile it modally afterwards.
-    # OFF by default; RECALL-affecting when on (more claims clear the gate), not behaviour-neutral.
-    reconcile_attribute: bool = False
+    # ON by default (lenient-agreement defaults, 2026-09, matching MemorySettings);
+    # RECALL-affecting when on (more claims clear the gate), not behaviour-neutral.
+    reconcile_attribute: bool = True
     # Same defect relocated into the other two identity fields, plus first-person canonicalization.
-    # All OFF by default and all RECALL-affecting when on, for the same reason as the attribute.
-    reconcile_scope: bool = False
-    reconcile_subject: bool = False
+    # Scope/subject ON by default (matching MemorySettings); canonical_self stays OFF.
+    reconcile_scope: bool = True
+    reconcile_subject: bool = True
     canonical_self: bool = False
     # When True, scalar_history Views are built alongside scalar_state at ingest and repair time.
     scalar_history_enabled: bool = False
@@ -87,6 +132,7 @@ async def select_scalar_targets(
 ) -> list[str]:
     """Snapshot scalar-dirty namespaces before the blocking consolidation worker starts."""
 
+    _warn_once_if_no_scalar_evidence(graph_adapter)
     if namespaces is not None:
         return list(namespaces)
     return await asyncio.to_thread(
@@ -111,17 +157,33 @@ def run_scalar_consolidation(
 ) -> dict[str, object]:
     """Run the typed-scalar backfill and repair phases with the shared LLM budget."""
 
+    from menhir.domain.typed_assertion import perceiver_rank
     from menhir.infrastructure.typed_assertion_repository import ScalarStateActivationError
     from menhir.services.typed_scalar_perception import (
         ScalarStateNotActivatedError,
         TypedScalarPerceptionService,
     )
 
-    scalar_states_written = 0
+    scalar_states_written = 0  # bound assertions (the key predates the stage split)
     scalar_advisory = 0
+    # Stage counts (#170 item 4): rows read, gate decisions, committed, persisted, binding
+    # mismatches, Views rebuilt. Bound is scalar_states_written.
+    scalar_evidence_rows = 0
+    scalar_decisions = 0
+    scalar_committed = 0
+    scalar_persisted = 0
+    scalar_mismatched = 0
+    scalar_views_rebuilt = 0
     scalar_processed = 0
     scalar_counters_retired = 0
     scalar_batches = 0
+    # #170 D1: prior-version readings kept (rule B) and retired after a re-read.
+    scalar_carried = 0
+    scalar_retired = 0
+    # 0 = no retirement: a non-SemVer version, or a graph without the retire queries (test fakes;
+    # MemoryGraphAdapter always has them, pinned by test_prior_version_retire).
+    rank = (perceiver_rank(config.perceiver_version)
+            if callable(getattr(graph_adapter, "retire_scalar_prior_version", None)) else 0)
     scalar_service = None
     scalar_state_service = None
 
@@ -166,12 +228,21 @@ def run_scalar_consolidation(
                 )
                 if not rows:
                     break
+                scalar_evidence_rows += len(rows)
                 episodes = build_episodes(rows)
+                reversion_owed: set[str] = set()
                 if episodes:
                     reference_by_uuid = {
                         str(row["uuid"]): (str(row.get("valid_at") or "") or None)
                         for row in rows
                     }
+                    turn_ids = [str(getattr(e, "uuid", "") or "") for e in episodes]
+                    # #170 D1, before persist: the older readings a re-read may replace, and the
+                    # subjects an earlier retire at this version left unrebuilt (a crash).
+                    prior = (graph_adapter.scalar_prior_version_rows(
+                        namespace, turn_ids, perceiver_rank=rank) if rank > 0 else [])
+                    owed = (set(graph_adapter.scalar_owed_subjects(
+                        namespace, turn_ids, perceiver_rank=rank)) if rank > 0 else set())
                     perception = scalar_service.perceive_and_persist(
                         episodes,
                         counting_llm,
@@ -183,11 +254,34 @@ def run_scalar_consolidation(
                         reconcile_scope=config.reconcile_scope,
                         reconcile_subject=config.reconcile_subject,
                         canonical_self=config.canonical_self,
+                        # Rebuild once after the retire, so no View holds old and new together.
+                        **({"defer_rebuild": True} if prior else {}),
                     )
                     scalar_states_written += int(perception.get("bound", 0))
                     scalar_advisory += int(perception.get("advisory", 0))
+                    scalar_decisions += int(perception.get("decisions", 0) or 0)
+                    scalar_committed += int(perception.get("committed", 0) or 0)
+                    scalar_persisted += int(perception.get("persisted", 0) or 0)
+                    scalar_mismatched += int(perception.get("mismatched", 0) or 0)
+                    scalar_views_rebuilt += int(perception.get("rebuilt", 0) or 0)
+                    if rank > 0:
+                        reversion = _retire_prior_scalar_version(
+                            graph_adapter, scalar_state_service, namespace, turn_ids,
+                            rank=rank, config=config, prior=prior, owed=owed,
+                            perception=perception if prior else None)
+                        scalar_carried += reversion["carried"]
+                        scalar_retired += reversion["retired"]
+                        scalar_views_rebuilt += reversion["rebuilt"]
+                        reversion_owed = reversion["owed"]
                 scalar_batches += 1
                 namespace_touched = True
+                if reversion_owed:
+                    # A retired reading's View did not rebuild. Keep the page unread, so the next
+                    # run rebuilds it (scalar_owed_subjects) before the cursor passes these turns.
+                    logger.warning(
+                        "scalar re-version: %d subject(s) in %s did not rebuild after retire; "
+                        "not advancing cursor", len(reversion_owed), namespace)
+                    break
 
                 # Cursor position is ingestion order (`cursor_at`), never semantic world time.
                 # Fail closed on a wholly timeless page so the namespace stays dirty for repair.
@@ -292,7 +386,15 @@ def run_scalar_consolidation(
         "scalar_batches": scalar_batches,
         "scalar_states_written": scalar_states_written,
         "scalar_advisory": scalar_advisory,
+        "scalar_evidence_rows": scalar_evidence_rows,
+        "scalar_decisions": scalar_decisions,
+        "scalar_assertions_committed": scalar_committed,
+        "scalar_assertions_persisted": scalar_persisted,
+        "scalar_binding_mismatched": scalar_mismatched,
+        "scalar_views_rebuilt": scalar_views_rebuilt,
         "scalar_counters_retired": scalar_counters_retired,
+        "scalar_prior_version_carried": scalar_carried,
+        "scalar_prior_version_retired": scalar_retired,
         "scalar_repaired": scalar_repaired,
         "scalar_repair_pending": scalar_repair_pending,
         "scalar_delete_repaired": scalar_delete_repaired,
@@ -302,6 +404,51 @@ def run_scalar_consolidation(
         "scalar_orphans_repaired": scalar_orphans_repaired,
         "scalar_orphans_unresolved": scalar_orphans_unresolved,
     }
+
+
+def _retire_prior_scalar_version(
+    graph_adapter: ScalarConsolidationGraph,
+    state_service: Any,
+    namespace: str,
+    turn_ids: list[str],
+    *,
+    rank: int,
+    config: ScalarConsolidationConfig,
+    prior: list[dict[str, Any]],
+    owed: set[str],
+    perception: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """#170 D1, counting's rule B for the scalar lane, after a page is stored at this version.
+
+    Keeps a prior reading the new samples proposed something over but nothing was stored for (a
+    gate veto, or a sample that could not read the turn); retires the rest, and every lower-rank
+    reading written on these turns since `prior` was read. Then rebuilds each touched subject once.
+    `perception` is the deferred persist result (None when nothing was deferred). Returns
+    {carried, retired, rebuilt, owed}; `owed` is the retired subjects whose rebuild failed."""
+    from menhir.services.counting_consolidation import _rebuild_page, reversion_carried
+
+    page_rows: list[dict[str, Any]] = []
+    spans: dict[str, Any] = {}
+    if perception is not None:
+        spans = dict(perception.get("spans") or {})
+        page_rows = [r for r in perception.get("results") or []
+                     if r.get("bound") and r.get("assertion_id")]
+    carry: list[str] = []
+    if prior:
+        stored = graph_adapter.scalar_current_version_spans(
+            namespace, turn_ids, perceiver_version=config.perceiver_version,
+            include_ids=[str(r["assertion_id"]) for r in page_rows])
+        carry = reversion_carried(prior, spans, stored)
+    # Also raises the turns' read marker, so a slower older-version writer cannot make a reading
+    # current here afterwards (_RECORD_CYPHER).
+    retired = graph_adapter.retire_scalar_prior_version(
+        namespace, turn_ids, perceiver_rank=rank, perceiver_version=config.perceiver_version,
+        keep_ids=carry)
+    due = set(retired.get("subjects") or []) | set(owed)
+    rebuilt = _rebuild_page(graph_adapter, state_service, namespace, due, page_rows,
+                            history=config.scalar_history_enabled)
+    return {"carried": len(carry), "retired": int(retired.get("retired") or 0),
+            "rebuilt": len(rebuilt), "owed": due - rebuilt - {""}}
 
 
 __all__ = [

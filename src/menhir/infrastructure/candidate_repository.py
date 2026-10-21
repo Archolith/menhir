@@ -133,8 +133,8 @@ class CandidateRepository:
                 n.candidate_notes = $notes,
                 n.source_confidence = $source_confidence,
                 n.user_flagged = false,
-                n.created_at = $now,
-                n.last_accessed = $now,
+                n.created_at = datetime($now),
+                n.last_accessed = datetime($now),
                 n.freshness = 'ACTIVE',
                 n.edge_count = 0,
                 n.sharpness = 0.0
@@ -143,7 +143,7 @@ class CandidateRepository:
                 n.candidate_distinct_sessions = $distinct_sessions,
                 n.candidate_last_seen = $last_seen,
                 n.candidate_notes = $notes,
-                n.last_accessed = $now
+                n.last_accessed = datetime($now)
             RETURN
                 n.uuid AS uuid,
                 n.scope AS scope,
@@ -179,7 +179,7 @@ class CandidateRepository:
             },
         )
         row = dict(rows[0]) if rows else {"uuid": node_uuid, "scope": "CANDIDATE"}
-        row["created"] = bool(row.get("created_at") == now)
+        row["created"] = row.get("uuid") == node_uuid
         return row
 
     # ------------------------------------------------------------------
@@ -202,7 +202,7 @@ class CandidateRepository:
             SET n.scope = 'PERSISTENT',
                 n.freshness = 'ACTIVE',
                 n.promoted_at = datetime(),
-                n.last_accessed = $now
+                n.last_accessed = datetime($now)
             RETURN count(n) AS promoted
             """,
             {"uuid": uuid, "now": now},

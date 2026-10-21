@@ -8,8 +8,8 @@ MENTIONS); this lane is where that assertion lives for the release.
 Every criterion here is a negative test. Per Gate C, a negative test that fails is not a
 lane failure to be retried -- it is a release-blocking issue with a reproduced failure.
 
-WHY THIS MODULE IS THREE TESTS
-------------------------------
+WHY THIS MODULE HAS SEPARATE TESTS
+----------------------------------
 A lane declares one provider, and these criteria need two opposite ones. Proving the
 #88 isolation pin needs a provider that succeeds, because the failure mode is entities
 extracted into the wrong silo and an extraction that never happens cannot land anywhere.
@@ -17,9 +17,11 @@ Proving "provider failure does not silently pass" needs one that reliably fails.
 Combining them would mean one of the two criteria was asserted against a provider that
 could not produce its failure mode. So they are separate tests in the same module.
 
-The third test is the declared-pending remainder, and it exists rather than being
-deleted because Gate C counts checklist items: a criterion that quietly stops being
-listed reads as a criterion that was met.
+The missing Graphiti fork criterion removes the public distribution from a separate
+installed-wheel environment, then checks the operator's dependency command. Gate C
+counts checklist items: a criterion that quietly stops being listed reads as a
+criterion that was met. The former Beacon adversarial scenario stays uncollected
+after its deferral in #120.
 
 THE #88 PIN USES THE DETERMINISTIC PROVIDER, NOT A LIVE ONE
 ------------------------------------------------------------
@@ -38,25 +40,36 @@ that surfaces the moment any other read path forgets the filter.
 
 from __future__ import annotations
 
+import asyncio
+import csv
+from contextlib import contextmanager
 import json
+import os
 import re
+import stat
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Iterator
 from uuid import uuid4
 
 import pytest
 
 from tests.e2e._harness.client import stdio_session, wait_for_project_indexed
-from tests.e2e._harness.config import E2EConfig
+from tests.e2e._harness.config import E2EConfig, child_environment
 from tests.e2e._harness.evidence import LaneEvidence
 from tests.e2e._harness.features import FeatureCombo
 from tests.e2e._harness.artifact_corpus import (
     EXPECTED_ARTIFACTS,
     MALFORMED_PATH,
+    UNRESOLVED_SUPERSEDED_PATH,
     build_artifact_corpus,
     write_malformed_document,
 )
 from tests.e2e._harness.fixture_repo import UNINDEXED_PATH, build_fixture_repo
 from tests.e2e._harness.pending import declare_pending
-from tests.e2e._harness.stack import graph_query, run_menhir_cli
+from tests.e2e._harness.stack import InstalledMenhir, graph_query, run_menhir_cli
 
 pytestmark = [pytest.mark.e2e, pytest.mark.timeout(3000)]
 
@@ -65,14 +78,17 @@ ISOLATION_CRITERIA = [
     "same_filenames_two_projects_do_not_cross_link",
     "stale_or_unknown_coverage_never_reports_safe",
     "oversized_memory_or_diff_refused_as_documented",
-    "capped_scan_does_not_authorize_destructive_prune",
+    "namespace_delete_cap_refuses_without_deletion",
+    "structure_scan_cap_preserves_previously_indexed_file",
 ]
+DENIED_DIRECTORY_CRITERIA = ["os_denied_directory_preserves_previously_indexed_structure"]
 
 PROVIDER_CRITERIA = ["provider_failure_does_not_silently_pass"]
 
 CORPUS_CRITERIA = ["malformed_artifact_metadata_fails_without_corruption"]
 
-DEFERRED_CRITERIA = ["invalid_beacon_input_does_not_clobber_manifest"]
+FORK_REFUSAL_CRITERIA = ["missing_or_incompatible_graphiti_fork_fails_explicitly"]
+BEACON_POST_MVP_CRITERIA = ["invalid_beacon_input_does_not_clobber_manifest"]
 
 EPISODE_ID = re.compile(r"episode_id[=:]\s*([0-9a-f-]{36})")
 
@@ -81,7 +97,7 @@ EPISODE_ID = re.compile(r"episode_id[=:]\s*([0-9a-f-]{36})")
 TENANT_A = "The Northwind billing service charges customers monthly and retries failures twice."
 TENANT_B = "The Northwind billing service charges customers monthly and retries failures twice."
 
-#: MAX_DIFF_CHARS is 50_000 (services/enrichment_steps.py:183). Comfortably past it.
+#: MAX_DIFF_CHARS is 50_000 (services/ingest_limits.py). Comfortably past it.
 OVERSIZED_DIFF = "diff --git a/x b/x\n" + ("+padding line that is long enough to matter\n" * 4000)
 
 
@@ -89,6 +105,42 @@ def _text(result: object) -> str:
     content = getattr(result, "content", None) or []
     parts = [getattr(item, "text", "") for item in content]
     return "\n".join(part for part in parts if part)
+
+
+@contextmanager
+def _deny_directory_listing(directory: Path) -> Iterator[None]:
+    """Deny real OS traversal to both the test and the backend, then restore it."""
+    if os.name == "nt":
+        identity = subprocess.run(
+            ["whoami", "/user", "/fo", "csv", "/nh"],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        sid = next(csv.reader(identity.splitlines()))[1]
+        assert sid.startswith("S-"), f"could not resolve current Windows SID: {sid!r}"
+        subprocess.run(
+            ["icacls", str(directory), "/deny", f"*{sid}:(RD)"],
+            capture_output=True, text=True, check=True,
+        )
+        try:
+            with pytest.raises(PermissionError, match="denied"):
+                list(os.scandir(directory))
+            yield
+        finally:
+            subprocess.run(
+                ["icacls", str(directory), "/remove:d", f"*{sid}"],
+                capture_output=True, text=True, check=True,
+            )
+    elif os.name == "posix":
+        original_mode = stat.S_IMODE(directory.stat().st_mode)
+        directory.chmod(0)
+        try:
+            with pytest.raises(PermissionError):
+                list(os.scandir(directory))
+            yield
+        finally:
+            directory.chmod(original_mode)
+    else:
+        pytest.skip(f"OS-level directory denial is unsupported on {os.name}")
 
 
 @pytest.mark.provider("deterministic")
@@ -271,7 +323,11 @@ async def test_e2e_08_isolation(
         # truncation that SAYS it truncated is fine. Silently storing a partial diff while
         # reporting an ordinary success is the failure: every later reader treats the
         # fragment as the whole change.
-        refused_outright = "Failed to store memory." in oversized or "too large" in oversized.lower()
+        refused_outright = (
+            "Failed to store memory." in oversized
+            or "too large" in oversized.lower()
+            or "Memory diff exceeds" in oversized
+        )
         accepted = "Queued." in oversized
         marked = False
         stored: list[dict] = []
@@ -313,13 +369,14 @@ async def test_e2e_08_isolation(
             f"partial diff is stored as if complete:\n{oversized[:600]}"
         )
 
-        # --- a capped scan must not authorize a destructive prune -------------------------
+        # --- namespace deletion refuses when its node cap is exceeded ---------------------
         before = graph_query(
             e2e_config,
-            "MATCH (n) WHERE n.group_id = $group RETURN count(n) AS nodes",
+            "MATCH (n) WHERE n.group_id = $group RETURN elementId(n) AS id",
             group=ns_a,
         )
-        nodes_before = before[0]["nodes"] if before else 0
+        before_ids = {row["id"] for row in before}
+        nodes_before = len(before_ids)
         assert nodes_before > 1, (
             f"namespace {ns_a} holds {nodes_before} nodes; the cap below would not be "
             "exceeded and the refusal would not be exercised"
@@ -340,16 +397,18 @@ async def test_e2e_08_isolation(
         )
         after = graph_query(
             e2e_config,
-            "MATCH (n) WHERE n.group_id = $group RETURN count(n) AS nodes",
+            "MATCH (n) WHERE n.group_id = $group RETURN elementId(n) AS id",
             group=ns_a,
         )
-        nodes_after = after[0]["nodes"] if after else 0
+        after_ids = {row["id"] for row in after}
+        nodes_after = len(after_ids)
         # The bug this guards against is a gate that reports a refusal after the delete
-        # has already run. Only the node count can tell those apart.
+        # has already run. A queued enrichment may add nodes while this check runs, so
+        # compare the original identities rather than requiring an unchanged count.
         documented_refusal = '"error"' in capped and "force=true" in capped
-        nothing_deleted = nodes_after == nodes_before
+        nothing_deleted = before_ids <= after_ids
         lane_evidence.record(
-            "capped_scan_does_not_authorize_destructive_prune",
+            "namespace_delete_cap_refuses_without_deletion",
             passed=documented_refusal and nothing_deleted,
             detail={
                 "response": capped[:400],
@@ -364,8 +423,148 @@ async def test_e2e_08_isolation(
         )
         assert nothing_deleted, (
             f"delete_namespace reported a refusal but the graph lost "
-            f"{nodes_before - nodes_after} nodes; the cap is checked after the delete"
+            f"{len(before_ids - after_ids)} original nodes; the cap is checked after the delete"
         )
+
+        # --- actual structural file cap: absence in a capped scan cannot prune ---------
+        cap_project = f"scan-cap-{suffix}"
+        cap_fixture = build_fixture_repo(e2e_config.fixtures_dir / cap_project)
+        retained = cap_fixture.path / "tests" / "test_retained.py"
+        retained.write_text("def test_retained(): pass\n", encoding="utf-8")
+        first = _text(await client.call_tool("call_tool", {
+            "name": "ingest_project", "arguments": {
+                "path": str(cap_fixture.path), "name": cap_project,
+                "identity_action": "new",
+            },
+        }))
+        assert first.startswith("Scanned "), first[:400]
+        await wait_for_project_indexed(client, cap_project)
+
+        # Source files outrank tests when the 2,000-file cap binds, so this existing test file
+        # is deliberately omitted from the second scan. Its old graph node must survive.
+        filler = cap_fixture.path / "src" / "cap"
+        filler.mkdir(parents=True, exist_ok=True)
+        for index in range(2001):
+            (filler / f"f{index:04d}.py").write_text("value = 1\n", encoding="utf-8")
+        second = _text(await client.call_tool("call_tool", {
+            "name": "ingest_project", "arguments": {
+                "path": str(cap_fixture.path), "name": cap_project, "force": True,
+            },
+        }))
+        assert second.startswith("Scanned "), second[:400]
+
+        deadline = time.monotonic() + 300
+        coverage = []
+        while time.monotonic() < deadline:
+            coverage = graph_query(
+                e2e_config,
+                "MATCH (p:Entity {structure_project: $project, structure_role: 'project'}) "
+                "RETURN p.partial_index AS partial, p.files_eligible AS eligible, "
+                "p.files_indexed AS indexed",
+                project=cap_project,
+            )
+            if coverage and coverage[0].get("partial") is True:
+                break
+            await asyncio.sleep(1)
+        assert coverage and coverage[0].get("partial") is True, (
+            f"capped scan did not publish partial coverage: {coverage}"
+        )
+        retained_rows = graph_query(
+            e2e_config,
+            "MATCH (f:Entity {structure_project: $project, "
+            "structure_path: 'tests/test_retained.py'}) RETURN f.uuid AS uuid",
+            project=cap_project,
+        )
+        preserved = len(retained_rows) == 1
+        lane_evidence.record(
+            "structure_scan_cap_preserves_previously_indexed_file",
+            passed=preserved and coverage[0]["eligible"] > coverage[0]["indexed"],
+            detail={"coverage": coverage[0], "retained_rows": retained_rows},
+        )
+        assert preserved, "the capped structural scan pruned an unseen indexed file"
+
+    lane_evidence.close(status="PASS")
+
+
+@pytest.mark.provider("deterministic")
+async def test_e2e_08_os_denied_directory_preserves_structure(
+    e2e_config: E2EConfig,
+    e2e_installed,
+    running_stack,
+    feature_combo: FeatureCombo,
+    feature_env: dict[str, str],
+    provider_env: dict[str, str],
+    lane_evidence: LaneEvidence,
+) -> None:
+    """A real denied subtree cannot turn an existing index into evidence of deletion."""
+    lane_evidence.record_stack(features=feature_combo.label, provider="deterministic")
+    project = f"os-denied-{uuid4().hex[:10]}"
+    fixture = build_fixture_repo(e2e_config.fixtures_dir / project)
+    denied = fixture.path / "src" / "protected"
+    denied.mkdir(parents=True)
+    (denied / "retained.py").write_text(
+        "def retained_marker():\n    return 1\n", encoding="utf-8",
+    )
+    child_env = {**feature_env, **provider_env}
+
+    def graph_state() -> dict[str, list[dict]]:
+        return {
+            "entities": graph_query(
+                e2e_config,
+                "MATCH (n:Entity {structure_project: $project}) "
+                "RETURN n.uuid AS uuid, properties(n) AS properties ORDER BY uuid",
+                project=project,
+            ),
+            "relationships": graph_query(
+                e2e_config,
+                "MATCH (a:Entity {structure_project: $project})-[r]->(b:Entity) "
+                "RETURN a.uuid AS source, type(r) AS relation, b.uuid AS target, "
+                "properties(r) AS properties ORDER BY source, relation, target",
+                project=project,
+            ),
+        }
+
+    async with stdio_session(
+        e2e_config, e2e_installed.venv_python, lane_evidence, feature_env=child_env,
+    ) as client:
+        initial = _text(await client.call_tool("call_tool", {
+            "name": "ingest_project", "arguments": {
+                "path": str(fixture.path), "name": project, "identity_action": "new",
+            },
+        }))
+        assert initial.startswith("Scanned "), initial[:500]
+        await wait_for_project_indexed(client, project, symbol_path="src/protected/retained.py")
+        before = graph_state()
+        assert any(
+            row["properties"].get("structure_path") == "src/protected/retained.py"
+            for row in before["entities"]
+        ), "the file was never indexed before access was denied"
+
+        with _deny_directory_listing(denied):
+            try:
+                failed = _text(await client.call_tool("call_tool", {
+                    "name": "ingest_project", "arguments": {
+                        "path": str(fixture.path), "name": project, "force": True,
+                    },
+                }))
+            except Exception as exc:  # noqa: BLE001 - the client may surface a tool error
+                failed = f"{type(exc).__name__}: {exc}"
+            after = graph_state()
+
+        refused = "could not traverse" in failed.lower() and not failed.startswith("Scanned ")
+        unchanged = before == after
+        lane_evidence.record(
+            DENIED_DIRECTORY_CRITERIA[0],
+            passed=refused and unchanged,
+            detail={
+                "response": failed[:1000],
+                "entities_before": len(before["entities"]),
+                "relationships_before": len(before["relationships"]),
+                "graph_unchanged": unchanged,
+            },
+        )
+        assert refused, f"denied traversal was not reported to the caller: {failed[:700]}"
+        assert unchanged, "a denied subtree changed indexed entities or relationships"
 
     lane_evidence.close(status="PASS")
 
@@ -582,13 +781,16 @@ async def test_e2e_08_malformed_artifact_metadata(
     good_registered = [p for p in EXPECTED_ARTIFACTS if registered.get(p)]
     uncorrupted = len(good_registered) == len(EXPECTED_ARTIFACTS)
     still_refused = not registered.get(MALFORMED_PATH)
+    unresolved_superseded_refused = not registered.get(UNRESOLVED_SUPERSEDED_PATH)
     lane_evidence.record(
         "malformed_artifact_metadata_fails_without_corruption",
-        passed=is_conflict and names_the_reason and lists_every_error and uncorrupted and still_refused,
+        passed=(is_conflict and names_the_reason and lists_every_error and uncorrupted
+                and still_refused and unresolved_superseded_refused),
         detail={
             "good_documents_registered": sorted(good_registered),
             "expected_good": sorted(EXPECTED_ARTIFACTS),
             "malformed_still_unregistered": still_refused,
+            "unresolved_superseded_still_unregistered": unresolved_superseded_refused,
         },
     )
     assert uncorrupted, (
@@ -598,11 +800,135 @@ async def test_e2e_08_malformed_artifact_metadata(
     assert still_refused, (
         f"{MALFORMED_PATH} was registered despite its metadata being rejected"
     )
+    assert unresolved_superseded_refused, (
+        f"{UNRESOLVED_SUPERSEDED_PATH} was registered without a replacement"
+    )
 
     lane_evidence.close(status="PASS")
 
 
-async def test_e2e_08_malformed_hand_authored_beacon_is_not_clobbered(
+def test_e2e_08_missing_fork_refusal(
+    e2e_config: E2EConfig,
+    e2e_installed: InstalledMenhir,
+    lane_evidence: LaneEvidence,
+) -> None:
+    """A broken installed-wheel environment must refuse Menhir's runtime check."""
+
+    # Never uninstall from the shared E2E interpreter: every other lane needs it.
+    broken_venv = e2e_config.work_root / "missing-fork-venv"
+    create = subprocess.run(
+        [sys.executable, "-m", "venv", str(broken_venv)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=300,
+    )
+    assert create.returncode == 0, create.stderr[-1500:]
+    broken_python = broken_venv / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    install = subprocess.run(
+        [
+            str(broken_python),
+            "-m",
+            "pip",
+            "install",
+            "-q",
+            str(e2e_installed.wheel_path),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=1200,
+    )
+    assert install.returncode == 0, install.stderr[-1500:]
+    installed_fork = subprocess.run(
+        [str(broken_python), "-m", "pip", "show", "archolith-graphiti-core"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    assert installed_fork.returncode == 0, installed_fork.stderr[-1500:]
+    assert "Version: 0.30.2.post7" in installed_fork.stdout, installed_fork.stdout
+    healthy_check = subprocess.run(
+        [str(broken_python), "-m", "pip", "check"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    assert healthy_check.returncode == 0, (
+        "the disposable environment was already broken before removing the fork: "
+        f"{healthy_check.stdout}{healthy_check.stderr}"
+    )
+    remove = subprocess.run(
+        [str(broken_python), "-m", "pip", "uninstall", "-y", "archolith-graphiti-core"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    assert remove.returncode == 0, remove.stderr[-1500:]
+    assert "Successfully uninstalled archolith-graphiti-core" in remove.stdout, remove.stdout
+
+    dependency_check = subprocess.run(
+        [str(broken_python), "-m", "pip", "check"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    dependency_output = dependency_check.stdout + dependency_check.stderr
+    lane_evidence.attach("missing-fork-pip-check.txt", dependency_output)
+    assert dependency_check.returncode != 0, (
+        "pip check accepted an environment missing the fork"
+    )
+    assert "archolith-graphiti-core" in dependency_output.lower(), dependency_output[
+        -1500:
+    ]
+
+    runtime_check = subprocess.run(
+        [str(broken_python), "-m", "menhir.main", "check"],
+        cwd=str(e2e_config.state_dir),
+        env=child_environment(e2e_config),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    runtime_output = runtime_check.stdout + runtime_check.stderr
+    lane_evidence.attach("missing-fork-menhir-check.txt", runtime_output)
+    refused = (
+        runtime_check.returncode != 0 and "graphiti_core" in runtime_output.lower()
+    )
+    lane_evidence.record(
+        FORK_REFUSAL_CRITERIA[0],
+        passed=refused,
+        detail={
+            "wheel_sha256": e2e_installed.wheel_sha256,
+            "pip_check_exit": dependency_check.returncode,
+            "runtime_check_exit": runtime_check.returncode,
+            "runtime_message": runtime_output.strip().splitlines()[-1]
+            if runtime_output.strip()
+            else "",
+        },
+    )
+    assert refused, (
+        "Menhir did not explicitly reject a missing Graphiti fork: "
+        f"exit={runtime_check.returncode}, output={runtime_output[-1500:]}"
+    )
+    lane_evidence.close(status="PASS")
+
+
+async def beacon_post_mvp_malformed_hand_authored_manifest_is_not_clobbered(
     e2e_config: E2EConfig,
     e2e_installed,
     running_stack,
@@ -610,7 +936,7 @@ async def test_e2e_08_malformed_hand_authored_beacon_is_not_clobbered(
     feature_env: dict[str, str],
     lane_evidence: LaneEvidence,
 ) -> None:
-    """A malformed hand-authored ``beacon.yaml`` must neither block generation nor be touched.
+    """Uncollected post-MVP scenario for a malformed hand-authored ``beacon.yaml``.
 
     E2E-6 proves the sidecar policy against a VALID hand-authored manifest. The adversarial
     question is what happens when the file a careless implementation would overwrite is
@@ -630,7 +956,7 @@ async def test_e2e_08_malformed_hand_authored_beacon_is_not_clobbered(
     if beacon_python is None:
         declare_pending(
             lane_evidence,
-            DEFERRED_CRITERIA,
+            BEACON_POST_MVP_CRITERIA,
             note="MENHIR_E2E_BEACON_PYTHON is unset or missing; the Beacon-side half cannot run.",
         )
 

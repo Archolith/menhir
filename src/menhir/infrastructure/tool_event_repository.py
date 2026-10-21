@@ -369,7 +369,6 @@ class ToolEventRepository:
         params: dict[str, Any] = {
             "limit": int(limit),
             **tenant_scope_params(tenant),
-            "verification_label": "StaleAnchorVerification",
             "uuid_key": "uuid",
             "memory_uuid_key": "memory_uuid",
             "project_key": "project",
@@ -394,7 +393,7 @@ class ToolEventRepository:
         where_clause = " AND ".join(conditions)
         rows = self._neo4j.execute(
             f"""
-            MATCH (v:$($verification_label))
+            MATCH (v:StaleAnchorVerification)
             WHERE {where_clause}
             RETURN v[$uuid_key] AS uuid, v[$memory_uuid_key] AS memory_uuid,
                    v[$project_key] AS project, v[$path_key] AS path,
@@ -436,7 +435,7 @@ class ToolEventRepository:
             return {}
         rows = self._neo4j.execute(
             """
-            MATCH (v:$($verification_label))
+            MATCH (v:StaleAnchorVerification)
             WHERE v[$memory_uuid_key] IN $memory_uuids
             RETURN v[$memory_uuid_key] AS memory_uuid, v[$path_key] AS path,
                    v[$outcome_key] AS outcome, v[$verified_by_key] AS verified_by,
@@ -447,7 +446,6 @@ class ToolEventRepository:
             """,
             params={
                 "memory_uuids": memory_uuids,
-                "verification_label": "StaleAnchorVerification",
                 "memory_uuid_key": "memory_uuid",
                 "path_key": "path",
                 "outcome_key": "outcome",

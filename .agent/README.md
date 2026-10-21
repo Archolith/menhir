@@ -38,6 +38,7 @@ Start with one file:
 - purpose and principles -> `memory-foundations.md`
 - the governance constitution (admission/assertion/authority/accountability/reversibility) -> `memory-governance.md`
 - current STATE of artifacts, provenance, and governance (what's wired/dark/unwired, with live measurements) -> `artifacts-provenance-governance-status.md`
+- accepted cross-cutting architecture decisions and their tradeoffs -> `adr/README.md`
 - policy, scope, lifecycle, scoring -> `memory-policy.md`
 - retrieval tuning profiles (code-workspace vs anecdotal) -> `retrieval-profiles.md`
 - query and ingest design -> `memory-ingest-queries.md`

@@ -14,9 +14,11 @@ This index routes the current execution owners listed below exactly once.
 
 | Document | Current ownership |
 |---|---|
-| [`menhir-local-stdio-mvp-release-2026-09-16.md`](menhir-local-stdio-mvp-release-2026-09-16.md) | Define and close the local stdio MVP: memory, WorkArtifacts, local code ingest/structure, TODOs, Beacon generation, independent audit, black-box E2Es, and a fresh full-Oracle LongMemEval release gate. |
-| [`menhir-deployment-control-plane-architecture-reset-2026-09-08.md`](menhir-deployment-control-plane-architecture-reset-2026-09-08.md) | Current `NOT READY` status, eight open architecture issues, and a serial recovery plan. Only the repository-census Phase 0 is eligible to start; all implementation remains blocked. |
-| [`menhir-feature-flag-registry.md`](menhir-feature-flag-registry.md) | Define one declarative feature-flag inventory and CI-enforce consistency with settings and environment documentation. |
+| [`menhir-local-main-safety-reconciliation-2026-09-28.md`](menhir-local-main-safety-reconciliation-2026-09-28.md) | Port the three missing local-main MVP safety fixes onto current GitHub main before RC selection. |
+| [`menhir-post-v023-audit-remediation-2026-09-28.md`](menhir-post-v023-audit-remediation-2026-09-28.md) | Fix the release-to-main Astra audit findings before naming an MVP release candidate. |
+| [`menhir-local-stdio-mvp-release-2026-09-16.md`](menhir-local-stdio-mvp-release-2026-09-16.md) | Gate B audit and pre-freeze Gate C E2Es complete; Phase D named-RC preparation, the fresh full-Oracle LongMemEval gate, frozen-RC rerun, and final release remain. Beacon is deferred. |
+| Deployment control-plane architecture reset | Private `Archolith/menhir-deploy` repository. Only the repository-census Phase 0 is eligible to start; implementation remains blocked. |
+| [`menhir-feature-flag-registry.md`](menhir-feature-flag-registry.md) | P1–P3 candidate implements a 98-entry metadata inventory, consistency tests and commented environment backfill; merge/CI and optional P4–P5 remain. |
 | [`menhir-core-promotion-restack-2026-08-31.md`](menhir-core-promotion-restack-2026-08-31.md) | Restack core-promotion PRs #11–#42 from the bottom branch, preserve tranche boundaries, and repair definition-scoped bounded recovery in tranches 5 and 9. |
 | [`menhir-research-execution-ladder.md`](menhir-research-execution-ladder.md) | Dependency-ordered research → code → bench sequence. Read-side rungs are closed; Track W6 is the remaining write-side rung. |
 | [`menhir-work-artifact-reconciliation-2026-08-11.md`](menhir-work-artifact-reconciliation-2026-08-11.md) | Add read-only corpus parity auditing, hash/Git-backed source reconciliation, bounded move detectors, and a separately approved live-graph repair. |

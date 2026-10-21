@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import pytest
 
-from menhir.infrastructure.graphiti_extraction_patches import (
+from menhir.infrastructure.graphiti_extraction_policy import (
     _EDGE_ANCHOR_EVIDENCE_FIELDS,
     _edge_has_current_message_anchor,
     _is_synthesizable_endpoint,

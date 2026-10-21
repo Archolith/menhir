@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from menhir.domain.self_identity import SelfSubjectEndpointCollisionError
 from menhir.infrastructure.episode_repository import is_context_window_error_text
+from menhir.infrastructure.openai_rate_limit import QUOTA_REASON_CODE, find_quota_exhaustion
 
 _MANUAL_REVIEW_TYPE_NAMES = {
     "jsondecodeerror",
@@ -147,6 +148,16 @@ def classify_enrichment_failure(error: object | None, *, error_type: object | No
         _normalize_error_type(error, error_type)
         == SelfSubjectEndpointCollisionError.__name__.lower()
         or SelfSubjectEndpointCollisionError.reason_code in _normalize_error_text(error)
+    ):
+        return "manual_review"
+
+    # Billing state (429 insufficient_quota): never retryable, and must not hit the "429" marker.
+    # Exceptions are matched through their cause chain; persisted text by reason code/provider code.
+    quota_text = _normalize_error_text(error)
+    if (
+        find_quota_exhaustion(error if isinstance(error, BaseException) else None) is not None
+        or QUOTA_REASON_CODE in quota_text
+        or "insufficient_quota" in quota_text
     ):
         return "manual_review"
 

@@ -92,6 +92,23 @@ def namespace_spellings(namespace: str | None) -> list[str] | None:
     return [namespace]
 
 
+#: Watermark key for :TurnEvidence stored with no namespace (pre-#170 writes). Contains NUL, so
+#: it can never be a real namespace and never collides with one's watermark.
+TURN_EVIDENCE_NULL_NAMESPACE_KEY = "\u0000null"
+
+
+def turn_evidence_cursor_keys(namespace: str | None) -> list[str]:
+    """Watermark keys for every stored spelling of *namespace*'s :TurnEvidence (#170).
+
+    The default silo is stored three ways ('default', '', and no namespace). Each spelling keeps
+    its own cursor: rows already processed under one spelling are never replayed, and rows no lane
+    ever saw (the namespace-less ones) are never skipped because another spelling's cursor is ahead.
+    """
+    if namespace is None or namespace in (DEFAULT_NAMESPACE, _GRAPHITI_DEFAULT_GROUP_ID):
+        return [DEFAULT_NAMESPACE, _GRAPHITI_DEFAULT_GROUP_ID, TURN_EVIDENCE_NULL_NAMESPACE_KEY]
+    return [namespace]
+
+
 class TenancyScheme(StrEnum):
     """Which tenancy key a label is partitioned by. There are exactly two, and they are blind to
     each other -- that blindness is CF-127's whole finding.
@@ -165,6 +182,25 @@ def tenant_scope_cypher(variable: str = "n", *, scheme: TenancyScheme = TenancyS
     return (
         f"(${_TENANT_PARAM} IS NULL OR "
         f"coalesce({variable}.namespace, {variable}.group_id, '') IN ${_TENANT_PARAM})"
+    )
+
+
+def tenant_scope_prefilter_cypher(variable: str = "n") -> str:
+    """An index-friendly SUPERSET of :func:`tenant_scope_cypher` (menhir #171).
+
+    Returns ``({v}.namespace IN $tenant_namespaces OR {v}.group_id IN $tenant_namespaces)``.
+    Unlike :func:`tenant_scope_cypher` this fragment is NOT the tenancy decision: it is a
+    superset used only so the query planner can seek the existing ``:Episodic(namespace)`` and
+    ``:Episodic(group_id)`` RANGE indexes instead of filtering every node with the unindexable
+    ``coalesce`` form. ``tenant_scope_cypher`` still decides membership and must always appear
+    alongside it; this fragment never replaces it. Callers must only use it when the namespace
+    is scoped (:func:`tenant_scope_params` not None); it shares the same ``$tenant_namespaces``
+    parameter and the same identifier validation as :func:`tenant_scope_cypher`.
+    """
+    if not variable or not variable.isidentifier():
+        raise ValueError(f"variable must be a Cypher identifier, got {variable!r}")
+    return (
+        f"({variable}.namespace IN ${_TENANT_PARAM} OR {variable}.group_id IN ${_TENANT_PARAM})"
     )
 
 

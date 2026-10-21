@@ -6,6 +6,7 @@ import asyncio
 import logging
 import math
 import os
+import re
 from dataclasses import dataclass, field, replace
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
@@ -15,6 +16,7 @@ if TYPE_CHECKING:
 
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
 from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FAMILY
+from menhir.domain.event_time import event_time_text
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
 from menhir.domain.recall import (
     CandidateData,
@@ -49,6 +51,8 @@ if TYPE_CHECKING:
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.telemetry import record_mcp_event
 from menhir.domain.utils import days_ago
+from datetime import datetime, timezone
+from menhir.domain.temporal import parse_iso8601
 from menhir.services.scheduler_protocols import LifecycleServiceProtocol
 from menhir.services.scoring_service import (
     GRAPHITI_RRF_DUAL_METHOD_MAX,
@@ -132,20 +136,41 @@ def _query_wants_history(query_text: str) -> bool:
 def _authority_contributors(payload: dict[str, Any]) -> tuple[ScalarAuthorityContributor, ...]:
     """Hydrate the stable public contributor contract from repository dictionaries."""
     return tuple(
-        ScalarAuthorityContributor(
-            assertion_id=str(row.get("assertion_id") or ""),
-            relation=str(row.get("relation") or "CONTRIBUTOR"),
-            operation=str(row.get("operation") or ""),
-            value=row.get("value"),
-            stated_span=str(row.get("stated_span") or ""),
-            valid_at=(str(row["valid_at"]) if row.get("valid_at") is not None else None),
-            evidence_tier=(
-                str(row["evidence_tier"]) if row.get("evidence_tier") is not None else None),
-            episode_uuid=(
-                str(row["episode_uuid"]) if row.get("episode_uuid") is not None else None),
-        )
+        _hydrate_contributor(row)
         for row in payload.get("contributors", [])
         if row.get("assertion_id")
+    )
+
+
+def _hydrate_contributor(row: dict[str, Any]) -> ScalarAuthorityContributor:
+    operation = str(row.get("operation") or "")
+    valid_at = str(row["valid_at"]) if row.get("valid_at") is not None else None
+    stated_span = str(row.get("stated_span") or "")
+    extra: dict[str, Any] = {}
+    if operation == "occurrence":
+        from menhir.services.occurrence_event_time import occurrence_event_time
+
+        # mentioned_at is the row's own session time; never recorded/ingest time.
+        mentioned_at = valid_at if row.get("time_basis") == "episode_reference" else None
+        timing = occurrence_event_time(stated_span, row.get("turn_text"), mentioned_at)
+        extra = {
+            "source_sentence": timing.sentence,
+            "event_at": timing.event_at,
+            "event_basis": timing.event_basis,
+            "mentioned_at": mentioned_at,
+        }
+    return ScalarAuthorityContributor(
+        assertion_id=str(row.get("assertion_id") or ""),
+        relation=str(row.get("relation") or "CONTRIBUTOR"),
+        operation=operation,
+        value=row.get("value"),
+        stated_span=stated_span,
+        valid_at=valid_at,
+        evidence_tier=(
+            str(row["evidence_tier"]) if row.get("evidence_tier") is not None else None),
+        episode_uuid=(
+            str(row["episode_uuid"]) if row.get("episode_uuid") is not None else None),
+        **extra,
     )
 
 # Source priors now live in domain/retrieval_tuning.py (SOURCE_PRIORS), keyed by
@@ -222,13 +247,24 @@ def _filter_to_current_beliefs(rows: list[dict[str, object]]) -> list[dict[str, 
 
 def _build_temporal_facts(
     rows: list[dict[str, object]],
+    *,
+    event_time: bool = False,
+    ended: bool = False,
+    now: datetime | None = None,
+    relevance_k: int = 0,
 ) -> dict[str, tuple[TemporalFact, ...]]:
     """Group fact-edge rows by node_uuid, cap to 5 most recent, and build TemporalFact tuples.
 
     Sorts by created_at DESC (None last), caps to 5 most recent per node,
     and assigns temporal_role based on whether expired_at is None.
+    With ``relevance_k`` > 0, up to that many rows with the highest finite
+    ``fact_similarity`` take slots first (ties by newest-first order), the remaining slots
+    fill from the newest rows, and output stays newest first.
+    With ``ended`` (MENHIR_ANCHORED_TIME_EXPIRY) an unexpired fact whose own end (invalid_at)
+    is at or before ``now`` is "ended": still believed, no longer true in the world.
     Returns a dict mapping node_uuid -> tuple of TemporalFact.
     """
+    pivot = (now or datetime.now(timezone.utc)) if ended else None
     by_uuid: dict[str, list[dict[str, object]]] = {}
     for row in rows:
         node_uuid = str(row.get("node_uuid") or "")
@@ -249,12 +285,33 @@ def _build_temporal_facts(
             reverse=True,
         )
         # Cap to 5 most recent
-        capped = sorted_rows[:5]
+        if relevance_k > 0:
+            scored = [
+                (i, float(r["fact_similarity"]))
+                for i, r in enumerate(sorted_rows)
+                if isinstance(r.get("fact_similarity"), (int, float))
+                and not isinstance(r.get("fact_similarity"), bool)
+                and math.isfinite(r["fact_similarity"])
+            ]
+            # Stable sort: equal similarity keeps the newest-first index order.
+            scored.sort(key=lambda item: -item[1])
+            picked = {i for i, _ in scored[:relevance_k]}
+            for i in range(len(sorted_rows)):
+                if len(picked) >= 5:
+                    break
+                picked.add(i)
+            capped = [sorted_rows[i] for i in sorted(picked)][:5]
+        else:
+            capped = sorted_rows[:5]
         facts = []
         for row in capped:
             expired_at = row.get("expired_at")
             is_current = expired_at is None
             temporal_role = "current_belief" if is_current else "superseded_belief"
+            if pivot is not None and is_current:
+                world_end = parse_iso8601(row.get("invalid_at"))
+                if world_end is not None and world_end <= pivot:
+                    temporal_role = "ended"
             fact = TemporalFact(
                 fact=row.get("fact"),
                 valid_at=row.get("valid_at"),
@@ -263,10 +320,101 @@ def _build_temporal_facts(
                 expired_at=expired_at,
                 is_current_belief=is_current,
                 temporal_role=temporal_role,
+                event_time=event_time_text(row) if event_time else None,
             )
             facts.append(fact)
         result[node_uuid] = tuple(facts)
     return result
+
+
+_TIER_FACT_TOKEN = re.compile(r"[a-z0-9]+")
+# Anchored binding writes "user" where inferred binding writes "the user"; articles never decide.
+_TIER_FACT_IGNORED = frozenset({"a", "an", "the"})
+
+
+def _tier_fact_tokens(text: object) -> frozenset[str]:
+    if not isinstance(text, str):
+        return frozenset()
+    return frozenset(t for t in _TIER_FACT_TOKEN.findall(text.casefold()) if t not in _TIER_FACT_IGNORED)
+
+
+def _tier_facts_match(a: frozenset[str], b: frozenset[str]) -> bool:
+    if not a or not b:
+        return False
+    return a == b or len(a & b) / len(a | b) > 0.8
+
+
+def label_and_collapse_self_tiers(
+    results: list[ScoredMemory], *, anchored_uuid: str, inferred_uuid: str,
+) -> list[ScoredMemory]:
+    """Label the two self entities by tier and collapse cross-tier duplicate facts.
+
+    An inferred fact is dropped only when a near-duplicate anchored fact is visible on the
+    anchored item of the same result, which is then marked ``corroborated``. Recall-time only.
+    """
+    anchored_idx = next((i for i, sm in enumerate(results) if sm.uuid == anchored_uuid), None)
+    inferred_idx = next((i for i, sm in enumerate(results) if sm.uuid == inferred_uuid), None)
+    if anchored_idx is None and inferred_idx is None:
+        return results
+    out = list(results)
+    if anchored_idx is not None:
+        out[anchored_idx] = replace(out[anchored_idx], self_tier="anchored")
+    if inferred_idx is None:
+        return out
+    inferred = out[inferred_idx]
+    if anchored_idx is None:
+        out[inferred_idx] = replace(inferred, self_tier="inferred")
+        return out
+    anchored_facts = list(out[anchored_idx].temporal_facts)
+    anchored_tokens = [_tier_fact_tokens(tf.fact) for tf in anchored_facts]
+    kept: list[TemporalFact] = []
+    for tf in inferred.temporal_facts:
+        tokens = _tier_fact_tokens(tf.fact)
+        hits = [i for i, a in enumerate(anchored_tokens) if _tier_facts_match(tokens, a)]
+        if not hits:
+            kept.append(tf)
+            continue
+        for i in hits:
+            anchored_facts[i] = replace(anchored_facts[i], corroborated=True)
+    out[anchored_idx] = replace(out[anchored_idx], temporal_facts=tuple(anchored_facts))
+    out[inferred_idx] = replace(inferred, self_tier="inferred", temporal_facts=tuple(kept))
+    return out
+
+
+def _scalar_history_records_change(history_view: dict[str, object]) -> bool:
+    """True when a scalar_history View records an actual change: a non-absolute entry, or more
+    than one distinct absolute value. A slot that only restates one value is not history and
+    must not take an advisory recall slot (#243). Truncated payloads count as changing."""
+    if int(history_view.get("omitted_entry_count") or 0) > 0:
+        return True
+    values: set[str] = set()
+    for entry in history_view.get("entries") or []:
+        if str(entry.get("operation") or "").strip().lower() != "absolute":
+            return True
+        values.add(str(entry.get("value")).strip().casefold())
+    return len(values) > 1
+
+
+def _scalar_history_has_occurrences(history_view: dict[str, object]) -> bool:
+    """True when a stored scalar_history View lists counting-lane occurrence rows: parsed
+    `operation_counts` (fetch_scalar_history) or raw `sh_op_counts` JSON (candidate metadata).
+    Such a View was built with counting on; with counting off it is stale and hidden."""
+    counts = history_view.get("operation_counts")
+    if isinstance(counts, dict) and counts.get("occurrence"):
+        return True
+    return '"occurrence"' in str(history_view.get("sh_op_counts") or "")
+
+
+def _scalar_history_evidence_days_ago(history_view: dict[str, object]) -> float:
+    """Days since the View's newest entry (source time), for the recency term. An advisory row
+    has no access record, so it must not get the just-accessed bonus (#243)."""
+    raw = history_view.get("last_valid_at")
+    if isinstance(raw, str):
+        try:
+            raw = datetime.fromisoformat(raw.strip())
+        except ValueError:
+            raw = None
+    return days_ago(raw)
 
 
 def _render_scalar_history_content(history_view: dict[str, object]) -> str:

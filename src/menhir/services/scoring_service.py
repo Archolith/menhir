@@ -167,6 +167,13 @@ class ScoringService:
                     retrieval_score_kind=c.retrieval_score_kind,
                     is_superseded_view=c.is_superseded_view,
                     view_kind=c.view_kind,
+                    status=c.status,
+                    artifact_status=c.artifact_status,
+                    superseded_by=c.superseded_by,
+                    needs_review=c.needs_review,
+                    review_reason=c.review_reason,
+                    review_flagged_at=c.review_flagged_at,
+                    verifier_evidence=c.verifier_evidence,
                     is_scalar_authority=c.is_scalar_authority,
                 )
             )

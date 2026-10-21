@@ -17,6 +17,24 @@ from menhir.infrastructure.text_io import read_text_utf8
 
 logger = logging.getLogger(__name__)
 
+
+class ScanReadError(RuntimeError):
+    """A required source file could not be read, so absence cannot authorize pruning."""
+
+
+def _read_text_for_scan(path: str | Path) -> str:
+    try:
+        return read_text_utf8(path)
+    except OSError as error:
+        raise ScanReadError(f"Project scan could not read {path}: {error}") from error
+
+
+def _getsize_for_scan(path: str | Path) -> int:
+    try:
+        return os.path.getsize(path)
+    except OSError as error:
+        raise ScanReadError(f"Project scan could not stat {path}: {error}") from error
+
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
@@ -114,6 +132,9 @@ class ProjectScanResult:
     #: The claim generation the identity was settled under (CF-257). Carried on the scan so the
     #: write boundary can prove the binding has not changed hands since; an id alone cannot.
     identity_generation: int | None = None
+    #: Graph-issued ordering token obtained before traversal. A late scan may publish only while
+    #: this is still the identity's latest issued scan generation.
+    scan_generation: int | None = None
     symbols: list[SymbolEntry] = field(default_factory=list)
     truncated_symbol_files: list[str] = field(default_factory=list)
     call_edges: list[CallEdge] = field(default_factory=list)
@@ -179,8 +200,8 @@ _MAX_FILE_BYTES = 2 * 1024 * 1024  # 2 MB — skip files larger than this to avo
 # fingerprint so a rules change invalidates every stored fingerprint and forces a re-scan --
 # otherwise the path+mtime fingerprint is unchanged, ingest skips as "unchanged", and existing
 # graphs keep their truncated state forever.
-SCANNER_SCHEMA_VERSION = 9  # v9: the legacy `.agent/project-id` identity file is scan-invisible
-# (v8: README.md is the last project-description fallback)
+SCANNER_SCHEMA_VERSION = 10  # v10: traversal/stat failures refuse publication
+# (v9: the legacy `.agent/project-id` identity file is scan-invisible)
 
 # Beacon publication and evidence scratch files live at the repository root. They are
 # outputs/coordination state derived from a scan, never project source. Letting them back into
@@ -266,7 +287,12 @@ class ProjectScanner:
         file_entries: list[FileEntry] = []
         nested_repos: list[NestedRepo] = []
 
-        for dirpath, dirnames, filenames in os.walk(root):
+        def _walk_error(error: OSError) -> None:
+            # os.walk silently skips unreadable subtrees without onerror. Their absence
+            # would otherwise authorize the graph writer to prune previously indexed data.
+            raise OSError(f"Project scan could not traverse {error.filename}: {error}") from error
+
+        for dirpath, dirnames, filenames in os.walk(root, onerror=_walk_error):
             # Prune skip dirs in-place. Root-only artifact names are pruned solely at the
             # repository root -- see _ROOT_ONLY_SKIP_DIRS for why they must not apply at depth.
             at_root = os.path.abspath(dirpath) == os.path.abspath(str(root))
@@ -325,8 +351,8 @@ class ProjectScanner:
                 mtime = os.path.getmtime(root / rp)
                 file_mtimes[rp] = mtime
                 fingerprint_lines.append(f"{rp}:{mtime}")
-            except OSError:
-                fingerprint_lines.append(rp)
+            except OSError as error:
+                raise OSError(f"Project scan could not stat {root / rp}: {error}") from error
         # Schema version participates in the fingerprint so a change to eligibility, priority,
         # or cap semantics invalidates stored fingerprints and forces a re-scan. Without it the
         # path+mtime hash is identical and ingest skips as "unchanged", leaving every existing
@@ -422,6 +448,14 @@ class ProjectScanner:
                     )
                 )
 
+        # A file disappearing after traversal is not evidence that it was deleted from the
+        # project. Refuse this publication rather than prune from a torn filesystem view.
+        for entry in result.files:
+            if not (root / entry.rel_path).is_file():
+                raise ScanReadError(
+                    f"Project scan lost indexed file {root / entry.rel_path}"
+                )
+
         # Read the binding on both sides of every filesystem read above: a commit or edit
         # landing mid-scan means the fingerprint and the commit may not describe one content.
         binding_after = _read_git_binding(root, ignore=_is_beacon_root_artifact)
@@ -443,7 +477,7 @@ def _load_gitignore(root: Path) -> list[str]:
         return []
     patterns: list[str] = []
     try:
-        for line in read_text_utf8(gi).splitlines():
+        for line in _read_text_for_scan(gi).splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
@@ -584,7 +618,7 @@ def _read_project_description(root: Path) -> str:
     agent_readme = root / ".agent" / "README.md"
     if agent_readme.is_file():
         try:
-            text = read_text_utf8(agent_readme)[:1000]
+            text = _read_text_for_scan(agent_readme)[:1000]
             # Extract first meaningful paragraph
             return _first_paragraph(text)
         except OSError:
@@ -596,7 +630,7 @@ def _read_project_description(root: Path) -> str:
         path = root / name
         if path.is_file():
             try:
-                description = _first_paragraph(read_text_utf8(path)[:1000])
+                description = _first_paragraph(_read_text_for_scan(path)[:1000])
             except OSError:
                 continue
             if description:
@@ -643,7 +677,7 @@ def _parse_python_deps(root: Path) -> list[str]:
     pyproject = root / "pyproject.toml"
     if pyproject.is_file():
         try:
-            text = read_text_utf8(pyproject)
+            text = _read_text_for_scan(pyproject)
             deps: list[str] = []
 
             # Strategy 1: PEP 621 inline list — dependencies = ["pkg>=1.0", ...]
@@ -694,7 +728,7 @@ def _parse_python_deps(root: Path) -> list[str]:
     if reqs.is_file():
         try:
             deps = []
-            for line in read_text_utf8(reqs).splitlines():
+            for line in _read_text_for_scan(reqs).splitlines():
                 line = line.strip()
                 if not line or line.startswith("#") or line.startswith("-"):
                     continue
@@ -713,7 +747,7 @@ def _parse_node_deps(root: Path) -> list[str]:
         return []
     try:
         import json
-        data = json.loads(read_text_utf8(pkg))
+        data = json.loads(_read_text_for_scan(pkg))
         deps: list[str] = []
         for key in ("dependencies", "devDependencies"):
             section = data.get(key, {})
@@ -730,7 +764,7 @@ def _parse_gradle_deps(root: Path) -> list[str]:
         if not gf.is_file():
             continue
         try:
-            text = read_text_utf8(gf)
+            text = _read_text_for_scan(gf)
             deps: list[str] = []
             for m in re.finditer(r"""(?:implementation|api|compileOnly|runtimeOnly)\s*[\('"]\s*([^'")\s]+)""", text):
                 deps.append(m.group(1).split(":")[0] if ":" in m.group(1) else m.group(1))
@@ -772,7 +806,7 @@ def _parse_imports(root: Path, files: list[FileEntry], stack: str) -> list[Impor
         if not full_path.is_file():
             continue
         try:
-            text = read_text_utf8(full_path)
+            text = _read_text_for_scan(full_path)
         except OSError:
             continue
 
@@ -878,7 +912,7 @@ def _detect_endpoints(root: Path, files: list[FileEntry], stack: str) -> list[En
         if not full.is_file():
             continue
         try:
-            text = read_text_utf8(full)
+            text = _read_text_for_scan(full)
         except OSError:
             continue
 
@@ -942,7 +976,7 @@ def _detect_cross_project_refs(
         if not full.is_file():
             continue
         try:
-            text = read_text_utf8(full)
+            text = _read_text_for_scan(full)
         except OSError:
             continue
         for port, proj in _KNOWN_PORTS.items():
@@ -958,7 +992,7 @@ def _detect_cross_project_refs(
         if not full.is_file():
             continue
         try:
-            text = read_text_utf8(full)
+            text = _read_text_for_scan(full)
         except OSError:
             continue
         for sibling in sibling_projects:
@@ -974,7 +1008,7 @@ def _detect_cross_project_refs(
         if not full.is_file():
             continue
         try:
-            text = read_text_utf8(full)
+            text = _read_text_for_scan(full)
         except OSError:
             continue
         if "NEO4J_" in text or "POSTGRES_" in text:
@@ -1155,7 +1189,7 @@ def _build_import_name_map(
         if not full_path.is_file():
             continue
         try:
-            text = read_text_utf8(full_path)
+            text = _read_text_for_scan(full_path)
         except OSError:
             continue
 
@@ -1214,9 +1248,9 @@ def _extract_call_edges(
     Returns deduplicated CallEdge list.
     """
     try:
-        if os.path.getsize(abs_path) > _MAX_FILE_BYTES:
+        if _getsize_for_scan(abs_path) > _MAX_FILE_BYTES:
             return []
-        source = read_text_utf8(abs_path)
+        source = _read_text_for_scan(abs_path)
     except OSError:
         return []
 
@@ -1289,9 +1323,9 @@ def _extract_call_edges(
 def _extract_module_docstring(abs_path: str) -> str:
     """Extract the module-level docstring or first block comment from a Python file."""
     try:
-        if os.path.getsize(abs_path) > _MAX_FILE_BYTES:
+        if _getsize_for_scan(abs_path) > _MAX_FILE_BYTES:
             return ""
-        source = read_text_utf8(abs_path)
+        source = _read_text_for_scan(abs_path)
     except OSError:
         return ""
     try:
@@ -1325,10 +1359,10 @@ def _extract_symbols(abs_path: str, rel_path: str) -> tuple[list[SymbolEntry], b
     Skips files >2 MB or >10k lines (generated code, data files) and files with syntax errors.
     """
     try:
-        if os.path.getsize(abs_path) > _MAX_FILE_BYTES:
+        if _getsize_for_scan(abs_path) > _MAX_FILE_BYTES:
             logger.debug("Skipping symbol extraction for oversized file: %s", rel_path)
             return [], False
-        source = read_text_utf8(abs_path)
+        source = _read_text_for_scan(abs_path)
     except OSError:
         return [], False
 

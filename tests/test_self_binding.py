@@ -521,11 +521,12 @@ def test_result_carries_only_structured_fields():
 
 
 @pytest.mark.unit
-def test_default_mode_is_off():
-    """A durable-write-semantics change must not activate merely by deploying."""
+def test_default_mode_is_enforce():
+    """Enforce is the default since #169; an explicit "off" remains the opt-out."""
     from menhir.config.settings_model import MemorySettings
 
-    assert MemorySettings().canonical_self_binding_mode == "off"
+    assert MemorySettings().canonical_self_binding_mode == "enforce"
+    assert resolve_bind_mode(MemorySettings().canonical_self_binding_mode) is SelfBindMode.ENFORCE
 
 
 @pytest.mark.unit
@@ -706,7 +707,7 @@ def test_telemetry_without_identity_still_renders():
 def _recording_binder(monkeypatch, nodes, mode, identity=None):
     """Drive the production wrapper and capture what it recorded."""
     import menhir.infrastructure.telemetry.recorders as recorders
-    from menhir.infrastructure.graphiti_extraction_patches import (
+    from menhir.infrastructure.graphiti_extraction_policy import (
         _record_self_binding,
         begin_extraction_receipt,
         clear_extraction_receipt,
@@ -735,7 +736,7 @@ def test_an_invalid_declaration_refusal_is_recorded_before_it_raises(monkeypatch
     recorded: list[dict] = []
 
     import menhir.infrastructure.telemetry.recorders as recorders
-    from menhir.infrastructure.graphiti_extraction_patches import (
+    from menhir.infrastructure.graphiti_extraction_policy import (
         _record_self_binding,
         begin_extraction_receipt,
         clear_extraction_receipt,
@@ -762,7 +763,7 @@ def test_an_invalid_declaration_refusal_is_recorded_before_it_raises(monkeypatch
 def test_declaration_cannot_be_replayed_into_another_episode(monkeypatch):
     """Node authority is episode-scoped; reusing it on another receipt must write nothing."""
     import menhir.infrastructure.telemetry.recorders as recorders
-    from menhir.infrastructure.graphiti_extraction_patches import (
+    from menhir.infrastructure.graphiti_extraction_policy import (
         _record_self_binding,
         begin_extraction_receipt,
         clear_extraction_receipt,

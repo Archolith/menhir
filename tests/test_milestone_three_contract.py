@@ -116,6 +116,9 @@ def test_scored_memory_has_required_fields() -> None:
     #   retrieval_score / retrieval_score_kind — honest raw retrieval lane metadata
     #   is_scalar_authority — marks the slot-keyed injected View as the current value so the consumer
     #                        leads with it and treats other observations as history (Phase 4c; DATA only)
+    #   status / artifact_status / superseded_by — stored completion and artifact history (#143)
+    #   needs_review / review_reason / review_flagged_at — verifier drift advisory, rank-inert (#173)
+    #   self_tier          — "anchored"/"inferred" label on first-person self facts; display only (#355)
     assert fields - required == {
         "warden_label",
         "temporal_facts",
@@ -125,7 +128,19 @@ def test_scored_memory_has_required_fields() -> None:
         "retrieval_score",
         "retrieval_score_kind",
         "is_scalar_authority",
+        "status",
+        "artifact_status",
+        "superseded_by",
+        "needs_review",
+        "review_reason",
+        "review_flagged_at",
+        "verifier_evidence",
+        "self_tier",
     }
+    for key in ("status", "artifact_status", "superseded_by", "review_reason", "review_flagged_at", "self_tier"):
+        assert ScoredMemory.__dataclass_fields__[key].default is None
+    assert ScoredMemory.__dataclass_fields__["needs_review"].default is False
+    assert ScoredMemory.__dataclass_fields__["verifier_evidence"].default == ()
 
 
 @pytest.mark.unit

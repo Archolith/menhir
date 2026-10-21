@@ -5,6 +5,35 @@ model section you need.
 
 ## Quick Index
 
+`RecallResult.warden_status` is an optional request-local `WardenExecutionStatus` execution receipt;
+it is populated only with `include_warden_status=true`. It carries configured/applied guard names,
+master-gate state, evaluated/refused/flagged counts, unassessed and pending counts, dropped missing
+candidate metadata count, metadata gaps, and excluded result types. `warden_notice` is a brief
+incomplete-check advisory independent of that option. Successful application may still have metadata
+gaps; applied does not imply complete inputs or verified truth. Counts refer to the pre-limit scored
+Entity pool; pending count refers to returned fallback rows. Missing candidate metadata is dropped
+before scoring rather than declared checked. Source-memory, authority, TODO and recent bootstrap
+lanes retain independent rules. No stored graph fields, query or configuration defaults change.
+
+Ranked `CandidateData`/`ScoredMemory` and REST `RecallMemory` carry the existing verifier node flags
+`needs_review` (default false), `review_reason`, and `review_flagged_at` (ISO timestamp). Compact MCP
+and REST add `review_advisory` for flagged results; context packs the warning with its memory.
+These fields label uncertainty and preserve content/ranking. They do not establish fresh truth.
+Ranked results also carry `verifier_evidence`: binding UUID, register subject/counter, last successful
+`value`/`display`/`last_verified_at`, and distinct `last_probe_at`/`last_probe_status`. The latter node
+properties record pending, error, source_unavailable, skipped_unknown_kind, or refreshed. Only the
+completed register/link/stamp sequence updates successful evidence. Missing legacy probe state is
+unknown. Same-namespace register fan-in is deduplicated by binding; derived memories are excluded.
+Verifier binding identity is `(verifier_key, namespace)`; reference and verification edges and the
+final belief flag write are fenced to matching namespaces. Existing scoped bindings are reused;
+legacy unstamped bindings are not automatically migrated. No graph cleanup occurs on startup.
+
+Generic memory read results and `CandidateData`/`ScoredMemory` retain three optional existing node properties:
+`status` (TEMPORAL open/completed), `artifact_status` (L4 candidate/trusted/historical), and `superseded_by`
+(replacement L4 artifact identifier). Compact/full MCP and resource results include present values plus a derived
+`lifecycle_note` for completed or superseded history. REST `RecallMemory` exposes the same four optional fields.
+Original content stays unchanged; absent state does not imply history. See `memory-policy.md` for the read policy.
+
 - Need episode processing fields: read `model.episode`
 - Need durable memory node fields: read `model.entity`
 - Need TODO / task state fields: read `model.todo`
@@ -21,6 +50,9 @@ model section you need.
 ## Modeling primitives
 
 Concept id: `model.primitives`
+
+The stable identity/embodiment/locator and declaration-resolution decision is recorded in
+[ADR 0008](adr/0008-separate-identity-embodiment-and-locator.md).
 
 Four general rules, extracted from the todo redesign and the artifact model but **not
 specific to either**. New features — beacons, orientations, workflows — should be checked
@@ -247,10 +279,10 @@ Each node represents a memory unit stored in Neo4j. Labels: `Entity` or `Episodi
 | `sources` | array[string] | Ordered, de-duplicated contributor labels. Written by entity merge (`domain/merge_delta.derive_merged_provenance`): survivor contributors keep their positions, the absorbed node's new ones append. Absent on nodes written before the property existed — readers fall back to splitting the legacy comma-joined `source`, but an explicitly EMPTY list means "no contributors" and must NOT fall back. The placeholder `merged` is never a member. Projected by `MEMORY_RETURN_FIELDS` and read by BOTH halves of structural recognition (`structural_memory.legacy_structural_memory_cypher` and `infer_legacy_structure_role`): a merged legacy structure row's `source` no longer says `project-scan`, so a reader consulting only `source` would surface it in recall as an ordinary memory. |
 | `corroboration` | int | How many INDEPENDENT writers assert this node: distinct source FAMILIES in `sources`, not distinct labels (`claude-code` and `claude-chat` are one writer; see `utils.source_family`). Deliberately separate from `source_confidence` — authority is who said it, corroboration is how much independent observation agrees, and neither is a function of merge count. |
 | `source_confidence` | float | Trust level: user-confirmed (1.0) > structural/project-scan (0.9) > agent-reviewed (0.7) > LLM-inferred (0.5). These tiers are formalised as `ReviewState` (HUMAN_REVIEWED / AGENT_REVIEWED / UNREVIEWED) in `domain/truth/`; use `review_state_from_confidence()` to convert. Constants: `SOURCE_CONFIDENCE_USER` (1.0), `SOURCE_CONFIDENCE_STRUCTURAL` (0.9, HUMAN_REVIEWED threshold), `SOURCE_CONFIDENCE_AGENT_REVIEWED` (0.7, AGENT_REVIEWED threshold), `SOURCE_CONFIDENCE_AGENT` (0.5, default fallback). **This is the node's EFFECTIVE authority, which the label tier only bounds.** `source_confidence_for(label)` returns a *nominal ceiling*; a writer may deliberately stamp lower (`structure_queries` writes an inferred import target as `source='project-scan'` at agent tier, not the structural tier the label permits). So `source_confidence <= source_confidence_for(source)` always holds, but equality does not — never "repair" a node by recomputing this from its label. Merge takes `min(effective authority of each input, ceiling of the merged contributor set)`, so a merge can never raise trust and never discards an explicit downgrade (`domain/utils.effective_authority`). The valid domain is `0.0 .. SOURCE_CONFIDENCE_USER` inclusive; a stored value outside it is corruption rather than a downgrade and is answered by the label ceiling, the same path a missing or non-numeric value takes — it is never propagated. |
-| `user_flagged` | boolean | Explicit v1 user override for retention/promotion review |
+| `user_flagged` | boolean | Direct entity retention intent on new writes; existing true values remain protective even when their origin is unknown. Source-derived retention never sets this field. |
 | `bootstrap_scope` | string or null | Startup injection selector, independent of retention: `general`, `workspace:<normalized-key>`, or null for retention-only. Structural nodes must remain null. |
-| `created_at` | timestamp | Creation time |
-| `last_accessed` | timestamp | Used by recency bonus |
+| `created_at` | timestamp | Native Neo4j zoned datetime on current memory writers; legacy ISO text remains readable. Creation-time fallback for chronological lists. |
+| `last_accessed` | timestamp | Native Neo4j zoned datetime on current memory writers. Chronological lists normalize valid legacy text before sorting/limiting; missing or malformed access time falls back to valid creation time. See `memory-policy.md` for compatibility and the separate relevance-scoring limitation. |
 | `sharpness` | float | Cached relevance/protection score |
 | `content` | string | Primary memory text |
 | `original_content` | string | Retained for future revision/recovery |
@@ -259,6 +291,7 @@ Each node represents a memory unit stored in Neo4j. Labels: `Entity` or `Episodi
 | `edge_count` | int | Cached incoming edge count proxy for prominence (synced by `sync_edge_counts()`) |
 | `promoted_at` | timestamp | Set when a SESSION node is promoted to PERSISTENT; null for nodes that were always PERSISTENT |
 | `rehydration_count` | int | Counter for compress→rehydrate cycles; nodes exempt from further compression after 3 cycles |
+| `decay_last_selected_at` | datetime or null | Native database-time scheduling marker set for a bounded decay batch before processing, including later skips. Least-recent selection rotates batches across restarts. Missing/invalid markers are unselected; never an access time, eligibility signal, success receipt, or lease. |
 | `emotions` | array[object] | Optional v1 emotion metadata list |
 | `merged_from` | array[string] | UUIDs this survivor has absorbed via merge. Cleared subtractively on unmerge (only the reversed absorption is removed). |
 | `merge_audit` | array[string] | One JSON blob per absorption (absorbed node's pre-merge snapshot, relationships, episode provenance). Matched by the `"absorbed_uuid"` field, never a bare substring — see the merge/delete lifecycle section. |
@@ -279,6 +312,7 @@ Episode nodes are provenance anchors created by each ingestion call. Label: `Epi
 | `session_id` | string | Session that produced the ingest |
 | `user_id` | string | Owner of the ingest |
 | `source` | string | Origin of the episode text |
+| `turn_role` | string or null | Declared speaker from `POST /api/memory` `role` (`user`, `assistant`, `tool`, `agent`, `system`), set ON CREATE only. Extraction uses the linked turn's role instead when exactly one `ADMITTED_ON` turn has text equal to `content` (surrounding whitespace ignored) and that turn is not `agent_quoted`; otherwise this value, else `unknown`. Never parsed from `content` (#271). |
 | `scope` | string | Usually `SESSION` at ingest time |
 | `source_confidence` | float | Provenance trust level |
 | `user_flagged` | boolean | Defaults to `false` |
@@ -300,7 +334,7 @@ Episode nodes are provenance anchors created by each ingestion call. Label: `Epi
 | `processing_llm_active_model` | string | Most recent active LLM model observed for this episode |
 | `processing_llm_active_endpoint` | string | Most recent active OpenAI-compatible endpoint observed for this episode |
 | `processing_heartbeat_at` | timestamp | Last worker heartbeat while the episode is being processed |
-| `processing_attempts` | int | Number of claim attempts made by enrichment workers |
+| `processing_attempts` | int | Claims that remain counted after claim-fenced transient refunds; transient requeues increment `transient_retries` in the same state transition |
 | `processing_owner` | string | Worker identity holding the current enrichment lease (`null` when not owned) |
 | `processing_lease_expires_at` | timestamp | Lease expiry timestamp for the current enrichment claim |
 | `processing_error` | string | Last terminal error when state is `FAILED` |
@@ -314,6 +348,15 @@ Episode nodes are provenance anchors created by each ingestion call. Label: `Epi
 | `diff` | string or null | Optional git diff attached at ingest time; appended to episode body during enrichment so Graphiti can reason about code changes |
 
 Episode nodes are included in graph traversal and provenance queries but excluded from default memory recall/ranking.
+
+Enrichment records `(:Episodic)-[:RETENTION_SOURCE]->(:Entity)` from the Menhir source episode
+to each eligible extracted semantic entity, whether or not the source is currently flagged. A
+source's live `user_flagged=true` protects its linked entities from harmful automatic lifecycle
+mutations. Structural entities are excluded. A missing or wrong-tenant source or semantic entity
+prevents enrichment from publishing `READY`. Merge and unmerge preserve these links. Existing
+episodes are not backfilled by this change; old true entity flags remain protective.
+Enrichment marks its retention links `direct=true`. A merge-rebound link has no direct marker;
+if enrichment later records the survivor directly, it marks that link direct so unmerge retains it.
 
 ### Node: Structural Entity
 
@@ -334,6 +377,18 @@ Common distinguishing fields:
 | `symbols_truncated` | bool | Set to `true` on file nodes when the 200-symbol-per-file cap was reached during AST extraction |
 
 Structural entities use the same `Entity` label and several shared fields (`uuid`, `scope`, `source`, `created_at`, `last_accessed`) but are not treated as normal semantic recall results.
+
+`ProjectIdentity.structure_scan_generation` is a graph-issued counter minted before each
+filesystem traversal. The scan carries that counter and its identity generation. Publication
+locks the identity and checks both values in one Neo4j transaction containing every structural
+mutation and prune. A missing or superseded scan generation refuses before changing the index;
+an interrupted transaction leaves the previous fingerprint, coverage, entities, and edges.
+Traversal, stat, or required-file read failures abort the scan before publication. A deliberate
+2,000-file cap records partial coverage and cannot authorize pruning unseen paths.
+Partial scans also preserve unseen symbols from older file rows without timestamps. Skipped
+fingerprint reads and binding refreshes match the claimed project identity, so one project's
+scan cannot refresh another same-name project. Transported scan payloads must include
+consistent discovered, eligible, and indexed counts.
 
 Legacy compatibility: a small pre-`structure_role` corpus still exists in production. A row is
 treated as structural on bootstrap read paths when its source contains `project-scan` and its
@@ -384,7 +439,15 @@ is given and always reports the TODO's namespace.
 - Use `add_memory` when: the item is a fact, decision, preference, or observation — something to recall and reason about rather than track and close.
 - Rule of thumb: if you would write it on a task board → TODO. If you would write it in a notebook → memory.
 
-**Multi-repo scoping**: always pass `structure_project` when creating a TODO with a `code_ref` in a multi-repo workspace. Without it, `REFERENCES_FILE` edge linking uses suffix-only path matching which can bind to the wrong project's file.
+**Multi-repo scoping**: pass `structure_project` when a TODO's `code_ref` names a file in a
+multi-repo workspace. Menhir normalizes each declared location, checks visible structural
+files, and creates `REFERENCES_FILE` only when exactly one permitted file matches that
+location. An omitted project can resolve when exactly one visible file matches; the chosen
+project and canonical file path are then stored on `TodoLocation`. Ambiguous matches, duplicate
+legacy file nodes, unknown projects, or conflicting project declarations leave that location
+unlinked with an explicit reason. Each location has
+its own result; one ambiguous path does not prevent another unambiguous path from linking.
+Existing TODO edges are not silently rewritten by this rule.
 
 ### Node: TurnEvidence
 
@@ -705,6 +768,8 @@ schedule, not on the immutable invocation evidence.
 ## Merge / delete lifecycle (recoverable saga)
 
 Concept id: `model.graph_operations`
+
+Decision record: [ADR 0006](adr/0006-recoverable-sagas-for-cross-store-mutations.md).
 
 SQLite and Neo4j cannot share a transaction, so every destructive graph mutation (merge, unmerge,
 delete) runs as a recoverable saga journaled in the telemetry sidecar. The missing

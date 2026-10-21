@@ -21,22 +21,27 @@ class BackendClientOpsMixin:
         namespace: str | None = None,
         occurred_at: str | None = None,
         turn_evidence_uuid: str | None = None,
+        user_statement: str | None = None,
+        role: str | None = None,
     ) -> dict[str, Any]:
-        return await self._request(
-            "queue_episode",
-            {
-                "text": text,
-                "user_id": user_id,
-                "session_id": session_id,
-                "source": source,
-                "diff": diff,
-                "flagged": flagged,
-                "bootstrap_scope": bootstrap_scope,
-                "namespace": namespace,
-                "occurred_at": occurred_at,
-                "turn_evidence_uuid": turn_evidence_uuid,
-            },
-        )
+        params: dict[str, Any] = {
+            "text": text,
+            "user_id": user_id,
+            "session_id": session_id,
+            "source": source,
+            "diff": diff,
+            "flagged": flagged,
+            "bootstrap_scope": bootstrap_scope,
+            "namespace": namespace,
+            "occurred_at": occurred_at,
+            "turn_evidence_uuid": turn_evidence_uuid,
+        }
+        # Sent only when set, so a bridge talking to an older backend keeps working without it.
+        if (user_statement or "").strip():
+            params["user_statement"] = user_statement
+        if role is not None:
+            params["role"] = role
+        return await self._request("queue_episode", params)
 
     async def flag_memory(
         self, node_uuid: str, bootstrap_scope: str | None = None
@@ -99,23 +104,104 @@ class BackendClientOpsMixin:
         file_context: str | None = None,
         file_context_project: str | None = None,
         namespace: str | None = None,
+        source_memory_limit: int | None = None,
+        counted_verdict_limit: int | None = None,
+        include_warden_status: bool = False,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "query": query,
+            "preset": preset,
+            "limit": limit,
+            "include_session": include_session,
+            "include_superseded": include_superseded,
+            "include_invalidated": include_invalidated,
+            "wait_for_pending": wait_for_pending,
+            "file_context": file_context,
+            "file_context_project": file_context_project,
+            "namespace": namespace,
+            "trace": trace,
+        }
+        if include_warden_status:
+            params["include_warden_status"] = True
+        if source_memory_limit is not None:
+            params["source_memory_limit"] = int(source_memory_limit)
+        if counted_verdict_limit is not None:
+            params["counted_verdict_limit"] = int(counted_verdict_limit)
+        return await self._request("recall", params)
+
+    async def recall_history(
+        self,
+        query: str,
+        *,
+        namespace: str | None = None,
+        limit: int = 30,
+        pools: bool = True,
     ) -> dict[str, Any]:
         return await self._request(
-            "recall",
+            "recall_history",
             {
                 "query": query,
-                "preset": preset,
-                "limit": limit,
-                "include_session": include_session,
-                "include_superseded": include_superseded,
-                "include_invalidated": include_invalidated,
-                "wait_for_pending": wait_for_pending,
-                "file_context": file_context,
-                "file_context_project": file_context_project,
                 "namespace": namespace,
-                "trace": trace,
+                "limit": int(limit),
+                "pools": bool(pools),
             },
         )
+
+    async def get_scalar_view_items(
+        self,
+        *,
+        view_uuid: str,
+        namespace: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "get_scalar_view_items",
+            {
+                "view_uuid": view_uuid,
+                "namespace": namespace,
+                "offset": int(offset),
+                "limit": int(limit),
+            },
+        )
+
+    async def recall_timeline(
+        self,
+        *,
+        namespace: str | None = None,
+        query: str | None = None,
+        subject: str | None = None,
+        at: str | None = None,
+        window_from: str | None = None,
+        window_to: str | None = None,
+        around: str | None = None,
+        cursor: str | None = None,
+        direction: str = "both",
+        limit: int = 10,
+        detail: str = "headline",
+        facts: bool = False,
+        history_view: str | None = None,
+        history_offset: int | None = None,
+        history_limit: int = 10,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "namespace": namespace,
+            "query": query,
+            "subject": subject,
+            "at": at,
+            "window_from": window_from,
+            "window_to": window_to,
+            "around": around,
+            "cursor": cursor,
+            "direction": direction,
+            "limit": int(limit),
+            "detail": detail,
+            "facts": bool(facts),
+            "history_view": history_view,
+            "history_offset": history_offset,
+            "history_limit": int(history_limit),
+        }
+        return await self._request("recall_timeline", params)
 
     async def view_entropy(
         self,
@@ -144,6 +230,7 @@ class BackendClientOpsMixin:
         session_id: str | None = None,
         include_scores: bool = False,
         namespace: str | None = None,
+        include_warden_status: bool = False,
     ) -> dict[str, Any]:
         return await self._request(
             "build_context",
@@ -154,6 +241,7 @@ class BackendClientOpsMixin:
                 "session_id": session_id,
                 "include_scores": include_scores,
                 "namespace": namespace,
+                **({"include_warden_status": True} if include_warden_status else {}),
             },
         )
 
@@ -298,6 +386,7 @@ class BackendClientOpsMixin:
         keep_uuid: str | None = None,
         remove_uuid: str | None = None,
         allow_promoted_removal: bool = False,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         return await self._request(
             "resolve_conflict_group",
@@ -308,6 +397,7 @@ class BackendClientOpsMixin:
                 "keep_uuid": keep_uuid,
                 "remove_uuid": remove_uuid,
                 "allow_promoted_removal": allow_promoted_removal,
+                "namespace": namespace,
             },
         )
 
@@ -390,8 +480,8 @@ class BackendClientOpsMixin:
     async def get_max_enrichment_attempts(self) -> int:
         return int(await self._request("get_max_enrichment_attempts"))
 
-    async def recover_orphans(self, *, max_age_hours: float = 24.0) -> dict[str, Any]:
-        return await self._request("recover_orphans", {"max_age_hours": max_age_hours})
+    async def recover_orphans(self, *, max_age_hours: float = 24.0, dry_run: bool = False) -> dict[str, Any]:
+        return await self._request("recover_orphans", {"max_age_hours": max_age_hours, "dry_run": dry_run})
 
     async def fetch_session_entities(
         self, *, session_id: str | None = None, max_age_hours: float = 24.0

@@ -16,11 +16,61 @@ __all__ = [
     "EPISODE_PROCESSING_FIELDS",
     "EPISODE_RETRY_FIELDS",
     "FACT_TEMPORAL_FIELDS",
+    "FACT_TEXT_PRESENT",
     "SHADOW_CANDIDATE_FACT_EDGE_FIELDS",
     "LLM_RESET_SET",
     "build_reset_or_fail_query",
     "non_derived_view_cypher",
+    "memory_timestamp_cypher",
+    "memory_recency_cypher",
 ]
+
+
+def memory_timestamp_cypher(value: str) -> str:
+    """Normalize a memory instant without throwing on malformed legacy properties.
+
+    Native zoned/local datetimes and dates plus extended ISO calendar strings are supported.
+    Legacy naive values mean UTC. Calendar validation precedes datetime(): regex alone admits
+    impossible days such as February 30. Unsupported types/text return null, never today's date.
+    ``value`` is an internal Cypher expression, not caller-supplied input. toStringOrNull() supports
+    older Neo4j 5 releases and rejects arrays without throwing. Numeric UTC offsets are authoritative;
+    a well-formed terminal native zone annotation is removed before parsing. No APOC is required.
+    """
+    raw = "_memory_ts"
+    base = f"head(split({raw}, '['))"
+    year = f"toInteger(substring({raw}, 0, 4))"
+    month = f"toInteger(substring({raw}, 5, 2))"
+    day = f"toInteger(substring({raw}, 8, 2))"
+    days_in_month = (
+        f"CASE WHEN {month} IN [4, 6, 9, 11] THEN 30 "
+        f"WHEN {month} = 2 THEN CASE WHEN {year} % 400 = 0 "
+        f"OR ({year} % 4 = 0 AND {year} % 100 <> 0) THEN 29 ELSE 28 END ELSE 31 END"
+    )
+    pattern = (
+        "[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])"
+        "([T ]([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]{1,9})?"
+        # Bracket suffixes are accepted only with an explicit, validated offset.
+        "((Z|[+-]((0[0-9]|1[0-7]):[0-5][0-9]|18:00))"
+        r"(\\[[A-Za-z0-9_+./-]+\\])?)?)?"
+    )
+    text = (
+        f"CASE WHEN size({base}) = 10 THEN {base} + 'T00:00:00Z' "
+        f"WHEN {base} =~ '.*(Z|[+-][0-9]{{2}}:[0-9]{{2}})' THEN replace({base}, ' ', 'T') "
+        f"ELSE replace({base}, ' ', 'T') + 'Z' END"
+    )
+    return (
+        f"head([{raw} IN [toStringOrNull({value})] | CASE WHEN {raw} =~ '{pattern}' "
+        f"AND {year} >= 1 AND {day} <= ({days_in_month}) "
+        f"THEN datetime({{datetime: datetime({text}), timezone: 'UTC'}}) ELSE null END])"
+    )
+
+
+def memory_recency_cypher(variable: str = "n") -> str:
+    """Use a valid access instant, then creation; unknown values remain null."""
+    return (
+        f"coalesce({memory_timestamp_cypher(variable + '.last_accessed')}, "
+        f"{memory_timestamp_cypher(variable + '.created_at')})"
+    )
 
 
 class Cypher:
@@ -270,11 +320,15 @@ _PROCESSING_DETAIL_FIELDS = (
 MEMORY_RETURN_FIELDS = (
     "labels(n) AS labels",
     "n.uuid AS uuid",
-    "n.name AS name",
+    # Scalar Views keep their text in view_name/view_summary, out of the full-text index.
+    "coalesce(n['view_name'], n.name) AS name",
     "n.type AS type",
     "n.scope AS scope",
     "n.content AS content",
-    "n.summary AS summary",
+    "coalesce(n['view_summary'], n.summary) AS summary",
+    "n.status AS status",
+    "n.artifact_status AS artifact_status",
+    "n.superseded_by AS superseded_by",
     "n.source AS source",
     # The contributor list, not just the primary `source`. A merged node's `source` holds only the
     # LOWEST-tier contributor, so `project-scan` can be present in provenance while absent from that
@@ -301,12 +355,18 @@ MEMORY_RETURN_FIELDS = (
 # Entity metadata for scoring/recall.
 ENTITY_METADATA_FIELDS = (
     "n.uuid AS uuid",
-    "n.name AS name",
+    "coalesce(n['view_name'], n.name) AS name",
     "n.scope AS scope",
     "n.type AS type",
     "n.content AS content",
-    "n.summary AS summary",
+    "coalesce(n['view_summary'], n.summary) AS summary",
+    "n.status AS status",
+    "n.artifact_status AS artifact_status",
+    "n.superseded_by AS superseded_by",
     "n.last_accessed AS last_accessed",
+    "n['needs_review'] AS needs_review",
+    "n['review_reason'] AS review_reason",
+    "toString(n['review_flagged_at']) AS review_flagged_at",
     "n.created_at AS created_at",
     "n.belief_commit AS belief_commit",
     "n.edge_count AS edge_count",
@@ -329,6 +389,9 @@ ENTITY_METADATA_FIELDS = (
     "n.view_class AS view_class",
     "n.view_subtype AS view_subtype",
     "n.view_audience AS view_audience",
+    # Counted scalar Views are hidden from recall when the counting flag is off.
+    "n['scalar_basis'] AS scalar_basis",
+    "n['sh_op_counts'] AS sh_op_counts",
     "coalesce(n.retired, false) AS retired",
     "coalesce(n.is_view, false) AS is_view",
     "n.episode_uuids AS episode_uuids",
@@ -349,6 +412,23 @@ FACT_TEMPORAL_FIELDS = (
     "toString(r.invalid_at) AS invalid_at",
     "toString(r.created_at) AS created_at",
     "toString(r.expired_at) AS expired_at",
+    # Anchored-time contract (P2); read only when MENHIR_ANCHORED_TIME_RENDER is on.
+    "r.time_basis AS time_basis",
+    "r.time_expression AS time_expression",
+    "r.time_kind AS time_kind",
+    "r.time_granularity AS time_granularity",
+    "r.time_window_start AS time_window_start",
+    "r.time_window_end AS time_window_end",
+    "r.time_outcome AS time_outcome",
+    "r.time_speech_date AS time_speech_date",
+    "r.time_ambiguity AS time_ambiguity",
+)
+
+# Menhir's own similarity/bridge links are RELATES_TO edges with no fact text. Queries that read
+# edges as facts need this, or those links take fact slots meant for real facts.
+# CASE so a non-string fact is skipped instead of trim() failing the whole query.
+FACT_TEXT_PRESENT = (
+    "CASE WHEN r.fact IS :: STRING NOT NULL THEN trim(r.fact) <> '' ELSE false END"
 )
 
 # Fact-edge IDENTITY + both endpoints, for shadow-mode context composition (Stage 1,

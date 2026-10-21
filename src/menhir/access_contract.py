@@ -47,10 +47,13 @@ AGENT_ALLOWED_TOOLS = frozenset(
         "list_todos",
         # Read-only Beacon memory evidence; the same structure facts query_structure exposes.
         "get_beacon_evidence",
+        "get_scalar_view_items",
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
+        "recall_history",
         "recall_memories",
+        "recall_timeline",
     }
 )
 OPERATOR_REQUIRED_TOOLS = frozenset(

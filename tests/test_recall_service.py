@@ -169,6 +169,90 @@ async def test_recall_session_id_excludes_other_and_unstamped_session_nodes(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+@pytest.mark.parametrize("pool", ["empty", "filtered", "ordinary"])
+@pytest.mark.parametrize(
+    "scope,owner,include_session,session_id,admitted",
+    [
+        ("SESSION", "A", True, "A", True),
+        ("SESSION", "B", True, "A", False),
+        ("SESSION", None, True, "A", False),
+        ("SESSION", "A", False, "A", False),
+        ("SESSION", "B", False, None, False),
+        ("SESSION", "B", True, None, True),
+        ("SESSION", None, True, None, True),
+        ("PERSISTENT", "B", False, "A", True),
+    ],
+)
+async def test_pending_fallback_obeys_session_admission_at_every_assembly_path(
+    stub_graphiti_client, stub_memory_graph_adapter,
+    pool, scope, owner, include_session, session_id, admitted,
+) -> None:
+    if pool == "empty":
+        stub_graphiti_client.search_scored_results = []
+    else:
+        _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
+        if pool == "filtered":
+            for row in stub_memory_graph_adapter.candidate_metadata:
+                row["scope"] = "CANDIDATE"
+    stub_memory_graph_adapter.pending_episode_rows["pending"] = {
+        "uuid": "pending", "content": "pending fact", "scope": scope,
+        "session_id": owner, "processing_state": "PENDING",
+    }
+    waits = []
+
+    class Ingest:
+        async def wait_for_episode_processing(self, episode_uuid, *, timeout_s):
+            waits.append(episode_uuid)
+            return dict(stub_memory_graph_adapter.pending_episode_rows[episode_uuid])
+
+    svc = _build_recall_service(
+        stub_graphiti_client, stub_memory_graph_adapter, ingest_service=Ingest()
+    )
+    result = await svc.recall(
+        "pending fact", include_session=include_session, session_id=session_id,
+        wait_for_pending=True, pending_wait_timeout_s=0.01,
+    )
+    ids = [memory.uuid for memory in result.results]
+    assert ("pending" in ids) is admitted
+    assert waits == (["pending"] if admitted else [])
+    if pool == "ordinary":
+        assert {"entity-1", "entity-2"}.issubset(ids)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refreshed_state", ["PENDING", "READY"])
+async def test_pending_refresh_cannot_change_session_owner_and_remain_admitted(
+    stub_graphiti_client, stub_memory_graph_adapter, refreshed_state,
+) -> None:
+    stub_graphiti_client.search_scored_results = []
+    stub_memory_graph_adapter.pending_episode_rows["pending"] = {
+        "uuid": "pending", "content": "pending fact", "scope": "SESSION",
+        "session_id": "A", "processing_state": "PENDING",
+    }
+    stub_memory_graph_adapter.candidate_metadata = [_meta("linked", "Linked entity")]
+
+    class Ingest:
+        async def wait_for_episode_processing(self, episode_uuid, *, timeout_s):
+            return {
+                **stub_memory_graph_adapter.pending_episode_rows[episode_uuid],
+                "session_id": "B", "processing_state": refreshed_state,
+                "linked_entity_uuids": ["linked"],
+            }
+
+    svc = _build_recall_service(
+        stub_graphiti_client, stub_memory_graph_adapter, ingest_service=Ingest()
+    )
+    result = await svc.recall(
+        "pending fact", include_session=True, session_id="A", wait_for_pending=True,
+    )
+    assert result.results == []
+    # Even READY source links must not be admitted as candidate-generation evidence.
+    assert result.candidates_evaluated == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_recall_excludes_gone_nodes(
     stub_graphiti_client, stub_memory_graph_adapter
 ) -> None:
@@ -550,6 +634,169 @@ async def test_recall_empty_search_returns_empty_result(
     assert result.search_error is None
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("base", ["empty", "filtered", "failed", "pending"])
+async def test_independent_file_source_survives_empty_semantic_pool(
+    stub_graphiti_client, stub_memory_graph_adapter, base,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    stub_graphiti_client.search_scored_results = []
+    linked = {**_meta("linked", "File-linked guidance"), "namespace": "proj"}
+    foreign = {**_meta("foreign", "Foreign"), "namespace": "other"}
+    hidden = {**_meta("hidden", "Hidden"), "namespace": "proj", "scope": "CANDIDATE"}
+    session = {**_meta("session", "Other session"), "namespace": "proj", "scope": "SESSION",
+               "session_id": "other-session"}
+    stub_memory_graph_adapter.candidate_metadata = [linked, foreign, hidden, session]
+    if base == "filtered":
+        stub_graphiti_client.search_scored_results = [("hidden", "Hidden", 0.9)]
+    elif base == "failed":
+        stub_graphiti_client.search_scored = AsyncMock(side_effect=RuntimeError("search unavailable"))
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+    svc._resolve_file_context = AsyncMock(return_value=["linked", "foreign", "hidden", "session"])
+    if base == "pending":
+        svc._wait_for_pending_episodes = AsyncMock(return_value=([
+            {"uuid": "pending", "name": "Pending", "content": "Pending content", "scope": "PERSISTENT",
+             "processing_state": "ENRICHING"},
+        ], []))
+    result = await svc.recall("file guidance", file_context="src/main.py", file_context_project="proj",
+                              namespace="proj", session_id="current-session", include_session=True,
+                              wait_for_pending=base == "pending", update_access=False)
+    assert "linked" in [row.uuid for row in result.results]
+    assert not {"foreign", "hidden", "session"} & {row.uuid for row in result.results}
+    svc._resolve_file_context.assert_awaited_once_with("src/main.py", "proj")
+    assert bool(result.search_error) is (base == "failed")
+    if base == "failed":
+        assert "incomplete" in result.note
+    if base == "pending":
+        assert "pending" in [row.uuid for row in result.results]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("filtered_base", [False, True])
+async def test_standalone_fact_edges_run_after_empty_node_pool(
+    stub_graphiti_client, stub_memory_graph_adapter, filtered_base,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    stub_graphiti_client.search_scored_results = [("hidden", "Hidden", 0.9)] if filtered_base else []
+    stub_memory_graph_adapter.candidate_metadata = [
+        {**_meta("hidden", "Hidden"), "scope": "CANDIDATE"},
+        *_endpoint_metas(),
+    ]
+    stub_graphiti_client.search_edges_scored = AsyncMock(return_value=[
+        {"uuid": "edge", "fact": "Recorded edge fact", "score": 0.8,
+         "source_node_uuid": "end-a", "target_node_uuid": "end-b"},
+    ])
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+    result = await svc.recall("recorded fact", namespace="proj", update_access=False,
+                              tuning=RetrievalTuningConfig(enable_fact_edges=True, fact_edge_mode="standalone"))
+    assert [row.uuid for row in result.results] == ["edge"]
+    stub_graphiti_client.search_edges_scored.assert_awaited_once_with(
+        "recorded fact", num_results=20, group_ids=["proj"],
+    )
+
+
+def _endpoint_metas(**b_fields) -> list[dict]:
+    return [{**_meta("end-a", "A"), "namespace": "proj"},
+            {**_meta("end-b", "B"), "namespace": "proj", **b_fields}]
+
+
+# A standalone edge is injected only when both endpoint memories would be admitted themselves.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("b_fields", "edge_kw", "recall_kw", "kept"),
+    [
+        ({}, {}, {}, True),
+        ({"scope": "SESSION", "session_id": "s1"}, {}, {}, False),
+        ({"scope": "SESSION", "session_id": "s1"}, {}, {"include_session": True, "session_id": "s1"}, True),
+        ({"scope": "SESSION", "session_id": "s2"}, {}, {"include_session": True, "session_id": "s1"}, False),
+        ({"freshness": "GONE"}, {}, {}, False),
+        ({"scope": "CANDIDATE"}, {}, {}, False),
+        ({"namespace": "elsewhere"}, {}, {}, False),
+        ({}, {"target_node_uuid": "no-metadata"}, {}, False),
+        ({}, {"source_node_uuid": None}, {}, False),
+    ],
+)
+async def test_standalone_fact_edge_needs_both_endpoints_admitted(
+    stub_graphiti_client, stub_memory_graph_adapter, b_fields, edge_kw, recall_kw, kept,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    stub_graphiti_client.search_scored_results = []
+    stub_memory_graph_adapter.candidate_metadata = _endpoint_metas(**b_fields)
+    edge = {"uuid": "edge", "fact": "Recorded edge fact", "score": 0.8,
+            "source_node_uuid": "end-a", "target_node_uuid": "end-b", **edge_kw}
+    stub_graphiti_client.search_edges_scored = AsyncMock(return_value=[edge])
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+    result = await svc.recall("recorded fact", namespace="proj", update_access=False,
+                              tuning=RetrievalTuningConfig(enable_fact_edges=True, fact_edge_mode="standalone"),
+                              **recall_kw)
+    assert ("edge" in [row.uuid for row in result.results]) is kept
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_observation_only_recall_respects_feature_switch(
+    stub_graphiti_client, stub_memory_graph_adapter, enabled,
+) -> None:
+    from unittest.mock import Mock
+
+    stub_graphiti_client.search_scored_results = []
+    stub_memory_graph_adapter.search_assertion_embeddings = Mock(return_value=_one_observation_hit())
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter,
+                                scalar_view_authority_enabled=enabled)
+    result = await svc.recall("how many rare coins", namespace="proj", update_access=False)
+    assert ("obs-aid-1" in [row.uuid for row in result.results]) is enabled
+    if enabled:
+        stub_memory_graph_adapter.search_assertion_embeddings.assert_called_once_with(
+            [0.1, 0.2], limit=10, namespaces=["proj"],
+        )
+    else:
+        stub_memory_graph_adapter.search_assertion_embeddings.assert_not_called()
+
+
+@pytest.mark.online
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_base", [False, True])
+async def test_empty_search_recalls_actual_file_links_with_visibility_guards(
+    test_neo4j_repo, stub_graphiti_client, failed_base,
+) -> None:
+    from uuid import uuid4
+    from unittest.mock import AsyncMock
+
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    tag = "issue154-" + uuid4().hex
+    uuids = [tag + suffix for suffix in ["-file", "-live", "-foreign", "-hidden", "-session"]]
+    try:
+        test_neo4j_repo.execute("""
+            CREATE (f:Entity {uuid:$file, structure_project:$ns, structure_path:'src/main.py',
+                              structure_role:'File', name:'src/main.py'})
+            WITH f UNWIND $rows AS row
+            CREATE (n:Entity {uuid:row.uuid, name:'Guidance', content:'Recorded file guidance',
+                type:'SEMANTIC', scope:row.scope, freshness:'ACTIVE', namespace:row.ns,
+                session_id:'other', created_at:datetime(), last_accessed:datetime()})
+            CREATE (n)-[:ANCHORED_TO]->(f)
+        """, {"file": uuids[0], "ns": tag, "rows": [
+            {"uuid": uuids[1], "ns": tag, "scope": "PERSISTENT"},
+            {"uuid": uuids[2], "ns": tag + "-other", "scope": "PERSISTENT"},
+            {"uuid": uuids[3], "ns": tag, "scope": "CANDIDATE"},
+            {"uuid": uuids[4], "ns": tag, "scope": "SESSION"},
+        ]})
+        stub_graphiti_client.search_scored_results = []
+        if failed_base:
+            stub_graphiti_client.search_scored = AsyncMock(side_effect=RuntimeError("search unavailable"))
+        svc = RecallService(graphiti_client=stub_graphiti_client,
+                            graph_adapter=MemoryGraphAdapter(neo4j=test_neo4j_repo), scoring_service=ScoringService())
+        result = await svc.recall("guidance", file_context="src/main.py", file_context_project=tag,
+                                  namespace=tag, include_session=True, session_id="current", update_access=False)
+        assert [row.uuid for row in result.results] == [uuids[1]]
+        assert bool(result.search_error) is failed_base
+    finally:
+        test_neo4j_repo.execute("MATCH (n:Entity) WHERE n.uuid IN $uuids DETACH DELETE n", {"uuids": uuids})
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_recall_reports_search_failure_as_degraded_not_zero_match(
@@ -674,7 +921,7 @@ async def test_recall_waits_for_relevant_pending_episode(
         ingest_service=StubIngestService(),
     )
 
-    await svc.recall("test query", wait_for_pending=True)
+    await svc.recall("test query", wait_for_pending=True, include_session=True)
 
     assert svc.ingest_service.waits == ["pending-1"]
 
@@ -1355,15 +1602,39 @@ def _two_cands(stub_graphiti_client, stub_memory_graph_adapter, *, c1, c2, extra
 async def test_recall_frontier_off_by_default_is_old_order(
     stub_graphiti_client, stub_memory_graph_adapter
 ) -> None:
-    """Default tuning runs no frontier portion: similarity order, no label, no note."""
+    """With every frontier portion off: similarity order, no label, no note."""
     _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
     svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
 
-    result = await svc.recall("test query")
+    result = await svc.recall("test query", tuning=RetrievalTuningConfig(
+        enable_oracle_ranking=False, enable_intent_lens=False, enable_warden_gate=False,
+        enable_contradiction_interrupt=False, enable_belief_gate=False))
 
     assert [r.uuid for r in result.results] == ["entity-1", "entity-2"]
     assert all(r.warden_label is None for r in result.results)
     assert "frontier" not in (result.note or "")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_recall_oracle_ranking_alone_leaves_warden_receipt_disabled(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    """Oracle ranking + intent lens (#172) with every Warden guard opted out does not touch the
+    Warden receipt: no guard is configured, so the state stays "disabled" with no notice."""
+    _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+    no_guards = RetrievalTuningConfig(enable_warden_gate=False, enable_contradiction_interrupt=False,
+                                      enable_belief_gate=False)
+
+    result = await svc.recall("test query", include_warden_status=True, tuning=no_guards)
+
+    assert sorted(r.uuid for r in result.results) == ["entity-1", "entity-2"]
+    assert "oracle_ranking" in (result.note or "") and "intent_lens" in (result.note or "")
+    assert all(r.warden_label is None for r in result.results)
+    assert result.warden_status.state == "disabled"
+    assert result.warden_status.evaluated == 0 and not result.warden_status.metadata_gaps
+    assert result.warden_notice is None
 
 
 @pytest.mark.unit
@@ -1418,7 +1689,8 @@ async def test_recall_warden_gate_drops_superseded(
                extra2={"expired_at": "2026-02-01", "created_at": "2026-01-01"})
     svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
 
-    base = await svc.recall("alpha beta")
+    base = await svc.recall("alpha beta", tuning=RetrievalTuningConfig(
+        enable_warden_gate=False, enable_contradiction_interrupt=False, enable_belief_gate=False))
     assert {r.uuid for r in base.results} == {"entity-1", "entity-2"}   # off: both kept
 
     gated = await svc.recall("alpha beta",
@@ -1445,8 +1717,8 @@ async def test_recall_warden_gate_refuses_agent_only_provenance(
     ]
     svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
 
-    gated = await svc.recall("test query",
-                             tuning=RetrievalTuningConfig(enable_warden_gate=True))
+    gated = await svc.recall("test query", tuning=RetrievalTuningConfig(
+        enable_warden_gate=True, enable_evidence_anchor=True))
 
     assert gated.results == []          # agent-only provenance -> no external anchor -> refused
 
@@ -1467,8 +1739,8 @@ async def test_recall_warden_gate_admits_structural_anchor(
     ]
     svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
 
-    gated = await svc.recall("test query",
-                             tuning=RetrievalTuningConfig(enable_warden_gate=True))
+    gated = await svc.recall("test query", tuning=RetrievalTuningConfig(
+        enable_warden_gate=True, enable_evidence_anchor=True))
 
     ids = {r.uuid for r in gated.results}
     assert ids == {"entity-1", "entity-2"}   # file anchor + user source both admit
@@ -1547,11 +1819,14 @@ async def test_recall_multi_project_anchor_left_unscoped(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_recall_belief_gate_flag_defaults_off(
+async def test_recall_warden_defaults(
     stub_graphiti_client, stub_memory_graph_adapter
 ) -> None:
-    """enable_belief_gate defaults False; when off, frontier_active does not include it."""
-    assert RetrievalTuningConfig().enable_belief_gate is False
+    """The Warden gate and contradiction interrupt default on (#173); the belief gate and the
+    evidence anchor default off, matching their MENHIR_FRONTIER_* settings (#173, #349)."""
+    t = RetrievalTuningConfig()
+    assert (t.enable_warden_gate, t.enable_belief_gate, t.enable_contradiction_interrupt) == (True, False, True)
+    assert t.enable_evidence_anchor is False
 
 
 @pytest.mark.unit
@@ -1570,7 +1845,8 @@ async def test_recall_belief_gate_without_warden_gate_is_inert_and_warns(
     ]
     svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
 
-    gated = await svc.recall("test", tuning=RetrievalTuningConfig(enable_belief_gate=True))
+    gated = await svc.recall("test", tuning=RetrievalTuningConfig(
+        enable_belief_gate=True, enable_warden_gate=False))
 
     # inert: superseded candidate is NOT dropped because warden_gate did not apply the chain
     assert "entity-2" in {r.uuid for r in gated.results}
@@ -1594,7 +1870,8 @@ async def test_recall_belief_gate_with_warden_gate_drops_superseded_belief(
     svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
 
     # warden_gate alone: belief markers are not fetched, supersession invisible -> entity-2 kept
-    warden_only = await svc.recall("test", tuning=RetrievalTuningConfig(enable_warden_gate=True))
+    warden_only = await svc.recall("test", tuning=RetrievalTuningConfig(
+        enable_warden_gate=True, enable_belief_gate=False))
     assert "entity-2" in {r.uuid for r in warden_only.results}
 
     # belief_gate + warden_gate: CurrentnessWarden runs AND the chain is applied -> entity-2 gated
@@ -1604,6 +1881,33 @@ async def test_recall_belief_gate_with_warden_gate_drops_superseded_belief(
     assert (not e2) or (e2[0].warden_label is not None)   # refused (dropped) or flagged
     assert "belief_gate" in (both.note or "") and "warden_gate" in (both.note or "")
     assert "has no effect" not in (both.note or "")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_recall_default_keeps_anchored_entity_with_one_expired_fact(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    """#173 counterexample: the belief gate marks an Entity superseded when any of its fact edges
+    expired; with git evidence that scores CONFLICT_SET and the contradiction guard refuses it
+    under the current lens. Shipped defaults (belief gate off) must keep it."""
+    _two_cands(stub_graphiti_client, stub_memory_graph_adapter, c1="project name", c2="other")
+    stub_memory_graph_adapter.temporal_fact_rows = [
+        {"node_uuid": "entity-1", "fact": "renamed to menhir", "expired_at": None},
+        {"node_uuid": "entity-1", "fact": "renamed to yawn_memory", "expired_at": "2026-02-01"},
+    ]
+    stub_memory_graph_adapter.candidate_provenance_rows = [
+        {"uuid": uuid, "evidence_node_kinds": ["git"], "anchor_projects": [], "episode_sources": []}
+        for uuid in ("entity-1", "entity-2")
+    ]
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+
+    default = await svc.recall("What is the project called?")
+    assert "entity-1" in {r.uuid for r in default.results}
+
+    belief = await svc.recall("What is the project called?",
+                              tuning=RetrievalTuningConfig(enable_belief_gate=True))
+    assert "entity-1" not in {r.uuid for r in belief.results}  # why the belief gate stays opt-in
 
 
 @pytest.mark.unit
@@ -1620,7 +1924,8 @@ async def test_recall_belief_gate_temporal_fetch_failure_degrades(
 
     monkeypatch.setattr(stub_memory_graph_adapter, "fetch_temporal_facts", _boom)
 
-    result = await svc.recall("test query", tuning=RetrievalTuningConfig(enable_belief_gate=True))
+    result = await svc.recall("test query", tuning=RetrievalTuningConfig(
+        enable_belief_gate=True, enable_warden_gate=False))
 
     assert [r.uuid for r in result.results] == ["entity-1", "entity-2"]
     assert "belief_gate" in (result.note or "")
@@ -1780,7 +2085,8 @@ async def test_recall_belief_gate_with_git_staleness_evidence(
     monkeypatch.setattr(rs, "_repo_path_for", lambda project: "/repo" if project == "proj" else None)
 
     # With gates off: both candidates returned in search order.
-    off_result = await svc.recall("alpha beta")
+    off_result = await svc.recall("alpha beta", tuning=RetrievalTuningConfig(
+        enable_warden_gate=False, enable_contradiction_interrupt=False, enable_belief_gate=False))
     off_uuids = [r.uuid for r in off_result.results]
     assert set(off_uuids) == {"entity-1", "entity-2"}
 

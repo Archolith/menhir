@@ -44,8 +44,8 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from typing import Any
-from uuid import uuid4
 
+from menhir.domain.exact_json import dumps_exact
 from menhir.domain.temporal import parse_iso8601
 from menhir.domain.typed_assertion import VALUE_KINDS as DOMAIN_VALUE_KINDS, normalize_scalar
 
@@ -67,6 +67,11 @@ _SHARED_STAMPS = (
     "type: 'SEMANTIC', scope: 'PERSISTENT', freshness: 'ACTIVE', user_flagged: false, "
     "edge_count: 0, sharpness: 0.0"
 )
+
+
+def _dumps_payload(obj: Any) -> str:
+    """View payload JSON: Decimal values (typed money/number scalars) as exact JSON numbers."""
+    return dumps_exact(obj, ensure_ascii=False)
 
 
 class ViewClass(Enum):
@@ -127,6 +132,11 @@ class ViewKind(ABC):
     #: it. True for value registers (counter). False for set/list kinds (timeline), whose
     #: supersession is driven by the signature (the whole set changed), not by which arrived latest.
     lww_register: bool = False
+
+    #: False: the surface text goes to view_name/view_summary and name/summary stay empty, so the
+    #: node adds no terms to Graphiti's shared :Entity full-text index (node_name_and_summary).
+    #: Every version stays an :Entity; only its keyword-index footprint changes.
+    keyword_indexed: bool = True
 
     @abstractmethod
     def key_discriminator(self, payload: dict[str, Any]) -> str:
@@ -303,7 +313,7 @@ class TimelineKind(ViewKind):
     def write_props(self, subject: str, key: str, payload: dict[str, Any]) -> dict[str, Any]:
         entries = payload["entries"]
         props = {"view_value": float(len(entries)),
-                 "view_payload": json.dumps(entries, ensure_ascii=False)}
+                 "view_payload": _dumps_payload(entries)}
         if _event_mode(payload):
             # Lane stamp: predicate always; domain only when present (None is dropped so legacy
             # subject-only write_props stays byte-identical).
@@ -514,6 +524,9 @@ class ScalarStateKind(ViewKind):
 
     name = "scalar_state"
     lww_register = True  # register semantics; rebuild writes bypass it (authoritative replacement)
+    # Recall reaches these by slot/uuid, not keyword search; indexed, every version shifted BM25
+    # ranks of ordinary entities (LME counting A/B, 2026-10-17).
+    keyword_indexed = False
     read_fields = (
         "n.uuid AS uuid, n.view_subject AS subject, n.view_subject_uuid AS subject_uuid, "
         "n.ss_attribute AS attribute, n.ss_scope AS scope, n.ss_kind AS value_kind, "
@@ -634,6 +647,7 @@ class ScalarHistoryKind(ViewKind):
 
     name = "scalar_history"
     lww_register = False  # set semantics: signature-driven supersession, not LWW
+    keyword_indexed = False  # same as scalar_state: read through the history lane, not search
 
     read_fields = (
         "n.uuid AS uuid, n.view_subject AS subject, n.view_subject_uuid AS subject_uuid, "
@@ -743,10 +757,7 @@ class ScalarHistoryKind(ViewKind):
         op_counts = payload.get("operation_counts") or {}
 
         # Serialize entries for the bounded recall payload.
-        entries_json = json.dumps(
-            normalized_entries,
-            ensure_ascii=False,
-        ) if normalized_entries else "[]"
+        entries_json = _dumps_payload(normalized_entries) if normalized_entries else "[]"
 
         return {
             "view_value": float(entry_count),

@@ -186,7 +186,9 @@ class _ShuffledAdapter(_CountingAdapter):
         return {u: list(self.linked.get(u, [])) for u in reversed(episode_uuids)}
 
     # --- the rest of what `_wait_for_pending_episodes` touches ---
-    def fetch_relevant_pending_episodes(self, query, limit=3, namespace=None):
+    def fetch_relevant_pending_episodes(
+        self, query, limit=3, namespace=None, include_session=True, session_id=None,
+    ):
         return [{"uuid": u, "processing_state": "READY"} for u in ("ep1", "ep2", "ep3")]
 
     def fetch_episode_processing(self, uuid):

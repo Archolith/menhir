@@ -5,8 +5,8 @@ typed-scalar path finds user input in a Turn-capturing production box (it previo
 slice-1 grounding Cypher resolves as a :TurnEvidence anchor -- so the composed path grounds assertions
 to the declarant foundation.
 
-Online (:7688) because it exercises the real ScalarConsolidationWatermark cursor + the global
-evidence_exists() switch a FakeNeo4j cannot evaluate (G7).
+Online (:7688) because it exercises the real ScalarConsolidationWatermark cursor a FakeNeo4j cannot
+evaluate (G7). Since #95 the scalar lane reads TurnEvidence only; there is no Episodic fallback.
 """
 
 from __future__ import annotations
@@ -68,19 +68,17 @@ def test_replay_source_time_drives_validity_but_not_cursor(test_neo4j_repo):
 
 
 @pytest.mark.online
-def test_falls_back_to_episodic_when_no_turn_evidence(test_neo4j_repo):
+def test_legacy_user_prefixed_episodic_is_not_scalar_input(test_neo4j_repo):
+    # #95: the `user:`-prefix Episodic fallback is removed; only TurnEvidence feeds the scalar lane.
     adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
     ns = f"ns-{uuidlib.uuid4().hex[:8]}"
-    # ONLY a legacy `user:`-prefixed Episodic -- no TurnEvidence anywhere.
     test_neo4j_repo.execute(
         "CREATE (e:Episodic {uuid:$u, group_id:$ns, content:'user: I own 20 rare coins', "
         "created_at: datetime()})",
         {"u": f"ep-{uuidlib.uuid4().hex[:8]}", "ns": ns})
 
-    assert ns in adapter.list_scalar_dirty_namespaces(perceiver_version=PV)
-    rows = adapter.load_next_scalar_batch(ns, perceiver_version=PV)
-    assert len(rows) == 1
-    assert rows[0]["content"] == "user: I own 20 rare coins"   # Episodic path (prefix intact)
+    assert ns not in adapter.list_scalar_dirty_namespaces(perceiver_version=PV)
+    assert adapter.load_next_scalar_batch(ns, perceiver_version=PV) == []
 
 
 @pytest.mark.online

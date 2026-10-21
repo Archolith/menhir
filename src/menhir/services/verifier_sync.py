@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol
 
 from menhir.infrastructure.view_repository import ViewRepository
+from menhir.domain.namespace import normalize_namespace
 from menhir.services.seam_types import Embed
 from menhir.clock import utc_now_iso as _utc_now_iso
 
@@ -67,9 +68,10 @@ def _coerce(raw: str, as_type: str) -> VerifierResult:
     if as_type == "int":
         try:
             return VerifierResult(value=float(int(raw)), display=raw)
-        except ValueError:
+        except (ValueError, OverflowError):
             return VerifierResult(value=0.0, display=raw, ok=False)
-    # default: boolean
+    if as_type != "bool" or raw.lower() not in ("1", "true", "yes", "on", "0", "false", "no", "off"):
+        return VerifierResult(value=0.0, display=raw, ok=False)
     truthy = raw.lower() in ("1", "true", "yes", "on")
     return VerifierResult(value=1.0 if truthy else 0.0, display=raw)
 
@@ -99,8 +101,9 @@ DEFAULT_EXECUTORS: dict[str, Executor] = {
 
 class VerifierRepositoryProtocol(Protocol):
     def list_verifiers(self) -> list[dict[str, Any]]: ...
+    def stamp_probe(self, *, verifier_uuid: str, status: str, at: str) -> None: ...
     def stamp_verifier(self, *, verifier_uuid: str, value: float, display: str, at: str) -> None: ...
-    def ensure_verified_edge(self, *, register_uuid: str, verifier_uuid: str) -> None: ...
+    def ensure_verified_edge(self, *, register_uuid: str, verifier_uuid: str) -> bool | None: ...
     def flag_referencing_beliefs(
         self, *, verifier_uuid: str, new_value: float, display: str, at: str
     ) -> int: ...
@@ -115,6 +118,13 @@ class CounterGraphProtocol(Protocol):
 
 # --------------------------------------------------------------------------- graph-driven sync
 
+
+def _stamp_probe(repo: VerifierRepositoryProtocol, vid: str, status: str) -> None:
+    # Older injected repositories can omit attempt stamps. Readers treat their absent status
+    # as unknown; the production repository always implements this separate write.
+    stamp = getattr(repo, "stamp_probe", None)
+    if stamp is not None:
+        stamp(verifier_uuid=vid, status=status, at=_utc_now_iso())
 
 
 
@@ -137,28 +147,38 @@ def sync_verifiers(
         kind = str(v.get("verifier_kind") or "")
         subject = str(v.get("register_subject") or "")
         counter = str(v.get("register_counter") or "")
+        # Persisted bindings own their silo. Legacy protocol callers may omit the stamp.
+        register_namespace = normalize_namespace(
+            v["namespace"] if v.get("namespace") is not None else namespace
+        )
         executor = executors.get(kind)
         if executor is None:
             # Unknown kind: the graph is data, execution is code — never run something untrusted.
+            _stamp_probe(repo, vid, "skipped_unknown_kind")
             results.append({"verifier": vid, "kind": kind, "status": "skipped_unknown_kind"})
             continue
+        _stamp_probe(repo, vid, "pending")  # a crash/write failure cannot leave a claimed latest success
         try:
             params = _parse_params(v.get("verifier_params"))
             res = executor(params, context)
         except Exception as exc:  # a broken probe must not abort the rest of the sync
             logger.warning("Verifier %s (%s) executor failed: %s", vid, kind, exc)
+            _stamp_probe(repo, vid, "error")
             results.append({"verifier": vid, "kind": kind, "status": "error", "error": str(exc)})
             continue
         if not res.ok:
+            _stamp_probe(repo, vid, "source_unavailable")
             results.append({"verifier": vid, "kind": kind, "status": "source_unavailable"})
             continue
 
         prev = None
         if hasattr(graph_adapter, "fetch_counter"):
             try:
-                prev = graph_adapter.fetch_counter(subject=subject, counter=counter, namespace=namespace)
-            except Exception:
-                prev = None
+                prev = graph_adapter.fetch_counter(subject=subject, counter=counter, namespace=register_namespace)
+            except Exception as exc:
+                _stamp_probe(repo, vid, "error")
+                results.append({"verifier": vid, "kind": kind, "status": "error", "error": str(exc)})
+                continue  # unknown stored state cannot justify a refresh or review flag
         changed = not (prev and prev.get("value") is not None and float(prev["value"]) == res.value)
 
         name_embedding = None
@@ -194,14 +214,16 @@ def sync_verifiers(
             subject=subject,
             counter=counter,
             value=res.value,
-            namespace=namespace,
+            namespace=register_namespace,
             source="verifier-sync",
             name_embedding=name_embedding,
         )
         register_uuid = str(rec.get("uuid") or "")
-        if register_uuid:
-            repo.ensure_verified_edge(register_uuid=register_uuid, verifier_uuid=vid)
-        repo.stamp_verifier(verifier_uuid=vid, value=res.value, display=res.display, at=now)
+        if not register_uuid or repo.ensure_verified_edge(register_uuid=register_uuid, verifier_uuid=vid) is False:
+            _stamp_probe(repo, vid, "error")
+            results.append({"verifier": vid, "kind": kind, "status": "error", "error": "register link unconfirmed"})
+            continue
+        repo.stamp_verifier(verifier_uuid=vid, value=res.value, display=res.display, at=_utc_now_iso())
         results.append({
             "verifier": vid, "kind": kind, "subject": subject, "counter": counter,
             "value": res.value, "display": res.display, "changed": changed,

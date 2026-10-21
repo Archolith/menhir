@@ -21,13 +21,13 @@ async def add_todo(
     through enrichment, and appear at the top of every hook bootstrap.
 
     Graph edges are created automatically:
-      - REFERENCES_FILE → structural file entity matching code_ref
+      - REFERENCES_FILE → one structural file for each unambiguous code_ref location
       - CREATED_FROM    → episodic memory node if episode_uuid is provided
       - HAS_REMINDER    → TEMPORAL :Entity node (created when due_date is set)
 
     Args:
         text: The TODO description. Be specific and actionable.
-        code_ref: Optional file path and line, e.g. "src/api/routes.py:42".
+        code_ref: Optional file path(s) and line, e.g. "src/api/routes.py:42".
         priority: "low", "normal", or "high". Default: "normal".
         episode_uuid: UUID of an episodic memory that triggered this TODO.
         due_date: Optional ISO date (YYYY-MM-DD). Creates a linked TEMPORAL
@@ -82,7 +82,16 @@ class AddTodoTool(BaseTextTool):
         parts = [f"Created TODO uuid={uuid} [{tag}]{ref} — {snippet}"]
 
         if todo.get("linked_file_path"):
-            parts.append(f"  → linked file: {todo['linked_file_path']}")
+            for linked in todo.get("linked_files") or [{"path": todo["linked_file_path"]}]:
+                project = linked.get("project")
+                label = f"{project}/{linked['path']}" if project else linked["path"]
+                parts.append(f"  → linked file: {label}")
+        for location in todo.get("locations") or []:
+            if location.get("resolution_status") != "unresolved":
+                continue
+            reason = location.get("unresolved_reason") or "unknown"
+            declared = location.get("raw_segment") or location.get("path") or "?"
+            parts.append(f"  → file link unresolved for {declared}: {reason}")
         if todo.get("episode_uuid"):
             parts.append(f"  → provenance: episode {todo['episode_uuid']}")
         if todo.get("reminder_uuid"):

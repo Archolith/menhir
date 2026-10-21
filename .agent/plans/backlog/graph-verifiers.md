@@ -1,9 +1,17 @@
 # Graph-native verifiers — keep derivable beliefs fresh against their source of truth
 
 Status: **PARTIAL / ACTIVE** (kept — not archivable). Core mechanism + scheduler wiring + seeding
-are shipped and live; the recall-side payoff is not yet wired.
+are implemented; ranked recall/context now consume review flags as explicit source-verification advisories.
 
-> **Status note 2026-07-11 (code-reconciled).** Verified against `src/menhir`:
+> **2026-10-05 reconciliation (#173):** the historical unwired-consumer finding below was reproduced
+> and fixed. Review flags survive ranked recall, compact/full MCP, REST and context with an atomic
+> warning. Namespace-scoped bindings and write fences prevent cross-silo drift flags. Invalid source
+> values are unavailable. Scores/content and default settings remain unchanged. This does not certify
+> prose as current, measure useful answers retained, or qualify deployment/default activation.
+> Linked register evidence now exposes the last successful value/time and distinct latest-probe status. Additional executor kinds and string registers are optional
+> product decisions, not prerequisites for the bounded `env_key` path.
+
+> **Historical status note 2026-07-11 (superseded by the reconciliation above).** Verified then against `src/menhir`:
 > - DONE & live: `verifier_sync.py` + `verifier_repository.py`; scheduler wiring
 >   (`verifier_sync_interval_s`/`MENHIR_VERIFIER_SYNC_ENABLED` in `settings.py:193,394`,
 >   `runtime.py:216`); standard-verifier **seeding** (`verifier_sync.py:203-220`) — so the top-line
@@ -15,6 +23,150 @@ are shipped and live; the recall-side payoff is not yet wired.
 >   load-bearing gap: the flag is produced but nothing reads it.
 
 ## Problem
+### Offline Warden/verifier interactions (#173, 2026-10-05)
+
+Compare neither feature, Warden only, verifier sync only and both using the existing freshness
+repository/register stubs and actual sync, recall and context code. Fix the candidate, retrieval
+score and source observation per case; disable ranking/source/shadow expansion. Exercise anchored
+current prose, unanchored conversation, unresolved current conflict and historical conflict against
+unchanged, changed, unavailable and already-flagged source states. Start each arm from an identical
+last-success register snapshot. Recreate services/repositories for restart, with sync then disabled.
+Report actual refusals, Warden labels, review advisories and last-success/latest-probe evidence
+separately. Assert retained content/scores are unchanged, review flags persist, unavailable probes
+do not advance success, and register observations explicitly do not verify prose. This is a
+development interaction panel, not answer-quality, latency/cost or default qualification. No new
+production path, store, executor, ingest, paid test, activation or deployment. Reuse fixtures rather
+than build another benchmark; focused neighbors and exact-head full CI provide code acceptance.
+
+Implemented by `tests/test_warden_verifier_interactions.py`: 64 independently reset cases, each
+checked after the probe interval and after restart with sync disabled (128 recall/context decisions).
+The Warden arm pins strict evidence anchoring plus contradiction interrupt; belief/currentness is
+off. It does not claim coverage of every optional guard/profile combination.
+The panel seeds identical last-success state; arms explicitly invoke or skip sync, so it does not
+claim scheduler/configuration qualification. Database-read copies separate derived recall metadata
+from persisted state in the shared stub. Actual warnings/refusals and retained/stored register
+evidence are embedded per case in the JUnit `warden_verifier_control` JSON property. Run
+`pytest tests/test_warden_verifier_interactions.py -o junit_family=legacy --junitxml=interactions.xml`.
+No interaction defect was found: changed-source advisories persist regardless of Warden state;
+unavailable probes preserve prior success; Warden refusals hide the prose without erasing stored
+review flags; historical conflicts retain labels and verifier disclaimers. Production code/defaults
+remain unchanged. Real-corpus usefulness, latency, probe spend and final combined-profile acceptance
+still require the deferred qualification work.
+
+### Recorded-conflict guard handoff (#173, 2026-10-05)
+
+Why: the offline panel found that persisted unresolved conflicts reach scoring/context but not
+the optional contradiction guard. Pass a bounded `recorded_conflict` signal into WardenContext
+from candidate metadata when a conflict group exists and its status is exactly `unresolved`.
+ContradictionWarden consumes it alongside existing oracle/belief signals: current intent refuses;
+historical intent retains with a conflict label. Resolved, absent and unknown status do not invent
+a contradiction. Other guards still apply and may independently refuse historical memories.
+Keep master-gate and optional-guard dependencies, ranking, default labels and settings unchanged.
+Alternative: add a default conflict oracle (rejected here because it also changes ranking and the
+base admission profile). No new graph fields, migration, write path, ingest or paid qualification.
+Validate the real assertion producer with guard on/off and current/historical queries; expand the
+offline recall panel with resolved and historical conflict controls. Run focused guard/recall/context
+neighbors and exact-head CI. Remaining default/corpus/usefulness gates stay open.
+
+### Offline Warden safety controls (#173, 2026-10-05)
+
+`tests/test_warden_safety_matrix.py` runs the actual recall/guard path against existing stub
+adapters. Nine authored controls cover anchored and conversation-only valid memories, unknown
+provenance, wrong project, expired current and historical claims, and unresolved/resolved/historical conflicts.
+Gold means useful or harmful **for the query's assertion context**; unknown evidence is scored
+separately. Each single-candidate pool and score stays fixed across Warden-off, strict (anchor on),
+and conversational (anchor off) profiles. Ranking/facet lanes and shadow execution stay off.
+Currentness and contradiction options are tested independently and together: 12 runs / 108 decisions.
+Retained candidates keep the Warden-off final score.
+
+The report counts useful refusals, harmful refusals, harmful returns with/without warnings, and
+unknown returns/refusals. Negative controls prove both error counters detect injected failures.
+Warnings include actual Warden labels, the existing context conflict marker, and dated expired
+facts; a warning is never counted as a refusal. Execution receipts must match the bounded run.
+Run `pytest tests/test_warden_safety_matrix.py -o junit_family=legacy --junitxml=warden.xml`;
+the `warden_safety_report` JUnit property contains JSON after pytest removes scratch files.
+
+Observed controls: strict refuses one useful conversation-only memory; conversational preserves
+all five useful fixtures. Both gated profiles refuse the wrong-project fixture. Currentness alone
+returns the strongly anchored expired-current fixture labeled historical; enabling both optional
+guards refuses it while preserving historical recall. The initial seven-control panel in #228 exposed
+the recorded-conflict producer gap. The handoff fix above now refuses unresolved current conflicts
+when master and contradiction guards are on, preserves historical conflicts with a label, and leaves
+resolved conflicts and guard-off behavior intact. These are bounded controls, not zero-error
+qualification. Default activation, answer usefulness, corpus accuracy and deployed enforcement
+remain unqualified. No new production policy, ingest, model calls or paid bench is part of this panel.
+
+### Optional Warden execution status (#173, 2026-10-05)
+
+Why: configured guards must not imply applied enforcement after an exception or on pending fallback
+results. Detailed diagnostic output should not add tokens to ordinary successful recall.
+Scope: ranked Entity recall, pending fallback, provenance/temporal/staleness metadata degradation,
+canonical runtime/client/API/MCP and context, plus Recall Lab. No guard policy/ranking/default changes,
+new store, deployed probe, ingest or paid qualification.
+Design: per-call `include_warden_status=False`; a structured execution receipt reports configured
+chain options, actual state/counts, metadata gaps and explicitly excluded result types. Produce the
+receipt from the current request's application path, never inferred from settings alone. Retain only
+a brief `warden_notice` by default for configured-but-unapplied, failed or incomplete coverage.
+Context packs that notice before ranked memories; insufficient budget suppresses those memories.
+Requested context diagnostics share the token budget. Recall Lab requests diagnostics and shows them
+in its existing details panel. Source/authority/TODO layers retain their existing independent rules.
+Alternative: always include diagnostics (rejected for token cost); change fallback policy (deferred
+because it changes admissions and requires usefulness evidence).
+Risks: status must survive all early returns; metadata absence must not be confused with successful
+checking; optional flags must reach remote and direct callers without altering older default calls.
+Invariants: visibility does not affect admissions, scores, labels or graph writes; failures never claim
+applied enforcement; no shared mutable per-request status. No data migration/atomic store is involved.
+Validation: direct positive/negative controls for applied/disabled/computed-not-applied/error/pending,
+metadata failure and missing rows; API/MCP/runtime/client flag-off omission and opt-in round trips;
+context budgets and Recall Lab diagnostics/redaction; focused neighbors and exact-head full CI.
+Docs: existing owner/index, data/API/default-off docs and changelog. Live enforcement remains unproven;
+this bounded receipt is diagnostic evidence, not a claim of universal enforcement.
+
+### Freshness evidence follow-up (#173, 2026-10-05)
+
+Expose the existing last successfully verified register value/time beside linked ranked memories,
+and persist a separate latest-probe time/status. Begin each probe as pending; only a completed
+register/link/success-stamp sequence records success. Unavailable, unknown-kind and failed probes
+must retain the previous successful value/time. A crash leaves an explicitly incomplete probe.
+Read same-silo `REFERENCES` → counter register → trusted binding evidence in the existing candidate
+metadata query, deduplicate bindings, and retain typed evidence through MCP/REST/context. Missing
+legacy probe stamps are unknown, not inferred successes. Use absolute UTC timestamps; no arbitrary
+freshness cutoff, score/rank change, review-marker clearing, source secrets, or default activation.
+
+Test changed/unchanged, failed/unavailable/unknown, first-failure without any success, restart, token
+budget, namespaces/legacy spellings, duplicate superseded register links and actual disposable graph
+queries. Preserve flag-before-write ordering. Concurrency/mixed-version writers and external graph
+mutation remain outside this bounded proof; successful register observations do not validate prose.
+Update data/API/default-off docs, the existing backlog owner/index, changelog and strict domain
+contract. No ingest, paid runs or deployed probes.
+
+### Bounded #173 implementation plan (2026-10-05)
+
+Trace the existing `env_key` observation → counter refresh → `REFERENCES` review flag →
+ranked recall/context path. Surface `needs_review`, `review_reason`, and `review_flagged_at`
+with an explicit instruction to verify the source before asserting current truth. Preserve
+content and ranking: a review flag indicates uncertainty, not proven contradiction; an arbitrary
+score penalty or refusal would need separate usefulness evidence. Keep sync and all defaults opt-in.
+
+Scope verifier identity and register writes to the binding's persisted namespace. Refuse cross-silo
+reference/verification edges and flag only same-silo non-derived beliefs. Preserve existing scoped
+bindings; legacy rows without namespace use the explicit sync namespace. Invalid boolean/type
+observations must be unavailable rather than freshly recorded false. Retain flag-before-write retry
+ordering. Test changed/unchanged/unavailable/unknown-kind, restart, namespace separation, derived
+register exclusion and actual recall/context plus compact/REST output. Disposable graph behavior
+belongs to CI; no production graph, ingest, paid run, new executor, or default promotion in this pass.
+
+Risks: persisted cross-silo edges require read-side fences; review markers remain until explicit
+correction (an unchanged probe cannot validate prose). Raw episode sources and independent authority
+layers are outside the linked-Entity contract. Freshness evidence is now implemented below; measured down-ranking remains
+separate acceptance work. Update this owner, the routing index, data/API docs and changelog.
+
+The sync write sequence is not a transaction. Existing flag-before-write tests prove retry ordering
+for already-linked beliefs; concurrent reference creation or competing register writers remain an
+assumption, not a system-wide freshness guarantee. External/manual graph writers are outside this
+repository census. No stored data is backfilled or deleted; reverting the reader change restores the
+previous display behavior while persisted review markers remain available.
+
 Supersession / contradiction detection only fire when a *new* memory is written. If the world
 changes and nothing writes a correcting memory, a belief silently stays "current" and wrong
 (observed this session: an "experience-counter job is paused" belief survived after the job was
@@ -73,6 +225,8 @@ only when enabled AND a repo is present, so default behavior is unchanged.
    `file_fingerprint` (reuse the structure-scan pattern). Keep each in the trusted code registry.
 3. **String-valued registers** — current registers are numeric (bool->1/0, int). A typed/string
    register View kind would let verifiers maintain non-numeric config (URIs, model names).
-4. **Recall integration** — teach recall to surface "value from register X, verified Ns ago" and to
-   down-rank `needs_review` prose, so flagged beliefs stop being asserted as current truth.
-5. **Seeding** — a small bootstrap that upserts the standard config/status verifiers on startup.
+4. **Recall integration — partial:** review advisories and linked-register freshness evidence are
+   consumed. Measured usefulness/down-ranking remains separate work; neither evidence nor a review
+   marker verifies prose. Freshness validation: 381 focused tests pass, with 7 graph tests reserved
+   for disposable CI; no ingest or paid qualification.
+5. **Seeding — implemented:** idempotent bootstrap upserts standard config/status bindings.

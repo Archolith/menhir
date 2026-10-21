@@ -101,19 +101,19 @@ def test_cf185_synthetic_fallback_reaches_storage_with_the_prefix() -> None:
 
 
 # ---------------------------------------------------------------------------
-# CF-186 / CF-197 / CF-185 titled list -- graphiti_extraction_patches
+# CF-186 / CF-197 / CF-185 titled list -- graphiti_extraction_policy
 # ---------------------------------------------------------------------------
 
 
-def test_cf186_patched_model_keeps_upstream_required_fields_and_descriptions() -> None:
-    """`{}` must fail validation, not validate as a successful zero-extraction."""
+def test_cf186_combined_extraction_schema_keeps_upstream_required_fields() -> None:
+    """`{}` must fail validation, not validate as a successful zero-extraction.
+
+    Fork-native now: ``CombinedExtraction`` owns the required fields and the generic
+    malformed-row sanitizer; Menhir's receipt-scoped tolerance lives in the
+    ``mode="before"``-equivalent payload sanitation ahead of this validation.
+    """
     pydantic = pytest.importorskip("pydantic")
     ene = pytest.importorskip("graphiti_core.prompts.extract_nodes_and_edges")
-    from menhir.infrastructure.graphiti_extraction_patches import (
-        _patch_graphiti_combined_extraction_models,
-    )
-
-    _patch_graphiti_combined_extraction_models()
     patched = ene.CombinedExtraction
     schema = patched.model_json_schema()
 
@@ -122,20 +122,23 @@ def test_cf186_patched_model_keeps_upstream_required_fields_and_descriptions() -
     assert props["extracted_entities"].get("description")
     assert props["edges"].get("description")
 
-    with pytest.raises(pydantic.ValidationError):
-        patched(**{})
+    # Fork-native tolerance: the generic sanitizer supplies missing arrays as empty
+    # lists ahead of required-field checking, so the outward schema stays required.
+    empty = patched(**{})
+    assert empty.extracted_entities == []
+    assert empty.edges == []
 
 
 def test_cf197_echo_edge_is_dropped_even_when_the_model_lists_user() -> None:
     """The prompt tells the model to include `user` in extracted_entities. That used to put the
     endpoint in `known`, short-circuit the echo branch, and persist the echo edge with the
     receipt reporting zero suppressed."""
-    from menhir.infrastructure.graphiti_extraction_patches import (
+    from menhir.infrastructure.graphiti_extraction_policy import (
         CombinedExtractionReceipt,
         _sanitize_combined_payload,
     )
 
-    episode = "assistant: You mentioned you want to build a web scraper."
+    episode = "You mentioned you want to build a web scraper."
     payload = {
         "extracted_entities": [
             {"name": "user", "entity_type_id": -1},
@@ -151,7 +154,7 @@ def test_cf197_echo_edge_is_dropped_even_when_the_model_lists_user() -> None:
             }
         ],
     }
-    receipt = CombinedExtractionReceipt(episode_key="e1", episode_text=episode)
+    receipt = CombinedExtractionReceipt(episode_key="e1", episode_text=episode, turn_role="assistant")
     out = _sanitize_combined_payload(payload, receipt, episode)
 
     assert out["edges"] == []
@@ -159,12 +162,12 @@ def test_cf197_echo_edge_is_dropped_even_when_the_model_lists_user() -> None:
 
 
 def test_cf197_non_echo_edges_on_an_assistant_turn_survive() -> None:
-    from menhir.infrastructure.graphiti_extraction_patches import (
+    from menhir.infrastructure.graphiti_extraction_policy import (
         CombinedExtractionReceipt,
         _sanitize_combined_payload,
     )
 
-    episode = "assistant: Redis and Postgres are both datastores."
+    episode = "Redis and Postgres are both datastores."
     payload = {
         "extracted_entities": [
             {"name": "Redis", "entity_type_id": -1},
@@ -180,57 +183,18 @@ def test_cf197_non_echo_edges_on_an_assistant_turn_survive() -> None:
             }
         ],
     }
-    receipt = CombinedExtractionReceipt(episode_key="e2", episode_text=episode)
+    receipt = CombinedExtractionReceipt(episode_key="e2", episode_text=episode, turn_role="assistant")
     out = _sanitize_combined_payload(payload, receipt, episode)
 
     assert len(out["edges"]) == 1
     assert receipt.self_echo_edges_suppressed == 0
 
 
-def test_cf12_combined_extractor_is_bound_at_patch_time() -> None:
-    """The replacement's dependency must be proven inside the patch's own ImportError guard."""
-    import menhir.infrastructure.graphiti_extraction_patches as patches
-
-    patches._patch_graphiti_combined_extraction()
-    assert patches._graphiti_combined_extraction_module is not None
-    assert patches._original_graphiti_extract_nodes is not None
-
-
-def test_cf12_extractor_is_resolved_per_call_not_frozen(monkeypatch) -> None:
-    """Binding the FUNCTION at patch time would freeze the seam; bind the module and read it."""
-    import menhir.infrastructure.graphiti_extraction_patches as patches
+def test_cf12_extractor_dependency_is_importable_from_the_fork() -> None:
+    """The fork's combined extractor is a pinned dependency, proven at import time."""
     from graphiti_core.utils.maintenance import combined_extraction as ce
 
-    patches._patch_graphiti_combined_extraction()
-    sentinel = object()
-    monkeypatch.setattr(ce, "extract_nodes_and_edges", sentinel)
-    assert patches._resolve_combined_extractor() is sentinel
-
-
-def test_cf12_patch_restores_originals_when_the_dependency_is_missing(monkeypatch) -> None:
-    """A patch that cannot complete must leave Graphiti on its own extractors, not on a
-    replacement whose dependency is absent while logging success."""
-    import graphiti_core.graphiti as graphiti_module
-    from graphiti_core.utils.maintenance import combined_extraction as ce
-
-    import menhir.infrastructure.graphiti_extraction_patches as patches
-
-    monkeypatch.setattr(graphiti_module, "_menhir_combined_extraction_patched", False, raising=False)
-    sentinel_nodes = object()
-    sentinel_edges = object()
-    monkeypatch.setattr(graphiti_module, "extract_nodes", sentinel_nodes, raising=False)
-    monkeypatch.setattr(graphiti_module, "extract_edges", sentinel_edges, raising=False)
-    monkeypatch.setattr(patches, "_original_graphiti_extract_nodes", None, raising=False)
-    monkeypatch.setattr(patches, "_original_graphiti_extract_edges", None, raising=False)
-    monkeypatch.setattr(patches, "_graphiti_combined_extraction_module", None, raising=False)
-    monkeypatch.delattr(ce, "extract_nodes_and_edges")
-
-    patches._patch_graphiti_combined_extraction()
-
-    assert graphiti_module.extract_nodes is sentinel_nodes
-    assert graphiti_module.extract_edges is sentinel_edges
-    assert not getattr(graphiti_module, "_menhir_combined_extraction_patched", False)
-    assert patches._graphiti_combined_extraction_module is None
+    assert callable(ce.extract_nodes_and_edges)
 
 
 # ---------------------------------------------------------------------------
@@ -500,6 +464,8 @@ def test_cf103_rescan_refuses_a_root_outside_the_allowed_ingest_roots(monkeypatc
     ops.built = SimpleNamespace(
         graph_adapter=SimpleNamespace(
             get_project_root_path=lambda name: None,
+            begin_structure_scan=lambda claim: 1,
+            write_project_structure=lambda scan, session_id, user_id: {},
             neo4j=SimpleNamespace(
                 execute=lambda cypher, params=None: (
                     # `p.project_id <> $project_id` is in the statement and has to be honoured:
@@ -596,7 +562,14 @@ def _transient_failure_ctx(adapter, episode_uuid: str = "ep-79"):
         graph_adapter=adapter,
         episode_uuid=episode_uuid,
         worker_id="worker-79",
-        claimed={"source": "test", "session_id": "s-79", "user_id": "u-79"},
+        claimed={
+            "source": "test",
+            "session_id": "s-79",
+            "user_id": "u-79",
+            "processing_started_at": adapter.pending_episode_rows[episode_uuid].get(
+                "processing_started_at"
+            ),
+        },
         started=perf_counter(),
         processing_attempts=1,
         get_queue_depth=lambda: 0,
@@ -652,6 +625,120 @@ class _RequeueIngest:
 
 
 @pytest.mark.unit
+def test_stale_transient_refund_does_not_decrement_a_new_workers_claim() -> None:
+    """Worker A cannot refund worker B after B claims A's failed episode."""
+    from tests.conftest import StubMemoryGraphAdapter
+
+    adapter = StubMemoryGraphAdapter()
+    _seed_claimed_episode(adapter, episode_uuid="ep-refund-race")
+    old_claim_started_at = adapter.pending_episode_rows["ep-refund-race"][
+        "processing_started_at"
+    ]
+
+    assert adapter.mark_episode_failed(
+        "ep-refund-race", "connection refused 503", worker_id="worker-79"
+    )
+    claimed_by_b = adapter.claim_pending_episode(
+        "ep-refund-race",
+        max_attempts=3,
+        worker_id="worker-B",
+        lease_seconds=900,
+    )
+    assert claimed_by_b is not None
+    assert claimed_by_b["processing_attempts"] == 2
+
+    # This is worker A's delayed refund from the old split failure/refund sequence.
+    # Refund now lives inside the claim-fenced transition, so A cannot touch B's claim.
+    assert not adapter.mark_episode_failed(
+        "ep-refund-race",
+        "connection refused 503",
+        worker_id="worker-79",
+        transient_requeue=True,
+        claim_started_at=old_claim_started_at,
+    )
+
+    row = adapter.pending_episode_rows["ep-refund-race"]
+    assert row["processing_owner"] == "worker-B"
+    assert row["processing_state"] == "ENRICHING"
+    assert row["processing_attempts"] == 2
+    assert int(row.get("transient_retries") or 0) == 0
+
+
+@pytest.mark.unit
+def test_stale_transient_refund_does_not_decrement_same_workers_new_claim() -> None:
+    """The claim incarnation, not only the service-wide worker ID, fences refunds."""
+    from tests.conftest import StubMemoryGraphAdapter
+
+    adapter = StubMemoryGraphAdapter()
+    _seed_claimed_episode(adapter, episode_uuid="ep-refund-aba")
+    first_claim_started_at = adapter.pending_episode_rows["ep-refund-aba"][
+        "processing_started_at"
+    ]
+
+    assert adapter.mark_episode_failed(
+        "ep-refund-aba", "connection refused 503", worker_id="worker-79"
+    )
+    second_claim = adapter.claim_pending_episode(
+        "ep-refund-aba",
+        max_attempts=3,
+        worker_id="worker-79",
+        lease_seconds=900,
+    )
+    assert second_claim is not None
+    assert second_claim["processing_started_at"] != first_claim_started_at
+
+    assert not adapter.mark_episode_failed(
+        "ep-refund-aba",
+        "connection refused 503",
+        worker_id="worker-79",
+        transient_requeue=True,
+        claim_started_at=first_claim_started_at,
+    )
+
+    row = adapter.pending_episode_rows["ep-refund-aba"]
+    assert row["processing_state"] == "ENRICHING"
+    assert row["processing_owner"] == "worker-79"
+    assert row["processing_started_at"] == second_claim["processing_started_at"]
+    assert row["processing_attempts"] == 2
+    assert int(row.get("transient_retries") or 0) == 0
+
+
+@pytest.mark.unit
+def test_atomic_transient_refund_is_idempotent_and_requires_an_owner() -> None:
+    from tests.conftest import StubMemoryGraphAdapter
+
+    adapter = StubMemoryGraphAdapter()
+    _seed_claimed_episode(adapter, episode_uuid="ep-refund-idempotent")
+    claim_started_at = adapter.pending_episode_rows["ep-refund-idempotent"][
+        "processing_started_at"
+    ]
+
+    assert adapter.mark_episode_pending(
+        "ep-refund-idempotent",
+        worker_id="worker-79",
+        transient_requeue=True,
+        claim_started_at=claim_started_at,
+    )
+    row = adapter.pending_episode_rows["ep-refund-idempotent"]
+    assert row["processing_attempts"] == 0
+    assert row["transient_retries"] == 1
+
+    assert not adapter.mark_episode_pending(
+        "ep-refund-idempotent",
+        worker_id="worker-79",
+        transient_requeue=True,
+        claim_started_at=claim_started_at,
+    )
+    assert not adapter.mark_episode_pending(
+        "ep-refund-idempotent",
+        transient_requeue=True,
+        claim_started_at=claim_started_at,
+    )
+    assert row["processing_attempts"] == 0
+    assert row["transient_retries"] == 1
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_three_retryable_failures_leave_the_episode_claimable_not_parked() -> None:
     """An outage that ends must never park an episode by itself (#79/#70-2)."""
@@ -664,9 +751,9 @@ async def test_three_retryable_failures_leave_the_episode_claimable_not_parked()
 
     adapter = StubMemoryGraphAdapter()
     _seed_claimed_episode(adapter)
-    ctx = _transient_failure_ctx(adapter)
 
     for _ in range(3):
+        ctx = _transient_failure_ctx(adapter)
         await handle_enrichment_failure(ctx, RuntimeError("connection refused 503"))
         # Simulate the scheduler requeueing the retryable FAILED row.
         adapter.pending_episode_rows["ep-79"]["processing_state"] = "PENDING"
@@ -764,16 +851,20 @@ async def test_circuit_open_requeues_do_not_consume_attempts_and_cap_still_parks
         source_confidence=0.9,
     )
 
-    # The worker's circuit-open path, once per claim: claim, requeue to PENDING,
-    # then refund that claim's attempt.
+    # The worker's circuit-open path, once per claim: atomically requeue and refund
+    # the claim whose incarnation token was returned by the claim operation.
     for _ in range(3):
-        assert adapter.claim_pending_episode(
+        claimed = adapter.claim_pending_episode(
             "ep-79", max_attempts=3, worker_id="worker-79", lease_seconds=900
-        ) is not None
-        assert adapter.mark_episode_pending(
-            "ep-79", retry_after_s=30.0, worker_id="worker-79"
         )
-        assert adapter.count_transient_requeue("ep-79")
+        assert claimed is not None
+        assert adapter.mark_episode_pending(
+            "ep-79",
+            retry_after_s=30.0,
+            worker_id="worker-79",
+            transient_requeue=True,
+            claim_started_at=claimed["processing_started_at"],
+        )
 
     row = adapter.pending_episode_rows["ep-79"]
     assert row["processing_state"] == "PENDING"

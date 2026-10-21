@@ -9,9 +9,9 @@
 #     Dockerfile performs no live git / PyPI / apt resolution; the wheelhouse is
 #     produced once, separately, in a network-enabled CI job:
 #         pip wheel . --wheel-dir deploy/wheelhouse
-#     Every dependency, first-party included, resolves from PyPI against hashes
-#     exported from uv.lock; nothing in the release path is fetched from a git
-#     repository.
+#     Registry dependencies, including the Archolith Graphiti fork, resolve
+#     against hashes exported from uv.lock. The image itself performs no
+#     repository access.
 #   * Fixed non-root UID/GID (MENHIR_UID / MENHIR_GID, default 10001/10001).
 #   * Healthcheck probes /livez, which the production route surface serves when
 #     MENHIR_STARTUP_SCOPE=production.
@@ -20,9 +20,9 @@
 # provenance label from Git and the wheelhouse; operators do not transcribe
 # RELEASE_COMMIT or wheel digests into a raw docker build command.
 #
-# The compose contract (deploy/docker-compose.production.yml) supplies the
-# image reference as the required MENHIR_IMAGE variable; there is no source
-# build on the VPS.
+# The operator's production Compose contract lives in the private
+# Archolith/menhir-deploy repository. It consumes an immutable image reference;
+# there is no source build on the host.
 
 # Declared before FROM so CI can override it; re-checked inside the stage so
 # the build fails closed with a clear message when it is not digest-pinned.
@@ -68,9 +68,8 @@ ENV PYTHONUNBUFFERED=1 \
 # Offline install from the pre-built wheelhouse only. --no-index --no-deps keeps
 # the image build hermetic: the full closure was already resolved and hashed when
 # the wheelhouse was built, so pip must not reach the network to second-guess it.
-# (It was once load-bearing for a different reason -- menhir's metadata recorded
-# the two first-party deps as git+https URLs, which pip would try to re-resolve,
-# demanding git. Both are ordinary PyPI pins now.)
+# --no-deps prevents pip from resolving dependencies again after the wheelhouse
+# closure has been verified.
 # Fail closed if the wheelhouse is empty.
 COPY deploy/lib/verify_wheelhouse.py /usr/local/libexec/verify_wheelhouse.py
 COPY ${WHEELHOUSE_DIR}/ /wheelhouse/

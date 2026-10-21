@@ -21,7 +21,7 @@ logging.basicConfig(
     format="%(asctime)s %(name)s %(levelname)s %(message)s",
 )
 # Focus on retry logs
-logging.getLogger("menhir.infrastructure.graphiti_patches").setLevel(logging.DEBUG)
+logging.getLogger("menhir.infrastructure.graphiti_llm_adapter").setLevel(logging.DEBUG)
 # Quiet other loggers
 logging.getLogger("openai").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -40,12 +40,9 @@ async def main() -> None:
 
     import openai as _openai
     from graphiti_core.llm_client.config import LLMConfig
-    from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
     from graphiti_core.prompts.models import Message
     from graphiti_core.prompts.extract_nodes_and_edges import CombinedExtraction
-
-    import menhir.infrastructure.graphiti_patches as patches
-    patches._patch_graphiti_openai_generic_client(OpenAIGenericClient)
+    from menhir.infrastructure.graphiti_llm_adapter import MenhirOpenAIGenericClient
 
     async_openai = _openai.AsyncOpenAI(api_key=api_key)
 
@@ -57,7 +54,7 @@ async def main() -> None:
     print("TEST 1: Normal extraction (max_tokens=4096)")
     print("=" * 60)
 
-    client = OpenAIGenericClient(
+    client = MenhirOpenAIGenericClient(
         config=LLMConfig(
             api_key=api_key,
             base_url="https://api.openai.com/v1",
@@ -103,7 +100,7 @@ async def main() -> None:
     print("TEST 2: Forced truncation (max_tokens=150) -> escalation")
     print("=" * 60)
 
-    client_small = OpenAIGenericClient(
+    client_small = MenhirOpenAIGenericClient(
         config=LLMConfig(
             api_key=api_key,
             base_url="https://api.openai.com/v1",

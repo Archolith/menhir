@@ -74,9 +74,10 @@ class _Scan:
         self.root_path = root
         self.project_id = project_id
         self.identity_generation = generation
+        self.scan_generation = 1
 
 
-def _adapter(graph, structure):
+def _adapter(graph, structure, monkeypatch):
     """A real MemoryGraphAdapter with its collaborators stubbed.
 
     The adapter itself is NOT stubbed: the guard under test lives in its
@@ -88,6 +89,18 @@ def _adapter(graph, structure):
     adapter = MemoryGraphAdapter.__new__(MemoryGraphAdapter)
     adapter.neo4j = graph
     adapter._structure = structure
+    # This suite pins the identity-admission fence. Model the later transactional writer
+    # seam locally; its scan-generation check and rollback are exercised against Neo4j in
+    # test_gateb_structure_publication_online.py.
+    monkeypatch.setattr(graph, "execute_write", lambda callback: callback(graph), raising=False)
+    monkeypatch.setattr(
+        "menhir.infrastructure.structure_queries.StructureGraphWriter",
+        lambda tx: structure,
+    )
+    monkeypatch.setattr(
+        "menhir.infrastructure.structure_write_fence.lock_structure_project",
+        lambda tx, claim, *, scan_generation=None: None,
+    )
     return adapter
 
 
@@ -96,7 +109,7 @@ def _adapter(graph, structure):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.unit
-def test_a_scan_settled_before_a_transfer_writes_nothing_after_it(graph):
+def test_a_scan_settled_before_a_transfer_writes_nothing_after_it(graph, monkeypatch):
     """Pause X before its write, complete Y, resume X: X is refused and writes zero rows."""
     x = bind_project_identity(graph, project_id="id-x", root_path=ROOT)
     scan = _Scan(x.project_id, x.claim_generation)  # X settles, then "scans for minutes"
@@ -104,7 +117,7 @@ def test_a_scan_settled_before_a_transfer_writes_nothing_after_it(graph):
     bind_project_identity(graph, project_id="id-y", root_path=ROOT, rebind=True)  # Y supersedes X
 
     structure = _Structure()
-    adapter = _adapter(graph, structure)
+    adapter = _adapter(graph, structure, monkeypatch)
 
     with pytest.raises(StaleIdentityClaim, match="no longer the active binding"):
         adapter.write_project_structure(scan, "s", "u")  # X resumes
@@ -113,19 +126,19 @@ def test_a_scan_settled_before_a_transfer_writes_nothing_after_it(graph):
 
 
 @pytest.mark.unit
-def test_the_same_scan_writes_when_its_claim_is_still_current(graph):
+def test_the_same_scan_writes_when_its_claim_is_still_current(graph, monkeypatch):
     """The negative control. Without it the test above passes on a writer that refuses always."""
     x = bind_project_identity(graph, project_id="id-x", root_path=ROOT)
     scan = _Scan(x.project_id, x.claim_generation)
 
     structure = _Structure()
-    _adapter(graph, structure).write_project_structure(scan, "s", "u")
+    _adapter(graph, structure, monkeypatch).write_project_structure(scan, "s", "u")
 
     assert structure.writes == ["proj"]
 
 
 @pytest.mark.unit
-def test_a_non_null_id_alone_does_not_authorise_a_write(graph):
+def test_a_non_null_id_alone_does_not_authorise_a_write(graph, monkeypatch):
     """What the old check accepted. ``project_id`` is populated and the identity is genuinely the
     active binding again; only the generation records that the directory changed hands twice in
     between, and that the scan in hand predates both."""
@@ -139,27 +152,27 @@ def test_a_non_null_id_alone_does_not_authorise_a_write(graph):
     assert graph.nodes["id-x"]["state"] == "bound", "id-x IS the active binding again"
 
     with pytest.raises(StaleIdentityClaim):
-        _adapter(graph, structure).write_project_structure(scan, "s", "u")
+        _adapter(graph, structure, monkeypatch).write_project_structure(scan, "s", "u")
     assert structure.writes == []
 
 
 @pytest.mark.unit
-def test_a_claim_for_a_different_directory_is_refused(graph):
+def test_a_claim_for_a_different_directory_is_refused(graph, monkeypatch):
     """The claim must authorise the directory the SCAN describes, not merely exist."""
     x = bind_project_identity(graph, project_id="id-x", root_path=ROOT)
     structure = _Structure()
     scan = _Scan(x.project_id, x.claim_generation, root="/srv/somewhere-else")
 
     with pytest.raises(StaleIdentityClaim):
-        _adapter(graph, structure).write_project_structure(scan, "s", "u")
+        _adapter(graph, structure, monkeypatch).write_project_structure(scan, "s", "u")
     assert structure.writes == []
 
 
 @pytest.mark.unit
-def test_an_id_less_scan_is_still_refused_before_any_claim_is_built(graph):
+def test_an_id_less_scan_is_still_refused_before_any_claim_is_built(graph, monkeypatch):
     structure = _Structure()
     with pytest.raises(ValueError, match="no structure_project_id"):
-        _adapter(graph, structure).write_project_structure(_Scan(None, 0), "s", "u")
+        _adapter(graph, structure, monkeypatch).write_project_structure(_Scan(None, 0), "s", "u")
     assert structure.writes == []
 
 

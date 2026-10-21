@@ -33,6 +33,8 @@ class RecordingNeo4j:
         self, query: str, params: dict[str, Any] | None = None
     ) -> list[dict[str, Any]]:
         self.calls.append((query, params or {}))
+        if "RETURN count(p) AS updated" in query:
+            return [{"updated": 1}]
         return []
 
 

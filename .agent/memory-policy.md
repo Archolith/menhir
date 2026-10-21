@@ -6,6 +6,92 @@ Use this file first when you need behavior and policy without loading the full d
 
 ## Scope
 
+### Independent recall acquisition (#154)
+
+An empty or failed base semantic search does not conclude recall. File-linked context, enabled observation
+and assertion/history lanes, and enabled fact-edge lanes first acquire their own bounded candidates. Ordinary
+metadata/session/namespace/View admission and scoring still apply. Pending-only/empty fallback is assembled
+after standalone edge candidates, so it cannot mask an eligible independent source. Preserve the base search
+error and incomplete-results warning even when another source succeeds; disabled lanes remain disabled.
+
+### Bounded decay progress (#144)
+
+The oldest eligible batch can contain records that policy or runtime repeatedly skips. Rotate bounded batches
+by least-recent selection, using a native `decay_last_selected_at` property on existing Entity nodes, with
+creation time and UUID as stable ties. Unselected or invalid-marker records come first. A separate batch marker
+write after acquisition records selection before processing; it never claims successful compression and never
+touches access time, age, sharpness, flags, or eligibility. Keep acquisition read-only for inspection callers.
+
+This extends the existing consolidation repository and lifecycle sweep, without a new cursor store, graph
+label, migration, or unbounded scan loop. Persistent markers survive a service restart and skipped records
+return after the other eligible batches. An aborted selected batch is retried on a later rotation. Existing
+500-record per-phase limits and all acquisition/mutation protection gates remain. Selection counts in logs
+must be distinguished from recalculation/compression/deletion counts. Old workers do not honor this ordering;
+single-runtime rollout is required for the scheduling behavior. Under a finite, stable eligible set every
+batch eventually receives a turn; continuous unbounded arrivals do not imply a fairness guarantee.
+
+If the selection marker cannot be written, abort before processing that batch. Selection is not a lease;
+concurrent workers retain the existing process/service coordination contract. A selection mark written before
+a crash may delay a retry until the next rotation, but never changes whether a destructive mutation is allowed.
+
+### Chronological memory timestamps (#145)
+
+The four generic memory lists (recent, flagged bootstrap, scope, and type) must order by the actual access
+instant, falling back to creation time when access time is missing or malformed. Valid legacy ISO strings
+and native Neo4j timestamps remain readable before any data backfill. Unknown dates sort after known dates;
+equal instants use UUID as the tie-break. Filtering and limits remain in the database.
+
+New writes to recallable memory nodes use native Neo4j zoned datetimes. Graphiti and existing Cypher-native
+writers already do this; direct TEMPORAL, candidate, L4, TODO-reminder mirror, and View refresh paths stamp
+native dates too. Dedicated TODO/WorkArtifact metadata and structural-only records retain their separate contracts.
+
+Use a shared guarded Cypher conversion, with explicit calendar/time validation before parsing legacy text;
+do not introduce APOC or a new stored sort key. Missing timezone/local date values are interpreted as UTC.
+The age predicates that consume these memory properties use the same conversion; an unknown age cannot
+justify destructive decay. This provides compatibility while old application versions may still write text.
+No startup schema rewrite or production backfill is part of the fix. Any optional conversion of existing
+properties must be bounded, previewed, backed up, and applied manually after approval.
+
+Compatibility accepts extended ISO calendar dates and date-times with seconds, up to nine fractional digits,
+and `Z` or numeric offsets through +/-18:00. Native zone annotations retain their explicit offset. Date-only
+and naive/local values mean UTC. Invalid dates, unsupported types, and unsupported timestamp spellings are
+unknown; valid creation time supplies the fallback. Returned properties retain their original stored values.
+
+Writer census: Graphiti persistence, episode lifecycle, schema missing-value fills, and recall touches already
+use native dates. The five direct repositories above are aligned by this change. Schema startup deliberately
+does not rewrite existing strings. Older deployed binaries, manual imports, and arbitrary property-map inputs
+can still introduce text; this is a compatible reader policy, not a database type constraint.
+
+Optional manual normalization: first deploy the compatible readers and align/drain old writers. Back up the
+graph, preview a bounded explicit UUID manifest of non-structural Entity/Episodic properties, and compute each
+proposed value with `memory_timestamp_cypher`; reject unknown values for individual review. Apply only reviewed
+values in small transactions that recheck namespace, labels, and the original property before writing; skip
+concurrent changes. Reread the converted manifest, compare instants and list ordering, then repeat the inventory
+until no reviewed legacy values remain. Never replace an invalid date with the current time. No conversion is
+executed by this PR. Such a backfill needs its own reviewed maintenance command and authorization.
+
+Separate relevance scoring still uses `domain.utils.days_ago`, which defaults legacy ISO text to 30 days.
+This PR fixes chronological lists and database age predicates, not that scoring contract. Converting stored
+text to native dates can therefore change relevance/sharpness scores; preview that effect before any backfill.
+
+### Generic reads of completed and superseded memories (#143)
+
+Generic recall, recent/startup context, resources, and REST reads keep history searchable. They carry the
+stored `status`, `artifact_status`, and `superseded_by` fields without changing original content or ranking.
+An explicit `status=completed` is labeled as historical context, not an outstanding obligation. An
+`artifact_status=historical` or nonblank `superseded_by` is labeled as superseded content, not current guidance.
+Text context retains that label in the same budgeted item as its content, including clipped timelines and
+pinned hook output. Context deduplication preserves records with distinct lifecycle states.
+
+Absent, blank, and unknown state values do not invent completion or supersession. Open reminders and trusted
+artifacts retain their ordinary presentation. Dedicated reminder lists continue to include only open records;
+explicit UUID inspection remains available for historical records. A timeline's current-belief marker describes
+fact belief time, not an outstanding task, and uses that explicit wording on historical memories.
+
+These fields already exist on TEMPORAL and L4 institutional artifact nodes. This change requires no database
+migration and does not activate the L4 production flow or change the separate WorkArtifact lifecycle. Readers
+observe the state acquired during their read; a concurrent close/supersession is reflected on a subsequent read.
+
 This file covers:
 
 - graph semantics
@@ -121,6 +207,20 @@ Key points:
 - `PERSISTENT` is durable memory
 - `PROMOTED` is protected durable memory with higher retention weight
 
+Semantic recall applies the same SESSION admission to enriched entities and pending source
+fallbacks. `include_session=False` excludes SESSION records. With inclusion enabled and a
+caller session id, only that session's stamped records qualify; missing owners are excluded.
+Runtime recall uses the request session, falling back to the process session. Direct sessionless
+reads with inclusion enabled retain the existing broad opt-in, including ownerless records.
+The stdio HTTP bridge forwards the same session used for writes in `x-menhir-session-id`,
+which trusted-header auth modes honor. OAuth continues deriving session identity from verified
+claims and ignores this header. A new stdio process starts a new conversation; promote a memory
+before expecting it to remain available across that restart.
+PERSISTENT/PROMOTED records remain eligible under their other guards. Missing/blank pending scope
+is treated as SESSION. Pending selection filters before its limit and rechecks refreshed records
+before exposing pending content or injecting READY-linked entities. Session identity is a
+conversation-context selector; credential-bound namespaces remain the authorization boundary.
+
 Detail notes:
 - session writes may be journal-first or graph-first, but the semantic distinction is the same: session scope is the working layer before durable retention
 - queue state, retries, and audit trails are increasingly sidecar concerns even though semantic truth stays in the graph
@@ -147,6 +247,9 @@ Detail notes:
 - compression should preserve fallback access to richer content long enough to recover from bad summaries
 - contradiction handling should keep both versions until resolution instead of silently overwriting the older one
 - sharpness thresholds, prominence brakes, and rehydration rules together define when a memory is safe, compressible, or recoverable
+- decay age pre-filters use the minimum compression/deletion days among non-exempt type policies,
+  derived at process startup. Exempt IDENTITY thresholds do not lower those minima; zero thresholds
+  on a non-exempt policy do. Policy edits require a process restart.
 - materialized Views are governed by their fold/projection lifecycle, not ordinary memory decay; generic compression and deletion must exclude them
 - a current FACT View's `MENTIONS` links retain its `:Episodic`/`:TurnEvidence` contributors from automatic orphan cleanup; a durable contributor UUID without a live evidence node is an audit receipt, not recall authority
 - explicit erasure still wins: it retires dependent current Views, scrubs erased contributor UUIDs from retained versions, and resets projection watermarks atomically before deleting evidence

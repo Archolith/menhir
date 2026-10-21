@@ -530,3 +530,34 @@ def test_collect_episode_status_timeout():
         assert len(history) >= 1
 
     asyncio.run(_test())
+@pytest.mark.parametrize("state,note", [
+    ({"status": "completed"}, "not an outstanding obligation"),
+    ({"artifact_status": "historical"}, "not current guidance"),
+    ({"superseded_by": "replacement"}, "not current guidance"),
+    ({"status": "open", "artifact_status": "trusted"}, None),
+    ({"status": "unknown", "artifact_status": "unknown", "superseded_by": " "}, None),
+    ({}, None),
+])
+def test_lifecycle_state_in_raw_scored_and_resource_reads(state, note):
+    from types import SimpleNamespace
+    from menhir.mcp.formatters import _compact_memory_item, _compact_scored_item
+    from menhir.mcp.resources import _normalize_memory_row, _normalize_scored_result
+
+    row = {"uuid": "m", "name": "instruction", "content": "Original instruction", **state}
+    outputs = [
+        _compact_memory_item(row, tag="recent"),
+        _compact_memory_item(row, tag="flagged"),
+        _compact_scored_item(SimpleNamespace(**row), compact=True),
+        _compact_scored_item(SimpleNamespace(**row)),
+        _normalize_memory_row(row), _normalize_memory_row(row, detail=True),
+        _normalize_scored_result(row), _normalize_scored_result(SimpleNamespace(**row)),
+    ]
+    for item in outputs:
+        for key, value in state.items():
+            assert item[key] == value
+        assert item["summary"] == "Original instruction"
+        if note:
+            assert note in item["lifecycle_note"]
+        else:
+            assert "lifecycle_note" not in item
+    assert outputs[5]["content"] == row["content"]

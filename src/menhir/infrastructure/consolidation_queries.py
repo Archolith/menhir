@@ -12,14 +12,17 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
 from menhir.domain.recall import adjacency_edge_pattern
-from menhir.infrastructure.cypher import Cypher, non_derived_view_cypher
+from menhir.domain.retention import destructive_retention_allowed_cypher
+from menhir.infrastructure.cypher import (
+    Cypher, memory_recency_cypher, memory_timestamp_cypher, non_derived_view_cypher,
+)
 from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S, Neo4jRepository
 
 logger = logging.getLogger(__name__)
 
-# Bounded per run so the decay sweep can't stall indefinitely; the stable
-# ORDER BY means successive runs make forward progress.
+# Bounded per run; least-recent selection rotates past records skipped by policy.
 _DECAY_CANDIDATE_LIMIT = 500
 
 
@@ -38,6 +41,15 @@ def automatic_lifecycle_protection_cypher(variable: str = "n") -> str:
         "WHERE coalesce(retaining_view.is_view, false) "
         "AND coalesce(retaining_view.view_current, retaining_view.qs_current, true) "
         "AND NOT coalesce(retaining_view.retired, false) }"
+    )
+
+
+def harmful_automatic_mutation_allowed_cypher(variable: str = "n") -> str:
+    """Guard destructive automation without changing beneficial lifecycle behavior."""
+
+    return (
+        f"{automatic_lifecycle_protection_cypher(variable)} "
+        f"AND {destructive_retention_allowed_cypher(variable)}"
     )
 
 
@@ -207,11 +219,11 @@ class ConsolidationRepository:
             .match("(n:Entity)")
             .where("n.scope = 'PERSISTENT'",
                    "n.freshness = $freshness",
-                   "coalesce(n.user_flagged, false) = false",
-                   automatic_lifecycle_protection_cypher("n"),
-                   "coalesce(n.last_accessed, n.created_at) < datetime() - duration({days: $min_days_since_accessed})",
+                   harmful_automatic_mutation_allowed_cypher("n"),
+                   f"{memory_recency_cypher()} < datetime() - duration({{days: $min_days_since_accessed}})",
                    "coalesce(toInteger(n.edge_count), 0) < $max_edge_count")
             .where_if(max_sharpness is not None, "n.sharpness IS NOT NULL AND toFloat(n.sharpness) < $max_sharpness")
+            .with_clause(f"n, {memory_timestamp_cypher('n.decay_last_selected_at')} AS selected_at")
             .return_raw("""n.uuid AS uuid,
        n.type AS type,
        n.name AS name,
@@ -227,7 +239,11 @@ class ConsolidationRepository:
        coalesce(toInteger(n.rehydration_count), 0) AS rehydration_count,
        CASE WHEN n.target_date IS NOT NULL AND date(n.target_date) < date() THEN true ELSE false END AS target_date_passed,
        n.created_at AS created_at""")
-            .order_by("coalesce(n.created_at, n.last_accessed) ASC, n.uuid")
+            .order_by(
+                f"selected_at IS NOT NULL ASC, selected_at ASC, "
+                f"coalesce({memory_timestamp_cypher('n.created_at')}, "
+                f"{memory_timestamp_cypher('n.last_accessed')}) ASC, n.uuid"
+            )
             .limit()
             .build())
         params: dict[str, object] = {
@@ -240,13 +256,27 @@ class ConsolidationRepository:
             params["max_sharpness"] = max_sharpness
         return self.neo4j.execute(query, params=params)
 
+    def mark_decay_candidates_selected(self, node_uuids: list[str]) -> int:
+        """Persist scheduling progress, independently of eligibility or processing success."""
+        if not node_uuids:
+            return 0
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Entity) WHERE n.uuid IN $uuids
+            SET n.decay_last_selected_at = datetime()
+            RETURN count(n) AS marked
+            """,
+            {"uuids": list(dict.fromkeys(node_uuids))},
+        )
+        return int(rows[0].get("marked", 0)) if rows else 0
+
     def compress_node(self, node_uuid: str, compressed_summary: str) -> bool:
         """Transition a PERSISTENT ACTIVE node to COMPRESSED with a summary."""
 
         query = (Cypher()
             .match("(n:Entity {uuid: $node_uuid})")
             .where("n.scope = 'PERSISTENT'", "n.freshness = 'ACTIVE'",
-                   automatic_lifecycle_protection_cypher("n"))
+                   harmful_automatic_mutation_allowed_cypher("n"))
             .set(("n.original_content = coalesce(n.original_content, n.content)",
                   "n.content = $compressed_summary",
                   "n.freshness = 'COMPRESSED'"))
@@ -328,7 +358,9 @@ class ConsolidationRepository:
             WITH n, coalesce(edges_bridged, 0) AS edges_bridged
             DETACH DELETE n
             RETURN edges_bridged AS edges_bridged, 1 AS deleted
-            """.replace("__NON_DERIVED_VIEW__", automatic_lifecycle_protection_cypher("n"))
+            """.replace(
+                "__NON_DERIVED_VIEW__", harmful_automatic_mutation_allowed_cypher("n")
+            )
         rows = self.neo4j.execute(
             query,
             params={"node_uuid": node_uuid},
@@ -377,7 +409,10 @@ class ConsolidationRepository:
             .match("(n:Entity)")
             .where("n.scope = 'SESSION'", automatic_lifecycle_protection_cypher("n"))
             .where_if(session_id is not None, "n.session_id = $session_id")
-            .where_if(max_age_hours > 0, "n.created_at < datetime() - duration({hours: $max_age_hours})")
+            .where_if(
+                max_age_hours > 0,
+                f"{memory_timestamp_cypher('n.created_at')} < datetime() - duration({{hours: $max_age_hours}})",
+            )
             .return_raw("""n.uuid AS uuid,
        n.name AS name,
        n.content AS content,
@@ -389,7 +424,7 @@ class ConsolidationRepository:
        coalesce(n.namespace, 'default') AS namespace,
        n.created_at AS created_at,
        n.ttl_expires AS ttl_expires""")
-            .order_by("n.created_at ASC")
+            .order_by(f"{memory_timestamp_cypher('n.created_at')} ASC, n.uuid")
             .build())
         return self.neo4j.execute(query, params=params)
 
@@ -443,7 +478,7 @@ class ConsolidationRepository:
         query = (Cypher()
             .match("(n:Entity)")
             .where("n.uuid IN $uuids", "n.scope = 'SESSION'",
-                   automatic_lifecycle_protection_cypher("n"))
+                   harmful_automatic_mutation_allowed_cypher("n"))
             .detach_delete("n")
             .return_raw("count(n) AS deleted")
             .build())
@@ -451,7 +486,11 @@ class ConsolidationRepository:
         return int(rows[0].get("deleted", 0)) if rows else 0
 
     def delete_entities_returning_uuids(
-        self, node_uuids: list[str], *, require_scope: str | None = None
+        self,
+        node_uuids: list[str],
+        *,
+        require_scope: str | None = None,
+        protect_retention: bool = False,
     ) -> list[str]:
         """DETACH DELETE the given Entity nodes and return the uuids ACTUALLY deleted (plan Phase 6).
 
@@ -467,11 +506,16 @@ class ConsolidationRepository:
         params: dict[str, Any] = {"uuids": node_uuids}
         if require_scope:
             params["scope"] = require_scope
+        protection = (
+            harmful_automatic_mutation_allowed_cypher("n")
+            if protect_retention
+            else automatic_lifecycle_protection_cypher("n")
+        )
         rows = self.neo4j.execute(
             f"""
             MATCH (n:Entity)
             WHERE n.uuid IN $uuids {scope_clause}
-              AND {automatic_lifecycle_protection_cypher("n")}
+              AND {protection}
             WITH collect(n) AS doomed, collect(n.uuid) AS deleted_uuids
             FOREACH (d IN doomed | DETACH DELETE d)
             RETURN deleted_uuids
@@ -517,31 +561,17 @@ class ConsolidationRepository:
         if not node_uuids:
             return 0
 
-        # Count nodes in the set that currently have NO ttl_expires (newly demoted).
-        pre_count_rows = self.neo4j.execute(
-            """
-            MATCH (n:Entity)
-            WHERE n.uuid IN $uuids AND n.scope = 'SESSION' AND n.ttl_expires IS NULL
-              AND __AUTOMATIC_LIFECYCLE_PROTECTION__
-            RETURN count(n) AS newly_demoted_count
-            """.replace(
-                "__AUTOMATIC_LIFECYCLE_PROTECTION__",
-                automatic_lifecycle_protection_cypher("n"),
-            ),
-            params={"uuids": node_uuids},
-        )
-        newly_demoted_count = int(pre_count_rows[0].get("newly_demoted_count", 0)) if pre_count_rows else 0
-
-        # Apply coalesce: only set if not already set.
+        # Decide and mutate in one statement so a source flag added after candidate discovery
+        # cannot race the TTL write.
         query = (Cypher()
             .match("(n:Entity)")
-            .where("n.uuid IN $uuids", "n.scope = 'SESSION'",
-                   automatic_lifecycle_protection_cypher("n"))
-            .set("n.ttl_expires = coalesce(n.ttl_expires, datetime() + duration({days: $days}))")
-            .return_raw("count(n) AS updated")
+            .where("n.uuid IN $uuids", "n.scope = 'SESSION'", "n.ttl_expires IS NULL",
+                   harmful_automatic_mutation_allowed_cypher("n"))
+            .set("n.ttl_expires = datetime() + duration({days: $days})")
+            .return_raw("count(n) AS newly_demoted_count")
             .build())
-        self.neo4j.execute(query, params={"uuids": node_uuids, "days": ttl_days})
-        return newly_demoted_count
+        rows = self.neo4j.execute(query, params={"uuids": node_uuids, "days": ttl_days})
+        return int(rows[0].get("newly_demoted_count", 0)) if rows else 0
 
     def fetch_ttl_expired_session_uuids(
         self,
@@ -561,7 +591,7 @@ class ConsolidationRepository:
             .where("n.scope = 'SESSION'",
                    "n.ttl_expires IS NOT NULL",
                    "n.ttl_expires < datetime()",
-                   automatic_lifecycle_protection_cypher("n"))
+                   harmful_automatic_mutation_allowed_cypher("n"))
             .where_if(session_id is not None, "n.session_id = $session_id")
             .return_raw("""n.uuid AS uuid,
        n.name AS name,
@@ -731,7 +761,11 @@ class ConsolidationRepository:
         """
         safe_limit = max(1, min(limit, 200))
         ns = str(namespace).strip() if namespace is not None else ""
-        params: dict[str, Any] = {"status": status, "limit": safe_limit, "namespace": ns or None}
+        params: dict[str, Any] = {
+            "status": status,
+            "limit": safe_limit,
+            **tenant_scope_params(ns or None),
+        }
 
         # Filtered POST-aggregation. A group's age is min(conflict_created_at) over its members,
         # so a member-level predicate would change what min() sees and could age a group by a
@@ -751,7 +785,7 @@ class ConsolidationRepository:
             MATCH (n:Entity)
             WHERE n.conflict_group_id IS NOT NULL
               AND ($status IS NULL OR n.conflict_status = $status)
-              AND ($namespace IS NULL OR coalesce(n.namespace, 'default') = $namespace)
+              AND {tenant_scope_cypher("n")}
               AND {automatic_lifecycle_protection_cypher("n")}
             WITH n.conflict_group_id AS group_id,
                  min(n.conflict_created_at) AS created_at,
@@ -785,57 +819,31 @@ class ConsolidationRepository:
         """
         return self.list_conflict_groups(status=status, limit=limit)
 
-    def bridge_edges_for_node(self, node_uuid: str) -> int:
+    def bridge_edges_for_node(
+        self, node_uuid: str, *, namespace: str | None = None
+    ) -> int:
         """Bridge edges around a single GONE node without deleting it.
 
         Called immediately after setting ``freshness = 'GONE'`` during manual
         conflict resolution so that the removed node's former neighbors are
         reconnected before the 24 h decay sweep runs.
 
-        Excludes ANCHORED_TO edges and structural neighbors from bridging.
+        Excludes ANCHORED_TO edges and structural neighbors from bridging. When
+        ``namespace`` is supplied, the node and its neighbors stay in that silo.
         """
-        query = """
-            MATCH (n:Entity {uuid: $node_uuid})
-            WHERE n.freshness = 'GONE'
-              AND __AUTOMATIC_LIFECYCLE_PROTECTION__
-            CALL {
-                WITH n
-                OPTIONAL MATCH (n)-[r]-(neighbor:Entity)
-                WHERE NOT type(r) = 'ANCHORED_TO'
-                  AND neighbor.structure_role IS NULL
-                WITH collect(DISTINCT neighbor) AS neighbors
-                UNWIND neighbors AS a
-                UNWIND neighbors AS b
-                WITH a, b WHERE a.uuid < b.uuid
-                MERGE (a)-[r:RELATES_TO]->(b)
-                ON CREATE SET r.type = 'bridged',
-                              r.bridged_from = $node_uuid,
-                              r.weight = 1.0,
-                              r.source = 'system-derived',
-                              r.scope = 'PERSISTENT',
-                              r.created_at = datetime(),
-                              r.last_traversed = datetime()
-                RETURN count(*) AS edges_bridged
-            }
-            RETURN coalesce(edges_bridged, 0) AS edges_bridged
-            """.replace(
-                "__AUTOMATIC_LIFECYCLE_PROTECTION__",
-                automatic_lifecycle_protection_cypher("n"),
-            )
-        rows = self.neo4j.execute(
-            query,
-            params={"node_uuid": node_uuid},
-        )
-        return int(rows[0].get("edges_bridged", 0)) if rows else 0
+        return self.bridge_edges_for_nodes([node_uuid], namespace=namespace)
 
-    def bridge_edges_for_nodes(self, node_uuids: list[str]) -> int:
+    def bridge_edges_for_nodes(
+        self, node_uuids: list[str], *, namespace: str | None = None
+    ) -> int:
         """Bridge edges around multiple GONE nodes efficiently in one query.
 
         Called immediately after setting ``freshness = 'GONE'`` during manual
         conflict resolution so that the removed nodes' former neighbors are
         reconnected before the 24 h decay sweep runs.
 
-        Excludes ANCHORED_TO edges and structural neighbors from bridging.
+        Excludes ANCHORED_TO edges and structural neighbors from bridging. When
+        ``namespace`` is supplied, all participants are restricted to that silo.
         """
         if not node_uuids:
             return 0
@@ -844,16 +852,21 @@ class ConsolidationRepository:
             UNWIND $node_uuids AS node_uuid
             MATCH (n:Entity {uuid: node_uuid})
             WHERE n.freshness = 'GONE'
+              AND __TENANT_NODE_SCOPE__
               AND __AUTOMATIC_LIFECYCLE_PROTECTION__
             CALL {
                 WITH n, node_uuid
                 OPTIONAL MATCH (n)-[r]-(neighbor:Entity)
                 WHERE NOT type(r) = 'ANCHORED_TO'
                   AND neighbor.structure_role IS NULL
+                  AND __TENANT_NEIGHBOR_SCOPE__
                 WITH node_uuid, collect(DISTINCT neighbor) AS neighbors
                 UNWIND neighbors AS a
                 UNWIND neighbors AS b
-                WITH node_uuid, a, b WHERE a.uuid < b.uuid
+                WITH node_uuid, a, b
+                WHERE a.uuid < b.uuid
+                  AND __TENANT_A_SCOPE__
+                  AND __TENANT_B_SCOPE__
                 MERGE (a)-[r:RELATES_TO]->(b)
                 ON CREATE SET r.type = 'bridged',
                               r.bridged_from = node_uuid,
@@ -868,10 +881,18 @@ class ConsolidationRepository:
             """.replace(
                 "__AUTOMATIC_LIFECYCLE_PROTECTION__",
                 automatic_lifecycle_protection_cypher("n"),
+            ).replace(
+                "__TENANT_NODE_SCOPE__", tenant_scope_cypher("n"),
+            ).replace(
+                "__TENANT_NEIGHBOR_SCOPE__", tenant_scope_cypher("neighbor"),
+            ).replace(
+                "__TENANT_A_SCOPE__", tenant_scope_cypher("a"),
+            ).replace(
+                "__TENANT_B_SCOPE__", tenant_scope_cypher("b"),
             )
         rows = self.neo4j.execute(
             query,
-            params={"node_uuids": node_uuids},
+            params={"node_uuids": node_uuids, **tenant_scope_params(namespace)},
         )
         return int(rows[0].get("total_edges_bridged", 0)) if rows else 0
 
@@ -884,6 +905,7 @@ class ConsolidationRepository:
         remove_uuid: str | None = None,
         resolution_status: str = "resolved",
         allow_promoted_removal: bool = False,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         """Resolve a conflict group via one of three actions.
 
@@ -896,6 +918,9 @@ class ConsolidationRepository:
         ``resolution_status`` defaults to ``'resolved'``; pass ``'auto-resolved'``
         for the scheduler auto-resolve path (single write, no intermediate state).
 
+        ``namespace`` is opt-in. When supplied, every read and mutation is
+        restricted to that silo, including mixed legacy groups.
+
         Returns a summary dict with action, group_id, resolved count, and
         remove_uuid when applicable.
         """
@@ -903,28 +928,39 @@ class ConsolidationRepository:
         if action not in _VALID_ACTIONS:
             raise ValueError(f"Invalid action {action!r}; must be one of {_VALID_ACTIONS}")
 
+        ns = str(namespace).strip() if namespace is not None else ""
+        namespace_value = ns or None
+        namespace_predicate = tenant_scope_cypher("n")
+        namespace_params = tenant_scope_params(namespace_value)
+
         # Prefetch member UUIDs before any mutation (needed for suppression recording)
         prefetch_rows = self.neo4j.execute(
             (Cypher()
                 .match("(n:Entity)")
                 .where("n.conflict_group_id = $group_id",
+                       namespace_predicate,
                        automatic_lifecycle_protection_cypher("n"))
                 .return_raw("n.uuid AS uuid")
                 .build()),
-            params={"group_id": conflict_group_id},
+            params={"group_id": conflict_group_id, **namespace_params},
         )
-        prefetched_member_uuids = [str(r["uuid"]) for r in prefetch_rows if r.get("uuid")]
+        prefetched_member_uuids = sorted(str(r["uuid"]) for r in prefetch_rows if r.get("uuid"))
 
         if action == "keep_both":
             rows = self.neo4j.execute(
                 (Cypher()
                     .match("(n:Entity)")
                     .where("n.conflict_group_id = $group_id",
+                           namespace_predicate,
                            automatic_lifecycle_protection_cypher("n"))
                     .set(("n.conflict_status = $resolution_status", "n.conflict_group_id = null"))
                     .return_raw("count(n) AS resolved")
                     .build()),
-                params={"group_id": conflict_group_id, "resolution_status": resolution_status},
+                params={
+                    "group_id": conflict_group_id,
+                    "resolution_status": resolution_status,
+                    **namespace_params,
+                },
             )
             resolved = int(rows[0].get("resolved", 0)) if rows else 0
             return {
@@ -944,10 +980,11 @@ class ConsolidationRepository:
             (Cypher()
                 .match("(n:Entity)")
                 .where("n.conflict_group_id = $group_id",
+                       namespace_predicate,
                        automatic_lifecycle_protection_cypher("n"))
                 .return_raw("n.uuid AS uuid, n.scope AS scope, n.name AS name")
                 .build()),
-            params={"group_id": conflict_group_id},
+            params={"group_id": conflict_group_id, **namespace_params},
         )
         member_uuids = {str(row.get("uuid") or "") for row in members if row.get("uuid")}
         if keep_uuid not in member_uuids:
@@ -986,10 +1023,11 @@ class ConsolidationRepository:
         keep_rows = self.neo4j.execute(
             (Cypher()
                 .match("(n:Entity)")
-                .where("n.uuid = $uuid", automatic_lifecycle_protection_cypher("n"))
+                .where("n.uuid = $uuid", namespace_predicate,
+                       automatic_lifecycle_protection_cypher("n"))
                 .return_raw("n.content AS content, n.original_content AS original_content")
                 .build()),
-            params={"uuid": keep_uuid},
+            params={"uuid": keep_uuid, **namespace_params},
         )
         keep_content: str = (keep_rows[0].get("content") or "") if keep_rows else ""
 
@@ -998,10 +1036,11 @@ class ConsolidationRepository:
             remove_rows = self.neo4j.execute(
                 (Cypher()
                     .match("(n:Entity)")
-                    .where("n.uuid = $uuid", automatic_lifecycle_protection_cypher("n"))
+                    .where("n.uuid = $uuid", namespace_predicate,
+                           automatic_lifecycle_protection_cypher("n"))
                     .return_raw("n.content AS content")
                     .build()),
-                params={"uuid": target_uuid},
+                params={"uuid": target_uuid, **namespace_params},
             )
             remove_content: str = (remove_rows[0].get("content") or "") if remove_rows else ""
 
@@ -1025,11 +1064,17 @@ class ConsolidationRepository:
                 self.neo4j.execute(
                     (Cypher()
                         .match("(n:Entity)")
-                        .where("n.uuid = $uuid", automatic_lifecycle_protection_cypher("n"))
+                        .where("n.uuid = $uuid", namespace_predicate,
+                               automatic_lifecycle_protection_cypher("n"))
                         .set(("n.content = $content",
                               "n.original_content = coalesce(n.original_content, $original)"))
                         .build()),
-                    params={"uuid": keep_uuid, "content": merged, "original": keep_content},
+                    params={
+                        "uuid": keep_uuid,
+                        "content": merged,
+                        "original": keep_content,
+                        **namespace_params,
+                    },
                 )
                 logger.debug(
                     "Content absorbed from %s into %s (%d chars appended)",
@@ -1044,6 +1089,7 @@ class ConsolidationRepository:
             (Cypher()
                 .match("(n:Entity)")
                 .where("n.conflict_group_id = $group_id", "n.uuid IN $remove_uuids",
+                       namespace_predicate,
                        automatic_lifecycle_protection_cypher("n"))
                 .set(("n.freshness = 'GONE'",
                       "n.conflict_status = $resolution_status",
@@ -1054,22 +1100,28 @@ class ConsolidationRepository:
                 "group_id": conflict_group_id,
                 "remove_uuids": remove_uuids,
                 "resolution_status": resolution_status,
+                **namespace_params,
             },
         )
         removed_uuids = []
         if gone_rows:
-            removed_uuids = [str(uuid) for uuid in (gone_rows[0].get("removed_uuids") or []) if str(uuid)]
+            removed_uuids = sorted(str(uuid) for uuid in (gone_rows[0].get("removed_uuids") or []) if str(uuid))
 
         # --- Step 2: resolve all remaining group members ---
         rows = self.neo4j.execute(
             (Cypher()
                 .match("(n:Entity)")
                 .where("n.conflict_group_id = $group_id",
+                       namespace_predicate,
                        automatic_lifecycle_protection_cypher("n"))
                 .set(("n.conflict_status = $resolution_status", "n.conflict_group_id = null"))
                 .return_raw("count(n) AS resolved")
                 .build()),
-            params={"group_id": conflict_group_id, "resolution_status": resolution_status},
+            params={
+                "group_id": conflict_group_id,
+                "resolution_status": resolution_status,
+                **namespace_params,
+            },
         )
         resolved = int(rows[0].get("resolved", 0)) if rows else 0
 
@@ -1077,18 +1129,21 @@ class ConsolidationRepository:
             self.neo4j.execute(
                 (Cypher()
                     .match("(n:Entity)")
-                    .where("n.uuid = $keep_uuid", automatic_lifecycle_protection_cypher("n"))
+                    .where("n.uuid = $keep_uuid", namespace_predicate,
+                           automatic_lifecycle_protection_cypher("n"))
                     .set(("n.sharpness = CASE"
                           " WHEN n.sharpness IS NULL THEN 0.0"
                           " WHEN toFloat(n.sharpness) - 0.1 < 0.0 THEN 0.0"
                           " ELSE toFloat(n.sharpness) - 0.1 END",
                           "n.pending_review = true"))
                     .build()),
-                params={"keep_uuid": keep_uuid},
+                params={"keep_uuid": keep_uuid, **namespace_params},
             )
 
         # --- Immediate edge bridge (avoid 24 h dead zone) ---
-        bridged_total = self.bridge_edges_for_nodes(removed_uuids)
+        bridged_total = self.bridge_edges_for_nodes(
+            removed_uuids, namespace=namespace_value
+        )
 
         return {
             "action": action,

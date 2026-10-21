@@ -395,8 +395,15 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
 
     personal_memory_enabled = getattr(settings, "personal_memory_consolidation_enabled", False)
     event_history_enabled = getattr(settings, "personal_memory_event_history_enabled", False)
+    scalar_state_enabled = getattr(settings, "personal_memory_scalar_state_enabled", False)
+    counting_enabled = getattr(settings, "personal_memory_counting_enabled", False)
+    if counting_enabled and not scalar_state_enabled:
+        logger.warning(
+            "personal-memory counting enabled but scalar state is disabled; "
+            "counting needs scalar state and will do nothing")
     personal_memory_llm = None
-    if (personal_memory_enabled or event_history_enabled) and settings is not None:
+    if (personal_memory_enabled or event_history_enabled or scalar_state_enabled
+            or counting_enabled) and settings is not None:
         from menhir.infrastructure.sync_llm import make_sync_chat
 
         pm_model = getattr(settings, "personal_memory_consolidation_chat_model", "") or None
@@ -407,7 +414,7 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
                 settings, "personal_memory_consolidation_disable_reasoning", False)))
         if personal_memory_llm is None:
             logger.warning(
-                "personal-memory consolidation or event history enabled but no sync chat provider; job disabled")
+                "personal-memory consolidation, event history, or scalar state enabled but no sync chat provider; job disabled")
 
     scheduler = MaintenanceScheduler(
         ingest_service=built.ingest_service,
@@ -434,6 +441,15 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         verifier_context=verifier_context,
         personal_memory_enabled=personal_memory_enabled,
         event_history_enabled=event_history_enabled,
+        counting_enabled=counting_enabled,
+        counting_perceiver_version=getattr(
+            settings, "personal_memory_counting_perceiver_version", "v1"),
+        counting_extract_v2=bool(getattr(
+            settings, "personal_memory_counting_extract_v2", False)),
+        counting_match=bool(getattr(
+            settings, "personal_memory_counting_match_enabled", False)),
+        counting_lease_seconds=getattr(
+            settings, "personal_memory_counting_lease_seconds", 900),
         event_history_perceiver_version=getattr(
             settings, "personal_memory_event_history_perceiver_version", "v1"),
         personal_memory_interval_s=getattr(settings, "personal_memory_consolidation_interval_s", 300.0),
@@ -442,7 +458,7 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         personal_memory_call_budget=getattr(settings, "personal_memory_consolidation_call_budget", 300),
         personal_memory_verify_retries=getattr(settings, "personal_memory_consolidation_verify_retries", 0),
         personal_memory_sum_grounding=getattr(settings, "personal_memory_consolidation_sum_grounding", False),
-        scalar_state_enabled=getattr(settings, "personal_memory_scalar_state_enabled", False),
+        scalar_state_enabled=scalar_state_enabled,
         scalar_state_perceiver_version=getattr(
             settings, "personal_memory_scalar_state_perceiver_version", "v2"),
         scalar_reconcile_attribute=getattr(
@@ -467,9 +483,11 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
     if not snapshot.get("running"):
         lease = snapshot.get("lease") or {}
         logger.warning(
-            "Maintenance scheduler not started in this process; blocked_reason=%s active_owner_pid=%s",
+            "Maintenance scheduler not started in this process; blocked_reason=%s "
+            "active_owner_pid=%s standby=%s",
             lease.get("blocked_reason"),
             (lease.get("active_owner") or {}).get("owner_pid"),
+            lease.get("standby"),
         )
     elif getattr(settings, "structure_watcher_enabled", True):
         asyncio.create_task(
@@ -715,7 +733,15 @@ async def _initialize_services(
     if candidate_readonly:
         from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 
-        graph_adapter = MemoryGraphAdapter(neo4j=built.neo4j)
+        graph_adapter = MemoryGraphAdapter(
+            neo4j=built.neo4j,
+            counting_enabled=bool(
+                getattr(settings, "personal_memory_counting_enabled", False)
+                and getattr(settings, "personal_memory_scalar_state_enabled", False)
+            ),
+            counting_match_enabled=bool(
+                getattr(settings, "personal_memory_counting_match_enabled", False)),
+        )
         schema_ready = await asyncio.to_thread(graph_adapter.phase_one_schema_ready)
         if not schema_ready:
             raise RuntimeError(

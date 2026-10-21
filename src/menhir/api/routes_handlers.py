@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from menhir.domain.recall import InvalidQueryPresetError
 from menhir.core.tenancy import require_namespace_target, resolve_namespace_filter
 from menhir.mcp.service_access import get_pinned_namespace
+from menhir.services.counting_consolidation import effective_counting_perceiver_version
 
 from .routes_support import (
     ClientSummary,
@@ -104,12 +105,43 @@ async def phase3_run_impl(
             settings, "personal_memory_scalar_deterministic_classes", ()),
         enable_event_history=getattr(
             settings, "personal_memory_event_history_enabled", False),
+        enable_counting=getattr(settings, "personal_memory_counting_enabled", False),
+        counting_perceiver_version=getattr(
+            settings, "personal_memory_counting_perceiver_version", "v1"),
+        counting_extract_v2=bool(getattr(
+            settings, "personal_memory_counting_extract_v2", False)),
+        counting_match=bool(getattr(
+            settings, "personal_memory_counting_match_enabled", False)),
+        counting_lease_seconds=getattr(
+            settings, "personal_memory_counting_lease_seconds", 900),
         event_history_perceiver_version=getattr(
             settings, "personal_memory_event_history_perceiver_version", "v1"),
         event_batch_size=getattr(
             settings, "personal_memory_event_history_batch_size", 500),
     )
     dirty_after = ns in await asyncio.to_thread(adapter.list_dirty_namespaces, limit=500)
+    event_dirty_after = None
+    if getattr(settings, "personal_memory_event_history_enabled", False):
+        event_dirty_after = bool(await asyncio.to_thread(
+            adapter.load_next_event_evidence_batch,
+            ns,
+            perceiver_version=getattr(settings, "personal_memory_event_history_perceiver_version", "v1"),
+            limit=1,
+        ))
+    counting_dirty_after = None
+    if (getattr(settings, "personal_memory_counting_enabled", False)
+            and getattr(settings, "personal_memory_scalar_state_enabled", False)):
+        counting_dirty_after = bool(await asyncio.to_thread(
+            adapter.load_next_counting_batch,
+            ns,
+            perceiver_version=effective_counting_perceiver_version(
+                getattr(settings, "personal_memory_counting_perceiver_version", "v1"),
+                bool(getattr(settings, "personal_memory_counting_extract_v2", False)),
+                match=bool(getattr(settings, "personal_memory_counting_match_enabled", False))),
+            scalar_perceiver_version=getattr(
+                settings, "personal_memory_scalar_state_perceiver_version", "v1"),
+            limit=1,
+        ))
     return Phase3RunResponse(
         namespace=ns,
         phase3_selected=selected,
@@ -120,6 +152,9 @@ async def phase3_run_impl(
         abstained=int(result.get("abstained", 0) or 0),
         corrections_applied=int(result.get("corrections_applied", 0) or 0),
         llm_calls=int(result.get("llm_calls", 0) or 0),
+        counter_enabled=bool(body.counter_state and getattr(settings, "personal_memory_consolidation_enabled", False)),
+        scalar_llm_calls=int(result.get("scalar_llm_calls", 0) or 0),
+        event_dirty_after=event_dirty_after,
         scalar_enabled=bool(getattr(settings, "personal_memory_scalar_state_enabled", False)),
         scalar_namespaces_processed=int(result.get("scalar_namespaces_processed", 0) or 0),
         scalar_states_written=int(result.get("scalar_states_written", 0) or 0),
@@ -127,6 +162,28 @@ async def phase3_run_impl(
         scalar_repair_pending=int(result.get("scalar_repair_pending", 0) or 0),
         event_history_enabled=bool(
             getattr(settings, "personal_memory_event_history_enabled", False)),
+        counting_enabled=bool(getattr(settings, "personal_memory_counting_enabled", False)),
+        counting_namespaces_processed=int(
+            result.get("counting_namespaces_processed", 0) or 0),
+        counting_batches=int(result.get("counting_batches", 0) or 0),
+        counting_occurrences_stored=int(
+            result.get("counting_occurrences_stored", 0) or 0),
+        counting_advisory=int(result.get("counting_advisory", 0) or 0),
+        counting_llm_calls=int(result.get("counting_llm_calls", 0) or 0),
+        counting_namespaces_failed=int(
+            result.get("counting_namespaces_failed", 0) or 0),
+        counting_namespaces_busy=int(
+            result.get("counting_namespaces_busy", 0) or 0),
+        counting_namespaces_fenced=int(
+            result.get("counting_namespaces_fenced", 0) or 0),
+        counting_dirty_after=counting_dirty_after,
+        counting_decided_counted=result.get("counting_decided_counted"),
+        counting_decided_uncertain=result.get("counting_decided_uncertain"),
+        counting_decided_repeat=result.get("counting_decided_repeat"),
+        counting_decided_same_event=result.get("counting_decided_same_event"),
+        counting_decided_swapped=result.get("counting_decided_swapped"),
+        counting_decided_deferred=result.get("counting_decided_deferred"),
+        counting_gate_dropped=result.get("counting_gate_dropped"),
         event_namespaces_processed=int(
             result.get("event_namespaces_processed", 0) or 0),
         event_namespaces_failed=int(
@@ -137,6 +194,7 @@ async def phase3_run_impl(
             result.get("event_assertions_created", 0) or 0),
         event_views_rebuilt=int(result.get("event_views_rebuilt", 0) or 0),
         event_llm_calls=int(result.get("event_llm_calls", 0) or 0),
+        lane_outcomes=result.get("lane_outcomes"),
     )
 
 

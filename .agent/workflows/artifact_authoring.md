@@ -111,8 +111,11 @@ Lifecycle vocabulary per type:
 | `implementation_report` | `DRAFT` → `READY_FOR_REVIEW` → `REVIEWED` → `COMPLETE` | `DRAFT` |
 | `handoff` | `OPEN` → `COMPLETE` | `OPEN` |
 
-`SUPERSEDED` and `DEFERRED` are reachable from any state of any type. They are not the same thing:
-superseded means a better answer exists, deferred means we chose not to answer yet.
+`DEFERRED` is an ordinary transition reachable from any nonterminal state. `SUPERSEDED`
+means a better answer exists and is reached only through `supersede_artifact(new_uuid,
+old_uuid)`, which records the replacement edge with the terminal status. A plain
+transition or fresh registration with `SUPERSEDED` is refused; a source document declaring
+it without a resolvable replacement stays available for explicit reconciliation.
 
 Documents that predate this contract are grandfathered. Reconciliation reads their prose `Status:`
 header where it can and reports the rest as unresolved; it never rewrites a document to comply.

@@ -21,7 +21,7 @@ particular live deployment unless a release and its external receipts bind it.
 | Coverage snapshot | `coverage.xml` (generated, not tracked) | Historical offline test execution, with the limitations below |
 | Model configuration record | [`model-governance.md`](model-governance.md) | Code defaults, environment overrides, and model-selection policy |
 | Runtime activation ledger | [`.agent/default-off-features.md`](../.agent/default-off-features.md) | Which implemented authority and retrieval paths are enabled by default |
-| Production release contract | [`deploy/PRODUCTION.md`](../deploy/PRODUCTION.md) | Release manifests, receipts, backup/restore, promotion, rollback, and live acceptance gates |
+| Production release contract | Private `Archolith/menhir-deploy` repository | Operator release manifests, receipts, backup/restore, promotion, rollback, and live acceptance gates |
 
 ## Knowledge governance
 
@@ -88,5 +88,5 @@ independent security-review attestation. Runtime, backup, restore, candidate, pr
 and rollback receipts bind their own authority digests.
 
 These controls describe the shipped release contract. A live deployment remains unproven
-until its exact release and external acceptance evidence pass the gates in
-[`deploy/PRODUCTION.md`](../deploy/PRODUCTION.md).
+until its exact release and external acceptance evidence pass the gates in the
+private `Archolith/menhir-deploy` production contract.

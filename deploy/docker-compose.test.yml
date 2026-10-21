@@ -14,12 +14,7 @@
 services:
   menhir-test:
     image: menhir:test
-    # Build from the repo root; the image is self-contained. New-user flow from a
-    # menhir clone:
-    #   docker compose -f deploy/docker-compose.test.yml up -d --build
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+    # Load or tag a previously built, verified image as menhir:test first.
     container_name: menhir-test
     restart: unless-stopped
     environment:

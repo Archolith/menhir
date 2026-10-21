@@ -222,8 +222,6 @@ def resolve_corrections(
 
     for r in rows:
         text = str(r.get("content") or "")
-        if text[:5].lower() == "user:":       # tolerate the legacy Episodic `user:` prefix
-            text = text[5:]
         corr = detect_correction(text)
         if corr is None:
             continue

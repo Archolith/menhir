@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from menhir.core.backend_impl import _drain_background_errors
 from menhir.domain.bootstrap_scope import bootstrap_selection
 from menhir.domain.recall import InvalidQueryPresetError
+from menhir.domain.recall_visibility import memory_lifecycle_note
 from menhir.domain.session import new_session
 from menhir.domain.structural_memory import is_structural_memory_row
 from menhir.mcp.service_access import get_request_session
@@ -48,11 +49,16 @@ from .routes_support import (
     Phase3StatusResponse,
     Phase3ViewsResponse,
     ReadyResponse,
+    RecallHistoryRequest,
+    RecallHistoryResponse,
     RecallMemory,
     RecallRequest,
     RecallResponse,
+    RecallTimelineRequest,
+    RecallTimelineResponse,
     RevokeClientResponse,
     RuntimeContext,
+    SourceMemoryResponse,
     StaleAnchorVerificationRequest,
     StaleAnchorVerificationResponse,
     StatsResponse,
@@ -76,6 +82,7 @@ from .routes_support import (
     _resolve_caller_session,
     _resolve_namespace,
     _provider_auth_failure_text,
+    _provider_quota_exhausted_text,
     _service_payload,
     _try_record_destructive_op_rest,
 )
@@ -98,6 +105,7 @@ async def health(request: Request) -> HealthResponse:
         startup_mode=capabilities.startup_mode if capabilities is not None else None,
         instance_id=str(settings.instance_id) or None if settings is not None else None,
         provider_auth_failure=_provider_auth_failure_text(),
+        provider_quota_exhausted=_provider_quota_exhausted_text(),
     )
 
 
@@ -113,13 +121,19 @@ async def ready(request: Request) -> ReadyResponse:
             failures=["runtime not initialized"],
         )
     auth_failure = _provider_auth_failure_text()
-    status = "ready" if capabilities.enrichment_ready and auth_failure is None else "degraded"
+    quota_exhausted = _provider_quota_exhausted_text()
+    status = (
+        "ready"
+        if capabilities.enrichment_ready and auth_failure is None and quota_exhausted is None
+        else "degraded"
+    )
     return ReadyResponse(
         status=status,
         startup_mode=capabilities.startup_mode,
         capabilities=_capability_payload(runtime_ctx),
         failures=list(capabilities.failures),
         provider_auth_failure=auth_failure,
+        provider_quota_exhausted=quota_exhausted,
     )
 
 
@@ -127,8 +141,14 @@ async def ready(request: Request) -> ReadyResponse:
 async def recall(request: Request, body: RecallRequest) -> RecallResponse:
     backend = _get_backend(request)
     recall_kwargs: dict[str, object] = {}
+    if body.include_warden_status:
+        recall_kwargs["include_warden_status"] = True
     if body.trace:
         recall_kwargs["trace"] = True
+    if body.source_memory_limit is not None:
+        recall_kwargs["source_memory_limit"] = body.source_memory_limit
+    if body.counted_verdict_limit is not None:
+        recall_kwargs["counted_verdict_limit"] = body.counted_verdict_limit
     try:
         result = await backend.recall(
             body.query,
@@ -147,6 +167,21 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
         preset=str(result.get("preset") or body.preset),
         results=[
             RecallMemory(
+                verifier_evidence=m.get("verifier_evidence") or [],
+                needs_review=m.get("needs_review") is True,
+                review_reason=m.get("review_reason"),
+                review_flagged_at=m.get("review_flagged_at"),
+                review_advisory=(
+                    "Verify the source before asserting this memory as current truth."
+                    if m.get("needs_review") is True else None
+                ),
+                status=m.get("status"),
+                artifact_status=m.get("artifact_status"),
+                superseded_by=m.get("superseded_by"),
+                lifecycle_note=memory_lifecycle_note(
+                    status=m.get("status"), artifact_status=m.get("artifact_status"),
+                    superseded_by=m.get("superseded_by"),
+                ),
                 uuid=str(m.get("uuid") or ""),
                 name=str(m.get("name") or ""),
                 content=m.get("content"),
@@ -170,9 +205,86 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
             for m in result.get("results", []) or []
         ],
         candidates_evaluated=int(result.get("candidates_evaluated") or 0),
+        warden_status=result.get("warden_status") if body.include_warden_status else None,
+        warden_notice=result.get("warden_notice"),
         trace=result.get("trace"),
         authority_layer=result.get("authority_layer"),
         event_authority_layer=result.get("event_authority_layer"),
+        source_memories=result.get("source_memories"),
+    )
+
+
+@router.post(
+    "/recall/history",
+    response_model=RecallHistoryResponse,
+    response_model_exclude_none=True,
+)
+async def recall_history(request: Request, body: RecallHistoryRequest) -> RecallHistoryResponse:
+    backend = _get_backend(request)
+    try:
+        result = await backend.recall_history(
+            body.query,
+            namespace=_resolve_namespace(request, body.namespace),
+            limit=body.limit,
+            pools=body.pools,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return RecallHistoryResponse(
+        query=str(result.get("query") or body.query),
+        memories=[
+            SourceMemoryResponse(
+                uuid=str(m.get("uuid") or ""),
+                content=str(m.get("content") or ""),
+                reference_time=m.get("reference_time"),
+                cosine=float(m.get("cosine") or 0.0),
+                source=m.get("source"),
+                pool_id=m.get("pool_id"),
+                pool_anchor=m.get("pool_anchor"),
+            )
+            for m in result.get("memories", []) or []
+        ],
+        note=result.get("note"),
+    )
+
+
+@router.post(
+    "/recall/timeline",
+    response_model=RecallTimelineResponse,
+    response_model_exclude_none=True,
+)
+async def recall_timeline(request: Request, body: RecallTimelineRequest) -> RecallTimelineResponse:
+    backend = _get_backend(request)
+    try:
+        result = await backend.recall_timeline(
+            namespace=_resolve_namespace(request, body.namespace),
+            query=body.query,
+            subject=body.subject,
+            at=body.at,
+            window_from=body.window_from,
+            window_to=body.window_to,
+            around=body.around,
+            cursor=body.cursor,
+            direction=body.direction,
+            limit=body.limit,
+            detail=body.detail,
+            facts=body.facts,
+            history_view=body.history_view,
+            history_offset=body.history_offset,
+            history_limit=body.history_limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return RecallTimelineResponse(
+        thread=str(result.get("thread") or "namespace"),
+        subject_uuid=result.get("subject_uuid"),
+        subject_name=result.get("subject_name"),
+        entries=result.get("entries", []) or [],
+        prev_cursor=result.get("prev_cursor"),
+        next_cursor=result.get("next_cursor"),
+        histories=result.get("histories", []) or [],
+        note=result.get("note"),
+        time_basis=str(result.get("time_basis") or "recorded"),
     )
 
 
@@ -197,7 +309,36 @@ async def scalar_authority_contributors(
         view_uuid=view_uuid, limit=limit, offset=offset,
         namespace=stamped_namespace(resolved),
     )
+    payload = {
+        **payload,
+        "contributors": [
+            {k: v for k, v in dict(c).items() if k != "turn_text"}
+            for c in (payload.get("contributors") or [])
+        ],
+    }
     return {"view_uuid": view_uuid, **payload}
+
+
+@router.get("/scalar-views/{view_uuid}/items")
+async def scalar_view_items(
+    request: Request,
+    view_uuid: str,
+    namespace: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, object]:
+    """Page the items a scalar View (count or current value) was built from."""
+    _require_tier("readonly")
+    runtime_ctx = _require_runtime_context(request)
+    adapter = getattr(runtime_ctx.built, "graph_adapter", None)
+    if adapter is None:
+        raise HTTPException(status_code=503, detail="scalar view items unavailable")
+    resolved = _resolve_namespace(request, namespace)
+    from menhir.services.scalar_view_items import fetch_scalar_view_items
+    return await asyncio.to_thread(
+        fetch_scalar_view_items, adapter,
+        view_uuid=view_uuid, namespace=resolved, offset=offset, limit=limit,
+    )
 
 
 @router.get("/bootstrap/flagged")
@@ -251,7 +392,7 @@ async def bootstrap_context(
     request: Request, body: BootstrapContextRequest
 ) -> dict[str, object]:
     """Return scoped recent/relevant context after the matching pin receipt."""
-    from menhir.mcp.formatters import _compact_scored_item, _normalize_reader_id
+    from menhir.mcp.formatters import _compact_scored_item, _memory_lifecycle_fields, _normalize_reader_id
     from menhir.mcp.lifecycle import _has_recent_flagged_bootstrap_read
     from types import SimpleNamespace
 
@@ -305,7 +446,7 @@ async def bootstrap_context(
         namespace=resolved_namespace,
     )
     recent = [
-        row
+        {**row, **_memory_lifecycle_fields(row)}
         for row in recent_rows
         if not bool(row.get("user_flagged")) and not is_structural_memory_row(row)
     ][: body.recent_limit]
@@ -323,12 +464,14 @@ async def bootstrap_context(
 async def context(request: Request, body: ContextRequest) -> ContextResponse:
     backend = _get_backend(request)
     try:
+        context_kwargs = {"include_warden_status": True} if body.include_warden_status else {}
         result = await backend.build_context(
             body.query,
             max_tokens=body.max_tokens,
             preset=body.preset,
             include_scores=body.include_scores,
             namespace=_resolve_namespace(request, body.namespace),
+            **context_kwargs,
         )
     except InvalidQueryPresetError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -363,6 +506,15 @@ async def ingest_memory(
         ingest_kwargs["flagged"] = True
     if body.bootstrap_scope is not None:
         ingest_kwargs["bootstrap_scope"] = body.bootstrap_scope
+    if (body.user_statement or "").strip():
+        if (body.turn_evidence_uuid or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail="user_statement and turn_evidence_uuid are mutually exclusive",
+            )
+        ingest_kwargs["user_statement"] = body.user_statement
+    if body.role is not None:
+        ingest_kwargs["role"] = body.role
     result = await backend.queue_episode(
         body.episode,
         user_id=session.user_id,

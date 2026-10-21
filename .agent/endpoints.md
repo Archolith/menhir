@@ -5,6 +5,28 @@ tool or resource section you need.
 
 ## Quick Index
 
+`recall_memories`, `build_context`, REST `/recall` and `/context`, and canonical backend calls accept
+`include_warden_status=false`. Set true for detailed configured/applied guard names, execution state
+(disabled/not_run/computed_not_applied/applied/partial/failed), counts and metadata gaps. This option
+controls output only, independent of `trace`; it does not activate guards or alter ranked admissions.
+Default recall omits the detail. A brief `warden_notice` survives compact/full MCP and REST when
+configured checks fail, are unapplied, or have incomplete metadata/verdict/pending coverage. Context
+reserves that notice before ranked memories; if it cannot fit, those memories are omitted. Requested
+context detail shares the budget and can be omitted with truncation. Recall Lab requests the detail
+for its execution/configuration panel. `recall_context_memories` reports `relevant_warden_status` only
+on request and keeps `relevant_warden_notice`; its recent bootstrap rows are outside Warden checking.
+
+Ranked recall returns verifier review state through REST and compact/full MCP: flagged results
+include `needs_review`, `review_reason`, `review_flagged_at`, and `review_advisory`. `build_context`
+renders an instruction to verify the source before asserting flagged prose as current truth, packed
+atomically with the memory. This is an advisory; ranking and content are unchanged. Raw source-memory
+sections and independent authority layers do not inherit Entity review flags.
+Linked ranked memories include `verifier_evidence` in full MCP/REST and, when nonempty, compact MCP.
+Context packs each register observation, absolute successful-verification time, and latest probe
+status/time with the memory. Failed/unavailable probes retain earlier successful evidence; legacy
+probe state is unknown. An observation verifies the register value, not the memory prose, and has
+no automatic freshness cutoff or ranking effect.
+
 - Need ingest / queueing tools: read `mcp.tool.add_memory`, `mcp.tool.add_memory_and_track`, `mcp.tool.get_enrichment_status`, and `mcp.tool.list_enrichment_queue`
 - Need troubleshooting tools: read `mcp.tool.watch_enrichment`, `mcp.tool.get_episode_trace`, and `mcp.tool.repair_stale_enrichment`
 - Need recall / memory tools: read `mcp.tool.read_flagged_memories`, `mcp.tool.recall_context_memories`, and `mcp.tool.recall_memories`
@@ -50,11 +72,11 @@ Public REST:
     is enabled (default off) and a namespace is present, may also attach `event_authority_layer` (a
     structured first-person latest/predecessor verdict; see the Event-history surface section below).
   - `/api/turn-evidence` (agent tier) — selective `:TurnEvidence` capture (ADR 0001); see `data_models.md` and `architecture.md`
-  - `POST /api/phase3/run` (agent tier) — run one personal-memory View consolidation pass over an explicit namespace (real LLM, all bias guards on); black-box surface for the `archolith-bench menhir-phase3` benchmark. When event history is enabled (default off), also runs event consolidation over an independent `:EventConsolidationWatermark` cursor and reports bounded Phase-3 event metrics (`event_namespaces_processed`, `event_namespaces_failed`, `event_assertions_recorded`, `event_assertions_created`, `event_views_rebuilt`, `event_llm_calls`).
+  - `POST /api/phase3/run` (agent tier) — run one personal-memory View consolidation pass over an explicit namespace (real LLM, all bias guards on); black-box surface for the `archolith-bench menhir-phase3` benchmark. When event history is enabled (default off), also runs event consolidation over an independent `:EventConsolidationWatermark` cursor and reports bounded Phase-3 event metrics (`event_namespaces_processed`, `event_namespaces_failed`, `event_assertions_recorded`, `event_assertions_created`, `event_views_rebuilt`, `event_llm_calls`). The response also reports effective `counter_enabled`, lane-specific `scalar_llm_calls`, and `event_dirty_after` (null when events are off; otherwise a one-row read beyond the event watermark). A processed namespace count alone does not prove that all event pages completed.
   - `GET /api/phase3/status` (readonly) — namespace dirty flag + `:TurnEvidence` count
   - `GET /api/views` (readonly) — current counter Views (each with value `history`/`superseded`) and `subject='perception'` abstention receipts, split
   - `POST /api/phase3/reset` (agent tier) — tear down a throwaway namespace: graphiti partition (Views + watermark) PLUS namespace-keyed `:TurnEvidence`; refuses the default/shared namespace
-  - public memory endpoints
+  - public memory endpoints. `POST /api/memory` takes an optional `role` (`user`, `assistant`, `tool`, `agent`, `system`, matched exactly; anything else is a 422, or a 400 through the internal backend bridge) naming the speaker of `episode`. Menhir never infers the speaker from the text, so a `user:` prefix grants nothing; a grounded episode takes its role from its turn evidence (#271). The MCP `add_memory` and `add_memory_and_track` tools take the same `role` (an invalid value is refused with a `Cannot store memory` message before any write).
 - Internal backend transport:
   - `/api/internal/backend/*`
   - used by `BackendClient`
@@ -160,6 +182,7 @@ Queue a memory for enrichment. Use this to remember facts, preferences, decision
 - **`flagged`** (bool, optional): Permanent retention. **USER-ONLY — never set this unless the user
   explicitly asked in this session.** See the warning under `flag_memory`; the flag propagates to
   every entity extracted from the episode, including pre-existing shared ones. Default `false`.
+- **`role`** (str, optional): Speaker of `text`, exactly one of `user`, `assistant`, `tool`, `agent`, `system`. Same contract as `POST /api/memory` `role`; a matching linked turn evidence overrides it. An invalid value returns `Cannot store memory: invalid role ...` and nothing is written. Checked on every path, but has no effect for `type="TEMPORAL"` with `valid_at` (no extraction).
 - Response now appends a one-line queue snapshot: `queue_depth`, current `active_enriching` count, and scheduler state.
 
 **Gateway alias behavior**: `memory_gateway(action="add_memory", payload_json='{"text":"..."}')` accepts `text` (preferred), `content`, or `summary` for the memory content field.
@@ -173,6 +196,7 @@ Queue one memory and return enrichment status updates until `READY`, `FAILED`, o
 - **`diff`** (str, optional): Optional git diff attached to the episode as change context.
 - **`timeout_s`** (float, optional): Max seconds to wait for completion (default: 60).
 - **`poll_interval_s`** (float, optional): Status polling interval in seconds (default: 1).
+- **`role`** (str, optional): Speaker of `text`, exactly one of `user`, `assistant`, `tool`, `agent`, `system`. Same contract as `POST /api/memory` `role`; a matching linked turn evidence overrides it. An invalid value returns `Cannot store memory: invalid role ...` and nothing is written.
 - Output includes stage/progress/step telemetry plus live LLM task counters (`attempt` and `total`).
 - Output begins with `queued_summary` so callers can see queue depth, active enrichment count, and scheduler state immediately after enqueue.
 - Very large memories can now fail early with `episode_preflight_too_large` instead of spending retry budget inside Graphiti extraction.
@@ -330,6 +354,7 @@ List grouped memory conflicts for operator review.
 Concept id: `mcp.tool.resolve_conflict`
 
 Resolve one conflict group using explicit operator intent.
+- Resolution, verification readback, and edge bridging stay within the caller's pinned namespace, including for a mixed legacy group.
 - **`group_id`** (str): Conflict group id.
 - **`action`** (str): One of `keep_both`, `replace`, or `discard_new`.
 - **`keep_uuid`** (str, optional): UUID to retain for `replace` / `discard_new`.
@@ -425,6 +450,47 @@ Search memories by semantic similarity. Returns ranked results with relevance sc
 - Gateway alias: `memory_gateway(action="search", payload_json="{...}")` dispatches to the same behavior as `action="recall"`.
 - Returns compact JSON with top results, short summaries, a compact score breakdown (`sim`, `adj`, `rec`, `prom`), and explicit `retrieval_score`, `retrieval_score_kind`, and `relevance_basis`. Legacy `relevance` is retained and explicitly labeled unvalidated.
 
+### `recall_history`
+Concept id: `mcp.tool.recall_history`
+
+List saved memories matching a subject in time order (oldest first), with optional pools.
+- **`query`** (str): Subject to match. Natural language works best.
+- **`namespace`** (str, optional): Silo to scope the operation to. Empty = default/global behavior.
+- **`limit`** (int, optional): Max memories to return (default: 30, max: 50).
+- **`pools`** (bool, optional): Group related memories into pools (default: true).
+- Read-only drill-down: no access updates, no ranking changes.
+- Returns compact JSON with `query`, `count`, and `memories[]` (`time`, `content`, `uuid`, `source`, plus `pool_id`/`pool_anchor` when pooled). A `note` is set (with empty `memories`) when no embedded memory matched — run `scripts/backfill_episode_embeddings.py` for pre-flag memories.
+
+### `recall_timeline`
+Concept id: `mcp.tool.recall_timeline`
+
+Navigate a recorded-time thread of saved memories on demand: page around an instant, a window, a memory, or a semantic seed, optionally restricted to one subject's thread, with typed scalar/event histories. Order is RECORDED time (episode `valid_at`).
+- Exactly one of `at` / `window_from`+`window_to` / `around` / `cursor` / `query` is required when any is given; `subject` is a filter that combines with every mode and alone means the latest page of the subject thread.
+- **`at`** (str, optional): ISO instant to split the timeline around.
+- **`window_from`** / **`window_to`** (str, optional): ISO instants bounding an ascending window.
+- **`around`** (str, optional): Memory uuid anchoring the page.
+- **`cursor`** (str, optional): Opaque cursor from `prev_cursor` / `next_cursor` (tenant/thread-bound).
+- **`query`** (str, optional): Semantic seed; the timeline anchors on the best-matching memory.
+- **`subject`** (str, optional): Entity name or uuid restricting the timeline to that thread.
+- **`direction`** (str, optional): `before`, `after`, or `both` (default).
+- **`limit`** (int, optional): Max entries per page (default: 10, max: 50).
+- **`detail`** (str, optional): `headline` (default) or `full`.
+- **`facts`** (bool, optional): Attach RELATES_TO facts to entries (default: false).
+- **`history_view`** / **`history_offset`** / **`history_limit`**: page one typed-history view at an offset (default: latest page, 10 entries).
+- Read-only: no access updates, no ranking changes.
+- Returns compact JSON with `thread`, `count`, and `entries[]` (`recorded_at`, `headline`, `uuid`, `source`, `is_anchor`, optional `content`/`facts`), plus `prev_cursor`/`next_cursor` when more pages exist, the `subject` when resolved, and `histories[]` (typed scalar/event pages) for subject threads. A `note` is set when a `query` seed matched nothing.
+
+### `get_scalar_view_items`
+Concept id: `mcp.tool.get_scalar_view_items`
+
+Drill into a scalar View from recall's `authority_layer` (a count or a current value) and page the items it was built from. With `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_COLLAPSE_ENABLED` on, counted Views omit their items from recall and render `built from N items; drill down: get_scalar_view_items(view_uuid=...)`.
+- **`view_uuid`** (str, required): The verdict's `view_uuid`.
+- **`offset`** (int, optional): Offset into the items (default: 0).
+- **`limit`** (int, optional): Max items per page (default: 20, max: 50).
+- Namespace-scoped (subject to the client pin); a View in another silo returns no items. Occurrences stay hidden when counting is off.
+- Read-only: no access updates, no ranking changes. REST: `GET /api/scalar-views/{view_uuid}/items`.
+- Returns `view_uuid`, `kind` (`scalar_state`, `scalar_history`, or null when nothing is found), `total`, `offset`, `next_offset`, and `items[]` (`assertion_id`, `relation`, `operation`, `value`, `quote`, `valid_at`, `evidence_tier`, `episode_uuid`).
+
 ### `flag_memory`
 Concept id: `mcp.tool.flag_memory`
 
@@ -498,22 +564,29 @@ after its `target_date` passes.
 ### `recover_orphans`
 Concept id: `mcp.tool.recover_orphans`
 
-Recover orphaned SESSION nodes from crashed or abandoned sessions.
-- **`max_age_hours`** (float, optional): Only process SESSION nodes older than this (default: 4.0).
-- **`dry_run`** (bool, optional): Report counts without making changes (default: false).
-- Promotes or deletes stale SESSION nodes that were never consolidated.
+Recover stale SESSION nodes globally, then delete expired demoted SESSION nodes and eligible
+empty orphan episodes. Requires operator access in both local and HTTP modes.
+- **`max_age_hours`** (float, optional): Minimum age for SESSION consolidation only (default: 4.0).
+  The expired-TTL sweep uses `ttl_expires < now`, regardless of this argument. Empty-episode
+  cleanup only targets READY, unflagged, edgeless episodes older than seven days
+  with empty content.
+- **`dry_run`** (bool, optional): Read-only preview of all three phases (default: false).
+  Returns `session_nodes_found`, `ttl_expired_nodes_found`, and `empty_orphan_episodes_found`
+  separately. An expired node may be rescued by promotion, so counts are not exact outcome
+  predictions; all-zero counts mean execution has no eligible work on an unchanged graph.
+- Execution returns the canonical consolidation counters, including `demoted`.
 
 ### `add_todo`
 Concept id: `mcp.tool.add_todo`
 
 Create a persistent TODO item that survives across sessions. TODOs are stored as `:Todo` nodes in Neo4j and are never enriched or decayed.
 - **`text`** (str): The TODO description. Be specific and actionable.
-- **`code_ref`** (str, optional): File path and optional line, e.g. `src/api/routes.py:42`.
+- **`code_ref`** (str, optional): One or more file paths with optional lines, e.g. `src/api/routes.py:42`.
 - **`priority`** (str, optional): `low`, `normal`, or `high` (default: `normal`).
 - **`episode_uuid`** (str, optional): UUID of an episodic memory that triggered this TODO. Creates a `CREATED_FROM` edge.
-- **`structure_project`** (str, optional): Project name for scoped `REFERENCES_FILE` linking. Required in multi-repo workspaces to avoid cross-project path ambiguity.
+- **`structure_project`** (str, optional): Project name for scoped `REFERENCES_FILE` linking. Supply it when paths are shared across projects.
 - **`namespace`** (str, optional): Silo to scope the TODO to. Empty means the shared `default` silo — a stored TODO always carries a non-null namespace.
-- Response includes `uuid`, priority tag, and any auto-linked graph nodes (`linked_file_path`, `linked_entities`, provenance episode).
+- Response includes `uuid`, priority tag, linked files, and an explicit reason for every unresolved or ambiguous location. A file edge is created only for one unique visible match per normalized location.
 - See `model.todo` in `data_models.md` for the full node schema and edge semantics.
 
 ### `list_todos`
@@ -532,7 +605,7 @@ Concept id: `mcp.tool.get_todo`
 Read one TODO in full — the content `list_todos` truncates, plus its graph context.
 - **`uuid`** (str): UUID of the TODO.
 - **`namespace`** (str, optional): Silo to enforce. Empty looks up by uuid alone; supplying one refuses a TODO outside that silo and the shared `default` bucket. The namespace is reported either way.
-- Returns priority, status, dates, age/stale flag, `code_ref`, the linked file
+- Returns priority, status, dates, age/stale flag, `code_ref`, all linked files
   (`REFERENCES_FILE`), the originating episode (`CREATED_FROM`), the entities named in the
   content, the normalized `:TodoLocation` records, inbound semantic links
   (`MENTIONS_TODO`/`ADDRESSES_TODO`/`RESOLVES_TODO`/`REOPENS_TODO`), and the untruncated body.
@@ -616,6 +689,9 @@ Move an artifact to a new lifecycle status.
 - **`to_status`** (str): Target status.
 - Checked against the artifact's stored type and current status, so steps cannot be
   skipped: a `PROPOSED` plan cannot jump to `IMPLEMENTED`.
+- A concurrent change refuses as stale; read the artifact again before retrying.
+- `SUPERSEDED` requires `supersede_artifact(new_uuid, old_uuid)`, which records the
+  replacement edge and terminal status together. Plain transition refuses it.
 - A refusal names the statuses that *are* reachable from the current one.
 
 ### `audit_artifact_corpus`
@@ -731,12 +807,15 @@ Close stale TODO items that have been open for too long.
 |-----------|------|
 | Session start — bootstrap pinned context | `read_flagged_memories` then `recall_context_memories` |
 | Mid-task targeted search for specific knowledge | `recall_memories` |
+| How something changed / sequence of states / what it was before | `recall_history` |
 | Building a token-budgeted context block for injection | `build_context` |
 | Knowing how long since last memory interaction | `get_client_context` |
 
 `recall_context_memories` is a two-phase bootstrap tool — it requires a prior `read_flagged_memories` call for the same `reader_id` and returns both `relevant[]` and `recent[]` arrays. Use it at session start to hydrate context efficiently.
 
 `recall_memories` is a standalone semantic search — no bootstrap dependency, returns ranked results with score breakdowns. Use it mid-task when you need targeted retrieval for a specific question.
+
+`recall_history` is a read-only drill-down over raw saved memories strictly in time order (oldest first), with optional pools. Use it after `recall_memories` when a question needs how something changed, the sequence of states, or what it was before.
 
 ### `build_context`
 Concept id: `mcp.tool.build_context`

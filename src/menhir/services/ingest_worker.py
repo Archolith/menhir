@@ -39,13 +39,14 @@ from menhir.infrastructure.telemetry import (
 )
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure.circuit_breaker import CircuitOpenError
-from menhir.infrastructure.graphiti_patches import clear_extraction_receipt
+from menhir.infrastructure.graphiti_extraction_policy import clear_extraction_receipt
+from menhir.infrastructure.self_binding import SelfBindMode, resolve_inferred_mode
 from menhir.services.enrichment_steps import (
     EnrichmentContext,
     add_episode_with_timeout,
     build_episode_preflight_rejection,
+    embed_episode_content,
     handle_enrichment_failure,
-    refund_transient_requeue_safely,
     run_graphiti_extraction,
     run_preflight_rejection,
     try_reconcile_existing,
@@ -128,47 +129,52 @@ class IngestWorkerMixin:
         started = perf_counter()
         processing_attempts = int(claimed.get("processing_attempts") or 0)
         heartbeat_stop = asyncio.Event()
-        heartbeat_task = asyncio.create_task(
-            self._processing_heartbeat_loop(episode_uuid, heartbeat_stop),
-            name=f"menhir-enrichment-heartbeat-{episode_uuid}",
-        )
-        # The session key is captured HERE, not looked up inside the callback: the callback fires
-        # from worker threads (graphiti dispatches model calls through asyncio.to_thread), where
-        # per-request context is not available. Closing over it is what lets the per-call
-        # reservation know which window it is spending from.
-        from menhir.services.ingest_queue import session_budget_key
-
-        budget_key = session_budget_key(episode_uuid, claimed.get("session_id"))
-        usage_token = set_llm_usage_callback(
-            lambda event: self._record_episode_llm_usage(
-                episode_uuid, event, budget_key=budget_key
-            )
-        )
-
-        ctx = EnrichmentContext(
-            episode_uuid=episode_uuid,
-            claimed=claimed,
-            started=started,
-            processing_attempts=processing_attempts,
-            worker_id=self._worker_id,
-            graph_adapter=self.graph_adapter,
-            graphiti_client=self.graphiti_client,
-            lifecycle_service=self.lifecycle_service,
-            llm=self.llm,
-            ingest_gate=self._gate(),
-            processing_steps_total=self._processing_steps_total,
-            settings_record_revisions=self._settings_record_revisions,
-            ready_warning_ms=self._ready_warning_ms,
-            graphiti_add_episode_timeout_s=self._graphiti_add_episode_timeout_s,
-            graphiti_episode_max_estimated_tokens=self._graphiti_episode_max_estimated_tokens,
-            canonical_self_binding_mode=self._canonical_self_binding_mode,
-            get_queue_depth=self.get_queue_depth,
-            shadow_context_composition=self._shadow_context_composition,
-            shadow_composition_timeout_s=self._shadow_composition_timeout_s,
-            register_background_task=self._register_shadow_task,
-        )
-
+        heartbeat_task: asyncio.Task[None] | None = None
+        usage_token = None
+        ctx: EnrichmentContext | None = None
         try:
+            heartbeat_task = asyncio.create_task(
+                self._processing_heartbeat_loop(episode_uuid, heartbeat_stop),
+                name=f"menhir-enrichment-heartbeat-{episode_uuid}",
+            )
+            # The session key is captured HERE, not looked up inside the callback: the callback fires
+            # from worker threads (graphiti dispatches model calls through asyncio.to_thread), where
+            # per-request context is not available. Closing over it is what lets the per-call
+            # reservation know which window it is spending from.
+            from menhir.services.ingest_queue import session_budget_key
+
+            budget_key = session_budget_key(episode_uuid, claimed.get("session_id"))
+            usage_token = set_llm_usage_callback(
+                lambda event: self._record_episode_llm_usage(
+                    episode_uuid, event, budget_key=budget_key
+                )
+            )
+
+            ctx = EnrichmentContext(
+                episode_uuid=episode_uuid,
+                claimed=claimed,
+                started=started,
+                processing_attempts=processing_attempts,
+                worker_id=self._worker_id,
+                graph_adapter=self.graph_adapter,
+                graphiti_client=self.graphiti_client,
+                lifecycle_service=self.lifecycle_service,
+                llm=self.llm,
+                ingest_gate=self._gate(),
+                processing_steps_total=self._processing_steps_total,
+                settings_record_revisions=self._settings_record_revisions,
+                ready_warning_ms=self._ready_warning_ms,
+                graphiti_add_episode_timeout_s=self._graphiti_add_episode_timeout_s,
+                graphiti_episode_max_estimated_tokens=self._graphiti_episode_max_estimated_tokens,
+                canonical_self_binding_mode=self._canonical_self_binding_mode,
+                inferred_self_mode=self._inferred_self_mode,
+                source_memories_enabled=self._source_memories_enabled,
+                get_queue_depth=self.get_queue_depth,
+                shadow_context_composition=self._shadow_context_composition,
+                shadow_composition_timeout_s=self._shadow_composition_timeout_s,
+                register_background_task=self._register_shadow_task,
+            )
+
             record_lifecycle_event(
                 component="ingest_worker",
                 event="claim_pending_episode",
@@ -207,11 +213,9 @@ class IngestWorkerMixin:
                     episode_uuid,
                     retry_after_s=budget_retry,
                     worker_id=self._worker_id,
+                    transient_requeue=True,
+                    claim_started_at=claimed.get("processing_started_at"),
                 )
-                # Backpressure is time-bound, not a processing failure (#79/#70): refund the
-                # claim's attempt so the window rolling cannot strand a permanently
-                # attempts-exhausted episode.
-                await refund_transient_requeue_safely(self.graph_adapter, episode_uuid)
                 record_lifecycle_event(
                     component="ingest_worker",
                     event="budget_cap_requeue",
@@ -230,6 +234,9 @@ class IngestWorkerMixin:
             # entity count multiplies judge calls, and episode content drives entity count -- so
             # only an in-flight bound stops it.
 
+            await embed_episode_content(ctx)
+            if await self._try_verbatim_skip(episode_uuid, claimed):
+                return
             await run_graphiti_extraction(ctx, finalize_under_gate=True)
         except CircuitOpenError as exc:
             logger.warning(
@@ -237,17 +244,18 @@ class IngestWorkerMixin:
                 episode_uuid,
                 exc,
             )
+            retry_after_s = 30.0
+            if exc.snapshot.get("reason"):
+                # Hard-open (quota): wait out the long cooldown instead of polling every 30 s.
+                retry_after_s = max(30.0, min(900.0, float(exc.snapshot.get("cooldown_remaining_s") or 0.0)))
             await asyncio.to_thread(
                 self.graph_adapter.mark_episode_pending,
                 episode_uuid,
-                retry_after_s=30.0,
+                retry_after_s=retry_after_s,
                 worker_id=self._worker_id,
+                transient_requeue=True,
+                claim_started_at=claimed.get("processing_started_at"),
             )
-            # An open circuit says nothing about this episode (#79/#70): refund the claim's
-            # attempt so an outage cannot burn the genuine-failure budget. The refund bumps
-            # `transient_retries`, whose own cap (enforced by the pending-list filter and the
-            # recovery park) still terminates a permanently dead provider.
-            await refund_transient_requeue_safely(self.graph_adapter, episode_uuid)
             record_lifecycle_event(
                 component="ingest_worker",
                 event="circuit_breaker_requeue",
@@ -257,19 +265,71 @@ class IngestWorkerMixin:
             )
             return
         except Exception as exc:
+            if ctx is None:
+                raise  # The worker logs setup failures; lease recovery can retry after cleanup.
             self._failed_enrichments += 1
             await handle_enrichment_failure(ctx, exc)
+            if claimed.get("is_evidence_projection"):
+                await self._reenable_skips_for_projection(episode_uuid)
             return
         finally:
-            reset_llm_usage_callback(usage_token)
+            if usage_token is not None:
+                reset_llm_usage_callback(usage_token)
             clear_extraction_receipt()
             self._job_llm_call_counts.pop(episode_uuid, None)
             heartbeat_stop.set()
-            heartbeat_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await heartbeat_task
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await heartbeat_task
 
         return
+
+    async def _try_verbatim_skip(self, episode_uuid: str, claimed: dict[str, Any]) -> bool:
+        """Two-tier self Phase 3 (enforce only): finish a client whose text is its hook turn's
+        verbatim text without extracting it; the turn's projection extracts it on the anchored
+        tier. True when the episode was marked READY by the skip."""
+        mode = resolve_inferred_mode(getattr(self, "_inferred_self_mode", None))
+        if mode is not SelfBindMode.ENFORCE:
+            return False
+        if claimed.get("is_evidence_projection") or not claimed.get("turn_evidence_uuid"):
+            return False
+        try:
+            projection_uuid = await asyncio.to_thread(
+                self.graph_adapter.mark_episode_verbatim_skipped,
+                episode_uuid,
+                worker_id=self._worker_id,
+                claim_started_at=claimed.get("processing_started_at"),
+            )
+        except Exception:
+            logger.exception("Verbatim skip check failed episode_id=%s; extracting", episode_uuid)
+            return False
+        if not projection_uuid:
+            return False
+        record_lifecycle_event(
+            component="ingest_worker",
+            event="verbatim_extraction_skipped",
+            state="completed",
+            episode_uuid=episode_uuid,
+            details={"projection_uuid": projection_uuid},
+        )
+        return True
+
+    async def _reenable_skips_for_projection(self, projection_uuid: str) -> None:
+        """A projection failed: return any client that skipped on it to PENDING now, rather
+        than at the next lease-recovery pass (which also does this)."""
+        reenable = getattr(self.graph_adapter, "reenable_verbatim_skips", None)
+        if reenable is None:
+            return
+        try:
+            revoked = await asyncio.to_thread(reenable, projection_uuid=projection_uuid)
+            for client_uuid in revoked or ():
+                await self._enqueue_pending_episode(client_uuid)
+        except Exception:
+            logger.exception(
+                "Verbatim-skip re-enable failed projection=%s; lease recovery retries",
+                projection_uuid,
+            )
 
     def _record_episode_llm_usage(
         self, episode_uuid: str, event: LLMUsageEvent, *, budget_key: str | None = None
@@ -391,6 +451,8 @@ class IngestWorkerMixin:
                     "total_tokens": event.total_tokens,
                     "cached_input_tokens": event.cached_input_tokens,
                     "reasoning_output_tokens": event.reasoning_output_tokens,
+                    "cache_write_input_tokens": event.cache_write_input_tokens,
+                    "service_tier": event.service_tier,
                     "error": event.error,
                 }.items()
                 if value is not None

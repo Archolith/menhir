@@ -66,3 +66,15 @@ def default_recall_visibility_cypher(variable: str = "n") -> str:
         f"AND {view_live_provenance_cypher(variable)}"
         f"))"
     )
+
+
+def memory_lifecycle_note(
+    *, status: object = None, artifact_status: object = None, superseded_by: object = None,
+) -> str | None:
+    """Label stored history without changing recall eligibility or its original content."""
+    notes = []
+    if str(status or "").strip().lower() == "completed":
+        notes.append("Completed memory; historical context, not an outstanding obligation.")
+    if str(artifact_status or "").strip().lower() == "historical" or str(superseded_by or "").strip():
+        notes.append("Historical artifact; superseded content, not current guidance.")
+    return " ".join(notes) or None

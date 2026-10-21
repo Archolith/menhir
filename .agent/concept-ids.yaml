@@ -200,6 +200,15 @@ mcp:
   mcp.tool.recall_memories:
     owner: endpoints.md
     meaning: Semantic recall over durable memory
+  mcp.tool.recall_history:
+    owner: endpoints.md
+    meaning: Time-ordered matching memories (drill-down)
+  mcp.tool.recall_timeline:
+    owner: endpoints.md
+    meaning: On-demand time navigation over recorded memory time
+  mcp.tool.get_scalar_view_items:
+    owner: endpoints.md
+    meaning: Drill into a scalar View and page the items it was built from
   mcp.tool.flag_memory:
     owner: endpoints.md
     meaning: Permanently flag one memory

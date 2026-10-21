@@ -164,3 +164,21 @@ def rebound_episodes(entry: dict[str, Any]) -> list[str]:
 def absorbed_episodes(entry: dict[str, Any]) -> list[str]:
     """Episodes that MENTIONED the absorbed node, to be re-pointed back at it."""
     return [str(e) for e in (entry.get("mentioned_by_episodes") or [])]
+
+
+def absorbed_retention_sources(entry: dict[str, Any]) -> list[str]:
+    """Source episodes whose RETENTION_SOURCE edge targeted the absorbed node."""
+
+    return [str(e) for e in (entry.get("retention_sources") or [])]
+
+
+def rebound_retention_sources(entry: dict[str, Any]) -> list[str]:
+    """RETENTION_SOURCE edges added to the survivor by this merge."""
+
+    absorbed = [str(e) for e in (entry.get("retention_sources") or [])]
+    if "survivor_retention_sources_before" not in entry:
+        return []
+    before = {
+        str(e) for e in (entry.get("survivor_retention_sources_before") or [])
+    }
+    return sorted(e for e in absorbed if e not in before)

@@ -142,6 +142,12 @@ def _upload(plan: BundlePlan, *, settings: MemorySettings) -> None:
     """
     url, key = _remote_target(settings)
     echo = typer.echo
+    try:
+        uploader = SnapshotUploader(url, auth_key=key)
+    except SnapshotUploadError as exc:
+        echo(f"sync target refused   {exc}")
+        echo(f"                      ({exc.code})")
+        raise typer.Exit(code=1) from exc
 
     with tempfile.TemporaryDirectory(prefix="menhir-sync-") as workspace:
         archive = Path(workspace) / "bundle.zip"
@@ -159,7 +165,7 @@ def _upload(plan: BundlePlan, *, settings: MemorySettings) -> None:
             typer.echo(f"\r  chunk {sent}/{total}", nl=False)
 
         try:
-            outcome = SnapshotUploader(url, auth_key=key).upload(
+            outcome = uploader.upload(
                 archive,
                 project_key=plan.manifest.display_name,
                 progress=progress,

@@ -19,8 +19,10 @@ from menhir.config import MemorySettings
 from menhir.core import build_memory_services, prepare_memory_runtime
 from menhir.domain import IngestStatus, new_session
 from menhir.infrastructure import Neo4jRepository
+from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.services.lifecycle_service import (
     ConsolidationResult,
+    LifecycleService,
     SHARPNESS_PROMOTE_THRESHOLD,
 )
 
@@ -292,6 +294,55 @@ async def test_consolidation_is_idempotent_live() -> None:
 
 @pytest.mark.online
 @pytest.mark.asyncio
+async def test_orphan_preview_covers_global_ttl_and_empty_episode_cleanup(
+    test_neo4j_repo, stub_graphiti_client
+) -> None:
+    """A restrictive consolidation age must not hide the global cleanup that execution runs."""
+    repo = test_neo4j_repo
+    expired_uuid = f"preview-expired-{uuid4()}"
+    protected_uuid = f"preview-protected-{uuid4()}"
+    empty_uuid = f"preview-empty-{uuid4()}"
+    content_uuid = f"preview-content-{uuid4()}"
+    repo.execute(
+        """
+        CREATE (:Entity {uuid: $expired, name: 'expired', scope: 'SESSION',
+            session_id: 'other-session', namespace: 'test-preview', user_flagged: false,
+            created_at: datetime() - duration({days: 15}),
+            ttl_expires: datetime() - duration({days: 1})})
+        CREATE (:Entity {uuid: $protected, name: 'protected', scope: 'SESSION',
+            session_id: 'other-session', namespace: 'test-preview', user_flagged: true,
+            created_at: datetime() - duration({days: 15}),
+            ttl_expires: datetime() - duration({days: 1})})
+        CREATE (:Episodic {uuid: $empty, scope: 'SESSION', processing_state: 'READY',
+            session_id: 'third-session', user_flagged: false, content: '',
+            created_at: datetime() - duration({days: 10})})
+        CREATE (:Episodic {uuid: $content, scope: 'SESSION', processing_state: 'READY',
+            session_id: 'third-session', user_flagged: false, content: 'keep this',
+            created_at: datetime() - duration({days: 10})})
+        """,
+        params={"expired": expired_uuid, "protected": protected_uuid,
+                "empty": empty_uuid, "content": content_uuid},
+    )
+    svc = LifecycleService(
+        graph_adapter=MemoryGraphAdapter(neo4j=repo), graphiti_client=stub_graphiti_client
+    )
+
+    preview = await svc.preview_orphan_recovery(max_age_hours=720)
+    assert preview["session_nodes_found"] == 0
+    assert preview["ttl_expired_nodes_found"] == 1
+    assert preview["empty_orphan_episodes_found"] == 1
+    assert repo.execute("MATCH (n {uuid: $u}) RETURN count(n) AS c", {"u": expired_uuid})[0]["c"] == 1
+
+    result = await svc.recover_orphans(max_age_hours=720)
+    assert result.deleted == 1
+    assert result.orphan_episodes_cleaned == 1
+    for node_uuid, expected in ((expired_uuid, 0), (protected_uuid, 1),
+                                (empty_uuid, 0), (content_uuid, 1)):
+        assert repo.execute("MATCH (n {uuid: $u}) RETURN count(n) AS c", {"u": node_uuid})[0]["c"] == expected
+
+
+@pytest.mark.online
+@pytest.mark.asyncio
 async def test_orphan_recovery_promotes_old_session_nodes() -> None:
     """recover_orphans() should promote SESSION nodes older than the threshold."""
     settings = MemorySettings.from_env()
@@ -474,4 +525,3 @@ async def test_consolidation_result_has_all_fields() -> None:
     finally:
         await built.graphiti_client.close()
         built.neo4j.close()
-

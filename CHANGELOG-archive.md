@@ -1,3 +1,496 @@
+## 2026-10-15 - Add a counting lane that records single happenings after the scalar phase
+
+- New flag `personal_memory_counting_enabled` (`MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED`), default off, requires scalar state. Plumbed through `config/feature_flags.py`, `config/settings_model.py`, `core/runtime.py`, `services/maintenance_scheduler.py`, `api/routes_handlers.py`, `api/routes_support.py` and `.env.example`.
+- `services/counting_consolidation.py` (new): runs in `scheduler_tasks.consolidate_personal_memory` right after the scalar phase, sharing its call counter and budget, so counting goes without when the budget runs out. It stores `occurrence` claims only, with its own prompt and claim ordinal 1, so a counting claim never shares a head with a scalar claim on the same span. Each page's prompt lists the scalar claims already stored for those turns ("already captured"). Off: no calls, no counting watermark, no `counting_*` result keys or audit fields.
+- `infrastructure/turn_evidence_repository.py` + adapter: own `:CountingConsolidationWatermark` cursor whose loader only returns turns at or before the scalar cursor for the scalar version in effect; no scalar cursor or another scalar version pauses counting. New bounded `scalar_claims_for_turns`. The label is added to every watermark wipe (namespace delete, merge/unmerge resets, scalar purge).
+- `services/typed_scalar_rules.py`: lane parameters on `extract_typed_scalars_once` / `parse_scalar_row` (defaults keep the scalar lane unchanged); occurrence rows parsed with an importance; a planned, hypothetical or negated clause is dropped as `occurrence_not_happened`; the gate takes the majority importance among agreeing samples, ties to the higher level.
+- `services/typed_scalar_service.py`: `perceive_and_persist` forwards the lane parameters. `typed_assertion_repair_repository.py` / `typed_scalar_persistence.py`: pending-binding repair keeps `importance`.
+- `services/scalar_state_service.py`: a counted View (no anchor) now gets provenance edges: its occurrences as `CONTRIBUTED_TO`, absorbed ones as `SUPERSEDED_ANCHOR`. Stated Views are unchanged. Counted Views stay advisory in recall.
+- Tests: new `tests/test_counting_extraction.py`, `tests/test_counting_consolidation.py`, `tests/test_counting_cursor_live.py` (online).
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-10-15 - Store single happenings as scalar occurrences and count them where no total was stated
+
+- `domain/typed_assertion.py`: new operation `occurrence` (one happening on a `count` or `money` slot; value a positive integer or a positive amount) with an `importance` of `tracked`, `notable` or `routine`, kept out of every identity key. `OPERATIONS` is unchanged, so the scalar parser still drops an occurrence row; stored assertions validate against the new `ASSERTION_OPERATIONS`.
+- `domain/scalar_state_fold.py`: a slot with no stated absolute folds its occurrences into a lower-bound value with `basis="counted"`. It materializes only when an applied occurrence is `tracked` or `notable` (else abstains `routine_only`). An occurrence from a turn that also gave the slot a delta is absorbed, so "three more times" is not counted twice. A slot with a stated absolute is unchanged: occurrences are neither contributors nor superseded anchors.
+- `infrastructure/typed_assertion_models.py`, `typed_assertion_repair_repository.py`, `typed_assertion_write_repository.py`, `projection_coverage_repository.py`: persist and read `importance` (null for every non-occurrence, so existing nodes are written as before).
+- `services/scalar_state_service.py`: a counted View's audit carries `scalar_basis`; stated Views' audit is unchanged.
+- Nothing writes occurrences yet; the counting lane that will is a separate, flagged change (#170).
+- Tests: new `tests/test_scalar_occurrence_fold.py`.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-10-15 - Default the OpenAI chat model to gpt-6-luna
+
+- `config/settings_model.py`: `openai_chat_model` defaults to `gpt-6-luna` (was `gpt-4o-mini`). It resolves to the existing gpt-6 profile (reasoning request shaping, extraction precision block, contained-edge pruning), the model the LongMemEval builds already run. Only OpenAI deployments with `OPENAI_CHAT_MODEL` unset or blank change; `chat_provider` still defaults to `local`.
+- `cli/setup.py` reads that default, so `menhir setup --provider openai` now fills a blank chat model with `gpt-6-luna`; `.env.example` ships it too, with the Flex tier hint and the gpt-4o-mini floor. Existing `.env` values are never overwritten.
+- Standard rates per 1M tokens: $0.10 in / $0.01 cached / $0.50 out (gpt-4o-mini: $0.15 / $0.075 / $0.60); Flex (`MENHIR_OPENAI_SERVICE_TIER=flex`) is half. It spends reasoning tokens, billed as output.
+- Docs: `docs/post-install.md`, `docs/model-governance.md`.
+- Tests: changed because they pinned the old default: the `openai` row of `test_provider_defaults_fill_blanks_without_overwriting_choices_or_opt_outs` and the openai branch of `test_provider_defaults_create_fresh_state_env` in `tests/test_cli_setup.py`.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-10-15 - Say which kind of provider error a failed or retried LLM call hit
+
+- `infrastructure/openai_rate_limit.py`: the 429 backoff warning names the kind (`flex_capacity` for Flex `resource_unavailable`, `rate_limit`, or `quota`) with the provider code and type, the retry hint and the request id. New `provider_error_code` builds a content-free label (`RateLimitError:429:resource_unavailable`, `APITimeoutError`), walking Graphiti's rewrap; provider fields are kept only in an identifier shape, and message text is never included. Neither helper raises.
+- `infrastructure/observability.py`, `infrastructure/telemetry/recorders.py`, `infrastructure/telemetry/llm_usage_store.py`: a failed call's usage event carries that label into a new `llm_usage_events.error_code` column (added to existing sidecars on open); `error` stays redacted. The store drops a value outside the label shape. `fetch_llm_usage_summary` adds `failed_by_error_code`.
+- `infrastructure/telemetry/erasure_inventory.py`: `error_code` is listed as non-content.
+- Tests: new `tests/infrastructure/test_provider_error_detail.py`.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-10-12 - Write an anchored time only when it dates the fact's own start
+
+- `infrastructure/anchored_time.py`: new `state_start_guard`, run after `clause_guard`. A "since" phrase is temporal only with "ever since" or a perfect (have/has/had plus a participle, not "'ve got" or an -ed adjective before its noun) right after the subject of the one clause it attaches to: for a leading since-clause, the first clause after its comma that is not a side clause (", as I've said"), up to and/but/so/or/yet/plus or a dash; for a trailing "since", the last non-subordinate comma clause before it, from its last coordinator or subordinator. A temporal "since" dates only that clause: when the clause shares no word with the fact, the item keeps its basis and is not written (`state_start`); otherwise it means "because" and the item is dropped (guard `causal_since`), for every kind. A state takes a time only when the text marks its start (temporal "since", "for" + amount + unit running up to now, or start/begin in the expression's own coordinate clause, which shares a word with the fact; a fronted time takes the next clause only when it opens its comma clause, and a back-reference such as "it all started" is not enough); otherwise the item keeps its basis, so facts anchored on it still place, and `plan_overlay` does not write it (outcome `state_start`, checked before `graphiti_inside_window`). A state whose window reaches past the speech date is never written either (same outcome). Every whole-word occurrence of a repeated expression is judged, the strictest wins, up to 8 (past that, conservative); matching folds case and curly apostrophes without shifting positions. Sentence bounds are computed once per turn. Graphiti's own dates are unchanged. Accepted misses: coordinated objects ("I started yoga and meditation") or predicates before a trailing since ("more rested and focused since"), no-comma leading since-clauses, a comma right before a trailing since, "since March" with no perfect, a perfect after other words ("I think I've ..."), "it all started", states started this week, paraphrased facts.
+- `domain/event_time.py`: a `state_start` row never renders the borrowed expression or a Graphiti date inside (or a day off) the borrowed window; it shows Graphiti's own date outside it, else "event time unknown".
+- `infrastructure/graphiti_extraction_policy.py`, `scripts/eval_anchored_time.py`: run the guard on the production path and in the offline eval; `guard_drops` lists both guards' indices.
+- Offline over the 22 frozen and gate runs: wrong writes 4 -> 0 (K04.3, G17.1, G28.0 x2) and no correct fact lost (writes 140 -> 138 after round 5: R26.0's "it all started" write, which Graphiti's date already scores correct); R29.2 is blocked on any speech date, not only within the year rule's 31 days. Chosen after seeing these runs, so not blind.
+- Tests: new `tests/test_anchored_time_state_start.py`. Changed because they pinned changed behavior: the `heldout2:frozen` row of `PINNED_O2` in `tests/test_anchored_time_replay.py` (false dates 2/76 -> 0/76, overridden 11 -> 9, kept inside 13 -> 12) and the `heldout3:frozen` row (kept inside 16 -> 15).
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-10-11 - Finish the speaker-role follow-ups from the #272 review
+
+- `domain/turn_role.py`: turn evidence from another namespace no longer proves an episode's speaker; namespaces compare through `normalize_namespace`, as the claim query's `subject_endpoint_eligible` does (review F6).
+- `mcp/tools/ingest/add_memory.py`, `mcp/tools/ingest/add_memory_and_track.py`, `services/ingest_intake.py`: MCP `add_memory` and `add_memory_and_track` take the same optional `role` as `POST /api/memory`, refused before any write when it is not an exact speaker; `ingest_episode` forwards `role` (review F11). TEMPORAL direct writes check it but do not use it (no extraction).
+- `scripts/backfill_admitted_on.py`: the admission join links only captured user turns (never `agent_quoted`) to episodes whose declared `turn_role` is absent or `user`, on raw text or the legacy `'user: ' + t.text`, so a backfilled edge can never prove `user` for an episode declared otherwise (review R1/R2 of #273). `scripts/freeze_scalar_samples.py` and `scripts/probe_scalar_extraction.py` read user `:TurnEvidence` with the scheduler's query and no prefix strip; `scripts/measure_absence_band.py` and `scripts/replay_fold_flags.py` keep reading the legacy prefixed LME corpus their frozen captures index into, now labelled as such. The suburbs smokes send raw text with `role="user"` (review F9).
+- Stale docstrings about the removed Episodic fallback and prefixed assistant turns are corrected (review F10).
+- Docs: `.agent/endpoints.md` and `docs/agent-usage.md` list the MCP `role`.
+- Tests: new `tests/mcp/test_add_memory_role.py` and `tests/test_backfill_admitted_on_live.py` (online); F6, F11 and legacy-strip cases added to `tests/test_turn_role_resolution.py`, `tests/test_turn_role_wiring.py`, `tests/test_turn_role_ingest.py` and `tests/test_freeze_scalar_samples.py`. Changed because they pinned changed behavior: `test_extraction_passes_proven_evidence_role` (now supplies the turn's namespace), `test_tracked_write_signature_does_not_grow_permissions_or_invent_options` (expects `role`), and in `test_freeze_scalar_samples.py` the `_Session` helper, `test_graph_turn_evidence_source_matches_scheduler_and_uses_exact_namespace`, `test_graph_missing_exact_namespace_fails_closed` and `test_graph_duplicate_namespace_selection_fails_closed`; `test_graph_legacy_source_matches_scheduler_and_uses_exact_namespace` is replaced by `test_graph_source_is_turn_evidence_only_and_keeps_raw_text`.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-10-11 - Take the speaker role from structured data, never from episode text
+
+- `domain/turn_role.py`: `resolve_turn_role` takes an episode's speaker from its single `ADMITTED_ON` turn when the content equals that turn's text (surrounding whitespace ignored) and the turn is not `agent_quoted`, else from the declared `turn_role`, else `unknown` (#271).
+- `api/routes_support.py`, `api/routes.py`, `core/backend_*.py`, `services/ingest_intake.py`, `infrastructure/memory_graph_adapter.py`, `infrastructure/episode_lifecycle.py`: optional `role` on `POST /api/memory`, persisted ON CREATE as `Episodic.turn_role` and returned by the claim query with the turn's `source_kind`; roles match exactly on every transport, and an invalid one is a 422 (400 through the bridge).
+- `infrastructure/graphiti_extraction_policy.py`, `infrastructure/anchored_time.py`, `services/enrichment_steps.py`: the anchored-time user gate, the assistant echo/self-label policy and self-like endpoint retention read the receipt's `turn_role`; `_episode_role`, `strip_user_prefix` and the titled-list prefix split are removed, and a titled list whose title is a speaker or self label is refused.
+- `infrastructure/memory_graph_adapter.py`, `infrastructure/personal_memory_queries.py`, `services/scheduler_tasks.py`, `services/correction_resolver.py`: personal-memory consolidation reads `:TurnEvidence` only; the `user:`-prefixed Episodic fallback and its two strips are removed.
+- Not compatible with graphs whose episodes carry their role only as a text prefix: those episodes now resolve to `unknown`. Rebuild them, or send `role` for extraction; counter consolidation needs user `:TurnEvidence` and ignores `role`.
+- Tests: new `tests/test_turn_role_*.py`; prefix-encoding fixtures updated to structured roles in the anchored-time, closure, high-wave1, titled-list, cf193 and turn-evidence tests; `test_strip_user_prefix_removes_only_the_leading_role` removed with its helper.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-10-05 - Apply configured Warden profiles to context recall
+
+- `tests/test_consumer_session_e2e.py`: `_ingest_project` takes a graph-issued structure scan generation before the walk, as `scan_and_write_project` does, so the `needs_llm` session test no longer fails on the write fence with `StaleStructureScan`. Test-only.
+- `infrastructure/memory_queries.py`: `timeline_anchor` accepts a receipt (queue-node) uuid and resolves it to its Graphiti episode only through a visible, non-FAILED queue node in the caller's namespace; Graphiti uuids still anchor directly. Query mode and `around=<receipt>` no longer fail with "unknown or hidden memory" for live memories.
+- `services/timeline_service.py`: the query-mode seed search applies the current embedding-model filter (#220), so stale-model vectors cannot pick the anchor.
+- `tests/test_recall_timeline_receipt_anchor.py`, `tests/test_recall_timeline.py`: disposable-graph coverage for receipt/episode anchors, hidden/FAILED/pending receipts, cross-silo receipts, subject threads and the model filter; offline query-shape checks.
+
+- `config/feature_flags.py`: add a 98-entry metadata inventory for boolean/mode settings, legacy settings readers and environment controls, with aliases, scoped prerequisites, observation markers and version requirements. Enforce inventory/default/binding/documentation consistency with AST and mutation controls; backfill 38 commented template entries without changing runtime behavior or defaults.
+- `.env.example`, `docs/post-install.md`, `.agent/default-off-features.md`: document bounded campaign controls, correct event-history variable names and explain upgrade precedence, explicit opt-outs and persisted-data limits; verify setup/template upgrades across 20 switches without changing defaults.
+- `src/menhir/cli/setup.py`: fill missing or blank provider model/URL settings from existing defaults in wheel and checkout setup (#193), preserving custom values, secrets and explicit feature opt-outs; add idempotence regression coverage.
+- `tests/test_warden_verifier_interactions.py`: validate Warden/verifier isolation and combination over changed, unchanged, unavailable and persisted-review sources with sync-disabled restart; report warnings, refusals and register evidence separately across 128 recall/context decisions. Reuse existing offline stores and document remaining qualification in the existing owner/index; production behavior/defaults unchanged.
+- `domain/warden.py`, `services/assertion_pipeline.py`: pass recorded unresolved conflict groups to the optional contradiction guard; refuse current assertions and label historical recall without changing ranking or defaults. Expand real-producer tests and the offline matrix to 108 decisions, including resolved conflicts and unchanged retained scores; update the existing owner/index and option contract.
+- `tests/test_warden_safety_matrix.py`: compare three Warden profiles across seven offline recall controls and independent optional guard runs; report harmful returns separately from warnings, useful refusals and unknown provenance in JUnit JSON. Document measured fixture limits in the existing verifier owner/index; no policy or default changes.
+- `domain/recall.py`, `services/recall_service.py`, `services/recall_pipeline.py`, `services/recall_support.py`: distinguish configured versus applied Warden checks, pending bypasses and metadata failures; expose detailed receipts only on request.
+- `core/backend_protocol.py`, `core/backend_runtime_data_ops.py`, `core/backend_client_ops.py`, `api/routes.py`, `api/routes_support.py`, `mcp/tools/recall/`: carry `include_warden_status=false` across canonical recall/context boundaries; preserve brief incomplete-check notices.
+- `services/context_builder.py`, `explorer/recall_lab.py`, `explorer/static/recall-lab.js`: budget optional diagnostics and mandatory notices with context; show execution receipts in Recall Lab details.
+- `tests/test_warden_execution_status.py`, `tests/test_api_routes.py`, `tests/test_backend_roundtrip.py`, `tests/test_recall_lab.py`: cover visibility, fallback/error/metadata paths, concurrency, context budgets and protocol forwarding; update owner/index and data/API/default-off docs.
+- Verifier sync preserves last successful register evidence while recording separate probe attempts; incomplete or unconfirmed register links cannot claim a new success.
+- Ranked recall, compact/full MCP, REST and context expose same-namespace register observations, successful verification times and latest probe statuses, without changing ranking or defaults.
+- Freshness regression coverage includes restart, unavailable/failed probes, missing first success, duplicate links, atomic context budgets and disposable graph projections; update the existing #173 owner and reference docs.
+- `src/menhir/infrastructure/verifier_repository.py`, `src/menhir/services/verifier_sync.py`: scope bindings/register writes and review traversals by namespace; reject invalid observations and avoid writes after a failed register read.
+- `src/menhir/domain/recall.py`, `src/menhir/infrastructure/cypher.py`, `src/menhir/services/recall_pipeline.py`, `src/menhir/services/scoring_service.py`: carry existing verifier review flags through ranked recall without changing content or scores.
+- `src/menhir/services/context_builder.py`, `src/menhir/mcp/formatters.py`, `src/menhir/api/routes.py`, `src/menhir/api/routes_support.py`: preserve review warnings in context, compact/full MCP and REST.
+- `tests/test_verifier_currentness.py`, `tests/test_verifier_sync.py`, `tests/test_context_builder.py`, `tests/test_scoring_service.py`, `tests/test_api_routes.py`: add drift/restart, malformed-source, budget, protocol and disposable graph namespace controls.
+- `tests/test_milestone_three_contract.py`: extend the strict optional-field contract and assert inert defaults for review metadata.
+- `.agent/plans/backlog/graph-verifiers.md`, `.agent/plans/backlog/README.md`, `.agent/data_models.md`, `.agent/endpoints.md`, `.agent/default-off-features.md`: reconcile the stale unwired-consumer claim and document the bounded advisory contract and remaining qualification.
+
+- `src/menhir/services/context_builder.py`, `src/menhir/core/bootstrap.py`, `src/menhir/cli/bootstrap.py`: pass the configured retrieval profile through runtime and direct-hook context recall, including Warden admission settings.
+- `tests/test_context_builder.py`, `tests/test_services_pipeline.py`: cover strict and conversational profiles, superseded and unknown-support controls, disabled-gate compatibility, and both production constructors.
+- `.agent/default-off-features.md`: explain strict versus conversational profiles and the limits of the scored-candidate gate; no defaults change.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-10-04 - Report Phase-3 lane completion for benchmark acceptance
+
+- `src/menhir/api/routes_handlers.py`, `src/menhir/api/routes_support.py`: report both counter gates, scalar-only model calls, and whether evidence remains beyond the event watermark.
+- `src/menhir/services/scheduler_tasks.py`: attribute scalar calls before the shared event phase.
+- `tests/test_api_routes.py`, `tests/test_consolidate_personal_memory.py`: cover counter gates, event completion and partial processing, and scalar call attribution.
+- `.agent/endpoints.md`: document the additive response fields.
+
+## 2026-09-30 - Keep merge lineage out of Graphiti prompts
+
+- `src/menhir/infrastructure/graphiti_llm_adapter.py`: the provider wrapper removes `merge_audit`, `merged_from` and `last_merge_op_id` from tagged JSON blocks before a Graphiti request is sent. The fork serializes entity attributes into its dedup and summary contexts, so the merge audit trail rode along and grew with every merge (64% of the dedup candidate block in AMA runs; one 131k-char NodeResolutions prompt). In a 60-call replay, dropping it matched the control consensus as often as a fresh control run and cut dedup input about 79%. Prompts without lineage are sent unchanged.
+- `tests/infrastructure/test_merge_lineage_prompt_policy.py`: renders the real fork dedup and summary prompts with lineage-carrying nodes; only lineage is removed and the rest of the prompt is byte-identical.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-29 - Give verdict LLM calls room to answer on reasoning models
+
+- `src/menhir/infrastructure/llm.py`: the identity judge, contradiction check and shadow tie-break use a shared `_VERDICT_MAX_TOKENS` (1024) instead of 64/64/128. On reasoning models `max_tokens` also covers hidden reasoning, so most identity-judge calls ended empty and became `None` votes that route merges to conflict (#203). `_chat_text` now warns when a completion comes back empty, naming the operation and budget.
+- `tests/infrastructure/test_verdict_budget_203.py`: a simulated reasoning model that answers only above a reasoning budget, the empty-completion warning, and the unchanged fail-safe `None` for a real empty answer.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-29 - Read multi-word numbers whole in scalar counts and frequencies
+
+- `src/menhir/services/typed_scalar_rules.py`: counts read thirteen to nineteen, the tens, and tens compounds ("twenty-five", "twenty five") as one number, so "twenty-five postcards" is 25, not 5. A count, range bound or frequency count joined to another number word, digit or scale word ("two hundred", "2 thousand") now gives no value instead of a piece of the number, and a frequency with a multi-word number before "every" no longer defaults to a count of 1 (#200).
+- `tests/test_scalar_compound_number_words.py`: compound, scaled, range, delta and frequency cases, plus unchanged single-word readings.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-29 - Default the scalar agreement gate to lenient
+
+- `src/menhir/config/settings_model.py`: `personal_memory_scalar_threshold` defaults to `2/3` and attribute/scope/subject reconciliation to on; scalar state itself stays off.
+- `src/menhir/services/maintenance_scheduler.py`, `scheduler_tasks.py`, `scalar_consolidation.py`, `typed_scalar_service.py`: align the same knobs' fallback defaults.
+- `.env.example`: document the new defaults and that the gain is not yet re-measured on current Menhir.
+- `tests/test_scalar_lenient_defaults.py`: defaults, overrides and the k=3 two-vote commit; `tests/test_scalar_threshold_setting.py`, `tests/test_gate_relaxations.py`: update the pinned old defaults.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-29 - Read scalar input only from TurnEvidence
+
+- `src/menhir/infrastructure/memory_graph_adapter.py`, `src/menhir/infrastructure/personal_memory_queries.py`: the typed-scalar lane always discovers and loads work from `:TurnEvidence`; the legacy `user:`-prefix Episodic selectors are removed (#95). The shared scalar cursor writer stays.
+- `src/menhir/services/scalar_consolidation.py`: warn once per process when scalar consolidation runs with no user-role evidence, naming `add_memory(user_statement=...)` and TurnEvidence hooks.
+- `tests/test_scalar_discovery_evidence_only.py`: evidence-only discovery and the warning; `tests/test_scalar_consolidation_cursor.py`: drop the two tests of the removed selectors.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-29 - Accept agent-quoted user statements for scalar perception
+
+- `src/menhir/mcp/tools/ingest/add_memory.py`, `src/menhir/core/backend_*.py`, `src/menhir/api/routes.py`, `src/menhir/api/routes_support.py`: new optional `user_statement` (verbatim user words) on `add_memory`, exclusive with `turn_evidence_uuid`, carried through MCP, in-process and REST and sent only when set. `add_memory_and_track` keeps its MVP signature.
+- `src/menhir/services/ingest_intake.py`: record it as `:TurnEvidence` with `source_kind='agent_quoted'` and link it provenance-only; failures never fail the ingest.
+- `src/menhir/domain/truth/admission_gate.py`, `src/menhir/infrastructure/scalar_view_repository.py`, `src/menhir/infrastructure/turn_evidence_repository.py`: agent-quoted evidence never grants user tier, never counts as user foundation, and never feeds the counter or event lanes; the scalar lane keeps it.
+- `tests/test_agent_quoted_evidence.py`, `tests/test_api_routes.py`: gate, foundation, lane, intake and REST coverage.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-29 - Require money and measurement quotes to state their value
+
+- `src/menhir/services/typed_scalar_rules.py`: a model-supplied money or measurement value drops with `value_not_in_span` unless its grounded quote states it as digits (thousands separators, decimals, k/million scale) or English number words; the check runs last so earlier drop reasons are unchanged, and counts, durations, frequencies and clock times keep their span-derived values (#89).
+- `tests/test_scalar_value_in_quote.py`: stated and missing money forms, measurement, scaled amounts, and unchanged count correction and multi-number abstention.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-29 - Treat equal Decimal amounts as one scalar value
+
+- `src/menhir/domain/typed_assertion.py`: canonical numeric form for voting and identity strips insignificant Decimal scale and signs zero (10, 10.0, 10.00 -> "10"; -0.00 -> "0"), without float (#152).
+- `src/menhir/infrastructure/typed_assertion_repair_repository.py`: stored `value_json` keeps the exact Decimal scale ("1200.50") instead of the canonical form.
+- `tests/test_scalar_decimal_equality.py`: gate, assertion-key and normalization regressions; `tests/test_money_currency_canonicalization.py`, `tests/test_typed_assertion_repository.py`: update the pinned normalized strings.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-28 - Restore default-silo scalar owner lookup
+
+- `src/menhir/infrastructure/episode_lifecycle.py`: use the shared tenant-scope
+  predicate for exact fallback entity lookup, including both persisted default
+  namespace spellings while keeping named tenants scoped.
+- `tests/test_episode_lifecycle.py`: cover default and named namespace query
+  parameters and a disposable-graph regression for current, legacy, named,
+  and derived-View entities.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-28 - Schedule scalar-only personal memory
+
+- `src/menhir/core/runtime.py`, `src/menhir/services/maintenance_scheduler.py`:
+  create the chat dependency and register the shared background job when scalar
+  state alone is enabled, while keeping counter and event lanes independent.
+- `tests/test_settings_event_history_runtime.py`, `tests/test_api_routes.py`:
+  cover all eight lane combinations, the unavailable-provider case, and scalar
+  parity with API-triggered consolidation.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-28 - Ground scalar clock times with dotted meridiems
+
+- `src/menhir/services/typed_scalar_rules.py`: normalize dotted AM/PM source
+  times correctly and refuse unsupported suffixes instead of accepting a bare
+  time prefix that could overwrite a correct model value.
+- `tests/test_typed_scalar_perception.py`: cover source spelling, noon and
+  midnight, malformed times, and full-row grounding.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-28 - Refuse ambiguous scalar subject fallback
+
+- `src/menhir/services/typed_scalar_rules.py`: distinguish absent, ambiguous,
+  invalid, and unique subject matches so a conflicting local owner cannot fall
+  through to a looser spelling or namespace lookup.
+- `tests/test_typed_scalar_self_binding.py`,
+  `tests/test_typed_scalar_bind_persist.py`: cover exact and variant ambiguity,
+  blank UUIDs, both namespace forms, persisted advisories, and repair.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-28 - Reconcile MVP preflight evidence before RC freeze
+
+- `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: record the completed issue inventory, five-item Oracle harness preflight, and merged Opus fixes while keeping exact-RC gates open.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-28 - Preserve MVP release evidence and clarify stdio setup
+
+- `README.md`, `docs/post-install.md`, `.env.example`: show the running-backend requirement and client environment for the supported local stdio path.
+- `tests/e2e/conftest.py`, `tests/e2e/README.md`, `tests/test_e2e_work_root.py`: keep local E2E evidence outside pytest's session scratch directory and document where to inspect it.
+- `.github/workflows/release-image.yml`, `tests/test_release_image_workflow.py`: fail validation when the in-image Graphiti fork probe fails before evidence upload.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-28 - Keep pytest scratch local and report cleanup failures
+
+- `pytest.ini`, `tests/conftest.py`, `tests/_temp_cleanup.py`: use pytest's public temporary-path fixtures outside the Git checkout, close CLI log handlers in the scratch tree, remove it with Windows read-only-file handling, and surface residue as a test failure.
+- `tests/infrastructure/test_git_log.py`, `tests/test_audit_trail.py`, `tests/test_consolidation_audit.py`, `tests/test_consumer_session_e2e.py`, `tests/test_telemetry_stats.py`: move test scratch databases and Git repositories under pytest-owned temporary paths and restore the session test's telemetry setting.
+- `tests/test_mcp_server.py`, `tests/test_mcp_telemetry.py`, `tests/test_services_pipeline.py`: report manual scratch cleanup failures instead of silently ignoring them, and close the inspected SQLite connection.
+- `tests/test_temp_hygiene.py`: catch direct scratch-directory bypasses and hidden cleanup failures, and keep pytest paths outside the repository for non-repository tests.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-28 - Reconcile local-main MVP safety fixes
+
+- `src/menhir/infrastructure/episode_lifecycle.py`, `src/menhir/infrastructure/memory_graph_adapter.py`, `src/menhir/services/enrichment_steps.py`, `src/menhir/services/ingest_worker.py`: fold transient retry refunds into the claim-fenced episode transition so stale workers cannot refund a newer claim.
+- `src/menhir/infrastructure/consolidation_queries.py`, `src/menhir/core/backend_client_ops.py`, `src/menhir/core/backend_protocol.py`, `src/menhir/core/backend_runtime_admin_ops.py`, `src/menhir/mcp/tools/conflict/resolve_conflict.py`: keep conflict reads, writes, readback, and edge bridging inside the requested namespace; return conflict member UUIDs in stable order.
+- `src/menhir/services/ingest_limits.py`, `src/menhir/services/ingest_intake.py`, `src/menhir/api/routes_support.py`, `src/menhir/services/enrichment_steps.py`, `src/menhir/core/backend_runtime_admin_ops.py`: share memory text and diff limits across local intake, direct temporal writes, and the API.
+- `tests/conftest.py`, `tests/services/test_ingest_write_bounds.py`, `tests/test_api_routes.py`, `tests/test_backend_roundtrip.py`, `tests/test_circuit_breaker.py`, `tests/test_conflict_namespace_scope.py`, `tests/test_episode_lifecycle.py`, `tests/test_high_wave1_remediation.py`, `tests/test_mcp_server.py`, `tests/test_memory_graph_adapter_methods.py`, `tests/test_transient_exhausted_recovery_live.py`, `tests/test_transient_refund_online.py`: cover write boundaries, mixed-group namespace isolation, deterministic results, and stale-claim retry accounting.
+- `tests/e2e/test_e2e_08_isolation_adversarial.py`: recognize the shared validator's explicit oversized-diff refusal in the stdio acceptance criterion.
+- `.agent/plans/menhir-local-main-safety-reconciliation-2026-09-28.md`, `.agent/plans/README.md`, `.agent/architecture.md`, `.agent/data_models.md`, `.agent/endpoints.md`: record the reconciliation scope and updated contracts.
+
+## 2026-09-28 - Harden post-release audit boundaries before MVP RC
+
+- `.github/workflows/tests.yml`, `tests/e2e/conftest.py`, `tests/e2e/_harness/ci_evidence_gate.py`, `tests/test_e2e_ci_gate.py`: fail wheel-build errors and reject missing, skipped, or unproven installed-wheel acceptance in CI.
+- `src/menhir/services/beacon_compat.py`, `tests/test_beacon_compat.py`: isolate Beacon subprocess imports from repository-controlled modules while preserving the installed Beacon contract.
+- `src/menhir/snapshot/upload_client.py`, `src/menhir/cli/sync.py`, `tests/snapshot/test_upload_client_offline.py`, `tests/snapshot/test_upload_security.py`: refuse unsafe operator-key transports and redirects before disclosure.
+- `src/menhir/infrastructure/graphiti_llm_adapter.py`, `tests/test_graphiti_combined_extraction_patch.py`, `tests/test_graphiti_fork_contract.py`, `docs/post-install.md`: restore JSON-object relationship aliases and explain mixed Graphiti installation repair.
+- `.agent/plans/menhir-post-v023-audit-remediation-2026-09-28.md`, `.agent/plans/README.md`, `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: keep the follow-up work and RC gate explicit.
+
+## 2026-09-28 - Close the local-stdio MVP Gate B audit
+
+- `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`: close Gate B against merged main after exact-commit CI, Ubuntu stdio criteria, Windows strict E2E, and no-publish Graphiti image receipts; keep RC freeze and final release separate.
+- `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: record Gate B and pre-freeze Gate C completion, exact evidence, and the remaining named-RC work.
+- `.agent/archive/plans/menhir-gate-b-remediation-2026-09-28.md`, `.agent/plans/README.md`: mark the completed remediation plan IMPLEMENTED, archive it, and remove it from active execution routing.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-28 - Prove denied scans and sealed Graphiti container preflight
+
+- `src/menhir/core/backend_runtime_data_ops.py`: report failed project traversal to stdio callers as a clear refusal while preserving the existing index.
+- `tests/infrastructure/test_gateb_structure_publication_online.py`: keep the graph-preservation regression aligned with the caller-visible refusal.
+- `tests/e2e/test_e2e_08_isolation_adversarial.py`: deny a real directory listing on Windows or POSIX and compare the indexed graph before and after a rejected rescan.
+- `tests/e2e/test_e2e_06_graphiti_fork.py`: verify and probe a no-publish release image artifact from the same clean commit; retain explicit PENDING evidence when no bundle is supplied.
+- `tests/e2e/README.md`: document both platform and container evidence paths.
+- `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`: reconcile merged correctness fixes and exact-commit evidence without declaring RC release approval.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-28 - Let isolated scanners read the release image archive
+
+- `deploy/build_release_image.py`: make the saved public-source image archive readable to non-root scanners and give Syft enough temporary space to unpack its layers during no-publish validation.
+- `.github/workflows/release-image.yml`: surface a failed builder's final diagnostic as a job annotation and verify the fork version, upstream absence, and native hook wiring inside the no-publish candidate image.
+- `tests/test_build_release_image.py`: reproduce Docker's restrictive archive mode, verify the scanner-readable mode on POSIX, and pin Syft's temporary-space budget.
+- `tests/test_release_image_workflow.py`: keep the offline container fork probe in the validation job before artifact upload.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-28 - Close Gate B structure, artifact, and TODO correctness gaps
+
+- `src/menhir/infrastructure/project_scanner.py`: refuse unreadable traversal, stat, and source reads before publication; bump the scanner fingerprint schema.
+- `src/menhir/infrastructure/structure_write_fence.py`: issue graph-backed scan generations and lock each project during transactional publication.
+- `src/menhir/infrastructure/structure_queries.py`: publish scan metadata last, preserve unseen legacy symbols on capped scans, and scope fingerprint reads and binding refreshes to project identity.
+- `src/menhir/infrastructure/memory_graph_adapter.py`: validate the latest scan generation and publish structure, binding refreshes, and document writes under the project transaction lock.
+- `src/menhir/core/backend_runtime_data_ops.py`: mint scan generations before manual and detached symbol scans and carry them into skipped binding refreshes.
+- `src/menhir/core/backend_shared.py`: preserve scan generations through serialized payloads and reject missing or inconsistent coverage counts before publication.
+- `src/menhir/services/scheduler_tasks.py`: settle identity and mint the generation before watcher traversal; report scan and binding failures.
+- `src/menhir/services/scheduler_protocols.py`: describe the watcher scan-generation and binding-refresh methods.
+- `src/menhir/domain/work_artifact.py`: require a replacement for `SUPERSEDED` and validate known lifecycle states.
+- `src/menhir/infrastructure/work_artifact_repository.py`: lock artifact updates and compare observed lifecycle state before applying transitions or supersession, including legacy null namespaces.
+- `src/menhir/services/artifact_reconciliation_service.py`: leave unresolved source declarations in place when a superseded registration has no replacement.
+- `src/menhir/mcp/tools/ops/transition_artifact.py`: explain stale transitions and the dedicated supersession operation.
+- `src/menhir/infrastructure/todo_repository.py`: link unique visible files, persist each chosen project and canonical path, and return linked and unresolved locations.
+- `src/menhir/mcp/tools/ops/add_todo.py`: report linked files and unresolved location reasons.
+- `src/menhir/mcp/tools/ops/get_todo.py`: display every linked file on a TODO read.
+- `src/menhir/mcp/tools/recall/query_structure.py`: qualify empty symbols, dependencies, documents, and affected-test answers by index coverage.
+- `tests/test_project_scanner.py`: traversal, stat, and required-read refusal regressions.
+- `tests/test_query_structure_tool.py`: complete, partial, and legacy-unknown negative-answer regressions.
+- `tests/test_structure_watcher.py`, `tests/test_beacon_provider.py`, and `tests/infrastructure/test_cf257_detached_write_identity.py`: cover the new watcher and detached-write ordering contract.
+- `tests/infrastructure/test_cf257_stale_claim.py`, `tests/test_high_wave1_remediation.py`, and `tests/test_high_wave5_explorer_domain.py`: keep the existing identity, rescan, and unscoped-transition regressions aligned with the new token and lifecycle compare-and-set boundaries.
+- `tests/infrastructure/test_gateb_structure_publication_online.py`: real-Neo4j stale-scan, rollback, same-project serialization, capped legacy-symbol, cross-identity refresh, and injected-traversal regressions.
+- `tests/test_work_artifact.py`, `tests/test_artifact_tools.py`, `tests/test_artifact_source_reconciliation_io.py`, and `tests/test_cf48_domain_owns_artifact_predicates.py`: artifact lifecycle and unresolved-import regressions.
+- `tests/test_work_artifact_online.py`: real-Neo4j artifact transition, supersession, and rollback races.
+- `tests/test_todo.py` and `tests/test_todo_file_link_online.py`: unique, ambiguous, multi-location, namespace, and restart link regressions.
+- `tests/e2e/test_e2e_08_isolation_adversarial.py`: distinguish namespace-delete caps from a real structural scan cap and check preservation of an indexed file.
+- `tests/e2e/test_e2e_04_workartifacts.py` and `tests/e2e/_harness/artifact_corpus.py`: verify a legacy superseded source without a replacement stays unregistered and byte-identical while valid artifacts reconcile.
+- `tests/e2e/README.md`: explain the two separate cap criteria.
+- `.agent/data_models.md`, `.agent/endpoints.md`, and `.agent/workflows/artifact_authoring.md`: document scan ordering, TODO resolution, and replacement-backed supersession.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-28 - Plan Gate B correctness remediation
+
+- `.agent/plans/menhir-gate-b-remediation-2026-09-28.md`: define bounded fixes and
+  regression evidence for supported-path structure, WorkArtifact, and TODO audit
+  findings, including concurrency, legacy-state, and rollback decisions.
+- `.agent/plans/README.md`: route the proposed work package under the approved
+  local-stdio MVP release plan.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-27 - Separate operator deployment from public Menhir
+
+- Move the operator host configuration, production runbooks, release receipts,
+  staging/promotion scripts, migration pipeline, and offline tests into the
+  private `Archolith/menhir-deploy` repository. Preserve their relative paths
+  for offline verification with a pinned public Menhir checkout.
+- Keep the public package, local self-host instructions, sealed image builder,
+  and disposable Docker checks. Correct the Docker guide so it no longer
+  claims a plain clone can build the release image.
+- Replace production-policy fixtures in public security tests with a synthetic
+  policy. Keep runtime checks public and add a boundary check against re-adding
+  operator files. Earlier public Git history still contains operator details;
+  no history rewrite, host rotation, deployment, or release occurred.
+
+## 2026-09-27 - Record local-stdio MVP platform and configuration decision
+
+- `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`: approve Windows 11
+  AMD64 and Ubuntu Linux AMD64 as the primary MVP platforms; record the stdio,
+  backend, Neo4j, provider, benchmark-model, default-off feature, and public
+  Graphiti fork contract. Keep Oracle preflight, container validation, RC freeze,
+  and frozen-RC evidence open.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
+## 2026-09-27 - Add packaged Graphiti fork stdio acceptance path
+
+- `tests/e2e/test_e2e_06_graphiti_fork.py`: verify the public fork wheel hash,
+  installed source bytes, absence of upstream Graphiti, native hook wiring, and
+  deterministic ingest/recall through the installed Menhir stdio path.
+- `tests/e2e/beacon_post_mvp_scenarios.py`,
+  `tests/e2e/test_e2e_08_isolation_adversarial.py`, `.github/workflows/tests.yml`:
+  remove deferred Beacon from MVP execution and verify a missing fork makes both
+  package integrity and Menhir's runtime check fail explicitly in a disposable install.
+- `tests/e2e/README.md`, `.agent/plans/README.md`, the approved MVP plan, and the
+  MVP release audit: distinguish the candidate-wheel result from the later
+  release-container gate and keep that gate explicitly PENDING in E2E evidence.
+
+## 2026-09-27 - Start independent local-stdio MVP release audit
+
+- `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`: record the
+  supported-path evidence map and the outstanding packaged-Graphiti E2E and
+  release-container validation blockers without claiming Gate B closure.
+
+## 2026-09-27 - Prepare public Graphiti fork package for Menhir MVP
+
+- Require `archolith-graphiti-core==0.30.2.post1` so normal installs can use a
+  public wheel rather than a VCS checkout while retaining the native fork hooks.
+- Lock the published PyPI wheel and source hashes from fork tag `v0.30.2.post1`;
+  verify a fresh Menhir wheel install resolves the public fork without upstream Graphiti.
+- Simplify the release image to consume the locked, hashed fork wheel directly.
+- Make the fork package and its cold-install compatibility an explicit MVP gate;
+  defer Beacon generation and consumption from this release.
+- `graphiti_client.py`, `graphiti_llm_adapter.py`: retain DeepSeek's JSON-object
+  fallback with its schema prompt, and accept the fork's typed-attribute extraction
+  flag while preserving its preamble across retries.
+- `tests/test_graphiti_client.py`: cover provider requests and the fork's typed
+  node-attribute path through Menhir's adapter.
+
+## 2026-09-26 - Reconcile native Graphiti fork with current Menhir
+
+- `pyproject.toml`, `uv.lock`: pin the public Archolith Graphiti 0.30.2 maintenance
+  commit `6b907b93fed32cb979093327608a4fd897b39751` and preserve locked registry dependencies.
+- Recover the unfinished Phase F migration onto published main: replace all 17 runtime
+  patch installers with native fork hooks and Menhir-owned extraction, resolution and
+  LLM policy adapters. Keep subsequent ingestion, retention and recall fixes.
+- `graphiti_client.py`, `graphiti_resolution_policy.py`: flush telemetry inside its
+  request task on success, failure and cancellation; count empty candidate searches.
+- `graphiti_llm_adapter.py`: preserve namespace and operation metadata across retries.
+- Release wheelhouse: derive the immutable fork requirement from package metadata,
+  pin/hash the additional build backend closure, and build without isolated dependency
+  resolution. Docker remains an offline wheel consumer.
+- Migrated contract tests and added dependency, request-context, task-boundary and
+  immutable-build-pin regressions. Feature defaults and deployed configuration stay as-is.
+- Fork baseline is now 0.30.2. Default-on readiness (#169 and siblings) still requires
+  outstanding source-grounding fixes and current graph/model quality evidence; this
+  integration does not itself qualify a feature for default enablement.
+
+## 2026-09-26 - remaining MVP audit fixes for recall and decay (#154, #144)
+
+- `recall_pipeline.py`: acquire applicable independent sources before deciding recall is empty;
+  assemble standalone edge candidates before fallback, retain pending results and search-failure attribution,
+  and avoid metadata/adjacency round trips for an empty node pool.
+- `consolidation_queries.py`, `memory_graph_adapter.py`, `lifecycle_decay.py`: rotate bounded decay
+  batches by persistent least-recent selection, mark selected rows before processing, and log selection
+  separately from successful work. Preserve access/age/retention/policy gates and deletion disarm.
+- `test_recall_service.py`: empty/filtered/failed/pending semantic pools, file visibility/session guards,
+  enabled observation-only and standalone edge lanes, plus actual scoped file-to-recall Neo4j acquisition.
+- `test_lifecycle_service.py`: actual 501-record skipped-batch/restart regression, marker order for both
+  phases, unchanged access/freshness, direct/source retention, and marker-failure refusal.
+- `.agent/memory-policy.md`, `.agent/data_models.md`: define independent acquisition and the scheduling-only
+  selection marker, finite-set fairness and restart/rollout limits. No production writes or migration.
+- `CHANGELOG-archive.md`: move the oldest entry to keep ten.
+
+## 2026-09-26 - chronological memory reads tolerate legacy timestamp storage (#145)
+
+- Normalize native dates and valid legacy ISO text before database ordering and limits in recent,
+  flagged, scope, and type reads; invalid access falls back to creation, unknown dates sort last,
+  and equal instants use a stable UUID tie-break without losing fractional precision.
+- Stamp native memory timestamps in TEMPORAL, candidate, L4, TODO-reminder mirrors, and View refreshes;
+  retain candidate/artifact creation receipts when storage types change.
+- Use guarded timestamp conversion for decay and session age predicates; unknown ages cannot
+  justify destructive decay. Document writer coverage, manual backfill precautions, and scoring limits.
+- Disposable Neo4j regressions cover actual reads/touches, bounded startup selection, writer receipts,
+  lifecycle protection, offsets, invalid calendar values, native/local dates, and nanosecond ties.
+- Archive the oldest changelog entry to keep ten. No automatic migration or production data changes.
+
+## 2026-09-26 - generic reads preserve completion and artifact supersession (#143)
+
+- Preserve stored status, artifact status, and replacement identifiers through graph projections,
+  recall scoring, MCP/resource serializers, REST recall, and startup context.
+- Label completed obligations and historical artifacts while keeping original content searchable;
+  retain labels through context budgets, clipped timelines, and pinned hook summaries.
+- Preserve distinct lifecycle states during context deduplication. Ordinary records retain their
+  existing presentation; dedicated reminder lists still include only open reminders.
+- Regressions cover compact/full recall, startup and REST reads, resources, clipping/budgets,
+  ordinary/unknown state controls, and actual completion/supersession writers on disposable Neo4j.
+- Document the read policy and optional result fields. No database migration or production activation.
+
+## 2026-09-26 - semantic recall preserves conversation admission (#148)
+
+- `backend_runtime_data_ops.py`: forward the effective request/process session into recall.
+- `backend_client.py` and `service_access.py`: carry the writer's conversation identity through
+  the stdio HTTP bridge; regressions exercise actual auth middleware across operation paths.
+- `recall_support.py` and `recall_pipeline.py`: share ordinary/pending SESSION admission,
+  filter before waiting, recheck refreshed source ownership before pending/READY projection,
+  and require explicit policy inputs at all three pending-result assembly paths.
+- `episode_lifecycle.py` and `memory_graph_adapter.py`: filter pending sources before the
+  bounded query limit and carry owner stamps, preserving namespace filtering and anonymous opt-in.
+- Recall/MCP/graph regressions cover owners, absent stamps, disabled inclusion, all assembly paths,
+  refresh changes, caller/process identity, and actual disposable-Neo4j query-to-recall behavior.
+  Existing test doubles accept the extended internal signatures.
+- The stdio lifecycle lane flags, consolidates, then promotes its corrected recall result before a new
+  conversation is expected to retrieve it, and verifies the same UUID after restart.
+- `.agent/memory-policy.md`: document conversation admission and its namespace-auth boundary.
+
+## 2026-09-26 - startup context supporting reads retain namespace scope (#116)
+
+- `src/menhir/mcp/tools/recall/recall_context_memories.py`: pass the effective tool namespace
+  to flag inspection and stale-TODO reads, preserving unscoped behavior and client pins.
+- `tests/test_cf238_bootstrap_receipt_identity.py`: exercise MCP execution and the real local
+  provider through scoped, default, omitted, and conflicting/omitted client-pin cases.
+- `.agent/tasks-mcp.md`: describe the supporting-read scope and the agreed MVP deferral of
+  the full effective-scope receipt feature. #116 remains open.
+
+## 2026-09-25 - decay age pre-filters follow eligible policy thresholds (#86)
+
+- `src/menhir/services/lifecycle_models.py`: derive compression and deletion age minima
+  from non-exempt policies at startup, preventing future lower thresholds from being skipped.
+  Current eligible-policy minima remain 7 and 30 days; zero-day non-exempt policies participate.
+- `src/menhir/services/lifecycle_decay.py`: replace the obsolete pre-LLM compression docstring
+  with the helper's actual truncation behavior and the automatic sweep's LLM path.
+- `tests/test_decay_logic.py`: verify both real sweep requests in fresh processes with shorter,
+  zero-day, and exempt policies, without mutating shared test module imports.
+- `.agent/memory-policy.md`: document the pre-filter rule, exemption choice, and restart requirement.
+
+## 2026-09-24 - MCP clients are told when to use memory, not just what Menhir is
+
+Every MCP client receives the server instructions, whether or not a repository pastes the
+AGENTS.md template. They were one positioning sentence that never mentioned memory or recall,
+and in an agent evaluation agents skipped `recall_memories` in half the runs and used Menhir as a
+code index. With the new instructions and descriptions, every run recalled and most read the
+source episode; answers improved at the same cost.
+
+- `src/menhir/mcp/instructions.py` (new): `SERVER_INSTRUCTIONS`, shared by the stdio and remote
+  servers. It covers when recall is worth it (recorded decisions, rejected alternatives,
+  incidents, preferences, constraints; especially when the repository cannot supply the
+  rationale), the identifier discipline, one focused query first, `get_provenance` for exact
+  wording, checking dates, conflicts and stale anchors, and that an empty result does not prove
+  there is no history.
+- The instructions also carry the local-stdio MVP write path (#118): write a decision with its
+  reason and the rejected alternative; `add_memory_and_track` when the write must be recallable
+  in the same session, observing its episode id rather than writing again; `ingest_project`
+  when the repository is missing; a new project's memory starts empty.
+- `src/menhir/mcp/server.py`, `src/menhir/api/mcp_remote.py`: use it. The stdio gateway also pins
+  `get_provenance`, which the instructions rely on for a recorded reason's exact wording.
+- `src/menhir/mcp/contracts.py`: `registered_description()` drops a docstring's opening sentence when
+  it repeats the curated description; 13 tools sent their lead sentence twice.
+- `recall_memories`, `get_provenance`, `query_structure`: descriptions say what each returns and
+  when to use the next tool. Recall returns summaries, not source episodes; `include_invalidated`
+  keeps superseded facts on returned results and is not a history search; `compact` and `trace` are
+  documented; the structure graph is not a substitute for targeted recall.
+- `get_artifact`, `list_artifacts`, `list_artifact_questions`: say they return records and document
+  locations, not document text (`get_artifact` claimed "in full"), and that an open question does
+  not establish a decision.
+- `docs/templates/AGENTS.menhir.md`, `docs/agent-usage.md`, `README.md`: the same when-to-recall and provenance
+  guidance; structure-first only for structural questions; `rate_recall` only where the client
+  exposes it (the readonly tier does not).
+- `tests/test_mcp_agent_guidance.py` (new): both transports send the shared text, every tool it names
+  exists, stdio agents see the tools it relies on, and no registered description repeats its lead
+  sentence. `tests/e2e/test_e2e_01_cold_install.py`: `get_provenance` joins the pinned MVP surface.
+- `CHANGELOG-archive.md`: archived the 2026-09-17 shadow-scan entry to keep ten.
+
 # Menhir Changelog Archive
 
 Entries older than the 10 most recent, archived from `CHANGELOG.md`.
@@ -8,34 +501,68 @@ Entries older than the 10 most recent, archived from `CHANGELOG.md`.
 - 2026-08-09: 2026-08-07 (1 entry).
 - 2026-08-10: 2026-08-07 (1 entry).
 - 2026-08-11: 2026-08-07 (1 entry).
+- 2026-09-21: 2026-09-16 (1 entry).
 - 2026-09-23: 2026-09-17 (1 entry).
 - 2026-09-24: 2026-09-17 (1 entry).
 
 ---
 
-## 2026-09-17 - extraction runs in a child process (P3 decision 1)
+## 2026-09-24 - source retention fails closed on incomplete provenance
 
-`extraction_writer` holds the rules; this holds the blast radius. A malformed archive that hangs or
-crashes the ZIP parser is now a failed job rather than a server outage.
+- `backfill_legacy_retention.py`: inventory all historical flags and processed sources, then add only individually reviewed, tenant-consistent source links under a quiesced, backed-up maintenance operation; preserve ambiguous entity flags.
+- `test_backfill_legacy_retention.py`: cover incomplete, cross-tenant, structural, and merged candidates, manifest drift, and graph-backed live flag/unflag/reflag behavior.
+- `episode_stamping.py`: refuse a missing or wrong-tenant source or extracted semantic entity instead of silently returning fewer retention links.
+- `scheduler_tasks.py`: leave a failed episode unreconciled and continue the retry sweep when provenance is incomplete.
+- `test_live_source_retention.py` and `test_live_source_retention_live.py`: cover incomplete links and structural exclusions with focused unit and Neo4j tests.
+- `test_e2e_08_isolation_adversarial.py`: compare original node identities during capped-delete refusal so concurrent enrichment additions do not register as deletion.
+- `memory_queries.py`, `.agent/data_models.md`, and `README.md`: describe direct entity flags, live source-linked protection, and the historical cutover limit.
+- `episode_stamping.py` and `correlation_queries.py`: mark enrichment-written provenance as direct so unmerge preserves a survivor link recorded after the merge.
+- `test_live_source_retention.py` and `test_unmerge_coordinator_live.py`: verify the direct marker and the graph-backed merge, later write, unmerge sequence.
 
-**The counterexample this module exists for: a killed child runs no cleanup.** The writer removes
-its root in an `except` clause, and SIGKILL raises nothing -- so a child killed at its deadline
-leaves a half-written root and the PARENT has to remove it. Easy to miss precisely because the
-in-process cleanup is correct and already tested. Confirmed by negative control: with the parent's
-cleanup removed, the half-written root really does survive.
+## 2026-09-23 - Beacon can search the docs an agent needs to get oriented
 
-- A hung child is killed at its deadline; a crashed one (segfault, OOM kill) becomes a stable code.
-- **Exit code 0 is not a result.** A child that printed a warning instead of JSON is refused rather
-  than read as success -- that is how an empty root becomes a believed snapshot.
-- Failures cross as codes, never tracebacks, and a child's refusal message is dropped. The child
-  was parsing attacker-chosen bytes, so its output is not a place to source an error string from.
-- The hanging and crashing children are injected as a different command, not hooked into the worker
-  with a test-only flag. A production module with a test branch can take that branch in production.
+Beacon only searches the documents listed in `beacon.yaml`'s `canonical_docs`. The list named five
+entry points and plans, so the architecture, workflow and procedure documents that `.agent/README.md`
+routes to could not be found through Beacon at all. In a Beacon-only evaluation run, an agent with
+no file tools inverted the stdio runtime decision because `backend-first-mcp.md` and
+`.agent/architecture.md` were out of reach.
 
-**Containment is not uniform across platforms, stated rather than implied.** The wall-clock
-deadline works everywhere; the memory ceiling uses `RLIMIT_AS`, which POSIX has and Windows does
-not. Menhir deploys on Linux so the gap is development-only, but a caller believing the ceiling is
-universal would be believing something false.
+- `beacon.yaml`: `canonical_docs` now lists 25 documents in reading order (entry points,
+  architecture and decisions, reference, workflows, then the current plans and research indexes),
+  chosen by an agent with no task context. The superseded July roadmap is left out, and so is
+  `deploy/RUNBOOK.md`, which is specific to one operator's deployment. Listing a document makes it
+  searchable, not required reading; the project overview still shows only the first four. Checked
+  locally: all listed documents are indexed (443 search chunks, up from 105) and the generated
+  manifest grows by about 420 tokens.
+- `CHANGELOG-archive.md`: the 2026-09-17 extraction-writer entry moved there (10-entry limit).
+
+## 2026-09-17 - the shadow scan: structural parity, and the copy does not survive it
+
+The last P3 piece, and the only one that produces a result rather than a refusal. Its correctness
+question is different in kind: not "was the attack stopped" but "does scanning a snapshot remotely
+give the same answer as scanning the repository locally".
+
+**It calls the existing `ProjectScanner` rather than reimplementing one.** Parity is then true by
+construction and a surviving difference is a real one -- something the bundle dropped or the
+extraction changed -- instead of a disagreement between two scanners.
+
+**Local scanning is untouched, and that is asserted rather than claimed.**
+`project_scanner.py` is not modified; a test checks it against git, and the 196 pre-existing tests
+covering it pass unchanged.
+
+- The fingerprint excludes `root_path` (absolute), `file_mtime` (extraction writes new files),
+  `name` (the root is named for an upload) and the identity/self-fingerprint fields. Including any
+  would make every parity check fail for a reason unrelated to the snapshot -- worse than not
+  checking, because it trains a reader to ignore the result.
+- Every list is sorted. `os.scandir` promises no order and differs between filesystems, so an
+  unsorted fingerprint would differ between two scans of identical content.
+- **A test proves the exclusions did not make it blind**: dropping one source file still changes
+  the fingerprint. A digest that ignores enough to always match reports parity it never checked.
+- The materialised root is deleted after the report, including when the scan raises. A root that
+  outlives its report is an unattributed copy of somebody's repository sitting on a disk.
+- The report carries the three coverage counts and does NOT carry `partial_index` (invariant 4):
+  the counts are the source of truth and the derivation belongs to whoever can see the whole
+  picture.
 
 ## 2026-09-17 - the extraction writer: bytes land, or nothing does
 
@@ -64,6 +591,31 @@ does not tell you.
 
 Still to come in P3: the subprocess wrapper this writer will run inside (decision 1), and the
 shadow scan.
+
+## 2026-09-16 - the snapshot receive mode is declared once instead of compared everywhere
+
+P2A read `MENHIR_SNAPSHOT_RECEIVE_MODE` with `os.getenv` inside the tool module and compared it to
+a string literal. Correct for one phase with one surface, and it does not survive three more modes:
+`shadow` extracts an archive and scans it, `write` also reaches the graph, and a string compared in
+each place that cares is how `receive` ends up extracting something.
+
+`menhir.config.snapshot_mode` now declares the ladder once, beside `auth_mode` and for the same
+reason -- "what is this server allowed to do?" should have one answer every caller reads.
+
+- `SnapshotReceiveMode` exposes `accepts_uploads`, `extracts_archives` and `writes_graph`, so
+  callers ask for the capability rather than comparing to a name. `mode == WRITE` in an extraction
+  guard is correct until `shadow` exists and silently wrong afterwards.
+- `extracts_archives` and `writes_graph` have no implementation -- P3 and P4 own those -- but are
+  pinned by test now, because the guards that will consult them get written against this contract.
+- **Unknown values resolve to OFF and do not raise.** A typo must not enable a receive surface, and
+  a snapshot mode nobody set is not a reason to refuse to boot.
+- P2A's `staging` still resolves, to `receive`. Silently becoming OFF after an upgrade would look
+  like the tools vanishing with nothing obviously wrong in the config. The remote-sim stack now
+  names `receive` so the alias is not the only thing exercised.
+
+`test_the_mode_is_off_unless_it_is_explicitly_staging` asserted that `receive` did NOT enable the
+tools. That was the phase's behaviour, not a safety property, so it was rewritten to pin the
+property that still holds: anything not naming a mode resolves to OFF.
 
 ## 2026-08-07 — docs: correct stale local-Docker Neo4j guidance in the operations runbook
 

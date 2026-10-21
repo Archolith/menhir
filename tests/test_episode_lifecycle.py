@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 
@@ -14,6 +15,56 @@ def _make_repo(execute_return=None):
     repo.neo4j = MagicMock()
     repo.neo4j.execute.return_value = execute_return or []
     return repo
+
+
+class TestAtomicTransientRefundQueries:
+    @pytest.mark.parametrize(
+        ("method_name", "terminal_state"),
+        (("mark_episode_pending", "PENDING"), ("mark_episode_failed", "FAILED")),
+    )
+    def test_refund_is_folded_into_claim_incarnation_fenced_transition(
+        self, method_name, terminal_state
+    ):
+        repo = _make_repo([{"updated": 1}])
+        method = getattr(repo, method_name)
+        kwargs = {
+            "worker_id": "worker-A",
+            "transient_requeue": True,
+            "claim_started_at": "claim-1",
+        }
+        if method_name == "mark_episode_failed":
+            assert method("ep-1", "timeout", **kwargs)
+        else:
+            assert method("ep-1", **kwargs)
+
+        query = repo.neo4j.execute.call_args.args[0]
+        params = repo.neo4j.execute.call_args.kwargs["params"]
+        assert "n.processing_state = 'ENRICHING'" in query
+        assert "n.processing_owner = $worker_id" in query
+        assert (
+            "n.processing_started_at.epochSeconds"
+            " = datetime($claim_started_at).epochSeconds"
+        ) in query
+        assert (
+            "n.processing_started_at.nanosecond"
+            " = datetime($claim_started_at).nanosecond"
+        ) in query
+        assert "n.transient_retries = CASE WHEN $transient_requeue" in query
+        assert "n.processing_attempts = CASE WHEN NOT $transient_requeue" in query
+        assert f"n.processing_state = '{terminal_state}'" in query
+        assert params["worker_id"] == "worker-A"
+        assert params["transient_requeue"] is True
+        assert params["claim_started_at"] == "claim-1"
+
+    def test_non_refund_admin_transition_keeps_legacy_unowned_path(self):
+        repo = _make_repo([{"updated": 1}])
+
+        assert repo.mark_episode_pending("ep-1")
+
+        params = repo.neo4j.execute.call_args.kwargs["params"]
+        assert params["worker_id"] is None
+        assert params["transient_requeue"] is False
+        assert params["claim_started_at"] is None
 
 
 class TestClaimContextRetryDefault:
@@ -103,6 +154,7 @@ class TestClaimProjectionCarriesWorldTime:
         "reference_time",
         "queued_at",
         "turn_evidence_uuid",
+        "processing_started_at",
     )
 
     def _claim_query(self):
@@ -378,7 +430,7 @@ class TestLinkedEntitiesAcceptsTurnEvidenceId:
 
 class TestLookupEntitiesByNormalizedNames:
     """The optional same-namespace repository fallback for typed-scalar binding (C.4.3) is exact and
-    fail-closed: nonblank namespace, group_id equality, View exclusion, blank-uuid exclusion."""
+    fail-closed: nonblank namespace, shared tenant scope, View exclusion, blank-uuid exclusion."""
 
     def _query_and_params(self, repo):
         call = repo.neo4j.execute.call_args
@@ -397,14 +449,21 @@ class TestLookupEntitiesByNormalizedNames:
         assert repo.lookup_entities_by_normalized_names("ns", []) == []
         repo.neo4j.execute.assert_not_called()
 
-    def test_query_uses_group_id_equality_for_same_namespace(self):
+    def test_query_uses_shared_scope_for_named_namespace(self):
         repo = _make_repo([])
         repo.lookup_entities_by_normalized_names("tenant-a", ["black shoes"])
         query, params = self._query_and_params(repo)
-        assert "n.group_id = $namespace" in query                 # same-namespace, not cross-tenant
+        assert "coalesce(n.namespace, n.group_id, '') IN $tenant_namespaces" in query
         assert "toLower(trim(n.name)) IN $spellings" in query     # exact normalized-name equality
-        assert params["namespace"] == "tenant-a"
+        assert params["tenant_namespaces"] == ["tenant-a"]
         assert params["spellings"] == ["black shoes"]
+
+    def test_default_namespace_queries_both_persisted_silo_spellings(self):
+        repo = _make_repo([])
+        repo.lookup_entities_by_normalized_names("default", ["black shoes"])
+        query, params = self._query_and_params(repo)
+        assert "coalesce(n.namespace, n.group_id, '') IN $tenant_namespaces" in query
+        assert set(params["tenant_namespaces"]) == {"default", ""}
 
     def test_query_excludes_derived_views_and_blank_uuids(self):
         repo = _make_repo([])
@@ -422,6 +481,33 @@ class TestLookupEntitiesByNormalizedNames:
         ])
         got = repo.lookup_entities_by_normalized_names("ns", ["black shoes"])
         assert got == [{"uuid": "e-1", "name": "black shoes"}]
+
+
+@pytest.mark.online
+def test_normalized_name_lookup_reads_default_silo_without_crossing_tenants(test_neo4j_repo):
+    prefix = f"cf77-{uuid4().hex}-"
+    rows = [
+        {"uuid": prefix + "current", "name": "black shoes", "group_id": ""},
+        {"uuid": prefix + "legacy", "name": "black shoes", "group_id": "default"},
+        {"uuid": prefix + "named", "name": "black shoes", "group_id": "tenant-a"},
+        {"uuid": prefix + "other", "name": "black shoes", "group_id": "tenant-b"},
+        {"uuid": prefix + "view", "name": "black shoes", "group_id": "", "is_view": True},
+    ]
+    test_neo4j_repo.execute("UNWIND $rows AS row CREATE (n:Entity) SET n += row", params={"rows": rows})
+    repo = EpisodeLifecycleRepository()
+    repo.neo4j = test_neo4j_repo
+    try:
+        assert {row["uuid"] for row in repo.lookup_entities_by_normalized_names(
+            "default", ["black shoes"],
+        )} == {prefix + "current", prefix + "legacy"}
+        assert {row["uuid"] for row in repo.lookup_entities_by_normalized_names(
+            "tenant-a", ["black shoes"],
+        )} == {prefix + "named"}
+    finally:
+        test_neo4j_repo.execute(
+            "MATCH (n:Entity) WHERE n.uuid STARTS WITH $prefix DETACH DELETE n",
+            params={"prefix": prefix},
+        )
 
 class TestAdapterDelegatesNormalizedNameLookup:
     """The MemoryGraphAdapter façade must forward the same-namespace lookup to the episode repo, so the

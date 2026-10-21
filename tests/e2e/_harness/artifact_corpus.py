@@ -58,6 +58,7 @@ __all__ = [
     "MOVE_SOURCE",
     "OUTSIDE_CORPUS_PATH",
     "UNPARSEABLE_STATUS_PATH",
+    "UNRESOLVED_SUPERSEDED_PATH",
     "build_artifact_corpus",
     "move_document",
     "write_malformed_document",
@@ -74,8 +75,12 @@ EXPECTED_ARTIFACTS: dict[str, tuple[str, str]] = {
         "implementation_report",
         "READY_FOR_REVIEW",
     ),
-    ".agent/archive/plans/shop-legacy-pricing.md": ("plan", "SUPERSEDED"),
 }
+
+# This source declares a terminal replacement but does not identify what replaced it.
+# Reconciliation must keep its bytes and report it unresolved instead of registering a
+# SUPERSEDED artifact with no replacement edge.
+UNRESOLVED_SUPERSEDED_PATH = ".agent/archive/plans/shop-legacy-pricing.md"
 
 #: An index, not work. Must not be registered as an artifact.
 INDEX_PATH = ".agent/plans/README.md"

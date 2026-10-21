@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from menhir.domain.self_identity import self_subject_endpoint_for_claim
-from menhir.infrastructure.graphiti_extraction_patches import get_extraction_receipt
+from menhir.infrastructure.graphiti_extraction_policy import get_extraction_receipt
 from menhir.services import IngestService
 from menhir.services import enrichment_steps as steps
 from menhir.services import scheduler_tasks

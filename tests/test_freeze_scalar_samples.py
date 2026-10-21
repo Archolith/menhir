@@ -12,8 +12,6 @@ from menhir.services.deterministic_scalar_extractor import DeterministicScalarEx
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from freeze_scalar_samples import (  # noqa: E402
-    LEGACY_EPISODIC_Q,
-    TURN_EVIDENCE_EXISTS_Q,
     TURN_EVIDENCE_Q,
     FreezeInputError,
     _load_graph_namespaces,
@@ -84,15 +82,12 @@ class _Result:
 
 
 class _Session:
-    def __init__(self, *, turn_evidence: bool, rows_by_query):
-        self.turn_evidence = turn_evidence
+    def __init__(self, *, rows_by_query):
         self.rows_by_query = rows_by_query
         self.calls = []
 
     def run(self, query, params=None):
         self.calls.append((query, params or {}))
-        if query == TURN_EVIDENCE_EXISTS_Q:
-            return _Result([{"c": 1 if self.turn_evidence else 0}])
         return _Result(self.rows_by_query.get(query, []))
 
 
@@ -178,7 +173,6 @@ def test_invalid_static_input_fails_closed_before_output_or_llm_key(tmp_path, mo
 
 def test_graph_turn_evidence_source_matches_scheduler_and_uses_exact_namespace():
     session = _Session(
-        turn_evidence=True,
         rows_by_query={
             TURN_EVIDENCE_Q: [
                 {"uuid": "turn-1", "valid_at": "2026-08-01T00:00:00Z", "content": "I have 2 coins."}
@@ -191,43 +185,47 @@ def test_graph_turn_evidence_source_matches_scheduler_and_uses_exact_namespace()
     assert metadata["source"] == "turn_evidence"
     assert loaded["heldout-exact"][0].uuid == "turn-1"
     assert loaded["heldout-exact"][0].content == "[2026-08-01] I have 2 coins."
-    assert [query for query, _params in session.calls] == [TURN_EVIDENCE_EXISTS_Q, TURN_EVIDENCE_Q]
+    assert [query for query, _params in session.calls] == [TURN_EVIDENCE_Q]
     assert session.calls[-1][1]["ns"] == "heldout-exact"
     assert "ENDS WITH" not in session.calls[-1][0]
 
 
-def test_graph_legacy_source_matches_scheduler_and_uses_exact_namespace():
+def test_graph_source_is_turn_evidence_only_and_keeps_raw_text():
+    # #271: no Episodic fallback and no `user:` strip, matching the scheduler's loader.
     session = _Session(
-        turn_evidence=False,
         rows_by_query={
-            LEGACY_EPISODIC_Q: [
-                {
-                    "uuid": "episode-1",
-                    "valid_at": "2026-08-01T00:00:00Z",
-                    "content": "user: I have 2 coins.",
-                }
+            TURN_EVIDENCE_Q: [
+                {"uuid": "turn-1", "valid_at": "2026-08-01T00:00:00Z", "content": "user: I have 2 coins."}
             ]
         },
     )
 
-    loaded, metadata = _load_graph_namespaces(session, ["exact-group-id"])
+    loaded, _metadata = _load_graph_namespaces(session, ["exact-group-id"])
 
-    assert metadata["source"] == "episodic"
-    assert loaded["exact-group-id"][0].content == "[2026-08-01] I have 2 coins."
-    assert [query for query, _params in session.calls] == [TURN_EVIDENCE_EXISTS_Q, LEGACY_EPISODIC_Q]
-    assert session.calls[-1][1]["ns"] == "exact-group-id"
-    assert "ENDS WITH" not in session.calls[-1][0]
+    assert loaded["exact-group-id"][0].content == "[2026-08-01] user: I have 2 coins."
+    assert "Episodic" not in TURN_EVIDENCE_Q
+    assert "agent_quoted" in TURN_EVIDENCE_Q
 
 
 def test_graph_missing_exact_namespace_fails_closed():
-    session = _Session(turn_evidence=False, rows_by_query={LEGACY_EPISODIC_Q: []})
+    session = _Session(rows_by_query={TURN_EVIDENCE_Q: []})
 
     with pytest.raises(FreezeInputError, match="exact namespace"):
         _load_graph_namespaces(session, ["missing-exact"])
 
 
 def test_graph_duplicate_namespace_selection_fails_closed():
-    session = _Session(turn_evidence=False, rows_by_query={})
+    session = _Session(rows_by_query={})
 
     with pytest.raises(FreezeInputError, match="duplicate exact namespaces"):
         _load_graph_namespaces(session, ["same", "same"])
+
+
+def test_legacy_corpus_strip_is_opt_out_for_raw_turn_text():
+    from measure_absence_band import build_episodes
+
+    rows = [{"uuid": "e-1", "valid_at": "2026-08-01T00:00:00Z", "content": "user: I have 2 coins."}]
+    # Legacy prefixed LME corpus (measure/replay default) vs raw TurnEvidence text (#271).
+    assert build_episodes(rows)[0].content == "[2026-08-01] I have 2 coins."
+    raw = build_episodes(rows, strip_legacy_prefix=False)[0].content
+    assert raw == "[2026-08-01] user: I have 2 coins."

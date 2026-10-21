@@ -3,26 +3,36 @@
 from __future__ import annotations
 
 import os
-import shutil
-import tempfile
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from tests._temp_cleanup import close_test_log_handlers, remove_test_dir
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
 from menhir.infrastructure import LLMAdapter, PhaseOneSchemaResult, PolicyStampResult
 from menhir.infrastructure import operation_owner as _operation_owner
 from menhir.infrastructure.memory_graph_adapter import is_context_window_error_text
 
 
+# Several tests need tmp_path to be outside the Git checkout so they can model
+# a directory that is not a repository. Keep the old location without changing
+# process-wide tempfile settings or replacing pytest's built-in tmp_path.
 _LOCAL_PYTEST_TEMP = Path.home() / ".codex" / "memories" / "pytest_tmp"
 _LOCAL_PYTEST_TEMP.mkdir(parents=True, exist_ok=True)
-os.environ.setdefault("TMPDIR", str(_LOCAL_PYTEST_TEMP))
-os.environ.setdefault("TEMP", str(_LOCAL_PYTEST_TEMP))
-os.environ.setdefault("TMP", str(_LOCAL_PYTEST_TEMP))
-tempfile.tempdir = str(_LOCAL_PYTEST_TEMP)
+os.environ.setdefault("PYTEST_DEBUG_TEMPROOT", str(_LOCAL_PYTEST_TEMP))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _cleanup_pytest_temp_session(tmp_path_factory: pytest.TempPathFactory):
+    """Remove this run's pytest scratch tree and report failed cleanup."""
+
+    yield
+    basetemp = tmp_path_factory.getbasetemp()
+    close_test_log_handlers(basetemp)
+    remove_test_dir(basetemp)
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -272,17 +282,6 @@ def _normalize_uri(uri: str) -> str:
     return value.replace("127.0.0.1", "localhost").rstrip("/")
 
 
-@pytest.fixture
-def tmp_path() -> Path:
-    """Provide a workspace-local tmp_path to avoid Windows tempdir permission issues."""
-
-    path = Path(tempfile.mkdtemp(prefix="pytest-case-", dir=str(_LOCAL_PYTEST_TEMP)))
-    try:
-        yield path
-    finally:
-        shutil.rmtree(path, ignore_errors=True)
-
-
 def _default_schema_result() -> PhaseOneSchemaResult:
     """Factory for a default successful schema bootstrap result."""
     return PhaseOneSchemaResult(success=True, queries_executed=1, failures=[])
@@ -295,6 +294,7 @@ class StubMemoryGraphAdapter:
     calls: int = 0
     result: PhaseOneSchemaResult = field(default_factory=_default_schema_result)
     stamp_calls: list[dict[str, object]] = field(default_factory=list)
+    retention_source_calls: list[dict[str, object]] = field(default_factory=list)
     stamp_result: PolicyStampResult = field(
         default_factory=lambda: PolicyStampResult(nodes_touched=2, edges_touched=2)
     )
@@ -308,6 +308,7 @@ class StubMemoryGraphAdapter:
     adjacency_calls: list[dict[str, object]] = field(default_factory=list)
     temporal_fact_rows: list[dict[str, object]] = field(default_factory=list)
     touch_count: int = 0
+    claim_sequence: int = 0
     pending_episode_rows: dict[str, dict[str, object]] = field(default_factory=dict)
     edge_counts_synced: int = 0
     sync_edge_counts_calls: int = 0
@@ -320,6 +321,10 @@ class StubMemoryGraphAdapter:
     raw_capture_calls: list[dict[str, object]] = field(default_factory=list)
     content_embedding_results: list[dict[str, object]] = field(default_factory=list)
     content_embedding_calls: list[dict[str, object]] = field(default_factory=list)
+    # Source-memory lane (default-off) stubs, mirroring the content-vector pair above.
+    episode_embedding_results: list[dict[str, object]] = field(default_factory=list)
+    episode_embedding_calls: list[dict[str, object]] = field(default_factory=list)
+    episode_embeddings_written: dict[str, tuple[list[float], str]] = field(default_factory=dict)
 
     def bootstrap_phase_one(self) -> PhaseOneSchemaResult:
         self.calls += 1
@@ -356,6 +361,22 @@ class StubMemoryGraphAdapter:
             }
         )
         return self.stamp_result
+
+    def record_retention_sources(
+        self,
+        *,
+        source_episode_uuid: str,
+        entity_uuids: list[str],
+        namespace: str | None = None,
+    ) -> int:
+        self.retention_source_calls.append(
+            {
+                "source_episode_uuid": source_episode_uuid,
+                "entity_uuids": list(entity_uuids),
+                "namespace": namespace,
+            }
+        )
+        return len(set(entity_uuids))
 
     def scalar_view_has_user_foundation(self, *, view_uuid: str, namespace=None) -> bool:
         # G14 slice 3: default = no declarant-user foundation reachable (the governance-safe advisory
@@ -454,8 +475,43 @@ class StubMemoryGraphAdapter:
         )
         return self.content_embedding_results
 
-    def fetch_temporal_facts(self, node_uuids: list[str]) -> list[dict[str, object]]:
+    def search_episode_embeddings(
+        self,
+        query_vector: list[float],
+        *,
+        limit: int = 10,
+        namespace: str | None = None,
+    ) -> list[dict[str, object]]:
+        self.episode_embedding_calls.append(
+            {"query_vector": query_vector, "limit": limit, "namespace": namespace}
+        )
+        return self.episode_embedding_results
+
+    def episode_has_content_embedding(self, episode_uuid: str) -> bool:
+        return episode_uuid in self.episode_embeddings_written
+
+    def set_episode_content_embedding(
+        self, episode_uuid: str, embedding: list[float], model: str
+    ) -> bool:
+        self.episode_embeddings_written[episode_uuid] = (embedding, model)
+        return True
+
+    def list_episodes_missing_content_embedding(
+        self, namespace: str | None = None, limit: int = 100
+    ) -> list[dict[str, object]]:
+        return [
+            {"uuid": uuid, "content": row.get("content")}
+            for uuid, row in self.pending_episode_rows.items()
+            if uuid not in self.episode_embeddings_written and row.get("content")
+        ][:limit]
+
+    def fetch_temporal_facts(
+        self, node_uuids: list[str], *, query_vector=None, namespace=None,
+    ) -> list[dict[str, object]]:
         return self.temporal_fact_rows
+
+    def search_facts_by_keywords(self, phrases, namespace, limit: int = 50) -> list[dict[str, object]]:
+        return []
 
     def fetch_candidate_provenance(self, node_uuids: list[str]) -> list[dict[str, object]]:
         return self.candidate_provenance_rows
@@ -476,6 +532,9 @@ class StubMemoryGraphAdapter:
         )
         self.node_freshness[node_uuid] = FreshnessState.COMPRESSED
         return True
+
+    def mark_decay_candidates_selected(self, node_uuids: list[str]) -> int:
+        return len(node_uuids)
 
     def fetch_node_freshness(self, node_uuids: list[str]) -> dict[str, str]:
         freshness_map: dict[str, str] = {}
@@ -636,6 +695,8 @@ class StubMemoryGraphAdapter:
         row["processing_llm_active_kind"] = None
         row["processing_llm_active_model"] = None
         row["processing_llm_active_endpoint"] = None
+        self.claim_sequence += 1
+        row["processing_started_at"] = f"claim-{self.claim_sequence}"
         row["processing_attempts"] = attempts + 1
         row["processing_owner"] = worker_id
         row["processing_lease_expires_at"] = lease_seconds
@@ -680,15 +741,34 @@ class StubMemoryGraphAdapter:
         row["enriched_edges_touched"] = edges_touched
         return True
 
-    def mark_episode_failed(self, episode_uuid: str, error: str, *, worker_id: str | None = None) -> bool:
+    def mark_episode_failed(
+        self,
+        episode_uuid: str,
+        error: str,
+        *,
+        worker_id: str | None = None,
+        transient_requeue: bool = False,
+        claim_started_at: object | None = None,
+    ) -> bool:
         row = self.pending_episode_rows.get(episode_uuid)
         if row is None:
+            return False
+        if transient_requeue and (
+            worker_id is None
+            or claim_started_at is None
+            or row.get("processing_started_at") != claim_started_at
+        ):
             return False
         if worker_id is not None and (
             row.get("processing_state") != ProcessingState.ENRICHING
             or row.get("processing_owner") != worker_id
         ):
             return False
+        if transient_requeue:
+            row["transient_retries"] = int(row.get("transient_retries") or 0) + 1
+            row["processing_attempts"] = max(
+                int(row.get("processing_attempts") or 0) - 1, 0
+            )
         row["processing_state"] = ProcessingState.FAILED
         row["processing_stage"] = "failed"
         row["processing_substage"] = "failed"
@@ -816,15 +896,6 @@ class StubMemoryGraphAdapter:
             failed += 1
         return failed
 
-    def count_transient_requeue(self, episode_uuid: str) -> bool:
-        """Refund one claim's attempt and bump the transient counter (#79/#70)."""
-        row = self.pending_episode_rows.get(episode_uuid)
-        if row is None:
-            return False
-        row["transient_retries"] = int(row.get("transient_retries") or 0) + 1
-        row["processing_attempts"] = max(int(row.get("processing_attempts") or 0) - 1, 0)
-        return True
-
     def fail_transient_exhausted_pending_episodes(self, *, transient_max: int = 20) -> int:
         failed = 0
         for row in self.pending_episode_rows.values():
@@ -881,16 +952,29 @@ class StubMemoryGraphAdapter:
         *,
         retry_after_s: float = 0.0,
         worker_id: str | None = None,
+        transient_requeue: bool = False,
+        claim_started_at: object | None = None,
     ) -> bool:
         """Release back to PENDING without incrementing attempts (circuit breaker requeue)."""
         row = self.pending_episode_rows.get(episode_uuid)
         if row is None:
+            return False
+        if transient_requeue and (
+            worker_id is None
+            or claim_started_at is None
+            or row.get("processing_started_at") != claim_started_at
+        ):
             return False
         if worker_id is not None and (
             row.get("processing_state") != ProcessingState.ENRICHING
             or row.get("processing_owner") != worker_id
         ):
             return False
+        if transient_requeue:
+            row["transient_retries"] = int(row.get("transient_retries") or 0) + 1
+            row["processing_attempts"] = max(
+                int(row.get("processing_attempts") or 0) - 1, 0
+            )
         row["processing_state"] = ProcessingState.PENDING
         row["processing_stage"] = "queued"
         row["processing_substage"] = "circuit_breaker_requeue"
@@ -1085,7 +1169,8 @@ class StubMemoryGraphAdapter:
         return True
 
     def fetch_relevant_pending_episodes(
-        self, query: str, limit: int = 3, *, namespace: str | None = None
+        self, query: str, limit: int = 3, *, namespace: str | None = None,
+        include_session: bool = True, session_id: str | None = None,
     ) -> list[dict[str, object]]:
         # `namespace` mirrors the real adapter signature (tenant scoping, CF-104). This stub
         # serves canned rows for recall-wiring tests and does not model the filter; the
@@ -1210,7 +1295,11 @@ class StubMemoryGraphAdapter:
         }
 
     def delete_entities_returning_uuids(
-        self, node_uuids: list[str], *, require_scope: str | None = None
+        self,
+        node_uuids: list[str],
+        *,
+        require_scope: str | None = None,
+        protect_retention: bool = False,
     ) -> list[str]:
         """Return the uuids ACTUALLY deleted, mirroring the real scope filter.
 
@@ -1362,6 +1451,7 @@ class StubMemoryGraphAdapter:
         remove_uuid: str | None = None,
         resolution_status: str = "resolved",
         allow_promoted_removal: bool = False,
+        namespace: str | None = None,
     ) -> dict[str, object]:
         _VALID_ACTIONS = {"keep_both", "replace", "discard_new"}
         if action not in _VALID_ACTIONS:
@@ -1463,10 +1553,20 @@ class StubMemoryGraphAdapter:
             requeued += 1
         return requeued
 
-    def bridge_edges_for_node(self, node_uuid: str) -> int:
+    def bridge_edges_for_node(
+        self,
+        node_uuid: str,
+        *,
+        namespace: str | None = None,
+    ) -> int:
         return 1
 
-    def bridge_edges_for_nodes(self, node_uuids: list[str]) -> int:
+    def bridge_edges_for_nodes(
+        self,
+        node_uuids: list[str],
+        *,
+        namespace: str | None = None,
+    ) -> int:
         return len(node_uuids)
 
     def count_pending_episodes(self, session_id: str | None = None) -> int:

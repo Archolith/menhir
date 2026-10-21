@@ -11,6 +11,8 @@ artifact_status: APPROVED
 **Owner:** Menhir  
 **Purpose:** Define, audit, test, benchmark, and close a bounded local MVP without absorbing the entire Menhir backlog.
 
+**Current gate:** Gate B audit and pre-freeze Gate C acceptance are complete. The post-v0.2.3 fixes and the Opus review follow-up are merged through [PR #187](https://github.com/Archolith/menhir/pull/187); its four required checks passed on the reviewed head. Phase A inventory and the five-item Oracle harness preflight are recorded below. Phase D remains open for exact merged-commit checks, current release-container evidence, wheel identity, and configuration freeze before naming an RC. No RC, deployment, #119 repair, or final release is authorized by this status.
+
 ## 1. MVP contract
 
 The MVP is a **local, single-operator coding-agent service exposed to the agent through MCP stdio**.
@@ -42,12 +44,10 @@ Loopback HTTP, Neo4j, workers, schedulers, and other local processes may remain 
    - preserve repository-relative location/context where supported;
    - persist TODO lifecycle across restart.
 
-5. **Beacon generation**
-   - generate or refresh the canonical Beacon artifact for an indexed local project from Menhir-held project knowledge;
-   - output must conform to the current Beacon manifest contract (`beacon.yaml` unless that contract changes before freeze);
-   - generated output must pass Beacon's own validator;
-   - generated output must be usable by Beacon's stdio server for project overview/onboarding/search/guardrail queries;
-   - generated claims must not silently invent unsupported project facts: source/currentness/uncertainty rules must be explicit.
+5. **Archolith Graphiti fork dependency**
+   - ship the native Graphiti extension hooks used by Menhir as a public, versioned wheel;
+   - install the fork from a hashed package-registry dependency on the cold-install and container paths;
+   - keep the upstream `graphiti-core` distribution out of the same environment to avoid competing `graphiti_core` packages.
 
 ### Explicitly outside MVP
 
@@ -63,6 +63,7 @@ Unless a release-blocking dependency is discovered, the following are post-MVP:
 - project rename/migration support unless a local E2E proves it is already safe;
 - change-provenance briefs and other new composition features;
 - default-off research/scalar/event authority features unless separately promoted before the RC freeze.
+- Beacon generation and Beacon MCP consumption (deferred in #120; may be shown separately, but are not release gates).
 
 ## 2. Release rule
 
@@ -83,7 +84,7 @@ No release decision is based solely on the size of the open-issue backlog. Every
 This plan must produce separate durable artifacts rather than hiding results in this checklist.
 
 1. **Independent release audit**
-   - path: `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-XX.md`
+   - path: `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`
    - artifact type: `review`
    - records scope, findings, severity, reproduction, disposition, and release blockers.
 
@@ -101,33 +102,96 @@ This plan must produce separate durable artifacts rather than hiding results in 
 
 ## 4. Phase A — scope freeze and preflight
 
+### Approved MVP platform and candidate configuration (2026-09-27)
+
+The owner approved this supported-path decision after the default stdio E2E pack
+passed on Windows and Ubuntu. It defines the candidate contract; the exact RC
+commit, installed dependency set, environment values, and benchmark graph are
+frozen later under Gate D. Neither platform preflight is a frozen-RC run.
+
+- **Platforms:** Windows 11 AMD64 and Ubuntu Linux AMD64, with Python 3.12 or
+  newer as required by the package. The measured paths use Python 3.12.10 on
+  Windows and Python 3.12 in Ubuntu CI; other Python versions and OS variants
+  have not received this MVP E2E acceptance.
+- **Agent interface and topology:** one local operator uses MCP stdio. Its
+  bridge calls one long-lived Menhir backend over loopback HTTP; the backend
+  uses Neo4j 5 with APOC. The bundled Docker Compose graph is an optional
+  way to start Neo4j locally, not a second agent-facing interface.
+- **Normal provider defaults:** chat and Graphiti extraction default to
+  `local`; Graphiti embedding inherits that provider when unset. The local
+  endpoint defaults to `http://127.0.0.1:8081/v1` and the chat model name to
+  `qwen3.5-35b-a3b`. The local embedding model defaults to an empty string:
+  the operator must configure a compatible model and live endpoint. The
+  `local` provider denotes an OpenAI-compatible endpoint and can point to a
+  hosted gateway; it does not promise local inference. An explicit `openai`
+  provider selection remains available.
+- **Canonical benchmark configuration:** separate from the normal install,
+  the planned Oracle path uses OpenAI `gpt-4o-mini` for extraction,
+  `text-embedding-3-small` for embeddings, `gpt-4o` for answers, and
+  `gpt-4o-mini` for judging, with adaptive segmentation. The five-item
+  preflight and canonical quality run must verify and record their actual
+  model and provider settings before they count as evidence.
+- **Dependency identity:** `archolith-graphiti-core==0.30.2.post1` from PyPI,
+  with locked wheel SHA-256
+  `a748f98e0b09d64ab1eb29bd3449f52b552250a31663e86c4d99dc51ddf991f0`.
+  The same environment must not install upstream `graphiti-core`.
+  `archolith-mcp-framework==0.2.0` and `archolith-oauth==0.3.1` remain the
+  direct package pins; the RC records the complete resolved set.
+- **Feature and product limits:** scalar-state, event-history, frontier
+  retrieval/brief, and canonical-self activation flags remain at their
+  shipped default-off settings; no research lane is promoted for MVP.
+  Project rename, Beacon integration, and remote MCP remain outside this
+  release contract.
+
+The Windows local run on merged `4750b1c8` and the Ubuntu [post-merge CI
+run](https://github.com/Archolith/menhir/actions/runs/36368518264) each reported
+11 default stdio E2E passes and one declared release-container skip. The
+candidate-wheel fork path passed. The [five-item Oracle harness preflight](https://github.com/Archolith/menhir/issues/123#issuecomment-5871929112)
+also passed on a fresh graph; it is not quality or frozen-RC evidence. Current
+release-container validation, exact RC configuration, Oracle-500, and frozen-RC
+E2E remain open.
+
 ### A1. Freeze supported behavior
 
-- [ ] Confirm the required capability list in §1.
-- [ ] Confirm stdio is the only supported agent-facing transport for MVP.
-- [ ] Confirm the local backend/Neo4j topology used by stdio.
-- [ ] Confirm the supported primary OS/platform set for the MVP package.
-- [ ] Confirm provider/model defaults used for canonical ingest.
-- [ ] Confirm which currently default-off features remain off.
-- [ ] Confirm project rename is unsupported unless explicitly promoted after E2E proof.
-- [ ] Confirm Beacon generation output contract and command/tool name.
+- [x] Confirm the required capability list in §1.
+- [x] Confirm stdio is the only supported agent-facing transport for MVP.
+- [x] Confirm the local backend/Neo4j topology used by stdio.
+- [x] Confirm the supported primary OS/platform set for the MVP package.
+- [x] Confirm provider/model defaults and planned canonical benchmark models; verify actual settings in benchmark preflight.
+- [x] Confirm which currently default-off features remain off.
+- [x] Confirm project rename is unsupported unless explicitly promoted after E2E proof.
+- [x] Confirm the exact Archolith Graphiti distribution/version and public wheel hash for supported candidate-wheel installs; release-container validation remains open.
 
 ### A2. Reconcile current work in flight
 
-- [ ] Inventory all open Menhir issues and active plans against the MVP contract.
-- [ ] Mark each BLOCKER / FIX IF CHEAP / DOCUMENTED LIMITATION / POST-MVP / RESEARCH.
+- [x] Inventory all open Menhir issues and active plans against the MVP contract in the [Phase A inventory](../reviews/menhir-local-stdio-mvp-phase-a-inventory-2026-09-16.md).
+- [x] Mark each BLOCKER / FIX IF CHEAP / DOCUMENTED LIMITATION / POST-MVP / RESEARCH. The later [#120 deferral](https://github.com/Archolith/menhir/issues/120) supersedes that inventory's Beacon blocker classification.
 - [ ] Do not merge unrelated architecture cleanup into the MVP lane.
 - [ ] Keep already-approved correctness work that directly affects a required surface.
 - [ ] Record all release-changing feature flags/defaults.
 
+The inventory and dispositions are complete; the remaining A2 bullets are
+controls through RC freeze. Record the exact selected flags and defaults with
+the named candidate under Gate D.
+
 ### A3. Benchmark preflight
 
-- [ ] Verify `archolith-bench` LongMemEval harness against current Menhir APIs.
-- [ ] Verify a throwaway 5-item Oracle graph can build from the intended candidate branch.
-- [ ] Verify provenance/manifest records clean commit and fresh graph correctly.
-- [ ] Verify zero failed episodes is enforced by the acceptance validator.
-- [ ] Verify temporal-date repair/backfill behavior is current and automatic or explicitly executed.
-- [ ] Verify per-question-type stratification; never use a bare grouped `--limit` as representative evidence.
+- [x] Verify `archolith-bench` LongMemEval harness against the Menhir preflight candidate.
+- [x] Verify a throwaway 5-item Oracle graph can build from the intended candidate branch.
+- [x] Verify provenance/manifest records clean commit and fresh graph correctly.
+- [x] Verify zero failed episodes is enforced by the acceptance validator.
+- [x] Verify temporal-date repair/backfill behavior is current and automatic or explicitly executed.
+- [x] Verify the analysis harness samples and reports by question type; never use a bare grouped `--limit` as representative evidence.
+
+The [Gate A receipt](https://github.com/Archolith/menhir/issues/123#issuecomment-5871929112)
+records a fresh graph, clean Menhir and bench commits, 5/5 items, zero failed or
+requeued episodes, validator PASS with no warnings, and zero date mismatches
+across 119 graph records with date backfill disabled. Bench PR #9 merged the
+preflight fix. The bench analysis [documents](https://github.com/Archolith/archolith-bench/blob/master/scripts/longmemeval/README.md)
+and [implements](https://github.com/Archolith/archolith-bench/blob/master/scripts/longmemeval/analysis/lib/retrieval_quality.py)
+per-type sampling.
+These checks establish harness readiness only; Oracle-500 retrieval and answer
+quality still need canonical evidence on the named RC.
 
 **Gate A:** no expensive canonical run until scope, harness, and evidence contracts are known-good.
 
@@ -182,15 +246,12 @@ The audit is a code-and-contract review, not an E2E run. It asks whether the imp
 - [ ] closing a TODO is idempotent or fails clearly.
 - [ ] persistence and ordering are deterministic enough for agent use.
 
-### B6. Beacon generation
+### B6. Graphiti fork packaging and compatibility
 
-- [ ] Identify the authoritative Menhir→Beacon mapping.
-- [ ] Generated `beacon.yaml` conforms to the current Beacon schema/version.
-- [ ] source paths and line/range provenance are truthful when emitted.
-- [ ] stale/superseded/experimental knowledge cannot be rendered as unqualified current truth.
-- [ ] generation is deterministic for a frozen Menhir graph/config or differences are explicitly explained.
-- [ ] generator does not overwrite a hand-authored Beacon without an explicit safe policy.
-- [ ] output passes `beacon validate` and produces sensible `beacon inspect` output.
+- [x] Publish the Archolith Graphiti fork wheel under its distinct distribution name, with native hooks present (`v0.30.2.post1` at `dbb0e33`, wheel SHA-256 `a748f98e0b09d64ab1eb29bd3449f52b552250a31663e86c4d99dc51ddf991f0`).
+- [x] Lock Menhir to the public wheel with an exact version and registry hash, without a VCS dependency.
+- [x] Confirm a fresh package install and no-publish container build resolve the same fork version without also installing upstream `graphiti-core` (pre-freeze evidence on `0f8deac5`; final RC repeat remains).
+- [x] Exercise Menhir's fork-hook contract and representative memory ingest/recall against that build (pre-freeze evidence on `0f8deac5`; final RC repeat remains).
 
 ### B7. Persistence, failure and resource safety
 
@@ -202,6 +263,8 @@ The audit is a code-and-contract review, not an E2E run. It asks whether the imp
 - [ ] logs/telemetry do not leak secrets or produce misleading healthy states.
 
 **Gate B:** every HIGH/critical correctness or data-loss finding on a supported path is fixed or explicitly proven unreachable under the MVP contract. The audit artifact is COMPLETE before RC freeze.
+
+**Gate B result:** COMPLETE on merged `0f8deac5`; see the [audit](../reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md) and its exact-main CI and no-publish image receipts.
 
 ## 6. Phase C — pre-freeze black-box E2E campaign
 
@@ -266,21 +329,15 @@ Use a fixture artifact corpus committed to Git.
 - [ ] repeat close or invalid close and verify safe behavior;
 - [ ] restart and verify persistence.
 
-### E2E-6 — Beacon generation and consumption
+### E2E-6 — Graphiti fork cold-install compatibility
 
-Use the same indexed fixture repository.
+Use the same clean environment and fixture repository as E2E-1.
 
-- [ ] generate Beacon output from Menhir;
-- [ ] assert the expected file/artifact exists without an unsafe overwrite;
-- [ ] run `beacon validate` against generated output — zero validation errors;
-- [ ] run `beacon inspect` and snapshot the normalized output;
-- [ ] launch Beacon's own stdio MCP server using the generated manifest;
-- [ ] query project overview;
-- [ ] query task-scoped onboarding;
-- [ ] query at least one generated concept or guardrail;
-- [ ] verify returned claims can be traced to the generated manifest/source material;
-- [ ] regenerate without graph/source changes and verify deterministic/controlled diff behavior;
-- [ ] change one source fact, refresh Menhir, regenerate, and verify only the expected Beacon portion changes.
+- [ ] install Menhir from the named candidate wheel in a clean environment and verify the exact public Archolith Graphiti wheel/version/hash;
+- [ ] verify the upstream `graphiti-core` distribution is absent;
+- [ ] start Menhir with the fork hooks wired, ingest one fixture episode, and recall it;
+- [ ] build and start the release container from the same locked dependency set;
+- [ ] verify both install paths expose the same fork version and hook behavior.
 
 ### E2E-7 — restart and interrupted work
 
@@ -298,20 +355,24 @@ Use the same indexed fixture repository.
 - [ ] oversized memory/diff is refused/truncated exactly as documented;
 - [ ] partial/capped code scan does not authorize destructive pruning of omitted files;
 - [ ] stale or unknown code coverage cannot produce an unqualified “safe” result;
-- [ ] invalid Beacon generation inputs fail without clobbering an existing manifest;
+- [ ] an incompatible or missing Graphiti fork fails explicitly during startup or install;
 - [ ] provider failure does not silently pass the E2E.
 
 **Gate C:** all required happy paths pass; every negative test either passes or creates a release-blocking issue with a reproduced failure.
 
+**Pre-freeze Gate C result:** PASS on the reviewed source tree: a clean Windows campaign recorded 13/13 tests and 71/71 criteria, while exact-merged Ubuntu stdio CI recorded 69/69 runnable criteria and the same-commit no-publish image verifier recorded the remaining 2/2 container criteria. The named frozen-RC rerun remains Phase F work.
+
 ## 7. Phase D — blocker fixes and RC freeze
 
-- [ ] Fix all Gate B/C blockers.
-- [ ] Re-run focused regression tests for every fix.
-- [ ] Re-run the complete pre-freeze E2E campaign.
-- [ ] Run the normal unit/integration/graph-backed suite and required CI checks.
+- [x] Fix the identified Gate B/C blockers from the `0f8deac5` audit; re-check on the named RC.
+- [x] Re-run focused regression tests for the Gate B fixes (including 23 disposable-graph structure/artifact/TODO tests).
+- [x] Re-run the complete pre-freeze E2E campaign (clean Windows 13/13, 71/71 criteria).
+- [x] Run the normal unit/integration/graph-backed suite and required CI checks (merged `0f8deac5`, four jobs PASS).
+- [ ] Close the post-v0.2.3 Astra findings: fail closed on missing installed-wheel acceptance, isolate Beacon imports, protect sync credentials, restore Graphiti JSON-object aliases, and document mixed-distribution repair. Require reviewed merged code and exact-commit CI before RC freeze.
 - [ ] Ensure working tree is clean.
 - [ ] Record exact Menhir commit as `MVP_RC_COMMIT`.
 - [ ] Record exact package artifact/wheel identity/hash.
+- [ ] Record the Archolith Graphiti fork wheel identity/hash and verify that the Menhir lock resolves it from the registry.
 - [ ] Freeze relevant configuration/defaults.
 - [ ] No unrelated merges until canonical evidence is complete.
 
@@ -319,7 +380,7 @@ Use the same indexed fixture repository.
 
 ## 8. Phase E — canonical full Oracle LongMemEval campaign
 
-LongMemEval and product E2Es answer different questions. LME measures memory quality; it does not certify artifacts, TODOs, code ingest, Beacon generation, installation, or restart behavior.
+LongMemEval and product E2Es answer different questions. LME measures memory quality; it does not certify artifacts, TODOs, code ingest, fork packaging, installation, or restart behavior.
 
 ### E1. Fresh build
 
@@ -374,7 +435,7 @@ Re-run the complete E2E campaign from Phase C using the exact RC commit/package 
 - [ ] E2E-3 code ingest/structure PASS;
 - [ ] E2E-4 WorkArtifacts PASS;
 - [ ] E2E-5 TODOs PASS;
-- [ ] E2E-6 Beacon generation/Beacon consumption PASS;
+- [ ] E2E-6 Graphiti fork cold-install compatibility PASS;
 - [ ] E2E-7 restart/interruption PASS;
 - [ ] E2E-8 isolation/adversarial PASS.
 
@@ -391,7 +452,7 @@ Re-run the complete E2E campaign from Phase C using the exact RC commit/package 
 - [ ] Post-MVP items remain open without delaying release.
 - [ ] Update evaluation docs with new canonical benchmark evidence.
 - [ ] Update MVP/README install and stdio instructions to match the tested path exactly.
-- [ ] Document Beacon generation command, overwrite/update policy, and validation workflow.
+- [ ] Document the Graphiti fork distribution, version, and supported upgrade path.
 - [ ] Record exact release commit and evidence links.
 - [ ] Transition this plan to IMPLEMENTED only after all mandatory gates pass.
 
@@ -430,18 +491,18 @@ These are starting hypotheses only; the audit/E2Es own the final ruling.
 - [ ] WorkArtifacts
 - [ ] local code ingest / structure
 - [ ] TODOs
-- [ ] Beacon generation
+- [ ] Archolith Graphiti fork dependency
 - [ ] explicit post-MVP exclusions documented
 
 ### Quality
-- [ ] independent release audit COMPLETE
-- [ ] all blockers fixed or disproven
-- [ ] full normal test/CI suite green
-- [ ] cold-package install E2E green
-- [ ] stdio MCP E2E green
-- [ ] restart/interruption E2E green
-- [ ] isolation/adversarial E2E green
-- [ ] Beacon generation validates and serves through Beacon MCP
+- [x] independent release audit COMPLETE (Gate B, merged `0f8deac5`)
+- [x] pre-freeze Gate B/C blockers fixed or disproven; frozen-RC review remains later
+- [x] full normal test/CI suite green on merged `0f8deac5`
+- [x] cold-package install E2E green on merged `0f8deac5`
+- [x] stdio MCP E2E green on merged `0f8deac5`
+- [x] restart/interruption E2E green on merged `0f8deac5`
+- [x] isolation/adversarial E2E green on merged `0f8deac5`
+- [x] Graphiti fork installs from a hashed public wheel on supported paths
 
 ### Benchmark
 - [ ] fresh graph
@@ -458,7 +519,7 @@ These are starting hypotheses only; the audit/E2Es own the final ruling.
 - [ ] issue sweep complete
 - [ ] limitations documented
 - [ ] README/install path matches tested path
-- [ ] Beacon generation docs match tested path
+- [ ] Graphiti fork install docs match tested path
 - [ ] evidence artifacts linked
 - [ ] release tag/version cut only after all mandatory gates pass
 
@@ -466,7 +527,7 @@ These are starting hypotheses only; the audit/E2Es own the final ruling.
 
 Stop and return to a new RC cycle if any of the following occurs:
 
-- a supported operation can silently lose/cross-link user memory, code structure, artifact identity, TODO state, or generated Beacon content;
+- a supported operation can silently lose/cross-link user memory, code structure, artifact identity, or TODO state;
 - namespaces cross-contaminate;
 - a fresh install cannot reach the supported stdio surface using documented steps;
 - restart produces false success or unrecoverable corruption on an ordinary supported flow;

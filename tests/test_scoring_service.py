@@ -36,6 +36,18 @@ def _make_candidate(**overrides: object) -> CandidateData:
     return CandidateData(**defaults)
 
 
+def test_review_flag_preserves_relevance_and_content() -> None:
+    svc = ScoringService()
+    ordinary = svc.score_candidates([_make_candidate()], QueryPreset.KNOWLEDGE)[0]
+    flagged = svc.score_candidates([_make_candidate(needs_review=True, review_reason="source changed",
+                                                    review_flagged_at="2026-10-05T00:00:00Z")],
+                                   QueryPreset.KNOWLEDGE)[0]
+    assert flagged.final_score == ordinary.final_score
+    assert flagged.content == ordinary.content
+    assert flagged.needs_review and flagged.review_reason == "source changed"
+    assert flagged.review_flagged_at == "2026-10-05T00:00:00Z"
+
+
 @pytest.mark.unit
 def test_graphiti_rrf_scale_contract() -> None:
     """Pin the RRF scale MIN_SIMILARITY_THRESHOLD gates (plan 1a).

@@ -25,6 +25,39 @@ from menhir.core.backend_impl import (
     drain_client_warnings,
 )
 from menhir.domain.recall import InvalidQueryPresetError
+from menhir.domain.session import new_session
+from menhir.mcp import service_access
+from menhir.services.lifecycle_models import ConsolidationResult
+from menhir.services.ingest_intake import IngestIntakeMixin
+from menhir.services.ingest_limits import MAX_DIFF_CHARS, MAX_EPISODE_CHARS
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bound_caller", [False, True])
+async def test_stdio_backend_factory_preserves_write_session_on_recall(server_app, monkeypatch, bound_caller):
+    """The bridge must use the writer's identity across distinct HTTP operation paths."""
+    from menhir.core.runtime import _state
+
+    app, ctx = server_app
+    monkeypatch.setattr(_state, "built", None)
+    monkeypatch.setattr(_state, "session", None)
+    monkeypatch.setattr(service_access, "_client_session", None)
+    caller = new_session("bridge-user", session_id="conversation-A") if bound_caller else None
+    monkeypatch.setattr(service_access, "get_request_session", lambda: caller)
+    settings = MemorySettings(backend_url="http://127.0.0.1:8100", api_key="test-api-key")
+    writer = service_access.get_mcp_session(settings)
+    backend = service_access.build_memory_backend(settings)
+    ctx.built.ingest_service.queue_episode_for_enrichment = AsyncMock(return_value={"episode_id": "queued"})
+    protected = BearerAuthMiddleware(app, api_key="test-api-key")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=protected), base_url="http://testserver") as client:
+        monkeypatch.setattr(backend, "_client", client)
+        await backend.queue_episode("fresh fact", user_id=writer.user_id, session_id=writer.session_id)
+        await backend.recall("fresh fact", include_session=True)
+        await backend.build_context("fresh fact", session_id=writer.session_id)
+    queued_session = ctx.built.ingest_service.queue_episode_for_enrichment.call_args.args[1]
+    assert queued_session.session_id == writer.session_id
+    assert ctx.built.recall_service.recall.call_args.kwargs["session_id"] == writer.session_id
+    assert ctx.built.context_builder.build_context.call_args.kwargs["session_id"] == writer.session_id
 
 
 def _build_fake_runtime_ctx(backend_overrides: dict | None = None):
@@ -63,6 +96,15 @@ def _build_fake_runtime_ctx(backend_overrides: dict | None = None):
             list_episode_processing=MagicMock(return_value=[]),
             get_scan_fingerprint=MagicMock(return_value="fp-1234"),
             count_namespace=MagicMock(return_value=5),
+            resolve_conflict_group=MagicMock(return_value={
+                "action": "replace",
+                "group_id": "group-1",
+                "resolved": 2,
+                "removed_uuid": "remove-1",
+                "removed_uuids": ["remove-1"],
+                "bridged_edges": 0,
+                "member_uuids": ["keep-1", "remove-1"],
+            }),
         ),
         graphiti_client=SimpleNamespace(
             circuit_breaker_snapshots=MagicMock(return_value={
@@ -146,6 +188,72 @@ def backend_client_like_uvicorn(server_app):
 
 
 class TestBackendRoundTrip:
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("text", "diff", "message"),
+        [
+            (
+                "x" * (MAX_EPISODE_CHARS + 1),
+                None,
+                f"Memory text exceeds the {MAX_EPISODE_CHARS}-character limit.",
+            ),
+            (
+                "x",
+                "d" * (MAX_DIFF_CHARS + 1),
+                f"Memory diff exceeds the {MAX_DIFF_CHARS}-character limit.",
+            ),
+        ],
+        ids=["text-over-limit", "diff-over-limit"],
+    )
+    async def test_queue_episode_bounds_survive_http_backend_round_trip(
+        self, backend_client_like_uvicorn, text, diff, message
+    ):
+        bc, ctx = backend_client_like_uvicorn
+        ctx.built.ingest_service = IngestIntakeMixin()
+
+        with pytest.raises(ValueError, match=f"^{message}$"):
+            await bc.queue_episode(
+                text,
+                user_id="bounds-user",
+                session_id="bounds-session",
+                diff=diff,
+            )
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_recover_orphans_preview_round_trip(self, backend_client):
+        bc, ctx = backend_client
+        preview = {"dry_run": True, "scope": "global", "session_nodes_found": 0,
+                   "ttl_expired_nodes_found": 1, "empty_orphan_episodes_found": 0}
+        ctx.built.lifecycle_service = SimpleNamespace(
+            preview_orphan_recovery=AsyncMock(return_value=preview),
+            recover_orphans=AsyncMock(side_effect=AssertionError("preview executed recovery")),
+        )
+
+        assert await bc.recover_orphans(max_age_hours=720, dry_run=True) == preview
+        ctx.built.lifecycle_service.preview_orphan_recovery.assert_awaited_once_with(max_age_hours=720)
+        ctx.built.lifecycle_service.recover_orphans.assert_not_awaited()
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_recover_orphans_execution_preserves_demoted_count(self, backend_client):
+        bc, ctx = backend_client
+        ctx.built.lifecycle_service = SimpleNamespace(
+            preview_orphan_recovery=AsyncMock(side_effect=AssertionError("unexpected preview")),
+            recover_orphans=AsyncMock(return_value=ConsolidationResult(
+                promoted=0, demoted=2, deleted=1, conflicts_detected=0,
+                skipped_pending=0, orphan_episodes_cleaned=0,
+            )),
+        )
+
+        result = await bc.recover_orphans(max_age_hours=720)
+
+        assert result["demoted"] == 2
+        assert result["deleted"] == 1
+        ctx.built.lifecycle_service.recover_orphans.assert_awaited_once_with(max_age_hours=720)
+        ctx.built.lifecycle_service.preview_orphan_recovery.assert_not_awaited()
+
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_flag_memory(self, backend_client):
@@ -245,6 +353,31 @@ class TestBackendRoundTrip:
         result = await bc.get_scan_fingerprint("cth.mcp.memory")
         assert result == "fp-1234"
         ctx.built.graph_adapter.get_scan_fingerprint.assert_called_once_with("cth.mcp.memory")
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_resolve_conflict_group_forwards_namespace_across_http(self, backend_client):
+        bc, ctx = backend_client
+
+        result = await bc.resolve_conflict_group(
+            "group-1",
+            action="replace",
+            resolution_status="resolved",
+            keep_uuid="keep-1",
+            remove_uuid="remove-1",
+            namespace="tenant_a",
+        )
+
+        assert result["removed_uuids"] == ["remove-1"]
+        ctx.built.graph_adapter.resolve_conflict_group.assert_called_once_with(
+            "group-1",
+            "replace",
+            keep_uuid="keep-1",
+            remove_uuid="remove-1",
+            resolution_status="resolved",
+            allow_promoted_removal=False,
+            namespace="tenant_a",
+        )
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -575,3 +708,15 @@ class TestBackendRoundTrip:
         _push_client_warning("warning-one")
         assert drain_client_warnings() == ["warning-one"]
         assert drain_client_warnings() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("show", [False, True])
+async def test_warden_visibility_option_survives_remote_boundary(backend_client, show):
+    bc, ctx = backend_client
+    ctx.built.recall_service.recall.return_value.update(warden_status={"state": "disabled"})
+    result = await bc.recall("config", include_warden_status=show)
+    assert ("warden_status" in result) is show
+    assert ctx.built.recall_service.recall.call_args.kwargs.get("include_warden_status", False) is show
+    await bc.build_context("config", include_warden_status=show)
+    assert ctx.built.context_builder.build_context.call_args.kwargs.get("include_warden_status", False) is show

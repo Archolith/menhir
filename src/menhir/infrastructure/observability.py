@@ -5,15 +5,22 @@ from __future__ import annotations
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 import logging
+import re
 from time import perf_counter
 from typing import Any, Callable
 from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
+import openai
 from openai import AsyncOpenAI
 
 from menhir.config import MemorySettings
+from menhir.infrastructure.openai_rate_limit import (
+    acall_with_rate_limit_backoff,
+    find_quota_exhaustion,
+    provider_error_code,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +46,14 @@ class LLMUsageEvent:
     total_tokens: int | None = None
     cached_input_tokens: int | None = None
     reasoning_output_tokens: int | None = None
+    #: Subset of input_tokens written to the provider cache (billed above the plain input rate).
+    cache_write_input_tokens: int | None = None
+    #: Billing tier the provider reports on the response (e.g. "flex", "default").
+    service_tier: str | None = None
     provider_usage: dict[str, Any] | None = None
     error: str | None = None
+    #: Content-free failure label (``provider_error_code``), persisted where ``error`` is redacted.
+    error_code: str | None = None
     #: This call is being MEASURED, not governed: a budget callback must count it and let it
     #: proceed rather than refusing it (CF-234). Set by the announcement site, never inferred, so
     #: a surface that does not opt in keeps whatever enforcement it has today.
@@ -120,8 +133,11 @@ def _emit_llm_usage_event(
     total_tokens: int | None = None,
     cached_input_tokens: int | None = None,
     reasoning_output_tokens: int | None = None,
+    cache_write_input_tokens: int | None = None,
+    service_tier: str | None = None,
     provider_usage: dict[str, Any] | None = None,
     error: str | None = None,
+    error_code: str | None = None,
     report_only: bool = False,
 ) -> None:
     callback = _llm_usage_callback.get() or _default_llm_usage_callback
@@ -142,8 +158,11 @@ def _emit_llm_usage_event(
                 total_tokens=total_tokens,
                 cached_input_tokens=cached_input_tokens,
                 reasoning_output_tokens=reasoning_output_tokens,
+                cache_write_input_tokens=cache_write_input_tokens,
+                service_tier=service_tier,
                 provider_usage=provider_usage,
                 error=error,
+                error_code=error_code,
                 report_only=report_only,
             )
         )
@@ -159,6 +178,10 @@ def _emit_llm_usage_event(
             endpoint,
             exc_info=True,
         )
+
+
+#: Content-free provider tier identifier (e.g. "flex", "default").
+_SERVICE_TIER_SHAPE = re.compile(r"[A-Za-z0-9_.-]{1,32}")
 
 
 def _value(source: Any, *names: str) -> Any:
@@ -233,12 +256,14 @@ def _normalized_usage(usage: Any) -> dict[str, Any]:
     reasoning_output_tokens = _nonnegative_int(_value(usage, "thoughtsTokenCount"))
     if reasoning_output_tokens is None:
         reasoning_output_tokens = _nonnegative_int(_value(completion_details, "reasoning_tokens"))
+    cache_write_input_tokens = _nonnegative_int(_value(prompt_details, "cache_write_tokens"))
     return {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
         "cached_input_tokens": cached_input_tokens,
         "reasoning_output_tokens": reasoning_output_tokens,
+        "cache_write_input_tokens": cache_write_input_tokens,
         "provider_usage": raw,
     }
 
@@ -284,8 +309,12 @@ def complete_llm_usage_call(
     usage: Any = None,
 ) -> None:
     clear_provider_auth_failure()
+    clear_provider_quota_exhaustion(handle.kind)
     try:
         normalized = _normalized_usage(usage if usage is not None else _value(result, "usage"))
+        service_tier = _value(result, "service_tier") if result is not None else None
+        if not (isinstance(service_tier, str) and _SERVICE_TIER_SHAPE.fullmatch(service_tier)):
+            service_tier = None
         _emit_llm_usage_event(
             handle.kind,
             phase="completed",
@@ -294,6 +323,7 @@ def complete_llm_usage_call(
             operation=handle.operation,
             call_id=handle.call_id,
             duration_ms=int((perf_counter() - handle.started_at) * 1000),
+            service_tier=service_tier,
             **normalized,
             report_only=handle.report_only,
         )
@@ -384,9 +414,53 @@ def last_provider_auth_failure() -> ProviderAuthFailure | None:
     return _provider_auth_failure
 
 
+@dataclass(frozen=True)
+class ProviderQuotaExhaustion:
+    """The most recent insufficient_quota 429 from an LLM provider, process-wide."""
+
+    kind: str
+    endpoint: str | None
+    model: str | None
+    at: str  # ISO-8601 UTC
+
+    def summary(self) -> str:
+        return (
+            f"provider_quota_exhausted: the LLM provider returned 429 insufficient_quota at "
+            f"{self.at} on {self.endpoint or self.kind}{f' ({self.model})' if self.model else ''}"
+        )
+
+
+_provider_quota_exhaustion: ProviderQuotaExhaustion | None = None
+
+
+def record_provider_quota_exhaustion(handle: LLMCallHandle) -> None:
+    global _provider_quota_exhaustion
+    from datetime import datetime, timezone
+
+    _provider_quota_exhaustion = ProviderQuotaExhaustion(
+        kind=handle.kind,
+        endpoint=handle.endpoint,
+        model=handle.model,
+        at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    )
+
+
+def clear_provider_quota_exhaustion(kind: str | None = None) -> None:
+    """Clear the standing quota flag; a given ``kind`` clears it only if that kind recorded it."""
+    global _provider_quota_exhaustion
+    if kind is None or (_provider_quota_exhaustion is not None and _provider_quota_exhaustion.kind == kind):
+        _provider_quota_exhaustion = None
+
+
+def last_provider_quota_exhaustion() -> ProviderQuotaExhaustion | None:
+    return _provider_quota_exhaustion
+
+
 def fail_llm_usage_call(handle: LLMCallHandle, error: BaseException) -> None:
     if is_provider_auth_error(error):
         record_provider_auth_failure(handle, error)
+    if find_quota_exhaustion(error) is not None:
+        record_provider_quota_exhaustion(handle)
     _emit_llm_usage_event(
         handle.kind,
         phase="failed",
@@ -396,6 +470,7 @@ def fail_llm_usage_call(handle: LLMCallHandle, error: BaseException) -> None:
         call_id=handle.call_id,
         duration_ms=int((perf_counter() - handle.started_at) * 1000),
         error=str(error),
+        error_code=provider_error_code(error),
         report_only=handle.report_only,
     )
 
@@ -403,10 +478,13 @@ def fail_llm_usage_call(handle: LLMCallHandle, error: BaseException) -> None:
 class _InstrumentedEndpoint:
     """Generic instrumented wrapper for any OpenAI-compatible async endpoint."""
 
-    def __init__(self, inner: Any, *, event_type: str, endpoint: str) -> None:
+    def __init__(
+        self, inner: Any, *, event_type: str, endpoint: str, retry_rate_limits: bool = False
+    ) -> None:
         self._inner = inner
         self._event_type = event_type
         self._endpoint = endpoint
+        self._retry_rate_limits = retry_rate_limits
 
     async def create(self, *args: Any, **kwargs: Any) -> Any:
         model = kwargs.get("model")
@@ -417,7 +495,12 @@ class _InstrumentedEndpoint:
             operation=self._endpoint,
         )
         try:
-            result = await self._inner.create(*args, **kwargs)
+            if self._retry_rate_limits:
+                result = await acall_with_rate_limit_backoff(
+                    lambda: self._inner.create(*args, **kwargs), label=self._endpoint
+                )
+            else:
+                result = await self._inner.create(*args, **kwargs)
         except Exception as exc:
             fail_llm_usage_call(handle, exc)
             raise
@@ -560,7 +643,11 @@ class _InstrumentedAsyncOpenAI:
             self.chat = _InstrumentedNamespace(chat)
         embeddings = getattr(inner, "embeddings", None)
         if embeddings is not None:
-            instrumented = _InstrumentedEndpoint(embeddings, event_type="embedding", endpoint="embeddings.create")
+            # Embeddings retry 429s here: Graphiti's embedder calls this client directly and no
+            # caller retries. Chat does not -- the Graphiti proxy and providers retry their own.
+            instrumented = _InstrumentedEndpoint(
+                embeddings, event_type="embedding", endpoint="embeddings.create", retry_rate_limits=True
+            )
             if embedding_cache is not None:
                 self.embeddings = _CachingEmbeddingsEndpoint(instrumented, embedding_cache)
             else:
@@ -607,6 +694,33 @@ def _build_http_client(base_url: str) -> httpx.AsyncClient | None:
     return httpx.AsyncClient(event_hooks={"request": [_strip_auth]})
 
 
+class _NoSdkRateLimitRetry:
+    """The SDK retries 429s (twice by default) before our backoff sees them, unlogged and even
+    for insufficient_quota. Every caller of this builder wraps 429s in openai_rate_limit, so the
+    SDK skips 429 only; 408/409/5xx/connection/timeout retries stay, since callers rely on them."""
+
+    def _should_retry(self, response: httpx.Response) -> bool:
+        if response.status_code == 429:
+            return False
+        return super()._should_retry(response)  # type: ignore[misc]
+
+
+_no_429_retry_classes: dict[type, type] = {}
+
+
+def _without_sdk_429_retry(client_cls: Any) -> Any:
+    """``client_cls`` with SDK 429 retry off; anything not an AsyncOpenAI subclass is unchanged."""
+    if not (isinstance(client_cls, type) and issubclass(client_cls, openai.AsyncOpenAI)):
+        return client_cls
+    if issubclass(client_cls, _NoSdkRateLimitRetry):
+        return client_cls
+    cls = _no_429_retry_classes.get(client_cls)
+    if cls is None:
+        cls = type(client_cls.__name__, (_NoSdkRateLimitRetry, client_cls), {})
+        _no_429_retry_classes[client_cls] = cls
+    return cls
+
+
 def build_async_openai_client(
     *,
     base_url: str,
@@ -617,7 +731,9 @@ def build_async_openai_client(
 ) -> Any:
     """Build an AsyncOpenAI-compatible client with optional Langfuse tracing and embedding cache."""
     http_client = _build_http_client(base_url)
-    client_cls: type[AsyncOpenAI] = _LocalAsyncOpenAI if _should_bypass_local_auth(base_url) else AsyncOpenAI
+    client_cls: type[AsyncOpenAI] = _without_sdk_429_retry(
+        _LocalAsyncOpenAI if _should_bypass_local_auth(base_url) else AsyncOpenAI
+    )
     client_kwargs: dict[str, Any] = {"base_url": base_url, "api_key": api_key, "http_client": http_client}
     if request_timeout_s is not None:
         client_kwargs["timeout"] = request_timeout_s
@@ -643,5 +759,5 @@ def build_async_openai_client(
         client = client_cls(**client_kwargs)
         return _InstrumentedAsyncOpenAI(client, embedding_cache=embedding_cache)
 
-    client = LangfuseAsyncOpenAI(**client_kwargs)
+    client = _without_sdk_429_retry(LangfuseAsyncOpenAI)(**client_kwargs)
     return _InstrumentedAsyncOpenAI(client, embedding_cache=embedding_cache)

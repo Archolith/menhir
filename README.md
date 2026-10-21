@@ -1,5 +1,13 @@
 # Menhir
 
+[![Tests](https://github.com/Archolith/menhir/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Archolith/menhir/actions/workflows/tests.yml)
+[![PyPI](https://img.shields.io/pypi/v/archolith-menhir?label=pypi)](https://pypi.org/project/archolith-menhir/)
+[![Python](https://img.shields.io/badge/python-3.12%2B-3776ab)](https://pypi.org/project/archolith-menhir/)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![beacon](https://img.shields.io/endpoint?url=https%3A%2F%2Fmenhir.archolith.dev%2Fv1%2Fbadge.json)](https://menhir.archolith.dev/.well-known/archolith-beacon)
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Add_Menhir_beacon-0098FF?logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=menhir-beacon&config=%7B%22type%22%3A%22http%22%2C%22url%22%3A%22https%3A%2F%2Fmenhir.archolith.dev%2Fmcp%22%7D)
+[![Add to Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=menhir-beacon&config=eyJ1cmwiOiJodHRwczovL21lbmhpci5hcmNob2xpdGguZGV2L21jcCJ9)
+
 > Git records what changed. Menhir records why an agent acted, where the evidence came
 > from, whether it is still current, and which code and tests carry the impact.
 
@@ -21,7 +29,12 @@ Python 3.12 or newer, and is designed for local or operator-controlled deploymen
 [Quick start](#quick-start) | [Agent workflow](#a-coding-loop) |
 [Blast radius](#code-graph-and-blast-radius) |
 [Governance](#governance-and-currentness) | [Evaluation](#evaluation-posture) |
-[Security](#security-and-privacy)
+[Security](#security-and-privacy) | [Project beacon](https://menhir.archolith.dev/.well-known/archolith-beacon)
+
+Coding agents can read this project's documented knowledge, meaning its purpose, guardrails,
+decisions and docs, from its public [Beacon](https://github.com/Archolith/beacon) at
+`https://menhir.archolith.dev/mcp` (Streamable HTTP, read-only, no auth). It serves this
+repository's published docs only. It is not a Menhir memory server and holds no one's memory.
 
 ## Why Menhir is useful for agentic coding
 
@@ -78,11 +91,14 @@ A typical agent session can use Menhir at each stage:
 1. Run `ingest_project` to build or refresh the repository graph.
 2. Before editing, use `query_structure` for local context, blast radius, and affected
    tests. Pass `file_context` to `recall_memories` to pull in code-linked decisions,
-   failures, and constraints.
+   failures, and constraints. When a design choice or constraint could change the work and
+   the repository does not record why, recall the recorded reason and read its source with
+   `get_provenance`.
 3. During the session, optional hooks can collect durable user-provided evidence and
    mark changed files dirty. Hook failures do not block the coding agent.
 4. After the change, attach the Git diff to `add_memory` so new lessons can be anchored
-   to touched files. Record remaining code work with repository-relative todo locations,
+   to touched files. Write each decision with its reason and the alternative rejected; use
+   `add_memory_and_track` when the write must be recallable in the same session. Record remaining code work with repository-relative todo locations,
    and update any plan, review, report, or handoff artifacts.
 
 ```text
@@ -225,7 +241,12 @@ tuning.
 Memories can be session-scoped, persistent, active, compressed, promoted, flagged, or
 marked gone. Daily maintenance runs consolidation and decay checks. Eligible inactive
 memories may be compressed, and compressed content can be rehydrated when new context
-arrives. Flagged and promoted memories receive stronger retention protection.
+arrives. A direct entity flag protects that entity. Enrichment also links each eligible
+extracted entity to its source episode, so flagging or unflagging that episode changes
+the entity's automatic retention protection without copying the flag. Promoted
+memories receive stronger protection through their separate authority policy.
+Existing episodes are not backfilled with these links; their stored entity flags
+remain protective.
 
 Automatic transitions from `COMPRESSED` to `GONE` are disabled. The old deletion
 threshold did not provide a safe basis for irreversible removal. An operator can still
@@ -364,39 +385,47 @@ run them by hand.
 
 ### Connect an MCP client
 
-Point an HTTP-capable MCP client at `/mcp-http`. On a fresh local install `menhir setup` writes
-no credentials at all, and with none configured Menhir binds to loopback and accepts MCP
-requests without an `Authorization` header -- so the smallest working config is:
+Keep `menhir up` (or `menhir serve`) running, then configure a local MCP client to launch
+the stdio bridge with the same Python installation as Menhir. The bridge connects to the
+running backend; it does not start one. A fresh loopback install needs no key:
 
 ```json
 {
   "mcpServers": {
     "memory": {
-      "type": "http",
-      "url": "http://127.0.0.1:8100/mcp-http"
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "menhir.mcp.server"],
+      "env": { "MENHIR_BACKEND_URL": "http://127.0.0.1:8100" }
     }
   }
 }
 ```
 
-The moment you configure any of `MENHIR_OPERATOR_KEY`, `MENHIR_AGENT_KEY`, or
-`MENHIR_READONLY_KEY`, every MCP request needs a matching bearer token and an unauthenticated
-one is refused with `401 Missing or invalid API key`. That is the right setting for anything
-beyond a single-user loopback install -- the credential tier decides which tools the client may
-call, and giving an automated client the agent key rather than the operator key is the point of
-having tiers:
+Use the absolute path to the Menhir environment's Python if your MCP client launches with
+a different one. Set `MENHIR_BACKEND_URL` in the client's environment even when the backend
+has its own `.env` file.
+
+Once any tier key is configured, unauthenticated MCP requests are refused. Configure a
+distinct `MENHIR_AGENT_KEY` on the backend, restart it, and pass the same value in the stdio
+client's `env` alongside `MENHIR_BACKEND_URL`. The agent key gives an automated client its
+intended tool tier:
 
 ```bash
-echo "MENHIR_AGENT_KEY=$(openssl rand -hex 24)" >> "${MENHIR_STATE_DIR:-~/.menhir}/.env"
+echo "MENHIR_AGENT_KEY=$(openssl rand -hex 24)" >> "${MENHIR_STATE_DIR:-$HOME/.menhir}/.env"
 ```
 
 ```json
 {
   "mcpServers": {
     "memory": {
-      "type": "http",
-      "url": "http://127.0.0.1:8100/mcp-http",
-      "headers": { "Authorization": "Bearer <the MENHIR_AGENT_KEY value>" }
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "menhir.mcp.server"],
+      "env": {
+        "MENHIR_BACKEND_URL": "http://127.0.0.1:8100",
+        "MENHIR_AGENT_KEY": "<the MENHIR_AGENT_KEY value>"
+      }
     }
   }
 }
@@ -406,11 +435,11 @@ Each configured key must be a distinct value: `_resolve_tier` returns the first 
 operator first, so a shared value would silently promote every client holding it to the highest
 tier it appears in. Startup refuses that rather than granting it.
 
-For a client that speaks stdio rather than HTTP, run `python -m menhir.mcp.server`; it bridges
-to the same runtime and needs no separate server process.
+The backend also exposes Streamable HTTP at `/mcp-http` for HTTP-capable clients. Local
+stdio is the supported MVP client path.
 
-**Check it without a client.** The transport is stateless Streamable HTTP -- no session id is
-issued and none is needed -- so one request lists the tools:
+**Check the HTTP endpoint without a client.** Its transport is stateless Streamable HTTP --
+no session id is issued or needed -- so one request lists the tools:
 
 ```bash
 curl -fsS -X POST http://127.0.0.1:8100/mcp-http \
@@ -586,20 +615,21 @@ Other CLI commands include `menhir console` for an interactive shell and
 
 ## Docker test stack
 
-The deployment compose file starts Menhir and an isolated, disposable Neo4j instance.
-It is a test stack, not a production template, and its supplied configuration uses
-OpenAI for extraction and embeddings.
+The public Compose files are disposable checks for an already built Menhir
+image. The full stack uses an isolated Neo4j volume and a configured model
+provider; its example uses paid OpenAI extraction and embeddings. For a local
+installation from source, follow the setup above and use
+`menhir up --compose-neo4j`.
 
-**It does not build from a plain clone.** `deploy/Dockerfile` installs from a pre-built
-wheelhouse and a digest-pinned base image that the release pipeline produces
-(`pip wheel . --wheel-dir deploy/wheelhouse`, see `deploy/`). To run Menhir in a container from
-source, use any Python 3.12 image with the pip steps above; the compose file below is for
-release verification.
+**The image does not build from a plain clone.** `deploy/Dockerfile` installs
+from a prepared, hash-verified wheelhouse on a digest-pinned base image. The
+release pipeline builds and verifies that image before a Compose check.
 
 ```bash
+# First load or tag a verified image as menhir:test.
 cp deploy/.env.deploy.example deploy/.env.deploy
 # Set OPENAI_API_KEY and MENHIR_OPERATOR_KEY in deploy/.env.deploy.
-docker compose -f deploy/docker-compose.full.yml up -d --build
+docker compose -f deploy/docker-compose.full.yml up -d
 curl -fsS http://127.0.0.1:8099/api/health
 ```
 
@@ -614,8 +644,9 @@ Two path and networking details matter in Docker:
 - `127.0.0.1` inside a container is the container itself. To use a model server on the
   host, set `LOCAL_LLM_BASE_URL` to an address such as `host.docker.internal`.
 
-See [`deploy/README.md`](deploy/README.md) for client-token bootstrap and deployment
-details.
+See [`deploy/README.md`](deploy/README.md) for client-token bootstrap and image
+verification details. Operator-specific production deployment is maintained in
+the private `Archolith/menhir-deploy` repository.
 
 ## Security and privacy
 

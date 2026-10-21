@@ -292,6 +292,18 @@ def _build_service(recall_result: RecallResult) -> ContextBuilderService:
     return ContextBuilderService(recall_service=mock_recall)
 
 
+@pytest.mark.asyncio
+async def test_verifier_warning_is_atomic_with_memory_budget() -> None:
+    memory = replace(_mem("review", "config", "The job is disabled.", .9), needs_review=True,
+                     review_reason="verifier changed to true")
+    service = _build_service(_recall_result([memory]))
+    for budget in (1, 25, 1000):
+        context = await service.build_context("config", max_tokens=budget)
+        assert ("The job is disabled." in context.context) == ("Review required:" in context.context)
+        if "review" in context.memory_ids:
+            assert "Verify the source before asserting this memory as current truth." in context.context
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_context_includes_fresh_session_scoped_memories() -> None:
@@ -413,6 +425,61 @@ async def test_context_marks_memory_without_temporal_facts_source_time_unknown()
 
     assert "Source time: unknown." in context.context
     assert recall_service.recall.await_args.kwargs["include_invalidated"] is True
+
+
+# ---------------------------------------------------------------------------
+# Configured Warden profiles
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("warden,anchor,sources,expected", [
+    (False, False, ["claude-code"], {"entity-1", "entity-2"}),
+    (False, True, ["claude-code"], {"entity-1", "entity-2"}),
+    (True, True, ["claude-code"], set()),
+    (True, False, ["claude-code"], {"entity-1"}),
+    (True, True, ["user"], {"entity-1"}),
+    (True, True, [], set()),
+    (True, False, [], {"entity-1"}),
+])
+async def test_context_applies_configured_warden_profile(
+    stub_graphiti_client, stub_memory_graph_adapter, warden, anchor, sources, expected,
+) -> None:
+    from menhir.config import MemorySettings
+    from tests.test_recall_service import _build_recall_service, _two_cands
+
+    _two_cands(
+        stub_graphiti_client, stub_memory_graph_adapter,
+        c1="Alice currently lives in Leeds", c2="Alice formerly lived in York",
+        extra2={"expired_at": "2025-02-01", "created_at": "2025-01-01"},
+    )
+    for row in stub_memory_graph_adapter.candidate_metadata:
+        row["namespace"] = "conversation"
+    stub_memory_graph_adapter.candidate_provenance_rows = [
+        {"uuid": uuid, "evidence_node_kinds": [], "anchor_projects": [], "episode_sources": sources}
+        for uuid in ("entity-1", "entity-2")
+    ]
+    tuning = MemorySettings(
+        frontier_warden_gate=warden, frontier_evidence_anchor=anchor, frontier_source_memories=False,
+    ).retrieval_tuning()
+    recall = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+    recalled = await recall.recall("Where does Alice live?", namespace="conversation", tuning=tuning)
+    context = await ContextBuilderService(recall_service=recall, retrieval_tuning=tuning).build_context(
+        "Where does Alice live?", namespace="conversation", max_tokens=2000,
+    )
+    assert {row.uuid for row in recalled.results} == expected
+    assert set(context.memory_ids) == expected
+    assert context.memory_count == len(expected)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_context_without_tuning_preserves_existing_call_shape() -> None:
+    recall = AsyncMock()
+    recall.recall.return_value = _recall_result([])
+    await ContextBuilderService(recall_service=recall).build_context("test")
+    assert "tuning" not in recall.recall.await_args.kwargs
 
 
 # ---------------------------------------------------------------------------
@@ -893,3 +960,29 @@ async def test_build_context_does_not_starve_the_loop_reading_linked_docs(tmp_pa
         "the linked-doc branch did not run, so the tick count below would be vacuous"
     )
     assert ticks >= 3, f"event loop starved while reading linked docs ({ticks} ticks)"
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state,note", [
+    ({"status": "completed"}, "not an outstanding obligation"),
+    ({"artifact_status": "historical", "superseded_by": "new"}, "not current guidance"),
+])
+async def test_context_lifecycle_label_is_atomic_under_budget(state, note):
+    memory = replace(_mem("history", "Task", "Submit report by Friday", 0.9), **state)
+    builder = _build_service(_recall_result([memory]))
+    for budget in (50, 100, 2000):
+        result = await builder.build_context("task", max_tokens=budget)
+        if "Submit report by Friday" in result.context:
+            assert note in result.context
+        assert result.token_estimate <= budget
+    result = await builder.build_context("task", max_tokens=2000)
+    assert note in result.context
+
+
+@pytest.mark.parametrize("historical", [
+    {"status": "completed"}, {"artifact_status": "historical"}, {"superseded_by": "new"},
+])
+def test_context_dedup_preserves_active_and_historical_same_instruction(historical):
+    active = _mem("active", "Task", "Submit report by Friday", 0.8)
+    old = replace(active, uuid="history", final_score=0.9, **historical)
+    assert {m.uuid for m in _deduplicate([old, active])} == {"active", "history"}
+    almost_same = replace(active, uuid="similar", content="Submit the report by Friday")
+    assert {m.uuid for m in _deduplicate([old, almost_same])} == {"similar", "history"}

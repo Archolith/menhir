@@ -235,7 +235,7 @@ def test_self_identity_producer_census_is_closed():
     )
     assert declarations == Counter(
         {
-            "src/menhir/infrastructure/graphiti_extraction_patches.py:begin_extraction_receipt": 1
+            "src/menhir/infrastructure/graphiti_extraction_policy.py:begin_extraction_receipt": 1
         }
     )
     assert explicit_authority == Counter(
@@ -243,7 +243,7 @@ def test_self_identity_producer_census_is_closed():
             "src/menhir/domain/self_identity.py:SelfEvidenceKind": 1,
             "src/menhir/domain/self_identity.py:declare_self_subject": 1,
             "src/menhir/domain/self_identity.py:proves_self_subject": 1,
-            "src/menhir/infrastructure/graphiti_extraction_patches.py:_record_self_binding": 1,
+            "src/menhir/infrastructure/graphiti_extraction_policy.py:_record_self_binding": 1,
             "src/menhir/infrastructure/self_binding.py:bind_canonical_self": 1,
             "src/menhir/services/enrichment_steps.py:add_episode_with_timeout": 1,
         }

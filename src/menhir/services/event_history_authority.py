@@ -20,7 +20,11 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-from menhir.domain.event_history import TypedEventAssertion, normalize_text as _norm
+from menhir.domain.event_history import (
+    TypedEventAssertion,
+    apply_event_corrections,
+    normalize_text as _norm,
+)
 from menhir.domain.recall import EventAuthorityVerdict
 from menhir.services.event_history_recall import (
     CANONICAL_PREDICATE_ACQUIRED,
@@ -91,13 +95,14 @@ def _unresolved_explicit_anchor_verdict(
     anchor = _explicit_anchor_guard_token(query)
     if anchor is None:
         return None
-    eligible = tuple(
+    # A corrected-away occurrence is not a second anchor candidate (#170 item 5).
+    eligible = tuple(apply_event_corrections(
         assertion
         for assertion in assertions
         if _norm(assertion.namespace) == _norm(namespace)
         and _norm(assertion.subject_uuid) == _norm(subject_uuid)
         and _norm(assertion.predicate) == CANONICAL_PREDICATE_ACQUIRED
-    )
+    ))
     if resolve_exact_anchor(eligible, anchor_token=anchor) is not None:
         return None
     return EventAuthorityVerdict(

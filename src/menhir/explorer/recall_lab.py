@@ -32,14 +32,14 @@ class RecallLabTuning(BaseModel):
     enable_facet_shadow: bool = False
     enable_facet_candidates: bool = False
     facet_weight: float = Field(default=0.5, ge=0.0, le=10.0)
-    enable_oracle_ranking: bool = False
+    enable_oracle_ranking: bool = True
     oracle_rank_weight: float = Field(default=0.25, ge=0.0, le=2.0)
-    enable_intent_lens: bool = False
-    enable_warden_gate: bool = False
+    enable_intent_lens: bool = True
+    enable_warden_gate: bool = True
     enable_diversity_gate: bool = False
-    enable_contradiction_interrupt: bool = False
+    enable_contradiction_interrupt: bool = True
     enable_belief_gate: bool = False
-    enable_evidence_anchor: bool = True
+    enable_evidence_anchor: bool = False
     enable_fact_edges: bool = False
     fact_edge_k: int = Field(default=20, ge=1, le=200)
     fact_edge_mode: Literal["pointer", "standalone"] = "pointer"
@@ -49,6 +49,12 @@ class RecallLabTuning(BaseModel):
     content_vector_k: int = Field(default=100, ge=1, le=200)
     content_vector_weight: float = Field(default=0.5, ge=0.0, le=10.0)
     fusion_admission_policy: Literal["attributed", "production_fused"] = "attributed"
+    enable_source_memories: bool = False
+    source_memory_limit: int = Field(default=10, ge=1, le=50)
+    source_memory_max_chars: int = Field(default=600, ge=100, le=4000)
+    source_memory_pools: bool = False
+    enable_verb_facets: bool = False
+    scalar_verdict_min_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
 
     def to_domain(self) -> RetrievalTuningConfig:
         return RetrievalTuningConfig(**self.model_dump())
@@ -76,7 +82,7 @@ class RecallLabRequest(BaseModel):
     include_invalidated: bool = False
     judge: bool = False
     judge_passes: int = Field(default=2, ge=1, le=2)
-    arms: list[RecallLabArm] = Field(min_length=1, max_length=9)
+    arms: list[RecallLabArm] = Field(min_length=1, max_length=12)
 
     @model_validator(mode="after")
     def validate_request(self) -> RecallLabRequest:
@@ -350,6 +356,10 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
             enable_oracle_ranking=True,
             enable_intent_lens=True,
             enable_warden_gate=True,
+            # Strict profile: pinned so the #173 default flip does not change this arm.
+            enable_evidence_anchor=True,
+            enable_contradiction_interrupt=False,
+            enable_belief_gate=False,
         ),
     },
     {
@@ -363,6 +373,8 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
             enable_intent_lens=True,
             enable_warden_gate=True,
             enable_evidence_anchor=False,
+            enable_contradiction_interrupt=False,
+            enable_belief_gate=False,
         ),
     },
     {
@@ -373,6 +385,11 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
             enable_assertion_shadow=False,
             enable_facet_candidates=True,
             facet_weight=0.5,
+            enable_oracle_ranking=False,
+            enable_intent_lens=False,
+            enable_warden_gate=False,
+            enable_contradiction_interrupt=False,
+            enable_belief_gate=False,
         ),
     },
     {
@@ -383,6 +400,9 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
             enable_assertion_shadow=False,
             enable_oracle_ranking=True,
             enable_intent_lens=True,
+            enable_warden_gate=False,
+            enable_contradiction_interrupt=False,
+            enable_belief_gate=False,
         ),
     },
     {
@@ -396,6 +416,8 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
             enable_intent_lens=True,
             enable_warden_gate=False,
             enable_evidence_anchor=False,
+            enable_contradiction_interrupt=False,
+            enable_belief_gate=False,
         ),
     },
 ]
@@ -444,6 +466,8 @@ def _redact_authority_verdicts(verdicts: list[dict[str, Any]], *, reveal: bool) 
     ``value`` is masked unconditionally (not via redact_text) because it is often non-string
     (a spend amount, a duration, a count) -- redact_text only masks strings, so routing a
     numeric authority value through it would silently leak the exact figure in redacted mode.
+    The match-audit fields ``count_uncertain``/``count_actions``/``count_items`` (item names, action
+    words and an exact figure) are memory content too and are masked the same way.
     """
     if reveal:
         return verdicts
@@ -452,6 +476,9 @@ def _redact_authority_verdicts(verdicts: list[dict[str, Any]], *, reveal: bool) 
         v = dict(verdict)
         if "value" in v and v["value"] not in (None, ""):
             v["value"] = MASK
+        for _audit_key in ("count_uncertain", "count_actions", "count_items"):
+            if _audit_key in v and v[_audit_key] not in (None, ""):
+                v[_audit_key] = MASK
         if "object_display" in v:
             v["object_display"] = redact_text(v["object_display"], reveal=False)
         # EventAuthorityVerdict carries its own top-level stated_span (no contributors list);
@@ -486,7 +513,17 @@ def _redact_temporal_facts(facts: list[dict[str, Any]], *, reveal: bool) -> list
         f = dict(fact)
         if "fact" in f:
             f["fact"] = redact_text(f["fact"], reveal=False)
+        if f.get("event_time"):  # free text: it quotes the source expression
+            f["event_time"] = redact_text(f["event_time"], reveal=False)
         out.append(f)
+    return out
+
+
+def _temporal_fact_dict(fact: object) -> dict[str, Any]:
+    """asdict without an absent event_time, so render-off payloads keep their prior shape."""
+    out = asdict(fact)
+    if out.get("event_time") is None:
+        out.pop("event_time", None)
     return out
 
 
@@ -537,7 +574,7 @@ def _serialize_result(result: object, *, reveal: bool) -> dict[str, Any]:
             # reasoning the answer prompt depends on this for was uniformly unavailable
             # across every Recall Lab arm regardless of tuning.
             "temporal_facts": _redact_temporal_facts(
-                [asdict(t) for t in _value(memory, "temporal_facts", ()) or ()],
+                [_temporal_fact_dict(t) for t in _value(memory, "temporal_facts", ()) or ()],
                 reveal=reveal,
             ),
         }
@@ -548,7 +585,12 @@ def _serialize_result(result: object, *, reveal: bool) -> dict[str, Any]:
     # so asdict() round-trips cleanly through the same JSON shape /api/recall emits.
     authority_layer = _value(result, "authority_layer")
     event_authority_layer = _value(result, "event_authority_layer")
+    # Source-memory lane (default-off): the additive section, serialized next to the
+    # ranked results exactly as /api/recall emits it (field names already match
+    # SourceMemoryResponse, so asdict round-trips cleanly).
+    source_memories = _value(result, "source_memories")
 
+    warden_status = _value(result, "warden_status")
     return {
         "query": str(_value(result, "query", "")),
         "preset": str(_enum_value(_value(result, "preset", ""))),
@@ -556,6 +598,8 @@ def _serialize_result(result: object, *, reveal: bool) -> dict[str, Any]:
         "candidates_evaluated": int(_value(result, "candidates_evaluated", 0) or 0),
         "nodes_touched": int(_value(result, "nodes_touched", 0) or 0),
         "note": _value(result, "note"),
+        "warden_status": asdict(warden_status) if is_dataclass(warden_status) else warden_status,
+        "warden_notice": _value(result, "warden_notice"),
         "search_error": _value(result, "search_error"),
         "service_ms": _value(trace, "total_ms"),
         "phases": dict(_value(trace, "phases", {}) or {}),
@@ -567,6 +611,13 @@ def _serialize_result(result: object, *, reveal: bool) -> dict[str, Any]:
         "event_authority_layer": (
             _redact_authority_verdicts([asdict(v) for v in event_authority_layer], reveal=reveal)
             if event_authority_layer else None
+        ),
+        "source_memories": (
+            [
+                redact_mapping(asdict(sm), reveal=reveal)
+                for sm in source_memories
+            ]
+            if source_memories else None
         ),
     }
 
@@ -591,6 +642,7 @@ async def _run_arm(
             namespace=request.namespace,
             tuning=arm.tuning.to_domain(),
             trace=True,
+            include_warden_status=True,
             update_access=False,
         )
     except Exception as exc:

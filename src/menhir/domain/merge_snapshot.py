@@ -306,6 +306,37 @@ def decode_node(node: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def is_moved_fact(rel: dict[str, Any], *, survivor_uuid: str, absorbed_uuid: str) -> bool:
+    """Whether a merge moves this decoded relationship of the absorbed node onto the survivor.
+
+    The Python half of ONE predicate; the Cypher half is ``correlation_queries._MOVED_FACT_WHERE``.
+    The merge moves exactly these edges and refuses to run unless the live set equals the snapshot's;
+    the unmerge moves exactly these back. A difference between the halves strands or loses a fact.
+    """
+    props = rel.get("properties") or {}
+    uuid = props.get("uuid")
+    peer = rel.get("peer_uuid")
+    return (
+        rel.get("type") == "RELATES_TO"
+        and props.get("fact") is not None
+        and isinstance(uuid, str)
+        and uuid != ""
+        and "Entity" in (rel.get("peer_labels") or [])
+        and peer is not None
+        and peer not in (survivor_uuid, absorbed_uuid)
+    )
+
+
+def moved_fact_uuids(absorbed: dict[str, Any], *, survivor_uuid: str) -> list[str]:
+    """Sorted uuids of the decoded absorbed node's fact edges a merge would move (with repeats)."""
+    absorbed_uuid = absorbed.get("uuid") or (absorbed.get("properties") or {}).get("uuid")
+    return sorted(
+        str((r.get("properties") or {})["uuid"])
+        for r in absorbed.get("relationships") or []
+        if is_moved_fact(r, survivor_uuid=survivor_uuid, absorbed_uuid=absorbed_uuid)
+    )
+
+
 def restorable_properties(properties: dict[str, Any]) -> dict[str, Any]:
     """The properties an unmerge should write back: everything except the system-managed ones.
 

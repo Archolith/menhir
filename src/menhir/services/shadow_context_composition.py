@@ -45,6 +45,7 @@ import time
 from dataclasses import dataclass
 
 from menhir.domain.facet_derivation import derive_facets
+from menhir.infrastructure.openai_rate_limit import await_with_backoff_aware_timeout
 from menhir.domain.namespace import namespace_to_group_id, namespace_to_group_ids
 from menhir.domain.temporal import FactTemporal, TemporalQuery, matches_query
 
@@ -517,18 +518,18 @@ async def run_shadow_composition_with_timeout(
 ) -> ShadowCompositionPrediction:
     """Wraps compose_shadow_prediction() in an independent timeout. This is the actual
     entry point the background task (Stage 1 wiring in enrichment_steps.py) calls --
-    asyncio.wait_for cancels the inner coroutine on timeout rather than letting it
+    the timeout cancels the inner coroutine rather than letting it
     report its own status, so the "timed_out" status is constructed here, not inside
     compose_shadow_prediction()."""
     try:
-        return await asyncio.wait_for(
+        return await await_with_backoff_aware_timeout(
             compose_shadow_prediction(
                 llm, episode_uuid=episode_uuid, namespace=namespace,
                 episode_body=episode_body, reference_time=reference_time,
                 candidates=candidates, candidate_query_error=candidate_query_error,
                 candidate_retrieval_ms=candidate_retrieval_ms,
             ),
-            timeout=timeout_s,
+            timeout_s=timeout_s,
         )
     except asyncio.TimeoutError:
         return _empty_prediction(

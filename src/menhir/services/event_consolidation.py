@@ -34,6 +34,7 @@ from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from menhir.domain.event_history import EventLane
+from menhir.domain.typed_assertion import perceiver_rank
 from menhir.services import perception
 from menhir.services.event_history_perception import (
     build_event_assertion,
@@ -90,6 +91,24 @@ class EventConsolidationGraph(Protocol):
     def record_typed_event_assertion(self, assertion: Any) -> dict[str, Any]: ...
 
     def event_history_service(self) -> Any: ...
+
+    # #170 D1 prior-version retirement (reversion_repository).
+    def event_prior_version_rows(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+    ) -> list[dict[str, Any]]: ...
+
+    def event_current_version_spans(
+        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
+    ) -> list[dict[str, Any]]: ...
+
+    def event_owed_lanes(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+    ) -> list[dict[str, Any]]: ...
+
+    def retire_event_prior_version(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+        perceiver_version: str, keep_ids: list[str] | None = None,
+    ) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True)
@@ -167,10 +186,20 @@ def run_event_consolidation(
     event_namespaces_failed = 0
     event_batches = 0
     event_proposals = 0
+    event_evidence_rows = 0
+    event_proposals_admitted = 0  # self-subject proposals, the event lane's binding stage
     event_assertions_recorded = 0
     event_assertions_created = 0
     event_views_rebuilt = 0
+    # #170 D1: prior-version readings kept (rule B) and retired after a re-read.
+    event_prior_carried = 0
+    event_prior_retired = 0
+    # 0 = no retirement: a non-SemVer version, or a graph without the retire queries (test fakes;
+    # MemoryGraphAdapter always has them, pinned by test_prior_version_retire).
+    rank = (perceiver_rank(config.perceiver_version)
+            if callable(getattr(graph_adapter, "retire_event_prior_version", None)) else 0)
     event_drop_reasons: Counter[str] = Counter()
+    event_time_notes: Counter[str] = Counter()
     event_errors: Counter[str] = Counter()
 
     event_history_service = None
@@ -214,6 +243,7 @@ def run_event_consolidation(
                 if not rows:
                     break
                 event_batches += 1
+                event_evidence_rows += len(rows)
                 namespace_touched = True
 
                 # Build episodes from raw trimmed user content ONLY (no date prefix); preserve the
@@ -222,17 +252,43 @@ def run_event_consolidation(
                 episodes, valid_at_by_uuid = _build_episodes(rows)
                 page_ok = True
                 page_drops: Counter[str] = Counter()
+                # #155 K3: temporal notes are NOT drops — a noted event is KEPT, so they are
+                # counted separately and never inflate event_drop_reasons.
+                page_notes: Counter[str] = Counter()
 
                 def _record_drop(reason: str) -> None:
                     page_drops[reason] += 1
 
+                def _record_note(reason: str) -> None:
+                    page_notes[reason] += 1
+
                 proposals: list[Any] = []
-                if episodes:
+                # #170 D1: the turns this page actually read, the older readings on them a re-read
+                # may replace, and the lanes an earlier retire at this version left unrebuilt.
+                turn_ids = [str(e.uuid) for e in episodes]
+                prior: list[dict[str, Any]] = []
+                owed_lanes: list[dict[str, Any]] = []
+                if rank > 0 and turn_ids:
+                    try:
+                        prior = graph_adapter.event_prior_version_rows(
+                            namespace, turn_ids, perceiver_rank=rank)
+                        owed_lanes = graph_adapter.event_owed_lanes(
+                            namespace, turn_ids, perceiver_rank=rank)
+                    except Exception as exc:  # noqa: BLE001 - fails the page closed
+                        page_ok = False
+                        event_errors["reversion_read_failed"] += 1
+                        logger.warning(
+                            "event prior-version read failed for %s: %s", namespace, exc
+                        )
+                extract_drops = 0
+                if episodes and page_ok:
                     try:
                         proposals = extract_events_once(
-                            episodes, counting_llm, on_drop=_record_drop
+                            episodes, counting_llm, on_drop=_record_drop,
+                            on_note=_record_note,
                         )
                         event_proposals += len(proposals)
+                        extract_drops = sum(page_drops.values())
                     except Exception as exc:  # noqa: BLE001 - extraction failure fails the page
                         page_ok = False
                         event_errors["extraction_failed"] += 1
@@ -258,6 +314,7 @@ def run_event_consolidation(
                             )
                         else:
                             _record_drop("non_self_subject")
+                    event_proposals_admitted += len(admitted)
 
                     if admitted and not self_resolved:
                         try:
@@ -301,6 +358,12 @@ def run_event_consolidation(
                         if not result.built:
                             _record_drop("no_valid_time")
                             continue
+                        # #155 K3: surface the temporal-resolution note (e.g.
+                        # when_conflict_used_source / ungrounded_when_ignored) in the separate
+                        # event_time_notes accounting so the resolution is auditable per page
+                        # WITHOUT counting a KEPT event as dropped.
+                        if result.note:
+                            _record_note(result.note)
                         assertions.append(result.assertion)
 
                 recorded: list[Any] = []
@@ -329,8 +392,36 @@ def run_event_consolidation(
                         if res.get("created"):
                             event_assertions_created += 1
 
-                if page_ok and recorded:
-                    lanes = _dedup_lanes(recorded, namespace)
+                extra_lanes: list[dict[str, Any]] = []
+                if page_ok and rank > 0 and turn_ids:
+                    # Rule B after every admitted reading is stored: keep a prior reading the model
+                    # proposed something over that was not stored; retire the rest (also raises the
+                    # turns' read marker). A turn read with any parse drop is not "read in full".
+                    try:
+                        spans = {
+                            "clean_turns": turn_ids if extract_drops == 0 else [],
+                            "proposed": [(p.episode_uuid, p.span_start, p.span_end)
+                                         for p in proposals],
+                        }
+                        stored = (graph_adapter.event_current_version_spans(
+                            namespace, turn_ids, perceiver_version=config.perceiver_version)
+                            if prior else [])
+                        carry = _reversion_carried(prior, spans, stored)
+                        retired = graph_adapter.retire_event_prior_version(
+                            namespace, turn_ids, perceiver_rank=rank,
+                            perceiver_version=config.perceiver_version, keep_ids=carry)
+                        event_prior_carried += len(carry)
+                        event_prior_retired += int(retired.get("retired") or 0)
+                        extra_lanes = list(retired.get("lanes") or []) + owed_lanes
+                    except Exception as exc:  # noqa: BLE001 - fails the page closed
+                        page_ok = False
+                        event_errors["reversion_retire_failed"] += 1
+                        logger.warning(
+                            "event prior-version retire failed for %s: %s", namespace, exc
+                        )
+
+                if page_ok and (recorded or extra_lanes):
+                    lanes = _dedup_lanes(recorded, namespace, extra=extra_lanes)
                     try:
                         rebuild = event_history_service.rebuild_lanes(lanes)
                     except Exception as exc:  # noqa: BLE001 - rebuild failure fails the page
@@ -347,6 +438,7 @@ def run_event_consolidation(
                             event_views_rebuilt += int(rebuild.get("lane_count", 0))
 
                 event_drop_reasons.update(page_drops)
+                event_time_notes.update(page_notes)
 
                 if not page_ok:
                     namespace_failed = True
@@ -390,10 +482,15 @@ def run_event_consolidation(
         "event_namespaces_failed": event_namespaces_failed,
         "event_batches": event_batches,
         "event_proposals": event_proposals,
+        "event_evidence_rows": event_evidence_rows,
+        "event_proposals_admitted": event_proposals_admitted,
         "event_assertions_recorded": event_assertions_recorded,
         "event_assertions_created": event_assertions_created,
         "event_views_rebuilt": event_views_rebuilt,
+        "event_prior_version_carried": event_prior_carried,
+        "event_prior_version_retired": event_prior_retired,
         "event_drop_reasons": dict(event_drop_reasons),
+        "event_time_notes": dict(event_time_notes),
         "event_errors": dict(event_errors),
         "event_llm_calls": counting_llm.calls - start_calls,
     }
@@ -426,22 +523,40 @@ def _build_episodes(
     return episodes, valid_at_by_uuid
 
 
-def _dedup_lanes(assertions: list[Any], namespace: str) -> list[EventLane]:
-    """Collect deduplicated :EventLane values from the persisted assertions (one per lane key)."""
+def _dedup_lanes(
+    assertions: list[Any], namespace: str, *, extra: list[dict[str, Any]] | None = None,
+) -> list[EventLane]:
+    """Collect deduplicated :EventLane values from the persisted assertions (one per lane key),
+    then from `extra` (lanes a prior-version retire touched: subject_uuid/predicate/domain)."""
     lanes: list[EventLane] = []
     seen: set[tuple[str, str, str, str]] = set()
-    for assertion in assertions:
+    fields = [(str(getattr(a, "subject_uuid", "") or ""), str(getattr(a, "predicate", "") or ""),
+               getattr(a, "domain", None)) for a in assertions]
+    fields += [(str(x.get("subject_uuid") or ""), str(x.get("predicate") or ""),
+                x.get("domain") or None) for x in (extra or [])
+               if str(x.get("subject_uuid") or "").strip() and str(x.get("predicate") or "").strip()]
+    for subject_uuid, predicate, domain in fields:
         lane = EventLane(
-            subject_uuid=str(getattr(assertion, "subject_uuid", "") or ""),
-            predicate=str(getattr(assertion, "predicate", "") or ""),
+            subject_uuid=subject_uuid,
+            predicate=predicate,
             namespace=namespace,
-            domain=getattr(assertion, "domain", None),
+            domain=domain,
         )
         if lane.key in seen:
             continue
         seen.add(lane.key)
         lanes.append(lane)
     return lanes
+
+
+def _reversion_carried(
+    prior: list[dict[str, Any]], spans: dict[str, Any], stored: list[dict[str, Any]],
+) -> list[str]:
+    """Counting's rule B (counting_consolidation.reversion_carried), shared by all three lanes.
+    Imported on use so loading the event runner does not load the counting lane."""
+    from menhir.services.counting_consolidation import reversion_carried
+
+    return reversion_carried(prior, spans, stored)
 
 
 __all__ = [

@@ -440,7 +440,8 @@ class ViewQueryRepositoryMixin:
             f"MATCH (n:Entity {{is_view:true}}) WHERE {visibility} "
             f"{kind_filter} {ns_filter} "
             "RETURN n.uuid AS uuid, n.view_kind AS kind, n.view_subject AS subject, "
-            "n.view_value AS value, n.name AS name, n.group_id AS namespace, "
+            "n.view_value AS value, coalesce(n['view_name'], n.name) AS name, "
+            "n.group_id AS namespace, "
             "n.view_class AS view_class, n.view_subtype AS view_subtype, "
             "n.view_audience AS view_audience, "
             "toString(n.valid_at) AS valid_at ORDER BY n.valid_at DESC LIMIT $limit",

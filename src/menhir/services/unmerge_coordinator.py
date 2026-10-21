@@ -190,9 +190,13 @@ class UnmergeCoordinator:
                     "absorbed_uuid": absorbed_uuid,
                     "labels": absorbed["labels"],
                     "properties": len(plan["absorbed_properties"]),
-                    "out_relationships": len(plan["out_rels"]),
-                    "in_relationships": len(plan["in_rels"]),
+                    "out_relationships": len(plan["out_rels"]) + len(plan["fact_out"]),
+                    "in_relationships": len(plan["in_rels"]) + len(plan["fact_in"]),
+                    "fact_relationships": len(plan["fact_out"]) + len(plan["fact_in"]),
                     "rebound_episodes_to_remove": plan["rebound_episodes"],
+                    "rebound_retention_sources_to_remove": plan[
+                        "rebound_retention_sources"
+                    ],
                     "survivor_properties_restored": plan["survivor_properties"],
                 },
             }
@@ -231,14 +235,38 @@ class UnmergeCoordinator:
     ) -> dict[str, Any]:
         """Turn the decoded snapshot into the exact parameters of the atomic restore."""
         rels = absorbed["relationships"]
+        survivor_uuid, absorbed_uuid = (
+            n.get("uuid") or (n.get("properties") or {}).get("uuid") for n in (survivor, absorbed)
+        )
+
+        def _moved_fact(r: dict[str, Any]) -> bool:
+            # The same predicate merge_entity moves by, so these are exactly the moved edges.
+            return ms.is_moved_fact(r, survivor_uuid=survivor_uuid, absorbed_uuid=absorbed_uuid)
+
+        def _facts(direction: str) -> list[dict[str, Any]]:
+            # One entry per (uuid, peer): the restore moves back EVERY survivor copy of it, so a
+            # repeated entry would restore parallel duplicates twice.
+            seen: dict[tuple[str, str], dict[str, Any]] = {}
+            for r in rels:
+                if r["direction"] == direction and _moved_fact(r):
+                    key = (r["properties"]["uuid"], r["peer_uuid"])
+                    seen.setdefault(key, {
+                        "uuid": r["properties"]["uuid"],
+                        "peer_uuid": r["peer_uuid"],
+                        "properties": r["properties"],
+                    })
+            return list(seen.values())
+
         out_rels = [
             {"type": r["type"], "peer_uuid": r["peer_uuid"], "properties": r["properties"]}
-            for r in rels if r["direction"] == "out"
+            for r in rels if r["direction"] == "out" and not _moved_fact(r)
         ]
         in_rels = [
             {"type": r["type"], "peer_uuid": r["peer_uuid"], "properties": r["properties"]}
-            for r in rels if r["direction"] == "in"
+            for r in rels if r["direction"] == "in" and not _moved_fact(r)
         ]
+        fact_out = _facts("out")
+        fact_in = _facts("in")
 
         # The MENTIONS the merge REBOUND onto the survivor = the absorbed node's mentioning episodes
         # MINUS the ones the survivor already had. Removing all of them would strip provenance the
@@ -253,6 +281,21 @@ class UnmergeCoordinator:
             if r["type"] == "MENTIONS" and r["direction"] == "in" and r.get("peer_uuid")
         }
         rebound = sorted(absorbed_eps - survivor_eps)
+        absorbed_retention_sources = {
+            r["peer_uuid"] for r in rels
+            if r["type"] == "RETENTION_SOURCE"
+            and r["direction"] == "in"
+            and r.get("peer_uuid")
+        }
+        survivor_retention_sources = {
+            r["peer_uuid"] for r in survivor["relationships"]
+            if r["type"] == "RETENTION_SOURCE"
+            and r["direction"] == "in"
+            and r.get("peer_uuid")
+        }
+        rebound_retention_sources = sorted(
+            absorbed_retention_sources - survivor_retention_sources
+        )
 
         return {
             "absorbed_labels": absorbed["labels"],
@@ -261,6 +304,9 @@ class UnmergeCoordinator:
             "in_rels": in_rels,
             "survivor_properties": md.restorable_survivor_properties(survivor["properties"]),
             "rebound_episodes": rebound,
+            "rebound_retention_sources": rebound_retention_sources,
+            "fact_out": fact_out,
+            "fact_in": fact_in,
         }
 
     def _classify_replay(self, request: dict[str, Any]) -> tuple[str, dict[str, Any]]:

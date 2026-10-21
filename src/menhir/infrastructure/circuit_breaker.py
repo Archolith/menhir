@@ -15,9 +15,18 @@ from typing import Any, Awaitable, Callable, TypeVar
 
 import httpx
 
+from menhir.infrastructure.openai_rate_limit import (
+    QUOTA_REASON_CODE,
+    ProviderQuotaExhaustedError,
+    quota_exhausted_error,
+)
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+#: Hard-open cooldown after insufficient_quota: one half-open probe per hour, not per 30 s.
+QUOTA_COOLDOWN_SECONDS = 3600.0
 
 
 class CircuitState(StrEnum):
@@ -43,6 +52,9 @@ def should_trip_circuit(exc: Exception) -> bool:
     Non-trip: Graphiti parse errors, validation/schema errors, malformed content,
     prompt-shape bugs, and other deterministic library exceptions.
     """
+
+    if isinstance(exc, ProviderQuotaExhaustedError):
+        return True
 
     # Timeouts
     if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
@@ -90,20 +102,35 @@ class CircuitBreaker:
     _failures: int = field(default=0, init=False)
     _opened_at: float | None = field(default=None, init=False)
     _probe_in_flight: bool = field(default=False, init=False)
+    _hard_open_reason: str | None = field(default=None, init=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
+
+    def _effective_cooldown(self) -> float:
+        return QUOTA_COOLDOWN_SECONDS if self._hard_open_reason else self.cooldown_seconds
 
     def state_snapshot(self) -> dict[str, Any]:
         """Return a serializable snapshot of breaker state."""
 
         remaining = 0.0
         if self._opened_at is not None and self._state in (CircuitState.OPEN, CircuitState.HALF_OPEN):
-            remaining = max(0.0, self.cooldown_seconds - (monotonic() - self._opened_at))
-        return {
+            remaining = max(0.0, self._effective_cooldown() - (monotonic() - self._opened_at))
+        snapshot: dict[str, Any] = {
             "name": self.name,
             "state": self._state.value,
             "failures": self._failures,
             "cooldown_remaining_s": remaining,
         }
+        if self._hard_open_reason:
+            snapshot["reason"] = self._hard_open_reason
+        return snapshot
+
+    def reset(self) -> None:
+        """Close the breaker now (operator reset); a process restart does the same."""
+        self._state = CircuitState.CLOSED
+        self._failures = 0
+        self._opened_at = None
+        self._probe_in_flight = False
+        self._hard_open_reason = None
 
     async def _acquire_or_abandon(self, is_probe: bool, *, healthy: bool) -> None:
         """Acquire _lock, settling probe state first if cancellation lands on the wait.
@@ -154,7 +181,7 @@ class CircuitBreaker:
             if self._state == CircuitState.OPEN:
                 now = monotonic()
                 elapsed = now - (self._opened_at or now)
-                if elapsed >= self.cooldown_seconds:
+                if elapsed >= self._effective_cooldown():
                     # Transition to HALF_OPEN — this caller is the probe
                     previous = self._state
                     self._state = CircuitState.HALF_OPEN
@@ -177,7 +204,7 @@ class CircuitBreaker:
                     raise CircuitOpenError(
                         f"Circuit breaker open for {self.name}; "
                         f"state={self._state.value} failures={self._failures} "
-                        f"cooldown_remaining_s={self.cooldown_seconds - elapsed:.0f}",
+                        f"cooldown_remaining_s={self._effective_cooldown() - elapsed:.0f}",
                         snapshot=self.state_snapshot(),
                     )
             elif self._state == CircuitState.HALF_OPEN:
@@ -197,8 +224,30 @@ class CircuitBreaker:
             result = await fn()
         except Exception as exc:
             await self._acquire_or_abandon(is_probe, healthy=False)
+            quota_error = quota_exhausted_error(exc)
             try:
-                if should_trip_circuit(exc):
+                if quota_error is not None:
+                    # Billing state: hard-open now, no failure threshold and no 30 s probes.
+                    previous = self._state
+                    self._failures += 1
+                    self._state = CircuitState.OPEN
+                    self._opened_at = monotonic()
+                    self._probe_in_flight = False
+                    self._hard_open_reason = QUOTA_REASON_CODE
+                    await asyncio.to_thread(
+                        partial(
+                            record_lifecycle_event,
+                            component="circuit_breaker",
+                            event=f"{previous.value}->{self._state.value}",
+                            state="transition",
+                            details={"breaker": self.name, "reason": QUOTA_REASON_CODE},
+                        )
+                    )
+                    logger.warning(
+                        "Circuit breaker %s hard-open: %s (next probe in %.0fs)",
+                        self.name, QUOTA_REASON_CODE, QUOTA_COOLDOWN_SECONDS,
+                    )
+                elif should_trip_circuit(exc):
                     self._failures += 1
                     if is_probe:
                         # HALF_OPEN -> OPEN on failed probe
@@ -239,6 +288,7 @@ class CircuitBreaker:
                         self._failures = 0
                         self._opened_at = None
                         self._probe_in_flight = False
+                        self._hard_open_reason = None
                         await asyncio.to_thread(
                             partial(
                                 record_lifecycle_event,
@@ -254,6 +304,8 @@ class CircuitBreaker:
                     )
             finally:
                 self._lock.release()
+            if quota_error is not None and quota_error is not exc:
+                raise quota_error
             raise
         except BaseException:
             # CancelledError / KeyboardInterrupt / SystemExit: the probe never completed,
@@ -275,6 +327,7 @@ class CircuitBreaker:
                 self._failures = 0
                 self._opened_at = None
                 self._probe_in_flight = False
+                self._hard_open_reason = None
                 await asyncio.to_thread(
                     partial(
                         record_lifecycle_event,

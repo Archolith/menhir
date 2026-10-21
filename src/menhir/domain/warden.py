@@ -88,6 +88,7 @@ class WardenContext:
     candidate_scope: MemoryScope | None = None  # where the candidate memory lives
     support_profile: SupportProfile | None = None  # provenance for the anti-spiral guard
     oracle_packet: OraclePacket | None = None   # the R7 combiner output for this candidate
+    recorded_conflict: bool = False  # persisted conflict group with unresolved status
 
 
 @runtime_checkable
@@ -247,7 +248,8 @@ class OracleAdmissionWarden:
 class ContradictionWarden:
     """Guard 7 (ContradictionInterrupt): a contradiction interrupts CURRENT assertion.
 
-    Contradiction (oracle CONFLICT/CONTRADICT, or belief CONFLICT_SET bucket) means the
+    Contradiction (recorded unresolved conflict, oracle CONFLICT/CONTRADICT, or belief
+    CONFLICT_SET bucket) means the
     candidate must not enter current-truth context until resolved -> REFUSE under current
     intent; historical intent still gets it, labeled 'conflict' (history is preserved). This
     is stricter than OracleAdmissionWarden's FLAG; most-restrictive-wins makes the REFUSE win
@@ -257,7 +259,9 @@ class ContradictionWarden:
     name: str = "contradiction"
 
     def _contradicted(self, ctx: WardenContext) -> bool:
-        """Check if a contradiction exists in belief score or oracle results."""
+        """Check recorded conflict, belief score and oracle results."""
+        if ctx.recorded_conflict:
+            return True
         if ctx.belief_score is not None and ctx.belief_score.bucket is RecallBucket.CONFLICT_SET:
             return True
         packet = ctx.oracle_packet

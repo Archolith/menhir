@@ -10,9 +10,12 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from enum import Enum
 from typing import Any, Callable
 
 from menhir.domain.typed_assertion import (
+    COUNTABLE_KINDS,
+    IMPORTANCE_LEVELS,
     NUMERIC_KINDS,
     OPERATIONS,
     TypedAssertion,
@@ -65,6 +68,23 @@ _FREQUENCY_NUMBER_PATTERN = (
     r"(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
     r"once|twice|thrice)"
 )
+# Any number-like word or digit run. A value token glued to one of these by whitespace or a hyphen
+# is only part of a longer number ("twenty-five", "two hundred", "2 thousand"), so it must not be
+# read on its own (#200).
+_NUMBERISH_PATTERN = (
+    r"(?:\d[\d,]*(?:\.\d+)?|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+    r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|"
+    r"sixty|seventy|eighty|ninety|hundred|thousand|million|billion|dozen)"
+)
+_NUMBERISH_BEFORE_RE = re.compile(rf"(?<![\w.]){_NUMBERISH_PATTERN}[\s-]+$", re.IGNORECASE)
+_NUMBERISH_AFTER_RE = re.compile(rf"^[\s-]+{_NUMBERISH_PATTERN}(?![\w.])", re.IGNORECASE)
+
+
+def _joined_to_number(text: str, start: int, end: int) -> bool:
+    """True when text[start:end] is glued to another number word or digit run."""
+    return bool(_NUMBERISH_BEFORE_RE.search(text[:start]) or _NUMBERISH_AFTER_RE.match(text[end:]))
+
+
 _FREQUENCY_INTERVAL_RE = re.compile(
     rf"\b(?:(?P<count>{_FREQUENCY_NUMBER_PATTERN})(?:\s+times?)?\s+)?"
     rf"every\s+(?:(?P<interval>other|{_FREQUENCY_NUMBER_PATTERN})\s+)?"
@@ -84,6 +104,7 @@ _MEASUREMENT_UNIT_ALIASES: dict[str, str] = {
     "km": "km", "kilometer": "km", "kilometers": "km",
     "kilometre": "km", "kilometres": "km",
     "mi": "miles", "mile": "miles", "miles": "miles",
+    "lb": "lb", "lbs": "lb", "pound": "lb", "pounds": "lb",
     "%": "percent", "percent": "percent", "percentage": "percent",
 }
 _SOURCE_NUMBER = r"[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
@@ -92,12 +113,16 @@ _MEASUREMENT_AMOUNT_UNIT_RE = re.compile(
     re.IGNORECASE,
 )
 _CLOCK_SOURCE_RE = re.compile(
-    r"(?<!\d)(?P<hour>\d{1,2}):(?P<minute>[0-5]\d)\s*(?P<meridiem>am|pm)?\b",
+    r"(?<!\d)(?P<hour>\d{1,2}):(?P<minute>[0-5]\d)(?!\d)",
     re.IGNORECASE,
 )
+# Consume a possible meridiem-like token as a whole; an invalid spelling must not leave a
+# valid-looking bare clock prefix behind for the source-value override.
+_CLOCK_MERIDIEM_RE = re.compile(r"^\s*(?P<suffix>[ap](?:[.\s/:-]?m)[\w.]*)", re.IGNORECASE)
+_CLOCK_SUPPORTED_MERIDIEM_RE = re.compile(r"[ap]\.?m\.?", re.IGNORECASE)
 _USD_SOURCE_RE = re.compile(r"\$|\b(?:usd|dollars?)\b", re.IGNORECASE)
 _BOOLEAN_UNCERTAIN_RE = re.compile(
-    r"\b(?:no\s+longer|used\s+to|did(?:\s+not|n't)\s+use\s+to|might|may|could|perhaps)\b|"
+    r"\b(?:did(?:\s+not|n't)\s+use\s+to|might|may|could|perhaps)\b|"
     r"\b(?:do\s+not|don't)\s+think\b|\bnot\s+sure\b",
     re.IGNORECASE,
 )
@@ -105,6 +130,35 @@ _BOOLEAN_NEGATIVE_RE = re.compile(
     r"\b(?:do\s+not|don't|does\s+not|doesn't)\b|\b(?:am|is|are)\s+not\b",
     re.IGNORECASE,
 )
+#: ENDED-STATE framing: the quoted state held before and does not hold now ("I quit smoking",
+#: "I no longer have 3 cars", "I don't drive anymore", "I used to live in Dallas"). The extraction
+#: contract represents an ended value as operation=expire (or boolean false), so an ended-state quote
+#: must never yield a CURRENT value: booleans read false, absolute/delta values are dropped.
+_ENDED_STATE_RE = re.compile(
+    r"\b(?:no\s+longer|any\s*more|quit|quits|stopped|gave\s+up|given\s+up|used\s+to)\b",
+    re.IGNORECASE,
+)
+#: the habit idiom "I'm used to X" / "got used to X" is a CURRENT state, not an ended one.
+_USED_TO_HABIT_RE = re.compile(
+    r"(?:\b(?:am|is|are|was|were|be|been|being|get|gets|got|getting|become|became)|'(?:m|re|s))"
+    r"\s+used\s+to\b",
+    re.IGNORECASE,
+)
+#: restoration: the ended state came back ("I quit, but started again").
+_RESTORATION_RE = re.compile(
+    r"\b(?:again|resumed|started\s+back|back\s+to)\b",
+    re.IGNORECASE,
+)
+
+
+def _ended_state(stated_span: str) -> bool:
+    """True when the quote frames its state as ended, with no current or restoration cue."""
+    span = _USED_TO_HABIT_RE.sub(" ", stated_span or "")
+    if not _ENDED_STATE_RE.search(span):
+        return False
+    return not (_CURRENT_RE.search(span) or _RESTORATION_RE.search(span))
+
+
 _BOOLEAN_POSITIVE_RE = re.compile(
     r"\b(?:i|we|you|they|he|she|it)\s+(?:have|has)\b",
     re.IGNORECASE,
@@ -172,11 +226,13 @@ def _normalize_interval_frequency(stated_span: str) -> tuple[int | float, str] |
         # than asserting a guess. A phrase with no number at all ("every week", "every other
         # week", "every three days") is genuinely count-1 and still normalizes as before.
         if re.search(
-            rf"\b{_FREQUENCY_NUMBER_PATTERN}\b",
+            rf"\b(?:{_FREQUENCY_NUMBER_PATTERN}|{_NUMBERISH_PATTERN})\b",
             stated_span[: match.start()],
             re.IGNORECASE,
         ):
             return None
+    elif _joined_to_number(stated_span, match.start("count"), match.end("count")):
+        return None
     count = _frequency_number(count_text, default=1.0)
     rate = count / interval
     value: int | float = int(rate) if rate.is_integer() else rate
@@ -378,6 +434,10 @@ class TypedScalarProposal:
     when: str | None = None
     display: str = ""
     claim_ordinal: int = 0
+    importance: str = ""
+    count_object: str = ""
+    count_item: str = ""
+    count_action: str = ""
 
     @property
     def slot_key(self) -> tuple[str, str, str, str]:
@@ -441,15 +501,24 @@ def _expand_episode_envelopes(
     rows: list[Any],
     episode_count: int,
     drop: "Callable[[str], None]",
+    unclean: "Callable[[int | None], None] | None" = None,
 ) -> list[Any]:
     """Flatten the completeness-enforcing response shape while accepting legacy flat rows.
 
     Envelope mode is machine-checkable: one object per input episode, including an explicit empty
     list when no scalar exists. Legacy flat arrays remain valid for frozen captures, experiments,
     and callers using the parser boundary directly.
+
+    `unclean` (optional) is told which episode a sample did not fully read: an index, or None for
+    the whole sample. A flat array proves no per-episode coverage, so it marks the whole sample.
     """
+    def _unclean(index: int | None) -> None:
+        if unclean is not None:
+            unclean(index)
+
     envelope_mode = any(isinstance(row, dict) and "observations" in row for row in rows)
     if not envelope_mode:
+        _unclean(None)
         return rows
 
     expanded: list[Any] = []
@@ -457,14 +526,17 @@ def _expand_episode_envelopes(
     for envelope in rows:
         if not isinstance(envelope, dict):
             drop("bad_episode_envelope")
+            _unclean(None)
             continue
         index = _req_episode_index(envelope, episode_count)
         observations = envelope.get("observations")
         if index is None or not isinstance(observations, list):
             drop("bad_episode_envelope")
+            _unclean(index)
             continue
         if index in seen:
             drop("duplicate_episode_envelope")
+            _unclean(index)
             continue
         seen.add(index)
         for observation in observations:
@@ -475,12 +547,16 @@ def _expand_episode_envelopes(
             supplied = row.get("episode")
             if supplied is not None and supplied != index:
                 drop("episode_envelope_mismatch")
+                _unclean(index)
                 continue
             row["episode"] = index
             expanded.append(row)
 
     for _missing in range(episode_count - len(seen)):
         drop("missing_episode_envelope")
+    for index in range(episode_count):
+        if index not in seen:
+            _unclean(index)
     return expanded
 
 
@@ -661,7 +737,14 @@ def _clock_time_from_source(stated_span: str) -> str | None:
     match = matches[0]
     hour = int(match.group("hour"))
     minute = int(match.group("minute"))
-    meridiem = (match.group("meridiem") or "").lower()
+    tail = (stated_span or "")[match.end():]
+    suffix_match = _CLOCK_MERIDIEM_RE.match(tail)
+    suffix = suffix_match.group("suffix") if suffix_match else ""
+    if suffix and _CLOCK_SUPPORTED_MERIDIEM_RE.fullmatch(suffix) is None:
+        return None
+    if not suffix and tail and (tail[0].isalnum() or tail[0] == "_"):
+        return None  # Never accept a bare-time prefix of a connected, unsupported token.
+    meridiem = suffix.replace(".", "").lower()
     if meridiem:
         if not 1 <= hour <= 12:
             return None
@@ -674,14 +757,30 @@ def _clock_time_from_source(stated_span: str) -> str | None:
     return f"{hour:02d}:{minute:02d}"
 
 
-_COUNT_WORDS = dict(_FREQUENCY_NUMBER_WORDS)
+_COUNT_WORDS: dict[str, int] = dict(_FREQUENCY_NUMBER_WORDS)
+_COUNT_WORDS.update({
+    "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+    "seventeen": 17, "eighteen": 18, "nineteen": 19,
+})
+for _count_tens_word, _count_tens_value in (
+    ("twenty", 20), ("thirty", 30), ("forty", 40), ("fifty", 50),
+    ("sixty", 60), ("seventy", 70), ("eighty", 80), ("ninety", 90),
+):
+    _COUNT_WORDS[_count_tens_word] = _count_tens_value
+    for _count_ones_word, _count_ones_value in list(_FREQUENCY_NUMBER_WORDS.items())[:9]:
+        for _count_sep in ("-", " "):
+            _COUNT_WORDS[f"{_count_tens_word}{_count_sep}{_count_ones_word}"] = (
+                _count_tens_value + _count_ones_value
+            )
+# Longest first, so "twenty-five" wins over its "twenty" prefix.
+_COUNT_WORD_ALT = "|".join(sorted(_COUNT_WORDS, key=len, reverse=True))
 _COUNT_TOKEN_RE = re.compile(
-    rf"(?<![\w.])(?P<token>{_SOURCE_NUMBER}|{'|'.join(_COUNT_WORDS)})(?![\w.])",
+    rf"(?<![\w.])(?P<token>{_SOURCE_NUMBER}|{_COUNT_WORD_ALT})(?![\w.])",
     re.IGNORECASE,
 )
 _COUNT_RANGE_RE = re.compile(
-    rf"\b(?:between|from)\s+(?P<low>{_SOURCE_NUMBER}|{'|'.join(_COUNT_WORDS)})\s+"
-    rf"(?:and|to)\s+(?P<high>{_SOURCE_NUMBER}|{'|'.join(_COUNT_WORDS)})\b",
+    rf"\b(?:between|from)\s+(?P<low>{_SOURCE_NUMBER}|{_COUNT_WORD_ALT})\s+"
+    rf"(?:and|to)\s+(?P<high>{_SOURCE_NUMBER}|{_COUNT_WORD_ALT})\b",
     re.IGNORECASE,
 )
 _COUNT_NEGATIVE_DELTA_RE = re.compile(
@@ -706,14 +805,19 @@ def _count_value_from_source(stated_span: str, operation: str, model_value: Any)
     span = _SRC_ISO_RE.sub(" ", _SRC_MONTH_DAY_YEAR_RE.sub(" ", stated_span or ""))
     range_match = _COUNT_RANGE_RE.search(span)
     if operation != "delta" and range_match is not None:
+        if any(
+            _joined_to_number(span, range_match.start(g), range_match.end(g)) for g in ("low", "high")
+        ):
+            return None
         return [
             _count_token_value(range_match.group("low")),
             _count_token_value(range_match.group("high")),
         ]
 
-    tokens = [match.group("token") for match in _COUNT_TOKEN_RE.finditer(span)]
-    if len(tokens) != 1:
+    matches = list(_COUNT_TOKEN_RE.finditer(span))
+    if len(matches) != 1 or _joined_to_number(span, matches[0].start(), matches[0].end()):
         return None
+    tokens = [matches[0].group("token")]
     value = _count_token_value(tokens[0])
     if operation != "delta":
         return value
@@ -728,11 +832,28 @@ def _count_value_from_source(stated_span: str, operation: str, model_value: Any)
     return -magnitude if isinstance(coerced_model, (int, float)) and coerced_model < 0 else magnitude
 
 
+#: a stop that only shrinks the count ("not as many cats anymore") does not state zero.
+_COUNT_PARTIAL_RE = re.compile(
+    r"\b(?:as\s+many|as\s+much|fewer|less|more|most|some|several|few|only|half|part)\b",
+    re.IGNORECASE,
+)
+
+
+def _numberless_count_stop(stated_span: str) -> bool:
+    """True for a stop that states no number ("I don't have cats anymore"): the count is now 0."""
+    if not _ended_state(stated_span) or _COUNT_PARTIAL_RE.search(stated_span or ""):
+        return False
+    span = _SRC_ISO_RE.sub(" ", _SRC_MONTH_DAY_YEAR_RE.sub(" ", stated_span or ""))
+    return _COUNT_TOKEN_RE.search(span) is None and _COUNT_RANGE_RE.search(span) is None
+
+
 def _boolean_source_polarity(stated_span: str) -> bool | None:
     """Classify only closed, unambiguous present boolean forms; otherwise abstain."""
     span = (stated_span or "").strip()
     if not span or _BOOLEAN_UNCERTAIN_RE.search(span):
         return None
+    if _ended_state(span):
+        return False
     if _BOOLEAN_NEGATIVE_RE.search(span):
         return False
     if _BOOLEAN_POSITIVE_RE.search(span):
@@ -824,11 +945,108 @@ def _ground_span(content: str, stated_span: str) -> tuple[int, int] | None:
     return (m.start(), m.end())
 
 
+#: #89 semantic grounding applies to kinds whose value is taken from the model as-is. Counts,
+#: durations, frequencies and clock times are derived or canonicalized from the span already.
+_VALUE_IN_SPAN_KINDS = frozenset({"money", "measurement"})
+_ONES_WORDS = (
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
+    "nineteen",
+)
+_TENS_WORDS = {
+    "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+    "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
+}
+_WORD_NUMBERS: dict[str, Decimal] = {w: Decimal(i) for i, w in enumerate(_ONES_WORDS)}
+for _tens_word, _tens_value in _TENS_WORDS.items():
+    _WORD_NUMBERS[_tens_word] = Decimal(_tens_value)
+    for _i in range(1, 10):
+        for _sep in ("-", " "):
+            _WORD_NUMBERS[f"{_tens_word}{_sep}{_ONES_WORDS[_i]}"] = Decimal(_tens_value + _i)
+_WORD_NUMBERS["hundred"] = Decimal(100)
+_WORD_NUMBERS["dozen"] = Decimal(12)
+_WORD_NUMBERS["half"] = Decimal("0.5")
+_SCALE_WORDS = {
+    "k": Decimal(1_000), "thousand": Decimal(1_000),
+    "m": Decimal(1_000_000), "mm": Decimal(1_000_000), "million": Decimal(1_000_000),
+    "b": Decimal(1_000_000_000), "bn": Decimal(1_000_000_000), "billion": Decimal(1_000_000_000),
+}
+_SCALE_RE = r"(?:\s*(?P<scale>k|mm|m|bn|b|thousand|million|billion)\b)?"
+_DIGIT_NUMBER_RE = re.compile(r"(?<![\w.])(?P<num>\d[\d,]*(?:\.\d+)?|\.\d+)" + _SCALE_RE, re.IGNORECASE)
+_WORD_NUMBER_RE = re.compile(
+    r"\b(?P<num>" + "|".join(re.escape(w) for w in sorted(_WORD_NUMBERS, key=len, reverse=True))
+    + r")\b" + _SCALE_RE,
+    re.IGNORECASE,
+)
+
+
+def _stated_numbers(stated_span: str) -> set[Decimal]:
+    """Every number the quote states: digits (thousands separators, decimals, optional k/million
+    style scale) and English number words 0-100 plus dozen/half. Loose words such as "a" or
+    "a couple" are deliberately not numbers."""
+    found: set[Decimal] = set()
+    text = stated_span or ""
+    for pattern, lookup in ((_DIGIT_NUMBER_RE, None), (_WORD_NUMBER_RE, _WORD_NUMBERS)):
+        for match in pattern.finditer(text):
+            raw = match.group("num")
+            try:
+                base = lookup[raw.lower()] if lookup else Decimal(raw.replace(",", ""))
+            except (InvalidOperation, KeyError):
+                continue
+            scale = match.group("scale")
+            # "$5k" states 5000, not 5: a scaled number counts only at its scaled value.
+            found.add(base * _SCALE_WORDS[scale.lower()] if scale else base)
+    return found
+
+
+def _span_states_value(value: Any, stated_span: str) -> bool:
+    """#89: True when the quote states every numeric component of `value` (a [lo, hi] range needs
+    both ends). A negative value also matches its magnitude, since deltas carry direction in words."""
+    components = list(value) if isinstance(value, (list, tuple)) else [value]
+    stated = _stated_numbers(stated_span)
+    for component in components:
+        if isinstance(component, bool) or not isinstance(component, (int, float, Decimal)):
+            return False
+        try:
+            number = Decimal(str(component))
+        except InvalidOperation:
+            return False
+        if number not in stated and -number not in stated:
+            return False
+    return True
+
+
+#: drop reasons that judge a well-formed row's quoted span (temporal and shape drops stay unclean).
+_SPAN_JUDGEMENT_DROPS = frozenset({"occurrence_not_happened", "hedged_value", "ended_state"})
+
+
+def _attributed_drop(
+    drop: "Callable[[str], None]", unclean: "Callable[[int | None], None]", index: int | None,
+) -> "Callable[[str], None]":
+    """A row's drop seam that also marks its episode as not fully read, except for a rejection the
+    rules make on the quoted span itself: the sample did read the turn, and the new version says
+    nothing countable is there, so a re-version may retire an old row it covers."""
+    def _row_drop(reason: str) -> None:
+        drop(reason)
+        if reason not in _SPAN_JUDGEMENT_DROPS:
+            unclean(index)
+    return _row_drop
+
+
 def extract_typed_scalars_once(
     episodes: list[Any], llm_complete: LlmComplete,
     *, on_drop: "Callable[[str], None] | None" = None,
+    system_prompt: "str | None" = TYPED_SCALAR_SYSTEM_PROMPT,
+    allowed_operations: "frozenset[str] | None" = OPERATIONS,
+    claim_ordinal: int = 0,
+    context: str = "",
+    counting_v2: bool = False,
+    on_unclean: "Callable[[int | None], None] | None" = None,
 ) -> list[TypedScalarProposal]:
     """One typed-scalar extraction pass: prose -> validated, grounded `TypedScalarProposal`s.
+
+    `on_unclean` (optional, counting re-version) is called with each episode index this pass did not
+    fully read (a dropped row, a missing or bad envelope), or None when the whole pass is unreadable.
 
     `episodes` are objects with `.uuid` and `.content` (e.g. `perception.Episode`). A row survives
     ONLY if every required field is an actual non-blank string (`subject`, `attribute`, `operation`,
@@ -852,20 +1070,34 @@ def extract_typed_scalars_once(
     audit emit lives with the other emits in the caller."""
     if not episodes:
         return []
+    # None means "scalar lane defaults" (callers forward optional lane selectors unchanged).
+    if system_prompt is None:
+        system_prompt = TYPED_SCALAR_SYSTEM_PROMPT
+    if allowed_operations is None:
+        allowed_operations = OPERATIONS
 
     def _drop(reason: str) -> None:
         if on_drop is not None:
             on_drop(reason)
     log = "\n".join(f"[{i}] {getattr(e, 'content', '')}" for i, e in enumerate(episodes))
-    raw_rows, parse_failure = _parse_json_array(llm_complete(TYPED_SCALAR_SYSTEM_PROMPT, log))
+    user_message = f"{context}\n\n{log}" if context else log
+    raw_rows, parse_failure = _parse_json_array(llm_complete(system_prompt, user_message))
     if parse_failure is not None:
         _drop(parse_failure)
+        if on_unclean is not None:
+            on_unclean(None)
     else:
-        raw_rows = _expand_episode_envelopes(raw_rows, len(episodes), _drop)
+        raw_rows = _expand_episode_envelopes(raw_rows, len(episodes), _drop, on_unclean)
 
     out: list[TypedScalarProposal] = []
     for row in raw_rows:
-        proposal = parse_scalar_row(row, episodes, _drop)
+        row_drop = _drop if on_unclean is None else _attributed_drop(
+            _drop, on_unclean,
+            _req_episode_index(row, len(episodes)) if isinstance(row, dict) else None)
+        proposal = parse_scalar_row(
+            row, episodes, row_drop,
+            allowed_operations=allowed_operations, claim_ordinal=claim_ordinal,
+            counting_v2=counting_v2)
         if proposal is not None:
             out.append(proposal)
     return out
@@ -976,8 +1208,17 @@ def _interpretation_label(
     return "\x1f".join(fields)
 
 
+def _clean_count_text(raw: Any) -> str:
+    """Occurrence object/item/action: str only, whitespace-collapsed, capped at 120 chars."""
+    if not isinstance(raw, str):
+        return ""
+    return " ".join(raw.split())[:120]
+
+
 def parse_scalar_row(
     row: Any, episodes: list[Any], drop: "Callable[[str], None]",
+    *, allowed_operations: frozenset[str] = OPERATIONS, claim_ordinal: int = 0,
+    counting_v2: bool = False,
 ) -> "TypedScalarProposal | None":
     """Validate ONE raw model row into a grounded proposal, or None with a `drop` reason.
 
@@ -1003,7 +1244,7 @@ def parse_scalar_row(
         return None
     attribute = attribute.lower()
     operation = operation.lower()
-    if not _SNAKE_RE.match(attribute) or operation not in OPERATIONS:
+    if not _SNAKE_RE.match(attribute) or operation not in allowed_operations:
         drop("bad_attribute_or_operation")
         return None
     attribute = _canon_attribute(attribute, stated_span)
@@ -1031,12 +1272,45 @@ def parse_scalar_row(
         return None  # unresolvable provenance -> cannot ground
 
     count_value_unresolved = False
+    numberless_stop = False
+    importance = ""
+    count_object = count_item = count_action = ""
     normalized_frequency = (
         _normalize_interval_frequency(stated_span)
         if value_kind == "frequency" and operation != "delta"
         else None
     )
-    if normalized_frequency is not None:
+    if operation == "occurrence":
+        if value_kind not in COUNTABLE_KINDS:
+            drop("occurrence_kind_not_countable")
+            return None
+        raw_importance = row.get("importance")
+        importance = raw_importance.strip().lower() if isinstance(raw_importance, str) else ""
+        if importance not in IMPORTANCE_LEVELS:
+            drop("bad_importance")
+            return None
+        count_object, count_item, count_action = (
+            _clean_count_text(row.get(k)) for k in ("object", "item", "action"))
+        raw_value = row.get("value")
+        if value_kind == "count":
+            unit = ""
+            if raw_value is None:
+                value = 1
+            else:
+                value = _occurrence_count_value(raw_value)
+                if value is None:
+                    drop("value_failed_validation")
+                    return None
+                if value != 1 and not _span_states_value(value, stated_span):
+                    drop("value_not_in_span")
+                    return None
+        else:
+            unit = _money_currency_from_source(stated_span)
+            if unit is None:
+                drop("money_currency_unresolved")
+                return None
+            value = _money_value(raw_value, "delta")
+    elif normalized_frequency is not None:
         value, unit = normalized_frequency
     elif value_kind == "duration":
         normalized_duration = _duration_value(row.get("value"), unit, operation)
@@ -1062,6 +1336,11 @@ def parse_scalar_row(
         if value is None:
             drop("clock_time_unresolved")
             return None
+    elif (value_kind == "count" and operation in ("absolute", "expire")
+          and "absolute" in allowed_operations and _numberless_count_stop(stated_span)):
+        # "I don't have cats anymore" states no number, so the count is now 0. Whatever number the
+        # model supplied is ignored: it is not in the source (#170 item 5).
+        operation, value, unit, numberless_stop = "absolute", 0, "", True
     elif value_kind == "count":
         model_value = _coerce_value(value_kind, operation, row.get("value"))
         try:
@@ -1117,7 +1396,7 @@ def parse_scalar_row(
     # typed schema for a hypothetical total or a single event, but those are not durable cumulative
     # scalars.  Use only the punctuation-delimited clause prefix ending at the grounded span so a
     # modal in trailing text cannot veto an otherwise valid observation.
-    activity_rejection = _activity_scalar_admission_reason(
+    activity_rejection = None if operation == "occurrence" else _activity_scalar_admission_reason(
         attribute=attribute,
         value_kind=value_kind,
         operation=operation,
@@ -1127,6 +1406,21 @@ def parse_scalar_row(
     if activity_rejection is not None:
         drop(activity_rejection)
         return None
+    # An occurrence must be a happening that took place. Planned, hypothetical or negated wording in
+    # the grounded clause ("I'm going to visit", "if I visit", "I didn't visit") is not one, whatever
+    # the model emitted. Fails closed: a dropped row can only undercount.
+    if operation == "occurrence":
+        occurrence_context = _activity_source_context(content, span_start, span_end)
+        if counting_v2:
+            not_happened = _occurrence_vetoed_v2(content, span_start, span_end)
+        else:
+            not_happened = bool(
+                _ACTIVITY_MODAL_RE.search(occurrence_context)
+                or _FUTURE_REL_RE.search(occurrence_context)
+                or _OCCURRENCE_NEGATED_RE.search(occurrence_context))
+        if not_happened:
+            drop("occurrence_not_happened")
+            return None
 
     # Hedged-value abstention: an underdetermined statement ("about 30 or 40", "around 7, sometimes
     # 7:30") must not become an exact scalar. Drop it here (span-local + deterministic) so the gate
@@ -1134,6 +1428,14 @@ def parse_scalar_row(
     # samples happened to agree on. A genuine [lo, hi] range value is exempt.
     if is_ambiguous_exact(stated_span, value, operation):
         drop("hedged_value")
+        return None
+
+    # Ended-state framing ("I no longer have 3 cars", "I used to weigh 90 kg") states a value that is
+    # NOT current. The contract for that is operation=expire (kept), never an absolute/delta current
+    # value; booleans are handled by source polarity above (ended -> false).
+    if (value_kind != "boolean" and operation in ("absolute", "delta") and not numberless_stop
+            and _ended_state(stated_span)):
+        drop("ended_state")
         return None
 
     # When-discipline: deterministically resolve temporal grounding from the span. A past-only,
@@ -1145,6 +1447,12 @@ def parse_scalar_row(
     _disp, _keep, when = resolve_temporal_disposition(stated_span, when, operation, _ep_ref)
     if not _keep:
         drop(f"temporal_{_disp}")
+        return None
+
+    # Semantic grounding (#89), last so every earlier drop keeps its reason: a model-supplied money or
+    # measurement value must be stated in its own quote, or the evidence cannot justify it.
+    if value_kind in _VALUE_IN_SPAN_KINDS and not _span_states_value(value, stated_span):
+        drop("value_not_in_span")
         return None
 
     return TypedScalarProposal(
@@ -1161,8 +1469,27 @@ def parse_scalar_row(
         span_end=span_end,
         when=when,
         display=display,
-        claim_ordinal=0,
+        claim_ordinal=claim_ordinal,
+        importance=importance,
+        count_object=count_object, count_item=count_item, count_action=count_action,
     )
+
+
+def _occurrence_count_value(raw: Any) -> "int | None":
+    """A model-stated occurrence count as an int >= 1, or None when it is not one."""
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        number = raw
+    elif isinstance(raw, float):
+        if not math.isfinite(raw) or raw != int(raw):
+            return None
+        number = int(raw)
+    elif isinstance(raw, str) and re.fullmatch(r"\d+", raw.strip()):
+        number = int(raw.strip())
+    else:
+        return None
+    return number if number >= 1 else None
 
 
 def _reconciled_identity(
@@ -1197,8 +1524,81 @@ def _reconciled_attribute(members: "list[TypedScalarProposal]") -> str:
     return _reconciled_identity(members, ("attribute",))[0]
 
 
+def _overlap_components(
+    flat: "list[tuple[int, TypedScalarProposal]]", idxs: list[int],
+) -> list[list[int]]:
+    """Connected components of `idxs` under span overlap between DIFFERENT samples, in first-seen
+    order. A sample never overlaps itself into one claim."""
+    edges: dict[int, set[int]] = defaultdict(set)
+    for a in idxs:
+        sa, pa = flat[a]
+        for b in idxs:
+            if b <= a:
+                continue
+            sb, pb = flat[b]
+            if sa == sb:
+                continue
+            if pa.span_start < pb.span_end and pb.span_start < pa.span_end:
+                edges[a].add(b)
+                edges[b].add(a)
+    seen: set[int] = set()
+    components: list[list[int]] = []
+    for start in idxs:
+        if start in seen:
+            continue
+        stack, component = [start], []
+        seen.add(start)
+        while stack:
+            cur = stack.pop()
+            component.append(cur)
+            for nb in edges.get(cur, ()):
+                if nb not in seen:
+                    seen.add(nb)
+                    stack.append(nb)
+        components.append(component)
+    return components
+
+
+def _drop_bridges(
+    flat: "list[tuple[int, TypedScalarProposal]]", part: list[int],
+) -> list[list[int]]:
+    """Split an ambiguous overlap component by setting aside its widest BRIDGE, repeatedly.
+
+    A bridge is a proposal that overlaps two or more proposals of ONE other sample: it cannot say
+    which of them it votes for, so it votes for none. Removing it only splits the component, and
+    every resulting part still faces the unchanged one-per-sample and common-span checks, so this
+    never forms a group those checks would refuse. Widest first, because a long quote that spans
+    several narrow ones is the least specific reading. Bridges tied on (width, start, end) are set
+    aside together: picking one by sample position would make the result depend on sample order.
+    Removed bridges fall through as singletons."""
+    if len({flat[i][0] for i in part}) == len(part):
+        return [part]
+
+    def _overlap(a: int, b: int) -> bool:
+        pa, pb = flat[a][1], flat[b][1]
+        return pa.span_start < pb.span_end and pb.span_start < pa.span_end
+
+    bridges = []
+    for i in part:
+        hits: Counter[int] = Counter(flat[j][0] for j in part
+                                     if flat[j][0] != flat[i][0] and _overlap(i, j))
+        if any(n >= 2 for n in hits.values()):
+            bridges.append(i)
+    if not bridges:
+        return [part]  # ambiguous without a bridge: left to the caller's fail-closed checks
+    def _rank(i: int) -> tuple[int, int, int]:
+        p = flat[i][1]
+        return (-(p.span_end - p.span_start), p.span_start, p.span_end)
+
+    widest = min(_rank(i) for i in bridges)
+    rest = [i for i in part if not (i in bridges and _rank(i) == widest)]
+    return [sub for comp in _overlap_components(flat, rest) if len(comp) >= 2
+            for sub in _drop_bridges(flat, comp)]
+
+
 def _claim_groups(
     samples: "list[list[TypedScalarProposal]]", *, align_spans: bool,
+    split_by_attribute: bool = False, resolve_bridges: bool = False,
 ) -> "list[list[tuple[int, TypedScalarProposal]]]":
     """Partition the k samples' proposals into CLAIM groups, in deterministic first-seen order.
 
@@ -1210,7 +1610,11 @@ def _claim_groups(
     sample. Common intersection rather than chained pairwise overlap -- chaining drags
     non-overlapping A and C together through a long B that touches both. Ambiguous groups (two
     proposals from ONE sample in the same component) are left ungrouped, so the worst case is the
-    status quo, never a wrong merge. Singletons pass through unchanged."""
+    status quo, never a wrong merge. Singletons pass through unchanged.
+
+    `resolve_bridges=True` (counting match lane): an ambiguous component first sets aside its
+    bridges (`_drop_bridges`), so one sample's list-wide quote no longer vetoes the item-level
+    agreement the other samples reached."""
     flat = [(si, p) for si, sample in enumerate(samples) for p in sample]
     if not align_spans:
         order: list[str] = []
@@ -1229,53 +1633,41 @@ def _claim_groups(
     groups: list[list[tuple[int, TypedScalarProposal]]] = []
     grouped: set[int] = set()
     for _episode, idxs in by_episode.items():
-        edges: dict[int, set[int]] = defaultdict(set)
-        for a in idxs:
-            sa, pa = flat[a]
-            for b in idxs:
-                if b <= a:
-                    continue
-                sb, pb = flat[b]
-                if sa == sb:  # a sample never overlaps itself into one claim
-                    continue
-                if pa.span_start < pb.span_end and pb.span_start < pa.span_end:
-                    edges[a].add(b)
-                    edges[b].add(a)
-        seen: set[int] = set()
-        for start in idxs:
-            if start in seen:
-                continue
-            stack, component = [start], []
-            seen.add(start)
-            while stack:
-                cur = stack.pop()
-                component.append(cur)
-                for nb in edges.get(cur, ()):
-                    if nb not in seen:
-                        seen.add(nb)
-                        stack.append(nb)
+        for component in _overlap_components(flat, idxs):
             if len(component) < 2:
                 continue
-            spans = [(flat[i][1].span_start, flat[i][1].span_end) for i in component]
-            sample_ids = [flat[i][0] for i in component]
-            if max(s for s, _ in spans) >= min(e for _, e in spans):
-                continue  # no span common to ALL members
-            if len(set(sample_ids)) != len(sample_ids):
-                continue  # a sample appears twice -- ambiguous, leave it alone
-            common_start = max(s for s, _ in spans)
-            common_end = min(e for _, e in spans)
-            verifiable_text: str | None = None
-            for i in component:
-                proposal = flat[i][1]
-                if len(proposal.stated_span) != proposal.span_end - proposal.span_start:
-                    continue
-                offset = common_start - proposal.span_start
-                verifiable_text = proposal.stated_span[offset:offset + (common_end - common_start)]
-                break
-            if verifiable_text is not None and not re.search(r"\w", verifiable_text, re.UNICODE):
-                continue  # punctuation/whitespace overlap is not a grounded claim anchor
-            groups.append([(flat[i][0], flat[i][1]) for i in sorted(component)])
-            grouped.update(component)
+            parts = [component]
+            if split_by_attribute and len({flat[i][0] for i in component}) != len(component):
+                # v2 (F12): one sample read the span as two happenings. Split the component by
+                # attribute so each reading is its own claim, instead of leaving all ungrouped.
+                by_attr: dict[str, list[int]] = {}
+                for i in component:
+                    by_attr.setdefault(flat[i][1].attribute, []).append(i)
+                if len(by_attr) > 1:
+                    parts = [p for p in by_attr.values() if len(p) >= 2]
+            if resolve_bridges:
+                parts = [sub for part in parts for sub in _drop_bridges(flat, part)]
+            for part in parts:
+                spans = [(flat[i][1].span_start, flat[i][1].span_end) for i in part]
+                sample_ids = [flat[i][0] for i in part]
+                if max(s for s, _ in spans) >= min(e for _, e in spans):
+                    continue  # no span common to ALL members
+                if len(set(sample_ids)) != len(sample_ids):
+                    continue  # a sample appears twice -- ambiguous, leave it alone
+                common_start = max(s for s, _ in spans)
+                common_end = min(e for _, e in spans)
+                verifiable_text: str | None = None
+                for i in part:
+                    proposal = flat[i][1]
+                    if len(proposal.stated_span) != proposal.span_end - proposal.span_start:
+                        continue
+                    offset = common_start - proposal.span_start
+                    verifiable_text = proposal.stated_span[offset:offset + (common_end - common_start)]
+                    break
+                if verifiable_text is not None and not re.search(r"\w", verifiable_text, re.UNICODE):
+                    continue  # punctuation/whitespace overlap is not a grounded claim anchor
+                groups.append([(flat[i][0], flat[i][1]) for i in sorted(part)])
+                grouped.update(part)
     for i, (si, p) in enumerate(flat):
         if i not in grouped:
             groups.append([(si, p)])
@@ -1348,7 +1740,7 @@ def gate_typed_scalars(
     samples: list[list[TypedScalarProposal]], *, threshold: float = 1.0,
     reconcile_attribute: bool = False, reconcile_scope: bool = False,
     reconcile_subject: bool = False, canonical_self: bool = False,
-    align_spans: bool = False,
+    align_spans: bool = False, counting_v2: bool = False, resolve_bridges: bool = False,
 ) -> list[TypedScalarDecision]:
     """SOURCE-CLAIM-FIRST k-sample consistency gate. For each distinct `source_key` seen across the k
     proposal samples, commit ONE interpretation only if it is concentrated:
@@ -1399,7 +1791,7 @@ def gate_typed_scalars(
     two are complementary rather than alternatives. It is not free: commits rise 64 -> 298 while the
     share matching the benchmark's labelled current value falls 41% -> 32%, and slots holding two
     contradictory values in one pass rise 22 -> 68. `threshold` is a validated caller argument,
-    supplied by `personal_memory_scalar_threshold` (default 1.0).
+    supplied by `personal_memory_scalar_threshold` (default 2/3; see docs/agreement-settings.md).
 
       * `reconcile_attribute` â€” drop the free-text attribute NAME from the vote and choose it after
         grouping (`_reconciled_attribute`). Samples routinely agree on subject/slot/value/when and
@@ -1419,7 +1811,8 @@ def gate_typed_scalars(
     # interpretation labels. rep maps (group index, label) -> every proposal that read it, first-seen
     # first, so the committed representative is deterministic regardless of value type (37 vs 37.0
     # normalize equal) and attribute reconciliation has the full candidate set to choose from.
-    groups = _claim_groups(samples, align_spans=align_spans)
+    groups = _claim_groups(samples, align_spans=align_spans, split_by_attribute=counting_v2,
+                           resolve_bridges=resolve_bridges)
     # The identity fields dropped from the vote, in label order, reconciled together afterwards.
     reconciled_fields = tuple(field for field, enabled in (
         ("subject_text", reconcile_subject),
@@ -1490,6 +1883,17 @@ def gate_typed_scalars(
             )
         if align_spans:
             proposal = _canonical_aligned_proposal(proposal, candidates)
+        if proposal.operation == "occurrence":
+            levels = Counter(c.importance for c in candidates)
+            rank = {"tracked": 2, "notable": 1, "routine": 0}
+            best = max(levels, key=lambda lv: (levels[lv], rank.get(lv, -1)))
+            modal: dict[str, str] = {}
+            for fname in ("count_object", "count_item", "count_action"):
+                vals = Counter(v for v in (getattr(c, fname) for c in candidates) if v)
+                # Counter preserves first-insertion order and max() keeps the first max,
+                # so ties break by first appearance in sample order.
+                modal[fname] = max(vals, key=lambda v: vals[v]) if vals else ""
+            proposal = replace(proposal, importance=best, **modal)
         # Under span alignment the proposal is grounded to the deterministic common source span, so
         # the durable identity is independent of which sample happened to be seen first.
         sk = proposal.source_key
@@ -1606,6 +2010,10 @@ _ACTIVITY_MODAL_RE = re.compile(
     r"expect(?:s|ed)?\s+to|going\s+to|gonna)\b",
     re.I,
 )
+#: grammatical negation of a happening ("I didn't go", "I never visited", "I haven't been").
+_OCCURRENCE_NEGATED_RE = re.compile(
+    r"\b(?:didn['’]t|did\s+not|never|haven['’]t|have\s+not|hasn['’]t|has\s+not|not)\b", re.I,
+)
 _ACTIVITY_EXACT_COUNT_CUE_RE = re.compile(
     r"\b(?:\d+(?:\.\d+)?|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|"
     r"twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|"
@@ -1631,6 +2039,86 @@ def _activity_source_context(content: str, span_start: int, span_end: int) -> st
     left_candidates = [text.rfind(mark, 0, span_start) for mark in ".?!;,:\n"]
     left = max(left_candidates, default=-1) + 1
     return text[left:span_end].strip()
+
+
+#: unit 3a.9 (counting extraction v2): words of the clause prefix / grounded span, hyphen- and
+#: apostrophe-joined parts kept whole ("can't", "must-see").
+_V2_WORD_RE = re.compile(r"[^\W\d_]+(?:['’-][^\W\d_]+)*", re.UNICODE)
+_V2_NEGATOR_WORDS = frozenset({"not", "never", "cannot"})
+_V2_MODAL_WORDS = frozenset({
+    "if", "unless", "maybe", "perhaps", "possibly", "might", "could", "would", "should", "will",
+    "shall", "can", "must", "gonna"})
+#: veto only when followed by "to" ("going to", "want to", "plan to", "hope to", "expect to").
+_V2_INTENT_WORDS = frozenset({
+    "want", "wants", "wanted", "plan", "plans", "planned", "planning", "hope", "hopes", "hoped",
+    "hoping", "expect", "expects", "expected", "going"})
+#: adverbs that do not count toward the 3-word window before the span.
+_V2_SKIP_WORDS = frozenset({
+    "really", "actually", "even", "ever", "yet", "still", "finally", "just", "also", "already",
+    "again", "now", "then", "quite", "truly", "totally", "definitely", "probably", "certainly",
+    "always"})
+#: words that may sit between a negator/modal and the happening verb without breaking its scope.
+_V2_LINK_WORDS = frozenset({
+    "i", "we", "you", "he", "she", "they", "it", "i'm", "i've", "i'd", "we're", "we've", "we'd",
+    "you're", "you've", "they're", "they've", "he's", "she's", "it's", "to",
+    "do", "does", "did", "have", "has", "had", "am", "is", "are", "was", "were", "be", "been",
+    "being"})
+
+
+def _v2_is_veto(word: str, following: str) -> bool:
+    if word in _V2_NEGATOR_WORDS or word in _V2_MODAL_WORDS:
+        return True
+    if word.endswith(("n't", "n’t", "'ll", "’ll")):
+        return True
+    if word in _V2_INTENT_WORDS and following == "to":
+        return True
+    base = re.split(r"['’]", word)[0]
+    return base != word and base in _V2_MODAL_WORDS  # would've, could've, should've
+
+
+def _v2_is_transparent(word: str, following: str) -> bool:
+    return word in _V2_SKIP_WORDS or word in _V2_LINK_WORDS or _v2_is_veto(word, following)
+
+
+def _occurrence_vetoed_v2(content: str, span_start: int, span_end: int) -> bool:
+    """Counting extraction v2: True when negation/modal/future wording GOVERNS the happening verb.
+
+    A veto word counts only when it lies inside the grounded span before its first content word, or
+    within the 3 words (adverbs like really/actually/even/ever/yet/still not counted) immediately
+    before the span with only pronouns/auxiliaries/adverbs between it and the span. A bare
+    not/can/will elsewhere in the clause ("I can't believe I finally visited", "Will and I went",
+    "Not only did I finish") does not veto. Relative-future phrases ("next week") stay clause-wide.
+    """
+    prefix = _activity_source_context(content, span_start, span_start)
+    inside = content[span_start:span_end]
+    if _FUTURE_REL_RE.search(f"{prefix} {inside}"):
+        return True
+    before = [w.lower() for w in _V2_WORD_RE.findall(prefix)]
+    within = [w.lower() for w in _V2_WORD_RE.findall(inside)]
+    words = before + within
+    for i in range(len(before), len(words)):
+        nxt = words[i + 1] if i + 1 < len(words) else ""
+        if _v2_is_veto(words[i], nxt):
+            return True
+        if not _v2_is_transparent(words[i], nxt):
+            break
+    counted = 0
+    for i in range(len(before) - 1, -1, -1):
+        word = words[i]
+        if word in _V2_SKIP_WORDS:
+            continue
+        counted += 1
+        if counted > 3:
+            break
+        nxt = words[i + 1] if i + 1 < len(words) else ""
+        if _v2_is_veto(word, nxt):
+            if all(_v2_is_transparent(words[j], words[j + 1] if j + 1 < len(words) else "")
+                   for j in range(i + 1, len(before))):
+                return True
+            break
+        if not _v2_is_transparent(word, nxt):
+            break
+    return False
 
 
 def _activity_clause_context(content: str, span_start: int, span_end: int) -> str:
@@ -1825,6 +2313,14 @@ def _same_calendar_day(a: str | None, b: str | None) -> bool:
     return da is not None and db is not None and da.date() == db.date()
 
 
+#: #155 public aliases for the deterministic source-date helpers, so the event-history perception
+#: boundary can reuse the SAME parsing without importing privates (no behavior change here).
+parse_source_date = _parse_source_date
+same_calendar_day = _same_calendar_day
+SRC_MONTH_DAY_RE = _SRC_MONTH_DAY_RE
+MONTHS = _MONTHS
+
+
 def resolve_temporal_disposition(
     stated_span: str, model_when: str | None, operation: str,
     episode_reference: str | None = None,
@@ -1895,7 +2391,7 @@ def _resolve_valid_time(
 #: "my car" (subject="my car") and every NAMED third party fall through to ordinary entity binding and
 #: can therefore never bind to self.
 #: DOMAIN: scalar-proposal ``subject_text``. Deliberately NARROWER than the extraction-time set in
-#: ``graphiti_extraction_patches`` (which adds "my"/"mine"): those are plausible entity NAMES but not
+#: ``graphiti_extraction_policy`` (which adds "my"/"mine"): those are plausible entity NAMES but not
 #: plausible SUBJECTS -- a proposal with subject "my" is malformed, and admitting it would bind
 #: garbage to the human. Do not "unify" these three sets; they answer different questions over
 #: different inputs. See ``domain/self_identity.SELF_ALIASES``.
@@ -1914,6 +2410,48 @@ ResolveSelfSubject = Callable[["str | None"], "tuple[str, str] | None"]
 def _is_self_reference(subject_text: str) -> bool:
     """True when `subject_text` denotes the first-person self (the namespace's canonical user)."""
     return subject_text.strip().lower() in SELF_TOKENS
+
+
+_POSSESSIVE_LEAD_WORDS = frozenset({"my", "our", "his", "her", "their", "your", "its"})
+_ARTICLE_LEAD_WORDS = frozenset({"the", "a", "an", "this", "that"})
+
+
+def _normalize_phrase(text: str) -> str:
+    return " ".join(str(text or "").lower().split())
+
+
+def _strip_article(text: str) -> str:
+    words = _normalize_phrase(text).split(" ")
+    if len(words) > 1 and words[0] in _ARTICLE_LEAD_WORDS:
+        words = words[1:]
+    return " ".join(words)
+
+
+def counting_subject_echoes_object(
+    subject_text: str, *, count_object: str, count_item: str, count_family: str, attribute: str,
+) -> bool:
+    """True when a counting row's subject is just the counted thing restated ("the museum" for a
+    museum visit) rather than a person: the row then belongs to the user. Never true for a blank or
+    self-token subject, nor a possessive one ("my sister", "David's baby"). Otherwise true when the
+    subject's tokens overlap the row's relation tokens (family, else object, else attribute), or the
+    subject minus a leading determiner equals the item minus a leading determiner."""
+    from menhir.domain.count_match import family_tokens, relation_tokens
+
+    normalized = _normalize_phrase(subject_text)
+    if not normalized or _is_self_reference(normalized):
+        return False
+    if normalized.split(" ")[0] in _POSSESSIVE_LEAD_WORDS:
+        return False
+    if "'s" in normalized or "’s" in normalized or "s'" in normalized or "s’" in normalized:
+        return False
+    row = {
+        "count_family": count_family, "count_object": count_object, "attribute": attribute,
+    }
+    row_tokens = set(relation_tokens(row))
+    if row_tokens and row_tokens & set(family_tokens(normalized)):
+        return True
+    item = _strip_article(count_item)
+    return bool(item) and _strip_article(normalized) == item
 
 
 #: Leading determiners the perceiver sometimes keeps on an extracted subject where the resolved
@@ -1992,40 +2530,70 @@ def _subject_spellings(subject_text: str) -> list[str]:
     return out
 
 
-def _bind_from_candidates(
+class _SubjectMatchStatus(Enum):
+    ABSENT = "absent"
+    AMBIGUOUS = "ambiguous"
+    INVALID = "invalid"
+    UNIQUE = "unique"
+
+
+@dataclass(frozen=True)
+class _SubjectMatch:
+    status: _SubjectMatchStatus
+    uuid: str | None = None
+    display: str | None = None
+
+
+def _match_from_candidates(
     subject_text: str, candidates: list[dict[str, Any]],
-) -> tuple[str | None, str | None]:
-    """The UNIQUE fail-closed binder over a candidate row set: match each normalized spelling, in
-    priority order, by exact name equality; bind on a single match with a nonblank uuid; abstain
-    (None, None) on zero, multiple, or a blank-uuid match. `candidates` is either the episode's linked
-    entities or the result of a same-namespace repository lookup — both are fed through this SAME
-    binder so authority never depends on which candidate source won."""
+) -> _SubjectMatch:
+    """Bind the first matching spelling, preserving why binding must abstain.
+
+    Only an absent spelling permits a less-specific variant or repository fallback. An ambiguous
+    or invalid match is a refusal, not permission to select another owner.
+    """
     target = subject_text.strip().lower()
     if not target:
-        return None, None
+        return _SubjectMatch(_SubjectMatchStatus.ABSENT)
 
-    def _unique(candidate: str) -> tuple[str | None, str | None]:
+    def _match(candidate: str) -> _SubjectMatch:
         matches = [
             e for e in candidates
             if str(e.get("name", "") or "").strip().lower() == candidate
         ]
+        if not matches:
+            return _SubjectMatch(_SubjectMatchStatus.ABSENT)
         if len(matches) != 1:
-            return None, None
+            return _SubjectMatch(_SubjectMatchStatus.AMBIGUOUS)
         uuid = str(matches[0].get("uuid") or "").strip()
         if not uuid:
-            return None, None
-        return uuid, (str(matches[0].get("name") or "").strip() or subject_text)
+            return _SubjectMatch(_SubjectMatchStatus.INVALID)
+        return _SubjectMatch(
+            _SubjectMatchStatus.UNIQUE,
+            uuid,
+            str(matches[0].get("name") or "").strip() or subject_text,
+        )
 
-    uuid, display = _unique(target)
-    if uuid is not None:
-        return uuid, display
+    exact = _match(target)
+    if exact.status is not _SubjectMatchStatus.ABSENT:
+        return exact
 
     for variant in _subject_variants(target):
         if variant in SELF_TOKENS:
             continue
-        uuid, display = _unique(variant)
-        if uuid is not None:
-            return uuid, display
+        match = _match(variant)
+        if match.status is not _SubjectMatchStatus.ABSENT:
+            return match
+    return _SubjectMatch(_SubjectMatchStatus.ABSENT)
+
+
+def _bind_from_candidates(
+    subject_text: str, candidates: list[dict[str, Any]],
+) -> tuple[str | None, str | None]:
+    """Keep the tuple-shaped binder for local callers while refusing non-unique owners."""
+    match = _match_from_candidates(subject_text, candidates)
+    if match.status is _SubjectMatchStatus.UNIQUE:
+        return match.uuid, match.display
     return None, None
 
 
@@ -2050,8 +2618,13 @@ def _resolve_subject(
     subject_text: str, entities: list[dict[str, Any]], namespace: str | None,
     resolve_self_subject: ResolveSelfSubject | None,
     lookup_namespace_entities: LookupNamespaceEntities | None = None,
+    *, self_echo: bool = False,
 ) -> tuple[str | None, str | None]:
     """Resolve a subject to (subject_uuid, subject_display), preferring the canonical self identity.
+
+    `self_echo` (a counting row whose subject merely restates the counted thing, see
+    `counting_subject_echoes_object`) routes through the self seam BEFORE any entity-name matching and
+    fails closed to (None, None) when the seam yields nothing.
 
     Ordering is deliberately conservative and additive:
       1. CANONICAL SELF first: a first-person subject binds to the namespace's ONE stable self entity
@@ -2061,14 +2634,22 @@ def _resolve_subject(
       2. EXACT LOCAL EPISODE matching next: bind against the episode's SURVIVING linked entities by
          exact normalized-name equality (`_bind_from_candidates`). Authority is asserted ONLY on a
          unique local match.
-      3. OPTIONAL same-namespace repository lookup, ONLY after the local pass fails: when
+      3. OPTIONAL same-namespace repository lookup, ONLY when the local pass has no match: when
          `lookup_namespace_entities` is supplied AND `namespace` is nonblank, ask the repository for
          same-namespace entities matching the bounded normalized spellings, then feed those rows
-         through the SAME unique fail-closed binder. No fuzzy/substring/stem/synonyms anywhere.
+         through the SAME unique fail-closed binder. A local ambiguous or invalid match abstains
+         without consulting another owner. No fuzzy/substring/stem/synonyms anywhere.
 
     When the self seam is absent, unavailable, or the subject is not first-person, and neither the
     local nor (when enabled) namespace pass yields a unique match, binding abstains to (None, None) —
     the caller records an advisory, never an unverified owner."""
+    if self_echo:
+        if resolve_self_subject is None:
+            return None, None
+        bound = resolve_self_subject(namespace)
+        if bound is not None and bound[0]:
+            return bound
+        return None, None
     if resolve_self_subject is not None and _is_self_reference(subject_text):
         bound = resolve_self_subject(namespace)
         if bound is not None and bound[0]:
@@ -2091,17 +2672,19 @@ def _resolve_subject(
         #                     any assertion bound to the twin onto a dead uuid. Refuse.
         if namespace:
             return None, None
-    local = _bind_from_candidates(subject_text, entities)
-    if local[0] is not None:
-        return local
+    local = _match_from_candidates(subject_text, entities)
+    if local.status is _SubjectMatchStatus.UNIQUE:
+        return local.uuid, local.display
+    if local.status is not _SubjectMatchStatus.ABSENT:
+        return None, None
     if lookup_namespace_entities is not None and namespace:
         try:
             rows = lookup_namespace_entities(namespace, _subject_spellings(subject_text))
         except Exception:  # noqa: BLE001 - the repository fallback is best-effort; never crash binding
             rows = []
-        namespace_match = _bind_from_candidates(subject_text, rows or [])
-        if namespace_match[0] is not None:
-            return namespace_match
+        namespace_match = _match_from_candidates(subject_text, rows or [])
+        if namespace_match.status is _SubjectMatchStatus.UNIQUE:
+            return namespace_match.uuid, namespace_match.display
     return None, None
 
 
@@ -2126,4 +2709,6 @@ def _assertion_from_proposal(
         # deterministic, span-local correction classification (NOT an LLM field; out of identity keys)
         absolute_semantics=classify_absolute_semantics(p.stated_span, p.operation),
         name_embedding=name_embedding, embed_version=embed_version,
+        importance=p.importance,
+        count_object=p.count_object, count_item=p.count_item, count_action=p.count_action,
     )

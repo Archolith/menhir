@@ -14,6 +14,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+from uuid import uuid4
 
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import consolidation_audit as _audit
@@ -25,13 +26,20 @@ from menhir.services.enrichment_failures import (
     is_budget_refusal,
     is_session_window_refusal,
 )
-from menhir.services.enrichment_steps import propagate_user_flag
+from menhir.services.enrichment_steps import record_retention_sources
+from menhir.services.counting_consolidation import (
+    CountingConsolidationConfig,
+    effective_counting_perceiver_version,
+    run_counting_consolidation,
+    sweep_counting_flag_state,
+)
 from menhir.services.event_consolidation import (
     EventConsolidationConfig,
     run_event_consolidation,
     select_event_targets,
 )
 from menhir.services.failure_counter_bridge import sync_failure_counters
+from menhir.services.lane_outcomes import lane_outcomes
 from menhir.services.instability_counter_bridge import sync_instability_counters
 from menhir.services.scalar_consolidation import (
     ScalarConsolidationConfig,
@@ -278,12 +286,21 @@ async def retry_process_candidate(
                 namespace=str(row.get("namespace") or "default"),
                 **stamp_kwargs,
             )
-            if bool(row.get("user_flagged", False)):
-                propagate_user_flag(
+            try:
+                record_retention_sources(
                     graph_adapter,
                     entity_uuids,
-                    episode_uuid=episode_uuid,
+                    source_episode_uuid=episode_uuid,
+                    namespace=str(row.get("namespace") or "default"),
                 )
+            except ValueError as exc:
+                logger.warning(
+                    "Leaving failed episode unreconciled after incomplete retention provenance "
+                    "episode_id=%s error=%s",
+                    episode_uuid,
+                    exc,
+                )
+                return "waiting"
             if await asyncio.to_thread(
                 graph_adapter.mark_episode_ready,
                 episode_uuid,
@@ -535,9 +552,9 @@ async def consolidate_personal_memory(
     enable_counter_state: bool = True,
     enable_scalar_state: bool = False,
     scalar_state_perceiver_version: str = "v1",
-    scalar_reconcile_attribute: bool = False,
-    scalar_reconcile_scope: bool = False,
-    scalar_reconcile_subject: bool = False,
+    scalar_reconcile_attribute: bool = True,
+    scalar_reconcile_scope: bool = True,
+    scalar_reconcile_subject: bool = True,
     scalar_canonical_self: bool = False,
     scalar_threshold: float | None = None,
     scalar_batch_size: int = 500,
@@ -551,6 +568,11 @@ async def consolidate_personal_memory(
     enable_event_history: bool = False,
     event_history_perceiver_version: str = "v1",
     event_batch_size: int = 500,
+    enable_counting: bool = False,
+    counting_perceiver_version: str = "v1",
+    counting_lease_seconds: int = 900,
+    counting_extract_v2: bool = False,
+    counting_match: bool = False,
 ) -> dict[str, object]:
     """Re-derive count/amount Views from each DIRTY namespace's user turns via the gated perception
     boundary, pinning ALL bias guards on (cross-check + coref + verify) so an automatic write never
@@ -579,6 +601,12 @@ async def consolidate_personal_memory(
     if enable_event_history:
         pass_details["event_history"] = True
         pass_details["event_perceiver_version"] = event_history_perceiver_version
+    # Counting only runs with scalars on; off keeps the pass payload byte-identical.
+    enable_counting = bool(enable_counting and enable_scalar_state)
+    if enable_counting:
+        pass_details["counting"] = True
+        pass_details["counting_perceiver_version"] = effective_counting_perceiver_version(
+            counting_perceiver_version, counting_extract_v2, match=counting_match)
     _audit.audit("pass", "start", details=pass_details)
     from menhir.services.perception import Episode, perceive_and_fold
 
@@ -629,6 +657,7 @@ async def consolidate_personal_memory(
         abstained = 0
         corrections_applied = 0
         processed = 0
+        counter_evidence_rows = 0
 
         def _build_episodes(rows: list) -> "list[Episode]":
             """Rows -> Episodes, collapsing EXACT duplicate observations.
@@ -658,8 +687,7 @@ async def consolidate_personal_memory(
             seen: set[tuple[str, str]] = set()
             for r in rows:
                 raw = str(r.get("content") or "")
-                # legacy Episodic turns are stored `user: <text>`; raw :Turn evidence has no prefix.
-                body = (raw[len("user:"):] if raw[:5].lower() == "user:" else raw).strip()[:2000]
+                body = raw.strip()[:2000]
                 if len(body) < 8:
                     continue
                 stamp = str(r.get("valid_at") or "")
@@ -673,6 +701,7 @@ async def consolidate_personal_memory(
             if call_budget is not None and counting_llm.calls >= call_budget:
                 break
             rows = graph_adapter.load_user_episodes(ns)
+            counter_evidence_rows += len(rows)
             episodes = _build_episodes(rows)
             if episodes:
                 res = perceive_and_fold(
@@ -698,7 +727,12 @@ async def consolidate_personal_memory(
                     run_tally=run_tally)
                 corrections_applied += int(corr["corrections_applied"])
             processed += 1
-            graph_adapter.mark_consolidated(ns, at=datetime.now(timezone.utc).isoformat())
+            # Watermark on the DB's own clock (#170): the newest recorded_at as of the load, so a
+            # turn recorded during this run stays dirty. now() here is a different clock, and on a
+            # same-host install it stamps past every mid-run turn.
+            newest = str((rows[0].get("newest_recorded_at") if rows else None) or "")
+            graph_adapter.mark_consolidated(
+                ns, at=newest or datetime.now(timezone.utc).isoformat())
 
         result: dict[str, object] = {
             "namespaces_dirty": len(targets),
@@ -712,6 +746,7 @@ async def consolidate_personal_memory(
         # Scalar consolidation is independently dirty-tracked but shares this run's counting LLM,
         # so the configured budget remains global across counter and scalar phases.
         if enable_scalar_state:
+            scalar_start_calls = counting_llm.calls
             result.update(
                 run_scalar_consolidation(
                     graph_adapter,
@@ -742,6 +777,19 @@ async def consolidate_personal_memory(
                     ),
                 )
             )
+            result["scalar_llm_calls"] = counting_llm.calls - scalar_start_calls
+            # Kill switch / re-enable: rebuild Views for namespaces whose counting flag marker
+            # disagrees with the flag now. No LLM calls; no markers means nothing to do.
+            sweep = sweep_counting_flag_state(
+                graph_adapter,
+                enabled=enable_counting,
+                namespaces=namespaces,
+                scalar_history_enabled=scalar_history_enabled,
+                match=bool(enable_counting and counting_match),
+            )
+            # Keys only when the sweep did something, so the counting-off payload is unchanged.
+            if any(sweep.values()):
+                result.update(sweep)
         # Event-history consolidation is independently dirty-tracked but shares this run's counting
         # LLM, so the configured budget remains global across counter, scalar, and event phases.
         if enable_event_history:
@@ -757,10 +805,75 @@ async def consolidate_personal_memory(
                     ),
                 )
             )
+        # The counting lane builds on scalars: it runs after the scalar and event phases, only over
+        # turns the scalar cursor has passed, and shares the budget (scalars first, counting last).
+        # Off: no calls, no counting watermark, no counting_* result keys.
+        if enable_counting:
+            result.update(
+                run_counting_consolidation(
+                    graph_adapter,
+                    namespaces=namespaces,
+                    counting_llm=counting_llm,
+                    build_episodes=_build_episodes,
+                    k=k,
+                    threshold=(threshold if scalar_threshold is None else scalar_threshold),
+                    call_budget=call_budget,
+                    embed=embed,
+                    config=CountingConsolidationConfig(
+                        perceiver_version=counting_perceiver_version,
+                        extract_v2=counting_extract_v2,
+                        match=counting_match,
+                        scalar_perceiver_version=scalar_state_perceiver_version,
+                        batch_size=scalar_batch_size,
+                        max_namespaces=max_namespaces,
+                        embed_version=scalar_embed_version,
+                        scalar_history_enabled=scalar_history_enabled,
+                        reconcile_attribute=scalar_reconcile_attribute,
+                        reconcile_scope=scalar_reconcile_scope,
+                        reconcile_subject=scalar_reconcile_subject,
+                        canonical_self=scalar_canonical_self,
+                        lease_seconds=counting_lease_seconds,
+                    ),
+                )
+            )
+        # Erasure leaves ViewProjectionRepair receipts for Views it retired; rebuild those of the
+        # namespaces this pass covered, after their lanes (#170 item 5). A failure is logged and the
+        # receipts stay claimable; it never fails the pass. Key present only when work was claimed.
+        run_repairs = getattr(graph_adapter, "run_view_projection_repairs", None)
+        repair_namespaces = sorted({str(n) for n in [*(namespaces or []), *(scalar_targets or []),
+                                                     *(event_targets or [])] if n})
+        if (enable_scalar_state or enable_event_history) and repair_namespaces \
+                and callable(run_repairs):
+            try:
+                repairs = run_repairs(repair_namespaces, owner_id=f"consolidation:{uuid4().hex}",
+                                      scalar_history_enabled=scalar_history_enabled)
+            except Exception:  # noqa: BLE001 - receipts remain durable and claimable
+                logger.warning("consolidation pass: view projection repair failed", exc_info=True)
+                repairs = None
+            if repairs and repairs.get("claimed"):
+                result["view_repairs"] = {
+                    key: int(repairs.get(key) or 0)
+                    for key in ("claimed", "complete", "failed", "terminal_not_rebuildable",
+                                "lost_claim")
+                }
         # `result` is initialized after the counter pass, then the independent scalar pass.
         # Refresh the shared call count here so API callers see the total work actually spent;
         # otherwise a scalar/event-only run reports zero calls even after consuming k samples.
         result["llm_calls"] = counting_llm.calls
+        # Per-lane report (#170 item 4) so one lane's output cannot hide another's inactivity.
+        # Only with a non-counter lane on: a counter-only pass has one lane and keeps its shape.
+        if enable_scalar_state or enable_event_history:
+            outcomes = lane_outcomes(
+                result,
+                enabled={"counter": bool(enable_counter_state), "scalar": enable_scalar_state,
+                         "event": enable_event_history, "counting": enable_counting},
+                counter_evidence_rows=counter_evidence_rows,
+            )
+            result["lane_outcomes"] = outcomes
+            quiet = sorted(f"{lane}:{flag}" for lane, rep in outcomes.items()
+                           for flag in ("no_output", "stalled") if rep.get(flag))
+            if quiet:
+                logger.info("consolidation pass: lanes without output: %s", ", ".join(quiet))
         return result
 
     result = await asyncio.to_thread(_run)
@@ -820,30 +933,6 @@ async def refresh_structure_graphs(
             )
             continue
 
-        try:
-            scan = await asyncio.to_thread(scanner.scan, root_path, name)
-        except Exception as exc:
-            errors += 1
-            details.append({"project": name, "status": f"scan_error: {exc}"})
-            logger.warning("Structure watcher scan failed for %s: %s", name, exc)
-            continue
-
-        stored_fp = await asyncio.to_thread(graph_adapter.get_scan_fingerprint, name)
-        if stored_fp and stored_fp == scan.scan_fingerprint:
-            # Same files, possibly a new commit: keep the evidence binding current.
-            refresh = getattr(graph_adapter, "refresh_indexed_binding", None)
-            if refresh is not None:
-                await asyncio.to_thread(
-                    refresh,
-                    name,
-                    scan.scan_fingerprint,
-                    scan.indexed_commit,
-                    scan.indexed_repository,
-                    scan.indexed_dirty,
-                )
-            skipped += 1
-            continue
-
         # CF-257. The watcher writes through the same adapter method as everything else, so it
         # must settle identity too -- it re-scans every known project on a timer, which is exactly
         # why leaving it out produced 1,816 id-less nodes rather than a handful. It never mints:
@@ -865,8 +954,38 @@ async def refresh_structure_graphs(
                 "reason": resolution.reason,
             })
             continue
+        try:
+            scan_generation = await asyncio.to_thread(
+                graph_adapter.begin_structure_scan, claim
+            )
+            scan = await asyncio.to_thread(scanner.scan, root_path, name)
+        except Exception as exc:
+            errors += 1
+            details.append({"project": name, "status": f"scan_error: {exc}"})
+            logger.warning("Structure watcher scan failed for %s: %s", name, exc)
+            continue
         scan.project_id = claim.project_id
         scan.identity_generation = claim.generation
+        scan.scan_generation = scan_generation
+
+        stored_fp = await asyncio.to_thread(
+            graph_adapter.get_scan_fingerprint, name, project_id=claim.project_id
+        )
+        if stored_fp and stored_fp == scan.scan_fingerprint:
+            try:
+                refresh = getattr(graph_adapter, "refresh_indexed_binding", None)
+                if refresh is not None:
+                    await asyncio.to_thread(
+                        refresh, name, scan.scan_fingerprint, scan.indexed_commit,
+                        scan.indexed_repository, scan.indexed_dirty,
+                        claim=claim, scan_generation=scan_generation,
+                    )
+            except Exception as exc:
+                errors += 1
+                details.append({"project": name, "status": f"binding_error: {exc}"})
+                continue
+            skipped += 1
+            continue
 
         try:
             # write_project_structure MERGEs thousands of nodes/edges — a heavy synchronous Neo4j

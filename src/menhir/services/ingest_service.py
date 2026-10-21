@@ -37,7 +37,7 @@ from menhir.infrastructure.telemetry import (
 )
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure.circuit_breaker import CircuitOpenError
-from menhir.infrastructure.graphiti_patches import clear_extraction_receipt
+from menhir.infrastructure.graphiti_extraction_policy import clear_extraction_receipt
 from menhir.services.enrichment_steps import (
     EnrichmentContext,
     add_episode_with_timeout,
@@ -93,6 +93,7 @@ class IngestService(IngestQueueMixin, IngestWorkerMixin, IngestIntakeMixin):
         default=12000, init=False, repr=False
     )
     _canonical_self_binding_mode: str = field(default="off", init=False, repr=False)
+    _inferred_self_mode: str = field(default="off", init=False, repr=False)
     # M6 Phase 6 — LLM budget caps
     _session_llm_call_times: dict[str, deque[float]] = field(
         default_factory=dict, init=False, repr=False
@@ -121,6 +122,9 @@ class IngestService(IngestQueueMixin, IngestWorkerMixin, IngestIntakeMixin):
     # .agent/plans/menhir-context-composition-production-integration.md). Off by default.
     _shadow_context_composition: bool = field(default=False, init=False, repr=False)
     _shadow_composition_timeout_s: float = field(default=30.0, init=False, repr=False)
+    # Source-memory lane (MENHIR_FRONTIER_SOURCE_MEMORIES). Off by default: no
+    # episode-content embedding call is made and ingest behavior is unchanged.
+    _source_memories_enabled: bool = field(default=False, init=False, repr=False)
     # Detached background shadow-composition tasks, tracked so shutdown() can drain them
     # instead of leaving "Task was destroyed but it is pending" warnings behind.
     _shadow_tasks: set[asyncio.Task] = field(default_factory=set, init=False, repr=False)

@@ -27,6 +27,7 @@ from menhir.infrastructure.observability import (
     fail_llm_usage_call,
     start_llm_usage_call,
 )
+from menhir.infrastructure.openai_calls import create_embedding
 from menhir.infrastructure.providers import DEFAULT_REQUEST_TIMEOUT_S, ProviderConfig
 
 logger = logging.getLogger(__name__)
@@ -86,7 +87,9 @@ def make_view_embedder(settings: MemorySettings) -> ViewEmbedder | None:
                 endpoint="embeddings.create",
                 operation="view_embed",
             )
-            response = client.embeddings.create(model=model, input=[text])
+            response = create_embedding(
+                client.embeddings.create, {"model": model, "input": [text]}, label="view_embed"
+            )
             complete_llm_usage_call(handle, result=response)
             return list(response.data[0].embedding)
         except Exception as exc:

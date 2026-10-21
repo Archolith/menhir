@@ -10,231 +10,92 @@ missed it: in the Beacon agent-task evaluation, two plans for archiving a Menhir
   serves it as the guardrail `explicit-staging`.
 - `CHANGELOG-archive.md`: the oldest 2026-09-17 entry moved there (10-entry limit).
 
-## 2026-09-23 - Beacon can search the docs an agent needs to get oriented
+## 2026-10-14 - Scan release archives from private output directories
 
-Beacon only searches the documents listed in `beacon.yaml`'s `canonical_docs`. The list named five
-entry points and plans, so the architecture, workflow and procedure documents that `.agent/README.md`
-routes to could not be found through Beacon at all. In a Beacon-only evaluation run, an agent with
-no file tools inverted the stdio runtime decision because `backend-first-mcp.md` and
-`.agent/architecture.md` were out of reach.
+- `deploy/build_release_image.py`: bind only the public image archive into each scanner, keeping private parent directories and sibling artifacts inaccessible.
+- `tests/test_build_release_image.py`: require the archive-only read-only bind for both Syft and Grype.
+- `.agent/reviews/menhir-release-container-audit-2026-10-14.md`, `.agent/plans/menhir-168-phase0-baseline-contract.md`: record the real unpublished image/fork checks, scanner reproduction, upstream-base scan refusal and remaining #168/#123 gates. Runtime defaults are unchanged.
 
-- `beacon.yaml`: `canonical_docs` now lists 25 documents in reading order (entry points,
-  architecture and decisions, reference, workflows, then the current plans and research indexes),
-  chosen by an agent with no task context. The superseded July roadmap is left out, and so is
-  `deploy/RUNBOOK.md`, which is specific to one operator's deployment. Listing a document makes it
-  searchable, not required reading; the project overview still shows only the first four. Checked
-  locally: all listed documents are indexed (443 search chunks, up from 105) and the generated
-  manifest grows by about 420 tokens.
-- `CHANGELOG-archive.md`: the 2026-09-17 extraction-writer entry moved there (10-entry limit).
+## 2026-10-21 - Make OAuth JWKS-fetch 503s diagnosable
 
-## 2026-09-23 - Menhir's own beacon.yaml
+- Ported from 0847c6e on `refactor/file-size-refactor`. Diagnostics only; no auth outcome changes.
+- `api/oauth.py`: a failed JWKS fetch logs `OAuth JWKS fetch failed` with the failure kind, the message (JWKS URI redacted to scheme://host/path), elapsed seconds, timeout, `force_refresh` and whether keys were cached; a payload with no `keys` list logs as `MalformedJWKS`. Process-wide `JWKS_REFRESH_STATS` counts failures.
+- `api/auth.py`: an OAuth `server_error` 503 logs the request id the client receives, the path, the detail and the cause's type.
+- `api/production_routes.py`: `/readyz` adds an `oauth_jwks` block (`refresh_failures`, `last_failure_at`, `last_failure_kind`), per process and never affecting readiness.
+- `docs/runbooks/oauth-remote-mcp-checklist.md`: failure-mode row for the 503. The original `deploy/RUNBOOK.md` section was deployment-specific, and that file no longer lives in this repo.
+- Tests: new `tests/test_oauth_jwks_diagnostics.py`.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
 
-Menhir's beacon intent holds only what a maintainer has to say: purpose, problem, non-goals,
-audiences, current focus, the entry docs and plans in reading order, and the areas an agent must
-not change without review. Everything else is read at build time from the repository, git and
-Menhir's evidence (workspace plan `beacon-near-zero-authoring-plan-2026-09-23.md`).
+## 2026-10-21 - Split 27 oversized modules that main has not changed since the file-size branch
 
-- `AGENTS.md`: five rules wrapped in `<!-- beacon:guardrail -->` markers (no secrets, extend the
-  canonical contracts, incomplete indexes are inconclusive, CI before publication, live tests
-  are opt-in); the wording is unchanged. Beacon cites and pins them exactly.
-- `docs/roadmap/menhir-mvp-roadmap.md`: frontmatter `status: superseded` (superseded by the
-  local-stdio MVP release plan), so the beacon reads the status from the document itself.
-- A comprehensive hand-written version (13 concepts, 20 docs, 13 cited guardrails, project
-  state) is kept at commit `dd73b1b9` as the golden reference. With Beacon P0/P1, the overlay plus
-  Menhir's own files matches it on identity, purpose, non-goals, audiences, review areas and
-  commands; guardrails come from `AGENTS.md` markers and `SECURITY.md` (6 of 13); concepts and most
-  project state await Menhir's evidence and the forge adapter.
-- `beacon validate --intent`: 0 errors. `beacon.generated.yaml` is committed once production
-  Menhir can supply the bound evidence.
+- Ports part of `refactor/file-size-refactor` (2802ebb): only the 27 originals whose pre-split text is identical to main's. Each keeps its name and re-exports what moved, so no import site changes; moved code lives in 87 new sibling modules. 16 `src/menhir` modules (`api/oauth_authorize`, `cli`, `core/runtime_preflight`, `domain/{artifact_reconciliation,projection_coverage,scalar_dependency_evidence}`, `explorer/{extraction_lab,recall_packet_prototype}`, `infrastructure/{evidence_publication_intents,graph_operations,projection_lifecycle_repository}`, `infrastructure/telemetry/{event_store,lifecycle_store,recall_store}`, `snapshot/{protocol,receive}`), 6 services (`correlation_service`, `deterministic_scalar_extractor`, `metric_write_coordinator`, `research_scalar_isolated_adapter`, `saga_reconcile_dispatcher`, `structural_scalar_composer`) and 5 scripts.
+- Every top-level definition of main's originals appears unchanged (AST-equal) in the split, except class bodies that became mixin bases (each method unchanged), `__all__` additions, and lookups routed through the original module so existing monkeypatch seams still apply. Extracted Cypher constants equal the original inline queries.
+- Fixes two defects in the branch's split: `EvidencePublicationIntentRepository` regains `@dataclass(frozen=True)` (its constructor was lost), and `telemetry/recall_store.py` keeps its module `logger`.
+- Not ported: the 75 other split targets (changed on main since, or no longer present); they need a fresh split.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
 
-## 2026-09-22 - project identity lives only in the graph; Menhir writes nothing into a checkout
+## 2026-10-21 - Two-tier self identity: an inferred user tier behind MENHIR_INFERRED_SELF_MODE
 
-Menhir no longer creates, changes or deletes `.agent/project-id`, `.agent/.gitignore` or a lock
-file in any project (CF-257's per-checkout identity file is retired).
+- New setting `MENHIR_INFERRED_SELF_MODE` (`off` default, `observe`, `enforce`; unrecognized falls back to `off`). With `enforce`, an episode that cannot reach the anchored speaker marker (agent-written memories, agent-quoted user statements) is offered a Menhir-allocated `MenhirInferredUser_` marker, and what the model attaches to it lands on one inferred self per namespace (`user-inferred`, `entity_role=inferred_self`, `self_tier=inferred`, never `is_self`) instead of a new ordinary "user" node (#343). `observe` records what would have been offered and binds nothing.
+- `domain/self_identity.py`, `infrastructure/self_binding.py`, `infrastructure/graphiti_extraction_policy.py`: inferred uuid, envelope and offer gate; `bind_inferred_self` with full rollback; one marker per prompt, never alongside the anchored marker; foreign or duplicate markers are quarantined; a marker prefix already present in the episode text withdraws the offer. Under `enforce`, an `agent_quoted` evidence projection no longer binds to the anchored self (with the mode `off` that path is unchanged).
+- `infrastructure/graphiti_resolution_policy.py`, `infrastructure/correlation_queries.py`, `domain/merge_eligibility.py`, `infrastructure/episode_lifecycle.py`: the inferred node is never a dedup candidate, never merges in either direction, and is not reported as a self fork. `link_self_tiers` draws a fact-less `INFERRED_VIEW_OF` edge from the anchored self to the inferred self.
+- Recall (`services/recall_pipeline.py`, `services/recall_policies.py`, `mcp/formatters.py`): with the mode on, first-person queries admit the inferred self to the View gate (event-history authority stays anchored-only), self entities carry `self_tier`, and an inferred fact whose near-duplicate is visible on the anchored self is dropped from that result, with the anchored fact marked `corroborated`.
+- Ingest (`services/ingest_worker.py`, `services/ingest_queue.py`, `infrastructure/episode_lifecycle.py`, `infrastructure/schema.py`): under `enforce`, a client episode whose text is exactly its single admitted turn's text finishes READY without extraction while that turn's projection is not FAILED (`extraction_skipped_for`); if the projection fails or is deleted, lease recovery (on every pass, whatever the mode) and the projection's own failure path return the client to PENDING, once (`verbatim_skip_revoked`). New index `episodic_extraction_skipped_for_idx`.
+- `scripts/report_self_forks.py`: read-only per-fork review report (facts, source episodes) and an approval manifest template, all unapproved. Folding approved forks into the inferred tier stays blocked until a journaled consolidation tool exists.
+- E2E-19 gains `two_tier_self` on a backend opted into `enforce`; the deterministic provider answers the inferred marker for one agent-written fixture sentence.
+- `.agent/default-off-features.md`: lists the new mode.
+- Tests: new `tests/test_inferred_self_tier.py`, `tests/test_inferred_self_tier_live.py`, `tests/test_inferred_self_recall.py`, `tests/test_verbatim_skip_worker.py`, `tests/test_verbatim_skip_live.py`, `tests/test_report_self_forks_live.py`.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
 
-- A directory resolves silently only when this host's active binding names it AND the checkout is
-  the one the binding recorded: the same `origin` (`""` for none). The binding now records
-  `bound_repository` on create and on every transfer.
-- A legacy binding (no recorded repository) is verified once by the legacy `.agent/project-id`
-  naming the same id, which is only read; the repository is then recorded and the file is never
-  consulted again. Without a matching file it is a decision (`legacy_binding_unverified`).
-- Everything else is a decision, as before: an unbound directory (`directory_not_bound`, the old
-  file's id offered as an adopt candidate for a moved checkout), or another repository in a bound
-  directory (`repository_changed`). A malformed legacy file is ignored, not fatal.
-- Removed: minting, the ignore rule, the `.agent/.gitignore` publication lock, and the publication
-  recovery marker functions. Transfers serialize on the graph (one statement, root constraint).
-- Scanner schema 9: `.agent/project-id` is scan-invisible (existing projects re-scan once).
-- With no file to read, the id comes from Menhir: `ingest_project` reports it
-  (`Scanned shop (project_id=...)`, also when skipped), and `get_beacon_evidence` accepts the
-  checkout's `repository` origin instead of an id, serving the one project that recorded it and
-  refusing with the list when several checkouts match. The tool census and client-policy digest
-  are unchanged (a parameter, not a tool). Lookup refusals are MCP error results, like
-  evidence refusals.
+## 2026-10-21 - Fresh-install and checkout-config E2E lanes; state-dir .env fallback
 
-## 2026-09-22 - Beacon provider: README descriptions; Beacon output no longer dirties the index
+- `env_file.py`: `resolve_env_file` falls back to `state_dir()/.env` after `ENV_FILE` and `./.env`, so a wheel install configured by `menhir setup` reads its settings from any cwd (`menhir serve` and the stdio bridge included). `docs/post-install.md` states the order.
+- `tests/e2e/_harness/features.py`: every flag default comes from `menhir.config.feature_flags.FEATURES` by env var, and the Warden gate, contradiction interrupt and source memories are registered. `mvp_default` now matches shipped defaults, so explorer, the experience counter and detailed revisions run on there.
+- New lane E2E-19 (`tests/e2e/test_e2e_19_fresh_install.py`, harness `tests/e2e/_harness/fresh_install.py`, #168 item 59): a fresh wheel install on shipped defaults (temp HOME, no `ENV_FILE`, no benchmark mode or flags) through setup, `menhir up`, the README client, ingest, Warden-gated recall, correction, restart, opt-out and restore, and canonical-self binding: an admitted first-person user turn binds to the canonical self node under the default `enforce` (fact rewritten to `user`, no speaker marker left) and does not under `off`. The deterministic provider (`tests/e2e/_harness/providers.py`) answers the speaker marker for that fixture sentence only; `MENHIR_E2E_CHAT_BASE_URL`/`MENHIR_E2E_CHAT_MODEL` send chat to a real model for a manual pass.
+- New lane E2E-20 (`tests/e2e/test_e2e_20_checkout_config.py`, #168 item 60): `setup --repo` copies `.env.example` with every flag commented, the template's documented defaults equal the code's, checkout and state-dir configs resolve to the same settings, and an upgrade from the v0.2.3 release wheel (downloaded, digest pinned) keeps the `.env` byte-identical through a setup rerun, apart from setup filling blank local URL/model keys with their defaults, while unset flags take the new defaults and pinned ones hold.
+- `.env.example`: `MENHIR_PERSONAL_MEMORY_CONSOLIDATION_AUDIT_ENABLED` gets its own commented default (`false`). Its only mention was wrapped prose that read as a commented `=true.` default, which E2E-20 caught.
+- `tests/e2e/_harness/ci_evidence_gate.py`: both lanes are required.
+- Tests: new `tests/test_env_file_state_dir_fallback.py`. Changed: `test_resolve_env_file_prefers_ENV_FILE_then_cwd` in `tests/test_env_file_and_neo4j_probe.py` pins an empty `MENHIR_STATE_DIR` so a developer's `~/.menhir/.env` cannot satisfy its None case.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
 
-Found by running Beacon's build against a local Menhir (plan Phase 3A exit check).
+## 2026-10-20 - Turn the Warden gate and its contradiction guard on by default
 
-- A repository with neither `.agent/README.md` nor `CLAUDE.md` is described by the first
-  paragraph of its own `README.md`, so Beacon evidence no longer refuses a plain repository.
-  Scanner schema 8 re-scans existing projects once to pick this up.
-- The index's dirty flag ignores Beacon's own root artifacts (`beacon.generated.yaml` and its
-  staging files), the same set the scanner never reads, so publishing a beacon does not make the
-  next index unservable. Any other change, or a rename touching another path, is still dirty;
-  unparseable git status is dirty.
-- `get_beacon_evidence` returns a refusal as an MCP error result (`isError`) with the reason, so
-  Beacon can tell it from evidence. New `McpToolRefusal` in the call tracker; every other tool's
-  failure keeps its "Error: ..." text.
+- `config/settings_model.py`, `config/feature_flags.py`, `domain/retrieval_tuning.py`, `.env.example`: `frontier_warden_gate` and `frontier_contradiction_interrupt` default true (#173). Installs that leave them unset, fresh or upgraded, get scope and Oracle admission and the contradiction interrupt on recall; set either to false to opt out.
+- The belief gate stays opt-in. It marks an Entity superseded when any of its fact edges expired; with git, test or log evidence that scores as a conflict, and the contradiction guard then refuses the entity under the current lens, including for history questions the Warden's lens reads as current. Follow-up: #350.
+- The evidence anchor stays opt-in, and `RetrievalTuningConfig.enable_evidence_anchor` now defaults false to match the setting (it was true). It reads provenance from the client label, so it refuses ordinary conversation; reimplementation is #349.
+- `explorer/recall_lab.py`: `RecallLabTuning` follows the new defaults; arms D-H pin their guards explicitly so their meaning does not change (D stays the strict profile with the anchor on).
+- Verifier sync is not a Warden and stays opt-in.
+- `.agent/default-off-features.md`: the two settings move to a "graduated to default-on" section; the belief-gate row records why it stays opt-in; the evidence-anchor row cites #349.
+- Tests: `tests/test_settings.py`, `tests/test_release_config_upgrade.py` and `tests/test_recall_service.py` assert the new defaults; new tests that each Warden default opts out through its env var, and that default recall keeps a git-backed entity with one expired fact edge (the belief gate refuses it). Tests that relied on the old defaults now pin them explicitly: `tests/test_recall_service.py`, `tests/test_warden_execution_status.py` (which also checks that default recall is `applied` without the anchor), `tests/test_warden_verifier_interactions.py` and `tests/test_git_staleness_recall_e2e.py`.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
 
-## 2026-09-22 - Menhir serves Beacon memory evidence as a read-only provider
+## 2026-10-20 - Default canonical-self binding to enforce
 
-Beacon now owns all beacon work and defines a backend-neutral memory-provider contract (Beacon
-`7a94fb0`). This is Menhir's side of it (plan Phase 3A); nothing here writes into a project.
+- `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: `canonical_self_binding_mode` defaults to `enforce` (owner decision for #169). Installs that leave it unset, fresh or upgraded, now bind declared user subjects to the canonical self; pin `off` to opt out. An unrecognized value still falls back to `off`.
+- Existing same-named "user" forks are left in place and logged as `SELF_FORKS_REQUIRE_MIGRATION`; there is still no consolidation tool. Turning `enforce` back to `off` is safe while no consolidation has run.
+- Known cost: agent-written memories that repeat user facts store them on a separate "user" entity, so recall can return both (#343).
+- `.agent/workflows/canonical-self-migration-runbook.md`, `.agent/default-off-features.md`: record the new default; the runbook's activation canary applies to the first deploy that picks it up.
+- Tests: `tests/test_self_binding.py` and `tests/test_release_config_upgrade.py` assert the new default; new upgrade test for unset versus pinned modes.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
 
-- The project scan records the git binding it describes: indexed commit, origin URL (credentials
-  stripped) and a dirty flag, read before and after the walk. It crosses the upload boundary and
-  is written in the same project-node write as the scan fingerprint.
-- Both fingerprint-skip paths (ingest, structure watcher) refresh only the binding when the files
-  are unchanged but the commit moved, and write nothing when it is already current.
-- `build_provider_evidence` reads the graph only and returns `beacon-memory-evidence-1.1`. It
-  refuses an unknown or ambiguous id, a partial or in-progress index, an index taken without git
-  or from a dirty checkout, and a re-index during the read. It sets no `project.status` (Menhir
-  does not judge maturity).
-- MCP tool `get_beacon_evidence(project_id)`: readonly tier, `menhir:read`, read-only, GLOBAL
-  like the structure graph it reads. Added to the agent allow-list and every production client;
-  `deploy/client-policy.production.json` digest is now
-  `04abc7bdf5d59d31e497dcefb9d431c06cf6cb0f34d395469391fabd77fbb0aa` -- a release must ship it.
-- `menhir beacon generate` is unchanged; Phase 3B removes it after Beacon's lane passes against
-  this provider.
+## 2026-10-20 - Turn Oracle ranking and the intent lens on and remove their flags
 
-## 2026-09-21 - a tracked-write receipt can be traced to its enriched episode (#92)
+- `domain/retrieval_tuning.py`: `enable_oracle_ranking` and `enable_intent_lens` default true. They stay per-request knobs for Recall Lab comparisons; there is no deployment flag.
+- `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: remove `frontier_oracle_ranking` / `MENHIR_FRONTIER_ORACLE_RANKING` and `frontier_intent_lens` / `MENHIR_FRONTIER_INTENT_LENS`; both are listed in `RETIRED`. A deployment that still sets them gets the new default.
+- `services/assertion_pipeline.py`: score ties keep the caller's order instead of candidate-id order, so an oracle outage (every oracle neutral) leaves recall order unchanged.
+- `services/recall_pipeline.py`: the frontier only writes the Warden receipt when a guard is configured, so default recall still reports `disabled` with no notice. With only the contradiction or currentness guard configured, the receipt now reads `computed_not_applied` (the chain runs because Oracle ranking does).
+- `explorer/recall_lab.py`: the Production arm follows the new default; the facet-only arm turns Oracle ranking and the intent lens off explicitly.
+- Tests: `tests/test_settings.py`, `tests/test_release_config_upgrade.py`, `tests/test_warden_safety_matrix.py`, `tests/test_recall_service.py` and `tests/e2e/_harness/features.py` updated for the new default; new tests for default recall's Warden receipt and for tie order.
+- Evidence and follow-ups: #172; remaining AMA checks in #345; diversity gate stays opt-in (#344).
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
 
-Every write leaves two `:Episodic` nodes: Menhir's receipt (the `episode_id` a caller is handed;
-carries `processing_*`) and the node Graphiti mints inside `add_episode` (carries the MENTIONS
-edges). That is by construction -- Menhir cannot pass a uuid into Graphiti -- and it is not double
-LLM cost. What it broke was traceability: `get_provenance` named only the Graphiti twin, so an
-agent holding its receipt could not match provenance to its own write. E2E-2 reproduced it.
+## 2026-10-18 - Keep scalar View text out of the shared keyword index
 
-**The link already existed, one-way, and nobody surfaced it.** `mark_episode_ready` has recorded
-the Graphiti uuid on the receipt as `resolved_episode_uuid` since the anchor design; the entity
-count on `POST /api/memory` already resolved through it. So the change is exposure, not schema:
-
-- `get_provenance` lists `episode_id` (the receipt) beside `uuid` (the twin) for every episode,
-  resolved by a reverse lookup on `resolved_episode_uuid` in `fetch_node_receipts`. Null for
-  episodes enriched before the anchor recorded it -- honest, not hidden.
-- `get_enrichment_status` reports `enriched_episode_uuid` so the pair is reachable from the
-  receipt side too. Either id gets you the other.
-- No new relationship, no migration, no backfill; the index for the lookup was already declared.
-- The issue's RCA attributes the twin to the evidence projection (`turn_evidence_uuid`). The
-  reproduction had none; the twin on the `add_memory_and_track` path is Graphiti's own node.
-- E2E-2 is re-selected in the `stdio-e2e` job and `provenance_reachable_from_receipt` now asserts
-  the structured field, not a substring. An online test proves the Cypher against a real graph.
-
-## 2026-09-21 - a backend refusal is an answer, not a crash (#132)
-
-`delete_namespace` refused correctly past its `max_nodes` cap, but MCP callers saw
-`500 Internal Server Error` instead of the tool's documented JSON error, and lost the
-"pass force=true, or dry_run=true first" guidance with it. Found by the E2E-8 isolation lane
-against a real stack; invisible to the unit suite.
-
-**The tools' `except ValueError` was dead code in HTTP mode.** `/api/internal/backend` mapped
-only `InvalidQueryPresetError` to a status and re-raised everything else, so a backend
-`ValueError` became a 500 before the tool could catch it. The named REST routes already mapped
-these; the generic dispatch the tools actually use did not -- the same per-site-fix shape CF-30
-recorded on this boundary.
-
-- `backend_invoke` now maps `PermissionError` -> 403 and `ValueError` -> 400 with the message
-  as `detail`; `BackendClient._request` re-raises them as the same exception types, so a tool
-  behaves identically in-process and over HTTP. Three tools wrap a backend call this way
-  (`delete_namespace`, `flag_memory`, `unflag_memory`); only the first was reproduced.
-- **Why 299 tests missed it, and what changed:** `httpx.ASGITransport` re-raises app
-  exceptions by default, so an in-process round-trip test could never see the 500 uvicorn
-  sends. The regression tests use a `raise_app_exceptions=False` transport and were confirmed
-  to fail on the pre-fix code; one runs the real `DeleteNamespaceTool` against the HTTP client.
-- **The named REST routes had the same hole, one layer up.** `POST /memory/{uuid}/flag` had no
-  mapping at all, so the structural-node refusal hit the catch-all and became 500 "An
-  unexpected server error occurred". An app-level `ValueError -> 400` handler now sits next to
-  the existing `PermissionError -> 403` one, so no route can be the one that forgot; a genuine
-  fault still gets the 500 and keeps its traceback, and a test pins both.
-- E2E-8 is re-selected in the `stdio-e2e` CI job. Its `capped_scan` criterion now requires the
-  documented JSON error rather than tolerating the 500, so a regression fails the job.
-
-## 2026-09-18 - Beacon generation switched to Beacon-owned build (issue #120 ownership switch)
-
-Menhir no longer maps Beacon manifest fields. The bespoke raw-manifest construction in
-`beacon_generation.py` (identity block, structure concept, doc selection, guidance block) is
-deleted; Menhir now supplies only what it owns and Beacon generates:
-
-- `beacon_evidence.py` (new) - dumps the versioned `beacon-menhir-evidence` v1.0 document from
-  the structure read surface (identity, documents, files, structure counts, scan fingerprint),
-  fail-closed on any index defect, deterministic for a frozen graph state. This is the single
-  boundary Beacon's `MenhirSourceAdapter` consumes.
-- `beacon_compat.py` (rewritten) - the compatibility gate is now the supported **build
-  contract** (`beacon build` + `beacon validate` present in the target interpreter), replacing
-  the brittle `beacon.__version__ == "0.1.0"` equality check that refused every post-0.1
-  implementation. The boundary runs the real Beacon CLI with fixed argv; generation streams
-  the manifest bytes from `beacon build --out -` so Menhir keeps publication ownership
-  unchanged (`beacon_publication.py`: prefix, lock, atomic replace, CAS refresh).
-- `beacon_generation.py` (rewritten) - evidence dump -> `beacon build` -> guarded publication.
-  Same public surface (`generate_beacon`, `GenerationOutcome`, refresh/`expected_sha256`
-  semantics) plus `GenerationOutcome.git_head`. Menhir refuses rather than invents: a project
-  whose scanner read no description (no `.agent/README.md` or `CLAUDE.md`) is refused instead
-  of publishing the `"<stack> project"` overview placeholder as its purpose; the raw scanner
-  value is now persisted on the project node as `indexed_description` for that check.
-- Freshness now covers git state. `beacon build --repo` runs Beacon's git tier, so the manifest
-  cites `git HEAD <sha>` and the `origin` URL; the scan fingerprint excludes `.git`. The
-  evidence guard captures is-a-repo/HEAD/origin alongside the graph fence and rechecks them
-  under the publication lock, so a HEAD move between capture and publish is refused like a
-  scan change and an empty commit counts as a change for refresh. Only `project.status` is
-  `experimental`; Beacon hard-codes `current` on concepts and canonical docs
-  (`docs/agent-usage.md` says so).
-- The Beacon child runs with an allowlisted environment (PATH, Windows runtime, home, temp,
-  locale, `PYTHONUTF8`-class switches only): `NEO4J_PASSWORD`, API keys and auth tokens loaded
-  by `load_menhir_env` no longer reach `--beacon-python` or the git it spawns.
-- Scanner-indexed documents publish `document_type`/`role` `generic` instead of the stringified
-  `None` (`query_documents` omits unset properties rather than stringifying them).
-- `menhir beacon generate` prints expected refusals (stale index, freshness/CAS, unusable
-  interpreter, Beacon failure, filesystem error) as one `beacon generate refused: ...` line
-  and exits 2; unexpected errors still propagate.
-- **Operational note: scanner schema 5 -> 7.** The version is part of the scan fingerprint, so
-  every stored fingerprint is invalidated and the next ingest of every project performs a full
-  re-scan. That re-scan adds `document` entities for the `.agent` orientation set (`README.md`,
-  `architecture.md`, and the rest of the A0 list) and stamps `indexed_description`, so overview
-  entity counts change once per project. Scanner-written `document` entities are now pruned on
-  rescan when the file is gone (`ingest_document` documents are untouched).
-- `tests/test_beacon_generation.py` rewritten for the new flow; `tests/test_beacon_evidence.py`
-  (graph-side fail-closed gates) and `tests/test_beacon_e2e6.py` (full Menhir MVP E2E-6:
-  Beacon-owned generation, validate/inspect, stdio overview/onboarding/concept queries,
-  claims-to-evidence tracing, deterministic rebuild, changed-fact isolation, serves without
-  Menhir) added. CI installs Beacon into an isolated venv pinned to the exact commit
-  `1cc3352b90004f3b76f1c5ed49ee4235c606a52f` (not a moving branch) and drops the
-  version-equality assert.
-- Requires a Beacon whose CLI supports build+validate (PR Archolith/beacon#10, stacked on #9).
-
-## 2026-09-17 - the shadow scan: structural parity, and the copy does not survive it
-
-The last P3 piece, and the only one that produces a result rather than a refusal. Its correctness
-question is different in kind: not "was the attack stopped" but "does scanning a snapshot remotely
-give the same answer as scanning the repository locally".
-
-**It calls the existing `ProjectScanner` rather than reimplementing one.** Parity is then true by
-construction and a surviving difference is a real one -- something the bundle dropped or the
-extraction changed -- instead of a disagreement between two scanners.
-
-**Local scanning is untouched, and that is asserted rather than claimed.**
-`project_scanner.py` is not modified; a test checks it against git, and the 196 pre-existing tests
-covering it pass unchanged.
-
-- The fingerprint excludes `root_path` (absolute), `file_mtime` (extraction writes new files),
-  `name` (the root is named for an upload) and the identity/self-fingerprint fields. Including any
-  would make every parity check fail for a reason unrelated to the snapshot -- worse than not
-  checking, because it trains a reader to ignore the result.
-- Every list is sorted. `os.scandir` promises no order and differs between filesystems, so an
-  unsorted fingerprint would differ between two scans of identical content.
-- **A test proves the exclusions did not make it blind**: dropping one source file still changes
-  the fingerprint. A digest that ignores enough to always match reports parity it never checked.
-- The materialised root is deleted after the report, including when the scan raises. A root that
-  outlives its report is an unattributed copy of somebody's repository sitting on a disk.
-- The report carries the three coverage counts and does NOT carry `partial_index` (invariant 4):
-  the counts are the source of truth and the derivation belongs to whoever can see the whole
-  picture.
+- Scalar Views (`scalar_state`, `scalar_history`) are `:Entity` nodes, so their text sat in Graphiti's `node_name_and_summary` full-text index. Lucene weighs terms across the whole index, so every View version shifted the keyword ranks of ordinary entities in every namespace. In the LME counting A/B the 4R count pass added 16 of them and pushed a summary entity from keyword rank 5 to 7, below the 0.15 similarity floor, and the answer went from 5 to 4.
+- `infrastructure/view_models.py`: new `ViewKind.keyword_indexed` (default true); false for `ScalarStateKind` and `ScalarHistoryKind`.
+- `infrastructure/view_write_repository.py`: for those kinds `record()` writes the surface into `view_name` / `view_summary` and leaves `name` / `summary` empty, on create and on the authoritative refresh. `content` keeps the summary (it is not indexed). Other kinds are written as before.
+- Readers return the moved text: `MEMORY_RETURN_FIELDS` and `ENTITY_METADATA_FIELDS` (`infrastructure/cypher.py`), `fetch_current_scalar_view_for_slot` (the name the authority lane renders), `list_views`, and the explorer's live scalar-state query.
+- `infrastructure/schema.py`: scalar activation moves indexed text on existing scalar Views (pre-change nodes, or an older writer during a rolling deploy) into `view_name` / `view_summary`. Idempotent; newer text wins.
+- Recall no longer finds scalar Views through keyword search. In the A/B outputs it never had: they reached answers only through the authority lane. Each View still counts toward its namespace's `group_id` term, which shifts every score in that namespace equally and leaves ranks alone.
+- Tests: new `tests/test_scalar_view_keyword_index_live.py` (online; fails on the old writer). `tests/test_scalar_state_view.py`: two assertions moved from `name` to `view_name`, because they pinned where the surface is stored.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.

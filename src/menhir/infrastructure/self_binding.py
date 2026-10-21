@@ -30,13 +30,20 @@ from typing import Any
 
 from menhir.domain.namespace import namespace_to_group_id
 from menhir.domain.self_identity import (
+    INFERRED_ENDPOINT_MARKER_PREFIX,
+    INFERRED_SELF_DISPLAY_NAME,
+    INFERRED_SELF_ENTITY_ROLE,
+    INFERRED_SELF_TIER,
     SUBJECT_ENDPOINT_MARKER_PREFIX,
     SelfEvidenceKind,
     SelfIdentityContext,
     eligible_self_evidence,
+    inferred_self_uuid_for_namespace,
     is_first_person_alias,
     is_self_alias,
+    normalize_logical_namespace,
     proves_self_subject,
+    self_uuid_for_namespace,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,8 +57,14 @@ __all__ = [
     "SelfBindOutcome",
     "SelfBindResult",
     "bind_canonical_self",
+    "bind_inferred_self",
     "resolve_bind_mode",
+    "resolve_inferred_mode",
 ]
+
+#: Inferred-tier marker scrub target. Fact prose reads naturally; only the node name carries the
+#: tier (plan Decision 5).
+_INFERRED_FACT_TEXT = "the user"
 
 
 class SelfBindMode(StrEnum):
@@ -76,6 +89,15 @@ def resolve_bind_mode(value: Any) -> SelfBindMode:
         logger.warning(
             "Unrecognized canonical_self_binding_mode %r; falling back to 'off'", value
         )
+        return SelfBindMode.OFF
+
+
+def resolve_inferred_mode(value: Any) -> SelfBindMode:
+    """Parse ``inferred_self_mode``; anything unrecognized fails safe to ``OFF``."""
+    try:
+        return SelfBindMode(str(value or "").strip().lower())
+    except ValueError:
+        logger.warning("Unrecognized inferred_self_mode %r; falling back to 'off'", value)
         return SelfBindMode.OFF
 
 
@@ -144,6 +166,8 @@ class SelfBindResult:
     #: subject provenance. This is an upper bound on nodes a span/attribution feature might resolve:
     #: quoted or reported speech can remain non-self even after provenance is added.
     first_person_unresolved: int = 0
+    #: ``anchored`` for canonical-self binding, ``inferred`` for the agent-inferred tier.
+    tier: str = "anchored"
 
     def telemetry_details(self, identity: SelfIdentityContext | None) -> dict[str, Any]:
         """Structured, privacy-safe record of one binding decision.
@@ -163,6 +187,7 @@ class SelfBindResult:
             "index_map_keys_merged": self.index_map_keys_merged,
             "self_like_without_subject_authority": self.self_like_without_subject_authority,
             "first_person_unresolved": self.first_person_unresolved,
+            "tier": self.tier,
         }
         if identity is not None:
             source_kind = str(identity.source_kind or "").strip().lower()
@@ -449,3 +474,143 @@ def bind_canonical_self(
         identity.speaker_role,
     )
     return result
+
+
+def _replace_marker(value: str, marker: str, replacement: str) -> str:
+    return re.sub(re.escape(marker), replacement, value, flags=re.IGNORECASE)
+
+
+def bind_inferred_self(
+    nodes: list[Any],
+    edges: list[Any],
+    index_map: dict[str, list[int]],
+    *,
+    namespace: Any,
+    keeper_uuid: str,
+    marker: str,
+) -> SelfBindResult:
+    """Rewrite the Menhir-allocated inferred-user node to the namespace's inferred-self identity.
+
+    Same all-or-nothing contract as :func:`bind_canonical_self`: the node, both edge directions,
+    marker text in edge prose and the episode index map change together or not at all. The
+    resulting node is named ``user-inferred`` and carries ``entity_role='inferred_self'`` and
+    ``self_tier='inferred'``; it never carries ``is_self``, so nothing keyed on the anchored tier
+    treats it as the human. Raises :class:`InvalidSelfSubjectDeclarationError` when the keeper is
+    missing, duplicated or in a foreign partition, and :class:`AmbiguousSelfBindingError` when
+    another node already holds either tier's deterministic UUID.
+    """
+    logical = normalize_logical_namespace(namespace)
+    inferred_uuid = inferred_self_uuid_for_namespace(logical)
+    anchored_uuid = self_uuid_for_namespace(logical)
+    if not str(marker or "").startswith(INFERRED_ENDPOINT_MARKER_PREFIX):
+        raise InvalidSelfSubjectDeclarationError("inferred bind requires an inferred marker")
+    keepers = [n for n in nodes if _node_uuid(n) == keeper_uuid and keeper_uuid]
+    if len(keepers) != 1:
+        raise InvalidSelfSubjectDeclarationError(
+            f"inferred keeper {keeper_uuid!r} must appear exactly once in the payload"
+        )
+    keeper = keepers[0]
+    expected_group = namespace_to_group_id(logical)
+    if str(getattr(keeper, "group_id", None)) != expected_group:
+        raise InvalidSelfSubjectDeclarationError(
+            f"inferred keeper belongs to physical group {getattr(keeper, 'group_id', None)!r}, "
+            f"expected {expected_group!r}; refusing to bind"
+        )
+    for node in nodes:
+        if node is not keeper and _node_uuid(node) in {inferred_uuid, anchored_uuid}:
+            raise AmbiguousSelfBindingError(
+                "a self-tier uuid is already held by another extracted node; refusing to bind"
+            )
+
+    original_uuid = _node_uuid(keeper)
+    original_name = getattr(keeper, "name", None)
+    attributes = getattr(keeper, "attributes", None)
+    original_attributes = dict(attributes) if isinstance(attributes, dict) else None
+    original_endpoints = [
+        (e, getattr(e, "source_node_uuid", None), getattr(e, "target_node_uuid", None))
+        for e in edges
+    ]
+    original_text = [
+        (e, attr, getattr(e, attr)) for e in edges for attr in ("name", "fact") if hasattr(e, attr)
+    ]
+    original_index_map = {k: list(v) for k, v in index_map.items()}
+
+    def _rollback() -> None:
+        try:
+            keeper.uuid = original_uuid
+            keeper.name = original_name
+            if original_attributes is not None:
+                keeper.attributes = original_attributes
+        except Exception:  # noqa: BLE001 - the raise below is what callers act on
+            logger.exception("Inferred-self rollback could not restore node identity")
+        for edge, source, target in original_endpoints:
+            try:
+                edge.source_node_uuid = source
+                edge.target_node_uuid = target
+            except Exception:  # noqa: BLE001
+                logger.exception("Inferred-self rollback could not restore an edge endpoint")
+        for edge, attr, value in original_text:
+            try:
+                setattr(edge, attr, value)
+            except Exception:  # noqa: BLE001
+                logger.exception("Inferred-self rollback could not restore edge text")
+        index_map.clear()
+        index_map.update(original_index_map)
+
+    try:
+        keeper.uuid = inferred_uuid
+        keeper.name = INFERRED_SELF_DISPLAY_NAME
+        stamped = dict(original_attributes or {})
+        stamped.pop("is_self", None)
+        stamped.update(
+            {
+                "entity_role": INFERRED_SELF_ENTITY_ROLE,
+                "self_tier": INFERRED_SELF_TIER,
+                "namespace": logical,
+            }
+        )
+        keeper.attributes = stamped
+        endpoints = 0
+        for edge in edges:
+            for attr in ("source_node_uuid", "target_node_uuid"):
+                if str(getattr(edge, attr, "") or "") == original_uuid:
+                    setattr(edge, attr, inferred_uuid)
+                    endpoints += 1
+        texts = 0
+        for edge in edges:
+            for attr in ("name", "fact"):
+                value = getattr(edge, attr, None)
+                if isinstance(value, str) and marker.casefold() in value.casefold():
+                    setattr(edge, attr, _replace_marker(value, marker, _INFERRED_FACT_TEXT))
+                    texts += 1
+        merged: list[int] = []
+        keys = 0
+        for key in (original_uuid, inferred_uuid):
+            indices = index_map.pop(key, None)
+            if indices is None:
+                continue
+            keys += 1
+            merged.extend(i for i in indices if i not in merged)
+        if merged:
+            index_map[inferred_uuid] = sorted(merged)
+    except Exception as exc:
+        _rollback()
+        raise AmbiguousSelfBindingError(
+            f"inferred-self binding failed partway for namespace {logical!r} and was rolled "
+            f"back: {exc}"
+        ) from exc
+
+    logger.info(
+        "Inferred self bound namespace=%s uuid=%s endpoints=%d edge_texts=%d index_keys=%d",
+        logical, inferred_uuid, endpoints, texts, keys,
+    )
+    return SelfBindResult(
+        outcome=SelfBindOutcome.BOUND,
+        mode=SelfBindMode.ENFORCE,
+        self_uuid=inferred_uuid,
+        rewritten_node_uuids=(original_uuid,),
+        edge_endpoints_rewritten=endpoints,
+        edge_texts_rewritten=texts,
+        index_map_keys_merged=keys,
+        tier=INFERRED_SELF_TIER,
+    )

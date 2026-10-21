@@ -70,7 +70,8 @@ class ArtifactStatus:
     DEFERRED = "DEFERRED"
 
 
-#: Reachable from any state of any type.
+#: Terminal states. SUPERSEDED is reached only through supersede_artifact,
+#: which also records the replacement edge; DEFERRED is a plain transition.
 #:
 #: SUPERSEDED means "a better answer exists"; DEFERRED means "we intentionally
 #: chose not to answer yet". Collapsing them would make "what is still
@@ -81,7 +82,8 @@ TERMINAL_ANY: frozenset[str] = frozenset({
     ArtifactStatus.DEFERRED,
 })
 
-#: Forward progressions per type. TERMINAL_ANY is additionally legal everywhere.
+#: Forward progressions per type. DEFERRED is additionally legal from every
+#: nonterminal state; SUPERSEDED needs the paired replacement edge.
 _FORWARD: dict[str, dict[str, frozenset[str]]] = {
     ArtifactType.PLAN: {
         ArtifactStatus.PROPOSED: frozenset({ArtifactStatus.REVIEWED}),
@@ -168,9 +170,12 @@ def can_transition(artifact_type: str, from_status: str, to_status: str) -> bool
     ``status_changed_at``, making an artifact look freshly moved when nothing
     happened. Terminal states are reachable from anywhere but lead nowhere --
     reopening a superseded plan means authoring a new one, which is what
-    SUPERSEDES is for.
+    SUPERSEDES is for. Creating SUPERSEDED requires the dedicated operation so
+    a terminal status cannot exist without its replacement edge.
     """
     if artifact_type not in _FORWARD:
+        return False
+    if to_status == ArtifactStatus.SUPERSEDED:
         return False
     if from_status == to_status:
         return False
@@ -188,12 +193,18 @@ def resolve_registration(artifact_type: str, status: str | None) -> str:
     delegates to. The asymmetry was the finding: ordinary transitions asked the domain, while the
     richer aggregate operations decided for themselves in infrastructure.
 
-    Raises ValueError with the same messages the repository raised, because they are the
-    registration contract's error surface and callers key on them.
+    Raises ValueError for an unsupported status or type. A source declaring
+    SUPERSEDED cannot be freshly registered by this plain create path because
+    that would produce a terminal artifact without replacement evidence.
     """
     if artifact_type not in ARTIFACT_TYPES:
         raise ValueError(f"unknown artifact_type: {artifact_type!r}")
     resolved = status or INITIAL_STATUS[artifact_type]
+    if resolved == ArtifactStatus.SUPERSEDED:
+        raise ValueError(
+            "SUPERSEDED requires a replacement artifact; register the source "
+            "without a terminal status and use supersede_artifact(new_uuid, old_uuid)"
+        )
     if resolved not in valid_statuses(artifact_type):
         raise ValueError(f"status {resolved!r} is not valid for {artifact_type!r}")
     return resolved
@@ -251,6 +262,10 @@ def namespace_compatibility_cypher(owner: str = "a", subordinate: str = "t") -> 
 #: Parameter names `supersession_cypher` binds. The repository must supply these.
 SUPERSESSION_PARAMS: dict[str, Any] = {
     "terminal": sorted(TERMINAL_ANY),
+    "valid_statuses_by_type": {
+        artifact_type: sorted(valid_statuses(artifact_type))
+        for artifact_type in ARTIFACT_TYPES
+    },
 }
 
 
@@ -262,10 +277,10 @@ def supersession_cypher(new: str = "new", old: str = "old") -> str:
     the MUTATION belongs in one Cypher statement. That was never a reason for the RULE to live
     there too, which is the distinction this finding turns on.
 
-    The rule, stated once: same type, not itself, the superseded artifact is not already in a
-    terminal state, and the namespaces are compatible. `TERMINAL_ANY` is the domain's own set, so
-    adding a terminal status now reaches this predicate instead of needing a second edit in
-    infrastructure that nobody would remember to make.
+    The rule, stated once: same known type, not itself, valid known statuses,
+    the superseded artifact is not already terminal, and compatible namespaces.
+    `TERMINAL_ANY` is the domain's own set, so adding a terminal status reaches
+    this predicate without a separate infrastructure edit.
 
     The fragment is a constant: `new` and `old` are Cypher variable names this codebase chooses,
     never caller input.
@@ -273,6 +288,9 @@ def supersession_cypher(new: str = "new", old: str = "old") -> str:
     return "\n              AND ".join([
         f"{new}.artifact_type = {old}.artifact_type",
         f"{new}.artifact_uuid <> {old}.artifact_uuid",
+        f"{new}.artifact_type IN $known_types",
+        f"{new}.status IN $valid_statuses_by_type[{new}.artifact_type]",
+        f"{old}.status IN $valid_statuses_by_type[{old}.artifact_type]",
         f"NOT {old}.status IN $terminal",
         namespace_compatibility_cypher(owner=new, subordinate=old),
     ])

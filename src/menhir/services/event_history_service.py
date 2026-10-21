@@ -37,6 +37,7 @@ from typing import Any, Iterable, Protocol
 from menhir.domain.event_history import (
     EventLane,
     TypedEventAssertion,
+    apply_event_corrections,
     # IDENTITY normalization, not query-text normalization (CF-72). This module compares
     # values against `EventLane.key`, which is built with this exact function; using the
     # whitespace-collapsing `normalize_text` here would make a stored predicate stop
@@ -250,6 +251,8 @@ class EventHistoryService:
                 excluded += 1
                 continue
             valid.append(a)
+        # A later correction replaces the one earlier entry it restates (#170 item 5).
+        valid = apply_event_corrections(valid)
 
         groups: dict[str, list[TypedEventAssertion]] = {}
         for a in valid:

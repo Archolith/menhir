@@ -10,22 +10,36 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from collections.abc import Sequence
 from typing import Any
 from uuid import uuid4
 
 from menhir.domain.bootstrap_scope import bootstrap_selection, normalize_bootstrap_scope
-from menhir.domain.namespace import normalize_namespace, namespace_spellings, namespace_to_group_ids
+from menhir.domain.namespace import (
+    normalize_namespace,
+    namespace_spellings,
+    namespace_to_group_ids,
+    tenant_scope_cypher,
+    tenant_scope_params,
+    tenant_scope_prefilter_cypher,
+)
 from menhir.domain.recall_visibility import default_recall_visibility_cypher
 from menhir.domain.structural_memory import non_structural_memory_cypher
+from menhir.domain.episode_nodes import menhir_queue_episode_cypher
+from menhir.domain.event_time import EVENT_TIME_PROPERTIES
 from menhir.domain.recall import adjacency_edge_pattern
 from menhir.infrastructure.cypher import (
     Cypher,
     ENTITY_METADATA_FIELDS,
     FACT_TEMPORAL_FIELDS,
+    FACT_TEXT_PRESENT,
     MEMORY_RETURN_FIELDS,
+    memory_recency_cypher,
+    non_derived_view_cypher,
     SHADOW_CANDIDATE_FACT_EDGE_FIELDS,
 )
 from menhir.infrastructure.neo4j import Neo4jRepository
+from menhir.infrastructure.verifier_repository import candidate_verifier_evidence_cypher
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +52,29 @@ ADMISSION_NO_TURNS = "no_turns"
 
 _OPAQUE_DIGEST_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,256}$")
 _DIGEST_KEY_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+def _lucene_quote(text: str) -> str:
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def fact_keyword_lucene_query(
+    phrases: Sequence[str], group_ids: list[str] | None
+) -> str | None:
+    """Lucene string for the edge fulltext index: OR of quoted phrases, optionally scoped by group.
+
+    Returns None when no non-empty phrase remains. The group clause is added only when every
+    group id is a non-empty string (Lucene cannot match an empty value); the caller still
+    filters group_id in Cypher.
+    """
+    quoted = [_lucene_quote(p) for p in phrases if p and p.strip()]
+    if not quoted:
+        return None
+    query = "(" + " OR ".join(quoted) + ")"
+    if group_ids and all(isinstance(g, str) and g for g in group_ids):
+        clause = " OR ".join(f"group_id:{_lucene_quote(g)}" for g in group_ids)
+        query = f"({clause}) AND {query}"
+    return query
 
 
 def _validated_evidence_tombstone_params(
@@ -196,8 +233,9 @@ class MemoryQueryRepository:
         query = (Cypher()
             .match("(n)")
             .where(*where)
+            .with_clause(f"n, {memory_recency_cypher()} AS recency")
             .return_fields(MEMORY_RETURN_FIELDS)
-            .order_by("coalesce(n.last_accessed, n.created_at) DESC, n.uuid")
+            .order_by("recency IS NOT NULL DESC, recency DESC, n.uuid")
             .limit()
             .build())
         return self.neo4j.execute(query, params=params)
@@ -233,8 +271,9 @@ class MemoryQueryRepository:
         query = (Cypher()
             .match("(n)")
             .where(*where)
+            .with_clause(f"n, {memory_recency_cypher()} AS recency")
             .return_fields(MEMORY_RETURN_FIELDS)
-            .order_by("coalesce(n.last_accessed, n.created_at) DESC, n.uuid")
+            .order_by("recency IS NOT NULL DESC, recency DESC, n.uuid")
             .limit()
             .build())
         return self.neo4j.execute(query, params=params)
@@ -312,8 +351,9 @@ class MemoryQueryRepository:
         query = (Cypher()
             .match("(n)")
             .where(*where)
+            .with_clause(f"n, {memory_recency_cypher()} AS recency")
             .return_fields(MEMORY_RETURN_FIELDS)
-            .order_by("coalesce(n.last_accessed, n.created_at) DESC, n.uuid")
+            .order_by("recency IS NOT NULL DESC, recency DESC, n.uuid")
             .limit()
             .build())
         return self.neo4j.execute(query, params=params)
@@ -332,8 +372,9 @@ class MemoryQueryRepository:
         query = (Cypher()
             .match("(n:Entity)")
             .where(*where)
+            .with_clause(f"n, {memory_recency_cypher()} AS recency")
             .return_fields(MEMORY_RETURN_FIELDS)
-            .order_by("coalesce(n.last_accessed, n.created_at) DESC, n.uuid")
+            .order_by("recency IS NOT NULL DESC, recency DESC, n.uuid")
             .limit()
             .build())
         return self.neo4j.execute(query, params=params)
@@ -367,6 +408,311 @@ class MemoryQueryRepository:
             },
         )
 
+    def search_episode_embeddings(
+        self,
+        query_vector: list[float],
+        *,
+        limit: int = 10,
+        namespace: str | None = None,
+        model: str | None = None,
+    ) -> list[dict[str, object]]:
+        """Cosine hits over Menhir `:Episodic` content embeddings (source-memory lane).
+
+        With ``model``, only vectors stamped by that embedder are compared: a different model of
+        the same dimension lives in a different space (audit F2).
+
+        Read-only; pairs with the ingest-side `set_episode_content_embedding` write.
+        Uses the same shared structural/visibility predicates and the shared
+        `tenant_scope_cypher` tenancy predicate as the rest of the domain ('' and 'default' are
+        the same silo; None is unscoped), so only memories generic recall could surface are
+        searched. Only
+        Menhir's own queue nodes match (`menhir_queue_episode_cypher`; `processing_state` alone
+        does not identify them -- the schema migration stamps it on Graphiti's episodes too, #215)
+        and FAILED enrichments are excluded. A
+        stale-dimension embedding is skipped by the size guard instead of erroring
+        the query. Evidence projections are excluded by
+        `non_structural_memory_cypher`.
+        """
+        safe_limit = max(1, min(limit, 50))
+        where = [
+            "n.content_embedding IS NOT NULL",
+            "size(n.content_embedding) = size($query_vector)",
+            menhir_queue_episode_cypher("n"),
+            "n.processing_state IS NOT NULL",
+            "n.processing_state <> 'FAILED'",
+            non_structural_memory_cypher("n"),
+            default_recall_visibility_cypher("n"),
+        ]
+        params: dict[str, Any] = {
+            "query_vector": query_vector,
+            "limit": safe_limit,
+            **tenant_scope_params(namespace),
+        }
+        if model is not None:
+            where.append("coalesce(n.content_embedding_model, '') = $embedding_model")
+            params["embedding_model"] = model
+        # menhir #171: when scoped, lead with the index-friendly prefilter so the planner can
+        # seek the :Episodic(namespace)/:Episodic(group_id) RANGE indexes. It is a superset;
+        # tenant_scope_cypher below still decides membership. Unscoped (None) is unchanged.
+        if namespace_spellings(namespace) is not None:
+            where.insert(0, tenant_scope_prefilter_cypher("n"))
+        where.append(tenant_scope_cypher("n"))
+        return self.neo4j.execute(
+            f"""
+            MATCH (n:Episodic)
+            WHERE {" AND ".join(where)}
+            WITH n, vector.similarity.cosine(n.content_embedding, $query_vector) AS cosine
+            WHERE cosine IS NOT NULL
+            RETURN n.uuid AS uuid, n.content AS content, n.source AS source,
+                   n.session_id AS session_id,
+                   toString(coalesce(n.reference_time, n.created_at)) AS reference_time,
+                   cosine
+            ORDER BY cosine DESC, n.uuid
+            LIMIT $limit
+            """,
+            params=params,
+        )
+
+    # --- Timeline navigation (recall_timeline, read-only) --------------------
+
+    def _timeline_episode_where(
+        self, *, namespace: str | None, params: dict[str, Any]
+    ) -> list[str]:
+        """The exact visible-episode predicates of `search_episode_embeddings`, minus
+        the embedding ones, plus the `valid_at` requirement of the total order (A1/A2).
+
+        Shared by `timeline_page` and `timeline_anchor` so the two can never drift.
+        Tenancy goes through the shared helpers only: `tenant_scope_prefilter_cypher`
+        FIRST when the namespace is scoped (same `namespace_spellings` check as #171),
+        `tenant_scope_cypher` always. No namespace/group_id comparison is spelled here.
+        """
+        # Timeline reads Graphiti's resolved :Episodic nodes (they carry valid_at, MENTIONS and the
+        # fact edges' `episodes` ids); Menhir's queue node carries reference_time, not valid_at, so
+        # `valid_at IS NOT NULL` selects one node per memory. processing_state is only guaranteed on
+        # the queue node, so it is NOT required here; explicit FAILED is still excluded.
+        where = [
+            "n.valid_at IS NOT NULL",
+            "coalesce(n.processing_state, '') <> 'FAILED'",
+            non_structural_memory_cypher("n"),
+            default_recall_visibility_cypher("n"),
+            # The memory still exists: a visible Menhir queue node resolves to this episode. Deleting
+            # or erasing a memory by its receipt (queue-node) uuid removes that twin, so the timeline
+            # stops showing the raw text even though Graphiti's episode survives (audit Q1 / #119).
+            # `episodic_resolved_episode_uuid_idx` backs the lookup. Evidence projections carry their
+            # flag on the queue node only, so the twin must also be non-structural (ADR 0001).
+            "EXISTS { MATCH (q:Episodic) WHERE q.resolved_episode_uuid = n.uuid AND "
+            + default_recall_visibility_cypher("q") + " AND " + non_structural_memory_cypher("q") + " }",
+        ]
+        params.update(tenant_scope_params(namespace))
+        if namespace_spellings(namespace) is not None:
+            where.insert(0, tenant_scope_prefilter_cypher("n"))
+        where.append(tenant_scope_cypher("n"))
+        return where
+
+    @staticmethod
+    def _timeline_match(subject_uuid: str | None) -> str:
+        """MENTIONS join when a subject thread is requested, plain episodes otherwise (A3)."""
+        if subject_uuid:
+            return "(s:Entity {uuid:$subject_uuid})<-[:MENTIONS]-(n:Episodic)"
+        return "(n:Episodic)"
+
+    _TIMELINE_RETURN = (
+        "n.uuid AS uuid, toString(n.valid_at) AS valid_at, "
+        "toString(n.created_at) AS created_at, n.content AS content, "
+        "n.session_id AS session_id, n.source AS source"
+    )
+
+    def timeline_page(
+        self,
+        *,
+        namespace: str | None,
+        subject_uuid: str | None = None,
+        after: tuple[str, str | None, str] | None = None,
+        before: tuple[str, str | None, str] | None = None,
+        window_from: str | None = None,
+        window_to: str | None = None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """One page of the recorded-time total order over visible episodes (A1/A3).
+
+        Order key is `(n.valid_at, coalesce(n.created_at, epoch), n.uuid)`; only
+        episodes with a non-null `valid_at` take part. `after`/`before` are exclusive
+        cursor keys `(valid_at_iso, created_at_iso, uuid)`; `before` queries DESC with
+        LIMIT and the returned rows are reversed so the caller always receives ASC.
+        Read-only: never touches `last_accessed`.
+        """
+        safe_limit = max(1, min(int(limit), 50))
+        params: dict[str, Any] = {
+            "limit": safe_limit,
+            "epoch": "1970-01-01T00:00:00Z",
+            "subject_uuid": subject_uuid,
+        }
+        where = self._timeline_episode_where(namespace=namespace, params=params)
+        if after is not None:
+            where.append(
+                "(n.valid_at > datetime($after_valid_at) "
+                "OR (n.valid_at = datetime($after_valid_at) AND "
+                "(coalesce(n.created_at, datetime($epoch)) > "
+                "coalesce(datetime($after_created_at), datetime($epoch)) OR "
+                "(coalesce(n.created_at, datetime($epoch)) = "
+                "coalesce(datetime($after_created_at), datetime($epoch)) AND "
+                "n.uuid > $after_uuid))))"
+            )
+            params["after_valid_at"] = after[0]
+            params["after_created_at"] = after[1]
+            params["after_uuid"] = after[2]
+        if before is not None:
+            where.append(
+                "(n.valid_at < datetime($before_valid_at) "
+                "OR (n.valid_at = datetime($before_valid_at) AND "
+                "(coalesce(n.created_at, datetime($epoch)) < "
+                "coalesce(datetime($before_created_at), datetime($epoch)) OR "
+                "(coalesce(n.created_at, datetime($epoch)) = "
+                "coalesce(datetime($before_created_at), datetime($epoch)) AND "
+                "n.uuid < $before_uuid))))"
+            )
+            params["before_valid_at"] = before[0]
+            params["before_created_at"] = before[1]
+            params["before_uuid"] = before[2]
+        if window_from is not None:
+            where.append("n.valid_at >= datetime($window_from)")
+            params["window_from"] = window_from
+        if window_to is not None:
+            where.append("n.valid_at <= datetime($window_to)")
+            params["window_to"] = window_to
+        desc = before is not None
+        direction = "DESC" if desc else "ASC"
+        query = f"""
+            MATCH {self._timeline_match(subject_uuid)}
+            WHERE {" AND ".join(where)}
+            RETURN {self._TIMELINE_RETURN}
+            ORDER BY n.valid_at {direction},
+                     coalesce(n.created_at, datetime($epoch)) {direction},
+                     n.uuid {direction}
+            LIMIT $limit
+        """
+        rows = self.neo4j.execute(query, params=params)
+        if desc:
+            rows.reverse()
+        return rows
+
+    def timeline_anchor(
+        self,
+        *,
+        uuid: str,
+        namespace: str | None,
+        subject_uuid: str | None = None,
+    ) -> dict[str, Any] | None:
+        """The anchor episode for `around` navigation, only if it is visible (A3).
+
+        `uuid` may be the Graphiti episode uuid or the memory's receipt uuid (Menhir's
+        queue node, which is what add_memory, recall_history and the source-memory
+        search return). A receipt uuid resolves through `resolved_episode_uuid` only
+        when that queue node is itself visible, non-FAILED and in the caller's silo.
+
+        Applies exactly the A2 predicates (and the MENTIONS join when a subject thread
+        is requested), so a hidden or foreign episode is indistinguishable from a
+        nonexistent one. Read-only.
+        """
+        params: dict[str, Any] = {
+            "anchor_uuid": uuid,
+            "epoch": "1970-01-01T00:00:00Z",
+            "subject_uuid": subject_uuid,
+        }
+        where = self._timeline_episode_where(namespace=namespace, params=params)
+        # Receipt uuid -> Graphiti episode uuid, resolved in-query so both kinds share
+        # one visibility/tenancy check on the anchor itself.
+        resolve = " AND ".join([
+            "a.uuid = $anchor_uuid",
+            menhir_queue_episode_cypher("a"),
+            "coalesce(a.processing_state, '') <> 'FAILED'",
+            default_recall_visibility_cypher("a"),
+            tenant_scope_cypher("a"),
+        ])
+        where.append("n.uuid = target_uuid")
+        query = f"""
+            OPTIONAL MATCH (a:Episodic) WHERE {resolve}
+            WITH coalesce(a.resolved_episode_uuid, $anchor_uuid) AS target_uuid
+            LIMIT 1
+            MATCH {self._timeline_match(subject_uuid)}
+            WHERE {" AND ".join(where)}
+            RETURN {self._TIMELINE_RETURN}
+            LIMIT 1
+        """
+        rows = self.neo4j.execute(query, params=params)
+        return rows[0] if rows else None
+
+    def timeline_facts(
+        self, *, episode_uuids: list[str], namespace: str | None, event_time: bool = False
+    ) -> dict[str, list[dict[str, Any]]]:
+        """RELATES_TO facts attached to the page's episodes, grouped per episode (A3).
+
+        Tenancy on the fact edge goes through `tenant_scope_cypher("r")` only. Bounded:
+        at most 50 episodes (clamped here) and 20 facts per episode, ordered by
+        `r.valid_at`. Read-only. With `event_time` (MENHIR_ANCHORED_TIME_RENDER) the anchored-time
+        contract is projected too and facts order by event-window start, falling back to valid_at.
+        """
+        safe_uuids = [u for u in episode_uuids if u][:50]
+        if not safe_uuids:
+            return {}
+        order_key = "r.valid_at"
+        contract_keys = ""
+        if event_time:
+            order_key = "coalesce(r.time_window_start, toString(r.valid_at))"
+            contract_keys = "".join(
+                f",\n                {name}: r.{name}" for name in EVENT_TIME_PROPERTIES
+            )
+        query = f"""
+            UNWIND $episode_uuids AS episode_uuid
+            MATCH (ep:Episodic {{uuid: episode_uuid}})-[:MENTIONS]->(:Entity)
+                  -[r:RELATES_TO]-(:Entity)
+            WHERE episode_uuid IN coalesce(r.episodes, [])
+              AND {tenant_scope_cypher("r")}
+            WITH DISTINCT episode_uuid, r
+            ORDER BY {order_key}
+            WITH episode_uuid, collect({{
+                fact: r.fact,
+                valid_at: toString(r.valid_at),
+                invalid_at: toString(r.invalid_at),
+                expired_at: toString(r.expired_at){contract_keys}
+            }})[0..20] AS facts
+            RETURN episode_uuid, facts
+        """
+        params: dict[str, Any] = {
+            "episode_uuids": safe_uuids,
+            **tenant_scope_params(namespace),
+        }
+        rows = self.neo4j.execute(query, params=params)
+        return {str(row["episode_uuid"]): list(row.get("facts") or []) for row in rows}
+
+    def resolve_timeline_subject(
+        self, *, subject: str, namespace: str | None
+    ) -> list[dict[str, Any]]:
+        """Resolve a subject thread anchor: an entity uuid or an exact case-insensitive
+        name among visible non-View `:Entity` nodes in scope (A3).
+
+        Returns up to 5 `{uuid, name}` candidates; the caller decides between unique,
+        ambiguous, and unknown. Read-only.
+        """
+        where = [
+            "(n.uuid = $subject OR (n.name IS NOT NULL AND toLower(n.name) = toLower($subject)))",
+            non_derived_view_cypher("n"),
+            default_recall_visibility_cypher("n"),
+        ]
+        params: dict[str, Any] = {"subject": str(subject).strip(), "limit": 5}
+        params.update(tenant_scope_params(namespace))
+        if namespace_spellings(namespace) is not None:
+            where.insert(0, tenant_scope_prefilter_cypher("n"))
+        where.append(tenant_scope_cypher("n"))
+        query = f"""
+            MATCH (n:Entity)
+            WHERE {" AND ".join(where)}
+            RETURN n.uuid AS uuid, n.name AS name
+            ORDER BY n.uuid
+            LIMIT $limit
+        """
+        return self.neo4j.execute(query, params=params)
+
     def search_assertion_embeddings(
         self,
         query_vector: list[float],
@@ -397,7 +743,9 @@ class MemoryQueryRepository:
                    a.subject_uuid AS subject_uuid, a.subject_display AS subject_display,
                    a.attribute AS attribute, a.scope AS scope, a.value_kind AS value_kind,
                    a.unit AS unit, a.namespace AS namespace, a.evidence_tier AS evidence_tier,
-                   a.operation AS operation, a.value AS value, toString(a.valid_at) AS valid_at
+                   a.operation AS operation, a.value AS value, toString(a.valid_at) AS valid_at,
+                   coalesce(a.count_object, '') AS count_object,
+                   coalesce(a.count_family, '') AS count_family
             ORDER BY cosine DESC, a.assertion_id
             LIMIT $limit
             """,
@@ -450,23 +798,95 @@ class MemoryQueryRepository:
         query = (Cypher()
             .match("(n:Entity)")
             .where("n.uuid IN $uuids")
-            .return_fields(metadata_fields)
+            .return_fields((*metadata_fields, candidate_verifier_evidence_cypher()))
             .build())
         return self.neo4j.execute(
             query,
             params={"uuids": node_uuids, "belief_commit_key": "belief_commit"},
         )
 
-    def fetch_temporal_facts(self, node_uuids: list[str]) -> list[dict[str, object]]:
-        """Fetch bi-temporal fact-edge state for candidate entity nodes."""
+    def fetch_temporal_facts(
+        self,
+        node_uuids: list[str],
+        *,
+        query_vector: list[float] | None = None,
+        namespace: str | None = None,
+    ) -> list[dict[str, object]]:
+        """Fetch bi-temporal fact-edge state for candidate entity nodes.
+
+        Only edges with fact text count: link edges without it would take the per-node slots
+        (and mark a node as having temporal facts for the belief gate).
+        With ``query_vector`` each row also carries ``fact_similarity`` (cosine of the
+        fact embedding to the query; null when the embedding is missing or mis-sized), and
+        the edges are tenant-scoped to ``namespace``: ranking by query similarity can pull
+        any edge on a hub node into the top slots, so it must not reach another silo's edge.
+        """
         if not node_uuids:
             return []
+        if query_vector is None:
+            query = (Cypher()
+                .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
+                .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT}")
+                .return_fields(FACT_TEMPORAL_FIELDS)
+                .build())
+            return self.neo4j.execute(query, params={"uuids": node_uuids})
+        similarity_field = (
+            "CASE WHEN r.fact_embedding IS NOT NULL "
+            "AND size(r.fact_embedding) = size($query_vector) "
+            "THEN vector.similarity.cosine(r.fact_embedding, $query_vector) "
+            "ELSE null END AS fact_similarity"
+        )
         query = (Cypher()
             .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
-            .where("n.uuid IN $uuids")
-            .return_fields(FACT_TEMPORAL_FIELDS)
+            .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT} AND {tenant_scope_cypher('r')}")
+            .return_fields([*FACT_TEMPORAL_FIELDS, similarity_field])
             .build())
-        return self.neo4j.execute(query, params={"uuids": node_uuids})
+        return self.neo4j.execute(
+            query,
+            params={"uuids": node_uuids, "query_vector": query_vector,
+                    **tenant_scope_params(namespace)},
+        )
+
+    def search_facts_by_keywords(
+        self,
+        phrases: Sequence[str],
+        namespace: str | None,
+        limit: int = 50,
+    ) -> list[dict[str, object]]:
+        """Keyword (Lucene) search over RELATES_TO fact text; rows feed _build_temporal_facts.
+
+        Tenancy is decided by tenant_scope_cypher (both default spellings); the Lucene group
+        clause is only a pre-filter so other tenants cannot crowd the fulltext limit.
+        """
+        lucene = fact_keyword_lucene_query(phrases, namespace_spellings(namespace))
+        if lucene is None:
+            return []
+        safe_limit = max(1, min(limit, 500))
+        return self.neo4j.execute(
+            f"""
+            CALL db.index.fulltext.queryRelationships('edge_name_and_fact', $q, {{limit: $limit}})
+            YIELD relationship AS r, score
+            WHERE {tenant_scope_cypher("r")}
+            RETURN r.uuid AS uuid, r.fact AS fact, score,
+                   startNode(r).uuid AS source_uuid, endNode(r).uuid AS target_uuid,
+                   toString(r.valid_at) AS valid_at,
+                   toString(r.invalid_at) AS invalid_at,
+                   toString(r.created_at) AS created_at,
+                   toString(r.expired_at) AS expired_at,
+                   r.group_id AS group_id,
+                   r.time_basis AS time_basis,
+                   r.time_expression AS time_expression,
+                   r.time_kind AS time_kind,
+                   r.time_granularity AS time_granularity,
+                   r.time_window_start AS time_window_start,
+                   r.time_window_end AS time_window_end,
+                   r.time_outcome AS time_outcome,
+                   r.time_speech_date AS time_speech_date,
+                   r.time_ambiguity AS time_ambiguity
+            ORDER BY score DESC
+            """,
+            params={"q": lucene, "limit": safe_limit, **tenant_scope_params(namespace)},
+        )
 
     def fetch_candidate_fact_edges(self, node_uuids: list[str]) -> list[dict[str, object]]:
         """Fetch fact-EDGE identity (not just node state) for candidate entity nodes.
@@ -485,7 +905,7 @@ class MemoryQueryRepository:
             return []
         query = (Cypher()
             .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
-            .where("n.uuid IN $uuids")
+            .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT}")
             .return_fields(SHADOW_CANDIDATE_FACT_EDGE_FIELDS)
             .build())
         return self.neo4j.execute(query, params={"uuids": node_uuids})
@@ -722,8 +1142,8 @@ class MemoryQueryRepository:
     def promote_memory(self, node_uuid: str) -> bool:
         """Promote a PERSISTENT memory to PROMOTED: operator-curated, verified ground truth (SSOT-08).
 
-        Distinct from user_flagged (importance to the user, auto-propagated,
-        decay-immune but still an ordinary claim): PROMOTED is a stronger,
+        Distinct from user_flagged (direct retention intent, decay-immune but still
+        an ordinary claim): PROMOTED is a stronger,
         deliberate curation action, never auto-set, meaning "this claim is
         verified and cannot be false." Confidence is pinned at 1.0 at
         promotion time; CorrelationService.classify_pair separately refuses
@@ -811,6 +1231,8 @@ class MemoryQueryRepository:
             "dependent_views_scrubbed": 0,
             "view_repairs_created": 0,
             "watermarks_reset": 0,
+            "event_assertions_deleted": 0,
+            "event_heads_deleted": 0,
             "repairs": [],
         }
 
@@ -855,6 +1277,12 @@ class MemoryQueryRepository:
                           MATCH (evidence)-[:MENTIONS]->(v)
                           WHERE (evidence:Episodic AND evidence.uuid = $node_uuid)
                              OR (evidence:TurnEvidence AND evidence.turn_id = $node_uuid)
+                      }
+                      // An event timeline shows its entries' text; the events below are deleted.
+                      OR EXISTS {
+                          MATCH (v)-[:EVENT_HISTORY_ENTRY]->(entry:TypedEventAssertion)
+                          WHERE entry.episode_uuid = $node_uuid
+                             OR entry.turn_evidence_uuid = $node_uuid
                       }
                   )
                 WITH fences, collect(DISTINCT v) AS dependent_views
@@ -959,10 +1387,10 @@ class MemoryQueryRepository:
                                 THEN [null] ELSE namespaces END AS ns
                     OPTIONAL MATCH (w)
                     WHERE (w:ConsolidationWatermark OR w:ScalarConsolidationWatermark
-                           OR w:EventConsolidationWatermark)
+                           OR w:EventConsolidationWatermark OR w:CountingConsolidationWatermark)
                       AND (coalesce(w.group_id, w.namespace, '') = ns
                            OR (ns = 'default'
-                               AND coalesce(w.group_id, w.namespace, '') = ''))
+                               AND coalesce(w.group_id, w.namespace, '') IN ['', '\\u0000null']))
                     WITH collect(DISTINCT w) AS watermarks
                     FOREACH (w IN watermarks | DETACH DELETE w)
                     RETURN size([w IN watermarks WHERE w IS NOT NULL]) AS watermarks_reset
@@ -1008,6 +1436,32 @@ class MemoryQueryRepository:
                 FOREACH (rb IN stale_rebinds | DETACH DELETE rb)
                 RETURN repairs, source_keys, assertions_deleted
             }
+            // Event assertions grounded on the target itself. Left in place they outlive their
+            // evidence and the lane's timeline rebuild fails closed on them (#170 item 5). Not
+            // via ADMITTED_ON: an admitted turn is erased by its own call, under its own fence.
+            CALL {
+                OPTIONAL MATCH (event:TypedEventAssertion)
+                WHERE event.episode_uuid = $node_uuid
+                   OR event.turn_evidence_uuid = $node_uuid
+                   OR EXISTS {
+                       MATCH (source)-[:FOUNDS|GROUNDS]->(event)
+                       WHERE (source:TurnEvidence AND source.turn_id = $node_uuid)
+                          OR (source:Episodic AND source.uuid = $node_uuid)
+                   }
+                WITH collect(DISTINCT event) AS doomed_events
+                OPTIONAL MATCH (event_head:TypedEventAssertionHead)
+                      -[:HAS_VERSION]->(head_event:TypedEventAssertion)
+                WHERE head_event IN doomed_events
+                  AND NOT EXISTS {
+                      MATCH (event_head)-[:HAS_VERSION]->(outside:TypedEventAssertion)
+                      WHERE NOT outside IN doomed_events
+                  }
+                WITH doomed_events, collect(DISTINCT event_head) AS event_heads
+                FOREACH (event IN doomed_events | DETACH DELETE event)
+                FOREACH (head IN event_heads | DETACH DELETE head)
+                RETURN size(doomed_events) AS event_assertions_deleted,
+                       size(event_heads) AS event_heads_deleted
+            }
             CALL {
                 OPTIONAL MATCH (n)
                 WHERE ((n:Entity OR n:Episodic) AND n.uuid = $node_uuid)
@@ -1035,6 +1489,8 @@ class MemoryQueryRepository:
                         n.processing_llm_active_kind = null,
                         n.processing_llm_active_model = null,
                         n.processing_llm_active_endpoint = null
+                    // The node is kept so the queue stops; the erased text is not.
+                    REMOVE n.content, n.content_embedding, n.content_embedding_model
                     RETURN 1 AS touched
                     UNION
                     WITH n
@@ -1052,18 +1508,21 @@ class MemoryQueryRepository:
             }
             WITH repairs, source_keys, assertions_deleted, memory_touched,
                  dependent_views_retired, dependent_views_scrubbed,
-                 view_repairs_created, watermarks_reset
+                 view_repairs_created, watermarks_reset,
+                 event_assertions_deleted, event_heads_deleted
             UNWIND CASE WHEN size(source_keys) = 0 THEN [null] ELSE source_keys END AS source_key
             OPTIONAL MATCH (h:TypedAssertionHead {source_key: source_key})
             WHERE source_key IS NOT NULL AND NOT (h)-[:HAS_VERSION]->(:TypedAssertion)
             WITH repairs, assertions_deleted, memory_touched, collect(h) AS orphan_heads,
                  dependent_views_retired, dependent_views_scrubbed,
-                 view_repairs_created, watermarks_reset
+                 view_repairs_created, watermarks_reset,
+                 event_assertions_deleted, event_heads_deleted
             FOREACH (h IN orphan_heads | DETACH DELETE h)
             RETURN assertions_deleted, memory_touched, repairs,
                    size([h IN orphan_heads WHERE h IS NOT NULL]) AS heads_deleted,
                    dependent_views_retired, dependent_views_scrubbed,
-                   view_repairs_created, watermarks_reset
+                   view_repairs_created, watermarks_reset,
+                   event_assertions_deleted, event_heads_deleted
             """,
             params={
                 "node_uuid": node_uuid,
@@ -1084,6 +1543,8 @@ class MemoryQueryRepository:
             "dependent_views_scrubbed": int(row.get("dependent_views_scrubbed", 0) or 0),
             "view_repairs_created": int(row.get("view_repairs_created", 0) or 0),
             "watermarks_reset": int(row.get("watermarks_reset", 0) or 0),
+            "event_assertions_deleted": int(row.get("event_assertions_deleted", 0) or 0),
+            "event_heads_deleted": int(row.get("event_heads_deleted", 0) or 0),
             "repairs": [dict(r) for r in (row.get("repairs") or [])],
         }
 
@@ -1270,10 +1731,10 @@ class MemoryQueryRepository:
                 UNWIND namespaces AS ns
                 OPTIONAL MATCH (w)
                 WHERE (w:ConsolidationWatermark OR w:ScalarConsolidationWatermark
-                       OR w:EventConsolidationWatermark)
+                       OR w:EventConsolidationWatermark OR w:CountingConsolidationWatermark)
                   AND (coalesce(w.group_id, w.namespace, '') = ns
                        OR (ns = 'default'
-                           AND coalesce(w.group_id, w.namespace, '') = ''))
+                           AND coalesce(w.group_id, w.namespace, '') IN ['', '\\u0000null']))
                 WITH collect(DISTINCT w) AS watermarks
                 FOREACH (w IN watermarks | DETACH DELETE w)
                 RETURN size([w IN watermarks WHERE w IS NOT NULL]) AS watermarks_reset

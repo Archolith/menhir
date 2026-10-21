@@ -74,6 +74,29 @@ def fake_backend():
     return backend
 
 
+def test_recall_preserves_verifier_review_warning(client, fake_backend) -> None:
+    memory = fake_backend.recall.return_value["results"][0]
+    memory.update(needs_review=True, review_reason="verifier value changed to false",
+                  review_flagged_at="2026-10-05T00:00:00Z")
+    response = client.post("/api/recall", json={"query": "config"})
+    assert response.status_code == 200
+    row = response.json()["results"][0]
+    assert row["needs_review"] is True
+    assert row["review_reason"] == memory["review_reason"]
+    assert row["review_flagged_at"] == memory["review_flagged_at"]
+    assert "current truth" in row["review_advisory"]
+
+
+def test_recall_preserves_verifier_observation_and_failed_probe(client, fake_backend) -> None:
+    evidence = dict(verifier_uuid="v1", register_subject="config", register_counter="enabled", value=0.0,
+                    display="false", last_verified_at="2026-10-05T00:00:00Z",
+                    last_probe_at="2026-10-05T01:00:00Z", last_probe_status="source_unavailable")
+    fake_backend.recall.return_value["results"][0]["verifier_evidence"] = [evidence]
+    response = client.post("/api/recall", json={"query": "config"})
+    assert response.status_code == 200
+    assert response.json()["results"][0]["verifier_evidence"] == [evidence]
+
+
 @pytest.fixture
 def fake_runtime_ctx():
     capabilities = SimpleNamespace(
@@ -91,6 +114,7 @@ def fake_runtime_ctx():
     graph_adapter = SimpleNamespace(
         list_dirty_namespaces=lambda *, limit=500: ["ns-bench"],
         count_turn_evidence=lambda ns: 2,
+        load_next_event_evidence_batch=Mock(return_value=[]),
         list_counters=lambda *, namespace=None, limit=100: [
             {"subject": "movies", "counter": "watchlist", "value": 20,
              "valid_at": "2026-07-01T00:00:00Z"},
@@ -369,33 +393,32 @@ class TestIngest:
         fake_backend.queue_episode.assert_awaited_once()
         assert fake_backend.queue_episode.await_args.kwargs["user_id"] == "remote-api"
 
-    def test_ingest_rejects_episode_over_hard_char_bound(self, client, fake_backend):
-        # 48_000 chars matches the default enrichment preflight (12000 tokens * ~4 chars).
-        resp = client.post("/api/memory", json={"episode": "x" * 48_001})
-        assert resp.status_code == 422
-        fake_backend.queue_episode.assert_not_awaited()
-
-    def test_ingest_accepts_episode_at_hard_char_bound(self, client, fake_backend):
-        resp = client.post("/api/memory", json={"episode": "x" * 48_000})
-        assert resp.status_code == 200
-        fake_backend.queue_episode.assert_awaited_once()
+    @pytest.mark.parametrize(
+        ("size", "expected_status"),
+        [(47_999, 200), (48_000, 200), (48_001, 422)],
+    )
+    def test_ingest_enforces_episode_hard_char_bound(
+        self, client, fake_backend, size, expected_status
+    ):
+        resp = client.post("/api/memory", json={"episode": "x" * size})
+        assert resp.status_code == expected_status
+        assert fake_backend.queue_episode.await_count == (1 if expected_status == 200 else 0)
 
     def test_ingest_rejects_empty_episode(self, client, fake_backend):
         resp = client.post("/api/memory", json={"episode": ""})
         assert resp.status_code == 422
         fake_backend.queue_episode.assert_not_awaited()
 
-    def test_ingest_rejects_diff_over_hard_char_bound(self, client, fake_backend):
-        # diff shares the episode bound's source: the compose path truncates at
-        # MAX_DIFF_CHARS (50_000), so the API refuses anything larger outright.
-        resp = client.post("/api/memory", json={"episode": "x", "diff": "d" * 50_001})
-        assert resp.status_code == 422
-        fake_backend.queue_episode.assert_not_awaited()
-
-    def test_ingest_accepts_diff_at_hard_char_bound(self, client, fake_backend):
-        resp = client.post("/api/memory", json={"episode": "x", "diff": "d" * 50_000})
-        assert resp.status_code == 200
-        fake_backend.queue_episode.assert_awaited_once()
+    @pytest.mark.parametrize(
+        ("size", "expected_status"),
+        [(49_999, 200), (50_000, 200), (50_001, 422)],
+    )
+    def test_ingest_enforces_diff_hard_char_bound(
+        self, client, fake_backend, size, expected_status
+    ):
+        resp = client.post("/api/memory", json={"episode": "x", "diff": "d" * size})
+        assert resp.status_code == expected_status
+        assert fake_backend.queue_episode.await_count == (1 if expected_status == 200 else 0)
 
     def test_ingest_with_explicit_session(self, client, fake_backend):
         resp = client.post(
@@ -426,6 +449,23 @@ class TestIngest:
             "ep-123",
             timeout_s=60.0,
         )
+
+
+    def test_ingest_forwards_user_statement(self, client, fake_backend):
+        resp = client.post(
+            "/api/memory",
+            json={"episode": "User has 20 coins", "user_statement": "I have 20 coins"},
+        )
+        assert resp.status_code == 200
+        assert fake_backend.queue_episode.await_args.kwargs["user_statement"] == "I have 20 coins"
+
+    def test_ingest_rejects_user_statement_with_turn_evidence_uuid(self, client, fake_backend):
+        resp = client.post(
+            "/api/memory",
+            json={"episode": "x", "user_statement": "I have 20 coins", "turn_evidence_uuid": "te-1"},
+        )
+        assert resp.status_code == 400
+        fake_backend.queue_episode.assert_not_awaited()
 
 
 class TestDeleteAndFlag:
@@ -532,6 +572,7 @@ class TestPhase3:
                 "abstained": 0,
                 "corrections_applied": 0,
                 "llm_calls": 6,
+                "scalar_llm_calls": 3,
                 "scalar_namespaces_processed": 1,
                 "scalar_states_written": 2,
                 "scalar_advisory": 1,
@@ -552,6 +593,7 @@ class TestPhase3:
         assert data["phase3_selected"] is True
         assert data["views_written"] == 2
         assert data["llm_calls"] == 6
+        assert data["scalar_llm_calls"] == 3
         assert data["scalar_enabled"] is True
         assert data["scalar_states_written"] == 2
         assert consolidate.await_args.kwargs["namespaces"] == ["ns-bench"]
@@ -576,6 +618,8 @@ class TestPhase3:
             )
         assert resp.status_code == 200
         assert consolidate.await_args.kwargs["enable_counter_state"] is False
+        assert consolidate.await_args.kwargs["enable_scalar_state"] is True
+        assert consolidate.await_args.kwargs["enable_event_history"] is False
 
     def test_run_503_when_no_chat_provider(self, client):
         with patch(
@@ -812,3 +856,83 @@ class TestBackendRefusalsOnNamedRoutes:
         resp = app_client.post("/api/memory/some-uuid/flag")
         assert resp.status_code == 500
         assert "neo4j" not in resp.text
+@pytest.mark.parametrize("state,note", [
+    ({"status": "completed"}, "not an outstanding obligation"),
+    ({"artifact_status": "historical", "superseded_by": "new"}, "not current guidance"),
+    ({"status": "open"}, None), ({}, None),
+])
+def test_rest_recall_preserves_lifecycle(client, fake_backend, state, note):
+    result = fake_backend.recall.return_value
+    result["results"][0].update(state)
+    response = client.post("/api/recall", json={"query": "test query"})
+    assert response.status_code == 200
+    item = response.json()["results"][0]
+    assert item["content"] == "Dog named Miso"
+    for key, value in state.items():
+        assert item[key] == value
+    if note:
+        assert note in item["lifecycle_note"]
+    else:
+        assert item.get("lifecycle_note") is None
+def test_rest_bootstrap_context_keeps_lifecycle_state(client, fake_backend):
+    state = {"artifact_status": "historical", "superseded_by": "replacement"}
+    fake_backend.recall.return_value["results"][0].update(state)
+    fake_backend.fetch_recent_memories.return_value[0].update(status="completed")
+    flagged = client.get("/api/bootstrap/flagged", params={"reader_id": "history-reader", "workspace": "alpha"})
+    assert flagged.status_code == 200
+    response = client.post("/api/bootstrap/context", json={
+        "reader_id": "history-reader", "workspace": "alpha", "namespace": "alpha", "query": "report",
+    })
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["relevant"][0]["superseded_by"] == "replacement"
+    assert "not current guidance" in payload["relevant"][0]["lifecycle_note"]
+    assert payload["recent"][0]["status"] == "completed"
+    assert "not an outstanding obligation" in payload["recent"][0]["lifecycle_note"]
+
+
+@pytest.mark.parametrize("pending", [[], [{"uuid": "unprocessed-evidence"}]])
+def test_phase3_reports_event_watermark_completion(client, fake_runtime_ctx, pending):
+    fake_runtime_ctx.built.settings.personal_memory_event_history_enabled = True
+    fake_runtime_ctx.built.settings.personal_memory_event_history_perceiver_version = "v9"
+    fake_runtime_ctx.built.graph_adapter.load_next_event_evidence_batch.return_value = pending
+    with patch("menhir.infrastructure.sync_llm.make_sync_chat", return_value=lambda *args: "[]"), \
+         patch("menhir.infrastructure.view_embedder.make_view_embedder", return_value=None), \
+         patch("menhir.services.scheduler_tasks.consolidate_personal_memory", new=AsyncMock(return_value={})):
+        response = client.post("/api/phase3/run", json={"namespace": "ns-bench", "counter_state": False})
+    assert response.status_code == 200
+    assert response.json()["event_dirty_after"] is bool(pending)
+    fake_runtime_ctx.built.graph_adapter.load_next_event_evidence_batch.assert_called_once_with(
+        "ns-bench", perceiver_version="v9", limit=1,
+    )
+
+
+@pytest.mark.parametrize("configured,requested", [(False, False), (False, True), (True, False), (True, True)])
+def test_phase3_counter_enabled_reports_both_gates(client, fake_runtime_ctx, configured, requested):
+    fake_runtime_ctx.built.settings.personal_memory_consolidation_enabled = configured
+    consolidate = AsyncMock(return_value={})
+    with patch("menhir.infrastructure.sync_llm.make_sync_chat", return_value=lambda *args: "[]"), \
+         patch("menhir.infrastructure.view_embedder.make_view_embedder", return_value=None), \
+         patch("menhir.services.scheduler_tasks.consolidate_personal_memory", new=consolidate):
+        response = client.post("/api/phase3/run", json={"namespace": "ns-bench", "counter_state": requested})
+    assert response.status_code == 200
+    assert response.json()["counter_enabled"] is (configured and requested)
+    assert consolidate.await_args.kwargs["enable_counter_state"] is (configured and requested)
+
+
+@pytest.mark.parametrize("show", [False, True])
+def test_recall_warden_status_is_opt_in_but_notice_is_always_visible(client, fake_backend, show):
+    fake_backend.recall.return_value.update(warden_status={"state": "failed"}, warden_notice="Warden checks failed.")
+    response = client.post("/api/recall", json={"query": "config", "include_warden_status": show})
+    assert response.status_code == 200
+    payload = response.json()
+    assert ("warden_status" in payload) is show
+    assert payload["warden_notice"] == "Warden checks failed."
+    assert fake_backend.recall.call_args.kwargs.get("include_warden_status", False) is show
+
+
+@pytest.mark.parametrize("show", [False, True])
+def test_context_forwards_optional_warden_status(client, fake_backend, show):
+    response = client.post("/api/context", json={"query": "config", "include_warden_status": show})
+    assert response.status_code == 200
+    assert fake_backend.build_context.call_args.kwargs.get("include_warden_status", False) is show

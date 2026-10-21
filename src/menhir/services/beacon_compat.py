@@ -89,7 +89,9 @@ def child_environment(parent: Mapping[str, str] | None = None) -> dict[str, str]
 def _run(beacon_python: str, args: list[str], *, cwd: Path | None, timeout: int) -> str:
     try:
         completed = subprocess.run(  # nosec B603 - fixed argv, no shell
-            [beacon_python, *args],
+            # -I removes repository imports and ignores Python env switches.
+            # -X utf8 keeps the captured CLI output decodable on Windows.
+            [beacon_python, "-I", "-X", "utf8", *args],
             capture_output=True,
             check=False,
             timeout=timeout,

@@ -237,6 +237,41 @@ def test_namespace_lookup_binds_only_after_local_failure():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("namespace", ["default", "tenant-a"])
+def test_ambiguous_local_exact_match_blocks_namespace_fallback(namespace):
+    rec, reb = _record_sink(), _rebuild_sink()
+    lookup = _lookup_seam([{"uuid": "ent-ns", "name": "black shoes"}])
+    out = bind_and_persist_typed_scalars(
+        [_decision(_prop(subject_text="my new black shoes"))],
+        linked_entities_for_episode=lambda e: [
+            {"uuid": "ent-a", "name": "my new black shoes"},
+            {"uuid": "ent-b", "name": "My New Black Shoes"},
+        ],
+        record_assertion=rec, rebuild_scalar_state=reb, now=lambda: _FIXED_NOW,
+        namespace=namespace, lookup_namespace_entities=lookup,
+    )
+    assert out["bound"] == 0 and out["advisory"] == 1 and reb.calls == []
+    assert rec.recorded[0].subject_uuid.startswith("unbound:")
+    assert lookup.calls == []
+
+
+@pytest.mark.unit
+def test_invalid_local_exact_match_blocks_namespace_fallback():
+    rec, reb = _record_sink(), _rebuild_sink()
+    lookup = _lookup_seam([{"uuid": "ent-ns", "name": "black shoes"}])
+    out = bind_and_persist_typed_scalars(
+        [_decision(_prop(subject_text="my new black shoes"))],
+        linked_entities_for_episode=lambda e: [
+            {"uuid": "  ", "name": "my new black shoes"},
+        ],
+        record_assertion=rec, rebuild_scalar_state=reb, now=lambda: _FIXED_NOW,
+        namespace="tenant-a", lookup_namespace_entities=lookup,
+    )
+    assert out["bound"] == 0 and out["advisory"] == 1 and reb.calls == []
+    assert lookup.calls == []
+
+
+@pytest.mark.unit
 def test_namespace_lookup_unique_fallback_binds():
     # local fails (no episode-linked survivor); the optional same-namespace lookup returns a UNIQUE
     # entity for the constrained spelling "black shoes" (from "my new black shoes") -> bound.
@@ -306,6 +341,23 @@ def test_repair_uses_namespace_lookup_fallback():
     assert reb.namespaces == ["tenant-a"]               # rebuilt in the row's namespace
     assert rec.recorded[0].subject_uuid == "ent-ns"
     assert lookup.calls[0][0] == "tenant-a"             # consulted in the ROW's namespace
+
+
+@pytest.mark.unit
+def test_repair_does_not_rebind_an_ambiguous_local_subject():
+    rec, reb = _record_sink(), _rebuild_sink()
+    lookup = _lookup_seam([{"uuid": "ent-ns", "name": "black shoes"}])
+    out = repair_pending_bindings(
+        [_pending_row(subject_display="my new black shoes", namespace="tenant-a")],
+        linked_entities_for_episode=lambda e: [
+            {"uuid": "ent-a", "name": "my new black shoes"},
+            {"uuid": "ent-b", "name": "My New Black Shoes"},
+        ],
+        record_assertion=rec, rebuild_scalar_state=reb,
+        lookup_namespace_entities=lookup,
+    )
+    assert out["repaired"] == 0 and out["still_pending"] == 1
+    assert rec.recorded == [] and reb.calls == [] and lookup.calls == []
 
 
 # ----------------------------------------------------------- constrained syntactic variant

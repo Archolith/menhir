@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import logging
 from dataclasses import dataclass, field
 from functools import partial
 from datetime import datetime
 from time import perf_counter
 from typing import Any
+from uuid import uuid4
 
 
 logger = logging.getLogger(__name__)
@@ -20,7 +22,6 @@ try:
     from graphiti_core.driver.neo4j_driver import Neo4jDriver
     from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
     from graphiti_core.llm_client.config import LLMConfig
-    from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
 except ModuleNotFoundError as exc:  # pragma: no cover - import guard
     Graphiti = Any  # type: ignore[assignment]
     OpenAIRerankerClient = None  # type: ignore[assignment]
@@ -28,41 +29,51 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import guard
     OpenAIEmbedder = None  # type: ignore[assignment]
     OpenAIEmbedderConfig = None  # type: ignore[assignment]
     LLMConfig = None  # type: ignore[assignment]
-    OpenAIGenericClient = None  # type: ignore[assignment]
     _GRAPHITI_IMPORT_ERROR = exc
+except ImportError as exc:
+    # Both upstream and the fork install into graphiti_core. A later upstream
+    # install may overwrite fork files and fail during graphiti_core.__init__,
+    # before our adapter can check the required symbol.
+    if "GraphitiRequestTooLargeError" not in str(exc):
+        raise
+    raise ImportError(
+        "graphiti_core is missing GraphitiRequestTooLargeError. Menhir requires "
+        "archolith-graphiti-core==0.30.2.post7; an older graphiti-core install may have "
+        "overwritten the fork's shared graphiti_core files. Use a fresh virtual environment "
+        "or uninstall both graphiti-core distributions before reinstalling Menhir "
+        "(see docs/post-install.md)."
+    ) from exc
 else:
     _GRAPHITI_IMPORT_ERROR = None
 
-from menhir.config import MemorySettings
-from menhir.infrastructure.circuit_breaker import CircuitBreaker
-from menhir.infrastructure.embedding_cache import get_embedding_cache
-from menhir.infrastructure.embedding_dimensions import expected_graphiti_embedding_dimension
-from menhir.infrastructure.observability import build_async_openai_client
-from menhir.infrastructure.providers import ProviderConfig, reset_client_cache
-from menhir.infrastructure.telemetry import record_lifecycle_event
-
-from menhir.infrastructure.graphiti_patches import (  # noqa: E402
-    _patch_graphiti_adaptive_dedupe,
-    _patch_graphiti_dedup_branch_telemetry,
-    _patch_graphiti_combined_extraction,
-    _patch_graphiti_combined_extraction_models,
-    _patch_graphiti_dedupe_resolutions,
-    _patch_graphiti_dedup_identity_gate,
-    _patch_graphiti_dedup_prompt,
-    _patch_graphiti_edge_none_fields,
-    _patch_graphiti_entity_record_group_id,
-    _patch_graphiti_entity_extraction,
-    _patch_graphiti_node_summary_none,
-    _patch_graphiti_none_replace,
-    _patch_graphiti_openai_generic_client as _patch_graphiti_openai_generic_client_impl,
-    _patch_graphiti_prompt_json,
-    _patch_graphiti_structural_candidate_isolation,
-    _patch_graphiti_summarize,
-    _patch_graphiti_untyped_attribute_preservation,
-    _safe_to_prompt_json,  # re-exported for test compatibility
+from menhir.config import MemorySettings  # noqa: E402
+from menhir.infrastructure.circuit_breaker import CircuitBreaker  # noqa: E402
+from menhir.infrastructure.embedding_cache import get_embedding_cache  # noqa: E402
+from menhir.infrastructure.embedding_dimensions import expected_graphiti_embedding_dimension  # noqa: E402
+from menhir.infrastructure.graphiti_extraction_policy import (  # noqa: E402
+    MenhirEdgeExpiryHook,
+    MenhirExtractionHook,
 )
+from menhir.infrastructure.graphiti_llm_adapter import (  # noqa: E402
+    MenhirOpenAIGenericClient,
+    _ProviderExtrasAsyncClient,
+    build_menhir_request_guard,
+)
+from menhir.infrastructure.model_profiles import resolve_model_profile  # noqa: E402
+from menhir.infrastructure.openai_calls import ResilientChatClient  # noqa: E402
+from menhir.infrastructure.graphiti_resolution_policy import (  # noqa: E402
+    MenhirCandidateFilterHook,
+    MenhirIdentityGateHook,
+    MenhirNodePreResolutionHook,
+    flush_resolution_telemetry,
+    install_entity_record_group_id_resolver,
+    menhir_resolution_hooks_installed,
+)
+from menhir.infrastructure.observability import build_async_openai_client  # noqa: E402
+from menhir.infrastructure.providers import ProviderConfig, reset_client_cache  # noqa: E402
+from menhir.infrastructure.telemetry import record_lifecycle_event  # noqa: E402
 
-__all__ = ["GraphitiClient", "_safe_to_prompt_json"]
+__all__ = ["GraphitiClient"]
 
 
 @contextlib.contextmanager
@@ -111,11 +122,60 @@ def _schedule_client_close(client: Any) -> asyncio.Task | None:
     return loop.create_task(aclose())
 
 
-def _patch_graphiti_openai_generic_client(max_request_estimated_tokens: int | None = None) -> None:
-    """Patch Graphiti's OpenAI-compatible client to handle loose JSON output."""
-    _patch_graphiti_openai_generic_client_impl(
-        OpenAIGenericClient, max_request_estimated_tokens=max_request_estimated_tokens
-    )
+def edge_expiry_hook_kwargs(enabled: bool, graphiti_cls: Any) -> dict[str, Any]:
+    """``Graphiti(...)`` kwargs for MENHIR_ANCHORED_TIME_EXPIRY: none when off.
+
+    With the flag on, an installed fork without ``edge_expiry_hook`` would silently keep
+    expiring ended facts, so startup refuses it instead.
+    """
+    if not enabled:
+        return {}
+    try:
+        params = inspect.signature(graphiti_cls.__init__).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if "edge_expiry_hook" not in params:
+        raise RuntimeError(
+            "MENHIR_ANCHORED_TIME_EXPIRY=true requires archolith-graphiti-core==0.30.2.post3 "
+            "or later (Graphiti(edge_expiry_hook=...)); the installed graphiti_core has no "
+            "edge_expiry_hook. Reinstall Menhir's pinned dependencies or turn the flag off."
+        )
+    return {"edge_expiry_hook": MenhirEdgeExpiryHook()}
+
+
+def preserved_edge_attributes_kwargs(
+    resolver_enabled: bool, expiry_enabled: bool, graphiti_cls: Any
+) -> dict[str, Any]:
+    """``Graphiti(...)`` kwargs that keep the anchored-time contract on duplicate restatements.
+
+    P3c: the contract properties and the world-end stamp survive a resolved duplicate, so a
+    restatement does not drop them and the expiry hook can read the stamp. With expiry on, a
+    fork without ``preserved_edge_attributes`` could expire a stored ended fact, so startup
+    refuses it; with only the resolver on, it warns and carries on.
+    """
+    if not resolver_enabled and not expiry_enabled:
+        return {}
+    try:
+        params = inspect.signature(graphiti_cls.__init__).parameters
+    except (TypeError, ValueError):
+        params = {}  # unknown signature counts as missing: refuse with expiry on
+    if "preserved_edge_attributes" not in params:
+        if expiry_enabled:
+            raise RuntimeError(
+                "MENHIR_ANCHORED_TIME_EXPIRY=true requires archolith-graphiti-core==0.30.2.post6 "
+                "or later (Graphiti(preserved_edge_attributes=...)); without it a restatement "
+                "can expire a stored ended fact. Reinstall Menhir's pinned dependencies or "
+                "turn the flag off."
+            )
+        logger.warning(
+            "Installed graphiti_core has no preserved_edge_attributes; the anchored-time "
+            "contract may be dropped by restatements. Upgrade to archolith-graphiti-core"
+            "==0.30.2.post6 or later."
+        )
+        return {}
+    from menhir.infrastructure.anchored_time_persist import PRESERVED_EDGE_ATTRIBUTES
+
+    return {"preserved_edge_attributes": PRESERVED_EDGE_ATTRIBUTES}
 
 
 @dataclass
@@ -205,25 +265,13 @@ class GraphitiClient:
                 "graphiti_core is required to construct a GraphitiClient from settings."
             ) from _GRAPHITI_IMPORT_ERROR
 
-        _patch_graphiti_prompt_json()
-        _patch_graphiti_combined_extraction()
-        _patch_graphiti_combined_extraction_models()
-        _patch_graphiti_entity_extraction()
-        _patch_graphiti_dedupe_resolutions()
-        _patch_graphiti_dedup_prompt()
-        _patch_graphiti_dedup_identity_gate()
-        _patch_graphiti_structural_candidate_isolation()
-        _patch_graphiti_untyped_attribute_preservation()
-        _patch_graphiti_dedup_branch_telemetry()
-        _patch_graphiti_adaptive_dedupe()
-        _patch_graphiti_openai_generic_client(
-            max_request_estimated_tokens=int(settings.graphiti_request_max_estimated_tokens)
-        )
-        _patch_graphiti_summarize()
-        _patch_graphiti_none_replace()
-        _patch_graphiti_entity_record_group_id()
-        _patch_graphiti_node_summary_none()
-        _patch_graphiti_edge_none_fields()
+        # Menhir policy rides entirely on the fork's explicit extension points:
+        # entity-record namespace inference via the fork's startup resolver seam,
+        # extraction/receipt/binding policy via SingleEpisodeExtractionHook,
+        # dedupe policy via the identity-gate / candidate-filter / node
+        # pre-resolution hooks, and request ceilings/telemetry via RequestGuard.
+        # No Graphiti symbol is rebound at runtime.
+        install_entity_record_group_id_resolver()
         llm_provider = ProviderConfig.for_graphiti_llm(settings)
         embed_provider = ProviderConfig.for_graphiti_embedder(settings)
         reranker_provider = ProviderConfig.for_graphiti_reranker(settings)
@@ -261,21 +309,71 @@ class GraphitiClient:
         )
 
         llm_client = None
+        anchored_time = None
+        anchored_time_attach = None
         if llm_enabled:
             # Pin temperature=0 for deterministic extraction and dedup.
             # Graphiti's DEFAULT_TEMPERATURE is 1, which permits high sampling
             # variance — live-traced as the root cause of stochastic entity
             # conflation (e.g. "the suburbs" merged into "Chicago" at ~3% rate).
-            llm_client = OpenAIGenericClient(
+            #
+            # Providers without native json_schema support run in json_object
+            # mode; the fork injects the response model's schema into the prompt
+            # for those instead of relying on API-side enforcement.
+            raw_llm_client = async_client
+            # DeepSeek is configured through the OpenAI-compatible `local` provider,
+            # so provider kind alone cannot identify its JSON-mode limitation.
+            model_profile = resolve_model_profile(
+                llm_provider.chat_model, endpoint=llama_base_url
+            )
+            structured_output_mode = model_profile.structured_output_mode
+            logger.info(
+                "Graphiti LLM model profile: %s (model=%s, structured_output_mode=%s)",
+                model_profile.name,
+                llm_provider.chat_model,
+                structured_output_mode,
+            )
+            llm_client = MenhirOpenAIGenericClient(
                 config=LLMConfig(
                     api_key=llm_provider.api_key,
                     base_url=llama_base_url,
                     model=llm_provider.chat_model,
                     temperature=0,
                 ),
-                client=async_client,
+                client=_ProviderExtrasAsyncClient(raw_llm_client, llama_base_url),
                 max_tokens=settings.llm_max_tokens,
+                structured_output_mode=structured_output_mode,
+                request_guard=build_menhir_request_guard(
+                    int(settings.graphiti_request_max_estimated_tokens)
+                ),
             )
+            if settings.anchored_time_resolver_enabled:
+                from menhir.infrastructure.anchored_time_resolver import AnchoredTimeResolver
+
+                # Unwrapped client: the resolver adds provider extras, shaping and the one 429
+                # backoff layer itself. Not the generic client: its language instruction would
+                # change the frozen prompt.
+                anchored_time = AnchoredTimeResolver(
+                    raw_llm_client,
+                    base_url=llama_base_url,
+                    model=settings.anchored_time_resolver_model or llm_provider.chat_model,
+                    timeout_s=settings.anchored_time_resolver_timeout_s,
+                )
+                logger.info(
+                    "Anchored-time resolver enabled (model=%s, timeout_s=%s)",
+                    anchored_time.model, settings.anchored_time_resolver_timeout_s,
+                )
+                if settings.anchored_time_attach_enabled:
+                    from menhir.infrastructure.anchored_time_attach_client import AnchoredTimeAttacher
+
+                    # Blind attach check: same unwrapped client and timeout as the resolver.
+                    anchored_time_attach = AnchoredTimeAttacher(
+                        raw_llm_client,
+                        base_url=llama_base_url,
+                        model=settings.anchored_time_attach_model or anchored_time.model,
+                        timeout_s=settings.anchored_time_resolver_timeout_s,
+                    )
+                    logger.info("Anchored-time attach check enabled (model=%s)", anchored_time_attach.model)
         embed_base_url = embed_provider.base_url
         embed_dimension = expected_graphiti_embedding_dimension(settings)
         embed_client = (
@@ -315,7 +413,7 @@ class GraphitiClient:
                     base_url=reranker_base_url,
                     model=reranker_provider.chat_model,
                 ),
-                client=reranker_client,
+                client=ResilientChatClient(reranker_client, label="reranker"),
             )
         graph_driver = Neo4jDriver(
             uri=settings.neo4j_uri,
@@ -323,6 +421,7 @@ class GraphitiClient:
             password=settings.neo4j_password,
             database=settings.neo4j_database,
         )
+        anchored_time_expiry = bool(settings.anchored_time_expiry_enabled)
         return cls(
             client=Graphiti(
                 uri=settings.neo4j_uri,
@@ -332,6 +431,18 @@ class GraphitiClient:
                 llm_client=llm_client,
                 embedder=embedder,
                 cross_encoder=cross_encoder,
+                single_episode_extraction_hook=MenhirExtractionHook(
+                    anchored_time=anchored_time,
+                    anchored_time_expiry=anchored_time_expiry,
+                    anchored_time_attach=anchored_time_attach,
+                ),
+                identity_gate_hook=MenhirIdentityGateHook(),
+                candidate_filter_hook=MenhirCandidateFilterHook(),
+                node_pre_resolution_hook=MenhirNodePreResolutionHook(),
+                **edge_expiry_hook_kwargs(anchored_time_expiry, Graphiti),
+                **preserved_edge_attributes_kwargs(
+                    anchored_time is not None, anchored_time_expiry, Graphiti
+                ),
             ),
             llm_base_url=llama_base_url,
             embed_base_url=embed_base_url,
@@ -347,7 +458,15 @@ class GraphitiClient:
 
     async def _await_add_episode_request(self, *, awaitable: Any) -> Any:
         """Await the Graphiti request, cancelling the inner task if the outer timeout fires."""
-        pending = asyncio.create_task(awaitable)
+        async def request_with_telemetry() -> Any:
+            try:
+                return await awaitable
+            finally:
+                # The extraction/resolution hooks create the ContextVar collector in
+                # this task. A flush in the parent task cannot see that collector.
+                flush_resolution_telemetry()
+
+        pending = asyncio.create_task(request_with_telemetry())
         try:
             return await pending
         except BaseException:
@@ -416,24 +535,51 @@ class GraphitiClient:
         group_id: str = "",
     ) -> Any:
         """Delegate episode ingestion to Graphiti."""
-        from menhir.infrastructure.graphiti_extraction_patches import (
-            _extract_nodes_combined_for_add_episode,
+        from menhir.infrastructure.graphiti_extraction_policy import (
+            AnchoredTimeSlot,
+            anchored_time_owner,
+            anchored_time_slot,
             get_extraction_receipt,
         )
 
         receipt = get_extraction_receipt()
-        if receipt is not None and str(receipt.self_bind_mode) == "enforce":
-            import graphiti_core.graphiti as graphiti_module
-            import graphiti_core.utils.maintenance.node_operations as node_operations
+        # Only a report this invocation produced may be persisted: a reused receipt can hold an
+        # earlier call's report, and a receipt shared by a concurrent call can hold that call's.
+        # The per-call slot keeps this call's report even after a concurrent call replaces the
+        # receipt's (P3b-3).
+        owner = uuid4().hex
+        owner_binding = anchored_time_owner.set(owner)
+        slot_binding = anchored_time_slot.set(AnchoredTimeSlot(owner=owner))
+        try:
+            return await self._add_episode_owned(
+                receipt, owner,
+                name=name, episode_body=episode_body, source_description=source_description,
+                reference_time=reference_time, episode_uuid=episode_uuid, group_id=group_id,
+            )
+        finally:
+            anchored_time_slot.reset(slot_binding)
+            anchored_time_owner.reset(owner_binding)
 
-            # A failed compatibility patch must not reopen probabilistic self resolution.
+    async def _add_episode_owned(
+        self,
+        receipt: Any,
+        owner: str,
+        *,
+        name: str,
+        episode_body: str,
+        source_description: str,
+        reference_time: datetime,
+        episode_uuid: str | None,
+        group_id: str,
+    ) -> Any:
+        if receipt is not None and str(receipt.self_bind_mode) == "enforce":
+            # A partial construction must not reopen probabilistic self resolution.
             # Check before the native add_episode call can perform any persistence.
-            if (
-                graphiti_module.extract_nodes is not _extract_nodes_combined_for_add_episode
-                or not getattr(node_operations, "_menhir_adaptive_dedupe_patched", False)
-                or graphiti_module.resolve_extracted_nodes is not node_operations.resolve_extracted_nodes
-            ):
-                raise RuntimeError("canonical-self enforce requires combined extraction and resolver bypass")
+            if not menhir_resolution_hooks_installed(self.client):
+                raise RuntimeError(
+                    "canonical-self enforce requires the Menhir extraction and resolution "
+                    "policy hooks to be installed on the Graphiti instance"
+                )
         task = "memory: graphiti add_episode"
         child_task_id = f"{(episode_uuid or name).replace('-', '')[:8]}:graphiti:add-episode:{int(perf_counter() * 1000)}"
         request_started = perf_counter()
@@ -482,6 +628,23 @@ class GraphitiClient:
                 },
             )
         )
+        from menhir.infrastructure.graphiti_extraction_policy import owned_anchored_time_report
+
+        report = owned_anchored_time_report(receipt, owner)
+        if report is not None and report.status == "ok":
+            from menhir.infrastructure.anchored_time import _utc_date
+            from menhir.infrastructure.anchored_time_persist import persist_anchored_time
+
+            episode = getattr(result, "episode", None)
+            await persist_anchored_time(
+                self.client.driver,
+                report,
+                episode_uuid=getattr(episode, "uuid", None),
+                group_id=group_id,
+                edge_uuids=[getattr(e, "uuid", None) for e in (getattr(result, "edges", None) or [])],
+                # UTC, like Graphiti's stored valid_at, so rendering can compare them exactly.
+                speech_date=_utc_date(reference_time),
+            )
         return result
 
     async def search(self, query: str, **kwargs: Any) -> Any:

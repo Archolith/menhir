@@ -11,6 +11,11 @@ entirely, which is exactly the failure mode of the wrong ``n.group_id`` fix.
 
 from __future__ import annotations
 
+import uuid as uuidlib
+from types import SimpleNamespace
+
+import pytest
+
 from menhir.infrastructure.episode_lifecycle import EpisodeLifecycleRepository
 
 
@@ -84,3 +89,68 @@ def test_pending_episode_fetch_omitted_namespace_preserves_global_behavior() -> 
 
     assert {r["uuid"] for r in rows} == {"ep-a", "ep-b"}
     assert repo.neo4j.executed_params[-1]["namespace"] is None
+
+
+@pytest.mark.online
+@pytest.mark.asyncio
+async def test_pending_query_filters_session_before_limit_and_flows_through_recall(
+    test_neo4j_repo, stub_graphiti_client,
+) -> None:
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+    from menhir.services.recall_service import RecallService
+    from menhir.services.scoring_service import ScoringService
+
+    ns = f"test-pending-session-{uuidlib.uuid4()}"
+    rows = [
+        {"uuid": f"{ns}-{name}", "scope": scope, "session_id": owner,
+         "namespace": namespace, "sequence": index}
+        for index, (name, scope, owner, namespace) in enumerate([
+            ("foreign-1", "SESSION", "B", ns), ("foreign-2", "SESSION", "B", ns),
+            ("foreign-3", "SESSION", "B", ns), ("ownerless", "SESSION", None, ns),
+            ("blank-scope", "", "B", ns), ("missing-scope", None, "B", ns),
+            ("own", "SESSION", "A", ns), ("durable", "PERSISTENT", "B", ns),
+            ("legacy-own", None, "A", ns),
+            ("other-tenant", "SESSION", "A", f"{ns}-other"),
+        ])
+    ]
+    test_neo4j_repo.execute(
+        "UNWIND $rows AS row CREATE (n:Episodic) SET n = row, n.test_tag=$tag, "
+        "n.content='zephyr pending fact', n.processing_state='PENDING', "
+        "n.created_at=datetime('2026-01-01') + duration({seconds:row.sequence})",
+        params={"rows": rows, "tag": ns},
+    )
+    try:
+        adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
+        selected = adapter.fetch_relevant_pending_episodes(
+            "zephyr", limit=3, namespace=ns, include_session=True, session_id="A",
+        )
+        expected = {f"{ns}-own", f"{ns}-durable", f"{ns}-legacy-own"}
+        assert {row["uuid"] for row in selected} == expected
+        assert next(row for row in selected if row["scope"] == "SESSION")["session_id"] == "A"
+        durable = adapter.fetch_relevant_pending_episodes(
+            "zephyr", namespace=ns, include_session=False, session_id="A",
+        )
+        assert [row["uuid"] for row in durable] == [f"{ns}-durable"]
+        assert len(adapter.fetch_relevant_pending_episodes("zephyr", namespace=ns)) == 3
+        assert adapter.fetch_relevant_pending_episodes("zephyr", namespace=f"{ns}-missing") == []
+
+        async def wait(episode_uuid, *, timeout_s):
+            return adapter.fetch_episode_processing(episode_uuid)
+
+        stub_graphiti_client.search_scored_results = []
+        svc = RecallService(
+            graphiti_client=stub_graphiti_client, graph_adapter=adapter,
+            scoring_service=ScoringService(), ingest_service=SimpleNamespace(wait_for_episode_processing=wait),
+        )
+        result = await svc.recall(
+            "zephyr", namespace=ns, include_session=True, session_id="A",
+            wait_for_pending=True, pending_wait_timeout_s=0.01,
+        )
+        assert {row.uuid for row in result.results} == expected
+        result = await svc.recall(
+            "zephyr", namespace=ns, include_session=False, session_id="A",
+            wait_for_pending=True, pending_wait_timeout_s=0.01,
+        )
+        assert [row.uuid for row in result.results] == [f"{ns}-durable"]
+    finally:
+        test_neo4j_repo.execute("MATCH (n {test_tag:$tag}) DETACH DELETE n", params={"tag": ns})

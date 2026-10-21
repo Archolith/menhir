@@ -61,12 +61,17 @@ class MemoryBackend(Protocol):
         namespace: str | None = None,
         occurred_at: str | None = None,
         turn_evidence_uuid: str | None = None,
+        user_statement: str | None = None,
+        role: str | None = None,
     ) -> dict[str, Any]:
         """Queue an episode for enrichment. Returns QueueResult-shaped dict.
 
         Args:
+            role: Optional structured speaker of the episode (never inferred from text).
             turn_evidence_uuid: Optional UUID of a :TurnEvidence node for grounding
                                source='user'/'manual' claims at the top trust tier.
+            user_statement: The user's verbatim words the memory is based on; recorded as
+                            agent-quoted evidence (provenance only, never a user-tier ground).
         """
         ...
 
@@ -142,8 +147,57 @@ class MemoryBackend(Protocol):
         namespace: str | None = None,
         include_invalidated: bool = False,
         trace: bool = False,
+        source_memory_limit: int | None = None,
+        counted_verdict_limit: int | None = None,
+        include_warden_status: bool = False,
     ) -> dict[str, Any]:
         """Search memory graph. Returns RecallResult-shaped dict."""
+        ...
+
+    async def recall_history(
+        self,
+        query: str,
+        *,
+        namespace: str | None = None,
+        limit: int = 30,
+        pools: bool = True,
+    ) -> dict[str, Any]:
+        """Drill-down: matching source memories oldest first. Returns
+        RecallHistoryResult-shaped dict."""
+        ...
+
+    async def get_scalar_view_items(
+        self,
+        *,
+        view_uuid: str,
+        namespace: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """Drill-down: page the items a scalar View was built from."""
+        ...
+
+    async def recall_timeline(
+        self,
+        *,
+        namespace: str | None = None,
+        query: str | None = None,
+        subject: str | None = None,
+        at: str | None = None,
+        window_from: str | None = None,
+        window_to: str | None = None,
+        around: str | None = None,
+        cursor: str | None = None,
+        direction: str = "both",
+        limit: int = 10,
+        detail: str = "headline",
+        facts: bool = False,
+        history_view: str | None = None,
+        history_offset: int | None = None,
+        history_limit: int = 10,
+    ) -> dict[str, Any]:
+        """On-demand time navigation over recorded memory time. Returns
+        TimelineResult-shaped dict."""
         ...
 
     async def build_context(
@@ -155,6 +209,7 @@ class MemoryBackend(Protocol):
         session_id: str | None = None,
         include_scores: bool = False,
         namespace: str | None = None,
+        include_warden_status: bool = False,
     ) -> dict[str, Any]:
         """Build token-budgeted context pack. Returns ContextResult-shaped dict."""
         ...
@@ -316,8 +371,9 @@ class MemoryBackend(Protocol):
         keep_uuid: str | None = None,
         remove_uuid: str | None = None,
         allow_promoted_removal: bool = False,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
-        """Resolve a conflict group."""
+        """Resolve a conflict group, optionally restricted to one namespace."""
         ...
 
     async def requeue_conflicts_for_llm_review(
@@ -403,7 +459,7 @@ class MemoryBackend(Protocol):
     # ------------------------------------------------------------------
 
     async def recover_orphans(
-        self, *, max_age_hours: float = 24.0
+        self, *, max_age_hours: float = 24.0, dry_run: bool = False
     ) -> dict[str, Any]:
         """Recover orphaned entities. Returns RecoveryResult-shaped dict.
 

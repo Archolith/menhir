@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from menhir.domain.turn_role import TURN_ROLES
 from menhir.mcp.contracts import ToolScope
 from menhir.mcp.formatters import (
     _collect_episode_status,
@@ -25,6 +26,7 @@ async def add_memory_and_track(
     diff: str | None = None,
     turn_evidence_uuid: str | None = None,
     namespace: str = "",
+    role: str | None = None,
 ) -> str:
     """Queue a NEW memory and return a status summary after READY/FAILED/timeout.
 
@@ -39,6 +41,8 @@ async def add_memory_and_track(
         poll_interval_s: Status polling interval in seconds.
         diff: Optional git diff to attach as context for what changed alongside this memory.
         turn_evidence_uuid: Optional UUID of the :TurnEvidence node for the turn this memory was written in the context of. For source='user'/'manual' it also grounds the user-tier claim (an ungrounded claim is downgraded). For every other source it draws the provenance edge only, which is what lets a typed-scalar assertion reach the entities extracted from this memory -- pass it whenever you know it.
+        namespace: Silo to write into.
+        role: Optional speaker of this text, exactly one of user, assistant, tool, agent, system. Declare it when the text is a raw conversation turn; never write the role into the text. A matching linked :TurnEvidence overrides it. Omit when unsure.
 
     Returns:
         Episode status summary plus observed state transitions.
@@ -52,6 +56,7 @@ async def add_memory_and_track(
         diff=diff,
         turn_evidence_uuid=turn_evidence_uuid,
         namespace=namespace,
+        role=role,
     )
 
 
@@ -77,6 +82,7 @@ class AddMemoryAndTrackTool(BaseTextTool):
         diff: str | None = None,
         turn_evidence_uuid: str | None = None,
         namespace: str = "",
+        role: str | None = None,
     ) -> int:
         return max(30, int(timeout_s) + 5)
 
@@ -89,6 +95,7 @@ class AddMemoryAndTrackTool(BaseTextTool):
         diff: str | None = None,
         turn_evidence_uuid: str | None = None,
         namespace: str = "",
+        role: str | None = None,
     ) -> str:
         """Queue a NEW memory and return a status summary after READY/FAILED/timeout.
 
@@ -106,12 +113,16 @@ class AddMemoryAndTrackTool(BaseTextTool):
             namespace: Silo to write into. A pinned client has this forced, and the parameter
                 existing is what makes that possible -- the pin is injected only into endpoints
                 whose signature declares it.
+            role: Optional speaker of this text, exactly one of user, assistant, tool, agent, system. Declare it when the text is a raw conversation turn; never write the role into the text. A matching linked :TurnEvidence overrides it. Omit when unsure.
 
         Returns:
             Episode status summary plus observed state transitions.
         """
+        if role is not None and (not isinstance(role, str) or role not in TURN_ROLES):
+            return f"Cannot store memory: invalid role {role!r}; use one of {', '.join(sorted(TURN_ROLES))}."
         backend = self.get_backend()
         session = get_mcp_session()
+        role_kwargs = {"role": role} if role is not None else {}
         queued = await backend.queue_episode(
             text,
             user_id=session.user_id,
@@ -123,6 +134,7 @@ class AddMemoryAndTrackTool(BaseTextTool):
             # performs the SAME write and did not, so a pinned client escaped its pin simply by
             # calling the sibling. `queue_episode` accepted the argument all along.
             namespace=namespace or None,
+            **role_kwargs,
         )
         if str(queued.get("status") or "") == "failed":
             return "Failed to queue memory."

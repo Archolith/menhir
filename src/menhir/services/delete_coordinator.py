@@ -204,7 +204,9 @@ class DeleteCoordinator:
         # MUTATE -- the exact deleted set comes back FROM the mutation, not from our intent.
         try:
             deleted = self.graph_adapter.delete_entities_returning_uuids(
-                present, require_scope=require_scope
+                present,
+                require_scope=require_scope,
+                protect_retention=(kind == "SESSION_TTL_DELETE"),
             )
         except Exception as exc:  # noqa: BLE001
             self.journal.record_attempt(op_id, error=f"{type(exc).__name__}: {exc}")

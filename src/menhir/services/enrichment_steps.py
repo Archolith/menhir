@@ -23,6 +23,7 @@ from menhir.domain.self_identity import (
     SelfEvidenceKind,
     SelfIdentityContext,
     SelfSubjectEndpointEnvelope,
+    inferred_subject_endpoint_for_claim,
     normalize_logical_namespace,
     self_context_for_pending_episode,
     self_subject_endpoint_for_claim,
@@ -31,7 +32,9 @@ from menhir.infrastructure.self_binding import (
     InvalidSelfSubjectDeclarationError,
     SelfBindMode,
     resolve_bind_mode,
+    resolve_inferred_mode,
 )
+from menhir.domain.turn_role import resolve_turn_role
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import GraphitiClient, MemoryGraphAdapter
 from menhir.infrastructure.evidence_publication_intents import (
@@ -45,17 +48,23 @@ from menhir.infrastructure.telemetry import (
     record_memory_revision,
 )
 from menhir.infrastructure.graphiti_helpers import SYNTHETIC_FACT_PREFIX, strip_synthetic_prefix
-from menhir.infrastructure.graphiti_patches import (
+from menhir.infrastructure.openai_rate_limit import (
+    await_with_backoff_aware_timeout,
+    quota_exhausted_error,
+)
+from menhir.infrastructure.graphiti_extraction_policy import (
     begin_extraction_receipt,
     is_policy_empty_extraction,
     clear_extraction_receipt,
     get_extraction_receipt,
 )
+from menhir.services.embedding_identity import comparable_model, embedder_model_name
 from menhir.services.enrichment_failures import (
     classify_enrichment_failure,
     is_graphiti_output_parse_error,
 )
 from menhir.services.ingest_gate import IngestGate
+from menhir.services.ingest_limits import MAX_DIFF_CHARS
 from menhir.services.shadow_context_composition import (
     build_shadow_trace,
     run_shadow_composition_with_timeout,
@@ -124,6 +133,11 @@ class EnrichmentContext:
     #: Canonical-self binding rollout: "off" (default), "observe" or "enforce". Defaulted so every
     #: construction site predating this field keeps pre-change behavior.
     canonical_self_binding_mode: str = "off"
+    #: Two-tier self identity rollout (agent-inferred node): "off" (default), "observe" or "enforce".
+    inferred_self_mode: str = "off"
+    #: Source-memory lane (MENHIR_FRONTIER_SOURCE_MEMORIES). Defaulted so every construction
+    #: site predating this field keeps pre-change behavior: no episode-content embedding call.
+    source_memories_enabled: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -139,48 +153,20 @@ def failure_details_from_exception(exc: Exception) -> dict[str, object]:
     return {}
 
 
-def propagate_user_flag(
+def record_retention_sources(
     graph_adapter: Any,
     node_uuids: list[str],
     *,
-    episode_uuid: str,
+    source_episode_uuid: str,
+    namespace: str,
 ) -> None:
-    """Flag each extracted entity node for retention, skipping structural nodes.
+    """Record source provenance without copying the source's mutable flag state."""
 
-    Single source of truth for propagating an episode's ``user_flagged`` onto the
-    entity nodes extracted from it. Entity resolution can dedupe an extracted node
-    onto an existing structural graph node (project/directory/file/document), which
-    ``flag_memory`` refuses by design with ``ValueError``; those are skipped rather
-    than raised so a single dedup-onto-structural node cannot abort the episode's
-    enrichment or reconcile. Every enrichment/reconcile path must call this instead
-    of looping over ``flag_memory`` directly (the guard previously lived in three
-    copies and drifted out of sync).
-
-    Propagates retention only. The episode's ``bootstrap_scope`` is deliberately NOT
-    forwarded: ``user_flagged`` is the retention override, ``bootstrap_scope`` is the
-    separate startup-selection bit (domain/bootstrap_scope.py). Forwarding it put every
-    extracted entity -- including shared hubs like "PostgreSQL 16" -- into the bootstrap
-    read, which requires both. An entity still gets a scope when flagged directly via
-    ``flag_memory(uuid, bootstrap_scope=...)``, and that existing scope survives here
-    because scope-less ``flag_memory`` leaves the property untouched.
-    """
-
-    for node_uuid in node_uuids:
-        try:
-            graph_adapter.flag_memory(node_uuid)
-        except ValueError:
-            logger.debug(
-                "Skipping flag on structural node uuid=%s during flag propagation "
-                "for episode_id=%s",
-                node_uuid,
-                episode_uuid,
-            )
-
-
-# Maximum diff size (in characters) appended to episode bodies.
-# Larger diffs are truncated to avoid exceeding Neo4j string property limits
-# and inflating LLM token usage during enrichment.
-MAX_DIFF_CHARS = 50_000
+    graph_adapter.record_retention_sources(
+        source_episode_uuid=source_episode_uuid,
+        entity_uuids=node_uuids,
+        namespace=namespace,
+    )
 
 
 def compose_episode_body(claimed: dict[str, object]) -> str:
@@ -313,12 +299,12 @@ async def try_reconcile_existing(ctx: EnrichmentContext) -> bool:
             namespace=str(ctx.claimed.get("namespace") or "default"),
             **stamp_kwargs,
         )
-        if bool(ctx.claimed.get("user_flagged", False)):
-            propagate_user_flag(
-                ctx.graph_adapter,
-                entity_uuids,
-                episode_uuid=ctx.episode_uuid,
-            )
+        record_retention_sources(
+            ctx.graph_adapter,
+            entity_uuids,
+            source_episode_uuid=ctx.episode_uuid,
+            namespace=str(ctx.claimed.get("namespace") or "default"),
+        )
         marked_ready = ctx.graph_adapter.mark_episode_ready(
             ctx.episode_uuid,
             worker_id=ctx.worker_id,
@@ -396,7 +382,7 @@ async def run_preflight_rejection(ctx: EnrichmentContext) -> bool:
                     source=str(ctx.claimed.get("source") or "claude-code"),
                 )
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Failed to create raw-capture for oversized episode %s: %s",
                 ctx.episode_uuid,
                 e,
@@ -500,8 +486,11 @@ async def run_graphiti_extraction(
     # None means genuinely ineligible. A collision in an eligible projection raises and is
     # parked by the worker's existing failure path; it must not disable self-fork prevention.
     # The endpoint changes behavior, so off/observe still do not construct one.
+    inferred_mode = resolve_inferred_mode(getattr(ctx, "inferred_self_mode", None))
     self_subject_endpoint = (
-        self_subject_endpoint_for_claim(ctx.claimed)
+        self_subject_endpoint_for_claim(
+            ctx.claimed, exclude_agent_quoted=inferred_mode is SelfBindMode.ENFORCE
+        )
         if self_bind_mode is SelfBindMode.ENFORCE
         else None
     )
@@ -642,6 +631,24 @@ async def run_graphiti_extraction(
                     ctx.claimed.get("turn_evidence_uuid") or ""
                 ).strip() or None,
             )
+            turn_role = resolve_turn_role(ctx.claimed)
+            inferred_subject_endpoint = None
+            if inferred_mode is not SelfBindMode.OFF:
+                inferred_candidate = inferred_subject_endpoint_for_claim(
+                    ctx.claimed,
+                    turn_role=turn_role,
+                    anchored_endpoint=self_subject_endpoint,
+                )
+                if inferred_mode is SelfBindMode.ENFORCE:
+                    inferred_subject_endpoint = inferred_candidate
+                else:
+                    record_lifecycle_event(
+                        component="self_binding",
+                        event="inferred_self_decision",
+                        state="would_offer" if inferred_candidate else "not_offered",
+                        episode_uuid=ctx.episode_uuid,
+                        details={"namespace": namespace},
+                    )
             graphiti_result = await add_episode_with_timeout(
                 ctx.graphiti_client,
                 name=episode_name,
@@ -656,6 +663,9 @@ async def run_graphiti_extraction(
                 self_identity=self_identity,
                 self_subject_endpoint=self_subject_endpoint,
                 self_bind_mode=self_bind_mode,
+                turn_role=turn_role,
+                inferred_subject_endpoint=inferred_subject_endpoint,
+                inferred_bind_mode=inferred_mode,
             )
             if publication_intent is not None:
                 publication_transition = (
@@ -789,6 +799,74 @@ async def _run_shadow_composition_and_log(
         # become an unretrieved-task-exception warning at GC time, and must never be
         # mistaken for a real extraction failure.
         logger.warning("Shadow composition logging failed episode_id=%s", ctx.episode_uuid, exc_info=True)
+
+
+# ---------------------------------------------------------------------------
+# Source-memory lane: episode content embedding (best-effort, never fatal)
+# ---------------------------------------------------------------------------
+
+#: Episode content is truncated before embedding so a pathological payload cannot
+#: blow the embedder's window; 8,000 chars is far beyond any real turn.
+_SOURCE_MEMORY_EMBED_MAX_CHARS = 8000
+
+
+def _episode_embedder_model_name(graphiti_client: Any) -> str:
+    """Best-effort embedder model name; 'unknown' when it cannot be resolved."""
+    return embedder_model_name(graphiti_client)
+
+
+#: Bound on the embedder call so a hung endpoint cannot stall the enrichment worker.
+_SOURCE_MEMORY_EMBED_TIMEOUT_S = 10.0
+
+
+async def embed_episode_content(ctx: EnrichmentContext) -> None:
+    """Embed the episode's raw content for the source-memory recall lane (default-off).
+
+    Runs only when the deployment enabled ``frontier_source_memories``. Skips evidence
+    projections (the SET-side guard in ``set_episode_content_embedding`` is the backstop)
+    and episodes that already carry an embedding, so the step is idempotent across
+    retries. The embedder call is bounded (10s) and graph I/O runs in a worker thread.
+    ANY exception or timeout is logged at WARNING and swallowed: this lane must never
+    fail, delay-retry, or requeue enrichment.
+    """
+    if not getattr(ctx, "source_memories_enabled", False):
+        return
+    try:
+        claimed = ctx.claimed
+        if claimed.get("is_evidence_projection"):
+            return
+        current_model = comparable_model(_episode_embedder_model_name(ctx.graphiti_client))
+        has_embedding = await asyncio.to_thread(
+            ctx.graph_adapter.episode_has_content_embedding,
+            ctx.episode_uuid,
+            # Model-aware only when the model resolves (audit F2); otherwise today's check.
+            *((current_model,) if current_model else ()),
+        )
+        if has_embedding:
+            return
+        content = str(claimed.get("content") or "")[:_SOURCE_MEMORY_EMBED_MAX_CHARS]
+        if not content.strip():
+            return
+        embedding = await await_with_backoff_aware_timeout(
+            ctx.graphiti_client.embed_query(content),
+            timeout_s=_SOURCE_MEMORY_EMBED_TIMEOUT_S,
+        )
+        if not embedding:
+            return
+        model = _episode_embedder_model_name(ctx.graphiti_client)
+        await asyncio.to_thread(
+            ctx.graph_adapter.set_episode_content_embedding,
+            ctx.episode_uuid,
+            embedding,
+            model,
+        )
+    except Exception as exc:  # never fail, delay, or requeue enrichment for this lane
+        logger.warning(
+            "Source-memory episode embedding skipped episode_id=%s: %s: %s",
+            ctx.episode_uuid,
+            exc.__class__.__name__,
+            exc,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1051,6 +1129,22 @@ async def stamp_and_finalize(
         )
         return
 
+    if receipt is not None and resolve_inferred_mode(
+        getattr(ctx, "inferred_self_mode", None)
+    ) is not SelfBindMode.OFF and (
+        getattr(getattr(receipt, "self_bind_result", None), "bound", False)
+        or getattr(getattr(receipt, "inferred_bind_result", None), "bound", False)
+    ):
+        # Best-effort two-tier self link; never fails the episode.
+        link_self_tiers = getattr(ctx.graph_adapter, "link_self_tiers", None)
+        if link_self_tiers is not None:
+            try:
+                link_self_tiers(str(ctx.claimed.get("namespace") or "default"))
+            except Exception:
+                logger.debug(
+                    "link_self_tiers failed episode_id=%s", ctx.episode_uuid, exc_info=True
+                )
+
     if not extracted_nodes and not extracted_edges:
         if raw_extraction_nonempty and is_policy_empty_extraction(receipt):
             # Policy-empty: the extraction produced entities but no persistable content.
@@ -1173,12 +1267,12 @@ async def stamp_and_finalize(
         namespace=str(ctx.claimed.get("namespace") or "default"),
         **stamp_kwargs,
     )
-    if bool(ctx.claimed.get("user_flagged", False)):
-        propagate_user_flag(
-            ctx.graph_adapter,
-            [node.uuid for node in extracted_nodes],
-            episode_uuid=ctx.episode_uuid,
-        )
+    record_retention_sources(
+        ctx.graph_adapter,
+        [node.uuid for node in extracted_nodes],
+        source_episode_uuid=ctx.episode_uuid,
+        namespace=str(ctx.claimed.get("namespace") or "default"),
+    )
     # M6 Phase 5: Record scope assignment for extracted entity nodes
     if ctx.settings_record_revisions:
         for node in extracted_nodes:
@@ -1391,24 +1485,6 @@ async def stamp_and_finalize(
 # Pipeline step 5 — handle enrichment failure
 # ---------------------------------------------------------------------------
 
-async def refund_transient_requeue_safely(graph_adapter: Any, episode_uuid: str) -> None:
-    """Best-effort #79/#70 attempt refund after a transient requeue or retryable failure.
-
-    The refund must never escalate the path it runs on: a backpressure or circuit-open
-    requeue that raises inside its own handler would land in `handle_enrichment_failure`
-    and FAIL an episode for a bookkeeping error. Log at WARNING and continue — a skipped
-    refund only leaves the attempt counted (the pre-#79 behaviour), never inflates budgets.
-    """
-    try:
-        await asyncio.to_thread(graph_adapter.count_transient_requeue, episode_uuid)
-    except Exception:
-        logger.warning(
-            "Transient attempt refund failed for episode %s — attempt stays counted",
-            episode_uuid,
-            exc_info=True,
-        )
-
-
 async def handle_enrichment_failure(
     ctx: EnrichmentContext,
     exc: BaseException,
@@ -1420,12 +1496,16 @@ async def handle_enrichment_failure(
     """
 
     duration_ms = int((perf_counter() - ctx.started) * 1000)
+    # A Graphiti-wrapped insufficient_quota 429 reads "Rate limit exceeded"; record the real cause.
+    exc = quota_exhausted_error(exc) or exc
     error_type = type(exc).__name__
     classification = classify_enrichment_failure(exc, error_type=error_type)
     failed = ctx.graph_adapter.mark_episode_failed(
         ctx.episode_uuid,
         str(exc),
         worker_id=ctx.worker_id,
+        transient_requeue=classification == "retryable",
+        claim_started_at=ctx.claimed.get("processing_started_at"),
     )
     if not failed:
         logger.info(
@@ -1435,11 +1515,6 @@ async def handle_enrichment_failure(
             exc,
         )
         return
-    # A retryable provider fault says nothing about this episode (#79/#70): refund the
-    # claim's attempt so an outage cannot consume the genuine-failure budget. The refund
-    # bumps `transient_retries`, whose cap still terminates a permanently dead provider.
-    if classification == "retryable":
-        await refund_transient_requeue_safely(ctx.graph_adapter, ctx.episode_uuid)
     failure_stage = (
         "graphiti_invalid_output"
         if is_graphiti_output_parse_error(exc, error_type=error_type)
@@ -1509,6 +1584,9 @@ async def add_episode_with_timeout(
     self_identity: SelfIdentityContext | None = None,
     self_subject_endpoint: SelfSubjectEndpointEnvelope | None = None,
     self_bind_mode: SelfBindMode = SelfBindMode.OFF,
+    turn_role: str = "unknown",
+    inferred_subject_endpoint: Any | None = None,
+    inferred_bind_mode: SelfBindMode = SelfBindMode.OFF,
 ) -> Any:
     """Bound one Graphiti add_episode call so stuck requests fail back into retry flow.
 
@@ -1541,6 +1619,17 @@ async def add_episode_with_timeout(
             raise InvalidSelfSubjectDeclarationError(
                 "self-subject endpoint turn does not match its identity context"
             )
+    if inferred_subject_endpoint is not None and (
+        not receipt_episode_key
+        or inferred_subject_endpoint.episode_uuid != receipt_episode_key
+        or (
+            self_identity is not None
+            and inferred_subject_endpoint.namespace != self_identity.namespace
+        )
+    ):
+        raise InvalidSelfSubjectDeclarationError(
+            "inferred endpoint scope does not match its extraction"
+        )
     if (
         self_identity is not None
         and self_identity.evidence_kind is SelfEvidenceKind.EXPLICIT_SELF_SUBJECT
@@ -1571,8 +1660,8 @@ async def add_episode_with_timeout(
         },
     )
     # Activate the combined-extraction receipt in THIS (parent) task, BEFORE the
-    # asyncio.wait_for below. wait_for schedules graphiti_client.add_episode as a
-    # separate Task with its own COPIED context, so a receipt created inside that call
+    # bounded await below. If graphiti_client.add_episode runs as a separate Task it
+    # gets its own COPIED context, so a receipt created inside that call
     # (or the nested Graphiti add_episode task) would never be visible to the parent
     # task that later runs stamp_and_finalize. Setting the mutable receipt here means
     # both the wait_for child and Graphiti's own child task inherit the same object and
@@ -1586,6 +1675,9 @@ async def add_episode_with_timeout(
         self_identity=self_identity,
         self_subject_endpoint=self_subject_endpoint,
         self_bind_mode=self_bind_mode,
+        turn_role=turn_role,
+        inferred_subject_endpoint=inferred_subject_endpoint,
+        inferred_bind_mode=inferred_bind_mode,
     )
     try:
         record_lifecycle_event(
@@ -1598,7 +1690,7 @@ async def add_episode_with_timeout(
                 "timeout_s": timeout_s,
             },
         )
-        result = await asyncio.wait_for(
+        result = await await_with_backoff_aware_timeout(
             graphiti_client.add_episode(
                 name=name,
                 episode_body=episode_body,
@@ -1608,7 +1700,7 @@ async def add_episode_with_timeout(
                 attempt=attempt,
                 group_id=group_id,
             ),
-            timeout=timeout_s,
+            timeout_s=timeout_s,
         )
     except asyncio.TimeoutError as exc:
         # stamp_and_finalize will not run for this episode; drop the receipt so a reused

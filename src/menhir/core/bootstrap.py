@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from menhir.config import MemorySettings
+from menhir.config.authority_gates import event_history_authority_effective, scalar_view_authority_effective
 from menhir.core.runtime_preflight import RuntimeCapabilities
 from menhir.infrastructure import GraphitiClient, LLMAdapter, MemoryGraphAdapter, Neo4jRepository
 from menhir.services import CandidateService, ContextBuilderService, IngestService, RecallService, ScoringService, LifecycleService
@@ -193,7 +194,14 @@ def build_memory_services(
             llm = UnavailableLLMAdapter(f"{llm_reason} ({exc})")
     else:
         llm = UnavailableLLMAdapter(llm_reason)
-    graph_adapter = MemoryGraphAdapter(neo4j=neo4j)
+    graph_adapter = MemoryGraphAdapter(
+        neo4j=neo4j,
+        counting_enabled=bool(
+            settings.personal_memory_counting_enabled
+            and settings.personal_memory_scalar_state_enabled
+        ),
+        counting_match_enabled=bool(settings.personal_memory_counting_match_enabled),
+    )
     scoring_service = ScoringService()
     lifecycle_service = LifecycleService(
         graph_adapter=graph_adapter,
@@ -211,6 +219,7 @@ def build_memory_services(
         graphiti_add_episode_timeout_s=float(settings.graphiti_add_episode_timeout_seconds),
         graphiti_episode_max_estimated_tokens=int(settings.graphiti_episode_max_estimated_tokens),
         canonical_self_binding_mode=str(getattr(settings, "canonical_self_binding_mode", "off")),
+        inferred_self_mode=str(getattr(settings, "inferred_self_mode", "off")),
         max_llm_calls_per_session_window=settings.max_llm_calls_per_session_window,
         llm_session_window_seconds=settings.llm_session_window_seconds,
         max_llm_calls_per_enrichment_job=settings.max_llm_calls_per_enrichment_job,
@@ -218,6 +227,7 @@ def build_memory_services(
         record_detailed_revisions=settings.record_detailed_revisions,
         shadow_context_composition=settings.shadow_context_composition,
         shadow_composition_timeout_s=settings.shadow_composition_timeout_s,
+        source_memories_enabled=getattr(settings, "frontier_source_memories", False),
         enrichment_enabled=(capabilities.enrichment_ready if capabilities is not None else True),
         enrichment_disabled_reason=(
             "Graphiti/LLM enrichment is unavailable in the current startup mode."
@@ -231,15 +241,29 @@ def build_memory_services(
         scoring_service=scoring_service,
         ingest_service=ingest_service,
         lifecycle_service=lifecycle_service,
-        scalar_view_authority_enabled=settings.personal_memory_scalar_view_authority_enabled,
+        scalar_view_authority_enabled=scalar_view_authority_effective(settings),
+        scalar_view_collapse_enabled=settings.personal_memory_scalar_view_collapse_enabled,
+        scalar_view_echo_drop_enabled=settings.personal_memory_scalar_view_echo_drop_enabled,
+        counting_recall_authority_only=settings.personal_memory_counting_recall_authority_only,
+        counting_wording_enabled=settings.personal_memory_counting_wording_enabled,
         scalar_history_enabled=settings.personal_memory_scalar_history_enabled,
-        event_history_authority_enabled=settings.personal_memory_event_history_authority_enabled,
+        event_history_authority_enabled=event_history_authority_effective(settings),
+        inferred_self_mode=str(getattr(settings, "inferred_self_mode", "off")),
+        counting_enabled=bool(
+            settings.personal_memory_counting_enabled
+            and settings.personal_memory_scalar_state_enabled
+        ),
         read_only=read_only,
     )
     context_builder = ContextBuilderService(
         recall_service=recall_service,
         graph_adapter=graph_adapter,
-        brief_builder_enabled=settings.frontier_brief_builder,
+        retrieval_tuning=settings.retrieval_tuning(),
+        source_memory_limit=(
+            getattr(settings, "frontier_source_memory_limit", None)
+            if getattr(settings, "frontier_source_memories", False)
+            else None
+        ),
     )
     candidate_service = CandidateService(
         graph_adapter=graph_adapter,

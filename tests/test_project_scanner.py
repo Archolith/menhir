@@ -211,6 +211,49 @@ class TestProjectScanner:
         with pytest.raises(ValueError, match="Not a directory"):
             ProjectScanner().scan(tmp_path / "nonexistent")
 
+    def test_walk_error_refuses_incomplete_scan(self, tmp_path, monkeypatch):
+        root = _make_python_project(tmp_path)
+        real_walk = os.walk
+
+        def unreadable_walk(path, **kwargs):
+            if Path(path) != root:
+                yield from real_walk(path, **kwargs)
+                return
+            yield str(path), ["src"], ["pyproject.toml"]
+            kwargs["onerror"](PermissionError(13, "Access denied", str(path / "src")))
+
+        monkeypatch.setattr("menhir.infrastructure.project_scanner.os.walk", unreadable_walk)
+        with pytest.raises(OSError, match="could not traverse"):
+            ProjectScanner().scan(root)
+
+    def test_stat_error_refuses_incomplete_scan(self, tmp_path, monkeypatch):
+        root = _make_python_project(tmp_path)
+        real_getmtime = os.path.getmtime
+
+        def unreadable_stat(path):
+            if str(path).endswith("pyproject.toml"):
+                raise PermissionError(13, "Access denied", str(path))
+            return real_getmtime(path)
+
+        monkeypatch.setattr("menhir.infrastructure.project_scanner.os.path.getmtime", unreadable_stat)
+        with pytest.raises(OSError, match="could not stat"):
+            ProjectScanner().scan(root)
+
+    def test_read_error_refuses_incomplete_scan(self, tmp_path, monkeypatch):
+        root = _make_python_project(tmp_path)
+        from menhir.infrastructure import project_scanner
+
+        real_read = project_scanner.read_text_utf8
+
+        def unreadable_source(path):
+            if str(path).endswith("ingest.py"):
+                raise PermissionError(13, "Access denied", str(path))
+            return real_read(path)
+
+        monkeypatch.setattr(project_scanner, "read_text_utf8", unreadable_source)
+        with pytest.raises(project_scanner.ScanReadError, match="could not read"):
+            ProjectScanner().scan(root)
+
 
 # ---------------------------------------------------------------------------
 # Import parsing

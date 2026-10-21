@@ -34,6 +34,8 @@ recall/ingest service with the following core loop:
 
 Concept id: `runtime.projections`
 
+Decision record: [ADR 0003](adr/0003-event-fold-view-projection-boundary.md).
+
 The durable write-side boundary is:
 
 ```text
@@ -74,7 +76,11 @@ Concept id: `runtime.stack`
 
 - Python 3.12+
 - Neo4j 5 (remote systemd service via bolt)
-- `graphiti-core` >=0.28.1 (graph memory framework)
+- `archolith-graphiti-core==0.30.2.post7` (Archolith soft fork of `getzep/graphiti`,
+  baseline `v0.30.2`; it still imports as `graphiti_core`). Menhir policy uses its explicit
+  hooks without runtime monkeypatching. Published from fork tag `v0.30.2.post7` at
+  `7f3922dfdf87e1a73d22f2185ce53f8ad3fcaf1b`; the locked PyPI wheel SHA-256 is
+  `a2ea8f63e00332672f88113228c2fcbb2a2c38e3e15e48c9531a9b1e371baa22`.
 - llama.cpp (`llama-server`) via OpenAI-compatible API
 - provider scaffold for pluggable chat backends (`openai_compat`, `openai`; `anthropic` scaffolded only)
 - Langfuse (optional local tracing for OpenAI-compatible llama.cpp calls)
@@ -86,6 +92,11 @@ Concept id: `runtime.stack`
 
 Concept id: `runtime.ops`
 
+Runtime ownership and backend access are recorded in
+[ADR 0004](adr/0004-single-runtime-owner-and-backend-first-access.md). Configured namespace
+isolation across those surfaces is recorded in
+[ADR 0005](adr/0005-core-enforced-namespace-isolation.md).
+
 Deferred enrichment now runs behind a persistent backend runtime, with MCP stdio acting as a client surface.
 
 Direction:
@@ -95,6 +106,7 @@ Direction:
 - runtime preflight now produces an explicit capability snapshot (`neo4j_ready`, `embedder_ready`, `llm_ready`) that the HTTP surface exposes directly for readiness and debugging
 - `menhir serve` constructs one immutable `MemorySettings` snapshot and shares it with HTTP auth, the embedded OAuth AS, client-token storage, and the backend runtime; request handlers do not reread OAuth/HTTP environment variables
   - `config/oauth.py` owns `OAuthConfig` and its snapshot/legacy-environment builder
+  - `config/feature_flags.py` catalogs feature/control metadata without loading operator values or changing runtime settings. `tests/test_feature_flag_registry.py` and its AST helper enforce current settings/default/name/documentation consistency in the existing offline CI lane; consumer-reference checks are static wiring evidence.
   - `config/auth_mode.py` owns the OAuth > client-token > static > none precedence decision
   - `api/oauth.py` retains token verification and compatibility exports, while config never imports API
 - embedded-AS process dependencies (registered-client/code/refresh-token stores, signing key, and rate limiters) are configured from that snapshot before routes serve traffic
@@ -185,13 +197,17 @@ Direction:
 
 Concept id: `runtime.packages`
 
+`scripts/backfill_legacy_retention.py` inventories historical episode flags and source-to-entity
+provenance. Its reviewed maintenance write adds only `RETENTION_SOURCE` edges; it cannot infer or
+clear a legacy entity's direct flag intent.
+
 ```text
 src/menhir/
 |- __init__.py        Package metadata
 |- __main__.py        CLI entry point
 |- main.py            Startup dependency checks (Neo4j + LLM endpoint connectivity)
 |- core/              build_memory_services(), prepare_memory_runtime(), BuildArtifacts
-|- config/            MemorySettings, AuthMode, OAuthConfig (env-backed), MilestoneZeroScope
+|- config/            MemorySettings, AuthMode, OAuthConfig (env-backed), MilestoneZeroScope, feature/control metadata
 |- domain/            MemoryNode, Edge, MemorySession, IngestResult, recall types (QueryPreset, ScoredMemory, etc.)
 |   |- retrieval_trace_models.py  Neutral recall scoring/trace value contracts
 |   |- event_history.py  Event History Phase 1: immutable TypedEventAssertion/EventLane contract +
@@ -199,7 +215,9 @@ src/menhir/
 |   |- truth/         Truth package (SSOT for provenance/trust): ReviewState, TruthAttestation, TruthClaim,
 |                     WardenLabel, ANCHOR_KINDS, KIND_TO_SIGNAL, DIVERSITY_FAMILY, SOURCE_CONFIDENCE_* constants
 |- infrastructure/    Neo4jRepository, GraphitiClient, MemoryGraphAdapter, schema bootstrap
-|   |- graphiti_*_patches.py  Extraction, model/dedup, and LLM-response compatibility families
+|   |- graphiti_extraction_policy.py  Menhir extraction-receipt/payload/binding policy on the fork's extraction hook
+|   |- graphiti_resolution_policy.py  Menhir identity-gate / candidate-filter / pre-resolution adapters + resolver seam
+|   |- graphiti_llm_adapter.py        Menhir LLM retry/strict-schema/RequestGuard adapter subclass
 |   |- telemetry/store.py  SQLite connection and schema owner
 |   |- telemetry/*_store.py  Event, lifecycle, and recall/client persistence families
 |   |- view_repository.py  Composition facade over View models, writes, scalar authority, and queries
@@ -224,6 +242,7 @@ src/menhir/
 |   |- recall_pipeline.py  Candidate acquisition, scoring, enrichment, and result assembly
 |   |- ingest_service.py  Public IngestService dataclass and composition facade
 |   |- ingest_queue.py / ingest_worker.py / ingest_intake.py  Queue lifecycle, enrichment workers, and intake operations
+|   |- ingest_limits.py  Shared memory text and diff size bounds at write entry points
 |   |- lifecycle_service.py  Public LifecycleService dataclass and composition facade
 |   |- lifecycle_consolidation.py / lifecycle_decay.py / lifecycle_conflicts.py  Focused lifecycle workflows
 |- mcp/               FastMCP server (43 tools, 9 resources, SQLite telemetry, structured failure logs, deferred enrichment, scheduler)
@@ -314,8 +333,8 @@ The system has a working ingestion pipeline:
 
 1. **Bootstrap** (`prepare_memory_runtime`)
    - Initialize Neo4j repository (lazy driver)
-   - Construct Graphiti client from settings (patches prompt JSON serialization and installs the
-     Graphiti 0.29.2 combined-extraction compatibility layer)
+   - Construct Graphiti client from settings (installs the Menhir policy hooks on the
+     Archolith graphiti fork's explicit extension points; no runtime symbol mutation)
    - Run Graphiti `build_indices_and_constraints()`
    - Run menhir phase-1 schema bootstrap (indexes + defaults for all policy fields)
 
@@ -543,6 +562,10 @@ Episode Text
 
 Concept id: `runtime.canonical_self`
 
+Governing decision: [ADR 0010](adr/0010-deterministic-canonical-self-identity.md). The identity
+contract is accepted; production activation and historical fork consolidation remain separate
+owner decisions.
+
 Menhir defines exactly one authoritative human-self target per **logical** namespace. In
 `enforce`, only an exact node declaration may reach that target; ordinary semantic retrieval and
 the dedup LLM are fenced away from it. The default `off` mode preserves the legacy resolver.
@@ -563,7 +586,7 @@ ingestion boundary owns:
 | `services/ingest_intake.py` | admission gate decides whether a `user`/`manual` claim is grounded |
 | `services/enrichment_steps.py` | reconstructs the identity context from the claimed episode |
 | `infrastructure/self_binding.py` | rewrites the proven human across the extraction payload |
-| `infrastructure/graphiti_model_patches.py` | withholds a bound self and, in `enforce`, isolates canonical self from ordinary resolution |
+| `infrastructure/graphiti_resolution_policy.py` | withholds a bound self and, in `enforce`, isolates canonical self from ordinary resolution |
 
 Evidence survives the asynchronous queue in the episode's persisted `source`. That value is a
 gate receipt rather than a caller's assertion: `evaluate_user_tier_claim` requires Menhir-owned
@@ -625,9 +648,10 @@ provenance remains available for inspection. Summaries are model-derived context
 truth; `fact_source=original` means extractor-originated, not human-approved.
 
 Canonical identity stays out of exact/similarity/LLM/override candidate selection. Ordinary nodes
-cannot resolve onto canonical self in `enforce`. The production adapter checks the extraction and
-resolver bypass hooks before dispatch, refusing a missing patch rather than falling back to the
-probabilistic writer. The AST census pins the single declaration at receipt construction.
+cannot resolve onto canonical self in `enforce`. The production adapter checks that the Menhir
+policy hooks are installed on the Graphiti instance before dispatch, refusing a partially wired
+client rather than falling back to the probabilistic writer. The AST census pins the single
+declaration at receipt construction.
 `off` and `observe` retain legacy prompts, hydration and resolution, with no endpoint injection.
 
 This is a small follow-up to PR #45's pinned identity baseline, not the larger signed-assertion or
@@ -737,7 +761,8 @@ Primary storage is Neo4j.
   general rules govern how objects, subordinates, declarations and locators relate;
   they are not specific to todos or artifacts, and rediscovering them per feature is
   how duplicate vocabulary gets introduced.
-- Graphiti prompt JSON serialization is patched at runtime to handle Neo4j temporal values.
+- Graphiti prompt JSON serialization handles Neo4j temporal values natively in the fork
+  (`graphiti_core.prompts.prompt_helpers.to_prompt_json`).
 
 ### Work-artifact corpus reconciliation
 

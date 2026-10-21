@@ -20,9 +20,29 @@ from menhir.services.typed_scalar_rules import (
     _utc_now_iso,
     advisory_subject_uuid,
     classify_absolute_semantics,
+    counting_subject_echoes_object,
 )
+from menhir.services.counting_consolidation import COUNTING_CLAIM_ORDINAL
 
 logger = logging.getLogger(__name__)
+
+
+def _counting_self_echo(
+    *, operation: Any, claim_ordinal: Any, subject_text: str, count_object: Any, count_item: Any,
+    count_family: Any, attribute: Any,
+) -> bool:
+    """True for a counting-lane occurrence row whose subject only restates the counted thing.
+    Scalar rows (any other ordinal) are never affected."""
+    if str(operation or "").strip().lower() != "occurrence":
+        return False
+    try:
+        if int(claim_ordinal) != COUNTING_CLAIM_ORDINAL:
+            return False
+    except (TypeError, ValueError):
+        return False
+    return counting_subject_echoes_object(
+        subject_text, count_object=str(count_object or ""), count_item=str(count_item or ""),
+        count_family=str(count_family or ""), attribute=str(attribute or ""))
 
 
 def _rebuild_succeeded(result: Any) -> bool:
@@ -104,7 +124,11 @@ def bind_and_persist_typed_scalars(
         entities = linked_entities_for_episode(p.episode_uuid) or []
         subject_uuid, subject_display = _resolve_subject(
             p.subject_text, entities, namespace, resolve_self_subject,
-            lookup_namespace_entities=lookup_namespace_entities)
+            lookup_namespace_entities=lookup_namespace_entities,
+            self_echo=_counting_self_echo(
+                operation=p.operation, claim_ordinal=p.claim_ordinal, subject_text=p.subject_text,
+                count_object=p.count_object, count_item=p.count_item, count_family="",
+                attribute=p.attribute))
         is_bound = subject_uuid is not None
         if not is_bound:
             subject_uuid = advisory_subject_uuid(d.source_key)
@@ -225,6 +249,10 @@ def _assertion_from_pending_row(row: dict[str, Any], *, subject_uuid: str, subje
         evidence_tier=PERCEPTION_EVIDENCE_TIER,
         perceiver_version=str(row.get("perceiver_version") or "v1"),
         namespace=row.get("namespace"),
+        importance=str(row.get("importance") or ""),
+        count_object=str(row.get("count_object") or ""),
+        count_item=str(row.get("count_item") or ""),
+        count_action=str(row.get("count_action") or ""),
         # re-derive deterministically from the stored span (same result as the original write); the
         # monotone write never downgrades a correction already persisted on the node.
         absolute_semantics=classify_absolute_semantics(
@@ -285,7 +313,12 @@ def repair_pending_bindings(
                 entities = linked_entities_for_episode(str(row.get("episode_uuid") or "")) or []
                 subject_uuid, subject_display = _resolve_subject(
                     subject_text, entities, row_ns, resolve_self_subject,
-                    lookup_namespace_entities=lookup_namespace_entities)
+                    lookup_namespace_entities=lookup_namespace_entities,
+                    self_echo=_counting_self_echo(
+                        operation=row.get("operation"), claim_ordinal=row.get("claim_ordinal"),
+                        subject_text=subject_text, count_object=row.get("count_object"),
+                        count_item=row.get("count_item"), count_family=row.get("count_family"),
+                        attribute=row.get("attribute")))
                 if subject_uuid is None:
                     still_pending += 1
                     results.append({"source_key": row.get("source_key"), "repaired": False,

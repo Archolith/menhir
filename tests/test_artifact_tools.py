@@ -214,8 +214,7 @@ def test_transition_refusal_names_what_is_legal() -> None:
             "applied": False, "reason": "illegal_transition",
             "from_status": ArtifactStatus.PROPOSED, "to_status": ArtifactStatus.IMPLEMENTED,
             "artifact_type": ArtifactType.PLAN,
-            "valid_transitions": [ArtifactStatus.DEFERRED, ArtifactStatus.REVIEWED,
-                                  ArtifactStatus.SUPERSEDED],
+            "valid_transitions": [ArtifactStatus.DEFERRED, ArtifactStatus.REVIEWED],
         },
     )
 
@@ -223,6 +222,30 @@ def test_transition_refusal_names_what_is_legal() -> None:
 
     assert "not legal for a plan" in out
     assert "REVIEWED" in out
+
+
+@pytest.mark.unit
+def test_transition_tool_routes_supersession_to_dedicated_action() -> None:
+    from menhir.mcp.tools.ops.transition_artifact import TransitionArtifactTool
+
+    tool, _ = _tool(
+        TransitionArtifactTool,
+        transition_artifact_status={"applied": False, "reason": "supersession_requires_replacement"},
+    )
+    out = _run(tool.endpoint(artifact_uuid="a1", to_status=ArtifactStatus.SUPERSEDED))
+    assert "supersede_artifact(new_uuid, old_uuid)" in out
+
+
+@pytest.mark.unit
+def test_transition_tool_reports_stale_conflict() -> None:
+    from menhir.mcp.tools.ops.transition_artifact import TransitionArtifactTool
+
+    tool, _ = _tool(
+        TransitionArtifactTool,
+        transition_artifact_status={"applied": False, "reason": "stale_transition"},
+    )
+    out = _run(tool.endpoint(artifact_uuid="a1", to_status=ArtifactStatus.REVIEWED))
+    assert "changed during this transition" in out
 
 
 @pytest.mark.unit

@@ -130,6 +130,10 @@ class LegacyUnmergeCoordinator:
             {"type": "MENTIONS", "peer_uuid": ep, "properties": {}}
             for ep in ls.absorbed_episodes(entry)
         ]
+        in_rels = in_rels + [
+            {"type": "RETENTION_SOURCE", "peer_uuid": source, "properties": {}}
+            for source in ls.absorbed_retention_sources(entry)
+        ]
 
         peer_uuids = [r["peer_uuid"] for r in out_rels + in_rels]
         present = self.graph_adapter.peers_exist(peer_uuids)
@@ -152,6 +156,7 @@ class LegacyUnmergeCoordinator:
             # An empty map makes `SET s += $props` a no-op -- we do NOT guess at prior values.
             "survivor_properties": {},
             "rebound_episodes": ls.rebound_episodes(entry),
+            "rebound_retention_sources": ls.rebound_retention_sources(entry),
         }
 
         if not acknowledge_degraded:

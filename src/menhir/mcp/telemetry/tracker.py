@@ -7,6 +7,7 @@ import sqlite3
 import time
 from typing import Any, Awaitable, Callable, TypeVar, cast
 
+from menhir.infrastructure.openai_rate_limit import await_with_backoff_aware_timeout
 from menhir.infrastructure.telemetry.helpers import _safe_preview_of, _size_of, _utc_now_iso
 from menhir.infrastructure.telemetry.store import McpTelemetryStore, telemetry_store
 from menhir.core.request_context import get_request_session, get_request_tier
@@ -214,7 +215,7 @@ async def track_mcp_call(
     client_name, client_id, session_id, tier = _caller_identity()
 
     try:
-        result = await asyncio.wait_for(runner(), timeout=timeout)
+        result = await await_with_backoff_aware_timeout(runner(), timeout_s=timeout)
     except asyncio.TimeoutError:
         completed_at = _utc_now_iso()
         duration_ms = int((time.perf_counter() - started) * 1000)

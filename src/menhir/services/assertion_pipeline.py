@@ -130,6 +130,11 @@ class AssertionPipeline:
     async def run(self, query: QueryContext, candidates: list[CandidateMemory]) -> AssertionOutcome:
         query = self._resolve_intent(query)
         grouped = await self.executor.evaluate(query, candidates)
+        # The executor keys by candidate id; the combiner breaks score ties by incoming order.
+        # Re-key in the caller's order so ties (and an all-neutral oracle outage) keep the
+        # caller's ranking instead of id order.
+        caller_order = {c.id: grouped[c.id] for c in candidates if c.id in grouped}
+        grouped = caller_order | {cid: r for cid, r in grouped.items() if cid not in caller_order}
         ranked_ids, packets = self.combiner.rank(query, grouped)
         by_id = {c.id: c for c in candidates}
         intent = _INTENT.get(query.intent, QueryIntent.CURRENT)
@@ -151,6 +156,8 @@ class AssertionPipeline:
                 belief_score=belief_score, evidence=evidence,
                 query_scope=q_scope, candidate_scope=_candidate_scope(candidate),
                 support_profile=_support_profile(candidate), oracle_packet=packet,
+                recorded_conflict=(bool(candidate.metadata.get("conflict_group_id"))
+                                   and candidate.metadata.get("conflict_status") == "unresolved"),
             )
             verdict = self.chain.evaluate(ctx)
             result = AdmissionResult(

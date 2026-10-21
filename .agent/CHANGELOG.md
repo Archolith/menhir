@@ -1,5 +1,315 @@
 # Changelog
 
+## 2026-10-12 - Anchored-time blind attach check (default off) and its labeled sets
+
+- `MENHIR_ANCHORED_TIME_ATTACH` (default off, needs the resolver): after the regex guards and
+  `plan_overlay`, the facts it would write are candidates. One blind model call per episode with
+  candidates (`anchored_time_attach_client.AnchoredTimeAttacher`; the prompt never sees the
+  resolver's items) quotes, per fact, the phrase that dates its start or occurrence. A candidate
+  is written only when both phrases overlap at the same place in the turn (V1) and the relation
+  matches the kind (V2). A failed call or missing answer writes nothing (V3). New outcomes
+  `attach_rejected`, `attach_unverified` and, with the check on, `state_future`; all render like
+  `state_start`. `MENHIR_ANCHORED_TIME_ATTACH_MODEL` (empty = the resolver's model).
+- `time_contract` is `at2|<resolver version>|<model>|<attach version>|<attach model>` for
+  episodes the check decided; `at1` otherwise. Flag off: the offline replay of the 22 runs is
+  identical to a0a9814 for all 2374 facts.
+- Labeled sets (plan P1): `scripts/build_attach_set.py` (set 1, offline from the frozen runs)
+  and `tests/fixtures/anchored_time/attach_adversarial.json` (set 2, 270 review reproducers).
+- New tests: `tests/test_anchored_time_attach.py`, `tests/test_anchored_time_attach_hook.py`,
+  `tests/test_anchored_time_attach_sets.py`. No existing test changed.
+- P3 (paid gate, `scripts/eval_attach.py`): the attach prompt was tuned twice and frozen, then run
+  once blind with the regex guards off. G1 and G2 failed, so P5 (retiring the regex attachment
+  inference) is not supported. The prompt now also answers "none" when the turn does not say the
+  fact is true (prompt e6ecd4d1): no loss on the tune sets, and it fixes the negation failures.
+  It also dates something done on a dated occasion in the next clause, unless a word moves it
+  (prompt 3aec9649): it fixes H19.5 (1 tune call reused over 5 runs, plus 5 of 5 probe calls),
+  with no change with the guards on; with the guards off it adds 2 wrong writes on set 2.
+
+## 2026-10-11 - Anchored-time P3c follow-ups: stale saves and the preserved-attributes guard
+
+- Pin `archolith-graphiti-core==0.30.2.post7` (fork PR #13: a Neo4j entity-edge save takes the
+  edge lock, then keeps a stored expiry; once the stored edge is expired, a save keeps the
+  earliest `expired_at` and earliest non-null `invalid_at`). Closes the P3c-1 known gap: a
+  concurrent writer's stale save no longer revives an edge another writer expired, and no
+  longer moves a truncated end later. Fork live tests cover the concurrent case.
+- `preserved_edge_attributes_kwargs`: a Graphiti constructor that cannot be inspected counts as
+  lacking the parameter, so with `MENHIR_ANCHORED_TIME_EXPIRY` on startup refuses (as the
+  edge-expiry hook guard does); with only the resolver on it warns.
+  `tests/test_anchored_time_preserved_guard.py`: NEW.
+- Not covered: the operator unmerge (`restore_merge_snapshot`) recreates relationships from the
+  merge-time snapshot and can recreate a live copy of an edge expired after the merge.
+
+## 2026-10-10 - Anchored-time P3c: a restatement keeps a stored ended fact live
+
+- Pin `archolith-graphiti-core==0.30.2.post6` (adds `Graphiti(preserved_edge_attributes=...)`,
+  fork PR #11: named edge properties survive the attribute recomputation on a paraphrased
+  duplicate and reach the edge-expiry hook).
+- `PRESERVED_EDGE_ATTRIBUTES` (`anchored_time_persist.py`): the P2 contract keys plus
+  `time_expiry` / `time_world_end`. `preserved_edge_attributes_kwargs` (`graphiti_client.py`)
+  passes them when the resolver or expiry is on. With `MENHIR_ANCHORED_TIME_EXPIRY` on, a
+  Graphiti without the parameter fails at client construction; with only the resolver on it
+  warns and passes nothing.
+- `MenhirEdgeExpiryHook`: when this call has no usable report (no cue, resolver error, plan),
+  a resolved duplicate whose stored `time_expiry` is `world_end` and whose stored
+  `time_world_end` is the same instant as `invalid_at` answers `WORLD_END`. Anything else,
+  including a new edge, a moved `invalid_at` or an unparsable stamp, answers `EXPIRE`. A
+  contradiction still expires the edge. The plan restatement does not override a stored
+  world end (D2); there is no backfill (D3).
+- Closes the P3 known gap D1 / Codex P3b-2 for stamped edges. Edges stored before P3 have no
+  stamp and keep upstream behavior.
+- `tests/test_anchored_time_restatement.py` (unit, real `resolve_extracted_edges`, plus the
+  `GraphitiClient` constructor forwarding the names, Codex P3c-2) and
+  `tests/test_anchored_time_restatement_live.py` (online): NEW.
+- Known gap (Codex P3c-1): Graphiti saves a resolved edge as a full replace of the copy it
+  fetched. If two writers ingest into one namespace at once, and one expires an edge (a
+  contradiction) before the other saves a restatement of it, the later save brings the edge
+  back live with the old end. `IngestGate` serializes a namespace only within one runtime;
+  ADR 0004 makes `menhir serve` the single runtime owner, but nothing durable stops a second
+  runtime from ingesting. The stale save predates P3c (upstream loses the truncation, and the
+  P3b report path revives the edge the same way); P3c adds unclassified restatements as a
+  route. Follow-up: a conditional save in the fork (never clear a stored `expired_at`).
+
+## 2026-10-08 - Anchored-time P3: a fact's own end is world time, not supersession
+
+- Pin `archolith-graphiti-core==0.30.2.post5` (adds `Graphiti(edge_expiry_hook=...)`, fork PR #5;
+  reconciles copies of one stored edge before the save, fork PR #7; reconciled copies take
+  the attributes resolution recomputed, never a fast-path copy's, fork PR #9).
+- `tests/test_anchored_time_edge_copies.py`: NEW. Real `resolve_extracted_edges` with
+  `MenhirEdgeExpiryHook`: a restated copy never overwrites a supersession found by another
+  mention (both orders, plus a no-reconcile control), and exact plus paraphrased mentions of
+  one stored edge save one attribute set.
+- `MENHIR_ANCHORED_TIME_EXPIRY` (default off): `_apply_anchored_time(expiry=True)` records the
+  world end of point events / states with an item before resolve; `MenhirEdgeExpiryHook`
+  (`graphiti_extraction_policy.py`) answers `WORLD_END` inside Graphiti's resolver for this
+  call's own owner-checked report, so such edges stay live; anything else, including errors,
+  answers `EXPIRE` (upstream behavior). The flag on with an older Graphiti fails at client
+  construction.
+- `EXPIRY_PERSIST_CYPHER` stamps `time_expiry='world_end'` / `time_world_end` on live edges
+  under the P2 lock only while `invalid_at` still equals the recorded end; it never un-expires.
+- Recall labels such live, ended facts `ended` (`_build_temporal_facts(ended=...)`).
+- The hook and the persist read this call's report from a per-call `AnchoredTimeSlot`, so a
+  concurrent call sharing the receipt cannot replace it (Codex P3b-3).
+- Known gap: a duplicate restatement re-saves the edge through Graphiti's full-replace save,
+  which drops the stored P2 contract and the stamp (pre-existing P2 behavior).
+- Known gap (D1, Codex P3b-2): the new mention decides. A restatement the resolver does not
+  classify (no time cue, resolver error, plan) answers `EXPIRE`, so it expires a stored ended
+  fact that an earlier ingest kept live. Follow-up: workspace
+  `menhir-anchored-time-p3c-restatement-evidence-plan.md`.
+
+## 2026-10-01 - Ended-state quotes never yield a current scalar value (#168 step-5)
+
+- `services/typed_scalar_rules.py`: new ended-state cue (`no longer`, `anymore`, `quit`, `stopped`,
+  `gave up`, `used to`; the habit idiom "I'm used to X" excluded; a current or restoration cue such as
+  "now" or "again" cancels it). Boolean source polarity reads an ended state as `false` ("no longer" and
+  "used to" were previously treated as uncertain, so a model `true` passed; "quit"/"stopped" were not
+  recognized). A non-boolean `absolute`/`delta` row whose quote is ended-state is dropped (`ended_state`);
+  `expire` -- the contract's form for an ended value -- is unchanged.
+- Measurement units: `lb` / `lbs` / `pound` / `pounds` -> `lb`.
+- Found by the #168 step-5 offline value probe: "I quit smoking" (model `smokes=true`) and
+  "I no longer have 3 cars" (model `cars=3`, absolute) were admitted as current values; both now rejected.
+
+## 2026-10-01 - recall_timeline on-demand time navigation; brief timeline removed
+
+- New read-only `recall_timeline` tool: on-demand time navigation over RECORDED
+  memory time (episode `valid_at`). Start from `at` / `window_from`+`window_to` /
+  `around` / `cursor` / `query` (exactly one when any is given), optionally
+  restricted to one `subject` thread (subject alone = latest page of the thread).
+  Pages return headline/full entries with `prev_cursor`/`next_cursor`
+  (tenant/thread-bound opaque cursors), optional RELATES_TO `facts`, and typed
+  scalar/event history pages for subject threads. Read-only: no access updates,
+  failures raise, never partial.
+- Surfaces: `RecallService.recall_timeline` (implementation
+  `services/timeline_service.py::run_recall_timeline`, models
+  `domain/timeline.py`), backend protocol/runtime/client plumbing
+  (`recall_timeline`), REST `POST /api/recall/timeline`
+  (`RecallTimelineRequest` / `RecallTimelineResponse`, namespace resolution
+  identical to `/api/recall/history`, `ValueError` handled like the history
+  route), and the MCP `recall_timeline` tool
+  (`mcp/tools/recall/recall_timeline.py`, registered in `RECALL_TOOLS`, not in
+  `always_visible`).
+- Registries: `AGENT_ALLOWED_TOOLS`, feature taxonomy `retrieve`,
+  `RATABLE_OPERATIONS`, `get_memory_stats` user ops, `.agent/concept-ids.yaml`
+  (`mcp.tool.recall_timeline`), `endpoints.md`, `tasks-mcp.md`.
+- Removed the appended `build_context` brief timeline (default-off
+  `frontier_brief_builder` / `MENHIR_FRONTIER_BRIEF_BUILDER`), superseded by
+  `recall_timeline`: flag, env parse, both bootstraps' wiring,
+  `.env.example` lines, and `domain/brief_builder.py` are gone;
+  `include_invalidated=True` in build_context recall is kept (its own
+  documented reason).
+
+## 2026-10-01 - Source-memory section passes the #168 latency limit (#171)
+
+- The episode search now leads with an index-friendly tenancy prefilter
+  (`domain/namespace.py::tenant_scope_prefilter_cypher`, a superset matching the existing
+  `:Episodic(namespace)`/`(group_id)` indexes). `tenant_scope_cypher` still decides membership.
+  Results were identical on 120/120 LongMemEval namespaces, and the query went from 32 ms to 10 ms median.
+- `run_recall` starts the section's search right after the vector search, so it overlaps the
+  metadata and adjacency phases. It is awaited where it was before, so results and return paths are unchanged.
+- Measured on the LongMemEval oracle copy (195 q x 2): recall p50 +28% -> +2.5%, p95 -1%
+  (#168 limits +15% / +25%).
+
+## 2026-10-01 - #172 context packing: declare tiktoken, skip oversized memories
+
+- `tiktoken` is now a declared dependency (`tiktoken>=0.8,<1`), so standard installs
+  no longer fall back to the halved heuristic token budget in `build_context`/hooks.
+- Ranked-memory packing now skips a memory that does not fit and continues
+  (`continue` instead of `break`): one oversized memory no longer drops every
+  lower-ranked memory. `truncated` is still set, labels keep their recall rank
+  (a skipped rank leaves a gap), and stale memory + advisory remain atomic.
+
+## 2026-10-01 - Erasing a memory erases both of its :Episodic nodes (audit Q1, #119)
+
+- `erase_memory` (and `delete_memory`, which delegates to it) now resolves the memory's twin before
+  PREPARE: Menhir's queue node and the Graphiti episode it resolves to (`resolved_episode_uuid`) both
+  carry the verbatim content, so erasing either erases both. Twins are recorded as erasure subjects, so a
+  crash between the two deletes is replayed for both; each node runs the unchanged single-node graph
+  cascade and sidecar purge. A twin lookup failure fails closed (no PREPARE, nothing deleted).
+- New read-only `episodic_twin_uuids` (episode lifecycle + adapter): only same-namespace twins, compared
+  with `normalize_namespace` in Python.
+- Derived entities and fact edges built from the episode are unchanged (#119 derived-retention scope).
+
+## 2026-10-01 - Source-memory backfill paging and embedding-model identity (delta audit F1/F2)
+
+- F1: `list_episodes_missing_content_embedding` filters blank content in Cypher (not after `LIMIT`)
+  and pages by an exclusive `after_uuid` cursor; `scripts/backfill_episode_embeddings.py` advances
+  that cursor and stops only on an empty page. Before, a page with blank rows ended the run early
+  and rows the script skipped were re-listed first forever.
+- F2: new `services/embedding_identity.py`. When the current embedder model resolves, the
+  source-memory search and `recall_history` compare only vectors stamped with that
+  `content_embedding_model`, the ingest step re-embeds a vector from another model, and the
+  backfill lists other-model vectors for re-embedding. Unresolved model (`unknown`): no filter,
+  byte-identical to before.
+- Live (LME copy, single model): search results identical on 40/40 namespaces with the stamped
+  model; a different model returns none and the backfill would re-embed.
+
+## 2026-10-01 - #215 source-memory reads and backfill select only Menhir queue nodes
+
+- New `domain/episode_nodes.py::menhir_queue_episode_cypher` (`valid_at IS NULL`): Menhir's queue
+  `:Episodic` never carries `valid_at`; Graphiti's resolved episode always does. `processing_state`
+  could not tell them apart because the node-defaults migration stamps it on Graphiti's episodes at
+  bootstrap, so the source-memory section / `recall_history` (`search_episode_embeddings`) and the
+  embedding backfill (`list_episodes_missing_content_embedding`) matched both nodes of every memory.
+- Measured on the LME oracle copy (40 namespaces, top-10 searches): 200 of 400 returned slots were
+  duplicate content before, 0 after. Existing duplicate embeddings on Graphiti episodes become inert;
+  no data cleanup is required. The ingest-time embed step already targeted only the queue node.
+- Same assumption, not changed here (see #215): `reset_zero_extraction_episodes` (no callers), the
+  SESSION orphan cleanup, and READY counts in the explorer/overview.
+
+## 2026-10-01 - Graphiti fork 0.30.2.post2; merge-lineage filter moves into the fork
+
+- Pin `archolith-graphiti-core==0.30.2.post2` (fork tag `v0.30.2.post2` at `7aaab9ca`; wheel SHA-256
+  `d7588bc9d75407495f859dffb2ff7400566d856a434698bfd68dcb9dce6ec8b9`). It carries graphiti #2 (merge lineage
+  kept out of dedup/summary/attribute-extraction prompts) and #3 (combined extraction prompt split so the static
+  instructions are a cacheable system prefix, ~13.5% of ingest spend on providers that cache by message).
+- Removed the Menhir-side stopgap from #205 (`_strip_merge_lineage` and helpers in
+  `infrastructure/graphiti_llm_adapter.py`); the fork owns the policy now.
+  `tests/infrastructure/test_merge_lineage_prompt_policy.py` now renders the real fork prompts with
+  lineage-carrying nodes and asserts the fork drops the keys.
+- Version/hash references updated: install hints, fork contract/pin tests, E2E-6/E2E-8, release-image
+  workflow, `docs/post-install.md`, `.agent/architecture.md`.
+
+## 2026-09-30 - #155 ground event dates in source evidence
+
+- Event-history perception no longer trusts the model's bare `when`:
+  `EventPerceptionProposal` gains `when_context` (the episode sentence containing the
+  claim span; NOT part of `source_key`/identity), and `_resolve_event_valid_time` now
+  grounds `valid_at` in that sentence — a fully-explicit source date (`2026-07-18`,
+  `July 18, 2026`) wins (`when_conflict_used_source` on model disagreement), a stated
+  month+day without a year resolves to the most recent year on/before the episode
+  reference when the model's month/day matches, supported relative phrases
+  (`today`/`tonight`, `yesterday`, `N day(s)/week(s) ago`) resolve deterministically from
+  the reference (`when_conflict_used_relative` on model disagreement), and with NO stated
+  date any model `when` is ignored (`ungrounded_when_ignored`) in favor of the episode
+  reference. A source date more than 1 day after the reference is ignored
+  (`future_source_date_ignored`; 1 day of timezone tolerance). A month+day without a year
+  must match the model's month/day (or stand alone when the model gave none).
+  Reuses `typed_scalar_rules.parse_source_date` / `same_calendar_day` (new public
+  aliases); the scalar expiration/disposition policy is NOT copied.
+- A malformed model `when` no longer drops the whole event: it is treated as absent and
+  reported as a NON-fatal `malformed_when_ignored` note through the new `on_note` seam
+  (`parse_event_row(note=...)`, `extract_events_once(on_note=...)`).
+- `EventAssertionBuildResult` gains `note` (temporal resolution note) and event
+  consolidation records it (and `malformed_when_ignored`) in a separate
+  `event_time_notes` counter -- kept events are never counted as drops.
+- Version/replay: default `personal_memory_event_history_perceiver_version` bumped
+  `v1` -> `v2`. The event consolidation cursor is keyed to the perceiver version and a
+  cursor stamped by a DIFFERENT version is treated as a reset
+  (`TurnEvidenceRepository.load_next_event_evidence_batch`), so with the new default all
+  existing evidence IS automatically re-perceived and v2 assertions supersede v1 via
+  strict `perceiver_rank` (verified `perceiver_rank("v2") > perceiver_rank("v1")`).
+  Deployments pinning `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_PERCEIVER_VERSION=v1` keep
+  v1 events until they replay under v2.
+
+## 2026-09-30 - recall_history drill-down tool
+
+- New read-only `recall_history` drill-down: matching saved memories strictly in time
+  order (oldest first, then uuid), optionally pooled. Reuses the source-memory lane's
+  embed + episode-embedding read; never writes, no access updates. Works whether or
+  not `MENHIR_FRONTIER_SOURCE_MEMORIES` is on.
+- Surfaces: `RecallService.recall_history` (implementation `run_recall_history` in
+  `services/recall_pipeline.py`; limit clamped 1..50; empty query -> ValueError;
+  failures raise, never partial), backend protocol/runtime/client plumbing
+  (`recall_history`), REST `POST /api/recall/history` (`RecallHistoryRequest` /
+  `RecallHistoryResponse`, namespace resolution identical to `/api/recall`), and the
+  MCP `recall_history` tool (`mcp/tools/recall/recall_history.py`, registered in
+  `RECALL_TOOLS`, not in `always_visible`).
+- Registries: `AGENT_ALLOWED_TOOLS`, feature taxonomy `retrieve`,
+  `RATABLE_OPERATIONS`, `get_memory_stats` user ops, `.agent/concept-ids.yaml`
+  (`mcp.tool.recall_history`), `endpoints.md`, `tasks-mcp.md`.
+## 2026-09-30 - Source-memory lane on by default
+
+- `frontier_source_memories` now defaults to `True` in `MemorySettings` (owner-approved
+  after evaluation: AMA-Bench live A/B 505 q x 2 fixed 104 / broke 52 vs off; LongMemEval
+  oracle 500 q x 2 correctness 0.340 -> 0.711). Library defaults
+  (`RetrievalTuningConfig.enable_source_memories`, Recall Lab tunings) and ingest
+  internal defaults are unchanged — they mean "no settings supplied".
+- Upgrade note: existing graphs must run `scripts/backfill_episode_embeddings.py` ONCE.
+  Set `MENHIR_FRONTIER_SOURCE_MEMORIES=false` to opt out.
+
+## 2026-09-30 - Source-memory recall lane (step 1, default off)
+
+- New additive recall section `source_memories` (raw episode memories by cosine over
+  `n.content_embedding`, oldest first, capped per entry), kept NEXT TO the ranked
+  results and never fused into them. Flag off (default) leaves recall, ingest and all
+  wire output byte-for-byte unchanged and makes no embedding call.
+- Settings: `MENHIR_FRONTIER_SOURCE_MEMORIES` (off), `_SOURCE_MEMORY_LIMIT` (10, 1..50),
+  `_SOURCE_MEMORY_MAX_CHARS` (600, 100..4000), `_SOURCE_MEMORY_POOLS` (off), mapped
+  into `RetrievalTuningConfig` and the Recall Lab tuning. Per-call override
+  `source_memory_limit` on `RecallService.recall`, the REST `RecallRequest` and the MCP
+  `recall_memories` tool (`0` = off for the call; `>0` = enable for the call).
+- Ingest step `embed_episode_content` embeds episode content (8k-char cap) via the
+  Graphiti embedder when the flag is on; skips evidence projections and
+  already-embedded episodes; any exception is logged at WARNING and swallowed.
+- New `scripts/backfill_episode_embeddings.py` (idempotent, `--dry-run`) for
+  pre-existing graphs; documented in `.agent/scripts-index.md`.
+- Optional anchor pools (`domain/source_memory_pools.py`, pure/deterministic) group
+  the section's returned memories when `_SOURCE_MEMORY_POOLS` is on.
+- Recall Lab opt-in arm tunings: `enable_source_memories=true` adds the section to an
+  arm's output, and additionally `source_memory_pools=true` groups it into pools; these
+  are tunings, not default arms (`DEFAULT_ARMS` is unchanged), and the Lab request must
+  set `include_session=true` for the section to appear. Lane failures degrade to a
+  "Source-memory lane unavailable" note; ranked results never change.
+
+## 2026-09-26 - Reconcile native Graphiti fork with current Menhir
+
+- `pyproject.toml`, `uv.lock`: pin the public Archolith Graphiti 0.30.2 maintenance
+  commit `6b907b93fed32cb979093327608a4fd897b39751` and preserve locked registry dependencies.
+- Recover the unfinished Phase F migration onto published main: replace all 17 runtime
+  patch installers with native fork hooks and Menhir-owned extraction, resolution and
+  LLM policy adapters. Keep subsequent ingestion, retention and recall fixes.
+- `graphiti_client.py`, `graphiti_resolution_policy.py`: flush telemetry inside its
+  request task on success, failure and cancellation; count empty candidate searches.
+- `graphiti_llm_adapter.py`: preserve namespace and operation metadata across retries.
+- Release wheelhouse: derive the immutable fork requirement from package metadata,
+  pin/hash the additional build backend closure, and build without isolated dependency
+  resolution. Docker remains an offline wheel consumer.
+- Migrated contract tests and added dependency, request-context, task-boundary and
+  immutable-build-pin regressions. Feature defaults and deployed configuration stay as-is.
+- Fork baseline is now 0.30.2. Default-on readiness (#169 and siblings) still requires
+  outstanding source-grounding fixes and current graph/model quality evidence; this
+  integration does not itself qualify a feature for default enablement.
+
+
 ## 2026-09-16 - Snapshot ingest: owner decisions, P2 split into P2A/P2B
 
 - P2 splits. **P2A** implements the real begin/chunk/status/abort handlers in an unadvertised,
@@ -45,6 +355,27 @@
 - P0's measurement half is NOT run and is the gate on P2: the chunk probe needs the tools P2
   introduces and would hit production. Every `SnapshotLimits` value is marked PROVISIONAL in the
   source; open decision 1 remains the owner's.
+
+## 2026-09-15 - Phase F: migrate Graphiti customization to the Archolith soft fork (monkeypatch removal)
+
+- Pin `graphiti-core` to the exact Archolith fork commit
+  `git+https://github.com/Archolith/graphiti.git@728b4e994d01cf1677095f4324ef88cc8a59521e`
+  (baseline `v0.29.3`) in `pyproject.toml` and `uv.lock`; the lock records the exact Git source
+  and commit with no PyPI `graphiti-core` entry.
+- Remove all 17 runtime `_patch_graphiti_*` installers, the `graphiti_patches.py` facade, and the
+  `check_graphiti_version` guard. Menhir policy now rides the fork's explicit extension points:
+  extraction receipts/payload sanitation/binding via `SingleEpisodeExtractionHook`
+  (`graphiti_extraction_policy.py`), identity-gate/candidate-filter/pre-resolution adapters plus
+  the fork's entity-record group-id resolver seam (`graphiti_resolution_policy.py`), and the
+  concise-retry/strict-schema/RequestGuard adapter subclass (`graphiti_llm_adapter.py`).
+- Re-home dedupe branch/resolution telemetry (#13) onto the supported hook callbacks, flushed once
+  per `add_episode` call; no Graphiti function or LLM method is wrapped or replaced.
+- Release workflow: exclude `graphiti-core` from the hashed registry wheel step
+  (`uv export --no-emit-package graphiti-core`) and build it explicitly at the exact fork commit in
+  the wheelhouse's Git wheel step.
+- Publication constraint: commit `728b4e9` is local-only until pushed; remote resolution proof is
+  deferred to Phase G after publication. Local wheelhouse build/install proof uses the exact
+  fork source artifact.
 
 ## 2026-09-08 - Replace the rejected architecture draft with a bounded recovery plan
 

@@ -29,13 +29,28 @@ observe (a submodule that was never uploaded) would otherwise read as deletion.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
+
+from menhir.snapshot.protocol_digest import (
+    b64_encoded_len,
+    chunk_count,
+    compute_tree_digest,
+    sha256_hex,
+    sort_records,
+)
+from menhir.snapshot.protocol_records import (
+    PROVENANCE_SELF_REPORTED,
+    PROVENANCE_TRUSTED_AUTOMATION,
+    FileRecord,
+    GitProvenance,
+    Omission,
+    OmissionReason,
+)
 
 __all__ = [
     "BUNDLE_POLICY_VERSION",
@@ -73,10 +88,6 @@ BUNDLE_POLICY_VERSION = 1
 
 MANIFEST_NAME = "snapshot.json"
 CONTENT_PREFIX = "content/"
-
-#: Domain separator for `tree_digest`. Present so the digest of a file list can never collide with
-#: some other sha256 in this system that happens to hash similar bytes.
-_TREE_DIGEST_DOMAIN = b"menhir-snapshot-tree-v1\n"
 
 # --- stable machine-readable error codes -------------------------------------------------------
 # These cross the wire and appear in status results, so they are API. Add, never repurpose.
@@ -226,139 +237,6 @@ class SnapshotLimits:
 PROVISIONAL_LIMITS = SnapshotLimits()
 
 
-#: Provenance quality. The client may only ever assert the first: it is describing its own
-#: machine, and nothing it says about a commit can be checked from inside the bundle (the bundle
-#: has no `.git`). The server assigns the second from trusted forge or CI evidence -- never from
-#: anything a caller sent. A remote URL, repository name, branch or commit string is a claim, and
-#: a claim is never authorization (plan: "Source classes and project identity").
-PROVENANCE_SELF_REPORTED = "self_reported"
-PROVENANCE_TRUSTED_AUTOMATION = "trusted_automation"
-
-
-@dataclass(frozen=True)
-class GitProvenance:
-    """Where the bundled bytes came from, as a CLAIM about the source checkout.
-
-    Replaces the single `source_head` field, which could not answer the question that matters for
-    grounding a code memory: *were these the bytes at that commit, or bytes someone was still
-    editing?* A commit id alone reads as the former and is frequently the latter.
-
-    What each field is for:
-
-    ``base_commit``
-        The commit HEAD pointed at. A label, not an anchor -- plan invariant 13 forbids a
-        caller-reported commit from being the sole historical anchor of anything.
-    ``commit_tree``
-        The tree OID of that commit. Present so a server that ever gains the commit's objects can
-        compare them against what arrived; `base_commit` alone cannot be checked against content.
-    ``branch``
-        The branch label, or None when detached. Display metadata: durable isolation uses
-        `view_id`, so renames, detached heads and duplicate branch names do not collide.
-    ``dirty``
-        True when tracked working-tree bytes differ from ``base_commit``. This describes the
-        SOURCE, not the bundle. Untracked files are excluded from the comparison because they
-        never enter the bundle, so they cannot make it differ from the commit.
-    ``quality``
-        Always :data:`PROVENANCE_SELF_REPORTED` from a client.
-
-    **`dirty=False` does not mean the bundle equals the commit.** The selection policy drops
-    scanner-skipped directories, oversized files and refused paths, and tracked-but-deleted files
-    appear as deletions. Those are declared separately (`omissions`, `deleted_count`) and a reader
-    must consult them; only a clean tree with neither would claim to be the commit's tracked
-    content, and even then no one inside this system can verify it. `tree_digest` is the
-    authoritative statement about the uploaded bytes; everything here is provenance.
-    """
-
-    base_commit: str | None = None
-    commit_tree: str | None = None
-    branch: str | None = None
-    dirty: bool = False
-    quality: str = PROVENANCE_SELF_REPORTED
-
-    def as_json(self) -> dict[str, Any]:
-        return {
-            "base_commit": self.base_commit,
-            "commit_tree": self.commit_tree,
-            "branch": self.branch,
-            "dirty": self.dirty,
-            "quality": self.quality,
-        }
-
-    @classmethod
-    def from_mapping(cls, raw: Mapping[str, Any] | None) -> GitProvenance:
-        """Parse untrusted provenance. Unparseable values become absent, never invented.
-
-        `quality` is forced back to self-reported: a client claiming to be trusted automation is
-        exactly the claim this field exists to refuse. Only the server may raise it.
-        """
-        if not isinstance(raw, Mapping):
-            return cls()
-        return cls(
-            base_commit=_optional_str(raw.get("base_commit")),
-            commit_tree=_optional_str(raw.get("commit_tree")),
-            branch=_optional_str(raw.get("branch")),
-            dirty=bool(raw.get("dirty", False)),
-            quality=PROVENANCE_SELF_REPORTED,
-        )
-
-
-def _optional_str(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-class OmissionReason:
-    """Why a tracked path is absent from the bundle on purpose.
-
-    The distinction that matters to the server: an omission is NOT a deletion. The extracted tree
-    cannot tell them apart by itself, so a snapshot that omits a submodule would otherwise look
-    like a snapshot in which those files were removed -- and structure writes prune.
-    """
-
-    SUBMODULE = "submodule"
-    SYMLINK = "symlink"
-    OVERSIZE = "oversize"
-    EXCLUDED_DIR = "excluded_dir"
-    RECEIPT = "local_receipt"
-    SECRET_RISK = "secret_risk"
-    UNREADABLE = "unreadable"
-
-
-@dataclass(frozen=True)
-class FileRecord:
-    """One regular file in the bundle."""
-
-    path: str
-    size: int
-    sha256: str
-    executable: bool = False
-
-    def as_json(self) -> dict[str, Any]:
-        return {
-            "path": self.path,
-            "size": self.size,
-            "sha256": self.sha256,
-            "executable": self.executable,
-        }
-
-
-@dataclass(frozen=True)
-class Omission:
-    """A declared, deliberate absence."""
-
-    path: str
-    reason: str
-
-    def as_json(self) -> dict[str, Any]:
-        return {"path": self.path, "reason": self.reason}
-
-
-def sha256_hex(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
 def normalize_bundle_path(raw: str, limits: SnapshotLimits = PROVISIONAL_LIMITS) -> str:
     """Return *raw* as a bundle path, or raise :class:`BundlePathError`.
 
@@ -407,54 +285,6 @@ def collision_key(path: str) -> str:
     than extracted into a tree that quietly holds one of them.
     """
     return unicodedata.normalize("NFC", path).casefold()
-
-
-def compute_tree_digest(records: Sequence[FileRecord]) -> str:
-    """Hash the ordered file records. Returns ``sha256:<hex>``.
-
-    Covers path, size, content digest and the executable bit -- and nothing else. Project name,
-    ids, HEAD and timestamps are deliberately outside it, so the same bytes produce the same
-    digest whatever the snapshot is called or when it was taken. Records must already be sorted
-    (:func:`sort_records`); the caller's order is hashed as given so that a mis-ordered manifest
-    fails the digest check instead of being silently accepted.
-    """
-    digest = hashlib.sha256()
-    digest.update(_TREE_DIGEST_DOMAIN)
-    for record in records:
-        digest.update(record.path.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(str(record.size).encode("ascii"))
-        digest.update(b"\0")
-        digest.update(record.sha256.encode("ascii"))
-        digest.update(b"\0")
-        digest.update(b"1" if record.executable else b"0")
-        digest.update(b"\n")
-    return f"sha256:{digest.hexdigest()}"
-
-
-def sort_records(records: Iterable[FileRecord]) -> list[FileRecord]:
-    """Canonical order: by UTF-8 bytes of the path.
-
-    Byte order, not locale or code-point order on decoded strings, so two machines with different
-    locales produce the same digest.
-    """
-    return sorted(records, key=lambda r: r.path.encode("utf-8"))
-
-
-def b64_encoded_len(decoded_len: int) -> int:
-    """Length of the standard base64 encoding of *decoded_len* bytes, padding included."""
-    if decoded_len < 0:
-        raise ValueError("decoded_len must be non-negative")
-    return 4 * ((decoded_len + 2) // 3)
-
-
-def chunk_count(total_bytes: int, chunk_bytes: int) -> int:
-    """Number of chunks a bundle of *total_bytes* needs. Zero bytes is zero chunks."""
-    if chunk_bytes <= 0:
-        raise ValueError("chunk_bytes must be positive")
-    if total_bytes < 0:
-        raise ValueError("total_bytes must be non-negative")
-    return (total_bytes + chunk_bytes - 1) // chunk_bytes
 
 
 @dataclass(frozen=True)

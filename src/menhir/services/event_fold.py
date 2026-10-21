@@ -11,11 +11,14 @@ level (Law 2) and the counter's `valid_at` feeds the View's LWW ordering guard (
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, Protocol
 
 from menhir.domain.fold_algebra import REDUCERS, Event, latest, timeline
 from menhir.infrastructure.view_repository import ViewRepository
 from menhir.services.seam_types import Embed
+
+logger = logging.getLogger(__name__)
 
 
 #: reducers whose accumulator is the scalar a counter stores.
@@ -41,15 +44,22 @@ def fold_events_to_counter(
     source: str = "event-fold",
     embed: Embed | None = None,
     audit: dict[str, Any] | None = None,
+    value: float | None = None,
 ) -> dict[str, Any]:
     """Fold `events` with a scalar reducer and upsert the result as a counter View for
     (subject, measure). `reducer` in {sum, count, distinct_count}. Idempotent + supersedable:
     re-folding the same events no-ops; adding a later-dated event supersedes (its `valid_at` > current,
-    so the LWW guard admits it). Returns the counter row + {reducer, value, events}."""
+    so the LWW guard admits it). Returns the counter row + {reducer, value, events}.
+
+    `value`, when given, is stored as-is and `events` are provenance only. Perception passes the
+    value its gate vetted: a Law-3 anchor + delta (`[anchor, *post]`) does not re-reduce to it under
+    count/distinct_count."""
     if reducer not in _SCALAR_REDUCERS:
         raise ValueError(f"reducer {reducer!r} must be one of {_SCALAR_REDUCERS}")
-    fn, _idempotent = REDUCERS[reducer]
-    value = float(fn(events))  # batch re-fold: absolute value over the full set (Law-2 safe)
+    if value is None:
+        fn, _idempotent = REDUCERS[reducer]
+        value = float(fn(events))  # batch re-fold: absolute value over the full set (Law-2 safe)
+    value = float(value)
     lat = latest(events)
     valid_at = lat.when if lat is not None else None
     episode_uuids = [e.episode_uuid for e in events if e.episode_uuid]
@@ -58,7 +68,12 @@ def fold_events_to_counter(
     if embed is not None:
         try:
             name_embedding = embed(ViewRepository.retrieval_text(subject, measure, value))
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Event-fold counter embedding failed subject=%s measure=%s namespace=%s; "
+                "writing without embedding (keyword-only retrieval): %s",
+                subject, measure, namespace, exc,
+            )
             name_embedding = None  # surfacing degrades to BM25-only; never block the write
 
     res = graph_adapter.record_counter(
@@ -94,7 +109,12 @@ def fold_events_to_timeline(
     if embed is not None and entries:
         try:
             name_embedding = embed(ViewRepository._timeline_surface(subject, entries))
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Event-fold timeline embedding failed subject=%s namespace=%s; "
+                "writing without embedding (keyword-only retrieval): %s",
+                subject, namespace, exc,
+            )
             name_embedding = None  # surfacing degrades to BM25-only; never block the write
 
     res = graph_adapter.record_timeline(

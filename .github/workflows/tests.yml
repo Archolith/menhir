@@ -130,9 +130,8 @@ jobs:
       # TestDecayLLMWiring failures in the same file) has a separate, unfixed hang
       # in the LLM chat-completion retry/backoff path -- tracked as a follow-up, not
       # yet root-caused. This run may still fail/timeout on that file.
-      # Beacon's framework dependency must not replace Menhir's pinned runtime.
-      # Pin the authoritative Beacon source, not the unrelated PyPI name or a moving branch.
-      # The exact green PR-head SHA is the compatibility contract issue #120's E2E pins.
+      # Existing Beacon tests still use an isolated, pinned dependency. Beacon release
+      # acceptance is deferred with #120; the active E2E-6 now covers the Graphiti fork.
       - name: Install isolated Beacon integration dependency
         run: |
           python -m venv "$RUNNER_TEMP/beacon-env"
@@ -185,11 +184,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ./menhir pytest pytest-asyncio pytest-xdist pytest-timeout
 
-      # The E2E-6 graph-backed test launches Beacon's real stdio server and
-      # needs the SAME isolated, exact Beacon revision the offline job pins:
-      # a separate venv so Beacon's framework dependencies never replace
-      # Menhir's pinned runtime, and a fixed SHA so the compatibility contract
-      # cannot silently follow a moving branch.
+      # Existing graph-backed Beacon tests use the same isolated revision as the
+      # offline job. Beacon-specific release acceptance is deferred with #120;
+      # the active Graphiti E2E-6 runs in the separate stdio job below.
       - name: Install isolated Beacon integration dependency
         run: |
           python -m venv "$RUNNER_TEMP/beacon-env"
@@ -279,22 +276,12 @@ jobs:
           cache: "pip"
           cache-dependency-path: menhir/pyproject.toml
 
-      # `build` is the wheel frontend the campaign uses; without it every lane SKIPS with
-      # "wheel build failed", which would leave this job green while running nothing.
+      # `build` is the wheel frontend the campaign uses. A missing frontend now
+      # fails the enabled campaign at fixture setup.
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e ./menhir build pytest pytest-asyncio pytest-timeout
-
-      # E2E-6 and E2E-8's Beacon criterion drive `menhir beacon generate` and Beacon's own
-      # validate/inspect/serve. Same isolated venv and exact SHA as the offline and online
-      # jobs: Beacon's dependencies stay out of the campaign's venv, and the compatibility
-      # contract cannot follow a moving branch. Without it both lanes declare_pending.
-      - name: Install isolated Beacon integration dependency
-        run: |
-          python -m venv "$RUNNER_TEMP/beacon-env"
-          "$RUNNER_TEMP/beacon-env/bin/python" -m pip install "git+https://github.com/Archolith/beacon.git@1cc3352b90004f3b76f1c5ed49ee4235c606a52f"
-          echo "MENHIR_E2E_BEACON_PYTHON=$RUNNER_TEMP/beacon-env/bin/python" >> "$GITHUB_ENV"
 
       # Port 7690, not 7688. The graph-backed job above owns 7688, and every lane here
       # DETACH DELETEs the graph between lanes -- sharing the port would let this job
@@ -328,13 +315,23 @@ jobs:
         working-directory: menhir
         env:
           MENHIR_E2E: "1"
+          MENHIR_E2E_STRICT: "1"
           MENHIR_E2E_NEO4J_URI: bolt://127.0.0.1:7690
           # Pinned so the evidence upload below can find it. Left unset, the campaign
           # writes under pytest's basetemp (/tmp/pytest-of-runner/...), outside the
           # checkout, and the first green run uploaded an empty artifact without saying so.
           MENHIR_E2E_WORK_ROOT: ${{ github.workspace }}/menhir/.e2e-work
         run: |
-          pytest tests/e2e -v -rs
+          pytest tests/e2e -v -rs --junitxml=.e2e-work/junit.xml
+
+      # A green pytest exit can still mean every runnable lane skipped. Compare the
+      # collected cases with their verdicts; only E2E-6's no-image PENDING is expected.
+      - name: Verify campaign evidence
+        if: always()
+        working-directory: menhir
+        run: |
+          python -m tests.e2e._harness.ci_evidence_gate \
+            --junit .e2e-work/junit.xml --evidence .e2e-work/evidence
 
       # result.json is what Gate C actually asks for: which acceptance criteria were
       # proven, not merely whether pytest was green. Kept on failure too -- that is when
@@ -345,7 +342,6 @@ jobs:
         with:
           name: stdio-e2e-evidence
           path: menhir/.e2e-work/evidence/**
-          # error, not ignore: every lane writes result.json even when it skips or
-          # crashes, so a run with no evidence is a run that did not happen.
+          # error, not ignore: no evidence means the campaign did not run.
           if-no-files-found: error
           retention-days: 14

@@ -19,6 +19,10 @@ from menhir.infrastructure.providers import (
 )
 _COMPRESS_MAX_RETRIES = 8
 _COMPRESS_RETRY_BASE_DELAY = 2.0
+# Verdict calls answer in a word or a small JSON object, but on reasoning models max_tokens also covers
+# hidden reasoning: at 64 tokens most identity-judge calls ended empty (#203). The answer stays short;
+# this is headroom, not a longer output.
+_VERDICT_MAX_TOKENS = 1024
 
 _THINKING_TAG_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
@@ -260,7 +264,16 @@ class LLMAdapter:
                     temperature=temperature,
                 )
                 result = _strip_thinking_tags(raw).strip()
-                return result if result else None
+                if not result:
+                    # Distinguishes a starved or refused completion from a failed call (#203).
+                    logger.warning(
+                        "LLM %s returned an empty completion (max_tokens=%d); a reasoning model "
+                        "may have spent the whole budget before answering",
+                        operation,
+                        max_tokens,
+                    )
+                    return None
+                return result
             except asyncio.CancelledError:
                 raise
             except LlmUsageControlSignal:
@@ -359,7 +372,7 @@ class LLMAdapter:
             system_prompt=_CONTRADICTION_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             operation="contradiction_check",
-            max_tokens=64,
+            max_tokens=_VERDICT_MAX_TOKENS,
             temperature=0.0,
             max_retries=0,  # fail fast — don't block MCP on a down server
         )
@@ -405,7 +418,7 @@ class LLMAdapter:
             system_prompt=_IDENTITY_JUDGMENT_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             operation="identity_judgment",
-            max_tokens=64,
+            max_tokens=_VERDICT_MAX_TOKENS,
             temperature=0.0,
             max_retries=0,  # fail fast — don't block MCP on a down server
         )
@@ -459,7 +472,7 @@ class LLMAdapter:
             system_prompt=_SHADOW_TIE_BREAK_SYSTEM_PROMPT,
             user_prompt=_shadow_tie_break_user_prompt(episode_body, tied_candidates),
             operation="shadow_context_composition_tie_break",
-            max_tokens=128,
+            max_tokens=_VERDICT_MAX_TOKENS,
             temperature=0.0,
             max_retries=0,
         )

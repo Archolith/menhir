@@ -38,6 +38,8 @@ class RuntimeProviderDataOpsMixin:
         namespace: str | None = None,
         occurred_at: str | None = None,
         turn_evidence_uuid: str | None = None,
+        user_statement: str | None = None,
+        role: str | None = None,
     ) -> dict[str, Any]:
         session = new_session(user_id, session_id=session_id)
         queue_kwargs: dict[str, Any] = {
@@ -47,6 +49,10 @@ class RuntimeProviderDataOpsMixin:
             "occurred_at": occurred_at,
             "turn_evidence_uuid": turn_evidence_uuid,
         }
+        if (user_statement or "").strip():
+            queue_kwargs["user_statement"] = user_statement
+        if role is not None:
+            queue_kwargs["role"] = role
         if bootstrap_scope is not None:
             queue_kwargs["bootstrap_scope"] = bootstrap_scope
         result = await self.built.ingest_service.queue_episode_for_enrichment(
@@ -308,6 +314,9 @@ class RuntimeProviderDataOpsMixin:
         namespace: str | None = None,
         include_invalidated: bool = False,
         trace: bool = False,
+        source_memory_limit: int | None = None,
+        counted_verdict_limit: int | None = None,
+        include_warden_status: bool = False,
     ) -> dict[str, Any]:
         # Map the env-driven frontier portions into the recall call. With no
         # MENHIR_FRONTIER_* set this is all-off -> today's ScoringService path; trace is
@@ -324,11 +333,18 @@ class RuntimeProviderDataOpsMixin:
             frontier_kwargs["tuning"] = tuning
         if trace:
             frontier_kwargs["trace"] = trace
+        if include_warden_status:
+            frontier_kwargs["include_warden_status"] = True
+        if source_memory_limit is not None:
+            frontier_kwargs["source_memory_limit"] = int(source_memory_limit)
+        if counted_verdict_limit is not None:
+            frontier_kwargs["counted_verdict_limit"] = int(counted_verdict_limit)
         result = await self.built.recall_service.recall(
             query,
             preset=parse_query_preset(preset),
             limit=limit,
             include_session=include_session,
+            session_id=self._effective_session_id(),
             include_superseded=include_superseded,
             wait_for_pending=wait_for_pending,
             file_context=file_context,
@@ -340,10 +356,105 @@ class RuntimeProviderDataOpsMixin:
         payload = _to_jsonable(result)
         # 7.J flag-off wire compatibility: RecallResult carries optional structured layers
         # internally, but disabled/no-verdict responses retain the historical JSON shape.
+        if not include_warden_status or payload.get("warden_status") is None:
+            payload.pop("warden_status", None)
+        if payload.get("warden_notice") is None:
+            payload.pop("warden_notice", None)
         if payload.get("authority_layer") is None:
             payload.pop("authority_layer", None)
         if payload.get("event_authority_layer") is None:
             payload.pop("event_authority_layer", None)
+        if payload.get("source_memories") is None:
+            payload.pop("source_memories", None)
+        return payload
+
+    async def recall_history(
+        self,
+        query: str,
+        *,
+        namespace: str | None = None,
+        limit: int = 30,
+        pools: bool = True,
+    ) -> dict[str, Any]:
+        from dataclasses import asdict
+
+        result = await self.built.recall_service.recall_history(
+            query, namespace=namespace, limit=limit, pools=pools
+        )
+        payload = _to_jsonable(asdict(result))
+        if payload.get("note") is None:
+            payload.pop("note", None)
+        return payload
+
+    async def get_scalar_view_items(
+        self,
+        *,
+        view_uuid: str,
+        namespace: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        import asyncio
+
+        from menhir.services.scalar_view_items import fetch_scalar_view_items
+
+        adapter = getattr(self.built, "graph_adapter", None)
+        if adapter is None:
+            raise RuntimeError("scalar view items unavailable: no graph adapter")
+        return await asyncio.to_thread(
+            fetch_scalar_view_items, adapter,
+            view_uuid=view_uuid, namespace=namespace, offset=offset, limit=limit,
+        )
+
+    async def recall_timeline(
+        self,
+        *,
+        namespace: str | None = None,
+        query: str | None = None,
+        subject: str | None = None,
+        at: str | None = None,
+        window_from: str | None = None,
+        window_to: str | None = None,
+        around: str | None = None,
+        cursor: str | None = None,
+        direction: str = "both",
+        limit: int = 10,
+        detail: str = "headline",
+        facts: bool = False,
+        history_view: str | None = None,
+        history_offset: int | None = None,
+        history_limit: int = 10,
+    ) -> dict[str, Any]:
+        from dataclasses import asdict
+
+        settings = getattr(self.built, "settings", None)
+        event_time = bool(getattr(settings, "anchored_time_render_enabled", False))
+        result = await self.built.recall_service.recall_timeline(
+            namespace=namespace,
+            query=query,
+            subject=subject,
+            at=at,
+            window_from=window_from,
+            window_to=window_to,
+            around=around,
+            cursor=cursor,
+            direction=direction,
+            limit=limit,
+            detail=detail,
+            facts=facts,
+            history_view=history_view,
+            history_offset=history_offset,
+            history_limit=history_limit,
+            **({"event_time": True} if event_time else {}),
+        )
+        payload = _to_jsonable(asdict(result))
+        if payload.get("note") is None:
+            payload.pop("note", None)
+        # Flag-off payloads stay byte-identical: no null event_time key on any fact.
+        for entry in payload.get("entries") or ():
+            for fact in entry.get("facts") or ():
+                if isinstance(fact, dict) and fact.get("event_time") is None:
+                    fact.pop("event_time", None)
         return payload
 
     async def view_entropy(
@@ -375,7 +486,9 @@ class RuntimeProviderDataOpsMixin:
         session_id: str | None = None,
         include_scores: bool = False,
         namespace: str | None = None,
+        include_warden_status: bool = False,
     ) -> dict[str, Any]:
+        context_kwargs = {"include_warden_status": True} if include_warden_status else {}
         result = await self.built.context_builder.build_context(
             query,
             max_tokens=max_tokens,
@@ -383,6 +496,7 @@ class RuntimeProviderDataOpsMixin:
             session_id=session_id or self._effective_session_id(),
             include_scores=include_scores,
             namespace=namespace,
+            **context_kwargs,
         )
         return _to_jsonable(result)
 
@@ -636,16 +750,26 @@ class RuntimeProviderDataOpsMixin:
             # lets each decide -- retry with an action, or skip and report.
             return resolution.as_dict()
 
+        scan_generation = await self._off_loop(
+            self.built.graph_adapter.begin_structure_scan, claim
+        )
         scanner = ProjectScanner()
-        scan = await asyncio.to_thread(scanner.scan, path, project_name)
+        try:
+            scan = await asyncio.to_thread(scanner.scan, path, project_name)
+        except OSError as exc:
+            # A failed walk leaves the existing index untouched. Give stdio callers
+            # the reason through the backend refusal path instead of an opaque 500.
+            raise ValueError(f"Project scan refused: {exc}") from exc
         # Carried on the scan so every writer under `write_project` stamps it without a second
         # parameter threaded through four batch helpers.
         scan.project_id = claim.project_id
         scan.identity_generation = claim.generation
+        scan.scan_generation = scan_generation
 
         if not force:
             stored_fp = await self._off_loop(
-                self.built.graph_adapter.get_scan_fingerprint, project_name
+                self.built.graph_adapter.get_scan_fingerprint, project_name,
+                project_id=claim.project_id,
             )
             if stored_fp and stored_fp == scan.scan_fingerprint:
                 # Same files, possibly a new commit: keep the evidence binding current.
@@ -656,6 +780,8 @@ class RuntimeProviderDataOpsMixin:
                     scan.indexed_commit,
                     scan.indexed_repository,
                     scan.indexed_dirty,
+                    claim=claim,
+                    scan_generation=scan_generation,
                 )
                 return {
                     "counts": {},
@@ -965,9 +1091,13 @@ class RuntimeProviderDataOpsMixin:
             )
             return
         try:
+            scan_generation = await _asyncio.to_thread(
+                self.built.graph_adapter.begin_structure_scan, rescan_claim
+            )
             fresh_scan = await _asyncio.to_thread(_PS().scan, root, name)
             fresh_scan.project_id = rescan_claim.project_id
             fresh_scan.identity_generation = rescan_claim.generation
+            fresh_scan.scan_generation = scan_generation
             await _asyncio.to_thread(
                 self.built.graph_adapter.write_project_structure,
                 fresh_scan,

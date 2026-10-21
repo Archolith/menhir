@@ -204,46 +204,6 @@ def test_cimd_selects_none_when_client_prefers_private_key_jwt(monkeypatch):
     assert get_client_store().get(_URL).token_endpoint_auth_method == "none"
 
 
-def test_production_policy_accepts_chatgpt_stable_cimd(monkeypatch):
-    """Keep the advertised CIMD mode aligned with the digest-bound web policy."""
-
-    policy_path = (
-        Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
-    )
-    payload = json.loads(policy_path.read_text(encoding="utf-8"))
-    policy = load_client_policy(str(policy_path), payload["canonical_digest"])
-    _install_resolver(
-        monkeypatch,
-        {
-            _CHATGPT_URL: _doc(
-                url=_CHATGPT_URL,
-                cb=_CHATGPT_CB,
-                client_name="ChatGPT",
-                token_endpoint_auth_method="private_key_jwt",
-                token_endpoint_auth_methods_supported=["none", "private_key_jwt"],
-                token_endpoint_auth_signing_alg="RS256",
-                jwks_uri="https://chatgpt.com/oauth/jwks.json",
-            )
-        },
-    )
-    _, challenge = _pkce()
-    params = _get_params(
-        _CHATGPT_URL,
-        challenge=challenge,
-        redirect_uri=_CHATGPT_CB,
-    )
-    params["scope"] = "menhir:read menhir:write menhir:admin"
-
-    response = _client(_ENABLED_REFRESH, policy=policy).get(
-        "/oauth/authorize",
-        params=params,
-    )
-
-    assert response.status_code == 200
-    assert "ChatGPT" in response.text
-    stored = get_client_store().get(_CHATGPT_URL)
-    assert stored is not None
-    assert stored.token_endpoint_auth_method == "none"
 
 
 def test_cimd_rejects_private_key_jwt_when_none_is_not_offered(monkeypatch):

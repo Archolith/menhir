@@ -7,7 +7,7 @@ mcp:
     conflicts:
       ids: [mcp.tool.list_conflicts, mcp.tool.resolve_conflict, mcp.tool.scan_for_conflicts, mcp.tool.run_llm_conflict_review, mcp.tool.requeue_conflicts_for_llm_review]
     recall:
-      ids: [mcp.tool.read_flagged_memories, mcp.tool.recall_context_memories, mcp.tool.recall_memories]
+      ids: [mcp.tool.read_flagged_memories, mcp.tool.recall_context_memories, mcp.tool.recall_history, mcp.tool.recall_memories]
     context:
       ids: [mcp.tool.build_context]
     stats:

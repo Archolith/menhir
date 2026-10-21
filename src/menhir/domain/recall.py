@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import math
 from typing import Any
 
 import menhir.domain.retrieval_trace_models as retrieval_trace_models
@@ -112,7 +113,65 @@ class TemporalFact:
     created_at: str | None
     expired_at: str | None
     is_current_belief: bool
-    temporal_role: str  # "current_belief" | "superseded_belief"
+    # "current_belief" | "superseded_belief" | "ended" (believed, but its own end has passed;
+    # only with MENHIR_ANCHORED_TIME_EXPIRY on).
+    temporal_role: str
+    # Rendered anchored-time event time; set only when MENHIR_ANCHORED_TIME_RENDER is on and the
+    # edge carries a persisted contract.
+    event_time: str | None = None
+    # Two-tier self: True when the inferred self tier holds a near-duplicate of this anchored fact
+    # (the inferred copy is dropped from the same result). Set only with MENHIR_INFERRED_SELF_MODE on.
+    corroborated: bool = False
+
+
+@dataclass(frozen=True)
+class VerifierEvidence:
+    """Last successful register observation plus the distinct latest probe status."""
+
+    verifier_uuid: str
+    register_subject: str
+    register_counter: str
+    value: float | None = None
+    display: str | None = None
+    last_verified_at: str | None = None
+    last_probe_at: str | None = None
+    last_probe_status: str | None = None
+
+    def context_line(self) -> str:
+        value = self.display or (str(self.value) if self.value is not None else "unknown")
+        if not self.last_verified_at:
+            value = "unverified"
+        return (
+            f"  Register observation: {self.register_subject}.{self.register_counter} = {value}; "
+            f"last successful verification: {self.last_verified_at or 'never'}; "
+            f"latest probe: {self.last_probe_status or 'unknown'} at {self.last_probe_at or 'unknown'}. "
+            "This observation does not verify the memory's prose."
+        )
+
+
+def parse_verifier_evidence(rows: object) -> tuple[VerifierEvidence, ...]:
+    """Normalize graph projections; superseded register fan-in repeats the same binding."""
+    if not isinstance(rows, (list, tuple)):
+        return ()
+    by_binding = {}
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("verifier_uuid"):
+            continue
+        try:
+            value = float(row["value"]) if row.get("value") is not None else None
+            if value is not None and not math.isfinite(value):
+                value = None
+        except (ValueError, TypeError, OverflowError):
+            value = None
+        evidence = VerifierEvidence(
+            verifier_uuid=str(row["verifier_uuid"]),
+            register_subject=str(row.get("register_subject") or "unknown"),
+            register_counter=str(row.get("register_counter") or "unknown"),
+            value=value, display=row.get("display"), last_verified_at=row.get("last_verified_at"),
+            last_probe_at=row.get("last_probe_at"), last_probe_status=row.get("last_probe_status"),
+        )
+        by_binding[evidence.verifier_uuid] = evidence
+    return tuple(by_binding[key] for key in sorted(by_binding))
 
 
 @dataclass(frozen=True)
@@ -146,6 +205,17 @@ class ScoredMemory:
     # Dict keys: stale_anchor (bool), stale_reason (str|None), dirty_at (str|None),
     # anchored_at (str|None), path (str|None).
     stale_anchor_info: dict[str, Any] | None = field(default=None)
+    status: str | None = None
+    artifact_status: str | None = None
+    superseded_by: str | None = None
+    # Verifier drift is an advisory, not proof that the prose is false.
+    needs_review: bool = False
+    review_reason: str | None = None
+    review_flagged_at: str | None = None
+    verifier_evidence: tuple[VerifierEvidence, ...] = ()
+    # Two-tier self: "anchored" or "inferred" on the namespace's self entities; None elsewhere and
+    # whenever MENHIR_INFERRED_SELF_MODE is off.
+    self_tier: str | None = None
 
 
 @dataclass(frozen=True)
@@ -160,6 +230,12 @@ class ScalarAuthorityContributor:
     valid_at: str | None
     evidence_tier: str | None
     episode_uuid: str | None
+    # Read-time event timing for counting occurrences only (None elsewhere). ``valid_at`` of an
+    # occurrence is the session time, not the event time; these carry the grounded event date.
+    source_sentence: str | None = None
+    event_at: str | None = None
+    event_basis: str | None = None
+    mentioned_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +257,14 @@ class ScalarAuthorityVerdict:
     contributors_total: int = 0
     contributors_truncated: bool = False
     next_offset: int | None = None
+    # The View's scalar_basis ("counted" for a counting-lane View), on current verdicts.
+    basis: str | None = None
+    # Counting wording flag: the value is a lower bound of the happenings the user mentioned.
+    lower_bound: bool = False
+    # unit 4R match audit: JSON strings from the counted View; None outside match mode.
+    count_uncertain: float | None = None
+    count_actions: str | None = None
+    count_items: str | None = None
 
 
 @dataclass(frozen=True)
@@ -215,6 +299,70 @@ class EventAuthorityVerdict:
 
 
 @dataclass(frozen=True)
+class SourceMemory:
+    """One entry of the additive source-memory section (raw episode content, not fused).
+
+    Never a ranked candidate: `results` and `candidates_evaluated` are identical with
+    the lane on or off. Ordered oldest-first by `reference_time`, then uuid.
+    """
+
+    uuid: str
+    content: str
+    reference_time: str | None
+    cosine: float
+    source: str | None
+    pool_id: str | None = None
+    pool_anchor: str | None = None
+
+
+@dataclass(frozen=True)
+class RecallHistoryResult:
+    """Result of the recall_history drill-down: matching source memories, oldest first.
+
+    Read-only over the episode-embedding search; never touches access state. ``note``
+    is set (and ``memories`` empty) when nothing matched.
+    """
+
+    query: str
+    memories: tuple[SourceMemory, ...]
+    note: str | None = None
+
+
+@dataclass
+class WardenExecutionStatus:
+    """Request-local receipt for ranked Entity enforcement, separate from configuration."""
+
+    configured_guards: tuple[str, ...] = ()
+    master_enabled: bool = False
+    state: str = "disabled"
+    evaluated: int = 0
+    applied_guards: tuple[str, ...] = ()
+    refused: int = 0
+    flagged: int = 0
+    unchecked_pending: int = 0
+    unassessed: int = 0
+    missing_candidate_metadata: int = 0
+    metadata_gaps: tuple[str, ...] = ()
+    excluded_result_types: tuple[str, ...] = ("source_memories", "authority_layers", "todos", "bootstrap_rows")
+
+    def add_gap(self, gap: str) -> None:
+        self.metadata_gaps = tuple(sorted({*self.metadata_gaps, gap}))
+
+    def notice(self) -> str | None:
+        if not self.configured_guards:
+            return None
+        if self.state == "failed":
+            return "Warden checks failed; ranked results are unchecked."
+        if not self.master_enabled:
+            return "Configured Warden guards were not applied; master gate is off."
+        if self.unchecked_pending:
+            return "Pending memories bypass Warden checks."
+        if self.metadata_gaps or self.unassessed:
+            return "Warden coverage is incomplete; some checks lack metadata or verdicts."
+        return None
+
+
+@dataclass(frozen=True)
 class RecallResult:
     query: str
     preset: str
@@ -225,6 +373,8 @@ class RecallResult:
     # Set when candidate generation failed and recall returned a degraded result.
     # This distinguishes a backend failure from a legitimate zero-match search.
     search_error: str | None = None
+    warden_status: WardenExecutionStatus | None = None
+    warden_notice: str | None = None
     # R0 retrieval observability: populated only when recall(trace=True).
     trace: retrieval_trace_models.RetrievalTrace | None = None
     # Phase 4c/7.J: an explicit authority layer, separate from flat ranked candidates. None when the
@@ -233,6 +383,10 @@ class RecallResult:
     # First-person event authority, separate from scalar authority. None when the authority feature
     # is disabled, no verdict was produced, or the query abstained; preserves flag-off wire output.
     event_authority_layer: tuple[EventAuthorityVerdict, ...] | None = None
+    # Source-memory lane (MENHIR_FRONTIER_SOURCE_MEMORIES): additive section of raw episode
+    # memories next to `results`, oldest first. None when the lane is off or failed;
+    # `results`/`candidates_evaluated` are identical either way.
+    source_memories: tuple[SourceMemory, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -268,3 +422,10 @@ class CandidateData:
     # is always CandidateSource.SCALAR_AUTHORITY (floor-exempt), but it is marked authoritative ONLY
     # when its effective tier rests on a foundation (not agent-only extraction) -- else it stays advisory.
     is_scalar_authority: bool = False
+    status: str | None = None
+    artifact_status: str | None = None
+    superseded_by: str | None = None
+    needs_review: bool = False
+    review_reason: str | None = None
+    review_flagged_at: str | None = None
+    verifier_evidence: tuple[VerifierEvidence, ...] = ()

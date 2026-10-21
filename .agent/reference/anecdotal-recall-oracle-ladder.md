@@ -9,9 +9,10 @@ Branch: `claude/menhir-chain-handoff-doc-7iuat2`
 > oracle/edge configs (0.322) on LongMemEval — the stack is net-neutral-to-negative on anecdotal
 > recall. Do not archive: the "why" behind the default-off levers (`.agent/default-off-features.md`)
 > lives here. Reconciliation notes:
-> - **BriefBuilder is BUILT, default-off** (`domain/brief_builder.py`, `frontier_brief_builder`); the
->   append-mode retest is safe/neutral (+0.03, within noise) — shippable without harm, lift unproven.
->   Tracked in `.agent/default-off-features.md`.
+> - **BriefBuilder was BUILT, default-off** (`domain/brief_builder.py`, `frontier_brief_builder`);
+>   the append-mode retest is safe/neutral (+0.03, within noise) — shippable without harm, lift unproven.
+>   Tracked in `.agent/default-off-features.md`. **REMOVED 2026-10-01**, superseded by
+>   `recall_timeline` (the flag and module no longer exist).
 > - **The backdating BLOCKER flagged mid-doc is RESOLVED.** `occurred_at`->`reference_time` now lands on
 >   the HTTP ingest path (see archived `menhir-temporal-ingest-backdating-plan.md`); the old inline
 >   `ingest_episode` body that could stamp `now()` was deleted — it delegates to the unified queue path.

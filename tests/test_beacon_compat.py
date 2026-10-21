@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
+import venv
 from pathlib import Path
 
 import pytest
 
-from menhir.services.beacon_compat import build_manifest_via_beacon
+from menhir.services.beacon_compat import (
+    BeaconCompatError,
+    beacon_python_is_usable,
+    build_manifest_via_beacon,
+    validate_manifest_file,
+)
 
 _SECRET = "pr125-f3-probe-secret"
 
@@ -29,6 +36,107 @@ def _fake_beacon_python(tmp_path: Path) -> str:
         wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}"\n', encoding="utf-8")
         wrapper.chmod(0o755)
     return str(wrapper)
+
+
+def _installed_beacon_python(tmp_path: Path) -> str:
+    """Put a fake Beacon in a separate interpreter's site-packages."""
+    venv_dir = tmp_path / "beacon-venv"
+    venv.EnvBuilder(with_pip=False).create(venv_dir)
+    if os.name == "nt":
+        python = venv_dir / "Scripts" / "python.exe"
+    else:
+        python = venv_dir / "bin" / "python"
+    site_packages = Path(
+        subprocess.check_output(
+            [
+                str(python),
+                "-I",
+                "-c",
+                "import sysconfig; print(sysconfig.get_path('purelib'))",
+            ],
+            text=True,
+        ).strip()
+    )
+    package = site_packages / "beacon"
+    package.mkdir()
+    (package / "__init__.py").write_text('__version__ = "0.3.0"\n', encoding="utf-8")
+    (package / "__main__.py").write_text(
+        "import os, sys\n"
+        "if '--help' in sys.argv:\n"
+        "    print('trusted help')\n"
+        "elif sys.argv[1] == 'build':\n"
+        "    if '--note' in sys.argv and sys.argv[sys.argv.index('--note') + 1] == 'fail':\n"
+        "        sys.stderr.write('secret=' + os.environ.get('NEO4J_PASSWORD', '<absent>'))\n"
+        "        raise SystemExit(2)\n"
+        "    print('trusted build')\n"
+        "elif sys.argv[1] == 'validate':\n"
+        "    print('trusted validate')\n"
+        "else:\n"
+        "    raise SystemExit(2)\n",
+        encoding="utf-8",
+    )
+    return str(python)
+
+
+@pytest.mark.parametrize("hostile_kind", ["module", "package"])
+def test_repo_local_beacon_cannot_shadow_installed_beacon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hostile_kind: str
+) -> None:
+    beacon_python = _installed_beacon_python(tmp_path)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    marker = tmp_path / "hostile-executed"
+    hostile_code = (
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('executed')\n"
+        "raise RuntimeError('repo-local Beacon executed')\n"
+    )
+    if hostile_kind == "module":
+        (repo_root / "beacon.py").write_text(hostile_code, encoding="utf-8")
+    else:
+        hostile_package = repo_root / "beacon"
+        hostile_package.mkdir()
+        (hostile_package / "__init__.py").write_text(hostile_code, encoding="utf-8")
+        (hostile_package / "__main__.py").write_text(hostile_code, encoding="utf-8")
+
+    monkeypatch.chdir(repo_root)
+    beacon_python_is_usable(beacon_python)
+    output = build_manifest_via_beacon(
+        beacon_python,
+        repo_root=repo_root,
+        evidence_path=repo_root / "evidence.json",
+        note="note",
+    )
+    validate_manifest_file(beacon_python, repo_root / "manifest.yaml")
+
+    assert output.decode("utf-8").splitlines() == ["trusted build"]
+    assert not marker.exists()
+
+
+def test_beacon_failure_does_not_reveal_parent_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    beacon_python = _installed_beacon_python(tmp_path)
+    monkeypatch.setenv("NEO4J_PASSWORD", _SECRET)
+
+    with pytest.raises(BeaconCompatError) as exc_info:
+        build_manifest_via_beacon(
+            beacon_python,
+            repo_root=tmp_path,
+            evidence_path=tmp_path / "evidence.json",
+            note="fail",
+        )
+
+    assert _SECRET not in str(exc_info.value)
+    assert "secret=<absent>" in str(exc_info.value)
+
+
+def test_isolated_beacon_child_keeps_utf8_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    from menhir.services.beacon_compat import _run
+
+    monkeypatch.setenv("PYTHONUTF8", "1")
+    output = _run(sys.executable, ["-c", "print(chr(233))"], cwd=None, timeout=10)
+    assert output.strip() == "é"
 
 
 def test_beacon_child_does_not_inherit_parent_secrets(

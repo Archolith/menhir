@@ -270,7 +270,7 @@ class EpisodeMaintenanceRepository:
         rows = self.neo4j.execute(query, params=params)
         return int(rows[0].get("pending", 0)) if rows else 0
 
-    def cleanup_orphan_episodes(self, session_id: str | None = None) -> int:
+    def cleanup_orphan_episodes(self, session_id: str | None = None, *, dry_run: bool = False) -> int:
         """Delete SESSION episodes that are edgeless, empty, and old, from the daily job.
 
         **Isolation is not authorization.** Two siblings forbid that inference by name --
@@ -300,7 +300,7 @@ class EpisodeMaintenanceRepository:
         params: dict[str, Any] = {}
         if session_id is not None:
             params["session_id"] = session_id
-        query = (
+        query_builder = (
             Cypher()
             .match("(n:Episodic)")
             .where(
@@ -312,6 +312,13 @@ class EpisodeMaintenanceRepository:
                 f"n.created_at < datetime() - duration({{days: {_ORPHAN_EPISODE_MIN_AGE_DAYS}}})",
             )
             .where_if(session_id is not None, "n.session_id = $session_id")
+        )
+        if dry_run:
+            query = query_builder.return_raw("count(n) AS eligible").build()
+            rows = self.neo4j.execute(query, params=params)
+            return int(rows[0].get("eligible", 0)) if rows else 0
+        query = (
+            query_builder
             .with_clause("n, n.uuid AS deleted_uuid")
             .detach_delete("n")
             .return_raw("collect(deleted_uuid) AS deleted_uuids, count(*) AS deleted")

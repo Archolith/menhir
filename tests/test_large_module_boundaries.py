@@ -87,26 +87,57 @@ def test_telemetry_store_owns_only_connection_and_schema() -> None:
 
 
 @pytest.mark.unit
-def test_graphiti_patch_facade_has_no_patch_implementations() -> None:
-    path = ROOT / "src/menhir/infrastructure/graphiti_patches.py"
-    tree = _tree("src/menhir/infrastructure/graphiti_patches.py")
+def test_zero_runtime_patch_census_over_menhir_sources() -> None:
+    """Phase F cutover census: no ``_patch_graphiti_*`` definitions, imports, or calls
+    remain anywhere under ``src/``, and the patch facade module is gone."""
+    offenders: list[str] = []
+    for path in (ROOT / "src").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            name = getattr(node, "name", None)
+            if isinstance(name, str) and "_patch_graphiti_" in name:
+                offenders.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+            if isinstance(node, ast.Name) and "_patch_graphiti_" in node.id:
+                offenders.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+    assert offenders == []
 
-    assert len(path.read_text(encoding="utf-8").splitlines()) <= 60
-    assert not [
-        node
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-    ]
-    owners = {
-        node.module
-        for node in tree.body
-        if isinstance(node, ast.ImportFrom) and node.module is not None
-    }
-    assert owners == {
-        "menhir.infrastructure.graphiti_extraction_patches",
-        "menhir.infrastructure.graphiti_llm_patches",
-        "menhir.infrastructure.graphiti_model_patches",
-    }
+    assert not (ROOT / "src/menhir/infrastructure/graphiti_patches.py").exists()
+
+
+@pytest.mark.unit
+def test_no_graphiti_symbol_rebinding_in_menhir_sources() -> None:
+    """Phase F no-rebinding census: no module-level attribute assignment targets a
+    ``graphiti_core`` module object (monkeypatching by another name)."""
+    offenders: list[str] = []
+    for path in (ROOT / "src/menhir/infrastructure").glob("graphiti_*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        binding_names = _graphiti_binding_names(tree)
+        if not binding_names:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
+                    if (
+                        isinstance(target, ast.Attribute)
+                        and isinstance(target.value, ast.Name)
+                        and target.value.id in binding_names
+                    ):
+                        offenders.append(f"{path.name}:{node.lineno}")
+    assert offenders == []
+
+
+def _graphiti_binding_names(tree: ast.Module) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("graphiti_core"):
+            for alias in node.names:
+                names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.startswith("graphiti_core"):
+                    names.add(alias.asname or alias.name.split(".")[0])
+    return names
 
 
 @pytest.mark.unit

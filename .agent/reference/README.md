@@ -13,7 +13,7 @@ This index routes all 14 Markdown references and the one intentionally unverifie
 
 | Document | Use it for |
 |---|---|
-| [`menhir-deployment-control-plane-architecture-spec-2026-09-08.md`](menhir-deployment-control-plane-architecture-spec-2026-09-08.md) | Non-executable source of truth for deployment ownership, protocol records, ingress, intake, replay, bootstrap, and serial phase derivation; consumed by the blocked control-plane reset plan. |
+| Deployment control-plane architecture spec | Private `Archolith/menhir-deploy` repository | Operator deployment ownership, ingress, and serial phase derivation. |
 | [`fold-algebra.md`](fold-algebra.md) | Reducer laws, replay, ordering, batch/incremental equivalence, and anchor-plus-delta behavior. |
 | [`ingest-primitive-family.md`](ingest-primitive-family.md) | Existing write-time primitives, the completed MVP cut, and deliberately deferred primitive families. |
 | [`write-time-aggregation-hardening-addendum.md`](write-time-aggregation-hardening-addendum.md) | Safety qualifications, corroboration lineage, invalidation, and evidence requirements for aggregation. |

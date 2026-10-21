@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import os
 import re
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING, Any
+
+from menhir.domain.recall_visibility import memory_lifecycle_note
 
 from menhir.domain.recall import (
     EventAuthorityVerdict,
@@ -21,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
+    from menhir.domain.retrieval_tuning import RetrievalTuningConfig
     from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
     from menhir.services.recall_service import RecallService
 
@@ -128,12 +132,12 @@ def _deduplicate(memories: list[ScoredMemory]) -> list[ScoredMemory]:
         words_map[m.uuid] = set(norm.split())
 
     # Exact-match collapse (skip if different claim shapes)
-    seen_norms: dict[tuple[str, str | None], ScoredMemory] = {}
+    seen_norms: dict[tuple[str, str | None, str | None, str | None, str | None], ScoredMemory] = {}
     unique: list[ScoredMemory] = []
     for m in memories:
         norm = norm_map[m.uuid]
-        # Use (normalized_text, view_kind) as dedup key to prevent collapsing across shapes
-        dedup_key = (norm, m.view_kind)
+        # Preserve distinct lifecycle states even when the original instruction is identical.
+        dedup_key = (norm, m.view_kind, m.status, m.artifact_status, m.superseded_by)
         existing = seen_norms.get(dedup_key)
         if existing is not None:
             if m.final_score > existing.final_score:
@@ -150,7 +154,10 @@ def _deduplicate(memories: list[ScoredMemory]) -> list[ScoredMemory]:
         redundant = False
         for k in kept:
             # Only dedup if both have same view_kind (or both are None)
-            if m.view_kind == k.view_kind and _jaccard(words_m, words_map[k.uuid]) > 0.8:
+            same_state = (m.status, m.artifact_status, m.superseded_by) == (
+                k.status, k.artifact_status, k.superseded_by,
+            )
+            if m.view_kind == k.view_kind and same_state and _jaccard(words_m, words_map[k.uuid]) > 0.8:
                 redundant = True
                 break
         if not redundant:
@@ -169,7 +176,11 @@ def _source_time_lines(memory: ScoredMemory) -> list[str]:
     for temporal_fact in facts:
         valid_at = temporal_fact.valid_at
         invalid_at = temporal_fact.invalid_at
-        if valid_at and invalid_at:
+        if temporal_fact.event_time:
+            happened = temporal_fact.event_time
+            if invalid_at:
+                happened = f"{happened} through {invalid_at}"
+        elif valid_at and invalid_at:
             happened = f"{valid_at} through {invalid_at}"
         elif valid_at:
             happened = valid_at
@@ -177,6 +188,8 @@ def _source_time_lines(memory: ScoredMemory) -> list[str]:
             happened = "unknown"
         fact = temporal_fact.fact or "(supporting fact text unavailable)"
         belief_role = temporal_fact.temporal_role.replace("_", " ")
+        if temporal_fact.temporal_role == "ended":
+            belief_role = f"current belief, ended {invalid_at}"
         lines.append(f"  - {happened} | {fact} | belief: {belief_role}")
     return lines
 
@@ -207,6 +220,44 @@ def _event_selection_failed(verdict: EventAuthorityVerdict) -> bool:
     )
 
 
+def _occurrence_contributor_line(contributor: Any) -> str:
+    """Occurrence line: the event date when grounded, else only when it was mentioned (never 'valid')."""
+    line = f"  - {contributor.relation}: {contributor.stated_span}"
+    if contributor.source_sentence:
+        line += f' -- "{contributor.source_sentence}"'
+    mentioned = (contributor.mentioned_at or "")[:10] or "unknown"
+    if contributor.event_at:
+        return f"{line} (event {contributor.event_at[:10]}; mentioned {mentioned})"
+    return f"{line} (mentioned {mentioned})"
+
+
+def _fmt_count(n: Any) -> str:
+    """Format a count as an int when integral, otherwise as-is."""
+    if isinstance(n, float) and n.is_integer():
+        return str(int(n))
+    return str(n)
+
+
+def _count_match_lines(verdict: Any) -> list[str]:
+    """Unit 4R match audit lines (per-action sums, item names) for a lower-bound counted View.
+
+    Malformed JSON or wrong types skip the corresponding line silently."""
+    lines: list[str] = []
+    try:
+        actions = json.loads(verdict.count_actions) if verdict.count_actions else None
+    except (TypeError, ValueError):
+        actions = None
+    if isinstance(actions, dict) and actions:
+        lines.append("  - per action: " + ", ".join(f"{k} {_fmt_count(n)}" for k, n in actions.items()))
+    try:
+        items = json.loads(verdict.count_items) if verdict.count_items else None
+    except (TypeError, ValueError):
+        items = None
+    if isinstance(items, list) and items:
+        lines.append("  - items: " + ", ".join(str(x) for x in items))
+    return lines
+
+
 @dataclass(frozen=True)
 class ContextResult:
     query: str
@@ -228,10 +279,12 @@ class ContextResult:
 class ContextBuilderService:
     recall_service: RecallService
     graph_adapter: MemoryGraphAdapter | None = None
-    # Frontier: cluster recalled memories into temporal/currency-aware evidence bundles
-    # (domain/brief_builder) instead of a flat "[Memory i] name: content" list. Off = today's
-    # behavior byte-for-byte. Wired from settings.frontier_brief_builder at bootstrap.
-    brief_builder_enabled: bool = False
+    # Frontier: per-call size of the additive source-memory section inside build_context's
+    # recall. None = no explicit per-call limit; retrieval tuning controls section enablement.
+    # Bootstrap supplies the configured limit when the deployment enables the section.
+    source_memory_limit: int | None = None
+    # Use the same configured admission/ranking profile as ordinary backend recall.
+    retrieval_tuning: RetrievalTuningConfig | None = None
 
     async def build_context(
         self,
@@ -241,6 +294,7 @@ class ContextBuilderService:
         preset: QueryPreset = QueryPreset.KNOWLEDGE,
         session_id: str | None = None,
         include_scores: bool = False,
+        include_warden_status: bool = False,
         namespace: str | None = None,
     ) -> ContextResult:
         """Recall memories and pack them into a token-budget-limited string."""
@@ -248,6 +302,13 @@ class ContextBuilderService:
         # Rich context always keeps historical source-time evidence. This does not add
         # invalidated candidates; it only prevents a recalled older fact from losing the
         # happened-at stamp needed to compare it with a later fact.
+        recall_kwargs: dict[str, Any] = {}
+        if include_warden_status:
+            recall_kwargs["include_warden_status"] = True
+        if self.retrieval_tuning is not None:
+            recall_kwargs["tuning"] = self.retrieval_tuning
+        if self.source_memory_limit is not None:
+            recall_kwargs["source_memory_limit"] = self.source_memory_limit
         recall_result: RecallResult = await self.recall_service.recall(
             # build_context is an ordinary agent recall surface.  Fresh tracked writes
             # initially produce SESSION-scoped nodes, so excluding that scope makes a
@@ -255,6 +316,7 @@ class ContextBuilderService:
             query, preset=preset, namespace=namespace, include_session=True,
             session_id=session_id,
             include_invalidated=True,
+            **recall_kwargs,
         )
         memories = list(recall_result.results)
 
@@ -308,6 +370,29 @@ class ContextBuilderService:
                 tokens = math.ceil(tokens * 1.3)
             return tokens
 
+        # Reserve a brief coverage notice before ranked memories. If it cannot fit, suppress
+        # that lane rather than return unchecked memories with their notice dropped.
+        ranked_notice_fits = True
+        if recall_result.warden_notice:
+            notice_line = "Memory checks: " + recall_result.warden_notice
+            cost = _tokens_for(notice_line)
+            if cost <= effective_budget:
+                lines.append(notice_line)
+                running_tokens += cost
+            else:
+                ranked_notice_fits = False
+                truncated = True
+        if include_warden_status and recall_result.warden_status is not None:
+            diagnostic = "Warden status: " + json.dumps(asdict(recall_result.warden_status), separators=(",", ":"))
+            cost = _tokens_for(diagnostic)
+            if running_tokens + cost <= effective_budget:
+                lines.append(diagnostic)
+                running_tokens += cost
+            else:
+                truncated = True
+        if not ranked_notice_fits:
+            memories = []
+
         # Fail-closed determination, computed FIRST so it gates scalar authority too. Any event
         # advisory whose selection itself failed to resolve an object (explicit selection-failure
         # gates anchor/ambiguity/time/scope/no_candidate) means "did I" cannot be answered from
@@ -327,19 +412,61 @@ class ContextBuilderService:
         # when an event verdict failed closed (current-state scalar must not answer a temporal query).
         if not fail_closed:
             for verdict in recall_result.authority_layer or ():
-                heading = (
-                    f"[Scalar authority: {verdict.status.upper()}] {verdict.attribute} = "
-                    f"{verdict.value} ({verdict.kind}"
-                    + (f", valid {verdict.valid_at}" if verdict.valid_at else "")
-                    + ")"
+                shown_value = (
+                    f"at least {verdict.value} you mentioned" if verdict.lower_bound
+                    else verdict.value
                 )
+                if verdict.lower_bound:
+                    _uncertain = verdict.count_uncertain
+                    if (
+                        isinstance(_uncertain, (int, float))
+                        and not isinstance(_uncertain, bool)
+                        and _uncertain > 0
+                    ):
+                        shown_value = (
+                            f"at least {verdict.value} you mentioned, plus "
+                            f"{_fmt_count(_uncertain)} more that may be repeats"
+                        )
+                if verdict.kind == "history":
+                    _history_n = (
+                        verdict.contributors_total if verdict.contributors_total > 0
+                        else len(verdict.contributors)
+                    )
+                    heading = (
+                        f"[Scalar authority: {verdict.status.upper()}] {verdict.attribute} "
+                        f"history, {_history_n} entries (history"
+                        + (f", valid {verdict.valid_at}" if verdict.valid_at else "")
+                        + ")"
+                    )
+                else:
+                    heading = (
+                        f"[Scalar authority: {verdict.status.upper()}] {verdict.attribute} = "
+                        f"{shown_value} ({verdict.kind}"
+                        + (f", valid {verdict.valid_at}" if verdict.valid_at else "")
+                        + ")"
+                    )
                 authority_lines = [heading]
+                if verdict.lower_bound:
+                    authority_lines.extend(_count_match_lines(verdict))
                 for contributor in verdict.contributors:
+                    if contributor.operation == "occurrence":
+                        authority_lines.append(_occurrence_contributor_line(contributor))
+                        continue
                     authority_lines.append(
                         f"  - {contributor.relation}: {contributor.stated_span} "
                         f"(valid {contributor.valid_at or 'unknown'})"
                     )
-                if verdict.contributors_truncated:
+                if (
+                    verdict.contributors_truncated
+                    and not verdict.contributors
+                    and verdict.contributors_total > 0
+                    and verdict.view_uuid
+                ):
+                    authority_lines.append(
+                        f"  - built from {verdict.contributors_total} items; "
+                        f"drill down: get_scalar_view_items(view_uuid={verdict.view_uuid})"
+                    )
+                elif verdict.contributors_truncated:
                     authority_lines.append(
                         f"  - provenance truncated: {verdict.contributors_total} total; "
                         f"continue at offset {verdict.next_offset} for View {verdict.view_uuid or 'synthetic'}"
@@ -432,6 +559,11 @@ class ContextBuilderService:
                 # them are active. Markers only activate when their gates are on (warden_label
                 # needs enable_warden_gate; is_superseded_view needs include_superseded).
                 markers = []
+                lifecycle_note = memory_lifecycle_note(
+                    status=mem.status, artifact_status=mem.artifact_status, superseded_by=mem.superseded_by,
+                )
+                if lifecycle_note:
+                    markers.append(lifecycle_note)
                 if getattr(mem, "is_scalar_authority", False):
                     markers.append("current authority")
                 if mem.is_superseded_view:
@@ -451,8 +583,17 @@ class ContextBuilderService:
                 else:
                     line = f"[Memory {idx}] {name_with_markers}: {content}"
                 line = "\n".join((line, *_source_time_lines(mem)))
+                if mem.needs_review:
+                    # Pack the warning atomically with its memory under the token budget.
+                    line += (
+                        "\n  Review required: " + (mem.review_reason or "source state changed")
+                        + ". Verify the source before asserting this memory as current truth."
+                    )
 
                 tokens = _tokens_for(line)
+                if mem.verifier_evidence:
+                    line += "\n" + "\n".join(e.context_line() for e in mem.verifier_evidence)
+                    tokens = _tokens_for(line)
 
                 # Stale-anchor advisory: atomic with the memory line.
                 # If the memory is stale, check memory + advisory combined budget.
@@ -497,7 +638,7 @@ class ContextBuilderService:
 
                 if running_tokens + total_tokens > effective_budget:
                     truncated = True
-                    break
+                    continue
 
                 lines.append(line)
                 memory_ids.append(mem.uuid)
@@ -506,20 +647,28 @@ class ContextBuilderService:
                     lines.append(advisory_line)
                     running_tokens += advisory_tokens
 
-        if not fail_closed and self.brief_builder_enabled and not truncated:
-            # Frontier: APPEND a supplementary Timeline view below the relevance list, so
-            # temporal questions get an ordered, currency-marked chain without displacing
-            # the answer. Only if budget remains; recall used include_invalidated so the
-            # Timeline can show superseded->current progression.
-            from menhir.domain.brief_builder import build_timeline_bundle, render_bundles
-
-            timeline = build_timeline_bundle(memories)
-            if timeline is not None:
-                block = render_bundles([timeline], include_provenance=include_scores)
-                tokens = _tokens_for(block)
-                if running_tokens + tokens <= effective_budget:
-                    lines.append(block)
-                    running_tokens += tokens
+        # Source-memory lane (MENHIR_FRONTIER_SOURCE_MEMORIES, additive, default off):
+        # the session's most similar raw episode memories (up to the limit) with their own time, packed AFTER the
+        # ranked list so it supplements rather than displaces relevance order. Flag-off
+        # (or lane failure) adds no lines and preserves the context byte-for-byte.
+        if not fail_closed and recall_result.source_memories:
+            source_lines = ["Source memories (raw episodes, oldest first):"]
+            for sm in recall_result.source_memories:
+                pool_tag = (
+                    f" [pool {sm.pool_id} via {sm.pool_anchor}]"
+                    if sm.pool_id
+                    else ""
+                )
+                source_lines.append(
+                    f"  - {sm.reference_time or 'unknown time'} | {sm.content}{pool_tag}"
+                )
+            source_block = "\n".join(source_lines)
+            source_tokens = _tokens_for(source_block)
+            if running_tokens + source_tokens <= effective_budget:
+                lines.append(source_block)
+                running_tokens += source_tokens
+            else:
+                truncated = True
 
         # Track actual memory count — advisory lines are not memories.
         # memory_ids was populated only for actual memory entries, so its

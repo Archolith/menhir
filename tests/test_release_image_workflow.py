@@ -133,6 +133,16 @@ def test_validation_builds_a_frozen_wheelhouse_from_the_clean_checkout() -> None
     assert '["diff", "--cached", "--quiet"]' in BUILDER_TEXT
 
 
+def test_graphiti_fork_uses_the_hashed_registry_wheelhouse() -> None:
+    validate = _block("validate", 2)
+    assert "--no-emit-package graphiti-core" not in validate
+    assert "--no-emit-package archolith-graphiti-core" not in validate
+    assert "git+https://github.com/Archolith/graphiti" not in validate
+    assert "GRAPHITI_REQUIREMENT" not in validate
+    assert '"$RUNNER_TEMP/release-requirements.txt"' in validate
+    assert "--require-hashes" in validate
+
+
 def test_scanners_are_official_digest_pins_acquired_before_the_build() -> None:
     validate = _block("validate", 2)
     scanner_at = validate.index("Acquire digest-pinned scanners")
@@ -159,6 +169,16 @@ def test_validation_generates_and_uploads_structurally_checked_evidence() -> Non
     assert 'for field in ("matches", "ignoredMatches")' in BUILDER_TEXT
     assert 'if counts["Critical"]:' in BUILDER_TEXT
     assert '"image_archive_sha256": archive_sha256' in BUILDER_TEXT
+    assert validate.index("Verify native Graphiti fork inside candidate image") < validate.index(
+        "Upload sealed candidate and evidence"
+    )
+    fork_step = validate.split("      - name: Verify native Graphiti fork inside candidate image", 1)[1]
+    assert "        run: |\n          set -euo pipefail\n          docker run" in fork_step
+    assert "--network none --read-only --cap-drop ALL" in validate
+    assert 'metadata.distribution("archolith-graphiti-core")' in validate
+    assert 'metadata.distribution("graphiti-core")' in validate
+    assert "menhir_resolution_hooks_installed(client.client)" in validate
+    assert "release-image-evidence/graphiti-container.json" in validate
 
 
 def test_metadata_schema_versions_are_validation_3_identity_2_publication_2() -> None:

@@ -731,12 +731,27 @@ def test_list_conflict_groups_applies_safe_limit_and_status_filter() -> None:
     assert neo4j.calls[0]["params"] == {
         "status": "unresolved",
         "limit": 200,
-        # The query now carries a `$namespace` predicate, so the parameter is bound on
+        # The canonical tenant predicate is bound on
         # every call; None is the "do not filter" value that preserves prior behavior.
-        "namespace": None,
+        "tenant_namespaces": None,
     }
     assert "MATCH (n:Entity)" in neo4j.calls[0]["query"]
+    assert "$tenant_namespaces" in neo4j.calls[0]["query"]
     assert "collect({" in neo4j.calls[0]["query"]
+
+
+@pytest.mark.unit
+def test_list_conflict_groups_default_scope_accepts_both_persisted_spellings() -> None:
+    neo4j = _StubNeo4jRepository(responses=[[]])
+    adapter = MemoryGraphAdapter(neo4j=neo4j)
+
+    adapter.list_conflict_groups(status=None, namespace="default")
+
+    assert neo4j.calls[0]["params"]["tenant_namespaces"] == ["default", ""]
+    assert (
+        "coalesce(n.namespace, n.group_id, '') IN $tenant_namespaces"
+        in neo4j.calls[0]["query"]
+    )
 
 
 @pytest.mark.unit
@@ -753,6 +768,46 @@ def test_list_conflict_pairs_wrapper_delegates_to_grouped_query() -> None:
 
 
 @pytest.mark.unit
+def test_bridge_edges_for_nodes_forwards_namespace_to_every_endpoint() -> None:
+    neo4j = _StubNeo4jRepository(responses=[[{"total_edges_bridged": 1}]])
+    adapter = MemoryGraphAdapter(neo4j=neo4j)
+
+    result = adapter.bridge_edges_for_nodes(["gone-1"], namespace="tenant_a")
+
+    assert result == 1
+    call = neo4j.calls[0]
+    assert call["params"] == {
+        "node_uuids": ["gone-1"],
+        "tenant_namespaces": ["tenant_a"],
+    }
+    for variable in ("n", "neighbor", "a", "b"):
+        assert (
+            f"coalesce({variable}.namespace, {variable}.group_id, '') "
+            "IN $tenant_namespaces"
+        ) in call["query"]
+
+
+@pytest.mark.unit
+def test_bridge_edges_for_node_forwards_namespace_to_every_endpoint() -> None:
+    neo4j = _StubNeo4jRepository(responses=[[{"total_edges_bridged": 1}]])
+    adapter = MemoryGraphAdapter(neo4j=neo4j)
+
+    result = adapter.bridge_edges_for_node("gone-1", namespace="tenant_a")
+
+    assert result == 1
+    call = neo4j.calls[0]
+    assert call["params"] == {
+        "node_uuids": ["gone-1"],
+        "tenant_namespaces": ["tenant_a"],
+    }
+    for variable in ("n", "neighbor", "a", "b"):
+        assert (
+            f"coalesce({variable}.namespace, {variable}.group_id, '') "
+            "IN $tenant_namespaces"
+        ) in call["query"]
+
+
+@pytest.mark.unit
 def test_resolve_conflict_group_keep_both_clears_group_and_sets_status() -> None:
     neo4j = _StubNeo4jRepository(responses=[
         [{"uuid": "m1"}, {"uuid": "m2"}, {"uuid": "m3"}],  # prefetch
@@ -764,6 +819,7 @@ def test_resolve_conflict_group_keep_both_clears_group_and_sets_status() -> None
         "group-1",
         "keep_both",
         resolution_status="auto-resolved",
+        namespace="default",
     )
 
     assert result == {
@@ -778,7 +834,13 @@ def test_resolve_conflict_group_keep_both_clears_group_and_sets_status() -> None
     assert neo4j.calls[1]["params"] == {
         "group_id": "group-1",
         "resolution_status": "auto-resolved",
+        "tenant_namespaces": ["default", ""],
     }
+    assert all("$tenant_namespaces" in call["query"] for call in neo4j.calls)
+    assert all(
+        call["params"]["tenant_namespaces"] == ["default", ""]
+        for call in neo4j.calls
+    )
     assert "n.conflict_status = $resolution_status" in neo4j.calls[1]["query"]
 
 
@@ -819,6 +881,7 @@ def test_resolve_conflict_group_replace_absorbs_content_resolves_and_bridges() -
         "replace",
         keep_uuid="keep-1",
         remove_uuid="remove-1",
+        namespace="tenant_a",
     )
 
     assert result == {
@@ -841,7 +904,17 @@ def test_resolve_conflict_group_replace_absorbs_content_resolves_and_bridges() -
         "group_id": "group-1",
         "remove_uuids": ["remove-1"],
         "resolution_status": "resolved",
+        "tenant_namespaces": ["tenant_a"],
     }
+    for scoped_call in neo4j.calls:
+        assert "$tenant_namespaces" in scoped_call["query"]
+        assert scoped_call["params"]["tenant_namespaces"] == ["tenant_a"]
+    bridge_call = neo4j.calls[7]
+    for variable in ("n", "neighbor", "a", "b"):
+        assert (
+            f"coalesce({variable}.namespace, {variable}.group_id, '') "
+            "IN $tenant_namespaces"
+        ) in bridge_call["query"]
     assert "n.freshness = 'GONE'" in gone_call["query"]
     assert "n.conflict_status = $resolution_status" in gone_call["query"]
 
@@ -884,6 +957,7 @@ def test_resolve_conflict_group_replace_without_remove_uuid_gones_all_non_keep()
         "group_id": "group-1",
         "remove_uuids": ["remove-1", "remove-2"],
         "resolution_status": "resolved",
+        "tenant_namespaces": None,
     }
 
 
@@ -965,11 +1039,15 @@ def test_resolve_conflict_group_discard_new_skips_absorption_on_high_overlap() -
         "discard_new",
         keep_uuid="keep-1",
         remove_uuid="remove-1",
+        namespace="tenant_a",
     )
 
     assert result["action"] == "discard_new"
     assert all("SET n.content = $content" not in call["query"] for call in neo4j.calls)
     assert any("n.pending_review = true" in call["query"] for call in neo4j.calls)
+    for scoped_call in neo4j.calls:
+        assert "$tenant_namespaces" in scoped_call["query"]
+        assert scoped_call["params"]["tenant_namespaces"] == ["tenant_a"]
 
 
 @pytest.mark.unit

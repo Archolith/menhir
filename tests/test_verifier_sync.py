@@ -52,6 +52,33 @@ def test_env_key_executor_settings_fallback(monkeypatch) -> None:
     assert res.ok and res.value == 1.0
 
 
+@pytest.mark.parametrize("raw,kind", [("maybe", "bool"), ("", "bool"), ("123", "float"), ("bad", "int")])
+def test_invalid_observation_is_unavailable(monkeypatch, raw, kind) -> None:
+    monkeypatch.setenv("MENHIR_TEST_FLAG", raw)
+    assert not env_key_executor({"key": "MENHIR_TEST_FLAG", "as": kind}, VerifierContext()).ok
+
+
+def test_stored_register_read_failure_does_not_refresh_or_flag(monkeypatch) -> None:
+    monkeypatch.setenv("MENHIR_TEST_FLAG", "true")
+    graph = _FakeCounterGraph()
+    def failed_read(**kwargs):
+        raise RuntimeError("register unavailable")
+    graph.fetch_counter = failed_read
+    repo = _FakeRepo([_verifier()])
+    out = sync_verifiers(repo=repo, graph_adapter=graph, context=VerifierContext())
+    assert out[0]["status"] == "error"
+    assert not graph.records and not repo.flag_calls and not repo.stamps
+
+
+@pytest.mark.parametrize("stored,expected", [("foreign", "foreign"), ("", "default"), (None, "agent-status")])
+def test_binding_namespace_controls_the_register_write(monkeypatch, stored, expected) -> None:
+    monkeypatch.setenv("MENHIR_TEST_FLAG", "true")
+    graph = _FakeCounterGraph()
+    repo = _FakeRepo([{**_verifier(), "namespace": stored}])
+    sync_verifiers(repo=repo, graph_adapter=graph, context=VerifierContext())
+    assert graph.records[0]["namespace"] == expected
+
+
 # --------------------------------------------------------------------------- sync fakes
 
 class _FakeCounterGraph:

@@ -7,7 +7,43 @@ artifact_status: PROPOSED
 
 # menhir -- FeatureFlag registry: one declarative inventory, machine-enforced
 
-Status: **PROPOSED. No code written.**
+Status: **PARTIALLY IMPLEMENTED.** P1–P3 are implemented in the candidate branch;
+exact-head CI and merge review remain. P4–P5 are not implemented.
+
+### Approved P1–P3 execution (2026-10-05)
+
+Implement metadata without changing settings construction or parsing. Recount current booleans,
+string mode fields and direct environment readers, including named constants and reviewed helper
+calls. Registry defaults are explicit snapshots checked against the model, not derived at import
+time. Record canonical names, actual aliases, interactions, observation-only markers and version
+requirements. Tests enforce inventory/default/name/documentation consistency, consumer references,
+and retired-control absence; synthetic omissions and drift must fail the same detectors.
+
+Use AST checks for direct reads and explicit contracts for parameterized wrappers. Unknown dynamic
+reads fail for review; arbitrary verifier parameter keys remain an identified dynamic boundary,
+not an invented finite setting list. Static consumer references establish wiring, not quality or
+universal enforcement. Keep existing focused behavioral controls for Warden prerequisites.
+Backfill missing commented template entries; do not generate or replace explanatory prose.
+The optional configuration UI, wholesale numeric/secret inventory, runtime behavior changes,
+default activation, deployment, ingest and paid qualification remain outside this tranche.
+
+Current census: **45 booleans, 8 string modes, 25 additional settings referenced by legacy
+environment readers, and 20 env-only controls** (98 entries, including actual aliases).
+The original 44/~20 counts below are historical. Model defaults and canonical/alias bindings
+are independently checked; legacy wrapper bindings are checked against the same loader.
+Env-only metadata records raw absent-read values before consumer-specific fallbacks, not a
+new runtime default. Required/data-producer prerequisites carry scope notes; deterministic
+shadow audit emission has a separate prerequisite. No runtime dependency validator is added.
+
+The first documentation check failed on **38 missing entries**, then passed after commented
+backfill. Exemptions remain empty. Tests reject omissions, new booleans/modes, default/name/alias
+drift, legacy wrong-variable reads, missing documentation, env-only absent-default drift and
+new unreviewed dynamic reads. Literal, named-constant, imported-getter alias, keyword and
+subscript reads are covered. Consumer references and settings-to-tuning bridges are static
+wiring evidence and may overcount same-named attributes; they are not semantic enforcement
+proof. Five parameterized reader boundaries are explicit, with wrapper callers inventoried
+and arbitrary verifier keys kept outside the finite setting list. Future indirection still
+requires review rather than a claim of general Python data-flow analysis.
 
 Date: 2026-09-11. Derived from the 2026-09-11 full feature-flag scan (44 boolean settings +
 modes + ~20 env vars read outside `MemorySettings`, cross-referenced against `.env` and
@@ -231,3 +267,54 @@ Nothing in P1-P3 touches runtime behavior; P4 adds a read-only CLI.
 - P4 verification: run `menhir config show` against the live `.env` and diff its "effective"
   column against the 2026-09-11 scan table (the one in this plan's Origin block) -- they must
   agree on every row, or the scan had an error the join just exposed.
+
+## Reconciliation with #168 Phase 0 (2026-09-28, `de370260`)
+
+Still PROPOSED; no registry code exists (`config/feature_flags.py` and its test are absent).
+#168 reuses this plan as its single flag owner and does not start a second registry. Rechecked
+against current code (details in `menhir-168-phase0-baseline-contract.md`):
+
+- **Counts hold:** 44 bool settings, 153 `MemorySettings` fields in total.
+- **Documentation gap is wider than the Origin block says:** 27 of 44 bool settings have no env
+  var in `.env.example`. That includes every #170-#173 candidate except scalar_state,
+  view_authority, reconcile_*, consolidation_audit, deterministic_shadow (documented under the
+  alias `MENHIR_SCALAR_DETERMINISTIC_SHADOW`), warden_gate, evidence_anchor, content_vector,
+  fact_edges and brief_builder (the brief_builder flag was removed 2026-10-01, superseded by
+  `recall_timeline`). `MENHIR_CANONICAL_SELF_BINDING_MODE` is also undocumented.
+- **Env-only census:** 20 `MENHIR_*` vars are read outside `settings_model.py`; 16 are absent from
+  `.env.example` (the Origin list plus `MENHIR_CONSOLE_SCHEME`, `MENHIR_EMBEDDING_CACHE_MAX_SIZE`,
+  `MENHIR_SAGA_ALL_WRITERS_GATE_AWARE`, `MENHIR_SNAPSHOT_RECEIVE_MODE`). `MENHIR_INGEST_ALLOWED_ROOTS`
+  is now documented.
+- **Invalid and absent values:** `parse_bool_env` maps anything outside `1/true/yes` to False, so an
+  empty or mistyped value silently turns off a default-ON flag. Modes are unvalidated at load
+  (`canonical_self_binding_mode` falls back to `off` with a warning at its consumer). #168 needs
+  the registry to state per-flag invalid-value behavior before any flag is promoted to default-ON.
+  Candidate addition: a T8 asserting that default-ON bools reject unrecognized values, or document it.
+- **`requires` edges #168 needs recorded (T6):** view_authority -> scalar_state;
+  event_history_authority -> event_history; scalar_reconcile_* / threshold -> scalar_state (plus
+  perceiver-version bump); belief_gate and evidence_anchor -> warden_gate;
+  deterministic_shadow audit output -> consolidation_audit.
+- **Observation switches** (`*_audit_enabled`, `frontier_shadow`, `shadow_context_composition`)
+  should carry a registry marker so #168 can refuse to count them as user defaults.
+
+Scope for #168: P1-P3 (registry, tests, `.env.example` backfill) are the parts #168's final gate
+("update settings/example descriptions") depends on. P4-P5 remain optional. Open decision 3
+(scheduler intervals wait for #81) is now unblocked: #81 landed as `24cedca2`.
+
+## Bounded release/upgrade audit (2026-10-05)
+
+The registry implementation remains proposed. This follow-up reuses its owner and backfills
+commented template entries for the 20 tested #168 campaign boolean switches plus canonical-self
+mode and event perceiver version. It does not claim a complete boolean/mode/env-only census.
+`tests/test_release_config_upgrade.py` checks actual checkout-template and generated wheel-state
+setup, explicit opt-outs after a changed template, byte-identical reruns, process/file precedence,
+and absent/blank/invalid/true/false parsing across that bounded set. The event ledger's unsupported
+short names were corrected to `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_*`.
+
+Existing `.env` is retained; absent values use current code defaults on upgrades as on fresh
+installs. Source memories already default on (#208); the other tested campaign switches remain
+off. A later new-install-only default change needs an explicit implementation/upgrade decision;
+this audit neither adds that discriminator nor promotes any option. `docs/post-install.md`
+records config precedence, accepted values, restart/opt-out behavior and persisted-data limits.
+Full registry enforcement, all aliases/modes/env-only controls, final package/container profile
+acceptance and ingest/paid qualification remain pending. Focused evidence: 65 passed, 1 skipped.

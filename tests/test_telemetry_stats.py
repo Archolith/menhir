@@ -10,7 +10,6 @@ Tests cover:
 - get_memory_stats tool respects since_hours param
 """
 
-import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -19,20 +18,6 @@ from uuid import uuid4
 import pytest
 
 from menhir.mcp.telemetry import McpTelemetryStore
-
-
-_TEST_TMP_ROOT = Path(__file__).resolve().parents[1] / ".agent" / "test_tmp"
-
-
-def _make_db_path() -> Path:
-    _TEST_TMP_ROOT.mkdir(parents=True, exist_ok=True)
-    run_dir = _TEST_TMP_ROOT / f"telemetry-stats-{uuid4()}"
-    run_dir.mkdir()
-    return run_dir / "mcp_telemetry.db"
-
-
-def _cleanup_db_path(db_path: Path) -> None:
-    shutil.rmtree(db_path.parent, ignore_errors=True)
 
 
 @pytest.fixture

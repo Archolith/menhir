@@ -342,7 +342,10 @@ def validate_vulnerability_scan(raw: bytes, expected_image_id: str) -> dict[str,
 
 
 def _run_scanner(*, scanner: str, image: str, archive: Path) -> bytes:
-    mount = f"type=bind,src={archive.parent},dst=/candidate,readonly"
+    # Mount only the public image archive. Binding its parent preserves host
+    # directory permissions (often 0700), which scanners without DAC override
+    # cannot traverse even when the archive itself is readable.
+    mount = f"type=bind,src={archive},dst=/candidate/{archive.name},readonly"
     command = [
         "docker", "run", "--rm", "--pull", "never", "--read-only",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges=true",
@@ -352,7 +355,7 @@ def _run_scanner(*, scanner: str, image: str, archive: Path) -> bytes:
     database_volume: str | None = None
     if scanner == "syft":
         command.extend((
-            "--tmpfs", "/tmp:rw,nosuid,nodev,size=268435456",
+            "--tmpfs", "/tmp:rw,nosuid,nodev,size=2147483648",
             "--network", "none", "--env", "SYFT_CHECK_FOR_APP_UPDATE=false",
         ))
     else:
@@ -528,6 +531,10 @@ def create_validation_bundle(args: argparse.Namespace) -> dict[str, Any]:
     )
     if not archive.is_file() or archive.is_symlink():
         raise BuildImageError("docker did not create a safe image archive")
+    # The digest-pinned scanner containers run as non-root users. Docker saves
+    # archives mode 0600 on the CI host, so their read-only bind mount must be
+    # made readable before scanning the public-source image.
+    archive.chmod(0o644)
     archive_sha256 = sha256_file(archive)
     artifact_root = args.output.resolve().parent
     evidence = generate_evidence(

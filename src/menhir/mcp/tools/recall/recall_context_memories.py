@@ -18,6 +18,7 @@ async def recall_context_memories(
     recent_limit: int = 5,
     namespace: str = "",
     workspace: str = "",
+    include_warden_status: bool = False,
 ) -> str:
     """Read non-flagged startup context memories (recent + relevant).
 
@@ -32,6 +33,7 @@ async def recall_context_memories(
         recent_limit: Max recent context rows to include (default: 5).
         namespace: Optional silo to scope this operation to. Empty = default/global behavior.
         workspace: Registered key selecting general + workspace bootstrap pins.
+        include_warden_status: Detailed checks for the ranked relevant lane only (default false); recent bootstrap rows are outside those checks.
 
     Returns:
         Context bundle with relevant and recent non-flagged memories.
@@ -45,6 +47,7 @@ async def recall_context_memories(
         recent_limit=recent_limit,
         namespace=namespace,
         workspace=workspace,
+        include_warden_status=include_warden_status,
     )
 
 
@@ -68,6 +71,7 @@ class RecallContextMemoriesTool(BaseJsonTool):
         recent_limit: int = 5,
         namespace: str = "",
         workspace: str = "",
+        include_warden_status: bool = False,
     ) -> str:
         """Read non-flagged startup context memories (recent + relevant)."""
         normalized_reader_id = _normalize_reader_id(reader_id)
@@ -104,6 +108,7 @@ class RecallContextMemoriesTool(BaseJsonTool):
                     },
                 }
             )
+        relevant: dict[str, object] = {}
         query_text = (query or "").strip()
         relevant_rows: list[dict[str, object]] = []
         if query_text:
@@ -114,6 +119,7 @@ class RecallContextMemoriesTool(BaseJsonTool):
                     limit=limit,
                     include_session=True,
                     wait_for_pending=True,
+                    **({"include_warden_status": True} if include_warden_status else {}),
                     namespace=namespace or None,
                 )
             except ValueError:
@@ -129,7 +135,9 @@ class RecallContextMemoriesTool(BaseJsonTool):
                     }
                 )
             for scored in relevant.get("results", []):
-                raw_row = await backend.fetch_memory_by_uuid(str(scored.get("uuid") or ""))
+                raw_row = await backend.fetch_memory_by_uuid(
+                    str(scored.get("uuid") or ""), namespace=namespace or None
+                )
                 if raw_row is not None and bool(raw_row.get("user_flagged", False)):
                     continue
                 relevant_rows.append(
@@ -141,6 +149,9 @@ class RecallContextMemoriesTool(BaseJsonTool):
                         "content": scored.get("content"),
                         "similarity": (scored.get("breakdown") or {}).get("semantic_similarity"),
                         "stale_anchor_info": scored.get("stale_anchor_info"),
+                        "status": scored.get("status"),
+                        "artifact_status": scored.get("artifact_status"),
+                        "superseded_by": scored.get("superseded_by"),
                     }
                 )
         recent_rows = await backend.fetch_recent_memories(
@@ -164,7 +175,7 @@ class RecallContextMemoriesTool(BaseJsonTool):
         # Check for stale todos and include a warning if any exist
         stale_warning = ""
         try:
-            todos = await backend.list_todos(status="open", limit=200)
+            todos = await backend.list_todos(status="open", limit=200, namespace=namespace or None)
             stale_count = sum(1 for t in todos if t.get("stale"))
             if stale_count:
                 stale_warning = f"\n⚠️ {stale_count} open todo(s) are >30 days old. Run list_todos to review."
@@ -176,6 +187,10 @@ class RecallContextMemoriesTool(BaseJsonTool):
                 "reader_id": normalized_reader_id,
                 "bootstrap_selection": selection_key,
                 "bootstrap_verified": True,
+                **({"relevant_warden_status": relevant["warden_status"]}
+                   if include_warden_status and relevant.get("warden_status") is not None else {}),
+                **({"relevant_warden_notice": relevant["warden_notice"]}
+                   if relevant.get("warden_notice") else {}),
                 "flagged_version": flagged_version,
                 "query": query_text or None,
                 "preset": preset if query_text else None,

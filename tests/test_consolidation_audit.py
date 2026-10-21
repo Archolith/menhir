@@ -7,7 +7,6 @@ readable back in oldest-first replay order. Emission must NEVER raise into the c
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -18,8 +17,8 @@ from menhir.infrastructure.telemetry.store import McpTelemetryStore
 
 
 @pytest.fixture
-def store():
-    db = Path(tempfile.mkdtemp()) / "audit.db"
+def store(tmp_path: Path):
+    db = tmp_path / "audit.db"
     return McpTelemetryStore(db)
 
 

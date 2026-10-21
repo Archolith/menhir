@@ -18,10 +18,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from menhir.infrastructure.graphiti_model_patches import (
+from menhir.infrastructure.graphiti_resolution_policy import (
+    MenhirCandidateFilterHook,
     _is_structural_graphiti_candidate,
     _is_view_graphiti_candidate,
-    _patch_graphiti_structural_candidate_isolation,
 )
 
 pytestmark = pytest.mark.unit
@@ -76,23 +76,31 @@ def test_the_two_predicates_are_independent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_candidate_collection_excludes_view_nodes(monkeypatch) -> None:
+async def test_candidate_filter_excludes_view_nodes() -> None:
     """The #94 shape: the extracted 'coins' entity must not be offered the counter View."""
-    import graphiti_core.utils.maintenance.node_operations as node_operations
+    from graphiti_core.candidate_filter import CandidateFilterDecision
 
     semantic_coins = _node("Alice's coins", source="user")
     structural = _node("sample-app", structure_role="project")
+    extracted = _node("coins")
 
-    async def _collect_candidate_nodes(clients, extracted_nodes, existing_nodes_override):
-        del clients, extracted_nodes, existing_nodes_override
-        # Graphiti's own search ranks the View FIRST: its name literally contains the mention.
-        return [[COUNTER_VIEW, semantic_coins, structural]]
+    hook = MenhirCandidateFilterHook()
 
-    monkeypatch.setattr(node_operations, "_collect_candidate_nodes", _collect_candidate_nodes)
-    monkeypatch.setattr(
-        node_operations, "_menhir_structural_candidate_isolation_patched", False, raising=False
+    assert (
+        await hook.filter_candidate(
+            SimpleNamespace(extracted_node=extracted, candidate_node=COUNTER_VIEW)
+        )
+        is CandidateFilterDecision.EXCLUDE
     )
-    _patch_graphiti_structural_candidate_isolation()
-
-    filtered = await node_operations._collect_candidate_nodes(object(), [object()], None)
-    assert filtered == [[semantic_coins]]
+    assert (
+        await hook.filter_candidate(
+            SimpleNamespace(extracted_node=extracted, candidate_node=structural)
+        )
+        is CandidateFilterDecision.EXCLUDE
+    )
+    assert (
+        await hook.filter_candidate(
+            SimpleNamespace(extracted_node=extracted, candidate_node=semantic_coins)
+        )
+        is CandidateFilterDecision.INCLUDE
+    )

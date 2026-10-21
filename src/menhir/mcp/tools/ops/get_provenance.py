@@ -46,8 +46,14 @@ class GetProvenanceTool(BaseJsonTool):
     destructive_hint = False
     open_world_hint = False
     description = (
-        "Show a memory/View node's receipts: the source episodes it was built from, plus evidence "
-        "anchors, so you can verify a summary or claim against its sources."
+        "Inspect source evidence behind a memory/entity or View result. Pass its UUID as "
+        "node_uuid. Returns linked source-episode excerpts, source dates, evidence references and"
+        " structural anchor paths.\n\n"
+        "Use this when a summary omits the rationale or exact wording matters. content_chars "
+        "limits each episode excerpt: default 500, maximum 5000; an ellipsis indicates clipping. "
+        "Sources may be missing, and episode or other non-entity UUIDs are not supported by this "
+        "reader. Use the same authorized namespace. Recorded wording is evidence, not proof of "
+        "truth."
     )
 
     async def endpoint(

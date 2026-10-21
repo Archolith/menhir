@@ -24,6 +24,8 @@ pytestmark = [pytest.mark.unit]
 def test_resolve_env_file_prefers_ENV_FILE_then_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ENV_FILE", raising=False)
+    # An empty state dir: otherwise the state-dir fallback finds the developer's ~/.menhir/.env.
+    monkeypatch.setenv("MENHIR_STATE_DIR", str(tmp_path / "empty-state"))
     assert env_file.resolve_env_file() is None
 
     (tmp_path / ".env").write_text("A=1\n", encoding="utf-8")

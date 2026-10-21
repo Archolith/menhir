@@ -20,7 +20,7 @@ async def get_memory_stats(since_hours: int = 24, namespace: str = "") -> str:
 
 # Operations that are user-facing (not scheduler background noise)
 _USER_OPS = frozenset({
-    "add_memory", "recall_memories", "recall_context_memories", "build_context",
+    "add_memory", "recall_memories", "recall_history", "recall_timeline", "recall_context_memories", "build_context",
     "read_flagged_memories", "flag_memory", "delete_memory", "resolve_conflict",
     "list_conflicts", "get_enrichment_status", "force_release_enrichment_lease",
     "ingest_project", "query_structure", "get_memory_stats",
@@ -178,7 +178,8 @@ class GetMemoryStatsTool(BaseTextTool):
         if tripped:
             lines.append("### Circuit Breakers")
             for kind, snap in tripped.items():
-                lines.append(f"  {kind}: {snap['state'].upper()} ({snap['failures']} failures)")
+                reason = f" [{snap['reason']}]" if snap.get("reason") else ""
+                lines.append(f"  {kind}: {snap['state'].upper()} ({snap['failures']} failures){reason}")
             lines.append("")
 
         return "\n".join(lines)

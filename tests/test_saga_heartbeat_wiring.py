@@ -116,7 +116,7 @@ class _MergeAdapter(_RevocationProbe):
     def fetch_merge_state(self, s, a):
         return dict(self.state)
 
-    def merge_entity(self, s, a, *, similarity, operation_id=None):
+    def merge_entity(self, s, a, *, similarity, operation_id=None, expected_fact_uuids=None):
         self._observe()
         self.state = dict(_ABSORBED_GONE)
         return {"merged": 1}
@@ -203,7 +203,9 @@ class _DeleteAdapter(_RevocationProbe):
     def newly_unreferenced_evidence(self, uuids):
         return []
 
-    def delete_entities_returning_uuids(self, uuids, *, require_scope=None):
+    def delete_entities_returning_uuids(
+        self, uuids, *, require_scope=None, protect_retention=False
+    ):
         self._observe()
         self.deleted_once = True
         return list(uuids)

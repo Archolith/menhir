@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from time import monotonic, perf_counter
 from uuid import UUID
 
 from menhir.core.reader_identity import normalize_reader_id as _normalize_reader_id
 from menhir.domain.models import ProcessingState
+from menhir.domain.recall_visibility import memory_lifecycle_note
 from menhir.domain.utils import excerpt
 from menhir.services.stale_labeling import (
     STALE_ACTION, STALE_ACTION_OUTDATED,
@@ -155,8 +157,19 @@ def _compact_json(payload: dict[str, object]) -> str:
     return json.dumps(payload, separators=(",", ":"), ensure_ascii=True, default=str)
 
 
+def _memory_lifecycle_fields(row: object) -> dict[str, object]:
+    """Preserve existing state fields and annotate history on every serialized read."""
+    fields = {key: _tf(row, key) for key in ("status", "artifact_status", "superseded_by")}
+    note = memory_lifecycle_note(**fields)
+    result = {key: value for key, value in fields.items() if value is not None}
+    if note:
+        result["lifecycle_note"] = note
+    return result
+
+
 def _compact_memory_item(row: dict[str, object], *, tag: str) -> dict[str, object]:
     item = {
+        **_memory_lifecycle_fields(row),
         "uuid": row.get("uuid"),
         "name": row.get("name") or row.get("uuid") or "(unnamed)",
         "scope": row.get("scope") or "UNKNOWN",
@@ -220,11 +233,18 @@ def _resolve_stale_advisory(stale_info: dict[str, object]) -> tuple[str, str]:
     return action, advisory
 
 
+def _with_corroborated(tf: object, fact: dict[str, object]) -> dict[str, object]:
+    if _tf(tf, "corroborated"):
+        fact["corroborated"] = True
+    return fact
+
+
 def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, object]:
     breakdown = getattr(scored, "breakdown", None)
     sim_raw = _bd(breakdown, "semantic_similarity")
     relevance = "high" if sim_raw >= 0.7 else "medium" if sim_raw >= 0.4 else "low"
     item: dict[str, object] = {
+        **_memory_lifecycle_fields(scored),
         "uuid": getattr(scored, "uuid", None),
         "name": getattr(scored, "name", None),
         "scope": getattr(scored, "scope", None),
@@ -246,11 +266,23 @@ def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, obj
     warden_label = getattr(scored, "warden_label", None)
     if warden_label:
         item["warden_label"] = warden_label
+    if getattr(scored, "needs_review", False):
+        item["needs_review"] = True
+        item["review_reason"] = getattr(scored, "review_reason", None)
+        item["review_flagged_at"] = getattr(scored, "review_flagged_at", None)
+        item["review_advisory"] = "Verify the source before asserting this memory as current truth."
+    evidence = getattr(scored, "verifier_evidence", ())
+    if evidence:
+        item["verifier_evidence"] = [asdict(e) if is_dataclass(e) else dict(e) for e in evidence]
     # Phase 4a.4/4c: the deterministically-injected current scalar_state View is the authoritative
     # CURRENT value for a surfaced slot. Marked so the consumer leads with it (the other observations
     # are its history/provenance). Decision-relevant -> kept even in compact mode.
     if getattr(scored, "is_scalar_authority", False):
         item["is_scalar_authority"] = True
+    # Two-tier self: which self tier this entity is (only with MENHIR_INFERRED_SELF_MODE on).
+    self_tier = getattr(scored, "self_tier", None)
+    if self_tier:
+        item["self_tier"] = self_tier
     # Hook Center stale-anchor metadata: present only when the recall service
     # performed stale labeling (stale_anchor_info is a dict). Always includes
     # "stale_anchor": true|false. Additional fields for stale items:
@@ -274,7 +306,7 @@ def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, obj
     temporal_facts_raw = getattr(scored, "temporal_facts", None) or ()
     if temporal_facts_raw:
         item["temporal_facts"] = [
-            {
+            _with_corroborated(tf, _with_event_time({
                 "fact": _tf(tf, "fact"),
                 "valid_at": _tf(tf, "valid_at"),
                 "invalid_at": _tf(tf, "invalid_at"),
@@ -284,7 +316,7 @@ def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, obj
                 "temporal_role": _tf(tf, "temporal_role"),
                 # Rung 1C: render happened-time (world) vs learned-time (belief) legibly.
                 "when": _format_when(tf),
-            }
+            }, tf))
             for tf in temporal_facts_raw
         ]
     if compact:
@@ -301,6 +333,14 @@ def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, obj
     return item
 
 
+def _with_event_time(item: dict, tf: object) -> dict:
+    """Adds ``event_time`` only when rendered (MENHIR_ANCHORED_TIME_RENDER), else unchanged."""
+    event_time = _tf(tf, "event_time")
+    if event_time:
+        item["event_time"] = event_time
+    return item
+
+
 def _format_when(tf: object) -> str:
     """Rung 1C: a compact happened-vs-learned phrase for one temporal fact.
 
@@ -313,7 +353,15 @@ def _format_when(tf: object) -> str:
     created_at = _tf(tf, "created_at")
     expired_at = _tf(tf, "expired_at")
 
-    if invalid_at:
+    event_time = _tf(tf, "event_time")
+    if event_time:
+        # A plan has not happened, and an unverified recorded date is not an occurrence date:
+        # their text already says "planned ..." / "recorded ...".
+        happened = (str(event_time) if str(event_time).startswith(("planned", "recorded"))
+                    else f"happened {event_time}")
+        if invalid_at:
+            happened = f"{happened} until {invalid_at}"
+    elif invalid_at:
         happened = f"happened {valid_at or '?'} until {invalid_at}"
     elif valid_at:
         happened = f"happened from {valid_at}"
@@ -614,6 +662,14 @@ async def _queue_summary(backend: object) -> str:
             f"\nWARNING: {auth_failure.summary()}. New memories are stored but cannot be "
             "enriched or recalled until the provider credential (e.g. OPENAI_API_KEY) is fixed; "
             "failed episodes are retried automatically once a call succeeds."
+        )
+    from menhir.infrastructure.observability import last_provider_quota_exhaustion
+
+    quota_exhaustion = last_provider_quota_exhaustion()
+    if quota_exhaustion is not None:
+        summary += (
+            f"\nWARNING: {quota_exhaustion.summary()}. Enrichment cannot progress until provider "
+            "credits are added; stop waiting on queued episodes."
         )
     unrecallable = await _standing_unrecallable_count(backend)
     if unrecallable > 0:

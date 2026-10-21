@@ -46,6 +46,7 @@ async def build_context(
     session_id: str | None = None,
     include_scores: bool = False,
     namespace: str = "",
+    include_warden_status: bool = False,
 ) -> str:
     """Build a token-budget-limited context string from recalled memories.
 
@@ -55,6 +56,7 @@ async def build_context(
         preset: Recall preset — one of 'knowledge', 'recent', 'emotional', 'connected', or 'conflict' (default: 'knowledge').
         session_id: Optional session ID for session-scoped recall.
         include_scores: Include relevance scores in output (default: False).
+        include_warden_status: Pack detailed Warden execution diagnostics into the budget (default false). Brief incomplete-check notices remain visible.
         namespace: Optional silo to scope this operation to. Empty = default/global behavior.
     """
 
@@ -64,6 +66,7 @@ async def build_context(
         preset=preset,
         session_id=session_id,
         include_scores=include_scores,
+        include_warden_status=include_warden_status,
         namespace=namespace,
     )
 
@@ -87,6 +90,7 @@ class BuildContextTool(BaseTextTool):
         session_id: str | None = None,
         include_scores: bool = False,
         namespace: str = "",
+        include_warden_status: bool = False,
     ) -> str:
         """Build a token-budget-limited context string from recalled memories."""
         backend = self.get_backend()
@@ -98,6 +102,7 @@ class BuildContextTool(BaseTextTool):
                 preset=preset,
                 session_id=effective_session_id,
                 include_scores=include_scores,
+                **({"include_warden_status": True} if include_warden_status else {}),
                 namespace=namespace or None,
             )
         except InvalidQueryPresetError:

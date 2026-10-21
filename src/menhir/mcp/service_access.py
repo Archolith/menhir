@@ -495,7 +495,10 @@ def build_memory_backend(settings: MemorySettings | None = None) -> MemoryBacken
         # caller is diagnostics -- a reporting surface must describe a bad configuration, not die on
         # it. Guarding a predicate or a report instead of the credential path is how a security
         # check ends up breaking everything except the thing it was meant to stop.
-        return BackendClient(_require_secure_backend_url(backend_url), settings=settings)
+        return BackendClient(
+            _require_secure_backend_url(backend_url), settings=settings,
+            caller_session=get_mcp_session(settings),
+        )
 
     raise RuntimeError("menhir runtime is not ready and no backend URL configured")
 

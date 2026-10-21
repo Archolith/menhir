@@ -120,12 +120,14 @@ def test_the_emitted_fragment_puts_the_subordinate_on_the_left() -> None:
 
 
 @pytest.mark.unit
-def test_the_supersession_predicate_is_byte_identical_after_the_extraction() -> None:
-    """NO BEHAVIOUR CHANGE, asserted rather than assumed. This is the shipped Cypher for the only
-    path that creates SUPERSEDES; a refactor that moved the rule must not have moved the query."""
+def test_the_supersession_predicate_checks_known_states_before_moving_status() -> None:
+    """The domain emits type, status, identity, and namespace guards for the paired write."""
     assert supersession_cypher() == (
         "new.artifact_type = old.artifact_type\n"
         "              AND new.artifact_uuid <> old.artifact_uuid\n"
+        "              AND new.artifact_type IN $known_types\n"
+        "              AND new.status IN $valid_statuses_by_type[new.artifact_type]\n"
+        "              AND old.status IN $valid_statuses_by_type[old.artifact_type]\n"
         "              AND NOT old.status IN $terminal\n"
         "              AND old.namespace IN [new.namespace, $default_ns]"
     )

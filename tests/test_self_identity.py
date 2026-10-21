@@ -480,7 +480,7 @@ def test_gate_approved_sources_are_exactly_the_apex_tier():
 def test_receipt_carries_identity_from_the_parent_task():
     """Phase 2 seam. The receipt is created in the parent task so both the wait_for child and
     Graphiti's own child task inherit the same object; identity must ride along with it."""
-    from menhir.infrastructure.graphiti_extraction_patches import (
+    from menhir.infrastructure.graphiti_extraction_policy import (
         begin_extraction_receipt,
         clear_extraction_receipt,
         get_extraction_receipt,
@@ -502,7 +502,7 @@ def test_receipt_carries_identity_from_the_parent_task():
 @pytest.mark.unit
 def test_receipt_without_identity_fails_closed():
     """A producer that supplies no evidence must not become the human by omission."""
-    from menhir.infrastructure.graphiti_extraction_patches import (
+    from menhir.infrastructure.graphiti_extraction_policy import (
         begin_extraction_receipt,
         clear_extraction_receipt,
     )

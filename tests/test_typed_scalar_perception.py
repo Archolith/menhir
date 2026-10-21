@@ -19,6 +19,7 @@ from menhir.services.typed_scalar_perception import (
     TypedScalarProposal,
     extract_typed_scalars_once,
 )
+from menhir.services.typed_scalar_rules import _clock_time_from_source
 
 
 @dataclass(frozen=True)
@@ -124,6 +125,57 @@ def test_well_typed_proposal_parses_and_grounds():
     assert p.span_start >= 0 and p.span_end == p.span_start + len("I wake at 7:30 on work days")
     assert _EPISODES[0].content[p.span_start:p.span_end].lower() == "i wake at 7:30 on work days"
     assert p.claim_ordinal == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("wake at 7:30 pm", "19:30"),
+        ("wake at 7:30 p.m.", "19:30"),
+        ("wake at 7:30P.M.", "19:30"),
+        ("wake at 12:30 a.m.", "00:30"),
+        ("wake at 12:30 p.m.", "12:30"),
+        ("wake at 00:00", "00:00"),
+        ("wake at 23:59", "23:59"),
+        ("wake at 7:30 pm, every day", "19:30"),
+        ("wake at 7:30 on work days", "07:30"),
+        ("wake at 7:30 p.m..", None),
+        ("wake at 7:30 pmx", None),
+        ("wake at 7:30 p m", None),
+        ("wake at 7:30 p/m", None),
+        ("wake at 7:30 p-m", None),
+        ("wake at 7:30foo", None),
+        ("wake at 13:30 pm", None),
+        ("wake at 24:00", None),
+        ("wake at 7:3 p.m.", None),
+    ],
+)
+def test_source_clock_meridiem_is_parsed_without_partial_tokens(source, expected):
+    assert _clock_time_from_source(source) == expected
+
+
+@pytest.mark.unit
+def test_dotted_source_clock_cannot_corrupt_correct_model_value():
+    source = "I wake at 7:30 p.m. every day"
+    episodes = [_Ep(uuid="ep-1", content=source)]
+    out = extract_typed_scalars_once(
+        episodes,
+        _llm([_row(value="19:30", stated_span=source, when="")]),
+    )
+    assert len(out) == 1
+    assert out[0].value == "19:30"
+    assert out[0].normalized_value == "19:30"
+
+
+@pytest.mark.unit
+def test_unsupported_meridiem_abstains_in_full_row_parser():
+    source = "I wake at 7:30 p.m.. every day"
+    episodes = [_Ep(uuid="ep-1", content=source)]
+    assert extract_typed_scalars_once(
+        episodes,
+        _llm([_row(value="19:30", stated_span=source, when="")]),
+    ) == []
 
 
 @pytest.mark.unit

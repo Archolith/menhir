@@ -304,13 +304,18 @@ def test_missing_and_duplicate_quote_are_rejected():
 
 
 @pytest.mark.unit
-def test_malformed_explicit_when_is_rejected():
+def test_malformed_when_is_ignored_not_dropped():  # #155: malformed when -> note, not drop
     episode = [_Ep(uuid="ep-0", content="I bought a pen.")]
     drops: list[str] = []
-    assert extract_events_once(
-        episode, _llm([{"episode": 0, "events": [_event(when="not-a-date", stated_span="bought a pen")]}]), on_drop=drops.append
-    ) == []
-    assert drops == ["malformed_when"]
+    notes: list[str] = []
+    out = extract_events_once(
+        episode, _llm([{"episode": 0, "events": [_event(object="pen", when="not-a-date", stated_span="bought a pen")]}]),
+        on_drop=drops.append, on_note=notes.append,
+    )
+    assert len(out) == 1
+    assert out[0].when is None
+    assert drops == []
+    assert notes == ["malformed_when_ignored"]
 
 
 # --------------------------------------------------------------------------- grounding / normalization
@@ -351,7 +356,11 @@ def _proposal(**over):
 
 @pytest.mark.unit
 def test_builder_uses_explicit_when_not_learned_at():
-    p = _proposal(when="2026-07-01T00:00:00+00:00")
+    # #155: explicit time must be grounded in the SOURCE sentence; when_context states the date
+    p = _proposal(
+        when="2026-05-20T00:00:00+00:00",
+        when_context="I bought a pen on 2026-05-20.",
+    )
     res = build_event_assertion(
         p, subject_uuid="u-1", namespace="n", learned_at="2026-08-01T00:00:00+00:00",
         episode_reference_time="2026-06-01T00:00:00+00:00", turn_evidence_uuid="te-1", perceiver_version="v1",
@@ -359,7 +368,7 @@ def test_builder_uses_explicit_when_not_learned_at():
     assert isinstance(res, EventAssertionBuildResult)
     assert res.built and res.reason is None
     assert res.assertion is not None
-    assert res.assertion.valid_at == "2026-07-01T00:00:00+00:00"
+    assert res.assertion.valid_at[:10] == "2026-05-20"
     assert res.assertion.time_basis == "explicit"
     assert res.assertion.evidence_tier == "agent"
 

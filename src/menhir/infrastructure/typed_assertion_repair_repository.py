@@ -6,6 +6,7 @@ import json
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
+from menhir.domain.exact_json import dumps_exact
 from menhir.domain.typed_assertion import IDENTITY_VERSION, TypedAssertion, normalize_scalar
 from menhir.infrastructure.schema import get_scalar_state_activation_queries
 from menhir.infrastructure.typed_assertion_models import (
@@ -15,12 +16,11 @@ from menhir.infrastructure.typed_assertion_models import (
 
 
 def _scalar_value_json(value: Any) -> str:
-    """Encode Decimal values as JSON numbers so currency scale survives durable storage."""
-    if isinstance(value, Decimal):
-        return normalize_scalar(value)
-    if isinstance(value, (list, tuple)):
-        return "[" + ", ".join(_scalar_value_json(item) for item in value) + "]"
-    return json.dumps(value, ensure_ascii=False)
+    """Decimal values as exact JSON numbers so currency scale survives durable storage.
+
+    Exact scale, not the canonical identity form: normalize_scalar strips trailing zeros (#152).
+    """
+    return dumps_exact(value, ensure_ascii=False)
 
 
 class TypedAssertionRepairMixin:
@@ -103,6 +103,11 @@ class TypedAssertionRepairMixin:
                    a.stated_span AS stated_span, a.episode_uuid AS episode_uuid,
                    a.span_start AS span_start, a.span_end AS span_end,
                    a.claim_ordinal AS claim_ordinal,
+                   coalesce(a.importance, '') AS importance,
+                   coalesce(a.count_object, '') AS count_object,
+                   coalesce(a.count_item, '') AS count_item,
+                   coalesce(a.count_action, '') AS count_action,
+                   coalesce(a.count_family, '') AS count_family,
                    toString(a.valid_at) AS valid_at, toString(a.learned_at) AS learned_at,
                    a.time_basis AS time_basis, a.perceiver_version AS perceiver_version,
                    a.namespace AS namespace
@@ -336,6 +341,10 @@ class TypedAssertionRepairMixin:
             "perceiver_version": a.perceiver_version, "perceiver_rank": a.perceiver_rank,
             "namespace": a.namespace,
             "absolute_semantics": (a.absolute_semantics or "ordinary").strip().lower(),
+            "importance": (a.importance or "").strip().lower(),
+            "count_object": a.count_object or "",
+            "count_item": a.count_item or "",
+            "count_action": a.count_action or "",
             "metadata_json": json.dumps(a.metadata or {}, ensure_ascii=False),
             "name_embedding": a.name_embedding,
             "embed_version": a.embed_version,

@@ -64,6 +64,8 @@ BASELINE_PROMPT_PREFIX = "You convert"
 #:
 #: The result is an ABLATION -- same extraction, corrected chronology -- not a simulation of the
 #: repaired system end to end. Measuring that needs a fresh capture.
+#: Like measure_absence_band.EPISODES_Q, this reads the legacy prefixed LME corpus the frozen
+#: captures were taken from; it does not mirror production discovery, which is TurnEvidence only.
 EPISODES_WITH_BOTH_TIMES_Q = """
 MATCH (e:Episodic)
 WHERE e.content STARTS WITH 'user:' AND e.group_id = $ns

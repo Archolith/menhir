@@ -31,6 +31,7 @@ work rather than that the rename path does.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 from pathlib import Path
@@ -44,6 +45,7 @@ from tests.e2e._harness.artifact_corpus import (
     MOVE_SOURCE,
     OUTSIDE_CORPUS_PATH,
     UNPARSEABLE_STATUS_PATH,
+    UNRESOLVED_SUPERSEDED_PATH,
     move_document,
 )
 from tests.e2e._harness.client import stdio_session
@@ -58,6 +60,7 @@ pytestmark = [pytest.mark.e2e, pytest.mark.timeout(2400)]
 CRITERIA = [
     "validate_fixture_corpus",
     "index_and_outside_documents_are_not_artifacts",
+    "superseded_source_without_replacement_stays_unregistered",
     "read_list_artifact_via_mcp",
     "unparseable_status_registers_unresolved_not_coerced",
     "link_two_artifacts",
@@ -139,6 +142,8 @@ async def test_e2e_04_workartifacts(
 ) -> None:
     lane_evidence.record_stack(features=feature_combo.label, **e2e_artifact_corpus.as_evidence())
     corpus = e2e_artifact_corpus
+    unresolved_source = corpus.path / UNRESOLVED_SUPERSEDED_PATH
+    unresolved_before = await asyncio.to_thread(unresolved_source.read_bytes)
 
     # --- audit, then apply --------------------------------------------------------
     audit = _audit_json(e2e_config, corpus, feature_env=feature_env)
@@ -147,7 +152,8 @@ async def test_e2e_04_workartifacts(
     paths_in_ledger = {
         (a.get("path") or "").replace("\\", "/") for a in audit.get("actions", [])
     }
-    every_expected_seen = set(EXPECTED_ARTIFACTS) <= paths_in_ledger
+    expected_seen = set(EXPECTED_ARTIFACTS) | {UNRESOLVED_SUPERSEDED_PATH}
+    every_expected_seen = expected_seen <= paths_in_ledger
     # An index is not work and an out-of-route document is not the corpus's business.
     # Either one appearing here is a false finding an operator would chase forever.
     index_excluded = INDEX_PATH not in paths_in_ledger
@@ -156,13 +162,13 @@ async def test_e2e_04_workartifacts(
         "validate_fixture_corpus",
         passed=every_expected_seen and bool(audit.get("plan_digest")),
         detail={
-            "expected": sorted(EXPECTED_ARTIFACTS),
-            "missing_from_ledger": sorted(set(EXPECTED_ARTIFACTS) - paths_in_ledger),
+            "expected": sorted(expected_seen),
+            "missing_from_ledger": sorted(expected_seen - paths_in_ledger),
             "counts": audit.get("counts"),
         },
     )
     assert every_expected_seen, (
-        f"the audit ledger did not mention {sorted(set(EXPECTED_ARTIFACTS) - paths_in_ledger)}"
+        f"the audit ledger did not mention {sorted(expected_seen - paths_in_ledger)}"
     )
     lane_evidence.record(
         "index_and_outside_documents_are_not_artifacts",
@@ -195,6 +201,18 @@ async def test_e2e_04_workartifacts(
     assert all(registered.values()), (
         f"artifacts without a uuid after apply: "
         f"{[p for p, u in registered.items() if not u]}"
+    )
+    unresolved_uuid = _uuid_by_path(after_apply, UNRESOLVED_SUPERSEDED_PATH)
+    source_preserved = (
+        await asyncio.to_thread(unresolved_source.read_bytes) == unresolved_before
+    )
+    lane_evidence.record(
+        "superseded_source_without_replacement_stays_unregistered",
+        passed=unresolved_uuid is None and source_preserved,
+        detail={"registered_uuid": unresolved_uuid, "source_preserved": source_preserved},
+    )
+    assert unresolved_uuid is None and source_preserved, (
+        "a source declaring SUPERSEDED without a replacement was registered or rewritten"
     )
 
     async with stdio_session(

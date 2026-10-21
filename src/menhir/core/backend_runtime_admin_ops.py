@@ -40,6 +40,7 @@ class RuntimeProviderAdminOpsMixin:
         keep_uuid: str | None = None,
         remove_uuid: str | None = None,
         allow_promoted_removal: bool = False,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         return _to_jsonable(
             await self._off_loop(
@@ -50,6 +51,7 @@ class RuntimeProviderAdminOpsMixin:
                 remove_uuid=remove_uuid,
                 resolution_status=resolution_status,
                 allow_promoted_removal=allow_promoted_removal,
+                namespace=namespace,
             )
         )
 
@@ -160,7 +162,9 @@ class RuntimeProviderAdminOpsMixin:
     async def get_max_enrichment_attempts(self) -> int:
         return int(self.built.ingest_service.get_max_enrichment_attempts())
 
-    async def recover_orphans(self, *, max_age_hours: float = 24.0) -> dict[str, Any]:
+    async def recover_orphans(self, *, max_age_hours: float = 24.0, dry_run: bool = False) -> dict[str, Any]:
+        if dry_run:
+            return await self.built.lifecycle_service.preview_orphan_recovery(max_age_hours=max_age_hours)
         return _to_jsonable(
             await self.built.lifecycle_service.recover_orphans(
                 max_age_hours=max_age_hours
@@ -613,6 +617,9 @@ class RuntimeProviderAdminOpsMixin:
         namespace: str | None = None,
         turn_evidence_uuid: str | None = None,
     ) -> dict[str, Any]:
+        from menhir.services.ingest_limits import validate_memory_payload
+
+        validate_memory_payload(content)
         kwargs: dict[str, Any] = {
             "content": content,
             "target_date": target_date,

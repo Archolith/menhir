@@ -226,6 +226,12 @@ class ViewWriteRepositoryMixin:
         payload["episode_uuids"] = eps
         name, summary = kind.surface(subject, payload)
         props = kind.write_props(subject, key, payload)
+        # A kind kept out of the :Entity full-text index carries its text in view_name/view_summary
+        # (readers coalesce them over name/summary). content is not indexed and keeps the summary.
+        index_name, index_summary = name, summary
+        if not kind.keyword_indexed:
+            props = {**props, "view_name": name[:300], "view_summary": summary[:1000]}
+            index_name, index_summary = "", ""
         # Authoritative rebuild replaces the projection with the deterministic result of the full
         # current log, so (a) it BYPASSES the LWW guard — a correction that moves the current value
         # backward in valid_at must install, not be rejected as a "late arrival"; and (b) on the
@@ -236,13 +242,14 @@ class ViewWriteRepositoryMixin:
         if authoritative:
             effective_refresh = {
                 "view_subject": subject.strip(),
-                "name": name[:300], "summary": summary[:1000], "content": summary[:1000],
+                "name": index_name[:300], "summary": index_summary[:1000],
+                "content": summary[:1000],
                 **props,
                 **(refresh_props or {}),
             }
         res = self._write_version(
             kind=kind.name, key=key, subject=subject, subject_uuid=subject_uuid,
-            name=name, summary=summary,
+            name=index_name, summary=index_summary, content=summary,
             sig=kind.signature(payload), extra_props=props, audit_props=audit_props,
             namespace=namespace, valid_at=kind.valid_at(payload) or _now(),
             source=source, source_confidence=source_confidence,
@@ -279,7 +286,7 @@ class ViewWriteRepositoryMixin:
         view_class: ViewClass = ViewClass.FACT, node_uuid: str | None = None,
         refresh_props: dict[str, Any] | None = None, summary_template: str | None = None,
         subject_uuid: str | None = None, replace_provenance: bool = False,
-        lifecycle_props: dict[str, str] | None = None,
+        lifecycle_props: dict[str, str] | None = None, content: str | None = None,
     ) -> dict[str, Any]:
         """The one place a View version is written. Idempotent on `sig`: unchanged -> refresh
         provenance/access only; changed -> create a fresh current version and supersede the prior
@@ -357,7 +364,7 @@ class ViewWriteRepositoryMixin:
                     MATCH (n:Entity {uuid: $u})
                     WHERE coalesce(n.view_current, n.qs_current, true)
                       AND NOT coalesce(n.retired, false)
-                    SET n.last_accessed = $now,
+                    SET n.last_accessed = datetime($now),
                         n.view_fence_generation = f.generation
                     SET n += $refresh
                     RETURN n.uuid AS uuid
@@ -376,7 +383,7 @@ class ViewWriteRepositoryMixin:
                 prov = {}
             else:
                 self.neo4j.execute(
-                    f"MATCH (n:{label} {{uuid:$u}}) SET n.last_accessed=$now, n += $refresh "
+                    f"MATCH (n:{label} {{uuid:$u}}) SET n.last_accessed=datetime($now), n += $refresh "
                     "RETURN n.uuid",
                     {"u": current["uuid"], "now": now, "refresh": dict(refresh_props or {})},
                     timeout_s=SAGA_MUTATION_TIMEOUT_S,  # CF-211
@@ -474,11 +481,11 @@ class ViewWriteRepositoryMixin:
             OPTIONAL MATCH (old:{label} {{uuid: $old}})
             FOREACH (o IN CASE WHEN old IS NULL THEN [] ELSE [old] END |
                 SET o.view_current = false, o.qs_current = false, o.superseded_by = $uuid,
-                    o.expired_at = datetime($now), o.last_accessed = $now
+                    o.expired_at = datetime($now), o.last_accessed = datetime($now)
                 {clear_current_key})
             WITH f, old, evidence
             CREATE (n:{label} {{
-                uuid: $uuid, name: $name, summary: $summary, content: $summary,
+                uuid: $uuid, name: $name, summary: $summary, content: $content,
                 group_id: $ns, namespace: $ns_stamped, {_SHARED_STAMPS},
                 source: $source, source_confidence: $sc,
                 valid_at: datetime($valid_at), created_at: datetime($now), last_accessed: datetime($now)
@@ -494,6 +501,7 @@ class ViewWriteRepositoryMixin:
             RETURN n.uuid AS uuid
             """
         params = {"uuid": new_uuid, "name": name[:300], "summary": summary[:1000],
+                  "content": (summary if content is None else content)[:1000],
                   "ns": (namespace or ""), "ns_stamped": ns_stamped,
                   "namespace_key": namespace_key, **tenant_scope_params(namespace_key),
                   "operation_id": new_uuid, "key": key, "eps": eps,
@@ -718,7 +726,7 @@ class ViewWriteRepositoryMixin:
         protect against lost updates -- the write lock is taken at the `SET`, but the property read
         happens upstream in the `UNWIND`, so two concurrent refreshes could both read the same base
         list, serialize at the SET, and have the second commit a union missing the first's UUIDs.
-        The leading `SET n.last_accessed = $now` exists to take the node's exclusive write lock
+        The leading `SET n.last_accessed = datetime($now)` exists to take the node's exclusive write lock
         BEFORE `episode_uuids` is read (Neo4j's documented explicit-locking pattern). A concurrent
         refresh then blocks there, and once it proceeds its read sees the other's committed list. It
         writes `last_accessed`, which this statement sets anyway, so the lock costs no extra property.
@@ -768,7 +776,7 @@ class ViewWriteRepositoryMixin:
             WHERE resolved_count = size(requested)
               AND all(e IN evidence WHERE
                   coalesce(e.evidence_generation, e.publication_generation) = f.generation)
-            SET n.last_accessed = $now, n.view_fence_generation = f.generation
+            SET n.last_accessed = datetime($now), n.view_fence_generation = f.generation
             WITH n, (coalesce(n.episode_uuids, []) + $eps) AS all_eids
             UNWIND CASE WHEN size(all_eids) = 0 THEN [null] ELSE all_eids END AS eid
             WITH n, eid ORDER BY eid
@@ -947,7 +955,7 @@ class ViewWriteRepositoryMixin:
             WHERE resolved_count = size($eps)
               AND all(e IN evidence WHERE
                   coalesce(e.evidence_generation, e.publication_generation) = f.generation)
-            SET n.last_accessed = $now,
+            SET n.last_accessed = datetime($now),
                 n.view_fence_generation = f.generation,
                 n.episode_uuids = $eps,
                 n.supporting_event_count = size($eps),

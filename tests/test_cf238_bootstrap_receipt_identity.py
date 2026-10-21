@@ -38,7 +38,7 @@ sides, and `body.namespace` continues to scope the content read alone.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -337,3 +337,71 @@ async def test_mcp_context_without_any_receipt_is_refused() -> None:
         payload = json.loads(await check.endpoint(reader_id="fresh-mcp-reader", namespace="tenant-a"))
 
     assert payload.get("ok") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "requested,pin,effective,relevant_count,stale_count",
+    [
+        ("tenant-a", "", "tenant-a", 1, 0),
+        ("tenant-b", "", "tenant-b", 0, 2),
+        ("default", "", "default", 1, 0),
+        ("", "", None, 0, 2),
+        ("tenant-b", "tenant-a", "tenant-a", 1, 0),
+        ("", "tenant-a", "tenant-a", 1, 0),
+    ],
+)
+async def test_context_supporting_reads_keep_effective_namespace(
+    monkeypatch, requested, pin, effective, relevant_count, stale_count
+) -> None:
+    """Exercise the MCP pin and real local-provider forwarding at the graph boundary.
+
+    Unscoped inspection deliberately sees a conflicting flag and foreign stale TODOs.
+    The primary recall is fixed so an omitted supporting-read scope changes the response.
+    """
+    import json
+
+    from menhir.core.backend_runtime import RuntimeProvider
+    from menhir.mcp import contracts
+    from menhir.mcp.tools.recall.recall_context_memories import RecallContextMemoriesTool
+
+    node_uuid = "shared-source-id"
+
+    def inspect_flag(uuid, *, namespace=None):
+        assert uuid == node_uuid
+        return {"user_flagged": namespace in (None, "tenant-b")}
+
+    def read_todos(*, status, limit, namespace=None):
+        assert (status, limit) == ("open", 200)
+        return [{"stale": True}, {"stale": True}] if namespace in (None, "tenant-b") else []
+
+    graph = SimpleNamespace(
+        fetch_memory_by_uuid=Mock(side_effect=inspect_flag),
+        list_todos=Mock(side_effect=read_todos),
+    )
+    backend = RuntimeProvider(SimpleNamespace(graph_adapter=graph), SimpleNamespace(session_id="session"))
+    backend.fetch_flagged_memory_bootstrap_version = AsyncMock(side_effect=_version)
+    backend.fetch_recent_memories = AsyncMock(return_value=[])
+    backend.recall = AsyncMock(return_value={"results": [{"uuid": node_uuid, "name": "Scoped fact"}]})
+    _remember_flagged_bootstrap_read("scope-reader", _version(namespace=effective), namespace=effective)
+
+    monkeypatch.setattr(contracts, "get_pinned_namespace", lambda: pin)
+    monkeypatch.setattr(contracts, "get_request_tier", lambda: "readonly")
+    monkeypatch.setattr(contracts, "require_trusted_client_identity", lambda: None)
+    monkeypatch.setattr(contracts, "request_uses_query_auth", lambda: False)
+    monkeypatch.setattr(contracts, "get_client_tool_allowlist", lambda: set())
+    tool = RecallContextMemoriesTool()
+    with patch.object(type(tool), "get_backend", return_value=backend):
+        payload = json.loads(await tool.execute(reader_id="scope-reader", query="fact", namespace=requested))
+
+    assert payload.get("ok") is not False, payload
+    assert payload["relevant_count"] == relevant_count
+    assert payload["stale_todo_warning"] == (
+        "\n⚠️ 2 open todo(s) are >30 days old. Run list_todos to review." if stale_count else None
+    )
+    assert backend.recall.await_args.kwargs["namespace"] == effective
+    assert backend.fetch_recent_memories.await_args.kwargs["namespace"] == effective
+    graph.fetch_memory_by_uuid.assert_called_once_with(
+        node_uuid, **({"namespace": effective} if effective is not None else {})
+    )
+    graph.list_todos.assert_called_once_with(status="open", limit=200, namespace=effective)

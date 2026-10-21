@@ -751,9 +751,18 @@ class BaseTool:
         carries the argument documentation the class attribute does not. Before this, neither
         reached the client: `mcp.tool()` was called with no `description=`, and 36 of the 54
         endpoints have no docstring for `@wraps` to copy.
+
+        A docstring that opens with the curated sentence would repeat it, as 13 tools did, so
+        that leading repeat is dropped and only the rest of the docstring follows.
         """
         curated = (self.description or "").strip()
         detail = (self.endpoint.__doc__ or "").strip()
+        if curated and detail:
+            first, sep, rest = detail.partition("\n\n")
+            flat_first, flat_curated = " ".join(first.split()), " ".join(curated.split())
+            if flat_first.lower().startswith(flat_curated.lower()):
+                remainder = flat_first[len(flat_curated):].strip()
+                detail = f"{remainder}{sep}{rest}".strip() if remainder else rest.strip()
         if detail and detail != curated:
             return f"{curated}\n\n{detail}" if curated else detail
         return curated

@@ -414,13 +414,15 @@ def test_identity_switches_are_wired_through_every_layer():
             assert switch in source, f"{relative_path} drops {switch}; the switch is inert"
 
 
-def test_identity_switches_default_off():
-    """Wiring is not activation. Every new switch must stay off unless explicitly enabled."""
+def test_identity_switches_default_to_lenient_policy():
+    """Scope/subject reconciliation default ON under the lenient-agreement policy (2026-09);
+    canonical_self stays off."""
     from menhir.config.settings_model import MemorySettings
     for field in ("personal_memory_scalar_reconcile_scope",
-                  "personal_memory_scalar_reconcile_subject",
-                  "personal_memory_scalar_canonical_self"):
-        assert getattr(MemorySettings, field) is False, f"{field} must default off"
+                  "personal_memory_scalar_reconcile_subject"):
+        assert getattr(MemorySettings, field) is True, f"{field} must default on"
+    assert getattr(MemorySettings, "personal_memory_scalar_canonical_self") is False, \
+        "personal_memory_scalar_canonical_self must default off"
 
 
 def test_align_spans_remains_internal_not_settings_reachable():

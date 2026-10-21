@@ -8,9 +8,9 @@ If it does NOT, the k-sample consistency gate is irrelevant to the miss and the 
 extraction/segmentation. If it DOES, extraction is fine and the gate is the whole story.
 
 Faithfulness: episodes are loaded and formatted exactly as the scheduler does
-(`personal_memory_queries.load_user_episodes` + `scheduler_tasks._build_episodes`):
-user-turn episodes only, oldest first, `user:` prefix stripped, body truncated to 2000 chars,
-bodies shorter than 8 chars skipped, content rendered as `[YYYY-MM-DD] <body>`.
+(`TurnEvidenceRepository.load_user_evidence` + `scheduler_tasks._build_episodes`):
+user TurnEvidence only (never Episodic content, #271), oldest first, raw text, body truncated
+to 2000 chars, bodies shorter than 8 chars skipped, content rendered as `[YYYY-MM-DD] <body>`.
 
 Writes nothing to the graph and calls no menhir persistence path.
 
@@ -130,14 +130,17 @@ def _segment(eps: list[_Ep], *, require_value: bool = False,
 
 
 def _load_episodes(driver, ns: str) -> list[_Ep]:
-    """Mirror load_user_episodes + _build_episodes exactly."""
+    """Mirror load_user_evidence + _build_episodes exactly."""
     with driver.session() as s:
         rows = list(s.run(
             """
-            MATCH (e:Episodic {group_id: $ns})
-            WHERE e.content STARTS WITH 'user:'
-            RETURN e.uuid AS uuid, toString(e.valid_at) AS valid_at, e.content AS content
-            ORDER BY e.valid_at
+            MATCH (t:TurnEvidence {namespace: $ns})
+            WHERE t.role = 'user' AND t.declarant = 'user' AND t.text IS NOT NULL AND t.text <> ''
+                  AND coalesce(t.source_kind, '') <> 'agent_quoted'
+            RETURN t.turn_id AS uuid,
+                   toString(coalesce(t.occurred_at, t.recorded_at, datetime())) AS valid_at,
+                   t.text AS content
+            ORDER BY coalesce(t.occurred_at, t.recorded_at), t.recorded_at, t.turn_id
             LIMIT 500
             """,
             ns=ns,
@@ -145,7 +148,7 @@ def _load_episodes(driver, ns: str) -> list[_Ep]:
     eps: list[_Ep] = []
     for r in rows:
         raw = str(r["content"] or "")
-        body = (raw[len("user:"):] if raw[:5].lower() == "user:" else raw).strip()[:2000]
+        body = raw.strip()[:2000]
         if len(body) < 8:
             continue
         when = str(r["valid_at"] or "")[:10]

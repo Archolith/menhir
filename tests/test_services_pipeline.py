@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
-import shutil
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +14,7 @@ from uuid import uuid4
 
 import pytest
 
+from tests._temp_cleanup import remove_test_dir
 from menhir.domain import IngestStatus, new_session
 from menhir.config import MemorySettings
 from menhir.core import BuildArtifacts, build_memory_services, prepare_memory_runtime
@@ -43,6 +44,29 @@ async def _wait_until(predicate, *, timeout_s: float = 10.0, interval_s: float =
             return True
         await asyncio.sleep(interval_s)
     return predicate()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("hook", [False, True])
+@pytest.mark.parametrize("anchor", [False, True])
+def test_context_builders_receive_configured_warden_profile(monkeypatch, stub_graphiti_client, hook, anchor):
+    from menhir.cli.bootstrap import build_hook_services
+
+    monkeypatch.setattr("menhir.core.bootstrap.Neo4jRepository", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr("menhir.cli.bootstrap.Neo4jRepository", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(
+        "menhir.core.bootstrap.GraphitiClient.from_settings_with_capabilities",
+        lambda settings, **kwargs: stub_graphiti_client,
+    )
+    monkeypatch.setattr(
+        "menhir.infrastructure.graphiti_client.GraphitiClient.from_settings",
+        lambda settings: stub_graphiti_client,
+    )
+    monkeypatch.setattr("menhir.core.bootstrap.LLMAdapter.from_settings", lambda settings: SimpleNamespace())
+    settings = MemorySettings(frontier_warden_gate=True, frontier_evidence_anchor=anchor)
+    built = build_hook_services(settings) if hook else build_memory_services(settings)
+    assert built.context_builder is not None
+    assert built.context_builder.retrieval_tuning == settings.retrieval_tuning()
 
 
 @pytest.mark.unit
@@ -99,6 +123,12 @@ async def test_process_pending_episode_extracts_and_stamps(
     assert len(adapter.stamp_calls) == 1
     assert adapter.stamp_calls[0]["session_id"] == "session-1"
     assert adapter.stamp_calls[0]["source"] == "unit-test"
+    assert adapter.retention_source_calls == [{
+        "source_episode_uuid": "pending-extract",
+        "entity_uuids": ["entity-1"],
+        "namespace": "default",
+    }]
+    assert adapter.flagged_nodes == []
     assert adapter.calls == 0
 
 
@@ -880,7 +910,8 @@ def test_build_memory_services_applies_graphiti_timeout_setting(monkeypatch: pyt
             return None
 
     class FakeMemoryGraphAdapter:
-        def __init__(self, neo4j: object) -> None:
+        def __init__(self, neo4j: object, counting_enabled: bool = False,
+                     counting_match_enabled: bool = False) -> None:
             self.neo4j = neo4j
 
     class FakeLifecycleService:
@@ -920,7 +951,8 @@ def test_build_memory_services_wires_event_history_authority_flag(
             return None
 
     class FakeMemoryGraphAdapter:
-        def __init__(self, neo4j: object) -> None:
+        def __init__(self, neo4j: object, counting_enabled: bool = False,
+                     counting_match_enabled: bool = False) -> None:
             self.neo4j = neo4j
 
     class FakeGraphitiClient:
@@ -945,7 +977,10 @@ def test_build_memory_services_wires_event_history_authority_flag(
     monkeypatch.setattr("menhir.core.bootstrap.LLMAdapter", FakeLLMAdapter)
     monkeypatch.setattr("menhir.core.bootstrap.RecallService", FakeRecallService)
 
-    settings = MemorySettings(personal_memory_event_history_authority_enabled=True)
+    settings = MemorySettings(
+        personal_memory_event_history_authority_enabled=True,
+        personal_memory_event_history_enabled=True,
+    )
     build_memory_services(settings=settings)
 
     assert captured["event_history_authority_enabled"] is True
@@ -985,6 +1020,119 @@ async def test_process_pending_episode_marks_failed_when_graphiti_raises(
 
     assert adapter.pending_episode_rows[episode_uuid]["processing_state"] == "FAILED"
     assert adapter.stamp_calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_stage", ["callback", "context", "cancelled_context"])
+async def test_process_pending_episode_cleans_up_after_setup_failure(
+    stub_memory_graph_adapter: "StubMemoryGraphAdapter",
+    stub_graphiti_client: "StubGraphitiClient",
+    stub_llm_adapter: object,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    from menhir.infrastructure import observability
+
+    adapter = stub_memory_graph_adapter
+    service = IngestService(
+        graphiti_client=stub_graphiti_client,
+        graph_adapter=adapter,
+        llm=stub_llm_adapter,
+    )
+    episode_uuid = adapter.create_pending_episode(
+        episode_uuid="pending-setup-fail",
+        name="episode-setup-fail",
+        content="first event",
+        session_id="session-1",
+        user_id="user-1",
+        source="unit-test",
+        source_confidence=0.5,
+    )
+    heartbeat_tasks: list[asyncio.Task[object]] = []
+    cleared_receipts: list[bool] = []
+    service._job_llm_call_counts[episode_uuid] = 1
+    monkeypatch.setattr(
+        "menhir.services.ingest_worker.clear_extraction_receipt",
+        lambda: cleared_receipts.append(True),
+    )
+
+    def fail_setup(*args: object) -> None:
+        heartbeat_tasks.extend(
+            task for task in asyncio.all_tasks()
+            if task.get_name() == f"menhir-enrichment-heartbeat-{episode_uuid}"
+        )
+        if failure_stage == "cancelled_context":
+            raise asyncio.CancelledError("setup cancelled")
+        raise RuntimeError("setup failed")
+
+    if failure_stage == "callback":
+        monkeypatch.setattr("menhir.services.ingest_worker.set_llm_usage_callback", fail_setup)
+    else:
+        monkeypatch.setattr(service, "_gate", fail_setup)
+
+    inherited_callback = lambda event: None
+    inherited_token = observability.set_llm_usage_callback(inherited_callback)
+    try:
+        error_type = asyncio.CancelledError if failure_stage == "cancelled_context" else RuntimeError
+        with pytest.raises(error_type):
+            await service._process_pending_episode(episode_uuid)
+
+        assert len(heartbeat_tasks) == 1
+        assert heartbeat_tasks[0].done(), "setup failure left a lease heartbeat running"
+        assert observability._llm_usage_callback.get() is inherited_callback
+        assert episode_uuid not in service._job_llm_call_counts
+        assert cleared_receipts == [True]
+        assert stub_graphiti_client.add_episode_calls == []
+    finally:
+        for task in heartbeat_tasks:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        observability.reset_llm_usage_callback(inherited_token)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_process_pending_episode_warns_when_raw_capture_fails(
+    stub_memory_graph_adapter: "StubMemoryGraphAdapter",
+    stub_graphiti_client: "StubGraphitiClient",
+    stub_llm_adapter: object,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    adapter = stub_memory_graph_adapter
+    service = IngestService(
+        graphiti_client=stub_graphiti_client,
+        graph_adapter=adapter,
+        llm=stub_llm_adapter,
+    )
+    service._graphiti_episode_max_estimated_tokens = 8
+    episode_uuid = adapter.create_pending_episode(
+        episode_uuid="pending-capture-fail",
+        name="episode-capture-fail",
+        content="x" * 128,
+        session_id="session-1",
+        user_id="user-1",
+        source="unit-test",
+        source_confidence=0.5,
+    )
+
+    def fail_capture(**kwargs: object) -> None:
+        raise OSError("capture storage unavailable")
+
+    monkeypatch.setattr(adapter, "create_raw_capture_entity", fail_capture)
+    with caplog.at_level(logging.WARNING, logger="menhir.services.enrichment_steps"):
+        await service._process_pending_episode(episode_uuid)
+
+    capture_errors = [record for record in caplog.records if "Failed to create raw-capture" in record.message]
+    assert len(capture_errors) == 1
+    assert capture_errors[0].levelno == logging.WARNING
+    assert episode_uuid in capture_errors[0].message
+    assert "capture storage unavailable" in capture_errors[0].message
+    assert adapter.pending_episode_rows[episode_uuid]["processing_state"] == "FAILED"
+    assert adapter.pending_episode_rows[episode_uuid]["content"] == "x" * 128
+    assert stub_graphiti_client.add_episode_calls == []
 
 
 @pytest.mark.unit
@@ -1260,6 +1408,11 @@ async def test_process_pending_episode_reconciles_existing_graphiti_completion_b
     assert adapter.pending_episode_rows[episode_uuid]["resolved_episode_uuid"] == "episode-existing-1"
     assert adapter.stamp_calls[-1]["node_uuids"] == ["episode-existing-1", "entity-1"]
     assert adapter.stamp_calls[-1]["edge_uuids"] == ["edge-1"]
+    assert adapter.retention_source_calls[-1] == {
+        "source_episode_uuid": "pending-reconcile",
+        "entity_uuids": ["entity-1"],
+        "namespace": "default",
+    }
 
 
 @pytest.mark.unit
@@ -1834,7 +1987,7 @@ async def test_maintenance_scheduler_runs_phase_one_jobs(monkeypatch: pytest.Mon
         snapshot = scheduler.status_snapshot()
         await scheduler.stop()
     finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
+        remove_test_dir(run_dir)
 
     assert snapshot["running"] is True
     assert snapshot["jobs"]["recover_stale_leases"]["runs"] >= 1
@@ -1893,7 +2046,7 @@ async def test_maintenance_scheduler_start_stop_is_idempotent() -> None:
         await scheduler.stop()
         assert scheduler.is_running() is False
     finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
+        remove_test_dir(run_dir)
 
 
 @pytest.mark.unit
@@ -1944,7 +2097,7 @@ async def test_maintenance_scheduler_stop_ignores_cancelled_task() -> None:
         assert scheduler._task is None
         assert scheduler.is_running() is False
     finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
+        remove_test_dir(run_dir)
 
 
 @pytest.mark.unit
@@ -2025,7 +2178,7 @@ async def test_maintenance_scheduler_allows_only_one_live_owner() -> None:
 
         await second.stop()
     finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
+        remove_test_dir(run_dir)
 
 
 @pytest.mark.unit
@@ -2117,7 +2270,7 @@ async def test_maintenance_scheduler_force_takeover_transfers_active_owner() -> 
 
         await second.stop()
     finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
+        remove_test_dir(run_dir)
 
 
 @pytest.mark.unit
@@ -2205,7 +2358,7 @@ async def test_maintenance_scheduler_heartbeat_keeps_lease_alive_during_long_job
         await first.stop()
         await second.stop()
     finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
+        remove_test_dir(run_dir)
 
 
 @pytest.mark.unit
@@ -2307,7 +2460,7 @@ async def test_maintenance_scheduler_forced_takeover_fences_displaced_owner_mid_
 
         await second.stop()
     finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
+        remove_test_dir(run_dir)
 
 
 @pytest.mark.unit
@@ -2576,6 +2729,9 @@ async def test_maintenance_scheduler_reconciles_silent_completed_failed_episode(
             )
             return FakeStamp()
 
+        def record_retention_sources(self, **_: object) -> int:
+            return 1
+
         def mark_episode_ready(
             self,
             episode_uuid: str,
@@ -2808,6 +2964,9 @@ async def test_maintenance_scheduler_reconciliation_skips_when_row_is_no_longer_
                 }
             )
             return FakeStamp()
+
+        def record_retention_sources(self, **_: object) -> int:
+            return 1
 
         def mark_episode_ready(
             self,

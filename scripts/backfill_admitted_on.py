@@ -7,10 +7,16 @@ resolves a `turn_id` to its episode through this edge (infrastructure/episode_li
 `fetch_linked_entities_for_episode`), so on a pre-existing corpus non-self subjects still cannot
 bind until the join is backfilled.
 
-THE JOIN IS EXACT, NOT FUZZY
-A `:TurnEvidence` carries the raw user text; the corresponding `:Episodic` stores it prefixed with
-the producer's role marker. The join is therefore exact string equality on
-`e.content = 'user: ' + t.text` within one namespace -- NOT similarity, NOT CONTAINS. Anything
+THE JOIN IS EXACT, NOT FUZZY, AND USER-ONLY
+Only captured user turns are linked (`role = declarant = 'user'`, never `agent_quoted`), and only to
+episodes whose declared `turn_role` is absent or `user`. That matters because an edge plus
+content equal to the turn text is what `resolve_turn_role` accepts as proof of the speaker (#271):
+an unfiltered text join would let this script prove `user` for an episode declared `assistant`.
+
+The episode must store the turn text exactly: raw (`e.content = t.text`, current producers), or
+with the legacy bench prefix (`e.content = 'user: ' + t.text`, graphs built before the bench sent
+`role`). A legacy link is provenance only; its content differs from the turn text, so it can
+never prove a role. Matching is within one namespace -- NOT similarity, NOT CONTAINS. Anything
 looser risks attaching an assertion's provenance to the wrong turn, which is worse than leaving it
 unbound: a wrong binding asserts authority the evidence never supported.
 
@@ -56,11 +62,21 @@ _PROD_MARKERS = tuple(
     if m.strip()
 )
 
-_SURVEY = """
+# Shared filters (review R1/R2 of #273): user turns only, to user-or-undeclared episodes, matched on
+# the raw or legacy-prefixed turn text.
+_USER_TURN = (
+    "t.role = 'user' AND t.declarant = 'user' AND coalesce(t.source_kind, '') <> 'agent_quoted'"
+)
+_SAME_TURN_EPISODE = (
+    "e.group_id = t.namespace AND (e.content = t.text OR e.content = 'user: ' + t.text) "
+    "AND coalesce(e.turn_role, 'user') = 'user'"
+)
+
+_SURVEY = f"""
 MATCH (t:TurnEvidence)
-WHERE $prefix IS NULL OR t.namespace STARTS WITH $prefix
+WHERE ($prefix IS NULL OR t.namespace STARTS WITH $prefix) AND {_USER_TURN}
 OPTIONAL MATCH (e:Episodic)
-  WHERE e.group_id = t.namespace AND e.content = 'user: ' + t.text
+  WHERE {_SAME_TURN_EPISODE}
 WITH t, count(e) AS matches
 OPTIONAL MATCH (t)<-[r:ADMITTED_ON]-(:Episodic)
 WITH t, matches, count(r) AS existing
@@ -73,24 +89,23 @@ RETURN count(t) AS turns,
 
 # Deterministic tie-break lives in the ORDER BY: identical-content duplicates are all correct
 # targets, so pick the oldest and keep re-runs idempotent.
-_APPLY = """
+_APPLY = f"""
 MATCH (t:TurnEvidence)
-WHERE ($prefix IS NULL OR t.namespace STARTS WITH $prefix)
-  AND NOT EXISTS { (t)<-[:ADMITTED_ON]-(:Episodic) }
+WHERE ($prefix IS NULL OR t.namespace STARTS WITH $prefix) AND {_USER_TURN}
+  AND NOT EXISTS {{ (t)<-[:ADMITTED_ON]-(:Episodic) }}
 MATCH (e:Episodic)
-WHERE e.group_id = t.namespace AND e.content = 'user: ' + t.text
+WHERE {_SAME_TURN_EPISODE}
 WITH t, e ORDER BY e.created_at, e.uuid
 WITH t, head(collect(e)) AS chosen
 MERGE (chosen)-[:ADMITTED_ON]->(t)
 RETURN count(*) AS linked
 """
 
-_UNMATCHED_SAMPLE = """
+_UNMATCHED_SAMPLE = f"""
 MATCH (t:TurnEvidence)
-WHERE ($prefix IS NULL OR t.namespace STARTS WITH $prefix)
-  AND NOT EXISTS { (t)<-[:ADMITTED_ON]-(:Episodic) }
-  AND NOT EXISTS { MATCH (e:Episodic)
-                   WHERE e.group_id = t.namespace AND e.content = 'user: ' + t.text }
+WHERE ($prefix IS NULL OR t.namespace STARTS WITH $prefix) AND {_USER_TURN}
+  AND NOT EXISTS {{ (t)<-[:ADMITTED_ON]-(:Episodic) }}
+  AND NOT EXISTS {{ MATCH (e:Episodic) WHERE {_SAME_TURN_EPISODE} }}
 RETURN t.namespace AS ns, t.turn_id AS turn_id, substring(coalesce(t.text, ''), 0, 70) AS text
 LIMIT 10
 """

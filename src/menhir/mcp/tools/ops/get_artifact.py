@@ -28,7 +28,11 @@ class GetArtifactTool(BaseTextTool):
     read_only_hint = True
     destructive_hint = False
     open_world_hint = False
-    description = "Read one work artifact (plan, review, investigation, report, handoff) in full."
+    description = (
+        "Read one work artifact's record (plan, review, investigation, report, handoff): type, "
+        "title, status and history, where the document lives, and the code it discusses. Returns "
+        "locations, not the document text; open the document to read its reasoning."
+    )
 
     async def endpoint(self, artifact_uuid: str, namespace: str = "") -> str:
         backend = self.get_backend()

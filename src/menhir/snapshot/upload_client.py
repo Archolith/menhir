@@ -20,13 +20,17 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
+import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from menhir.config.settings_helpers import is_loopback_host
 from menhir.snapshot.protocol import sha256_hex
 
 __all__ = [
@@ -45,6 +49,8 @@ _USER_AGENT = "menhir-sync"
 #: would stop being a client -- the point of speaking a wire protocol is that the two halves can
 #: ship separately. The string is part of the frozen contract.
 _ERR_SIZE_REJECTED = "snapshot.upload.declared_size_rejected"
+_ALLOW_INSECURE_BACKEND_ENV = "MENHIR_ALLOW_INSECURE_BACKEND_URL"
+logger = logging.getLogger(__name__)
 
 
 class SnapshotUploadError(RuntimeError):
@@ -65,6 +71,68 @@ class UploadOutcome:
     bytes_sent: int
 
 
+def _validated_base_url(base_url: str) -> str:
+    """Keep the operator bearer key off plaintext non-loopback transports."""
+    if (
+        not isinstance(base_url, str)
+        or base_url != base_url.strip()
+        or any(ord(char) < 32 for char in base_url)
+        or "?" in base_url
+        or "#" in base_url
+    ):
+        raise SnapshotUploadError(
+            "sync.transport.invalid_url", "the remote Menhir URL is invalid"
+        )
+    try:
+        parsed = urllib.parse.urlsplit(base_url)
+        host = parsed.hostname
+        # Accessing port also rejects malformed authorities such as :not-a-port.
+        parsed.port
+    except (TypeError, ValueError) as exc:
+        raise SnapshotUploadError(
+            "sync.transport.invalid_url", "the remote Menhir URL is invalid"
+        ) from exc
+
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not host
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise SnapshotUploadError(
+            "sync.transport.invalid_url",
+            "the remote Menhir URL must be an HTTP(S) base URL without credentials or a query",
+        )
+    if parsed.scheme == "http" and not is_loopback_host(host):
+        if os.getenv(_ALLOW_INSECURE_BACKEND_ENV, "").strip().lower() not in {
+            "1", "true", "yes"
+        }:
+            raise SnapshotUploadError(
+                "sync.transport.insecure_url",
+                "refusing plaintext HTTP for a non-loopback sync target carrying an operator key; "
+                f"use HTTPS or explicitly set {_ALLOW_INSECURE_BACKEND_ENV}=1",
+            )
+        logger.warning(
+            "%s is set: sending the sync operator key to %s over plaintext HTTP",
+            _ALLOW_INSECURE_BACKEND_ENV,
+            host,
+        )
+    return base_url.rstrip("/")
+
+
+class _RejectRedirect(urllib.request.HTTPRedirectHandler):
+    """Never forward an authenticated upload to a server-selected destination."""
+
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+
+def _open_no_redirect(request: urllib.request.Request, *, timeout: float):
+    return urllib.request.build_opener(_RejectRedirect()).open(request, timeout=timeout)
+
+
 class SnapshotUploader:
     """Drives begin -> chunk* -> status against one remote Menhir."""
 
@@ -76,7 +144,7 @@ class SnapshotUploader:
         timeout_s: float = 120.0,
         user_agent: str = _USER_AGENT,
     ) -> None:
-        self.endpoint = f"{base_url.rstrip('/')}/mcp-http"
+        self.endpoint = f"{_validated_base_url(base_url)}/mcp-http"
         self.auth_key = auth_key
         self.timeout_s = timeout_s
         self.user_agent = user_agent
@@ -102,9 +170,15 @@ class SnapshotUploader:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
+            with _open_no_redirect(request, timeout=self.timeout_s) as response:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
+            if 300 <= exc.code < 400:
+                raise SnapshotUploadError(
+                    "sync.transport.redirect_refused",
+                    "the remote Menhir redirected an authenticated upload; refusing to forward "
+                    "the operator key",
+                ) from exc
             raise SnapshotUploadError(
                 "sync.transport.http_error",
                 f"the server answered HTTP {exc.code} at {self.endpoint}",

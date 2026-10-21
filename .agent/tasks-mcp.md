@@ -25,6 +25,7 @@ Use this file when the work is about tool selection, resource usage, bootstrap r
   - `mcp.tool.read_flagged_memories`
   - `mcp.tool.recall_context_memories`
   - `mcp.tool.recall_memories`
+  - `mcp.tool.recall_history`
 - Codex lean path:
   - use `memory_gateway(action="bootstrap_context", payload_json=...)` to perform the two-phase bootstrap without registering the full recall tool set in prompt context
 - then open:
@@ -33,9 +34,17 @@ Use this file when the work is about tool selection, resource usage, bootstrap r
 - call `read_flagged_memories(reader_id=..., workspace=...)` and then `recall_context_memories` with the same reader/workspace; receipts do not cross workspace selections
 
 ### Choose between recall tools
+
+Startup context's flag inspection and stale-TODO warning use the same storage namespace as
+its relevant/recent reads, including client pins. An omitted namespace remains unfiltered;
+`workspace` selects bootstrap pins and is not a storage namespace. The full effective-scope
+receipt feature (#116) is deferred for MVP; these corrections do not add a scope receipt.
+
 - **Session start bootstrap** → `read_flagged_memories` then `recall_context_memories` (two-phase, returns flagged + relevant + recent)
 - **Codex token-light bootstrap** → `memory_gateway(action="bootstrap_context", payload_json=...)` on the Codex gateway server
 - **Mid-task targeted search** → `recall_memories` (standalone semantic search, no bootstrap dependency)
+- **How something changed / sequence of states** → `recall_history` (time-ordered drill-down, oldest first, optional pools)
+- **What was known at a time / how a thread unfolded** → `recall_timeline` (recorded-time navigation: at/window/around/cursor/query, optional subject thread, typed histories)
 - **Token-budgeted context block** → `build_context` (packs memories + TODOs within a token limit)
 - **How long since last access** → `get_client_context` (no recall, just identity + elapsed time)
 

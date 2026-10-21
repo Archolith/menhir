@@ -16,6 +16,7 @@ from typing import Annotated
 import typer
 
 from menhir.cli.hook import _entry_has_menhir_hook, install_hooks
+from menhir.config.settings_model import MemorySettings
 
 
 class SetupError(RuntimeError):
@@ -55,6 +56,18 @@ _PROVIDER_KEYS: dict[str, dict[str, str | None]] = {
     },
 }
 
+# Fill absent/blank operational defaults, never replace an operator's model/URL.
+_PROVIDER_DEFAULTS = {
+    "local": {
+        "LOCAL_LLM_BASE_URL": MemorySettings.local_llm_base_url,
+        "LOCAL_LLM_CHAT_MODEL": MemorySettings.local_llm_chat_model,
+    },
+    "openai": {
+        "OPENAI_CHAT_MODEL": MemorySettings.openai_chat_model,
+        "OPENAI_EMBED_MODEL": MemorySettings.openai_embed_model,
+    },
+}
+
 #: Credentials matching the root docker-compose.yml Neo4j service.
 COMPOSE_NEO4J_KEYS: dict[str, str | None] = {
     "NEO4J_URI": "bolt://localhost:7687",
@@ -81,7 +94,9 @@ def _split_env_line(line: str) -> tuple[str, str, str] | None:
     return prefix, key, value
 
 
-def upsert_env_keys(env_path: Path, updates: dict[str, str | None]) -> list[str]:
+def upsert_env_keys(
+    env_path: Path, updates: dict[str, str | None], *, preserve_nonempty: bool = False,
+) -> list[str]:
     """Set keys in a dotenv file, preserving every other line. Returns the changes made.
 
     - An active ``KEY=`` line is rewritten in place (only when the value differs).
@@ -90,6 +105,7 @@ def upsert_env_keys(env_path: Path, updates: dict[str, str | None]) -> list[str]
     - ``None`` values mean *ensure present*: an existing active line with a non-empty
       value is left untouched, otherwise ``KEY=`` is written so the operator sees what
       to fill in. Secrets therefore never get overwritten by re-running setup.
+    - ``preserve_nonempty`` fills missing or blank defaults while retaining operator values.
     """
 
     lines = env_path.read_text(encoding="utf-8").split("\n") if env_path.exists() else [""]
@@ -111,8 +127,8 @@ def upsert_env_keys(env_path: Path, updates: dict[str, str | None]) -> list[str]
             i = active_idx[key]
             _, _, current = _split_env_line(lines[i])  # type: ignore[misc]
             current = current.strip()
-            if desired is None:
-                continue  # ensure-present only; an active line already satisfies it
+            if desired is None or (preserve_nonempty and current.strip("'\"").strip()):
+                continue  # Keep ensure-present entries and explicit operator choices.
             if current != desired:
                 lines[i] = f"{key}={desired}"
                 changes.append(f"set {key}")
@@ -361,6 +377,8 @@ def apply_setup(
             env_updates.update(_PROVIDER_KEYS[provider])
         if env_updates:
             changes.extend(upsert_env_keys(env_path, env_updates))
+        if provider is not None:
+            changes.extend(upsert_env_keys(env_path, _PROVIDER_DEFAULTS[provider], preserve_nonempty=True))
 
     if configure_git_hooks and not checkout:
         # Nothing to hook: a pip install has no working tree. Reported rather than skipped

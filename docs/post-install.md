@@ -1,8 +1,31 @@
 # Post-install setup
 
-`pip install` makes the Menhir CLI available. A usable installation also needs a configured checkout,
+`pip install` makes the Menhir CLI available. A usable installation also needs configuration,
 runtime dependencies, an MCP client connection, and whichever optional agent integrations the operator
 has explicitly chosen.
+
+If upgrading from Menhir v0.2.3, install into a fresh virtual environment. That version may have
+installed upstream `graphiti-core`; current Menhir uses `archolith-graphiti-core==0.30.2.post7`.
+Both distributions write the `graphiti_core` package, so an in-place upgrade or later upstream
+reinstall can leave mixed files even when `pip check` reports no conflict. From the repository
+checkout, a fresh installation is:
+
+```bash
+python -m venv .venv
+.venv/bin/python -m pip install .
+```
+
+On Windows, use `.\.venv\Scripts\python.exe -m pip install .` for the second command. To repair an
+existing virtual environment instead, remove both distributions before reinstalling Menhir:
+
+```bash
+python -m pip uninstall -y graphiti-core archolith-graphiti-core
+python -m pip install .
+```
+
+Use that environment's Python for the repair commands. If import fails because
+`GraphitiRequestTooLargeError` is missing, the installed `graphiti_core` files do not match the
+required fork.
 
 ## 1. Finish the safe checkout setup
 
@@ -18,15 +41,57 @@ The command is idempotent. It:
 - creates `.env` from `.env.example` only when `.env` is absent;
 - with `--provider local|openai`, writes a consistent provider block (chat, Graphiti LLM, Graphiti
   embed) and makes sure the provider's URL/model/key lines are present without ever overwriting a
-  filled-in secret; with `--compose-neo4j`, points `NEO4J_*` at the root `docker-compose.yml`
+  filled-in secret or custom model. Missing or blank OpenAI models use `gpt-6-luna` and
+  `text-embedding-3-small`; local URL/chat defaults match the settings model, while the local
+  embedding model still requires operator configuration. Explicit feature opt-outs are preserved.
+  With `--compose-neo4j`, points `NEO4J_*` at the root `docker-compose.yml`
   instance (`neo4j/password`).
 - configures `core.hooksPath=.githooks` so the repository's pre-push protection is active;
 - preserves an existing `.env` and refuses to replace a different Git hooks path without
   `--force-git-hooks`;
 - reports the remaining runtime, MCP, and optional capture steps.
 
-Use `--repo PATH` when running outside the checkout. The command needs a source checkout because the
-Git hooks, service launcher, and optional producer scripts are repository-managed assets.
+Use `--repo PATH` to select a source checkout explicitly. A plain wheel install uses
+`MENHIR_STATE_DIR` (default `~/.menhir`) for generated configuration and bundled Neo4j compose.
+Git hooks and repository-managed producer scripts require a checkout.
+
+## Configuration across upgrades and opt-outs
+
+Setup copies `.env.example` only when `.env` is absent. A package upgrade or setup rerun does
+not merge a newer template into an existing file. `--provider` explicitly selects the provider;
+missing or blank model/URL defaults are filled, while custom values and secrets are retained.
+
+For normal startup, process/service environment wins over the selected `.env`, then unset
+settings use the installed version's code defaults. `ENV_FILE` selects the file; otherwise
+`./.env`, then the state directory's `.env` (`MENHIR_STATE_DIR`, default `~/.menhir`) is read.
+`menhir up` otherwise selects its checkout/state `.env`. Removing a setting restores the current code
+default, not the previous release's behavior. Current code has no separate feature-default
+policy for fresh versus existing installs. Before any future new-install-only promotion, its
+owner must choose an implementation that distinguishes those paths or explicitly preserve the
+upgrade configuration. No promotion is authorized by this audit.
+
+To opt out, set explicit `false` in the selected configuration and remove any conflicting
+process/service override, then restart the backend and workers that captured the settings.
+For example, the already-shipped source-memory lane uses:
+
+```dotenv
+MENHIR_FRONTIER_SOURCE_MEMORIES=false
+```
+
+This disables its recall section and new ingest-side episode-content embedding step. It does
+not delete stored embeddings or undo earlier writes. Boolean switches accept `true`, `1`, or
+`yes` (case-insensitive); `false`, `0`, `no`, blank and unrecognized strings all load as false.
+Use explicit `false` rather than a blank or misspelled opt-out. Commented template lines do not
+set values; the evidence-anchor example is a code-corpus choice, not its code default.
+
+Scalar state, scalar/history authority, event history, Wardens and verifier sync remain opt-in.
+The canonical event variables are `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED` and
+`MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED`; the shorter `MENHIR_EVENT_HISTORY_*`
+names are not aliases. Disabling a feature stops its gated paths and leaves persisted data in
+place; this is not a database rollback. Scalar/event processing can revisit historical evidence
+when enabled or when perceiver versions change. Review namespace/version and historical-data
+obligations before activation; do not run a backfill or ingest simply to upgrade the package.
+Keep configuration and verified data backups for a separately approved deployment rollback.
 
 ## 1b. Or do it in one step
 
@@ -49,7 +114,8 @@ menhir serve
 ```
 
 `diagnostics` is an offline, redacted configuration snapshot. `check` verifies live dependencies.
-Both read `.env` from the current directory (or `ENV_FILE`), the same file `serve` uses.
+Both read `ENV_FILE`, else `.env` in the current directory, else `.env` in the state directory
+(`MENHIR_STATE_DIR`, default `~/.menhir`), the same file `serve` uses.
 After startup, `/api/health` confirms the process is alive and `/api/ready` confirms its dependencies:
 
 ```bash
@@ -62,9 +128,14 @@ the agent hooks must target another port.
 
 ## 3. Register the MCP client
 
-Point HTTP-capable clients at `http://127.0.0.1:8100/mcp-http`. When authentication is enabled, use a
-credential with the smallest tier the client needs. Stdio clients must set `MENHIR_BACKEND_URL` and
-connect through `python -m menhir.mcp.server`; the stdio bridge does not start another runtime.
+For the supported local MVP path, keep `menhir serve` running and configure the client to launch
+`python -m menhir.mcp.server` with `MENHIR_BACKEND_URL=http://127.0.0.1:8100` in the client's
+environment. Use the Python installation that contains Menhir. If the backend has tier keys,
+pass its `MENHIR_AGENT_KEY` to the client too. The [stdio client example](../README.md#connect-an-mcp-client)
+shows both settings. The stdio bridge connects to the running backend; it does not start one.
+
+HTTP-capable clients can also connect to `http://127.0.0.1:8100/mcp-http`. When authentication is
+enabled, use a credential with the smallest tier the client needs.
 
 Client schemas and credential stores differ, so `menhir setup` does not rewrite MCP client config.
 Validate the connection by listing tools, calling `query_structure` with `query_type="projects"`, and

@@ -11,7 +11,7 @@ from menhir.config.settings_model import MemorySettings
 def test_event_history_fields_default_off() -> None:
     settings = MemorySettings()
     assert settings.personal_memory_event_history_enabled is False
-    assert settings.personal_memory_event_history_perceiver_version == "v1"
+    assert settings.personal_memory_event_history_perceiver_version == "v2"  # #155: default bumped for replay
     assert settings.personal_memory_event_history_authority_enabled is False
 
 
@@ -31,6 +31,6 @@ def test_event_history_authority_from_env(monkeypatch: pytest.MonkeyPatch, raw: 
 
 @pytest.mark.unit
 def test_event_history_perceiver_version_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert MemorySettings().personal_memory_event_history_perceiver_version == "v1"
+    assert MemorySettings().personal_memory_event_history_perceiver_version == "v2"  # #155
     monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_PERCEIVER_VERSION", "v3")
     assert MemorySettings.from_env().personal_memory_event_history_perceiver_version == "v3"

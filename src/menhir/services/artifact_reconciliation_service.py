@@ -34,7 +34,7 @@ from menhir.domain.artifact_reconciliation import (
     route_for_path,
     WorkArtifactIdentitySnapshot,
 )
-from menhir.domain.work_artifact import ArtifactMedium
+from menhir.domain.work_artifact import ArtifactMedium, ArtifactStatus
 from menhir.infrastructure.artifact_corpus_scanner import (
     GitEvidence,
     collect_git_evidence,
@@ -525,6 +525,14 @@ class ArtifactReconciliationService:
                 expected_integrity=action.expected_integrity,
             )
         if action.kind == ActionKind.REGISTER_ARTIFACT:
+            if action.status == ArtifactStatus.SUPERSEDED:
+                return {
+                    "applied": False,
+                    "reason": "superseded_registration_requires_replacement",
+                    "detail": "Resolve the replacement and use supersede_artifact; "
+                    "the declared source and status remain unchanged for review.",
+                    "raw_status": action.raw_status_header,
+                }
             return self._repo.register_work_artifact(
                 artifact_type=action.artifact_type or "",
                 title=action.title or Path(action.path or "").stem,

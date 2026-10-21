@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
@@ -12,13 +12,14 @@ from menhir.core.backend_impl import RuntimeProvider
 from menhir.core.backend_protocol import MemoryBackend
 from menhir.core.runtime import RuntimeContext
 from menhir.domain.session import MemorySession, new_session
+from menhir.domain.recall import VerifierEvidence
 from menhir.infrastructure.telemetry import record_destructive_op
 from menhir.mcp.service_access import (
     get_pinned_namespace,
     get_request_session,
     get_request_tier,
 )
-from menhir.services.enrichment_steps import MAX_DIFF_CHARS
+from menhir.services.ingest_limits import MAX_DIFF_CHARS, MAX_EPISODE_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,13 @@ def _provider_auth_failure_text() -> str | None:
 
     failure = last_provider_auth_failure()
     return failure.summary() if failure is not None else None
+
+
+def _provider_quota_exhausted_text() -> str | None:
+    from menhir.infrastructure.observability import last_provider_quota_exhaustion
+
+    exhaustion = last_provider_quota_exhaustion()
+    return exhaustion.summary() if exhaustion is not None else None
 
 
 def _service_payload(runtime_ctx: RuntimeContext | None) -> dict[str, str]:
@@ -196,6 +204,15 @@ class RecallRequest(BaseModel):
     # This enriches returned memories with history; it does not add invalidated candidates.
     include_invalidated: bool = False
     trace: bool = False
+    include_warden_status: bool = False
+    # Per-call source-memory section size override. None = deployment default
+    # (MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT when MENHIR_FRONTIER_SOURCE_MEMORIES is on,
+    # else off); 0 = off for this call; >0 = that limit, enabling the section for this
+    # call even when the deployment flag is off. The section carries SESSION-scoped
+    # raw episodes, so it is off whenever include_session is False (promoted
+    # knowledge only).
+    source_memory_limit: int | None = Field(default=None, ge=0, le=50)
+    counted_verdict_limit: int | None = Field(default=None, ge=0, le=50)
 
 
 class RecallTemporalFact(BaseModel):
@@ -206,9 +223,19 @@ class RecallTemporalFact(BaseModel):
     expired_at: str | None = None
     is_current_belief: bool = True
     temporal_role: str = "current_belief"
+    event_time: str | None = None
 
 
 class RecallMemory(BaseModel):
+    verifier_evidence: list[VerifierEvidence] = Field(default_factory=list)
+    needs_review: bool = False
+    review_reason: str | None = None
+    review_flagged_at: str | None = None
+    review_advisory: str | None = None
+    status: str | None = None
+    artifact_status: str | None = None
+    superseded_by: str | None = None
+    lifecycle_note: str | None = None
     uuid: str
     name: str
     content: str | None
@@ -237,6 +264,10 @@ class ScalarAuthorityContributorResponse(BaseModel):
     valid_at: str | None = None
     evidence_tier: str | None = None
     episode_uuid: str | None = None
+    source_sentence: str | None = None
+    event_at: str | None = None
+    event_basis: str | None = None
+    mentioned_at: str | None = None
 
 
 class ScalarAuthorityVerdictResponse(BaseModel):
@@ -255,6 +286,11 @@ class ScalarAuthorityVerdictResponse(BaseModel):
     contributors_total: int = 0
     contributors_truncated: bool = False
     next_offset: int | None = None
+    basis: str | None = None
+    lower_bound: bool = False
+    count_uncertain: float | None = None
+    count_actions: str | None = None
+    count_items: str | None = None
 
 
 class EventAuthorityVerdictResponse(BaseModel):
@@ -284,14 +320,113 @@ class EventAuthorityVerdictResponse(BaseModel):
     kind: str
 
 
+class SourceMemoryResponse(BaseModel):
+    """One entry of the additive source-memory section (raw episode content, oldest first)."""
+
+    uuid: str
+    content: str
+    reference_time: str | None = None
+    cosine: float
+    source: str | None = None
+    pool_id: str | None = None
+    pool_anchor: str | None = None
+
+
 class RecallResponse(BaseModel):
     query: str
     preset: str
     results: list[RecallMemory]
     candidates_evaluated: int
+    warden_status: dict[str, object] | None = None
+    warden_notice: str | None = None
     trace: dict[str, object] | None = None
     authority_layer: list[ScalarAuthorityVerdictResponse] | None = None
     event_authority_layer: list[EventAuthorityVerdictResponse] | None = None
+    source_memories: list[SourceMemoryResponse] | None = None
+
+
+class RecallHistoryRequest(BaseModel):
+    query: str
+    namespace: str | None = None
+    limit: int = Field(default=30, ge=1, le=50)
+    pools: bool = True
+
+
+class RecallHistoryResponse(BaseModel):
+    query: str
+    memories: list[SourceMemoryResponse] = Field(default_factory=list)
+    note: str | None = None
+
+
+class RecallTimelineFactResponse(BaseModel):
+    fact: str
+    valid_at: str | None = None
+    invalid_at: str | None = None
+    expired_at: str | None = None
+    time_basis: str = "world"
+    event_time: str | None = None
+
+
+class RecallTimelineEntryResponse(BaseModel):
+    uuid: str
+    recorded_at: str
+    created_at: str | None = None
+    session_id: str | None = None
+    source: str | None = None
+    headline: str
+    content: str | None = None
+    facts: list[RecallTimelineFactResponse] = Field(default_factory=list)
+    is_anchor: bool = False
+
+
+class RecallTimelineHistoryEntryResponse(BaseModel):
+    valid_at: str
+    value: Any = None
+    operation: str | None = None
+    time_basis: str | None = None
+    quote: str | None = None
+    episode_uuid: str | None = None
+
+
+class RecallTimelineHistoryResponse(BaseModel):
+    kind: str
+    view_uuid: str
+    label: str
+    total: int
+    offset: int
+    entries: list[RecallTimelineHistoryEntryResponse] = Field(default_factory=list)
+    prev_offset: int | None = None
+    next_offset: int | None = None
+
+
+class RecallTimelineRequest(BaseModel):
+    namespace: str | None = None
+    query: str | None = None
+    subject: str | None = None
+    at: str | None = None
+    window_from: str | None = None
+    window_to: str | None = None
+    around: str | None = None
+    cursor: str | None = None
+    direction: str = Field(default="both", pattern="^(before|after|both)$")
+    limit: int = Field(default=10, ge=1, le=50)
+    detail: str = Field(default="headline", pattern="^(headline|full)$")
+    facts: bool = False
+    history_view: str | None = None
+    history_offset: int | None = Field(default=None, ge=0)
+    history_limit: int = Field(default=10, ge=1, le=50)
+
+
+class RecallTimelineResponse(BaseModel):
+    thread: str
+    subject_uuid: str | None = None
+    subject_name: str | None = None
+    entries: list[RecallTimelineEntryResponse] = Field(default_factory=list)
+    prev_cursor: str | None = None
+    next_cursor: str | None = None
+    histories: list[RecallTimelineHistoryResponse] = Field(default_factory=list)
+    note: str | None = None
+    time_basis: str = "recorded"
 
 
 class BootstrapContextRequest(BaseModel):
@@ -304,6 +439,7 @@ class BootstrapContextRequest(BaseModel):
 
 
 class ContextRequest(BaseModel):
+    include_warden_status: bool = False
     query: str
     max_tokens: int = Field(default=2000, ge=100, le=10000)
     preset: str = "knowledge"
@@ -320,13 +456,6 @@ class ContextResponse(BaseModel):
     preset: str
 
 
-#: Hard API bound on a single episode body. Matches the default enrichment preflight:
-#: estimate_episode_tokens() counts ~4 chars per token and
-#: graphiti_episode_max_estimated_tokens defaults to 12000, so anything accepted here is
-#: never rejected downstream on episode size alone.
-MAX_EPISODE_CHARS = 48_000
-
-
 class MemoryRequest(BaseModel):
     episode: str = Field(..., min_length=1, max_length=MAX_EPISODE_CHARS)
     source: str = "remote-api"
@@ -340,6 +469,12 @@ class MemoryRequest(BaseModel):
     flagged: bool = False
     bootstrap_scope: str | None = None
     turn_evidence_uuid: str | None = None
+    #: The user's verbatim words, supplied by the agent. Recorded as agent_quoted TurnEvidence:
+    #: scalar perception input only, never user-tier grounds. Exclusive with turn_evidence_uuid.
+    user_statement: str | None = None
+    # Speaker of `episode`. Menhir never infers the speaker from the text (#271); grounded
+    # episodes take it from their turn evidence.
+    role: Literal["user", "assistant", "tool", "agent", "system"] | None = None
 
 
 class MemoryResponse(BaseModel):
@@ -513,6 +648,9 @@ class HealthResponse(BaseModel):
     # Set when the LLM provider has rejected our credentials since the last successful
     # call: a server can be "ok" and "full" and still unable to enrich anything.
     provider_auth_failure: str | None = None
+    # Set after an insufficient_quota 429 until a call of that kind succeeds: enrichment cannot
+    # progress until credits are added, so a polling driver should stop instead of waiting.
+    provider_quota_exhausted: str | None = None
     startup_mode: str | None = None
     # Echoes MENHIR_INSTANCE_ID when set, so a client (e.g. a smoke launcher) can
     # confirm it is talking to the exact server it started and not a different
@@ -526,6 +664,7 @@ class ReadyResponse(BaseModel):
     capabilities: dict[str, bool]
     failures: list[str]
     provider_auth_failure: str | None = None
+    provider_quota_exhausted: str | None = None
 
 
 class StatsResponse(BaseModel):
@@ -566,18 +705,41 @@ class Phase3RunResponse(BaseModel):
     abstained: int
     corrections_applied: int
     llm_calls: int
+    counter_enabled: bool = False
+    scalar_llm_calls: int = 0
+    event_dirty_after: bool | None = None
     scalar_enabled: bool = False
     scalar_namespaces_processed: int = 0
     scalar_states_written: int = 0
     scalar_advisory: int = 0
     scalar_repair_pending: int = 0
     event_history_enabled: bool = False
+    counting_enabled: bool = False
+    counting_namespaces_processed: int = 0
+    counting_batches: int = 0
+    counting_occurrences_stored: int = 0
+    counting_advisory: int = 0
+    counting_llm_calls: int = 0
+    counting_namespaces_failed: int = 0
+    counting_namespaces_busy: int = 0
+    counting_namespaces_fenced: int = 0
+    counting_dirty_after: bool | None = None
+    # 4R match only (None otherwise): decide outcomes and rows the k samples did not agree on.
+    counting_decided_counted: int | None = None
+    counting_decided_uncertain: int | None = None
+    counting_decided_repeat: int | None = None
+    counting_decided_same_event: int | None = None
+    counting_decided_swapped: int | None = None
+    counting_decided_deferred: int | None = None
+    counting_gate_dropped: int | None = None
     event_namespaces_processed: int = 0
     event_namespaces_failed: int = 0
     event_assertions_recorded: int = 0
     event_assertions_created: int = 0
     event_views_rebuilt: int = 0
     event_llm_calls: int = 0
+    # Per-lane stage counts and no_output/stalled flags (#170 item 4); None on a counter-only pass.
+    lane_outcomes: dict[str, dict[str, Any]] | None = None
 
 
 class Phase3StatusResponse(BaseModel):
@@ -617,6 +779,9 @@ _BACKEND_METHODS = {
     "delete_namespace",
     "enqueue_pending_episode",
     "recall",
+    "recall_history",
+    "recall_timeline",
+    "get_scalar_view_items",
     "build_context",
     "view_entropy",
     "fetch_memory_by_uuid",
