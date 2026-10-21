@@ -73,6 +73,7 @@ class RetrievalScoreKind(str, Enum):
     WEIGHTED_RRF_NORMALIZED = "weighted_rrf_normalized"
     SOURCE_PRIOR = "source_prior"
     FACT_EDGE_RRF = "fact_edge_rrf"
+    VERB_FACET = "verb_facet"
 
 
 # Candidates below this score are noise and should be filtered before scoring.
@@ -207,34 +208,37 @@ class RetrievalTuningConfig:
     # and final ranking. Default OFF preserves production behavior.
     enable_facet_candidates: bool = False
     facet_weight: float = 0.5
-    # --- Frontier portions (active; each OFF == today's ScoringService behavior) ---
+    # --- Frontier portions (active; each OFF == plain ScoringService order) ---
     # Oracle ranking: run oracles+combiner over the post-floor survivors and blend its
     # order into the upstream ScoringService/facet order. The upstream rank remains the
     # baseline so a secondary trust/temporal signal cannot erase an exact semantic hit.
-    enable_oracle_ranking: bool = False
+    # On by default since #172 (retrieval-neutral on LME, within latency limits); kept as a
+    # per-request knob for Recall Lab comparisons. There is no deployment flag.
+    enable_oracle_ranking: bool = True
     # Reciprocal-rank residual weight for the Oracle order. 0 preserves the upstream
     # order exactly; 0.25 lets Oracle adjust close/lower-ranked candidates without
     # becoming a second replacement ranker.
     oracle_rank_weight: float = 0.25
     # Intent auto-lens: derive the temporal lens (current/historical/any) from the query
     # text for the oracle/warden path. No effect unless oracle_ranking or warden_gate is on.
-    enable_intent_lens: bool = False
-    # Warden gate: drop REFUSED candidates from results and label FLAGGED ones.
-    enable_warden_gate: bool = False
+    # On by default since #172, like oracle ranking.
+    enable_intent_lens: bool = True
+    # Warden gate: drop REFUSED candidates from results and label FLAGGED ones. On since #173.
+    enable_warden_gate: bool = True
     # Diversity gate: reorder results by evidence family to prevent any single source from dominating.
     enable_diversity_gate: bool = False
-    # Contradiction interrupt: append ContradictionWarden to the default warden chain.
-    enable_contradiction_interrupt: bool = False
+    # Contradiction interrupt: append ContradictionWarden to the default warden chain. On since #173.
+    enable_contradiction_interrupt: bool = True
     # Belief gate: append CurrentnessWarden + populate belief_score/evidence from
-    # candidate metadata temporal markers. Default OFF; only belief-bearing candidates
-    # are scored (warden ADMITs the rest permissively).
+    # candidate metadata temporal markers. Default OFF (#173, #350): an Entity is marked superseded
+    # when any of its fact edges expired, and with the contradiction guard an anchored one is
+    # then refused under the current lens. Only belief-bearing candidates are scored.
     enable_belief_gate: bool = False
     # Evidence-anchor gate (Guard 5 / EvidenceAnchorWarden): refuse candidates whose support is
-    # synthetic-only / has no external anchor (user/log/test/git/file). ON = today's behavior.
-    # Turn OFF for ANECDOTAL corpora (personal conversation) where every recalled fact is
-    # LLM-extracted from chat with no code/test/git anchor — otherwise Guard 5 refuses the whole
-    # result set. See MENHIR_FRONTIER_EVIDENCE_ANCHOR.
-    enable_evidence_anchor: bool = True
+    # synthetic-only / has no external anchor (user/log/test/git/file). OFF by default, matching
+    # MENHIR_FRONTIER_EVIDENCE_ANCHOR: provenance comes from the client label, so ordinary
+    # conversation stored via MCP/REST looks agent-written and is refused (#349).
+    enable_evidence_anchor: bool = False
     # Fact-edge retrieval: in addition to the entity-node candidate pool, run a
     # graphiti EDGE_HYBRID search and inject the top RELATES_TO fact edges as
     # CandidateSource.FACT_EDGE candidates (content == EntityEdge.fact). Default
@@ -246,6 +250,9 @@ class RetrievalTuningConfig:
     # edge RRF reranker). Kept modest so edges augment rather than swamp the node
     # pool; the combiner/floor still rank the merged set.
     fact_edge_k: int = 20
+    # Minimum query similarity (best per slot) for a scalar verdict to be emitted; 0 = off.
+    # Neo4j vector.similarity.cosine scale, (1+cos)/2. MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY.
+    scalar_verdict_min_similarity: float = 0.0
     # How a retrieved fact edge enters the candidate pool:
     #   "standalone" — inject the terse EntityEdge.fact as its own CandidateData (edge-as-
     #     answer). Measured net-NEGATIVE at N=30 (rung A′, 0.300->0.033): terse floor-exempt
@@ -312,11 +319,23 @@ class RetrievalTuningConfig:
     # Label unexpired facts whose own end (invalid_at) has passed as "ended" instead of
     # "current_belief" (MENHIR_ANCHORED_TIME_EXPIRY). Presentation only, like the render flag.
     enable_anchored_time_expiry: bool = False
+    # Attach the facts most similar to the query, not only the newest (MENHIR_FRONTIER_FACT_RELEVANCE).
+    enable_fact_relevance: bool = False
+    # One observation per identical stated text in the observation lane (MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED).
+    enable_observation_dedup: bool = False
+    # Append one keyword-matched fact per question verb after ranking (MENHIR_FRONTIER_VERB_FACETS).
+    enable_verb_facets: bool = False
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.hybrid_alpha <= 1.0:
             raise ValueError(
                 f"hybrid_alpha must be in [0.0, 1.0], got {self.hybrid_alpha!r}"
+            )
+        # NaN fails this too: it would otherwise silently disable the gate.
+        if not 0.0 <= self.scalar_verdict_min_similarity <= 1.0:
+            raise ValueError(
+                "scalar_verdict_min_similarity must be in [0.0, 1.0], "
+                f"got {self.scalar_verdict_min_similarity!r}"
             )
         if self.similarity_scale not in ("rrf", "normalized"):
             raise ValueError(

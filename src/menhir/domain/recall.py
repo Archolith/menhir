@@ -119,6 +119,9 @@ class TemporalFact:
     # Rendered anchored-time event time; set only when MENHIR_ANCHORED_TIME_RENDER is on and the
     # edge carries a persisted contract.
     event_time: str | None = None
+    # Two-tier self: True when the inferred self tier holds a near-duplicate of this anchored fact
+    # (the inferred copy is dropped from the same result). Set only with MENHIR_INFERRED_SELF_MODE on.
+    corroborated: bool = False
 
 
 @dataclass(frozen=True)
@@ -210,6 +213,9 @@ class ScoredMemory:
     review_reason: str | None = None
     review_flagged_at: str | None = None
     verifier_evidence: tuple[VerifierEvidence, ...] = ()
+    # Two-tier self: "anchored" or "inferred" on the namespace's self entities; None elsewhere and
+    # whenever MENHIR_INFERRED_SELF_MODE is off.
+    self_tier: str | None = None
 
 
 @dataclass(frozen=True)
@@ -224,6 +230,12 @@ class ScalarAuthorityContributor:
     valid_at: str | None
     evidence_tier: str | None
     episode_uuid: str | None
+    # Read-time event timing for counting occurrences only (None elsewhere). ``valid_at`` of an
+    # occurrence is the session time, not the event time; these carry the grounded event date.
+    source_sentence: str | None = None
+    event_at: str | None = None
+    event_basis: str | None = None
+    mentioned_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -245,6 +257,14 @@ class ScalarAuthorityVerdict:
     contributors_total: int = 0
     contributors_truncated: bool = False
     next_offset: int | None = None
+    # The View's scalar_basis ("counted" for a counting-lane View), on current verdicts.
+    basis: str | None = None
+    # Counting wording flag: the value is a lower bound of the happenings the user mentioned.
+    lower_bound: bool = False
+    # unit 4R match audit: JSON strings from the counted View; None outside match mode.
+    count_uncertain: float | None = None
+    count_actions: str | None = None
+    count_items: str | None = None
 
 
 @dataclass(frozen=True)

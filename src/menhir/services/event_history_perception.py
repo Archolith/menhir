@@ -11,7 +11,9 @@ the caller owns persistence, projection, and authority.
 Only *completed acquisition* semantics are recognized: a small conservative predicate registry maps
 surface verbs to the single canonical predicate ``acquired``. There is deliberately NO ownership
 supersession — a newer acquisition records an occurrence and never invalidates an older one (that is
-the event-history invariant the domain contract already enforces).
+the event-history invariant the domain contract already enforces). The one exception is a correction
+cue ("Actually, I bought the bike on March 3"): it is stamped in metadata, and the read side replaces
+the single earlier occurrence it restates (``apply_event_corrections``). Nothing durable is changed.
 
 The parser is fail-closed and mirrors the typed-scalar boundary's conventions (same required-field
 helpers, unique substring grounding, and drop-reason codes) so the two perception seams behave
@@ -27,7 +29,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Callable
 
-from menhir.domain.event_history import TypedEventAssertion
+from menhir.domain.event_history import EVENT_CORRECTION, EVENT_STATED_AT, TypedEventAssertion
 from menhir.domain.temporal import parse_iso8601
 from menhir.domain.typed_assertion import build_source_key
 from menhir.services.event_history_recall import _has_whole_token
@@ -38,6 +40,7 @@ from menhir.services.typed_scalar_rules import (
     _opt_str,
     _req_episode_index,
     _req_str,
+    classify_absolute_semantics,
     parse_source_date,
     same_calendar_day,
 )
@@ -684,6 +687,26 @@ def _resolve_event_valid_time(
     return _fallback()
 
 
+#: Public aliases of the #155 grounding helpers, shared with read-time occurrence event timing.
+sentence_context = _sentence_context
+resolve_event_valid_time = _resolve_event_valid_time
+
+
+#: wording that names a different occurrence ("a new bike", "another one"), never a restatement.
+_NOT_A_RESTATEMENT_RE = re.compile(
+    r"\b(?:new|another|again|second|extra|one\s+more)\b", re.IGNORECASE,
+)
+
+
+def is_event_correction(sentence: str) -> bool:
+    """True when the claim's source sentence corrects an earlier one ("Actually, I bought the bike on
+    March 3"). Uses the scalar lane's cue list on the whole sentence (an event span often omits the
+    leading cue); wording that names another occurrence is never a correction."""
+    text = sentence or ""
+    return (classify_absolute_semantics(text) == "correction"
+            and not _NOT_A_RESTATEMENT_RE.search(text))
+
+
 @dataclass(frozen=True)
 class EventAssertionBuildResult:
     """Pure builder receipt. ``assertion`` is None EXACTLY when the builder abstained (no usable
@@ -724,6 +747,12 @@ def build_event_assertion(
         proposal.when, proposal.when_context, episode_reference_time)
     if valid_at is None:
         return EventAssertionBuildResult(None, "no_valid_time", note)
+    # Not in any key. `stated_at` orders turns for corrections; see apply_event_corrections.
+    metadata: dict[str, Any] = {}
+    if parse_iso8601(episode_reference_time) is not None:
+        metadata[EVENT_STATED_AT] = episode_reference_time
+        if is_event_correction(proposal.when_context or proposal.stated_span):
+            metadata[EVENT_CORRECTION] = True
     assertion = TypedEventAssertion(
         subject_uuid=subject_uuid,
         subject_display=proposal.subject_text,
@@ -743,5 +772,6 @@ def build_event_assertion(
         time_basis=time_basis,
         evidence_tier="agent",
         perceiver_version=perceiver_version,
+        metadata=metadata,
     )
     return EventAssertionBuildResult(assertion, note=note)

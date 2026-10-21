@@ -34,13 +34,18 @@ from graphiti_core.utils.maintenance.combined_extraction import extract_nodes_an
 from menhir.domain.namespace import namespace_to_group_id
 from menhir.domain.turn_role import TURN_ROLES
 from menhir.domain.self_identity import (
+    INFERRED_ENDPOINT_MARKER_PREFIX,
+    INFERRED_SELF_TIER,
     SUBJECT_ENDPOINT_MARKER_PREFIX,
+    InferredSubjectEndpointEnvelope,
     SelfEvidenceKind,
     SelfIdentityContext,
     SelfSubjectEndpointEnvelope,
     declare_self_subject,
+    inferred_self_uuid_for_namespace,
     is_self_alias,
     proves_self_subject,
+    self_uuid_for_namespace,
 )
 from menhir.infrastructure.self_binding import (
     AmbiguousSelfBindingError,
@@ -49,6 +54,7 @@ from menhir.infrastructure.self_binding import (
     SelfBindOutcome,
     SelfBindResult,
     bind_canonical_self,
+    bind_inferred_self,
 )
 from menhir.infrastructure.edge_containment import prune_contained_edges
 from menhir.infrastructure.graphiti_helpers import SYNTHETIC_FACT_PREFIX
@@ -100,6 +106,15 @@ class CombinedExtractionReceipt:
     #: Outcome of the binding attempt, or ``None`` if binding never ran. Read by the resolver
     #: partition to know which UUID is already authoritative and must skip candidate search.
     self_bind_result: "SelfBindResult | None" = None
+    #: Inferred tier (agent-authored episodes). Never set together with the anchored endpoint:
+    #: one marker per prompt. The node is Menhir-allocated before dispatch, like the anchored one.
+    inferred_subject_endpoint: "InferredSubjectEndpointEnvelope | None" = None
+    inferred_subject_node: Any | None = None
+    inferred_bind_mode: "SelfBindMode" = SelfBindMode.OFF
+    inferred_bind_result: "SelfBindResult | None" = None
+    #: Marker transport the inferred tier refused (malformed, duplicated or orphaned marker
+    #: nodes and their edges). Removed rather than persisted as ordinary entities.
+    inferred_marker_items_suppressed: int = 0
     #: Graphiti's internally allocated primary episode UUID for this extraction.  It differs from
     #: the external pending UUID and is required to prove a marker edge belongs to CURRENT MESSAGES.
     graphiti_episode_uuid: str = ""
@@ -339,6 +354,8 @@ def begin_extraction_receipt(
     self_subject_endpoint: SelfSubjectEndpointEnvelope | None = None,
     self_bind_mode: SelfBindMode = SelfBindMode.OFF,
     turn_role: str = "unknown",
+    inferred_subject_endpoint: InferredSubjectEndpointEnvelope | None = None,
+    inferred_bind_mode: SelfBindMode = SelfBindMode.OFF,
 ) -> CombinedExtractionReceipt:
     """Create and activate a fresh receipt for the current episode (call in the parent task).
 
@@ -346,6 +363,22 @@ def begin_extraction_receipt(
     gate-approved metadata. Omitting it fails closed: extraction proceeds with no self binding.
     """
     normalized_episode_key = str(episode_key or "")
+    if inferred_subject_endpoint is not None:
+        if inferred_bind_mode is not SelfBindMode.ENFORCE:
+            raise InvalidSelfSubjectDeclarationError(
+                "an inferred endpoint may be activated only in enforce mode"
+            )
+        if self_subject_endpoint is not None:
+            raise InvalidSelfSubjectDeclarationError(
+                "one marker per prompt: inferred and anchored endpoints are exclusive"
+            )
+        if inferred_subject_endpoint.episode_uuid != normalized_episode_key.strip() or (
+            self_identity is not None
+            and inferred_subject_endpoint.namespace != self_identity.namespace
+        ):
+            raise InvalidSelfSubjectDeclarationError(
+                "inferred endpoint scope does not match its extraction receipt"
+            )
     if self_subject_endpoint is not None:
         if self_bind_mode is not SelfBindMode.ENFORCE:
             raise InvalidSelfSubjectDeclarationError(
@@ -393,6 +426,19 @@ def begin_extraction_receipt(
         )
         receipt.self_identity = declare_self_subject(
             self_identity, subject_node_uuid=receipt.self_subject_node.uuid
+        )
+    receipt.inferred_bind_mode = inferred_bind_mode
+    if inferred_subject_endpoint is not None:
+        from graphiti_core.nodes import EntityNode
+        from graphiti_core.utils.datetime_utils import utc_now
+
+        # Menhir creates the node; the model may only reference its opaque handle.
+        receipt.inferred_subject_endpoint = inferred_subject_endpoint
+        receipt.inferred_subject_node = EntityNode(
+            name=inferred_subject_endpoint.marker,
+            group_id=namespace_to_group_id(inferred_subject_endpoint.namespace),
+            labels=["Entity"],
+            created_at=utc_now(),
         )
     _extraction_receipt.set(receipt)
     return receipt
@@ -466,6 +512,34 @@ def _is_reserved_subject_marker(value: Any) -> bool:
 
 def _subject_marker_guard_active(receipt: CombinedExtractionReceipt | None) -> bool:
     return receipt is not None and receipt.self_bind_mode is SelfBindMode.ENFORCE
+
+
+def _active_inferred_marker(receipt: CombinedExtractionReceipt | None) -> str:
+    endpoint = receipt.inferred_subject_endpoint if receipt is not None else None
+    return endpoint.marker if endpoint is not None else ""
+
+
+def _is_reserved_inferred_marker(value: Any) -> bool:
+    return str(value or "").casefold().startswith(INFERRED_ENDPOINT_MARKER_PREFIX.casefold())
+
+
+def _inferred_marker_guard_active(receipt: CombinedExtractionReceipt | None) -> bool:
+    return receipt is not None and receipt.inferred_bind_mode is SelfBindMode.ENFORCE
+
+
+def _inferred_marker_rejects_edge(norm: dict[str, Any], marker: str) -> bool:
+    """True when an edge carries inferred-marker transport that is not the active, used marker."""
+    prefix = INFERRED_ENDPOINT_MARKER_PREFIX.casefold()
+    endpoints = (norm["source_entity_name"], norm["target_entity_name"])
+    if any(_is_reserved_inferred_marker(e) and e != marker for e in endpoints):
+        return True
+    text = " ".join(norm[key] for key in ("relation_type", "fact"))
+    if prefix not in text.casefold():
+        return False
+    if not marker or marker not in endpoints:
+        return True
+    remainder = re.sub(re.escape(marker), "", text, flags=re.IGNORECASE)
+    return prefix in remainder.casefold()
 
 
 # Pronoun / role-label endpoints that must never be synthesized as KG identities.
@@ -733,6 +807,13 @@ def _sanitize_combined_payload(
             # A stale, malformed, or model-invented reserved endpoint is never an ordinary entity.
             entities_dropped += 1
             continue
+        if (
+            _inferred_marker_guard_active(receipt)
+            and INFERRED_ENDPOINT_MARKER_PREFIX.casefold() in norm["name"].casefold()
+            and norm["name"] != _active_inferred_marker(receipt)
+        ):
+            entities_dropped += 1
+            continue
         entities.append(norm)
 
     edges: list[dict[str, Any]] = []
@@ -774,6 +855,12 @@ def _sanitize_combined_payload(
                 edges_dropped += 1
                 subject_marker_edges_suppressed += 1
                 continue
+        if _inferred_marker_guard_active(receipt) and _inferred_marker_rejects_edge(
+            norm, _active_inferred_marker(receipt)
+        ):
+            edges_dropped += 1
+            subject_marker_edges_suppressed += 1
+            continue
         edges.append(norm)
 
     context_unsupported_edges = 0
@@ -827,6 +914,13 @@ def _sanitize_combined_payload(
             if marker and endpoint_name == marker:
                 # The marker is grounded by the receipt, not by user text.
                 entities.append({"name": marker, "entity_type_id": -1})
+                known.add(norm_key)
+                synthesized += 1
+                continue
+            inferred_marker = _active_inferred_marker(receipt)
+            if inferred_marker and endpoint_name == inferred_marker:
+                # Grounded by the receipt's Menhir-allocated node, like the anchored marker.
+                entities.append({"name": inferred_marker, "entity_type_id": -1})
                 known.add(norm_key)
                 synthesized += 1
                 continue
@@ -1092,6 +1186,41 @@ MENHIR STRUCTURAL CURRENT-MESSAGE AUTHOR ENDPOINT:
   affirmative facts about the author. Relation interpretation is inference, not owner confirmation.
 - Emit `{endpoint.marker}` only when at least one extracted edge about the current author uses it.
 """
+
+def _inferred_endpoint_instructions(
+    endpoint: InferredSubjectEndpointEnvelope | None,
+    turn_role: str,
+) -> str | None:
+    if endpoint is None:
+        return None
+    marker = endpoint.marker
+    writer_is_human = (
+        f"- CURRENT MESSAGES are written by that human, so the writer's I/me/my also denote "
+        f"`{marker}`.\n"
+        if turn_role == "user"
+        else "- The writer's own I/me/my (an assistant, agent, or tool) is NOT the human user.\n"
+    )
+    return f"""\
+MENHIR STRUCTURAL USER ENDPOINT:
+- The exact opaque entity name `{marker}` denotes the human user whom the writer of CURRENT
+  MESSAGES works for or assists (often written "the user" or "User").
+- Use `{marker}` as the endpoint for every relation about that human. Do not substitute `user`,
+  `the user`, or another label for it.
+{writer_is_human}- Do not use `{marker}` for application users, customers, accounts, roles, permissions,
+  database tables, collections, or for anyone speaking inside quoted or reported speech.
+- Preserve negation. Questions and hypothetical statements are not facts about the human user.
+- Emit `{marker}` only when at least one extracted edge about the human user uses it.
+"""
+
+
+def _first_person_endpoint(receipt: CombinedExtractionReceipt) -> Any:
+    """Envelope whose marker the first-person rules bind to, or None for the plain `user` rules."""
+    if receipt.self_subject_endpoint is not None:
+        return receipt.self_subject_endpoint
+    if receipt.inferred_subject_endpoint is not None and receipt.turn_role == "user":
+        return receipt.inferred_subject_endpoint
+    return None
+
 
 _RELATIONLESS_REPAIR_CONTEXT_INSTRUCTIONS = """\
 ADJACENT TRANSCRIPT CONTEXT:
@@ -1376,6 +1505,160 @@ def _record_self_binding_decision(
         logger.exception("Failed to record canonical-self binding telemetry")
 
 
+def _inferred_prefix_collides(*texts: Any) -> bool:
+    prefix = INFERRED_ENDPOINT_MARKER_PREFIX.casefold()
+    return any(isinstance(text, str) and prefix in text.casefold() for text in texts)
+
+
+def _withdraw_inferred_endpoint(receipt: CombinedExtractionReceipt, where: str) -> None:
+    """Fall back to ordinary extraction; the sanitizer guard still drops any marker-shaped name."""
+    logger.warning(
+        "Inferred-user marker prefix occurs in %s; withdrawing the inferred endpoint episode_id=%s",
+        where, receipt.episode_key,
+    )
+    receipt.inferred_subject_endpoint = None
+    receipt.inferred_subject_node = None
+
+
+def _quarantine_inferred_markers(
+    nodes: list[Any], edges: list[Any], index_map: dict[str, list[int]],
+) -> int:
+    """Remove every inferred-marker node and each edge touching it, in place. Returns the count."""
+    marked = {
+        str(getattr(node, "uuid", "") or "") for node in nodes
+        if _is_reserved_inferred_marker(getattr(node, "name", None))
+    }
+    if not marked:
+        return 0
+    kept_edges = [edge for edge in edges if not (marked & _edge_endpoint_uuids(edge))]
+    removed = len(marked) + len(edges) - len(kept_edges)
+    nodes[:] = [node for node in nodes if str(getattr(node, "uuid", "") or "") not in marked]
+    edges[:] = kept_edges
+    for uuid in marked:
+        index_map.pop(uuid, None)
+    return removed
+
+
+def _bind_inferred_endpoint(
+    nodes: list[Any],
+    edges: list[Any],
+    index_map: dict[str, list[int]],
+    receipt: CombinedExtractionReceipt,
+) -> SelfBindResult:
+    """Attach marker relationships to the Menhir-allocated inferred node, atomically.
+
+    Transport is validated exactly like the anchored endpoint (one marker node, current-episode
+    attribution, no pre-stamped self-tier uuid). Work happens on copies; the payload is replaced
+    only after ``bind_inferred_self`` succeeds. Raises ``AmbiguousSelfBindingError`` on any
+    violation; the caller quarantines the marker rather than persisting it.
+    """
+    endpoint = receipt.inferred_subject_endpoint
+    owned = receipt.inferred_subject_node
+    if endpoint is None or owned is None or owned.name != endpoint.marker:
+        raise InvalidSelfSubjectDeclarationError("inferred endpoint lacks its preallocated node")
+    if endpoint.episode_uuid != str(receipt.episode_key or "").strip():
+        raise InvalidSelfSubjectDeclarationError("inferred endpoint scope differs from its receipt")
+    if owned.group_id != namespace_to_group_id(endpoint.namespace):
+        raise InvalidSelfSubjectDeclarationError("inferred node has a foreign physical group")
+
+    reserved = [n for n in nodes if _is_reserved_inferred_marker(getattr(n, "name", None))]
+    if any(n.name != endpoint.marker for n in reserved) or len(reserved) > 1:
+        raise InvalidSelfSubjectDeclarationError("stale, malformed or duplicated inferred marker")
+    uuids = [str(getattr(n, "uuid", "") or "") for n in nodes]
+    if any(not u for u in uuids) or len(uuids) != len(set(uuids)):
+        raise InvalidSelfSubjectDeclarationError("extracted node UUIDs must be nonblank and unique")
+    reserved_uuids = {
+        owned.uuid,
+        inferred_self_uuid_for_namespace(endpoint.namespace),
+        self_uuid_for_namespace(endpoint.namespace),
+    }
+    if reserved_uuids & set(uuids):
+        raise InvalidSelfSubjectDeclarationError("extracted node pre-stamped a reserved self UUID")
+    if not reserved:
+        return SelfBindResult(
+            SelfBindOutcome.NO_SELF_CANDIDATE, mode=SelfBindMode.ENFORCE, tier=INFERRED_SELF_TIER
+        )
+
+    marker_uuid = str(reserved[0].uuid)
+    if getattr(reserved[0], "group_id", None) != owned.group_id:
+        raise InvalidSelfSubjectDeclarationError("inferred marker node has a foreign physical group")
+    marker_edges = [e for e in edges if marker_uuid in _edge_endpoint_uuids(e)]
+    if not marker_edges:
+        raise InvalidSelfSubjectDeclarationError("inferred marker is not an edge endpoint")
+    if not receipt.graphiti_episode_uuid or any(
+        receipt.graphiti_episode_uuid not in (getattr(e, "episodes", None) or [])
+        for e in marker_edges
+    ):
+        raise InvalidSelfSubjectDeclarationError("inferred marker edge lacks current attribution")
+    if 0 not in index_map.get(marker_uuid, []):
+        raise InvalidSelfSubjectDeclarationError("inferred marker lacks current index attribution")
+
+    author = deepcopy(owned)
+    candidate_nodes = [author if n.uuid == marker_uuid else n for n in nodes]
+    candidate_edges = deepcopy(edges)
+    for edge in candidate_edges:
+        for attr in ("source_node_uuid", "target_node_uuid"):
+            if getattr(edge, attr, None) == marker_uuid:
+                setattr(edge, attr, author.uuid)
+    candidate_index = {uuid: list(idx) for uuid, idx in index_map.items()}
+    candidate_index[author.uuid] = candidate_index.pop(marker_uuid)
+    result = bind_inferred_self(
+        candidate_nodes, candidate_edges, candidate_index,
+        namespace=endpoint.namespace, keeper_uuid=author.uuid, marker=endpoint.marker,
+    )
+    nodes[:] = candidate_nodes
+    edges[:] = candidate_edges
+    index_map.clear()
+    index_map.update(candidate_index)
+    return result
+
+
+def _record_inferred_binding(
+    nodes: list[Any],
+    edges: list[Any],
+    index_map: dict[str, list[int]],
+    receipt: CombinedExtractionReceipt,
+) -> SelfBindResult | None:
+    """Bind the inferred tier, or quarantine its marker. Never fails the extraction.
+
+    The tier carries no authority, so a refused transport costs the marker's edges, not the
+    episode. Nothing marker-shaped is ever handed to resolution.
+    """
+    if receipt.inferred_subject_endpoint is None:
+        receipt.inferred_marker_items_suppressed += _quarantine_inferred_markers(
+            nodes, edges, index_map
+        )
+        return None
+    try:
+        result = _bind_inferred_endpoint(nodes, edges, index_map, receipt)
+    except AmbiguousSelfBindingError as exc:
+        logger.warning(
+            "Inferred-user marker refused episode_id=%s reason=%s", receipt.episode_key, exc
+        )
+        receipt.inferred_marker_items_suppressed += _quarantine_inferred_markers(
+            nodes, edges, index_map
+        )
+        result = SelfBindResult(
+            SelfBindOutcome.AMBIGUOUS, mode=SelfBindMode.ENFORCE, tier=INFERRED_SELF_TIER
+        )
+    try:
+        from menhir.infrastructure.telemetry.recorders import record_lifecycle_event
+
+        details = result.telemetry_details(None)
+        details["namespace"] = receipt.inferred_subject_endpoint.namespace
+        details["marker_items_suppressed"] = receipt.inferred_marker_items_suppressed
+        record_lifecycle_event(
+            component="self_binding",
+            event="inferred_self_decision",
+            state=str(result.outcome),
+            episode_uuid=receipt.episode_key or None,
+            details=details,
+        )
+    except Exception:  # noqa: BLE001 - observability must never fail an ingest
+        logger.exception("Failed to record inferred-self binding telemetry")
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Menhir single-episode extraction hook (fork extension point)
 # ---------------------------------------------------------------------------
@@ -1477,12 +1760,18 @@ async def _run_graphiti_combined_extraction(
             raise InvalidSelfSubjectDeclarationError(
                 "reserved self-subject marker prefix occurs in extraction text or context"
             )
-    endpoint_instructions = _subject_endpoint_instructions(endpoint)
+    if receipt.inferred_subject_endpoint is not None and _inferred_prefix_collides(
+        receipt.episode_text, *receipt.previous_episode_texts
+    ):
+        _withdraw_inferred_endpoint(receipt, "extraction text or context")
+    endpoint_instructions = _subject_endpoint_instructions(endpoint) or _inferred_endpoint_instructions(
+        receipt.inferred_subject_endpoint, receipt.turn_role
+    )
 
     # The repair pass builds on effective_instructions, so the profile block reaches both passes.
     effective_instructions = _combine_extraction_instructions(
         custom_extraction_instructions,
-        _relation_completeness_instructions(endpoint, receipt.episode_text),
+        _relation_completeness_instructions(_first_person_endpoint(receipt), receipt.episode_text),
         endpoint_instructions,
         _model_profile_for_clients(clients).extraction_instructions(),
     )
@@ -1519,6 +1808,16 @@ async def _run_graphiti_combined_extraction(
             raise InvalidSelfSubjectDeclarationError(
                 "reserved self-subject marker prefix occurs in repair context"
             )
+        if receipt.inferred_subject_endpoint is not None and _inferred_prefix_collides(
+            *receipt.relationless_repair_context_texts
+        ):
+            _withdraw_inferred_endpoint(receipt, "repair context")
+            endpoint_instructions = None
+            effective_instructions = _combine_extraction_instructions(
+                custom_extraction_instructions,
+                _relation_completeness_instructions(None, receipt.episode_text),
+                _model_profile_for_clients(clients).extraction_instructions(),
+            )
         logger.warning(
             "Relationless combined extraction; running one corrective retry "
             "episode_id=%s raw_entities=%d raw_edges=%d source=%s adjacent_context_turns=%d",
@@ -1530,7 +1829,7 @@ async def _run_graphiti_combined_extraction(
         )
         repair_instructions = _combine_extraction_instructions(
             effective_instructions,
-            _relationless_repair_instructions(endpoint, receipt.episode_text),
+            _relationless_repair_instructions(_first_person_endpoint(receipt), receipt.episode_text),
             (
                 _RELATIONLESS_REPAIR_CONTEXT_INSTRUCTIONS
                 if receipt.relationless_repair_context_texts
@@ -1589,7 +1888,10 @@ async def _run_graphiti_combined_extraction(
             correction_previous_episodes, correction_instructions
         )
     # Bind the proven human AFTER the repair branches above: a repair re-runs extraction and
-    # replaces nodes/edges/index_map wholesale.
+    # replaces nodes/edges/index_map wholesale. The inferred tier binds first; its node is never
+    # a self alias, so the anchored decision below cannot see it as a candidate.
+    if receipt.inferred_bind_mode is SelfBindMode.ENFORCE:
+        receipt.inferred_bind_result = _record_inferred_binding(nodes, edges, index_map, receipt)
     if receipt.self_identity is not None:
         receipt.self_bind_result = _record_self_binding(
             nodes, edges, index_map, receipt
@@ -1610,6 +1912,7 @@ async def _run_graphiti_combined_extraction(
             for uuid in (
                 getattr(receipt.self_bind_result, "self_uuid", None),
                 getattr(receipt.self_subject_node, "uuid", None),
+                getattr(receipt.inferred_bind_result, "self_uuid", None),
             )
             if uuid
         }

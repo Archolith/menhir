@@ -233,6 +233,12 @@ def _resolve_stale_advisory(stale_info: dict[str, object]) -> tuple[str, str]:
     return action, advisory
 
 
+def _with_corroborated(tf: object, fact: dict[str, object]) -> dict[str, object]:
+    if _tf(tf, "corroborated"):
+        fact["corroborated"] = True
+    return fact
+
+
 def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, object]:
     breakdown = getattr(scored, "breakdown", None)
     sim_raw = _bd(breakdown, "semantic_similarity")
@@ -273,6 +279,10 @@ def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, obj
     # are its history/provenance). Decision-relevant -> kept even in compact mode.
     if getattr(scored, "is_scalar_authority", False):
         item["is_scalar_authority"] = True
+    # Two-tier self: which self tier this entity is (only with MENHIR_INFERRED_SELF_MODE on).
+    self_tier = getattr(scored, "self_tier", None)
+    if self_tier:
+        item["self_tier"] = self_tier
     # Hook Center stale-anchor metadata: present only when the recall service
     # performed stale labeling (stale_anchor_info is a dict). Always includes
     # "stale_anchor": true|false. Additional fields for stale items:
@@ -296,7 +306,7 @@ def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, obj
     temporal_facts_raw = getattr(scored, "temporal_facts", None) or ()
     if temporal_facts_raw:
         item["temporal_facts"] = [
-            _with_event_time({
+            _with_corroborated(tf, _with_event_time({
                 "fact": _tf(tf, "fact"),
                 "valid_at": _tf(tf, "valid_at"),
                 "invalid_at": _tf(tf, "invalid_at"),
@@ -306,7 +316,7 @@ def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, obj
                 "temporal_role": _tf(tf, "temporal_role"),
                 # Rung 1C: render happened-time (world) vs learned-time (belief) legibly.
                 "when": _format_when(tf),
-            }, tf)
+            }, tf))
             for tf in temporal_facts_raw
         ]
     if compact:
@@ -652,6 +662,14 @@ async def _queue_summary(backend: object) -> str:
             f"\nWARNING: {auth_failure.summary()}. New memories are stored but cannot be "
             "enriched or recalled until the provider credential (e.g. OPENAI_API_KEY) is fixed; "
             "failed episodes are retried automatically once a call succeeds."
+        )
+    from menhir.infrastructure.observability import last_provider_quota_exhaustion
+
+    quota_exhaustion = last_provider_quota_exhaustion()
+    if quota_exhaustion is not None:
+        summary += (
+            f"\nWARNING: {quota_exhaustion.summary()}. Enrichment cannot progress until provider "
+            "credits are added; stop waiting on queued episodes."
         )
     unrecallable = await _standing_unrecallable_count(backend)
     if unrecallable > 0:

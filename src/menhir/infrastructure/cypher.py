@@ -16,6 +16,7 @@ __all__ = [
     "EPISODE_PROCESSING_FIELDS",
     "EPISODE_RETRY_FIELDS",
     "FACT_TEMPORAL_FIELDS",
+    "FACT_TEXT_PRESENT",
     "SHADOW_CANDIDATE_FACT_EDGE_FIELDS",
     "LLM_RESET_SET",
     "build_reset_or_fail_query",
@@ -319,11 +320,12 @@ _PROCESSING_DETAIL_FIELDS = (
 MEMORY_RETURN_FIELDS = (
     "labels(n) AS labels",
     "n.uuid AS uuid",
-    "n.name AS name",
+    # Scalar Views keep their text in view_name/view_summary, out of the full-text index.
+    "coalesce(n['view_name'], n.name) AS name",
     "n.type AS type",
     "n.scope AS scope",
     "n.content AS content",
-    "n.summary AS summary",
+    "coalesce(n['view_summary'], n.summary) AS summary",
     "n.status AS status",
     "n.artifact_status AS artifact_status",
     "n.superseded_by AS superseded_by",
@@ -353,11 +355,11 @@ MEMORY_RETURN_FIELDS = (
 # Entity metadata for scoring/recall.
 ENTITY_METADATA_FIELDS = (
     "n.uuid AS uuid",
-    "n.name AS name",
+    "coalesce(n['view_name'], n.name) AS name",
     "n.scope AS scope",
     "n.type AS type",
     "n.content AS content",
-    "n.summary AS summary",
+    "coalesce(n['view_summary'], n.summary) AS summary",
     "n.status AS status",
     "n.artifact_status AS artifact_status",
     "n.superseded_by AS superseded_by",
@@ -387,6 +389,9 @@ ENTITY_METADATA_FIELDS = (
     "n.view_class AS view_class",
     "n.view_subtype AS view_subtype",
     "n.view_audience AS view_audience",
+    # Counted scalar Views are hidden from recall when the counting flag is off.
+    "n['scalar_basis'] AS scalar_basis",
+    "n['sh_op_counts'] AS sh_op_counts",
     "coalesce(n.retired, false) AS retired",
     "coalesce(n.is_view, false) AS is_view",
     "n.episode_uuids AS episode_uuids",
@@ -417,6 +422,13 @@ FACT_TEMPORAL_FIELDS = (
     "r.time_outcome AS time_outcome",
     "r.time_speech_date AS time_speech_date",
     "r.time_ambiguity AS time_ambiguity",
+)
+
+# Menhir's own similarity/bridge links are RELATES_TO edges with no fact text. Queries that read
+# edges as facts need this, or those links take fact slots meant for real facts.
+# CASE so a non-string fact is skipped instead of trim() failing the whole query.
+FACT_TEXT_PRESENT = (
+    "CASE WHEN r.fact IS :: STRING NOT NULL THEN trim(r.fact) <> '' ELSE false END"
 )
 
 # Fact-edge IDENTITY + both endpoints, for shadow-mode context composition (Stage 1,

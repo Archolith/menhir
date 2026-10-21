@@ -88,13 +88,24 @@ _RECORD_CYPHER = """
 MERGE (h:TypedEventAssertionHead {source_key: $source_key})
   ON CREATE SET h.created_at = datetime(), h.identity_version = $identity_version,
                 h.subject_uuid = $subject_uuid
+// #170 D1 read marker: the highest perceiver rank that re-read this turn. Locked before it is read,
+// so this write and that version's retire (reversion_repository) serialize. An agent-tier write
+// ranked below it is stored non-current.
+WITH h
+FOREACH (_ IN CASE WHEN coalesce($episode_uuid, '') <> '' THEN [1] ELSE [] END |
+    MERGE (rm:TypedReadMarker {marker_key: 'event:' + $episode_uuid})
+      ON CREATE SET rm.rank = -1, rm.turn_id = $episode_uuid
+    SET rm.write_at = datetime())
+WITH h
+OPTIONAL MATCH (rm:TypedReadMarker {marker_key: 'event:' + coalesce($episode_uuid, '')})
+WITH h, ($evidence_tier <> 'agent' OR $perceiver_rank >= coalesce(rm.rank, -1)) AS read_current
 // already-bound identity-mismatch — decided from the head's EXISTING current owner BEFORE any node
 // create / CURRENT move / supersession / provenance, so a fresh higher-version node cannot escape the
 // guard by lacking a binding_pending property yet. A claim durably bound to A must never be re-bound
 // or re-owned by a record presenting a different subject (re-binding is the merge path's job).
-WITH h
+WITH h, read_current
 OPTIONAL MATCH (h)-[cr:CURRENT]->(cur:TypedEventAssertion)
-WITH h, cr, cur,
+WITH h, cr, cur, read_current,
      (cur IS NOT NULL AND NOT coalesce(cur.binding_pending, true)
       AND cur.subject_uuid <> $subject_uuid) AS binding_mismatch
 MERGE (a:TypedEventAssertion {assertion_key: $assertion_key})
@@ -126,14 +137,16 @@ MERGE (h)-[:HAS_VERSION]->(a)
 FOREACH (_ IN CASE WHEN (NOT binding_mismatch) AND $evidence_rank > coalesce(a.evidence_rank, -1)
                    THEN [1] ELSE [] END |
     SET a.evidence_tier = $evidence_tier, a.evidence_rank = $evidence_rank)
-WITH h, a, cr, cur, binding_mismatch,
+WITH h, a, cr, cur, binding_mismatch, read_current,
      ((NOT binding_mismatch) AND cur IS NOT NULL AND cur.assertion_key <> $assertion_key
-      AND $perceiver_rank > coalesce(cur.perceiver_rank, -1)) AS will_supersede
+      AND $perceiver_rank > coalesce(cur.perceiver_rank, -1) AND read_current) AS will_supersede
 // a becomes current: no prior current, OR it strictly out-ranks it, OR it IS the current (idempotent)
-// — but NEVER on a binding_mismatch (a mismatched version stays a non-current superseded audit node).
+// — but NEVER on a binding_mismatch (a mismatched version stays a non-current superseded audit node),
+// and a new current never ranks below the turn's read marker (read_current).
 FOREACH (_ IN CASE WHEN (NOT binding_mismatch)
                         AND (cur IS NULL OR will_supersede
                              OR (cur IS NOT NULL AND cur.assertion_key = $assertion_key))
+                        AND (read_current OR (cur IS NOT NULL AND cur.assertion_key = $assertion_key))
                    THEN [1] ELSE [] END |
     SET a.superseded = false
     MERGE (h)-[:CURRENT]->(a))
@@ -361,6 +374,8 @@ class TypedEventAssertionRepository:
             "CREATE INDEX typed_event_assertion_source_idx IF NOT EXISTS FOR (a:TypedEventAssertion) ON (a.source_key)",
             "CREATE INDEX typed_event_assertion_episode_idx IF NOT EXISTS FOR (a:TypedEventAssertion) ON (a.episode_uuid)",
             "CREATE INDEX typed_event_assertion_valid_at_idx IF NOT EXISTS FOR (a:TypedEventAssertion) ON (a.valid_at)",
+            # #170 D1: shared with the scalar lane (keys are lane-prefixed).
+            "CREATE CONSTRAINT typed_read_marker_key_unique IF NOT EXISTS FOR (m:TypedReadMarker) REQUIRE m.marker_key IS UNIQUE",
         ]
         for query in queries:
             self._neo4j.execute(query)

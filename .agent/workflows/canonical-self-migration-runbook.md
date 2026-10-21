@@ -16,7 +16,9 @@ parent plan's node-authority, score-bound, and historical-population assumptions
 
 ## Candidate modes (not activation evidence)
 
-`MENHIR_CANONICAL_SELF_BINDING_MODE` — `off` (default) | `observe` | `enforce`.
+`MENHIR_CANONICAL_SELF_BINDING_MODE` — `off` | `observe` | `enforce` (default since #169, 2026-10-20).
+Installs that leave it unset, fresh or upgraded, run `enforce`; pin `off` to opt out. The
+activation steps below still apply to the first deploy that picks up the new default.
 
 | Mode | Behavior |
 |---|---|

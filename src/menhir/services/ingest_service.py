@@ -93,6 +93,7 @@ class IngestService(IngestQueueMixin, IngestWorkerMixin, IngestIntakeMixin):
         default=12000, init=False, repr=False
     )
     _canonical_self_binding_mode: str = field(default="off", init=False, repr=False)
+    _inferred_self_mode: str = field(default="off", init=False, repr=False)
     # M6 Phase 6 — LLM budget caps
     _session_llm_call_times: dict[str, deque[float]] = field(
         default_factory=dict, init=False, repr=False

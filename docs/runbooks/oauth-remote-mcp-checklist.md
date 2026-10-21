@@ -168,6 +168,7 @@ Never paste a real access token into a PR, issue, log excerpt, or committed fixt
 | Valid token rejected for audience/resource | Token audience/resource does not match Menhir config | Compare token claims with `MENHIR_OAUTH_AUDIENCE` / `MENHIR_OAUTH_RESOURCE`. |
 | Valid token rejected for issuer | Issuer string mismatch, often trailing slash | Compare the exact issuer claim with `MENHIR_OAUTH_ISSUER`. |
 | Valid token rejected for signing key | JWKS URI wrong, stale, or missing key ID | Confirm `MENHIR_OAUTH_JWKS_URI` and IdP key rotation state. |
+| `503 server_error` "Unable to fetch OAuth JWKS" (or "malformed") with a `request_id` | The JWKS refetch after the cache TTL failed (timeout, DNS, connect, HTTP status, bad payload); one failed refetch fails the request even with cached keys | Find `OAuth server_error -> 503: request_id=<id>` in the server log; the `OAuth JWKS fetch failed: kind=...` line before it gives the cause, redacted URI and elapsed time. `/readyz` `oauth_jwks` shows per-process failure counters and never affects readiness. One occurrence is usually a transient network blip; repeats point at the path to `MENHIR_OAUTH_JWKS_URI`. |
 | Token accepted but wrong identity shown | Caller headers are overriding OAuth principal | Treat as a blocker; OAuth principal claims must own identity. |
 
 ## PR acceptance checklist

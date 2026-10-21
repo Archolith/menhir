@@ -151,6 +151,13 @@ class TypedAssertionWriteMixin:
                    toString(a.learned_at) AS learned_at, a.time_basis AS time_basis,
                    a.evidence_tier AS evidence_tier, a.perceiver_version AS perceiver_version,
                    coalesce(a.absolute_semantics, 'ordinary') AS absolute_semantics,
+                   coalesce(a.importance, '') AS importance,
+                   coalesce(a.count_object, '') AS count_object,
+                   coalesce(a.count_item, '') AS count_item,
+                   coalesce(a.count_action, '') AS count_action,
+                   coalesce(a.count_status, '') AS count_status,
+                   coalesce(a.count_target_id, '') AS count_target_id,
+                   coalesce(a.count_family, '') AS count_family,
                    coalesce(a.superseded, false) AS superseded,
                    coalesce(a.binding_pending, false) AS binding_pending
             ORDER BY a.valid_at ASC, a.learned_at ASC
@@ -258,10 +265,18 @@ class TypedAssertionWriteMixin:
             """
             UNWIND range(0, size($ids) - 1) AS ordinal
             MATCH (a:TypedAssertion {assertion_id: $ids[ordinal]})
+            CALL {
+                WITH a
+                OPTIONAL MATCH (t:TurnEvidence {turn_id: a.episode_uuid})
+                WHERE t.namespace = a.namespace
+                RETURN t.text AS turn_text
+                LIMIT 1
+            }
             RETURN a.assertion_id AS assertion_id, a.operation AS operation,
                    coalesce(a.value, a.value_json) AS value, a.stated_span AS stated_span,
                    toString(a.valid_at) AS valid_at, a.evidence_tier AS evidence_tier,
-                   a.episode_uuid AS episode_uuid, ordinal
+                   a.episode_uuid AS episode_uuid, a.time_basis AS time_basis,
+                   turn_text AS turn_text, ordinal
             ORDER BY ordinal
             """,
             params={"ids": bounded},

@@ -702,8 +702,30 @@ class TypedScalarPerceptionService:
         reconcile_scope: bool = True,
         reconcile_subject: bool = True,
         canonical_self: bool = False,
+        system_prompt: str | None = None,
+        allowed_operations: frozenset[str] | None = None,
+        claim_ordinal: int = 0,
+        context: str = "",
+        write_guard: Callable[[], None] | None = None,
+        counting_v2: bool = False,
+        counting_match: bool = False,
+        defer_rebuild: bool = False,
     ) -> dict[str, Any]:
         """Perceive typed scalars from `episodes` and durably persist the committed, bound ones.
+
+        `counting_v2` (counting lane only, unit 3a.9) selects the verb-anchored occurrence guard and
+        the per-attribute claim split; it is forwarded only when True, so every other caller is
+        unchanged. `counting_match` (counting lane under 4R match) lets the gate set aside bridge
+        quotes (`resolve_bridges`); off everywhere else.
+
+        Counting re-version (default off): `defer_rebuild` skips the per-row rebuild, so bound rows
+        keep `projection_pending` until the caller rebuilds and marks them; the result then also
+        carries `spans` = {"clean_turns": turns every sample read in full, "proposed": every
+        sample's (episode, start, end), "committed": the gate's}.
+
+        `system_prompt` / `allowed_operations` / `claim_ordinal` / `context` select the lane: the
+        defaults are the scalar lane; the counting lane passes its own prompt, occurrence-only
+        operations, claim ordinal 1 and the page's already-stored scalar claims as context.
         Activation is enforced FIRST â€” if it is refused (legacy store) or the schema is not ready, we
         raise and record nothing. `k` must be a real integer >= 1 (bool/zero/negative fail closed
         rather than silently collapsing to one sample); k samples require temp>0 in `llm_complete` to
@@ -840,10 +862,23 @@ class TypedScalarPerceptionService:
                 except Exception:
                     logger.exception("deterministic router audit emit failed (best-effort)")
 
-        samples = [
-            extract_typed_scalars_once(llm_episodes, llm_complete, on_drop=_note_drop)
-            for _ in range(k)
-        ] if llm_episodes or not router_enabled else []
+        v2_kwargs: dict[str, Any] = {"counting_v2": True} if counting_v2 else {}
+        # Per sample, the episode indexes it did not fully read (None = the whole sample); only
+        # collected for the counting re-version (defer_rebuild).
+        unclean: list[set[int | None]] = []
+
+        def _extract_once() -> list[TypedScalarProposal]:
+            extra: dict[str, Any] = {}
+            if defer_rebuild:
+                marks: set[int | None] = set()
+                unclean.append(marks)
+                extra["on_unclean"] = marks.add
+            return extract_typed_scalars_once(
+                llm_episodes, llm_complete, on_drop=_note_drop,
+                system_prompt=system_prompt, allowed_operations=allowed_operations,
+                claim_ordinal=claim_ordinal, context=context, **v2_kwargs, **extra)
+
+        samples = [_extract_once() for _ in range(k)] if llm_episodes or not router_enabled else []
         kept = sum(len(s) for s in samples)
         sample_details: list[dict[str, Any]] = []
         if _audit.is_enabled():
@@ -874,7 +909,8 @@ class TypedScalarPerceptionService:
         llm_decisions = gate_typed_scalars(
             samples, threshold=threshold, reconcile_attribute=reconcile_attribute,
             reconcile_scope=reconcile_scope, reconcile_subject=reconcile_subject,
-            canonical_self=canonical_self, align_spans=True) if samples else []
+            canonical_self=canonical_self, align_spans=True, resolve_bridges=counting_match,
+            **v2_kwargs) if samples else []
         decisions = self._merge_router_decisions(
             episodes, deterministic_decisions, llm_decisions
         ) if router_enabled and router_failure is None else llm_decisions
@@ -900,16 +936,27 @@ class TypedScalarPerceptionService:
             )
         # When scalar_history is enabled, the rebuild lambda calls the coordinator
         # (which rebuilds both state and history projections) instead of state-only.
-        if self._scalar_history_enabled:
+        if defer_rebuild:
+            # The caller rebuilds once per subject after its own retire step; an incomplete
+            # result keeps projection_pending set, so a crash before that rebuild is repairable.
+            _rebuild = lambda u: {"complete": False, "deferred": True}
+        elif self._scalar_history_enabled:
             _rebuild = lambda u: self._service.rebuild_scalar_projections(
                 u, namespace=namespace, as_of=as_of, history_enabled=True)
         else:
             _rebuild = lambda u: self._service.rebuild_scalar_state(
                 u, namespace=namespace, as_of=as_of)
+        record_assertion = self._adapter.record_typed_assertion
+        if write_guard is not None:
+            # Counting lane: re-check the namespace fence before every assertion write, so a run
+            # whose lease or watermark was lost during the LLM step stores nothing.
+            def record_assertion(*args: Any, _record=record_assertion, **kwargs: Any) -> Any:
+                write_guard()
+                return _record(*args, **kwargs)
         out = bind_and_persist_typed_scalars(
             decisions,
             linked_entities_for_episode=self._adapter.fetch_linked_entities_for_episode,
-            record_assertion=self._adapter.record_typed_assertion,
+            record_assertion=record_assertion,
             rebuild_scalar_state=_rebuild,
             episode_reference_time=episode_reference_time,
             namespace=namespace, perceiver_version=self._perceiver_version,
@@ -921,6 +968,20 @@ class TypedScalarPerceptionService:
         )
         out["decisions"] = len(decisions)
         out["committed"] = sum(1 for d in decisions if d.committed)
+        if defer_rebuild:
+            # Turns every sample read in full: only there is "no sample proposed anything" evidence.
+            uuids = [str(getattr(e, "uuid", "") or "") for e in llm_episodes]
+            clean = set(uuids) if samples and len(unclean) == len(samples) else set()
+            for marks in unclean:
+                clean = set() if None in marks else clean - {
+                    uuids[i] for i in marks if i is not None and 0 <= i < len(uuids)}
+            out["spans"] = {
+                "clean_turns": sorted(clean - {""}),
+                "proposed": [(p.episode_uuid, p.span_start, p.span_end)
+                             for sample in samples for p in sample],
+                "committed": [(d.proposal.episode_uuid, d.proposal.span_start, d.proposal.span_end)
+                              for d in decisions if d.committed and d.proposal is not None],
+            }
         return out
 
     def _run_deterministic_shadow(

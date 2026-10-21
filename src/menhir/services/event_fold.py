@@ -44,15 +44,22 @@ def fold_events_to_counter(
     source: str = "event-fold",
     embed: Embed | None = None,
     audit: dict[str, Any] | None = None,
+    value: float | None = None,
 ) -> dict[str, Any]:
     """Fold `events` with a scalar reducer and upsert the result as a counter View for
     (subject, measure). `reducer` in {sum, count, distinct_count}. Idempotent + supersedable:
     re-folding the same events no-ops; adding a later-dated event supersedes (its `valid_at` > current,
-    so the LWW guard admits it). Returns the counter row + {reducer, value, events}."""
+    so the LWW guard admits it). Returns the counter row + {reducer, value, events}.
+
+    `value`, when given, is stored as-is and `events` are provenance only. Perception passes the
+    value its gate vetted: a Law-3 anchor + delta (`[anchor, *post]`) does not re-reduce to it under
+    count/distinct_count."""
     if reducer not in _SCALAR_REDUCERS:
         raise ValueError(f"reducer {reducer!r} must be one of {_SCALAR_REDUCERS}")
-    fn, _idempotent = REDUCERS[reducer]
-    value = float(fn(events))  # batch re-fold: absolute value over the full set (Law-2 safe)
+    if value is None:
+        fn, _idempotent = REDUCERS[reducer]
+        value = float(fn(events))  # batch re-fold: absolute value over the full set (Law-2 safe)
+    value = float(value)
     lat = latest(events)
     valid_at = lat.when if lat is not None else None
     episode_uuids = [e.episode_uuid for e in events if e.episode_uuid]

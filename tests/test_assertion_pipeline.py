@@ -271,3 +271,39 @@ async def test_belief_gate_on_refuses_superseded_under_current_intent() -> None:
     outcome = await p.run(q, cands)
     # a superseded belief must not land in admitted-as-current
     assert all(r.candidate_id != "u1" for r in outcome.admitted)
+
+
+# --- tie order: ties keep the caller's order, not candidate-id order ---------
+
+class _FailingOracle:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def evaluate(self, query, candidate):
+        raise RuntimeError("oracle down")
+
+
+_UNSORTED_IDS = ["m7", "m2", "m9", "m0", "m5", "m3"]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_oracle_outage_keeps_caller_order() -> None:
+    """Every oracle failing degrades to neutral; the ranking must equal the caller's order."""
+    from menhir.services.oracle_executor import OracleExecutor
+
+    executor = OracleExecutor([_FailingOracle(o.name) for o in default_oracles()])
+    pipe = AssertionPipeline(LogSpaceOracleCombiner(), executor=executor, auto_intent=False)
+    cands = [CandidateMemory(id=i, content=f"memory {i}", metadata={"similarity": 0.5})
+             for i in _UNSORTED_IDS]
+    out = await pipe.run(QueryContext(text="what did I say"), cands)
+    assert [r.candidate_id for r in out.ranked] == _UNSORTED_IDS
+
+
+@pytest.mark.asyncio
+async def test_pipeline_score_ties_keep_caller_order() -> None:
+    """Candidates the oracles score identically keep the caller's relative order."""
+    pipe = AssertionPipeline(LogSpaceOracleCombiner(), auto_intent=False)
+    cands = [CandidateMemory(id=i, content="same text", metadata={"similarity": 0.5})
+             for i in _UNSORTED_IDS]
+    out = await pipe.run(QueryContext(text="what did I say"), cands)
+    assert [r.candidate_id for r in out.ranked] == _UNSORTED_IDS

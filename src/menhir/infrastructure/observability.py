@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 import logging
+import re
 from time import perf_counter
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -15,7 +16,11 @@ import openai
 from openai import AsyncOpenAI
 
 from menhir.config import MemorySettings
-from menhir.infrastructure.openai_rate_limit import acall_with_rate_limit_backoff
+from menhir.infrastructure.openai_rate_limit import (
+    acall_with_rate_limit_backoff,
+    find_quota_exhaustion,
+    provider_error_code,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +46,14 @@ class LLMUsageEvent:
     total_tokens: int | None = None
     cached_input_tokens: int | None = None
     reasoning_output_tokens: int | None = None
+    #: Subset of input_tokens written to the provider cache (billed above the plain input rate).
+    cache_write_input_tokens: int | None = None
+    #: Billing tier the provider reports on the response (e.g. "flex", "default").
+    service_tier: str | None = None
     provider_usage: dict[str, Any] | None = None
     error: str | None = None
+    #: Content-free failure label (``provider_error_code``), persisted where ``error`` is redacted.
+    error_code: str | None = None
     #: This call is being MEASURED, not governed: a budget callback must count it and let it
     #: proceed rather than refusing it (CF-234). Set by the announcement site, never inferred, so
     #: a surface that does not opt in keeps whatever enforcement it has today.
@@ -122,8 +133,11 @@ def _emit_llm_usage_event(
     total_tokens: int | None = None,
     cached_input_tokens: int | None = None,
     reasoning_output_tokens: int | None = None,
+    cache_write_input_tokens: int | None = None,
+    service_tier: str | None = None,
     provider_usage: dict[str, Any] | None = None,
     error: str | None = None,
+    error_code: str | None = None,
     report_only: bool = False,
 ) -> None:
     callback = _llm_usage_callback.get() or _default_llm_usage_callback
@@ -144,8 +158,11 @@ def _emit_llm_usage_event(
                 total_tokens=total_tokens,
                 cached_input_tokens=cached_input_tokens,
                 reasoning_output_tokens=reasoning_output_tokens,
+                cache_write_input_tokens=cache_write_input_tokens,
+                service_tier=service_tier,
                 provider_usage=provider_usage,
                 error=error,
+                error_code=error_code,
                 report_only=report_only,
             )
         )
@@ -161,6 +178,10 @@ def _emit_llm_usage_event(
             endpoint,
             exc_info=True,
         )
+
+
+#: Content-free provider tier identifier (e.g. "flex", "default").
+_SERVICE_TIER_SHAPE = re.compile(r"[A-Za-z0-9_.-]{1,32}")
 
 
 def _value(source: Any, *names: str) -> Any:
@@ -235,12 +256,14 @@ def _normalized_usage(usage: Any) -> dict[str, Any]:
     reasoning_output_tokens = _nonnegative_int(_value(usage, "thoughtsTokenCount"))
     if reasoning_output_tokens is None:
         reasoning_output_tokens = _nonnegative_int(_value(completion_details, "reasoning_tokens"))
+    cache_write_input_tokens = _nonnegative_int(_value(prompt_details, "cache_write_tokens"))
     return {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
         "cached_input_tokens": cached_input_tokens,
         "reasoning_output_tokens": reasoning_output_tokens,
+        "cache_write_input_tokens": cache_write_input_tokens,
         "provider_usage": raw,
     }
 
@@ -286,8 +309,12 @@ def complete_llm_usage_call(
     usage: Any = None,
 ) -> None:
     clear_provider_auth_failure()
+    clear_provider_quota_exhaustion(handle.kind)
     try:
         normalized = _normalized_usage(usage if usage is not None else _value(result, "usage"))
+        service_tier = _value(result, "service_tier") if result is not None else None
+        if not (isinstance(service_tier, str) and _SERVICE_TIER_SHAPE.fullmatch(service_tier)):
+            service_tier = None
         _emit_llm_usage_event(
             handle.kind,
             phase="completed",
@@ -296,6 +323,7 @@ def complete_llm_usage_call(
             operation=handle.operation,
             call_id=handle.call_id,
             duration_ms=int((perf_counter() - handle.started_at) * 1000),
+            service_tier=service_tier,
             **normalized,
             report_only=handle.report_only,
         )
@@ -386,9 +414,53 @@ def last_provider_auth_failure() -> ProviderAuthFailure | None:
     return _provider_auth_failure
 
 
+@dataclass(frozen=True)
+class ProviderQuotaExhaustion:
+    """The most recent insufficient_quota 429 from an LLM provider, process-wide."""
+
+    kind: str
+    endpoint: str | None
+    model: str | None
+    at: str  # ISO-8601 UTC
+
+    def summary(self) -> str:
+        return (
+            f"provider_quota_exhausted: the LLM provider returned 429 insufficient_quota at "
+            f"{self.at} on {self.endpoint or self.kind}{f' ({self.model})' if self.model else ''}"
+        )
+
+
+_provider_quota_exhaustion: ProviderQuotaExhaustion | None = None
+
+
+def record_provider_quota_exhaustion(handle: LLMCallHandle) -> None:
+    global _provider_quota_exhaustion
+    from datetime import datetime, timezone
+
+    _provider_quota_exhaustion = ProviderQuotaExhaustion(
+        kind=handle.kind,
+        endpoint=handle.endpoint,
+        model=handle.model,
+        at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    )
+
+
+def clear_provider_quota_exhaustion(kind: str | None = None) -> None:
+    """Clear the standing quota flag; a given ``kind`` clears it only if that kind recorded it."""
+    global _provider_quota_exhaustion
+    if kind is None or (_provider_quota_exhaustion is not None and _provider_quota_exhaustion.kind == kind):
+        _provider_quota_exhaustion = None
+
+
+def last_provider_quota_exhaustion() -> ProviderQuotaExhaustion | None:
+    return _provider_quota_exhaustion
+
+
 def fail_llm_usage_call(handle: LLMCallHandle, error: BaseException) -> None:
     if is_provider_auth_error(error):
         record_provider_auth_failure(handle, error)
+    if find_quota_exhaustion(error) is not None:
+        record_provider_quota_exhaustion(handle)
     _emit_llm_usage_event(
         handle.kind,
         phase="failed",
@@ -398,6 +470,7 @@ def fail_llm_usage_call(handle: LLMCallHandle, error: BaseException) -> None:
         call_id=handle.call_id,
         duration_ms=int((perf_counter() - handle.started_at) * 1000),
         error=str(error),
+        error_code=provider_error_code(error),
         report_only=handle.report_only,
     )
 

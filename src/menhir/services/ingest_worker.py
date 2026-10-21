@@ -40,6 +40,7 @@ from menhir.infrastructure.telemetry import (
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure.circuit_breaker import CircuitOpenError
 from menhir.infrastructure.graphiti_extraction_policy import clear_extraction_receipt
+from menhir.infrastructure.self_binding import SelfBindMode, resolve_inferred_mode
 from menhir.services.enrichment_steps import (
     EnrichmentContext,
     add_episode_with_timeout,
@@ -166,6 +167,7 @@ class IngestWorkerMixin:
                 graphiti_add_episode_timeout_s=self._graphiti_add_episode_timeout_s,
                 graphiti_episode_max_estimated_tokens=self._graphiti_episode_max_estimated_tokens,
                 canonical_self_binding_mode=self._canonical_self_binding_mode,
+                inferred_self_mode=self._inferred_self_mode,
                 source_memories_enabled=self._source_memories_enabled,
                 get_queue_depth=self.get_queue_depth,
                 shadow_context_composition=self._shadow_context_composition,
@@ -233,6 +235,8 @@ class IngestWorkerMixin:
             # only an in-flight bound stops it.
 
             await embed_episode_content(ctx)
+            if await self._try_verbatim_skip(episode_uuid, claimed):
+                return
             await run_graphiti_extraction(ctx, finalize_under_gate=True)
         except CircuitOpenError as exc:
             logger.warning(
@@ -240,10 +244,14 @@ class IngestWorkerMixin:
                 episode_uuid,
                 exc,
             )
+            retry_after_s = 30.0
+            if exc.snapshot.get("reason"):
+                # Hard-open (quota): wait out the long cooldown instead of polling every 30 s.
+                retry_after_s = max(30.0, min(900.0, float(exc.snapshot.get("cooldown_remaining_s") or 0.0)))
             await asyncio.to_thread(
                 self.graph_adapter.mark_episode_pending,
                 episode_uuid,
-                retry_after_s=30.0,
+                retry_after_s=retry_after_s,
                 worker_id=self._worker_id,
                 transient_requeue=True,
                 claim_started_at=claimed.get("processing_started_at"),
@@ -261,6 +269,8 @@ class IngestWorkerMixin:
                 raise  # The worker logs setup failures; lease recovery can retry after cleanup.
             self._failed_enrichments += 1
             await handle_enrichment_failure(ctx, exc)
+            if claimed.get("is_evidence_projection"):
+                await self._reenable_skips_for_projection(episode_uuid)
             return
         finally:
             if usage_token is not None:
@@ -274,6 +284,52 @@ class IngestWorkerMixin:
                     await heartbeat_task
 
         return
+
+    async def _try_verbatim_skip(self, episode_uuid: str, claimed: dict[str, Any]) -> bool:
+        """Two-tier self Phase 3 (enforce only): finish a client whose text is its hook turn's
+        verbatim text without extracting it; the turn's projection extracts it on the anchored
+        tier. True when the episode was marked READY by the skip."""
+        mode = resolve_inferred_mode(getattr(self, "_inferred_self_mode", None))
+        if mode is not SelfBindMode.ENFORCE:
+            return False
+        if claimed.get("is_evidence_projection") or not claimed.get("turn_evidence_uuid"):
+            return False
+        try:
+            projection_uuid = await asyncio.to_thread(
+                self.graph_adapter.mark_episode_verbatim_skipped,
+                episode_uuid,
+                worker_id=self._worker_id,
+                claim_started_at=claimed.get("processing_started_at"),
+            )
+        except Exception:
+            logger.exception("Verbatim skip check failed episode_id=%s; extracting", episode_uuid)
+            return False
+        if not projection_uuid:
+            return False
+        record_lifecycle_event(
+            component="ingest_worker",
+            event="verbatim_extraction_skipped",
+            state="completed",
+            episode_uuid=episode_uuid,
+            details={"projection_uuid": projection_uuid},
+        )
+        return True
+
+    async def _reenable_skips_for_projection(self, projection_uuid: str) -> None:
+        """A projection failed: return any client that skipped on it to PENDING now, rather
+        than at the next lease-recovery pass (which also does this)."""
+        reenable = getattr(self.graph_adapter, "reenable_verbatim_skips", None)
+        if reenable is None:
+            return
+        try:
+            revoked = await asyncio.to_thread(reenable, projection_uuid=projection_uuid)
+            for client_uuid in revoked or ():
+                await self._enqueue_pending_episode(client_uuid)
+        except Exception:
+            logger.exception(
+                "Verbatim-skip re-enable failed projection=%s; lease recovery retries",
+                projection_uuid,
+            )
 
     def _record_episode_llm_usage(
         self, episode_uuid: str, event: LLMUsageEvent, *, budget_key: str | None = None
@@ -395,6 +451,8 @@ class IngestWorkerMixin:
                     "total_tokens": event.total_tokens,
                     "cached_input_tokens": event.cached_input_tokens,
                     "reasoning_output_tokens": event.reasoning_output_tokens,
+                    "cache_write_input_tokens": event.cache_write_input_tokens,
+                    "service_tier": event.service_tier,
                     "error": event.error,
                 }.items()
                 if value is not None

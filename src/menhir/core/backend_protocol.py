@@ -148,6 +148,7 @@ class MemoryBackend(Protocol):
         include_invalidated: bool = False,
         trace: bool = False,
         source_memory_limit: int | None = None,
+        counted_verdict_limit: int | None = None,
         include_warden_status: bool = False,
     ) -> dict[str, Any]:
         """Search memory graph. Returns RecallResult-shaped dict."""
@@ -163,6 +164,17 @@ class MemoryBackend(Protocol):
     ) -> dict[str, Any]:
         """Drill-down: matching source memories oldest first. Returns
         RecallHistoryResult-shaped dict."""
+        ...
+
+    async def get_scalar_view_items(
+        self,
+        *,
+        view_uuid: str,
+        namespace: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """Drill-down: page the items a scalar View was built from."""
         ...
 
     async def recall_timeline(

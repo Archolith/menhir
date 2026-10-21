@@ -910,7 +910,8 @@ def test_build_memory_services_applies_graphiti_timeout_setting(monkeypatch: pyt
             return None
 
     class FakeMemoryGraphAdapter:
-        def __init__(self, neo4j: object) -> None:
+        def __init__(self, neo4j: object, counting_enabled: bool = False,
+                     counting_match_enabled: bool = False) -> None:
             self.neo4j = neo4j
 
     class FakeLifecycleService:
@@ -950,7 +951,8 @@ def test_build_memory_services_wires_event_history_authority_flag(
             return None
 
     class FakeMemoryGraphAdapter:
-        def __init__(self, neo4j: object) -> None:
+        def __init__(self, neo4j: object, counting_enabled: bool = False,
+                     counting_match_enabled: bool = False) -> None:
             self.neo4j = neo4j
 
     class FakeGraphitiClient:
@@ -975,7 +977,10 @@ def test_build_memory_services_wires_event_history_authority_flag(
     monkeypatch.setattr("menhir.core.bootstrap.LLMAdapter", FakeLLMAdapter)
     monkeypatch.setattr("menhir.core.bootstrap.RecallService", FakeRecallService)
 
-    settings = MemorySettings(personal_memory_event_history_authority_enabled=True)
+    settings = MemorySettings(
+        personal_memory_event_history_authority_enabled=True,
+        personal_memory_event_history_enabled=True,
+    )
     build_memory_services(settings=settings)
 
     assert captured["event_history_authority_enabled"] is True

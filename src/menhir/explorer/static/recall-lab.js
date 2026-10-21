@@ -22,6 +22,8 @@
     ['enable_fact_edges', 'Fact-edge retrieval', 'bool'],
     ['fact_edge_mode', 'Fact-edge mode', 'select', ['pointer', 'standalone']],
     ['fact_edge_k', 'Fact-edge candidates', 'number', { min: 1, max: 200, step: 1 }],
+    ['enable_verb_facets', 'Verb-facet facts', 'bool'],
+    ['scalar_verdict_min_similarity', 'Verdict min similarity', 'number', { min: 0, max: 1, step: 0.005 }],
     ['enable_oracle_ranking', 'Oracle ranking', 'bool'],
     ['oracle_rank_weight', 'Oracle residual weight', 'number', { min: 0, max: 2, step: 0.05 }],
     ['enable_intent_lens', 'Intent lens', 'bool'],
