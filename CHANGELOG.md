@@ -1,3 +1,13 @@
+## 2026-10-21 - Make OAuth JWKS-fetch 503s diagnosable
+
+- Ported from 0847c6e on `refactor/file-size-refactor`. Diagnostics only; no auth outcome changes.
+- `api/oauth.py`: a failed JWKS fetch logs `OAuth JWKS fetch failed` with the failure kind, the message (JWKS URI redacted to scheme://host/path), elapsed seconds, timeout, `force_refresh` and whether keys were cached; a payload with no `keys` list logs as `MalformedJWKS`. Process-wide `JWKS_REFRESH_STATS` counts failures.
+- `api/auth.py`: an OAuth `server_error` 503 logs the request id the client receives, the path, the detail and the cause's type.
+- `api/production_routes.py`: `/readyz` adds an `oauth_jwks` block (`refresh_failures`, `last_failure_at`, `last_failure_kind`), per process and never affecting readiness.
+- `docs/runbooks/oauth-remote-mcp-checklist.md`: failure-mode row for the 503. The original `deploy/RUNBOOK.md` section was deployment-specific, and that file no longer lives in this repo.
+- Tests: new `tests/test_oauth_jwks_diagnostics.py`.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-10-21 - Split 27 oversized modules that main has not changed since the file-size branch
 
 - Ports part of `refactor/file-size-refactor` (2802ebb): only the 27 originals whose pre-split text is identical to main's. Each keeps its name and re-exports what moved, so no import site changes; moved code lives in 87 new sibling modules. 16 `src/menhir` modules (`api/oauth_authorize`, `cli`, `core/runtime_preflight`, `domain/{artifact_reconciliation,projection_coverage,scalar_dependency_evidence}`, `explorer/{extraction_lab,recall_packet_prototype}`, `infrastructure/{evidence_publication_intents,graph_operations,projection_lifecycle_repository}`, `infrastructure/telemetry/{event_store,lifecycle_store,recall_store}`, `snapshot/{protocol,receive}`), 6 services (`correlation_service`, `deterministic_scalar_extractor`, `metric_write_coordinator`, `research_scalar_isolated_adapter`, `saga_reconcile_dispatcher`, `structural_scalar_composer`) and 5 scripts.
@@ -91,13 +101,4 @@
 - `services/scalar_state_service.py`: a counted View's audit carries `scalar_basis`; stated Views' audit is unchanged.
 - Nothing writes occurrences yet; the counting lane that will is a separate, flagged change (#170).
 - Tests: new `tests/test_scalar_occurrence_fold.py`.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-10-15 - Default the OpenAI chat model to gpt-6-luna
-
-- `config/settings_model.py`: `openai_chat_model` defaults to `gpt-6-luna` (was `gpt-4o-mini`). It resolves to the existing gpt-6 profile (reasoning request shaping, extraction precision block, contained-edge pruning), the model the LongMemEval builds already run. Only OpenAI deployments with `OPENAI_CHAT_MODEL` unset or blank change; `chat_provider` still defaults to `local`.
-- `cli/setup.py` reads that default, so `menhir setup --provider openai` now fills a blank chat model with `gpt-6-luna`; `.env.example` ships it too, with the Flex tier hint and the gpt-4o-mini floor. Existing `.env` values are never overwritten.
-- Standard rates per 1M tokens: $0.10 in / $0.01 cached / $0.50 out (gpt-4o-mini: $0.15 / $0.075 / $0.60); Flex (`MENHIR_OPENAI_SERVICE_TIER=flex`) is half. It spends reasoning tokens, billed as output.
-- Docs: `docs/post-install.md`, `docs/model-governance.md`.
-- Tests: changed because they pinned the old default: the `openai` row of `test_provider_defaults_fill_blanks_without_overwriting_choices_or_opt_outs` and the openai branch of `test_provider_defaults_create_fresh_state_env` in `tests/test_cli_setup.py`.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.

@@ -1,3 +1,12 @@
+## 2026-10-15 - Default the OpenAI chat model to gpt-6-luna
+
+- `config/settings_model.py`: `openai_chat_model` defaults to `gpt-6-luna` (was `gpt-4o-mini`). It resolves to the existing gpt-6 profile (reasoning request shaping, extraction precision block, contained-edge pruning), the model the LongMemEval builds already run. Only OpenAI deployments with `OPENAI_CHAT_MODEL` unset or blank change; `chat_provider` still defaults to `local`.
+- `cli/setup.py` reads that default, so `menhir setup --provider openai` now fills a blank chat model with `gpt-6-luna`; `.env.example` ships it too, with the Flex tier hint and the gpt-4o-mini floor. Existing `.env` values are never overwritten.
+- Standard rates per 1M tokens: $0.10 in / $0.01 cached / $0.50 out (gpt-4o-mini: $0.15 / $0.075 / $0.60); Flex (`MENHIR_OPENAI_SERVICE_TIER=flex`) is half. It spends reasoning tokens, billed as output.
+- Docs: `docs/post-install.md`, `docs/model-governance.md`.
+- Tests: changed because they pinned the old default: the `openai` row of `test_provider_defaults_fill_blanks_without_overwriting_choices_or_opt_outs` and the openai branch of `test_provider_defaults_create_fresh_state_env` in `tests/test_cli_setup.py`.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-10-15 - Say which kind of provider error a failed or retried LLM call hit
 
 - `infrastructure/openai_rate_limit.py`: the 429 backoff warning names the kind (`flex_capacity` for Flex `resource_unavailable`, `rate_limit`, or `quota`) with the provider code and type, the retry hint and the request id. New `provider_error_code` builds a content-free label (`RateLimitError:429:resource_unavailable`, `APITimeoutError`), walking Graphiti's rewrap; provider fields are kept only in an identifier shape, and message text is never included. Neither helper raises.
