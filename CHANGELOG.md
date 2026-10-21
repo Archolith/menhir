@@ -1,3 +1,9 @@
+## 2026-10-14 - Scan release archives from private output directories
+
+- `deploy/build_release_image.py`: bind only the public image archive into each scanner, keeping private parent directories and sibling artifacts inaccessible.
+- `tests/test_build_release_image.py`: require the archive-only read-only bind for both Syft and Grype.
+- `.agent/reviews/menhir-release-container-audit-2026-10-14.md`, `.agent/plans/menhir-168-phase0-baseline-contract.md`: record the real unpublished image/fork checks, scanner reproduction, upstream-base scan refusal and remaining #168/#123 gates. Runtime defaults are unchanged.
+
 ## 2026-10-21 - Make OAuth JWKS-fetch 503s diagnosable
 
 - Ported from 0847c6e on `refactor/file-size-refactor`. Diagnostics only; no auth outcome changes.
@@ -91,14 +97,4 @@
 - `services/typed_scalar_service.py`: `perceive_and_persist` forwards the lane parameters. `typed_assertion_repair_repository.py` / `typed_scalar_persistence.py`: pending-binding repair keeps `importance`.
 - `services/scalar_state_service.py`: a counted View (no anchor) now gets provenance edges: its occurrences as `CONTRIBUTED_TO`, absorbed ones as `SUPERSEDED_ANCHOR`. Stated Views are unchanged. Counted Views stay advisory in recall.
 - Tests: new `tests/test_counting_extraction.py`, `tests/test_counting_consolidation.py`, `tests/test_counting_cursor_live.py` (online).
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-10-15 - Store single happenings as scalar occurrences and count them where no total was stated
-
-- `domain/typed_assertion.py`: new operation `occurrence` (one happening on a `count` or `money` slot; value a positive integer or a positive amount) with an `importance` of `tracked`, `notable` or `routine`, kept out of every identity key. `OPERATIONS` is unchanged, so the scalar parser still drops an occurrence row; stored assertions validate against the new `ASSERTION_OPERATIONS`.
-- `domain/scalar_state_fold.py`: a slot with no stated absolute folds its occurrences into a lower-bound value with `basis="counted"`. It materializes only when an applied occurrence is `tracked` or `notable` (else abstains `routine_only`). An occurrence from a turn that also gave the slot a delta is absorbed, so "three more times" is not counted twice. A slot with a stated absolute is unchanged: occurrences are neither contributors nor superseded anchors.
-- `infrastructure/typed_assertion_models.py`, `typed_assertion_repair_repository.py`, `typed_assertion_write_repository.py`, `projection_coverage_repository.py`: persist and read `importance` (null for every non-occurrence, so existing nodes are written as before).
-- `services/scalar_state_service.py`: a counted View's audit carries `scalar_basis`; stated Views' audit is unchanged.
-- Nothing writes occurrences yet; the counting lane that will is a separate, flagged change (#170).
-- Tests: new `tests/test_scalar_occurrence_fold.py`.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.

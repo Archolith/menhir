@@ -1,3 +1,13 @@
+## 2026-10-15 - Store single happenings as scalar occurrences and count them where no total was stated
+
+- `domain/typed_assertion.py`: new operation `occurrence` (one happening on a `count` or `money` slot; value a positive integer or a positive amount) with an `importance` of `tracked`, `notable` or `routine`, kept out of every identity key. `OPERATIONS` is unchanged, so the scalar parser still drops an occurrence row; stored assertions validate against the new `ASSERTION_OPERATIONS`.
+- `domain/scalar_state_fold.py`: a slot with no stated absolute folds its occurrences into a lower-bound value with `basis="counted"`. It materializes only when an applied occurrence is `tracked` or `notable` (else abstains `routine_only`). An occurrence from a turn that also gave the slot a delta is absorbed, so "three more times" is not counted twice. A slot with a stated absolute is unchanged: occurrences are neither contributors nor superseded anchors.
+- `infrastructure/typed_assertion_models.py`, `typed_assertion_repair_repository.py`, `typed_assertion_write_repository.py`, `projection_coverage_repository.py`: persist and read `importance` (null for every non-occurrence, so existing nodes are written as before).
+- `services/scalar_state_service.py`: a counted View's audit carries `scalar_basis`; stated Views' audit is unchanged.
+- Nothing writes occurrences yet; the counting lane that will is a separate, flagged change (#170).
+- Tests: new `tests/test_scalar_occurrence_fold.py`.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-10-15 - Default the OpenAI chat model to gpt-6-luna
 
 - `config/settings_model.py`: `openai_chat_model` defaults to `gpt-6-luna` (was `gpt-4o-mini`). It resolves to the existing gpt-6 profile (reasoning request shaping, extraction precision block, contained-edge pruning), the model the LongMemEval builds already run. Only OpenAI deployments with `OPENAI_CHAT_MODEL` unset or blank change; `chat_provider` still defaults to `local`.
@@ -320,6 +330,7 @@
 - `.agent/reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md`: record the
   supported-path evidence map and the outstanding packaged-Graphiti E2E and
   release-container validation blockers without claiming Gate B closure.
+
 ## 2026-09-27 - Prepare public Graphiti fork package for Menhir MVP
 
 - Require `archolith-graphiti-core==0.30.2.post1` so normal installs can use a
