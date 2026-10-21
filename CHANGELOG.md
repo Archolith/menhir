@@ -1,3 +1,10 @@
+## 2026-10-13 - Assess Anthropic Scion as prior art for revision intelligence
+
+- `docs/research/prior-art/anthropic-scion-source-control-comparison.md`: dated comparison of Anthropic's proprietary Scion, its open-source status, Git-compatible alternatives, Menhir overlap and risks; no VCS replacement proposed.
+- `.agent/plans/backlog/menhir-scion-exploration-2026-10-13.md`: proposed gated inventory, benchmark and limited-spike plan for Git revision metadata and content-addressed sync, with proof obligations and stop conditions.
+- `docs/research/prior-art/README.md`, `docs/research/README.md`, `.agent/plans/backlog/README.md`: route the research and plan in canonical indexes.
+- `CHANGELOG-archive.md`: retain the oldest dated current entry.
+
 ## 2026-09-24 - explicit staging is a Beacon guardrail
 
 The rule was only in `.agent/maintenance.md` and the startup list, so agents working from Beacon
@@ -87,15 +94,4 @@ missed it: in the Beacon agent-task evaluation, two plans for archiving a Menhir
 - `explorer/recall_lab.py`: the Production arm follows the new default; the facet-only arm turns Oracle ranking and the intent lens off explicitly.
 - Tests: `tests/test_settings.py`, `tests/test_release_config_upgrade.py`, `tests/test_warden_safety_matrix.py`, `tests/test_recall_service.py` and `tests/e2e/_harness/features.py` updated for the new default; new tests for default recall's Warden receipt and for tie order.
 - Evidence and follow-ups: #172; remaining AMA checks in #345; diversity gate stays opt-in (#344).
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-10-18 - Keep scalar View text out of the shared keyword index
-
-- Scalar Views (`scalar_state`, `scalar_history`) are `:Entity` nodes, so their text sat in Graphiti's `node_name_and_summary` full-text index. Lucene weighs terms across the whole index, so every View version shifted the keyword ranks of ordinary entities in every namespace. In the LME counting A/B the 4R count pass added 16 of them and pushed a summary entity from keyword rank 5 to 7, below the 0.15 similarity floor, and the answer went from 5 to 4.
-- `infrastructure/view_models.py`: new `ViewKind.keyword_indexed` (default true); false for `ScalarStateKind` and `ScalarHistoryKind`.
-- `infrastructure/view_write_repository.py`: for those kinds `record()` writes the surface into `view_name` / `view_summary` and leaves `name` / `summary` empty, on create and on the authoritative refresh. `content` keeps the summary (it is not indexed). Other kinds are written as before.
-- Readers return the moved text: `MEMORY_RETURN_FIELDS` and `ENTITY_METADATA_FIELDS` (`infrastructure/cypher.py`), `fetch_current_scalar_view_for_slot` (the name the authority lane renders), `list_views`, and the explorer's live scalar-state query.
-- `infrastructure/schema.py`: scalar activation moves indexed text on existing scalar Views (pre-change nodes, or an older writer during a rolling deploy) into `view_name` / `view_summary`. Idempotent; newer text wins.
-- Recall no longer finds scalar Views through keyword search. In the A/B outputs it never had: they reached answers only through the authority lane. Each View still counts toward its namespace's `group_id` term, which shifts every score in that namespace equally and leaves ranks alone.
-- Tests: new `tests/test_scalar_view_keyword_index_live.py` (online; fails on the old writer). `tests/test_scalar_state_view.py`: two assertions moved from `name` to `view_name`, because they pinned where the surface is stored.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
