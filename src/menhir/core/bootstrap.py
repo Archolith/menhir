@@ -219,6 +219,7 @@ def build_memory_services(
         graphiti_add_episode_timeout_s=float(settings.graphiti_add_episode_timeout_seconds),
         graphiti_episode_max_estimated_tokens=int(settings.graphiti_episode_max_estimated_tokens),
         canonical_self_binding_mode=str(getattr(settings, "canonical_self_binding_mode", "off")),
+        inferred_self_mode=str(getattr(settings, "inferred_self_mode", "off")),
         max_llm_calls_per_session_window=settings.max_llm_calls_per_session_window,
         llm_session_window_seconds=settings.llm_session_window_seconds,
         max_llm_calls_per_enrichment_job=settings.max_llm_calls_per_enrichment_job,
@@ -247,6 +248,7 @@ def build_memory_services(
         counting_wording_enabled=settings.personal_memory_counting_wording_enabled,
         scalar_history_enabled=settings.personal_memory_scalar_history_enabled,
         event_history_authority_enabled=event_history_authority_effective(settings),
+        inferred_self_mode=str(getattr(settings, "inferred_self_mode", "off")),
         counting_enabled=bool(
             settings.personal_memory_counting_enabled
             and settings.personal_memory_scalar_state_enabled

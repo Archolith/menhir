@@ -111,6 +111,8 @@ def mutable_eligibility_cypher(survivor: str = "survivor", absorbed: str = "abso
         clauses.extend([
             f"coalesce({var}.is_self, false) = false",
             f"toLower(trim(coalesce({var}.entity_role, ''))) <> 'self'",
+            f"toLower(trim(coalesce({var}.entity_role, ''))) <> 'inferred_self'",
+            f"{var}.self_tier IS NULL",
             f"toUpper(trim(coalesce({var}.freshness, 'ACTIVE'))) IN $mergeable_freshness",
             f"toUpper(trim(coalesce({var}.scope, ''))) <> 'PROMOTED'",
             f"coalesce({var}.user_flagged, false) = false",

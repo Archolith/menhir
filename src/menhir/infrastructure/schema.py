@@ -164,6 +164,8 @@ def _node_index_queries() -> list[str]:
             "CREATE INDEX episodic_processing_lease_expires_idx IF NOT EXISTS FOR (n:Episodic) ON (n.processing_lease_expires_at)",
             "CREATE INDEX episodic_queued_at_idx IF NOT EXISTS FOR (n:Episodic) ON (n.queued_at)",
             "CREATE INDEX episodic_resolved_episode_uuid_idx IF NOT EXISTS FOR (n:Episodic) ON (n.resolved_episode_uuid)",
+            # Two-tier self Phase 3: the re-enable sweep runs on every lease-recovery pass.
+            "CREATE INDEX episodic_extraction_skipped_for_idx IF NOT EXISTS FOR (n:Episodic) ON (n.extraction_skipped_for)",
             # Dirty-namespace detection scans :Episodic with a content STARTS WITH predicate on
             # every consolidation request and scheduler cycle; a plain index backs prefix search.
             "CREATE INDEX episodic_content_idx IF NOT EXISTS FOR (n:Episodic) ON (n.content)",

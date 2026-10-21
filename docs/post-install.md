@@ -62,8 +62,9 @@ not merge a newer template into an existing file. `--provider` explicitly select
 missing or blank model/URL defaults are filled, while custom values and secrets are retained.
 
 For normal startup, process/service environment wins over the selected `.env`, then unset
-settings use the installed version's code defaults. `ENV_FILE` selects the file; `menhir up`
-otherwise selects its checkout/state `.env`. Removing a setting restores the current code
+settings use the installed version's code defaults. `ENV_FILE` selects the file; otherwise
+`./.env`, then the state directory's `.env` (`MENHIR_STATE_DIR`, default `~/.menhir`) is read.
+`menhir up` otherwise selects its checkout/state `.env`. Removing a setting restores the current code
 default, not the previous release's behavior. Current code has no separate feature-default
 policy for fresh versus existing installs. Before any future new-install-only promotion, its
 owner must choose an implementation that distinguishes those paths or explicitly preserve the
@@ -113,7 +114,8 @@ menhir serve
 ```
 
 `diagnostics` is an offline, redacted configuration snapshot. `check` verifies live dependencies.
-Both read `.env` from the current directory (or `ENV_FILE`), the same file `serve` uses.
+Both read `ENV_FILE`, else `.env` in the current directory, else `.env` in the state directory
+(`MENHIR_STATE_DIR`, default `~/.menhir`), the same file `serve` uses.
 After startup, `/api/health` confirms the process is alive and `/api/ready` confirms its dependencies:
 
 ```bash
