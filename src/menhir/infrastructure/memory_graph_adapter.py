@@ -2654,9 +2654,11 @@ class MemoryGraphAdapter:
         *,
         similarity: float,
         operation_id: str | None = None,
+        expected_fact_uuids: list[str] | None = None,
     ) -> dict[str, int]:
         return self._correlation.merge_entity(
             survivor_uuid, absorbed_uuid, similarity=similarity, operation_id=operation_id,
+            expected_fact_uuids=expected_fact_uuids,
         )
 
     def correlation_exists(self, uuid_a: str, uuid_b: str) -> bool:

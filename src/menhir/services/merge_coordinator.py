@@ -69,10 +69,25 @@ class MergeGraphAdapter(Protocol):
     def fetch_merge_state(self, survivor_uuid: str, absorbed_uuid: str) -> dict[str, Any]: ...
     def merge_entity(
         self, survivor_uuid: str, absorbed_uuid: str, *, similarity: float,
-        operation_id: str | None = ...,
+        operation_id: str | None = ..., expected_fact_uuids: list[str] | None = ...,
     ) -> dict[str, Any]: ...
 
 
+
+
+def _snapshot_fact_uuids(snapshot_json: str | None, survivor_uuid: str) -> list[str] | None:
+    """The moved-fact uuids recorded in a PREPARE snapshot, as unmerge will read them.
+
+    None when there is no loadable snapshot: unmerge then refuses anyway, so there is no inverse
+    for the merge's fact-set guard to keep consistent.
+    """
+    if not snapshot_json:
+        return None
+    try:
+        body = ms.load_snapshot(ms.loads(snapshot_json))
+        return ms.moved_fact_uuids(ms.decode_node(body["absorbed"]), survivor_uuid=survivor_uuid)
+    except (TypeError, ValueError, KeyError, ms.SnapshotSchemaError):
+        return None
 
 
 def _canonical(payload: Any) -> str:
@@ -172,6 +187,9 @@ class MergeCoordinator:
             "similarity": float(similarity),
             "requested_at": _utc_now_iso(),
             "expected_before_sha256": merge_state_fingerprint(before, op_id=op_id),
+            # Durable with the snapshot: the merge moves only these facts, so a crash-replay hours
+            # later cannot move facts the unmerge would not move back.
+            "expected_fact_uuids": _snapshot_fact_uuids(snapshot_json, survivor_uuid),
         }
         # The state a successful merge produces: absorbed gone, survivor present, lineage recorded,
         # and stamped with THIS op. Frozen at PREPARE so a replay can recognize its own work.
@@ -333,10 +351,16 @@ class MergeCoordinator:
 
         # Expected before-state -> mutate. merge_entity re-checks eligibility itself and repeats the
         # material predicates inside the mutation, so a change in this window still fails closed.
+        expected_facts = request.get("expected_fact_uuids")
+        if expected_facts is None:
+            # A row PREPAREd before requests carried the set: read it from the row's own snapshot.
+            expected_facts = _snapshot_fact_uuids(
+                (self.journal.get(op_id) or {}).get("before_snapshot_json"), survivor_uuid
+            )
         try:
             result = self.graph_adapter.merge_entity(
                 survivor_uuid, absorbed_uuid, similarity=float(request["similarity"]),
-                operation_id=op_id,
+                operation_id=op_id, expected_fact_uuids=expected_facts,
             )
         except Exception as exc:  # noqa: BLE001
             self.journal.record_attempt(op_id, error=f"{type(exc).__name__}: {exc}")
