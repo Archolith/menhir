@@ -1,3 +1,11 @@
+## 2026-10-21 - Split 27 oversized modules that main has not changed since the file-size branch
+
+- Ports part of `refactor/file-size-refactor` (2802ebb): only the 27 originals whose pre-split text is identical to main's. Each keeps its name and re-exports what moved, so no import site changes; moved code lives in 87 new sibling modules. 16 `src/menhir` modules (`api/oauth_authorize`, `cli`, `core/runtime_preflight`, `domain/{artifact_reconciliation,projection_coverage,scalar_dependency_evidence}`, `explorer/{extraction_lab,recall_packet_prototype}`, `infrastructure/{evidence_publication_intents,graph_operations,projection_lifecycle_repository}`, `infrastructure/telemetry/{event_store,lifecycle_store,recall_store}`, `snapshot/{protocol,receive}`), 6 services (`correlation_service`, `deterministic_scalar_extractor`, `metric_write_coordinator`, `research_scalar_isolated_adapter`, `saga_reconcile_dispatcher`, `structural_scalar_composer`) and 5 scripts.
+- Every top-level definition of main's originals appears unchanged (AST-equal) in the split, except class bodies that became mixin bases (each method unchanged), `__all__` additions, and lookups routed through the original module so existing monkeypatch seams still apply. Extracted Cypher constants equal the original inline queries.
+- Fixes two defects in the branch's split: `EvidencePublicationIntentRepository` regains `@dataclass(frozen=True)` (its constructor was lost), and `telemetry/recall_store.py` keeps its module `logger`.
+- Not ported: the 75 other split targets (changed on main since, or no longer present); they need a fresh split.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-10-21 - Two-tier self identity: an inferred user tier behind MENHIR_INFERRED_SELF_MODE
 
 - New setting `MENHIR_INFERRED_SELF_MODE` (`off` default, `observe`, `enforce`; unrecognized falls back to `off`). With `enforce`, an episode that cannot reach the anchored speaker marker (agent-written memories, agent-quoted user statements) is offered a Menhir-allocated `MenhirInferredUser_` marker, and what the model attaches to it lands on one inferred self per namespace (`user-inferred`, `entity_role=inferred_self`, `self_tier=inferred`, never `is_self`) instead of a new ordinary "user" node (#343). `observe` records what would have been offered and binds nothing.
@@ -92,12 +100,4 @@
 - Standard rates per 1M tokens: $0.10 in / $0.01 cached / $0.50 out (gpt-4o-mini: $0.15 / $0.075 / $0.60); Flex (`MENHIR_OPENAI_SERVICE_TIER=flex`) is half. It spends reasoning tokens, billed as output.
 - Docs: `docs/post-install.md`, `docs/model-governance.md`.
 - Tests: changed because they pinned the old default: the `openai` row of `test_provider_defaults_fill_blanks_without_overwriting_choices_or_opt_outs` and the openai branch of `test_provider_defaults_create_fresh_state_env` in `tests/test_cli_setup.py`.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-10-15 - Say which kind of provider error a failed or retried LLM call hit
-
-- `infrastructure/openai_rate_limit.py`: the 429 backoff warning names the kind (`flex_capacity` for Flex `resource_unavailable`, `rate_limit`, or `quota`) with the provider code and type, the retry hint and the request id. New `provider_error_code` builds a content-free label (`RateLimitError:429:resource_unavailable`, `APITimeoutError`), walking Graphiti's rewrap; provider fields are kept only in an identifier shape, and message text is never included. Neither helper raises.
-- `infrastructure/observability.py`, `infrastructure/telemetry/recorders.py`, `infrastructure/telemetry/llm_usage_store.py`: a failed call's usage event carries that label into a new `llm_usage_events.error_code` column (added to existing sidecars on open); `error` stays redacted. The store drops a value outside the label shape. `fetch_llm_usage_summary` adds `failed_by_error_code`.
-- `infrastructure/telemetry/erasure_inventory.py`: `error_code` is listed as non-content.
-- Tests: new `tests/infrastructure/test_provider_error_detail.py`.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
