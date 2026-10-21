@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import logging
 import uuid as uuidlib
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -67,6 +68,10 @@ class MemoryGraphAdapter:
     """Thin façade over graph storage; delegates to focused sub-repositories."""
 
     neo4j: Neo4jRepository
+    # keyword-only dataclass field (a same-named property would clobber the init default)
+    counting_enabled: bool = field(default=False, kw_only=True)
+    # unit 4R: counted Views fold by count decision; only effective with counting on.
+    counting_match_enabled: bool = field(default=False, kw_only=True)
 
     def __post_init__(self) -> None:
         from menhir.infrastructure.memory_queries import MemoryQueryRepository
@@ -102,6 +107,8 @@ class MemoryGraphAdapter:
         self._typed_assertions = TypedAssertionRepository(self.neo4j)
         from menhir.infrastructure.typed_event_repository import TypedEventAssertionRepository
         self._typed_event_assertions = TypedEventAssertionRepository(self.neo4j)
+        from menhir.infrastructure.reversion_repository import PerceptionReversionRepository
+        self._reversion = PerceptionReversionRepository(self.neo4j)
 
     # -------------------------------------------------------------------------
     # Schema bootstrap (stays here — uses SHOW INDEXES admin query)
@@ -257,13 +264,19 @@ class MemoryGraphAdapter:
         the fairness frontier (ScalarStateView C.4.4)."""
         return self._typed_assertions.mark_orphan_repair_attempted(work_items, at=at)
 
-    def scalar_state_service(self, *, scalar_history_enabled: bool = False) -> Any:
+    def scalar_state_service(
+        self, *, scalar_history_enabled: bool = False, counting_enabled: bool | None = None,
+        count_match: bool | None = None,
+    ) -> Any:
         """Build a `ScalarStateService` bound to this adapter's typed-assertion store (fold input) and
-        its scalar-state View sink. Used by the C.4.3 perception path to rebuild Views after persist."""
+        its scalar-state View sink. Used by the C.4.3 perception path to rebuild Views after persist.
+        Every fold path builds its service here, so the counting and match fold modes are set once."""
         from menhir.services.scalar_state_service import ScalarStateService
         return ScalarStateService(
             self._typed_assertions, self,
-            scalar_history_enabled=scalar_history_enabled)
+            scalar_history_enabled=scalar_history_enabled,
+            counting_enabled=self.counting_enabled if counting_enabled is None else counting_enabled,
+            count_match=self.counting_match_enabled if count_match is None else count_match)
 
     # -------------------------------------------------------------------------
     # Typed-event assertion delegates → TypedEventAssertionRepository
@@ -324,6 +337,21 @@ class MemoryGraphAdapter:
         to the adapter itself as the event-lane timeline View sink."""
         from menhir.services.event_history_service import EventHistoryService
         return EventHistoryService(self._typed_event_assertions, self)
+
+    def run_view_projection_repairs(
+        self, namespaces: list[str], *, owner_id: str, scalar_history_enabled: bool = False,
+        limit: int = 25,
+    ) -> dict[str, Any]:
+        """One bounded pass over `namespaces`' View projection-repair receipts."""
+        from menhir.infrastructure.view_projection_repair import ViewProjectionRepairRepository
+        from menhir.services.view_projection_repair import ViewProjectionRepairService
+        service = ViewProjectionRepairService(
+            ViewProjectionRepairRepository(self.neo4j),
+            scalar_rebuilder=self.scalar_state_service(
+                scalar_history_enabled=scalar_history_enabled),
+            event_rebuilder=self.event_history_service(),
+        )
+        return service.run_pending(owner_id=owner_id, limit=limit, namespaces=namespaces)
 
     def bootstrap_phase_one(self) -> PhaseOneSchemaResult:
         """Apply phase-1 schema fields and indexes in an idempotent manner."""
@@ -404,6 +432,10 @@ class MemoryGraphAdapter:
     def episodic_twin_uuids(self, node_uuid: str) -> list[str]:
         """See EpisodeLifecycleRepository.episodic_twin_uuids."""
         return self._episodes.episodic_twin_uuids(node_uuid)
+
+    def erasure_evidence_uuids(self, node_uuid: str) -> list[str]:
+        """See EpisodeLifecycleRepository.erasure_evidence_uuids."""
+        return self._episodes.erasure_evidence_uuids(node_uuid)
 
     def list_episodes_missing_content_embedding(
         self,
@@ -688,6 +720,24 @@ class MemoryGraphAdapter:
         reported, never absorbed; see `EpisodeLifecycleRepository.ensure_self_entity`."""
         return self._episodes.ensure_self_entity(namespace)
 
+    def link_self_tiers(self, namespace: str) -> bool:
+        """Structural INFERRED_VIEW_OF link from anchored self to inferred self, only when both
+        exist; see `EpisodeLifecycleRepository.link_self_tiers`."""
+        return self._episodes.link_self_tiers(namespace)
+
+    def mark_episode_verbatim_skipped(
+        self, episode_uuid: str, *, worker_id: str, claim_started_at: object | None,
+    ) -> str | None:
+        """See `EpisodeLifecycleRepository.mark_episode_verbatim_skipped`."""
+        return self._episodes.mark_episode_verbatim_skipped(
+            episode_uuid, worker_id=worker_id, claim_started_at=claim_started_at)
+
+    def reenable_verbatim_skips(
+        self, *, projection_uuid: str | None = None, limit: int = 100,
+    ) -> list[str]:
+        """See `EpisodeLifecycleRepository.reenable_verbatim_skips`."""
+        return self._episodes.reenable_verbatim_skips(projection_uuid=projection_uuid, limit=limit)
+
     def detect_self_forks(self, namespace: str) -> list[str]:
         """Read-only inventory of same-named self forks for `namespace`.
 
@@ -964,10 +1014,25 @@ class MemoryGraphAdapter:
         return self._memory_queries.fetch_assertion_candidate_metadata(assertion_ids)
 
     def fetch_temporal_facts(
-        self, node_uuids: list[str]
+        self,
+        node_uuids: list[str],
+        *,
+        query_vector: list[float] | None = None,
+        namespace: str | None = None,
     ) -> list[dict[str, object]]:
         """Fetch bi-temporal fact-edge state for candidate nodes."""
-        return self._memory_queries.fetch_temporal_facts(node_uuids)
+        return self._memory_queries.fetch_temporal_facts(
+            node_uuids, query_vector=query_vector, namespace=namespace
+        )
+
+    def search_facts_by_keywords(
+        self,
+        phrases: Sequence[str],
+        namespace: str | None,
+        limit: int = 50,
+    ) -> list[dict[str, object]]:
+        """Keyword search over fact-edge text, scoped to the namespace's silo."""
+        return self._memory_queries.search_facts_by_keywords(phrases, namespace, limit)
 
     def fetch_candidate_fact_edges(
         self, node_uuids: list[str]
@@ -1670,6 +1735,211 @@ class MemoryGraphAdapter:
             namespace, cursor_at=cursor_at, cursor_uuid=cursor_uuid,
             perceiver_version=perceiver_version, at=at)
 
+    # --- counting-consolidation cursor (counting lane; never reads past the scalar cursor) ---
+    def list_counting_dirty_namespaces(
+        self, *, perceiver_version: str, scalar_perceiver_version: str, limit: int = 200,
+    ) -> list[str]:
+        return self._turn_evidence.list_counting_dirty_evidence_namespaces(
+            perceiver_version=perceiver_version,
+            scalar_perceiver_version=scalar_perceiver_version, limit=limit)
+
+    def load_next_counting_batch(
+        self, namespace: str, *, perceiver_version: str, scalar_perceiver_version: str,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        return self._turn_evidence.load_next_counting_evidence_batch(
+            namespace, perceiver_version=perceiver_version,
+            scalar_perceiver_version=scalar_perceiver_version, limit=limit)
+
+    def advance_counting_cursor(
+        self, namespace: str, *, cursor_at: str, cursor_uuid: str,
+        perceiver_version: str, at: str, run_id: str, incarnation: str, epoch: int,
+    ) -> None:
+        self._turn_evidence.advance_counting_cursor(
+            namespace, cursor_at=cursor_at, cursor_uuid=cursor_uuid,
+            perceiver_version=perceiver_version, at=at,
+            run_id=run_id, incarnation=incarnation, epoch=epoch)
+
+    def claim_counting_namespace(
+        self, namespace: str, *, run_id: str, lease_seconds: int, now: str,
+    ) -> dict[str, Any] | None:
+        return self._turn_evidence.claim_counting_namespace(
+            namespace, run_id=run_id, lease_seconds=lease_seconds, now=now)
+
+    def renew_counting_claim(
+        self, namespace: str, *, run_id: str, incarnation: str, epoch: int,
+        lease_seconds: int, now: str,
+    ) -> bool:
+        return self._turn_evidence.renew_counting_claim(
+            namespace, run_id=run_id, incarnation=incarnation, epoch=epoch,
+            lease_seconds=lease_seconds, now=now)
+
+    def release_counting_claim(
+        self, namespace: str, *, run_id: str, incarnation: str,
+        rebuilt_subjects: list[str] | None = None,
+    ) -> None:
+        self._turn_evidence.release_counting_claim(
+            namespace, run_id=run_id, incarnation=incarnation, rebuilt_subjects=rebuilt_subjects)
+
+    def current_version_occurrence_spans(
+        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
+        include_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        return self._turn_evidence.current_version_occurrence_spans(
+            namespace, turn_ids, perceiver_version=perceiver_version, include_ids=include_ids)
+
+    def prior_version_occurrences(
+        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
+    ) -> list[dict[str, Any]]:
+        return self._turn_evidence.prior_version_occurrences(
+            namespace, turn_ids, perceiver_version=perceiver_version)
+
+    def retire_prior_version_occurrences(
+        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
+        run_id: str, incarnation: str, epoch: int,
+        keep_ids: list[str] | None = None, promote_ids: list[str] | None = None,
+    ) -> list[str]:
+        return self._turn_evidence.retire_prior_version_occurrences(
+            namespace, turn_ids, perceiver_version=perceiver_version,
+            run_id=run_id, incarnation=incarnation, epoch=epoch,
+            keep_ids=keep_ids, promote_ids=promote_ids)
+
+    # --- prior-version retirement, scalar + event lanes (#170 D1; reversion_repository) ---
+    def scalar_prior_version_rows(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+    ) -> list[dict[str, Any]]:
+        return self._reversion.scalar_prior_version_rows(
+            namespace, turn_ids, perceiver_rank=perceiver_rank)
+
+    def scalar_current_version_spans(
+        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
+        include_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        return self._reversion.scalar_current_version_spans(
+            namespace, turn_ids, perceiver_version=perceiver_version, include_ids=include_ids)
+
+    def scalar_owed_subjects(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+    ) -> list[str]:
+        return self._reversion.scalar_owed_subjects(
+            namespace, turn_ids, perceiver_rank=perceiver_rank)
+
+    def retire_scalar_prior_version(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+        perceiver_version: str, keep_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self._reversion.retire_scalar_prior_version(
+            namespace, turn_ids, perceiver_rank=perceiver_rank,
+            perceiver_version=perceiver_version, keep_ids=keep_ids)
+
+    def event_prior_version_rows(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+    ) -> list[dict[str, Any]]:
+        return self._reversion.event_prior_version_rows(
+            namespace, turn_ids, perceiver_rank=perceiver_rank)
+
+    def event_current_version_spans(
+        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
+    ) -> list[dict[str, Any]]:
+        return self._reversion.event_current_version_spans(
+            namespace, turn_ids, perceiver_version=perceiver_version)
+
+    def event_owed_lanes(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+    ) -> list[dict[str, Any]]:
+        return self._reversion.event_owed_lanes(
+            namespace, turn_ids, perceiver_rank=perceiver_rank)
+
+    def retire_event_prior_version(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+        perceiver_version: str, keep_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self._reversion.retire_event_prior_version(
+            namespace, turn_ids, perceiver_rank=perceiver_rank,
+            perceiver_version=perceiver_version, keep_ids=keep_ids)
+
+    def mark_counting_flag_state(
+        self, namespace: str, *, enabled: bool, at: str, create_only: bool = False,
+        match: bool = False,
+    ) -> None:
+        self._turn_evidence.mark_counting_flag_state(
+            namespace, enabled=enabled, at=at, create_only=create_only, match=match)
+
+    def counting_flag_sweep_targets(
+        self, *, enabled: bool, namespaces: list[str] | None, limit: int, match: bool = False,
+    ) -> list[str]:
+        return self._turn_evidence.counting_flag_sweep_targets(
+            enabled=enabled, namespaces=namespaces, limit=limit, match=match)
+
+    # ---- unit 4R count decisions -> CountDecisionRepository ----
+
+    def count_occurrences_by_ids(
+        self, namespace: str, assertion_ids: list[str], *, perceiver_version: str,
+    ) -> list[dict[str, Any]]:
+        from menhir.infrastructure.count_decision_repository import CountDecisionRepository
+        return CountDecisionRepository(self.neo4j).occurrences_by_ids(
+            namespace, assertion_ids, perceiver_version=perceiver_version)
+
+    def counted_occurrences_for_subjects(
+        self, namespace: str, subject_uuids: list[str], *, limit: int,
+    ) -> list[dict[str, Any]]:
+        from menhir.infrastructure.count_decision_repository import CountDecisionRepository
+        return CountDecisionRepository(self.neo4j).counted_occurrences_for_subjects(
+            namespace, subject_uuids, limit=limit)
+
+    def undecided_count_occurrences(
+        self, namespace: str, *, perceiver_version: str, limit: int,
+    ) -> list[dict[str, Any]]:
+        from menhir.infrastructure.count_decision_repository import CountDecisionRepository
+        return CountDecisionRepository(self.neo4j).undecided_occurrences(
+            namespace, perceiver_version=perceiver_version, limit=limit)
+
+    def cosine_related_counted(
+        self, namespace: str, probes: list[dict[str, Any]], *, embed_version: str,
+        min_cosine: float, per_probe: int,
+    ) -> list[dict[str, Any]]:
+        from menhir.infrastructure.count_decision_repository import CountDecisionRepository
+        return CountDecisionRepository(self.neo4j).cosine_related_counted(
+            namespace, probes, embed_version=embed_version, min_cosine=min_cosine,
+            per_probe=per_probe)
+
+    def redecide_count_occurrences(
+        self, namespace: str, *, perceiver_version: str, max_attempts: int, limit: int,
+        exclude_run_id: str = "", cooldown_s: int | None = None,
+    ) -> list[dict[str, Any]]:
+        from menhir.infrastructure.count_decision_repository import CountDecisionRepository
+        return CountDecisionRepository(self.neo4j).redecide_occurrences(
+            namespace, perceiver_version=perceiver_version, max_attempts=max_attempts,
+            limit=limit, exclude_run_id=exclude_run_id, cooldown_s=cooldown_s)
+
+    def pending_decision_namespaces(
+        self, *, perceiver_version: str, max_attempts: int, limit: int, cooldown_s: int,
+    ) -> list[str]:
+        from menhir.infrastructure.count_decision_repository import CountDecisionRepository
+        return CountDecisionRepository(self.neo4j).pending_decision_namespaces(
+            perceiver_version=perceiver_version, max_attempts=max_attempts, limit=limit,
+            cooldown_s=cooldown_s)
+
+    def record_count_decisions(
+        self, namespace: str, decisions: list[dict[str, Any]], *, perceiver_version: str,
+        run_id: str, incarnation: str, epoch: int,
+        swaps: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        from menhir.infrastructure.count_decision_repository import CountDecisionRepository
+        return CountDecisionRepository(self.neo4j).record_count_decisions(
+            namespace, decisions, perceiver_version=perceiver_version,
+            run_id=run_id, incarnation=incarnation, epoch=epoch, swaps=swaps)
+
+    def counting_sweep_subjects(
+        self, namespace: str, *, limit: int, after: str = "",
+    ) -> list[str]:
+        return self._turn_evidence.counting_sweep_subjects(namespace, limit=limit, after=after)
+
+    def scalar_claims_for_turns(
+        self, namespace: str, turn_ids: list[str], *, limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        return self._turn_evidence.scalar_claims_for_turns(namespace, turn_ids, limit=limit)
+
     # --- selective :TurnEvidence capture (ADR 0001) ---
     def record_turn_evidence(self, **kwargs: Any) -> dict[str, Any]:
         return self._turn_evidence.record_turn_evidence(**kwargs)
@@ -2240,6 +2510,8 @@ class MemoryGraphAdapter:
 
     def fetch_scalar_authority_contributors(self, **kwargs: Any) -> dict[str, Any]:
         """Bounded labeled provenance for the structured authority layer (Phase 4c/7.J)."""
+        # Counting off: occurrence contributors stay hidden on every read (kill switch).
+        kwargs.setdefault("include_occurrences", bool(self.counting_enabled))
         return self._views.fetch_scalar_authority_contributors(**kwargs)
 
     def scalar_view_has_user_foundation(self, **kwargs: Any) -> bool:
@@ -2293,6 +2565,7 @@ class MemoryGraphAdapter:
         return self._views.draw_scalar_history_entries(**kwargs)
 
     def list_scalar_history_entries(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.setdefault("include_occurrences", bool(self.counting_enabled))  # kill switch
         return self._views.list_scalar_history_entries(**kwargs)
 
     def record_timeline(self, **kwargs: Any) -> dict[str, Any]:
@@ -2381,9 +2654,11 @@ class MemoryGraphAdapter:
         *,
         similarity: float,
         operation_id: str | None = None,
+        expected_fact_uuids: list[str] | None = None,
     ) -> dict[str, int]:
         return self._correlation.merge_entity(
             survivor_uuid, absorbed_uuid, similarity=similarity, operation_id=operation_id,
+            expected_fact_uuids=expected_fact_uuids,
         )
 
     def correlation_exists(self, uuid_a: str, uuid_b: str) -> bool:

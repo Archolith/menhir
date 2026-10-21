@@ -158,7 +158,15 @@ def build_runtime_lifespan(
         )
         app.state.runtime_ctx = ctx
         app.state.repo = ctx.built.neo4j
-        graph_adapter = MemoryGraphAdapter(neo4j=app.state.repo)
+        graph_adapter = MemoryGraphAdapter(
+            neo4j=app.state.repo,
+            counting_enabled=bool(
+                getattr(settings, "personal_memory_counting_enabled", False)
+                and getattr(settings, "personal_memory_scalar_state_enabled", False)
+            ),
+            counting_match_enabled=bool(
+                getattr(settings, "personal_memory_counting_match_enabled", False)),
+        )
         lifecycle_service = LifecycleService(
             graph_adapter=graph_adapter,
             graphiti_client=ctx.built.graphiti_client,

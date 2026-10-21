@@ -58,6 +58,23 @@ NUMERIC_KINDS: frozenset[str] = frozenset({"count", "money", "measurement", "dur
 #: "current unknown, no View" rather than a standing value.
 OPERATIONS: frozenset[str] = frozenset({"absolute", "delta", "expire"})
 
+#: operations only the COUNTING lane may write: one happening on a count/money slot (value 1 or a
+#: positive amount). Kept OUT of `OPERATIONS`, which stays the set the scalar lane may emit, so no
+#: scalar parse path can produce an occurrence.
+COUNTING_OPERATIONS: frozenset[str] = frozenset({"occurrence"})
+
+#: every operation a stored TypedAssertion may carry.
+ASSERTION_OPERATIONS: frozenset[str] = OPERATIONS | COUNTING_OPERATIONS
+
+#: value_kinds an occurrence may count.
+COUNTABLE_KINDS: frozenset[str] = frozenset({"count", "money"})
+
+#: how much an occurrence matters to the user. Carried only on occurrences, never in an identity key.
+IMPORTANCE_LEVELS: frozenset[str] = frozenset({"tracked", "notable", "routine"})
+
+#: a counted slot materializes only if one of its applied occurrences carries one of these.
+MATERIALIZING_IMPORTANCE: frozenset[str] = frozenset({"tracked", "notable"})
+
 #: framing of an `absolute` value (relevant ONLY when operation == "absolute"). `correction` marks an
 #: explicit fix of a previously-stated value ("actually, 182") and is used ONLY to break an otherwise
 #: unbreakable equal-`valid_at` tie at fold time -- never to override a genuinely later value. It is
@@ -208,6 +225,14 @@ def normalize_scalar(value: Any) -> str:
 
 def validate_value(value_kind: str, operation: str, value: Any) -> None:
     """Kind-specific value validation + delta compatibility. Raises ValueError on a mismatch."""
+    if operation == "occurrence":
+        if value_kind not in COUNTABLE_KINDS:
+            raise ValueError(f"occurrence requires value_kind in {sorted(COUNTABLE_KINDS)}, got {value_kind!r}")
+        if not _is_finite_number(value) or value <= 0:
+            raise ValueError("an occurrence value must be a single positive finite number")
+        if value_kind == "count" and not _is_integral_number(value):
+            raise ValueError("a count occurrence must be a positive integer")
+        return
     if operation == "delta":
         if value_kind not in NUMERIC_KINDS:
             raise ValueError(f"delta operation requires a numeric value_kind, got {value_kind!r}")
@@ -287,6 +312,10 @@ class TypedAssertion:
     perceiver_version: str = "v1"
     namespace: str | None = None
     absolute_semantics: str = "ordinary"   # ordinary | correction (framing of an absolute; NOT in any key)
+    importance: str = ""                   # occurrences only: tracked | notable | routine (NOT in any key)
+    count_object: str = ""                 # occurrences only; NOT in any key
+    count_item: str = ""                   # occurrences only; NOT in any key
+    count_action: str = ""                 # occurrences only; NOT in any key
     metadata: dict[str, Any] = field(default_factory=dict)
     # 4a.1 write-time observation embedding (optional): the cosine surface for the recall observation
     # lane, computed from stated_span at persist time. None -> no embedding written (the resumable
@@ -304,8 +333,17 @@ class TypedAssertion:
             raise ValueError("TypedAssertion requires a non-empty attribute (state family)")
         if self.value_kind not in VALUE_KINDS:
             raise ValueError(f"value_kind {self.value_kind!r} not in {sorted(VALUE_KINDS)}")
-        if self.operation not in OPERATIONS:
-            raise ValueError(f"operation {self.operation!r} not in {sorted(OPERATIONS)}")
+        if self.operation not in ASSERTION_OPERATIONS:
+            raise ValueError(f"operation {self.operation!r} not in {sorted(ASSERTION_OPERATIONS)}")
+        if self.operation in COUNTING_OPERATIONS:
+            if self.importance not in IMPORTANCE_LEVELS:
+                raise ValueError(f"importance {self.importance!r} not in {sorted(IMPORTANCE_LEVELS)}")
+        elif self.importance:
+            raise ValueError("importance is carried only on occurrence assertions")
+        if self.operation not in COUNTING_OPERATIONS and (
+                self.count_object or self.count_item or self.count_action):
+            raise ValueError(
+                "count_object/count_item/count_action are carried only on occurrence assertions")
         if not (self.stated_span or "").strip():
             raise ValueError("TypedAssertion requires a non-empty stated_span (source grounding)")
         if not (self.episode_uuid or "").strip():

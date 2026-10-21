@@ -521,11 +521,12 @@ def test_result_carries_only_structured_fields():
 
 
 @pytest.mark.unit
-def test_default_mode_is_off():
-    """A durable-write-semantics change must not activate merely by deploying."""
+def test_default_mode_is_enforce():
+    """Enforce is the default since #169; an explicit "off" remains the opt-out."""
     from menhir.config.settings_model import MemorySettings
 
-    assert MemorySettings().canonical_self_binding_mode == "off"
+    assert MemorySettings().canonical_self_binding_mode == "enforce"
+    assert resolve_bind_mode(MemorySettings().canonical_self_binding_mode) is SelfBindMode.ENFORCE
 
 
 @pytest.mark.unit

@@ -220,6 +220,44 @@ def _event_selection_failed(verdict: EventAuthorityVerdict) -> bool:
     )
 
 
+def _occurrence_contributor_line(contributor: Any) -> str:
+    """Occurrence line: the event date when grounded, else only when it was mentioned (never 'valid')."""
+    line = f"  - {contributor.relation}: {contributor.stated_span}"
+    if contributor.source_sentence:
+        line += f' -- "{contributor.source_sentence}"'
+    mentioned = (contributor.mentioned_at or "")[:10] or "unknown"
+    if contributor.event_at:
+        return f"{line} (event {contributor.event_at[:10]}; mentioned {mentioned})"
+    return f"{line} (mentioned {mentioned})"
+
+
+def _fmt_count(n: Any) -> str:
+    """Format a count as an int when integral, otherwise as-is."""
+    if isinstance(n, float) and n.is_integer():
+        return str(int(n))
+    return str(n)
+
+
+def _count_match_lines(verdict: Any) -> list[str]:
+    """Unit 4R match audit lines (per-action sums, item names) for a lower-bound counted View.
+
+    Malformed JSON or wrong types skip the corresponding line silently."""
+    lines: list[str] = []
+    try:
+        actions = json.loads(verdict.count_actions) if verdict.count_actions else None
+    except (TypeError, ValueError):
+        actions = None
+    if isinstance(actions, dict) and actions:
+        lines.append("  - per action: " + ", ".join(f"{k} {_fmt_count(n)}" for k, n in actions.items()))
+    try:
+        items = json.loads(verdict.count_items) if verdict.count_items else None
+    except (TypeError, ValueError):
+        items = None
+    if isinstance(items, list) and items:
+        lines.append("  - items: " + ", ".join(str(x) for x in items))
+    return lines
+
+
 @dataclass(frozen=True)
 class ContextResult:
     query: str
@@ -374,19 +412,61 @@ class ContextBuilderService:
         # when an event verdict failed closed (current-state scalar must not answer a temporal query).
         if not fail_closed:
             for verdict in recall_result.authority_layer or ():
-                heading = (
-                    f"[Scalar authority: {verdict.status.upper()}] {verdict.attribute} = "
-                    f"{verdict.value} ({verdict.kind}"
-                    + (f", valid {verdict.valid_at}" if verdict.valid_at else "")
-                    + ")"
+                shown_value = (
+                    f"at least {verdict.value} you mentioned" if verdict.lower_bound
+                    else verdict.value
                 )
+                if verdict.lower_bound:
+                    _uncertain = verdict.count_uncertain
+                    if (
+                        isinstance(_uncertain, (int, float))
+                        and not isinstance(_uncertain, bool)
+                        and _uncertain > 0
+                    ):
+                        shown_value = (
+                            f"at least {verdict.value} you mentioned, plus "
+                            f"{_fmt_count(_uncertain)} more that may be repeats"
+                        )
+                if verdict.kind == "history":
+                    _history_n = (
+                        verdict.contributors_total if verdict.contributors_total > 0
+                        else len(verdict.contributors)
+                    )
+                    heading = (
+                        f"[Scalar authority: {verdict.status.upper()}] {verdict.attribute} "
+                        f"history, {_history_n} entries (history"
+                        + (f", valid {verdict.valid_at}" if verdict.valid_at else "")
+                        + ")"
+                    )
+                else:
+                    heading = (
+                        f"[Scalar authority: {verdict.status.upper()}] {verdict.attribute} = "
+                        f"{shown_value} ({verdict.kind}"
+                        + (f", valid {verdict.valid_at}" if verdict.valid_at else "")
+                        + ")"
+                    )
                 authority_lines = [heading]
+                if verdict.lower_bound:
+                    authority_lines.extend(_count_match_lines(verdict))
                 for contributor in verdict.contributors:
+                    if contributor.operation == "occurrence":
+                        authority_lines.append(_occurrence_contributor_line(contributor))
+                        continue
                     authority_lines.append(
                         f"  - {contributor.relation}: {contributor.stated_span} "
                         f"(valid {contributor.valid_at or 'unknown'})"
                     )
-                if verdict.contributors_truncated:
+                if (
+                    verdict.contributors_truncated
+                    and not verdict.contributors
+                    and verdict.contributors_total > 0
+                    and verdict.view_uuid
+                ):
+                    authority_lines.append(
+                        f"  - built from {verdict.contributors_total} items; "
+                        f"drill down: get_scalar_view_items(view_uuid={verdict.view_uuid})"
+                    )
+                elif verdict.contributors_truncated:
                     authority_lines.append(
                         f"  - provenance truncated: {verdict.contributors_total} total; "
                         f"continue at offset {verdict.next_offset} for View {verdict.view_uuid or 'synthetic'}"

@@ -1252,7 +1252,15 @@ def create_app(
         from menhir.services.candidate_service import CandidateService
         from menhir.services.lifecycle_service import LifecycleService
 
-        graph_adapter = MemoryGraphAdapter(neo4j=app.state.repo)
+        graph_adapter = MemoryGraphAdapter(
+            neo4j=app.state.repo,
+            counting_enabled=bool(
+                getattr(settings, "personal_memory_counting_enabled", False)
+                and getattr(settings, "personal_memory_scalar_state_enabled", False)
+            ),
+            counting_match_enabled=bool(
+                getattr(settings, "personal_memory_counting_match_enabled", False)),
+        )
         lifecycle_service = LifecycleService(
             graph_adapter=graph_adapter,
             graphiti_client=UnavailableGraphitiClient("explorer: no live Graphiti client"),

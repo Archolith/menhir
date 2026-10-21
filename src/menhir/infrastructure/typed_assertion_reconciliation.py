@@ -289,8 +289,11 @@ class TypedAssertionReconciliationMixin:
             CALL { MATCH (rr:ScalarProjectionRepair) DETACH DELETE rr
                    RETURN count(rr) AS projection_repairs }
             CALL { MATCH (v:Entity {view_kind: 'scalar_state'}) DETACH DELETE v RETURN count(v) AS views }
-            CALL { MATCH (w:ScalarConsolidationWatermark) DETACH DELETE w RETURN count(w) AS watermarks }
-            RETURN assertions, heads, rebinds, receipts, projection_repairs, views, watermarks
+            CALL { MATCH (w:ScalarConsolidationWatermark) DETACH DELETE w RETURN count(w) AS scalar_marks }
+            CALL { MATCH (cw:CountingConsolidationWatermark) DETACH DELETE cw
+                   RETURN count(cw) AS counting_marks }
+            RETURN assertions, heads, rebinds, receipts, projection_repairs, views,
+                   scalar_marks + counting_marks AS watermarks
             """,
         )
         row = rows[0] if rows else {}

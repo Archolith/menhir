@@ -31,7 +31,7 @@ listed environment variables.
 | Chat provider | `chat_provider` | `LLM_CHAT_PROVIDER` / `MEMORY_CHAT_PROVIDER` | `local` |
 | Local chat model | `local_llm_chat_model` | `LOCAL_LLM_CHAT_MODEL` | `qwen3.5-35b-a3b` |
 | Local embedding model | `local_llm_embed_model` | `LOCAL_LLM_EMBED_MODEL` | empty |
-| OpenAI chat model | `openai_chat_model` | `OPENAI_CHAT_MODEL` | `gpt-4o-mini` |
+| OpenAI chat model | `openai_chat_model` | `OPENAI_CHAT_MODEL` | `gpt-6-luna` |
 | OpenAI embedding model | `openai_embed_model` | `OPENAI_EMBED_MODEL` | `text-embedding-3-small` |
 | Graphiti extraction provider | `graphiti_provider` | `GRAPHITI_LLM_PROVIDER` / `MEMORY_GRAPHITI_PROVIDER` / `GRAPHITI_PROVIDER` | `local` |
 | Graphiti embedding provider | `graphiti_embed_provider` | `GRAPHITI_EMBED_PROVIDER` / `MEMORY_GRAPHITI_EMBED_PROVIDER` | inherits extraction provider |

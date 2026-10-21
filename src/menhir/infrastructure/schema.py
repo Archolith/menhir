@@ -164,6 +164,8 @@ def _node_index_queries() -> list[str]:
             "CREATE INDEX episodic_processing_lease_expires_idx IF NOT EXISTS FOR (n:Episodic) ON (n.processing_lease_expires_at)",
             "CREATE INDEX episodic_queued_at_idx IF NOT EXISTS FOR (n:Episodic) ON (n.queued_at)",
             "CREATE INDEX episodic_resolved_episode_uuid_idx IF NOT EXISTS FOR (n:Episodic) ON (n.resolved_episode_uuid)",
+            # Two-tier self Phase 3: the re-enable sweep runs on every lease-recovery pass.
+            "CREATE INDEX episodic_extraction_skipped_for_idx IF NOT EXISTS FOR (n:Episodic) ON (n.extraction_skipped_for)",
             # Dirty-namespace detection scans :Episodic with a content STARTS WITH predicate on
             # every consolidation request and scheduler cycle; a plain index backs prefix search.
             "CREATE INDEX episodic_content_idx IF NOT EXISTS FOR (n:Episodic) ON (n.content)",
@@ -375,6 +377,8 @@ def get_scalar_state_activation_queries() -> list[str]:
         # — converge on one head. claim_key is a non-unique historical property (index only).
         "CREATE CONSTRAINT typed_assertion_head_source_key_unique IF NOT EXISTS FOR (h:TypedAssertionHead) REQUIRE h.source_key IS UNIQUE",
         "CREATE INDEX typed_assertion_head_claim_key_idx IF NOT EXISTS FOR (h:TypedAssertionHead) ON (h.claim_key)",
+        # #170 D1: one read marker per (lane, turn); records and the prior-version retire MERGE it.
+        "CREATE CONSTRAINT typed_read_marker_key_unique IF NOT EXISTS FOR (m:TypedReadMarker) REQUIRE m.marker_key IS UNIQUE",
         # merge-lineage journal (DB-unique per op+assertion) + reconciliation receipts (Piece C.3)
         "CREATE CONSTRAINT assertion_rebind_key_unique IF NOT EXISTS FOR (r:AssertionRebind) REQUIRE r.rebind_key IS UNIQUE",
         "CREATE INDEX assertion_rebind_op_idx IF NOT EXISTS FOR (r:AssertionRebind) ON (r.merge_op_id)",
@@ -401,6 +405,29 @@ def get_scalar_state_activation_queries() -> list[str]:
         # constraint can come online over an existing single-current store.
         "MATCH (n:Entity {view_kind: 'scalar_state'}) WHERE coalesce(n.view_current, true) AND n.ss_view_key_current IS NULL SET n.ss_view_key_current = n.view_key",
         "CREATE CONSTRAINT scalar_state_view_current_key_unique IF NOT EXISTS FOR (n:Entity) REQUIRE n.ss_view_key_current IS UNIQUE",
+        # Scalar Views keep their text out of the :Entity full-text index (ScalarStateKind /
+        # ScalarHistoryKind keyword_indexed=False). Move any indexed text -- pre-change nodes, or an
+        # older writer during a rolling deploy -- into view_name/view_summary. Newer text wins.
+        "MATCH (n:Entity) WHERE n.view_kind IN ['scalar_state', 'scalar_history'] "
+        "AND (coalesce(n.name, '') <> '' OR coalesce(n.summary, '') <> '') "
+        "SET n.view_name = CASE WHEN coalesce(n.name, '') <> '' THEN n.name ELSE n.view_name END, "
+        "n.view_summary = CASE WHEN coalesce(n.summary, '') <> '' THEN n.summary "
+        "ELSE n.view_summary END, n.name = '', n.summary = ''",
+        # Counting-lane fence: one watermark per namespace, or concurrent claims split the fence.
+        # Pre-constraint stores may hold duplicates from the old unconstrained MERGE; delete every
+        # copy (a reset: turns are re-read and the per-turn fold collapse absorbs repeats) so the
+        # constraint can come online instead of failing activation for the whole scalar lane.
+        "MATCH (w:CountingConsolidationWatermark) WITH w.group_id AS g, collect(w) AS ws "
+        "WHERE size(ws) > 1 UNWIND ws AS d DETACH DELETE d",
+        "MATCH (m:CountingFlagState) WITH m.namespace_key AS k, collect(m) AS ms "
+        "WHERE size(ms) > 1 UNWIND ms AS d DETACH DELETE d",
+        "CREATE CONSTRAINT counting_watermark_group_unique IF NOT EXISTS "
+        "FOR (w:CountingConsolidationWatermark) REQUIRE w.group_id IS UNIQUE",
+        "CREATE CONSTRAINT counting_flag_state_namespace_unique IF NOT EXISTS "
+        "FOR (m:CountingFlagState) REQUIRE m.namespace_key IS UNIQUE",
+        # The flag sweep finds namespaces holding occurrence assertions with this index each pass.
+        "CREATE INDEX typed_assertion_operation_idx IF NOT EXISTS "
+        "FOR (a:TypedAssertion) ON (a.operation)",
     ]
 
 

@@ -99,6 +99,13 @@ def _provider_auth_failure_text() -> str | None:
     return failure.summary() if failure is not None else None
 
 
+def _provider_quota_exhausted_text() -> str | None:
+    from menhir.infrastructure.observability import last_provider_quota_exhaustion
+
+    exhaustion = last_provider_quota_exhaustion()
+    return exhaustion.summary() if exhaustion is not None else None
+
+
 def _service_payload(runtime_ctx: RuntimeContext | None) -> dict[str, str]:
     if runtime_ctx is None:
         return {"runtime": "starting"}
@@ -205,6 +212,7 @@ class RecallRequest(BaseModel):
     # raw episodes, so it is off whenever include_session is False (promoted
     # knowledge only).
     source_memory_limit: int | None = Field(default=None, ge=0, le=50)
+    counted_verdict_limit: int | None = Field(default=None, ge=0, le=50)
 
 
 class RecallTemporalFact(BaseModel):
@@ -256,6 +264,10 @@ class ScalarAuthorityContributorResponse(BaseModel):
     valid_at: str | None = None
     evidence_tier: str | None = None
     episode_uuid: str | None = None
+    source_sentence: str | None = None
+    event_at: str | None = None
+    event_basis: str | None = None
+    mentioned_at: str | None = None
 
 
 class ScalarAuthorityVerdictResponse(BaseModel):
@@ -274,6 +286,11 @@ class ScalarAuthorityVerdictResponse(BaseModel):
     contributors_total: int = 0
     contributors_truncated: bool = False
     next_offset: int | None = None
+    basis: str | None = None
+    lower_bound: bool = False
+    count_uncertain: float | None = None
+    count_actions: str | None = None
+    count_items: str | None = None
 
 
 class EventAuthorityVerdictResponse(BaseModel):
@@ -631,6 +648,9 @@ class HealthResponse(BaseModel):
     # Set when the LLM provider has rejected our credentials since the last successful
     # call: a server can be "ok" and "full" and still unable to enrich anything.
     provider_auth_failure: str | None = None
+    # Set after an insufficient_quota 429 until a call of that kind succeeds: enrichment cannot
+    # progress until credits are added, so a polling driver should stop instead of waiting.
+    provider_quota_exhausted: str | None = None
     startup_mode: str | None = None
     # Echoes MENHIR_INSTANCE_ID when set, so a client (e.g. a smoke launcher) can
     # confirm it is talking to the exact server it started and not a different
@@ -644,6 +664,7 @@ class ReadyResponse(BaseModel):
     capabilities: dict[str, bool]
     failures: list[str]
     provider_auth_failure: str | None = None
+    provider_quota_exhausted: str | None = None
 
 
 class StatsResponse(BaseModel):
@@ -693,12 +714,32 @@ class Phase3RunResponse(BaseModel):
     scalar_advisory: int = 0
     scalar_repair_pending: int = 0
     event_history_enabled: bool = False
+    counting_enabled: bool = False
+    counting_namespaces_processed: int = 0
+    counting_batches: int = 0
+    counting_occurrences_stored: int = 0
+    counting_advisory: int = 0
+    counting_llm_calls: int = 0
+    counting_namespaces_failed: int = 0
+    counting_namespaces_busy: int = 0
+    counting_namespaces_fenced: int = 0
+    counting_dirty_after: bool | None = None
+    # 4R match only (None otherwise): decide outcomes and rows the k samples did not agree on.
+    counting_decided_counted: int | None = None
+    counting_decided_uncertain: int | None = None
+    counting_decided_repeat: int | None = None
+    counting_decided_same_event: int | None = None
+    counting_decided_swapped: int | None = None
+    counting_decided_deferred: int | None = None
+    counting_gate_dropped: int | None = None
     event_namespaces_processed: int = 0
     event_namespaces_failed: int = 0
     event_assertions_recorded: int = 0
     event_assertions_created: int = 0
     event_views_rebuilt: int = 0
     event_llm_calls: int = 0
+    # Per-lane stage counts and no_output/stalled flags (#170 item 4); None on a counter-only pass.
+    lane_outcomes: dict[str, dict[str, Any]] | None = None
 
 
 class Phase3StatusResponse(BaseModel):
@@ -740,6 +781,7 @@ _BACKEND_METHODS = {
     "recall",
     "recall_history",
     "recall_timeline",
+    "get_scalar_view_items",
     "build_context",
     "view_entropy",
     "fetch_memory_by_uuid",

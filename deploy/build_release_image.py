@@ -342,7 +342,10 @@ def validate_vulnerability_scan(raw: bytes, expected_image_id: str) -> dict[str,
 
 
 def _run_scanner(*, scanner: str, image: str, archive: Path) -> bytes:
-    mount = f"type=bind,src={archive.parent},dst=/candidate,readonly"
+    # Mount only the public image archive. Binding its parent preserves host
+    # directory permissions (often 0700), which scanners without DAC override
+    # cannot traverse even when the archive itself is readable.
+    mount = f"type=bind,src={archive},dst=/candidate/{archive.name},readonly"
     command = [
         "docker", "run", "--rm", "--pull", "never", "--read-only",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges=true",

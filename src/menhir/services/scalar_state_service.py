@@ -28,8 +28,10 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Protocol
 
+from menhir.domain.exact_json import dumps_exact
 from menhir.domain.scalar_history import MALFORMED_VALID_AT, build_history
 from menhir.domain.scalar_state_fold import Expiry, FoldResult, fold_assertions
 from menhir.infrastructure import consolidation_audit as _audit
@@ -156,6 +158,21 @@ def _blocked_slots(result: FoldResult) -> set[tuple[str, str, str, str]]:
     }
 
 
+def _count_match_audit(state: Any) -> dict[str, Any]:
+    """View properties for a counted state: the uncertain total, per-action counts and items (match
+    mode), all None otherwise. JSON strings so they are plain node properties."""
+    uncertain = getattr(state, "count_uncertain", None)
+    if uncertain is None:
+        return {"count_uncertain": None, "count_actions": None, "count_items": None}
+    actions = getattr(state, "count_actions", None) or {}
+    return {
+        "count_uncertain": float(uncertain) if isinstance(uncertain, Decimal) else uncertain,
+        # Exact JSON numbers for money sums (exact_json discipline), keys sorted.
+        "count_actions": dumps_exact(dict(sorted(actions.items()))),
+        "count_items": dumps_exact(list(getattr(state, "count_items", None) or [])),
+    }
+
+
 def _projection_complete(result: Any) -> bool:
     """Return whether a rebuild result is safe to use as a durable completion proof."""
     if not isinstance(result, dict) or result.get("complete") is False:
@@ -169,11 +186,24 @@ class ScalarStateService:
 
     def __init__(
         self, assertions: _AssertionSource, views: _ViewSink, *,
-        scalar_history_enabled: bool = False,
+        scalar_history_enabled: bool = False, counting_enabled: bool = True,
+        count_match: bool = False,
     ) -> None:
         self._assertions = assertions
         self._views = views
         self._scalar_history_enabled = scalar_history_enabled
+        self._counting_enabled = counting_enabled
+        # Unit 4R fold mode. Every rebuild path builds this service through the adapter, so one
+        # setting decides how every counted View is folded.
+        self._count_match = bool(count_match) and counting_enabled
+
+    @property
+    def counting_enabled(self) -> bool:
+        return self._counting_enabled
+
+    @property
+    def count_match(self) -> bool:
+        return self._count_match
 
     def fold_entity(
         self, subject_uuid: str, *, namespace: str | None = None, as_of: datetime | None = None,
@@ -184,7 +214,8 @@ class ScalarStateService:
         tenants' assertions sharing a subject_uuid; None = all (unchanged behavior). `as_of` (Phase B)
         is the evaluation time: future assertions (`valid_at > as_of`) are ignored; None = now(UTC)."""
         rows = self._assertions.materializable_assertions_for_entity(subject_uuid, namespace=namespace)
-        return fold_assertions(rows, as_of=as_of)
+        return fold_assertions(rows, as_of=as_of, include_occurrences=self._counting_enabled,
+                               count_match=self._count_match)
 
     def current_authority(
         self, subject_uuid: str, *, namespace: str | None = None, as_of: datetime | None = None,
@@ -243,6 +274,14 @@ class ScalarStateService:
                 "scalar_anchor_value": str(state.anchor_value),
                 "scalar_delta_total": state.delta_total,
             }
+            # Counted states carry the key. Stated states pass None: the create path drops None (new
+            # stated Views stay byte-identical) and the unchanged-value refresh (`SET n += $refresh`)
+            # removes a stale 'counted' mark left by an earlier counted version of the same value.
+            audit["scalar_basis"] = state.basis if state.basis != "stated" else None
+            if state.basis == "counted" and self._counting_enabled:
+                # Unit 4R fields; None outside match mode, so a match on->off rebuild clears them
+                # through the refresh path instead of leaving a stale uncertain count.
+                audit.update(_count_match_audit(state))
             res = self._views.record_scalar_state(
                 subject=state.subject_display, subject_uuid=state.subject_uuid,
                 attribute=state.attribute, scope=state.scope, value_kind=state.value_kind,
@@ -292,13 +331,21 @@ class ScalarStateService:
             # lie or double up. Guarded on the View uuid + an anchor; a mid-rebuild crash self-heals on
             # the next rebuild's redraw. Best-effort: an edge-draw failure must not fail the rebuild
             # (the View + its stamped provenance list are already durable).
+            # A counted View (basis="counted") has no anchor: its contributing occurrences are drawn
+            # as CONTRIBUTED_TO and the absorbed ones (double-count guard) as SUPERSEDED_ANCHOR.
+            # Stated Views pass empty occurrence lists, so their edges are unchanged.
             view_uuid = res.get("uuid")
-            if view_uuid and state.anchor_id and hasattr(self._views, "draw_scalar_state_provenance_edges"):
+            occurrence_ids = list(getattr(state, "contributed_occurrence_ids", ()) or ())
+            if (view_uuid and (state.anchor_id or occurrence_ids)
+                    and hasattr(self._views, "draw_scalar_state_provenance_edges")):
                 try:
                     self._views.draw_scalar_state_provenance_edges(
                         view_uuid=str(view_uuid), anchor_id=state.anchor_id,
-                        contributed_delta_ids=list(state.contributed_delta_ids),
-                        superseded_anchor_ids=list(state.superseded_anchor_ids),
+                        contributed_delta_ids=(list(state.contributed_delta_ids)
+                                               + occurrence_ids),
+                        superseded_anchor_ids=(
+                            list(state.superseded_anchor_ids)
+                            + list(getattr(state, "absorbed_occurrence_ids", ()) or ())),
                     )
                 except Exception:  # noqa: BLE001 - provenance edges are advisory; never fail a rebuild
                     logger.exception(
@@ -377,7 +424,11 @@ class ScalarStateService:
         try:
             rows = self._assertions.materializable_assertions_for_entity(
                 subject_uuid, namespace=namespace)
-            result = build_history(rows, as_of=as_of, max_entries=max_entries)
+            if not self._counting_enabled:
+                # Counting off: history must not list occurrences either (same rule as fold_entity).
+                rows = [r for r in rows if str(r.get("operation")) != "occurrence"]
+            result = build_history(rows, as_of=as_of, max_entries=max_entries,
+                                   **({"count_match": True} if self._count_match else {}))
         except Exception as exc:  # noqa: BLE001 - durable marker must remain retryable
             logger.exception("scalar_history source/build failed for %s", subject_uuid)
             return {

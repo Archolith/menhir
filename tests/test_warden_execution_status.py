@@ -15,6 +15,12 @@ from menhir.services.context_builder import ContextBuilderService
 from menhir.services.recall_service import RecallService
 from menhir.services.scoring_service import ScoringService
 
+# Pre-#173 meanings, pinned so the default flip does not change what these tests check.
+STRICT = RetrievalTuningConfig(enable_warden_gate=True, enable_evidence_anchor=True,
+                               enable_contradiction_interrupt=False, enable_belief_gate=False)
+OFF = RetrievalTuningConfig(enable_warden_gate=False, enable_contradiction_interrupt=False,
+                            enable_belief_gate=False)
+
 
 @pytest.fixture
 def service(stub_graphiti_client, stub_memory_graph_adapter):
@@ -35,7 +41,7 @@ def service(stub_graphiti_client, stub_memory_graph_adapter):
 
 @pytest.mark.asyncio
 async def test_details_are_opt_in_and_cannot_change_enforcement(service):
-    tuning = RetrievalTuningConfig(enable_warden_gate=True)
+    tuning = STRICT
     ordinary = await service.recall("config", namespace="tenant", tuning=tuning)
     detailed = await service.recall("config", namespace="tenant", tuning=tuning, include_warden_status=True)
     assert ordinary.results == detailed.results and ordinary.warden_status is None
@@ -47,8 +53,11 @@ async def test_details_are_opt_in_and_cannot_change_enforcement(service):
     assert status.applied_guards == ("scope", "evidence_anchor", "oracle_admission")
     assert not status.metadata_gaps
     assert "authority_layers" in status.excluded_result_types
-    disabled = await service.recall("config", namespace="tenant", include_warden_status=True)
+    disabled = await service.recall("config", namespace="tenant", tuning=OFF, include_warden_status=True)
     assert disabled.warden_status.state == "disabled" and disabled.warden_notice is None
+    default = await service.recall("config", namespace="tenant", include_warden_status=True)
+    assert default.warden_status.state == "applied"  # on by default since #173
+    assert "evidence_anchor" not in default.warden_status.applied_guards  # opt-in (#349)
 
 
 @pytest.mark.asyncio
@@ -73,7 +82,9 @@ async def test_failure_notice_is_independent_of_diagnostic_visibility(service, m
 @pytest.mark.asyncio
 async def test_optional_guard_is_computed_but_not_applied_without_master(service):
     result = await service.recall("config", namespace="tenant",
-        tuning=RetrievalTuningConfig(enable_belief_gate=True), include_warden_status=True)
+        tuning=RetrievalTuningConfig(enable_belief_gate=True, enable_warden_gate=False,
+                                     enable_contradiction_interrupt=False),
+        include_warden_status=True)
     assert result.warden_status.state == "computed_not_applied"
     assert "currentness" in result.warden_status.configured_guards
     assert not result.warden_status.applied_guards
@@ -133,7 +144,7 @@ async def test_empty_and_missing_metadata_have_honest_receipts(service):
 @pytest.mark.asyncio
 async def test_context_details_are_opt_in_and_budgeted(service, monkeypatch):
     builder = ContextBuilderService(recall_service=service,
-                                   retrieval_tuning=RetrievalTuningConfig(enable_warden_gate=True))
+                                   retrieval_tuning=STRICT)
     ordinary = await builder.build_context("config", namespace="tenant", max_tokens=3000)
     detailed = await builder.build_context("config", namespace="tenant", max_tokens=3000,
                                            include_warden_status=True)
@@ -188,7 +199,7 @@ async def test_concurrent_calls_do_not_share_execution_receipts(service):
     applied, disabled = await asyncio.gather(
         service.recall("config", namespace="tenant", include_warden_status=True,
                        tuning=RetrievalTuningConfig(enable_warden_gate=True)),
-        service.recall("config", namespace="tenant", include_warden_status=True),
+        service.recall("config", namespace="tenant", include_warden_status=True, tuning=OFF),
     )
     assert applied.warden_status.state == "applied"
     assert disabled.warden_status.state == "disabled"

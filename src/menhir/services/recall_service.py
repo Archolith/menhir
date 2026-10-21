@@ -92,19 +92,20 @@ class RecallService(RecallSupportMixin):
     scoring_service: ScoringService
     ingest_service: IngestService | None = None
     lifecycle_service: LifecycleServiceProtocol | None = None
-    #: Step 7 canary: when True, a current scalar_state View may suppress an older provenance-linked
-    #: graph fact for an explicit current-state query (all six authority gates must pass). Default
-    #: OFF -> today's behavior (a View never suppresses a fact).
+    #: Step 7 canary: a current View may suppress an older provenance-linked fact (six gates); off.
     scalar_view_authority_enabled: bool = False
-    #: When True, scalar_history Views are surfaced as advisory context via a dedicated recall lane.
-    #: When False, scalar_history Entities are excluded from generic recall (real rollback).
+    scalar_view_collapse_enabled: bool = False  # Views hide their items (drill-down tool); off = unchanged
+    scalar_view_echo_drop_enabled: bool = False  # only drop observations echoing a verdict slot
+    #: True: scalar_history Views form an advisory recall lane; False: excluded (real rollback).
     scalar_history_enabled: bool = False
-    #: When True, a recognized conservative first-person event recall query (with a non-None
-    #: namespace) surfaces a leading/advisory event-history authority layer. Default OFF -> today's
-    #: behavior (no event authority and no event-assertion repository read).
+    counting_enabled: bool = False  # False hides counted scalar_state Views (read-side kill switch)
+    counting_recall_authority_only: bool = False  # unit R: counted Views only as verdicts
+    counting_wording_enabled: bool = False  # unit 6: "at least N you mentioned", never leads
+    #: When True, a recognized conservative first-person event recall query (non-None namespace) surfaces
+    #: a leading/advisory event-history authority layer. Default OFF: no event authority or assertion read.
     event_history_authority_enabled: bool = False
-    #: Candidate-readonly instances must not reinforce retrieval by touching graph
-    #: access timestamps, edge weights, or lifecycle state.
+    inferred_self_mode: str = "off"  # MENHIR_INFERRED_SELF_MODE; not "off": recall reads both self tiers
+    #: Candidate-readonly: never reinforce retrieval via access timestamps, edge weights or lifecycle.
     read_only: bool = False
     _rehydration_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     _change_log_provider: ChangeLogProvider = field(default_factory=CachedGitChangeLog)
@@ -130,7 +131,7 @@ class RecallService(RecallSupportMixin):
         include_warden_status: bool = False,
         trace: bool = False,
         update_access: bool = True,
-        source_memory_limit: int | None = None,
+        source_memory_limit: int | None = None, counted_verdict_limit: int | None = None,
     ) -> RecallResult:
         result = await run_recall(
             self, query,
@@ -151,10 +152,9 @@ class RecallService(RecallSupportMixin):
             include_warden_status=include_warden_status,
             trace=trace,
             update_access=update_access and not self.read_only,
-            source_memory_limit=source_memory_limit,
+            source_memory_limit=source_memory_limit, counted_verdict_limit=counted_verdict_limit,
         )
         return await apply_event_history_authority_layer(self, result, query, namespace)
 
-    # Drill-down; delegates to run_recall_history, which takes the service first.
-    recall_history = run_recall_history
+    recall_history = run_recall_history  # drill-down; run_recall_history takes the service first
     recall_timeline = run_recall_timeline  # on-demand recorded-time navigation (same delegation)

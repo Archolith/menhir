@@ -302,6 +302,59 @@ class TypedEventAssertion:
         )
 
 
+#: metadata keys (never part of any key). ``stated_at`` is when the turn was said (its reference time);
+#: ``correction`` marks a turn whose sentence carries a correction cue.
+EVENT_STATED_AT = "stated_at"
+EVENT_CORRECTION = "correction"
+
+
+def _event_stated_at(event: TypedEventAssertion) -> datetime | None:
+    """When the event's turn was said. Older assertions carry no ``stated_at``; their ``valid_at`` is
+    that time only when it fell back to the episode reference. Otherwise unknown (None)."""
+    meta = event.metadata if isinstance(event.metadata, dict) else {}
+    stated = parse_iso8601(meta.get(EVENT_STATED_AT)) if meta.get(EVENT_STATED_AT) else None
+    if stated is None and event.time_basis == "episode_reference":
+        stated = parse_iso8601(event.valid_at)
+    return stated
+
+
+def apply_event_corrections(events: Iterable[TypedEventAssertion]) -> list[TypedEventAssertion]:
+    """Drop the one earlier occurrence each correction restates (#170 item 5).
+
+    A correction ("Actually, I bought the bike on March 3") hides the single earlier-said assertion
+    in its lane with the same ``object_key``. With two or more earlier candidates nothing is hidden:
+    which one it corrects is unknown, so all stay. Corrections apply in the order they were said, so a
+    correction of a correction leaves only the last. An assertion with no known ``stated_at`` is never
+    hidden and never corrects. Pure, deterministic and idempotent; erasing the correcting turn brings
+    the original back on the next read.
+    """
+    events = list(events)
+    by_key: dict[str, TypedEventAssertion] = {}
+    for e in events:
+        by_key.setdefault(e.assertion_key, e)
+    corrections = sorted(
+        (e for e in by_key.values()
+         if isinstance(e.metadata, dict) and e.metadata.get(EVENT_CORRECTION) is True
+         and _event_stated_at(e) is not None),
+        key=lambda e: (_event_stated_at(e), e.assertion_key),
+    )
+    hidden: set[str] = set()
+    for correction in corrections:
+        if correction.assertion_key in hidden:
+            continue
+        said = _event_stated_at(correction)
+        earlier = [
+            e for key, e in by_key.items()
+            if key != correction.assertion_key and key not in hidden
+            and e.lane_key == correction.lane_key
+            and _norm(e.object_key) == _norm(correction.object_key)
+            and (stated := _event_stated_at(e)) is not None and stated < said
+        ]
+        if len(earlier) == 1:
+            hidden.add(earlier[0].assertion_key)
+    return [e for e in events if e.assertion_key not in hidden]
+
+
 def select_event_assertion(
     events: Iterable[TypedEventAssertion],
     *,
@@ -345,8 +398,8 @@ def select_event_assertion(
             SelectionStatus.INVALID, GATE_ANCHOR,
             "as_of is not valid for PREDECESSOR (use anchor_time / anchor_assertion_key)", None)
 
-    # 1) Strict lane filter.
-    lane_events = [e for e in events if e.lane_key == req_key]
+    # 1) Strict lane filter, then drop occurrences a later correction restated.
+    lane_events = apply_event_corrections(e for e in events if e.lane_key == req_key)
 
     # 2) Deterministic exact-replay dedup. Identical ``assertion_key`` == the same proven occurrence
     #    re-persisted; within that group we keep ONE representative chosen by earliest parseable

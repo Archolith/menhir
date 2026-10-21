@@ -43,6 +43,7 @@ from menhir.domain.fold_algebra import (
 )
 from menhir.infrastructure import consolidation_audit as _audit
 from menhir.services.seam_types import Embed, LlmComplete
+from menhir.services.typed_scalar_rules import is_ambiguous_exact
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +213,7 @@ VETO_CROSS_CHECK = "cross_check"           # holistic 2nd derivation disagreed
 VETO_VERIFICATION = "verification"         # final audit of linked items failed
 VETO_UNRESOLVED_COREFERENCE = "unresolved_coreference"  # ambiguous same-item cluster the judge didn't settle
 VETO_UNSUPPORTED_STATED = "unsupported_stated"  # a STATED_MEASURE whose value isn't grounded in a span
+VETO_HEDGED_VALUE = "hedged_value"  # a contributing number the source span hedges ("about 5 or 6")
 VETO_COMMIT = "commit"
 
 
@@ -879,6 +881,33 @@ def _stated_value_grounded(
     return any(n in span for span in spans for n in needles)
 
 
+#: clause boundaries for the hedged-value check; ", " (comma + space) so "1,200" stays one number.
+_CLAUSE_SPLIT_RE = re.compile(r"[.!?;\n]|,\s")
+
+
+def _hedged_contributions(
+    reducer: str, events: list[Event], is_law3: bool, episodes: list[Episode]
+) -> list[float]:
+    """The numbers in a candidate that a source clause hedges ("about 5 or 6", "maybe $20"), as the
+    scalar lane's `is_ambiguous_exact` judges them. A number contributes when it enters the value: the
+    stated total, a Law-3 anchor, and each SUM amount (count/distinct items carry no number). Checked
+    clause-local in the event's own episode, or every episode when provenance is unknown (fail-closed)."""
+    contributing = [
+        e for i, e in enumerate(events)
+        if e.value is not None and (reducer in ("stated", "sum") or (is_law3 and i == 0))
+    ]
+    text_by_uuid = {e.uuid: (e.content or "") for e in episodes}
+    hedged: list[float] = []
+    for ev in contributing:
+        spans = ([text_by_uuid[ev.episode_uuid]] if ev.episode_uuid in text_by_uuid
+                 else [e.content or "" for e in episodes])
+        value = float(ev.value)
+        if any(_price_token_count(clause, value) and is_ambiguous_exact(clause, value, "absolute")
+               for span in spans for clause in _CLAUSE_SPLIT_RE.split(span)):
+            hedged.append(value)
+    return hedged
+
+
 def _price_token_count(span: str, amount: float) -> int:
     """Count occurrences of `amount` as a STANDALONE explicit price in `span` — digit-boundary guarded
     so it never matches a number embedded in a larger one ('50' must NOT match inside '150' or '50.5').
@@ -1164,6 +1193,21 @@ def gate(
                 subject=subject, measure=measure, reducer=reducer, committed=False,
                 reason=f"count-floor: {reducer}={value:g} < {min_count:g} (no aggregation; raw fact)",
                 veto=VETO_COUNT_FLOOR,
+                value=None, agreement=agreement, k=k, distribution=dict(dist), stated_total=stated,
+            ))
+            continue
+
+        # --- veto 2a: hedged value (the scalar lane's hedged_value rule) ---
+        # "I own about 5 or 6 bikes" read unanimously as 5 is still an underdetermined number; an
+        # exact counter would be over-confident. Deterministic and span-local, like the stated-span
+        # guard, and on the same opt-in (`episodes` supplied).
+        hedged = (_hedged_contributions(reducer, events, is_law3, episodes)
+                  if episodes is not None else [])
+        if hedged:
+            decisions.append(GateDecision(
+                subject=subject, measure=measure, reducer=reducer, committed=False,
+                reason=f"hedged value: {[f'{v:g}' for v in hedged]} hedged in its source clause",
+                veto=VETO_HEDGED_VALUE,
                 value=None, agreement=agreement, k=k, distribution=dict(dist), stated_total=stated,
             ))
             continue
@@ -1492,10 +1536,12 @@ def perceive_and_fold(
         # a move-1 'stated' commit folds its single assertion event under SUM (sum of one = the
         # stated value); the deterministic sink only knows the scalar reducers.
         sink_reducer = "sum" if d.reducer == "stated" else d.reducer
+        # Store the value the gate vetted. Re-reducing d.events is wrong for a Law-3 count or
+        # distinct_count: [anchor, *post] counts the anchor as one event (15 mugs + 1 -> 2).
         row = fold_events_to_counter(
             graph_adapter=graph_adapter, subject=d.subject, measure=d.measure,
             events=d.events, reducer=sink_reducer, namespace=namespace, source=source, embed=embed,
-            audit=audit,
+            audit=audit, value=d.value,
         )
         row.update({"agreement": d.agreement, "triangulated": d.triangulated})
         result.committed.append(row)

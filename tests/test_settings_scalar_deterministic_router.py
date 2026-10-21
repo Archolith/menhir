@@ -93,7 +93,7 @@ def test_consolidation_forwards_router_flag_into_scalar_config(monkeypatch):
         from menhir.services.scheduler_tasks import consolidate_personal_memory
 
         return await consolidate_personal_memory(
-            graph_adapter=SimpleNamespace(),
+            graph_adapter=SimpleNamespace(counting_flag_sweep_targets=lambda **_kw: []),
             llm_complete=lambda _system, _user: "[]",
             namespaces=["ns-x"],
             enable_counter_state=False,

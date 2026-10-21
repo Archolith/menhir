@@ -132,7 +132,7 @@ def test_consolidation_forwards_flag_into_scalar_config(monkeypatch):
 
     async def _run():
         return await consolidate_personal_memory(
-            graph_adapter=SimpleNamespace(),
+            graph_adapter=SimpleNamespace(counting_flag_sweep_targets=lambda **_kw: []),
             llm_complete=lambda system, user: "[]",
             embed=None,
             namespaces=["ns-x"],

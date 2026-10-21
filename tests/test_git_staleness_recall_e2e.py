@@ -115,7 +115,8 @@ async def test_git_staleness_surfaces_in_shadow_without_changing_results(
     (repo / "auth.py").write_text("x = 2\n")
     _git(repo, "commit", "-q", "-am", "c1")
 
-    tuning = RetrievalTuningConfig(enable_belief_gate=True, enable_assertion_shadow=True)
+    tuning = RetrievalTuningConfig(enable_belief_gate=True, enable_assertion_shadow=True,
+                                   enable_warden_gate=False)
     res = await svc.recall("auth", tuning=tuning, trace=True)
 
     # observe-only: warden_gate off -> m1 still present in results

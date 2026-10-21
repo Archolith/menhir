@@ -70,6 +70,7 @@ class IngestQueueMixin:
         graphiti_add_episode_timeout_s: float | None = None,
         graphiti_episode_max_estimated_tokens: int | None = None,
         canonical_self_binding_mode: str | None = None,
+        inferred_self_mode: str | None = None,
         max_llm_calls_per_session_window: int | None = None,
         llm_session_window_seconds: int | None = None,
         max_llm_calls_per_enrichment_job: int | None = None,
@@ -88,6 +89,8 @@ class IngestQueueMixin:
             )
         if canonical_self_binding_mode is not None:
             self._canonical_self_binding_mode = str(canonical_self_binding_mode)
+        if inferred_self_mode is not None:
+            self._inferred_self_mode = str(inferred_self_mode)
         if graphiti_episode_max_estimated_tokens is not None:
             self._graphiti_episode_max_estimated_tokens = max(
                 0, int(graphiti_episode_max_estimated_tokens)
@@ -227,6 +230,18 @@ class IngestQueueMixin:
             self.graph_adapter.reset_stale_enriching_episodes,
             max_attempts=self._max_enrichment_attempts,
         )
+        # Runs regardless of MENHIR_INFERRED_SELF_MODE: a skip recorded while the mode was on
+        # must still be revoked after it is turned off. Before the PENDING listing so revoked
+        # clients are enqueued this pass.
+        reenable = getattr(self.graph_adapter, "reenable_verbatim_skips", None)
+        if reenable is not None:
+            try:
+                revoked = await asyncio.to_thread(reenable, limit=limit)
+            except Exception:
+                logger.exception("Verbatim-skip re-enable sweep failed; retried next pass")
+            else:
+                if revoked:
+                    logger.warning("Re-enabled %d verbatim-skipped client episodes", len(revoked))
         episode_ids = await asyncio.to_thread(
             self.graph_adapter.list_pending_episode_uuids,
             max_attempts=self._max_enrichment_attempts,

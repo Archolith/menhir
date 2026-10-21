@@ -82,6 +82,7 @@ from .routes_support import (
     _resolve_caller_session,
     _resolve_namespace,
     _provider_auth_failure_text,
+    _provider_quota_exhausted_text,
     _service_payload,
     _try_record_destructive_op_rest,
 )
@@ -104,6 +105,7 @@ async def health(request: Request) -> HealthResponse:
         startup_mode=capabilities.startup_mode if capabilities is not None else None,
         instance_id=str(settings.instance_id) or None if settings is not None else None,
         provider_auth_failure=_provider_auth_failure_text(),
+        provider_quota_exhausted=_provider_quota_exhausted_text(),
     )
 
 
@@ -119,13 +121,19 @@ async def ready(request: Request) -> ReadyResponse:
             failures=["runtime not initialized"],
         )
     auth_failure = _provider_auth_failure_text()
-    status = "ready" if capabilities.enrichment_ready and auth_failure is None else "degraded"
+    quota_exhausted = _provider_quota_exhausted_text()
+    status = (
+        "ready"
+        if capabilities.enrichment_ready and auth_failure is None and quota_exhausted is None
+        else "degraded"
+    )
     return ReadyResponse(
         status=status,
         startup_mode=capabilities.startup_mode,
         capabilities=_capability_payload(runtime_ctx),
         failures=list(capabilities.failures),
         provider_auth_failure=auth_failure,
+        provider_quota_exhausted=quota_exhausted,
     )
 
 
@@ -139,6 +147,8 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
         recall_kwargs["trace"] = True
     if body.source_memory_limit is not None:
         recall_kwargs["source_memory_limit"] = body.source_memory_limit
+    if body.counted_verdict_limit is not None:
+        recall_kwargs["counted_verdict_limit"] = body.counted_verdict_limit
     try:
         result = await backend.recall(
             body.query,
@@ -299,7 +309,36 @@ async def scalar_authority_contributors(
         view_uuid=view_uuid, limit=limit, offset=offset,
         namespace=stamped_namespace(resolved),
     )
+    payload = {
+        **payload,
+        "contributors": [
+            {k: v for k, v in dict(c).items() if k != "turn_text"}
+            for c in (payload.get("contributors") or [])
+        ],
+    }
     return {"view_uuid": view_uuid, **payload}
+
+
+@router.get("/scalar-views/{view_uuid}/items")
+async def scalar_view_items(
+    request: Request,
+    view_uuid: str,
+    namespace: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, object]:
+    """Page the items a scalar View (count or current value) was built from."""
+    _require_tier("readonly")
+    runtime_ctx = _require_runtime_context(request)
+    adapter = getattr(runtime_ctx.built, "graph_adapter", None)
+    if adapter is None:
+        raise HTTPException(status_code=503, detail="scalar view items unavailable")
+    resolved = _resolve_namespace(request, namespace)
+    from menhir.services.scalar_view_items import fetch_scalar_view_items
+    return await asyncio.to_thread(
+        fetch_scalar_view_items, adapter,
+        view_uuid=view_uuid, namespace=resolved, offset=offset, limit=limit,
+    )
 
 
 @router.get("/bootstrap/flagged")

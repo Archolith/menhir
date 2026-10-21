@@ -119,8 +119,9 @@ async def test_offline_profile_safety_matrix(
                     include_invalidated=True, source_memory_limit=0, update_access=False,
                     tuning=tuning, include_warden_status=True)
                 assert not result.warden_status.metadata_gaps
-                expected_state = ("applied" if gate else "computed_not_applied" if currentness
-                                  else "not_run" if contradiction else "disabled")
+                # Oracle ranking always runs the chain (#172), so any configured guard is computed.
+                expected_state = ("applied" if gate else "computed_not_applied"
+                                  if currentness or contradiction else "disabled")
                 assert result.warden_status.state == expected_state
                 warnings = []
                 if result.results:

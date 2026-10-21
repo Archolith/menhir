@@ -98,13 +98,25 @@ class ErasureCoordinator:
         twins are resolved BEFORE prepare and recorded as subjects, so a crash after deleting one is
         replayed for all of them; each node runs the unchanged single-node graph cascade. A twin
         lookup failure propagates (fail closed) rather than erasing only half the memory.
+
+        The captured evidence carrying the memory's words (its admitted turns, their projection
+        episodes and the projections' twins) is resolved and erased the same way. Left behind, a
+        turn is re-perceived by the next Phase 3 pass and the erased claim returns (#170 item 5).
         """
         node_uuid = (node_uuid or "").strip()
         if not node_uuid:
             return {"reason": NOTHING_TO_ERASE, "subjects": 0}
         twin_lookup = getattr(self.graph_adapter, "episodic_twin_uuids", None)
         twins = [str(t) for t in (twin_lookup(node_uuid) if callable(twin_lookup) else []) if t]
-        targets = [node_uuid, *[t for t in twins if t != node_uuid]]
+        evidence_lookup = getattr(self.graph_adapter, "erasure_evidence_uuids", None)
+        evidence: list[str] = []
+        if callable(evidence_lookup):
+            for base in [node_uuid, *twins]:
+                evidence.extend(str(u) for u in (evidence_lookup(base) or []) if u)
+        targets: list[str] = []
+        for target in [node_uuid, *twins, *evidence]:
+            if target not in targets:
+                targets.append(target)
         return self._run(
             subjects=[("NODE_UUID", target) for target in targets],
             purge=_subjects_for_uuids(set(targets)),

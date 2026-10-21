@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import threading
 import time
 from collections.abc import Awaitable, Callable, Iterator
@@ -131,6 +132,142 @@ def is_retryable_rate_limit(exc: BaseException) -> bool:
     return exc.code not in _NOT_RETRYABLE_CODES and exc.type not in _NOT_RETRYABLE_CODES
 
 
+QUOTA_REASON_CODE = "provider_quota_exhausted"
+
+
+class ProviderQuotaExhaustedError(Exception):
+    """The provider refused with 429 insufficient_quota: a billing state, not throttling."""
+
+    reason_code = QUOTA_REASON_CODE
+
+
+def find_quota_exhaustion(exc: BaseException | None) -> openai.RateLimitError | None:
+    """The insufficient_quota openai error in ``exc``'s __cause__/__context__ chain, if any.
+
+    Graphiti rewraps the openai error as its own RateLimitError (``raise ... from e``), which
+    loses the quota code, so the chain is walked rather than only ``exc`` itself.
+    """
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, openai.RateLimitError) and (
+            exc.code in _NOT_RETRYABLE_CODES or exc.type in _NOT_RETRYABLE_CODES
+        ):
+            return exc
+        exc = exc.__cause__ or exc.__context__
+    return None
+
+
+def quota_exhausted_error(exc: BaseException | None) -> ProviderQuotaExhaustedError | None:
+    """``exc`` itself if already a quota error, else a new one chained to it, else None."""
+    if isinstance(exc, ProviderQuotaExhaustedError):
+        return exc
+    if find_quota_exhaustion(exc) is None:
+        return None
+    error = ProviderQuotaExhaustedError(
+        f"{QUOTA_REASON_CODE}: the provider returned 429 insufficient_quota (credits "
+        "exhausted); waiting will not help - add credits, then re-enrich"
+    )
+    error.__cause__ = exc
+    return error
+
+
+#: Flex returns 429 ``resource_unavailable`` when it has no capacity: a wait, not throttling.
+_FLEX_CAPACITY_CODES = frozenset({"resource_unavailable"})
+#: Provider codes/types and request ids are kept only in this shape. A compatible provider can put
+#: anything in those fields, and they reach telemetry rows that are classified as non-content.
+_SAFE_TOKEN = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
+
+
+def _safe_token(value: object) -> str | None:
+    text = str(value) if value is not None else ""
+    return text if _SAFE_TOKEN.fullmatch(text) else None
+
+
+def find_provider_status_error(exc: BaseException | None) -> openai.APIStatusError | None:
+    """The first openai HTTP-status error in ``exc``'s __cause__/__context__ chain, if any.
+
+    Graphiti rewraps provider errors (see ``find_quota_exhaustion``), so the chain is walked.
+    """
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, openai.APIStatusError):
+            return exc
+        exc = exc.__cause__ or exc.__context__
+    return None
+
+
+def rate_limit_category(exc: BaseException | None) -> str | None:
+    """``quota``, ``flex_capacity`` or ``rate_limit`` for a provider 429; None for anything else."""
+    status_error = find_provider_status_error(exc)
+    if status_error is None or getattr(status_error, "status_code", None) != 429:
+        return None
+    codes = {
+        value for value in (getattr(status_error, "code", None), getattr(status_error, "type", None))
+        if isinstance(value, str)
+    }
+    if codes & _NOT_RETRYABLE_CODES:
+        return "quota"
+    if codes & _FLEX_CAPACITY_CODES:
+        return "flex_capacity"
+    return "rate_limit"
+
+
+def provider_error_code(exc: BaseException | None) -> str | None:
+    """A content-free label for a failed provider call, safe to persist; None when ``exc`` is None.
+
+    ``<ExceptionClass>`` for a non-HTTP failure (timeout, connection), else
+    ``<ExceptionClass>:<status>:<provider code or type>``. The provider's message text is never
+    included: it can echo prompt content.
+    """
+    if exc is None:
+        return None
+    try:
+        status_error = find_provider_status_error(exc)
+        if status_error is None:
+            return _safe_token(type(exc).__name__) or "Exception"
+        status = getattr(status_error, "status_code", None)
+        parts = [_safe_token(type(status_error).__name__) or "APIStatusError",
+                 str(status) if isinstance(status, int) and 0 <= status <= 999 else "0"]
+        code = _safe_token(getattr(status_error, "code", None)) or _safe_token(
+            getattr(status_error, "type", None)
+        )
+        if code:
+            parts.append(code)
+        return ":".join(parts)
+    except Exception:  # noqa: BLE001 - a label must never fail the failure path it describes
+        return "Exception"
+
+
+def describe_provider_error(exc: BaseException | None) -> str:
+    """One log-line fragment naming what kind of provider failure ``exc`` is. Never raises."""
+    try:
+        return _describe_provider_error(exc)
+    except Exception:  # noqa: BLE001 - logging must not break the retry it reports on
+        return "unclassified"
+
+
+def _describe_provider_error(exc: BaseException | None) -> str:
+    status_error = find_provider_status_error(exc)
+    if status_error is None:
+        return type(exc).__name__ if exc is not None else "unknown"
+    status = _safe_token(getattr(status_error, "status_code", None)) or "?"
+    fields = [rate_limit_category(status_error) or f"http {status}"]
+    code = _safe_token(getattr(status_error, "code", None))
+    kind = _safe_token(getattr(status_error, "type", None))
+    if code:
+        fields.append(f"code={code}")
+    if kind and kind != code:
+        fields.append(f"type={kind}")
+    hint = retry_after_seconds(status_error)
+    fields.append(f"retry-after={hint:.1f}s" if hint is not None else "retry-after=none")
+    request_id = _safe_token(getattr(status_error, "request_id", None))
+    if request_id:
+        fields.append(f"request_id={request_id}")
+    return ", ".join(fields)
+
+
 def retry_after_seconds(exc: BaseException | None) -> float | None:
     """The server's retry hint in seconds, or None when absent or unparseable (HTTP-date form)."""
     response = getattr(exc, "response", None)
@@ -175,9 +312,12 @@ def _retry_kwargs(label: str) -> dict[str, Any]:
 
     def _log(state: RetryCallState) -> None:
         wait_s = state.next_action.sleep if state.next_action else 0.0
+        # Name the kind of 429: a Flex capacity wait and real throttling call for different
+        # operator responses, and the bare status hid which one a run was hitting.
         logger.warning(
-            "OpenAI 429 on %s; backing off %.1fs before attempt %d",
+            "OpenAI 429 on %s (%s); backing off %.1fs before attempt %d",
             label,
+            describe_provider_error(state.outcome.exception() if state.outcome else None),
             wait_s,
             state.attempt_number + 1,
         )

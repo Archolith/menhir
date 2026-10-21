@@ -334,6 +334,12 @@ NON_CONTENT_COLUMNS: frozenset[tuple[str, str]] = frozenset(
         ("llm_usage_events", "model"),
         ("llm_usage_events", "endpoint"),
         ("llm_usage_events", "status"),
+        # Exception class, HTTP status and provider code only, each held to an identifier shape
+        # by openai_rate_limit.provider_error_code; message text never reaches this column.
+        ("llm_usage_events", "error_code"),
+        # Token counter and provider tier identifier (shape-checked); no content.
+        ("llm_usage_events", "cache_write_input_tokens"),
+        ("llm_usage_events", "service_tier"),
         # lifecycle_events
         ("lifecycle_events", "recorded_at"),
         ("lifecycle_events", "phase"),

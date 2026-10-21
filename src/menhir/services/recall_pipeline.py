@@ -7,17 +7,21 @@ import logging
 import math
 import os
 from dataclasses import dataclass, field, replace
+from functools import partial
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from menhir.services.ingest_service import IngestService
 
+from menhir.domain.count_match import match_slot_row
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
 from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FAMILY
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
 from menhir.services.embedding_identity import comparable_model, embedder_model_name
 from menhir.domain.self_identity import self_uuid_for_namespace
+from menhir.domain.self_identity import inferred_self_uuid_for_namespace
+from menhir.infrastructure.self_binding import SelfBindMode, resolve_inferred_mode
 from menhir.domain.recall import (
     CandidateData,
     QueryPreset,
@@ -55,6 +59,7 @@ if TYPE_CHECKING:
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.telemetry import record_mcp_event
 from menhir.domain.utils import days_ago
+from menhir.domain.verb_facets import verb_facets
 from menhir.services.scheduler_protocols import LifecycleServiceProtocol
 from menhir.services.scoring_service import (
     GRAPHITI_RRF_DUAL_METHOD_MAX,
@@ -67,12 +72,21 @@ from menhir.infrastructure.paths import repo_root_for_project
 
 logger = logging.getLogger(__name__)
 
+
+def _inferred_self_on(service: object) -> bool:
+    """MENHIR_INFERRED_SELF_MODE observe/enforce: recall reads the inferred self tier too."""
+    return resolve_inferred_mode(getattr(service, "inferred_self_mode", None)) is not SelfBindMode.OFF
+
 # Degradation is deliberate: a slow or unavailable graph must not fail recall. But a programming
 # error raised by a call whose signature we control is a bug, not an outage -- a stale signature
 # once surfaced as a wrong answer (swallowed into `assert 0 == 1`) instead of an error. Split them.
 _PROGRAMMING_ERRORS = (TypeError, AttributeError, NameError, KeyError)
 
+# Facts per entity chosen by query similarity when MENHIR_FRONTIER_FACT_RELEVANCE is on.
+_FACT_RELEVANCE_K = 3
 
+
+from menhir.services.recall_policies import label_and_collapse_self_tiers
 from menhir.services.recall_policies import (
     FILE_LINKED_BASELINE_SIMILARITY,
     PENDING_ENTITY_SIMILARITY,
@@ -87,6 +101,7 @@ from menhir.services.recall_policies import (
     _render_scalar_history_content,
     _repo_path_for,
     _scalar_history_evidence_days_ago,
+    _scalar_history_has_occurrences,
     _scalar_history_records_change,
     _select_candidate_content,
     _staleness_evidence_for,
@@ -94,6 +109,71 @@ from menhir.services.recall_policies import (
 
 from menhir.services.event_history_authority import event_authority_for_query
 from menhir.services.event_history_recall import classify_event_query
+
+
+def _valid_at_sort_key(raw: object) -> float:
+    """valid_at as epoch seconds for ordering; unparsable or missing sorts lowest."""
+    from datetime import datetime, timezone
+    try:
+        parsed = datetime.fromisoformat(str(raw).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return float("-inf")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def _relevance_ordered_slots(slots, best_cosine) -> list[tuple[str, str, str, str, str]]:
+    """Slots ordered by best observation cosine descending, ties by slot tuple ascending.
+
+    Clients cap how many verdicts they render, and set iteration order is hash-random, so
+    the authority and history lanes iterate in this deterministic relevance order instead.
+    A slot missing from best_cosine sorts last.
+    """
+    return sorted(
+        slots,
+        key=lambda s: (
+            -best_cosine.get(s, float("-inf")),
+            tuple(str(x or "") for x in s),
+        ),
+    )
+
+
+def _observation_dedup_skip_ids(obs_hits: list[dict[str, Any]]) -> set[str]:
+    """Assertion ids to skip so identical stated text injects one observation per slot.
+
+    Hits are grouped by slot (subject, attribute, scope, value kind, unit) plus normalized
+    stated_span (strip, collapse whitespace, casefold); per group the highest cosine wins,
+    then latest valid_at, then lowest assertion_id. Grouping per slot keeps every slot's
+    own observation, so a later per-slot drop (echo drop, verdict gate) cannot remove the
+    only copy of a text. Occurrence rows (counted happenings) and delta rows (separate
+    increments) are never deduped.
+    """
+    groups: dict[tuple[str, ...], list[tuple[float, float, str]]] = {}
+    for hit in obs_hits:
+        if str(hit.get("operation")) in ("occurrence", "delta"):
+            continue
+        aid = str(hit.get("assertion_id") or "").strip()
+        span = " ".join(str(hit.get("stated_span") or "").split()).casefold()
+        try:
+            cos = float(hit.get("cosine"))
+        except (TypeError, ValueError):
+            continue
+        if not aid or not span or not math.isfinite(cos):
+            continue
+        slot = tuple(str(hit.get(k) or "") for k in ("subject_uuid", "attribute", "scope",
+                                                     "value_kind", "unit"))
+        groups.setdefault((*slot, span), []).append(
+            (cos, _valid_at_sort_key(hit.get("valid_at")), aid))
+    skip: set[str] = set()
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        # Best first: cosine desc, valid_at desc (missing lowest), assertion_id asc.
+        ranked = sorted(members, key=lambda m: m[2])
+        ranked.sort(key=lambda m: (m[0], m[1]), reverse=True)
+        skip.update(m[2] for m in ranked[1:])
+    return skip
 
 
 def _projection_is_recall_eligible(view: dict[str, Any]) -> bool:
@@ -195,6 +275,219 @@ _RECALL_HISTORY_EMPTY_NOTE = (
 )
 
 
+def _memory_admitted(
+    service: Any,
+    meta: dict[str, object],
+    *,
+    include_session: bool,
+    session_id: str | None,
+    namespace: str | None,
+) -> bool:
+    """Node-level recall admission, shared by ranked candidates and appended fact endpoints."""
+    # Structural graph nodes (project-scan Directory/File/Project entities) carry a
+    # structure_role. They exist for query_structure, never semantic recall, but leak in
+    # here via BM25 token collisions (e.g. "rules" -> the .continue/rules directory node).
+    # Drop them before scoring, mirroring fetch_recent_memories' structural exclusion.
+    if meta.get("structure_role") is not None:
+        return False
+    scope = str(meta.get("scope") or NodeScope.SESSION)
+    freshness = str(meta.get("freshness") or FreshnessState.ACTIVE)
+    # CANDIDATE is the human-review tier: never recalled until approved
+    # (which promotes it to PERSISTENT). This is the load-bearing guarantee
+    # of staged review - candidates must not influence ranking or results.
+    if scope == NodeScope.CANDIDATE:
+        return False
+    if freshness == FreshnessState.GONE:
+        return False
+    if not service._session_scope_admitted(
+        scope, meta.get("session_id"), include_session=include_session, session_id=session_id,
+    ):
+        return False
+    # Materialized Views have a fail-closed context contract. Historical/debug inspection uses
+    # direct getters and operator listings; ``include_superseded`` must not turn ordinary recall
+    # into an inspection API. Missing lifecycle stamps, OPERATOR audience, retirement, or a
+    # receipt/MENTIONS mismatch therefore excludes the View unconditionally. Ordinary memories
+    # have ``is_view`` unset/false and pass through untouched.
+    if bool(meta.get("is_view")) and (
+        meta.get("view_class") != "FACT"
+        or meta.get("view_audience") != "RECALL"
+        or meta.get("view_current") is not True
+        or bool(meta.get("retired"))
+        or not bool(meta.get("view_provenance_live"))
+    ):
+        return False
+    # scalar_history exclusion: when the feature flag is OFF, stored scalar_history
+    # Entities must be excluded from generic recall — not merely omitted from the
+    # dedicated lane. This makes rollback real and prevents an old View from leaking
+    # through vector/entity retrieval.
+    if meta.get("view_kind") == "scalar_history" and not service.scalar_history_enabled:
+        return False
+    # Counted scalar_state Views, and history Views listing occurrences, are hidden when
+    # counting is OFF (read-side kill switch).
+    if not service.counting_enabled and (
+        (meta.get("view_kind") == "scalar_state" and meta.get("scalar_basis") == "counted")
+        or (meta.get("view_kind") == "scalar_history" and _scalar_history_has_occurrences(meta))
+    ):
+        return False
+    # Defense-in-depth: if namespace is explicitly set, filter candidates by namespace.
+    # The candidate's metadata namespace property (or "default" if missing/None)
+    # must match the target namespace.
+    if namespace is not None:
+        candidate_namespace = meta.get("namespace") or stamped_namespace(None)
+        if candidate_namespace != stamped_namespace(namespace):
+            return False
+    return True
+
+
+def _drop_counted_occurrence_observations(
+    candidate_inputs: list[dict[str, Any]],
+    metadata_by_uuid: dict[str, dict[str, Any]],
+    authority_layer: list[ScalarAuthorityVerdict],
+    occurrence_ids: set[str],
+) -> list[dict[str, Any]]:
+    """Unit R: drop injected occurrence observations whose slot has a counted current verdict.
+
+    Runs after the authority layer is built, so an occurrence whose View was skipped (no verdict)
+    stays as the only carrier of that slot.
+    """
+    def _key(subject, attribute, scope, value_kind, unit):
+        return tuple(str(x or "") for x in (subject, attribute, scope, value_kind, unit))
+
+    counted_slots = {
+        _key(v.subject_uuid, v.attribute, v.scope, v.value_kind, v.unit)
+        for v in authority_layer if v.kind == "current" and v.basis == "counted"
+    }
+    if not counted_slots or not occurrence_ids:
+        return candidate_inputs
+    kept = []
+    for c in candidate_inputs:
+        uuid = str(c.get("uuid") or "")
+        if uuid in occurrence_ids:
+            m = metadata_by_uuid.get(uuid) or {}
+            if _key(m.get("subject_uuid"), m.get("ss_attribute"), m.get("ss_scope"),
+                    m.get("ss_value_kind"), m.get("ss_unit")) in counted_slots:
+                continue
+        kept.append(c)
+    return kept
+
+
+_VERB_FACET_MAX = 3
+_VERB_FACET_MAX_SEARCHES = 5
+
+
+async def _admitted_fact_rows(
+    service: Any,
+    rows: list[dict[str, object]],
+    *,
+    include_session: bool,
+    session_id: str | None,
+    namespace: str | None,
+    endpoint_keys: tuple[str, str] = ("source_uuid", "target_uuid"),
+) -> list[dict[str, object]]:
+    """Keep a fact only when both endpoint memories pass ranked recall's admission.
+
+    Required because fact search matches the edge alone: without this a fact from a
+    SESSION-scoped, other-session, GONE or CANDIDATE memory would bypass recall's filters.
+    Missing endpoint metadata fails closed.
+    """
+    src_key, dst_key = endpoint_keys
+    endpoints = sorted({
+        str(row.get(key) or "") for row in rows for key in endpoint_keys
+    } - {""})
+    if not endpoints:
+        return []
+    meta_rows = await asyncio.to_thread(service.graph_adapter.fetch_candidate_metadata, endpoints)
+    meta_by_uuid = {str(m.get("uuid") or ""): m for m in meta_rows}
+    admitted = {
+        uuid for uuid in endpoints
+        if uuid in meta_by_uuid and _memory_admitted(
+            service, meta_by_uuid[uuid], include_session=include_session,
+            session_id=session_id, namespace=namespace,
+        )
+    }
+    return [
+        row for row in rows
+        if str(row.get(src_key) or "") in admitted
+        and str(row.get(dst_key) or "") in admitted
+    ]
+
+
+async def _append_verb_facet_facts(
+    service: Any,
+    query: str,
+    top_results: list[ScoredMemory],
+    namespace: str | None,
+    include_invalidated: bool,
+    preset: QueryPreset,
+    tuning: RetrievalTuningConfig,
+    *,
+    include_session: bool,
+    session_id: str | None,
+) -> list[ScoredMemory]:
+    """Append at most one keyword-matched fact per question verb (max 3), never reordering."""
+    facets = verb_facets(query)
+    if not facets:
+        return top_results
+    seen_uuids = {r.uuid for r in top_results}
+    seen_texts: set[str] = set()
+    for r in top_results:
+        for text in (r.name, r.content, *(tf.fact for tf in r.temporal_facts)):
+            if text is not None and str(text).strip():
+                seen_texts.add(str(text).strip())
+    appended: list[ScoredMemory] = []
+    # The cap counts appended facts; also bound the searches, so a long verb list that
+    # matches nothing cannot run one graph query per verb.
+    for facet in facets[:_VERB_FACET_MAX_SEARCHES]:
+        if len(appended) >= _VERB_FACET_MAX:
+            break
+        rows = await asyncio.to_thread(
+            service.graph_adapter.search_facts_by_keywords, facet.forms, namespace
+        )
+        if not include_invalidated:
+            rows = _filter_to_current_beliefs(rows)
+        rows = await _admitted_fact_rows(
+            service, rows, include_session=include_session, session_id=session_id,
+            namespace=namespace,
+        )
+        for row in rows:
+            uuid = str(row.get("uuid") or "")
+            fact = str(row.get("fact") or "").strip()
+            if not uuid or uuid in seen_uuids or not fact or fact in seen_texts:
+                continue
+            score = float(row.get("score") or 0.0)
+            facts = _build_temporal_facts(
+                [dict(row, node_uuid=uuid)],
+                event_time=tuning.enable_anchored_time_render,
+                ended=tuning.enable_anchored_time_expiry,
+            )
+            appended.append(
+                ScoredMemory(
+                    uuid=uuid,
+                    name=fact,
+                    content=fact,
+                    scope=str(NodeScope.SESSION),
+                    memory_type="SEMANTIC",
+                    # Unranked append: the raw fulltext score (often 5-15) is not on the ranked
+                    # 0-1 scale, and a high final_score would let context dedup prefer this item
+                    # over a ranked memory. The raw score stays in retrieval_score.
+                    final_score=0.0,
+                    breakdown=RelevanceBreakdown(
+                        semantic_similarity=0.0, adjacency_bonus=0.0, recency_bonus=0.0,
+                        prominence_bonus=0.0, conflict_bonus=0.0, type_boost=0.0,
+                        preset=preset.value, alpha=0.0, beta=0.0, gamma=0.0, delta=0.0,
+                    ),
+                    retrieval_score=score,
+                    retrieval_score_kind=RetrievalScoreKind.VERB_FACET,
+                    temporal_facts=facts.get(uuid, ()),
+                    stale_anchor_info={"stale_anchor": False},
+                )
+            )
+            seen_uuids.add(uuid)
+            seen_texts.add(fact)
+            break
+    return [*top_results, *appended]
+
+
 async def run_recall_history(
     service: Any,
     query: str,
@@ -275,6 +568,7 @@ async def run_recall(
     trace: bool = False,
     update_access: bool = True,
     source_memory_limit: int | None = None,
+    counted_verdict_limit: int | None = None,
 ) -> RecallResult:
     # update_access=False makes recall a pure read: no last_accessed touches, no
     # edge-weight reinforcement, no rehydration scheduling. For measurement probes
@@ -334,6 +628,8 @@ async def run_recall(
     # Query embedding computed by the content-vector lane; the source-memory lane
     # reuses it so the query is embedded at most once per recall.
     content_query_vector: list[float] | None = None
+    # Query embedding from the observation lane, reused by fact-relevance enrichment.
+    obs_query_vector: list[float] | None = None
     try:
         if tuning.enable_content_vector:
             methods: list[str] = []
@@ -726,54 +1022,14 @@ async def run_recall(
         meta = metadata_by_uuid.get(uuid)
         if meta is None:
             continue
-        # Structural graph nodes (project-scan Directory/File/Project entities) carry a
-        # structure_role. They exist for query_structure, never semantic recall, but leak in
-        # here via BM25 token collisions (e.g. "rules" -> the .continue/rules directory node).
-        # Drop them before scoring, mirroring fetch_recent_memories' structural exclusion.
-        if meta.get("structure_role") is not None:
+        if not _memory_admitted(
+            service, meta, include_session=include_session, session_id=session_id,
+            namespace=namespace,
+        ):
             continue
         scope = str(meta.get("scope") or NodeScope.SESSION)
         freshness = str(meta.get("freshness") or FreshnessState.ACTIVE)
-        # CANDIDATE is the human-review tier: never recalled until approved
-        # (which promotes it to PERSISTENT). This is the load-bearing guarantee
-        # of staged review - candidates must not influence ranking or results.
-        if scope == NodeScope.CANDIDATE:
-            continue
-        if freshness == FreshnessState.GONE:
-            continue
-        if not service._session_scope_admitted(
-            scope, meta.get("session_id"), include_session=include_session, session_id=session_id,
-        ):
-            continue
-        # Materialized Views have a fail-closed context contract. Historical/debug inspection uses
-        # direct getters and operator listings; ``include_superseded`` must not turn ordinary recall
-        # into an inspection API. Missing lifecycle stamps, OPERATOR audience, retirement, or a
-        # receipt/MENTIONS mismatch therefore excludes the View unconditionally. Ordinary memories
-        # have ``is_view`` unset/false and pass through untouched.
-        is_view = bool(meta.get("is_view"))
-        is_superseded_view = is_view and meta.get("view_current") is not True
-        if is_view and (
-            meta.get("view_class") != "FACT"
-            or meta.get("view_audience") != "RECALL"
-            or meta.get("view_current") is not True
-            or bool(meta.get("retired"))
-            or not bool(meta.get("view_provenance_live"))
-        ):
-            continue
-        # scalar_history exclusion: when the feature flag is OFF, stored scalar_history
-        # Entities must be excluded from generic recall — not merely omitted from the
-        # dedicated lane. This makes rollback real and prevents an old View from leaking
-        # through vector/entity retrieval.
-        if meta.get("view_kind") == "scalar_history" and not service.scalar_history_enabled:
-            continue
-        # Defense-in-depth: if namespace is explicitly set, filter candidates by namespace.
-        # The candidate's metadata namespace property (or "default" if missing/None)
-        # must match the target namespace.
-        if namespace is not None:
-            candidate_namespace = meta.get("namespace") or stamped_namespace(None)
-            target_namespace = stamped_namespace(namespace)
-            if candidate_namespace != target_namespace:
-                continue
+        is_superseded_view = bool(meta.get("is_view")) and meta.get("view_current") is not True
         try:
             edge_count = int(meta.get("edge_count") or 0)
             similarity = float(similarity_map.get(uuid, 0.0))
@@ -828,6 +1084,12 @@ async def run_recall(
     _obs_slots_for_history: set[tuple[str, str, str, str, str]] = set()
     # Best observation cosine per slot: the history lane's relevance score (#243).
     _obs_slot_best_cosine: dict[tuple[str, str, str, str, str], float] = {}
+    # Counted authority only (unit R): counted Views and their occurrences stay out of the ranked
+    # list. _occurrence_obs_ids are the injected occurrence observations, dropped below when their
+    # slot gets a counted verdict.
+    _counted_authority_only = bool(
+        getattr(service, "counting_recall_authority_only", False) and service.counting_enabled)
+    _occurrence_obs_ids: set[str] = set()
 
     # --- Observation candidates (Phase 4a.2, flag-gated): inject :TypedAssertion observations ---
     # The recall pipeline is otherwise :Entity-only (fetch_candidate_metadata matches (n:Entity)),
@@ -851,10 +1113,13 @@ async def run_recall(
             _authority_audit.begin()
         try:
             obs_vec = await service.graphiti_client.embed_query(query)
+            obs_query_vector = obs_vec
             obs_hits = await asyncio.to_thread(
                 service.graph_adapter.search_assertion_embeddings,
                 obs_vec, limit=10, namespaces=[stamped_namespace(namespace)],
             )
+            if not service.counting_enabled:  # counting off: occurrence rows never enter recall
+                obs_hits = [h for h in obs_hits if str(h.get("operation")) != "occurrence"]
             existing_uuids = (
                 {str(c["uuid"]) for c in candidate_inputs}
                 if service.scalar_view_authority_enabled else set()
@@ -865,6 +1130,12 @@ async def run_recall(
             # resolve the QUERY's subject INDEPENDENTLY of the injection's provenance row (a named
             # third party the query mentions is rescued by matching its display in the query text).
             obs_subject_displays: dict[str, str] = {}
+            obs_dedup_skip: set[str] = (
+                _observation_dedup_skip_ids(obs_hits) if tuning.enable_observation_dedup else set()
+            )
+            _occurrence_slots_injected: set[tuple[str, str, str, str, str]] = set()
+            _count_match = bool(service.counting_enabled) and bool(
+                getattr(service.graph_adapter, "counting_match_enabled", False))
             for hit in obs_hits:
                 try:
                     aid = str(hit.get("assertion_id") or "").strip()
@@ -875,6 +1146,11 @@ async def run_recall(
                     _subj = str(hit.get("subject_uuid") or "")
                     _attr = str(hit.get("attribute") or "")
                     _scope = str(hit.get("scope") or "")
+                    _shaped = _count_match and str(hit.get("operation")) == "occurrence"
+                    if _shaped:
+                        _m = match_slot_row(hit)
+                        _attr = str(_m.get("attribute") or "")
+                        _scope = str(_m.get("scope") or "")
                     _value_kind = str(hit.get("value_kind") or "")
                     _unit = str(hit.get("unit") or "")
                     if _subj and _attr and _value_kind:
@@ -886,8 +1162,18 @@ async def run_recall(
                     # the raw observation or run scalar-state authority/suppression work.
                     if not service.scalar_view_authority_enabled:
                         continue
+                    if aid in obs_dedup_skip:
+                        continue
                     if aid in existing_uuids:
                         continue
+                    if (_counted_authority_only and str(hit.get("operation")) == "occurrence"
+                            and _subj and _attr and _value_kind):
+                        # At most one occurrence per slot; hits arrive best cosine first.
+                        _occ_slot = (_subj, _attr, _scope, _value_kind, _unit)
+                        if _occ_slot in _occurrence_slots_injected:
+                            continue
+                        _occurrence_slots_injected.add(_occ_slot)
+                        _occurrence_obs_ids.add(aid)
                     existing_uuids.add(aid)
                     candidate_inputs.append({
                         "uuid": aid, "name": span, "content": span,
@@ -905,7 +1191,8 @@ async def run_recall(
                     metadata_by_uuid[aid] = {
                         "name": span, "content": span, "namespace": hit.get("namespace"),
                         "valid_at": hit.get("valid_at"),
-                        "ss_attribute": hit.get("attribute"), "ss_scope": hit.get("scope"),
+                        "ss_attribute": _attr if _shaped else hit.get("attribute"),
+                        "ss_scope": _scope if _shaped else hit.get("scope"),
                         "ss_value_kind": hit.get("value_kind"), "ss_unit": hit.get("unit"),
                         "subject_uuid": hit.get("subject_uuid"),
                     }
@@ -1006,6 +1293,9 @@ async def run_recall(
                 # the canonical self subject, via the identity SSOT: deterministic and I/O-free,
                 # matching what perception binds self-subject assertions to -- no DB read.
                 query_subjects.add(self_uuid_for_namespace(namespace))
+                if _inferred_self_on(service):
+                    # View gate only; event-history authority below stays anchored-only.
+                    query_subjects.add(inferred_self_uuid_for_namespace(namespace))
             for _s_uuid, _s_disp in obs_subject_displays.items():
                 _disp = (_s_disp or "").strip().lower()
                 if not _disp:
@@ -1049,8 +1339,11 @@ async def run_recall(
                     return {"contributors": [], "total": 0, "next_offset": None}
 
             auth_added = 0
+            _counted_verdicts_emitted = 0
+            _verdict_min_sim = float(tuning.scalar_verdict_min_similarity or 0.0)
             _authority_slots = obs_slots if service.scalar_view_authority_enabled else set()
-            for (subj, attr, scp, vk, un) in _authority_slots:
+            for (subj, attr, scp, vk, un) in _relevance_ordered_slots(
+                    _authority_slots, _obs_slot_best_cosine):
                 if not subj or not attr or not vk:
                     continue
                 # G17 subject safety: skip the authority injection for a subject the query is NOT
@@ -1060,6 +1353,16 @@ async def run_recall(
                     logger.debug(
                         "scalar-authority injection skipped cross-subject subj=%r (query subjects=%r)",
                         subj, query_subjects)
+                    continue
+                # Relevance gate (MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY, 0 = off): the
+                # lane takes the 10 nearest assertions with no floor, so in a small namespace an
+                # unrelated count (a gym visit for a clothing question) becomes a verdict. Scale is
+                # Neo4j vector.similarity.cosine, (1+cos)/2: 0.5 means orthogonal.
+                _best = _obs_slot_best_cosine.get((subj, attr, scp, vk, un), float("-inf"))
+                if _verdict_min_sim > 0 and _best < _verdict_min_sim:
+                    logger.debug(
+                        "scalar-authority injection skipped low similarity slot=%r cosine=%.3f",
+                        (subj, attr), _best)
                     continue
                 if _intent == QueryIntent.COMPARISON and _as_of_dt is None:
                     # The as-of date matched _AS_OF_RE (so intent is COMPARISON) but did not resolve
@@ -1219,8 +1522,24 @@ async def run_recall(
                     continue
                 if not _projection_is_recall_eligible(view):
                     continue
+                if view.get("scalar_basis") == "counted" and not service.counting_enabled:
+                    continue
                 vuuid = str(view.get("uuid") or "").strip()
                 if not vuuid:
+                    continue
+                # The client renders only N counted verdicts; a verdict past N would drop its
+                # slot's occurrence evidence and show nothing, so skip it and keep the evidence.
+                if (
+                    _counted_authority_only
+                    and view.get("scalar_basis") == "counted"
+                    and counted_verdict_limit is not None
+                    and _counted_verdicts_emitted >= counted_verdict_limit
+                ):
+                    candidate_inputs[:] = [
+                        c for c in candidate_inputs if str(c.get("uuid") or "") != vuuid]
+                    logger.debug(
+                        "counted verdict past client limit=%d; slot kept as evidence view=%r",
+                        counted_verdict_limit, vuuid)
                     continue
                 view_already_ranked = vuuid in existing_uuids
                 if not view_already_ranked:
@@ -1244,6 +1563,16 @@ async def run_recall(
                         logger.exception(
                             "foundation-gate FOUNDS read failed view=%r; advisory", vuuid)
                 has_foundation = tier_foundation or user_foundation
+                view_counted = view.get("scalar_basis") == "counted"
+                # Wording flag: a counted View is a lower bound and never leads (F10).
+                count_wording = view_counted and bool(
+                    getattr(service, "counting_wording_enabled", False))
+                # A history question ("did I have before") is not answered by the current value, so
+                # the current View is shown but never leads it (#170).
+                view_leads = (
+                    has_foundation and not count_wording
+                    and _intent != QueryIntent.PREVIOUS_VALUE
+                )
                 authority_candidate = {
                     "uuid": vuuid, "name": vname, "content": vname,
                     "scope": str(NodeScope.PERSISTENT), "memory_type": "SCALAR_STATE",
@@ -1256,9 +1585,14 @@ async def run_recall(
                     "content_cosine": None, "is_superseded_view": False,
                     "view_kind": "scalar_state",
                     # Phase 4b: lead ONLY on a foundation; else injected but advisory.
-                    "is_scalar_authority": has_foundation,
+                    "is_scalar_authority": view_leads,
                 }
-                if view_already_ranked:
+                if view_counted and _counted_authority_only:
+                    # Unit R: the counted View is stated by its verdict only, never ranked.
+                    if view_already_ranked:
+                        candidate_inputs[:] = [
+                            c for c in candidate_inputs if str(c.get("uuid") or "") != vuuid]
+                elif view_already_ranked:
                     # A View can win ordinary vector search before the deterministic slot lookup.
                     # Do not let UUID dedup skip its authority annotation (the wake_time e2e case):
                     # upgrade that same candidate in place and still emit the structured verdict.
@@ -1276,18 +1610,40 @@ async def run_recall(
                     "tier_foundation": tier_foundation, "user_foundation": user_foundation,
                 }
                 contributor_payload = await _view_contributor_payload(vuuid)
+                if (
+                    getattr(service, "scalar_view_collapse_enabled", False)
+                    and view.get("scalar_basis") == "counted"
+                ):
+                    # Collapse: a counted View states the count; its items are fetched on demand.
+                    _collapsed_total = int(contributor_payload.get("total", 0))
+                    _verdict_contributors = ()
+                    _verdict_total = _collapsed_total
+                    _verdict_truncated = _collapsed_total > 0
+                    _verdict_next_offset = 0 if _collapsed_total > 0 else None
+                else:
+                    _verdict_contributors = _authority_contributors(contributor_payload)
+                    _verdict_total = int(contributor_payload.get("total", 0))
+                    _verdict_truncated = (contributor_payload.get("next_offset") is not None)
+                    _verdict_next_offset = contributor_payload.get("next_offset")
                 authority_layer.append(ScalarAuthorityVerdict(
-                    kind="current", status="leads" if has_foundation else "advisory",
+                    kind="current", status="leads" if view_leads else "advisory",
                     subject_uuid=subj, attribute=attr, scope=scp, value_kind=vk, unit=un,
                     value=view.get("value"), valid_at=view.get("valid_at"), view_uuid=vuuid,
                     has_foundation=has_foundation,
-                    contributors=_authority_contributors(contributor_payload),
-                    contributors_total=int(contributor_payload.get("total", 0)),
-                    contributors_truncated=(contributor_payload.get("next_offset") is not None),
-                    next_offset=contributor_payload.get("next_offset"),
+                    contributors=_verdict_contributors,
+                    contributors_total=_verdict_total,
+                    contributors_truncated=_verdict_truncated,
+                    next_offset=_verdict_next_offset,
+                    basis=view.get("scalar_basis") or None,
+                    lower_bound=count_wording,
+                    count_uncertain=view.get("count_uncertain"),
+                    count_actions=view.get("count_actions"),
+                    count_items=view.get("count_items"),
                 ))
+                if _counted_authority_only and view.get("scalar_basis") == "counted":
+                    _counted_verdicts_emitted += 1
                 _authority_audit.audit(
-                    "authority_annotation", "leads" if has_foundation else "advisory",
+                    "authority_annotation", "leads" if view_leads else "advisory",
                     namespace=stamped_namespace(namespace), subject_uuid=subj,
                     slot=[attr, scp, vk, un],
                     details={"kind": "current", "value": str(view.get("value")),
@@ -1335,20 +1691,34 @@ async def run_recall(
             )
             _sh_existing = {str(c["uuid"]) for c in candidate_inputs}
             _sh_added = 0
-            for (subj, attr, scp, vk, un) in _obs_slots_for_history:
+            _sh_min_sim = float(tuning.scalar_verdict_min_similarity or 0.0)
+            for (subj, attr, scp, vk, un) in _relevance_ordered_slots(
+                    _obs_slots_for_history, _obs_slot_best_cosine):
                 if not subj or not attr or not vk:
                     continue
-                # Read gate: history/comparison → always; current-state → only when
-                # no scalar_state View exists (bounded support for unanchored slots).
-                if not _sh_wants_history:
-                    _state_view = await asyncio.to_thread(
-                        service.graph_adapter.fetch_current_scalar_view_for_slot,
-                        subject_uuid=subj, attribute=attr, scope=scp,
-                        value_kind=vk, unit=un,
-                        namespace=stamped_namespace(namespace),
+                # Same relevance gate as the authority loop: a history verdict is a verdict too.
+                if _sh_min_sim > 0 and _obs_slot_best_cosine.get(
+                        (subj, attr, scp, vk, un), float("-inf")) < _sh_min_sim:
+                    continue
+                # Read gate: history/comparison → unless the slot's View is counted; current-state
+                # → only when no scalar_state View exists (bounded support for unanchored slots).
+                _state_view = await asyncio.to_thread(
+                    service.graph_adapter.fetch_current_scalar_view_for_slot,
+                    subject_uuid=subj, attribute=attr, scope=scp,
+                    value_kind=vk, unit=un,
+                    namespace=stamped_namespace(namespace),
+                )
+                if (
+                    _state_view
+                    and _projection_is_recall_eligible(_state_view)
+                    and not (
+                        _state_view.get("scalar_basis") == "counted"
+                        and not service.counting_enabled
                     )
-                    if _state_view and _projection_is_recall_eligible(_state_view):
-                        continue  # scalar_state leads; history stays off
+                    # A counted slot is stated by its counted verdict; its history would repeat it.
+                    and (not _sh_wants_history or _state_view.get("scalar_basis") == "counted")
+                ):
+                    continue  # scalar_state leads; history stays off
                 hv = await asyncio.to_thread(
                     service.graph_adapter.fetch_scalar_history,
                     subject_uuid=subj, attribute=attr, scope=scp,
@@ -1357,6 +1727,8 @@ async def run_recall(
                 )
                 if not hv or not _projection_is_recall_eligible(hv):
                     continue
+                if not service.counting_enabled and _scalar_history_has_occurrences(hv):
+                    continue  # built with counting on; stale until the flag sweep rebuilds it
                 if not _scalar_history_records_change(hv):
                     continue  # one restated value is not history (#243)
                 huuid = str(hv.get("uuid") or "").strip()
@@ -1435,6 +1807,56 @@ async def run_recall(
                 query[:60],
             )
         _t_phases["scalar_history_lane"] = int((perf_counter() - _t) * 1000)
+
+    # --- Counted authority only (unit R, flag-gated): a counted slot's occurrences leave recall ---
+    if _counted_authority_only and authority_layer:
+        try:
+            candidate_inputs = _drop_counted_occurrence_observations(
+                candidate_inputs, metadata_by_uuid, authority_layer, _occurrence_obs_ids)
+        except Exception:
+            logger.exception(
+                "counted-occurrence drop failed query=%r; leaving recall unchanged", query[:60])
+
+    # --- Scalar View collapse: drop observations a verdict already carries (flag-gated) ---
+    # The verdict states the value/count; an observation echoing the same slot repeats the quote and
+    # crowds other memories out of recall. Only emitted verdicts count as covering a slot, so an
+    # observation whose View was skipped is kept. Only OBSERVATION candidates are ever dropped.
+    # Runs under collapse (which also hides counted items) or echo-drop alone (counted items stay).
+    if (
+        (getattr(service, "scalar_view_collapse_enabled", False)
+         or getattr(service, "scalar_view_echo_drop_enabled", False))
+        and service.scalar_view_authority_enabled
+        and namespace is not None
+        and authority_layer
+    ):
+        try:
+            def _slot_key(subject, attribute, scope, value_kind, unit):
+                return tuple(str(x or "") for x in (subject, attribute, scope, value_kind, unit))
+
+            _covered_slots = {
+                _slot_key(v.subject_uuid, v.attribute, v.scope, v.value_kind, v.unit)
+                for v in authority_layer
+                if v.kind in ("current", "expired", "as_of", "history")
+            }
+            _kept_inputs = []
+            for _c in candidate_inputs:
+                if _c.get("memory_type") == "OBSERVATION":
+                    _m = metadata_by_uuid.get(str(_c["uuid"])) or {}
+                    if _slot_key(
+                        _m.get("subject_uuid"), _m.get("ss_attribute"), _m.get("ss_scope"),
+                        _m.get("ss_value_kind"), _m.get("ss_unit"),
+                    ) in _covered_slots:
+                        continue
+                _kept_inputs.append(_c)
+            logger.debug(
+                "scalar-view collapse dropped %d echoed observations",
+                len(candidate_inputs) - len(_kept_inputs),
+            )
+            candidate_inputs = _kept_inputs
+        except Exception:
+            logger.exception(
+                "scalar-view collapse failed query=%r; leaving recall unchanged", query[:60]
+            )
 
     # --- Step 7 canary: current-state View authority suppression (flag-gated) ---
     # When enabled, a current scalar_state View may suppress an older PROVENANCE-LINKED graph
@@ -1518,7 +1940,20 @@ async def run_recall(
     if tuning.enable_fact_edges and tuning.fact_edge_mode == "standalone":
         existing_uuids = {c.uuid for c in candidates}
         edges_added = 0
-        for hit in edge_hits:
+        # Same endpoint admission as the verb-facet lane: an edge is injected only when both
+        # endpoint memories would themselves be admitted. Fails closed if metadata is unavailable.
+        try:
+            standalone_hits = await _admitted_fact_rows(
+                service, list(edge_hits), include_session=include_session,
+                session_id=session_id, namespace=namespace,
+                endpoint_keys=("source_node_uuid", "target_node_uuid"),
+            )
+        except _PROGRAMMING_ERRORS:
+            raise
+        except Exception:
+            logger.exception("Standalone fact-edge endpoint check failed; injecting no edges")
+            standalone_hits = []
+        for hit in standalone_hits:
             try:
                 edge_uuid = str(hit.get("uuid") or "").strip()
                 score = float(hit["score"])
@@ -1649,9 +2084,12 @@ async def run_recall(
         or tuning.enable_belief_gate
         or (trace and tuning.enable_assertion_shadow)
     )
+    # Oracle ranking is not a Warden: with no guard configured, running the frontier must not
+    # change the Warden receipt (state, counts, gaps). Only configured guards get a receipt.
+    guard_status = warden_status if warden_status.configured_guards else None
     if frontier_active and candidate_inputs:
         _t = perf_counter()
-        await service._attach_frontier_metadata(eligible_uuids, metadata_by_uuid, warden_status=warden_status)
+        await service._attach_frontier_metadata(eligible_uuids, metadata_by_uuid, warden_status=guard_status)
         if tuning.enable_belief_gate:
             try:
                 fact_rows = await asyncio.to_thread(
@@ -1696,13 +2134,13 @@ async def run_recall(
 
     # --- Frontier portions (active): reorder by combiner / gate by wardens ---
     # Applied to the survivors BEFORE the limit slice so it shapes which make the cut.
-    # OFF by default -> this block is skipped and the path is byte-for-byte the old one.
+    # Oracle ranking is on by default (#172); with every portion off this block is skipped.
     frontier_note: str | None = None
     if scored and (tuning.enable_oracle_ranking or tuning.enable_warden_gate or tuning.enable_belief_gate):
         _t = perf_counter()
         scored, frontier_note = await service._apply_frontier(
             query, namespace, scored, metadata_by_uuid, tuning,
-            query_project=file_context_project, warden_status=warden_status,
+            query_project=file_context_project, warden_status=guard_status,
         )
         _t_phases["frontier"] = int((perf_counter() - _t) * 1000)
 
@@ -1736,14 +2174,41 @@ async def run_recall(
             r.uuid for r in top_results if r.memory_type != "EPISODIC_PENDING"
         ]
         if result_uuids_for_facts:
-            fact_rows = await asyncio.to_thread(
-                service.graph_adapter.fetch_temporal_facts, result_uuids_for_facts
-            )
+            fact_query_vector: list[float] | None = None
+            if tuning.enable_fact_relevance:
+                try:
+                    fact_query_vector = content_query_vector or obs_query_vector
+                    if fact_query_vector is None:
+                        fact_query_vector = await service.graphiti_client.embed_query(query)
+                except _PROGRAMMING_ERRORS:
+                    raise
+                except Exception:  # recall must not break: fall back to newest-5 facts
+                    logger.exception("Fact relevance query embedding failed; using newest facts")
+                    fact_query_vector = None
+            if fact_query_vector is not None:
+                try:
+                    fact_rows = await asyncio.to_thread(
+                        partial(
+                            service.graph_adapter.fetch_temporal_facts,
+                            result_uuids_for_facts, query_vector=fact_query_vector,
+                            namespace=namespace,
+                        )
+                    )
+                except _PROGRAMMING_ERRORS:
+                    raise
+                except Exception:  # fall back to the newest-5 query rather than no facts
+                    logger.exception("Fact relevance query failed; using newest facts")
+                    fact_query_vector = None
+            if fact_query_vector is None:
+                fact_rows = await asyncio.to_thread(
+                    service.graph_adapter.fetch_temporal_facts, result_uuids_for_facts
+                )
             if not include_invalidated:
                 fact_rows = _filter_to_current_beliefs(fact_rows)
             facts_by_uuid = _build_temporal_facts(
                 fact_rows, event_time=tuning.enable_anchored_time_render,
                 ended=tuning.enable_anchored_time_expiry,
+                relevance_k=_FACT_RELEVANCE_K if fact_query_vector is not None else 0,
             )
             enriched_results = []
             for sm in top_results:
@@ -1753,6 +2218,12 @@ async def run_recall(
                     facts = facts_by_uuid.get(sm.uuid, ())
                     enriched_results.append(replace(sm, temporal_facts=facts))
             top_results = enriched_results
+            if namespace is not None and _inferred_self_on(service):
+                top_results = label_and_collapse_self_tiers(
+                    top_results,
+                    anchored_uuid=self_uuid_for_namespace(namespace),
+                    inferred_uuid=inferred_self_uuid_for_namespace(namespace),
+                )
     except Exception:  # degraded mode: log and continue with empty temporal_facts
         logger.exception("Temporal facts enrichment failed; continuing with empty facts")
     _t_phases["temporal_enrichment"] = int((perf_counter() - _t) * 1000)
@@ -1856,6 +2327,22 @@ async def run_recall(
                 len(top_results),
             )
     _t_phases["post_updates"] = int((perf_counter() - _t) * 1000)
+
+    # --- Verb-facet facts (APPENDED, after post-recall updates) ---
+    # Placed here so appended edge uuids never reach _post_recall_updates (access-stat writes),
+    # the temporal-facts enrichment, or the stale-anchor blocks above.
+    if tuning.enable_verb_facets:
+        _t = perf_counter()
+        try:
+            top_results = await _append_verb_facet_facts(
+                service, query, top_results, namespace, include_invalidated, preset, tuning,
+                include_session=include_session, session_id=session_id,
+            )
+        except _PROGRAMMING_ERRORS:
+            raise
+        except Exception:
+            logger.exception("Verb-facet fact append failed; continuing without it")
+        _t_phases["verb_facets"] = int((perf_counter() - _t) * 1000)
 
     _t_phases["total"] = int((perf_counter() - _t_total) * 1000)
     logger.info(
@@ -2016,6 +2503,25 @@ async def run_recall(
     )
 
 
+def _event_lead_has_user_foundation(service: Any, verdict: Any) -> bool:
+    """A lead must rest on captured user words (#170). The event lane reads agent_quoted evidence,
+    which is never user foundation, so a lead founded on it (or on a non-user declarant) is
+    demoted to advisory. A failed or empty lookup fails closed. Episode-grounded leads (no
+    turn_evidence_uuid) and adapters without the lookup (test doubles) keep their prior behavior."""
+    turn_id = str(getattr(verdict, "turn_evidence_uuid", None) or "").strip()
+    fetch = getattr(service.graph_adapter, "fetch_turn_evidence", None)
+    if not turn_id or fetch is None:
+        return True
+    try:
+        evidence = fetch(turn_id)
+    except Exception:
+        logger.warning("event lead foundation lookup failed turn=%r; advisory", turn_id,
+                       exc_info=True)
+        return False
+    return bool(evidence) and evidence.get("declarant") == "user" and (
+        str(evidence.get("source_kind") or "") != "agent_quoted")
+
+
 async def apply_event_history_authority_layer(
     service: Any,
     result: RecallResult,
@@ -2049,6 +2555,11 @@ async def apply_event_history_authority_layer(
         verdict = event_authority_for_query(
             query, assertions, subject_uuid=subject_uuid, namespace=stamped,
             foundation_verified=True)
+        if (verdict is not None and verdict.status == "leads"
+                and not _event_lead_has_user_foundation(service, verdict)):
+            verdict = event_authority_for_query(
+                query, assertions, subject_uuid=subject_uuid, namespace=stamped,
+                foundation_verified=False)
         if verdict is not None:
             return replace(result, event_authority_layer=(verdict,))
     except Exception:

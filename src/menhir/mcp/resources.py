@@ -211,6 +211,7 @@ def _normalize_scheduler_snapshot(snapshot: dict[str, Any] | None) -> dict[str, 
         "running": snapshot.get("running"),
         "lease_acquired": lease.get("acquired"),
         "lease_blocked_reason": lease.get("blocked_reason"),
+        "lease_standby": lease.get("standby"),
     }
 
 

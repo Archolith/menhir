@@ -32,5 +32,7 @@ def test_advance_cursor_stamps_ingestion_position_and_version():
     q, params = fake.calls[0]
     assert params["cursor_at"] == "2026-07-03T00:00:00Z" and params["cu"] == "e2"
     assert params["pv"] == "v1"
-    assert "w.cursor_at = datetime($cursor_at)" in q and "w.cursor_uuid = $cu" in q
+    assert params["keys"] == ["lme-a"]
+    assert "w.cursor_at = CASE WHEN forward THEN pos" in q
+    assert "w.cursor_uuid = CASE WHEN forward THEN $cu" in q
     assert "w.perceiver_version = $pv" in q

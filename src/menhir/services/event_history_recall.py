@@ -24,6 +24,7 @@ from menhir.domain.event_history import (
     EventSelectionIntent,
     SelectionStatus,
     TypedEventAssertion,
+    apply_event_corrections,
     normalize_text as _norm,
     select_event_assertion,
 )
@@ -384,12 +385,13 @@ def select_event_recall(
             gate=EventRecallGate.ROUTE, reason="query route abstained",
         )
     predicate = _norm(route.predicate) or CANONICAL_PREDICATE_ACQUIRED
-    filtered = [
+    # Corrected-away occurrences go before scope and anchor resolution see them (#170 item 5).
+    filtered = apply_event_corrections(
         a for a in assertions
         if _norm(a.namespace) == _norm(namespace)
         and _norm(a.subject_uuid) == _norm(subject_uuid)
         and _norm(a.predicate) == predicate
-    ]
+    )
     advisory = route.kind is EventQueryRouteKind.GENERIC_ADVISORY
 
     if route.kind is EventQueryRouteKind.PREDECESSOR:
