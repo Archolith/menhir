@@ -214,9 +214,13 @@ class MemorySettings:
 
     # Deterministic canonical-self binding rollout. "off" preserves pre-change behavior exactly;
     # "observe" evaluates and records the decision without rewriting the payload; "enforce" binds.
-    # Default off until the plan's acceptance gates pass -- a proven self bypasses graphiti dedup
-    # entirely, which is a durable-write-semantics change.
-    canonical_self_binding_mode: str = "off"
+    # Default enforce since #169 (owner decision 2026-10-19). A proven self bypasses graphiti dedup
+    # entirely, a durable-write-semantics change; set "off" to opt out (safe while no consolidation
+    # migration has run, see workflows/canonical-self-migration-runbook.md).
+    canonical_self_binding_mode: str = "enforce"
+
+    # Two-tier self identity: off | observe | enforce. Agent-inferred "user-inferred" node.
+    inferred_self_mode: str = "off"
 
     # Anchored-time resolver: one extra LLM call per user turn with a temporal cue, overlaying
     # valid_at on extracted edges. Default off until the live eval gates (L1-L3) pass.
@@ -428,25 +432,22 @@ class MemorySettings:
     benchmark_mode: bool = False
 
     # Frontier retrieval portions, mapped into a RetrievalTuningConfig at the recall entry
-    # point via retrieval_tuning(). ALL portions default OFF so the shipped recall path is
-    # byte-for-byte today's ScoringService behavior (merge-to-main neutrality gate + the
-    # 2026-07-04 read-side bench verdict: the oracle stack is neutral-to-negative on
-    # LongMemEval, so it does not earn being on by default). Enable any portion per
-    # deployment via MENHIR_FRONTIER_BM25 / _ORACLE_RANKING / _INTENT_LENS / _WARDEN_GATE /
-    # _SHADOW / etc. (This also resolves audit DOC-05: code defaults now match .env.example.)
+    # point via retrieval_tuning(). Most portions default OFF; enable any per deployment via
+    # MENHIR_FRONTIER_BM25 / _SHADOW / etc. (code defaults match .env.example, audit DOC-05).
+    # Oracle ranking and the intent lens are always on since #172 and have no setting; see
+    # RetrievalTuningConfig. The Warden gate and its contradiction guard are on by default since
+    # #173 (set each to false to opt out); the belief gate and evidence anchor (#349) stay opt-in.
     frontier_bm25: bool = False            # attributed hybrid (vector+BM25) candidate gen
     frontier_content_vector: bool = False  # add menhir-owned content-embedding cosine lane
     frontier_content_vector_replace_name: bool = False
     frontier_content_vector_k: int = 100
     frontier_content_vector_weight: float = 0.5
     frontier_fusion_admission_policy: str = "attributed"
-    frontier_oracle_ranking: bool = False  # reorder survivors by the oracle combiner
-    frontier_intent_lens: bool = False     # derive temporal lens from query text
-    frontier_warden_gate: bool = False     # drop REFUSED / label FLAGGED (opt-in; aggressive)
+    frontier_warden_gate: bool = True      # drop REFUSED / label FLAGGED (on since #173)
     frontier_diversity_gate: bool = False  # reorder by evidence family to prevent spiral (opt-in)
-    frontier_contradiction_interrupt: bool = False  # append ContradictionWarden to default chain (opt-in)
-    frontier_belief_gate: bool = False     # add CurrentnessWarden + belief scoring to the chain; REQUIRES frontier_warden_gate to apply its verdicts (opt-in; aggressive)
-    frontier_evidence_anchor: bool = False  # Guard 5 EvidenceAnchorWarden (only applies under warden_gate); set TRUE for code corpora, FALSE for anecdotal/conversational
+    frontier_contradiction_interrupt: bool = True  # append ContradictionWarden to default chain (on since #173)
+    frontier_belief_gate: bool = False     # add CurrentnessWarden + belief scoring to the chain; REQUIRES frontier_warden_gate to apply its verdicts (opt-in; see #350)
+    frontier_evidence_anchor: bool = False  # Guard 5 EvidenceAnchorWarden (only applies under warden_gate); opt-in: it reads the client label, not the speaker, and refuses ordinary conversation (#349)
     frontier_fact_edges: bool = False      # inject RELATES_TO fact edges (EntityEdge.fact) into the candidate pool; set TRUE for episodic/"what happened" corpora where the answer is a dated edge fact, not an entity name
     frontier_fact_relevance: bool = False  # attach the facts most similar to the query (plus the newest) instead of only the 5 newest
     frontier_verb_facets: bool = False     # append one keyword-matched fact per question verb after ranking (verb-centric questions only)
@@ -764,8 +765,6 @@ class MemorySettings:
             content_vector_k=self.frontier_content_vector_k,
             content_vector_weight=self.frontier_content_vector_weight,
             fusion_admission_policy=self.frontier_fusion_admission_policy,
-            enable_oracle_ranking=self.frontier_oracle_ranking,
-            enable_intent_lens=self.frontier_intent_lens,
             enable_warden_gate=self.frontier_warden_gate,
             enable_diversity_gate=self.frontier_diversity_gate,
             enable_contradiction_interrupt=self.frontier_contradiction_interrupt,
@@ -891,6 +890,7 @@ class MemorySettings:
                 minimum=1.0,
             ),
             canonical_self_binding_mode=_getenv("MENHIR_CANONICAL_SELF_BINDING_MODE", default=cls.canonical_self_binding_mode),
+            inferred_self_mode=_getenv("MENHIR_INFERRED_SELF_MODE", default=cls.inferred_self_mode),
             anchored_time_resolver_enabled=parse_bool_env(_getenv("MENHIR_ANCHORED_TIME_RESOLVER", default=str(cls.anchored_time_resolver_enabled))),
             anchored_time_resolver_model=(_getenv("MENHIR_ANCHORED_TIME_MODEL", default=cls.anchored_time_resolver_model) or "").strip(),
             anchored_time_resolver_timeout_s=_parse_float(
@@ -1020,8 +1020,6 @@ class MemorySettings:
                 "MENHIR_FRONTIER_FUSION_ADMISSION_POLICY",
                 default=cls.frontier_fusion_admission_policy,
             ).strip().lower(),
-            frontier_oracle_ranking=parse_bool_env(_getenv("MENHIR_FRONTIER_ORACLE_RANKING", default=str(cls.frontier_oracle_ranking))),
-            frontier_intent_lens=parse_bool_env(_getenv("MENHIR_FRONTIER_INTENT_LENS", default=str(cls.frontier_intent_lens))),
             frontier_warden_gate=parse_bool_env(_getenv("MENHIR_FRONTIER_WARDEN_GATE", default=str(cls.frontier_warden_gate))),
             frontier_diversity_gate=parse_bool_env(_getenv("MENHIR_FRONTIER_DIVERSITY_GATE", default=str(cls.frontier_diversity_gate))),
             frontier_contradiction_interrupt=parse_bool_env(_getenv("MENHIR_FRONTIER_CONTRADICTION_INTERRUPT", default=str(cls.frontier_contradiction_interrupt))),

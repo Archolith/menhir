@@ -14,6 +14,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+from uuid import uuid4
 
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import consolidation_audit as _audit
@@ -38,6 +39,7 @@ from menhir.services.event_consolidation import (
     select_event_targets,
 )
 from menhir.services.failure_counter_bridge import sync_failure_counters
+from menhir.services.lane_outcomes import lane_outcomes
 from menhir.services.instability_counter_bridge import sync_instability_counters
 from menhir.services.scalar_consolidation import (
     ScalarConsolidationConfig,
@@ -655,6 +657,7 @@ async def consolidate_personal_memory(
         abstained = 0
         corrections_applied = 0
         processed = 0
+        counter_evidence_rows = 0
 
         def _build_episodes(rows: list) -> "list[Episode]":
             """Rows -> Episodes, collapsing EXACT duplicate observations.
@@ -698,6 +701,7 @@ async def consolidate_personal_memory(
             if call_budget is not None and counting_llm.calls >= call_budget:
                 break
             rows = graph_adapter.load_user_episodes(ns)
+            counter_evidence_rows += len(rows)
             episodes = _build_episodes(rows)
             if episodes:
                 res = perceive_and_fold(
@@ -723,7 +727,12 @@ async def consolidate_personal_memory(
                     run_tally=run_tally)
                 corrections_applied += int(corr["corrections_applied"])
             processed += 1
-            graph_adapter.mark_consolidated(ns, at=datetime.now(timezone.utc).isoformat())
+            # Watermark on the DB's own clock (#170): the newest recorded_at as of the load, so a
+            # turn recorded during this run stays dirty. now() here is a different clock, and on a
+            # same-host install it stamps past every mid-run turn.
+            newest = str((rows[0].get("newest_recorded_at") if rows else None) or "")
+            graph_adapter.mark_consolidated(
+                ns, at=newest or datetime.now(timezone.utc).isoformat())
 
         result: dict[str, object] = {
             "namespaces_dirty": len(targets),
@@ -827,10 +836,44 @@ async def consolidate_personal_memory(
                     ),
                 )
             )
+        # Erasure leaves ViewProjectionRepair receipts for Views it retired; rebuild those of the
+        # namespaces this pass covered, after their lanes (#170 item 5). A failure is logged and the
+        # receipts stay claimable; it never fails the pass. Key present only when work was claimed.
+        run_repairs = getattr(graph_adapter, "run_view_projection_repairs", None)
+        repair_namespaces = sorted({str(n) for n in [*(namespaces or []), *(scalar_targets or []),
+                                                     *(event_targets or [])] if n})
+        if (enable_scalar_state or enable_event_history) and repair_namespaces \
+                and callable(run_repairs):
+            try:
+                repairs = run_repairs(repair_namespaces, owner_id=f"consolidation:{uuid4().hex}",
+                                      scalar_history_enabled=scalar_history_enabled)
+            except Exception:  # noqa: BLE001 - receipts remain durable and claimable
+                logger.warning("consolidation pass: view projection repair failed", exc_info=True)
+                repairs = None
+            if repairs and repairs.get("claimed"):
+                result["view_repairs"] = {
+                    key: int(repairs.get(key) or 0)
+                    for key in ("claimed", "complete", "failed", "terminal_not_rebuildable",
+                                "lost_claim")
+                }
         # `result` is initialized after the counter pass, then the independent scalar pass.
         # Refresh the shared call count here so API callers see the total work actually spent;
         # otherwise a scalar/event-only run reports zero calls even after consuming k samples.
         result["llm_calls"] = counting_llm.calls
+        # Per-lane report (#170 item 4) so one lane's output cannot hide another's inactivity.
+        # Only with a non-counter lane on: a counter-only pass has one lane and keeps its shape.
+        if enable_scalar_state or enable_event_history:
+            outcomes = lane_outcomes(
+                result,
+                enabled={"counter": bool(enable_counter_state), "scalar": enable_scalar_state,
+                         "event": enable_event_history, "counting": enable_counting},
+                counter_evidence_rows=counter_evidence_rows,
+            )
+            result["lane_outcomes"] = outcomes
+            quiet = sorted(f"{lane}:{flag}" for lane, rep in outcomes.items()
+                           for flag in ("no_output", "stalled") if rep.get(flag))
+            if quiet:
+                logger.info("consolidation pass: lanes without output: %s", ", ".join(quiet))
         return result
 
     result = await asyncio.to_thread(_run)

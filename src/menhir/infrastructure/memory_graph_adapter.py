@@ -107,6 +107,8 @@ class MemoryGraphAdapter:
         self._typed_assertions = TypedAssertionRepository(self.neo4j)
         from menhir.infrastructure.typed_event_repository import TypedEventAssertionRepository
         self._typed_event_assertions = TypedEventAssertionRepository(self.neo4j)
+        from menhir.infrastructure.reversion_repository import PerceptionReversionRepository
+        self._reversion = PerceptionReversionRepository(self.neo4j)
 
     # -------------------------------------------------------------------------
     # Schema bootstrap (stays here — uses SHOW INDEXES admin query)
@@ -336,6 +338,21 @@ class MemoryGraphAdapter:
         from menhir.services.event_history_service import EventHistoryService
         return EventHistoryService(self._typed_event_assertions, self)
 
+    def run_view_projection_repairs(
+        self, namespaces: list[str], *, owner_id: str, scalar_history_enabled: bool = False,
+        limit: int = 25,
+    ) -> dict[str, Any]:
+        """One bounded pass over `namespaces`' View projection-repair receipts."""
+        from menhir.infrastructure.view_projection_repair import ViewProjectionRepairRepository
+        from menhir.services.view_projection_repair import ViewProjectionRepairService
+        service = ViewProjectionRepairService(
+            ViewProjectionRepairRepository(self.neo4j),
+            scalar_rebuilder=self.scalar_state_service(
+                scalar_history_enabled=scalar_history_enabled),
+            event_rebuilder=self.event_history_service(),
+        )
+        return service.run_pending(owner_id=owner_id, limit=limit, namespaces=namespaces)
+
     def bootstrap_phase_one(self) -> PhaseOneSchemaResult:
         """Apply phase-1 schema fields and indexes in an idempotent manner."""
         queries = get_phase1_bootstrap_queries()
@@ -415,6 +432,10 @@ class MemoryGraphAdapter:
     def episodic_twin_uuids(self, node_uuid: str) -> list[str]:
         """See EpisodeLifecycleRepository.episodic_twin_uuids."""
         return self._episodes.episodic_twin_uuids(node_uuid)
+
+    def erasure_evidence_uuids(self, node_uuid: str) -> list[str]:
+        """See EpisodeLifecycleRepository.erasure_evidence_uuids."""
+        return self._episodes.erasure_evidence_uuids(node_uuid)
 
     def list_episodes_missing_content_embedding(
         self,
@@ -698,6 +719,24 @@ class MemoryGraphAdapter:
         NON-DESTRUCTIVE. Creates or updates only the canonical target. Pre-existing forks are
         reported, never absorbed; see `EpisodeLifecycleRepository.ensure_self_entity`."""
         return self._episodes.ensure_self_entity(namespace)
+
+    def link_self_tiers(self, namespace: str) -> bool:
+        """Structural INFERRED_VIEW_OF link from anchored self to inferred self, only when both
+        exist; see `EpisodeLifecycleRepository.link_self_tiers`."""
+        return self._episodes.link_self_tiers(namespace)
+
+    def mark_episode_verbatim_skipped(
+        self, episode_uuid: str, *, worker_id: str, claim_started_at: object | None,
+    ) -> str | None:
+        """See `EpisodeLifecycleRepository.mark_episode_verbatim_skipped`."""
+        return self._episodes.mark_episode_verbatim_skipped(
+            episode_uuid, worker_id=worker_id, claim_started_at=claim_started_at)
+
+    def reenable_verbatim_skips(
+        self, *, projection_uuid: str | None = None, limit: int = 100,
+    ) -> list[str]:
+        """See `EpisodeLifecycleRepository.reenable_verbatim_skips`."""
+        return self._episodes.reenable_verbatim_skips(projection_uuid=projection_uuid, limit=limit)
 
     def detect_self_forks(self, namespace: str) -> list[str]:
         """Read-only inventory of same-named self forks for `namespace`.
@@ -1765,6 +1804,60 @@ class MemoryGraphAdapter:
             run_id=run_id, incarnation=incarnation, epoch=epoch,
             keep_ids=keep_ids, promote_ids=promote_ids)
 
+    # --- prior-version retirement, scalar + event lanes (#170 D1; reversion_repository) ---
+    def scalar_prior_version_rows(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+    ) -> list[dict[str, Any]]:
+        return self._reversion.scalar_prior_version_rows(
+            namespace, turn_ids, perceiver_rank=perceiver_rank)
+
+    def scalar_current_version_spans(
+        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
+        include_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        return self._reversion.scalar_current_version_spans(
+            namespace, turn_ids, perceiver_version=perceiver_version, include_ids=include_ids)
+
+    def scalar_owed_subjects(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+    ) -> list[str]:
+        return self._reversion.scalar_owed_subjects(
+            namespace, turn_ids, perceiver_rank=perceiver_rank)
+
+    def retire_scalar_prior_version(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+        perceiver_version: str, keep_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self._reversion.retire_scalar_prior_version(
+            namespace, turn_ids, perceiver_rank=perceiver_rank,
+            perceiver_version=perceiver_version, keep_ids=keep_ids)
+
+    def event_prior_version_rows(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+    ) -> list[dict[str, Any]]:
+        return self._reversion.event_prior_version_rows(
+            namespace, turn_ids, perceiver_rank=perceiver_rank)
+
+    def event_current_version_spans(
+        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
+    ) -> list[dict[str, Any]]:
+        return self._reversion.event_current_version_spans(
+            namespace, turn_ids, perceiver_version=perceiver_version)
+
+    def event_owed_lanes(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+    ) -> list[dict[str, Any]]:
+        return self._reversion.event_owed_lanes(
+            namespace, turn_ids, perceiver_rank=perceiver_rank)
+
+    def retire_event_prior_version(
+        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
+        perceiver_version: str, keep_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self._reversion.retire_event_prior_version(
+            namespace, turn_ids, perceiver_rank=perceiver_rank,
+            perceiver_version=perceiver_version, keep_ids=keep_ids)
+
     def mark_counting_flag_state(
         self, namespace: str, *, enabled: bool, at: str, create_only: bool = False,
         match: bool = False,
@@ -2561,9 +2654,11 @@ class MemoryGraphAdapter:
         *,
         similarity: float,
         operation_id: str | None = None,
+        expected_fact_uuids: list[str] | None = None,
     ) -> dict[str, int]:
         return self._correlation.merge_entity(
             survivor_uuid, absorbed_uuid, similarity=similarity, operation_id=operation_id,
+            expected_fact_uuids=expected_fact_uuids,
         )
 
     def correlation_exists(self, uuid_a: str, uuid_b: str) -> bool:

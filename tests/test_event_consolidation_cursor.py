@@ -36,8 +36,8 @@ def test_list_event_dirty_is_cursor_and_version_aware_with_independent_label():
     # dirty when: no watermark, different perceiver_version, or evidence beyond the stored cursor
     assert "w.perceiver_version <> $pv" in q
     assert "ckey > w.cursor_at" in q and "tuuid > w.cursor_uuid" in q
-    # SEPARATE label keyed by the namespace string in group_id — not the scalar/counter watermark
-    assert "EventConsolidationWatermark {group_id: t.namespace}" in q
+    # SEPARATE label keyed by each row's stored spelling (#170) — not the scalar/counter watermark
+    assert "EventConsolidationWatermark {group_id: ck}" in q
     assert "ScalarConsolidationWatermark" not in q
     assert ":ConsolidationWatermark" not in q
     # only role=user, declarant=user, nonempty text participates
@@ -59,8 +59,9 @@ def test_load_next_batch_pages_on_recorded_at_then_turn_id():
     assert out[0]["content"] == "keep this in mind"
     assert out[0]["source_kind"] == "chat" and out[0]["session_id"] == "s1"
     q, params = fake.calls[0]
-    assert params == {"ns": "project-a", "pv": "v1", "limit": 100}
-    assert "EventConsolidationWatermark {group_id: $ns}" in q
+    assert params["pv"] == "v1" and params["limit"] == 100
+    assert params["keys"] == ["project-a"] and params["tenant_namespaces"] == ["project-a"]
+    assert "EventConsolidationWatermark {group_id: ck}" in q
     assert "w.perceiver_version <> $pv" in q                # version mismatch resets the cursor
     assert "ckey > cca OR (ckey = cca AND t.turn_id > cu)" in q  # strict (recorded_at, turn_id) paging
     assert "ORDER BY ckey, t.turn_id" in q                  # deterministic truncation-safe order
@@ -80,8 +81,10 @@ def test_advance_cursor_stamps_independent_event_watermark_position_and_version(
     q, params = fake.calls[0]
     assert params["cursor_at"] == "2026-07-03T00:00:00Z" and params["cu"] == "t2"
     assert params["pv"] == "v1"
-    assert "EventConsolidationWatermark {group_id: $ns}" in q
-    assert "w.cursor_at = datetime($cursor_at)" in q and "w.cursor_uuid = $cu" in q
+    assert params["keys"] == ["project-a"]
+    assert "EventConsolidationWatermark {group_id: k}" in q
+    assert "w.cursor_at = CASE WHEN forward THEN pos" in q
+    assert "w.cursor_uuid = CASE WHEN forward THEN $cu" in q
     assert "w.perceiver_version = $pv" in q
     assert "ScalarConsolidationWatermark" not in q
     assert ":ConsolidationWatermark" not in q

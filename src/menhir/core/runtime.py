@@ -483,9 +483,11 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
     if not snapshot.get("running"):
         lease = snapshot.get("lease") or {}
         logger.warning(
-            "Maintenance scheduler not started in this process; blocked_reason=%s active_owner_pid=%s",
+            "Maintenance scheduler not started in this process; blocked_reason=%s "
+            "active_owner_pid=%s standby=%s",
             lease.get("blocked_reason"),
             (lease.get("active_owner") or {}).get("owner_pid"),
+            lease.get("standby"),
         )
     elif getattr(settings, "structure_watcher_enabled", True):
         asyncio.create_task(

@@ -194,6 +194,7 @@ async def phase3_run_impl(
             result.get("event_assertions_created", 0) or 0),
         event_views_rebuilt=int(result.get("event_views_rebuilt", 0) or 0),
         event_llm_calls=int(result.get("event_llm_calls", 0) or 0),
+        lane_outcomes=result.get("lane_outcomes"),
     )
 
 

@@ -208,34 +208,37 @@ class RetrievalTuningConfig:
     # and final ranking. Default OFF preserves production behavior.
     enable_facet_candidates: bool = False
     facet_weight: float = 0.5
-    # --- Frontier portions (active; each OFF == today's ScoringService behavior) ---
+    # --- Frontier portions (active; each OFF == plain ScoringService order) ---
     # Oracle ranking: run oracles+combiner over the post-floor survivors and blend its
     # order into the upstream ScoringService/facet order. The upstream rank remains the
     # baseline so a secondary trust/temporal signal cannot erase an exact semantic hit.
-    enable_oracle_ranking: bool = False
+    # On by default since #172 (retrieval-neutral on LME, within latency limits); kept as a
+    # per-request knob for Recall Lab comparisons. There is no deployment flag.
+    enable_oracle_ranking: bool = True
     # Reciprocal-rank residual weight for the Oracle order. 0 preserves the upstream
     # order exactly; 0.25 lets Oracle adjust close/lower-ranked candidates without
     # becoming a second replacement ranker.
     oracle_rank_weight: float = 0.25
     # Intent auto-lens: derive the temporal lens (current/historical/any) from the query
     # text for the oracle/warden path. No effect unless oracle_ranking or warden_gate is on.
-    enable_intent_lens: bool = False
-    # Warden gate: drop REFUSED candidates from results and label FLAGGED ones.
-    enable_warden_gate: bool = False
+    # On by default since #172, like oracle ranking.
+    enable_intent_lens: bool = True
+    # Warden gate: drop REFUSED candidates from results and label FLAGGED ones. On since #173.
+    enable_warden_gate: bool = True
     # Diversity gate: reorder results by evidence family to prevent any single source from dominating.
     enable_diversity_gate: bool = False
-    # Contradiction interrupt: append ContradictionWarden to the default warden chain.
-    enable_contradiction_interrupt: bool = False
+    # Contradiction interrupt: append ContradictionWarden to the default warden chain. On since #173.
+    enable_contradiction_interrupt: bool = True
     # Belief gate: append CurrentnessWarden + populate belief_score/evidence from
-    # candidate metadata temporal markers. Default OFF; only belief-bearing candidates
-    # are scored (warden ADMITs the rest permissively).
+    # candidate metadata temporal markers. Default OFF (#173, #350): an Entity is marked superseded
+    # when any of its fact edges expired, and with the contradiction guard an anchored one is
+    # then refused under the current lens. Only belief-bearing candidates are scored.
     enable_belief_gate: bool = False
     # Evidence-anchor gate (Guard 5 / EvidenceAnchorWarden): refuse candidates whose support is
-    # synthetic-only / has no external anchor (user/log/test/git/file). ON = today's behavior.
-    # Turn OFF for ANECDOTAL corpora (personal conversation) where every recalled fact is
-    # LLM-extracted from chat with no code/test/git anchor — otherwise Guard 5 refuses the whole
-    # result set. See MENHIR_FRONTIER_EVIDENCE_ANCHOR.
-    enable_evidence_anchor: bool = True
+    # synthetic-only / has no external anchor (user/log/test/git/file). OFF by default, matching
+    # MENHIR_FRONTIER_EVIDENCE_ANCHOR: provenance comes from the client label, so ordinary
+    # conversation stored via MCP/REST looks agent-written and is refused (#349).
+    enable_evidence_anchor: bool = False
     # Fact-edge retrieval: in addition to the entity-node candidate pool, run a
     # graphiti EDGE_HYBRID search and inject the top RELATES_TO fact edges as
     # CandidateSource.FACT_EDGE candidates (content == EntityEdge.fact). Default

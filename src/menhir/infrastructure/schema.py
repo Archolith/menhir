@@ -164,6 +164,8 @@ def _node_index_queries() -> list[str]:
             "CREATE INDEX episodic_processing_lease_expires_idx IF NOT EXISTS FOR (n:Episodic) ON (n.processing_lease_expires_at)",
             "CREATE INDEX episodic_queued_at_idx IF NOT EXISTS FOR (n:Episodic) ON (n.queued_at)",
             "CREATE INDEX episodic_resolved_episode_uuid_idx IF NOT EXISTS FOR (n:Episodic) ON (n.resolved_episode_uuid)",
+            # Two-tier self Phase 3: the re-enable sweep runs on every lease-recovery pass.
+            "CREATE INDEX episodic_extraction_skipped_for_idx IF NOT EXISTS FOR (n:Episodic) ON (n.extraction_skipped_for)",
             # Dirty-namespace detection scans :Episodic with a content STARTS WITH predicate on
             # every consolidation request and scheduler cycle; a plain index backs prefix search.
             "CREATE INDEX episodic_content_idx IF NOT EXISTS FOR (n:Episodic) ON (n.content)",
@@ -375,6 +377,8 @@ def get_scalar_state_activation_queries() -> list[str]:
         # — converge on one head. claim_key is a non-unique historical property (index only).
         "CREATE CONSTRAINT typed_assertion_head_source_key_unique IF NOT EXISTS FOR (h:TypedAssertionHead) REQUIRE h.source_key IS UNIQUE",
         "CREATE INDEX typed_assertion_head_claim_key_idx IF NOT EXISTS FOR (h:TypedAssertionHead) ON (h.claim_key)",
+        # #170 D1: one read marker per (lane, turn); records and the prior-version retire MERGE it.
+        "CREATE CONSTRAINT typed_read_marker_key_unique IF NOT EXISTS FOR (m:TypedReadMarker) REQUIRE m.marker_key IS UNIQUE",
         # merge-lineage journal (DB-unique per op+assertion) + reconciliation receipts (Piece C.3)
         "CREATE CONSTRAINT assertion_rebind_key_unique IF NOT EXISTS FOR (r:AssertionRebind) REQUIRE r.rebind_key IS UNIQUE",
         "CREATE INDEX assertion_rebind_op_idx IF NOT EXISTS FOR (r:AssertionRebind) ON (r.merge_op_id)",

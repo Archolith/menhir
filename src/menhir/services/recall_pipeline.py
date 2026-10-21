@@ -20,6 +20,8 @@ from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FA
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
 from menhir.services.embedding_identity import comparable_model, embedder_model_name
 from menhir.domain.self_identity import self_uuid_for_namespace
+from menhir.domain.self_identity import inferred_self_uuid_for_namespace
+from menhir.infrastructure.self_binding import SelfBindMode, resolve_inferred_mode
 from menhir.domain.recall import (
     CandidateData,
     QueryPreset,
@@ -70,6 +72,11 @@ from menhir.infrastructure.paths import repo_root_for_project
 
 logger = logging.getLogger(__name__)
 
+
+def _inferred_self_on(service: object) -> bool:
+    """MENHIR_INFERRED_SELF_MODE observe/enforce: recall reads the inferred self tier too."""
+    return resolve_inferred_mode(getattr(service, "inferred_self_mode", None)) is not SelfBindMode.OFF
+
 # Degradation is deliberate: a slow or unavailable graph must not fail recall. But a programming
 # error raised by a call whose signature we control is a bug, not an outage -- a stale signature
 # once surfaced as a wrong answer (swallowed into `assert 0 == 1`) instead of an error. Split them.
@@ -79,6 +86,7 @@ _PROGRAMMING_ERRORS = (TypeError, AttributeError, NameError, KeyError)
 _FACT_RELEVANCE_K = 3
 
 
+from menhir.services.recall_policies import label_and_collapse_self_tiers
 from menhir.services.recall_policies import (
     FILE_LINKED_BASELINE_SIMILARITY,
     PENDING_ENTITY_SIMILARITY,
@@ -1285,6 +1293,9 @@ async def run_recall(
                 # the canonical self subject, via the identity SSOT: deterministic and I/O-free,
                 # matching what perception binds self-subject assertions to -- no DB read.
                 query_subjects.add(self_uuid_for_namespace(namespace))
+                if _inferred_self_on(service):
+                    # View gate only; event-history authority below stays anchored-only.
+                    query_subjects.add(inferred_self_uuid_for_namespace(namespace))
             for _s_uuid, _s_disp in obs_subject_displays.items():
                 _disp = (_s_disp or "").strip().lower()
                 if not _disp:
@@ -1556,7 +1567,12 @@ async def run_recall(
                 # Wording flag: a counted View is a lower bound and never leads (F10).
                 count_wording = view_counted and bool(
                     getattr(service, "counting_wording_enabled", False))
-                view_leads = has_foundation and not count_wording
+                # A history question ("did I have before") is not answered by the current value, so
+                # the current View is shown but never leads it (#170).
+                view_leads = (
+                    has_foundation and not count_wording
+                    and _intent != QueryIntent.PREVIOUS_VALUE
+                )
                 authority_candidate = {
                     "uuid": vuuid, "name": vname, "content": vname,
                     "scope": str(NodeScope.PERSISTENT), "memory_type": "SCALAR_STATE",
@@ -2068,9 +2084,12 @@ async def run_recall(
         or tuning.enable_belief_gate
         or (trace and tuning.enable_assertion_shadow)
     )
+    # Oracle ranking is not a Warden: with no guard configured, running the frontier must not
+    # change the Warden receipt (state, counts, gaps). Only configured guards get a receipt.
+    guard_status = warden_status if warden_status.configured_guards else None
     if frontier_active and candidate_inputs:
         _t = perf_counter()
-        await service._attach_frontier_metadata(eligible_uuids, metadata_by_uuid, warden_status=warden_status)
+        await service._attach_frontier_metadata(eligible_uuids, metadata_by_uuid, warden_status=guard_status)
         if tuning.enable_belief_gate:
             try:
                 fact_rows = await asyncio.to_thread(
@@ -2115,13 +2134,13 @@ async def run_recall(
 
     # --- Frontier portions (active): reorder by combiner / gate by wardens ---
     # Applied to the survivors BEFORE the limit slice so it shapes which make the cut.
-    # OFF by default -> this block is skipped and the path is byte-for-byte the old one.
+    # Oracle ranking is on by default (#172); with every portion off this block is skipped.
     frontier_note: str | None = None
     if scored and (tuning.enable_oracle_ranking or tuning.enable_warden_gate or tuning.enable_belief_gate):
         _t = perf_counter()
         scored, frontier_note = await service._apply_frontier(
             query, namespace, scored, metadata_by_uuid, tuning,
-            query_project=file_context_project, warden_status=warden_status,
+            query_project=file_context_project, warden_status=guard_status,
         )
         _t_phases["frontier"] = int((perf_counter() - _t) * 1000)
 
@@ -2199,6 +2218,12 @@ async def run_recall(
                     facts = facts_by_uuid.get(sm.uuid, ())
                     enriched_results.append(replace(sm, temporal_facts=facts))
             top_results = enriched_results
+            if namespace is not None and _inferred_self_on(service):
+                top_results = label_and_collapse_self_tiers(
+                    top_results,
+                    anchored_uuid=self_uuid_for_namespace(namespace),
+                    inferred_uuid=inferred_self_uuid_for_namespace(namespace),
+                )
     except Exception:  # degraded mode: log and continue with empty temporal_facts
         logger.exception("Temporal facts enrichment failed; continuing with empty facts")
     _t_phases["temporal_enrichment"] = int((perf_counter() - _t) * 1000)
@@ -2478,6 +2503,25 @@ async def run_recall(
     )
 
 
+def _event_lead_has_user_foundation(service: Any, verdict: Any) -> bool:
+    """A lead must rest on captured user words (#170). The event lane reads agent_quoted evidence,
+    which is never user foundation, so a lead founded on it (or on a non-user declarant) is
+    demoted to advisory. A failed or empty lookup fails closed. Episode-grounded leads (no
+    turn_evidence_uuid) and adapters without the lookup (test doubles) keep their prior behavior."""
+    turn_id = str(getattr(verdict, "turn_evidence_uuid", None) or "").strip()
+    fetch = getattr(service.graph_adapter, "fetch_turn_evidence", None)
+    if not turn_id or fetch is None:
+        return True
+    try:
+        evidence = fetch(turn_id)
+    except Exception:
+        logger.warning("event lead foundation lookup failed turn=%r; advisory", turn_id,
+                       exc_info=True)
+        return False
+    return bool(evidence) and evidence.get("declarant") == "user" and (
+        str(evidence.get("source_kind") or "") != "agent_quoted")
+
+
 async def apply_event_history_authority_layer(
     service: Any,
     result: RecallResult,
@@ -2511,6 +2555,11 @@ async def apply_event_history_authority_layer(
         verdict = event_authority_for_query(
             query, assertions, subject_uuid=subject_uuid, namespace=stamped,
             foundation_verified=True)
+        if (verdict is not None and verdict.status == "leads"
+                and not _event_lead_has_user_foundation(service, verdict)):
+            verdict = event_authority_for_query(
+                query, assertions, subject_uuid=subject_uuid, namespace=stamped,
+                foundation_verified=False)
         if verdict is not None:
             return replace(result, event_authority_layer=(verdict,))
     except Exception:

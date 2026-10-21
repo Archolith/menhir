@@ -32,14 +32,14 @@ class RecallLabTuning(BaseModel):
     enable_facet_shadow: bool = False
     enable_facet_candidates: bool = False
     facet_weight: float = Field(default=0.5, ge=0.0, le=10.0)
-    enable_oracle_ranking: bool = False
+    enable_oracle_ranking: bool = True
     oracle_rank_weight: float = Field(default=0.25, ge=0.0, le=2.0)
-    enable_intent_lens: bool = False
-    enable_warden_gate: bool = False
+    enable_intent_lens: bool = True
+    enable_warden_gate: bool = True
     enable_diversity_gate: bool = False
-    enable_contradiction_interrupt: bool = False
+    enable_contradiction_interrupt: bool = True
     enable_belief_gate: bool = False
-    enable_evidence_anchor: bool = True
+    enable_evidence_anchor: bool = False
     enable_fact_edges: bool = False
     fact_edge_k: int = Field(default=20, ge=1, le=200)
     fact_edge_mode: Literal["pointer", "standalone"] = "pointer"
@@ -356,6 +356,10 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
             enable_oracle_ranking=True,
             enable_intent_lens=True,
             enable_warden_gate=True,
+            # Strict profile: pinned so the #173 default flip does not change this arm.
+            enable_evidence_anchor=True,
+            enable_contradiction_interrupt=False,
+            enable_belief_gate=False,
         ),
     },
     {
@@ -369,6 +373,8 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
             enable_intent_lens=True,
             enable_warden_gate=True,
             enable_evidence_anchor=False,
+            enable_contradiction_interrupt=False,
+            enable_belief_gate=False,
         ),
     },
     {
@@ -379,6 +385,11 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
             enable_assertion_shadow=False,
             enable_facet_candidates=True,
             facet_weight=0.5,
+            enable_oracle_ranking=False,
+            enable_intent_lens=False,
+            enable_warden_gate=False,
+            enable_contradiction_interrupt=False,
+            enable_belief_gate=False,
         ),
     },
     {
@@ -389,6 +400,9 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
             enable_assertion_shadow=False,
             enable_oracle_ranking=True,
             enable_intent_lens=True,
+            enable_warden_gate=False,
+            enable_contradiction_interrupt=False,
+            enable_belief_gate=False,
         ),
     },
     {
@@ -402,6 +416,8 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
             enable_intent_lens=True,
             enable_warden_gate=False,
             enable_evidence_anchor=False,
+            enable_contradiction_interrupt=False,
+            enable_belief_gate=False,
         ),
     },
 ]

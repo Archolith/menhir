@@ -173,6 +173,11 @@ class MaintenanceScheduler:
     # Monotonic deadline before which THIS owner must not run jobs, because a displaced owner's
     # own provable window has not expired yet (CF-241). 0.0 means "no displaced owner to outlive".
     _jobs_blocked_until: float = field(default=0.0, init=False, repr=False)
+    # Standby (#170): a start() that could not take the lease retries on the heartbeat cadence until
+    # it does or stop() runs. The lease row still decides every acquire, so a live owner keeps it.
+    _standby_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
+    # True from start() until stop(); the standby re-checks it under _state_lock before acquiring.
+    _want_running: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._jobs = {
@@ -227,60 +232,114 @@ class MaintenanceScheduler:
         takeover_reason: str | None = None,
     ) -> bool:
         async with self._state_lock:
-            if self.is_running():
-                return True
-            acquire_started = time.monotonic()
-            if force_takeover:
-                previous_owner = self.lease_store.force_acquire(
-                    lease_name=self.lease_name,
-                    owner_id=self._owner_id,
-                    owner_pid=self._owner_pid,
-                    lease_duration_s=self.lease_duration_s,
-                )
-                acquired = True
-                self._last_force_takeover_at = _utc_now_iso()
-                self._last_force_takeover_reason = (takeover_reason or "manual").strip() or "manual"
-                self._last_force_takeover_from = previous_owner
-                self._block_jobs_until_displaced_owner_expires(previous_owner, acquire_started)
-                logger.warning(
-                    "Maintenance scheduler lease force takeover; lease=%s previous_owner_pid=%s "
-                    "reason=%s jobs_deferred_s=%.1f",
-                    self.lease_name,
-                    previous_owner.get("owner_pid") if previous_owner is not None else None,
-                    self._last_force_takeover_reason,
-                    max(0.0, self._jobs_blocked_until - time.monotonic()),
-                )
-            else:
-                acquired = self.lease_store.try_acquire(
-                    lease_name=self.lease_name,
-                    owner_id=self._owner_id,
-                    owner_pid=self._owner_pid,
-                    lease_duration_s=self.lease_duration_s,
-                )
-            self._lease_acquired = acquired
-            if not acquired:
-                lease = self.lease_store.fetch(lease_name=self.lease_name)
-                self._lease_blocked_reason = (
-                    f"lease_held_by_pid={lease.get('owner_pid')}" if lease is not None else "lease_unavailable"
-                )
-                logger.warning(
-                    "Maintenance scheduler start skipped; lease=%s owner_pid=%s owner_id=%s",
-                    self.lease_name,
-                    lease.get("owner_pid") if lease is not None else None,
-                    lease.get("owner_id") if lease is not None else None,
-                )
-                return False
-            self._lease_blocked_reason = None
-            # The acquire is itself a proof of ownership; without stamping it here the first
-            # job of the run would be refused for want of a renewal that has not happened yet.
-            self._stamp_lease_deadline(acquire_started)
-            self._lease_lost_event.clear()
-            self._stop_event.clear()
-            self._task = asyncio.create_task(
-                self._run_loop(),
-                name="menhir-maintenance-scheduler",
-            )
+            self._want_running = True
+            started = self._start_locked(
+                force_takeover=force_takeover, takeover_reason=takeover_reason)
+            if started:
+                self._cancel_standby()
+            elif not self._lease_lost and (
+                self._standby_task is None or self._standby_task.done()
+            ):
+                # Not after a lost lease: one job thread from that ownership may still be running
+                # (see _await_job_under_lease), so re-acquiring then stays an operator action.
+                self._standby_task = asyncio.create_task(
+                    self._standby_loop(), name="menhir-maintenance-standby")
+            return started
+
+    async def _standby_loop(self) -> None:
+        """Retry the lease until this process owns it, or stop() withdraws the request."""
+        me = asyncio.current_task()
+        interval = self._heartbeat_interval_s()
+        while True:
+            await asyncio.sleep(interval)
+            async with self._state_lock:
+                if self._standby_task is not me or not self._want_running:
+                    return
+                try:
+                    started = self._start_locked(
+                        force_takeover=False, takeover_reason=None, quiet=True)
+                except Exception:
+                    # A store error says nothing about who owns the lease; keep standing by.
+                    logger.warning("Maintenance scheduler standby acquire errored owner_id=%s",
+                                   self._owner_id, exc_info=True)
+                    continue
+                if started:
+                    self._standby_task = None
+                    logger.info("Maintenance scheduler acquired the lease from standby owner_id=%s",
+                                self._owner_id)
+                    return
+
+    def _cancel_standby(self) -> asyncio.Task[None] | None:
+        """Withdraw the standby; the caller holds _state_lock. Returns the cancelled task."""
+        standby, self._standby_task = self._standby_task, None
+        if standby is not None and not standby.done():
+            standby.cancel()
+            return standby
+        return None
+
+    def _start_locked(
+        self,
+        *,
+        force_takeover: bool,
+        takeover_reason: str | None,
+        quiet: bool = False,
+    ) -> bool:
+        """The acquire-and-launch step. The caller holds _state_lock."""
+        if self.is_running():
             return True
+        acquire_started = time.monotonic()
+        if force_takeover:
+            previous_owner = self.lease_store.force_acquire(
+                lease_name=self.lease_name,
+                owner_id=self._owner_id,
+                owner_pid=self._owner_pid,
+                lease_duration_s=self.lease_duration_s,
+            )
+            acquired = True
+            self._last_force_takeover_at = _utc_now_iso()
+            self._last_force_takeover_reason = (takeover_reason or "manual").strip() or "manual"
+            self._last_force_takeover_from = previous_owner
+            self._block_jobs_until_displaced_owner_expires(previous_owner, acquire_started)
+            logger.warning(
+                "Maintenance scheduler lease force takeover; lease=%s previous_owner_pid=%s "
+                "reason=%s jobs_deferred_s=%.1f",
+                self.lease_name,
+                previous_owner.get("owner_pid") if previous_owner is not None else None,
+                self._last_force_takeover_reason,
+                max(0.0, self._jobs_blocked_until - time.monotonic()),
+            )
+        else:
+            acquired = self.lease_store.try_acquire(
+                lease_name=self.lease_name,
+                owner_id=self._owner_id,
+                owner_pid=self._owner_pid,
+                lease_duration_s=self.lease_duration_s,
+            )
+        self._lease_acquired = acquired
+        if not acquired:
+            lease = self.lease_store.fetch(lease_name=self.lease_name)
+            self._lease_blocked_reason = (
+                f"lease_held_by_pid={lease.get('owner_pid')}" if lease is not None else "lease_unavailable"
+            )
+            # A standby retry logs quietly: a live owner may hold the lease for hours.
+            (logger.debug if quiet else logger.warning)(
+                "Maintenance scheduler start skipped; lease=%s owner_pid=%s owner_id=%s",
+                self.lease_name,
+                lease.get("owner_pid") if lease is not None else None,
+                lease.get("owner_id") if lease is not None else None,
+            )
+            return False
+        self._lease_blocked_reason = None
+        # The acquire is itself a proof of ownership; without stamping it here the first
+        # job of the run would be refused for want of a renewal that has not happened yet.
+        self._stamp_lease_deadline(acquire_started)
+        self._lease_lost_event.clear()
+        self._stop_event.clear()
+        self._task = asyncio.create_task(
+            self._run_loop(),
+            name="menhir-maintenance-scheduler",
+        )
+        return True
 
     async def force_takeover(self, reason: str = "manual") -> bool:
         """Force this process to take the scheduler lease for troubleshooting."""
@@ -308,6 +367,13 @@ class MaintenanceScheduler:
         this cannot deadlock or hang longer than the previous code's own unguarded `await task`.
         """
         async with self._state_lock:
+            # Withdraw the standby first, so it cannot acquire after this stop. It cannot be inside
+            # _start_locked now (we hold the lock), so awaiting the cancel cannot deadlock.
+            self._want_running = False
+            standby = self._cancel_standby()
+            if standby is not None:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await standby
             task = self._task
             if task is None:
                 if self._lease_acquired:
@@ -337,6 +403,7 @@ class MaintenanceScheduler:
                 "owner_pid": self._owner_pid,
                 "acquired": self._lease_acquired,
                 "blocked_reason": self._lease_blocked_reason,
+                "standby": self._standby_task is not None and not self._standby_task.done(),
                 "active_owner": lease,
                 "last_forced_takeover": {
                     "at": self._last_force_takeover_at,

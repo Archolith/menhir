@@ -1,10 +1,11 @@
 """One idempotent pass over durable generic View projection-repair receipts.
 
-Activation blocker: this service is intentionally not advertised as always-on.  The current runtime
-does not expose a safe independent scheduler lease for this queue, and several erasure producers do
-not yet persist every projection-identity field needed after namespace deletion.  Construct the
-service explicitly and call :meth:`run_pending`; runtime registration should follow only after the
-producer receipt contract and an independently owned scheduling hook are deployed together.
+Each consolidation pass runs :meth:`run_pending` for the namespaces it processed, after its lanes
+(#170 item 5). That is not a standalone always-on job: receipts of namespaces no pass visits wait
+for one. Claims and transitions are lease- and token-conditional and rebuilds are deterministic;
+a rebuild racing a lane write from another pass over the same namespace is not fenced here. A
+receipt missing projection-identity fields (some namespace-deletion producers) fails retryably and
+is retried on later passes.
 """
 
 from __future__ import annotations
@@ -17,7 +18,8 @@ from menhir.infrastructure.view_projection_repair import ViewProjectionRepairCla
 
 class RepairStore(Protocol):
     def claim_pending(
-        self, *, owner_id: str, limit: int, lease_seconds: int
+        self, *, owner_id: str, limit: int, lease_seconds: int,
+        namespaces: list[str] | None = None,
     ) -> list[ViewProjectionRepairClaim]: ...
 
     def complete(self, claim: ViewProjectionRepairClaim) -> bool: ...
@@ -65,18 +67,21 @@ class ViewProjectionRepairService:
         owner_id: str,
         limit: int = 25,
         lease_seconds: int = 300,
+        namespaces: list[str] | None = None,
     ) -> dict[str, Any]:
         """Run one bounded, idempotent claim/dispatch pass.
 
         Repeating the pass is safe: completed/terminal rows are not claimable, failures retain
         retry accounting, and all dispatched rebuild APIs are deterministic.  A stale owner cannot
         finalize after lease loss because every transition is token- and lease-conditional.
+        ``namespaces`` limits the pass to those namespaces' receipts.
         """
-        claims = self._store.claim_pending(
-            owner_id=owner_id,
-            limit=limit,
-            lease_seconds=lease_seconds,
-        )
+        claim_kwargs: dict[str, Any] = {
+            "owner_id": owner_id, "limit": limit, "lease_seconds": lease_seconds,
+        }
+        if namespaces is not None:
+            claim_kwargs["namespaces"] = list(namespaces)
+        claims = self._store.claim_pending(**claim_kwargs)
         summary: dict[str, Any] = {
             "claimed": len(claims),
             "complete": 0,

@@ -66,6 +66,14 @@ _PROVENANCE_GUARD_CYPHER = "\n".join(
     for node, prop, param in GUARDED_PROVENANCE
 )
 
+#: Which `(absorbed)-[f:RELATES_TO]-(peer:Entity)` edges a merge moves onto the survivor. The Cypher
+#: half of ONE predicate; the Python half is `merge_snapshot.is_moved_fact`. Used by the fact-set
+#: guard and by both move blocks, so the guarded set and the moved set are the same edges.
+_MOVED_FACT_WHERE = (
+    "f.fact IS NOT NULL AND f.uuid IS :: STRING NOT NULL AND f.uuid <> '' "
+    "AND peer.uuid IS NOT NULL AND peer.uuid <> survivor.uuid AND peer.uuid <> absorbed.uuid"
+)
+
 
 class CorrelationRepository:
     """Neo4j operations for semantic correlation between entities."""
@@ -142,11 +150,14 @@ class CorrelationRepository:
     #: so `is_quantstate` covers pre-View registers specifically. Canonical-self markers are part
     #: of this same predicate: canonical self is an endpoint authority, not a duplicate candidate,
     #: and absorbing it into an ordinary ``user`` node destroys the deterministic identity after
-    #: an otherwise correct extraction.
+    #: an otherwise correct extraction. The lower-trust inferred-self node (entity_role
+    #: 'inferred_self' / any self_tier) gets the same protection as the anchored self.
     _INELIGIBLE_ROLE_PREDICATE = (
         f"(n.structure_role IS NOT NULL) OR NOT ({non_derived_view_cypher('n')}) OR "
         "coalesce(n.is_self, false) OR "
         "toLower(trim(coalesce(n.entity_role, ''))) = 'self' OR "
+        "toLower(trim(coalesce(n.entity_role, ''))) = 'inferred_self' OR "
+        "n.self_tier IS NOT NULL OR "
         r"(n.name =~ '(?i).*([\\/]|\\.(py|md|txt|json|ya?ml|ps1|sh|java|ts|tsx|js|sql|env|toml|"
         r"cfg|ini|gradle|html|css|png|jpg|svg))(\b|$).*')"
     )
@@ -280,6 +291,8 @@ class CorrelationRepository:
         rebound_episodes: list[str],
         operation_id: str,
         rebound_retention_sources: list[str] | None = None,
+        fact_out: list[dict[str, Any]] | None = None,
+        fact_in: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Invert a merge in ONE atomic Cypher transaction (plan Phase 5).
 
@@ -298,7 +311,11 @@ class CorrelationRepository:
           * delete only the bridges this merge created (``bridged_from = absorbed``);
           * delete only the MENTIONS this merge rebound onto the survivor;
           * remove this absorption from the survivor's lineage SUBTRACTIVELY, so absorptions made by
-            OTHER merges after this one survive.
+            OTHER merges after this one survive;
+          * move each fact edge the merge moved (``fact_out``/``fact_in``, matched by edge uuid on
+            the survivor) back to the absorbed node with its CURRENT properties, so a later expiry
+            or episode append survives; a fact with no survivor copy (a pre-fix merge, or deleted
+            since) is recreated from the snapshot.
 
         Callers must have already verified that every referenced peer exists -- this query does not
         fabricate peers, and a missing one must abstain upstream, not silently drop an edge.
@@ -328,9 +345,54 @@ class CorrelationRepository:
                 SET r += rel.properties
                 RETURN count(r) AS in_restored
             }
+            // Fact edges the merge moved onto the survivor go back with their current state. Every
+            // survivor copy with the uuid moves (parallel duplicates included); with none, the edge
+            // is recreated from the snapshot. One $fact_out/$fact_in entry per (uuid, peer).
+            CALL {
+                WITH s, a
+                UNWIND $fact_out AS rel
+                MATCH (peer {uuid: rel.peer_uuid})
+                OPTIONAL MATCH (s)-[cur:RELATES_TO {uuid: rel.uuid}]->(peer)
+                WITH a, peer, rel, collect(cur) AS curs
+                WITH a, peer, curs,
+                     CASE WHEN size(curs) = 0 THEN [rel.properties]
+                          ELSE [c IN curs | properties(c)] END AS prop_sets
+                FOREACH (p IN prop_sets |
+                    CREATE (a)-[r:RELATES_TO]->(peer)
+                    SET r = p,
+                        r.source_uuid = CASE WHEN p.source_uuid IS NULL THEN NULL ELSE a.uuid END,
+                        r.source_node_uuid =
+                            CASE WHEN p.source_node_uuid IS NULL THEN NULL ELSE a.uuid END
+                )
+                FOREACH (c IN curs | DELETE c)
+                RETURN sum(size(prop_sets)) AS fact_out_restored,
+                       sum(size(curs)) AS fact_out_moved_back
+            }
+            CALL {
+                WITH s, a
+                UNWIND $fact_in AS rel
+                MATCH (peer {uuid: rel.peer_uuid})
+                OPTIONAL MATCH (peer)-[cur:RELATES_TO {uuid: rel.uuid}]->(s)
+                WITH a, peer, rel, collect(cur) AS curs
+                WITH a, peer, curs,
+                     CASE WHEN size(curs) = 0 THEN [rel.properties]
+                          ELSE [c IN curs | properties(c)] END AS prop_sets
+                FOREACH (p IN prop_sets |
+                    CREATE (peer)-[r:RELATES_TO]->(a)
+                    SET r = p,
+                        r.target_uuid = CASE WHEN p.target_uuid IS NULL THEN NULL ELSE a.uuid END,
+                        r.target_node_uuid =
+                            CASE WHEN p.target_node_uuid IS NULL THEN NULL ELSE a.uuid END
+                )
+                FOREACH (c IN curs | DELETE c)
+                RETURN sum(size(prop_sets)) AS fact_in_restored,
+                       sum(size(curs)) AS fact_in_moved_back
+            }
             // Reverse the survivor's merge-owned delta (content/summary/source/confidence).
             SET s += $survivor_properties
-            WITH s, a, out_restored, in_restored
+            WITH s, a, out_restored, in_restored,
+                 fact_out_restored + fact_in_restored AS facts_restored,
+                 fact_out_moved_back + fact_in_moved_back AS facts_moved_back
             CALL {
                 WITH s
                 MATCH (s)-[b:RELATES_TO {bridged_from: $absorbed}]-()
@@ -365,7 +427,8 @@ class CorrelationRepository:
                 s.merge_audit = [x IN coalesce(s.merge_audit, [])
                                  WHERE NOT x CONTAINS $absorbed_audit_marker]
             RETURN out_restored, in_restored, bridges_removed, mentions_removed,
-                   retention_sources_removed
+                   retention_sources_removed, facts_moved_back,
+                   facts_restored - facts_moved_back AS facts_recreated
             """.replace(
                 "__RETENTION_SOURCE_TENANT__", same_tenant_cypher("source", "s")
             ),
@@ -381,6 +444,8 @@ class CorrelationRepository:
                 "survivor_properties": survivor_properties,
                 "rebound_episodes": rebound_episodes,
                 "rebound_retention_sources": rebound_retention_sources or [],
+                "fact_out": fact_out or [],
+                "fact_in": fact_in or [],
                 "operation_id": operation_id,
             },
             timeout_s=SAGA_MUTATION_TIMEOUT_S,  # bounded for ownership ageing (CF-211)
@@ -451,12 +516,18 @@ class CorrelationRepository:
         *,
         similarity: float,
         operation_id: str | None = None,
+        expected_fact_uuids: list[str] | None = None,
     ) -> dict[str, int]:
         """Merge *absorbed_uuid* into *survivor_uuid*.
 
         ``operation_id`` stamps the survivor with ``last_merge_op_id`` so a crash-replay can
         recognize its OWN completed work instead of re-running or forking (plan Phase 4). It is an
         idempotency aid, never a substitute for full after-state verification.
+
+        ``expected_fact_uuids`` is the PREPARE snapshot's moved-fact set
+        (``merge_snapshot.moved_fact_uuids``). The absorbed node's fact edges are moved onto the
+        survivor, and the merge abstains (``ELIGIBILITY_CHANGED_AT_MUTATION``) unless the live set
+        equals this one, because unmerge moves back only the snapshot's facts.
 
         Strategy:
         1. Keep the richer summary/content (>20% longer = substantially more context).
@@ -469,7 +540,8 @@ class CorrelationRepository:
         Part 3: Snapshot preserves uuid, all properties, and relationships so
         the absorbed node is fully recoverable from the merge_audit trail.
 
-        Returns dict with keys: merged, edges_bridged, deleted.
+        Returns dict with keys: merged, edges_bridged, episodes_rebound, retention_sources_rebound,
+        facts_moved, deleted (plus ``reason`` on abstention).
         """
         import json
         from datetime import datetime, timezone
@@ -621,7 +693,7 @@ class CorrelationRepository:
         # Phase 2 (mutate): pick the richer text, write derived provenance, append the
         # audit entry, bridge the absorbed node's edges onto the survivor, then delete it. FOREACH
         # bridges over the (possibly empty) neighbor list without gating the row, so the merge always
-        # reaches DETACH DELETE and RETURN even when the absorbed node had no bridgeable neighbors.
+        # reaches the final DELETE and RETURN even when the absorbed node had no bridgeable neighbors.
         rows = self._neo4j.execute(
             (
             """
@@ -648,8 +720,22 @@ class CorrelationRepository:
 """
             + _PROVENANCE_GUARD_CYPHER
             + """
-            // Pick richer text — prefer the longer content when >20% difference
             WITH survivor, absorbed,
+                 [(absorbed)-[f:RELATES_TO]-(peer:Entity) WHERE __MOVED_FACT__ | f.uuid]
+                     AS live_fact_uuids,
+                 // Every relationship the absorbed node has NOW. Only these are deleted at the end,
+                 // and the node by plain DELETE: a relationship committed by another writer after
+                 // this read makes that DELETE fail, aborting the whole merge, where DETACH DELETE
+                 // would silently destroy it (checked on 5.26 for sparse and dense nodes).
+                 [(absorbed)-[x]-() | elementId(x)] AS known_rel_ids
+            // Unmerge moves back exactly the facts the PREPARE snapshot recorded, so the merge may
+            // move only those: a fact added or removed since the snapshot abstains here (no row).
+            WHERE $expected_fact_uuids IS NULL
+               OR (size(live_fact_uuids) = size($expected_fact_uuids)
+                   AND all(u IN live_fact_uuids WHERE u IN $expected_fact_uuids)
+                   AND all(u IN $expected_fact_uuids WHERE u IN live_fact_uuids))
+            // Pick richer text — prefer the longer content when >20% difference
+            WITH survivor, absorbed, known_rel_ids,
                 CASE
                     WHEN size(coalesce(absorbed.summary, absorbed.content, '')) >
                          size(coalesce(survivor.summary, survivor.content, '')) * 1.2
@@ -688,13 +774,43 @@ class CorrelationRepository:
                 // Idempotency marker (plan Phase 4): lets a crash-replay recognize its OWN completed
                 // work. coalesce keeps any prior value when this is an unjournaled direct call.
                 survivor.last_merge_op_id = coalesce($op_id, survivor.last_merge_op_id)
+            // Move the absorbed node's Graphiti fact edges onto the survivor: deleting the absorbed
+            // node below would destroy them, and a bridge carries no fact. Same uuid and properties, so a
+            // uuid-keyed Graphiti re-save finds the moved edge and unmerge can move it back.
+            // Facts between the two participants are not moved (they would become self-loops).
+            // Endpoint properties: Graphiti's bulk save writes source_node_uuid/target_node_uuid,
+            // its single save source_uuid/target_uuid; whichever is present is rewritten.
+            WITH survivor, absorbed, known_rel_ids
+            CALL {
+                WITH survivor, absorbed
+                MATCH (absorbed)-[f:RELATES_TO]->(peer:Entity)
+                WHERE __MOVED_FACT__
+                CREATE (survivor)-[m:RELATES_TO]->(peer)
+                SET m = properties(f)
+                SET m.source_uuid = CASE WHEN f.source_uuid IS NULL THEN NULL ELSE survivor.uuid END,
+                    m.source_node_uuid =
+                        CASE WHEN f.source_node_uuid IS NULL THEN NULL ELSE survivor.uuid END
+                RETURN count(m) AS facts_moved_out
+            }
+            CALL {
+                WITH survivor, absorbed
+                MATCH (peer:Entity)-[f:RELATES_TO]->(absorbed)
+                WHERE __MOVED_FACT__
+                CREATE (peer)-[m:RELATES_TO]->(survivor)
+                SET m = properties(f)
+                SET m.target_uuid = CASE WHEN f.target_uuid IS NULL THEN NULL ELSE survivor.uuid END,
+                    m.target_node_uuid =
+                        CASE WHEN f.target_node_uuid IS NULL THEN NULL ELSE survivor.uuid END
+                RETURN count(m) AS facts_moved_in
+            }
             // Bridge edges from absorbed to survivor (skip ANCHORED_TO and structural)
-            WITH survivor, absorbed
+            WITH survivor, absorbed, known_rel_ids, facts_moved_out + facts_moved_in AS facts_moved
             OPTIONAL MATCH (absorbed)-[r]-(neighbor:Entity)
             WHERE NOT type(r) = 'ANCHORED_TO'
             AND neighbor.structure_role IS NULL
             AND neighbor.uuid <> survivor.uuid
-            WITH survivor, absorbed, collect(DISTINCT neighbor) AS neighbors
+            WITH survivor, absorbed, known_rel_ids, facts_moved,
+                 collect(DISTINCT neighbor) AS neighbors
             FOREACH (n IN neighbors |
                 MERGE (survivor)-[bridge:RELATES_TO]->(n)
                 ON CREATE SET
@@ -706,35 +822,47 @@ class CorrelationRepository:
                     bridge.created_at = datetime(),
                     bridge.last_traversed = datetime()
             )
-            WITH survivor, absorbed, size(neighbors) AS edges_bridged
+            WITH survivor, absorbed, known_rel_ids, facts_moved, size(neighbors) AS edges_bridged
             // Preserve episode provenance. The Entity-only bridge above does not touch
             // (:Episodic)-[:MENTIONS]->(absorbed), so DETACH DELETE used to destroy the
             // absorbed node's source episodes outright. Re-point them onto the survivor:
             // the survivor now carries the union of both nodes' provenance, which is also
             // what the co-mention veto reads.
             OPTIONAL MATCH (ep:Episodic)-[:MENTIONS]->(absorbed)
-            WITH survivor, absorbed, edges_bridged, collect(DISTINCT ep) AS episodes
+            WITH survivor, absorbed, known_rel_ids, facts_moved, edges_bridged,
+                 collect(DISTINCT ep) AS episodes
             FOREACH (e IN episodes | MERGE (e)-[:MENTIONS]->(survivor))
-            WITH survivor, absorbed, edges_bridged, size(episodes) AS episodes_rebound
+            WITH survivor, absorbed, known_rel_ids, facts_moved, edges_bridged,
+                 size(episodes) AS episodes_rebound
             // Preserve source-derived retention provenance independently of MENTIONS.
             OPTIONAL MATCH (retention_source:Episodic)-[:RETENTION_SOURCE]->(absorbed)
             WHERE __ABSORBED_RETENTION_TENANT__
-            WITH survivor, absorbed, edges_bridged, episodes_rebound,
+            WITH survivor, absorbed, known_rel_ids, facts_moved, edges_bridged, episodes_rebound,
                  collect(DISTINCT retention_source) AS retention_sources
             FOREACH (source IN retention_sources |
                 MERGE (source)-[:RETENTION_SOURCE]->(survivor)
             )
-            WITH survivor, absorbed, edges_bridged, episodes_rebound,
+            WITH survivor, absorbed, known_rel_ids, facts_moved, edges_bridged, episodes_rebound,
                  size(retention_sources) AS retention_sources_rebound
-            // Remove the absorbed node
-            DETACH DELETE absorbed
-            RETURN edges_bridged, episodes_rebound, retention_sources_rebound, 1 AS deleted,
+            // Remove the absorbed node: the relationships read at the guard, then the node itself
+            // with a plain DELETE (fails, aborting the merge, if another writer added one since).
+            CALL {
+                WITH absorbed, known_rel_ids
+                MATCH (absorbed)-[x]-()
+                WHERE elementId(x) IN known_rel_ids
+                WITH DISTINCT x
+                DELETE x
+                RETURN count(x) AS rels_deleted
+            }
+            DELETE absorbed
+            RETURN edges_bridged, episodes_rebound, retention_sources_rebound, facts_moved,
+                   1 AS deleted,
                    coalesce(survivor.namespace, survivor.group_id, 'default') AS merge_namespace
             """
             ).replace(
                 "__ABSORBED_RETENTION_TENANT__",
                 same_tenant_cypher("retention_source", "absorbed"),
-            ),
+            ).replace("__MOVED_FACT__", _MOVED_FACT_WHERE),
             params={
                 # CF-47: the mutable predicates in the WHERE above are emitted by
                 # `domain.merge_eligibility`, and these are the values they bind. They come from
@@ -745,6 +873,10 @@ class CorrelationRepository:
                 "absorbed_uuid": absorbed_uuid,
                 "audit_entry": audit_entry,
                 "op_id": operation_id,
+                # None only for an unjournaled direct call, which has no exact unmerge to protect.
+                "expected_fact_uuids": (
+                    None if expected_fact_uuids is None else list(expected_fact_uuids)
+                ),
                 "sources": provenance["sources"],
                 "corroboration": provenance["corroboration"],
                 "authority": provenance["source_confidence"],
@@ -777,11 +909,12 @@ class CorrelationRepository:
         if not rows:
             # The preflight passed but the mutation matched nothing: a concurrent writer changed a
             # material predicate (freshness/scope/flag/conflict/namespace) or one of the provenance
-            # inputs the Python derivation read in Phase 1, and the in-mutation WHERE failed closed.
+            # inputs the Python derivation read in Phase 1, or the absorbed node's fact edges differ
+            # from the PREPARE snapshot, and the in-mutation WHERE failed closed.
             # No partial merge occurred.
             logger.info(
-                "merge_entity ABSTAIN %s <- %s: eligibility or provenance changed between "
-                "preflight and mutation",
+                "merge_entity ABSTAIN %s <- %s: eligibility, provenance or fact edges changed "
+                "between preflight and mutation",
                 survivor_uuid, absorbed_uuid,
             )
             return {
@@ -813,6 +946,7 @@ class CorrelationRepository:
             "edges_bridged": int(row.get("edges_bridged", 0) or 0),
             "episodes_rebound": int(row.get("episodes_rebound", 0) or 0),
             "retention_sources_rebound": int(row.get("retention_sources_rebound", 0) or 0),
+            "facts_moved": int(row.get("facts_moved", 0) or 0),
             "deleted": int(row.get("deleted", 0) or 0),
         }
 

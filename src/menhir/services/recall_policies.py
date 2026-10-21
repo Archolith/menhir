@@ -6,6 +6,7 @@ import asyncio
 import logging
 import math
 import os
+import re
 from dataclasses import dataclass, field, replace
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
@@ -324,6 +325,60 @@ def _build_temporal_facts(
             facts.append(fact)
         result[node_uuid] = tuple(facts)
     return result
+
+
+_TIER_FACT_TOKEN = re.compile(r"[a-z0-9]+")
+# Anchored binding writes "user" where inferred binding writes "the user"; articles never decide.
+_TIER_FACT_IGNORED = frozenset({"a", "an", "the"})
+
+
+def _tier_fact_tokens(text: object) -> frozenset[str]:
+    if not isinstance(text, str):
+        return frozenset()
+    return frozenset(t for t in _TIER_FACT_TOKEN.findall(text.casefold()) if t not in _TIER_FACT_IGNORED)
+
+
+def _tier_facts_match(a: frozenset[str], b: frozenset[str]) -> bool:
+    if not a or not b:
+        return False
+    return a == b or len(a & b) / len(a | b) > 0.8
+
+
+def label_and_collapse_self_tiers(
+    results: list[ScoredMemory], *, anchored_uuid: str, inferred_uuid: str,
+) -> list[ScoredMemory]:
+    """Label the two self entities by tier and collapse cross-tier duplicate facts.
+
+    An inferred fact is dropped only when a near-duplicate anchored fact is visible on the
+    anchored item of the same result, which is then marked ``corroborated``. Recall-time only.
+    """
+    anchored_idx = next((i for i, sm in enumerate(results) if sm.uuid == anchored_uuid), None)
+    inferred_idx = next((i for i, sm in enumerate(results) if sm.uuid == inferred_uuid), None)
+    if anchored_idx is None and inferred_idx is None:
+        return results
+    out = list(results)
+    if anchored_idx is not None:
+        out[anchored_idx] = replace(out[anchored_idx], self_tier="anchored")
+    if inferred_idx is None:
+        return out
+    inferred = out[inferred_idx]
+    if anchored_idx is None:
+        out[inferred_idx] = replace(inferred, self_tier="inferred")
+        return out
+    anchored_facts = list(out[anchored_idx].temporal_facts)
+    anchored_tokens = [_tier_fact_tokens(tf.fact) for tf in anchored_facts]
+    kept: list[TemporalFact] = []
+    for tf in inferred.temporal_facts:
+        tokens = _tier_fact_tokens(tf.fact)
+        hits = [i for i, a in enumerate(anchored_tokens) if _tier_facts_match(tokens, a)]
+        if not hits:
+            kept.append(tf)
+            continue
+        for i in hits:
+            anchored_facts[i] = replace(anchored_facts[i], corroborated=True)
+    out[anchored_idx] = replace(out[anchored_idx], temporal_facts=tuple(anchored_facts))
+    out[inferred_idx] = replace(inferred, self_tier="inferred", temporal_facts=tuple(kept))
+    return out
 
 
 def _scalar_history_records_change(history_view: dict[str, object]) -> bool:
