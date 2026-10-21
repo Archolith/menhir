@@ -230,6 +230,18 @@ class IngestQueueMixin:
             self.graph_adapter.reset_stale_enriching_episodes,
             max_attempts=self._max_enrichment_attempts,
         )
+        # Runs regardless of MENHIR_INFERRED_SELF_MODE: a skip recorded while the mode was on
+        # must still be revoked after it is turned off. Before the PENDING listing so revoked
+        # clients are enqueued this pass.
+        reenable = getattr(self.graph_adapter, "reenable_verbatim_skips", None)
+        if reenable is not None:
+            try:
+                revoked = await asyncio.to_thread(reenable, limit=limit)
+            except Exception:
+                logger.exception("Verbatim-skip re-enable sweep failed; retried next pass")
+            else:
+                if revoked:
+                    logger.warning("Re-enabled %d verbatim-skipped client episodes", len(revoked))
         episode_ids = await asyncio.to_thread(
             self.graph_adapter.list_pending_episode_uuids,
             max_attempts=self._max_enrichment_attempts,

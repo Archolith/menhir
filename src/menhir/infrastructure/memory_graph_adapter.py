@@ -725,6 +725,19 @@ class MemoryGraphAdapter:
         exist; see `EpisodeLifecycleRepository.link_self_tiers`."""
         return self._episodes.link_self_tiers(namespace)
 
+    def mark_episode_verbatim_skipped(
+        self, episode_uuid: str, *, worker_id: str, claim_started_at: object | None,
+    ) -> str | None:
+        """See `EpisodeLifecycleRepository.mark_episode_verbatim_skipped`."""
+        return self._episodes.mark_episode_verbatim_skipped(
+            episode_uuid, worker_id=worker_id, claim_started_at=claim_started_at)
+
+    def reenable_verbatim_skips(
+        self, *, projection_uuid: str | None = None, limit: int = 100,
+    ) -> list[str]:
+        """See `EpisodeLifecycleRepository.reenable_verbatim_skips`."""
+        return self._episodes.reenable_verbatim_skips(projection_uuid=projection_uuid, limit=limit)
+
     def detect_self_forks(self, namespace: str) -> list[str]:
         """Read-only inventory of same-named self forks for `namespace`.
 
