@@ -20,6 +20,8 @@ from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FA
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
 from menhir.services.embedding_identity import comparable_model, embedder_model_name
 from menhir.domain.self_identity import self_uuid_for_namespace
+from menhir.domain.self_identity import inferred_self_uuid_for_namespace
+from menhir.infrastructure.self_binding import SelfBindMode, resolve_inferred_mode
 from menhir.domain.recall import (
     CandidateData,
     QueryPreset,
@@ -70,6 +72,11 @@ from menhir.infrastructure.paths import repo_root_for_project
 
 logger = logging.getLogger(__name__)
 
+
+def _inferred_self_on(service: object) -> bool:
+    """MENHIR_INFERRED_SELF_MODE observe/enforce: recall reads the inferred self tier too."""
+    return resolve_inferred_mode(getattr(service, "inferred_self_mode", None)) is not SelfBindMode.OFF
+
 # Degradation is deliberate: a slow or unavailable graph must not fail recall. But a programming
 # error raised by a call whose signature we control is a bug, not an outage -- a stale signature
 # once surfaced as a wrong answer (swallowed into `assert 0 == 1`) instead of an error. Split them.
@@ -79,6 +86,7 @@ _PROGRAMMING_ERRORS = (TypeError, AttributeError, NameError, KeyError)
 _FACT_RELEVANCE_K = 3
 
 
+from menhir.services.recall_policies import label_and_collapse_self_tiers
 from menhir.services.recall_policies import (
     FILE_LINKED_BASELINE_SIMILARITY,
     PENDING_ENTITY_SIMILARITY,
@@ -1285,6 +1293,9 @@ async def run_recall(
                 # the canonical self subject, via the identity SSOT: deterministic and I/O-free,
                 # matching what perception binds self-subject assertions to -- no DB read.
                 query_subjects.add(self_uuid_for_namespace(namespace))
+                if _inferred_self_on(service):
+                    # View gate only; event-history authority below stays anchored-only.
+                    query_subjects.add(inferred_self_uuid_for_namespace(namespace))
             for _s_uuid, _s_disp in obs_subject_displays.items():
                 _disp = (_s_disp or "").strip().lower()
                 if not _disp:
@@ -2207,6 +2218,12 @@ async def run_recall(
                     facts = facts_by_uuid.get(sm.uuid, ())
                     enriched_results.append(replace(sm, temporal_facts=facts))
             top_results = enriched_results
+            if namespace is not None and _inferred_self_on(service):
+                top_results = label_and_collapse_self_tiers(
+                    top_results,
+                    anchored_uuid=self_uuid_for_namespace(namespace),
+                    inferred_uuid=inferred_self_uuid_for_namespace(namespace),
+                )
     except Exception:  # degraded mode: log and continue with empty temporal_facts
         logger.exception("Temporal facts enrichment failed; continuing with empty facts")
     _t_phases["temporal_enrichment"] = int((perf_counter() - _t) * 1000)

@@ -119,6 +119,9 @@ class TemporalFact:
     # Rendered anchored-time event time; set only when MENHIR_ANCHORED_TIME_RENDER is on and the
     # edge carries a persisted contract.
     event_time: str | None = None
+    # Two-tier self: True when the inferred self tier holds a near-duplicate of this anchored fact
+    # (the inferred copy is dropped from the same result). Set only with MENHIR_INFERRED_SELF_MODE on.
+    corroborated: bool = False
 
 
 @dataclass(frozen=True)
@@ -210,6 +213,9 @@ class ScoredMemory:
     review_reason: str | None = None
     review_flagged_at: str | None = None
     verifier_evidence: tuple[VerifierEvidence, ...] = ()
+    # Two-tier self: "anchored" or "inferred" on the namespace's self entities; None elsewhere and
+    # whenever MENHIR_INFERRED_SELF_MODE is off.
+    self_tier: str | None = None
 
 
 @dataclass(frozen=True)
