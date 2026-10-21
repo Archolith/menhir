@@ -19,12 +19,17 @@ Each stock-client launch is a new MCP session, and a fresh write is SESSION-scop
 promoted, so a later session gets no ranked items for it; only the source-memory section carries
 it. Steps that need the Warden to rank something therefore write in the session they recall from.
 
-Canonical-self binding is probed but is not a criterion: the deterministic provider never emits
-the self-subject marker, so no binding can happen through it. Proving it needs a real model.
+Canonical self: an admitted user turn in the first person binds to the canonical self node under
+the default `enforce` and does not under `off`. Binding needs the model to use the speaker marker
+Menhir puts in the extraction prompt; the deterministic provider does that for this lane's fixture
+sentence only. For a real-model pass, set MENHIR_E2E_CHAT_BASE_URL (and MENHIR_E2E_CHAT_MODEL)
+to send chat and extraction there while embeddings stay on the deterministic provider; Atlas
+criteria then depend on that model's extraction.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -32,7 +37,8 @@ from uuid import uuid4
 
 import pytest
 
-from menhir.domain.self_identity import self_uuid_for_namespace
+from menhir.domain.namespace import namespace_to_group_id
+from menhir.domain.self_identity import SUBJECT_ENDPOINT_MARKER_PREFIX, self_uuid_for_namespace
 from tests.e2e._harness.config import E2EConfig
 from tests.e2e._harness.evidence import LaneEvidence
 from tests.e2e._harness.fresh_install import (
@@ -51,7 +57,11 @@ from tests.e2e._harness.fresh_install import (
     wait_episode_state,
 )
 from tests.e2e._harness.phase3 import admit_turn, close_pass, record_turn
-from tests.e2e._harness.providers import deterministic_provider, local_provider_environment
+from tests.e2e._harness.providers import (
+    SELF_POSTCARD_TEXT,
+    deterministic_provider,
+    local_provider_environment,
+)
 from tests.e2e._harness.stack import graph_query
 from tests.e2e.test_e2e_02_memory_lifecycle import (
     CORRECTED_AMOUNT,
@@ -75,6 +85,7 @@ CRITERIA = [
     "explicit_opt_out_survives_setup_rerun",
     "serve_from_other_cwd_reads_state_env",
     "opt_out_takes_effect_after_restart",
+    "canonical_self_binds",
 ]
 
 OPT_OUT = {
@@ -85,7 +96,7 @@ OPT_OUT = {
 }
 
 QUERY = "Atlas Lantern refund approval threshold"
-SELF_TEXT = "I own exactly 37 cobalt postcards in the north cabinet."
+SELF_TEXT = SELF_POSTCARD_TEXT
 SELF_AT = "2026-07-01T10:00:00+00:00"
 
 
@@ -123,7 +134,7 @@ async def _admit_self(config: E2EConfig, client, ns: str) -> dict | None:
     deadline = time.monotonic() + 60
     proj = projection_for_turn(config, turn)
     while proj is None and time.monotonic() < deadline:
-        time.sleep(2)
+        await asyncio.sleep(2)
         proj = projection_for_turn(config, turn)
     return proj
 
@@ -149,6 +160,52 @@ def _self_rows(config: E2EConfig, ns: str) -> list[dict]:
         config,
         "MATCH (s:Entity {uuid:$uuid}) RETURN s.name AS name, s.group_id AS group_id",
         uuid=self_uuid_for_namespace(ns))
+
+
+def _self_binding(config: E2EConfig, ns: str, state: str) -> dict:
+    """What the graph holds for the namespace's canonical self, plus any leaked speaker marker."""
+    uuid, group = self_uuid_for_namespace(ns), namespace_to_group_id(ns)
+    edges = graph_query(
+        config,
+        "MATCH (s:Entity {uuid:$uuid})-[r]-(o:Entity) RETURN type(r) AS type, r.fact AS fact, "
+        "o.name AS other",
+        uuid=uuid)
+    leaked_nodes = graph_query(
+        config,
+        "MATCH (n) WHERE n.group_id = $g AND (coalesce(n.name, '') CONTAINS $p "
+        "OR coalesce(n.summary, '') CONTAINS $p) RETURN count(n) AS c",
+        g=group, p=SUBJECT_ENDPOINT_MARKER_PREFIX)
+    leaked_facts = graph_query(
+        config,
+        "MATCH ()-[r]->() WHERE r.group_id = $g AND (coalesce(r.fact, '') CONTAINS $p "
+        "OR coalesce(r.name, '') CONTAINS $p) RETURN count(r) AS c",
+        g=group, p=SUBJECT_ENDPOINT_MARKER_PREFIX)
+    return {
+        "projection_state": state,
+        "group_id": group,
+        "self_rows": _self_rows(config, ns),
+        "self_edges": edges,
+        "marker_leaks": leaked_nodes[0]["c"] + leaked_facts[0]["c"],
+    }
+
+
+def _bound(probe: dict) -> bool:
+    return (
+        probe["projection_state"] == "READY"
+        and probe["self_rows"] == [{"name": "user", "group_id": probe["group_id"]}]
+        and any("cobalt postcards" in f"{e.get('other')} {e.get('fact')}" for e in probe["self_edges"])
+        and probe["marker_leaks"] == 0
+    )
+
+
+def _provider_env(base_url: str) -> dict[str, str]:
+    """Deterministic provider, or chat on MENHIR_E2E_CHAT_BASE_URL with embeddings kept here."""
+    env = local_provider_environment(base_url)
+    chat_url = os.environ.get("MENHIR_E2E_CHAT_BASE_URL", "").strip()
+    if chat_url:
+        env["LOCAL_LLM_BASE_URL"] = chat_url
+        env["LOCAL_LLM_CHAT_MODEL"] = os.environ.get("MENHIR_E2E_CHAT_MODEL", "").strip() or "local"
+    return env
 
 
 def _configured(ws: dict) -> set[str]:
@@ -192,8 +249,11 @@ async def test_e2e_19_fresh_install_shipped_defaults(
     with deterministic_provider() as base_url:
         try:
             # 2. effective defaults (after the user fills in provider + graph settings)
+            provider_env = _provider_env(base_url)
+            ev.record_stack(chat_base_url=provider_env["LOCAL_LLM_BASE_URL"],
+                            chat_model=provider_env["LOCAL_LLM_CHAT_MODEL"])
             edit_env(home.env_path, set_values={
-                **local_provider_environment(base_url),
+                **provider_env,
                 "NEO4J_URI": cfg.neo4j_uri, "NEO4J_USER": cfg.neo4j_user,
                 "NEO4J_PASSWORD": cfg.neo4j_password, "NEO4J_DATABASE": cfg.neo4j_database})
             eff = effective_settings(cfg, inst, home)
@@ -256,12 +316,11 @@ async def test_e2e_19_fresh_install_shipped_defaults(
                             "source_memories": len(sources) if sources else 0,
                             "keys": sorted(r), "build_context_has_amount": ORIGINAL_AMOUNT in built})
 
-                # 7. canonical self: probe only (see module docstring)
+                # 7. canonical self under the default enforce (criterion recorded after step 12)
                 ns_self = f"e2e19-self-{uuid4().hex[:12]}"
                 proj = await _admit_self(cfg, client, ns_self)
                 self_state = wait_episode_state(cfg, proj["uuid"]) if proj else "NO_PROJECTION"
-                ev.record_stack(canonical_self_probe_enforce={
-                    "projection_state": self_state, "self_rows": _self_rows(cfg, ns_self)})
+                probe_enforce = _self_binding(cfg, ns_self, self_state)
 
                 # 8. correction and history
                 correction_episode = await _track(client, CORRECTION, ns)
@@ -333,15 +392,17 @@ async def test_e2e_19_fresh_install_shipped_defaults(
             backend = start("up", home.cwd, "up-opted-out")
             ns_off = f"e2e19-off-{uuid4().hex[:12]}"
             async with _session(home, cfg, inst, ev, "client-opted-out") as client:
-                r, _, state_d = await _write_then_recall(cfg, client, "e2e19-off")
-                ws_off = r.get("warden_status") or {}
+                r_off, _, state_d = await _write_then_recall(cfg, client, "e2e19-off")
+                ws_off = r_off.get("warden_status") or {}
                 proj_off = await _admit_self(cfg, client, ns_off)
                 off_state = wait_episode_state(cfg, proj_off["uuid"]) if proj_off else "NO_PROJECTION"
-                ev.record_stack(canonical_self_probe_off={
-                    "projection_state": off_state, "self_rows": _self_rows(cfg, ns_off)})
+                probe_off = _self_binding(cfg, ns_off, off_state)
+            ev.record("canonical_self_binds", passed=(
+                _bound(probe_enforce) and off_state == "READY" and probe_off["self_rows"] == []),
+                detail={"enforce": probe_enforce, "off": probe_off})
             opted_out = effective_settings(cfg, inst, home)["values"]
             part_a = (state_d == "READY" and ws_off.get("state") == "disabled"
-                      and not r.get("source_memories") and _ranked_has(r, ORIGINAL_AMOUNT)
+                      and not r_off.get("source_memories") and _ranked_has(r_off, ORIGINAL_AMOUNT)
                       and opted_out.get("MENHIR_CANONICAL_SELF_BINDING_MODE") == "off")
             stop(backend)
 
@@ -357,7 +418,7 @@ async def test_e2e_19_fresh_install_shipped_defaults(
                       and _sources_have(r, ORIGINAL) and restored == code_defaults())
             ev.record("opt_out_takes_effect_after_restart", passed=part_a and part_b, detail={
                 "opted_out": {"ok": part_a, "episode_state": state_d, "warden_status": ws_off,
-                              "source_memories": bool(r.get("source_memories")),
+                              "source_memories": bool(r_off.get("source_memories")),
                               "binding_mode": opted_out.get("MENHIR_CANONICAL_SELF_BINDING_MODE")},
                 "restored": {"ok": part_b, "episode_state": state_e, "warden_status": ws_on,
                              "settings_equal_defaults": restored == code_defaults()}})
