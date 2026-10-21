@@ -44,6 +44,14 @@ from menhir.domain.namespace import normalize_namespace
 __all__ = [
     "FIRST_PERSON_SELF_ALIASES",
     "GATE_APPROVED_HUMAN_SOURCES",
+    "INFERRED_ENDPOINT_MARKER_PREFIX",
+    "INFERRED_SELF_DISPLAY_NAME",
+    "INFERRED_SELF_ENTITY_ROLE",
+    "INFERRED_SELF_TIER",
+    "InferredSubjectEndpointEnvelope",
+    "inferred_self_uuid_for_namespace",
+    "inferred_subject_endpoint_for_claim",
+    "is_inferred_self_attributes",
     "SELF_ALIASES",
     "THIRD_PERSON_SELF_ALIASES",
     "SelfEvidenceKind",
@@ -275,6 +283,8 @@ def _subject_endpoint_marker(
 
 def self_subject_endpoint_for_claim(
     claimed: Mapping[str, Any],
+    *,
+    exclude_agent_quoted: bool = False,
 ) -> SelfSubjectEndpointEnvelope | None:
     """Build an endpoint only for a graph-proven, verbatim user-turn projection.
 
@@ -283,9 +293,15 @@ def self_subject_endpoint_for_claim(
     ineligible and ordinary extraction continues unchanged. A reserved-prefix collision in an
     otherwise eligible claim instead raises :class:`SelfSubjectEndpointCollisionError`: callers
     must stop semantic dispatch, never turn that refusal into the ordinary-path ``None`` sentinel.
+
+    ``exclude_agent_quoted`` refuses a projection of an ``agent_quoted`` turn (words an agent
+    supplied as ``user_statement``). The inferred tier sets it, so agent-supplied text reaches the
+    inferred node instead of the anchored one. Off by default to keep the pre-two-tier behavior.
     """
 
     if claimed.get("subject_endpoint_eligible") is not True:
+        return None
+    if exclude_agent_quoted and _is_agent_quoted(claimed):
         return None
     if claimed.get("is_evidence_projection") is not True:
         return None
@@ -337,6 +353,124 @@ def self_subject_endpoint_for_claim(
         turn_evidence_uuid=turn_uuid,
         namespace=namespace,
         marker=marker,
+    )
+
+
+def _is_agent_quoted(claimed: Mapping[str, Any]) -> bool:
+    kind = str(claimed.get("turn_evidence_source_kind") or "").strip().lower()
+    return kind.replace("-", "_") == "agent_quoted"
+
+
+# ---------------------------------------------------------------------------
+# Inferred tier: the human an agent-authored episode refers to
+# ---------------------------------------------------------------------------
+#
+# A lower-trust identity than the anchored self above. The extraction model declares it through
+# its own opaque marker (never by name), it is written to a separate deterministic node, and no
+# fact, node or authority flows from it into the anchored tier. See
+# `.agent/plans/menhir-two-tier-self-identity-plan-2026-10-21.md`.
+
+INFERRED_ENDPOINT_MARKER_PREFIX = "MenhirInferredUser_"
+_INFERRED_ENDPOINT_VERSION = "inferred-user-endpoint-v1"
+#: Node display name. Deliberately not a self alias, so name-based self paths never match it.
+INFERRED_SELF_DISPLAY_NAME = "user-inferred"
+INFERRED_SELF_ENTITY_ROLE = "inferred_self"
+INFERRED_SELF_TIER = "inferred"
+#: Roles whose own I/me/my is never the human the episode is about.
+_INFERRED_REFUSED_ROLES = frozenset({"assistant", "tool", "system"})
+
+
+def inferred_self_uuid_for_namespace(namespace: Any) -> str:
+    """The deterministic inferred-self UUID for *namespace*. Never equal to the anchored UUID."""
+    return str(
+        uuid5(NAMESPACE_URL, f"menhir-inferred-self:{normalize_logical_namespace(namespace)}")
+    )
+
+
+def is_inferred_self_attributes(attributes: Any) -> bool:
+    """Whether a node's attribute/property map marks it as the inferred self."""
+    if not isinstance(attributes, Mapping):
+        return False
+    role = str(attributes.get("entity_role") or "").strip().casefold()
+    return role == INFERRED_SELF_ENTITY_ROLE or attributes.get("self_tier") is not None
+
+
+@dataclass(frozen=True, slots=True)
+class InferredSubjectEndpointEnvelope:
+    """Menhir-owned marker for the inferred human in one agent-authored extraction."""
+
+    version: str
+    episode_uuid: str
+    namespace: str
+    marker: str
+
+    def __post_init__(self) -> None:
+        version = str(self.version or "").strip()
+        episode_uuid = str(self.episode_uuid or "").strip()
+        namespace = normalize_logical_namespace(self.namespace)
+        if version != _INFERRED_ENDPOINT_VERSION:
+            raise ValueError("unsupported inferred endpoint version")
+        if not episode_uuid:
+            raise ValueError("inferred endpoint requires an episode identifier")
+        expected = _inferred_endpoint_marker(
+            version=version, episode_uuid=episode_uuid, namespace=namespace
+        )
+        if str(self.marker or "").strip() != expected:
+            raise ValueError("inferred endpoint marker does not match its authority tuple")
+        object.__setattr__(self, "version", version)
+        object.__setattr__(self, "episode_uuid", episode_uuid)
+        object.__setattr__(self, "namespace", namespace)
+        object.__setattr__(self, "marker", expected)
+
+    @property
+    def inferred_uuid(self) -> str:
+        return inferred_self_uuid_for_namespace(self.namespace)
+
+
+def _inferred_endpoint_marker(*, version: str, episode_uuid: str, namespace: str) -> str:
+    material = "\0".join((version, namespace, episode_uuid)).encode("utf-8")
+    return f"{INFERRED_ENDPOINT_MARKER_PREFIX}{sha256(material).hexdigest()[:24]}"
+
+
+def inferred_subject_endpoint_for_claim(
+    claimed: Mapping[str, Any],
+    *,
+    turn_role: Any,
+    anchored_endpoint: SelfSubjectEndpointEnvelope | None,
+) -> InferredSubjectEndpointEnvelope | None:
+    """Offer the inferred marker for one claimed episode, or ``None``.
+
+    At most one marker per prompt: never when the anchored endpoint was built. A verbatim
+    evidence projection is the anchored tier's input, so a projection is eligible only when its
+    turn was ``agent_quoted`` (agent-supplied words). Assistant, tool and system turns are refused
+    (their I/me/my is the writer, not the human), as are structurally non-self producers such as
+    project scans. A collision with the reserved prefix withholds the marker rather than refusing
+    the episode: this tier carries no authority worth parking an agent memory for.
+    """
+    if anchored_endpoint is not None:
+        return None
+    if claimed.get("is_evidence_projection") is True and not _is_agent_quoted(claimed):
+        return None
+    if str(turn_role or "").strip().lower() in _INFERRED_REFUSED_ROLES:
+        return None
+    if _fold_source_kind(str(claimed.get("source") or "")) in _NEVER_SELF_SOURCE_KINDS:
+        return None
+    episode_uuid = str(claimed.get("uuid") or "").strip()
+    if not episode_uuid:
+        return None
+    content = claimed.get("content")
+    if not isinstance(content, str) or (
+        INFERRED_ENDPOINT_MARKER_PREFIX.casefold() in content.casefold()
+    ):
+        return None
+    namespace = normalize_logical_namespace(claimed.get("namespace"))
+    return InferredSubjectEndpointEnvelope(
+        version=_INFERRED_ENDPOINT_VERSION,
+        episode_uuid=episode_uuid,
+        namespace=namespace,
+        marker=_inferred_endpoint_marker(
+            version=_INFERRED_ENDPOINT_VERSION, episode_uuid=episode_uuid, namespace=namespace
+        ),
     )
 
 

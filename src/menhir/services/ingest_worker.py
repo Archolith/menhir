@@ -166,6 +166,7 @@ class IngestWorkerMixin:
                 graphiti_add_episode_timeout_s=self._graphiti_add_episode_timeout_s,
                 graphiti_episode_max_estimated_tokens=self._graphiti_episode_max_estimated_tokens,
                 canonical_self_binding_mode=self._canonical_self_binding_mode,
+                inferred_self_mode=self._inferred_self_mode,
                 source_memories_enabled=self._source_memories_enabled,
                 get_queue_depth=self.get_queue_depth,
                 shadow_context_composition=self._shadow_context_composition,

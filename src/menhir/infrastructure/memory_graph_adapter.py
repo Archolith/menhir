@@ -720,6 +720,11 @@ class MemoryGraphAdapter:
         reported, never absorbed; see `EpisodeLifecycleRepository.ensure_self_entity`."""
         return self._episodes.ensure_self_entity(namespace)
 
+    def link_self_tiers(self, namespace: str) -> bool:
+        """Structural INFERRED_VIEW_OF link from anchored self to inferred self, only when both
+        exist; see `EpisodeLifecycleRepository.link_self_tiers`."""
+        return self._episodes.link_self_tiers(namespace)
+
     def detect_self_forks(self, namespace: str) -> list[str]:
         """Read-only inventory of same-named self forks for `namespace`.
 

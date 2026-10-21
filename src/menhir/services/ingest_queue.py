@@ -70,6 +70,7 @@ class IngestQueueMixin:
         graphiti_add_episode_timeout_s: float | None = None,
         graphiti_episode_max_estimated_tokens: int | None = None,
         canonical_self_binding_mode: str | None = None,
+        inferred_self_mode: str | None = None,
         max_llm_calls_per_session_window: int | None = None,
         llm_session_window_seconds: int | None = None,
         max_llm_calls_per_enrichment_job: int | None = None,
@@ -88,6 +89,8 @@ class IngestQueueMixin:
             )
         if canonical_self_binding_mode is not None:
             self._canonical_self_binding_mode = str(canonical_self_binding_mode)
+        if inferred_self_mode is not None:
+            self._inferred_self_mode = str(inferred_self_mode)
         if graphiti_episode_max_estimated_tokens is not None:
             self._graphiti_episode_max_estimated_tokens = max(
                 0, int(graphiti_episode_max_estimated_tokens)

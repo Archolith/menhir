@@ -17,6 +17,7 @@ from menhir.domain.namespace import (
 from menhir.domain.recall_visibility import default_recall_visibility_cypher
 from menhir.domain.episode_nodes import menhir_queue_episode_cypher
 from menhir.domain.self_identity import self_uuid_for_namespace
+from menhir.domain.self_identity import inferred_self_uuid_for_namespace
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure.cypher import (
@@ -1283,6 +1284,32 @@ NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If
             )
         return self_uuid
 
+    def link_self_tiers(self, namespace: str) -> bool:
+        """Link the anchored self to the inferred self with an INFERRED_VIEW_OF edge.
+
+        Structural link only: created only when BOTH tiers already exist (MATCH-only, never
+        creates either node), and it carries no fact and no authority. Returns True when the
+        link exists after the call."""
+        if not namespace:
+            raise ValueError("link_self_tiers requires a non-empty namespace")
+        rows = self.neo4j.execute(
+            """
+            MATCH (a:Entity {uuid: $anchored})
+            WHERE a.group_id = $group_id AND coalesce(a.is_self, false)
+            MATCH (i:Entity {uuid: $inferred})
+            WHERE i.group_id = $group_id AND toLower(coalesce(i.entity_role, '')) = 'inferred_self'
+            MERGE (a)-[r:INFERRED_VIEW_OF]->(i)
+            ON CREATE SET r.created_at = datetime()
+            RETURN count(r) AS linked
+            """,
+            params={
+                "anchored": self_uuid_for_namespace(namespace),
+                "inferred": inferred_self_uuid_for_namespace(namespace),
+                "group_id": namespace_to_group_id(namespace),
+            },
+        )
+        return any(int(row.get("linked") or 0) > 0 for row in rows)
+
     def detect_self_forks(self, *, namespace: str, self_uuid: str) -> list[str]:
         """Return the uuids of same-named self forks in `namespace`. READ ONLY.
 
@@ -1310,6 +1337,7 @@ NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If
                 MATCH (f:Entity)
                 WHERE f.group_id IN $group_ids AND f.uuid <> $self_uuid
                       AND toLower(f.name) = $name
+                      AND f.self_tier IS NULL AND toLower(coalesce(f.entity_role, '')) <> 'inferred_self'
                       AND {non_derived_view_cypher("f")}
                 RETURN f.uuid AS uuid
                 """,
