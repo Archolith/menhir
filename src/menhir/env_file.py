@@ -12,7 +12,8 @@ the operator's ``.env`` leaves unset is then silently filled from a bystander fi
 as ``GRAPHITI_EMBED_PROVIDER=openai`` appearing in a deployment whose ``.env`` said ``local``.
 
 Menhir therefore (1) always passes an explicit path: ``ENV_FILE`` if set, else ``./.env`` if
-present, else nothing; and (2) turns a dependency's bare ``load_dotenv()`` into a no-op.
+present, else ``state_dir()/.env`` if present (where ``menhir setup`` writes on an install without
+a checkout, and where ``menhir up`` points ``ENV_FILE``), else nothing; and (2) turns a dependency's bare ``load_dotenv()`` into a no-op.
 """
 
 from __future__ import annotations
@@ -26,13 +27,23 @@ import dotenv.main
 
 
 def resolve_env_file() -> Path | None:
-    """Return the ``.env`` Menhir should read: ``ENV_FILE``, else ``./.env`` when it exists."""
+    """Return the ``.env`` Menhir should read.
+
+    Order: ``ENV_FILE``; else ``./.env`` when it exists; else ``state_dir()/.env`` when it
+    exists (where ``menhir setup`` writes on an install without a checkout, and where
+    ``menhir up`` points ``ENV_FILE``); else ``None``.
+    """
 
     configured = os.getenv("ENV_FILE", "").strip()
     if configured:
         return Path(configured).expanduser()
     candidate = Path.cwd() / ".env"
-    return candidate if candidate.is_file() else None
+    if candidate.is_file():
+        return candidate
+    from menhir.infrastructure.paths import state_dir
+
+    state_candidate = state_dir() / ".env"
+    return state_candidate if state_candidate.is_file() else None
 
 
 def load_menhir_env(*, override: bool = False) -> Path | None:
