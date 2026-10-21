@@ -1,3 +1,9 @@
+## 2026-10-21 - E2E work root is always absolute; dev group installs build
+
+- `tests/e2e/conftest.py`, `tests/e2e/_harness/config.py`: `MENHIR_E2E_WORK_ROOT` is resolved to an absolute path. A relative root broke E2E-20's upgrade step, where pip runs from another cwd and could not find the candidate wheel.
+- `pyproject.toml`, `uv.lock`: the `dev` group adds `build` (the wheel frontend E2E-19/20 use; CI already installs it), so `uv sync` is enough for a local E2E run. The relock also adds platform markers to `secretstorage`'s dependencies.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-10-21 - Default the inferred self tier to enforce
 
 - `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: `inferred_self_mode` defaults to `enforce` (owner decision for #343). Installs that leave it unset, fresh or upgraded, bind what agent-written memories say about the user to the inferred self (`user-inferred`) instead of a new "user" node, and recall reads both self tiers; pin `off` to opt out. An unrecognized value still falls back to `off`.
@@ -84,13 +90,4 @@ missed it: in the Beacon agent-task evaluation, two plans for archiving a Menhir
 - Verifier sync is not a Warden and stays opt-in.
 - `.agent/default-off-features.md`: the two settings move to a "graduated to default-on" section; the belief-gate row records why it stays opt-in; the evidence-anchor row cites #349.
 - Tests: `tests/test_settings.py`, `tests/test_release_config_upgrade.py` and `tests/test_recall_service.py` assert the new defaults; new tests that each Warden default opts out through its env var, and that default recall keeps a git-backed entity with one expired fact edge (the belief gate refuses it). Tests that relied on the old defaults now pin them explicitly: `tests/test_recall_service.py`, `tests/test_warden_execution_status.py` (which also checks that default recall is `applied` without the anchor), `tests/test_warden_verifier_interactions.py` and `tests/test_git_staleness_recall_e2e.py`.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-10-20 - Default canonical-self binding to enforce
-
-- `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: `canonical_self_binding_mode` defaults to `enforce` (owner decision for #169). Installs that leave it unset, fresh or upgraded, now bind declared user subjects to the canonical self; pin `off` to opt out. An unrecognized value still falls back to `off`.
-- Existing same-named "user" forks are left in place and logged as `SELF_FORKS_REQUIRE_MIGRATION`; there is still no consolidation tool. Turning `enforce` back to `off` is safe while no consolidation has run.
-- Known cost: agent-written memories that repeat user facts store them on a separate "user" entity, so recall can return both (#343).
-- `.agent/workflows/canonical-self-migration-runbook.md`, `.agent/default-off-features.md`: record the new default; the runbook's activation canary applies to the first deploy that picks it up.
-- Tests: `tests/test_self_binding.py` and `tests/test_release_config_upgrade.py` assert the new default; new upgrade test for unset versus pinned modes.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.

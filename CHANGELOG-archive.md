@@ -1,3 +1,12 @@
+## 2026-10-20 - Default canonical-self binding to enforce
+
+- `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: `canonical_self_binding_mode` defaults to `enforce` (owner decision for #169). Installs that leave it unset, fresh or upgraded, now bind declared user subjects to the canonical self; pin `off` to opt out. An unrecognized value still falls back to `off`.
+- Existing same-named "user" forks are left in place and logged as `SELF_FORKS_REQUIRE_MIGRATION`; there is still no consolidation tool. Turning `enforce` back to `off` is safe while no consolidation has run.
+- Known cost: agent-written memories that repeat user facts store them on a separate "user" entity, so recall can return both (#343).
+- `.agent/workflows/canonical-self-migration-runbook.md`, `.agent/default-off-features.md`: record the new default; the runbook's activation canary applies to the first deploy that picks it up.
+- Tests: `tests/test_self_binding.py` and `tests/test_release_config_upgrade.py` assert the new default; new upgrade test for unset versus pinned modes.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-10-20 - Turn Oracle ranking and the intent lens on and remove their flags
 
 - `domain/retrieval_tuning.py`: `enable_oracle_ranking` and `enable_intent_lens` default true. They stay per-request knobs for Recall Lab comparisons; there is no deployment flag.

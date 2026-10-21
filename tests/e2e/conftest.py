@@ -104,7 +104,8 @@ def e2e_config() -> E2EConfig:
 
     # Keep release evidence outside pytest's session scratch tree, which the root
     # conftest removes at teardown. The default directory is gitignored.
-    work_root = Path(os.getenv("MENHIR_E2E_WORK_ROOT") or REPO_ROOT / ".e2e-work")
+    # Absolute: child processes (pip, menhir) run from other cwds and would misread a relative root.
+    work_root = Path(os.getenv("MENHIR_E2E_WORK_ROOT") or REPO_ROOT / ".e2e-work").resolve()
     config = E2EConfig(work_root=work_root)
     config.validate()
     for directory in (config.state_dir, config.evidence_dir, config.fixtures_dir):
