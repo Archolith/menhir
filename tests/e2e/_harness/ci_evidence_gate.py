@@ -50,6 +50,7 @@ REQUIRED_LANES = frozenset(
         "test_e2e_17_scalar_authority[mvp_default]",
         "test_e2e_17_event_authority[mvp_default]",
         "test_e2e_18_opt_out_and_back[mvp_default]",
+        "test_e2e_19_fresh_install_shipped_defaults",
         CONTAINER_LANE,
         "test_e2e_08_missing_fork_refusal",
     }
