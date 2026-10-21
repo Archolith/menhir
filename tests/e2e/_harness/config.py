@@ -162,7 +162,7 @@ class E2EConfig:
     backend_port: int = field(default_factory=lambda: int(os.getenv("MENHIR_E2E_BACKEND_PORT", "8199")))
 
     #: Root for the campaign's scratch state: venv, env file, fixture repos, evidence.
-    work_root: Path = field(default_factory=lambda: Path(os.getenv("MENHIR_E2E_WORK_ROOT", "")) if os.getenv("MENHIR_E2E_WORK_ROOT") else Path())
+    work_root: Path = field(default_factory=lambda: Path(os.getenv("MENHIR_E2E_WORK_ROOT", "")).resolve() if os.getenv("MENHIR_E2E_WORK_ROOT") else Path())
 
     #: Seconds to wait for `menhir serve` to answer /api/ready before failing the lane.
     backend_ready_timeout: float = 120.0
