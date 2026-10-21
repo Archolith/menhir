@@ -46,6 +46,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping
 
+from menhir.config.feature_flags import FEATURES
+
 __all__ = [
     "FEATURE_REGISTRY",
     "FeatureCombo",
@@ -60,7 +62,8 @@ class FeatureFlag:
     """One switch the campaign can drive.
 
     ``default`` is what an operator gets with no configuration -- recorded so evidence
-    can state whether a lane ran on defaults or on a deviation.
+    can state whether a lane ran on defaults or on a deviation. It is read from
+    ``menhir.config.feature_flags`` so the harness cannot drift from the code defaults.
 
     ``in_mvp_surface`` marks flags that gate a capability the local-stdio MVP contract
     promises. A lane that fails with one of these OFF is a different severity from one
@@ -74,121 +77,136 @@ class FeatureFlag:
     in_mvp_surface: bool = False
 
 
+def _flag(name: str, env_var: str, summary: str, *, in_mvp_surface: bool = False) -> FeatureFlag:
+    """Build a harness flag whose default is read from the product registry."""
+
+    product = next((f for f in FEATURES.values() if f.env_var == env_var), None)
+    if product is None:
+        raise RuntimeError(
+            f"tests/e2e feature {name!r} names {env_var}, which is not in "
+            "menhir.config.feature_flags.FEATURES. Update FEATURE_REGISTRY."
+        )
+    if not isinstance(product.default, bool):
+        raise RuntimeError(
+            f"tests/e2e feature {name!r} ({env_var}) has product default "
+            f"{product.default!r}, which is not a bool; it cannot be a matrix toggle."
+        )
+    return FeatureFlag(name, env_var, product.default, summary, in_mvp_surface)
+
+
 #: The switches the campaign drives. Grouped by what they gate.
 FEATURE_REGISTRY: tuple[FeatureFlag, ...] = (
     # --- surfaces the MVP contract promises -------------------------------------
-    FeatureFlag(
+    _flag(
         "structure_watcher",
         "MENHIR_STRUCTURE_WATCHER_ENABLED",
-        default=True,
         summary="Background rescan that keeps code structure fresh.",
         in_mvp_surface=True,
     ),
-    FeatureFlag(
+    _flag(
         "privacy_redact",
         "MENHIR_PRIVACY_REDACT",
-        default=False,
         summary="Redact memory content in telemetry and operator surfaces.",
         in_mvp_surface=True,
     ),
-    FeatureFlag(
+    _flag(
         "detailed_revisions",
         "MENHIR_RECORD_DETAILED_REVISIONS",
-        default=False,
         summary="Record per-field revision history for memory updates.",
         in_mvp_surface=True,
     ),
-    FeatureFlag(
+    _flag(
         "experience_counter",
         "MENHIR_EXPERIENCE_COUNTER_ENABLED",
-        default=False,
         summary="QuantState-style agent-memory counters.",
         in_mvp_surface=True,
     ),
-    # --- surfaces outside the MVP contract, which must stay off and stay harmless
-    FeatureFlag(
+    # --- default-on Warden surfaces promoted by #168 (#173, #171) ---------------
+    _flag(
+        "frontier_warden_gate",
+        "MENHIR_FRONTIER_WARDEN_GATE",
+        summary="Warden recall gate (scope, oracle admission, contradiction guards).",
+    ),
+    _flag(
+        "frontier_contradiction_interrupt",
+        "MENHIR_FRONTIER_CONTRADICTION_INTERRUPT",
+        summary="Warden contradiction interrupt on recall.",
+    ),
+    _flag(
+        "frontier_source_memories",
+        "MENHIR_FRONTIER_SOURCE_MEMORIES",
+        summary="Source-memory section on recall results.",
+    ),
+    # --- surfaces outside the local-stdio MVP contract ---------------------------
+    _flag(
         "explorer",
         "MENHIR_EXPLORER_ENABLED",
-        default=False,
-        summary="Explorer web UI. Outside the MVP contract; a lane proves it stays inert.",
+        summary="Explorer web UI. Ships on; outside the local-stdio MVP contract.",
     ),
-    FeatureFlag(
+    _flag(
         "oauth",
         "MENHIR_OAUTH_ENABLED",
-        default=False,
         summary="Remote OAuth resource-server mode. Outside the local-stdio MVP.",
     ),
-    FeatureFlag(
+    _flag(
         "client_tokens",
         "MENHIR_CLIENT_TOKENS_ENABLED",
-        default=False,
         summary="Per-client token auth. Outside the local-stdio MVP.",
     ),
     # --- default-off research lanes; the plan requires they stay preserved and off
-    FeatureFlag(
+    _flag(
         "frontier_bm25",
         "MENHIR_FRONTIER_BM25",
-        default=False,
         summary="BM25 lexical candidate generation in the frontier retriever.",
     ),
-    FeatureFlag(
+    _flag(
         "frontier_content_vector",
         "MENHIR_FRONTIER_CONTENT_VECTOR",
-        default=False,
         summary="Content-vector candidate generation.",
     ),
-    FeatureFlag(
+    _flag(
         "frontier_fact_edges",
         "MENHIR_FRONTIER_FACT_EDGES",
-        default=False,
         summary="FACT-edge expansion during retrieval.",
     ),
-    FeatureFlag(
+    _flag(
         "frontier_shadow",
         "MENHIR_FRONTIER_SHADOW",
-        default=False,
         summary="Shadow-mode frontier scoring (computes, does not serve).",
     ),
-    FeatureFlag(
+    _flag(
         "scalar_state",
         "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED",
-        default=False,
         summary="Typed scalar state extraction.",
     ),
-    FeatureFlag(
+    _flag(
         "scalar_history",
         "MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED",
-        default=False,
         summary="Scalar history projection.",
     ),
-    FeatureFlag(
+    _flag(
         "event_history",
         "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED",
-        default=False,
         summary="Event-history extraction.",
     ),
-    FeatureFlag(
+    _flag(
         "consolidation",
         "MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED",
-        default=False,
         summary="Background personal-memory consolidation.",
     ),
-    FeatureFlag(
+    _flag(
         "recall_audit",
         "MENHIR_PERSONAL_MEMORY_RECALL_AUDIT_ENABLED",
-        default=False,
         summary="Recall audit trail.",
     ),
-    FeatureFlag(
+    _flag(
         "verifier_sync",
         "MENHIR_VERIFIER_SYNC_ENABLED",
-        default=False,
         summary="Background verifier synchronization.",
     ),
-    FeatureFlag(
+    _flag(
         "shadow_context_composition",
         "MENHIR_SHADOW_CONTEXT_COMPOSITION",
-        default=False,
         summary="Shadow context composition alongside the served path.",
     ),
 )
