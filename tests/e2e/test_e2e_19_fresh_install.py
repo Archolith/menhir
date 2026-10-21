@@ -14,7 +14,7 @@ Steps:
 7. A restart through `menhir up` keeps state and settings.
 8. Explicit opt-outs survive `menhir setup` re-runs, `menhir serve` from another cwd reads the
    same state-dir .env, and the opt-outs take effect; removing them restores the defaults.
-9. Opted in to MENHIR_INFERRED_SELF_MODE=enforce (not a shipped default): a hook turn's fact
+9. Under the default MENHIR_INFERRED_SELF_MODE=enforce (#343): a hook turn's fact
    lands on the anchored self, an agent-written memory about the user lands on the inferred
    self, the verbatim client copy of the hook turn skips extraction, no ordinary "user" node
    forms, and no marker of either prefix is persisted.
@@ -104,7 +104,6 @@ CRITERIA = [
     "two_tier_self",
 ]
 
-TWO_TIER = {"MENHIR_INFERRED_SELF_MODE": "enforce"}
 # `add_memory` answers "Queued. episode_id=<uuid>"; the tracked write uses "episode_id: <uuid>".
 ADMITTED_EPISODE_ID = re.compile(r"episode_id[=:]\s*([0-9a-f-]{36})")
 
@@ -113,6 +112,7 @@ OPT_OUT = {
     "MENHIR_FRONTIER_CONTRADICTION_INTERRUPT": "false",
     "MENHIR_FRONTIER_SOURCE_MEMORIES": "false",
     "MENHIR_CANONICAL_SELF_BINDING_MODE": "off",
+    "MENHIR_INFERRED_SELF_MODE": "off",
 }
 
 QUERY = "Atlas Lantern refund approval threshold"
@@ -372,6 +372,7 @@ async def test_e2e_19_fresh_install_shipped_defaults(
                         and values.get("MENHIR_FRONTIER_CONTRADICTION_INTERRUPT") is True
                         and values.get("MENHIR_FRONTIER_SOURCE_MEMORIES") is True
                         and values.get("MENHIR_CANONICAL_SELF_BINDING_MODE") == "enforce"
+                        and values.get("MENHIR_INFERRED_SELF_MODE") == "enforce"
                         and values.get("MENHIR_FRONTIER_BELIEF_GATE") is False
                         and values.get("MENHIR_FRONTIER_EVIDENCE_ANCHOR") is False
                         and values.get("MENHIR_BENCHMARK_MODE") is False)
@@ -511,7 +512,8 @@ async def test_e2e_19_fresh_install_shipped_defaults(
             opted_out = effective_settings(cfg, inst, home)["values"]
             part_a = (state_d == "READY" and ws_off.get("state") == "disabled"
                       and not r_off.get("source_memories") and _ranked_has(r_off, ORIGINAL_AMOUNT)
-                      and opted_out.get("MENHIR_CANONICAL_SELF_BINDING_MODE") == "off")
+                      and opted_out.get("MENHIR_CANONICAL_SELF_BINDING_MODE") == "off"
+                      and opted_out.get("MENHIR_INFERRED_SELF_MODE") == "off")
             stop(backend)
 
             edit_env(home.env_path, remove=OPT_OUT.keys())
@@ -527,13 +529,14 @@ async def test_e2e_19_fresh_install_shipped_defaults(
             ev.record("opt_out_takes_effect_after_restart", passed=part_a and part_b, detail={
                 "opted_out": {"ok": part_a, "episode_state": state_d, "warden_status": ws_off,
                               "source_memories": bool(r_off.get("source_memories")),
-                              "binding_mode": opted_out.get("MENHIR_CANONICAL_SELF_BINDING_MODE")},
+                              "binding_mode": opted_out.get("MENHIR_CANONICAL_SELF_BINDING_MODE"),
+                              "inferred_mode": opted_out.get("MENHIR_INFERRED_SELF_MODE")},
                 "restored": {"ok": part_b, "episode_state": state_e, "warden_status": ws_on,
                              "settings_equal_defaults": restored == code_defaults()}})
             stop(backend)
 
-            # 13. two-tier self, opted in (not a shipped default; removed again afterwards)
-            edit_env(home.env_path, set_values=TWO_TIER)
+            # 13. two-tier self under the shipped defaults (enforce since #343)
+            assert flag_lines(home.env_path) == []
             backend = start("up", home.cwd, "up-two-tier")
             ns_tier = f"e2e19-tier-{uuid4().hex[:12]}"
             async with _session(home, cfg, inst, ev, "client-two-tier") as client:
@@ -558,7 +561,6 @@ async def test_e2e_19_fresh_install_shipped_defaults(
                 detail={"projection_state": proj_state, "client_state": client_state,
                         "agent_state": agent_state, "probe": probe_tier})
             stop(backend)
-            edit_env(home.env_path, remove=TWO_TIER.keys())
         finally:
             for backend_proc in live:
                 try:

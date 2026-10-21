@@ -41,7 +41,7 @@ _SETTINGS = (
         False, ()),
     ('canonical_self_binding_mode', 'MENHIR_CANONICAL_SELF_BINDING_MODE', 'enforce', 'runtime',
         'Configure canonical self binding mode.', True, ()),
-    ('inferred_self_mode', 'MENHIR_INFERRED_SELF_MODE', 'off', 'runtime',
+    ('inferred_self_mode', 'MENHIR_INFERRED_SELF_MODE', 'enforce', 'runtime',
         'Configure agent-inferred user-inferred self node mode (off | observe | enforce).', True, ()),
     ('anchored_time_resolver_enabled', 'MENHIR_ANCHORED_TIME_RESOLVER', False, 'runtime',
         'Overlay anchored-time valid_at on edges from user turns with temporal cues.', True, ()),

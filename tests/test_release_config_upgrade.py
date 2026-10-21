@@ -109,6 +109,26 @@ def test_upgrade_canonical_self_mode_follows_default_unless_pinned(
     assert MemorySettings.from_env().canonical_self_binding_mode == expected
 
 
+@pytest.mark.parametrize("pinned,expected", [(None, "enforce"), ("off", "off"),
+                                              ("observe", "observe")])
+def test_upgrade_inferred_self_mode_follows_default_unless_pinned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_campaign_env: None,
+    pinned: str | None, expected: str,
+) -> None:
+    """Upgrades without the key get enforce (#343); an explicit value is kept as the opt-out."""
+    monkeypatch.delenv("MENHIR_INFERRED_SELF_MODE", raising=False)
+    home = _home(tmp_path, checkout=False)
+    original = "# existing configuration\n"
+    if pinned is not None:
+        original += f"MENHIR_INFERRED_SELF_MODE={pinned}\n"
+    (home / ".env").write_text(original)
+    apply_setup(home, provider="openai", configure_git_hooks=False)
+    assert (home / ".env").read_text().startswith(original)
+    monkeypatch.setenv("ENV_FILE", str(home / ".env"))
+    env_file.load_menhir_env()
+    assert MemorySettings.from_env().inferred_self_mode == expected
+
+
 @pytest.mark.parametrize("checkout", [False, True], ids=["wheel-state", "checkout"])
 def test_upgrade_keeps_explicit_opt_outs_despite_changed_template(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_campaign_env: None, checkout: bool,

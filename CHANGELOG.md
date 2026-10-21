@@ -1,3 +1,13 @@
+## 2026-10-21 - Default the inferred self tier to enforce
+
+- `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: `inferred_self_mode` defaults to `enforce` (owner decision for #343). Installs that leave it unset, fresh or upgraded, bind what agent-written memories say about the user to the inferred self (`user-inferred`) instead of a new "user" node, and recall reads both self tiers; pin `off` to opt out. An unrecognized value still falls back to `off`.
+- `cli/bootstrap.py`: the hook CLI's `RecallService` now receives the mode, so hook-injected context reads the same tiers as backend recall (it ignored the inferred tier before).
+- Existing "user" forks created before the upgrade stay where they are; `scripts/report_self_forks.py` lists them and consolidation stays blocked.
+- E2E-19 runs `two_tier_self` on the shipped defaults; its opt-out step also pins `MENHIR_INFERRED_SELF_MODE=off`.
+- `.agent/default-off-features.md`: the mode moves to a "graduated to default-on" section.
+- Tests: new upgrade test in `tests/test_release_config_upgrade.py` for unset versus pinned modes. Changed: `tests/e2e/test_e2e_19_fresh_install.py` (default-on expectations and opt-out pin).
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-10-13 - Assess Anthropic Scion as prior art for revision intelligence
 
 - `docs/research/prior-art/anthropic-scion-source-control-comparison.md`: dated comparison of Anthropic's proprietary Scion, its open-source status, Git-compatible alternatives, Menhir overlap and risks; no VCS replacement proposed.
@@ -83,15 +93,4 @@ missed it: in the Beacon agent-task evaluation, two plans for archiving a Menhir
 - Known cost: agent-written memories that repeat user facts store them on a separate "user" entity, so recall can return both (#343).
 - `.agent/workflows/canonical-self-migration-runbook.md`, `.agent/default-off-features.md`: record the new default; the runbook's activation canary applies to the first deploy that picks it up.
 - Tests: `tests/test_self_binding.py` and `tests/test_release_config_upgrade.py` assert the new default; new upgrade test for unset versus pinned modes.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-10-20 - Turn Oracle ranking and the intent lens on and remove their flags
-
-- `domain/retrieval_tuning.py`: `enable_oracle_ranking` and `enable_intent_lens` default true. They stay per-request knobs for Recall Lab comparisons; there is no deployment flag.
-- `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: remove `frontier_oracle_ranking` / `MENHIR_FRONTIER_ORACLE_RANKING` and `frontier_intent_lens` / `MENHIR_FRONTIER_INTENT_LENS`; both are listed in `RETIRED`. A deployment that still sets them gets the new default.
-- `services/assertion_pipeline.py`: score ties keep the caller's order instead of candidate-id order, so an oracle outage (every oracle neutral) leaves recall order unchanged.
-- `services/recall_pipeline.py`: the frontier only writes the Warden receipt when a guard is configured, so default recall still reports `disabled` with no notice. With only the contradiction or currentness guard configured, the receipt now reads `computed_not_applied` (the chain runs because Oracle ranking does).
-- `explorer/recall_lab.py`: the Production arm follows the new default; the facet-only arm turns Oracle ranking and the intent lens off explicitly.
-- Tests: `tests/test_settings.py`, `tests/test_release_config_upgrade.py`, `tests/test_warden_safety_matrix.py`, `tests/test_recall_service.py` and `tests/e2e/_harness/features.py` updated for the new default; new tests for default recall's Warden receipt and for tie order.
-- Evidence and follow-ups: #172; remaining AMA checks in #345; diversity gate stays opt-in (#344).
 - `CHANGELOG-archive.md`: retain the oldest former current entry.

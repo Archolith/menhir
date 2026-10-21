@@ -79,6 +79,8 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
             counting_wording_enabled=getattr(
                 settings, "personal_memory_counting_wording_enabled", False),
             event_history_authority_enabled=event_history_authority_effective(settings),
+            # Same tier view as the backend's recall (core/bootstrap.py), so hook context agrees.
+            inferred_self_mode=str(getattr(settings, "inferred_self_mode", "enforce")),
             counting_enabled=counting_enabled,
         )
         context_builder = ContextBuilderService(

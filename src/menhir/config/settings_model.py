@@ -220,7 +220,9 @@ class MemorySettings:
     canonical_self_binding_mode: str = "enforce"
 
     # Two-tier self identity: off | observe | enforce. Agent-inferred "user-inferred" node.
-    inferred_self_mode: str = "off"
+    # Default enforce since #343 (owner decision 2026-10-21): episodes that cannot reach the
+    # anchored speaker marker bind to the inferred self instead of forking "user"; set "off" to opt out.
+    inferred_self_mode: str = "enforce"
 
     # Anchored-time resolver: one extra LLM call per user turn with a temporal cue, overlaying
     # valid_at on extracted edges. Default off until the live eval gates (L1-L3) pass.
