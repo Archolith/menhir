@@ -63,10 +63,13 @@ class MemoryBackend(Protocol):
         turn_evidence_uuid: str | None = None,
         user_statement: str | None = None,
         role: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Queue an episode for enrichment. Returns QueueResult-shaped dict.
 
         Args:
+            idempotency_key: Optional client key; a repeat with the same content returns the
+                            existing anchor (idempotent_replay) instead of a second episode.
             role: Optional structured speaker of the episode (never inferred from text).
             turn_evidence_uuid: Optional UUID of a :TurnEvidence node for grounding
                                source='user'/'manual' claims at the top trust tier.

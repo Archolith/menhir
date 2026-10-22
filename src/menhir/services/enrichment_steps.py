@@ -311,6 +311,7 @@ async def try_reconcile_existing(ctx: EnrichmentContext) -> bool:
             resolved_episode_uuid=resolved_episode_uuid,
             nodes_touched=stamped.nodes_touched,
             edges_touched=stamped.edges_touched,
+            claim_started_at=ctx.claimed.get("processing_started_at"),
         )
         if not marked_ready:
             logger.info(
@@ -392,6 +393,7 @@ async def run_preflight_rejection(ctx: EnrichmentContext) -> bool:
             ctx.episode_uuid,
             str(preflight_rejection["error"]),
             worker_id=ctx.worker_id,
+            claim_started_at=ctx.claimed.get("processing_started_at"),
         )
         if not failed:
             logger.info(
@@ -1217,6 +1219,7 @@ async def stamp_and_finalize(
             resolved_episode_uuid=resolved_episode_uuid,
             nodes_touched=0,
             edges_touched=0,
+            claim_started_at=ctx.claimed.get("processing_started_at"),
         )
         if not marked_ready:
             logger.info(
@@ -1436,6 +1439,7 @@ async def stamp_and_finalize(
         resolved_episode_uuid=resolved_episode_uuid,
         nodes_touched=stamped.nodes_touched,
         edges_touched=stamped.edges_touched,
+        claim_started_at=ctx.claimed.get("processing_started_at"),
     )
     if not marked_ready:
         logger.info(

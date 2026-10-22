@@ -83,6 +83,7 @@ class SchedulerGraphAdapter(Protocol):
         resolved_episode_uuid: str,
         nodes_touched: int,
         edges_touched: int,
+        claim_started_at: Any = None,
     ) -> bool:
         ...
 

@@ -318,7 +318,60 @@ class EpisodeStampingRepository:
         rows = self.neo4j.execute(query, params=params)
         return bool(rows and int(rows[0].get("updated", 0)) > 0)
 
-    def touch_episode_processing_heartbeat(self, episode_uuid: str, *, worker_id: str | None = None) -> bool:
+    def touch_episode_processing_heartbeat(
+        self,
+        episode_uuid: str,
+        *,
+        worker_id: str | None = None,
+        claim_started_at: Any = None,
+        lease_seconds: int | None = None,
+        max_enrichment_seconds: int | None = None,
+    ) -> bool:
+        """Stamp the heartbeat; optionally renew the lease up to a hard ceiling.
+
+        Legacy call (no claim_started_at/lease_seconds/max_enrichment_seconds): returns True when
+        the row matched. Renewing call (all three plus worker_id): fenced on owner, ENRICHING and
+        the claim instant; returns True only if the row matched. Past the ceiling the heartbeat
+        stamp still lands but the lease is left as is (still True).
+        """
+        renew_args = (claim_started_at, lease_seconds, max_enrichment_seconds)
+        if any(v is not None for v in renew_args):
+            if any(v is None for v in renew_args) or worker_id is None:
+                raise ValueError(
+                    "claim_started_at, lease_seconds, max_enrichment_seconds and worker_id "
+                    "must be given together"
+                )
+            renew_query = (
+                Cypher()
+                .match("(n:Episodic)")
+                .where(
+                    "n.uuid = $episode_uuid",
+                    "n.processing_state = 'ENRICHING'",
+                    "n.processing_owner = $worker_id",
+                    "n.processing_started_at IS NOT NULL AND n.processing_started_at.epochSeconds = datetime($claim_started_at).epochSeconds AND n.processing_started_at.nanosecond = datetime($claim_started_at).nanosecond",
+                )
+                .set(
+                    [
+                        "n.processing_heartbeat_at = datetime()",
+                        "n.processing_lease_expires_at = CASE WHEN datetime() < n.processing_started_at + duration({seconds: $max_enrichment_seconds}) THEN datetime() + duration({seconds: $lease_seconds}) ELSE n.processing_lease_expires_at END",
+                    ]
+                )
+                .return_raw("count(n) AS updated")
+                .build()
+            )
+            rows = self.neo4j.execute(
+                renew_query,
+                params={
+                    "episode_uuid": episode_uuid,
+                    "worker_id": worker_id,
+                    "claim_started_at": claim_started_at,
+                    "lease_seconds": int(lease_seconds),
+                    "max_enrichment_seconds": int(max_enrichment_seconds),
+                },
+                # No safe_to_reexecute (CF-158 ratchet): an ambiguous failure propagates and the
+                # heartbeat loop retries on its next tick, well inside the lease.
+            )
+            return bool(rows and int(rows[0].get("updated", 0)) > 0)
         query = (
             Cypher()
             .match("(n:Episodic)")

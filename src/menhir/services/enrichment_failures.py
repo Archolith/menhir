@@ -88,6 +88,13 @@ _UNKNOWN_REMOTE_TIMEOUT_MARKERS = (
 )
 
 
+DEADLINE_REASON_CODE = "enrichment_deadline_exceeded"
+
+
+class EnrichmentDeadlineExceeded(RuntimeError):
+    """The worker abandoned an episode that ran past the hard enrichment ceiling."""
+
+
 def _normalize_error_text(error: object | None) -> str:
     return str(error or "").strip().lower()
 
@@ -148,6 +155,13 @@ def classify_enrichment_failure(error: object | None, *, error_type: object | No
         _normalize_error_type(error, error_type)
         == SelfSubjectEndpointCollisionError.__name__.lower()
         or SelfSubjectEndpointCollisionError.reason_code in _normalize_error_text(error)
+    ):
+        return "manual_review"
+
+    # A hung episode must not be requeued (a retryable grade refunds the attempt and loops forever).
+    if (
+        _normalize_error_type(error, error_type) == EnrichmentDeadlineExceeded.__name__.lower()
+        or DEADLINE_REASON_CODE in _normalize_error_text(error)
     ):
         return "manual_review"
 

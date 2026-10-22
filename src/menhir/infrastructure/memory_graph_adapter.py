@@ -391,7 +391,13 @@ class MemoryGraphAdapter:
         namespace: str = "default",
         reference_time: datetime | None = None,
         turn_role: str | None = None,
+        ingest_key: str | None = None,
+        ingest_request_sha256: str | None = None,
     ) -> str:
+        ingest_kwargs: dict[str, Any] = {}
+        if ingest_key is not None:
+            ingest_kwargs["ingest_key"] = ingest_key
+            ingest_kwargs["ingest_request_sha256"] = ingest_request_sha256
         return self._episodes.create_pending_episode(
             episode_uuid=episode_uuid,
             name=name,
@@ -406,7 +412,11 @@ class MemoryGraphAdapter:
             namespace=namespace,
             reference_time=reference_time,
             turn_role=turn_role,
+            **ingest_kwargs,
         )
+
+    def find_episode_by_ingest_key(self, ingest_key: str) -> dict | None:
+        return self._episodes.find_episode_by_ingest_key(ingest_key)
 
     def link_episode_admission(
         self, *, episode_uuid: str, turn_evidence_uuid: str, namespace: str | None = None
@@ -526,7 +536,11 @@ class MemoryGraphAdapter:
         resolved_episode_uuid: str,
         nodes_touched: int,
         edges_touched: int,
+        claim_started_at: Any = None,
     ) -> bool:
+        extra: dict[str, Any] = {}
+        if claim_started_at is not None:
+            extra["claim_started_at"] = claim_started_at
         return self._episodes.mark_episode_ready(
             episode_uuid,
             worker_id=worker_id,
@@ -534,6 +548,7 @@ class MemoryGraphAdapter:
             resolved_episode_uuid=resolved_episode_uuid,
             nodes_touched=nodes_touched,
             edges_touched=edges_touched,
+            **extra,
         )
 
     def mark_episode_failed(
@@ -1294,10 +1309,20 @@ class MemoryGraphAdapter:
         )
 
     def touch_episode_processing_heartbeat(
-        self, episode_uuid: str, *, worker_id: str | None = None
+        self,
+        episode_uuid: str,
+        *,
+        worker_id: str | None = None,
+        claim_started_at: Any = None,
+        lease_seconds: int | None = None,
+        max_enrichment_seconds: int | None = None,
     ) -> bool:
         return self._episodes.touch_episode_processing_heartbeat(
-            episode_uuid, worker_id=worker_id
+            episode_uuid,
+            worker_id=worker_id,
+            claim_started_at=claim_started_at,
+            lease_seconds=lease_seconds,
+            max_enrichment_seconds=max_enrichment_seconds,
         )
 
     def increment_episode_llm_usage(

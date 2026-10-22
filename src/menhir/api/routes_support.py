@@ -475,10 +475,17 @@ class MemoryRequest(BaseModel):
     # Speaker of `episode`. Menhir never infers the speaker from the text (#271); grounded
     # episodes take it from their turn evidence.
     role: Literal["user", "assistant", "tool", "agent", "system"] | None = None
+    #: Optional client key making resubmits safe: the same key + content returns the existing
+    #: anchor (``idempotent_replay``); the same key with different content is a 409.
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=256)
 
 
 class MemoryResponse(BaseModel):
     episode_id: str
+    #: True when ``idempotency_key`` matched an existing episode and nothing new was queued.
+    idempotent_replay: bool = False
+    #: Processing state of the replayed anchor (``PENDING`` / ``READY`` / ...); None otherwise.
+    processing_state: str | None = None
     #: Without ``?wait=true``: the queue result (``queued``). With it: the terminal processing
     #: state after waiting -- ``ready``, ``failed``, or the still-pending state on timeout
     #: (``pending`` / ``enriching``). A cold-start evaluator got ``200 queued`` for a write whose

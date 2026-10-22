@@ -7,7 +7,8 @@ capped per attempt. Retrying a chat completion has no side effects beyond token 
 
 ``MENHIR_OPENAI_RATE_LIMIT_MAX_ATTEMPTS`` (default 6, ``1`` disables) and
 ``MENHIR_OPENAI_RATE_LIMIT_MAX_WAIT_S`` (default 60) bound the total: at most about five minutes
-of sleep per call, under the 900 s enrichment lease, which a heartbeat renews anyway.
+of sleep per call, under the 900 s enrichment lease, which the heartbeat renews up to a
+10800 s hard ceiling per claim (not per episode).
 
 Applied at each OpenAI call seam: the Graphiti proxy (``generate_response`` re-raises
 RateLimitError), the sync chat seam, ``providers.OpenAIStyleChatBackend`` (the judges call it

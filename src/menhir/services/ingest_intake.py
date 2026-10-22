@@ -15,6 +15,12 @@ from uuid import uuid4
 import httpx
 
 from menhir.domain import IngestResult, IngestStatus, MemorySession
+from menhir.domain.ingest import (
+    IdempotencyKeyConflict,
+    episode_ingest_key,
+    episode_request_digest,
+    is_constraint_violation,
+)
 from menhir.domain.models import ProcessingState
 from menhir.infrastructure import GraphitiClient, LLMAdapter, MemoryGraphAdapter
 from menhir.infrastructure.git_log import current_head
@@ -72,6 +78,7 @@ class IngestIntakeMixin:
         turn_evidence_uuid: str | None = None,
         user_statement: str | None = None,
         role: str | None = None,
+        idempotency_key: str | None = None,
     ) -> IngestResult:
         """Durably record a raw episode and queue background enrichment.
 
@@ -92,7 +99,7 @@ class IngestIntakeMixin:
             raise ValueError(f"invalid role: {role!r}")
         turn_role = role
 
-        from menhir.domain.namespace import stamped_namespace
+        from menhir.domain.namespace import normalize_namespace, stamped_namespace
         from menhir.domain.bootstrap_scope import normalize_bootstrap_scope_for_flag
         from menhir.domain.truth.admission_gate import evaluate_user_tier_claim
 
@@ -100,6 +107,27 @@ class IngestIntakeMixin:
         episode_name = f"episode-{session.session_id}-{episode_uuid}"
         reference_time = _parse_occurred_at(occurred_at)
         normalized_bootstrap_scope = normalize_bootstrap_scope_for_flag(bootstrap_scope, flagged)
+
+        # Idempotent submit: a repeat of the same key + content returns the existing anchor and
+        # does nothing else. Outside the try below so a conflict propagates instead of FAILED.
+        ingest_key: str | None = None
+        ingest_digest: str | None = None
+        if idempotency_key is not None:
+            ingest_key = episode_ingest_key(idempotency_key, normalize_namespace(namespace))
+            ingest_digest = episode_request_digest(
+                content=episode,
+                diff=diff,
+                source=source,
+                flagged=flagged,
+                bootstrap_scope=bootstrap_scope,
+                occurred_at=occurred_at,
+                role=role,
+                turn_evidence_uuid=turn_evidence_uuid,
+                user_statement=user_statement,
+            )
+            existing = self.graph_adapter.find_episode_by_ingest_key(ingest_key)
+            if existing is not None:
+                return self._idempotent_replay_result(existing, ingest_digest)
 
         # Agent-quoted evidence (best-effort, like every other provenance write below): record
         # the caller's verbatim user words as a role='user' :TurnEvidence stamped
@@ -166,20 +194,32 @@ class IngestIntakeMixin:
                 pending_kwargs["bootstrap_scope"] = normalized_bootstrap_scope
             if turn_role is not None:
                 pending_kwargs["turn_role"] = turn_role
-            self.graph_adapter.create_pending_episode(
-                episode_uuid=episode_uuid,
-                name=episode_name,
-                content=episode,
-                session_id=session.session_id,
-                user_id=session.user_id,
-                source=effective_source,
-                source_confidence=source_confidence_for(effective_source),
-                diff=diff or None,
-                user_flagged=flagged,
-                namespace=stamped_namespace(namespace),
-                reference_time=reference_time,
-                **pending_kwargs,
-            )
+            if ingest_key is not None:
+                pending_kwargs["ingest_key"] = ingest_key
+                pending_kwargs["ingest_request_sha256"] = ingest_digest
+            try:
+                self.graph_adapter.create_pending_episode(
+                    episode_uuid=episode_uuid,
+                    name=episode_name,
+                    content=episode,
+                    session_id=session.session_id,
+                    user_id=session.user_id,
+                    source=effective_source,
+                    source_confidence=source_confidence_for(effective_source),
+                    diff=diff or None,
+                    user_flagged=flagged,
+                    namespace=stamped_namespace(namespace),
+                    reference_time=reference_time,
+                    **pending_kwargs,
+                )
+            except Exception as create_exc:
+                if ingest_key is None or not is_constraint_violation(create_exc):
+                    raise
+                # Lost a concurrent first-submit race: return the winner's anchor.
+                existing = self.graph_adapter.find_episode_by_ingest_key(ingest_key)
+                if existing is None:
+                    raise
+                return self._idempotent_replay_result(existing, ingest_digest)
 
             # Provenance (best-effort): persist the evidence->memory join, so a scalar View founded on
             # this turn can reach the memory built from it (and back).
@@ -320,6 +360,8 @@ class IngestIntakeMixin:
                 # to produce. Enqueued AFTER the memory so the curated write is never delayed by it.
                 if evidence_projection_uuid:
                     await self._enqueue_pending_episode(evidence_projection_uuid)
+        except IdempotencyKeyConflict:
+            raise
         except Exception:  # catch-all: episode queue must not crash the caller
             logger.exception(
                 "Episode queue failed for session_id=%s source=%s",
@@ -338,6 +380,22 @@ class IngestIntakeMixin:
             status=IngestStatus.QUEUED,
             nodes_touched=1,
             edges_touched=0,
+        )
+
+    @staticmethod
+    def _idempotent_replay_result(existing: dict, digest: str | None) -> IngestResult:
+        """Replay result for an existing anchor; a different request digest is a conflict."""
+
+        if existing.get("ingest_request_sha256") != digest:
+            raise IdempotencyKeyConflict("idempotency_key was already used with a different request")
+        state = existing.get("processing_state")
+        return IngestResult(
+            episode_id=str(existing.get("uuid") or ""),
+            status=IngestStatus.QUEUED,
+            nodes_touched=0,
+            edges_touched=0,
+            idempotent_replay=True,
+            processing_state=str(getattr(state, "value", state)) if state is not None else None,
         )
 
     async def wait_for_episode_processing(

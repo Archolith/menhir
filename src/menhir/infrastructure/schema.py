@@ -101,6 +101,7 @@ PHASE_ONE_REQUIRED_INDEXES = (
     "project_identity_id_unique",
     "project_identity_root_unique",
     "structure_project_path_unique",
+    "episodic_ingest_key_unique",
 )
 
 # Name, constraint type, entity type, labels/types, ordered properties. Index names alone are not
@@ -127,6 +128,13 @@ PHASE_ONE_REQUIRED_CONSTRAINTS = (
         "NODE",
         ("Entity",),
         ("structure_project_id", "structure_path"),
+    ),
+    (
+        "episodic_ingest_key_unique",
+        "UNIQUENESS",
+        "NODE",
+        ("Episodic",),
+        ("ingest_key",),
     ),
 )
 
@@ -312,6 +320,7 @@ def _turn_evidence_index_queries() -> list[str]:
     Additive — TurnEvidence nodes are new, so no backfill and no _SCHEMA_V bump."""
     return [
         "CREATE CONSTRAINT turn_evidence_key_unique IF NOT EXISTS FOR (t:TurnEvidence) REQUIRE t.turn_key IS UNIQUE",
+        "CREATE CONSTRAINT episodic_ingest_key_unique IF NOT EXISTS FOR (n:Episodic) REQUIRE n.ingest_key IS UNIQUE",
         "CREATE INDEX turn_evidence_turn_id_idx IF NOT EXISTS FOR (t:TurnEvidence) ON (t.turn_id)",
         "CREATE INDEX turn_evidence_namespace_idx IF NOT EXISTS FOR (t:TurnEvidence) ON (t.namespace)",
         "CREATE INDEX turn_evidence_role_idx IF NOT EXISTS FOR (t:TurnEvidence) ON (t.role)",
