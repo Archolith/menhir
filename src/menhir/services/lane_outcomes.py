@@ -25,8 +25,8 @@ _LANES: dict[str, tuple[str, str, str | None, str, str, dict[str, str]]] = {
          "corrections_applied": "corrections_applied"},
     ),
     "scalar": (
-        "scalar_namespaces_dirty", "scalar_namespaces_processed", None, "scalar_evidence_rows",
-        "scalar_assertions_persisted",
+        "scalar_namespaces_dirty", "scalar_namespaces_processed", "scalar_namespaces_failed",
+        "scalar_evidence_rows", "scalar_assertions_persisted",
         {"decisions": "scalar_decisions", "committed": "scalar_assertions_committed",
          "persisted": "scalar_assertions_persisted", "bound": "scalar_states_written",
          "binding_mismatched": "scalar_binding_mismatched", "advisory": "scalar_advisory",
@@ -80,4 +80,16 @@ def lane_outcomes(result: dict[str, Any], *, enabled: dict[str, bool],
     return out
 
 
-__all__ = ["lane_outcomes"]
+def failed_lanes(result: dict[str, Any], namespaces: list[str]) -> list[dict[str, Any]]:
+    """Lanes that failed closed on ``namespaces`` in this pass: one entry per lane whose failed
+    counter is above zero. The result carries counts only, so a caller that ran one namespace gets
+    that namespace named; with several, every one is listed as a candidate."""
+    out: list[dict[str, Any]] = []
+    for lane, (_dirty, _processed, failed, *_rest) in _LANES.items():
+        count = _int(result.get(failed)) if failed is not None else 0
+        if count > 0:
+            out.append({"lane": lane, "namespaces": list(namespaces), "failed": count})
+    return out
+
+
+__all__ = ["failed_lanes", "lane_outcomes"]

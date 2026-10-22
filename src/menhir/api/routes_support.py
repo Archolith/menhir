@@ -740,6 +740,9 @@ class Phase3RunResponse(BaseModel):
     event_llm_calls: int = 0
     # Per-lane stage counts and no_output/stalled flags (#170 item 4); None on a counter-only pass.
     lane_outcomes: dict[str, dict[str, Any]] | None = None
+    # False when any lane failed closed for the namespace; failed_lanes then names each one.
+    ok: bool = True
+    failed_lanes: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class Phase3StatusResponse(BaseModel):

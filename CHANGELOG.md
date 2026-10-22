@@ -1,3 +1,13 @@
+## 2026-10-21 - POST /api/phase3/run reports lanes that failed
+
+In the LME pilot a counting namespace failed inside the pass (a provider 500), yet the request returned 200 with nothing marking it failed, so the bench recorded it as done.
+
+- `api/routes_support.py`, `api/routes_handlers.py`: `Phase3RunResponse` gains `ok` (false when any lane failed closed for the namespace) and `failed_lanes` (lane, namespace, failed count). The status stays 200 and the existing counters are unchanged.
+- `services/lane_outcomes.py`: new `failed_lanes()` reads each lane's failed counter; the scalar lane now has one.
+- `services/scalar_consolidation.py`: when scalar-state activation is refused, `scalar_namespaces_failed` counts the scalar targets. Before, the lane was skipped with only a log warning, the same way the event lane already reports its activation refusal.
+- Tests: new `tests/test_phase3_run_lane_failure.py`.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-10-21 - E2E work root is always absolute; dev group installs build
 
 - `tests/e2e/conftest.py`, `tests/e2e/_harness/config.py`: `MENHIR_E2E_WORK_ROOT` is resolved to an absolute path. A relative root broke E2E-20's upgrade step, where pip runs from another cwd and could not find the candidate wheel.
@@ -79,15 +89,4 @@ missed it: in the Beacon agent-task evaluation, two plans for archiving a Menhir
 - `.env.example`: `MENHIR_PERSONAL_MEMORY_CONSOLIDATION_AUDIT_ENABLED` gets its own commented default (`false`). Its only mention was wrapped prose that read as a commented `=true.` default, which E2E-20 caught.
 - `tests/e2e/_harness/ci_evidence_gate.py`: both lanes are required.
 - Tests: new `tests/test_env_file_state_dir_fallback.py`. Changed: `test_resolve_env_file_prefers_ENV_FILE_then_cwd` in `tests/test_env_file_and_neo4j_probe.py` pins an empty `MENHIR_STATE_DIR` so a developer's `~/.menhir/.env` cannot satisfy its None case.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-10-20 - Turn the Warden gate and its contradiction guard on by default
-
-- `config/settings_model.py`, `config/feature_flags.py`, `domain/retrieval_tuning.py`, `.env.example`: `frontier_warden_gate` and `frontier_contradiction_interrupt` default true (#173). Installs that leave them unset, fresh or upgraded, get scope and Oracle admission and the contradiction interrupt on recall; set either to false to opt out.
-- The belief gate stays opt-in. It marks an Entity superseded when any of its fact edges expired; with git, test or log evidence that scores as a conflict, and the contradiction guard then refuses the entity under the current lens, including for history questions the Warden's lens reads as current. Follow-up: #350.
-- The evidence anchor stays opt-in, and `RetrievalTuningConfig.enable_evidence_anchor` now defaults false to match the setting (it was true). It reads provenance from the client label, so it refuses ordinary conversation; reimplementation is #349.
-- `explorer/recall_lab.py`: `RecallLabTuning` follows the new defaults; arms D-H pin their guards explicitly so their meaning does not change (D stays the strict profile with the anchor on).
-- Verifier sync is not a Warden and stays opt-in.
-- `.agent/default-off-features.md`: the two settings move to a "graduated to default-on" section; the belief-gate row records why it stays opt-in; the evidence-anchor row cites #349.
-- Tests: `tests/test_settings.py`, `tests/test_release_config_upgrade.py` and `tests/test_recall_service.py` assert the new defaults; new tests that each Warden default opts out through its env var, and that default recall keeps a git-backed entity with one expired fact edge (the belief gate refuses it). Tests that relied on the old defaults now pin them explicitly: `tests/test_recall_service.py`, `tests/test_warden_execution_status.py` (which also checks that default recall is `applied` without the anchor), `tests/test_warden_verifier_interactions.py` and `tests/test_git_staleness_recall_e2e.py`.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.

@@ -43,6 +43,7 @@ async def phase3_run_impl(
         raise HTTPException(status_code=503, detail="phase 3 consolidation unavailable")
     from menhir.infrastructure.sync_llm import make_sync_chat
     from menhir.infrastructure.view_embedder import make_view_embedder, view_embedder_version
+    from menhir.services.lane_outcomes import failed_lanes
     from menhir.services.scheduler_tasks import consolidate_personal_memory
 
     pm_model = getattr(settings, "personal_memory_consolidation_chat_model", "") or None
@@ -142,7 +143,10 @@ async def phase3_run_impl(
                 settings, "personal_memory_scalar_state_perceiver_version", "v1"),
             limit=1,
         ))
+    failed = failed_lanes(result, [ns])
     return Phase3RunResponse(
+        ok=not failed,
+        failed_lanes=failed,
         namespace=ns,
         phase3_selected=selected,
         dirty_after=dirty_after,
