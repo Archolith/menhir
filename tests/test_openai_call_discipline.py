@@ -56,7 +56,11 @@ _TIMEOUTS_ALLOWED: dict[str, tuple[int, str]] = {
     "core/runtime.py": (1, "startup resume of pending episodes (enqueue)"),
     INFRA + "graphiti_client.py": (1, "Neo4j index build"),
     INFRA + "anchored_time_persist.py": (1, "Neo4j anchored-time contract write"),
-    "services/ingest_worker.py": (1, "idle queue poll"),
+    "services/ingest_worker.py": (
+        2,
+        "idle queue poll; enrichment hard ceiling, wall-clock on purpose so the attempt ends "
+        "before its lease stops renewing (backoff-aware would outlive the lease)",
+    ),
     "services/maintenance_scheduler.py": (3, "stop / lease-lost event waits"),
 }
 
