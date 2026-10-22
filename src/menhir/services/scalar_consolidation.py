@@ -186,6 +186,7 @@ def run_scalar_consolidation(
             if callable(getattr(graph_adapter, "retire_scalar_prior_version", None)) else 0)
     scalar_service = None
     scalar_state_service = None
+    scalar_namespaces_failed = 0
 
     try:
         scalar_state_service = graph_adapter.scalar_state_service(
@@ -210,6 +211,7 @@ def run_scalar_consolidation(
         )
         scalar_service = None
         scalar_state_service = None
+        scalar_namespaces_failed = len(scalar_targets)
 
     if scalar_service is not None:
         for namespace in scalar_targets:
@@ -383,6 +385,7 @@ def run_scalar_consolidation(
     return {
         "scalar_namespaces_dirty": len(scalar_targets),
         "scalar_namespaces_processed": scalar_processed,
+        "scalar_namespaces_failed": scalar_namespaces_failed,
         "scalar_batches": scalar_batches,
         "scalar_states_written": scalar_states_written,
         "scalar_advisory": scalar_advisory,
