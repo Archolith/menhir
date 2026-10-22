@@ -7,6 +7,9 @@ from typing import Any, Callable
 
 from menhir.domain.typed_assertion import IDENTITY_VERSION, TypedAssertion, normalize_scalar
 from menhir.infrastructure.schema import get_scalar_state_activation_queries
+from menhir.infrastructure.schema_ddl import (
+    await_schema_online, execute_schema_statement, schema_rule_name,
+)
 
 from menhir.infrastructure.typed_assertion_models import (
     ScalarStateActivationError,
@@ -264,8 +267,13 @@ class TypedAssertionReconciliationMixin:
         DDL is IF (NOT) EXISTS). Returns {queries_executed}."""
         self.assert_scalar_state_activatable()
         queries = get_scalar_state_activation_queries()
+        created: list[str] = []
         for query in queries:
-            self._neo4j.execute(query)
+            execute_schema_statement(self._neo4j, query)
+            name = schema_rule_name(query)
+            if name:
+                created.append(name)
+        await_schema_online(self._neo4j, created)
         return {"queries_executed": len(queries)}
 
     def purge_scalar_state_nodes(self) -> dict[str, Any]:
