@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from menhir.core.backend_impl import _drain_background_errors
 from menhir.domain.bootstrap_scope import bootstrap_selection
+from menhir.domain.ingest import IdempotencyKeyConflict
 from menhir.domain.recall import InvalidQueryPresetError
 from menhir.domain.recall_visibility import memory_lifecycle_note
 from menhir.domain.session import new_session
@@ -515,17 +516,22 @@ async def ingest_memory(
         ingest_kwargs["user_statement"] = body.user_statement
     if body.role is not None:
         ingest_kwargs["role"] = body.role
-    result = await backend.queue_episode(
-        body.episode,
-        user_id=session.user_id,
-        session_id=session.session_id,
-        source=body.source,
-        diff=body.diff,
-        namespace=_resolve_namespace(request, body.namespace),
-        occurred_at=body.occurred_at,
-        turn_evidence_uuid=body.turn_evidence_uuid,
-        **ingest_kwargs,
-    )
+    if body.idempotency_key is not None:
+        ingest_kwargs["idempotency_key"] = body.idempotency_key
+    try:
+        result = await backend.queue_episode(
+            body.episode,
+            user_id=session.user_id,
+            session_id=session.session_id,
+            source=body.source,
+            diff=body.diff,
+            namespace=_resolve_namespace(request, body.namespace),
+            occurred_at=body.occurred_at,
+            turn_evidence_uuid=body.turn_evidence_uuid,
+            **ingest_kwargs,
+        )
+    except IdempotencyKeyConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     status = str(result.get("status") or "")
     error: str | None = None
     retry: str | None = None
@@ -548,6 +554,8 @@ async def ingest_memory(
         retry=retry,
         timed_out=timed_out,
         entities_linked=entities_linked,
+        idempotent_replay=bool(result.get("idempotent_replay")),
+        processing_state=result.get("processing_state") or None,
     )
 
 

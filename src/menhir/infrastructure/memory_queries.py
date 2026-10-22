@@ -1490,7 +1490,8 @@ class MemoryQueryRepository:
                         n.processing_llm_active_model = null,
                         n.processing_llm_active_endpoint = null
                     // The node is kept so the queue stops; the erased text is not.
-                    REMOVE n.content, n.content_embedding, n.content_embedding_model
+                    REMOVE n.content, n.content_embedding, n.content_embedding_model,
+                           n.ingest_key, n.ingest_request_sha256
                     RETURN 1 AS touched
                     UNION
                     WITH n

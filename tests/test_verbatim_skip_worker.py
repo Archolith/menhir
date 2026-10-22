@@ -108,7 +108,7 @@ class _Svc(IngestWorkerMixin, IngestQueueMixin):
     async def _enqueue_pending_episode(self, episode_uuid: str) -> None:
         self.enqueued.append(episode_uuid)
 
-    async def _processing_heartbeat_loop(self, episode_uuid, stop_event):
+    async def _processing_heartbeat_loop(self, episode_uuid, stop_event, claim_started_at=None):
         await stop_event.wait()
 
     async def _check_session_budget(self, episode_uuid, session_id):

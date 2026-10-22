@@ -121,7 +121,33 @@ class EpisodeLifecycleRepository:
         namespace: str = "default",
         reference_time: datetime | None = None,
         turn_role: str | None = None,
+        ingest_key: str | None = None,
+        ingest_request_sha256: str | None = None,
     ) -> str:
+        ingest_key_set = (
+            "            , n.ingest_key = $ingest_key,\n"
+            "                n.ingest_request_sha256 = $ingest_request_sha256\n"
+            if ingest_key is not None
+            else ""
+        )
+        params: dict[str, Any] = {
+            "episode_uuid": episode_uuid,
+            "name": name,
+            "content": content,
+            "diff": diff,
+            "session_id": session_id,
+            "user_id": user_id,
+            "source": source,
+            "turn_role": turn_role,
+            "source_confidence": source_confidence,
+            "user_flagged": user_flagged,
+            "bootstrap_scope": bootstrap_scope,
+            "namespace": namespace,
+            "reference_time": reference_time,
+        }
+        if ingest_key is not None:
+            params["ingest_key"] = ingest_key
+            params["ingest_request_sha256"] = ingest_request_sha256
         self.neo4j.execute(
             """
             // CF-158 criterion 1, sibling label. `:Episodic.uuid` has no uniqueness constraint
@@ -166,24 +192,34 @@ class EpisodeLifecycleRepository:
                 n.enrichment_priority = 'P1',
                 n.enriched_nodes_touched = 0,
                 n.enriched_edges_touched = 0
-            """,
-            params={
-                "episode_uuid": episode_uuid,
-                "name": name,
-                "content": content,
-                "diff": diff,
-                "session_id": session_id,
-                "user_id": user_id,
-                "source": source,
-                "turn_role": turn_role,
-                "source_confidence": source_confidence,
-                "user_flagged": user_flagged,
-                "bootstrap_scope": bootstrap_scope,
-                "namespace": namespace,
-                "reference_time": reference_time,
-            },
+            """
+            + ingest_key_set,
+            params=params,
         )
         return episode_uuid
+
+    def find_episode_by_ingest_key(self, ingest_key: str) -> dict | None:
+        """The anchor `:Episodic` stamped with this ingest key, or None (unique by constraint)."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic {ingest_key: $ingest_key})
+            RETURN n.uuid AS uuid,
+                   n.processing_state AS processing_state,
+                   n.namespace AS namespace,
+                   n.ingest_request_sha256 AS ingest_request_sha256
+            LIMIT 1
+            """,
+            params={"ingest_key": ingest_key},
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        return {
+            "uuid": row["uuid"],
+            "processing_state": row["processing_state"],
+            "namespace": row["namespace"],
+            "ingest_request_sha256": row["ingest_request_sha256"],
+        }
 
     def episode_has_content_embedding(self, episode_uuid: str, model: str | None = None) -> bool:
         """Whether this Menhir-owned `:Episodic` node already carries a content embedding.
@@ -939,7 +975,18 @@ class EpisodeLifecycleRepository:
         resolved_episode_uuid: str,
         nodes_touched: int,
         edges_touched: int,
+        claim_started_at: Any = None,
     ) -> bool:
+        # Owner + claim instant is the attempt's token; owner alone lets a stale attempt in the
+        # same process finalize a newer claim.
+        fence_instant = claim_started_at is not None and worker_id is not None
+        instant_clause = (
+            " AND n.processing_started_at IS NOT NULL"
+            " AND n.processing_started_at.epochSeconds = datetime($claim_started_at).epochSeconds"
+            " AND n.processing_started_at.nanosecond = datetime($claim_started_at).nanosecond"
+            if fence_instant
+            else ""
+        )
         query = (
             Cypher()
             .match("(n:Episodic)")
@@ -947,7 +994,9 @@ class EpisodeLifecycleRepository:
                 "n.uuid = $episode_uuid",
                 "($required_state IS NULL OR n.processing_state = $required_state)",
                 "($worker_id IS NULL OR (n.processing_state = 'ENRICHING'"
-                " AND n.processing_owner = $worker_id))",
+                " AND n.processing_owner = $worker_id"
+                + instant_clause
+                + "))",
             )
             .set(
                 (
@@ -974,17 +1023,17 @@ class EpisodeLifecycleRepository:
             .return_raw("count(n) AS updated")
             .build()
         )
-        rows = self.neo4j.execute(
-            query,
-            params={
-                "episode_uuid": episode_uuid,
-                "worker_id": worker_id,
-                "required_state": required_state,
-                "resolved_episode_uuid": resolved_episode_uuid,
-                "nodes_touched": nodes_touched,
-                "edges_touched": edges_touched,
-            },
-        )
+        params: dict[str, Any] = {
+            "episode_uuid": episode_uuid,
+            "worker_id": worker_id,
+            "required_state": required_state,
+            "resolved_episode_uuid": resolved_episode_uuid,
+            "nodes_touched": nodes_touched,
+            "edges_touched": edges_touched,
+        }
+        if fence_instant:
+            params["claim_started_at"] = claim_started_at
+        rows = self.neo4j.execute(query, params=params)
         return bool(rows and int(rows[0].get("updated", 0)) > 0)
 
     def mark_episode_verbatim_skipped(
@@ -1113,6 +1162,25 @@ class EpisodeLifecycleRepository:
         # Neo4j temporal equality includes timezone identity: a stored `Z` value round-trips
         # through the Python driver as `[UTC]` and compares unequal despite naming one instant.
         # Epoch seconds + nanoseconds preserve full instant precision for the claim fence.
+        # With an instant supplied, a non-transient owner path requires it too (the transient
+        # path already does); without one the legacy text is unchanged.
+        if claim_started_at is not None and not transient_requeue:
+            owner_instant = (
+                " AND n.processing_started_at IS NOT NULL"
+                " AND n.processing_started_at.epochSeconds"
+                " = datetime($claim_started_at).epochSeconds"
+                " AND n.processing_started_at.nanosecond"
+                " = datetime($claim_started_at).nanosecond))"
+            )
+        else:
+            owner_instant = (
+                " AND (NOT $transient_requeue OR ($claim_started_at IS NOT NULL"
+                " AND n.processing_started_at IS NOT NULL"
+                " AND n.processing_started_at.epochSeconds"
+                " = datetime($claim_started_at).epochSeconds"
+                " AND n.processing_started_at.nanosecond"
+                " = datetime($claim_started_at).nanosecond))))"
+            )
         query = (
             Cypher()
             .match("(n:Episodic)")
@@ -1120,12 +1188,7 @@ class EpisodeLifecycleRepository:
                 "n.uuid = $episode_uuid",
                 "(($worker_id IS NULL AND NOT $transient_requeue)"
                 " OR (n.processing_state = 'ENRICHING' AND n.processing_owner = $worker_id"
-                " AND (NOT $transient_requeue OR ($claim_started_at IS NOT NULL"
-                " AND n.processing_started_at IS NOT NULL"
-                " AND n.processing_started_at.epochSeconds"
-                " = datetime($claim_started_at).epochSeconds"
-                " AND n.processing_started_at.nanosecond"
-                " = datetime($claim_started_at).nanosecond))))",
+                + owner_instant,
             )
             .set(
                 (

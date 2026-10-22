@@ -23,6 +23,7 @@ class BackendClientOpsMixin:
         turn_evidence_uuid: str | None = None,
         user_statement: str | None = None,
         role: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {
             "text": text,
@@ -41,6 +42,8 @@ class BackendClientOpsMixin:
             params["user_statement"] = user_statement
         if role is not None:
             params["role"] = role
+        if idempotency_key is not None:
+            params["idempotency_key"] = idempotency_key
         return await self._request("queue_episode", params)
 
     async def flag_memory(

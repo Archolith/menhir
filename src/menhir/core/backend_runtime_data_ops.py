@@ -40,6 +40,7 @@ class RuntimeProviderDataOpsMixin:
         turn_evidence_uuid: str | None = None,
         user_statement: str | None = None,
         role: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         session = new_session(user_id, session_id=session_id)
         queue_kwargs: dict[str, Any] = {
@@ -53,6 +54,8 @@ class RuntimeProviderDataOpsMixin:
             queue_kwargs["user_statement"] = user_statement
         if role is not None:
             queue_kwargs["role"] = role
+        if idempotency_key is not None:
+            queue_kwargs["idempotency_key"] = idempotency_key
         if bootstrap_scope is not None:
             queue_kwargs["bootstrap_scope"] = bootstrap_scope
         result = await self.built.ingest_service.queue_episode_for_enrichment(

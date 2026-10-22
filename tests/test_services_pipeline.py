@@ -2564,6 +2564,7 @@ async def test_maintenance_scheduler_requeues_only_retryable_failed_episodes(
             resolved_episode_uuid: str,
             nodes_touched: int,
             edges_touched: int,
+            claim_started_at: object | None = None,
         ) -> bool:
             raise AssertionError("mark_episode_ready should not be called in this test")
 
@@ -2741,6 +2742,7 @@ async def test_maintenance_scheduler_reconciles_silent_completed_failed_episode(
             resolved_episode_uuid: str,
             nodes_touched: int,
             edges_touched: int,
+            claim_started_at: object | None = None,
         ) -> bool:
             ready_calls.append(
                 {
@@ -2977,6 +2979,7 @@ async def test_maintenance_scheduler_reconciliation_skips_when_row_is_no_longer_
             resolved_episode_uuid: str,
             nodes_touched: int,
             edges_touched: int,
+            claim_started_at: object | None = None,
         ) -> bool:
             ready_calls.append(
                 {

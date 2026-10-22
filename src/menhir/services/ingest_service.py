@@ -77,6 +77,7 @@ class IngestService(IngestQueueMixin, IngestWorkerMixin, IngestIntakeMixin):
     _max_enrichment_attempts: int = field(default=3, init=False, repr=False)
     _context_window_retry_attempts: int = field(default=6, init=False, repr=False)
     _enrichment_lease_seconds: int = field(default=900, init=False, repr=False)
+    _max_enrichment_seconds: int = field(default=10800, init=False, repr=False)
     _lease_recovery_poll_s: float = field(default=5.0, init=False, repr=False)
     _queue_warning_depth: int = field(default=5, init=False, repr=False)
     _ready_warning_ms: int = field(default=8000, init=False, repr=False)

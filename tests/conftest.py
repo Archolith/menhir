@@ -712,6 +712,7 @@ class StubMemoryGraphAdapter:
         resolved_episode_uuid: str,
         nodes_touched: int,
         edges_touched: int,
+        claim_started_at: object | None = None,
     ) -> bool:
         row = self.pending_episode_rows.get(episode_uuid)
         if row is None:

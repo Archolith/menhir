@@ -51,6 +51,7 @@ from menhir.services.enrichment_steps import (
     run_preflight_rejection,
     try_reconcile_existing,
 )
+from menhir.services.enrichment_failures import EnrichmentDeadlineExceeded
 from menhir.services.ingest_gate import IngestGate
 
 logger = logging.getLogger(__name__)
@@ -134,7 +135,11 @@ class IngestWorkerMixin:
         ctx: EnrichmentContext | None = None
         try:
             heartbeat_task = asyncio.create_task(
-                self._processing_heartbeat_loop(episode_uuid, heartbeat_stop),
+                self._processing_heartbeat_loop(
+                    episode_uuid,
+                    heartbeat_stop,
+                    claim_started_at=claimed.get("processing_started_at"),
+                ),
                 name=f"menhir-enrichment-heartbeat-{episode_uuid}",
             )
             # The session key is captured HERE, not looked up inside the callback: the callback fires
@@ -192,52 +197,64 @@ class IngestWorkerMixin:
                 processing_attempts,
                 claimed.get("source"),
             )
-            if await try_reconcile_existing(ctx):
-                return
-            if await run_preflight_rejection(ctx):
-                return
+            # Hung-task backstop (10800 s; also spans IngestGate wait and 429 backoff). The
+            # heartbeat renews the lease only until started_at + this ceiling, so a reclaim
+            # cannot happen before that instant plus the remaining lease; we abandon locally first.
+            try:
+                async with asyncio.timeout(self._max_enrichment_seconds) as deadline:
+                    if await try_reconcile_existing(ctx):
+                        return
+                    if await run_preflight_rejection(ctx):
+                        return
 
-            # Phase 6: LLM budget cap — rolling-window check before extraction
-            budget_retry = await self._check_session_budget(
-                episode_uuid,
-                claimed.get("session_id"),
-            )
-            if budget_retry is not None:
-                logger.warning(
-                    "Budget cap hit for episode %s — requeueing with retry_after=%.1fs",
-                    episode_uuid,
-                    budget_retry,
-                )
-                await asyncio.to_thread(
-                    self.graph_adapter.mark_episode_pending,
-                    episode_uuid,
-                    retry_after_s=budget_retry,
-                    worker_id=self._worker_id,
-                    transient_requeue=True,
-                    claim_started_at=claimed.get("processing_started_at"),
-                )
-                record_lifecycle_event(
-                    component="ingest_worker",
-                    event="budget_cap_requeue",
-                    state="completed",
-                    episode_uuid=episode_uuid,
-                    details={"retry_after_s": budget_retry},
-                )
-                return
+                    # Phase 6: LLM budget cap — rolling-window check before extraction
+                    budget_retry = await self._check_session_budget(
+                        episode_uuid,
+                        claimed.get("session_id"),
+                    )
+                    if budget_retry is not None:
+                        logger.warning(
+                            "Budget cap hit for episode %s — requeueing with retry_after=%.1fs",
+                            episode_uuid,
+                            budget_retry,
+                        )
+                        await asyncio.to_thread(
+                            self.graph_adapter.mark_episode_pending,
+                            episode_uuid,
+                            retry_after_s=budget_retry,
+                            worker_id=self._worker_id,
+                            transient_requeue=True,
+                            claim_started_at=claimed.get("processing_started_at"),
+                        )
+                        record_lifecycle_event(
+                            component="ingest_worker",
+                            event="budget_cap_requeue",
+                            state="completed",
+                            episode_uuid=episode_uuid,
+                            details={"retry_after_s": budget_retry},
+                        )
+                        return
 
-            # PART 4: the per-job LLM budget is enforced at the RESERVATION point, in
-            # `_record_episode_llm_usage`, not here (CF-79). A pre-attempt check on
-            # `_job_llm_call_counts` could never fire: the `finally` below pops the counter at the
-            # end of every attempt, so a fresh attempt always reads 0. It could only have stopped
-            # an attempt that was already over budget when it began, which is not a state this
-            # code can produce. The amplification the finding proves is WITHIN one attempt --
-            # entity count multiplies judge calls, and episode content drives entity count -- so
-            # only an in-flight bound stops it.
+                    # PART 4: the per-job LLM budget is enforced at the RESERVATION point, in
+                    # `_record_episode_llm_usage`, not here (CF-79). A pre-attempt check on
+                    # `_job_llm_call_counts` could never fire: the `finally` below pops the counter at the
+                    # end of every attempt, so a fresh attempt always reads 0. It could only have stopped
+                    # an attempt that was already over budget when it began, which is not a state this
+                    # code can produce. The amplification the finding proves is WITHIN one attempt --
+                    # entity count multiplies judge calls, and episode content drives entity count -- so
+                    # only an in-flight bound stops it.
 
-            await embed_episode_content(ctx)
-            if await self._try_verbatim_skip(episode_uuid, claimed):
-                return
-            await run_graphiti_extraction(ctx, finalize_under_gate=True)
+                    await embed_episode_content(ctx)
+                    if await self._try_verbatim_skip(episode_uuid, claimed):
+                        return
+                    await run_graphiti_extraction(ctx, finalize_under_gate=True)
+            except TimeoutError as timeout_exc:
+                if not deadline.expired():
+                    raise
+                raise EnrichmentDeadlineExceeded(
+                    f"enrichment_deadline_exceeded: episode {episode_uuid} ran past "
+                    f"{self._max_enrichment_seconds}s and was abandoned"
+                ) from timeout_exc
         except CircuitOpenError as exc:
             logger.warning(
                 "Circuit open for graphiti — requeueing episode %s: %s",
@@ -480,32 +497,60 @@ class IngestWorkerMixin:
         record_llm_usage_event(event=event, episode_uuid=episode_uuid)
 
     async def _processing_heartbeat_loop(
-        self, episode_uuid: str, stop_event: asyncio.Event
+        self,
+        episode_uuid: str,
+        stop_event: asyncio.Event,
+        claim_started_at: Any = None,
     ) -> None:
         while not stop_event.is_set():
             await asyncio.sleep(self._processing_heartbeat_interval_s)
             if stop_event.is_set():
                 break
             try:
-                await asyncio.to_thread(
-                    self.graph_adapter.touch_episode_processing_heartbeat,
-                    episode_uuid,
-                    worker_id=self._worker_id,
-                )
+                if claim_started_at is not None:
+                    touched = await asyncio.to_thread(
+                        self.graph_adapter.touch_episode_processing_heartbeat,
+                        episode_uuid,
+                        worker_id=self._worker_id,
+                        claim_started_at=claim_started_at,
+                        lease_seconds=self._enrichment_lease_seconds,
+                        max_enrichment_seconds=self._max_enrichment_seconds,
+                    )
+                    if not touched:
+                        record_lifecycle_event(
+                            component="ingest_worker",
+                            event="heartbeat_touch",
+                            state="lost",
+                            episode_uuid=episode_uuid,
+                        )
+                        logger.warning(
+                            "Heartbeat fence lost for %s (reset or re-claimed); stopping heartbeat",
+                            episode_uuid,
+                        )
+                        break
+                else:
+                    await asyncio.to_thread(
+                        self.graph_adapter.touch_episode_processing_heartbeat,
+                        episode_uuid,
+                        worker_id=self._worker_id,
+                    )
                 record_lifecycle_event(
                     component="ingest_worker",
                     event="heartbeat_touch",
                     state="completed",
                     episode_uuid=episode_uuid,
                 )
-            except (OSError, RuntimeError):
+            except Exception:
+                # Driver errors (ServiceUnavailable, SessionExpired, TransientError) are not
+                # OSError/RuntimeError; one blip must not end the heartbeat and lapse the lease.
                 record_lifecycle_event(
                     component="ingest_worker",
                     event="heartbeat_touch",
                     state="failed",
                     episode_uuid=episode_uuid,
                 )
-                logger.debug(
+                log_failure = logger.warning if claim_started_at is not None else logger.debug
+                log_failure(
                     "Failed to refresh processing heartbeat for %s",
                     episode_uuid,
                     exc_info=True,
