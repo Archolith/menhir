@@ -573,6 +573,8 @@ async def consolidate_personal_memory(
     counting_lease_seconds: int = 900,
     counting_extract_v2: bool = False,
     counting_match: bool = False,
+    counting_span_rule: bool = False,
+    counting_captured_states: bool = False,
 ) -> dict[str, object]:
     """Re-derive count/amount Views from each DIRTY namespace's user turns via the gated perception
     boundary, pinning ALL bias guards on (cross-check + coref + verify) so an automatic write never
@@ -606,7 +608,8 @@ async def consolidate_personal_memory(
     if enable_counting:
         pass_details["counting"] = True
         pass_details["counting_perceiver_version"] = effective_counting_perceiver_version(
-            counting_perceiver_version, counting_extract_v2, match=counting_match)
+            counting_perceiver_version, counting_extract_v2, match=counting_match,
+            span_rule=counting_span_rule, captured_states=counting_captured_states)
     _audit.audit("pass", "start", details=pass_details)
     from menhir.services.perception import Episode, perceive_and_fold
 
@@ -823,6 +826,8 @@ async def consolidate_personal_memory(
                         perceiver_version=counting_perceiver_version,
                         extract_v2=counting_extract_v2,
                         match=counting_match,
+                        span_rule=counting_span_rule,
+                        captured_states=counting_captured_states,
                         scalar_perceiver_version=scalar_state_perceiver_version,
                         batch_size=scalar_batch_size,
                         max_namespaces=max_namespaces,

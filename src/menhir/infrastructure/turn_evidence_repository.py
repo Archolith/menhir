@@ -916,7 +916,7 @@ class TurnEvidenceRepository:
             RETURN a.episode_uuid AS episode_uuid, a.subject_display AS subject,
                    a.attribute AS attribute, a.scope AS scope, a.unit AS unit,
                    a.operation AS operation, a.value_json AS value_json,
-                   a.stated_span AS stated_span
+                   a.stated_span AS stated_span, a.value_kind AS value_kind
             ORDER BY a.episode_uuid, a.span_start, a.attribute
             LIMIT $limit
             """,
