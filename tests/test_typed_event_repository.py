@@ -477,7 +477,11 @@ def test_subject_predicate_blank_required_inputs_reject_before_execute(subject, 
 def test_activate_runs_idempotent_ddl():
     fake = FakeNeo4j(default=[])
     out = TypedEventAssertionRepository(fake).activate()
-    executed = [q for q, _ in fake.executed]
+    all_executed = [q for q, _ in fake.executed]
+    # Activation ends with read-only waits for the created rules to come ONLINE; the rest is DDL.
+    awaits = [q for q in all_executed if q.startswith("CALL db.awaitIndex(")]
+    executed = [q for q in all_executed if q not in awaits]
+    assert awaits and all("DROP" not in q and "DELETE" not in q for q in awaits)
     assert out["queries_executed"] == len(executed)
     assert any("typed_event_assertion_head_source_key_unique" in q for q in executed)
     assert any("typed_event_assertion_key_unique" in q for q in executed)

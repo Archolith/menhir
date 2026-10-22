@@ -37,6 +37,9 @@ from typing import Any, Iterable
 from menhir.domain.event_history import EventLane, TypedEventAssertion
 from menhir.domain.temporal import parse_iso8601
 from menhir.domain.typed_assertion import evidence_rank, perceiver_rank
+from menhir.infrastructure.schema_ddl import (
+    await_schema_online, execute_schema_statement, schema_rule_name,
+)
 
 #: identity-contract version stamped on every head + assertion at ON CREATE. Fresh-only contract;
 #: bump only on a real identity change. Deliberately independent of the scalar
@@ -377,8 +380,13 @@ class TypedEventAssertionRepository:
             # #170 D1: shared with the scalar lane (keys are lane-prefixed).
             "CREATE CONSTRAINT typed_read_marker_key_unique IF NOT EXISTS FOR (m:TypedReadMarker) REQUIRE m.marker_key IS UNIQUE",
         ]
+        created: list[str] = []
         for query in queries:
-            self._neo4j.execute(query)
+            execute_schema_statement(self._neo4j, query)
+            name = schema_rule_name(query)
+            if name:
+                created.append(name)
+        await_schema_online(self._neo4j, created)
         return {"queries_executed": len(queries)}
 
     # ---- hydration ---------------------------------------------------------------------------
