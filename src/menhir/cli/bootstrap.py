@@ -10,6 +10,7 @@ from menhir.config import MemorySettings
 from menhir.config.authority_gates import event_history_authority_effective, scalar_view_authority_effective
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.neo4j import Neo4jRepository
+from menhir.infrastructure.view_embedder import counting_view_selection_adapter_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
         counting_enabled=counting_enabled,
         counting_match_enabled=bool(
             getattr(settings, "personal_memory_counting_match_enabled", False)),
+        **counting_view_selection_adapter_kwargs(settings),
     )
 
     # Attempt full path for context recall.

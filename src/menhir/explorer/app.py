@@ -1249,6 +1249,7 @@ def create_app(
         # gets the same promotion/consistency guarantees even without live search.
         from menhir.core.bootstrap import UnavailableGraphitiClient
         from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+        from menhir.infrastructure.view_embedder import counting_view_selection_adapter_kwargs
         from menhir.services.candidate_service import CandidateService
         from menhir.services.lifecycle_service import LifecycleService
 
@@ -1260,6 +1261,7 @@ def create_app(
             ),
             counting_match_enabled=bool(
                 getattr(settings, "personal_memory_counting_match_enabled", False)),
+            **counting_view_selection_adapter_kwargs(settings),
         )
         lifecycle_service = LifecycleService(
             graph_adapter=graph_adapter,

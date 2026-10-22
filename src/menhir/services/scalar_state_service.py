@@ -29,8 +29,10 @@ import json
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
+from collections.abc import Callable
 from typing import Any, Protocol
 
+from menhir.domain.count_view_text import count_view_text
 from menhir.domain.exact_json import dumps_exact
 from menhir.domain.scalar_history import MALFORMED_VALID_AT, build_history
 from menhir.domain.scalar_state_fold import Expiry, FoldResult, fold_assertions
@@ -188,11 +190,18 @@ class ScalarStateService:
         self, assertions: _AssertionSource, views: _ViewSink, *,
         scalar_history_enabled: bool = False, counting_enabled: bool = True,
         count_match: bool = False,
+        view_embed: Callable[[str], list[float] | None] | None = None,
+        view_embed_version: str | None = None,
     ) -> None:
         self._assertions = assertions
         self._views = views
         self._scalar_history_enabled = scalar_history_enabled
         self._counting_enabled = counting_enabled
+        # Counted-View selection: embeds each counted View's text so recall can rank Views directly.
+        # None (the default) writes no extra keys at all. Successes only are cached per service.
+        self._view_embed = view_embed
+        self._view_embed_version = view_embed_version
+        self._view_embed_cache: dict[str, list[float]] = {}
         # Unit 4R fold mode. Every rebuild path builds this service through the adapter, so one
         # setting decides how every counted View is folded.
         self._count_match = bool(count_match) and counting_enabled
@@ -247,6 +256,30 @@ class ScalarStateService:
             for e in result.expiries
         }
 
+    def _count_view_selection_audit(self, state: Any) -> dict[str, Any]:
+        """Text, embedding and embed version of a counted View, for selection by cosine. A failed
+        embed returns all three as None: a refresh then removes any earlier vector instead of
+        leaving a stale one. Never raises."""
+        actions = getattr(state, "count_actions", None) or {}
+        text = count_view_text(
+            state.attribute, list(getattr(state, "count_items", None) or []),
+            dict(sorted(actions.items())))
+        vector = self._view_embed_cache.get(text)
+        if vector is None:
+            try:
+                result = self._view_embed(text)  # type: ignore[misc]
+            except Exception:  # selection is optional; never fail a rebuild
+                logger.warning("counted View embed failed; writing no vector", exc_info=True)
+                result = None
+            if result:
+                vector = [float(x) for x in result]
+                self._view_embed_cache[text] = vector
+        if vector is None:
+            return {"count_view_text": None, "count_view_embedding": None,
+                    "count_view_embed_version": None}
+        return {"count_view_text": text, "count_view_embedding": list(vector),
+                "count_view_embed_version": self._view_embed_version}
+
     def rebuild_scalar_state(
         self, subject_uuid: str, *, namespace: str | None = None, source: str = "scalar-state",
         as_of: datetime | None = None,
@@ -282,6 +315,8 @@ class ScalarStateService:
                 # Unit 4R fields; None outside match mode, so a match on->off rebuild clears them
                 # through the refresh path instead of leaving a stale uncertain count.
                 audit.update(_count_match_audit(state))
+            if state.basis == "counted" and self._view_embed is not None:
+                audit.update(self._count_view_selection_audit(state))
             res = self._views.record_scalar_state(
                 subject=state.subject_display, subject_uuid=state.subject_uuid,
                 attribute=state.attribute, scope=state.scope, value_kind=state.value_kind,

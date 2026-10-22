@@ -10,6 +10,7 @@ from menhir.config import MemorySettings
 from menhir.config.authority_gates import event_history_authority_effective, scalar_view_authority_effective
 from menhir.core.runtime_preflight import RuntimeCapabilities
 from menhir.infrastructure import GraphitiClient, LLMAdapter, MemoryGraphAdapter, Neo4jRepository
+from menhir.infrastructure.view_embedder import counting_view_selection_adapter_kwargs
 from menhir.services import CandidateService, ContextBuilderService, IngestService, RecallService, ScoringService, LifecycleService
 
 
@@ -201,6 +202,7 @@ def build_memory_services(
             and settings.personal_memory_scalar_state_enabled
         ),
         counting_match_enabled=bool(settings.personal_memory_counting_match_enabled),
+        **counting_view_selection_adapter_kwargs(settings),
     )
     scoring_service = ScoringService()
     lifecycle_service = LifecycleService(

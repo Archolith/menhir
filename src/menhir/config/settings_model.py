@@ -422,6 +422,9 @@ class MemorySettings:
     personal_memory_counting_extract_v2: bool = False
     # Unit 4R related-count matching; needs counting.
     personal_memory_counting_match_enabled: bool = False
+    # Counted-View selection: counted Views are embedded at write and ranked by cosine to the query
+    # at recall; needs counting and the scalar view authority lane. Not a perceiver-version flag.
+    personal_memory_counting_view_selection_enabled: bool = False
     # Unit R: counted Views appear only as verdicts; their occurrence observations leave recall.
     personal_memory_counting_recall_authority_only: bool = False
     # Unit 6: counted verdicts read "at least N you mentioned" and never lead.
@@ -990,6 +993,10 @@ class MemorySettings:
             personal_memory_counting_match_enabled=parse_bool_env(_getenv(
                 "MENHIR_PERSONAL_MEMORY_COUNTING_MATCH_ENABLED",
                 default=str(cls.personal_memory_counting_match_enabled),
+            )),
+            personal_memory_counting_view_selection_enabled=parse_bool_env(_getenv(
+                "MENHIR_PERSONAL_MEMORY_COUNTING_VIEW_SELECTION_ENABLED",
+                default=str(cls.personal_memory_counting_view_selection_enabled),
             )),
             personal_memory_counting_recall_authority_only=parse_bool_env(_getenv(
                 "MENHIR_PERSONAL_MEMORY_COUNTING_RECALL_AUTHORITY_ONLY",

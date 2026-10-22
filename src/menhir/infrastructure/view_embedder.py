@@ -101,6 +101,30 @@ def make_view_embedder(settings: MemorySettings) -> ViewEmbedder | None:
     return embed
 
 
+def counting_view_selection_adapter_kwargs(settings: MemorySettings) -> dict[str, Any]:
+    """MemoryGraphAdapter keywords for counted-View selection: the sync embedder and its version.
+
+    Empty unless the view-selection flag, counting, scalar state and the scalar view authority lane
+    are all on, so with the flag off the adapter is built exactly as before. Never raises."""
+    try:
+        if not (
+            getattr(settings, "personal_memory_counting_view_selection_enabled", False)
+            and getattr(settings, "personal_memory_counting_enabled", False)
+            and getattr(settings, "personal_memory_scalar_state_enabled", False)
+            and getattr(settings, "personal_memory_scalar_view_authority_enabled", False)
+        ):
+            return {}
+        embed = make_view_embedder(settings)
+        version = view_embedder_version(settings)
+        if embed is None or not version:
+            return {}
+        return {"counting_view_embed": embed, "counting_view_embed_version": version}
+    except Exception:
+        logger.warning("counted-View selection embedder unavailable; selection disabled",
+                       exc_info=True)
+        return {}
+
+
 def _normalize_embed_stamp_base(base_url: str) -> str:
     """Normalize a base URL for stamping: strip whitespace, any userinfo, and a trailing slash.
 

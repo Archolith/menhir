@@ -278,6 +278,14 @@ class CountingConsolidationConfig:
     match: bool = False
 
 
+def adapter_view_selection(graph_adapter: Any) -> bool:
+    """Counted-View selection is on for this adapter: bootstrap gave it a View embedder version
+    (only when the flag and its prerequisites are on). The one switch for the View write, the
+    recall read and the flag marker, so no caller can stamp a marker its Views do not match."""
+    version = getattr(graph_adapter, "counting_view_embed_version", None)
+    return isinstance(version, str) and bool(version)
+
+
 def build_counting_context(
     episodes: list[Any], claims: list[dict[str, Any]],
     *, fenced: bool = False, nonce_fn: Callable[[], str] = _new_fence_nonce,
@@ -344,6 +352,8 @@ def run_counting_consolidation(
         config.perceiver_version, extract_v2, match)
     # Match-only keywords: with match off every graph call is exactly as before.
     match_kwargs: dict[str, Any] = {"match": True} if match else {}
+    view_selection_kwargs: dict[str, Any] = (
+        {"view_selection": True} if adapter_view_selection(graph_adapter) else {})
     decided = {"counted": 0, "uncertain": 0}
     occurrences_stored = 0
     evidence_rows = 0
@@ -444,7 +454,7 @@ def run_counting_consolidation(
                 # sweep retries; only a completed sweep flips it.
                 graph_adapter.mark_counting_flag_state(
                     namespace, enabled=True, at=datetime.now(timezone.utc).isoformat(),
-                    create_only=True, **match_kwargs)
+                    create_only=True, **match_kwargs, **view_selection_kwargs)
                 if owed:
                     # An earlier owner retired these subjects' rows and stopped before rebuilding.
                     owed -= _rebuild_subjects(state_service, namespace, owed,
@@ -844,15 +854,18 @@ def sweep_counting_flag_state(
     limit: int = 50,
     subject_limit: int = 500,
 ) -> dict[str, int]:
-    """Rebuild Views for namespaces whose counting flag marker disagrees with the current flag
-    or match fold mode. Subjects are paged (`subject_limit` per page) until exhausted; the marker
-    is set only after every page rebuilt, so a crash leaves it for the next pass. Makes no LLM
-    calls. With match off every graph call is exactly as before (the defaults mean match off)."""
+    """Rebuild Views for namespaces whose counting flag marker disagrees with the current flag,
+    match fold mode or counted-View selection mode (read from the adapter, see
+    adapter_view_selection). Subjects are paged (`subject_limit` per page) until exhausted; the
+    marker is set only after every page rebuilt, so a crash leaves it for the next pass. Makes no
+    LLM calls. With match off every graph call is exactly as before (the defaults mean match off)."""
     swept = 0
     rebuilt = 0
     failed = 0
     match = bool(match and enabled)
     match_kwargs: dict[str, Any] = {"match": True} if match else {}
+    if enabled and adapter_view_selection(graph_adapter):
+        match_kwargs["view_selection"] = True
     targets = graph_adapter.counting_flag_sweep_targets(
         enabled=enabled, namespaces=namespaces, limit=limit, **match_kwargs)
     for namespace in targets:

@@ -95,6 +95,8 @@ _SETTINGS = (
         'personal_memory', 'Counting extraction v2: verb-anchored negation guard, per-attribute claim split, fenced captured block.', True, ()),
     ('personal_memory_counting_match_enabled', 'MENHIR_PERSONAL_MEMORY_COUNTING_MATCH_ENABLED', False,
         'personal_memory', 'Unit 4R related-count matching in the counting lane.', True, ()),
+    ('personal_memory_counting_view_selection_enabled', 'MENHIR_PERSONAL_MEMORY_COUNTING_VIEW_SELECTION_ENABLED', False,
+        'personal_memory', 'Embed counted Views at write and select them by cosine to the query in the authority lane.', True, ()),
     ('personal_memory_counting_recall_authority_only', 'MENHIR_PERSONAL_MEMORY_COUNTING_RECALL_AUTHORITY_ONLY', False,
         'personal_memory', 'Counted Views appear only as verdicts, not ranked memories; their occurrence observations leave recall.', True, ()),
     ('personal_memory_counting_wording_enabled', 'MENHIR_PERSONAL_MEMORY_COUNTING_WORDING_ENABLED', False,
@@ -232,6 +234,8 @@ _REQUIRES = {
     "personal_memory_counting_enabled": ("personal_memory_scalar_state_enabled",),
     "personal_memory_counting_extract_v2": ("personal_memory_counting_enabled",),
     "personal_memory_counting_match_enabled": ("personal_memory_counting_enabled",),
+    "personal_memory_counting_view_selection_enabled": (
+        "personal_memory_counting_enabled", "personal_memory_scalar_view_authority_enabled"),
     "personal_memory_counting_recall_authority_only": (
         "personal_memory_counting_enabled", "personal_memory_scalar_view_authority_enabled"),
     "personal_memory_counting_wording_enabled": (
@@ -258,6 +262,7 @@ _REQUIREMENT_SCOPE = {
     "personal_memory_counting_enabled": "The counting lane runs after the scalar phase and reads scalar state.",
     "personal_memory_counting_extract_v2": "Only the counting lane's extraction changes; with counting off it never runs.",
     "personal_memory_counting_match_enabled": "Related-count matching only changes the counting lane; with counting off it never runs.",
+    "personal_memory_counting_view_selection_enabled": "Selects counted Views for the authority lane, which exists only with counting and scalar view authority on.",
     "personal_memory_counting_recall_authority_only": "Acts on counted verdicts, which exist only with counting and scalar view authority on.",
     "personal_memory_counting_wording_enabled": "Acts on counted verdicts, which exist only with counting and scalar view authority on.",
     "frontier_belief_gate": "Warden verdict enforcement needs the master gate; belief scoring is independent.",
