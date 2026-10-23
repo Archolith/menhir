@@ -1001,6 +1001,79 @@ async def test_both_passes_self_only_is_an_intentional_empty(
     assert receipt.repair_self_only_entities is True
 
 
+_LG_QUESTION = "What would you like to know about LG's 4K smart TVs or the deals available?"
+_TOPIC_ONLY = {"extracted_entities": [{"name": "LG 4K smart TVs", "entity_type_id": 0}], "edges": []}
+_EMPTY = {"extracted_entities": [], "edges": []}
+
+
+@pytest.mark.asyncio
+async def test_claimless_question_with_empty_repair_is_an_intentional_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """o500 c1ee3ed7: a role-flipped LongMemEval "user" turn asks a question and asserts nothing.
+
+    The first pass names the topic with no edge; the repair, asked for the missing relationship,
+    returns nothing. That agreement is the same no-op a first-pass empty already completes as, so
+    it must not become a non-retryable relationless failure that depends on which pass was empty.
+    """
+    patches.begin_extraction_receipt("ep-lg-question", _LG_QUESTION, turn_role="user")
+    calls = await _run_two_pass_extraction(
+        monkeypatch, "ep-lg-question", [_TOPIC_ONLY, _EMPTY],
+    )
+
+    assert calls == 2
+    receipt = patches.get_extraction_receipt()
+    assert receipt.relationless_repair_attempted is True
+    assert receipt.relationless_repair_succeeded is False
+    assert receipt.repair_payload_empty is True
+    assert patches.is_policy_empty_extraction(receipt) is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("text", "repair"),
+    [
+        # First person: the repair exists for exactly this under-extraction.
+        ("Should I buy one of LG's 4K smart TVs?", _EMPTY),
+        # Declarative: a stated fact the model failed to relate stays visible.
+        ("LG makes 4K smart TVs.", _EMPTY),
+        # A statement on its own unterminated line next to a question.
+        ("LG 4K smart TVs are great\nWhat do you think about them?", _EMPTY),
+        # Question, but the repair still named an entity: the passes did not agree on nothing.
+        (_LG_QUESTION, _TOPIC_ONLY),
+    ],
+)
+async def test_relationless_failure_kept_unless_claimless_question_and_empty_repair(
+    monkeypatch: pytest.MonkeyPatch, text: str, repair: dict,
+) -> None:
+    patches.begin_extraction_receipt("ep-kept", text, turn_role="user")
+    calls = await _run_two_pass_extraction(monkeypatch, "ep-kept", [_TOPIC_ONLY, repair])
+
+    assert calls == 2
+    receipt = patches.get_extraction_receipt()
+    assert receipt.relationless_repair_succeeded is False
+    assert patches.is_policy_empty_extraction(receipt) is False
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (_LG_QUESTION, True),
+        ("Which one is cheaper? Does it support HDR?", True),
+        ("What would you like to know?", True),
+        ("user: What would you like to know?", True),
+        ("user: I moved to Seattle last month.", False),
+        ("Can you help me pick one?", False),
+        ("I'd like to know more. What's new?", False),
+        ("Thanks. What's new?", False),
+        ("", False),
+        ("   ", False),
+    ],
+)
+def test_is_claimless_question(text: str, expected: bool) -> None:
+    assert patches._is_claimless_question(text) is expected
+
+
 def test_malformed_edge_dropped_valid_sibling_survives() -> None:
     """Acceptance #6: one edge missing target is dropped; the valid sibling still builds."""
     patches.begin_extraction_receipt("ep7", "user: Bob works at Acme and owns a bike.")

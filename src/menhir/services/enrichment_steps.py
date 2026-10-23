@@ -1153,12 +1153,13 @@ async def stamp_and_finalize(
             # Cases: (a) assistant turn with only self-label and no relationship, (b) every
             # usable edge was user->X echo suppressed by design, (c) any-source turn where
             # BOTH the initial and the repair extraction produced only self-labels with zero
-            # edges (e.g. evidence projection of "Thanks again for your help!").
+            # edges (e.g. evidence projection of "Thanks again for your help!"), (d) a claimless
+            # question whose repair returned an empty payload.
             logger.info(
                 "Policy-empty enrichment (success) episode_id=%s "
                 "(raw_edges=%d suppressed=%d self_only_relationless=%s "
                 "initial_self_only=%s repair_self_only=%s repair_attempted=%s "
-                "context_unsupported_edges_suppressed=%d)",
+                "repair_payload_empty=%s context_unsupported_edges_suppressed=%d)",
                 ctx.episode_uuid,
                 receipt.raw_edge_count,
                 receipt.self_echo_edges_suppressed,
@@ -1166,6 +1167,7 @@ async def stamp_and_finalize(
                 receipt.initial_self_only_entities,
                 receipt.repair_self_only_entities,
                 receipt.relationless_repair_attempted,
+                receipt.repair_payload_empty,
                 receipt.context_unsupported_edges_suppressed,
             )
         elif raw_extraction_nonempty:
