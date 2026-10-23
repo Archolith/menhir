@@ -167,3 +167,59 @@ def test_verbatim_skip_ready_write_clears_a_stale_label(test_neo4j_repo, repo, t
     n = _node(test_neo4j_repo, client)
     assert n["processing_state"] == "READY"
     assert n.get("policy_empty_reason") is None
+
+
+def _verbatim_skipped_client(raw, repo, tag):
+    """A client completed READY by the real verbatim-skip write; returns (client, projection)."""
+    ns = _uid("ns")
+    turn = _uid("turn")
+    raw.execute(
+        "CREATE (:TurnEvidence {turn_id: $tid, role: 'user', declarant: 'user', text: $text, "
+        "namespace: $ns, recorded_at: datetime(), test_tag: $tag})",
+        params={"tid": turn, "text": TEXT, "ns": ns, "tag": tag})
+    client = _pending(raw, tag, ns=ns)
+    assert repo.link_episode_admission(episode_uuid=client, turn_evidence_uuid=turn, namespace=ns)
+    proj = repo.create_evidence_projection(
+        turn_evidence_uuid=turn, projection_uuid=_uid("proj"), name=f"ep-{turn}",
+        session_id="s", user_id="u", namespace=ns)
+    raw.execute("MATCH (p:Episodic {uuid: $u}) SET p.test_tag = $tag", params={"u": proj, "tag": tag})
+    claimed = _claim(repo, client, "worker-a")
+    assert repo.mark_episode_verbatim_skipped(
+        client, worker_id="worker-a", claim_started_at=claimed["processing_started_at"]) == proj
+    return client, proj
+
+
+@pytest.mark.online
+def test_zero_extraction_reset_skips_verbatim_skipped_clients(
+    test_neo4j_repo, repo, maintenance, tag,
+):
+    """A skipped client is READY 0/0 with no Entity by design: its projection carries the text."""
+    client, proj = _verbatim_skipped_client(test_neo4j_repo, repo, tag)
+    unlabelled = _pending(test_neo4j_repo, tag)
+    _ready_empty(repo, unlabelled, "worker-a")
+
+    assert maintenance.reset_zero_extraction_episodes() >= 1
+
+    n = _node(test_neo4j_repo, client)
+    assert n["processing_state"] == "READY"
+    assert n["extraction_skipped_for"] == proj
+    assert n.get("processing_error") is None
+    assert _node(test_neo4j_repo, unlabelled)["processing_state"] == "PENDING"
+
+
+@pytest.mark.online
+def test_stale_skip_pointer_does_not_exempt_a_later_normal_ready(
+    test_neo4j_repo, repo, maintenance, tag,
+):
+    """extraction_skipped_for left over from an earlier skip must not hide a real empty READY."""
+    ep = _pending(test_neo4j_repo, tag)
+    test_neo4j_repo.execute(
+        "MATCH (n:Episodic {uuid: $u}) SET n.extraction_skipped_for = 'old-projection'",
+        params={"u": ep})
+    _ready_empty(repo, ep, "worker-a")  # normal READY: substage 'complete', pointer still set
+
+    assert maintenance.reset_zero_extraction_episodes() >= 1
+
+    n = _node(test_neo4j_repo, ep)
+    assert n["processing_state"] == "PENDING"
+    assert n["processing_error"] == "zero_extraction_reset"
