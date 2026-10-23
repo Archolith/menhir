@@ -84,6 +84,7 @@ class SchedulerGraphAdapter(Protocol):
         nodes_touched: int,
         edges_touched: int,
         claim_started_at: Any = None,
+        policy_empty_reason: str | None = None,
     ) -> bool:
         ...
 

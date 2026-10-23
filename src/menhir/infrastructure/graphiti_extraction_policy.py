@@ -322,20 +322,36 @@ def is_policy_empty_extraction(receipt: "CombinedExtractionReceipt | None") -> b
     but asserts nothing. When its repair pass returns an EMPTY payload, the two passes agree there
     is no fact, as a first-pass empty would. A declarative or first-person turn never qualifies.
     """
+    return policy_empty_reason(receipt) is not None
+
+
+#: Durable labels for `policy_empty_reason`, stored on the READY Episodic row.
+POLICY_EMPTY_REASONS = frozenset({
+    "assistant_self_only",
+    "claimless_question",
+    "both_passes_self_only",
+    "context_unsupported_repair_edges",
+    "unresolved_author_suppressed",
+    "self_echo_suppressed",
+})
+
+
+def policy_empty_reason(receipt: "CombinedExtractionReceipt | None") -> str | None:
+    """Which `is_policy_empty_extraction` clause holds, or None when the empty is not policy."""
     if receipt is None:
-        return False
+        return None
     if receipt.assistant_self_only_relationless:
-        return True
+        return "assistant_self_only"
     if (receipt.relationless_repair_attempted
             and not receipt.relationless_repair_succeeded
             and receipt.repair_payload_empty
             and _is_claimless_question(receipt.episode_text)):
-        return True
+        return "claimless_question"
     if (receipt.relationless_repair_attempted
             and not receipt.relationless_repair_succeeded
             and receipt.initial_self_only_entities
             and receipt.repair_self_only_entities):
-        return True
+        return "both_passes_self_only"
     usable_repair_edges = receipt.raw_edge_count - receipt.malformed_edges_dropped
     if (
         receipt.relationless_repair_attempted
@@ -345,16 +361,18 @@ def is_policy_empty_extraction(receipt: "CombinedExtractionReceipt | None") -> b
         and usable_repair_edges > 0
         and receipt.context_unsupported_edges_suppressed >= usable_repair_edges
     ):
-        return True
+        return "context_unsupported_repair_edges"
     if (receipt.unresolved_author_nodes_suppressed > 0
             and receipt.resolved_node_count == 0 and receipt.resolved_edge_count == 0
             and receipt.unresolved_author_edges_suppressed
             >= max(0, receipt.raw_edge_count - receipt.malformed_edges_dropped)):
-        return True
+        return "unresolved_author_suppressed"
     if receipt.raw_edge_count <= 0:
-        return False
+        return None
     usable_edges = receipt.raw_edge_count - receipt.malformed_edges_dropped
-    return usable_edges > 0 and receipt.self_echo_edges_suppressed >= usable_edges
+    if usable_edges > 0 and receipt.self_echo_edges_suppressed >= usable_edges:
+        return "self_echo_suppressed"
+    return None
 
 
 def begin_extraction_receipt(

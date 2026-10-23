@@ -234,6 +234,8 @@ class EpisodeMaintenanceRepository:
                 "NOT EXISTS { MATCH (n)-[]-(e:Entity) }",
                 "coalesce(toInteger(n.enriched_nodes_touched), 0) <= 1",
                 "coalesce(toInteger(n.enriched_edges_touched), 0) = 0",
+                # A labelled policy-empty is a decided outcome, not a lost extraction.
+                "n.policy_empty_reason IS NULL",
             )
             .set(
                 (

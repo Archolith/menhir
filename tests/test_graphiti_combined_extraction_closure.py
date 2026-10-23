@@ -11,6 +11,7 @@ success.
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -1027,6 +1028,7 @@ async def test_claimless_question_with_empty_repair_is_an_intentional_empty(
     assert receipt.relationless_repair_succeeded is False
     assert receipt.repair_payload_empty is True
     assert patches.is_policy_empty_extraction(receipt) is True
+    assert patches.policy_empty_reason(receipt) == "claimless_question"
 
 
 @pytest.mark.asyncio
@@ -1233,6 +1235,48 @@ async def test_stamp_and_finalize_treats_genuinely_empty_as_success(
     # raising. The point is simply that no collapse error is raised for a truly empty payload.
     await steps.stamp_and_finalize(ctx, _empty_graphiti_result())
     ctx.graph_adapter.mark_episode_ready.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_stamp_and_finalize_labels_the_ready_row_with_the_policy_empty_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The READY write carries the clause that decided the empty; a log line is not durable."""
+    patches.begin_extraction_receipt("ep-collapse", _LG_QUESTION, turn_role="user")
+    await _run_two_pass_extraction(monkeypatch, "ep-collapse", [_TOPIC_ONLY, _EMPTY])
+    monkeypatch.setattr(steps, "still_owns_episode", lambda *a, **k: True)
+    ctx = _fake_ctx()
+
+    await steps.stamp_and_finalize(ctx, _empty_graphiti_result())
+
+    ctx.graph_adapter.mark_episode_ready.assert_called_once()
+    kwargs = ctx.graph_adapter.mark_episode_ready.call_args.kwargs
+    assert kwargs["policy_empty_reason"] == "claimless_question"
+    assert kwargs["nodes_touched"] == 0 and kwargs["edges_touched"] == 0
+
+
+@pytest.mark.asyncio
+async def test_stamp_and_finalize_leaves_a_genuinely_empty_row_unlabelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No raw content means no policy decision: the row stays eligible for the zero-extraction reset."""
+    monkeypatch.setattr(steps, "still_owns_episode", lambda *a, **k: True)
+    ctx = _fake_ctx()
+    patches.begin_extraction_receipt("ep-collapse", _LG_QUESTION)  # raw counts stay 0
+
+    await steps.stamp_and_finalize(ctx, _empty_graphiti_result())
+
+    ctx.graph_adapter.mark_episode_ready.assert_called_once()
+    assert ctx.graph_adapter.mark_episode_ready.call_args.kwargs.get("policy_empty_reason") is None
+
+
+def test_every_policy_empty_clause_has_a_registered_reason() -> None:
+    """Each reason the policy can return is in the published set (no free-text labels)."""
+    import inspect
+
+    source = inspect.getsource(patches.policy_empty_reason)
+    returned = set(re.findall(r'return "([a-z_]+)"', source))
+    assert returned == set(patches.POLICY_EMPTY_REASONS)
 
 
 # ---------------------------------------------------------------------------

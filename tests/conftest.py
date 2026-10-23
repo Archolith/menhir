@@ -713,6 +713,7 @@ class StubMemoryGraphAdapter:
         nodes_touched: int,
         edges_touched: int,
         claim_started_at: object | None = None,
+        policy_empty_reason: str | None = None,
     ) -> bool:
         row = self.pending_episode_rows.get(episode_uuid)
         if row is None:
@@ -740,6 +741,7 @@ class StubMemoryGraphAdapter:
         row["resolved_episode_uuid"] = resolved_episode_uuid
         row["enriched_nodes_touched"] = nodes_touched
         row["enriched_edges_touched"] = edges_touched
+        row["policy_empty_reason"] = policy_empty_reason
         return True
 
     def mark_episode_failed(
