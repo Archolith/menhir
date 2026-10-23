@@ -54,7 +54,7 @@ from menhir.infrastructure.openai_rate_limit import (
 )
 from menhir.infrastructure.graphiti_extraction_policy import (
     begin_extraction_receipt,
-    is_policy_empty_extraction,
+    policy_empty_reason,
     clear_extraction_receipt,
     get_extraction_receipt,
 )
@@ -1148,24 +1148,28 @@ async def stamp_and_finalize(
                 )
 
     if not extracted_nodes and not extracted_edges:
-        if raw_extraction_nonempty and is_policy_empty_extraction(receipt):
+        empty_reason = policy_empty_reason(receipt) if raw_extraction_nonempty else None
+        if empty_reason is not None:
             # Policy-empty: the extraction produced entities but no persistable content.
             # Cases: (a) assistant turn with only self-label and no relationship, (b) every
             # usable edge was user->X echo suppressed by design, (c) any-source turn where
             # BOTH the initial and the repair extraction produced only self-labels with zero
-            # edges (e.g. evidence projection of "Thanks again for your help!").
+            # edges (e.g. evidence projection of "Thanks again for your help!"), (d) a claimless
+            # question whose repair returned an empty payload.
             logger.info(
-                "Policy-empty enrichment (success) episode_id=%s "
+                "Policy-empty enrichment (success) episode_id=%s reason=%s "
                 "(raw_edges=%d suppressed=%d self_only_relationless=%s "
                 "initial_self_only=%s repair_self_only=%s repair_attempted=%s "
-                "context_unsupported_edges_suppressed=%d)",
+                "repair_payload_empty=%s context_unsupported_edges_suppressed=%d)",
                 ctx.episode_uuid,
+                empty_reason,
                 receipt.raw_edge_count,
                 receipt.self_echo_edges_suppressed,
                 receipt.assistant_self_only_relationless,
                 receipt.initial_self_only_entities,
                 receipt.repair_self_only_entities,
                 receipt.relationless_repair_attempted,
+                receipt.repair_payload_empty,
                 receipt.context_unsupported_edges_suppressed,
             )
         elif raw_extraction_nonempty:
@@ -1213,6 +1217,9 @@ async def stamp_and_finalize(
             "Zero-extraction enrichment (success) episode_id=%s — Graphiti returned no nodes or edges",
             ctx.episode_uuid,
         )
+        # Durable label on the READY row (the log line above is not): lets audits find these and
+        # keeps reset_zero_extraction_episodes from requeueing a decided outcome.
+        reason_kwargs = {"policy_empty_reason": empty_reason} if empty_reason is not None else {}
         marked_ready = ctx.graph_adapter.mark_episode_ready(
             ctx.episode_uuid,
             worker_id=ctx.worker_id,
@@ -1220,6 +1227,7 @@ async def stamp_and_finalize(
             nodes_touched=0,
             edges_touched=0,
             claim_started_at=ctx.claimed.get("processing_started_at"),
+            **reason_kwargs,
         )
         if not marked_ready:
             logger.info(
@@ -1249,7 +1257,7 @@ async def stamp_and_finalize(
             event="episode_empty",
             state="completed",
             episode_uuid=ctx.episode_uuid,
-            details={"reason": "empty_extraction"},
+            details={"reason": "empty_extraction", "policy_empty_reason": empty_reason},
         )
         return
 

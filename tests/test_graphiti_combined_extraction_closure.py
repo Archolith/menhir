@@ -11,6 +11,7 @@ success.
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -1001,6 +1002,80 @@ async def test_both_passes_self_only_is_an_intentional_empty(
     assert receipt.repair_self_only_entities is True
 
 
+_LG_QUESTION = "What would you like to know about LG's 4K smart TVs or the deals available?"
+_TOPIC_ONLY = {"extracted_entities": [{"name": "LG 4K smart TVs", "entity_type_id": 0}], "edges": []}
+_EMPTY = {"extracted_entities": [], "edges": []}
+
+
+@pytest.mark.asyncio
+async def test_claimless_question_with_empty_repair_is_an_intentional_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """o500 c1ee3ed7: a role-flipped LongMemEval "user" turn asks a question and asserts nothing.
+
+    The first pass names the topic with no edge; the repair, asked for the missing relationship,
+    returns nothing. That agreement is the same no-op a first-pass empty already completes as, so
+    it must not become a non-retryable relationless failure that depends on which pass was empty.
+    """
+    patches.begin_extraction_receipt("ep-lg-question", _LG_QUESTION, turn_role="user")
+    calls = await _run_two_pass_extraction(
+        monkeypatch, "ep-lg-question", [_TOPIC_ONLY, _EMPTY],
+    )
+
+    assert calls == 2
+    receipt = patches.get_extraction_receipt()
+    assert receipt.relationless_repair_attempted is True
+    assert receipt.relationless_repair_succeeded is False
+    assert receipt.repair_payload_empty is True
+    assert patches.is_policy_empty_extraction(receipt) is True
+    assert patches.policy_empty_reason(receipt) == "claimless_question"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("text", "repair"),
+    [
+        # First person: the repair exists for exactly this under-extraction.
+        ("Should I buy one of LG's 4K smart TVs?", _EMPTY),
+        # Declarative: a stated fact the model failed to relate stays visible.
+        ("LG makes 4K smart TVs.", _EMPTY),
+        # A statement on its own unterminated line next to a question.
+        ("LG 4K smart TVs are great\nWhat do you think about them?", _EMPTY),
+        # Question, but the repair still named an entity: the passes did not agree on nothing.
+        (_LG_QUESTION, _TOPIC_ONLY),
+    ],
+)
+async def test_relationless_failure_kept_unless_claimless_question_and_empty_repair(
+    monkeypatch: pytest.MonkeyPatch, text: str, repair: dict,
+) -> None:
+    patches.begin_extraction_receipt("ep-kept", text, turn_role="user")
+    calls = await _run_two_pass_extraction(monkeypatch, "ep-kept", [_TOPIC_ONLY, repair])
+
+    assert calls == 2
+    receipt = patches.get_extraction_receipt()
+    assert receipt.relationless_repair_succeeded is False
+    assert patches.is_policy_empty_extraction(receipt) is False
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (_LG_QUESTION, True),
+        ("Which one is cheaper? Does it support HDR?", True),
+        ("What would you like to know?", True),
+        ("user: What would you like to know?", True),
+        ("user: I moved to Seattle last month.", False),
+        ("Can you help me pick one?", False),
+        ("I'd like to know more. What's new?", False),
+        ("Thanks. What's new?", False),
+        ("", False),
+        ("   ", False),
+    ],
+)
+def test_is_claimless_question(text: str, expected: bool) -> None:
+    assert patches._is_claimless_question(text) is expected
+
+
 def test_malformed_edge_dropped_valid_sibling_survives() -> None:
     """Acceptance #6: one edge missing target is dropped; the valid sibling still builds."""
     patches.begin_extraction_receipt("ep7", "user: Bob works at Acme and owns a bike.")
@@ -1160,6 +1235,48 @@ async def test_stamp_and_finalize_treats_genuinely_empty_as_success(
     # raising. The point is simply that no collapse error is raised for a truly empty payload.
     await steps.stamp_and_finalize(ctx, _empty_graphiti_result())
     ctx.graph_adapter.mark_episode_ready.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_stamp_and_finalize_labels_the_ready_row_with_the_policy_empty_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The READY write carries the clause that decided the empty; a log line is not durable."""
+    patches.begin_extraction_receipt("ep-collapse", _LG_QUESTION, turn_role="user")
+    await _run_two_pass_extraction(monkeypatch, "ep-collapse", [_TOPIC_ONLY, _EMPTY])
+    monkeypatch.setattr(steps, "still_owns_episode", lambda *a, **k: True)
+    ctx = _fake_ctx()
+
+    await steps.stamp_and_finalize(ctx, _empty_graphiti_result())
+
+    ctx.graph_adapter.mark_episode_ready.assert_called_once()
+    kwargs = ctx.graph_adapter.mark_episode_ready.call_args.kwargs
+    assert kwargs["policy_empty_reason"] == "claimless_question"
+    assert kwargs["nodes_touched"] == 0 and kwargs["edges_touched"] == 0
+
+
+@pytest.mark.asyncio
+async def test_stamp_and_finalize_leaves_a_genuinely_empty_row_unlabelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No raw content means no policy decision: the row stays eligible for the zero-extraction reset."""
+    monkeypatch.setattr(steps, "still_owns_episode", lambda *a, **k: True)
+    ctx = _fake_ctx()
+    patches.begin_extraction_receipt("ep-collapse", _LG_QUESTION)  # raw counts stay 0
+
+    await steps.stamp_and_finalize(ctx, _empty_graphiti_result())
+
+    ctx.graph_adapter.mark_episode_ready.assert_called_once()
+    assert ctx.graph_adapter.mark_episode_ready.call_args.kwargs.get("policy_empty_reason") is None
+
+
+def test_every_policy_empty_clause_has_a_registered_reason() -> None:
+    """Each reason the policy can return is in the published set (no free-text labels)."""
+    import inspect
+
+    source = inspect.getsource(patches.policy_empty_reason)
+    returned = set(re.findall(r'return "([a-z_]+)"', source))
+    assert returned == set(patches.POLICY_EMPTY_REASONS)
 
 
 # ---------------------------------------------------------------------------

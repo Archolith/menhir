@@ -537,10 +537,13 @@ class MemoryGraphAdapter:
         nodes_touched: int,
         edges_touched: int,
         claim_started_at: Any = None,
+        policy_empty_reason: str | None = None,
     ) -> bool:
         extra: dict[str, Any] = {}
         if claim_started_at is not None:
             extra["claim_started_at"] = claim_started_at
+        if policy_empty_reason is not None:
+            extra["policy_empty_reason"] = policy_empty_reason
         return self._episodes.mark_episode_ready(
             episode_uuid,
             worker_id=worker_id,

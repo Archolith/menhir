@@ -181,6 +181,10 @@ class CombinedExtractionReceipt:
     #: two independent passes agreed the content has nothing extractable
     #: (e.g. "Thanks again for your help!").
     repair_self_only_entities: bool = False
+    #: The REPAIR pass's raw payload had no entities and no edges: the model, asked specifically
+    #: for the missing relationship, reported nothing extractable. Read before the raw counts are
+    #: merged back to the first pass's. Only a claimless question may treat this as policy-empty.
+    repair_payload_empty: bool = False
     #: Anchored-time resolver telemetry (``AnchoredTimeReport``). ``None`` when the resolver is
     #: off, which is the default.
     anchored_time: Any | None = None
@@ -313,16 +317,41 @@ def is_policy_empty_extraction(receipt: "CombinedExtractionReceipt | None") -> b
     deterministic. Real collapses remain visible because either every surviving raw edge must be
     accounted for as echo, or every relationless entity must be a self label on a turn whose
     structured role (receipt `turn_role`) is assistant.
+
+    A claimless question ("What would you like to know about LG's 4K smart TVs?") names a topic
+    but asserts nothing. When its repair pass returns an EMPTY payload, the two passes agree there
+    is no fact, as a first-pass empty would. A declarative or first-person turn never qualifies.
     """
+    return policy_empty_reason(receipt) is not None
+
+
+#: Durable labels for `policy_empty_reason`, stored on the READY Episodic row.
+POLICY_EMPTY_REASONS = frozenset({
+    "assistant_self_only",
+    "claimless_question",
+    "both_passes_self_only",
+    "context_unsupported_repair_edges",
+    "unresolved_author_suppressed",
+    "self_echo_suppressed",
+})
+
+
+def policy_empty_reason(receipt: "CombinedExtractionReceipt | None") -> str | None:
+    """Which `is_policy_empty_extraction` clause holds, or None when the empty is not policy."""
     if receipt is None:
-        return False
+        return None
     if receipt.assistant_self_only_relationless:
-        return True
+        return "assistant_self_only"
+    if (receipt.relationless_repair_attempted
+            and not receipt.relationless_repair_succeeded
+            and receipt.repair_payload_empty
+            and _is_claimless_question(receipt.episode_text)):
+        return "claimless_question"
     if (receipt.relationless_repair_attempted
             and not receipt.relationless_repair_succeeded
             and receipt.initial_self_only_entities
             and receipt.repair_self_only_entities):
-        return True
+        return "both_passes_self_only"
     usable_repair_edges = receipt.raw_edge_count - receipt.malformed_edges_dropped
     if (
         receipt.relationless_repair_attempted
@@ -332,16 +361,18 @@ def is_policy_empty_extraction(receipt: "CombinedExtractionReceipt | None") -> b
         and usable_repair_edges > 0
         and receipt.context_unsupported_edges_suppressed >= usable_repair_edges
     ):
-        return True
+        return "context_unsupported_repair_edges"
     if (receipt.unresolved_author_nodes_suppressed > 0
             and receipt.resolved_node_count == 0 and receipt.resolved_edge_count == 0
             and receipt.unresolved_author_edges_suppressed
             >= max(0, receipt.raw_edge_count - receipt.malformed_edges_dropped)):
-        return True
+        return "unresolved_author_suppressed"
     if receipt.raw_edge_count <= 0:
-        return False
+        return None
     usable_edges = receipt.raw_edge_count - receipt.malformed_edges_dropped
-    return usable_edges > 0 and receipt.self_echo_edges_suppressed >= usable_edges
+    if usable_edges > 0 and receipt.self_echo_edges_suppressed >= usable_edges:
+        return "self_echo_suppressed"
+    return None
 
 
 def begin_extraction_receipt(
@@ -1152,6 +1183,19 @@ def _is_first_person(text: str) -> bool:
     return bool(_AUTHOR_REFERENCE_RE.search(text or ""))
 
 
+# Sentence or line boundaries: an unterminated line counts as its own (non-question) sentence.
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def _is_claimless_question(text: str) -> bool:
+    """True when every sentence of `text` is a question and none refers to the author."""
+    body = (text or "").strip()
+    if not body or _is_first_person(body):
+        return False
+    sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(body) if s.strip()]
+    return bool(sentences) and all(s.endswith("?") for s in sentences)
+
+
 def _unresolved_author_aliases(
     nodes: list[Any], receipt: CombinedExtractionReceipt,
 ) -> set[str]:
@@ -1846,6 +1890,11 @@ async def _run_graphiti_combined_extraction(
             repair_previous_episodes, repair_instructions
         )
         receipt.relationless_repair_succeeded = bool(edges)
+        # Raw counts still describe the repair payload here. A non-dict response leaves the first
+        # pass's nonzero counts (stays False); a dict missing both lists reads as empty.
+        receipt.repair_payload_empty = (
+            receipt.raw_entity_count == 0 and receipt.raw_edge_count == 0
+        )
         if not edges:
             receipt.raw_entity_count = max(
                 receipt.raw_entity_count,

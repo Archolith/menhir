@@ -976,9 +976,12 @@ class EpisodeLifecycleRepository:
         nodes_touched: int,
         edges_touched: int,
         claim_started_at: Any = None,
+        policy_empty_reason: str | None = None,
     ) -> bool:
         # Owner + claim instant is the attempt's token; owner alone lets a stale attempt in the
         # same process finalize a newer claim.
+        # policy_empty_reason is always written (None clears it): a READY row's label must come
+        # from the attempt that made it READY, never from an earlier one.
         fence_instant = claim_started_at is not None and worker_id is not None
         instant_clause = (
             " AND n.processing_started_at IS NOT NULL"
@@ -1018,6 +1021,7 @@ class EpisodeLifecycleRepository:
                     "n.resolved_episode_uuid = $resolved_episode_uuid",
                     "n.enriched_nodes_touched = $nodes_touched",
                     "n.enriched_edges_touched = $edges_touched",
+                    "n.policy_empty_reason = $policy_empty_reason",
                 )
             )
             .return_raw("count(n) AS updated")
@@ -1030,6 +1034,7 @@ class EpisodeLifecycleRepository:
             "resolved_episode_uuid": resolved_episode_uuid,
             "nodes_touched": nodes_touched,
             "edges_touched": edges_touched,
+            "policy_empty_reason": policy_empty_reason,
         }
         if fence_instant:
             params["claim_started_at"] = claim_started_at
@@ -1095,6 +1100,7 @@ class EpisodeLifecycleRepository:
                 n.processing_llm_active_endpoint = null,
                 n.enriched_nodes_touched = 0,
                 n.enriched_edges_touched = 0,
+                n.policy_empty_reason = null,
                 n.extraction_skipped_for = p.uuid
             RETURN p.uuid AS projection_uuid
             """,
