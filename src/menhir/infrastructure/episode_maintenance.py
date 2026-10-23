@@ -236,6 +236,11 @@ class EpisodeMaintenanceRepository:
                 "coalesce(toInteger(n.enriched_edges_touched), 0) = 0",
                 # A labelled policy-empty is a decided outcome, not a lost extraction.
                 "n.policy_empty_reason IS NULL",
+                # A verbatim skip is a decided outcome too. Both READY writers set the substage,
+                # so this matches only when the skip itself made the row READY; a stale
+                # extraction_skipped_for on a later normal READY does not exempt it.
+                "NOT (n.processing_substage = 'verbatim_skipped'"
+                " AND n.extraction_skipped_for IS NOT NULL)",
             )
             .set(
                 (
