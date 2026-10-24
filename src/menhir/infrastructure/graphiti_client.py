@@ -38,7 +38,7 @@ except ImportError as exc:
         raise
     raise ImportError(
         "graphiti_core is missing GraphitiRequestTooLargeError. Menhir requires "
-        "archolith-graphiti-core==0.30.2.post7; an older graphiti-core install may have "
+        "archolith-graphiti-core==0.31.2.post1; an older graphiti-core install may have "
         "overwritten the fork's shared graphiti_core files. Use a fresh virtual environment "
         "or uninstall both graphiti-core distributions before reinstalling Menhir "
         "(see docs/post-install.md)."
@@ -50,6 +50,13 @@ from menhir.config import MemorySettings  # noqa: E402
 from menhir.infrastructure.circuit_breaker import CircuitBreaker  # noqa: E402
 from menhir.infrastructure.embedding_cache import get_embedding_cache  # noqa: E402
 from menhir.infrastructure.embedding_dimensions import expected_graphiti_embedding_dimension  # noqa: E402
+from menhir.infrastructure.graphiti_edge_invalidation import (  # noqa: E402
+    InvalidationGuardState,
+    guarded_preserved_edge_attributes_kwargs,
+    invalidation_guard_state,
+    invalidation_hook_kwargs,
+    record_kept_conflicts,
+)
 from menhir.infrastructure.graphiti_extraction_policy import (  # noqa: E402
     MenhirEdgeExpiryHook,
     MenhirExtractionHook,
@@ -440,8 +447,11 @@ class GraphitiClient:
                 candidate_filter_hook=MenhirCandidateFilterHook(),
                 node_pre_resolution_hook=MenhirNodePreResolutionHook(),
                 **edge_expiry_hook_kwargs(anchored_time_expiry, Graphiti),
-                **preserved_edge_attributes_kwargs(
-                    anchored_time is not None, anchored_time_expiry, Graphiti
+                **invalidation_hook_kwargs(Graphiti, graph_driver),
+                **guarded_preserved_edge_attributes_kwargs(
+                    preserved_edge_attributes_kwargs(
+                        anchored_time is not None, anchored_time_expiry, Graphiti
+                    )
                 ),
             ),
             llm_base_url=llama_base_url,
@@ -550,15 +560,29 @@ class GraphitiClient:
         owner = uuid4().hex
         owner_binding = anchored_time_owner.set(owner)
         slot_binding = anchored_time_slot.set(AnchoredTimeSlot(owner=owner))
+        state = InvalidationGuardState(owner=owner, source=source_description)
+        guard_binding = invalidation_guard_state.set(state)
         try:
-            return await self._add_episode_owned(
+            result = await self._add_episode_owned(
                 receipt, owner,
                 name=name, episode_body=episode_body, source_description=source_description,
                 reference_time=reference_time, episode_uuid=episode_uuid, group_id=group_id,
             )
+            await self._record_kept_conflicts(state)
+            return result
         finally:
+            invalidation_guard_state.reset(guard_binding)
             anchored_time_slot.reset(slot_binding)
             anchored_time_owner.reset(owner_binding)
+
+    async def _record_kept_conflicts(self, state: InvalidationGuardState) -> None:
+        """Record unresolved conflicts for edges the guard kept; never fails the episode."""
+        if not state.kept:
+            return
+        try:
+            await record_kept_conflicts(self.client.driver, state.kept)
+        except Exception:
+            logger.exception("Recording kept-edge conflicts failed; edges stay kept")
 
     async def _add_episode_owned(
         self,

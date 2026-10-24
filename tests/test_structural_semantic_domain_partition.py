@@ -36,7 +36,7 @@ class _Clients:
 def _stub_collect(monkeypatch, nodes):
     import graphiti_core.utils.maintenance.node_operations as node_operations
 
-    async def _stub(clients, extracted_nodes, existing_nodes_override):
+    async def _stub(clients, extracted_nodes, existing_nodes_override, identity_properties=None):
         del clients, existing_nodes_override
         return [list(nodes) for _ in extracted_nodes]
 

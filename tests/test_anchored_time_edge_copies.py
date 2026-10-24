@@ -61,7 +61,7 @@ async def _resolve_batch(monkeypatch, mentions, responses):
     async def immediate_gather(*aws, max_coroutines=None):
         return [await aw for aw in aws]
 
-    async def fake_search(clients, query, group_ids, config, search_filter):
+    async def fake_search(clients, query, group_ids, config, search_filter, query_vector=None):
         if search_filter.edge_uuids is not None:
             return SearchResults(edges=[_stored()])
         return SearchResults(edges=[_stored(), milan])

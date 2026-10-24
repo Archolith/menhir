@@ -1,3 +1,15 @@
+## 2026-09-24 - explicit staging is a Beacon guardrail
+
+The rule was only in `.agent/maintenance.md` and the startup list, so agents working from Beacon
+missed it: in the Beacon agent-task evaluation, two plans for archiving a Menhir plan proposed
+`git add -A -- <paths>`.
+
+- `AGENTS.md`: a new `<!-- beacon:guardrail id=explicit-staging severity=medium -->` bullet, "Stage
+  files explicitly by path; never `git add .` or `git add -A`. Leave unrelated changes unstaged.",
+  after the existing implementation rules (no existing line moves). Checked locally: `beacon build`
+  serves it as the guardrail `explicit-staging`.
+- `CHANGELOG-archive.md`: the oldest 2026-09-17 entry moved there (10-entry limit).
+
 ## 2026-10-21 - Split 27 oversized modules that main has not changed since the file-size branch
 
 - Ports part of `refactor/file-size-refactor` (2802ebb): only the 27 originals whose pre-split text is identical to main's. Each keeps its name and re-exports what moved, so no import site changes; moved code lives in 87 new sibling modules. 16 `src/menhir` modules (`api/oauth_authorize`, `cli`, `core/runtime_preflight`, `domain/{artifact_reconciliation,projection_coverage,scalar_dependency_evidence}`, `explorer/{extraction_lab,recall_packet_prototype}`, `infrastructure/{evidence_publication_intents,graph_operations,projection_lifecycle_repository}`, `infrastructure/telemetry/{event_store,lifecycle_store,recall_store}`, `snapshot/{protocol,receive}`), 6 services (`correlation_service`, `deterministic_scalar_extractor`, `metric_write_coordinator`, `research_scalar_isolated_adapter`, `saga_reconcile_dispatcher`, `structural_scalar_composer`) and 5 scripts.

@@ -40,7 +40,7 @@ async def _run_synthetic_resolution(
     ]
     calls: list[tuple[int, int]] = []
 
-    async def _collect_candidates(clients, nodes, existing_nodes_override):
+    async def _collect_candidates(clients, nodes, existing_nodes_override, identity_properties=None):
         del clients, nodes, existing_nodes_override
         return candidates_by_extracted
 
@@ -139,7 +139,7 @@ async def test_real_graphiti_prompt_builder_splits_until_request_fits(monkeypatc
     attempted_estimates: list[int] = []
     accepted_estimates: list[int] = []
 
-    async def _collect_candidates(clients, nodes, existing_nodes_override):
+    async def _collect_candidates(clients, nodes, existing_nodes_override, identity_properties=None):
         del clients, nodes, existing_nodes_override
         return candidates_by_extracted
 
@@ -147,6 +147,8 @@ async def test_real_graphiti_prompt_builder_splits_until_request_fits(monkeypatc
         del nodes, indexes, state
 
     class _GuardedLlmClient:
+        max_tokens = None  # graphiti_core 0.31 reads llm_client.max_tokens
+
         async def generate_response(self, messages, response_model=None, **kwargs):
             del response_model, kwargs
             request = [{"role": message.role, "content": message.content} for message in messages]

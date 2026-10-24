@@ -116,7 +116,7 @@ async def _resolve(monkeypatch, nodes) -> tuple[list[list[str]], list[object], o
     searched: list[list[str]] = []
     llm_calls: list[object] = []
 
-    async def _collect(clients, extracted_nodes, existing_nodes_override=None):
+    async def _collect(clients, extracted_nodes, existing_nodes_override=None, identity_properties=None):
         searched.append([n.name for n in extracted_nodes])
         return [[] for _ in extracted_nodes]
 
@@ -193,7 +193,7 @@ async def test_undeclared_node_cannot_reuse_canonical_self_through_ordinary_dedu
     ordinary_candidate = _node("ordinary-user", "user")
     seen_candidate_uuids: list[str] = []
 
-    async def _collect(clients, extracted_nodes, existing_nodes_override=None):
+    async def _collect(clients, extracted_nodes, existing_nodes_override=None, identity_properties=None):
         return [[canonical_candidate, ordinary_candidate] for _ in extracted_nodes]
 
     original_build_indexes = node_operations._build_candidate_indexes
@@ -237,7 +237,7 @@ async def test_non_enforce_modes_do_not_filter_canonical_candidates(monkeypatch,
     canonical_candidate.attributes = {"is_self": True, "entity_role": "self"}
     seen_candidate_uuids: list[str] = []
 
-    async def _collect(clients, extracted_nodes, existing_nodes_override=None):
+    async def _collect(clients, extracted_nodes, existing_nodes_override=None, identity_properties=None):
         return [[canonical_candidate] for _ in extracted_nodes]
 
     original_build_indexes = node_operations._build_candidate_indexes
@@ -275,7 +275,7 @@ async def test_enforce_refuses_undeclared_extracted_node_with_canonical_identity
     extracted.attributes = {"is_self": True, "entity_role": "self"}
     candidate_search_called = False
 
-    async def _collect(clients, extracted_nodes, existing_nodes_override=None):
+    async def _collect(clients, extracted_nodes, existing_nodes_override=None, identity_properties=None):
         nonlocal candidate_search_called
         candidate_search_called = True
         return [[] for _ in extracted_nodes]
@@ -328,7 +328,7 @@ async def test_existing_canonical_node_is_preserved_not_overwritten(monkeypatch)
 
         monkeypatch.setattr(EntityNode, "get_by_uuid", _get_by_uuid)
 
-        async def _collect(clients, extracted_nodes, existing_nodes_override=None):
+        async def _collect(clients, extracted_nodes, existing_nodes_override=None, identity_properties=None):
             return [[] for _ in extracted_nodes]
 
         monkeypatch.setattr(node_operations, "_collect_candidate_nodes", _collect)
@@ -366,7 +366,7 @@ async def test_first_self_episode_creates_the_canonical_node(monkeypatch):
 
         monkeypatch.setattr(EntityNode, "get_by_uuid", _missing)
 
-        async def _collect(clients, extracted_nodes, existing_nodes_override=None):
+        async def _collect(clients, extracted_nodes, existing_nodes_override=None, identity_properties=None):
             return [[] for _ in extracted_nodes]
 
         monkeypatch.setattr(node_operations, "_collect_candidate_nodes", _collect)

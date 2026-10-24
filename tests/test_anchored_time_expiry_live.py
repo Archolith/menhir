@@ -295,10 +295,11 @@ async def test_episode_chain_restated_duplicate_stays_live_contradiction_expires
     assert report.persist == "no_rows"
     state = _state(test_neo4j_repo, trip.uuid)
     assert state["expired_at"] is None and state["invalid_at"].to_native() == TRIP_END
-    # Pre-existing (P2): the resolver clears attributes and EntityEdge.save replaces all edge
-    # properties, so a restatement drops the first episode's contract and stamp. Expiry and the
-    # "ended" role read only expired_at/invalid_at.
-    assert state["contract"] is None and state["expiry"] is None
+    # graphiti_core 0.31.2: a direct resolve_extracted_edge call with no edge-type map keeps the
+    # stored attributes (0.30.2 cleared them), so the contract and stamp survive this restatement.
+    # add_episode passes a map and still clears; Menhir's preserved attributes cover that path.
+    # Expiry and the "ended" role read only expired_at/invalid_at either way.
+    assert state["contract"] is not None and state["expiry"] == "world_end"
 
     # Episode 3 contradicts it inside the window (Milan from March 28): the trip is expired.
     ep3 = str(uuidlib.uuid4())
