@@ -56,6 +56,8 @@ _TIMEOUTS_ALLOWED: dict[str, tuple[int, str]] = {
     "core/runtime.py": (1, "startup resume of pending episodes (enqueue)"),
     INFRA + "graphiti_client.py": (1, "Neo4j index build"),
     INFRA + "anchored_time_persist.py": (1, "Neo4j anchored-time contract write"),
+    INFRA + "graphiti_edge_invalidation.py": (
+        2, "Neo4j stored-edge source lookup and kept-conflict write (no OpenAI)"),
     "services/ingest_worker.py": (
         2,
         "idle queue poll; enrichment hard ceiling, wall-clock on purpose so the attempt ends "

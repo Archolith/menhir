@@ -288,10 +288,11 @@ def test_client_passes_preserved_attributes_to_graphiti(monkeypatch, flags, pres
 
     monkeypatch.setattr(graphiti_client, "Graphiti", _CapturingGraphiti)
     graphiti_client.GraphitiClient.from_settings_with_capabilities(MemorySettings(**flags))
+    # #168 P1: the invalidation guard always preserves the stamped edge source.
     if preserved:
-        assert seen["preserved_edge_attributes"] == PRESERVED_EDGE_ATTRIBUTES
+        assert seen["preserved_edge_attributes"] == PRESERVED_EDGE_ATTRIBUTES + ("source",)
     else:
-        assert "preserved_edge_attributes" not in seen
+        assert seen["preserved_edge_attributes"] == ("source",)
 
 
 # --- Graphiti's real resolver ---------------------------------------------------------------------
@@ -317,7 +318,7 @@ async def _resolve_batch(monkeypatch, mentions, responses, *, results=(), status
     async def immediate_gather(*aws, max_coroutines=None):
         return [await aw for aw in aws]
 
-    async def fake_search(clients, query, group_ids, config, search_filter):
+    async def fake_search(clients, query, group_ids, config, search_filter, query_vector=None):
         if search_filter.edge_uuids is not None:
             return SearchResults(edges=[_stored()])
         return SearchResults(edges=[_stored(), milan])
