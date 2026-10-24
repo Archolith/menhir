@@ -152,6 +152,7 @@ class RecallContextMemoriesTool(BaseJsonTool):
                         "status": scored.get("status"),
                         "artifact_status": scored.get("artifact_status"),
                         "superseded_by": scored.get("superseded_by"),
+                        "provenance": scored.get("provenance"),
                     }
                 )
         recent_rows = await backend.fetch_recent_memories(

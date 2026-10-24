@@ -1064,6 +1064,12 @@ class MemoryGraphAdapter:
         """Raw per-candidate provenance (SUPPORTED_BY / ANCHORED_TO project / MENTIONS source)."""
         return self._memory_queries.fetch_candidate_provenance(node_uuids)
 
+    def fetch_result_provenance(
+        self, uuids: list[str], namespace: str | None = None
+    ) -> list[dict[str, object]]:
+        """Raw who-said-it signals (episode sources, first seen, turn ids) per result id."""
+        return self._memory_queries.fetch_result_provenance(uuids, namespace)
+
     def fetch_node_receipts(self, node_uuid: str) -> dict[str, object] | None:
         """Receipts for one node: its MENTIONS source episodes + SUPPORTED_BY evidence + ANCHORED_TO paths."""
         return self._memory_queries.fetch_node_receipts(node_uuid)

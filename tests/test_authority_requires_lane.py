@@ -88,6 +88,32 @@ def test_backend_wiring_requires_lane(monkeypatch, lane, authority):
     assert captured["event_history_authority_enabled"] is (lane and authority)
 
 
+@pytest.mark.parametrize(("settings_kwargs", "expected"), [({}, False), ({"personal_memory_scalar_state_enabled": True}, True)])
+def test_backend_wiring_with_default_authority_follows_lane(monkeypatch, settings_kwargs, expected):
+    from menhir.core.bootstrap import build_memory_services
+
+    class FakeGraphiti:
+        @classmethod
+        def from_settings_with_capabilities(cls, settings, **kwargs):
+            return SimpleNamespace()
+
+    class FakeLLM:
+        @classmethod
+        def from_settings(cls, settings):
+            return SimpleNamespace()
+
+    captured = _Captured()
+    monkeypatch.setattr("menhir.core.bootstrap.Neo4jRepository", _Inert)
+    monkeypatch.setattr("menhir.core.bootstrap.MemoryGraphAdapter", _Inert)
+    monkeypatch.setattr("menhir.core.bootstrap.GraphitiClient", FakeGraphiti)
+    monkeypatch.setattr("menhir.core.bootstrap.LLMAdapter", FakeLLM)
+    monkeypatch.setattr("menhir.core.bootstrap.RecallService", _fake_recall(captured))
+
+    build_memory_services(settings=MemorySettings(**settings_kwargs))
+
+    assert captured["scalar_view_authority_enabled"] is expected
+
+
 @pytest.mark.parametrize(("lane", "authority"), COMBOS)
 def test_hook_cli_wiring_requires_lane(monkeypatch, lane, authority):
     from menhir.cli.bootstrap import build_hook_services

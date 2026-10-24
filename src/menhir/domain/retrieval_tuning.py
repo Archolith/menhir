@@ -57,7 +57,8 @@ class CandidateSource(str, Enum):
     # typed-scalar observation log's stated_span). The recall pipeline is otherwise :Entity-only, so a
     # typed observation ("I own 20 rare coins") is never a candidate. Behaves like CONTENT_VECTOR
     # downstream: competes on its real cosine (0.0 source prior, NOT floor-exempt). Gated by
-    # RecallService.scalar_view_authority_enabled (the scalar-view-authority feature; default off).
+    # RecallService.scalar_view_authority_enabled (the scalar-view-authority feature; default on,
+    # effective only while the scalar lane is on).
     OBSERVATION = "observation"
     # Scalar-authority candidate: the CURRENT scalar_state View for a slot, injected DETERMINISTICALLY by
     # slot-keyed lookup (not embedding rank) so the authoritative current value surfaces even when its

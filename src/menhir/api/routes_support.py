@@ -253,6 +253,9 @@ class RecallMemory(BaseModel):
     # Source/world-time evidence attached to this result. ``created_at``/``expired_at`` remain
     # belief-time metadata and must never substitute for a missing ``valid_at``.
     temporal_facts: list[RecallTemporalFact] = Field(default_factory=list)
+    # Who recorded this item (said_by user|agent|mixed|unknown, sources, first_seen_at,
+    # turn_evidence_ids); omitted when not resolved.
+    provenance: dict[str, object] | None = None
 
 
 class ScalarAuthorityContributorResponse(BaseModel):

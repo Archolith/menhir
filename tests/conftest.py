@@ -304,6 +304,7 @@ class StubMemoryGraphAdapter:
     weighted_edges: list[str] = field(default_factory=list)
     candidate_metadata: list[dict[str, object]] = field(default_factory=list)
     candidate_provenance_rows: list[dict[str, object]] = field(default_factory=list)
+    result_provenance_rows: list[dict[str, object]] = field(default_factory=list)
     adjacency_pairs: list[dict[str, object]] = field(default_factory=list)
     adjacency_calls: list[dict[str, object]] = field(default_factory=list)
     temporal_fact_rows: list[dict[str, object]] = field(default_factory=list)
@@ -515,6 +516,9 @@ class StubMemoryGraphAdapter:
 
     def fetch_candidate_provenance(self, node_uuids: list[str]) -> list[dict[str, object]]:
         return self.candidate_provenance_rows
+
+    def fetch_result_provenance(self, uuids: list[str], namespace=None) -> list[dict[str, object]]:
+        return list(self.result_provenance_rows)
 
     def fetch_decay_candidates(
         self,

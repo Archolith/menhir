@@ -53,10 +53,10 @@ SHIPPED_SETTINGS = {
     "personal_memory_counting_extract_v2": False,
     "personal_memory_counting_match_enabled": False,
     "personal_memory_counting_lease_seconds": 900,
-    # Defaults are not activation: every lane and authority path ships off.
+    # Defaults are not activation: every lane ships off; scalar authority ships on but is gated by its lane.
     "personal_memory_consolidation_enabled": False,
     "personal_memory_scalar_state_enabled": False,
-    "personal_memory_scalar_view_authority_enabled": False,
+    "personal_memory_scalar_view_authority_enabled": True,
     "personal_memory_scalar_history_enabled": False,
     "personal_memory_scalar_deterministic_router": False,
     "personal_memory_event_history_enabled": False,

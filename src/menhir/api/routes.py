@@ -14,6 +14,7 @@ from menhir.core.backend_impl import _drain_background_errors
 from menhir.domain.bootstrap_scope import bootstrap_selection
 from menhir.domain.ingest import IdempotencyKeyConflict
 from menhir.domain.recall import InvalidQueryPresetError
+from menhir.domain.recall_provenance import provenance_label
 from menhir.domain.recall_visibility import memory_lifecycle_note
 from menhir.domain.session import new_session
 from menhir.domain.structural_memory import is_structural_memory_row
@@ -202,6 +203,11 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
                 is_superseded_view=bool(m.get("is_superseded_view")),
                 is_scalar_authority=bool(m.get("is_scalar_authority")),
                 temporal_facts=m.get("temporal_facts") or [],
+                provenance=(
+                    m.get("provenance")
+                    if provenance_label(m.get("provenance")) is not None
+                    else None
+                ),
             )
             for m in result.get("results", []) or []
         ],

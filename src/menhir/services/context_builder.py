@@ -11,6 +11,7 @@ import re
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
+from menhir.domain.recall_provenance import provenance_label
 from menhir.domain.recall_visibility import memory_lifecycle_note
 
 from menhir.domain.recall import (
@@ -572,6 +573,9 @@ class ContextBuilderService:
                     markers.append(f"flagged: {mem.warden_label.value}")
                 if mem.breakdown.conflict_bonus == 1.0:
                     markers.append("unresolved conflict")
+                provenance_marker = provenance_label(getattr(mem, "provenance", None))
+                if provenance_marker:
+                    markers.append(provenance_marker)
 
                 if markers:
                     name_with_markers = f"{name} ({', '.join(markers)})"

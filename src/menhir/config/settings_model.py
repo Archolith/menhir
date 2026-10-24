@@ -324,13 +324,14 @@ class MemorySettings:
     # grounding only lands as a NEW interpreted assertion — a version bump makes it supersede v1 by
     # strict rank rather than silently no-op on the stored row.
     personal_memory_scalar_state_perceiver_version: str = "v2"
-    # Step 7 current-state-only authority canary. OFF by default: when off, a current scalar_state
-    # View is context only and NEVER suppresses an overlapping graph fact in recall (today's
-    # behavior). When on, a View may suppress an older overlapping fact ONLY if all six authority
-    # gates pass (current-state query + resolved subject + exact slot + grounded evidence +
+    # Step 7 current-state-only authority canary. ON by default (owner decision 2026-10-23), but
+    # effective only while personal_memory_scalar_state_enabled is on (config/authority_gates).
+    # When off, a current scalar_state View is context only and NEVER suppresses an overlapping
+    # graph fact in recall. When on, a View may suppress an older overlapping fact ONLY if all six
+    # authority gates pass (current-state query + resolved subject + exact slot + grounded evidence +
     # unambiguous current View + complete overlap proof); every other case stays advisory. The
     # decision is computed by menhir.domain.scalar_view_authority.decide_view_authority.
-    personal_memory_scalar_view_authority_enabled: bool = False
+    personal_memory_scalar_view_authority_enabled: bool = True
     personal_memory_scalar_view_collapse_enabled: bool = False
     personal_memory_scalar_view_echo_drop_enabled: bool = False
     personal_memory_observation_dedup_enabled: bool = False

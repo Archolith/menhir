@@ -113,6 +113,12 @@ Not yet measured (non-blocking, #345): AMA stale-before-current and answer-level
 |---|---|---|---|---|
 | Two-tier self identity (episodes that cannot reach the anchored speaker marker bind the user to one inferred self per namespace instead of an ordinary "user" node; recall reads both tiers labelled; verbatim client copies of hook turns skip extraction) | `inferred_self_mode` / `MENHIR_INFERRED_SELF_MODE` (`off` / `observe` / `enforce`, default `enforce`; pin `off` to opt out) | `begin_extraction_receipt` / `_record_inferred_binding` in `graphiti_extraction_policy.py`; recall in `recall_pipeline.py` (backend) and `cli/bootstrap.py` (hook context); skip in `ingest_worker._try_verbatim_skip`; the re-enable sweep runs in lease recovery whatever the mode | offline and live tests; E2E-19 `two_tier_self` on the deterministic provider, now on shipped defaults; one manual pass on local `qwen3.6-35b-a3b` (2026-10-21): `two_tier_self` passed and, with the mode off, `canonical_self_binds` reproduced the #343 fork | workspace `menhir-two-tier-self-identity-plan-2026-10-21.md` (#343; owner decision 2026-10-21) |
 
+### Graduated to default-on 2026-10-23: scalar View authority (inert until the scalar lane is on)
+
+| Feature | Flag / env | Gate location | Evidence | Source plan |
+|---|---|---|---|---|
+| Scalar View authority (a current scalar_state View may suppress an older overlapping graph fact, only when all six authority gates pass) | `personal_memory_scalar_view_authority_enabled` / `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED` (default true; pin `false` to opt out) | `scalar_view_authority_effective` in `config/authority_gates.py`: applied only while `personal_memory_scalar_state_enabled` is on (default off), so a default install is unchanged. Collapse, echo-drop and observation-dedup stay off | canonical +0.795 lift on the frozen LME panel (scalar roadmap 2026-08-07); E2E-17 and E2E-18 cover authority on and the opt-out | `menhir-scalar-default-enablement-plan.md` (owner decision 2026-10-23, #168; `menhir-agent-memory-writer-plan-2026-10-23` P1b) |
+
 ### Graduated to default-on 2026-10-20: Warden gate with the contradiction guard
 
 | Feature | Flag / env | Gate location | Evidence | Source plan |

@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 from menhir.domain.models import NodeScope, ProcessingState
 from menhir.domain.recall import QueryPreset
+from menhir.domain.recall_provenance import provenance_label
 from menhir.domain.utils import decode_json_value, excerpt
 from menhir.mcp.contracts import BaseJsonResource
 from menhir.mcp.formatters import _memory_lifecycle_fields
@@ -129,10 +130,16 @@ def _normalize_memory_row(row: dict[str, Any] | None, *, detail: bool = False) -
     }
 
 
+def _provenance_field(provenance: Any) -> dict[str, Any]:
+    """Provenance only for non-user items, so user-stated output is unchanged."""
+    return {"provenance": provenance} if provenance_label(provenance) is not None else {}
+
+
 def _normalize_scored_result(scored: Any) -> dict[str, Any]:
     if isinstance(scored, dict):
         breakdown = scored.get("breakdown") or {}
         return {
+            **_provenance_field(scored.get("provenance")),
             **_memory_lifecycle_fields(scored),
             "uuid": scored.get("uuid"),
             "name": scored.get("name"),
@@ -149,6 +156,7 @@ def _normalize_scored_result(scored: Any) -> dict[str, Any]:
         }
     breakdown = getattr(scored, "breakdown", None)
     return {
+        **_provenance_field(getattr(scored, "provenance", None)),
         **_memory_lifecycle_fields(scored),
         "uuid": getattr(scored, "uuid", None),
         "name": getattr(scored, "name", None),

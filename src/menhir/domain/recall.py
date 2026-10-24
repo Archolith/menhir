@@ -216,6 +216,8 @@ class ScoredMemory:
     # Two-tier self: "anchored" or "inferred" on the namespace's self entities; None elsewhere and
     # whenever MENHIR_INFERRED_SELF_MODE is off.
     self_tier: str | None = None
+    # Who said it (RecallProvenance.to_dict() form); None for item types without episodes.
+    provenance: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
