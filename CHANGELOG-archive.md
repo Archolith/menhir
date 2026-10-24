@@ -1,3 +1,11 @@
+## 2026-10-21 - Split 27 oversized modules that main has not changed since the file-size branch
+
+- Ports part of `refactor/file-size-refactor` (2802ebb): only the 27 originals whose pre-split text is identical to main's. Each keeps its name and re-exports what moved, so no import site changes; moved code lives in 87 new sibling modules. 16 `src/menhir` modules (`api/oauth_authorize`, `cli`, `core/runtime_preflight`, `domain/{artifact_reconciliation,projection_coverage,scalar_dependency_evidence}`, `explorer/{extraction_lab,recall_packet_prototype}`, `infrastructure/{evidence_publication_intents,graph_operations,projection_lifecycle_repository}`, `infrastructure/telemetry/{event_store,lifecycle_store,recall_store}`, `snapshot/{protocol,receive}`), 6 services (`correlation_service`, `deterministic_scalar_extractor`, `metric_write_coordinator`, `research_scalar_isolated_adapter`, `saga_reconcile_dispatcher`, `structural_scalar_composer`) and 5 scripts.
+- Every top-level definition of main's originals appears unchanged (AST-equal) in the split, except class bodies that became mixin bases (each method unchanged), `__all__` additions, and lookups routed through the original module so existing monkeypatch seams still apply. Extracted Cypher constants equal the original inline queries.
+- Fixes two defects in the branch's split: `EvidencePublicationIntentRepository` regains `@dataclass(frozen=True)` (its constructor was lost), and `telemetry/recall_store.py` keeps its module `logger`.
+- Not ported: the 75 other split targets (changed on main since, or no longer present); they need a fresh split.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-10-21 - Two-tier self identity: an inferred user tier behind MENHIR_INFERRED_SELF_MODE
 
 - New setting `MENHIR_INFERRED_SELF_MODE` (`off` default, `observe`, `enforce`; unrecognized falls back to `off`). With `enforce`, an episode that cannot reach the anchored speaker marker (agent-written memories, agent-quoted user statements) is offered a Menhir-allocated `MenhirInferredUser_` marker, and what the model attaches to it lands on one inferred self per namespace (`user-inferred`, `entity_role=inferred_self`, `self_tier=inferred`, never `is_self`) instead of a new ordinary "user" node (#343). `observe` records what would have been offered and binds nothing.

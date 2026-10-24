@@ -946,6 +946,78 @@ class MemoryQueryRepository:
             },
         )
 
+    def fetch_result_provenance(
+        self, uuids: list[str], namespace: str | None
+    ) -> list[dict[str, object]]:
+        """Raw "who said it" signals for recall result ids, in ONE batched query.
+
+        Each id resolves as exactly one of: an Entity (contributing episodes are the
+        ``MENTIONS`` episodes), a RELATES_TO fact edge (episodes whose uuid is in
+        ``r.episodes``), or a pending anchor (the anchor is itself the episode). Entities and
+        edges are tenant-scoped to ``namespace`` (no filter when None, as in
+        ``fetch_temporal_facts``); anchors are scoped the same way.
+
+        Per contributing Graphiti episode the query joins Menhir's receipt anchor
+        (``receipt.resolved_episode_uuid = epi.uuid``, indexed; see ``fetch_node_receipts``):
+        source is ``coalesce(receipt.source, epi.source)`` (Graphiti stamps a placeholder
+        ``'message'`` on ``epi`` until Menhir overwrites it, so the receipt wins), first-seen is
+        ``coalesce(receipt.reference_time, epi.valid_at, epi.created_at)`` and the turn ids come
+        from the receipt's ``ADMITTED_ON`` edges. Returns one row per matched id with
+        ``uuid``, ``sources`` (distinct, may include null), ``first_seen_at`` (min, string) and
+        ``turn_evidence_ids`` (distinct, at most 5). Ids matching nothing, and entities or edges
+        with no contributing episode (Views, projection- or scan-built nodes), return no row, so
+        they carry no provenance and no label. Raw signals only -- classification is in the
+        domain (``derive_recall_provenance``)."""
+        if not uuids:
+            return []
+        query = f"""
+            UNWIND $uuids AS id
+            CALL {{
+              WITH id
+              MATCH (n:Entity {{uuid: id}}) WHERE {tenant_scope_cypher('n')}
+              MATCH (epi:Episodic)-[:MENTIONS]->(n)
+              RETURN epi AS epi, null AS anchor
+              UNION
+              WITH id
+              MATCH ()-[r:RELATES_TO {{uuid: id}}]->() WHERE {tenant_scope_cypher('r')}
+              MATCH (epi:Episodic) WHERE epi.uuid IN r.episodes
+              RETURN epi AS epi, null AS anchor
+              UNION
+              WITH id
+              MATCH (a:Episodic {{uuid: id}}) WHERE {tenant_scope_cypher('a')}
+              RETURN null AS epi, a AS anchor
+            }}
+            OPTIONAL MATCH (receipt:Episodic)
+              WHERE epi IS NOT NULL AND receipt.resolved_episode_uuid = epi.uuid
+            WITH id, epi, coalesce(receipt, anchor) AS rec
+            WITH id, rec,
+                 coalesce(rec.source, epi.source) AS source,
+                 toString(coalesce(rec.reference_time, epi.valid_at, epi.created_at)) AS first_seen
+            WITH id,
+                 collect(DISTINCT source) AS sources,
+                 min(first_seen) AS first_seen_at,
+                 collect({{rec: rec, fs: first_seen}}) AS eps
+            UNWIND eps AS e
+            WITH id, sources, first_seen_at, e ORDER BY e.fs
+            WITH id, sources, first_seen_at, collect(e.rec)[0..5] AS earliest
+            RETURN id AS uuid, sources, first_seen_at,
+                   reduce(acc = [], r IN earliest |
+                          acc + [ (r)-[:ADMITTED_ON]->(t:TurnEvidence) | t.turn_id ])
+                     AS all_turn_ids
+        """
+        rows = self.neo4j.execute(
+            query,
+            params={"uuids": uuids, **tenant_scope_params(namespace)},
+            timeout_s=10.0,
+        )
+        for row in rows:
+            seen: list[object] = []
+            for t in row.pop("all_turn_ids", None) or []:
+                if t is not None and t not in seen:
+                    seen.append(t)
+            row["turn_evidence_ids"] = seen[:5]
+        return rows
+
     def fetch_node_receipts(self, node_uuid: str) -> dict[str, object] | None:
         """Receipts for one node (the "show me the sources" read): the source episodes that
         ``MENTIONS`` it, its first-class ``SUPPORTED_BY`` :Evidence, and its ``ANCHORED_TO``

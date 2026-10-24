@@ -131,6 +131,7 @@ Only if step 6 passes the ratified limits: `personal_memory_scalar_state_enabled
 ## Explicitly not in this plan
 - `personal_memory_scalar_view_authority_enabled` (override): stays off. Agent-quoted facts can never
   gain authority even when it is on (safety property).
+  - 2026-10-23: the owner decided to default it on (campaign #168, plan menhir-agent-memory-writer-plan-2026-10-23 P1b); it stays inert until the scalar lane is on.
 - `personal_memory_scalar_history_enabled`, the deterministic router, and canonical-self mode: separate decisions.
 - Hook-verified upgrade of agent-quoted records: deferred.
 - D1 (#193): path-W runs set models by hand until it is fixed.

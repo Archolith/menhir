@@ -40,6 +40,7 @@ DEFAULT_ON = {
     "MENHIR_FRONTIER_SOURCE_MEMORIES",
     "MENHIR_FRONTIER_WARDEN_GATE",
     "MENHIR_FRONTIER_CONTRADICTION_INTERRUPT",
+    "MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED",
 }
 
 
@@ -127,6 +128,24 @@ def test_upgrade_inferred_self_mode_follows_default_unless_pinned(
     monkeypatch.setenv("ENV_FILE", str(home / ".env"))
     env_file.load_menhir_env()
     assert MemorySettings.from_env().inferred_self_mode == expected
+
+
+@pytest.mark.parametrize("pinned,expected", [(None, True), ("false", False)])
+def test_upgrade_scalar_view_authority_follows_default_unless_pinned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_campaign_env: None,
+    pinned: str | None, expected: bool,
+) -> None:
+    """Upgrades without the key get authority on (inert until the scalar lane is on); =false opts out."""
+    home = _home(tmp_path, checkout=False)
+    original = "# existing configuration\n"
+    if pinned is not None:
+        original += f"MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED={pinned}\n"
+    (home / ".env").write_text(original)
+    apply_setup(home, provider="openai", configure_git_hooks=False)
+    assert (home / ".env").read_text().startswith(original)
+    monkeypatch.setenv("ENV_FILE", str(home / ".env"))
+    env_file.load_menhir_env()
+    assert MemorySettings.from_env().personal_memory_scalar_view_authority_enabled is expected
 
 
 @pytest.mark.parametrize("checkout", [False, True], ids=["wheel-state", "checkout"])

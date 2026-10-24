@@ -22,6 +22,7 @@ from menhir.services.embedding_identity import comparable_model, embedder_model_
 from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.self_identity import inferred_self_uuid_for_namespace
 from menhir.infrastructure.self_binding import SelfBindMode, resolve_inferred_mode
+from menhir.domain.recall_provenance import derive_recall_provenance
 from menhir.domain.recall import (
     CandidateData,
     QueryPreset,
@@ -84,6 +85,8 @@ _PROGRAMMING_ERRORS = (TypeError, AttributeError, NameError, KeyError)
 
 # Facts per entity chosen by query similarity when MENHIR_FRONTIER_FACT_RELEVANCE is on.
 _FACT_RELEVANCE_K = 3
+# Synthetic result types with no contributing Graphiti episodes to attribute.
+_NO_PROVENANCE_TYPES = frozenset({"SCALAR_STATE", "SCALAR_HISTORY", "OBSERVATION"})
 
 
 from menhir.services.recall_policies import label_and_collapse_self_tiers
@@ -2227,6 +2230,38 @@ async def run_recall(
     except Exception:  # degraded mode: log and continue with empty temporal_facts
         logger.exception("Temporal facts enrichment failed; continuing with empty facts")
     _t_phases["temporal_enrichment"] = int((perf_counter() - _t) * 1000)
+
+    # --- Provenance (POST-RANK, label-only) ---
+    # One batched, namespace-filtered query says who recorded each Entity / fact edge / pending
+    # episode. Best-effort: failure leaves provenance=None (no label) and never breaks recall.
+    # Verb-facet items appended later are not filled.
+    _t = perf_counter()
+    try:
+        provenance_uuids = [
+            r.uuid for r in top_results
+            if r.memory_type not in _NO_PROVENANCE_TYPES and r.view_kind is None
+        ]
+        if provenance_uuids:
+            provenance_rows = await asyncio.to_thread(
+                partial(
+                    service.graph_adapter.fetch_result_provenance,
+                    provenance_uuids, namespace=namespace,
+                )
+            )
+            provenance_by_uuid = {
+                row["uuid"]: derive_recall_provenance(row).to_dict()
+                for row in provenance_rows
+            }
+            top_results = [
+                replace(sm, provenance=provenance_by_uuid[sm.uuid])
+                if sm.uuid in provenance_by_uuid else sm
+                for sm in top_results
+            ]
+    except _PROGRAMMING_ERRORS:
+        raise
+    except Exception:  # recall must not break: leave provenance unset
+        logger.exception("Result provenance enrichment failed; continuing without labels")
+    _t_phases["provenance"] = int((perf_counter() - _t) * 1000)
 
     # --- Stale-anchor labeling (POST-RANK, label-only) ---
     # Enrich each result with stale metadata when the anchor file was changed

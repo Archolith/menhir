@@ -12,6 +12,7 @@ from uuid import UUID
 
 from menhir.core.reader_identity import normalize_reader_id as _normalize_reader_id
 from menhir.domain.models import ProcessingState
+from menhir.domain.recall_provenance import provenance_label
 from menhir.domain.recall_visibility import memory_lifecycle_note
 from menhir.domain.utils import excerpt
 from menhir.services.stale_labeling import (
@@ -179,6 +180,8 @@ def _compact_memory_item(row: dict[str, object], *, tag: str) -> dict[str, objec
     }
     if row.get("similarity") is not None:
         item["similarity"] = row.get("similarity")
+    if provenance_label(row.get("provenance")) is not None:  # non-user items only
+        item["provenance"] = row.get("provenance")
     # Stale-anchor advisory: pass through when the recall service labeled this item.
     stale_info = row.get("stale_anchor_info")
     if stale_info is not None:
@@ -319,6 +322,10 @@ def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, obj
             }, tf))
             for tf in temporal_facts_raw
         ]
+    # Who recorded it: emitted only for non-user items, so user-stated output is unchanged.
+    provenance = getattr(scored, "provenance", None)
+    if provenance_label(provenance) is not None:
+        item["provenance"] = provenance
     if compact:
         # Drop explainability/diagnostic fields the LLM does not act on. The
         # decision-relevant fields (score, scope, relevance) are retained.

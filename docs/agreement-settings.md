@@ -44,7 +44,8 @@ scheduled pass uses the 300-call budget.
 | Scalar threshold | 1.0 | 2/3 | 2/3 |
 | Reconcile attribute / scope / subject | off | on | on |
 | Canonical self | off | off | off |
-| Scalar lane / View authority | off | off | on (env) |
+| Scalar lane | off | off | on (env) |
+| Scalar View authority (effective only while the lane is on) | off | on | on (env) |
 | Chat model | global | global | set by env |
 
 The 2/3 profile was not imported from the bench silently. The owner chose it on 2026-09-28

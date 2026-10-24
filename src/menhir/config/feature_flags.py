@@ -60,7 +60,7 @@ _SETTINGS = (
     ('personal_memory_scalar_state_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED', False,
         'personal_memory', 'Enable personal memory scalar state enabled.', True, ()),
     ('personal_memory_scalar_view_authority_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED',
-        False, 'personal_memory', 'Enable personal memory scalar view authority enabled.', True, ()),
+        True, 'personal_memory', 'Enable personal memory scalar view authority enabled.', True, ()),
     ('personal_memory_scalar_view_collapse_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_COLLAPSE_ENABLED',
         False, 'personal_memory', 'Collapse scalar View items into the verdict and drop echoed observations.', True, ()),
     ('personal_memory_scalar_view_echo_drop_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_ECHO_DROP_ENABLED',

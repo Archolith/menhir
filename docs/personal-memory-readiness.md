@@ -94,6 +94,8 @@ What happens (E2E-18):
   (`config/authority_gates.py`), even if the authority flag is left on. The stored Views and
   events no longer update, so serving them as current would give a changed value its old
   number. Recall serves ordinary memories instead.
+- **Scalar authority default.** The scalar authority flag now defaults on (owner decision
+  2026-10-23), but it is inert until the scalar lane is enabled.
 - **With both off,** recall returns ordinary memories and `source_memories`, with no verdicts.
 - **Turning the lane back on.**
   - **Scalar and event:** they read the turns captured while they were off, from their
