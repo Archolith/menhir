@@ -1,6 +1,12 @@
+## 2026-10-25 - Fact said time drops the Neo4j zone id; freshness A/B numbers corrected
+
+- `services/recall_policies.py`: `said_at` drops a trailing zone id (`2023-11-30T20:25:00Z[UTC]` -> `2023-11-30T20:25:00Z`), as `domain/event_time.py` does for event times. Test: `tests/test_fact_said_time.py`.
+- `CHANGELOG.md`: the freshness gate entry quoted 0.746 for both fixes, measured with the first, broader gate; as shipped it is 0.738 (re-measured).
+- `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
+
 ## 2026-10-25 - View freshness gate and fact statement time, both on by default
 
-o500 (#168): a View kept leading with a stale value when the newer statement was a same-slot occurrence the fold ignores, and fact lines carried only event time, so a later statement about an earlier event read as older. Recall-only o500 A/B (one run per arm): both off 0.712, said time 0.738 (+0.026, paired 95% CI +0.002 to +0.048), both 0.746. That run's gate also demoted on newer statements in other slots of the same subject; E2E-17 showed this is wrong (a newer book count demoted the coin count), and on o500 only 1 of its 15 demotions changed an answer (a win, from a same-slot occurrence), so the shipped gate keeps only the same-slot rule. The narrowed gate is not re-measured.
+o500 (#168): a View kept leading with a stale value when the newer statement was a same-slot occurrence the fold ignores, and fact lines carried only event time, so a later statement about an earlier event read as older. Recall-only o500 A/B (one run per arm): both off 0.712, said time 0.738 (+0.026, paired 95% CI +0.002 to +0.048). A first gate version also demoted on newer statements in other slots of the same subject; E2E-17 showed this is wrong (a newer book count demoted the coin count), and on o500 only 1 of its 15 demotions changed an answer (a win, from a same-slot occurrence), so the shipped gate keeps only the same-slot rule. Re-measured as shipped: gate alone 0.714, gate and said time 0.738; the gate fired once in 500 questions (that win, no losses).
 
 - `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_FRESHNESS_GATE` (new, on; requires scalar view authority): `domain/scalar_view_freshness.py` (new) finds occurrences in the verdict's exact slot with a later `valid_at`. `services/recall_pipeline.py`: a current (not counted) View or expiry verdict with one is advisory instead of leading; `has_foundation` is unchanged and the audit records `stale_by`. Hits kept out of the ranked list still count; occurrences reach recall only with the counting lane on.
 - `MENHIR_FRONTIER_FACT_SAID_TIME` (new, on): fact queries (`infrastructure/cypher.py`, `infrastructure/memory_queries.py`) read the edge `reference_time` as `said_at`; with the flag on, `TemporalFact.said_at`, the API item (`api/routes_support.py`, `mcp/formatters.py`) and the context line (`services/context_builder.py`: `<happened> | said <date> | <fact>`) carry it.
@@ -110,10 +116,4 @@ In the LME pilot a counting namespace failed inside the pass (a provider 500), y
 - `.agent/default-off-features.md`: the mode moves to a "graduated to default-on" section.
 - Tests: new upgrade test in `tests/test_release_config_upgrade.py` for unset versus pinned modes. Changed: `tests/e2e/test_e2e_19_fresh_install.py` (default-on expectations and opt-out pin).
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-10-14 - Scan release archives from private output directories
-
-- `deploy/build_release_image.py`: bind only the public image archive into each scanner, keeping private parent directories and sibling artifacts inaccessible.
-- `tests/test_build_release_image.py`: require the archive-only read-only bind for both Syft and Grype.
-- `.agent/reviews/menhir-release-container-audit-2026-10-14.md`, `.agent/plans/menhir-168-phase0-baseline-contract.md`: record the real unpublished image/fork checks, scanner reproduction, upstream-base scan refusal and remaining #168/#123 gates. Runtime defaults are unchanged.
 

@@ -1,3 +1,9 @@
+## 2026-10-14 - Scan release archives from private output directories
+
+- `deploy/build_release_image.py`: bind only the public image archive into each scanner, keeping private parent directories and sibling artifacts inaccessible.
+- `tests/test_build_release_image.py`: require the archive-only read-only bind for both Syft and Grype.
+- `.agent/reviews/menhir-release-container-audit-2026-10-14.md`, `.agent/plans/menhir-168-phase0-baseline-contract.md`: record the real unpublished image/fork checks, scanner reproduction, upstream-base scan refusal and remaining #168/#123 gates. Runtime defaults are unchanged.
+
 ## 2026-10-21 - Make OAuth JWKS-fetch 503s diagnosable
 
 - Ported from 0847c6e on `refactor/file-size-refactor`. Diagnostics only; no auth outcome changes.
