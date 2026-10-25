@@ -1,3 +1,13 @@
+## 2026-10-25 - Scalar verdict gate on by default; observation recall gated by default
+
+On o500 the scalar lane lost to lanes-off (0.618 vs 0.686): off-topic verdicts and raw observation quotes took the slots of answer-bearing memories (#168). With both changes, counted-rw scores 0.694 (lanes-off 0.686; parity, not yet a significant gain).
+
+- `config/settings_model.py`: `MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY` defaults to 0.675 (raw cosine 0.35, #300's bench value), was 0 (off).
+- `MENHIR_PERSONAL_MEMORY_SCALAR_OBSERVATION_RECALL` (new; `gated` default, `all`, `off`): which raw observations enter the ranked list. `gated` keeps those at or above the verdict gate; `all` is the old behavior; `off` keeps none. Slots still feed the authority and history lanes, and a skipped observation still resolves the query subject (G17).
+- `domain/retrieval_tuning.py`, `services/recall_pipeline.py`: the mode, validated to the three values.
+- `.env.example`, `docs/agreement-settings.md`, `tests/test_shipped_agreement_profile.py`: the new default and setting. `tests/test_scalar_verdict_min_similarity.py`: default assertion. `tests/test_scalar_observation_recall.py` (new).
+- `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
+
 ## 2026-10-24 - Agent episodes cannot supersede user-stated facts; Graphiti fork 0.31.2.post1
 
 For agent-written memories (#168, plan `menhir-agent-memory-writer-plan-2026-10-23` P1).
@@ -89,13 +99,6 @@ In the LME pilot a counting namespace failed inside the pass (a provider 500), y
 - `.agent/default-off-features.md`: the mode moves to a "graduated to default-on" section.
 - Tests: new upgrade test in `tests/test_release_config_upgrade.py` for unset versus pinned modes. Changed: `tests/e2e/test_e2e_19_fresh_install.py` (default-on expectations and opt-out pin).
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-10-13 - Assess Anthropic Scion as prior art for revision intelligence
-
-- `docs/research/prior-art/anthropic-scion-source-control-comparison.md`: dated comparison of Anthropic's proprietary Scion, its open-source status, Git-compatible alternatives, Menhir overlap and risks; no VCS replacement proposed.
-- `.agent/plans/backlog/menhir-scion-exploration-2026-10-13.md`: proposed gated inventory, benchmark and limited-spike plan for Git revision metadata and content-addressed sync, with proof obligations and stop conditions.
-- `docs/research/prior-art/README.md`, `docs/research/README.md`, `.agent/plans/backlog/README.md`: route the research and plan in canonical indexes.
-- `CHANGELOG-archive.md`: retain the oldest dated current entry.
 
 ## 2026-10-14 - Scan release archives from private output directories
 

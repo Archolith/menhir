@@ -1128,6 +1128,8 @@ async def run_recall(
                 if service.scalar_view_authority_enabled else set()
             )
             obs_added = 0
+            _obs_recall_mode = tuning.scalar_observation_recall
+            _obs_recall_min_sim = float(tuning.scalar_verdict_min_similarity or 0.0)
             obs_slots: set[tuple[str, str, str, str, str]] = set()
             # G17 (4a.3): subject_uuid -> subject_display of each surfaced observation, used to
             # resolve the QUERY's subject INDEPENDENTLY of the injection's provenance row (a named
@@ -1168,6 +1170,15 @@ async def run_recall(
                     if aid in obs_dedup_skip:
                         continue
                     if aid in existing_uuids:
+                        continue
+                    # Observation recall mode (#168): the slot is already collected above for the
+                    # authority and history lanes; only the raw quote is kept out of the ranked
+                    # list, where it displaced memories. The subject display still feeds G17.
+                    if _obs_recall_mode == "off" or (
+                        _obs_recall_mode == "gated" and float(cos) < _obs_recall_min_sim
+                    ):
+                        if _subj:
+                            obs_subject_displays[_subj] = str(hit.get("subject_display") or "")
                         continue
                     if (_counted_authority_only and str(hit.get("operation")) == "occurrence"
                             and _subj and _attr and _value_kind):
