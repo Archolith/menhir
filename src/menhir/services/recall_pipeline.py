@@ -1168,7 +1168,7 @@ async def run_recall(
                             float(cos), _obs_slot_best_cosine.get(_slot, float("-inf")))
                         _obs_times.append(ObservationTime(
                             assertion_id=aid, slot=_slot, operation=str(hit.get("operation") or ""),
-                            valid_at=hit.get("valid_at"), cosine=float(cos)))
+                            valid_at=hit.get("valid_at")))
                     # History-only mode deliberately collects the matched slot but does not inject
                     # the raw observation or run scalar-state authority/suppression work.
                     if not service.scalar_view_authority_enabled:
@@ -1494,8 +1494,7 @@ async def run_recall(
                                 expiry_stale_by: tuple[str, ...] = ()
                                 if e_founded and tuning.scalar_view_freshness_gate:
                                     expiry_stale_by = newer_unfolded_evidence(
-                                        (subj, attr, scp, vk, un), exp.valid_at, _obs_times,
-                                        min_similarity=_verdict_min_sim)
+                                        (subj, attr, scp, vk, un), exp.valid_at, _obs_times)
                                 e_leads = bool(e_founded) and not expiry_stale_by
                                 ename = (
                                     f"{exp.subject_display or 'user'}'s {attr}: EXPIRED. last known "
@@ -1600,12 +1599,12 @@ async def run_recall(
                     has_foundation and not count_wording
                     and _intent != QueryIntent.PREVIOUS_VALUE
                 )
-                # Freshness gate: newer evidence the fold ignores keeps the View advisory.
+                # Freshness gate: a newer same-slot occurrence (unfolded) keeps the View advisory.
+                # Not for counted Views: those are built from occurrences.
                 view_stale_by: tuple[str, ...] = ()
-                if view_leads and tuning.scalar_view_freshness_gate:
+                if view_leads and not view_counted and tuning.scalar_view_freshness_gate:
                     view_stale_by = newer_unfolded_evidence(
-                        (subj, attr, scp, vk, un), view.get("valid_at"), _obs_times,
-                        min_similarity=_verdict_min_sim)
+                        (subj, attr, scp, vk, un), view.get("valid_at"), _obs_times)
                     view_leads = not view_stale_by
                 authority_candidate = {
                     "uuid": vuuid, "name": vname, "content": vname,

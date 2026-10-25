@@ -1,16 +1,13 @@
 """Freshness gate for scalar authority verdicts (#168).
 
-A current or expired verdict leads the answer with the fold's value. Newer evidence the fold does
-not use can make that value stale:
+A current or expired verdict leads the answer with the fold's value. Once a slot has a stated
+absolute, occurrences in that slot never move it (``scalar_state_fold``), so "just finished my 5th
+project" leaves a View of 4 in place. When the recall's observation hits hold a newer occurrence in
+the verdict's own slot, the verdict is shown but does not lead.
 
-* an occurrence in the same slot: once a slot has a stated absolute, occurrences never move it
-  (``scalar_state_fold``), so "just finished my 5th project" leaves a View of 4 in place;
-* a newer assertion about the same subject that landed in another slot of the same value kind
-  ("switched to the F-150" under a different attribute than the car the View tracks).
-
-When the recall's observation hits hold such evidence, the verdict is shown but does not lead.
-Times are the assertions' ``valid_at``, the only time the observation query returns. A missing or
-unparseable time never demotes.
+Only the exact slot counts. A newer assertion in another slot of the same subject and value kind
+is not evidence: the subject is usually the user, so "I have 22 books" would demote a coin count
+(E2E-17). Times are the assertions' ``valid_at``; a missing or unparseable time never demotes.
 """
 
 from __future__ import annotations
@@ -31,33 +28,23 @@ class ObservationTime:
     slot: Slot
     operation: str
     valid_at: str | None
-    cosine: float
 
 
 def newer_unfolded_evidence(
     slot: Slot,
     verdict_valid_at: str | None,
     observations: Iterable[ObservationTime],
-    *,
-    min_similarity: float,
 ) -> tuple[str, ...]:
-    """Assertion ids that are newer than the verdict and that its fold does not account for."""
+    """Ids of same-slot occurrences newer than the verdict (the fold ignores occurrences)."""
     verdict_time = parse_iso8601(verdict_valid_at)
     if verdict_time is None:
         return ()
-    subject, _, _, value_kind, _ = slot
     stale_by: list[str] = []
     for obs in observations:
-        if obs.slot[0] != subject:
+        if obs.slot != slot or obs.operation != "occurrence":
             continue
         obs_time = parse_iso8601(obs.valid_at)
         if obs_time is None or obs_time <= verdict_time:
-            continue
-        if obs.slot == slot:
-            # Absolutes and deltas in the slot are folded into the verdict; occurrences are not.
-            if obs.operation != "occurrence":
-                continue
-        elif obs.slot[3] != value_kind or obs.cosine < min_similarity:
             continue
         stale_by.append(obs.assertion_id)
     return tuple(stale_by)
