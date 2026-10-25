@@ -224,6 +224,7 @@ class RecallTemporalFact(BaseModel):
     is_current_belief: bool = True
     temporal_role: str = "current_belief"
     event_time: str | None = None
+    said_at: str | None = None
 
 
 class RecallMemory(BaseModel):

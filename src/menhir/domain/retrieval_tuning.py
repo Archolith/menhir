@@ -258,6 +258,10 @@ class RetrievalTuningConfig:
     # "all" (every hit), "gated" (hits at or above scalar_verdict_min_similarity) or "off" (none).
     # Slots are collected for the authority and history lanes in every mode.
     scalar_observation_recall: str = "all"
+    # A current or expired verdict stops leading when the recall's observation hits hold newer
+    # evidence its fold ignores (MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_FRESHNESS_GATE; see
+    # domain/scalar_view_freshness.py). The verdict is still shown, as advisory.
+    scalar_view_freshness_gate: bool = False
     # How a retrieved fact edge enters the candidate pool:
     #   "standalone" — inject the terse EntityEdge.fact as its own CandidateData (edge-as-
     #     answer). Measured net-NEGATIVE at N=30 (rung A′, 0.300->0.033): terse floor-exempt
@@ -321,6 +325,9 @@ class RetrievalTuningConfig:
     # Render persisted anchored-time contracts as fact event times (MENHIR_ANCHORED_TIME_RENDER).
     # Presentation only: ranking and admission are identical with it on or off.
     enable_anchored_time_render: bool = False
+    # Put each fact edge's statement time (its reference_time) on recall temporal facts as
+    # said_at, rendered as "said <time>" (MENHIR_FRONTIER_FACT_SAID_TIME). Presentation only.
+    enable_fact_said_time: bool = False
     # Label unexpired facts whose own end (invalid_at) has passed as "ended" instead of
     # "current_belief" (MENHIR_ANCHORED_TIME_EXPIRY). Presentation only, like the render flag.
     enable_anchored_time_expiry: bool = False

@@ -1,3 +1,14 @@
+## 2026-10-25 - View freshness gate and fact statement time, both on by default
+
+o500 (#168): a View kept leading with a stale value when the newer statement was a same-slot occurrence the fold ignores, and fact lines carried only event time, so a later statement about an earlier event read as older. Recall-only o500 A/B (one run per arm): both off 0.712, said time 0.738 (+0.026, paired 95% CI +0.002 to +0.048), both 0.746. That run's gate also demoted on newer statements in other slots of the same subject; E2E-17 showed this is wrong (a newer book count demoted the coin count), and on o500 only 1 of its 15 demotions changed an answer (a win, from a same-slot occurrence), so the shipped gate keeps only the same-slot rule. The narrowed gate is not re-measured.
+
+- `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_FRESHNESS_GATE` (new, on; requires scalar view authority): `domain/scalar_view_freshness.py` (new) finds occurrences in the verdict's exact slot with a later `valid_at`. `services/recall_pipeline.py`: a current (not counted) View or expiry verdict with one is advisory instead of leading; `has_foundation` is unchanged and the audit records `stale_by`. Hits kept out of the ranked list still count; occurrences reach recall only with the counting lane on.
+- `MENHIR_FRONTIER_FACT_SAID_TIME` (new, on): fact queries (`infrastructure/cypher.py`, `infrastructure/memory_queries.py`) read the edge `reference_time` as `said_at`; with the flag on, `TemporalFact.said_at`, the API item (`api/routes_support.py`, `mcp/formatters.py`) and the context line (`services/context_builder.py`: `<happened> | said <date> | <fact>`) carry it.
+- `domain/retrieval_tuning.py`, `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: the two settings; the shipped settings default on, the `RetrievalTuningConfig` engine defaults stay off.
+- `docs/agreement-settings.md`, `tests/test_shipped_agreement_profile.py`: the freshness gate in the shipped profile.
+- Tests: new `tests/test_scalar_view_freshness.py`, `tests/test_fact_said_time.py`.
+- `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
+
 ## 2026-10-25 - Scalar verdict gate on by default; observation recall gated by default
 
 On o500 the scalar lane lost to lanes-off (0.618 vs 0.686): off-topic verdicts and raw observation quotes took the slots of answer-bearing memories (#168). With both changes, counted-rw scores 0.694 (lanes-off 0.686; parity, not yet a significant gain).
@@ -106,12 +117,3 @@ In the LME pilot a counting namespace failed inside the pass (a provider 500), y
 - `tests/test_build_release_image.py`: require the archive-only read-only bind for both Syft and Grype.
 - `.agent/reviews/menhir-release-container-audit-2026-10-14.md`, `.agent/plans/menhir-168-phase0-baseline-contract.md`: record the real unpublished image/fork checks, scanner reproduction, upstream-base scan refusal and remaining #168/#123 gates. Runtime defaults are unchanged.
 
-## 2026-10-21 - Make OAuth JWKS-fetch 503s diagnosable
-
-- Ported from 0847c6e on `refactor/file-size-refactor`. Diagnostics only; no auth outcome changes.
-- `api/oauth.py`: a failed JWKS fetch logs `OAuth JWKS fetch failed` with the failure kind, the message (JWKS URI redacted to scheme://host/path), elapsed seconds, timeout, `force_refresh` and whether keys were cached; a payload with no `keys` list logs as `MalformedJWKS`. Process-wide `JWKS_REFRESH_STATS` counts failures.
-- `api/auth.py`: an OAuth `server_error` 503 logs the request id the client receives, the path, the detail and the cause's type.
-- `api/production_routes.py`: `/readyz` adds an `oauth_jwks` block (`refresh_failures`, `last_failure_at`, `last_failure_kind`), per process and never affecting readiness.
-- `docs/runbooks/oauth-remote-mcp-checklist.md`: failure-mode row for the 503. The original `deploy/RUNBOOK.md` section was deployment-specific, and that file no longer lives in this repo.
-- Tests: new `tests/test_oauth_jwks_diagnostics.py`.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
