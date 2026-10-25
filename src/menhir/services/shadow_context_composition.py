@@ -1,6 +1,6 @@
 """Stage 1 — shadow-mode context composition (observe-only, never applied).
 
-.agent/plans/menhir-context-composition-production-integration.md lays out the 4-stage
+.agent/archive/plans/menhir-context-composition-production-integration.md lays out the 4-stage
 rollout path from the Extraction Lab Phase 1-5 investigation
 (.agent/plans/menhir-extraction-context-ablation-handoff.md) to production trust. This
 module is Stage 1: for every ingested episode, best-effort retrieve real candidate

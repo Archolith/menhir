@@ -14,7 +14,7 @@ to the root problem.
 
 **Work on fixing real production extraction — the "suburbs" failure below — not on continuing the
 context-composition rollout (Stages 2-4 of
-`.agent/plans/menhir-context-composition-production-integration.md`), and not on running more
+`.agent/archive/plans/menhir-context-composition-production-integration.md`), and not on running more
 shadow-mode candidate-selection/judge validation labs (`shadow_semantic_similarity_lab.py`,
 `shadow_llm_judge_lab.py`, `shadow_contrastive_judge_lab.py`).** Those are all downstream of an
 assumption — "once we know which prior context to show the extractor, extraction will correctly
@@ -115,7 +115,7 @@ synthetic 0/1-episode simulation.
 - `.agent/archive/plans/menhir-extraction-context-ablation-handoff.md` — Phase 1-5, the full downstream
   investigation (candidate selection given correct metadata — assumes extraction already
   succeeded, which is exactly the assumption this handoff is questioning)
-- `.agent/plans/menhir-context-composition-production-integration.md` — the 4-stage rollout plan
+- `.agent/archive/plans/menhir-context-composition-production-integration.md` — the 4-stage rollout plan
   for wiring Stage 1's shadow composition into production; explicitly paused pending more
   validation, and irrelevant to fixing the extraction failure itself
 - `.agent/reviews/menhir-shadow-context-composition-facet-instability-2026-07-16.md`,

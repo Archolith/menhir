@@ -3368,7 +3368,7 @@ def test_pid_alive_true_for_current_process_false_for_bogus() -> None:
 
 # ---------------------------------------------------------------------------
 # Stage 1 shadow-mode context composition wiring
-# (.agent/plans/menhir-context-composition-production-integration.md)
+# (.agent/archive/plans/menhir-context-composition-production-integration.md)
 # ---------------------------------------------------------------------------
 
 class _FakeGraphAdapterForShadow:

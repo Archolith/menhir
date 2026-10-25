@@ -150,7 +150,7 @@ Not yet done, in priority order:
 
 - `.agent/reviews/menhir-shadow-context-composition-facet-instability-2026-07-16.md` — the finding
   this experiment responds to
-- `.agent/plans/menhir-context-composition-production-integration.md` — Stage 1 spec and execution
+- `.agent/archive/plans/menhir-context-composition-production-integration.md` — Stage 1 spec and execution
   result
 - `src/menhir/explorer/shadow_semantic_similarity_lab.py` — fixture assembly + pure logic
 - `scripts/run_shadow_semantic_similarity_lab.py` — runner (real embedding calls)

@@ -892,7 +892,7 @@ class MemoryQueryRepository:
         """Fetch fact-EDGE identity (not just node state) for candidate entity nodes.
 
         Stage 1 of shadow-mode context composition
-        (.agent/plans/menhir-context-composition-production-integration.md) selects at
+        (.agent/archive/plans/menhir-context-composition-production-integration.md) selects at
         fact-edge granularity, not entity granularity -- one entity can carry many
         competing fact-edges (e.g. "Rachel moved to Chicago" / "Rachel moved to Austin" /
         "Rachel moved to the suburbs" are three distinct RELATES_TO edges on the same

@@ -642,7 +642,7 @@ class ScalarHistoryKind(ViewKind):
     Payload: bounded JSON entries array (latest N assertions with typed values and provenance),
     plus first-class identity/count/signature/time-bound properties for inspection.
 
-    See `.agent/plans/menhir-scalar-history-projection-plan.md`.
+    See `.agent/archive/plans/menhir-scalar-history-projection-plan.md`.
     """
 
     name = "scalar_history"

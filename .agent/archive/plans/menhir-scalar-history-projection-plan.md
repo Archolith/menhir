@@ -1,4 +1,17 @@
+---
+artifact_schema: 1
+artifact_type: plan
+artifact_status: IMPLEMENTED
+---
+
 # Menhir Scalar History Projection
+
+> **Disposition (archived 2026-10-24):** Slices 1-3 implemented; the "READY FOR IMPLEMENTATION" and
+> "unbuilt" lines below are stale. `rebuild_scalar_history` is in
+> `src/menhir/services/scalar_state_service.py` and the recall lane in
+> `src/menhir/services/recall_pipeline.py`, behind `personal_memory_scalar_history_enabled`
+> (default off). `.agent/CHANGELOG.md` records the ship. Slice 4 is only partly present and Slice 5
+> was not found in this repo; both are residuals for a new plan if wanted.
 
 ## Compact Summary
 

@@ -19,7 +19,7 @@ Pure and offline: no Neo4j, no LLM. The same function backs both the live projec
 The existing `scalar_state` View remains the authoritative current-state projection
 and continues to abstain when a slot has no absolute anchor.
 
-See `.agent/plans/menhir-scalar-history-projection-plan.md`.
+See `.agent/archive/plans/menhir-scalar-history-projection-plan.md`.
 """
 
 from __future__ import annotations

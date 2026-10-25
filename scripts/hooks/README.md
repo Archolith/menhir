@@ -172,7 +172,7 @@ It records that a memory was written **in the context of** a captured turn. It i
 human said the memory's content. Every id involved is supplied by whoever holds the agent key, and
 `/api/turn-evidence` accepts `role` and `declarant` from the caller — so a client can post a turn
 claiming `declarant='user'` and cite it. Treat the edge as provenance, never as verification. See the
-CORRECTION in `.agent/plans/menhir-evidence-projection-episodes.md`.
+CORRECTION in `.agent/archive/plans/menhir-evidence-projection-episodes.md`.
 
 ---
 

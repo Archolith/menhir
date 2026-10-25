@@ -1,5 +1,5 @@
 """Manual smoke test for Stage 1 shadow-mode context composition
-(.agent/plans/menhir-context-composition-production-integration.md).
+(.agent/archive/plans/menhir-context-composition-production-integration.md).
 
 Runs a real episode through the ACTUAL production ingest path
 (IngestService.ingest_episode -> queue_episode_for_enrichment ->

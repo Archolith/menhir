@@ -1,5 +1,5 @@
 """Unit tests for Stage 1 shadow-mode context composition
-(.agent/plans/menhir-context-composition-production-integration.md).
+(.agent/archive/plans/menhir-context-composition-production-integration.md).
 
 Pure-logic tests against fake llm/graph_adapter/graphiti_client -- no live Neo4j, no real
 LLM. Every status-vocabulary path is tested explicitly (not just the happy path): this

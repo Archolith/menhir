@@ -1,10 +1,19 @@
+---
+artifact_schema: 1
+artifact_type: plan
+artifact_status: DEFERRED
+---
+
 # Menhir Context-Composition Production Integration — Handoff Plan
 
-Status: STAGE 1 IMPLEMENTED AND SMOKE-TESTED (2026-07-16); Stages 2-4 not started. Written
-**Last verified:** 2026-08-18 — CONSISTENT with STAGE 1 IMPLEMENTED. `MemoryFacetSet` 12 hits, `abstained_no_eligible_candidates` 1.
+> **Disposition (2026-10-23, archived 2026-10-24):** DEFERRED (deferred by owner 2026-10-23; Stage 1
+> shadow hook shipped 2026-07-16 in `c7d39b0`/`25c2140`/`488bfcc`, Stages 2-4 blocked on Stage 1
+> exit gate and overtaken by the `TurnEvidence -> TypedAssertion -> ScalarStateView` pipeline).
+> The Stage 1 hook stays in the code behind `shadow_context_composition` (default off).
 
+Status: STAGE 1 IMPLEMENTED AND SMOKE-TESTED (2026-07-16); Stages 2-4 not started. Written
 2026-07-16, immediately following the close of the Extraction Lab Phase 1-5 investigation. Stage 1
-was built the same day (`.agent/plans/menhir-context-composition-production-integration.md`'s own
+was built the same day (this plan's own
 Stage 1 section below), committed in `c7d39b0`/`25c2140`/`488bfcc`, and run against real ingest
 traffic — see "Stage 1 execution result" below for what that run actually found.
 

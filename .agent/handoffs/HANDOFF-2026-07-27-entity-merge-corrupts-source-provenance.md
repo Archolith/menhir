@@ -108,6 +108,6 @@ channel, never a person. Do not treat it as an identity.
 ## Explicitly out of scope
 
 Do not fold this into the evidence-projection work
-(`IdeaProjects/projects/archolith/.agent/plans/menhir-evidence-projection-episodes.md`). That plan
+(`.agent/archive/plans/menhir-evidence-projection-episodes.md`). That plan
 consumes provenance; this bug is in how provenance is written. They should be fixed and reviewed
 separately.

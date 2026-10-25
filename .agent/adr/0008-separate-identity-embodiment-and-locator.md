@@ -5,7 +5,7 @@
 - **Date:** 2026-09-21
 - **Deciders:** ctharvey
 - **Related:** `.agent/data_models.md`, `.agent/workflows/artifact_authoring.md`,
-  `.agent/plans/menhir-artifact-semantic-model.md`,
+  `.agent/archive/plans/menhir-artifact-semantic-model.md`,
   `.agent/plans/menhir-work-artifact-reconciliation-2026-08-11.md`
 
 ## Context

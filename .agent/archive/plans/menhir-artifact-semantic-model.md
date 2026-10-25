@@ -1,8 +1,18 @@
+---
+artifact_schema: 1
+artifact_type: plan
+artifact_status: IMPLEMENTED
+---
+
 # menhir — Artifact semantic model
 
-Status: IMPLEMENTED (2026-08-03). Design approved 2026-08-02; shipped in five slices plus
-**Last verified:** 2026-08-18 — CONSISTENT with IMPLEMENTED. `ArtifactLocation` 8 hits. Gap: `CurrentPlanView` is 0 hits — that piece is not in `src/`.
+> **Disposition (2026-08-03, archived 2026-10-24):** Implemented. The `WorkArtifact` model
+> (`src/menhir/domain/work_artifact.py`), its repository and the seven artifact MCP tools shipped.
+> The derived views in §6 (`CurrentPlanView`, `ImplementationProgressView`, `ReviewCoverageView`)
+> were never built (0 hits in `src/` and `tests/` on 2026-10-24); the MVP inventory review lists
+> them as not required. Re-plan them separately if they are wanted.
 
+Status: IMPLEMENTED (2026-08-03). Design approved 2026-08-02; shipped in five slices plus
 shape validation and the MCP surface, `37e4039..ea34c1d`. Sections below were reconciled
 with the shipped code — where design and implementation diverged, the implementation is
 described and the reason for the divergence is stated inline.

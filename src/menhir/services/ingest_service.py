@@ -120,7 +120,7 @@ class IngestService(IngestQueueMixin, IngestWorkerMixin, IngestIntakeMixin):
     _enrichment_enabled: bool = field(default=True, init=False, repr=False)
     _enrichment_disabled_reason: str = field(default="", init=False, repr=False)
     # Stage 1 shadow-mode context composition (observe-only; see
-    # .agent/plans/menhir-context-composition-production-integration.md). Off by default.
+    # .agent/archive/plans/menhir-context-composition-production-integration.md). Off by default.
     _shadow_context_composition: bool = field(default=False, init=False, repr=False)
     _shadow_composition_timeout_s: float = field(default=30.0, init=False, repr=False)
     # Source-memory lane (MENHIR_FRONTIER_SOURCE_MEMORIES). Off by default: no

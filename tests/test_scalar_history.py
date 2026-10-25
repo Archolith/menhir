@@ -4,7 +4,7 @@ Pure/offline. Proves that materializable assertions produce correct ordered hist
 with deterministic signatures, operation counts, source-time ordering, and bounded payloads.
 Also tests the ViewKind's key, signature, surface, write_props, and parse methods.
 
-See `.agent/plans/menhir-scalar-history-projection-plan.md`.
+See `.agent/archive/plans/menhir-scalar-history-projection-plan.md`.
 """
 
 from __future__ import annotations

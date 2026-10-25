@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-16
 **Scope:** `src/menhir/services/shadow_context_composition.py` (Stage 1 of
-`.agent/plans/menhir-context-composition-production-integration.md`), and the LLM prompt in
+`.agent/archive/plans/menhir-context-composition-production-integration.md`), and the LLM prompt in
 `src/menhir/infrastructure/llm.py` that produces its `shadow_facet` / `shadow_state_family` labels.
 **Commits:** `c7d39b0` (build), `25c2140` (review-pass fixes), `488bfcc` (smoke-test fixes), `ac96484`
 (this result written up + broad smoke script committed).
@@ -187,7 +187,7 @@ selects anything.
 
 ## References
 
-- `.agent/plans/menhir-context-composition-production-integration.md` — "Stage 1 execution result"
+- `.agent/archive/plans/menhir-context-composition-production-integration.md` — "Stage 1 execution result"
   subsection (short-form version of this finding, written the same day)
 - `.agent/archive/plans/menhir-extraction-context-ablation-handoff.md` — Phase 5, the Recall-Labs-only
   investigation this stage carries forward (its winning `predict_candidate_aware_ranked` approach

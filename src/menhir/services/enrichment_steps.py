@@ -117,8 +117,9 @@ class EnrichmentContext:
     # Callback
     get_queue_depth: Callable[[], int]
     # Stage 1 shadow-mode context composition (observe-only; see shadow_context_composition.py
-    # and .agent/plans/menhir-context-composition-production-integration.md). Off by default —
-    # every EnrichmentContext construction site that predates this field gets the safe default.
+    # and .agent/archive/plans/menhir-context-composition-production-integration.md).
+    # Off by default — every EnrichmentContext construction site that predates this field gets
+    # the safe default.
     shadow_context_composition: bool = False
     shadow_composition_timeout_s: float = 30.0
     # Registers a fire-and-forget background task so IngestService can track/drain it at

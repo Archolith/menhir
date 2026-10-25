@@ -126,7 +126,7 @@ failure is a one-off or a pattern.
   responds to
 - `.agent/reviews/menhir-shadow-semantic-similarity-lab-2026-07-16.md` — where the boundaries case
   was first found (similarity score 0.5794, above every true positive)
-- `.agent/plans/menhir-context-composition-production-integration.md` — Stage 1 spec, cross-referenced
+- `.agent/archive/plans/menhir-context-composition-production-integration.md` — Stage 1 spec, cross-referenced
 - `src/menhir/explorer/shadow_contrastive_judge_lab.py` — fixture assembly, prompt, parsing, scoring
 - `scripts/run_shadow_contrastive_judge_lab.py` — runner (real LLM calls)
 - `results/shadow_contrastive_judge_lab.json` — full raw responses and audit trails for all 3 cases
