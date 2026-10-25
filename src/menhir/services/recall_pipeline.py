@@ -197,6 +197,7 @@ async def _build_source_memories(
     *,
     include_session: bool,
     content_query_vector: list[float] | None,
+    sources: tuple[str, ...] | None = None,
 ) -> tuple[tuple[SourceMemory, ...] | None, str | None, int]:
     """Run the additive source-memory lane; never raises.
 
@@ -205,6 +206,8 @@ async def _build_source_memories(
     that limit (an explicit request enables the lane for this call even when the flag is off).
     The lane is also off for ``include_session=False`` calls: the section carries
     SESSION-scoped raw episodes, and that flag means promoted knowledge only.
+    ``sources`` keeps only episodes with one of those ingest sources; it does not turn the
+    lane on by itself.
     """
     if source_memory_limit is None:
         effective_limit = tuning.source_memory_limit if tuning.enable_source_memories else 0
@@ -223,6 +226,7 @@ async def _build_source_memories(
             limit=effective_limit,
             namespace=namespace,
             **_embedding_model_kwargs(service),
+            **({"sources": sources} if sources is not None else {}),
         )
         section: list[SourceMemory] = []
         for row in rows:
@@ -572,6 +576,7 @@ async def run_recall(
     update_access: bool = True,
     source_memory_limit: int | None = None,
     counted_verdict_limit: int | None = None,
+    source_memory_sources: tuple[str, ...] | None = None,
 ) -> RecallResult:
     # update_access=False makes recall a pure read: no last_accessed touches, no
     # edge-weight reinforcement, no rehydration scheduling. For measurement probes
@@ -859,6 +864,7 @@ async def run_recall(
     source_memory_task = asyncio.create_task(_build_source_memories(
         service, query, namespace, tuning, source_memory_limit,
         include_session=include_session, content_query_vector=content_query_vector,
+        sources=source_memory_sources,
     ))
 
     # Plan 1b (staged; default "rrf" == byte-identical): normalize graphiti's

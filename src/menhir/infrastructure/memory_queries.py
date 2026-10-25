@@ -415,11 +415,15 @@ class MemoryQueryRepository:
         limit: int = 10,
         namespace: str | None = None,
         model: str | None = None,
+        sources: Sequence[str] | None = None,
     ) -> list[dict[str, object]]:
         """Cosine hits over Menhir `:Episodic` content embeddings (source-memory lane).
 
         With ``model``, only vectors stamped by that embedder are compared: a different model of
         the same dimension lives in a different space (audit F2).
+
+        With ``sources``, only episodes whose ingest ``source`` is one of those exact strings
+        match, before the limit is applied. An empty sequence matches nothing; ``None`` is no filter.
 
         Read-only; pairs with the ingest-side `set_episode_content_embedding` write.
         Uses the same shared structural/visibility predicates and the shared
@@ -451,6 +455,9 @@ class MemoryQueryRepository:
         if model is not None:
             where.append("coalesce(n.content_embedding_model, '') = $embedding_model")
             params["embedding_model"] = model
+        if sources is not None:
+            where.append("n.source IN $sources")
+            params["sources"] = list(sources)
         # menhir #171: when scoped, lead with the index-friendly prefilter so the planner can
         # seek the :Episodic(namespace)/:Episodic(group_id) RANGE indexes. It is a superset;
         # tenant_scope_cypher below still decides membership. Unscoped (None) is unchanged.

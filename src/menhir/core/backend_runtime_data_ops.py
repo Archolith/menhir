@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from menhir.domain.namespace import DEFAULT_NAMESPACE, namespace_to_group_id
-from menhir.domain.recall import parse_query_preset
+from menhir.domain.recall import normalize_source_memory_sources, parse_query_preset
 from menhir.domain.session import new_session
 from menhir.infrastructure.text_io import read_text_utf8
 from menhir.services.project_ingest import build_project_narrative
@@ -320,6 +320,7 @@ class RuntimeProviderDataOpsMixin:
         source_memory_limit: int | None = None,
         counted_verdict_limit: int | None = None,
         include_warden_status: bool = False,
+        source_memory_sources: list[str] | None = None,
     ) -> dict[str, Any]:
         # Map the env-driven frontier portions into the recall call. With no
         # MENHIR_FRONTIER_* set this is all-off -> today's ScoringService path; trace is
@@ -342,6 +343,11 @@ class RuntimeProviderDataOpsMixin:
             frontier_kwargs["source_memory_limit"] = int(source_memory_limit)
         if counted_verdict_limit is not None:
             frontier_kwargs["counted_verdict_limit"] = int(counted_verdict_limit)
+        if source_memory_sources is not None:
+            # The internal backend route skips RecallRequest, so validate here too.
+            frontier_kwargs["source_memory_sources"] = normalize_source_memory_sources(
+                source_memory_sources
+            )
         result = await self.built.recall_service.recall(
             query,
             preset=parse_query_preset(preset),
