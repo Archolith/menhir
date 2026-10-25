@@ -335,7 +335,11 @@ class MemorySettings:
     personal_memory_scalar_view_collapse_enabled: bool = False
     personal_memory_scalar_view_echo_drop_enabled: bool = False
     personal_memory_observation_dedup_enabled: bool = False
-    personal_memory_scalar_verdict_min_similarity: float = 0.0  # 0 = off; else min (1+cos)/2 per verdict slot
+    # 0 = off; else min (1+cos)/2 per verdict slot. 0.675 (raw cosine 0.35): on o500 the gate-off
+    # lane emitted verdicts that shared no word with the question for 72% of blocks (#168).
+    personal_memory_scalar_verdict_min_similarity: float = 0.675
+    # Which raw scalar observations enter the ranked list: all | gated | off (see retrieval_tuning).
+    personal_memory_scalar_observation_recall: str = "all"
     # Attribute reconciliation in the k-sample consistency gate. ON by default (lenient-agreement
     # defaults, 2026-09). When on, the samples
     # vote WITHOUT the free-text attribute name and the name is chosen modally afterwards (ties to the
@@ -775,6 +779,7 @@ class MemorySettings:
             enable_evidence_anchor=self.frontier_evidence_anchor,
             enable_fact_edges=self.frontier_fact_edges,
             scalar_verdict_min_similarity=self.personal_memory_scalar_verdict_min_similarity,
+            scalar_observation_recall=self.personal_memory_scalar_observation_recall,
             fact_edge_mode=self.frontier_fact_edge_mode,
             similarity_scale=self.frontier_similarity_scale,
             enable_assertion_shadow=self.frontier_shadow,
@@ -935,6 +940,7 @@ class MemorySettings:
             personal_memory_scalar_view_echo_drop_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_ECHO_DROP_ENABLED", default=str(cls.personal_memory_scalar_view_echo_drop_enabled))),
             personal_memory_observation_dedup_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED", default=str(cls.personal_memory_observation_dedup_enabled))),
             personal_memory_scalar_verdict_min_similarity=_parse_float(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY", default=str(cls.personal_memory_scalar_verdict_min_similarity)), env_var="MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY", minimum=0.0),
+            personal_memory_scalar_observation_recall=_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_OBSERVATION_RECALL", default=cls.personal_memory_scalar_observation_recall).strip().lower(),
             personal_memory_scalar_reconcile_attribute=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_ATTRIBUTE", default=str(cls.personal_memory_scalar_reconcile_attribute))),
             personal_memory_scalar_reconcile_scope=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_SCOPE", default=str(cls.personal_memory_scalar_reconcile_scope))),
             personal_memory_scalar_reconcile_subject=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_SUBJECT", default=str(cls.personal_memory_scalar_reconcile_subject))),

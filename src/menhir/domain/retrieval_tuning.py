@@ -254,6 +254,10 @@ class RetrievalTuningConfig:
     # Minimum query similarity (best per slot) for a scalar verdict to be emitted; 0 = off.
     # Neo4j vector.similarity.cosine scale, (1+cos)/2. MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY.
     scalar_verdict_min_similarity: float = 0.0
+    # Which raw scalar observations enter the ranked list (MENHIR_PERSONAL_MEMORY_SCALAR_OBSERVATION_RECALL):
+    # "all" (every hit), "gated" (hits at or above scalar_verdict_min_similarity) or "off" (none).
+    # Slots are collected for the authority and history lanes in every mode.
+    scalar_observation_recall: str = "all"
     # How a retrieved fact edge enters the candidate pool:
     #   "standalone" — inject the terse EntityEdge.fact as its own CandidateData (edge-as-
     #     answer). Measured net-NEGATIVE at N=30 (rung A′, 0.300->0.033): terse floor-exempt
@@ -337,6 +341,11 @@ class RetrievalTuningConfig:
             raise ValueError(
                 "scalar_verdict_min_similarity must be in [0.0, 1.0], "
                 f"got {self.scalar_verdict_min_similarity!r}"
+            )
+        if self.scalar_observation_recall not in ("all", "gated", "off"):
+            raise ValueError(
+                'scalar_observation_recall must be "all", "gated" or "off", '
+                f"got {self.scalar_observation_recall!r}"
             )
         if self.similarity_scale not in ("rrf", "normalized"):
             raise ValueError(
