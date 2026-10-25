@@ -322,7 +322,9 @@ def _build_temporal_facts(
                 is_current_belief=is_current,
                 temporal_role=temporal_role,
                 event_time=event_time_text(row) if event_time else None,
-                said_at=(str(row.get("said_at")) if said_time and row.get("said_at") else None),
+                # Drop a trailing zone id like [UTC] (Neo4j toString), as event_time does.
+                said_at=(str(row.get("said_at")).split("[", 1)[0].strip()
+                         if said_time and row.get("said_at") else None),
             )
             facts.append(fact)
         result[node_uuid] = tuple(facts)

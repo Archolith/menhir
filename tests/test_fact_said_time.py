@@ -38,6 +38,13 @@ def test_said_at_is_set_only_with_the_flag():
 
 
 @pytest.mark.unit
+def test_neo4j_zone_id_is_dropped():
+    (fact,) = _build_temporal_facts(
+        [dict(ROW, said_at="2023-11-30T20:25:00Z[UTC]")], said_time=True)["n1"]
+    assert fact.said_at == "2023-11-30T20:25:00Z"
+
+
+@pytest.mark.unit
 def test_missing_reference_time_stays_none():
     (fact,) = _build_temporal_facts([dict(ROW, said_at=None)], said_time=True)["n1"]
     assert fact.said_at is None
