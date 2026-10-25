@@ -1,9 +1,18 @@
-# Titled-List Memory Shape (design note, NOT approved for build)
+---
+artifact_schema: 1
+artifact_type: plan
+artifact_status: IMPLEMENTED
+---
 
-Status: DESIGN NOTE. Raised 2026-07-27 by ctharvey: "maybe a special view or memory for just bare
-**Last verified:** 2026-08-18 — CONSISTENT with DESIGN NOTE. `titled_list` 3 hits and `_sanitize_combined_edge` 3 -- a design note raised by ctharvey 2026-07-27, not a work item claiming completion.
+# Titled-List Memory Shape
 
-item lists with title." Nothing here is approved for implementation.
+> **Disposition (archived 2026-10-24):** Implemented, although this header used to say "design note,
+> NOT approved for build". `parse_titled_list` and the `MEMBER_OF` edge live in
+> `src/menhir/infrastructure/graphiti_extraction_policy.py`, and the IMPLEMENTED section further
+> down this note records the build. The original header text is kept below as history.
+
+Original status: DESIGN NOTE. Raised 2026-07-27 by ctharvey: "maybe a special view or memory for just bare
+item lists with title." At the time, nothing here was approved for implementation.
 
 Related: task #11 (edgeless-roster collapse causes permanent content loss), task #10 (perceiver
 emits subject strings no entity carries).

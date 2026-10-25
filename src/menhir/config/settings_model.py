@@ -176,9 +176,9 @@ class MemorySettings:
     ingest_concurrency: int = 1
 
     # Shadow-mode context composition (Stage 1 of the context-composition production-integration
-    # plan, .agent/plans/menhir-context-composition-production-integration.md): observe-only,
-    # never applied. When on, every ingested episode gets a candidate-fact-edge retrieval +
-    # grounded shadow-label classification + eligibility trace logged alongside the real
+    # plan, .agent/archive/plans/menhir-context-composition-production-integration.md):
+    # observe-only, never applied. When on, every ingested episode gets a candidate-fact-edge
+    # retrieval + grounded shadow-label classification + eligibility trace logged alongside the real
     # extraction outcome, with zero effect on what gets extracted or written. Off by default —
     # this is research instrumentation, not a recall/extraction behavior change. The shadow
     # LLM work runs OUTSIDE the per-namespace ingest gate as a detached background task (see
@@ -399,7 +399,7 @@ class MemorySettings:
     # default. When on, the projection coordinator also builds scalar_history Views alongside
     # scalar_state, and the recall path includes a dedicated advisory history lane. When off,
     # stored scalar_history Views are excluded from generic recall (real rollback, not leakage).
-    # See `.agent/plans/menhir-scalar-history-projection-plan.md`.
+    # See `.agent/archive/plans/menhir-scalar-history-projection-plan.md`.
     personal_memory_scalar_history_enabled: bool = False
     # Observe-only deterministic typed-scalar shadow. When enabled, consolidation runs the pure
     # deterministic extractor beside the existing LLM gate and emits bounded comparison audit

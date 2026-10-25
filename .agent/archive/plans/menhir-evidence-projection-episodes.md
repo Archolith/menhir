@@ -1,7 +1,18 @@
+---
+artifact_schema: 1
+artifact_type: plan
+artifact_status: IMPLEMENTED
+---
+
 # Evidence-Projection Episodes: entities from the user's own words
 
-Status: PLAN, approved in direction 2026-07-27 by ctharvey ("i think second"). Not built.
-**Last verified:** 2026-08-18 — PARTIAL. `TurnEvidenceRequest` (4) and `UserPromptSubmit` (5) are present; `PostToolUse` is 0, so the tool-side projection leg is absent. Status is "PLAN, approved in direction", which does not claim completion.
+> **Disposition (archived 2026-10-24):** Implemented; the "Not built" status below is stale.
+> `create_evidence_projection` (`src/menhir/infrastructure/episode_lifecycle.py`, sets
+> `is_evidence_projection`), the `POST /episode-admission` route and the admission hook
+> `scripts/hooks/menhir_memory_admission.py` shipped. The only open item is the optional
+> credential-tier follow-on; plan it on its own if wanted.
+
+Original status: PLAN, approved in direction 2026-07-27 by ctharvey ("i think second"). Not built.
 
 Supersedes the context-injection design sketched earlier in the same session (see "Designs that
 died" below -- three were tried, and the reasons they failed are the load-bearing part of this doc).

@@ -1,5 +1,5 @@
 """Broadened manual smoke test for Stage 1 shadow-mode context composition
-(.agent/plans/menhir-context-composition-production-integration.md).
+(.agent/archive/plans/menhir-context-composition-production-integration.md).
 
 The single-episode smoke test (shadow_context_composition_smoke.py) proved the
 mechanism works end-to-end against real infra. This is the plan's actual Stage 1

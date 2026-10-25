@@ -553,7 +553,7 @@ class EpisodeAdmissionRequest(BaseModel):
     exist -- a client holding the same key can already POST a `:TurnEvidence` with
     `declarant='user'` (see `TurnEvidenceRequest`) and write memories -- but do not mistake the
     resulting edge for verification. See the CORRECTION in
-    `.agent/plans/menhir-evidence-projection-episodes.md`.
+    `.agent/archive/plans/menhir-evidence-projection-episodes.md`.
     """
     episode_uuid: str
     turn_evidence_uuid: str

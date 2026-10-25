@@ -453,7 +453,7 @@ class EpisodeLifecycleRepository:
         claiming `declarant='user'` and have it projected here. The chain is producer-trust end to
         end; the governance ledger's "convention-sound, not adversarially-sound" verdict still
         applies. An earlier version of this docstring claimed the link was unforgeable -- retracted,
-        see the CORRECTION in `.agent/plans/menhir-evidence-projection-episodes.md`.
+        see the CORRECTION in `.agent/archive/plans/menhir-evidence-projection-episodes.md`.
 
         IDEMPOTENT on the turn: `MERGE` keys on `evidence_projection_of`, so N memories citing one
         turn yield ONE projection, not N.

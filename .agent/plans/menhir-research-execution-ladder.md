@@ -1,6 +1,8 @@
 # Menhir Research → Production Execution Ladder
 
-**Last verified:** 2026-08-18 — IMPLEMENTED. `WardenChain` 6 hits, `WardenVerdict` 36.
+**Last verified:** 2026-10-24 — active, not implemented. The read-side rungs and the Warden chain
+are built; Track W6 (Law-3 corroboration independence) and the later write-side rungs are still open.
+The earlier "IMPLEMENTED" stamp described the Warden pieces only, not the ladder.
 
 
 ## Status

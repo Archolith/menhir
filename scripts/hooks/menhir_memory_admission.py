@@ -15,7 +15,7 @@ hook-to-hook, keyed on a session id that is genuinely per-conversation.
 
 WHAT THE LINK MEANS. That a memory was written in the context of a captured turn. It is NOT proof a
 human said the memory's content: every id involved is supplied by whoever holds the agent key. See
-`.agent/plans/menhir-evidence-projection-episodes.md`.
+`.agent/archive/plans/menhir-evidence-projection-episodes.md`.
 
 Contract, matching the turn-evidence producers:
 - **Never block the host agent.** Any failure logs locally and exits 0.

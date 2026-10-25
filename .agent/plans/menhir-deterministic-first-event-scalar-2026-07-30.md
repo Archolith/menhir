@@ -1,7 +1,12 @@
 # Deterministic-First Event Scalar Extraction
 
-Status: **reviewer-approved**
-**Last verified:** 2026-08-18 — ACCURATE. `reviewer-approved` is not `implemented`: `MENHIR_SCALAR_DETERMINISTIC_FIRST_ENABLED` and `MENHIR_SCALAR_DETERMINISTIC_CLASSES` are both 0 hits.
+Status: **Phase 1/2A implemented (default off); population gates and promotion open**
+**Last verified:** 2026-10-24 — the flags this plan names (`MENHIR_SCALAR_DETERMINISTIC_FIRST_ENABLED`,
+`MENHIR_SCALAR_DETERMINISTIC_CLASSES`) were never added. The shipped settings are
+`personal_memory_scalar_deterministic_shadow` (`MENHIR_SCALAR_DETERMINISTIC_SHADOW`),
+`personal_memory_scalar_deterministic_router` (`MENHIR_PERSONAL_MEMORY_SCALAR_DETERMINISTIC_ROUTER`) and
+`personal_memory_scalar_deterministic_classes` (`MENHIR_PERSONAL_MEMORY_SCALAR_DETERMINISTIC_CLASSES`),
+all off/empty by default (`src/menhir/config/settings_model.py`).
 
 
 Implementation status (2026-08-05): **Phase 1 + Phase 2A code-complete; bounded Phase 2 smoke

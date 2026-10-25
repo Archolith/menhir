@@ -432,7 +432,7 @@ FACT_TEXT_PRESENT = (
 )
 
 # Fact-edge IDENTITY + both endpoints, for shadow-mode context composition (Stage 1,
-# .agent/plans/menhir-context-composition-production-integration.md). FACT_TEMPORAL_FIELDS
+# .agent/archive/plans/menhir-context-composition-production-integration.md). FACT_TEMPORAL_FIELDS
 # above deliberately omits edge/endpoint identity (it was built for recall enrichment, where
 # the caller already knows which node it asked about); shadow composition must select at
 # fact-edge granularity -- one entity can carry many competing fact-edges -- so it needs

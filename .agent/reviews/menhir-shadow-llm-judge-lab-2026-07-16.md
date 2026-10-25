@@ -144,7 +144,7 @@ Not yet done, in priority order:
   this responds to
 - `.agent/reviews/menhir-shadow-context-composition-facet-instability-2026-07-16.md` — the original
   finding that started this chain
-- `.agent/plans/menhir-context-composition-production-integration.md` — Stage 1 spec, cross-referenced
+- `.agent/archive/plans/menhir-context-composition-production-integration.md` — Stage 1 spec, cross-referenced
 - `src/menhir/explorer/shadow_llm_judge_lab.py` — prompt (attempts 1→2, attempt 2 is what's
   committed), parsing, scoring
 - `scripts/run_shadow_llm_judge_lab.py` — runner (real LLM calls)

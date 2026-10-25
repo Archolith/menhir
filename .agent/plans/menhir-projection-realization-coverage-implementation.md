@@ -1,7 +1,12 @@
 # Plan: Projection Coverage + Realization Coverage v1
 
-**Status: READY FOR IMPLEMENTATION — 2026-07-19.**
-**Last verified:** 2026-08-18 — ACCURATE, unbuilt. Novel surface absent: `realization_fingerprint`, `multi_fingerprint_agreement`, `interpretation_disagreement`, `metadata_incomplete` all 0 hits in `src/`. (`binding_pending`/`projection_pending` exist as pre-existing primitives this builds on.)
+**Status: PARTIALLY IMPLEMENTED — projection coverage built, realization coverage open.** (Was READY
+FOR IMPLEMENTATION, 2026-07-19.)
+**Last verified:** 2026-10-24 — P1/P2 are built: `ProjectionCoverageService`
+(`src/menhir/services/projection_coverage_service.py`), though nothing outside tests calls it yet.
+R1/R2 are not built: `realization_fingerprint` and `PerceptionRealizationObservation` have 0 hits in
+`src/`. The `realization_coverage` that does exist (commit `6b798719`) is a different mechanism, not
+this plan's R-track.
 
 Research inputs:
 

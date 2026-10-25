@@ -6,7 +6,7 @@ cannot pass `turn_evidence_uuid` on the original call. It reports the pairing he
 WHAT THIS IS NOT. Verification. Both ids are caller-supplied and the server cannot confirm the
 memory came from that turn; the tests below pin the honest behaviour (MATCH-only, no projection
 without a landed link) rather than pretending to a guarantee. See the CORRECTION in
-`.agent/plans/menhir-evidence-projection-episodes.md`.
+`.agent/archive/plans/menhir-evidence-projection-episodes.md`.
 """
 
 from __future__ import annotations

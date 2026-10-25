@@ -36,7 +36,7 @@ Implementation record:
 
 Extends:
 
-- `.agent/plans/menhir-artifact-semantic-model.md`
+- `.agent/archive/plans/menhir-artifact-semantic-model.md`
 - `model.embodiment_invariant` in `.agent/data_models.md`
 - Hook Center file events in `docs/hook-center-tool-events.md`
 

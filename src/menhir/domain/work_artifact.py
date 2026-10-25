@@ -11,7 +11,7 @@ believe this?"; a plan answers "is this current?". ``Document`` was also taken
 -- ``ingest_document`` writes ``structure_role='document'`` entities.
 
 See `model.primitives` in .agent/data_models.md for the modeling rules this
-follows, and .agent/plans/menhir-artifact-semantic-model.md for the design.
+follows, and .agent/archive/plans/menhir-artifact-semantic-model.md for the design.
 """
 
 from __future__ import annotations

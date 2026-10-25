@@ -1,7 +1,8 @@
 # Compositional Scalar Identity
 
 Status: **Phases 1-4 implemented; larger population evidence is next**
-**Last verified:** 2026-08-18 — CONSISTENT with Phases 1-4 implemented. `diagnostic_vs_llm` 2 hits, `TypedScalarProposal` 90.
+**Last verified:** 2026-10-24 — still CONSISTENT: Phases 1-4 are implemented; the larger-population
+evidence and the §5 promotion gates have not been run.
 
 
 This is a corrective supplement to
