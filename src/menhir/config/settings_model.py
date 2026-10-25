@@ -339,7 +339,8 @@ class MemorySettings:
     # lane emitted verdicts that shared no word with the question for 72% of blocks (#168).
     personal_memory_scalar_verdict_min_similarity: float = 0.675
     # Which raw scalar observations enter the ranked list: all | gated | off (see retrieval_tuning).
-    personal_memory_scalar_observation_recall: str = "all"
+    # "gated" (o500, #383): .694 vs .670 for "all"; multi-session +7.5 pts.
+    personal_memory_scalar_observation_recall: str = "gated"
     # Attribute reconciliation in the k-sample consistency gate. ON by default (lenient-agreement
     # defaults, 2026-09). When on, the samples
     # vote WITHOUT the free-text attribute name and the name is chosen modally afterwards (ties to the

@@ -1,9 +1,9 @@
-## 2026-10-25 - Scalar verdict gate on by default; observation recall mode
+## 2026-10-25 - Scalar verdict gate on by default; observation recall gated by default
 
-On o500 the scalar lane lost to lanes-off (0.618 vs 0.686): off-topic verdicts and raw observation quotes took the slots of answer-bearing memories (#168).
+On o500 the scalar lane lost to lanes-off (0.618 vs 0.686): off-topic verdicts and raw observation quotes took the slots of answer-bearing memories (#168). With both changes, counted-rw scores 0.694 (lanes-off 0.686; parity, not yet a significant gain).
 
 - `config/settings_model.py`: `MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY` defaults to 0.675 (raw cosine 0.35, #300's bench value), was 0 (off).
-- `MENHIR_PERSONAL_MEMORY_SCALAR_OBSERVATION_RECALL` (new; `all` default, `gated`, `off`): which raw observations enter the ranked list. `gated` keeps those at or above the verdict gate; `off` keeps none. Slots still feed the authority and history lanes, and a skipped observation still resolves the query subject (G17).
+- `MENHIR_PERSONAL_MEMORY_SCALAR_OBSERVATION_RECALL` (new; `gated` default, `all`, `off`): which raw observations enter the ranked list. `gated` keeps those at or above the verdict gate; `all` is the old behavior; `off` keeps none. Slots still feed the authority and history lanes, and a skipped observation still resolves the query subject (G17).
 - `domain/retrieval_tuning.py`, `services/recall_pipeline.py`: the mode, validated to the three values.
 - `.env.example`, `docs/agreement-settings.md`, `tests/test_shipped_agreement_profile.py`: the new default and setting. `tests/test_scalar_verdict_min_similarity.py`: default assertion. `tests/test_scalar_observation_recall.py` (new).
 - `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).

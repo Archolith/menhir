@@ -108,7 +108,8 @@ async def test_gated_mode_judges_each_observation_not_the_slot(
 
 @pytest.mark.unit
 def test_setting_default_and_env_reach_tuning(monkeypatch):
-    assert MemorySettings().personal_memory_scalar_observation_recall == "all"
+    # Shipped default is "gated"; the bare tuning dataclass keeps today's "all", like the other flags.
+    assert MemorySettings().personal_memory_scalar_observation_recall == "gated"
     assert RetrievalTuningConfig().scalar_observation_recall == "all"
     monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_SCALAR_OBSERVATION_RECALL", " Off ")
     settings = MemorySettings.from_env()
