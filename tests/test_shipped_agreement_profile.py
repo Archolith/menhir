@@ -48,6 +48,7 @@ SHIPPED_SETTINGS = {
     "personal_memory_scalar_canonical_self": False,
     "personal_memory_scalar_verdict_min_similarity": 0.675,
     "personal_memory_scalar_observation_recall": "gated",
+    "personal_memory_scalar_view_freshness_gate": True,
     "personal_memory_scalar_state_perceiver_version": "v2",
     "personal_memory_event_history_perceiver_version": "v2",
     "personal_memory_counting_perceiver_version": "v1",

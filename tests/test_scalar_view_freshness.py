@@ -171,8 +171,10 @@ async def test_gate_counts_hits_kept_out_of_the_ranked_list(
 
 @pytest.mark.unit
 def test_setting_default_and_env_reach_tuning(monkeypatch):
-    assert MemorySettings().personal_memory_scalar_view_freshness_gate is False
+    # Shipped on; the engine-level tuning default stays off for callers that build it directly.
+    assert MemorySettings().personal_memory_scalar_view_freshness_gate is True
     assert RetrievalTuningConfig().scalar_view_freshness_gate is False
-    monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_FRESHNESS_GATE", "true")
-    settings = MemorySettings.from_env()
-    assert settings.retrieval_tuning().scalar_view_freshness_gate is True
+    monkeypatch.delenv("MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_FRESHNESS_GATE", raising=False)
+    assert MemorySettings.from_env().retrieval_tuning().scalar_view_freshness_gate is True
+    monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_FRESHNESS_GATE", "false")
+    assert MemorySettings.from_env().retrieval_tuning().scalar_view_freshness_gate is False

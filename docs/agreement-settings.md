@@ -19,6 +19,7 @@ Shipping a value is not the same as turning a lane on. Every lane and authority 
 | Scalar span alignment | always on | fixed in code |
 | Scalar verdict min similarity | 0.675 (raw cosine 0.35; 0 = off) | `..._SCALAR_VERDICT_MIN_SIMILARITY` |
 | Scalar observations in ranked recall | `gated` (`all` / `off`) | `..._SCALAR_OBSERVATION_RECALL` |
+| Scalar View freshness gate | on | `..._SCALAR_VIEW_FRESHNESS_GATE` |
 | Counter lane threshold | 1.0 (unanimous) | fixed; no caller passes it |
 | Counter coref / verify samples | 3 / 3, unanimous | fixed |
 | Counter verify retries / sum grounding | 0 / on | `..._VERIFY_RETRIES`, `..._SUM_GROUNDING` |

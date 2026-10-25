@@ -69,7 +69,10 @@ def test_api_item_carries_said_at_only_when_set():
 
 @pytest.mark.unit
 def test_setting_default_and_env_reach_tuning(monkeypatch):
-    assert MemorySettings().frontier_fact_said_time is False
+    # Shipped on; the engine-level tuning default stays off for callers that build it directly.
+    assert MemorySettings().frontier_fact_said_time is True
     assert RetrievalTuningConfig().enable_fact_said_time is False
-    monkeypatch.setenv("MENHIR_FRONTIER_FACT_SAID_TIME", "1")
+    monkeypatch.delenv("MENHIR_FRONTIER_FACT_SAID_TIME", raising=False)
     assert MemorySettings.from_env().retrieval_tuning().enable_fact_said_time is True
+    monkeypatch.setenv("MENHIR_FRONTIER_FACT_SAID_TIME", "false")
+    assert MemorySettings.from_env().retrieval_tuning().enable_fact_said_time is False

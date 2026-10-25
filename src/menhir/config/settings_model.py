@@ -342,7 +342,8 @@ class MemorySettings:
     # "gated" (o500, #383): .694 vs .670 for "all"; multi-session +7.5 pts.
     personal_memory_scalar_observation_recall: str = "gated"
     # A verdict stops leading when newer evidence its fold ignores is in the recall (#168).
-    personal_memory_scalar_view_freshness_gate: bool = False
+    # On (o500, #384): with fact said time, .746 vs .712 both off.
+    personal_memory_scalar_view_freshness_gate: bool = True
     # Attribute reconciliation in the k-sample consistency gate. ON by default (lenient-agreement
     # defaults, 2026-09). When on, the samples
     # vote WITHOUT the free-text attribute name and the name is chosen modally afterwards (ties to the
@@ -460,7 +461,7 @@ class MemorySettings:
     frontier_evidence_anchor: bool = False  # Guard 5 EvidenceAnchorWarden (only applies under warden_gate); opt-in: it reads the client label, not the speaker, and refuses ordinary conversation (#349)
     frontier_fact_edges: bool = False      # inject RELATES_TO fact edges (EntityEdge.fact) into the candidate pool; set TRUE for episodic/"what happened" corpora where the answer is a dated edge fact, not an entity name
     frontier_fact_relevance: bool = False  # attach the facts most similar to the query (plus the newest) instead of only the 5 newest
-    frontier_fact_said_time: bool = False  # put each fact's statement time (reference_time) on recall facts as said_at
+    frontier_fact_said_time: bool = True  # put each fact's statement time (reference_time) on recall facts as said_at (o500 +.026, #384)
     frontier_verb_facets: bool = False     # append one keyword-matched fact per question verb after ranking (verb-centric questions only)
     frontier_fact_edge_mode: str = "standalone"  # how fact edges enter the pool: "standalone" (terse fact as its own candidate; net-negative at N=30) or "pointer" (hydrate endpoint nodes' rich context; preferred)
     frontier_similarity_scale: str = "rrf"  # similarity lane scale (plan 1a/1b): "rrf" (today; RRF ~[0,2]) or "normalized" (divide search scores by the pinned RRF max -> [0,1], restoring PENDING's top-pin; ranking change, A/B before default flip)

@@ -1,10 +1,11 @@
-## 2026-10-25 - Optional View freshness gate and fact statement time (both off)
+## 2026-10-25 - View freshness gate and fact statement time, both on by default
 
-o500 (#168): a View kept leading with a stale value when the newer statement was one the fold ignores (an occurrence, or another slot), and fact lines carried only event time, so a later statement about an earlier event read as older. Both are off by default pending the recall-only A/B.
+o500 (#168): a View kept leading with a stale value when the newer statement was one the fold ignores (an occurrence, or another slot), and fact lines carried only event time, so a later statement about an earlier event read as older. Recall-only o500 A/B (one run per arm): both off 0.712, freshness gate 0.724, said time 0.738, both 0.746 (+0.034, paired 95% CI +0.010 to +0.058).
 
-- `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_FRESHNESS_GATE` (new, off; requires scalar view authority): `domain/scalar_view_freshness.py` (new) finds newer unfolded evidence: a same-slot occurrence, or another slot of the same subject and value kind at or above the verdict gate, with a later `valid_at`. `services/recall_pipeline.py`: a current View or expiry verdict with such evidence is advisory instead of leading; `has_foundation` is unchanged and the audit records `stale_by`. Hits kept out of the ranked list still count.
-- `MENHIR_FRONTIER_FACT_SAID_TIME` (new, off): fact queries (`infrastructure/cypher.py`, `infrastructure/memory_queries.py`) read the edge `reference_time` as `said_at`; with the flag on, `TemporalFact.said_at`, the API item (`api/routes_support.py`, `mcp/formatters.py`) and the context line (`services/context_builder.py`: `<happened> | said <date> | <fact>`) carry it.
-- `domain/retrieval_tuning.py`, `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: the two settings.
+- `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_FRESHNESS_GATE` (new, on; requires scalar view authority): `domain/scalar_view_freshness.py` (new) finds newer unfolded evidence: a same-slot occurrence, or another slot of the same subject and value kind at or above the verdict gate, with a later `valid_at`. `services/recall_pipeline.py`: a current View or expiry verdict with such evidence is advisory instead of leading; `has_foundation` is unchanged and the audit records `stale_by`. Hits kept out of the ranked list still count.
+- `MENHIR_FRONTIER_FACT_SAID_TIME` (new, on): fact queries (`infrastructure/cypher.py`, `infrastructure/memory_queries.py`) read the edge `reference_time` as `said_at`; with the flag on, `TemporalFact.said_at`, the API item (`api/routes_support.py`, `mcp/formatters.py`) and the context line (`services/context_builder.py`: `<happened> | said <date> | <fact>`) carry it.
+- `domain/retrieval_tuning.py`, `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: the two settings; the shipped settings default on, the `RetrievalTuningConfig` engine defaults stay off.
+- `docs/agreement-settings.md`, `tests/test_shipped_agreement_profile.py`: the freshness gate in the shipped profile.
 - Tests: new `tests/test_scalar_view_freshness.py`, `tests/test_fact_said_time.py`.
 - `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
 
