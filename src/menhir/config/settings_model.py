@@ -341,6 +341,8 @@ class MemorySettings:
     # Which raw scalar observations enter the ranked list: all | gated | off (see retrieval_tuning).
     # "gated" (o500, #383): .694 vs .670 for "all"; multi-session +7.5 pts.
     personal_memory_scalar_observation_recall: str = "gated"
+    # A verdict stops leading when newer evidence its fold ignores is in the recall (#168).
+    personal_memory_scalar_view_freshness_gate: bool = False
     # Attribute reconciliation in the k-sample consistency gate. ON by default (lenient-agreement
     # defaults, 2026-09). When on, the samples
     # vote WITHOUT the free-text attribute name and the name is chosen modally afterwards (ties to the
@@ -458,6 +460,7 @@ class MemorySettings:
     frontier_evidence_anchor: bool = False  # Guard 5 EvidenceAnchorWarden (only applies under warden_gate); opt-in: it reads the client label, not the speaker, and refuses ordinary conversation (#349)
     frontier_fact_edges: bool = False      # inject RELATES_TO fact edges (EntityEdge.fact) into the candidate pool; set TRUE for episodic/"what happened" corpora where the answer is a dated edge fact, not an entity name
     frontier_fact_relevance: bool = False  # attach the facts most similar to the query (plus the newest) instead of only the 5 newest
+    frontier_fact_said_time: bool = False  # put each fact's statement time (reference_time) on recall facts as said_at
     frontier_verb_facets: bool = False     # append one keyword-matched fact per question verb after ranking (verb-centric questions only)
     frontier_fact_edge_mode: str = "standalone"  # how fact edges enter the pool: "standalone" (terse fact as its own candidate; net-negative at N=30) or "pointer" (hydrate endpoint nodes' rich context; preferred)
     frontier_similarity_scale: str = "rrf"  # similarity lane scale (plan 1a/1b): "rrf" (today; RRF ~[0,2]) or "normalized" (divide search scores by the pinned RRF max -> [0,1], restoring PENDING's top-pin; ranking change, A/B before default flip)
@@ -781,6 +784,7 @@ class MemorySettings:
             enable_fact_edges=self.frontier_fact_edges,
             scalar_verdict_min_similarity=self.personal_memory_scalar_verdict_min_similarity,
             scalar_observation_recall=self.personal_memory_scalar_observation_recall,
+            scalar_view_freshness_gate=self.personal_memory_scalar_view_freshness_gate,
             fact_edge_mode=self.frontier_fact_edge_mode,
             similarity_scale=self.frontier_similarity_scale,
             enable_assertion_shadow=self.frontier_shadow,
@@ -791,6 +795,7 @@ class MemorySettings:
             enable_anchored_time_render=self.anchored_time_render_enabled,
             enable_anchored_time_expiry=self.anchored_time_expiry_enabled,
             enable_fact_relevance=self.frontier_fact_relevance,
+            enable_fact_said_time=self.frontier_fact_said_time,
             enable_observation_dedup=self.personal_memory_observation_dedup_enabled,
             enable_verb_facets=self.frontier_verb_facets,
         )
@@ -942,6 +947,7 @@ class MemorySettings:
             personal_memory_observation_dedup_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED", default=str(cls.personal_memory_observation_dedup_enabled))),
             personal_memory_scalar_verdict_min_similarity=_parse_float(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY", default=str(cls.personal_memory_scalar_verdict_min_similarity)), env_var="MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY", minimum=0.0),
             personal_memory_scalar_observation_recall=_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_OBSERVATION_RECALL", default=cls.personal_memory_scalar_observation_recall).strip().lower(),
+            personal_memory_scalar_view_freshness_gate=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_FRESHNESS_GATE", default=str(cls.personal_memory_scalar_view_freshness_gate))),
             personal_memory_scalar_reconcile_attribute=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_ATTRIBUTE", default=str(cls.personal_memory_scalar_reconcile_attribute))),
             personal_memory_scalar_reconcile_scope=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_SCOPE", default=str(cls.personal_memory_scalar_reconcile_scope))),
             personal_memory_scalar_reconcile_subject=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_SUBJECT", default=str(cls.personal_memory_scalar_reconcile_subject))),
@@ -1037,6 +1043,7 @@ class MemorySettings:
             frontier_evidence_anchor=parse_bool_env(_getenv("MENHIR_FRONTIER_EVIDENCE_ANCHOR", default=str(cls.frontier_evidence_anchor))),
             frontier_fact_edges=parse_bool_env(_getenv("MENHIR_FRONTIER_FACT_EDGES", default=str(cls.frontier_fact_edges))),
             frontier_fact_relevance=parse_bool_env(_getenv("MENHIR_FRONTIER_FACT_RELEVANCE", default=str(cls.frontier_fact_relevance))),
+            frontier_fact_said_time=parse_bool_env(_getenv("MENHIR_FRONTIER_FACT_SAID_TIME", default=str(cls.frontier_fact_said_time))),
             frontier_verb_facets=parse_bool_env(_getenv("MENHIR_FRONTIER_VERB_FACETS", default=str(cls.frontier_verb_facets))),
             frontier_fact_edge_mode=_getenv("MENHIR_FRONTIER_FACT_EDGE_MODE", default=cls.frontier_fact_edge_mode).strip().lower(),
             frontier_similarity_scale=_getenv("MENHIR_FRONTIER_SIMILARITY_SCALE", default=cls.frontier_similarity_scale).strip().lower(),

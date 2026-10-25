@@ -23,6 +23,7 @@ from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.self_identity import inferred_self_uuid_for_namespace
 from menhir.infrastructure.self_binding import SelfBindMode, resolve_inferred_mode
 from menhir.domain.recall_provenance import derive_recall_provenance
+from menhir.domain.scalar_view_freshness import ObservationTime, newer_unfolded_evidence
 from menhir.domain.recall import (
     CandidateData,
     QueryPreset,
@@ -462,6 +463,7 @@ async def _append_verb_facet_facts(
                 [dict(row, node_uuid=uuid)],
                 event_time=tuning.enable_anchored_time_render,
                 ended=tuning.enable_anchored_time_expiry,
+                said_time=tuning.enable_fact_said_time,
             )
             appended.append(
                 ScoredMemory(
@@ -1131,6 +1133,7 @@ async def run_recall(
             _obs_recall_mode = tuning.scalar_observation_recall
             _obs_recall_min_sim = float(tuning.scalar_verdict_min_similarity or 0.0)
             obs_slots: set[tuple[str, str, str, str, str]] = set()
+            _obs_times: list[ObservationTime] = []  # freshness gate input, every hit with a slot
             # G17 (4a.3): subject_uuid -> subject_display of each surfaced observation, used to
             # resolve the QUERY's subject INDEPENDENTLY of the injection's provenance row (a named
             # third party the query mentions is rescued by matching its display in the query text).
@@ -1163,6 +1166,9 @@ async def run_recall(
                         obs_slots.add(_slot)
                         _obs_slot_best_cosine[_slot] = max(
                             float(cos), _obs_slot_best_cosine.get(_slot, float("-inf")))
+                        _obs_times.append(ObservationTime(
+                            assertion_id=aid, slot=_slot, operation=str(hit.get("operation") or ""),
+                            valid_at=hit.get("valid_at"), cosine=float(cos)))
                     # History-only mode deliberately collects the matched slot but does not inject
                     # the raw observation or run scalar-state authority/suppression work.
                     if not service.scalar_view_authority_enabled:
@@ -1485,6 +1491,12 @@ async def run_recall(
                                     logger.exception(
                                         "expiry foundation read failed slot=%r; advisory",
                                         (subj, attr))
+                                expiry_stale_by: tuple[str, ...] = ()
+                                if e_founded and tuning.scalar_view_freshness_gate:
+                                    expiry_stale_by = newer_unfolded_evidence(
+                                        (subj, attr, scp, vk, un), exp.valid_at, _obs_times,
+                                        min_similarity=_verdict_min_sim)
+                                e_leads = bool(e_founded) and not expiry_stale_by
                                 ename = (
                                     f"{exp.subject_display or 'user'}'s {attr}: EXPIRED. last known "
                                     f"{exp.expired_value} as of {exp.valid_at}; current {attr} UNKNOWN.")
@@ -1500,7 +1512,7 @@ async def run_recall(
                                     "bm25_rank": None, "cosine_rank": None, "content_rank": None,
                                     "content_cosine": None, "is_superseded_view": False,
                                     "view_kind": "scalar_state",
-                                    "is_scalar_authority": e_founded,
+                                    "is_scalar_authority": e_leads,
                                 })
                                 metadata_by_uuid[euuid] = {
                                     "name": ename, "content": ename,
@@ -1515,7 +1527,7 @@ async def run_recall(
                                 )
                                 authority_layer.append(ScalarAuthorityVerdict(
                                     kind="expired",
-                                    status="leads" if e_founded else "advisory",
+                                    status="leads" if e_leads else "advisory",
                                     subject_uuid=subj, attribute=attr, scope=scp,
                                     value_kind=vk, unit=un, value=exp.expired_value,
                                     valid_at=exp.valid_at, view_uuid=None,
@@ -1527,11 +1539,12 @@ async def run_recall(
                                     next_offset=contributor_payload.get("next_offset"),
                                 ))
                                 _authority_audit.audit(
-                                    "authority_annotation", "leads" if e_founded else "advisory",
+                                    "authority_annotation", "leads" if e_leads else "advisory",
                                     namespace=stamped_namespace(namespace), subject_uuid=subj,
                                     slot=[attr, scp, vk, un],
                                     details={"kind": "expiry", "expired_value": str(exp.expired_value),
-                                             "valid_at": exp.valid_at, "user_foundation": e_founded})
+                                             "valid_at": exp.valid_at, "user_foundation": e_founded,
+                                             "stale_by": list(expiry_stale_by)})
                                 auth_added += 1
                     continue
                 if not _projection_is_recall_eligible(view):
@@ -1587,6 +1600,13 @@ async def run_recall(
                     has_foundation and not count_wording
                     and _intent != QueryIntent.PREVIOUS_VALUE
                 )
+                # Freshness gate: newer evidence the fold ignores keeps the View advisory.
+                view_stale_by: tuple[str, ...] = ()
+                if view_leads and tuning.scalar_view_freshness_gate:
+                    view_stale_by = newer_unfolded_evidence(
+                        (subj, attr, scp, vk, un), view.get("valid_at"), _obs_times,
+                        min_similarity=_verdict_min_sim)
+                    view_leads = not view_stale_by
                 authority_candidate = {
                     "uuid": vuuid, "name": vname, "content": vname,
                     "scope": str(NodeScope.PERSISTENT), "memory_type": "SCALAR_STATE",
@@ -1662,7 +1682,8 @@ async def run_recall(
                     slot=[attr, scp, vk, un],
                     details={"kind": "current", "value": str(view.get("value")),
                              "effective_tier": tier, "tier_foundation": tier_foundation,
-                             "user_foundation": user_foundation})
+                             "user_foundation": user_foundation,
+                             "stale_by": list(view_stale_by)})
                 auth_added += 1
             logger.debug("scalar-authority injection query=%r added=%d", query[:60], auth_added)
             # Lane summary: how many observations surfaced and how many authority annotations fired,
@@ -2223,6 +2244,7 @@ async def run_recall(
                 fact_rows, event_time=tuning.enable_anchored_time_render,
                 ended=tuning.enable_anchored_time_expiry,
                 relevance_k=_FACT_RELEVANCE_K if fact_query_vector is not None else 0,
+                said_time=tuning.enable_fact_said_time,
             )
             enriched_results = []
             for sm in top_results:

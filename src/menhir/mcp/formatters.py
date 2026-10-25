@@ -341,10 +341,14 @@ def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, obj
 
 
 def _with_event_time(item: dict, tf: object) -> dict:
-    """Adds ``event_time`` only when rendered (MENHIR_ANCHORED_TIME_RENDER), else unchanged."""
+    """Adds ``event_time`` (MENHIR_ANCHORED_TIME_RENDER) and ``said_at``
+    (MENHIR_FRONTIER_FACT_SAID_TIME) only when set, else unchanged."""
     event_time = _tf(tf, "event_time")
     if event_time:
         item["event_time"] = event_time
+    said_at = _tf(tf, "said_at")
+    if said_at:
+        item["said_at"] = said_at
     return item
 
 
