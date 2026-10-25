@@ -12,7 +12,7 @@ from menhir.core.backend_impl import RuntimeProvider
 from menhir.core.backend_protocol import MemoryBackend
 from menhir.core.runtime import RuntimeContext
 from menhir.domain.session import MemorySession, new_session
-from menhir.domain.recall import VerifierEvidence
+from menhir.domain.recall import VerifierEvidence, normalize_source_memory_sources
 from menhir.infrastructure.telemetry import record_destructive_op
 from menhir.mcp.service_access import (
     get_pinned_namespace,
@@ -213,6 +213,15 @@ class RecallRequest(BaseModel):
     # knowledge only).
     source_memory_limit: int | None = Field(default=None, ge=0, le=50)
     counted_verdict_limit: int | None = Field(default=None, ge=0, le=50)
+    # Keep only source memories whose ingest `source` is one of these exact strings (e.g.
+    # ["agent-writer"]), applied before source_memory_limit. None = no filter. It does not
+    # turn the section on: that is still source_memory_limit / the deployment default.
+    source_memory_sources: list[str] | None = None
+
+    @field_validator("source_memory_sources")
+    @classmethod
+    def _clean_source_memory_sources(cls, value: list[str] | None) -> list[str] | None:
+        return None if value is None else list(normalize_source_memory_sources(value))
 
 
 class RecallTemporalFact(BaseModel):

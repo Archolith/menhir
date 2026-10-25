@@ -317,6 +317,35 @@ class SourceMemory:
     pool_anchor: str | None = None
 
 
+MAX_SOURCE_MEMORY_SOURCES = 20
+MAX_SOURCE_MEMORY_SOURCE_CHARS = 200
+
+
+def normalize_source_memory_sources(value: Any) -> tuple[str, ...]:
+    """Validate a source-memory source filter: 1-20 non-blank strings, stripped, de-duplicated.
+
+    Raises ValueError on anything else, including a bare string (which would otherwise
+    iterate into characters) and an empty list (which would silently match nothing).
+    """
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)):
+        raise ValueError("source_memory_sources must be a list of strings")
+    cleaned: list[str] = []
+    for item in value:
+        text = item.strip() if isinstance(item, str) else ""
+        if not text or len(text) > MAX_SOURCE_MEMORY_SOURCE_CHARS:
+            raise ValueError(
+                "source_memory_sources entries must be "
+                f"1-{MAX_SOURCE_MEMORY_SOURCE_CHARS} non-blank characters"
+            )
+        if text not in cleaned:
+            cleaned.append(text)
+    if not 1 <= len(cleaned) <= MAX_SOURCE_MEMORY_SOURCES:
+        raise ValueError(
+            f"source_memory_sources must hold 1-{MAX_SOURCE_MEMORY_SOURCES} distinct sources"
+        )
+    return tuple(cleaned)
+
+
 @dataclass(frozen=True)
 class RecallHistoryResult:
     """Result of the recall_history drill-down: matching source memories, oldest first.

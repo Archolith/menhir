@@ -110,6 +110,7 @@ class BackendClientOpsMixin:
         source_memory_limit: int | None = None,
         counted_verdict_limit: int | None = None,
         include_warden_status: bool = False,
+        source_memory_sources: list[str] | None = None,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {
             "query": query,
@@ -130,6 +131,8 @@ class BackendClientOpsMixin:
             params["source_memory_limit"] = int(source_memory_limit)
         if counted_verdict_limit is not None:
             params["counted_verdict_limit"] = int(counted_verdict_limit)
+        if source_memory_sources is not None:
+            params["source_memory_sources"] = list(source_memory_sources)
         return await self._request("recall", params)
 
     async def recall_history(

@@ -1,3 +1,10 @@
+## 2026-10-13 - Assess Anthropic Scion as prior art for revision intelligence
+
+- `docs/research/prior-art/anthropic-scion-source-control-comparison.md`: dated comparison of Anthropic's proprietary Scion, its open-source status, Git-compatible alternatives, Menhir overlap and risks; no VCS replacement proposed.
+- `.agent/plans/backlog/menhir-scion-exploration-2026-10-13.md`: proposed gated inventory, benchmark and limited-spike plan for Git revision metadata and content-addressed sync, with proof obligations and stop conditions.
+- `docs/research/prior-art/README.md`, `docs/research/README.md`, `.agent/plans/backlog/README.md`: route the research and plan in canonical indexes.
+- `CHANGELOG-archive.md`: retain the oldest dated current entry.
+
 ## 2026-09-24 - explicit staging is a Beacon guardrail
 
 The rule was only in `.agent/maintenance.md` and the startup list, so agents working from Beacon

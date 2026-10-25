@@ -1,3 +1,13 @@
+## 2026-10-25 - Filter recall's source memories by ingest source
+
+For agent-written memories (#168): a caller can ask for just the agent-writer items, ranked among themselves, instead of fetching 50 and filtering client-side.
+
+- `POST /api/recall` takes `source_memory_sources` (1-20 exact `source` strings, stripped and de-duplicated; anything else is 422). The source-memory search keeps only episodes with one of those sources, before `source_memory_limit` is applied. It does not turn the section on: that is still `source_memory_limit` or the deployment default. Without the field, recall is unchanged and the kwarg is not passed down.
+- `domain/recall.py`: `normalize_source_memory_sources`, shared by the request model and the backend runtime, since the internal backend route skips `RecallRequest`. Threaded through `backend_client_ops`, `backend_protocol`, `backend_runtime_data_ops`, `RecallService`, `run_recall`, `_build_source_memories`, `MemoryGraphAdapter` and `MemoryQueryRepository.search_episode_embeddings` (`n.source IN $sources`; an empty sequence matches nothing).
+- Not on the `recall_memories` MCP tool.
+- Tests (new): `tests/test_source_memory_source_filter.py`, including an online test showing the filter applies before LIMIT.
+- `CHANGELOG-archive.md`: the oldest dated current entry moved there (10-entry limit).
+
 ## 2026-10-24 - Agent episodes cannot supersede user-stated facts; Graphiti fork 0.31.2.post1
 
 For agent-written memories (#168, plan `menhir-agent-memory-writer-plan-2026-10-23` P1).
@@ -89,13 +99,6 @@ In the LME pilot a counting namespace failed inside the pass (a provider 500), y
 - `.agent/default-off-features.md`: the mode moves to a "graduated to default-on" section.
 - Tests: new upgrade test in `tests/test_release_config_upgrade.py` for unset versus pinned modes. Changed: `tests/e2e/test_e2e_19_fresh_install.py` (default-on expectations and opt-out pin).
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-10-13 - Assess Anthropic Scion as prior art for revision intelligence
-
-- `docs/research/prior-art/anthropic-scion-source-control-comparison.md`: dated comparison of Anthropic's proprietary Scion, its open-source status, Git-compatible alternatives, Menhir overlap and risks; no VCS replacement proposed.
-- `.agent/plans/backlog/menhir-scion-exploration-2026-10-13.md`: proposed gated inventory, benchmark and limited-spike plan for Git revision metadata and content-addressed sync, with proof obligations and stop conditions.
-- `docs/research/prior-art/README.md`, `docs/research/README.md`, `.agent/plans/backlog/README.md`: route the research and plan in canonical indexes.
-- `CHANGELOG-archive.md`: retain the oldest dated current entry.
 
 ## 2026-10-14 - Scan release archives from private output directories
 

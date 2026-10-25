@@ -153,6 +153,7 @@ class MemoryBackend(Protocol):
         source_memory_limit: int | None = None,
         counted_verdict_limit: int | None = None,
         include_warden_status: bool = False,
+        source_memory_sources: list[str] | None = None,
     ) -> dict[str, Any]:
         """Search memory graph. Returns RecallResult-shaped dict."""
         ...
