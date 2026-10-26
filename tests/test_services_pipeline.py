@@ -1708,6 +1708,7 @@ async def test_prepare_memory_runtime_initializes_graphiti_then_schema() -> None
         llm=object(),
         graph_adapter=SimpleNamespace(
             calls=[],
+            retire_obsolete_indexes=lambda: [],
             phase_one_schema_ready=lambda **_: next(readiness),
             bootstrap_phase_one=None,
             sync_edge_counts=None,
@@ -1753,6 +1754,7 @@ async def test_prepare_memory_runtime_refuses_partial_schema_failures() -> None:
         llm=object(),
         graph_adapter=SimpleNamespace(
             sync_calls=0,
+            retire_obsolete_indexes=lambda: [],
             phase_one_schema_ready=lambda **_: False,
             bootstrap_phase_one=lambda: type(
                 "StubSchemaResult",
@@ -1786,6 +1788,7 @@ async def test_prepare_memory_runtime_refuses_successful_but_wrong_shaped_schema
     readiness = iter([False, False])
     adapter = SimpleNamespace(
         sync_calls=0,
+        retire_obsolete_indexes=lambda: [],
         phase_one_schema_ready=lambda **_: next(readiness),
         bootstrap_phase_one=lambda: type(
             "StubSchemaResult",
@@ -1836,6 +1839,7 @@ async def test_prepare_memory_runtime_forwards_force_graphiti_flag() -> None:
         llm=object(),
         graph_adapter=SimpleNamespace(
             sync_calls=0,
+            retire_obsolete_indexes=lambda: [],
             phase_one_schema_ready=lambda **_: next(readiness),
             bootstrap_phase_one=lambda: type(
                 "StubSchemaResult",
@@ -1882,6 +1886,7 @@ async def test_prepare_memory_runtime_skips_schema_bootstrap_when_phase_one_read
         llm=object(),
         graph_adapter=SimpleNamespace(
             sync_calls=0,
+            retire_obsolete_indexes=lambda: [],
             phase_one_schema_ready=lambda **_: True,
             bootstrap_phase_one=lambda: (_ for _ in ()).throw(AssertionError("should not run bootstrap")),
             sync_edge_counts=None,

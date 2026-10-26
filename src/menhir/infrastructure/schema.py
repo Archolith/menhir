@@ -44,6 +44,17 @@ def get_artifact_reconciliation_schema_queries() -> list[str]:
         "FOR (n:ArtifactReconciliationCursor) REQUIRE n.repository IS UNIQUE",
     ]
 
+#: Indexes Menhir once created and now drops. `episodic_content_idx` was a RANGE index on
+#: :Episodic(content); Neo4j cannot index a value over ~8 KB, so it made every longer episode
+#: unwritable. Nothing seeks it: the content prefix scan it was added for is gone, and text search
+#: uses Graphiti's FULLTEXT `episode_content`.
+RETIRED_INDEXES = ("episodic_content_idx",)
+
+
+def get_retired_index_queries() -> list[str]:
+    return [f"DROP INDEX {name} IF EXISTS" for name in RETIRED_INDEXES]
+
+
 #: The three phase-one indexes GRAPHITI creates, not Menhir. Nothing in
 #: `get_phase1_bootstrap_queries` emits them -- they come from
 #: `graphiti_client.build_indices_and_constraints`, which `prepare_memory_runtime` skips when
@@ -174,9 +185,6 @@ def _node_index_queries() -> list[str]:
             "CREATE INDEX episodic_resolved_episode_uuid_idx IF NOT EXISTS FOR (n:Episodic) ON (n.resolved_episode_uuid)",
             # Two-tier self Phase 3: the re-enable sweep runs on every lease-recovery pass.
             "CREATE INDEX episodic_extraction_skipped_for_idx IF NOT EXISTS FOR (n:Episodic) ON (n.extraction_skipped_for)",
-            # Dirty-namespace detection scans :Episodic with a content STARTS WITH predicate on
-            # every consolidation request and scheduler cycle; a plain index backs prefix search.
-            "CREATE INDEX episodic_content_idx IF NOT EXISTS FOR (n:Episodic) ON (n.content)",
             # Raw captures are MERGEd by this property once per exhausted episode during the
             # terminal-failure sweep. Without the index that MERGE is a full :Entity label scan
             # per episode.

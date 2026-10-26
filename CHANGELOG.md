@@ -1,3 +1,13 @@
+## 2026-10-26 - Episodes over ~8 KB can be written again
+
+Neo4j cannot index a property value over about 8 KB, and `episodic_content_idx` (a RANGE index on `:Episodic(content)`, added 2026-08-18) made every longer episode fail to write; an LME build died on a 9,838-byte episode. Nothing seeks that index any more (its content prefix scan is gone, and text search uses Graphiti's FULLTEXT `episode_content`).
+
+- `infrastructure/schema.py`: the index is no longer created; `RETIRED_INDEXES` lists it and `get_retired_index_queries()` drops it (`DROP INDEX ... IF EXISTS`).
+- `infrastructure/memory_graph_adapter.py`: `retire_obsolete_indexes()` runs those drops and returns failures.
+- `core/bootstrap.py`: `prepare_memory_runtime` runs the drops on every writer start, before the readiness gate, because phase-one bootstrap is skipped on any install whose required indexes are online (every existing graph). A failed drop is logged and reported as `retired_index_failures`; startup continues. Candidate-readonly startup does not drop.
+- Tests: new `tests/test_retired_content_index.py` (unit, plus an online test that reproduces the failed write with the old index and passes after the drop). `tests/test_degraded_startup.py`: its fake adapter gains the new method.
+- `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
+
 ## 2026-10-25 - Fact said time drops the Neo4j zone id; freshness A/B numbers corrected
 
 - `services/recall_policies.py`: `said_at` drops a trailing zone id (`2023-11-30T20:25:00Z[UTC]` -> `2023-11-30T20:25:00Z`), as `domain/event_time.py` does for event times. Test: `tests/test_fact_said_time.py`.
@@ -105,15 +115,5 @@ In the LME pilot a counting namespace failed inside the pass (a provider 500), y
 
 - `tests/e2e/conftest.py`, `tests/e2e/_harness/config.py`: `MENHIR_E2E_WORK_ROOT` is resolved to an absolute path. A relative root broke E2E-20's upgrade step, where pip runs from another cwd and could not find the candidate wheel.
 - `pyproject.toml`, `uv.lock`: the `dev` group adds `build` (the wheel frontend E2E-19/20 use; CI already installs it), so `uv sync` is enough for a local E2E run. The relock also adds platform markers to `secretstorage`'s dependencies.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-10-21 - Default the inferred self tier to enforce
-
-- `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: `inferred_self_mode` defaults to `enforce` (owner decision for #343). Installs that leave it unset, fresh or upgraded, bind what agent-written memories say about the user to the inferred self (`user-inferred`) instead of a new "user" node, and recall reads both self tiers; pin `off` to opt out. An unrecognized value still falls back to `off`.
-- `cli/bootstrap.py`: the hook CLI's `RecallService` now receives the mode, so hook-injected context reads the same tiers as backend recall (it ignored the inferred tier before).
-- Existing "user" forks created before the upgrade stay where they are; `scripts/report_self_forks.py` lists them and consolidation stays blocked.
-- E2E-19 runs `two_tier_self` on the shipped defaults; its opt-out step also pins `MENHIR_INFERRED_SELF_MODE=off`.
-- `.agent/default-off-features.md`: the mode moves to a "graduated to default-on" section.
-- Tests: new upgrade test in `tests/test_release_config_upgrade.py` for unset versus pinned modes. Changed: `tests/e2e/test_e2e_19_fresh_install.py` (default-on expectations and opt-out pin).
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
 

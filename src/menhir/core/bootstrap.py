@@ -307,6 +307,14 @@ async def prepare_memory_runtime(
     graphiti_in_play = bool(graphiti_ready and graphiti_client_available)
     if graphiti_in_play:
         await artifacts.graphiti_client.build_indices_and_constraints(force=force_graphiti)
+    # Every start, not inside the bootstrap below: that is skipped on any install whose required
+    # set is online, so a drop placed there never reaches an existing graph.
+    retired_index_failures = await asyncio.to_thread(artifacts.graph_adapter.retire_obsolete_indexes)
+    if retired_index_failures:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Dropping retired indexes failed, continuing: %s", "; ".join(retired_index_failures)
+        )
     schema_ready = await asyncio.to_thread(
         artifacts.graph_adapter.phase_one_schema_ready, require_graphiti=graphiti_in_play
     )
@@ -364,6 +372,7 @@ async def prepare_memory_runtime(
         # disagreement is unrepresentable rather than merely currently-absent.
         "graphiti": "ok" if graphiti_in_play else "skipped",
         "schema": schema,
+        "retired_index_failures": retired_index_failures,
         "edge_count_sync": edge_count_sync,
         "edge_count_sync_error": edge_count_sync_error,
     }

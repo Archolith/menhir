@@ -253,7 +253,9 @@ def test_cf203_the_unindexed_predicates_now_have_indexes() -> None:
     joined = " ".join(get_phase1_bootstrap_queries())
     for prop in ("structure_role", "structure_path", "structure_project", "raw_capture_for"):
         assert prop in joined, prop
-    assert "FOR (n:Episodic) ON (n.content)" in joined
+    # The :Episodic(content) index CF-203 added is retired: no reader seeks it, and Neo4j cannot
+    # index values over ~8 KB (tests/test_retired_content_index.py).
+    assert "FOR (n:Episodic) ON (n.content)" not in joined
 
 
 # ---------------------------------------------------------------------------

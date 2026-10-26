@@ -35,6 +35,7 @@ from menhir.infrastructure.schema import (
     PHASE_ONE_REQUIRED_INDEXES,
     SCALAR_STATE_REQUIRED_INDEXES,
     get_phase1_bootstrap_queries,
+    get_retired_index_queries,
 )
 
 logger = logging.getLogger(__name__)
@@ -367,6 +368,17 @@ class MemoryGraphAdapter:
             queries_executed=len(queries),
             failures=failures,
         )
+
+    def retire_obsolete_indexes(self) -> list[str]:
+        """Drop RETIRED_INDEXES; return failure messages. Separate from bootstrap_phase_one
+        because that is skipped once the required set is online, i.e. on every existing install."""
+        failures: list[str] = []
+        for query in get_retired_index_queries():
+            try:
+                self.neo4j.execute(query)
+            except Exception as exc:  # pragma: no cover - external dependency behavior
+                failures.append(str(exc))
+        return failures
 
     # -------------------------------------------------------------------------
     # Episode lifecycle delegates → EpisodeRepository
