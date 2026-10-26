@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-25 - Backfill `--require-complete` build gate
+
+- `scripts/backfill_episode_embeddings.py --require-complete`: after the run, count READY
+  episodes that still have no content embedding (the listing's own predicates, missing only) and
+  exit 3 if any remain. With `--dry-run` it only checks. For benchmark builds, where the
+  scheduler (and so the repair job) is off.
+
 ## 2026-10-25 - Store-only ingest (`store_only` on POST /api/memory)
 
 - `store_only: true` stores and embeds the episode for the source-memory lane and never extracts

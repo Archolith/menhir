@@ -18,6 +18,7 @@ Usage:
   python scripts/backfill_episode_embeddings.py --dry-run
   python scripts/backfill_episode_embeddings.py --namespace default --limit 500
   python scripts/backfill_episode_embeddings.py --namespace lme-x --batch 100
+  python scripts/backfill_episode_embeddings.py --require-complete   # build gate: exit 3 on gaps
 
 Read-only unless run WITHOUT --dry-run. Embeds via the configured Graphiti
 embedder (the same embedder recall uses), truncating content to 8,000 chars.
@@ -124,11 +125,36 @@ async def _run(args: argparse.Namespace) -> int:
                     written += 1
                 else:
                     skipped += 1
+        mode = "would write" if args.dry_run else "wrote"
+        print(f"{mode} {written} embedding(s); skipped {skipped}.")
+        if getattr(args, "require_complete", False):
+            missing = _count_ready_missing(repo, args.namespace)
+            if missing:
+                print(f"INCOMPLETE: {missing} READY episode(s) still have no content embedding.",
+                      file=sys.stderr)
+                return 3
+            print("complete: every READY episode has a content embedding.")
     finally:
         neo4j.close()
-    mode = "would write" if args.dry_run else "wrote"
-    print(f"{mode} {written} embedding(s); skipped {skipped}.")
     return 0
+
+
+def _count_ready_missing(repo: Any, namespace: str | None) -> int:
+    """READY episodes with no embedding at all, under the listing's own predicates.
+
+    Missing only (``model=None``): a vector from another embedder is a migration question, not
+    a gap in the source-memory lane.
+    """
+    count = 0
+    after_uuid: str | None = None
+    while True:
+        rows = repo.list_episodes_missing_content_embedding(
+            namespace, limit=500, after_uuid=after_uuid, ready_only=True
+        )
+        if not rows:
+            return count
+        count += len(rows)
+        after_uuid = str(rows[-1]["uuid"])
 
 
 def main() -> int:
@@ -141,6 +167,9 @@ def main() -> int:
                         help="stop after this many episodes (default: no limit)")
     parser.add_argument("--dry-run", action="store_true",
                         help="list what would be embedded without writing")
+    parser.add_argument("--require-complete", action="store_true",
+                        help="afterwards, exit 3 if any READY episode still has no embedding "
+                             "(with --dry-run: check only, write nothing)")
     args = parser.parse_args()
     if args.batch < 1:
         parser.error("--batch must be >= 1")
