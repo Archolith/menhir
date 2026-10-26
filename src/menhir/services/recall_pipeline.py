@@ -218,13 +218,19 @@ async def _build_source_memories(
         query_vector = content_query_vector
         if query_vector is None:
             query_vector = await service.graphiti_client.embed_query(query)
+        spread = tuning.source_memory_spread
+        if spread:
+            from menhir.domain.source_memory_spread import pool_size, spread_by_session
         rows = await asyncio.to_thread(
             service.graph_adapter.search_episode_embeddings,
             query_vector,
-            limit=effective_limit,
+            limit=pool_size(effective_limit) if spread else effective_limit,
             namespace=namespace,
             **_embedding_model_kwargs(service),
         )
+        if spread:
+            rows = spread_by_session(
+                [row for row in rows if str(row.get("uuid") or "").strip()], effective_limit)
         section: list[SourceMemory] = []
         for row in rows:
             uuid = str(row.get("uuid") or "").strip()

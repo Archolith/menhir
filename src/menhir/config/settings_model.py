@@ -473,6 +473,7 @@ class MemorySettings:
     frontier_source_memory_limit: int = 10          # section size (1..50; validated in RetrievalTuningConfig)
     frontier_source_memory_max_chars: int = 600  # per-memory content cap (100..4000)
     frontier_source_memory_pools: bool = False  # group section entries by shared anchors
+    frontier_source_memory_spread: bool = False  # pick the section per session from a 3x pool, dropping exact repeats
 
     # HTTP server
     api_host: str = "127.0.0.1"
@@ -793,6 +794,7 @@ class MemorySettings:
             source_memory_limit=self.frontier_source_memory_limit,
             source_memory_max_chars=self.frontier_source_memory_max_chars,
             source_memory_pools=self.frontier_source_memory_pools,
+            source_memory_spread=self.frontier_source_memory_spread,
             enable_anchored_time_render=self.anchored_time_render_enabled,
             enable_anchored_time_expiry=self.anchored_time_expiry_enabled,
             enable_fact_relevance=self.frontier_fact_relevance,
@@ -1063,6 +1065,7 @@ class MemorySettings:
                 maximum=4000,
             ),
             frontier_source_memory_pools=parse_bool_env(_getenv("MENHIR_FRONTIER_SOURCE_MEMORY_POOLS", default=str(cls.frontier_source_memory_pools))),
+            frontier_source_memory_spread=parse_bool_env(_getenv("MENHIR_FRONTIER_SOURCE_MEMORY_SPREAD", default=str(cls.frontier_source_memory_spread))),
             # HTTP server
             api_host=_getenv("MENHIR_API_HOST", default=cls.api_host),
             api_port=_parse_int(
