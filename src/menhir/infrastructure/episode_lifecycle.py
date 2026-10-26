@@ -16,6 +16,7 @@ from menhir.domain.namespace import (
 )
 from menhir.domain.recall_visibility import default_recall_visibility_cypher
 from menhir.domain.episode_nodes import menhir_queue_episode_cypher
+from menhir.domain.ingest import EXTRACTION_MODE_STORE_ONLY
 from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.self_identity import inferred_self_uuid_for_namespace
 from menhir.domain.structural_memory import non_structural_memory_cypher
@@ -123,6 +124,7 @@ class EpisodeLifecycleRepository:
         turn_role: str | None = None,
         ingest_key: str | None = None,
         ingest_request_sha256: str | None = None,
+        extraction_mode: str | None = None,
     ) -> str:
         ingest_key_set = (
             "            , n.ingest_key = $ingest_key,\n"
@@ -144,6 +146,7 @@ class EpisodeLifecycleRepository:
             "bootstrap_scope": bootstrap_scope,
             "namespace": namespace,
             "reference_time": reference_time,
+            "extraction_mode": extraction_mode,
         }
         if ingest_key is not None:
             params["ingest_key"] = ingest_key
@@ -191,7 +194,8 @@ class EpisodeLifecycleRepository:
                 n.resolved_episode_uuid = null,
                 n.enrichment_priority = 'P1',
                 n.enriched_nodes_touched = 0,
-                n.enriched_edges_touched = 0
+                n.enriched_edges_touched = 0,
+                n.extraction_mode = $extraction_mode
             """
             + ingest_key_set,
             params=params,
@@ -932,6 +936,9 @@ class EpisodeLifecycleRepository:
                 # noted above: stored correctly, projected nowhere.
                 "n.reference_time AS reference_time",
                 "n.queued_at AS queued_at",
+                # Durable per-episode mode: every re-claim (lease recovery, retry, requeue) reads
+                # it here, so a store-only episode is never extracted on a later attempt.
+                "n.extraction_mode AS extraction_mode",
                 # The episode-to-evidence link identifies the current raw transcript turn. A
                 # relationless corrective extraction can use it to retrieve bounded adjacent
                 # dialogue without putting assistant context into the persisted episode body.
@@ -1126,6 +1133,60 @@ class EpisodeLifecycleRepository:
         if not rows or not rows[0].get("projection_uuid"):
             return None
         return str(rows[0]["projection_uuid"])
+
+    def mark_episode_store_only(
+        self, episode_uuid: str, *, worker_id: str, claim_started_at: object | None,
+    ) -> bool:
+        """Finish a store-only episode READY without extraction. True when this claim wrote it.
+
+        Fenced on this claim's owner and start instant, and on the durable ``extraction_mode``
+        itself, so only an attempt holding the current lease on a store-only row can finish it.
+        """
+        if not worker_id or claim_started_at is None:
+            return False
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $episode_uuid})
+            WHERE n.processing_state = 'ENRICHING' AND n.processing_owner = $worker_id
+              AND n.processing_started_at IS NOT NULL
+              AND n.processing_started_at.epochSeconds = datetime($claim_started_at).epochSeconds
+              AND n.processing_started_at.nanosecond = datetime($claim_started_at).nanosecond
+              AND n.extraction_mode = $store_only
+            SET n.processing_state = 'READY',
+                n.processing_stage = 'ready',
+                n.processing_substage = $store_only,
+                n.processing_substage_started_at = datetime(),
+                n.processing_progress = 100.0,
+                n.processing_steps_completed = coalesce(toInteger(n.processing_steps_total), 5),
+                n.processing_completed_at = datetime(),
+                n.processing_owner = null,
+                n.processing_lease_expires_at = null,
+                n.processing_heartbeat_at = datetime(),
+                n.processing_error = null,
+                n.processing_llm_active_task = null,
+                n.processing_llm_active_kind = null,
+                n.processing_llm_active_model = null,
+                n.processing_llm_active_endpoint = null,
+                n.enriched_nodes_touched = 0,
+                n.enriched_edges_touched = 0,
+                n.policy_empty_reason = null
+            RETURN n.uuid AS uuid
+            """,
+            params={
+                "episode_uuid": episode_uuid,
+                "worker_id": worker_id,
+                "claim_started_at": claim_started_at,
+                "store_only": EXTRACTION_MODE_STORE_ONLY,
+            },
+        )
+        return bool(rows)
+
+    def episode_is_store_only(self, episode_uuid: str) -> bool:
+        rows = self.neo4j.execute(
+            "MATCH (n:Episodic {uuid: $uuid}) RETURN n.extraction_mode = $store_only AS store_only",
+            params={"uuid": episode_uuid, "store_only": EXTRACTION_MODE_STORE_ONLY},
+        )
+        return bool(rows and rows[0].get("store_only"))
 
     def reenable_verbatim_skips(
         self, *, projection_uuid: str | None = None, limit: int = 100,

@@ -64,6 +64,7 @@ class MemoryBackend(Protocol):
         user_statement: str | None = None,
         role: str | None = None,
         idempotency_key: str | None = None,
+        store_only: bool = False,
     ) -> dict[str, Any]:
         """Queue an episode for enrichment. Returns QueueResult-shaped dict.
 

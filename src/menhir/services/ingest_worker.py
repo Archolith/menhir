@@ -14,6 +14,7 @@ from uuid import uuid4
 
 
 from menhir.domain import IngestResult, IngestStatus, MemorySession
+from menhir.domain.ingest import EXTRACTION_MODE_STORE_ONLY
 from menhir.domain.models import ProcessingState
 from menhir.infrastructure import GraphitiClient, LLMAdapter, MemoryGraphAdapter
 from menhir.infrastructure.git_log import current_head
@@ -202,6 +203,12 @@ class IngestWorkerMixin:
             # cannot happen before that instant plus the remaining lease; we abandon locally first.
             try:
                 async with asyncio.timeout(self._max_enrichment_seconds) as deadline:
+                    # Store-only: embed for the source-memory lane, then finish READY. Ahead of
+                    # reconcile/preflight/budget, which are all about extraction.
+                    if claimed.get("extraction_mode") == EXTRACTION_MODE_STORE_ONLY:
+                        await embed_episode_content(ctx)
+                        await self._finish_store_only(episode_uuid, claimed)
+                        return
                     if await try_reconcile_existing(ctx):
                         return
                     if await run_preflight_rejection(ctx):
@@ -301,6 +308,23 @@ class IngestWorkerMixin:
                     await heartbeat_task
 
         return
+
+    async def _finish_store_only(self, episode_uuid: str, claimed: dict[str, Any]) -> None:
+        """Mark a store-only episode READY. Never falls through to extraction: if the fenced
+        write misses, this attempt no longer holds the lease and the current owner finishes it."""
+        finished = await asyncio.to_thread(
+            self.graph_adapter.mark_episode_store_only,
+            episode_uuid,
+            worker_id=self._worker_id,
+            claim_started_at=claimed.get("processing_started_at"),
+        )
+        record_lifecycle_event(
+            component="ingest_worker",
+            event="store_only_ready",
+            state="completed" if finished else "skipped",
+            episode_uuid=episode_uuid,
+            details={} if finished else {"reason": "claim_fence_lost"},
+        )
 
     async def _try_verbatim_skip(self, episode_uuid: str, claimed: dict[str, Any]) -> bool:
         """Two-tier self Phase 3 (enforce only): finish a client whose text is its hook turn's

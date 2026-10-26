@@ -41,6 +41,7 @@ class RuntimeProviderDataOpsMixin:
         user_statement: str | None = None,
         role: str | None = None,
         idempotency_key: str | None = None,
+        store_only: bool = False,
     ) -> dict[str, Any]:
         session = new_session(user_id, session_id=session_id)
         queue_kwargs: dict[str, Any] = {
@@ -58,6 +59,8 @@ class RuntimeProviderDataOpsMixin:
             queue_kwargs["idempotency_key"] = idempotency_key
         if bootstrap_scope is not None:
             queue_kwargs["bootstrap_scope"] = bootstrap_scope
+        if store_only:
+            queue_kwargs["store_only"] = True
         result = await self.built.ingest_service.queue_episode_for_enrichment(
             text, session, source, **queue_kwargs
         )

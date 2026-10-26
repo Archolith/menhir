@@ -393,11 +393,14 @@ class MemoryGraphAdapter:
         turn_role: str | None = None,
         ingest_key: str | None = None,
         ingest_request_sha256: str | None = None,
+        extraction_mode: str | None = None,
     ) -> str:
         ingest_kwargs: dict[str, Any] = {}
         if ingest_key is not None:
             ingest_kwargs["ingest_key"] = ingest_key
             ingest_kwargs["ingest_request_sha256"] = ingest_request_sha256
+        if extraction_mode is not None:
+            ingest_kwargs["extraction_mode"] = extraction_mode
         return self._episodes.create_pending_episode(
             episode_uuid=episode_uuid,
             name=name,
@@ -744,6 +747,17 @@ class MemoryGraphAdapter:
         """Structural INFERRED_VIEW_OF link from anchored self to inferred self, only when both
         exist; see `EpisodeLifecycleRepository.link_self_tiers`."""
         return self._episodes.link_self_tiers(namespace)
+
+    def mark_episode_store_only(
+        self, episode_uuid: str, *, worker_id: str, claim_started_at: object | None,
+    ) -> bool:
+        """See `EpisodeLifecycleRepository.mark_episode_store_only`."""
+        return self._episodes.mark_episode_store_only(
+            episode_uuid, worker_id=worker_id, claim_started_at=claim_started_at,
+        )
+
+    def episode_is_store_only(self, episode_uuid: str) -> bool:
+        return self._episodes.episode_is_store_only(episode_uuid)
 
     def mark_episode_verbatim_skipped(
         self, episode_uuid: str, *, worker_id: str, claim_started_at: object | None,
