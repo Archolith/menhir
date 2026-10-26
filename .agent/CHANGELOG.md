@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-25 - Record statement-order keeps as edge conflicts (#168 item 9, deferred link)
+
+- Each pair the statement-order veto keeps (NEWER_CANDIDATE and CONTRADICTION) is now written as an
+  `EdgeInvalidationConflict` record with `kept_by = 'statement_order'`, the fork reason, and the
+  cause's source (stored, or this call's). Authority keeps are written exactly as before; a record
+  without `kept_by` is an authority keep. One record per ordered (kept, cause) pair, as before.
+- Nothing reads these records yet. Linking them to `list_conflicts`, recall and resolution needs
+  edge-level conflict code: Menhir's conflict groups live on `:Entity` nodes, so linking through a
+  fact's endpoints would flag the user node on every recall. That link is deferred to post-MVP.
+- Written only when `MENHIR_EDGE_INVALIDATION_STATEMENT_ORDER` is on.
+- `tests/test_edge_invalidation_statement_order_records.py`, `tests/test_edge_invalidation_statement_order_records_online.py`.
+
 ## 2026-10-25 - Statement-order veto on edge invalidation (#168 2a)
 
 - Graphiti orders supersession by event date (`valid_at`), so an older statement whose event dates

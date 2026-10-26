@@ -21,7 +21,8 @@ Any error answers KEEP (fail closed): a stored human edge is never ended on a fa
 Statement order (2a, ``statement_order``; MENHIR_EDGE_INVALIDATION_STATEMENT_ORDER): after the
 authority check, on NEWER_CANDIDATE and CONTRADICTION, a cause said before its target answers KEEP,
 so an older statement whose event date is later never ends a newer one; both stay live. It only
-adds KEEP answers. "Said" is the episode time, read per edge (see ``_cause_said_earlier``).
+adds KEEP answers. "Said" is the episode time, read per edge (see ``_cause_said_earlier``). Each
+such pair is recorded as an ``EdgeInvalidationConflict`` with ``kept_by = 'statement_order'``.
 
 Known gap (fork): the OWN_END branch expires an edge whose own window is inverted or empty
 without asking this hook.
@@ -64,7 +65,7 @@ UNWIND $rows AS row
 MERGE (c:EdgeInvalidationConflict {uuid: row.uuid})
 ON CREATE SET c.kept_edge_uuid = row.kept_edge_uuid, c.cause_edge_uuid = row.cause_edge_uuid,
     c.group_id = row.group_id, c.reason = row.reason, c.cause_source = row.cause_source,
-    c.kept_fact = row.kept_fact, c.cause_fact = row.cause_fact,
+    c.kept_fact = row.kept_fact, c.cause_fact = row.cause_fact, c.kept_by = row.kept_by,
     c.status = 'unresolved', c.created_at = datetime()
 SET c.last_seen_at = datetime(), c.seen_count = coalesce(c.seen_count, 0) + 1
 RETURN count(c) AS recorded
@@ -77,7 +78,12 @@ def is_human_source(source: object) -> bool:
 
 @dataclass(frozen=True)
 class KeptEdge:
-    """A stored human edge the guard kept against a non-human contradiction."""
+    """An edge the hook kept against a cause.
+
+    ``kept_by``: ``authority`` (#377, a stored human edge against a non-human contradiction) or
+    ``statement_order`` (2a, a cause said before the edge). A record without ``kept_by`` is an
+    authority keep, as are records written before 2a.
+    """
 
     reason: str
     kept_edge_uuid: str
@@ -86,6 +92,7 @@ class KeptEdge:
     cause_edge_uuid: str
     cause_fact: str
     cause_source: str
+    kept_by: str = "authority"
 
 
 @dataclass
@@ -142,18 +149,7 @@ class MenhirEdgeInvalidationHook:
             context.target_edge.uuid, reason, cause_source,
         )
         if state is not None and reason == "contradiction":
-            target, cause = context.target_edge, context.cause_edge
-            state.kept.append(
-                KeptEdge(
-                    reason=reason,
-                    kept_edge_uuid=str(target.uuid),
-                    kept_group_id=str(getattr(target, "group_id", "") or ""),
-                    kept_fact=str(getattr(target, "fact", "") or ""),
-                    cause_edge_uuid=str(cause.uuid),
-                    cause_fact=str(getattr(cause, "fact", "") or ""),
-                    cause_source=str(cause_source or ""),
-                )
-            )
+            state.kept.append(_kept_edge(context, reason, cause_source, "authority"))
         return True
 
     async def _cause_said_earlier(
@@ -188,6 +184,10 @@ class MenhirEdgeInvalidationHook:
             context.target_edge.uuid, reason, target_said.isoformat(),
             context.cause_edge.uuid, cause_said.isoformat(),
         )
+        if state is not None:
+            # Both reasons are recorded: the inversion this veto exists for is NEWER_CANDIDATE.
+            cause_source = await self._cause_source(state, context.cause_edge)
+            state.kept.append(_kept_edge(context, reason, cause_source, "statement_order"))
         return True
 
     async def _stored_said(
@@ -237,6 +237,20 @@ class MenhirEdgeInvalidationHook:
         return source
 
 
+def _kept_edge(context: Any, reason: str, cause_source: str | None, kept_by: str) -> KeptEdge:
+    target, cause = context.target_edge, context.cause_edge
+    return KeptEdge(
+        reason=reason,
+        kept_edge_uuid=str(target.uuid),
+        kept_group_id=str(getattr(target, "group_id", "") or ""),
+        kept_fact=str(getattr(target, "fact", "") or ""),
+        cause_edge_uuid=str(cause.uuid),
+        cause_fact=str(getattr(cause, "fact", "") or ""),
+        cause_source=str(cause_source or ""),
+        kept_by=kept_by,
+    )
+
+
 def _reason(context: Any) -> str:
     return str(getattr(context.reason, "value", context.reason))
 
@@ -270,7 +284,7 @@ def kept_conflict_rows(kept: list[KeptEdge]) -> list[dict[str, str]]:
     rows: dict[str, dict[str, str]] = {}
     for item in kept:
         uid = str(uuid5(NAMESPACE_URL, f"menhir:edge-conflict:{item.kept_edge_uuid}:{item.cause_edge_uuid}"))
-        rows.setdefault(uid, {
+        row = {
             "uuid": uid,
             "kept_edge_uuid": item.kept_edge_uuid,
             "cause_edge_uuid": item.cause_edge_uuid,
@@ -279,7 +293,11 @@ def kept_conflict_rows(kept: list[KeptEdge]) -> list[dict[str, str]]:
             "cause_source": item.cause_source,
             "kept_fact": item.kept_fact,
             "cause_fact": item.cause_fact,
-        })
+        }
+        if item.kept_by != "authority":
+            # Absent means authority, so pre-2a records and rows read the same way.
+            row["kept_by"] = item.kept_by
+        rows.setdefault(uid, row)
     return list(rows.values())
 
 
