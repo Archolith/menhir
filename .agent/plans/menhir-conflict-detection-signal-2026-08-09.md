@@ -1,6 +1,6 @@
 # Conflict Detection Signal Correction
 
-Status: **planned; implementation not started**
+Status: **Phases 1-3 implemented behind default-off flags on branch `fix/conflict-detection-signal` (2026-10-26); Phase 0 live RRF distribution NOT obtained (graph unreachable); precision re-run and online tests NOT RUN**
 **Last verified:** 2026-08-18 — ACCURATE, not started. `classify_pair` (`services/correlation_service.py:146`) is the PRE-EXISTING method the RCA indicts, not this plan's output; it still takes a bare `similarity: float` and routes on it, and no Phase 0 precision measurement is recorded.
 
 

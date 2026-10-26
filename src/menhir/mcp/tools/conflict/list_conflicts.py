@@ -32,6 +32,31 @@ async def list_conflicts(
     )
 
 
+def _origin_note(members: list[dict[str, object]]) -> dict[str, object]:
+    """How this group likely reached its status, from durable fields only.
+
+    ``llm_confirmed`` (``pending_llm_review`` -> ``unresolved`` after the contradiction judge
+    agreed) and ``promoted_bypass`` (``set_conflict`` writes ``unresolved`` directly for a PROMOTED
+    member, SSOT-08, with no judge) end in the same ``conflict_status`` and no other field records
+    which happened: ``confirm_pending_conflicts`` writes ``conflict_status`` only. So the origin
+    is NOT recorded. What is derivable is that a group with a PROMOTED member CAN have bypassed the
+    judge; a group with none cannot have used that path. Read-only; nothing is written.
+    """
+    promoted = any(str(m.get("scope") or "") == "PROMOTED" for m in members)
+    return {
+        "recorded": False,
+        "promoted_bypass_possible": promoted,
+        "note": (
+            "origin (llm_confirmed vs promoted_bypass) is not durably recorded; "
+            + (
+                "a member is PROMOTED, so this group may have skipped the LLM judge."
+                if promoted
+                else "no member is PROMOTED (the schema backfill of a null status is the only other direct write)."
+            )
+        ),
+    }
+
+
 class ListConflictsTool(BaseJsonTool):
     name = "list_conflicts"
     # NAMESPACED, not OBJECT: this reads member `content` at READONLY tier, and before the
@@ -70,11 +95,13 @@ class ListConflictsTool(BaseJsonTool):
                     "group_id": group_id or None,
                     "detected_at": _coerce_iso(row.get("created_at")),
                     "member_count": len(members),
+                    "origin": _origin_note(members),
                     "members": [
                         {
                             "uuid": member.get("uuid"),
                             "name": member.get("name") or member.get("uuid"),
                             "status": member.get("status") or "unknown",
+                            "scope": member.get("scope") or "unknown",
                             "tag": "older" if index == 0 else "newer",
                             "summary": excerpt(member.get("content"), limit=120),
                         }

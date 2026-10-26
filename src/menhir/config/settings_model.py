@@ -206,6 +206,8 @@ class MemorySettings:
     # job can be paused independently of the rest of the scheduler (it can be an expensive fold +
     # per-counter embedding pass). MENHIR_EXPERIENCE_COUNTER_ENABLED=false removes it from the loop.
     experience_counter_enabled: bool = True
+    correlation_cosine_shadow_enabled: bool = False
+    correlation_shared_episode_veto_enabled: bool = False
 
     # Verifier sync job (graph-native verifiers -> re-derive config/status registers from their
     # source of truth and flag referencing beliefs on change). Default off — opt in per box.
@@ -903,6 +905,8 @@ class MemorySettings:
                 "MENHIR_ARTIFACT_RECONCILE_REPOSITORY", default=""
             ) or "",
             experience_counter_enabled=parse_bool_env(_getenv("MENHIR_EXPERIENCE_COUNTER_ENABLED", default=str(cls.experience_counter_enabled))),
+            correlation_cosine_shadow_enabled=parse_bool_env(_getenv("MENHIR_CORRELATION_COSINE_SHADOW_ENABLED", default=str(cls.correlation_cosine_shadow_enabled))),
+            correlation_shared_episode_veto_enabled=parse_bool_env(_getenv("MENHIR_CORRELATION_SHARED_EPISODE_VETO_ENABLED", default=str(cls.correlation_shared_episode_veto_enabled))),
             verifier_sync_enabled=parse_bool_env(_getenv("MENHIR_VERIFIER_SYNC_ENABLED", default=str(cls.verifier_sync_enabled))),
             verifier_sync_interval_s=_parse_float(
                 _getenv("MENHIR_VERIFIER_SYNC_INTERVAL_S", default=str(cls.verifier_sync_interval_s)),

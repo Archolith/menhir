@@ -1,3 +1,15 @@
+## 2026-10-26 - Conflict detection: cosine shadow, shared-episode veto, scope in list_conflicts
+
+`CorrelationService` compared a graphiti RRF rank-fusion score (ordinal, [0, 2]) with cosine-valued thresholds, so nearly every top hit reached the merge/conflict path (plan `menhir-conflict-detection-signal-2026-08-09`). Default behaviour is unchanged; both new flags are off.
+
+- `services/correlation_service.py`: `classify_pair` parameter renamed `similarity` -> `rrf_score` (scale documented; routing and telemetry keys unchanged). `cosine_shadow` records the legacy vs cosine route per pair as `correlation_cosine_shadow` and never acts. `shared_episode_veto` drops a conflict-bound pair (native conflict, or a merge blocked by a veto/judge) whose members share an episode, neither is PROMOTED, and the names share no attribute word; fails open.
+- `services/correlation_service_signals.py` (new): `pair_cosine`, `attribute_tokens`, `attributes_overlap`. `infrastructure/correlation_queries.py`, `infrastructure/memory_graph_adapter.py`: `fetch_pair_name_embeddings` (stored vectors, no embedding call). `search_scored` is untouched.
+- `MENHIR_CORRELATION_COSINE_SHADOW_ENABLED`, `MENHIR_CORRELATION_SHARED_EPISODE_VETO_ENABLED` (new, off): `config/settings_model.py`, `config/feature_flags.py`, `.env.example`, `.agent/default-off-features.md`; wired in `services/lifecycle_consolidation.py`.
+- `mcp/tools/conflict/list_conflicts.py`: each member shows `scope`; each group an `origin` note. The origin (`llm_confirmed` vs `promoted_bypass`) is not durably recorded, so only `promoted_bypass_possible` is derived.
+- `scripts/conflict_group_signal_survey.py` (new, read-only, indexed in `.agent/scripts-index.md`).
+- Tests: new `tests/test_conflict_detection_signal.py`.
+- `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
+
 ## 2026-10-25 - Fact said time drops the Neo4j zone id; freshness A/B numbers corrected
 
 - `services/recall_policies.py`: `said_at` drops a trailing zone id (`2023-11-30T20:25:00Z[UTC]` -> `2023-11-30T20:25:00Z`), as `domain/event_time.py` does for event times. Test: `tests/test_fact_said_time.py`.
@@ -106,14 +118,3 @@ In the LME pilot a counting namespace failed inside the pass (a provider 500), y
 - `tests/e2e/conftest.py`, `tests/e2e/_harness/config.py`: `MENHIR_E2E_WORK_ROOT` is resolved to an absolute path. A relative root broke E2E-20's upgrade step, where pip runs from another cwd and could not find the candidate wheel.
 - `pyproject.toml`, `uv.lock`: the `dev` group adds `build` (the wheel frontend E2E-19/20 use; CI already installs it), so `uv sync` is enough for a local E2E run. The relock also adds platform markers to `secretstorage`'s dependencies.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-10-21 - Default the inferred self tier to enforce
-
-- `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: `inferred_self_mode` defaults to `enforce` (owner decision for #343). Installs that leave it unset, fresh or upgraded, bind what agent-written memories say about the user to the inferred self (`user-inferred`) instead of a new "user" node, and recall reads both self tiers; pin `off` to opt out. An unrecognized value still falls back to `off`.
-- `cli/bootstrap.py`: the hook CLI's `RecallService` now receives the mode, so hook-injected context reads the same tiers as backend recall (it ignored the inferred tier before).
-- Existing "user" forks created before the upgrade stay where they are; `scripts/report_self_forks.py` lists them and consolidation stays blocked.
-- E2E-19 runs `two_tier_self` on the shipped defaults; its opt-out step also pins `MENHIR_INFERRED_SELF_MODE=off`.
-- `.agent/default-off-features.md`: the mode moves to a "graduated to default-on" section.
-- Tests: new upgrade test in `tests/test_release_config_upgrade.py` for unset versus pinned modes. Changed: `tests/e2e/test_e2e_19_fresh_install.py` (default-on expectations and opt-out pin).
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-

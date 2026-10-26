@@ -1027,6 +1027,31 @@ class CorrelationRepository:
             return shared_count > 0
         return False
 
+    def fetch_pair_name_embeddings(
+        self,
+        uuid_a: str,
+        uuid_b: str,
+    ) -> tuple[list[float] | None, list[float] | None]:
+        """Read-only: the stored ``name_embedding`` of each entity (``None`` when absent).
+
+        Used by the cosine shadow in ``CorrelationService``: the pair cosine is computed from
+        vectors already on the nodes, so it makes no embedding call.
+        """
+        rows = self._neo4j.execute(
+            """
+            MATCH (n:Entity)
+            WHERE n.uuid IN [$a, $b]
+            RETURN n.uuid AS uuid, n.name_embedding AS embedding
+            """,
+            params={"a": uuid_a, "b": uuid_b},
+        )
+        by_uuid = {str(r.get("uuid")): r.get("embedding") for r in rows or []}
+
+        def _vec(value: Any) -> list[float] | None:
+            return [float(x) for x in value] if value else None
+
+        return _vec(by_uuid.get(uuid_a)), _vec(by_uuid.get(uuid_b))
+
     def check_anchor_project_veto(
         self,
         uuid_a: str,

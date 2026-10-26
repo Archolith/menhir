@@ -341,10 +341,15 @@ class LifecycleConsolidationMixin:
         """
         from menhir.services.correlation_service import CorrelationService
 
+        settings = getattr(self, "settings", None)
         return CorrelationService(
             self.graph_adapter,
             self.graphiti_client,
             llm=self.llm,
+            cosine_shadow=bool(getattr(settings, "correlation_cosine_shadow_enabled", False)),
+            shared_episode_veto=bool(
+                getattr(settings, "correlation_shared_episode_veto_enabled", False)
+            ),
         )
 
     async def _check_contradictions_batch(
