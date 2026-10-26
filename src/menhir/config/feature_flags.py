@@ -132,6 +132,8 @@ _SETTINGS = (
         'Enable frontier source memories.', True, ()),
     ('frontier_source_memory_pools', 'MENHIR_FRONTIER_SOURCE_MEMORY_POOLS', False, 'frontier',
         'Enable frontier source memory pools.', True, ()),
+    ('frontier_source_memory_spread', 'MENHIR_FRONTIER_SOURCE_MEMORY_SPREAD', True, 'frontier',
+        "Pick source memories per session from a larger pool, dropping exact repeats, before more from one session.", True, ()),
     ('allow_insecure_remote_no_auth', 'MENHIR_ALLOW_INSECURE_REMOTE_NO_AUTH', False, 'auth',
         'Explicitly permit a remote no-auth bind.', False, ()),
     ('client_tokens_enabled', 'MENHIR_CLIENT_TOKENS_ENABLED', False, 'auth', 'Enable per-client bearer tokens.',

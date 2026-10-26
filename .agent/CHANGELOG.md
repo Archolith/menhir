@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-25 - Source-memory session spread (default on)
+
+- `MENHIR_FRONTIER_SOURCE_MEMORY_SPREAD` (default on; `=false` opts out): the source-memory lane fetches a pool
+  of 3x the limit (capped at 50), drops exact content repeats (whitespace and case folded), then
+  takes each session's best match in cosine order before a second turn from any session. Rows
+  without a session count as their own session; rows without a uuid never take a slot. The
+  section is still sorted oldest first. Off: the lane fetches and returns exactly as before.
+  `recall_history` is unchanged.
+- Why: in the o500 src-sm10 run, the slots often crowded into one session (e.g. 6 of 10 from a
+  single session, with an evidence session absent) and exact repeats took slots.
+- o500 recall-only A/B vs src-sm10: 0.810 vs 0.804 (noise). The spread changed 18/500 sections;
+  those flipped fixed 3 / broke 0. o500 has a median of 2 sessions per item, so it rarely fires.
+- New `domain/source_memory_spread.py` and `tests/test_source_memory_spread.py`; the flag is
+  added to the release-config campaign list and its default-on set. `RetrievalTuningConfig` and
+  Recall Lab keep `source_memory_spread=False`, as they do for `enable_source_memories`.
+
 ## 2026-10-12 - Anchored-time blind attach check (default off) and its labeled sets
 
 - `MENHIR_ANCHORED_TIME_ATTACH` (default off, needs the resolver): after the regex guards and
