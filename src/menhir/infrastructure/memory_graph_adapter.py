@@ -2764,5 +2764,10 @@ class MemoryGraphAdapter:
     def check_co_mention_veto(self, uuid_a: str, uuid_b: str) -> bool:
         return self._correlation.check_co_mention_veto(uuid_a, uuid_b)
 
+    def fetch_pair_name_embeddings(
+        self, uuid_a: str, uuid_b: str,
+    ) -> tuple[list[float] | None, list[float] | None]:
+        return self._correlation.fetch_pair_name_embeddings(uuid_a, uuid_b)
+
     def check_anchor_project_veto(self, uuid_a: str, uuid_b: str) -> bool:
         return self._correlation.check_anchor_project_veto(uuid_a, uuid_b)

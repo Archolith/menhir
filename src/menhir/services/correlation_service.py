@@ -30,6 +30,7 @@ from menhir.infrastructure.telemetry import record_mcp_event
 # Facade re-exports: thresholds and result types live in correlation_service_types;
 # the search-driven check methods live on CorrelationChecksMixin.
 from menhir.services.correlation_service_checks import CorrelationChecksMixin
+from menhir.services.correlation_service_signals import attributes_overlap, pair_cosine
 from menhir.services.correlation_service_types import (
     CORRELATION_CONFLICT_THRESHOLD,
     CORRELATION_MERGE_THRESHOLD,
@@ -72,6 +73,8 @@ class CorrelationService(CorrelationChecksMixin):
         llm: "LLMAdapter | None" = None,
         merge_coordinator: Any = None,
         on_merge_committed: Any = None,
+        cosine_shadow: bool = False,
+        shared_episode_veto: bool = False,
     ) -> None:
         self._repo = correlation_repo
         self._graphiti = graphiti_client
@@ -85,6 +88,14 @@ class CorrelationService(CorrelationChecksMixin):
         # no scalar-state coupling, byte-identical to before. Best-effort: it must never fail the
         # merge (the merge already committed; scalar reconciliation is repairable out of band).
         self._on_merge_committed = on_merge_committed
+        # Conflict-detection signal plan (2026-08-09). Both default OFF so a service built without
+        # them routes byte-identically to before.
+        #   cosine_shadow: Phase 1. Observe-only -- also route on a real pair cosine and RECORD the
+        #     old vs new decision. The new decision is never acted on.
+        #   shared_episode_veto: Phase 2. A conflict-bound pair whose members were extracted from
+        #     one episode, about non-overlapping attributes, is dropped before it can be queued.
+        self._cosine_shadow = cosine_shadow
+        self._shared_episode_veto_enabled = shared_episode_veto
 
     @property
     def merge_coordinator(self) -> Any:
@@ -113,9 +124,16 @@ class CorrelationService(CorrelationChecksMixin):
         self,
         source_uuid: str,
         target_uuid: str,
-        similarity: float,
+        rrf_score: float,
     ) -> tuple[str, dict[str, Any] | None]:
         """Classify one entity pair, execute the routed action, and return the result.
+
+        ``rrf_score`` is graphiti's RRF rank-fusion score from ``search_scored`` (range ~[0, 2],
+        rank_const=1: 1.0 for a lane's top hit, 0.5 for its second). It is ORDINAL, NOT a cosine
+        similarity, although the 0.70 / 0.85 / 0.95 thresholds it is compared with are written as
+        cosine values (RCA ``rca-conflict-detection-rrf-scale-mismatch-2026-08-09``). The name says
+        so on purpose; production routing is unchanged. A real cosine is available as a shadow
+        signal (``cosine_shadow``) and is never used to act.
 
         This is the sole owner of pair classification, deterministic vetoes, and
         judge-gated merge decisions (SSOT-03: previously duplicated -- with a
@@ -132,7 +150,10 @@ class CorrelationService(CorrelationChecksMixin):
         Returns ``(final_action, details)`` where ``final_action`` is one of
         "none" | "related" | "conflict" | "merged".
         """
+        similarity = rrf_score  # downstream names/telemetry keys stay `similarity` (unchanged)
         action = self._route(similarity)
+        if self._cosine_shadow:
+            await self._record_cosine_shadow(source_uuid, target_uuid, rrf_score, action)
         if action == "none":
             return "none", None
 
@@ -197,17 +218,120 @@ class CorrelationService(CorrelationChecksMixin):
                     "reason": "merge_abstained",
                     "abstain_reason": merge_result.get("reason"),
                 }
+            # A shared-episode pair blocked here by the co-mention veto used to fall through to the
+            # conflict queue -- the veto proved the pair distinct and it was queued anyway.
+            if await self._shared_episode_veto(source_uuid, target_uuid, stage="merge_blocked"):
+                return "none", {"reason": "shared_episode_veto"}
             return "conflict", {"reason": "merge_proposal_blocked_by_veto_or_judge"}
 
         # action == "conflict"
+        if await self._shared_episode_veto(source_uuid, target_uuid, stage="conflict"):
+            return "none", {"reason": "shared_episode_veto"}
         return "conflict", {"reason": "strong_overlap_pending_review"}
+
+    # ------------------------------------------------------------------
+    # Conflict-detection signal plan: Phase 1 shadow + Phase 2 veto
+    # ------------------------------------------------------------------
+
+    async def _record_cosine_shadow(
+        self, source_uuid: str, target_uuid: str, rrf_score: float, legacy_action: str,
+    ) -> None:
+        """Phase 1 shadow: route the same pair on a real cosine and record both decisions.
+
+        Observe-only. Reads two stored vectors (no embedding call), applies the SAME threshold
+        cascade to the cosine, and records ``legacy_action`` vs ``cosine_action``. It never
+        changes what ``classify_pair`` does and never raises: any failure is logged at debug.
+        ``cosine_action`` may be ``merge_proposed`` -- that is a would-be decision only; no
+        judge, veto or merge runs for it.
+        """
+        try:
+            vec_a, vec_b = await asyncio.to_thread(
+                self._repo.fetch_pair_name_embeddings, source_uuid, target_uuid,
+            )
+            cosine = pair_cosine(vec_a, vec_b)
+            cosine_action = self._route(cosine) if cosine is not None else "no_signal"
+            record_mcp_event(
+                kind="background",
+                operation="correlation_cosine_shadow",
+                payload={
+                    "source_uuid": source_uuid,
+                    "target_uuid": target_uuid,
+                    "rrf_score": rrf_score,
+                    "cosine": cosine,
+                },
+                result={
+                    "legacy_action": legacy_action,
+                    "cosine_action": cosine_action,
+                    "differs": cosine_action != legacy_action,
+                },
+                success=True,
+            )
+            logger.info(
+                "Correlation cosine shadow %s <-> %s rrf=%.3f cosine=%s legacy=%s cosine_route=%s",
+                source_uuid, target_uuid, rrf_score,
+                "n/a" if cosine is None else f"{cosine:.3f}", legacy_action, cosine_action,
+            )
+        except Exception:  # noqa: BLE001 -- the shadow must never affect routing
+            logger.debug(
+                "Cosine shadow failed for %s <-> %s", source_uuid, target_uuid, exc_info=True,
+            )
+
+    async def _shared_episode_veto(self, source_uuid: str, target_uuid: str, *, stage: str) -> bool:
+        """Phase 2: True when a conflict-bound pair must be dropped before it is queued.
+
+        Safety property: a pair is dropped only if BOTH members are MENTIONed by one episode (a
+        single source asserted both, which is affirmative evidence of compatibility) AND neither is PROMOTED AND their
+        names share no attribute word (so it is not a same-turn correction such as "retry limit
+        was 5, actually 7"). Every other case, and every error, returns False -- i.e. today's
+        behaviour. Reached only from the two ``conflict`` outcomes of ``classify_pair``; the merge
+        path (vetoes, judge, saga) is not touched.
+        """
+        if not self._shared_episode_veto_enabled:
+            return False
+        try:
+            shared = await asyncio.to_thread(
+                self._repo.check_co_mention_veto, source_uuid, target_uuid,
+            )
+            if not shared:
+                return False
+            metadata = await asyncio.to_thread(
+                self._repo.fetch_entity_merge_metadata, [source_uuid, target_uuid],
+            )
+            names = {str(m.get("uuid")): m.get("name") for m in metadata or []}
+            if any(str(m.get("scope") or "") == "PROMOTED" for m in metadata or []):
+                return False  # operator-curated ground truth is never silently dropped (SSOT-08)
+            overlap = attributes_overlap(names.get(source_uuid), names.get(target_uuid))
+        except Exception:  # noqa: BLE001 -- fail open: an unreadable pair is queued as before
+            logger.debug(
+                "Shared-episode veto check failed for %s <-> %s; not vetoing",
+                source_uuid, target_uuid, exc_info=True,
+            )
+            return False
+        record_mcp_event(
+            kind="background",
+            operation="conflict_shared_episode_veto",
+            payload={"source_uuid": source_uuid, "target_uuid": target_uuid, "stage": stage},
+            result={"vetoed": not overlap, "attribute_overlap": overlap},
+            success=True,
+        )
+        if overlap:
+            return False
+        logger.info(
+            "Conflict candidate %s <-> %s VETOED: shared episode, non-overlapping attributes (%s)",
+            source_uuid, target_uuid, stage,
+        )
+        return True
 
     # ------------------------------------------------------------------
     # Routing logic
     # ------------------------------------------------------------------
 
     def _route(self, similarity: float) -> str:
-        """Determine the action for a given similarity score.
+        """Determine the action for a given score on the SAME scale as the thresholds.
+
+        Production passes an RRF rank-fusion score (see ``classify_pair``); the cosine shadow
+        passes a real cosine. The thresholds are cosine-calibrated, so only the latter is on the
+        scale they name.
 
         Part 2: Judge-gated merge — scores >= merge_threshold route to "merge_proposed",
         which is then handled by vetoes + LLM judge. The judge returns "conflict" on
