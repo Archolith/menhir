@@ -240,6 +240,9 @@ class MemorySettings:
     #: must quote the same words with the right relation before a resolver time is written.
     #: Needs the resolver. Default off.
     anchored_time_attach_enabled: bool = False
+    #: 2a (#168): Graphiti never ends a fact on a statement said before it (episode time), so
+    #: an older statement with a later event date leaves both live. Veto only. Default on.
+    edge_invalidation_statement_order: bool = True
     #: Model for the attach call; empty means the resolver's model.
     anchored_time_attach_model: str = ""
 
@@ -917,6 +920,7 @@ class MemorySettings:
             anchored_time_render_enabled=parse_bool_env(_getenv("MENHIR_ANCHORED_TIME_RENDER", default=str(cls.anchored_time_render_enabled))),
             anchored_time_expiry_enabled=parse_bool_env(_getenv("MENHIR_ANCHORED_TIME_EXPIRY", default=str(cls.anchored_time_expiry_enabled))),
             anchored_time_attach_enabled=parse_bool_env(_getenv("MENHIR_ANCHORED_TIME_ATTACH", default=str(cls.anchored_time_attach_enabled))),
+            edge_invalidation_statement_order=parse_bool_env(_getenv("MENHIR_EDGE_INVALIDATION_STATEMENT_ORDER", default=str(cls.edge_invalidation_statement_order))),
             anchored_time_attach_model=(_getenv("MENHIR_ANCHORED_TIME_ATTACH_MODEL", default=cls.anchored_time_attach_model) or "").strip(),
             personal_memory_consolidation_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED", default=str(cls.personal_memory_consolidation_enabled))),
             personal_memory_consolidation_interval_s=_parse_float(
