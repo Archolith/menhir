@@ -32,7 +32,8 @@ class Driver:
 
     async def execute_query(self, cypher: str, **kw):
         if "reference_time" in cypher:
-            key = (kw["uuid"], kw["group_id"])
+            (group_id,) = kw["tenant_namespaces"]
+            key = (kw["uuid"], group_id)
             return SimpleNamespace(records=[{"said": self.said[key]}] if key in self.said else [])
         if kw["uuid"] not in self.sources:
             return SimpleNamespace(records=[])
