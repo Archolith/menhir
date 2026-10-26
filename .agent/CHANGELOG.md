@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-25 - Statement-order veto on edge invalidation (#168 2a)
+
+- Graphiti orders supersession by event date (`valid_at`), so an older statement whose event dates
+  later ("had it for 3 months") ended a newer one ("switched yesterday"). The invalidation hook now
+  answers KEEP on NEWER_CANDIDATE and CONTRADICTION when the cause was said before the target, and
+  both facts stay live. "Said" is the episode time: this call's episode for its own mention, the
+  stored `r.reference_time` (read by uuid and `group_id`, cached per call) for any other edge.
+- Veto only: it never ends a fact today's code keeps. The #377 authority check still answers
+  first. A missing or unparseable time keeps today's answer; a failed lookup answers KEEP. OWN_END
+  is unchanged.
+- `MENHIR_EDGE_INVALIDATION_STATEMENT_ORDER`, default on; `false` restores the old behaviour.
+  Applies at ingest, so existing graphs change only for facts written after it is on.
+- `tests/test_edge_invalidation_statement_order.py`, `tests/test_edge_invalidation_statement_order_online.py`.
+
 ## 2026-10-25 - Backfill `--require-complete` build gate
 
 - `scripts/backfill_episode_embeddings.py --require-complete`: after the run, count READY

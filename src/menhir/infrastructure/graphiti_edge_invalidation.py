@@ -18,6 +18,11 @@ Durable facts the decision rests on:
 
 Any error answers KEEP (fail closed): a stored human edge is never ended on a failed lookup.
 
+Statement order (2a, ``statement_order``; MENHIR_EDGE_INVALIDATION_STATEMENT_ORDER): after the
+authority check, on NEWER_CANDIDATE and CONTRADICTION, a cause said before its target answers KEEP,
+so an older statement whose event date is later never ends a newer one; both stay live. It only
+adds KEEP answers. "Said" is the episode time, read per edge (see ``_cause_said_earlier``).
+
 Known gap (fork): the OWN_END branch expires an edge whose own window is inverted or empty
 without asking this hook.
 """
@@ -29,9 +34,11 @@ import inspect
 import logging
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
+from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
 from menhir.domain.self_identity import GATE_APPROVED_HUMAN_SOURCES
 
 logger = logging.getLogger(__name__)
@@ -42,6 +49,12 @@ _RECORD_TIMEOUT_S = 10.0
 _STORED_EDGE_SOURCE_CYPHER = (
     "MATCH ()-[r:RELATES_TO {uuid: $uuid}]->() RETURN r.source AS source LIMIT 1"
 )
+_STORED_EDGE_SAID_CYPHER = (
+    f"MATCH ()-[r:RELATES_TO {{uuid: $uuid}}]->() WHERE {tenant_scope_cypher('r')} "
+    "RETURN r.reference_time AS said LIMIT 1"
+)
+#: Reasons the statement-order veto (2a) answers; OWN_END keeps today's answer.
+_STATEMENT_ORDER_REASONS = frozenset({"newer_candidate", "contradiction"})
 
 #: Standalone record per (kept edge, cause edge). Not an :Entity, so recall, merge eligibility
 #: and the entity conflict groups are untouched. A repeat sighting never reopens a record an
@@ -83,6 +96,7 @@ class InvalidationGuardState:
     source: str
     kept: list[KeptEdge] = field(default_factory=list)
     stored_sources: dict[str, str | None] = field(default_factory=dict)
+    stored_said: dict[tuple[str, str], datetime | None] = field(default_factory=dict)
 
 
 invalidation_guard_state: ContextVar[InvalidationGuardState | None] = ContextVar(
@@ -93,45 +107,112 @@ invalidation_guard_state: ContextVar[InvalidationGuardState | None] = ContextVar
 class MenhirEdgeInvalidationHook:
     """Menhir adapter on the fork's ``EdgeInvalidationHook`` seam."""
 
-    def __init__(self, driver: Any) -> None:
+    def __init__(self, driver: Any, *, statement_order: bool = False) -> None:
         self._driver = driver
+        self._statement_order = statement_order
 
     async def decide_edge_invalidation(self, context: Any) -> Any:
         from graphiti_core.edge_invalidation import EdgeInvalidationDecision
 
         try:
             state = invalidation_guard_state.get()
-            if context.target_is_new:
-                # Created by this very call, so it carries this call's source.
-                return EdgeInvalidationDecision.INVALIDATE
-            cause_source = await self._cause_source(state, context.cause_edge)
-            if is_human_source(cause_source):
-                return EdgeInvalidationDecision.INVALIDATE
-            target_source = await self._stored_source(state, str(context.target_edge.uuid))
-            if not is_human_source(target_source):
-                return EdgeInvalidationDecision.INVALIDATE
-            reason = getattr(context.reason, "value", str(context.reason))
-            logger.info(
-                "Edge-invalidation guard kept human edge=%s reason=%s cause_source=%s",
-                context.target_edge.uuid, reason, cause_source,
-            )
-            if state is not None and reason == "contradiction":
-                target, cause = context.target_edge, context.cause_edge
-                state.kept.append(
-                    KeptEdge(
-                        reason=reason,
-                        kept_edge_uuid=str(target.uuid),
-                        kept_group_id=str(getattr(target, "group_id", "") or ""),
-                        kept_fact=str(getattr(target, "fact", "") or ""),
-                        cause_edge_uuid=str(cause.uuid),
-                        cause_fact=str(getattr(cause, "fact", "") or ""),
-                        cause_source=str(cause_source or ""),
-                    )
-                )
-            return EdgeInvalidationDecision.KEEP
+            if await self._authority_keeps(state, context):
+                return EdgeInvalidationDecision.KEEP
+            if self._statement_order and await self._cause_said_earlier(state, context):
+                return EdgeInvalidationDecision.KEEP
+            return EdgeInvalidationDecision.INVALIDATE
         except Exception:
             logger.exception("Edge-invalidation hook failed; keeping the edge (fail closed)")
             return EdgeInvalidationDecision.KEEP
+
+    async def _authority_keeps(self, state: InvalidationGuardState | None, context: Any) -> bool:
+        """#377: a non-human cause never ends a stored human edge."""
+        if context.target_is_new:
+            # Created by this very call, so it carries this call's source.
+            return False
+        cause_source = await self._cause_source(state, context.cause_edge)
+        if is_human_source(cause_source):
+            return False
+        target_source = await self._stored_source(state, str(context.target_edge.uuid))
+        if not is_human_source(target_source):
+            return False
+        reason = _reason(context)
+        logger.info(
+            "Edge-invalidation guard kept human edge=%s reason=%s cause_source=%s",
+            context.target_edge.uuid, reason, cause_source,
+        )
+        if state is not None and reason == "contradiction":
+            target, cause = context.target_edge, context.cause_edge
+            state.kept.append(
+                KeptEdge(
+                    reason=reason,
+                    kept_edge_uuid=str(target.uuid),
+                    kept_group_id=str(getattr(target, "group_id", "") or ""),
+                    kept_fact=str(getattr(target, "fact", "") or ""),
+                    cause_edge_uuid=str(cause.uuid),
+                    cause_fact=str(getattr(cause, "fact", "") or ""),
+                    cause_source=str(cause_source or ""),
+                )
+            )
+        return True
+
+    async def _cause_said_earlier(
+        self, state: InvalidationGuardState | None, context: Any
+    ) -> bool:
+        """2a: a statement said before the target's never ends it (veto only).
+
+        "Said" is the episode time: this call's episode for its own mention (the target when
+        ``target_is_new``, the cause on CONTRADICTION), the stored ``r.reference_time`` for any
+        other edge. A missing or unparseable time keeps today's answer.
+        """
+        reason = _reason(context)
+        if reason not in _STATEMENT_ORDER_REASONS:
+            return False
+        episode_said = _as_utc(getattr(context.episode, "valid_at", None))
+        if context.target_is_new:
+            target_said = episode_said
+        else:
+            target_said = await self._stored_said(state, context.target_edge)
+        if target_said is None:
+            return False
+        if reason == "contradiction":
+            # The fork's CONTRADICTION cause is always this call's extracted mention.
+            cause_said = episode_said
+        else:
+            cause_said = await self._stored_said(state, context.cause_edge)
+        if cause_said is None or cause_said >= target_said:
+            return False
+        logger.info(
+            "Edge-invalidation statement order kept edge=%s reason=%s target_said=%s "
+            "cause=%s cause_said=%s",
+            context.target_edge.uuid, reason, target_said.isoformat(),
+            context.cause_edge.uuid, cause_said.isoformat(),
+        )
+        return True
+
+    async def _stored_said(
+        self, state: InvalidationGuardState | None, edge: Any
+    ) -> datetime | None:
+        edge_uuid = str(edge.uuid)
+        group_id = str(getattr(edge, "group_id", "") or "")
+        key = (group_id, edge_uuid)
+        if state is not None and key in state.stored_said:
+            return state.stored_said[key]
+        # A str group id never yields None params, so the tenancy fragment always filters.
+        records = await self._lookup(
+            _STORED_EDGE_SAID_CYPHER, uuid=edge_uuid, **tenant_scope_params(group_id)
+        )
+        said = _as_utc(records[0]["said"]) if records else None
+        if state is not None:
+            state.stored_said[key] = said
+        return said
+
+    async def _lookup(self, cypher: str, **params: Any) -> Any:
+        """One stored-edge read (Neo4j only, no OpenAI), bounded by the lookup timeout."""
+        result = await asyncio.wait_for(
+            self._driver.execute_query(cypher, **params), timeout=_SOURCE_LOOKUP_TIMEOUT_S
+        )
+        return _records(result)
 
     async def _cause_source(self, state: InvalidationGuardState | None, cause: Any) -> str | None:
         """Stored source of a cause edge already in the graph, else this call's source.
@@ -148,18 +229,40 @@ class MenhirEdgeInvalidationHook:
     ) -> str | None:
         if state is not None and edge_uuid in state.stored_sources:
             return state.stored_sources[edge_uuid]
-        result = await asyncio.wait_for(
-            self._driver.execute_query(_STORED_EDGE_SOURCE_CYPHER, uuid=edge_uuid),
-            timeout=_SOURCE_LOOKUP_TIMEOUT_S,
-        )
-        records = getattr(result, "records", None)
-        if records is None and isinstance(result, tuple):
-            records = result[0]
+        records = await self._lookup(_STORED_EDGE_SOURCE_CYPHER, uuid=edge_uuid)
         value = records[0]["source"] if records else None
         source = str(value) if value else None
         if state is not None:
             state.stored_sources[edge_uuid] = source
         return source
+
+
+def _reason(context: Any) -> str:
+    return str(getattr(context.reason, "value", context.reason))
+
+
+def _records(result: Any) -> Any:
+    records = getattr(result, "records", None)
+    if records is None and isinstance(result, tuple):
+        records = result[0]
+    return records
+
+
+def _as_utc(value: object) -> datetime | None:
+    """A timezone-aware time, or None when missing or unparseable (naive is read as UTC)."""
+    try:
+        if value is None:
+            return None
+        to_native = getattr(value, "to_native", None)
+        if callable(to_native):
+            value = to_native()
+        if isinstance(value, str):
+            value = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        if not isinstance(value, datetime):
+            return None
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError, AttributeError):
+        return None
 
 
 def kept_conflict_rows(kept: list[KeptEdge]) -> list[dict[str, str]]:
@@ -204,7 +307,9 @@ def guarded_preserved_edge_attributes_kwargs(base: dict[str, Any]) -> dict[str, 
     return {"preserved_edge_attributes": names + extra}
 
 
-def invalidation_hook_kwargs(graphiti_cls: Any, driver: Any) -> dict[str, Any]:
+def invalidation_hook_kwargs(
+    graphiti_cls: Any, driver: Any, *, statement_order: bool = False
+) -> dict[str, Any]:
     """``Graphiti(...)`` kwargs for the invalidation guard; refuses a fork without the seam."""
     try:
         params = inspect.signature(graphiti_cls.__init__).parameters
@@ -220,4 +325,8 @@ def invalidation_hook_kwargs(graphiti_cls: Any, driver: Any) -> dict[str, Any]:
             "edge_invalidation_hook, so an agent episode could expire a user-stated edge. "
             "Reinstall Menhir's pinned dependencies."
         )
-    return {"edge_invalidation_hook": MenhirEdgeInvalidationHook(driver)}
+    return {
+        "edge_invalidation_hook": MenhirEdgeInvalidationHook(
+            driver, statement_order=statement_order
+        )
+    }
