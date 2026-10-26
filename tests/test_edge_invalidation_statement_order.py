@@ -38,10 +38,12 @@ class Driver:
 
     async def execute_query(self, cypher: str, **kw):
         if "reference_time" in cypher:
-            self.said_calls.append((kw["uuid"], kw["group_id"]))
+            # tenant_scope_params(group_id): a single spelling for a non-default namespace.
+            (group_id,) = kw["tenant_namespaces"]
+            self.said_calls.append((kw["uuid"], group_id))
             if self.said_error is not None:
                 raise self.said_error
-            key = (kw["uuid"], kw["group_id"])
+            key = (kw["uuid"], group_id)
             return SimpleNamespace(records=[{"said": self.said[key]}] if key in self.said else [])
         self.source_calls.append(kw["uuid"])
         if kw["uuid"] not in self.sources:

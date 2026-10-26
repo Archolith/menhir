@@ -38,6 +38,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
+from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
 from menhir.domain.self_identity import GATE_APPROVED_HUMAN_SOURCES
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ _STORED_EDGE_SOURCE_CYPHER = (
     "MATCH ()-[r:RELATES_TO {uuid: $uuid}]->() RETURN r.source AS source LIMIT 1"
 )
 _STORED_EDGE_SAID_CYPHER = (
-    "MATCH ()-[r:RELATES_TO {uuid: $uuid}]->() WHERE r.group_id = $group_id "
+    f"MATCH ()-[r:RELATES_TO {{uuid: $uuid}}]->() WHERE {tenant_scope_cypher('r')} "
     "RETURN r.reference_time AS said LIMIT 1"
 )
 #: Reasons the statement-order veto (2a) answers; OWN_END keeps today's answer.
@@ -197,17 +198,21 @@ class MenhirEdgeInvalidationHook:
         key = (group_id, edge_uuid)
         if state is not None and key in state.stored_said:
             return state.stored_said[key]
-        result = await asyncio.wait_for(
-            self._driver.execute_query(
-                _STORED_EDGE_SAID_CYPHER, uuid=edge_uuid, group_id=group_id
-            ),
-            timeout=_SOURCE_LOOKUP_TIMEOUT_S,
+        # A str group id never yields None params, so the tenancy fragment always filters.
+        records = await self._lookup(
+            _STORED_EDGE_SAID_CYPHER, uuid=edge_uuid, **tenant_scope_params(group_id)
         )
-        records = _records(result)
         said = _as_utc(records[0]["said"]) if records else None
         if state is not None:
             state.stored_said[key] = said
         return said
+
+    async def _lookup(self, cypher: str, **params: Any) -> Any:
+        """One stored-edge read (Neo4j only, no OpenAI), bounded by the lookup timeout."""
+        result = await asyncio.wait_for(
+            self._driver.execute_query(cypher, **params), timeout=_SOURCE_LOOKUP_TIMEOUT_S
+        )
+        return _records(result)
 
     async def _cause_source(self, state: InvalidationGuardState | None, cause: Any) -> str | None:
         """Stored source of a cause edge already in the graph, else this call's source.
@@ -224,11 +229,7 @@ class MenhirEdgeInvalidationHook:
     ) -> str | None:
         if state is not None and edge_uuid in state.stored_sources:
             return state.stored_sources[edge_uuid]
-        result = await asyncio.wait_for(
-            self._driver.execute_query(_STORED_EDGE_SOURCE_CYPHER, uuid=edge_uuid),
-            timeout=_SOURCE_LOOKUP_TIMEOUT_S,
-        )
-        records = _records(result)
+        records = await self._lookup(_STORED_EDGE_SOURCE_CYPHER, uuid=edge_uuid)
         value = records[0]["source"] if records else None
         source = str(value) if value else None
         if state is not None:
