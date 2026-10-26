@@ -16,6 +16,7 @@ from menhir.domain import new_session
 from menhir.infrastructure.telemetry import enable_llm_usage_telemetry, record_lifecycle_event
 from menhir.infrastructure.view_embedder import make_view_embedder, view_embedder_version
 from menhir.services import MaintenanceScheduler
+from menhir.services.embedding_identity import embedder_model_name
 
 from .runtime_support import (
     RuntimeContext,
@@ -435,6 +436,13 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         experience_counter_enabled=getattr(settings, "experience_counter_enabled", True),
         experience_embed=make_view_embedder(settings) if settings is not None else None,
         experience_embed_version=view_embedder_version(settings) if settings is not None else None,
+        # Same embedder and model stamp as the ingest-time step (enrichment_steps.embed_episode_content).
+        source_embedding_repair_enabled=bool(getattr(settings, "frontier_source_memories", False)),
+        source_embedding_embed=getattr(getattr(built, "graphiti_client", None), "embed_query", None),
+        source_embedding_model_name=(
+            (lambda: embedder_model_name(built.graphiti_client))
+            if getattr(built, "graphiti_client", None) is not None else None
+        ),
         verifier_sync_enabled=verifier_sync_enabled,
         verifier_sync_interval_s=getattr(settings, "verifier_sync_interval_s", 300.0),
         verifier_repo=verifier_repo,

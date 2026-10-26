@@ -247,18 +247,26 @@ class EpisodeLifecycleRepository:
         return bool(rows and rows[0].get("has_embedding"))
 
     def set_episode_content_embedding(
-        self, episode_uuid: str, embedding: list[float], model: str
+        self,
+        episode_uuid: str,
+        embedding: list[float],
+        model: str,
+        *,
+        expected_content: str | None = None,
     ) -> bool:
         """Stamp a content embedding onto Menhir's own `:Episodic` queue node.
 
         The evidence-projection guard in the WHERE clause is the backstop: evidence
         projections are an entity source, not memory (ADR 0001), and must never be
-        embedded into the source-memory lane. Returns whether a node was written.
+        embedded into the source-memory lane. With ``expected_content``, the write happens only
+        while the node still holds exactly that content, so a vector computed from text read
+        earlier is never stamped onto changed text. Returns whether a node was written.
         """
         rows = self.neo4j.execute(
             """
             MATCH (n:Episodic {uuid: $uuid})
             WHERE NOT coalesce(n.is_evidence_projection, false)
+              AND ($expected_content IS NULL OR n.content = $expected_content)
             SET n.content_embedding = $embedding,
                 n.content_embedding_model = $model,
                 n.content_embedding_at = datetime()
@@ -268,6 +276,7 @@ class EpisodeLifecycleRepository:
                 "uuid": episode_uuid,
                 "embedding": embedding,
                 "model": model,
+                "expected_content": expected_content,
             },
         )
         return bool(rows)
@@ -372,11 +381,13 @@ class EpisodeLifecycleRepository:
         *,
         after_uuid: str | None = None,
         model: str | None = None,
+        ready_only: bool = False,
     ) -> list[dict[str, object]]:
         """Page through Menhir `:Episodic` nodes that need a content embedding.
 
         Needs one = no embedding yet, or (with ``model``) an embedding stamped by a different
-        model. Blank content is excluded IN the query and paging is by an exclusive ``after_uuid``
+        model. ``ready_only`` keeps only finished (READY) episodes: the ingest step is still ahead
+        of PENDING/ENRICHING ones. Blank content is excluded IN the query and paging is by an exclusive ``after_uuid``
         cursor (``ORDER BY n.uuid``), so a page is short only at the true end and rows a caller
         skips are never re-listed ahead of the rest (audit F1).
 
@@ -399,6 +410,7 @@ class EpisodeLifecycleRepository:
             menhir_queue_episode_cypher("n"),
             "n.processing_state IS NOT NULL",
             "n.processing_state <> 'FAILED'",
+            "($ready_only = false OR n.processing_state = 'READY')",
             non_structural_memory_cypher("n"),
             default_recall_visibility_cypher("n"),
         ]
@@ -406,6 +418,7 @@ class EpisodeLifecycleRepository:
             "limit": safe_limit,
             "after_uuid": after_uuid,
             "model": model,
+            "ready_only": bool(ready_only),
             **tenant_scope_params(namespace),
         }
         where.append(tenant_scope_cypher("n"))

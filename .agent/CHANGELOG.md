@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-25 - Source-memory embedding repair job
+
+- The ingest step's episode embed (10 s timeout) logs and swallows failures, so an episode could
+  stay READY with no `content_embedding` and never reach the source-memory lane. In the o500
+  build, 91 such timeouts left 91 READY episodes unembedded, 34 of them evidence turns.
+- New scheduler job `repair_source_embeddings` (`services/source_embedding_repair.py`), on when
+  `MENHIR_FRONTIER_SOURCE_MEMORIES` is on (the default) and the embedder is wired: every 300 s it embeds up to
+  200 READY episodes missing an embedding (30 s timeout each), skips past failures, and stops a
+  run after 5 consecutive failures. It fills missing embeddings only; re-embedding for a model
+  change stays with `scripts/backfill_episode_embeddings.py`.
+- `set_episode_content_embedding(..., expected_content=)` writes only if the content still matches
+  the text that was embedded; `list_episodes_missing_content_embedding(..., ready_only=)` limits
+  the listing to READY episodes so the job never races the ingest step.
+- Benchmark mode disables the scheduler, so LME builds still need the backfill script after drain.
+
 ## 2026-10-25 - Source-memory session spread (default on)
 
 - `MENHIR_FRONTIER_SOURCE_MEMORY_SPREAD` (default on; `=false` opts out): the source-memory lane fetches a pool
