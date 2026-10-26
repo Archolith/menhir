@@ -37,6 +37,7 @@ from menhir.services.scheduler_tasks import (
     sync_experience_counters,
     sync_verifiers_job,
 )
+from menhir.services.source_embedding_repair import repair_source_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,13 @@ class MaintenanceScheduler:
     experience_counter_enabled: bool = True
     experience_embed: Callable[[str], "list[float] | None"] | None = None
     experience_embed_version: str | None = None   # 4a.1: model id stamped on write-time observation embeddings
+    # Retry for source-memory embeds the ingest step gave up on (services/source_embedding_repair.py).
+    # Registered only when enabled AND both callables are wired (core/runtime.py).
+    source_embedding_repair_enabled: bool = False
+    source_embedding_repair_interval_s: float = 300.0
+    source_embedding_repair_budget: int = 200
+    source_embedding_embed: Callable[[str], Awaitable["list[float] | None"]] | None = None
+    source_embedding_model_name: Callable[[], str] | None = None
     verifier_sync_interval_s: float = 300.0
     verifier_sync_enabled: bool = False
     verifier_repo: object | None = None
@@ -194,6 +202,14 @@ class MaintenanceScheduler:
             self._jobs["sync_experience_counters"] = _JobState(interval_s=self.experience_counter_interval_s)
         if self.verifier_sync_enabled and self.verifier_repo is not None:
             self._jobs["sync_verifiers"] = _JobState(interval_s=self.verifier_sync_interval_s)
+        if (
+            self.source_embedding_repair_enabled
+            and self.source_embedding_embed is not None
+            and self.source_embedding_model_name is not None
+        ):
+            self._jobs["repair_source_embeddings"] = _JobState(
+                interval_s=self.source_embedding_repair_interval_s
+            )
         if (
             (self.personal_memory_enabled or self.event_history_enabled or self.scalar_state_enabled
              or self.counting_enabled)
@@ -647,6 +663,10 @@ class MaintenanceScheduler:
                 await self._run_job(job, "scheduler_sync_experience_counters", self._make_sync_experience_counters())
             elif name == "sync_verifiers":
                 await self._run_job(job, "scheduler_sync_verifiers", self._make_sync_verifiers())
+            elif name == "repair_source_embeddings":
+                await self._run_job(
+                    job, "scheduler_repair_source_embeddings", self._make_repair_source_embeddings()
+                )
             elif name == "consolidate_personal_memory":
                 await self._run_job(job, "scheduler_consolidate_personal_memory", self._make_consolidate_personal_memory())
             elif name == "consolidate_lifecycle":
@@ -887,6 +907,15 @@ class MaintenanceScheduler:
             verifier_repo=self.verifier_repo,
             verifier_context=self.verifier_context,
             embed=self.experience_embed,
+        )
+
+    def _make_repair_source_embeddings(self) -> Awaitable[dict[str, object]]:
+        assert self.source_embedding_embed is not None and self.source_embedding_model_name is not None
+        return repair_source_embeddings(
+            self.graph_adapter,
+            embed=self.source_embedding_embed,
+            model_name=self.source_embedding_model_name,
+            call_budget=self.source_embedding_repair_budget,
         )
 
     def _make_consolidate_personal_memory(self) -> Awaitable[dict[str, object]]:

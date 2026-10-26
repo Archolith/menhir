@@ -432,11 +432,12 @@ class MemoryGraphAdapter:
         return self._episodes.episode_has_content_embedding(episode_uuid, model)
 
     def set_episode_content_embedding(
-        self, episode_uuid: str, embedding: list[float], model: str
+        self, episode_uuid: str, embedding: list[float], model: str, *,
+        expected_content: str | None = None,
     ) -> bool:
         """See EpisodeLifecycleRepository.set_episode_content_embedding."""
         return self._episodes.set_episode_content_embedding(
-            episode_uuid, embedding, model
+            episode_uuid, embedding, model, expected_content=expected_content
         )
 
     def episodic_twin_uuids(self, node_uuid: str) -> list[str]:
@@ -454,10 +455,11 @@ class MemoryGraphAdapter:
         *,
         after_uuid: str | None = None,
         model: str | None = None,
+        ready_only: bool = False,
     ) -> list[dict[str, Any]]:
         """See EpisodeLifecycleRepository.list_episodes_missing_content_embedding."""
         return self._episodes.list_episodes_missing_content_embedding(
-            namespace, limit, after_uuid=after_uuid, model=model
+            namespace, limit, after_uuid=after_uuid, model=model, ready_only=ready_only
         )
 
     def create_evidence_projection(
