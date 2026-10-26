@@ -16,6 +16,7 @@ import httpx
 
 from menhir.domain import IngestResult, IngestStatus, MemorySession
 from menhir.domain.ingest import (
+    EXTRACTION_MODE_STORE_ONLY,
     IdempotencyKeyConflict,
     episode_ingest_key,
     episode_request_digest,
@@ -79,8 +80,13 @@ class IngestIntakeMixin:
         user_statement: str | None = None,
         role: str | None = None,
         idempotency_key: str | None = None,
+        store_only: bool = False,
     ) -> IngestResult:
         """Durably record a raw episode and queue background enrichment.
+
+        `store_only`: store and embed the episode for the source-memory lane, but never extract
+        it and never mint its turn's evidence projection. For turns with nothing to extract (a
+        fact-free question), where extraction would collapse and fail the episode.
 
         Gate user-tier claims (source='user' or 'manual') using turn evidence grounding before
         persistence. If the claim is ungrounded, downgrade to agent_inference tier.
@@ -124,6 +130,7 @@ class IngestIntakeMixin:
                 role=role,
                 turn_evidence_uuid=turn_evidence_uuid,
                 user_statement=user_statement,
+                store_only=store_only,
             )
             existing = self.graph_adapter.find_episode_by_ingest_key(ingest_key)
             if existing is not None:
@@ -197,6 +204,8 @@ class IngestIntakeMixin:
             if ingest_key is not None:
                 pending_kwargs["ingest_key"] = ingest_key
                 pending_kwargs["ingest_request_sha256"] = ingest_digest
+            if store_only:
+                pending_kwargs["extraction_mode"] = EXTRACTION_MODE_STORE_ONLY
             try:
                 self.graph_adapter.create_pending_episode(
                     episode_uuid=episode_uuid,
@@ -306,21 +315,25 @@ class IngestIntakeMixin:
                 #
                 # Strictly additive, like the edge above: the memory is already durable, so a failed
                 # projection must not fail the write.
-                try:
-                    evidence_projection_uuid = self.graph_adapter.create_evidence_projection(
-                        turn_evidence_uuid=admitted_on_uuid,
-                        projection_uuid=str(uuid4()),
-                        name=f"evidence-projection-{admitted_on_uuid}",
-                        session_id=session.session_id,
-                        user_id=session.user_id,
-                        namespace=stamped_namespace(namespace),
-                    )
-                except Exception:
-                    logger.debug(
-                        "Failed to project turn evidence=%s; entities will come only from the "
-                        "memory text (non-fatal)",
-                        admitted_on_uuid, exc_info=True,
-                    )
+                #
+                # Never for store-only: the projection is an extraction of the same text, which is
+                # exactly what store-only declines.
+                if not store_only:
+                    try:
+                        evidence_projection_uuid = self.graph_adapter.create_evidence_projection(
+                            turn_evidence_uuid=admitted_on_uuid,
+                            projection_uuid=str(uuid4()),
+                            name=f"evidence-projection-{admitted_on_uuid}",
+                            session_id=session.session_id,
+                            user_id=session.user_id,
+                            namespace=stamped_namespace(namespace),
+                        )
+                    except Exception:
+                        logger.debug(
+                            "Failed to project turn evidence=%s; entities will come only from "
+                            "the memory text (non-fatal)",
+                            admitted_on_uuid, exc_info=True,
+                        )
 
             # Audit trail (best-effort): only DOWNGRADES/DENIALS carry signal and are recorded.
             # A routine grant (granted=True, effective_source==requested_source) previously wrote one

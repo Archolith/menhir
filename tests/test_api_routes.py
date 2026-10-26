@@ -459,6 +459,12 @@ class TestIngest:
         assert resp.status_code == 200
         assert fake_backend.queue_episode.await_args.kwargs["user_statement"] == "I have 20 coins"
 
+    def test_ingest_forwards_store_only_only_when_set(self, client, fake_backend):
+        assert client.post("/api/memory", json={"episode": "x", "store_only": True}).status_code == 200
+        assert fake_backend.queue_episode.await_args.kwargs["store_only"] is True
+        client.post("/api/memory", json={"episode": "x"})
+        assert "store_only" not in fake_backend.queue_episode.await_args.kwargs
+
     def test_ingest_rejects_user_statement_with_turn_evidence_uuid(self, client, fake_backend):
         resp = client.post(
             "/api/memory",

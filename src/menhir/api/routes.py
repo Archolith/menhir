@@ -524,6 +524,8 @@ async def ingest_memory(
         ingest_kwargs["role"] = body.role
     if body.idempotency_key is not None:
         ingest_kwargs["idempotency_key"] = body.idempotency_key
+    if body.store_only:
+        ingest_kwargs["store_only"] = True
     try:
         result = await backend.queue_episode(
             body.episode,
@@ -709,7 +711,14 @@ async def link_episode_admission(
     # Only project once the join actually landed. Projecting after a failed link would enrich a turn
     # that no memory references, which is capture-volume enrichment -- the cost ADR 0001 rejected.
     projection_uuid = None
-    if linked and hasattr(adapter, "create_evidence_projection"):
+    # A store-only memory declined extraction of its text; projecting its turn here would extract
+    # it anyway. The link above still records provenance.
+    is_store_only = getattr(adapter, "episode_is_store_only", None)
+    store_only = (
+        linked and is_store_only is not None
+        and await asyncio.to_thread(is_store_only, episode_uuid) is True
+    )
+    if linked and not store_only and hasattr(adapter, "create_evidence_projection"):
         session = get_request_session()
         projection_uuid = await asyncio.to_thread(
             adapter.create_evidence_projection,

@@ -24,6 +24,7 @@ class BackendClientOpsMixin:
         user_statement: str | None = None,
         role: str | None = None,
         idempotency_key: str | None = None,
+        store_only: bool = False,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {
             "text": text,
@@ -44,6 +45,8 @@ class BackendClientOpsMixin:
             params["role"] = role
         if idempotency_key is not None:
             params["idempotency_key"] = idempotency_key
+        if store_only:
+            params["store_only"] = True
         return await self._request("queue_episode", params)
 
     async def flag_memory(

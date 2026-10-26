@@ -482,6 +482,9 @@ class MemoryRequest(BaseModel):
     #: Optional client key making resubmits safe: the same key + content returns the existing
     #: anchor (``idempotent_replay``); the same key with different content is a 409.
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=256)
+    #: Store and embed for the source-memory lane only: no extraction and no evidence projection.
+    #: For turns with nothing to extract, such as a fact-free question.
+    store_only: bool = False
 
 
 class MemoryResponse(BaseModel):

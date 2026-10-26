@@ -241,6 +241,8 @@ class EpisodeMaintenanceRepository:
                 # extraction_skipped_for on a later normal READY does not exempt it.
                 "NOT (n.processing_substage = 'verbatim_skipped'"
                 " AND n.extraction_skipped_for IS NOT NULL)",
+                # Store-only episodes are never extracted; resetting one would loop forever.
+                "coalesce(n.extraction_mode, '') <> 'store_only'",
             )
             .set(
                 (
