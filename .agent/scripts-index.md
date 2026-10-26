@@ -60,6 +60,7 @@ scripts are indexed in the private `Archolith/menhir-deploy` repository.
 |---|---|
 | `.github/workflows/release-image.yml` | Reusable release-image validation/publication workflow with no-push validation, protected publication environment, least-privilege permissions, retained metadata, and provenance attestations |
 | `run_mcp_gateway.py` | stdio launcher for the MCP server |
+| `conflict_group_signal_survey.py` | read-only survey of existing conflict groups: member scope, shared episodes/anchors, stored-vector cosine, optional RRF (`--rrf`); plan `menhir-conflict-detection-signal-2026-08-09` |
 | `export_graph_backup.py` / `_tolerant.py` | logical graph backup; the tolerant variant survives corruption |
 | `migrate_schema_v_property.py` | dry-run-first `_yawn_schema_v` removal and replacement-index migration. Remote writes require `--allow-remote`; configured production targets require `--allow-production` after a verified backup |
 | `unmerge.py` | operator CLI to reverse a merge |
