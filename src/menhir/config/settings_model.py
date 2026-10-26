@@ -473,7 +473,7 @@ class MemorySettings:
     frontier_source_memory_limit: int = 10          # section size (1..50; validated in RetrievalTuningConfig)
     frontier_source_memory_max_chars: int = 600  # per-memory content cap (100..4000)
     frontier_source_memory_pools: bool = False  # group section entries by shared anchors
-    frontier_source_memory_spread: bool = False  # pick the section per session from a 3x pool, dropping exact repeats
+    frontier_source_memory_spread: bool = True  # pick the section per session from a 3x pool, dropping exact repeats (default on)
 
     # HTTP server
     api_host: str = "127.0.0.1"

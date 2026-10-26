@@ -35,10 +35,11 @@ CAMPAIGN_FLAGS = {
 }
 
 
-# Campaign switches that ship on by default: source memories (#208) and the Warden gate with
-# its contradiction guard (#173).
+# Campaign switches that ship on by default: source memories (#208) with session spread (#386)
+# and the Warden gate with its contradiction guard (#173).
 DEFAULT_ON = {
     "MENHIR_FRONTIER_SOURCE_MEMORIES",
+    "MENHIR_FRONTIER_SOURCE_MEMORY_SPREAD",
     "MENHIR_FRONTIER_WARDEN_GATE",
     "MENHIR_FRONTIER_CONTRADICTION_INTERRUPT",
     "MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED",

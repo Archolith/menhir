@@ -95,12 +95,12 @@ async def test_lane_is_unchanged_when_off(stub_graphiti_client, stub_memory_grap
     assert [sm.uuid for sm in result.source_memories] == ["a2", "a1"]
 
 
-def test_setting_defaults_off_and_reaches_tuning(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_setting_defaults_on_reaches_tuning_and_opts_out(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MENHIR_FRONTIER_SOURCE_MEMORY_SPREAD", raising=False)
-    settings = MemorySettings.from_env()
-    assert settings.frontier_source_memory_spread is False
-    assert settings.retrieval_tuning().source_memory_spread is False
-    monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_SPREAD", "true")
     settings = MemorySettings.from_env()
     assert settings.frontier_source_memory_spread is True
     assert settings.retrieval_tuning().source_memory_spread is True
+    monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_SPREAD", "false")
+    settings = MemorySettings.from_env()
+    assert settings.frontier_source_memory_spread is False
+    assert settings.retrieval_tuning().source_memory_spread is False
