@@ -25,6 +25,8 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from menhir.infrastructure.openai_rate_limit import await_with_backoff_aware_timeout
+
 logger = logging.getLogger(__name__)
 
 #: Same truncation bound as the ingest step and the backfill script.
@@ -75,8 +77,8 @@ async def repair_source_embeddings(
                 continue
             calls += 1
             try:
-                embedding = await asyncio.wait_for(
-                    embed(content[:EMBED_MAX_CHARS]), timeout=EMBED_TIMEOUT_S
+                embedding = await await_with_backoff_aware_timeout(
+                    embed(content[:EMBED_MAX_CHARS]), timeout_s=EMBED_TIMEOUT_S
                 )
             except Exception as exc:  # timeout or embedder error: count it, keep going
                 failed += 1
