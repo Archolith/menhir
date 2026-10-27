@@ -1102,7 +1102,8 @@ async def run_recall(
     # list. _occurrence_obs_ids are the injected occurrence observations, dropped below when their
     # slot gets a counted verdict.
     _counted_authority_only = bool(
-        getattr(service, "counting_recall_authority_only", True) and service.counting_enabled)
+        getattr(service, "counting_recall_authority_only", True)
+        and getattr(service, "counting_enabled", False))
     _occurrence_obs_ids: set[str] = set()
 
     # --- Observation candidates (Phase 4a.2, flag-gated): inject :TypedAssertion observations ---
