@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-10-27 - #168 freeze: tested behavior becomes the default; 23 flags retired
+
+- **Always on, flags retired:**
+  - Warden gate, contradiction interrupt, fact said-time, source memories, source-memory spread,
+    count anchor hint and stale-lead demotion (`370fd94e`);
+  - edge-invalidation statement order (`8ec03d26`);
+  - scalar reconcile attribute, scope and subject, scalar View authority, the View freshness gate
+    and sum grounding (`d022a7ed`);
+  - counting recall authority-only, counting wording, counting extraction v2 and related-count
+    matching (`9ec4d08c`, fix `7b26834f`);
+  - assistant turns stored only (`bdad118c`).
+- **Defaults on, switches kept** (`cc931186`). These three cost LLM calls and remain the way to turn
+  the work off:
+  - `MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED` and `MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED`: the
+    scheduler runs the scalar and counting lanes.
+  - `MENHIR_ANCHORED_TIME_RESOLVER`: now also drives the blind attach check and world-end expiry.
+    `MENHIR_ANCHORED_TIME_ATTACH` and `_EXPIRY` are retired.
+- `MENHIR_FRONTIER_SOURCE_MEMORY_MAX_CHARS` defaults to 2000.
+- **Retired keys** are recorded in `RETIRED` (`config/feature_flags.py`). Menhir ignores a retired env
+  var, so a stale export cannot turn a feature off.
+- **Component knobs** (`RetrievalTuningConfig`, service, adapter and scheduler fields) default on and
+  stay as per-request or test seams. No alternate code path was deleted.
+- **Scalar View authority** now follows the scalar lane alone (`config/authority_gates.py`).
+  Features that required it now require scalar state.
+- **Counting stamp:** writers and the API dirty check stamp `<configured>+x2+m`. Namespaces counted
+  without v2 or matching are re-counted once.
+- **Equivalence check:** an empty env on the new code resolves to the same settings, recall tuning,
+  Graphiti hooks and production-constructor values as the old code (`466a8d39`) with the approved
+  values set. The same holds with each switch off.
+- Plan: workspace `menhir-freeze-retire-always-on-flags-plan-2026-10-27.md`.
+
 ## 2026-10-25 - Record statement-order keeps as edge conflicts (#168 item 9, deferred link)
 
 - Each pair the statement-order veto keeps (NEWER_CANDIDATE and CONTRADICTION) is now written as an

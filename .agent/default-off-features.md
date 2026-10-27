@@ -35,10 +35,7 @@ mapped into `RetrievalTuningConfig` at the recall entry via `retrieval_tuning()`
 | Event History Phase 3 Consolidation | `personal_memory_event_history_enabled` / `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED` | backfill :TurnEvidence -> assertions via independent watermark cursor | production-capable but default-off; Phase 1-5 complete | `menhir-event-history-plan.md` + commits 048b8d9..51c11cf |
 | Event History Phase 4 Recall Authority | `personal_memory_event_history_authority_enabled` / `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED` | conditional first-person event route probed only when enabled and namespace present | production-capable but default-off; independent of scalar authority | commits 048b8d9..51c11cf |
 | Brief builder (append temporal Timeline in build_context) | `frontier_brief_builder` | removed 2026-10-01, superseded by `recall_timeline` | — | brief-builder work |
-| Anchored-time resolver (overlay a dated window midpoint onto `valid_at` for user-turn edges with temporal cues; keeps Graphiti's value when inside the window, never touches `invalid_at`) | `anchored_time_resolver_enabled` / `MENHIR_ANCHORED_TIME_RESOLVER` (+ `_MODEL`, `_TIMEOUT_S`) | end of `_run_graphiti_combined_extraction` via `MenhirExtractionHook(anchored_time=...)`, before `resolve_extracted_edges`; resolver built in `graphiti_client.py` only when the LLM is on | offline replay: frozen held-outs written 26/32, 19/23, 19/23, 25/28 dated vs baseline 18/32, 12/23, 12/23, 18/28; live L1 (Flex, 120 s timeout) passed: written 26/32, 19/23, 23/28, 1/89 timeouts; L3 fresh held-out: C1 not met, C2/C3 met; gate run 1 (b11) FAIL on d16485d, year rule added in efdbfd4; accepted on non-blind evidence, no gate pass | workspace `menhir-anchored-time-resolver-p1-plan.md` |
 | Anchored-time render (show the persisted time contract as each fact's event time: the resolved window, a plan's planned window, or "event time unknown (said <speech date>)" instead of a speech-date `valid_at`; timeline facts order by window start) | `anchored_time_render_enabled` / `MENHIR_ANCHORED_TIME_RENDER` | `_build_temporal_facts(event_time=...)` in recall enrichment, `_source_time_lines` in the context builder, MCP recall formatter, `timeline_facts(event_time=...)`; contracts are written by the resolver (`anchored_time_persist.py`) whenever it is on, independent of this flag | offline render and flag-off identity tests (`tests/test_anchored_time_render.py`); no live readback yet | workspace `menhir-anchored-time-resolver-p2-plan.md` |
-| Anchored-time expiry (a fact's own end is world time, not supersession: Graphiti does not set `expired_at` only because an extracted point event or state carries its own `invalid_at` (`MenhirEdgeExpiryHook` answers `WORLD_END`; needs archolith-graphiti-core 0.30.2.post6), the edge is stamped `time_expiry`/`time_world_end`, and recall labels such live ended facts `ended`) | `anchored_time_expiry_enabled` / `MENHIR_ANCHORED_TIME_EXPIRY` | `_apply_anchored_time(expiry=...)` records the world end before resolve; `MenhirEdgeExpiryHook` in `graphiti_extraction_policy.py` decides expiry inside the resolver (owner-checked, fails to `EXPIRE`); `EXPIRY_PERSIST_CYPHER` in `anchored_time_persist.py` stamps live edges under the P2 lock only while `invalid_at` is unchanged and never un-expires; `_build_temporal_facts(ended=...)` and `_source_time_lines`; needs the resolver at ingest, no backfill; a restatement with no usable report keeps a stored ended fact live only from its own stamp (`time_expiry='world_end'` and `time_world_end` equal to `invalid_at`), which the fork keeps through duplicate resolution via `preserved_edge_attributes` (P3c); a concurrent writer's stale save cannot revive an edge another writer expired or move its end later on Neo4j (archolith-graphiti-core 0.31.2.post1, Codex P3c-1); the operator unmerge (`restore_merge_snapshot`) can still recreate a live copy from its merge-time snapshot | offline and live counterexample tests (`tests/test_anchored_time_expiry.py`, `tests/test_anchored_time_expiry_live.py`, `tests/test_anchored_time_restatement.py`, `tests/test_anchored_time_restatement_live.py`); no live LLM readback yet | workspace `menhir-anchored-time-resolver-p3-plan.md`, `menhir-anchored-time-p3c-restatement-evidence-plan.md` |
-| Anchored-time attach check (a blind second model call must quote the same time words with the right relation before a resolver time is written; otherwise the edge keeps Graphiti's value) | `anchored_time_attach_enabled` / `MENHIR_ANCHORED_TIME_ATTACH` (+ `MENHIR_ANCHORED_TIME_ATTACH_MODEL`, empty means the resolver's model) | `_attach_check` after `plan_overlay` in `_apply_anchored_time` (one blind call per episode with candidates; V1-V3 in `anchored_time_attach.decide`; any failure writes nothing); attacher built in `graphiti_client.py` only with the resolver; persisted contract `at2`; ingest-only, no backfill | unit tests (`tests/test_anchored_time_attach.py`, `tests/test_anchored_time_attach_hook.py`); flag-off replay identical to a0a9814 over 2374 facts; no live run yet (P3 gates G1-G4 pending) | workspace `menhir-anchored-time-attachment-plan.md` |
 
 ## Warden profiles and context wiring (2026-10-05)
 
@@ -84,7 +81,26 @@ frontier errors can fall back to baseline results. This is not universal enforce
 
 ## Activated (moved on default-on)
 
-_(none yet — add rows here with the activation date when a flag flips `True` or a gate is removed)_
+### #168 freeze 2026-10-27: tested behavior becomes the default
+
+Owner rule: a feature on in a bench run since 2026-10-13 is on by default, and its flag is removed,
+except the three switches that guard LLM cost. Evidence per flag:
+workspace `.agent/reviews/menhir-168-freeze-feature-flag-review-2026-10-27.md`. Retired keys are
+listed in `RETIRED` (`config/feature_flags.py`); component knobs stay as per-request or test seams.
+
+| Feature | Flag / env | Now | Commit |
+|---|---|---|---|
+| Scalar state lane (scheduler) | `MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED` | default on, switch kept (LLM cost) | `cc931186` |
+| Counting lane (scheduler) | `MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED` | default on, switch kept (LLM cost) | `cc931186` |
+| Anchored time: resolver, blind attach check, world-end expiry | `MENHIR_ANCHORED_TIME_RESOLVER` (one switch); `_ATTACH`, `_EXPIRY` retired | default on, switch kept (LLM cost at ingest); `_MODEL`, `_ATTACH_MODEL`, `_TIMEOUT_S` unchanged | `cc931186` |
+| Source-memory max chars | `MENHIR_FRONTIER_SOURCE_MEMORY_MAX_CHARS` | 2000 (was 600) | `cc931186` |
+| Warden gate, contradiction interrupt, fact said-time, source memories, source-memory spread, count anchor hint, stale-lead demotion | retired | always on | `370fd94e` |
+| Edge-invalidation statement order | retired | always on | `8ec03d26` |
+| Scalar reconcile attribute/scope/subject, scalar View authority (follows the scalar lane), View freshness gate, sum grounding | retired | always on | `d022a7ed` |
+| Counting recall authority-only, wording, extraction v2, related-count matching (stamp `+x2+m`) | retired | always on | `9ec4d08c` |
+| Assistant turns stored only | retired | always on | `bdad118c` |
+
+Anchored-time render (`MENHIR_ANCHORED_TIME_RENDER`) stays off: it did not run in the window.
 
 ### Graduated to default-on 2026-09-30: source-memory recall lane
 

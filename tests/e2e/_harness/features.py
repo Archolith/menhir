@@ -161,7 +161,7 @@ FEATURE_REGISTRY: tuple[FeatureFlag, ...] = (
     _flag(
         "scalar_state",
         "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED",
-        summary="Typed scalar state extraction.",
+        summary="Typed scalar state extraction. Default on since the #168 freeze (cost switch).",
     ),
     _flag(
         "scalar_history",
