@@ -51,8 +51,6 @@ _SETTINGS = (
         'Treat invalid_at as world time, not supersession: keep such facts live, label them ended.', True, ()),
     ('anchored_time_attach_enabled', 'MENHIR_ANCHORED_TIME_ATTACH', False, 'runtime',
         'Write an anchored time only when a blind second check quotes the same words with the right relation.', True, ()),
-    ('edge_invalidation_statement_order', 'MENHIR_EDGE_INVALIDATION_STATEMENT_ORDER', True, 'runtime',
-        'Never end a fact on a statement said before it; both stay live (veto only).', True, ()),
     ('personal_memory_consolidation_enabled', 'MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED', False,
         'personal_memory', 'Enable personal-memory consolidation.', True, ()),
     ('personal_memory_consolidation_disable_reasoning', 'MENHIR_PERSONAL_MEMORY_CONSOLIDATION_DISABLE_REASONING',
@@ -310,4 +308,6 @@ RETIRED = {
     "MENHIR_FRONTIER_SOURCE_MEMORIES": "2026-10-27: always on (#168 freeze)",
     "frontier_source_memory_spread": "2026-10-27: always on (#168 freeze)",
     "MENHIR_FRONTIER_SOURCE_MEMORY_SPREAD": "2026-10-27: always on (#168 freeze)",
+    "edge_invalidation_statement_order": "2026-10-27: always on (#168 freeze)",
+    "MENHIR_EDGE_INVALIDATION_STATEMENT_ORDER": "2026-10-27: always on (#168 freeze)",
 }

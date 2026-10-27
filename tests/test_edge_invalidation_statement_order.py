@@ -231,20 +231,18 @@ def test_hook_kwargs_pass_the_switch():
         def __init__(self, uri=None, edge_invalidation_hook=None):
             pass
 
-    assert invalidation_hook_kwargs(G, object())["edge_invalidation_hook"]._statement_order is False
-    assert invalidation_hook_kwargs(G, object(), statement_order=True)["edge_invalidation_hook"]._statement_order
+    # On by default since the #168 freeze; the keyword stays as a seam.
+    assert invalidation_hook_kwargs(G, object())["edge_invalidation_hook"]._statement_order is True
+    assert invalidation_hook_kwargs(G, object(), statement_order=False)["edge_invalidation_hook"]._statement_order is False
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(("env", "expected"), [(None, True), ("false", False)])
-def test_from_settings_wires_the_setting_default_on(monkeypatch, env, expected):
+def test_from_settings_wires_statement_order_always_on(monkeypatch):
+    """Always on since the #168 freeze: a stale env var cannot turn it off."""
     import menhir.infrastructure.graphiti_client as graphiti_client
     from menhir.config.settings_model import MemorySettings
 
-    if env is None:
-        monkeypatch.delenv("MENHIR_EDGE_INVALIDATION_STATEMENT_ORDER", raising=False)
-    else:
-        monkeypatch.setenv("MENHIR_EDGE_INVALIDATION_STATEMENT_ORDER", env)
+    monkeypatch.setenv("MENHIR_EDGE_INVALIDATION_STATEMENT_ORDER", "false")
     seen: dict = {}
 
     class _CapturingGraphiti:
@@ -253,6 +251,6 @@ def test_from_settings_wires_the_setting_default_on(monkeypatch, env, expected):
 
     monkeypatch.setattr(graphiti_client, "Graphiti", _CapturingGraphiti)
     settings = MemorySettings.from_env()
-    assert settings.edge_invalidation_statement_order is expected
+    assert not hasattr(settings, "edge_invalidation_statement_order")
     graphiti_client.GraphitiClient.from_settings_with_capabilities(settings)
-    assert seen["edge_invalidation_hook"]._statement_order is expected
+    assert seen["edge_invalidation_hook"]._statement_order is True

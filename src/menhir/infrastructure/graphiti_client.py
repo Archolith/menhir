@@ -447,10 +447,7 @@ class GraphitiClient:
                 candidate_filter_hook=MenhirCandidateFilterHook(),
                 node_pre_resolution_hook=MenhirNodePreResolutionHook(),
                 **edge_expiry_hook_kwargs(anchored_time_expiry, Graphiti),
-                **invalidation_hook_kwargs(
-                    Graphiti, graph_driver,
-                    statement_order=bool(settings.edge_invalidation_statement_order),
-                ),
+                **invalidation_hook_kwargs(Graphiti, graph_driver),
                 **guarded_preserved_edge_attributes_kwargs(
                     preserved_edge_attributes_kwargs(
                         anchored_time is not None, anchored_time_expiry, Graphiti

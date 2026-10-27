@@ -18,7 +18,7 @@ Durable facts the decision rests on:
 
 Any error answers KEEP (fail closed): a stored human edge is never ended on a failed lookup.
 
-Statement order (2a, ``statement_order``; MENHIR_EDGE_INVALIDATION_STATEMENT_ORDER): after the
+Statement order (2a, ``statement_order``; always on since the #168 freeze, kept as a seam): after the
 authority check, on NEWER_CANDIDATE and CONTRADICTION, a cause said before its target answers KEEP,
 so an older statement whose event date is later never ends a newer one; both stay live. It only
 adds KEEP answers. "Said" is the episode time, read per edge (see ``_cause_said_earlier``). Each
@@ -326,7 +326,7 @@ def guarded_preserved_edge_attributes_kwargs(base: dict[str, Any]) -> dict[str, 
 
 
 def invalidation_hook_kwargs(
-    graphiti_cls: Any, driver: Any, *, statement_order: bool = False
+    graphiti_cls: Any, driver: Any, *, statement_order: bool = True
 ) -> dict[str, Any]:
     """``Graphiti(...)`` kwargs for the invalidation guard; refuses a fork without the seam."""
     try:
