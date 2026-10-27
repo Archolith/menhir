@@ -412,7 +412,7 @@ FACT_TEMPORAL_FIELDS = (
     "toString(r.invalid_at) AS invalid_at",
     "toString(r.created_at) AS created_at",
     "toString(r.expired_at) AS expired_at",
-    # Statement time (the episode's reference time); used only with MENHIR_FRONTIER_FACT_SAID_TIME.
+    # Statement time (the episode's reference time); read by the fact-said-time knob.
     "toString(r.reference_time) AS said_at",
     # Anchored-time contract (P2); read only when MENHIR_ANCHORED_TIME_RENDER is on.
     "r.time_basis AS time_basis",

@@ -108,9 +108,6 @@ CRITERIA = [
 ADMITTED_EPISODE_ID = re.compile(r"episode_id[=:]\s*([0-9a-f-]{36})")
 
 OPT_OUT = {
-    "MENHIR_FRONTIER_WARDEN_GATE": "false",
-    "MENHIR_FRONTIER_CONTRADICTION_INTERRUPT": "false",
-    "MENHIR_FRONTIER_SOURCE_MEMORIES": "false",
     "MENHIR_CANONICAL_SELF_BINDING_MODE": "off",
     "MENHIR_INFERRED_SELF_MODE": "off",
 }
@@ -368,10 +365,7 @@ async def test_e2e_19_fresh_install_shipped_defaults(
             values, expected = eff["values"], code_defaults()
             mismatch = sorted(k for k in set(values) | set(expected)
                               if values.get(k) != expected.get(k))
-            promoted = (values.get("MENHIR_FRONTIER_WARDEN_GATE") is True
-                        and values.get("MENHIR_FRONTIER_CONTRADICTION_INTERRUPT") is True
-                        and values.get("MENHIR_FRONTIER_SOURCE_MEMORIES") is True
-                        and values.get("MENHIR_CANONICAL_SELF_BINDING_MODE") == "enforce"
+            promoted = (values.get("MENHIR_CANONICAL_SELF_BINDING_MODE") == "enforce"
                         and values.get("MENHIR_INFERRED_SELF_MODE") == "enforce"
                         and values.get("MENHIR_FRONTIER_BELIEF_GATE") is False
                         and values.get("MENHIR_FRONTIER_EVIDENCE_ANCHOR") is False
@@ -484,17 +478,25 @@ async def test_e2e_19_fresh_install_shipped_defaults(
 
             # 11. serve from another cwd reads the state-dir .env
             backend = start("serve", home.other_cwd, "serve-other-cwd")
+            ns_serve = f"e2e19-serve-self-{uuid4().hex[:12]}"
             async with _session(home, cfg, inst, ev, "client-serve") as client:
                 r, text, state_c = await _write_then_recall(cfg, client, "e2e19-serve")
+                proj_serve = await _admit_self(cfg, client, ns_serve)
+                serve_self_state = (wait_episode_state(cfg, proj_serve["uuid"])
+                                    if proj_serve else "NO_PROJECTION")
+                probe_serve = _self_binding(cfg, ns_serve, serve_self_state)
             ws = r.get("warden_status") or {}
-            # The opt-outs exist only in the state-dir .env, so "disabled" proves serve read it.
+            # The Warden and source memories are always on (#168 freeze). The self-binding opt-out
+            # exists only in the state-dir .env, so an unbound self proves serve read it.
             ev.record("serve_from_other_cwd_reads_state_env", passed=(
-                state_c == "READY" and ws.get("state") == "disabled"
-                and not ws.get("configured_guards") and not r.get("source_memories")
-                and _ranked_has(r, ORIGINAL_AMOUNT)),
+                state_c == "READY" and ws.get("state") == "applied"
+                and bool(ws.get("configured_guards")) and bool(r.get("source_memories"))
+                and _ranked_has(r, ORIGINAL_AMOUNT)
+                and serve_self_state == "READY" and probe_serve["self_rows"] == []),
                 detail={"episode_state": state_c, "warden_status": ws,
                         "source_memories": bool(r.get("source_memories")),
-                        "ranked_has_amount": _ranked_has(r, ORIGINAL_AMOUNT)})
+                        "ranked_has_amount": _ranked_has(r, ORIGINAL_AMOUNT),
+                        "self_binding_probe": probe_serve})
             stop(backend)
 
             # 12. opt-out takes effect after restart; removing it restores defaults
@@ -510,8 +512,8 @@ async def test_e2e_19_fresh_install_shipped_defaults(
                 _bound(probe_enforce) and off_state == "READY" and probe_off["self_rows"] == []),
                 detail={"enforce": probe_enforce, "off": probe_off})
             opted_out = effective_settings(cfg, inst, home)["values"]
-            part_a = (state_d == "READY" and ws_off.get("state") == "disabled"
-                      and not r_off.get("source_memories") and _ranked_has(r_off, ORIGINAL_AMOUNT)
+            part_a = (state_d == "READY" and ws_off.get("state") == "applied"
+                      and _ranked_has(r_off, ORIGINAL_AMOUNT)
                       and opted_out.get("MENHIR_CANONICAL_SELF_BINDING_MODE") == "off"
                       and opted_out.get("MENHIR_INFERRED_SELF_MODE") == "off")
             stop(backend)

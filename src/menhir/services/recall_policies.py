@@ -252,7 +252,7 @@ def _build_temporal_facts(
     ended: bool = False,
     now: datetime | None = None,
     relevance_k: int = 0,
-    said_time: bool = False,
+    said_time: bool = True,
 ) -> dict[str, tuple[TemporalFact, ...]]:
     """Group fact-edge rows by node_uuid, cap to 5 most recent, and build TemporalFact tuples.
 

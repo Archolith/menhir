@@ -91,8 +91,9 @@ class MaintenanceScheduler:
     experience_embed: Callable[[str], "list[float] | None"] | None = None
     experience_embed_version: str | None = None   # 4a.1: model id stamped on write-time observation embeddings
     # Retry for source-memory embeds the ingest step gave up on (services/source_embedding_repair.py).
-    # Registered only when enabled AND both callables are wired (core/runtime.py).
-    source_embedding_repair_enabled: bool = False
+    # Registered only when enabled AND both callables are wired (core/runtime.py). On by default
+    # since #168 freeze; kept as a test seam.
+    source_embedding_repair_enabled: bool = True
     source_embedding_repair_interval_s: float = 300.0
     source_embedding_repair_budget: int = 200
     source_embedding_embed: Callable[[str], Awaitable["list[float] | None"]] | None = None

@@ -121,22 +121,6 @@ FEATURE_REGISTRY: tuple[FeatureFlag, ...] = (
         summary="QuantState-style agent-memory counters.",
         in_mvp_surface=True,
     ),
-    # --- default-on Warden surfaces promoted by #168 (#173, #171) ---------------
-    _flag(
-        "frontier_warden_gate",
-        "MENHIR_FRONTIER_WARDEN_GATE",
-        summary="Warden recall gate (scope, oracle admission, contradiction guards).",
-    ),
-    _flag(
-        "frontier_contradiction_interrupt",
-        "MENHIR_FRONTIER_CONTRADICTION_INTERRUPT",
-        summary="Warden contradiction interrupt on recall.",
-    ),
-    _flag(
-        "frontier_source_memories",
-        "MENHIR_FRONTIER_SOURCE_MEMORIES",
-        summary="Source-memory section on recall results.",
-    ),
     # --- surfaces outside the local-stdio MVP contract ---------------------------
     _flag(
         "explorer",

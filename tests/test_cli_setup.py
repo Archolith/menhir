@@ -255,8 +255,8 @@ def test_provider_defaults_fill_blanks_without_overwriting_choices_or_opt_outs(
 ) -> None:
     state = tmp_path / "state"
     state.mkdir()
-    opt_outs = ("MENHIR_FRONTIER_WARDEN_GATE=false\nMENHIR_FRONTIER_BELIEF_GATE=false\n"
-                "MENHIR_FRONTIER_EVIDENCE_ANCHOR=false\nMENHIR_FRONTIER_CONTRADICTION_INTERRUPT=false\n"
+    opt_outs = ("MENHIR_FRONTIER_BELIEF_GATE=false\n"
+                "MENHIR_FRONTIER_EVIDENCE_ANCHOR=false\n"
                 "MENHIR_VERIFIER_SYNC_ENABLED=false\n")
     existing = opt_outs + "OPENAI_API_KEY=operator-secret\n"
     if initial is not None:

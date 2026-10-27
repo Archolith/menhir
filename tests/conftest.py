@@ -384,6 +384,10 @@ class StubMemoryGraphAdapter:
         # default). Tests that exercise the leads path override this attribute with a lambda.
         return False
 
+    def newer_subject_assertions(self, **kwargs) -> list[dict]:
+        # Stale-lead demotion is on by default (#168 freeze): no newer related assertion by default.
+        return []
+
     def assertions_have_user_foundation(self, *, assertion_ids, namespace=None) -> bool:
         # G13 expiry-verdict basis: default = no user foundation (advisory). Overridden in tests.
         return False

@@ -665,10 +665,10 @@ class ContextBuilderService:
                     lines.append(advisory_line)
                     running_tokens += advisory_tokens
 
-        # Source-memory lane (MENHIR_FRONTIER_SOURCE_MEMORIES, additive, default off):
+        # Source-memory lane (additive):
         # the session's most similar raw episode memories (up to the limit) with their own time, packed AFTER the
-        # ranked list so it supplements rather than displaces relevance order. Flag-off
-        # (or lane failure) adds no lines and preserves the context byte-for-byte.
+        # ranked list so it supplements rather than displaces relevance order. A
+        # per-request knob-off (or lane failure) adds no lines and preserves the context byte-for-byte.
         if not fail_closed and recall_result.source_memories:
             source_lines = ["Source memories (raw episodes, oldest first):"]
             for sm in recall_result.source_memories:

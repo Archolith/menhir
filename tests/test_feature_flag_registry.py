@@ -118,8 +118,8 @@ def test_retired_controls_have_no_live_settings_or_readers(evidence) -> None:
 
 
 def test_known_interactions_and_observation_switches_are_recorded() -> None:
-    for key in ("frontier_belief_gate", "frontier_evidence_anchor", "frontier_contradiction_interrupt"):
-        assert FEATURES[key].requires == ("frontier_warden_gate",)
+    for key in ("frontier_belief_gate", "frontier_evidence_anchor"):
+        assert FEATURES[key].requires == ()
     assert FEATURES["personal_memory_scalar_view_authority_enabled"].requires == (
         "personal_memory_scalar_state_enabled",)
     assert FEATURES["personal_memory_scalar_deterministic_shadow"].emission_requires == (
@@ -135,7 +135,7 @@ def test_known_interactions_and_observation_switches_are_recorded() -> None:
 @pytest.mark.parametrize("fault", ["missing", "default", "env", "alias", "undocumented"])
 def test_detectors_reject_inventory_and_documentation_regressions(evidence, fault: str) -> None:
     changed = dict(FEATURES)
-    key = "frontier_source_memories"
+    key = "assistant_turns_store_only_enabled"
     if fault == "missing":
         del changed[key]
     else:
@@ -191,6 +191,6 @@ def test_legacy_wrapper_cannot_silently_read_another_registered_control(evidence
 
 
 def test_documentation_detector_rejects_prose_only_mentions() -> None:
-    entry = FEATURES["frontier_source_memories"]
-    assert documentation_errors({entry.setting: entry}, "Use MENHIR_FRONTIER_SOURCE_MEMORIES to opt out")
-    assert documentation_errors({entry.setting: entry}, "# MENHIR_FRONTIER_SOURCE_MEMORIES=false") == []
+    entry = FEATURES["assistant_turns_store_only_enabled"]
+    assert documentation_errors({entry.setting: entry}, "Use MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED to opt out")
+    assert documentation_errors({entry.setting: entry}, "# MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED=false") == []

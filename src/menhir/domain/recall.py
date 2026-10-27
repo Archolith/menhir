@@ -120,7 +120,7 @@ class TemporalFact:
     # edge carries a persisted contract.
     event_time: str | None = None
     # When the fact was said: the edge's reference_time (statement time, not world time). Set only
-    # when MENHIR_FRONTIER_FACT_SAID_TIME is on.
+    # when the fact-said-time knob is on (default).
     said_at: str | None = None
     # Two-tier self: True when the inferred self tier holds a near-duplicate of this anchored fact
     # (the inferred copy is dropped from the same result). Set only with MENHIR_INFERRED_SELF_MODE on.
@@ -388,7 +388,7 @@ class RecallResult:
     # First-person event authority, separate from scalar authority. None when the authority feature
     # is disabled, no verdict was produced, or the query abstained; preserves flag-off wire output.
     event_authority_layer: tuple[EventAuthorityVerdict, ...] | None = None
-    # Source-memory lane (MENHIR_FRONTIER_SOURCE_MEMORIES): additive section of raw episode
+    # Source-memory lane: additive section of raw episode
     # memories next to `results`, oldest first. None when the lane is off or failed;
     # `results`/`candidates_evaluated` are identical either way.
     source_memories: tuple[SourceMemory, ...] | None = None

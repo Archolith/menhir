@@ -123,9 +123,9 @@ class IngestService(IngestQueueMixin, IngestWorkerMixin, IngestIntakeMixin):
     # .agent/archive/plans/menhir-context-composition-production-integration.md). Off by default.
     _shadow_context_composition: bool = field(default=False, init=False, repr=False)
     _shadow_composition_timeout_s: float = field(default=30.0, init=False, repr=False)
-    # Source-memory lane (MENHIR_FRONTIER_SOURCE_MEMORIES). Off by default: no
-    # episode-content embedding call is made and ingest behavior is unchanged.
-    _source_memories_enabled: bool = field(default=False, init=False, repr=False)
+    # Source-memory lane: episode-content embedding at ingest. On by default since #168 freeze;
+    # kept as a test seam via configure(source_memories_enabled=...).
+    _source_memories_enabled: bool = field(default=True, init=False, repr=False)
     # Raw assistant turns are stored, never extracted (MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED).
     # Off here; settings default it on and bootstrap passes it in.
     _assistant_turns_store_only: bool = field(default=False, init=False, repr=False)

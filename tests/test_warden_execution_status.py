@@ -165,7 +165,7 @@ async def test_context_details_are_opt_in_and_budgeted(service, monkeypatch):
 @pytest.mark.parametrize("compact", [False, True])
 async def test_runtime_and_mcp_omit_details_by_default(service, compact):
     runtime = RuntimeProvider(SimpleNamespace(recall_service=service,
-        settings=MemorySettings(frontier_warden_gate=True, frontier_source_memories=False)), process_session=None)
+        settings=MemorySettings()), process_session=None)
     plain = await runtime.recall("config", namespace="tenant")
     assert "warden_status" not in plain and "warden_notice" not in plain
     tool = RecallMemoriesTool()

@@ -224,11 +224,11 @@ class RetrievalTuningConfig:
     # text for the oracle/warden path. No effect unless oracle_ranking or warden_gate is on.
     # On by default since #172, like oracle ranking.
     enable_intent_lens: bool = True
-    # Warden gate: drop REFUSED candidates from results and label FLAGGED ones. On since #173.
+    # Warden gate: drop REFUSED candidates from results and label FLAGGED ones. On by default since #168 freeze; kept as a per-request knob.
     enable_warden_gate: bool = True
     # Diversity gate: reorder results by evidence family to prevent any single source from dominating.
     enable_diversity_gate: bool = False
-    # Contradiction interrupt: append ContradictionWarden to the default warden chain. On since #173.
+    # Contradiction interrupt: append ContradictionWarden to the default warden chain. On by default since #168 freeze; kept as a per-request knob.
     enable_contradiction_interrupt: bool = True
     # Belief gate: append CurrentnessWarden + populate belief_score/evidence from
     # candidate metadata temporal markers. Default OFF (#173, #350): an Entity is marked superseded
@@ -309,12 +309,11 @@ class RetrievalTuningConfig:
     # control/treatment arms use ``production_fused`` so BM25 membership alone never
     # grants a floor exemption that today's opaque Graphiti fusion does not grant.
     fusion_admission_policy: str = "attributed"
-    # Source-memory lane (plan menhir-source-memory-lane). EXPERIMENTAL, default OFF ==
-    # today's behavior byte-for-byte. When on, recall builds an ADDITIVE source_memories
-    # section (raw episode contents by cosine over n.content_embedding, oldest first) next
-    # to the ranked results. Never fused: results/candidates_evaluated are identical with
-    # the lane on or off. See MENHIR_FRONTIER_SOURCE_MEMORIES.
-    enable_source_memories: bool = False
+    # Source-memory lane (plan menhir-source-memory-lane). When on, recall builds an ADDITIVE
+    # source_memories section (raw episode contents by cosine over n.content_embedding, oldest
+    # first) next to the ranked results. Never fused: results/candidates_evaluated are identical
+    # with the lane on or off. On by default since #168 freeze; kept as a per-request knob.
+    enable_source_memories: bool = True
     # Section size (effective only when enable_source_memories is on, or when a caller
     # passes an explicit per-call source_memory_limit > 0).
     source_memory_limit: int = 10
@@ -323,14 +322,16 @@ class RetrievalTuningConfig:
     # Group the section's returned memories into anchor-based pools (pure, deterministic).
     source_memory_pools: bool = False
     # Pick the section from a larger pool: drop exact content repeats, then each session's best
-    # memory before more from the same session (domain/source_memory_spread.py).
-    source_memory_spread: bool = False
+    # memory before more from the same session (domain/source_memory_spread.py). On by default
+    # since #168 freeze; kept as a per-request knob.
+    source_memory_spread: bool = True
     # Render persisted anchored-time contracts as fact event times (MENHIR_ANCHORED_TIME_RENDER).
     # Presentation only: ranking and admission are identical with it on or off.
     enable_anchored_time_render: bool = False
     # Put each fact edge's statement time (its reference_time) on recall temporal facts as
-    # said_at, rendered as "said <time>" (MENHIR_FRONTIER_FACT_SAID_TIME). Presentation only.
-    enable_fact_said_time: bool = False
+    # said_at, rendered as "said <time>". Presentation only. On by default since #168 freeze;
+    # kept as a per-request knob.
+    enable_fact_said_time: bool = True
     # Label unexpired facts whose own end (invalid_at) has passed as "ended" instead of
     # "current_belief" (MENHIR_ANCHORED_TIME_EXPIRY). Presentation only, like the render flag.
     enable_anchored_time_expiry: bool = False

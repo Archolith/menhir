@@ -227,7 +227,6 @@ def build_memory_services(
         record_detailed_revisions=settings.record_detailed_revisions,
         shadow_context_composition=settings.shadow_context_composition,
         shadow_composition_timeout_s=settings.shadow_composition_timeout_s,
-        source_memories_enabled=getattr(settings, "frontier_source_memories", False),
         assistant_turns_store_only=settings.assistant_turns_store_only_enabled,
         enrichment_enabled=(capabilities.enrichment_ready if capabilities is not None else True),
         enrichment_disabled_reason=(
@@ -247,8 +246,6 @@ def build_memory_services(
         scalar_view_echo_drop_enabled=settings.personal_memory_scalar_view_echo_drop_enabled,
         counting_recall_authority_only=settings.personal_memory_counting_recall_authority_only,
         counting_wording_enabled=settings.personal_memory_counting_wording_enabled,
-        count_anchor_hint_enabled=settings.count_anchor_hint_enabled,
-        stale_lead_demotion_enabled=settings.stale_lead_demotion_enabled,
         scalar_history_enabled=settings.personal_memory_scalar_history_enabled,
         event_history_authority_enabled=event_history_authority_effective(settings),
         inferred_self_mode=str(getattr(settings, "inferred_self_mode", "off")),
@@ -262,11 +259,7 @@ def build_memory_services(
         recall_service=recall_service,
         graph_adapter=graph_adapter,
         retrieval_tuning=settings.retrieval_tuning(),
-        source_memory_limit=(
-            getattr(settings, "frontier_source_memory_limit", None)
-            if getattr(settings, "frontier_source_memories", False)
-            else None
-        ),
+        source_memory_limit=getattr(settings, "frontier_source_memory_limit", None),
     )
     candidate_service = CandidateService(
         graph_adapter=graph_adapter,

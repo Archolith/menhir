@@ -437,7 +437,6 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         experience_embed=make_view_embedder(settings) if settings is not None else None,
         experience_embed_version=view_embedder_version(settings) if settings is not None else None,
         # Same embedder and model stamp as the ingest-time step (enrichment_steps.embed_episode_content).
-        source_embedding_repair_enabled=bool(getattr(settings, "frontier_source_memories", False)),
         source_embedding_embed=getattr(getattr(built, "graphiti_client", None), "embed_query", None),
         source_embedding_model_name=(
             (lambda: embedder_model_name(built.graphiti_client))

@@ -20,28 +20,20 @@ CAMPAIGN_FLAGS = {
     "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED": "personal_memory_event_history_authority_enabled",
     "MENHIR_FRONTIER_BM25": "frontier_bm25",
     "MENHIR_FRONTIER_CONTENT_VECTOR": "frontier_content_vector",
-    "MENHIR_FRONTIER_WARDEN_GATE": "frontier_warden_gate",
     "MENHIR_FRONTIER_DIVERSITY_GATE": "frontier_diversity_gate",
-    "MENHIR_FRONTIER_CONTRADICTION_INTERRUPT": "frontier_contradiction_interrupt",
     "MENHIR_FRONTIER_BELIEF_GATE": "frontier_belief_gate",
     "MENHIR_FRONTIER_EVIDENCE_ANCHOR": "frontier_evidence_anchor",
     "MENHIR_FRONTIER_FACT_EDGES": "frontier_fact_edges",
     "MENHIR_FRONTIER_SHADOW": "frontier_shadow",
-    "MENHIR_FRONTIER_SOURCE_MEMORIES": "frontier_source_memories",
     "MENHIR_FRONTIER_SOURCE_MEMORY_POOLS": "frontier_source_memory_pools",
-    "MENHIR_FRONTIER_SOURCE_MEMORY_SPREAD": "frontier_source_memory_spread",
     "MENHIR_VERIFIER_SYNC_ENABLED": "verifier_sync_enabled",
     "MENHIR_SCALAR_DETERMINISTIC_SHADOW": "personal_memory_scalar_deterministic_shadow",
 }
 
 
-# Campaign switches that ship on by default: source memories (#208) with session spread (#386)
-# and the Warden gate with its contradiction guard (#173).
+# Campaign switches that ship on by default. The Warden gate, source memories and the others
+# retired by the #168 freeze have no switch.
 DEFAULT_ON = {
-    "MENHIR_FRONTIER_SOURCE_MEMORIES",
-    "MENHIR_FRONTIER_SOURCE_MEMORY_SPREAD",
-    "MENHIR_FRONTIER_WARDEN_GATE",
-    "MENHIR_FRONTIER_CONTRADICTION_INTERRUPT",
     "MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED",
 }
 

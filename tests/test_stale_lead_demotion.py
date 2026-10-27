@@ -10,7 +10,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from menhir.config.settings_model import MemorySettings
 from menhir.domain.self_identity import inferred_self_uuid_for_namespace, self_uuid_for_namespace
 from menhir.domain.stale_lead import attribute_nouns, related_attributes
 from menhir.services.recall_service import RecallService
@@ -83,7 +82,7 @@ def _service(client, adapter, *, newer_rows, value_kind="count", enabled=True, n
 
     adapter.newer_subject_assertions = _newer
     svc = RecallService(graphiti_client=client, graph_adapter=adapter, scoring_service=ScoringService(),
-                        scalar_view_authority_enabled=True, stale_lead_demotion_enabled=enabled,
+                        scalar_view_authority_enabled=True, stale_lead_demotion=enabled,
                         inferred_self_mode=inferred_self_mode, counting_enabled=counting)
     return svc, calls
 
@@ -236,7 +235,7 @@ async def test_expired_lead_demoted_by_newer_related_count(
         {"assertion_id": "a2", "attribute": "bike_purchase_count", "valid_at": OCT}]
     svc = RecallService(graphiti_client=stub_graphiti_client, graph_adapter=adapter,
                         scoring_service=ScoringService(), scalar_view_authority_enabled=True,
-                        stale_lead_demotion_enabled=True)
+                        stale_lead_demotion=True)
     res = await svc.recall("how many bikes do I currently own", namespace="proj")
     expired = [v for v in (res.authority_layer or ()) if v.kind == "expired"]
     assert len(expired) == 1 and expired[0].status == "advisory"
@@ -246,10 +245,6 @@ async def test_expired_lead_demoted_by_newer_related_count(
 # --------------------------------------------------------------------------- settings
 
 @pytest.mark.unit
-def test_settings_default_on_service_default_off(monkeypatch) -> None:
-    # Fails if the env var name is wrong or either default flips.
-    monkeypatch.delenv("MENHIR_STALE_LEAD_DEMOTION_ENABLED", raising=False)
-    assert MemorySettings.from_env().stale_lead_demotion_enabled is True
-    monkeypatch.setenv("MENHIR_STALE_LEAD_DEMOTION_ENABLED", "false")
-    assert MemorySettings.from_env().stale_lead_demotion_enabled is False
-    assert RecallService.__dataclass_fields__["stale_lead_demotion_enabled"].default is False
+def test_service_default_on() -> None:
+    # Fails if the service default flips (on since the #168 freeze; kept as a knob).
+    assert RecallService.__dataclass_fields__["stale_lead_demotion"].default is True

@@ -250,7 +250,8 @@ async def test_per_call_zero_disables_and_positive_enables(
     assert stub_memory_graph_adapter.episode_embedding_calls == []
 
     on = await svc.recall(
-        "query", tuning=_tuning(), source_memory_limit=3, include_session=True
+        "query", tuning=_tuning(source_memory_spread=False), source_memory_limit=3,
+        include_session=True,
     )
     assert on.source_memories is not None and len(on.source_memories) == 3
     assert stub_memory_graph_adapter.episode_embedding_calls[-1]["limit"] == 3
@@ -542,19 +543,17 @@ async def test_ingest_step_swallows_embedder_errors(
 # ---------------------------------------------------------------------------
 
 
-def test_settings_defaults_deployment_on_library_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Library default (no settings supplied) stays off; the deployment default is on.
-    assert RetrievalTuningConfig().enable_source_memories is False
+def test_settings_defaults_deployment_and_library_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    # On everywhere since the #168 freeze; the library knob stays a per-request seam.
+    assert RetrievalTuningConfig().enable_source_memories is True
 
     for var in (
-        "MENHIR_FRONTIER_SOURCE_MEMORIES",
         "MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT",
         "MENHIR_FRONTIER_SOURCE_MEMORY_MAX_CHARS",
         "MENHIR_FRONTIER_SOURCE_MEMORY_POOLS",
     ):
         monkeypatch.delenv(var, raising=False)
     settings = MemorySettings.from_env()
-    assert settings.frontier_source_memories is True
     assert settings.frontier_source_memory_limit == 10
     assert settings.frontier_source_memory_max_chars == 600
     assert settings.frontier_source_memory_pools is False
@@ -567,12 +566,10 @@ def test_settings_defaults_deployment_on_library_off(monkeypatch: pytest.MonkeyP
 
 
 def test_settings_env_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORIES", "true")
     monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT", "25")
     monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_MAX_CHARS", "1200")
     monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_POOLS", "1")
     settings = MemorySettings.from_env()
-    assert settings.frontier_source_memories is True
     assert settings.frontier_source_memory_limit == 25
     assert settings.frontier_source_memory_max_chars == 1200
     assert settings.frontier_source_memory_pools is True

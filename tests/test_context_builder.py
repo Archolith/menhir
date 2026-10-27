@@ -460,9 +460,12 @@ async def test_context_applies_configured_warden_profile(
         {"uuid": uuid, "evidence_node_kinds": [], "anchor_projects": [], "episode_sources": sources}
         for uuid in ("entity-1", "entity-2")
     ]
-    tuning = MemorySettings(
-        frontier_warden_gate=warden, frontier_evidence_anchor=anchor, frontier_source_memories=False,
-    ).retrieval_tuning()
+    from dataclasses import replace
+
+    tuning = replace(
+        MemorySettings(frontier_evidence_anchor=anchor).retrieval_tuning(),
+        enable_warden_gate=warden, enable_source_memories=False,
+    )
     recall = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
     recalled = await recall.recall("Where does Alice live?", namespace="conversation", tuning=tuning)
     context = await ContextBuilderService(recall_service=recall, retrieval_tuning=tuning).build_context(

@@ -107,13 +107,14 @@ def test_frontier_portions_env_can_enable_default_off(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.unit
-def test_warden_defaults_can_be_turned_off_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The #173 default-on Warden settings each opt out independently."""
-    monkeypatch.setenv("MENHIR_FRONTIER_WARDEN_GATE", "false")
-    monkeypatch.setenv("MENHIR_FRONTIER_CONTRADICTION_INTERRUPT", "0")
+def test_always_on_portions_are_on_without_settings() -> None:
+    """Warden gate, contradiction interrupt, source memories, spread, said-time are always on (#168 freeze)."""
     t = MemorySettings.from_env().retrieval_tuning()
-    assert t.enable_warden_gate is False
-    assert t.enable_contradiction_interrupt is False
+    assert t.enable_warden_gate is True
+    assert t.enable_contradiction_interrupt is True
+    assert t.enable_source_memories is True
+    assert t.source_memory_spread is True
+    assert t.enable_fact_said_time is True
 
 
 @pytest.mark.unit
@@ -135,7 +136,6 @@ def test_content_vector_env_maps_all_tuning_knobs(monkeypatch: pytest.MonkeyPatc
 def test_frontier_portions_from_env_map_to_tuning(monkeypatch: pytest.MonkeyPatch) -> None:
     """MENHIR_FRONTIER_* env flags map onto RetrievalTuningConfig; shadow drives assertion_shadow."""
     # Set each explicitly so the mapping is asserted independent of field defaults.
-    monkeypatch.setenv("MENHIR_FRONTIER_WARDEN_GATE", "true")
     monkeypatch.setenv("MENHIR_FRONTIER_BELIEF_GATE", "1")
     monkeypatch.setenv("MENHIR_FRONTIER_SHADOW", "yes")
     monkeypatch.setenv("MENHIR_FRONTIER_BM25", "false")
@@ -143,7 +143,7 @@ def test_frontier_portions_from_env_map_to_tuning(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("MENHIR_FRONTIER_ORACLE_RANKING", "0")
     monkeypatch.setenv("MENHIR_FRONTIER_INTENT_LENS", "0")
     s = MemorySettings.from_env()
-    assert (s.frontier_warden_gate, s.frontier_belief_gate, s.frontier_shadow) == (True, True, True)
+    assert (s.frontier_belief_gate, s.frontier_shadow) == (True, True)
     assert s.frontier_bm25 is False
     t = s.retrieval_tuning()
     assert t.enable_oracle_ranking is True

@@ -1,7 +1,7 @@
 """resolve_env_file() falls back to the state-dir .env that `menhir setup` writes.
 
 Bug: on a wheel install `menhir setup` wrote config (including opt-outs such as
-MENHIR_FRONTIER_WARDEN_GATE=false) to state_dir()/.env, but `menhir serve` from another cwd
+MENHIR_FRONTIER_BELIEF_GATE=false) to state_dir()/.env, but `menhir serve` from another cwd
 without ENV_FILE ignored it and ran on code defaults.
 """
 
@@ -16,7 +16,7 @@ from menhir import env_file
 
 pytestmark = [pytest.mark.unit]
 
-GATE = "MENHIR_FRONTIER_WARDEN_GATE"
+GATE = "MENHIR_FRONTIER_BELIEF_GATE"
 
 
 @pytest.fixture

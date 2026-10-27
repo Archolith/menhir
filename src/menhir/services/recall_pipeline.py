@@ -283,7 +283,7 @@ _RECALL_HISTORY_MAX_CHARS = 4000
 #: result means no embedded memory matched -- not that no memory exists.
 _RECALL_HISTORY_EMPTY_NOTE = (
     "No embedded memories matched. Memories are embedded when "
-    "MENHIR_FRONTIER_SOURCE_MEMORIES is on; run scripts/backfill_episode_embeddings.py "
+    "source-memory embedding is on; run scripts/backfill_episode_embeddings.py "
     "for older memories."
 )
 
@@ -515,7 +515,7 @@ async def run_recall_history(
     Read-only re-use of the source-memory lane's embed + episode-embedding search.
     Unlike the lane, failures RAISE (the tool/route layers convert errors); no
     ``last_accessed`` touches, no access updates. Works whether or not
-    ``MENHIR_FRONTIER_SOURCE_MEMORIES`` is on: it only reads embeddings.
+    the source-memory lane is on for the request: it only reads embeddings.
     """
     stripped = (query or "").strip()
     if not stripped:
@@ -1368,7 +1368,7 @@ async def run_recall(
                     return {"contributors": [], "total": 0, "next_offset": None}
 
             from menhir.domain.stale_lead import DEMOTABLE_VALUE_KINDS, related_attributes
-            _stale_check = bool(getattr(service, "stale_lead_demotion_enabled", False))
+            _stale_check = bool(getattr(service, "stale_lead_demotion", True))
 
             async def _newer_related(
                 subject_uuid: str, attribute: str, value_kind: str, after: Any,
@@ -2636,7 +2636,7 @@ async def run_recall(
         source_memories=source_memories,
         query_hint=(
             count_anchor_hint(query)
-            if getattr(service, "count_anchor_hint_enabled", False) else None
+            if getattr(service, "anchored_count_hint", True) else None
         ),
     )
 

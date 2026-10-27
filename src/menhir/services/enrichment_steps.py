@@ -136,9 +136,9 @@ class EnrichmentContext:
     canonical_self_binding_mode: str = "off"
     #: Two-tier self identity rollout (agent-inferred node): "off" (default), "observe" or "enforce".
     inferred_self_mode: str = "off"
-    #: Source-memory lane (MENHIR_FRONTIER_SOURCE_MEMORIES). Defaulted so every construction
-    #: site predating this field keeps pre-change behavior: no episode-content embedding call.
-    source_memories_enabled: bool = False
+    #: Source-memory lane: embed the episode content at ingest. On by default since #168 freeze;
+    #: kept as a per-context knob.
+    source_memories_enabled: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -823,16 +823,16 @@ _SOURCE_MEMORY_EMBED_TIMEOUT_S = 10.0
 
 
 async def embed_episode_content(ctx: EnrichmentContext) -> None:
-    """Embed the episode's raw content for the source-memory recall lane (default-off).
+    """Embed the episode's raw content for the source-memory recall lane.
 
-    Runs only when the deployment enabled ``frontier_source_memories``. Skips evidence
+    Runs unless the context turns ``source_memories_enabled`` off. Skips evidence
     projections (the SET-side guard in ``set_episode_content_embedding`` is the backstop)
     and episodes that already carry an embedding, so the step is idempotent across
     retries. The embedder call is bounded (10s) and graph I/O runs in a worker thread.
     ANY exception or timeout is logged at WARNING and swallowed: this lane must never
     fail, delay-retry, or requeue enrichment.
     """
-    if not getattr(ctx, "source_memories_enabled", False):
+    if not getattr(ctx, "source_memories_enabled", True):
         return
     try:
         claimed = ctx.claimed

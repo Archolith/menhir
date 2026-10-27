@@ -63,7 +63,7 @@ def test_context_builders_receive_configured_warden_profile(monkeypatch, stub_gr
         lambda settings: stub_graphiti_client,
     )
     monkeypatch.setattr("menhir.core.bootstrap.LLMAdapter.from_settings", lambda settings: SimpleNamespace())
-    settings = MemorySettings(frontier_warden_gate=True, frontier_evidence_anchor=anchor)
+    settings = MemorySettings(frontier_evidence_anchor=anchor)
     built = build_hook_services(settings) if hook else build_memory_services(settings)
     assert built.context_builder is not None
     assert built.context_builder.retrieval_tuning == settings.retrieval_tuning()

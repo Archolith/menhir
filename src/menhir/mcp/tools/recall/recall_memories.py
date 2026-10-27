@@ -44,7 +44,7 @@ async def recall_memories(
         include_invalidated: When True, also return superseded/historical beliefs (expired facts). Default False = current beliefs only.
         compact: True to drop per-item explainability (breakdown sub-scores, type) and candidates_evaluated, keeping only the decision-relevant fields (name, scope, score, relevance, summary, uuid). None defers to the MENHIR_RECALL_COMPACT env default (off).
         include_warden_status: Include detailed Warden execution diagnostics (default false). Brief incomplete-check notices remain visible.
-        source_memory_limit: Per-call size of the additive source-memory section (raw episode memories with their time, kept NEXT TO the ranked results, never fused into them). None = deployment default (on with MENHIR_FRONTIER_SOURCE_MEMORIES, else off); 0 = off for this call; 1..50 = that many entries for this call, even when the deployment flag is off. The section carries SESSION-scoped raw episodes, so it is off whenever include_session is false (promoted knowledge only); this tool always recalls with include_session=true.
+        source_memory_limit: Per-call size of the additive source-memory section (raw episode memories with their time, kept NEXT TO the ranked results, never fused into them). None = deployment default (on); 0 = off for this call; 1..50 = that many entries for this call. The section carries SESSION-scoped raw episodes, so it is off whenever include_session is false (promoted knowledge only); this tool always recalls with include_session=true.
 
     Returns:
         Ranked memory results with scores and explainability breakdown.

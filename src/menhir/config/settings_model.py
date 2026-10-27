@@ -438,8 +438,6 @@ class MemorySettings:
     personal_memory_counting_recall_authority_only: bool = False
     # Unit 6: counted verdicts read "at least N you mentioned" and never lead.
     personal_memory_counting_wording_enabled: bool = False
-    count_anchor_hint_enabled: bool = True
-    stale_lead_demotion_enabled: bool = True
     # A raw assistant turn (role resolved as extraction would) is stored and embedded, never extracted.
     assistant_turns_store_only_enabled: bool = True
     personal_memory_counting_lease_seconds: int = 900
@@ -461,26 +459,21 @@ class MemorySettings:
     frontier_content_vector_k: int = 100
     frontier_content_vector_weight: float = 0.5
     frontier_fusion_admission_policy: str = "attributed"
-    frontier_warden_gate: bool = True      # drop REFUSED / label FLAGGED (on since #173)
     frontier_diversity_gate: bool = False  # reorder by evidence family to prevent spiral (opt-in)
-    frontier_contradiction_interrupt: bool = True  # append ContradictionWarden to default chain (on since #173)
-    frontier_belief_gate: bool = False     # add CurrentnessWarden + belief scoring to the chain; REQUIRES frontier_warden_gate to apply its verdicts (opt-in; see #350)
-    frontier_evidence_anchor: bool = False  # Guard 5 EvidenceAnchorWarden (only applies under warden_gate); opt-in: it reads the client label, not the speaker, and refuses ordinary conversation (#349)
+    frontier_belief_gate: bool = False     # add CurrentnessWarden + belief scoring to the chain (opt-in; see #350)
+    frontier_evidence_anchor: bool = False  # Guard 5 EvidenceAnchorWarden; opt-in: it reads the client label, not the speaker, and refuses ordinary conversation (#349)
     frontier_fact_edges: bool = False      # inject RELATES_TO fact edges (EntityEdge.fact) into the candidate pool; set TRUE for episodic/"what happened" corpora where the answer is a dated edge fact, not an entity name
     frontier_fact_relevance: bool = False  # attach the facts most similar to the query (plus the newest) instead of only the 5 newest
-    frontier_fact_said_time: bool = True  # put each fact's statement time (reference_time) on recall facts as said_at (o500 +.026, #384)
     frontier_verb_facets: bool = False     # append one keyword-matched fact per question verb after ranking (verb-centric questions only)
     frontier_fact_edge_mode: str = "standalone"  # how fact edges enter the pool: "standalone" (terse fact as its own candidate; net-negative at N=30) or "pointer" (hydrate endpoint nodes' rich context; preferred)
     frontier_similarity_scale: str = "rrf"  # similarity lane scale (plan 1a/1b): "rrf" (today; RRF ~[0,2]) or "normalized" (divide search scores by the pinned RRF max -> [0,1], restoring PENDING's top-pin; ranking change, A/B before default flip)
     frontier_shadow: bool = False          # observe-only oracle/warden pass (trace)
     # Source-memory recall lane: additive section of raw episode memories (cosine over
-    # n.content_embedding), NEXT TO the ranked results, never fused into them. Requires the
-    # ingest-side episode-content embedding step (also gated by frontier_source_memories).
-    frontier_source_memories: bool = True  # additive source-memory section next to ranked recall (default on)
+    # n.content_embedding), NEXT TO the ranked results, never fused into them. Always on since
+    # the #168 freeze, with the ingest-side episode-content embedding step.
     frontier_source_memory_limit: int = 10          # section size (1..50; validated in RetrievalTuningConfig)
     frontier_source_memory_max_chars: int = 600  # per-memory content cap (100..4000)
     frontier_source_memory_pools: bool = False  # group section entries by shared anchors
-    frontier_source_memory_spread: bool = True  # pick the section per session from a 3x pool, dropping exact repeats (default on)
 
     # HTTP server
     api_host: str = "127.0.0.1"
@@ -785,9 +778,7 @@ class MemorySettings:
             content_vector_k=self.frontier_content_vector_k,
             content_vector_weight=self.frontier_content_vector_weight,
             fusion_admission_policy=self.frontier_fusion_admission_policy,
-            enable_warden_gate=self.frontier_warden_gate,
             enable_diversity_gate=self.frontier_diversity_gate,
-            enable_contradiction_interrupt=self.frontier_contradiction_interrupt,
             enable_belief_gate=self.frontier_belief_gate,
             enable_evidence_anchor=self.frontier_evidence_anchor,
             enable_fact_edges=self.frontier_fact_edges,
@@ -797,15 +788,12 @@ class MemorySettings:
             fact_edge_mode=self.frontier_fact_edge_mode,
             similarity_scale=self.frontier_similarity_scale,
             enable_assertion_shadow=self.frontier_shadow,
-            enable_source_memories=self.frontier_source_memories,
             source_memory_limit=self.frontier_source_memory_limit,
             source_memory_max_chars=self.frontier_source_memory_max_chars,
             source_memory_pools=self.frontier_source_memory_pools,
-            source_memory_spread=self.frontier_source_memory_spread,
             enable_anchored_time_render=self.anchored_time_render_enabled,
             enable_anchored_time_expiry=self.anchored_time_expiry_enabled,
             enable_fact_relevance=self.frontier_fact_relevance,
-            enable_fact_said_time=self.frontier_fact_said_time,
             enable_observation_dedup=self.personal_memory_observation_dedup_enabled,
             enable_verb_facets=self.frontier_verb_facets,
         )
@@ -1024,14 +1012,6 @@ class MemorySettings:
                 "MENHIR_PERSONAL_MEMORY_COUNTING_WORDING_ENABLED",
                 default=str(cls.personal_memory_counting_wording_enabled),
             )),
-            count_anchor_hint_enabled=parse_bool_env(_getenv(
-                "MENHIR_COUNT_ANCHOR_HINT_ENABLED",
-                default=str(cls.count_anchor_hint_enabled),
-            )),
-            stale_lead_demotion_enabled=parse_bool_env(_getenv(
-                "MENHIR_STALE_LEAD_DEMOTION_ENABLED",
-                default=str(cls.stale_lead_demotion_enabled),
-            )),
             assistant_turns_store_only_enabled=parse_bool_env(_getenv(
                 "MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED",
                 default=str(cls.assistant_turns_store_only_enabled),
@@ -1059,19 +1039,15 @@ class MemorySettings:
                 "MENHIR_FRONTIER_FUSION_ADMISSION_POLICY",
                 default=cls.frontier_fusion_admission_policy,
             ).strip().lower(),
-            frontier_warden_gate=parse_bool_env(_getenv("MENHIR_FRONTIER_WARDEN_GATE", default=str(cls.frontier_warden_gate))),
             frontier_diversity_gate=parse_bool_env(_getenv("MENHIR_FRONTIER_DIVERSITY_GATE", default=str(cls.frontier_diversity_gate))),
-            frontier_contradiction_interrupt=parse_bool_env(_getenv("MENHIR_FRONTIER_CONTRADICTION_INTERRUPT", default=str(cls.frontier_contradiction_interrupt))),
             frontier_belief_gate=parse_bool_env(_getenv("MENHIR_FRONTIER_BELIEF_GATE", default=str(cls.frontier_belief_gate))),
             frontier_evidence_anchor=parse_bool_env(_getenv("MENHIR_FRONTIER_EVIDENCE_ANCHOR", default=str(cls.frontier_evidence_anchor))),
             frontier_fact_edges=parse_bool_env(_getenv("MENHIR_FRONTIER_FACT_EDGES", default=str(cls.frontier_fact_edges))),
             frontier_fact_relevance=parse_bool_env(_getenv("MENHIR_FRONTIER_FACT_RELEVANCE", default=str(cls.frontier_fact_relevance))),
-            frontier_fact_said_time=parse_bool_env(_getenv("MENHIR_FRONTIER_FACT_SAID_TIME", default=str(cls.frontier_fact_said_time))),
             frontier_verb_facets=parse_bool_env(_getenv("MENHIR_FRONTIER_VERB_FACETS", default=str(cls.frontier_verb_facets))),
             frontier_fact_edge_mode=_getenv("MENHIR_FRONTIER_FACT_EDGE_MODE", default=cls.frontier_fact_edge_mode).strip().lower(),
             frontier_similarity_scale=_getenv("MENHIR_FRONTIER_SIMILARITY_SCALE", default=cls.frontier_similarity_scale).strip().lower(),
             frontier_shadow=parse_bool_env(_getenv("MENHIR_FRONTIER_SHADOW", default=str(cls.frontier_shadow))),
-            frontier_source_memories=parse_bool_env(_getenv("MENHIR_FRONTIER_SOURCE_MEMORIES", default=str(cls.frontier_source_memories))),
             frontier_source_memory_limit=_parse_int(
                 _getenv("MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT", default=str(cls.frontier_source_memory_limit)),
                 env_var="MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT",
@@ -1085,7 +1061,6 @@ class MemorySettings:
                 maximum=4000,
             ),
             frontier_source_memory_pools=parse_bool_env(_getenv("MENHIR_FRONTIER_SOURCE_MEMORY_POOLS", default=str(cls.frontier_source_memory_pools))),
-            frontier_source_memory_spread=parse_bool_env(_getenv("MENHIR_FRONTIER_SOURCE_MEMORY_SPREAD", default=str(cls.frontier_source_memory_spread))),
             # HTTP server
             api_host=_getenv("MENHIR_API_HOST", default=cls.api_host),
             api_port=_parse_int(

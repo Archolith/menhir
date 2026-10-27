@@ -49,11 +49,11 @@ class RecallLabTuning(BaseModel):
     content_vector_k: int = Field(default=100, ge=1, le=200)
     content_vector_weight: float = Field(default=0.5, ge=0.0, le=10.0)
     fusion_admission_policy: Literal["attributed", "production_fused"] = "attributed"
-    enable_source_memories: bool = False
+    enable_source_memories: bool = True
     source_memory_limit: int = Field(default=10, ge=1, le=50)
     source_memory_max_chars: int = Field(default=600, ge=100, le=4000)
     source_memory_pools: bool = False
-    source_memory_spread: bool = False
+    source_memory_spread: bool = True
     enable_verb_facets: bool = False
     scalar_verdict_min_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
 

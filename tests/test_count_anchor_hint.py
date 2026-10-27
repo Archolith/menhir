@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from menhir.api.routes_support import RecallResponse
-from menhir.config.settings_model import MemorySettings
 from menhir.core.backend_runtime_data_ops import RuntimeProviderDataOpsMixin
 from menhir.domain.count_anchor_hint import count_anchor_hint
 from menhir.domain.recall import RecallResult, ScalarAuthorityVerdict
@@ -69,19 +68,21 @@ async def _recall(client, adapter, query, **svc_kw) -> RecallResult:
 
 @pytest.mark.unit
 def test_recall_defaults() -> None:
-    # Fails if either default flips to on / non-None.
+    # Fails if the hint stops defaulting to None on the result or on for the service (#168 freeze).
     assert RecallResult.__dataclass_fields__["query_hint"].default is None
-    assert RecallService.__dataclass_fields__["count_anchor_hint_enabled"].default is False
+    assert RecallService.__dataclass_fields__["anchored_count_hint"].default is True
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_pipeline_sets_hint_only_when_flag_on(stub_graphiti_client, stub_memory_graph_adapter) -> None:
-    # Fails if the pipeline ignores the flag in either direction.
-    off = await _recall(stub_graphiti_client, stub_memory_graph_adapter, ANCHORED)
+async def test_pipeline_sets_hint_by_default_and_knob_turns_it_off(
+    stub_graphiti_client, stub_memory_graph_adapter,
+) -> None:
+    # Fails if the pipeline ignores the knob in either direction.
+    off = await _recall(stub_graphiti_client, stub_memory_graph_adapter, ANCHORED,
+                        anchored_count_hint=False)
     assert off.query_hint is None
-    on = await _recall(stub_graphiti_client, stub_memory_graph_adapter, ANCHORED,
-                       count_anchor_hint_enabled=True)
+    on = await _recall(stub_graphiti_client, stub_memory_graph_adapter, ANCHORED)
     assert on.query_hint is not None
     assert "the townhouse in the Brookside neighborhood" in on.query_hint
 
@@ -93,8 +94,7 @@ async def test_pipeline_flag_on_non_anchored_query_has_no_hint(
 ) -> None:
     # Fails if the hint is emitted for queries the detector rejects.
     res = await _recall(stub_graphiti_client, stub_memory_graph_adapter,
-                        "How many weddings have I attended in this year?",
-                        count_anchor_hint_enabled=True)
+                        "How many weddings have I attended in this year?")
     assert res.query_hint is None
 
 
@@ -178,15 +178,3 @@ async def test_query_note_skipped_when_event_authority_fails_closed() -> None:
         event_authority_layer=(_event_verdict(status="advisory", gate="anchor", has_foundation=False),)))
     assert "[Event authority: UNRESOLVED]" in ctx
     assert "Query note:" not in ctx
-
-
-# --------------------------------------------------------------------------- settings
-
-@pytest.mark.unit
-def test_settings_flag_default_on_and_env_parsed(monkeypatch) -> None:
-    # Fails if the env var name is wrong or the default flips.
-    monkeypatch.delenv("MENHIR_COUNT_ANCHOR_HINT_ENABLED", raising=False)
-    assert MemorySettings().count_anchor_hint_enabled is True
-    assert MemorySettings.from_env().count_anchor_hint_enabled is True
-    monkeypatch.setenv("MENHIR_COUNT_ANCHOR_HINT_ENABLED", "false")
-    assert MemorySettings.from_env().count_anchor_hint_enabled is False

@@ -78,8 +78,6 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
                 settings, "personal_memory_counting_recall_authority_only", False),
             counting_wording_enabled=getattr(
                 settings, "personal_memory_counting_wording_enabled", False),
-            count_anchor_hint_enabled=getattr(settings, "count_anchor_hint_enabled", False),
-            stale_lead_demotion_enabled=getattr(settings, "stale_lead_demotion_enabled", False),
             event_history_authority_enabled=event_history_authority_effective(settings),
             # Same tier view as the backend's recall (core/bootstrap.py), so hook context agrees.
             inferred_self_mode=str(getattr(settings, "inferred_self_mode", "enforce")),
@@ -89,11 +87,7 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
             recall_service=recall_service,
             graph_adapter=graph_adapter,
             retrieval_tuning=settings.retrieval_tuning(),
-            source_memory_limit=(
-                getattr(settings, "frontier_source_memory_limit", None)
-                if getattr(settings, "frontier_source_memories", False)
-                else None
-            ),
+            source_memory_limit=getattr(settings, "frontier_source_memory_limit", None),
         )
     except Exception:
         logger.debug("Direct recall path unavailable, trying backend", exc_info=True)
