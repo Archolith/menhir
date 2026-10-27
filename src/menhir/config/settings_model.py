@@ -440,6 +440,8 @@ class MemorySettings:
     personal_memory_counting_wording_enabled: bool = False
     count_anchor_hint_enabled: bool = True
     stale_lead_demotion_enabled: bool = True
+    # A raw assistant turn (role resolved as extraction would) is stored and embedded, never extracted.
+    assistant_turns_store_only_enabled: bool = True
     personal_memory_counting_lease_seconds: int = 900
 
     # Benchmark mode — when true, disables the background scheduler,
@@ -1029,6 +1031,10 @@ class MemorySettings:
             stale_lead_demotion_enabled=parse_bool_env(_getenv(
                 "MENHIR_STALE_LEAD_DEMOTION_ENABLED",
                 default=str(cls.stale_lead_demotion_enabled),
+            )),
+            assistant_turns_store_only_enabled=parse_bool_env(_getenv(
+                "MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED",
+                default=str(cls.assistant_turns_store_only_enabled),
             )),
             personal_memory_counting_lease_seconds=max(1, int(_getenv(
                 "MENHIR_PERSONAL_MEMORY_COUNTING_LEASE_SECONDS",

@@ -16,6 +16,7 @@ from uuid import uuid4
 from menhir.domain import IngestResult, IngestStatus, MemorySession
 from menhir.domain.ingest import EXTRACTION_MODE_STORE_ONLY
 from menhir.domain.models import ProcessingState
+from menhir.domain.turn_role import STORE_ONLY_TURN_ROLES, resolve_turn_role
 from menhir.infrastructure import GraphitiClient, LLMAdapter, MemoryGraphAdapter
 from menhir.infrastructure.git_log import current_head
 from menhir.infrastructure.paths import repo_root_for_project
@@ -205,9 +206,10 @@ class IngestWorkerMixin:
                 async with asyncio.timeout(self._max_enrichment_seconds) as deadline:
                     # Store-only: embed for the source-memory lane, then finish READY. Ahead of
                     # reconcile/preflight/budget, which are all about extraction.
-                    if claimed.get("extraction_mode") == EXTRACTION_MODE_STORE_ONLY:
+                    by_turn_role = self._store_only_by_turn_role(claimed)
+                    if by_turn_role or claimed.get("extraction_mode") == EXTRACTION_MODE_STORE_ONLY:
                         await embed_episode_content(ctx)
-                        await self._finish_store_only(episode_uuid, claimed)
+                        await self._finish_store_only(episode_uuid, claimed, by_turn_role=by_turn_role)
                         return
                     if await try_reconcile_existing(ctx):
                         return
@@ -309,21 +311,40 @@ class IngestWorkerMixin:
 
         return
 
-    async def _finish_store_only(self, episode_uuid: str, claimed: dict[str, Any]) -> None:
+    def _store_only_by_turn_role(self, claimed: dict[str, Any]) -> bool:
+        """Assistant-turn policy (MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED): a raw assistant turn
+        is kept verbatim for the source-memory lane and never extracted. The role is the one
+        extraction would use: a matching linked :TurnEvidence wins over the declared role."""
+        if not getattr(self, "_assistant_turns_store_only", False):
+            return False
+        if claimed.get("extraction_mode") == EXTRACTION_MODE_STORE_ONLY:
+            return False
+        if claimed.get("is_evidence_projection"):
+            return False
+        return resolve_turn_role(claimed) in STORE_ONLY_TURN_ROLES
+
+    async def _finish_store_only(
+        self, episode_uuid: str, claimed: dict[str, Any], *, by_turn_role: bool = False,
+    ) -> None:
         """Mark a store-only episode READY. Never falls through to extraction: if the fenced
         write misses, this attempt no longer holds the lease and the current owner finishes it."""
+        role_kwargs = {"by_turn_role": True} if by_turn_role else {}
         finished = await asyncio.to_thread(
             self.graph_adapter.mark_episode_store_only,
             episode_uuid,
             worker_id=self._worker_id,
             claim_started_at=claimed.get("processing_started_at"),
+            **role_kwargs,
         )
+        details: dict[str, Any] = {} if finished else {"reason": "claim_fence_lost"}
+        if by_turn_role:
+            details["store_only_by"] = "turn_role:assistant"
         record_lifecycle_event(
             component="ingest_worker",
             event="store_only_ready",
             state="completed" if finished else "skipped",
             episode_uuid=episode_uuid,
-            details={} if finished else {"reason": "claim_fence_lost"},
+            details=details,
         )
 
     async def _try_verbatim_skip(self, episode_uuid: str, claimed: dict[str, Any]) -> bool:

@@ -39,7 +39,7 @@ async def add_memory(
         turn_evidence_uuid: Optional UUID of the :TurnEvidence node for the turn this memory was written in the context of. For source='user'/'manual' it also grounds the user-tier claim (an ungrounded claim is downgraded). For every other source it draws the provenance edge only, which is what lets a typed-scalar assertion reach the entities extracted from this memory -- pass it whenever you know it.
                            Required for the user tier; omit to use agent_inference tier.
         user_statement: The user's exact words for the statement this memory is based on; verbatim only, never paraphrased, never a third party's words; omit when unsure. Mutually exclusive with turn_evidence_uuid.
-        role: Optional speaker of this text, exactly one of user, assistant, tool, agent, system. Declare it when the text is a raw conversation turn; never write the role into the text. A matching linked :TurnEvidence overrides it. Omit when unsure. Checked on every path, but has no effect for TEMPORAL + valid_at (no extraction).
+        role: Optional speaker of this text, exactly one of user, assistant, tool, agent, system. Declare it when the text is a raw conversation turn; never write the role into the text. A raw assistant turn is stored for verbatim recall and never extracted (MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED). A matching linked :TurnEvidence overrides it. Omit when unsure. Checked on every path, but has no effect for TEMPORAL + valid_at (no extraction).
 
     Returns:
         Confirmation with the episode ID and counts of nodes/edges created.
@@ -88,7 +88,7 @@ class AddMemoryTool(BaseTextTool):
             bootstrap_scope: Optional startup pin: general or workspace:<registered-key>.
             turn_evidence_uuid: Optional UUID of the :TurnEvidence node for the turn this memory was written in the context of. For source='user'/'manual' it also grounds the user-tier claim (an ungrounded claim is downgraded). For every other source it draws the provenance edge only, which is what lets a typed-scalar assertion reach the entities extracted from this memory -- pass it whenever you know it.
             user_statement: The user's exact words for the statement this memory is based on; verbatim only, never paraphrased, never a third party's words; omit when unsure. Mutually exclusive with turn_evidence_uuid.
-            role: Optional speaker of this text, exactly one of user, assistant, tool, agent, system. Declare it when the text is a raw conversation turn; never write the role into the text. A matching linked :TurnEvidence overrides it. Omit when unsure. Checked on every path, but has no effect for TEMPORAL + valid_at (no extraction).
+            role: Optional speaker of this text, exactly one of user, assistant, tool, agent, system. Declare it when the text is a raw conversation turn; never write the role into the text. A raw assistant turn is stored for verbatim recall and never extracted (MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED). A matching linked :TurnEvidence overrides it. Omit when unsure. Checked on every path, but has no effect for TEMPORAL + valid_at (no extraction).
 
         Returns:
             Confirmation with the episode ID and counts of nodes/edges created.

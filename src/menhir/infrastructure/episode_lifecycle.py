@@ -1136,11 +1136,16 @@ class EpisodeLifecycleRepository:
 
     def mark_episode_store_only(
         self, episode_uuid: str, *, worker_id: str, claim_started_at: object | None,
+        by_turn_role: bool = False,
     ) -> bool:
         """Finish a store-only episode READY without extraction. True when this claim wrote it.
 
         Fenced on this claim's owner and start instant, and on the durable ``extraction_mode``
         itself, so only an attempt holding the current lease on a store-only row can finish it.
+
+        ``by_turn_role``: the worker's assistant-turn policy decided store-only for a row created
+        normal. The mode is then written in the same fenced SET as READY, so the zero-extraction
+        sweep (which exempts store-only by mode) can never see this row READY without it.
         """
         if not worker_id or claim_started_at is None:
             return False
@@ -1151,8 +1156,9 @@ class EpisodeLifecycleRepository:
               AND n.processing_started_at IS NOT NULL
               AND n.processing_started_at.epochSeconds = datetime($claim_started_at).epochSeconds
               AND n.processing_started_at.nanosecond = datetime($claim_started_at).nanosecond
-              AND n.extraction_mode = $store_only
-            SET n.processing_state = 'READY',
+              AND (n.extraction_mode = $store_only OR $by_turn_role)
+            SET n.extraction_mode = $store_only,
+                n.processing_state = 'READY',
                 n.processing_stage = 'ready',
                 n.processing_substage = $store_only,
                 n.processing_substage_started_at = datetime(),
@@ -1177,6 +1183,7 @@ class EpisodeLifecycleRepository:
                 "worker_id": worker_id,
                 "claim_started_at": claim_started_at,
                 "store_only": EXTRACTION_MODE_STORE_ONLY,
+                "by_turn_role": bool(by_turn_role),
             },
         )
         return bool(rows)

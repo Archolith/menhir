@@ -762,10 +762,12 @@ class MemoryGraphAdapter:
 
     def mark_episode_store_only(
         self, episode_uuid: str, *, worker_id: str, claim_started_at: object | None,
+        by_turn_role: bool = False,
     ) -> bool:
         """See `EpisodeLifecycleRepository.mark_episode_store_only`."""
         return self._episodes.mark_episode_store_only(
             episode_uuid, worker_id=worker_id, claim_started_at=claim_started_at,
+            by_turn_role=by_turn_role,
         )
 
     def episode_is_store_only(self, episode_uuid: str) -> bool:

@@ -126,6 +126,9 @@ class IngestService(IngestQueueMixin, IngestWorkerMixin, IngestIntakeMixin):
     # Source-memory lane (MENHIR_FRONTIER_SOURCE_MEMORIES). Off by default: no
     # episode-content embedding call is made and ingest behavior is unchanged.
     _source_memories_enabled: bool = field(default=False, init=False, repr=False)
+    # Raw assistant turns are stored, never extracted (MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED).
+    # Off here; settings default it on and bootstrap passes it in.
+    _assistant_turns_store_only: bool = field(default=False, init=False, repr=False)
     # Detached background shadow-composition tasks, tracked so shutdown() can drain them
     # instead of leaving "Task was destroyed but it is pending" warnings behind.
     _shadow_tasks: set[asyncio.Task] = field(default_factory=set, init=False, repr=False)

@@ -42,7 +42,7 @@ async def add_memory_and_track(
         diff: Optional git diff to attach as context for what changed alongside this memory.
         turn_evidence_uuid: Optional UUID of the :TurnEvidence node for the turn this memory was written in the context of. For source='user'/'manual' it also grounds the user-tier claim (an ungrounded claim is downgraded). For every other source it draws the provenance edge only, which is what lets a typed-scalar assertion reach the entities extracted from this memory -- pass it whenever you know it.
         namespace: Silo to write into.
-        role: Optional speaker of this text, exactly one of user, assistant, tool, agent, system. Declare it when the text is a raw conversation turn; never write the role into the text. A matching linked :TurnEvidence overrides it. Omit when unsure.
+        role: Optional speaker of this text, exactly one of user, assistant, tool, agent, system. Declare it when the text is a raw conversation turn; never write the role into the text. A raw assistant turn is stored for verbatim recall and never extracted (MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED). A matching linked :TurnEvidence overrides it. Omit when unsure.
 
     Returns:
         Episode status summary plus observed state transitions.
@@ -113,7 +113,7 @@ class AddMemoryAndTrackTool(BaseTextTool):
             namespace: Silo to write into. A pinned client has this forced, and the parameter
                 existing is what makes that possible -- the pin is injected only into endpoints
                 whose signature declares it.
-            role: Optional speaker of this text, exactly one of user, assistant, tool, agent, system. Declare it when the text is a raw conversation turn; never write the role into the text. A matching linked :TurnEvidence overrides it. Omit when unsure.
+            role: Optional speaker of this text, exactly one of user, assistant, tool, agent, system. Declare it when the text is a raw conversation turn; never write the role into the text. A raw assistant turn is stored for verbatim recall and never extracted (MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED). A matching linked :TurnEvidence overrides it. Omit when unsure.
 
         Returns:
             Episode status summary plus observed state transitions.
