@@ -120,12 +120,17 @@ def test_retired_controls_have_no_live_settings_or_readers(evidence) -> None:
 def test_known_interactions_and_observation_switches_are_recorded() -> None:
     for key in ("frontier_belief_gate", "frontier_evidence_anchor"):
         assert FEATURES[key].requires == ()
-    assert FEATURES["personal_memory_scalar_view_authority_enabled"].requires == (
-        "personal_memory_scalar_state_enabled",)
+    # Scalar view authority is always on (#168 freeze): its dependents require the scalar lane itself.
+    for key in ("personal_memory_scalar_view_collapse_enabled", "personal_memory_scalar_view_echo_drop_enabled",
+                "personal_memory_observation_dedup_enabled"):
+        assert FEATURES[key].requires == ("personal_memory_scalar_state_enabled",)
+    for key in ("personal_memory_counting_recall_authority_only", "personal_memory_counting_wording_enabled"):
+        assert FEATURES[key].requires == (
+            "personal_memory_counting_enabled", "personal_memory_scalar_state_enabled")
     assert FEATURES["personal_memory_scalar_deterministic_shadow"].emission_requires == (
         "personal_memory_consolidation_audit_enabled",)
-    for suffix in ("attribute", "scope", "subject"):
-        assert FEATURES[f"personal_memory_scalar_reconcile_{suffix}"].version_bump is True
+    for key in ("personal_memory_counting_extract_v2", "personal_memory_counting_match_enabled"):
+        assert FEATURES[key].version_bump is True
     for key in ("frontier_shadow", "personal_memory_recall_audit_enabled",
                 "personal_memory_consolidation_audit_enabled", "MENHIR_FRONTIER_TRACE"):
         assert FEATURES[key].observation_only is True

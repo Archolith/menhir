@@ -47,7 +47,6 @@ COUNTER_ON = {
     "MENHIR_PERSONAL_MEMORY_CONSOLIDATION_INTERVAL_S": "86400",
     # Scalar on (with empty replies) so the response carries lane_outcomes.
     "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED": "true",
-    "MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED": "true",
 }
 
 _LINE = re.compile(r"^\[(\d+)\] \[(\d{4}-\d{2}-\d{2})\] (.*)$", re.MULTILINE)

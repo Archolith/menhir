@@ -24,10 +24,10 @@ pytestmark = pytest.mark.unit
 COMBOS = list(itertools.product([False, True], [False, True]))
 
 
-def _settings(scalar_lane, scalar_auth, event_lane, event_auth):
+def _settings(scalar_lane, event_lane, event_auth):
+    # Scalar view authority is always on since the #168 freeze: it follows the scalar lane alone.
     return MemorySettings(
         personal_memory_scalar_state_enabled=scalar_lane,
-        personal_memory_scalar_view_authority_enabled=scalar_auth,
         personal_memory_event_history_enabled=event_lane,
         personal_memory_event_history_authority_enabled=event_auth,
     )
@@ -35,9 +35,9 @@ def _settings(scalar_lane, scalar_auth, event_lane, event_auth):
 
 @pytest.mark.parametrize(("lane", "authority"), COMBOS)
 def test_effective_authority_needs_both_flags(lane, authority):
-    scalar = _settings(lane, authority, False, False)
-    event = _settings(False, False, lane, authority)
-    assert scalar_view_authority_effective(scalar) is (lane and authority)
+    scalar = _settings(lane, False, False)
+    event = _settings(False, lane, authority)
+    assert scalar_view_authority_effective(scalar) is lane
     assert event_history_authority_effective(event) is (lane and authority)
     # The other lane's flags never leak across.
     assert event_history_authority_effective(scalar) is False
@@ -82,9 +82,9 @@ def test_backend_wiring_requires_lane(monkeypatch, lane, authority):
     monkeypatch.setattr("menhir.core.bootstrap.LLMAdapter", FakeLLM)
     monkeypatch.setattr("menhir.core.bootstrap.RecallService", _fake_recall(captured))
 
-    build_memory_services(settings=_settings(lane, authority, lane, authority))
+    build_memory_services(settings=_settings(lane, lane, authority))
 
-    assert captured["scalar_view_authority_enabled"] is (lane and authority)
+    assert captured["scalar_view_authority_enabled"] is lane
     assert captured["event_history_authority_enabled"] is (lane and authority)
 
 
@@ -130,8 +130,8 @@ def test_hook_cli_wiring_requires_lane(monkeypatch, lane, authority):
     monkeypatch.setattr("menhir.services.recall_service.RecallService", _fake_recall(captured))
     monkeypatch.setattr("menhir.services.context_builder.ContextBuilderService", _Inert)
 
-    services = build_hook_services(settings=_settings(lane, authority, lane, authority))
+    services = build_hook_services(settings=_settings(lane, lane, authority))
 
     assert services.context_builder is not None, "full recall path was not built"
-    assert captured["scalar_view_authority_enabled"] is (lane and authority)
+    assert captured["scalar_view_authority_enabled"] is lane
     assert captured["event_history_authority_enabled"] is (lane and authority)

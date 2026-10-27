@@ -548,7 +548,7 @@ async def consolidate_personal_memory(
     source: str = "perception",
     max_namespaces: int = 200,
     verify_retries: int = 0,
-    sum_grounding: bool = False,
+    sum_grounding: bool = True,
     enable_counter_state: bool = True,
     enable_scalar_state: bool = False,
     scalar_state_perceiver_version: str = "v1",

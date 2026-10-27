@@ -1,6 +1,6 @@
 """Lenient-agreement defaults for the typed-scalar gate (owner decision 2026-09).
 
-MemorySettings defaults to threshold 2/3 with attribute/scope/subject reconciliation ON, while
+MemorySettings defaults to threshold 2/3 (reconciliation is always on, #168 freeze), while
 `personal_memory_scalar_state_enabled` stays OFF (defaults are not activation). At k=3 the default
 threshold means two agreeing samples commit and one dissenting sample does not.
 """
@@ -20,9 +20,6 @@ from menhir.services.typed_scalar_perception import (
 
 _SCALAR_ENV_VARS = (
     "MENHIR_PERSONAL_MEMORY_SCALAR_THRESHOLD",
-    "MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_ATTRIBUTE",
-    "MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_SCOPE",
-    "MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_SUBJECT",
     "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED",
 )
 
@@ -63,9 +60,6 @@ def _row(*, value=25, attribute="postcard_count", stated_span="I have 25 postcar
 def test_memory_settings_defaults_are_lenient() -> None:
     settings = MemorySettings()
     assert settings.personal_memory_scalar_threshold == 2 / 3
-    assert settings.personal_memory_scalar_reconcile_attribute is True
-    assert settings.personal_memory_scalar_reconcile_scope is True
-    assert settings.personal_memory_scalar_reconcile_subject is True
     assert settings.personal_memory_scalar_state_enabled is False
 
 
@@ -77,9 +71,6 @@ def test_from_env_clean_environment_round_trips_lenient_defaults(
     settings = MemorySettings.from_env()
     assert settings.personal_memory_scalar_threshold == 2 / 3
     assert settings.personal_memory_scalar_threshold == 0.6666666666666666
-    assert settings.personal_memory_scalar_reconcile_attribute is True
-    assert settings.personal_memory_scalar_reconcile_scope is True
-    assert settings.personal_memory_scalar_reconcile_subject is True
     assert settings.personal_memory_scalar_state_enabled is False
 
 
@@ -87,22 +78,13 @@ def test_from_env_clean_environment_round_trips_lenient_defaults(
 def test_from_env_explicit_overrides_still_work(monkeypatch: pytest.MonkeyPatch) -> None:
     _clean_scalar_env(monkeypatch)
     monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_SCALAR_THRESHOLD", "1.0")
-    monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_ATTRIBUTE", "false")
     settings = MemorySettings.from_env()
     assert settings.personal_memory_scalar_threshold == 1.0
-    assert settings.personal_memory_scalar_reconcile_attribute is False
 
     _clean_scalar_env(monkeypatch)
     monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_SCALAR_THRESHOLD", "0.67")
     settings = MemorySettings.from_env()
     assert settings.personal_memory_scalar_threshold == 0.67
-
-    _clean_scalar_env(monkeypatch)
-    monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_SCOPE", "false")
-    monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_SUBJECT", "false")
-    settings = MemorySettings.from_env()
-    assert settings.personal_memory_scalar_reconcile_scope is False
-    assert settings.personal_memory_scalar_reconcile_subject is False
 
 
 @pytest.mark.unit
@@ -122,9 +104,10 @@ def test_default_threshold_commits_two_of_three_and_not_one_dissent(
     gate = lambda samples: gate_typed_scalars(  # noqa: E731
         samples,
         threshold=settings.personal_memory_scalar_threshold,
-        reconcile_attribute=settings.personal_memory_scalar_reconcile_attribute,
-        reconcile_scope=settings.personal_memory_scalar_reconcile_scope,
-        reconcile_subject=settings.personal_memory_scalar_reconcile_subject,
+        # Reconciliation is always on since the #168 freeze; production passes it explicitly.
+        reconcile_attribute=True,
+        reconcile_scope=True,
+        reconcile_subject=True,
     )
 
     # Two samples agree; the third misses the claim entirely (absent vote). 2/3 >= 2/3 commits.

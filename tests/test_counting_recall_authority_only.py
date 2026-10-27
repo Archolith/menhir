@@ -392,7 +392,7 @@ def test_counting_flags_registered_default_off_and_need_authority(monkeypatch, n
     assert feature.env_var == env
     assert feature.default is False
     assert "personal_memory_counting_enabled" in feature.requires
-    assert "personal_memory_scalar_view_authority_enabled" in feature.requires
+    assert "personal_memory_scalar_state_enabled" in feature.requires
     assert getattr(MemorySettings.from_env(), name) is False
     monkeypatch.setenv(env, "1")
     assert getattr(MemorySettings.from_env(), name) is True

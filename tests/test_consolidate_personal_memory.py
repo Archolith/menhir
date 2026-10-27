@@ -881,16 +881,12 @@ def test_verify_retries_threads_to_perceive(monkeypatch) -> None:
 
 
 @pytest.mark.unit
-def test_settings_reads_sum_grounding(monkeypatch) -> None:
+def test_settings_sum_grounding_is_retired(monkeypatch) -> None:
     from menhir.config import MemorySettings
 
-    # promoted to default True (2026-07-08, cross-check-quality pack); env can still disable it.
-    monkeypatch.delenv("MENHIR_PERSONAL_MEMORY_SUM_GROUNDING", raising=False)
-    assert MemorySettings.from_env().personal_memory_consolidation_sum_grounding is True
+    # Always on since the #168 freeze: no setting, and a stale env var cannot turn it off.
     monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_SUM_GROUNDING", "0")
-    assert MemorySettings.from_env().personal_memory_consolidation_sum_grounding is False
-    monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_SUM_GROUNDING", "1")
-    assert MemorySettings.from_env().personal_memory_consolidation_sum_grounding is True
+    assert not hasattr(MemorySettings.from_env(), "personal_memory_consolidation_sum_grounding")
 
 
 @pytest.mark.unit
@@ -911,13 +907,13 @@ def test_sum_grounding_threads_to_perceive(monkeypatch) -> None:
 
     graph = _FakeGraph(dirty=["ns-a"], episodes_by_ns={"ns-a": _eps("spent thirty on a helmet")})
     asyncio.run(scheduler_tasks.consolidate_personal_memory(
-        graph, llm_complete=_empty_llm, k=2, sum_grounding=True))
-    assert seen.get("enable_sum_grounding") is True
+        graph, llm_complete=_empty_llm, k=2, sum_grounding=False))
+    assert seen.get("enable_sum_grounding") is False  # per-call knob still turns it off
 
     seen.clear()
     graph2 = _FakeGraph(dirty=["ns-a"], episodes_by_ns={"ns-a": _eps("spent thirty on a helmet")})
     asyncio.run(scheduler_tasks.consolidate_personal_memory(graph2, llm_complete=_empty_llm, k=2))
-    assert seen.get("enable_sum_grounding") is False  # default unchanged
+    assert seen.get("enable_sum_grounding") is True  # on by default since the #168 freeze
 
 
 @pytest.mark.unit

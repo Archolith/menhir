@@ -60,7 +60,6 @@ pytestmark = [pytest.mark.e2e, pytest.mark.timeout(2400)]
 
 ON = {
     "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED": "true",
-    "MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED": "true",
     "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED": "true",
     "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED": "true",
     "MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED": "true",
@@ -71,8 +70,9 @@ LANES_OFF = {**ON,
              "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED": "false",
              "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED": "false",
              "MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED": "false"}
+#: Scalar authority is always on (#168 freeze) and follows its lane, so only event authority is
+#: switched off here; the scalar half of this stage equals stage 2.
 ALL_OFF = {**LANES_OFF,
-           "MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED": "false",
            "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED": "false"}
 
 COINS = [

@@ -11,10 +11,7 @@ from menhir.config.settings_model import MemorySettings
 
 
 def scalar_view_authority_effective(settings: MemorySettings) -> bool:
-    return bool(
-        settings.personal_memory_scalar_view_authority_enabled
-        and settings.personal_memory_scalar_state_enabled
-    )
+    return bool(settings.personal_memory_scalar_state_enabled)
 
 
 def event_history_authority_effective(settings: MemorySettings) -> bool:

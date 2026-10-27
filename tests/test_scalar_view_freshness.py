@@ -1,4 +1,4 @@
-"""Freshness gate for scalar verdicts (MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_FRESHNESS_GATE), offline.
+"""Freshness gate for scalar verdicts (always on since the #168 freeze), offline.
 
 o500 (#168): a View kept leading with a stale value when the newer statement was a same-slot
 occurrence the fold ignores (painting: "just finished my 5th"). Only the exact slot counts: E2E-17
@@ -219,11 +219,10 @@ async def test_counting_off_drops_occurrences_so_the_gate_has_no_evidence(
 
 
 @pytest.mark.unit
-def test_setting_default_and_env_reach_tuning(monkeypatch):
-    # Shipped on; the engine-level tuning default stays off for callers that build it directly.
-    assert MemorySettings().personal_memory_scalar_view_freshness_gate is True
-    assert RetrievalTuningConfig().scalar_view_freshness_gate is False
-    monkeypatch.delenv("MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_FRESHNESS_GATE", raising=False)
-    assert MemorySettings.from_env().retrieval_tuning().scalar_view_freshness_gate is True
+def test_gate_is_on_by_default_and_retired_as_a_setting(monkeypatch):
+    # Always on since the #168 freeze; the tuning field stays as a per-request knob.
+    assert RetrievalTuningConfig().scalar_view_freshness_gate is True
+    assert RetrievalTuningConfig(scalar_view_freshness_gate=False).scalar_view_freshness_gate is False
+    assert not hasattr(MemorySettings(), "personal_memory_scalar_view_freshness_gate")
     monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_FRESHNESS_GATE", "false")
-    assert MemorySettings.from_env().retrieval_tuning().scalar_view_freshness_gate is False
+    assert MemorySettings.from_env().retrieval_tuning().scalar_view_freshness_gate is True

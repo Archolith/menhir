@@ -116,7 +116,7 @@ class MaintenanceScheduler:
     event_history_batch_size: int = 500
     personal_memory_call_budget: int | None = None
     personal_memory_verify_retries: int = 0
-    personal_memory_sum_grounding: bool = False
+    personal_memory_sum_grounding: bool = True
     # ScalarStateView typed-scalar shadow path (Piece C.4.3), gated inside the same consolidation job.
     # OFF by default -> the counter path is byte-identical; when on, the job also runs typed-scalar
     # extract -> gate -> bind -> persist -> rebuild over its own scalar watermark cursor.

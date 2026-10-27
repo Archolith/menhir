@@ -464,16 +464,9 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         personal_memory_k=getattr(settings, "personal_memory_consolidation_k", 3),
         personal_memory_call_budget=getattr(settings, "personal_memory_consolidation_call_budget", 300),
         personal_memory_verify_retries=getattr(settings, "personal_memory_consolidation_verify_retries", 0),
-        personal_memory_sum_grounding=getattr(settings, "personal_memory_consolidation_sum_grounding", False),
         scalar_state_enabled=scalar_state_enabled,
         scalar_state_perceiver_version=getattr(
             settings, "personal_memory_scalar_state_perceiver_version", "v2"),
-        scalar_reconcile_attribute=getattr(
-            settings, "personal_memory_scalar_reconcile_attribute", False),
-        scalar_reconcile_scope=getattr(
-            settings, "personal_memory_scalar_reconcile_scope", False),
-        scalar_reconcile_subject=getattr(
-            settings, "personal_memory_scalar_reconcile_subject", False),
         scalar_canonical_self=getattr(
             settings, "personal_memory_scalar_canonical_self", False),
         scalar_threshold=getattr(settings, "personal_memory_scalar_threshold", 1.0),

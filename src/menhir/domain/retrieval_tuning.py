@@ -259,9 +259,9 @@ class RetrievalTuningConfig:
     # Slots are collected for the authority and history lanes in every mode.
     scalar_observation_recall: str = "all"
     # A current or expired verdict stops leading when the recall's observation hits hold newer
-    # evidence its fold ignores (MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_FRESHNESS_GATE; see
-    # domain/scalar_view_freshness.py). The verdict is still shown, as advisory.
-    scalar_view_freshness_gate: bool = False
+    # evidence its fold ignores (see domain/scalar_view_freshness.py). The verdict is still shown,
+    # as advisory. On by default since the #168 freeze; kept as a per-request knob.
+    scalar_view_freshness_gate: bool = True
     # How a retrieved fact edge enters the candidate pool:
     #   "standalone" — inject the terse EntityEdge.fact as its own CandidateData (edge-as-
     #     answer). Measured net-NEGATIVE at N=30 (rung A′, 0.300->0.033): terse floor-exempt

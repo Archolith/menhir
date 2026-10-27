@@ -90,7 +90,6 @@ def _sources_text(recall: dict) -> str:
 
 SCALAR_ON = {
     "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED": "true",
-    "MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED": "true",
     "MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED": "true",
 }
 
@@ -194,7 +193,8 @@ async def test_e2e_17_scalar_authority(
                 lane_evidence.attach("coin-contributors.json",
                                      json.dumps(provenance, indent=2, default=str))
 
-        off_env = {**env, "MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED": "false"}
+        # Scalar authority is always on (#168 freeze) and follows the scalar lane, so the opt-out is the lane.
+        off_env = {**env, "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED": "false"}
         with lane_backend(e2e_config, e2e_installed, lane_evidence, off_env, name="backend-off"):
             async with stdio_session(e2e_config, e2e_installed.venv_python, lane_evidence,
                                      feature_env=off_env) as client:

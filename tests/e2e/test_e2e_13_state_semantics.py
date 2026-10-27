@@ -44,7 +44,6 @@ pytestmark = [pytest.mark.e2e, pytest.mark.timeout(1500)]
 
 SCALAR_ON = {
     "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED": "true",
-    "MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED": "true",
     "MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED": "true",
 }
 

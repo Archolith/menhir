@@ -40,25 +40,19 @@ SHIPPED_SETTINGS = {
     "personal_memory_consolidation_disable_reasoning": False,
     "personal_memory_consolidation_chat_model": "",
     "personal_memory_consolidation_verify_retries": 0,
-    "personal_memory_consolidation_sum_grounding": True,
     "personal_memory_scalar_threshold": 2 / 3,
-    "personal_memory_scalar_reconcile_attribute": True,
-    "personal_memory_scalar_reconcile_scope": True,
-    "personal_memory_scalar_reconcile_subject": True,
     "personal_memory_scalar_canonical_self": False,
     "personal_memory_scalar_verdict_min_similarity": 0.675,
     "personal_memory_scalar_observation_recall": "gated",
-    "personal_memory_scalar_view_freshness_gate": True,
     "personal_memory_scalar_state_perceiver_version": "v2",
     "personal_memory_event_history_perceiver_version": "v2",
     "personal_memory_counting_perceiver_version": "v1",
     "personal_memory_counting_extract_v2": False,
     "personal_memory_counting_match_enabled": False,
     "personal_memory_counting_lease_seconds": 900,
-    # Defaults are not activation: every lane ships off; scalar authority ships on but is gated by its lane.
+    # Defaults are not activation: every lane ships off; scalar authority is always on but gated by its lane.
     "personal_memory_consolidation_enabled": False,
     "personal_memory_scalar_state_enabled": False,
-    "personal_memory_scalar_view_authority_enabled": True,
     "personal_memory_scalar_history_enabled": False,
     "personal_memory_scalar_deterministic_router": False,
     "personal_memory_event_history_enabled": False,
@@ -72,11 +66,7 @@ SCHEDULER_KWARGS = {
     "personal_memory_call_budget": 300,
     "personal_memory_interval_s": 300.0,
     "personal_memory_verify_retries": 0,
-    "personal_memory_sum_grounding": True,
     "scalar_threshold": 2 / 3,
-    "scalar_reconcile_attribute": True,
-    "scalar_reconcile_scope": True,
-    "scalar_reconcile_subject": True,
     "scalar_canonical_self": False,
     "scalar_state_perceiver_version": "v2",
     "event_history_perceiver_version": "v2",
@@ -90,11 +80,7 @@ SCHEDULER_KWARGS = {
 CONSOLIDATE_KWARGS = {
     "k": 3,
     "verify_retries": 0,
-    "sum_grounding": True,
     "scalar_threshold": 2 / 3,
-    "scalar_reconcile_attribute": True,
-    "scalar_reconcile_scope": True,
-    "scalar_reconcile_subject": True,
     "scalar_canonical_self": False,
     "scalar_state_perceiver_version": "v2",
     "counting_perceiver_version": "v1",
@@ -102,6 +88,21 @@ CONSOLIDATE_KWARGS = {
     "counting_match": False,
     "counting_lease_seconds": 900,
     "event_history_perceiver_version": "v2",
+}
+
+#: Always on since the #168 freeze: no setting feeds them, so neither entry point passes a value and
+#: the scheduler and consolidation defaults must be on.
+ALWAYS_ON_SCHEDULER = {
+    "personal_memory_sum_grounding": True,
+    "scalar_reconcile_attribute": True,
+    "scalar_reconcile_scope": True,
+    "scalar_reconcile_subject": True,
+}
+ALWAYS_ON_CONSOLIDATE = {
+    "sum_grounding": True,
+    "scalar_reconcile_attribute": True,
+    "scalar_reconcile_scope": True,
+    "scalar_reconcile_subject": True,
 }
 
 
@@ -197,6 +198,8 @@ def test_runtime_scheduler_receives_the_frozen_profile(monkeypatch: pytest.Monke
     asyncio.run(runtime._start_scheduler(built))
 
     assert {name: captured[name] for name in SCHEDULER_KWARGS} == SCHEDULER_KWARGS
+    # A retired switch is never passed as off; omitted means the scheduler default (on).
+    assert {name: captured.get(name, on) for name, on in ALWAYS_ON_SCHEDULER.items()} == ALWAYS_ON_SCHEDULER
     assert chat_kwargs == {"model": None, "max_tokens": 8192, "disable_reasoning": False}
 
 
@@ -224,7 +227,18 @@ def test_scheduler_pass_forwards_the_frozen_profile(monkeypatch: pytest.MonkeyPa
     assert captured["call_budget"] == 300
     expected = {k: v for k, v in CONSOLIDATE_KWARGS.items()
                 if k != "event_history_perceiver_version"}
+    expected.update(ALWAYS_ON_CONSOLIDATE)
     assert {name: captured[name] for name in expected} == expected
+
+
+@pytest.mark.unit
+def test_always_on_switches_default_on_at_every_production_entry_point() -> None:
+    consolidate = inspect.signature(scheduler_tasks.consolidate_personal_memory).parameters
+    scheduler = inspect.signature(MaintenanceScheduler).parameters
+    for name, on in ALWAYS_ON_CONSOLIDATE.items():
+        assert consolidate[name].default is on, name
+    for name, on in ALWAYS_ON_SCHEDULER.items():
+        assert scheduler[name].default is on, name
 
 
 @pytest.mark.unit
@@ -255,3 +269,5 @@ def test_phase3_run_forwards_the_frozen_profile() -> None:
     kwargs = consolidate.await_args.kwargs
     assert "threshold" not in kwargs
     assert {name: kwargs[name] for name in CONSOLIDATE_KWARGS} == CONSOLIDATE_KWARGS
+    # Not passed: the consolidation defaults (on) apply.
+    assert {name: kwargs.get(name, on) for name, on in ALWAYS_ON_CONSOLIDATE.items()} == ALWAYS_ON_CONSOLIDATE

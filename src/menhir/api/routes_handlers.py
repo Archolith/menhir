@@ -72,7 +72,6 @@ async def phase3_run_impl(
         source=body.source,
         call_budget=body.call_budget,
         verify_retries=getattr(settings, "personal_memory_consolidation_verify_retries", 0),
-        sum_grounding=getattr(settings, "personal_memory_consolidation_sum_grounding", False),
         # CF-129: the deployment flag is the kill switch and the API was bypassing it. The
         # request body defaulted counter_state=True while the scheduler path
         # (scheduler_tasks.py) honours personal_memory_consolidation_enabled, which defaults
@@ -86,12 +85,6 @@ async def phase3_run_impl(
             "personal_memory_scalar_state_perceiver_version",
             "v1",
         ),
-        scalar_reconcile_attribute=getattr(
-            settings, "personal_memory_scalar_reconcile_attribute", False),
-        scalar_reconcile_scope=getattr(
-            settings, "personal_memory_scalar_reconcile_scope", False),
-        scalar_reconcile_subject=getattr(
-            settings, "personal_memory_scalar_reconcile_subject", False),
         scalar_canonical_self=getattr(
             settings, "personal_memory_scalar_canonical_self", False),
         scalar_threshold=getattr(settings, "personal_memory_scalar_threshold", 1.0),

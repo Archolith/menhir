@@ -220,9 +220,9 @@ def test_align_leaves_unrelated_claims_separate():
 # invariant in the perception service rather than an operator setting: it now commits the
 # deterministic common source substring, so quote-boundary drift cannot choose a sample-dependent
 # durable source_key.
+# runtime.py and routes_handlers.py no longer pass the reconcile switches since the #168 freeze
+# (always on); the scheduler and consolidation defaults carry them.
 PLUMBING = [
-    ("src/menhir/core/runtime.py", "scalar_reconcile_attribute=getattr("),
-    ("src/menhir/api/routes_handlers.py", "scalar_reconcile_attribute=getattr("),
     ("src/menhir/services/maintenance_scheduler.py",
      "scalar_reconcile_attribute=self.scalar_reconcile_attribute"),
     ("src/menhir/services/scheduler_tasks.py",
@@ -410,17 +410,31 @@ def test_identity_switches_are_wired_through_every_layer():
         "src/menhir/config/settings_model.py",
     ):
         source = (root / relative_path).read_text(encoding="utf-8")
-        for switch in ("reconcile_scope", "reconcile_subject", "canonical_self"):
+        # Reconciliation is always on since the #168 freeze: settings, runtime and the API no longer
+        # pass it; the scheduler and service layers carry the default-on knobs.
+        switches = ("canonical_self",)
+        if relative_path.startswith(("src/menhir/services/",)):
+            switches += ("reconcile_scope", "reconcile_subject")
+        for switch in switches:
             assert switch in source, f"{relative_path} drops {switch}; the switch is inert"
 
 
 def test_identity_switches_default_to_lenient_policy():
-    """Scope/subject reconciliation default ON under the lenient-agreement policy (2026-09);
-    canonical_self stays off."""
+    """Scope/subject reconciliation are always ON under the lenient-agreement policy (#168 freeze):
+    every production entry point defaults them on. canonical_self stays off."""
+    import inspect
+
     from menhir.config.settings_model import MemorySettings
+    from menhir.services.maintenance_scheduler import MaintenanceScheduler
+    from menhir.services.scheduler_tasks import consolidate_personal_memory
     for field in ("personal_memory_scalar_reconcile_scope",
                   "personal_memory_scalar_reconcile_subject"):
-        assert getattr(MemorySettings, field) is True, f"{field} must default on"
+        assert not hasattr(MemorySettings, field), f"{field} is retired"
+    params = inspect.signature(consolidate_personal_memory).parameters
+    scheduler = inspect.signature(MaintenanceScheduler).parameters
+    for name in ("scalar_reconcile_attribute", "scalar_reconcile_scope", "scalar_reconcile_subject"):
+        assert params[name].default is True
+        assert scheduler[name].default is True
     assert getattr(MemorySettings, "personal_memory_scalar_canonical_self") is False, \
         "personal_memory_scalar_canonical_self must default off"
 

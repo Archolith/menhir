@@ -167,7 +167,7 @@ def test_dedup_flag_registered_default_off_and_needs_authority(monkeypatch):
     feature = FEATURES["personal_memory_observation_dedup_enabled"]
     assert feature.env_var == "MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED"
     assert feature.default is False
-    assert "personal_memory_scalar_view_authority_enabled" in feature.requires
+    assert "personal_memory_scalar_state_enabled" in feature.requires
     monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED", "1")
     settings = MemorySettings.from_env()
     assert settings.personal_memory_observation_dedup_enabled is True

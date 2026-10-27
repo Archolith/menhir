@@ -308,10 +308,9 @@ class MemorySettings:
     # Deterministic SUM arithmetic grounding (precision-preserving cross-check adjustment): when a
     # fold-SUM's amounts are each an explicit price literally in their source span, prove the
     # arithmetic deterministically and skip the noisy holistic cross-check (the sharper verifier still
-    # audits membership). PROMOTED to default True (2026-07-08): live characterization showed the
+    # audits membership). Always on (#168 freeze; promoted 2026-07-08): live characterization showed the
     # cross-check-dominated variants jump 40%->90-100% commit with wrong_view_writes=0 across OFF + 2x
-    # ON. Set MENHIR_PERSONAL_MEMORY_SUM_GROUNDING=0 to disable. See the cross-check-quality pack.
-    personal_memory_consolidation_sum_grounding: bool = True
+    # ON. consolidate_personal_memory(sum_grounding=...) stays as a per-call knob. See the cross-check-quality pack.
     # ScalarStateView typed-scalar shadow path (Piece C.4.3), gated inside the same consolidation job.
     # OFF by default: the counter path is byte-identical when off. When on, the job also extracts typed
     # scalars, binds them to resolved entities, and persists :TypedAssertion + rebuilds ScalarStateViews
@@ -324,14 +323,13 @@ class MemorySettings:
     # grounding only lands as a NEW interpreted assertion — a version bump makes it supersede v1 by
     # strict rank rather than silently no-op on the stored row.
     personal_memory_scalar_state_perceiver_version: str = "v2"
-    # Step 7 current-state-only authority canary. ON by default (owner decision 2026-10-23), but
-    # effective only while personal_memory_scalar_state_enabled is on (config/authority_gates).
-    # When off, a current scalar_state View is context only and NEVER suppresses an overlapping
-    # graph fact in recall. When on, a View may suppress an older overlapping fact ONLY if all six
+    # Step 7 current-state-only authority canary. Always on (#168 freeze) while
+    # personal_memory_scalar_state_enabled is on (config/authority_gates). While the scalar lane
+    # is off, a current scalar_state View is context only and NEVER suppresses an overlapping
+    # graph fact in recall. With the lane on, a View may suppress an older overlapping fact ONLY if all six
     # authority gates pass (current-state query + resolved subject + exact slot + grounded evidence +
     # unambiguous current View + complete overlap proof); every other case stays advisory. The
     # decision is computed by menhir.domain.scalar_view_authority.decide_view_authority.
-    personal_memory_scalar_view_authority_enabled: bool = True
     personal_memory_scalar_view_collapse_enabled: bool = False
     personal_memory_scalar_view_echo_drop_enabled: bool = False
     personal_memory_observation_dedup_enabled: bool = False
@@ -341,40 +339,8 @@ class MemorySettings:
     # Which raw scalar observations enter the ranked list: all | gated | off (see retrieval_tuning).
     # "gated" (o500, #383): .694 vs .670 for "all"; multi-session +7.5 pts.
     personal_memory_scalar_observation_recall: str = "gated"
-    # A verdict stops leading when newer evidence its fold ignores is in the recall (#168).
-    # On (o500, #384): with fact said time, .746 vs .712 both off.
-    personal_memory_scalar_view_freshness_gate: bool = True
-    # Attribute reconciliation in the k-sample consistency gate. ON by default (lenient-agreement
-    # defaults, 2026-09). When on, the samples
-    # vote WITHOUT the free-text attribute name and the name is chosen modally afterwards (ties to the
-    # longest, then lexicographic -- a pure function of the candidate set, never of sample order).
-    # Measured cause: replaying the frozen LME panel through the real parser and gate, the model emits
-    # the asked value in 100/100 namespace-trials and all k samples emit it in 81/100, but only 23/100
-    # commit -- samples agree the user has 25 postcards and disagree on whether the slot is called
-    # `postcard_count`, `collection_size`, or `count`, and the disagreement vetoes the fact. Turning
-    # this on takes that panel to 34/100 at the unanimity threshold of 1.0, and to 72/100 at a 2/3
-    # threshold -- see gate_typed_scalars for the full grid. It is independently settings-exposed below.
-    # It is RECALL-affecting, not behavior-neutral: more claims
-    # commit, so more assertions and Views are written. The chosen name lands in `slot_key`, so a
-    # namespace consolidated with this on and off can hold the same fact under two different slots --
-    # bump `personal_memory_scalar_state_perceiver_version` when flipping it if that matters.
-    # Defaults changed 2026-09 for new installs; existing namespaces flipping these should bump
-    # `personal_memory_scalar_state_perceiver_version`.
-    personal_memory_scalar_reconcile_attribute: bool = True
-    # Scope/subject/self identity reconciliation -- the same defect as the attribute above, relocated.
-    # The model smears one fact's identity across subject/attribute/scope in arbitrary order, so
-    # exact-matching each field independently turns one agreed fact into several single-vote claims.
-    # These vote on the identity TUPLE (never field-by-field, which could synthesize a slot no sample
-    # proposed) and pick the modal combination. All RECALL-affecting when on,
-    # for the same reason as reconcile_attribute: more claims commit, so more assertions and Views are
-    # written, and the reconciled subject/scope lands in the durable slot -- bump
-    # `personal_memory_scalar_state_perceiver_version` when flipping these on an existing namespace.
-    # Measured on the frozen LME panel at threshold=2/3 with reconcile_attribute on: +scope 65 -> 70,
-    # +scope+subject -> 72 correct current Views out of 100, stale-as-current 0 throughout.
-    # Defaults changed 2026-09 for new installs; existing namespaces flipping these should bump
-    # `personal_memory_scalar_state_perceiver_version`.
-    personal_memory_scalar_reconcile_scope: bool = True
-    personal_memory_scalar_reconcile_subject: bool = True
+    # Attribute, scope and subject reconciliation in the k-sample consistency gate are always on
+    # (#168 freeze); the consolidation job and scheduler knobs `scalar_reconcile_*` default on.
     # Fold first-person subjects ('I', 'me', 'my') to the bound self display before the vote, so the
     # vote key stops contradicting the binder. Measured effect on the LME panel: ZERO cells in every
     # configuration -- the extraction prompt already emits 'user' almost without exception. Exposed
@@ -781,7 +747,6 @@ class MemorySettings:
             enable_fact_edges=self.frontier_fact_edges,
             scalar_verdict_min_similarity=self.personal_memory_scalar_verdict_min_similarity,
             scalar_observation_recall=self.personal_memory_scalar_observation_recall,
-            scalar_view_freshness_gate=self.personal_memory_scalar_view_freshness_gate,
             fact_edge_mode=self.frontier_fact_edge_mode,
             similarity_scale=self.frontier_similarity_scale,
             enable_assertion_shadow=self.frontier_shadow,
@@ -933,19 +898,13 @@ class MemorySettings:
             personal_memory_consolidation_disable_reasoning=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_DISABLE_REASONING", default=str(cls.personal_memory_consolidation_disable_reasoning))),
             personal_memory_consolidation_chat_model=_getenv("MENHIR_PERSONAL_MEMORY_CHAT_MODEL", default=cls.personal_memory_consolidation_chat_model),
             personal_memory_consolidation_verify_retries=int(_getenv("MENHIR_PERSONAL_MEMORY_VERIFY_RETRIES", default=str(cls.personal_memory_consolidation_verify_retries))),
-            personal_memory_consolidation_sum_grounding=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SUM_GROUNDING", default=str(cls.personal_memory_consolidation_sum_grounding))),
             personal_memory_scalar_state_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED", default=str(cls.personal_memory_scalar_state_enabled))),
             personal_memory_scalar_state_perceiver_version=_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_STATE_PERCEIVER_VERSION", default=cls.personal_memory_scalar_state_perceiver_version),
-            personal_memory_scalar_view_authority_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED", default=str(cls.personal_memory_scalar_view_authority_enabled))),
             personal_memory_scalar_view_collapse_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_COLLAPSE_ENABLED", default=str(cls.personal_memory_scalar_view_collapse_enabled))),
             personal_memory_scalar_view_echo_drop_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_ECHO_DROP_ENABLED", default=str(cls.personal_memory_scalar_view_echo_drop_enabled))),
             personal_memory_observation_dedup_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED", default=str(cls.personal_memory_observation_dedup_enabled))),
             personal_memory_scalar_verdict_min_similarity=_parse_float(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY", default=str(cls.personal_memory_scalar_verdict_min_similarity)), env_var="MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY", minimum=0.0),
             personal_memory_scalar_observation_recall=_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_OBSERVATION_RECALL", default=cls.personal_memory_scalar_observation_recall).strip().lower(),
-            personal_memory_scalar_view_freshness_gate=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_FRESHNESS_GATE", default=str(cls.personal_memory_scalar_view_freshness_gate))),
-            personal_memory_scalar_reconcile_attribute=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_ATTRIBUTE", default=str(cls.personal_memory_scalar_reconcile_attribute))),
-            personal_memory_scalar_reconcile_scope=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_SCOPE", default=str(cls.personal_memory_scalar_reconcile_scope))),
-            personal_memory_scalar_reconcile_subject=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_SUBJECT", default=str(cls.personal_memory_scalar_reconcile_subject))),
             personal_memory_scalar_canonical_self=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_CANONICAL_SELF", default=str(cls.personal_memory_scalar_canonical_self))),
             personal_memory_scalar_threshold=_parse_scalar_threshold(
                 _getenv(
