@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from menhir.config.settings_model import MemorySettings
+from menhir.domain.self_identity import inferred_self_uuid_for_namespace, self_uuid_for_namespace
 from menhir.domain.stale_lead import attribute_nouns, related_attributes
 from menhir.services.recall_service import RecallService
 from menhir.services.scoring_service import ScoringService
@@ -57,10 +58,12 @@ def _hit(attr: str, valid_at: str, value_kind: str = "count") -> dict:
     }
 
 
-def _service(client, adapter, *, newer_rows, value_kind="count", enabled=True, newer_raises=False):
+def _service(client, adapter, *, newer_rows, value_kind="count", enabled=True, newer_raises=False,
+             subject=SUBJ, inferred_self_mode="off"):
     _setup_search_and_metadata(client, adapter)
-    adapter.search_assertion_embeddings = (
-        lambda vec, *, limit, namespaces: [_hit("owned_bike_count", FEB, value_kind)])
+    hit = _hit("owned_bike_count", FEB, value_kind)
+    hit["subject_uuid"] = subject
+    adapter.search_assertion_embeddings = lambda vec, *, limit, namespaces: [hit]
     adapter.fetch_current_scalar_view_for_slot = (
         lambda *, subject_uuid, attribute, scope, value_kind, unit, namespace: {
             "uuid": "view-bikes", "value": 3, "name": "user's owned bike count: 3",
@@ -79,7 +82,8 @@ def _service(client, adapter, *, newer_rows, value_kind="count", enabled=True, n
 
     adapter.newer_subject_assertions = _newer
     svc = RecallService(graphiti_client=client, graph_adapter=adapter, scoring_service=ScoringService(),
-                        scalar_view_authority_enabled=True, stale_lead_demotion_enabled=enabled)
+                        scalar_view_authority_enabled=True, stale_lead_demotion_enabled=enabled,
+                        inferred_self_mode=inferred_self_mode)
     return svc, calls
 
 
@@ -102,7 +106,7 @@ async def test_newer_related_count_demotes_lead(stub_graphiti_client, stub_memor
     assert verdict.has_foundation is True          # the foundation is real; only the lead is withdrawn
     assert authority is False
     assert calls and calls[0]["after"] == FEB and calls[0]["value_kind"] == "count"
-    assert calls[0]["subject_uuid"] == SUBJ and calls[0]["before"] is None
+    assert calls[0]["subject_uuids"] == [SUBJ] and calls[0]["before"] is None
 
 
 @pytest.mark.unit
@@ -143,6 +147,33 @@ async def test_read_failure_is_advisory(stub_graphiti_client, stub_memory_graph_
     svc, _ = _service(stub_graphiti_client, stub_memory_graph_adapter, newer_rows=[], newer_raises=True)
     verdict, _ = await _verdict(svc)
     assert verdict.status == "advisory"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode, both", [("observe", True), ("enforce", True), ("off", False)])
+async def test_self_lead_reads_both_self_tiers_when_recall_does(
+    stub_graphiti_client, stub_memory_graph_adapter, mode, both,
+) -> None:
+    # Fails if a canonical-self lead ignores newer evidence bound to the inferred self while recall
+    # reads both tiers, or reads the inferred tier while inferred-self mode is off.
+    canonical, inferred = self_uuid_for_namespace("proj"), inferred_self_uuid_for_namespace("proj")
+    svc, calls = _service(stub_graphiti_client, stub_memory_graph_adapter, subject=canonical,
+                          inferred_self_mode=mode, newer_rows=[])
+    verdict, _ = await _verdict(svc)
+    assert verdict.status == "leads"
+    expected = sorted({canonical, inferred}) if both else [canonical]
+    assert calls and calls[0]["subject_uuids"] == expected
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_non_self_lead_reads_only_its_subject(stub_graphiti_client, stub_memory_graph_adapter) -> None:
+    # Fails if a third-party subject's lead is checked against the user's self tiers.
+    svc, calls = _service(stub_graphiti_client, stub_memory_graph_adapter, inferred_self_mode="observe",
+                          newer_rows=[])
+    await _verdict(svc)
+    assert calls[0]["subject_uuids"] == [SUBJ]
 
 
 @pytest.mark.unit

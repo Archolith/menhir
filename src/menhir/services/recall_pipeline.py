@@ -1382,10 +1382,17 @@ async def run_recall(
                 (owned_bike_count); test_stale_lead_demotion covers it."""
                 if not _stale_check or value_kind not in DEMOTABLE_VALUE_KINDS or not after:
                     return []
+                # Both self tiers are the same human whenever recall reads both (the subject gate
+                # above admits either); a newer count on the other tier is newer evidence too.
+                subjects = [subject_uuid]
+                _selves = (self_uuid_for_namespace(namespace),
+                           inferred_self_uuid_for_namespace(namespace))
+                if _inferred_self_on(service) and subject_uuid in _selves:
+                    subjects = sorted(set(_selves))
                 try:
                     rows = await asyncio.to_thread(
                         service.graph_adapter.newer_subject_assertions,
-                        subject_uuid=subject_uuid, value_kind=value_kind, after=str(after),
+                        subject_uuids=subjects, value_kind=value_kind, after=str(after),
                         before=before, namespace=stamped_namespace(namespace),
                         limit=_STALE_LEAD_ATTR_LIMIT)
                 except Exception:
