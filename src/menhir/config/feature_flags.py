@@ -81,8 +81,6 @@ _SETTINGS = (
         False, 'personal_memory', 'Enable personal memory event history authority enabled.', True, ()),
     ('personal_memory_counting_enabled', 'MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED', False,
         'personal_memory', 'Count single happenings ("went to yoga") as scalar occurrences after the scalar phase; builds on scalar state.', True, ()),
-    ('assistant_turns_store_only_enabled', 'MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED', True,
-        'runtime', 'A raw assistant turn (role as extraction resolves it) is stored and embedded for the source-memory lane, never extracted.', True, ()),
     ('benchmark_mode', 'MENHIR_BENCHMARK_MODE', False, 'runtime', 'Enable benchmark mode.', False, ()),
     ('frontier_bm25', 'MENHIR_FRONTIER_BM25', False, 'frontier', 'Enable frontier bm25.', True, ()),
     ('frontier_content_vector', 'MENHIR_FRONTIER_CONTENT_VECTOR', False, 'frontier',
@@ -288,4 +286,6 @@ RETIRED = {
     "MENHIR_PERSONAL_MEMORY_COUNTING_RECALL_AUTHORITY_ONLY": "2026-10-27: always on (#168 freeze)",
     "personal_memory_counting_wording_enabled": "2026-10-27: always on (#168 freeze)",
     "MENHIR_PERSONAL_MEMORY_COUNTING_WORDING_ENABLED": "2026-10-27: always on (#168 freeze)",
+    "assistant_turns_store_only_enabled": "2026-10-27: always on (#168 freeze)",
+    "MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED": "2026-10-27: always on (#168 freeze)",
 }

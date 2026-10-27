@@ -1,6 +1,6 @@
 """Assistant-turn policy: a raw assistant turn is stored and embedded, never extracted (#168).
 
-Safety property: with MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED on, no episode whose turn role
+Safety property (always on since the #168 freeze): no episode whose turn role
 resolves to ``assistant`` (the role extraction itself would use) reaches Graphiti extraction, and
 the store-only mode lands in the same fenced write as READY. The Cypher half is proven in
 `test_assistant_turn_store_only_live.py`.
@@ -175,14 +175,17 @@ async def test_role_only_request_differs_from_the_old_store_only_request_only_in
 
 # --- settings ---------------------------------------------------------------------------------
 
-def test_settings_default_on_env_parsed_and_registered(monkeypatch) -> None:
-    monkeypatch.delenv("MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED", raising=False)
-    assert MemorySettings().assistant_turns_store_only_enabled is True
-    assert MemorySettings.from_env().assistant_turns_store_only_enabled is True
+def test_policy_always_on_and_retired(monkeypatch) -> None:
+    """Always on since the #168 freeze: a stale env var cannot turn it off."""
+    from menhir.config.feature_flags import RETIRED
+    from menhir.services.ingest_service import IngestService
+
     monkeypatch.setenv("MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED", "false")
-    assert MemorySettings.from_env().assistant_turns_store_only_enabled is False
-    flag = FEATURES["assistant_turns_store_only_enabled"]
-    assert flag.env_var == "MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED" and flag.default is True
+    assert not hasattr(MemorySettings.from_env(), "assistant_turns_store_only_enabled")
+    assert "assistant_turns_store_only_enabled" not in FEATURES
+    assert "MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED" in RETIRED
+    field = IngestService.__dataclass_fields__["_assistant_turns_store_only"]
+    assert field.default is True
 
 
 def test_configure_sets_the_worker_field() -> None:

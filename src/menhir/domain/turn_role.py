@@ -12,7 +12,7 @@ from menhir.domain.namespace import normalize_namespace
 
 TURN_ROLES: frozenset[str] = frozenset({"user", "assistant", "tool", "agent", "system"})
 UNKNOWN_TURN_ROLE = "unknown"
-# Raw turns the worker stores and embeds but never extracts (MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED).
+# Raw turns the worker stores and embeds but never extracts (always on since the #168 freeze).
 # An assistant restating or guessing at the user's facts must not become memory of them.
 STORE_ONLY_TURN_ROLES: frozenset[str] = frozenset({"assistant"})
 

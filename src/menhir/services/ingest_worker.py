@@ -312,10 +312,10 @@ class IngestWorkerMixin:
         return
 
     def _store_only_by_turn_role(self, claimed: dict[str, Any]) -> bool:
-        """Assistant-turn policy (MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED): a raw assistant turn
+        """Assistant-turn policy (always on since the #168 freeze): a raw assistant turn
         is kept verbatim for the source-memory lane and never extracted. The role is the one
         extraction would use: a matching linked :TurnEvidence wins over the declared role."""
-        if not getattr(self, "_assistant_turns_store_only", False):
+        if not getattr(self, "_assistant_turns_store_only", True):
             return False
         if claimed.get("extraction_mode") == EXTRACTION_MODE_STORE_ONLY:
             return False

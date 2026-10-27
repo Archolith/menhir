@@ -226,7 +226,6 @@ def build_memory_services(
         record_detailed_revisions=settings.record_detailed_revisions,
         shadow_context_composition=settings.shadow_context_composition,
         shadow_composition_timeout_s=settings.shadow_composition_timeout_s,
-        assistant_turns_store_only=settings.assistant_turns_store_only_enabled,
         enrichment_enabled=(capabilities.enrichment_ready if capabilities is not None else True),
         enrichment_disabled_reason=(
             "Graphiti/LLM enrichment is unavailable in the current startup mode."

@@ -135,7 +135,7 @@ def test_known_interactions_and_observation_switches_are_recorded() -> None:
 @pytest.mark.parametrize("fault", ["missing", "default", "env", "alias", "undocumented"])
 def test_detectors_reject_inventory_and_documentation_regressions(evidence, fault: str) -> None:
     changed = dict(FEATURES)
-    key = "assistant_turns_store_only_enabled"
+    key = "record_detailed_revisions"
     if fault == "missing":
         del changed[key]
     else:
@@ -191,6 +191,6 @@ def test_legacy_wrapper_cannot_silently_read_another_registered_control(evidence
 
 
 def test_documentation_detector_rejects_prose_only_mentions() -> None:
-    entry = FEATURES["assistant_turns_store_only_enabled"]
-    assert documentation_errors({entry.setting: entry}, "Use MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED to opt out")
-    assert documentation_errors({entry.setting: entry}, "# MENHIR_ASSISTANT_TURNS_STORE_ONLY_ENABLED=false") == []
+    entry = FEATURES["record_detailed_revisions"]
+    assert documentation_errors({entry.setting: entry}, "Use MENHIR_RECORD_DETAILED_REVISIONS to opt out")
+    assert documentation_errors({entry.setting: entry}, "# MENHIR_RECORD_DETAILED_REVISIONS=false") == []
