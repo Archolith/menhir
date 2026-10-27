@@ -5,9 +5,11 @@ absolute, occurrences in that slot never move it (``scalar_state_fold``), so "ju
 project" leaves a View of 4 in place. When the recall's observation hits hold a newer occurrence in
 the verdict's own slot, the verdict is shown but does not lead.
 
-Only the exact slot counts. A newer assertion in another slot of the same subject and value kind
-is not evidence: the subject is usually the user, so "I have 22 books" would demote a coin count
-(E2E-17). Times are the assertions' ``valid_at``; a missing or unparseable time never demotes.
+Only the exact slot counts here. Any newer assertion in another slot of the same subject would be
+too broad: the subject is usually the user, so "I have 22 books" would demote a coin count
+(E2E-17). Related other slots (bike_purchase_count against owned_bike_count) are the stale-lead
+check's job (``menhir.domain.stale_lead``, counts only), which runs after this gate. Times are the
+assertions' ``valid_at``; a missing or unparseable time never demotes.
 """
 
 from __future__ import annotations

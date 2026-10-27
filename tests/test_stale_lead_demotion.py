@@ -59,11 +59,12 @@ def _hit(attr: str, valid_at: str, value_kind: str = "count") -> dict:
 
 
 def _service(client, adapter, *, newer_rows, value_kind="count", enabled=True, newer_raises=False,
-             subject=SUBJ, inferred_self_mode="off"):
+             subject=SUBJ, inferred_self_mode="off", extra_hits=(), counting=False):
     _setup_search_and_metadata(client, adapter)
     hit = _hit("owned_bike_count", FEB, value_kind)
     hit["subject_uuid"] = subject
-    adapter.search_assertion_embeddings = lambda vec, *, limit, namespaces: [hit]
+    adapter.search_assertion_embeddings = lambda vec, *, limit, namespaces: [hit, *extra_hits]
+    adapter.counting_match_enabled = False
     adapter.fetch_current_scalar_view_for_slot = (
         lambda *, subject_uuid, attribute, scope, value_kind, unit, namespace: {
             "uuid": "view-bikes", "value": 3, "name": "user's owned bike count: 3",
@@ -83,7 +84,7 @@ def _service(client, adapter, *, newer_rows, value_kind="count", enabled=True, n
     adapter.newer_subject_assertions = _newer
     svc = RecallService(graphiti_client=client, graph_adapter=adapter, scoring_service=ScoringService(),
                         scalar_view_authority_enabled=True, stale_lead_demotion_enabled=enabled,
-                        inferred_self_mode=inferred_self_mode)
+                        inferred_self_mode=inferred_self_mode, counting_enabled=counting)
     return svc, calls
 
 
@@ -174,6 +175,31 @@ async def test_non_self_lead_reads_only_its_subject(stub_graphiti_client, stub_m
                           newer_rows=[])
     await _verdict(svc)
     assert calls[0]["subject_uuids"] == [SUBJ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("gate, related, status, checked", [
+    (True, False, "advisory", False),   # same-slot occurrence: freshness gate decides, no extra read
+    (False, True, "advisory", True),    # gate off: the related check still demotes
+    (True, True, "advisory", False),
+    (False, False, "leads", True),
+])
+async def test_freshness_gate_then_related_check(
+    stub_graphiti_client, stub_memory_graph_adapter, gate, related, status, checked,
+) -> None:
+    # Fails if the merged order drops either gate or lets one undo the other's demotion.
+    from menhir.domain.retrieval_tuning import RetrievalTuningConfig
+    occurrence = _hit("owned_bike_count", OCT)
+    occurrence.update(assertion_id="obs-occ", operation="occurrence")
+    rows = [{"attribute": "bike_purchase_count", "valid_at": OCT}] if related else []
+    svc, calls = _service(stub_graphiti_client, stub_memory_graph_adapter, newer_rows=rows,
+                          extra_hits=[occurrence], counting=True)
+    res = await svc.recall("how many bikes do I currently own", namespace="proj",
+                           tuning=RetrievalTuningConfig(scalar_view_freshness_gate=gate))
+    verdict = next(v for v in res.authority_layer if v.kind == "current")
+    assert verdict.status == status
+    assert bool(calls) is checked
 
 
 @pytest.mark.unit
