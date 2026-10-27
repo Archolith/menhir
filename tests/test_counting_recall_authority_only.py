@@ -15,11 +15,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from menhir.api.routes_support import ScalarAuthorityVerdictResponse
-from menhir.config.feature_flags import FEATURES
+from menhir.config.feature_flags import FEATURES, RETIRED
 from menhir.config.settings_model import MemorySettings
 from menhir.domain.recall import RecallResult, ScalarAuthorityContributor, ScalarAuthorityVerdict
 from menhir.services.context_builder import ContextBuilderService
 from menhir.services.recall_pipeline import _drop_counted_occurrence_observations
+from menhir.services.recall_service import RecallService
 from tests.test_scalar_history_recall import (
     _postcard_observation_hit,
     _setup_observation_lane,
@@ -82,7 +83,8 @@ async def test_flags_off_counted_view_ranked_and_basis_populated(
     # Fails if R acts without its flag, or the verdict basis/lower_bound are not populated.
     res = await _run(stub_graphiti_client, stub_memory_graph_adapter,
                      [_postcard_observation_hit()[0], _occ_hit("occ-1", 0.90, "posted 1 card")],
-                     state_view=_state_view("counted"), counting_enabled=True)
+                     state_view=_state_view("counted"), counting_enabled=True,
+                     counting_recall_authority_only=False, counting_wording_enabled=False)
     assert "sv-1" in _ids(res)
     assert "occ-1" in _ids(res)
     verdict = _verdict_for(res, "sv-1")
@@ -140,7 +142,8 @@ async def test_r_on_removes_counted_view_that_won_vector_search(
     _view_wins_search(client, adapter)
     _setup_observation_lane(adapter, obs_hit=[_postcard_observation_hit()[0]],
                             state_view=_state_view("counted"))
-    control = await _svc(client, adapter, counting_enabled=True).recall(QUERY, namespace="proj")
+    control = await _svc(client, adapter, counting_enabled=True,
+                         counting_recall_authority_only=False).recall(QUERY, namespace="proj")
     assert "sv-1" in _ids(control)  # control: the row passes the View eligibility filters
     res = await _svc(client, adapter, **R_ON).recall(QUERY, namespace="proj")
     assert "sv-1" not in _ids(res)
@@ -212,8 +215,8 @@ async def test_r_on_keeps_all_entities_when_counted_slots_would_crowd(
     # Fails if counted Views / occurrences still compete for the limit and push entities out.
     entities = {f"ent-{i}" for i in range(10)}
     _crowd_setup(stub_graphiti_client, stub_memory_graph_adapter)
-    off = await _svc(stub_graphiti_client, stub_memory_graph_adapter,
-                     counting_enabled=True).recall(QUERY, namespace="proj", limit=10)
+    off = await _svc(stub_graphiti_client, stub_memory_graph_adapter, counting_enabled=True,
+                     counting_recall_authority_only=False).recall(QUERY, namespace="proj", limit=10)
     assert entities - _ids(off), "precondition: with R off at least one entity is crowded out"
     assert entities & _ids(off), "precondition: entities are real candidates, not filtered"
     on = await _svc(stub_graphiti_client, stub_memory_graph_adapter, **R_ON).recall(
@@ -273,7 +276,8 @@ async def test_stated_view_output_identical_with_flags_on(
     client, adapter = stub_graphiti_client, stub_memory_graph_adapter
     adapter.scalar_view_has_user_foundation = lambda **kw: True
     hits = [_postcard_observation_hit()[0], _other_slot_hit()]
-    off = await _run(client, adapter, hits, state_view=_state_view(), counting_enabled=True)
+    off = await _run(client, adapter, hits, state_view=_state_view(), counting_enabled=True,
+                     counting_recall_authority_only=False, counting_wording_enabled=False)
     on = await _run(client, adapter, hits, state_view=_state_view(),
                     counting_enabled=True, counting_recall_authority_only=True,
                     counting_wording_enabled=True)
@@ -305,8 +309,8 @@ async def test_wording_counted_founded_is_advisory_lower_bound_and_not_authority
     client, adapter = stub_graphiti_client, stub_memory_graph_adapter
     adapter.scalar_view_has_user_foundation = lambda **kw: True
     res = await _run(client, adapter, [_postcard_observation_hit()[0]],
-                     state_view=_state_view("counted"),
-                     counting_enabled=True, counting_wording_enabled=True)
+                     state_view=_state_view("counted"), counting_enabled=True,
+                     counting_recall_authority_only=False, counting_wording_enabled=True)
     verdict = _verdict_for(res, "sv-1")
     assert verdict.status == "advisory" and verdict.lower_bound is True
     assert verdict.has_foundation is True
@@ -386,16 +390,15 @@ def test_api_response_round_trips_basis_and_lower_bound():
     ("personal_memory_counting_wording_enabled",
      "MENHIR_PERSONAL_MEMORY_COUNTING_WORDING_ENABLED"),
 ])
-def test_counting_flags_registered_default_off_and_need_authority(monkeypatch, name, env):
-    # Fails if a flag is unregistered, defaults on, loses its requirements, or is not parsed.
-    feature = FEATURES[name]
-    assert feature.env_var == env
-    assert feature.default is False
-    assert "personal_memory_counting_enabled" in feature.requires
-    assert "personal_memory_scalar_state_enabled" in feature.requires
-    assert getattr(MemorySettings.from_env(), name) is False
-    monkeypatch.setenv(env, "1")
-    assert getattr(MemorySettings.from_env(), name) is True
+def test_counting_flags_retired_and_service_defaults_on(monkeypatch, name, env):
+    # Fails if a retired flag returns as a setting/feature, or a service default goes back off.
+    assert name not in FEATURES and env not in FEATURES
+    monkeypatch.setenv(env, "0")
+    assert not hasattr(MemorySettings.from_env(), name)
+    assert RETIRED[name] and RETIRED[env]
+    knobs = {f.name: f.default for f in dataclasses.fields(RecallService)}
+    assert knobs["counting_recall_authority_only"] is True
+    assert knobs["counting_wording_enabled"] is True
 
 
 # --------------------------------------------------------------------------- 13. helper

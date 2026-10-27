@@ -72,7 +72,7 @@ class MemoryGraphAdapter:
     # keyword-only dataclass field (a same-named property would clobber the init default)
     counting_enabled: bool = field(default=False, kw_only=True)
     # unit 4R: counted Views fold by count decision; only effective with counting on.
-    counting_match_enabled: bool = field(default=False, kw_only=True)
+    counting_match_enabled: bool = field(default=True, kw_only=True)
 
     def __post_init__(self) -> None:
         from menhir.infrastructure.memory_queries import MemoryQueryRepository

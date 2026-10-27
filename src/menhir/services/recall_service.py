@@ -99,8 +99,9 @@ class RecallService(RecallSupportMixin):
     #: True: scalar_history Views form an advisory recall lane; False: excluded (real rollback).
     scalar_history_enabled: bool = False
     counting_enabled: bool = False  # False hides counted scalar_state Views (read-side kill switch)
-    counting_recall_authority_only: bool = False  # unit R: counted Views only as verdicts
-    counting_wording_enabled: bool = False  # unit 6: "at least N you mentioned", never leads
+    # On by default since #168 freeze; kept as per-service knobs.
+    counting_recall_authority_only: bool = True  # unit R: counted Views only as verdicts
+    counting_wording_enabled: bool = True  # unit 6: "at least N you mentioned", never leads
     # On by default since #168 freeze; kept as a per-service knob.
     anchored_count_hint: bool = True  # query_hint on anchored count questions
     stale_lead_demotion: bool = True  # a count lead with newer related evidence is advisory

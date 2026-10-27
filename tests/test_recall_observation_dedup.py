@@ -31,7 +31,8 @@ async def _recall(client, adapter, hits, *, dedup, counting=False):
     _setup_observation_lane(adapter, obs_hit=hits)
     svc = RecallService(
         graphiti_client=client, graph_adapter=adapter, scoring_service=ScoringService(),
-        scalar_view_authority_enabled=True, counting_enabled=counting)
+        scalar_view_authority_enabled=True, counting_enabled=counting,
+        counting_recall_authority_only=False)
     res = await svc.recall(
         QUERY, namespace="proj",
         tuning=RetrievalTuningConfig(enable_observation_dedup=dedup))

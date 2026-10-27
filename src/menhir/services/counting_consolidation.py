@@ -130,7 +130,7 @@ COUNTING_MATCH_PROMPT_ADDENDUM = (
 
 
 def effective_counting_perceiver_version(
-    configured: str, extract_v2: bool, match: bool = False,
+    configured: str, extract_v2: bool = True, match: bool = True,
 ) -> str:
     """The counting perceiver version used for writes, the re-version check and the watermark:
     the configured value, plus `+x2` under extraction v2 and `+m` under the 4R match flag. The one
@@ -272,10 +272,10 @@ class CountingConsolidationConfig:
     scalar_history_enabled: bool = False
     #: per-namespace claim lease; renewed after every page.
     lease_seconds: int = 900
-    #: unit 3a.9 extraction v2 (own flag); the effective version becomes `<perceiver_version>+x2`.
-    extract_v2: bool = False
-    #: unit 4R related-count matching (own flag); the effective version gains `+m`.
-    match: bool = False
+    #: unit 3a.9 extraction v2 (always on by default); the effective version becomes `<perceiver_version>+x2`.
+    extract_v2: bool = True
+    #: unit 4R related-count matching (always on by default); the effective version gains `+m`.
+    match: bool = True
 
 
 def build_counting_context(

@@ -47,8 +47,6 @@ SHIPPED_SETTINGS = {
     "personal_memory_scalar_state_perceiver_version": "v2",
     "personal_memory_event_history_perceiver_version": "v2",
     "personal_memory_counting_perceiver_version": "v1",
-    "personal_memory_counting_extract_v2": False,
-    "personal_memory_counting_match_enabled": False,
     "personal_memory_counting_lease_seconds": 900,
     # Defaults are not activation: every lane ships off; scalar authority is always on but gated by its lane.
     "personal_memory_consolidation_enabled": False,
@@ -71,8 +69,6 @@ SCHEDULER_KWARGS = {
     "scalar_state_perceiver_version": "v2",
     "event_history_perceiver_version": "v2",
     "counting_perceiver_version": "v1",
-    "counting_extract_v2": False,
-    "counting_match": False,
     "counting_lease_seconds": 900,
 }
 
@@ -84,8 +80,6 @@ CONSOLIDATE_KWARGS = {
     "scalar_canonical_self": False,
     "scalar_state_perceiver_version": "v2",
     "counting_perceiver_version": "v1",
-    "counting_extract_v2": False,
-    "counting_match": False,
     "counting_lease_seconds": 900,
     "event_history_perceiver_version": "v2",
 }
@@ -97,12 +91,16 @@ ALWAYS_ON_SCHEDULER = {
     "scalar_reconcile_attribute": True,
     "scalar_reconcile_scope": True,
     "scalar_reconcile_subject": True,
+    "counting_extract_v2": True,
+    "counting_match": True,
 }
 ALWAYS_ON_CONSOLIDATE = {
     "sum_grounding": True,
     "scalar_reconcile_attribute": True,
     "scalar_reconcile_scope": True,
     "scalar_reconcile_subject": True,
+    "counting_extract_v2": True,
+    "counting_match": True,
 }
 
 
@@ -163,8 +161,9 @@ def test_shipped_perceiver_versions_rank_so_a_bump_can_supersede() -> None:
         assert perceiver_rank(version) > perceiver_rank("v1.999999") > 0
     assert perceiver_rank("v3") > perceiver_rank("v2.1") > perceiver_rank("v2")
     # Counting compares the version string for equality, so suffixes are fine there.
-    assert effective_counting_perceiver_version("v1", False) == "v1"
-    assert effective_counting_perceiver_version("v1", True) == "v1+x2"
+    assert effective_counting_perceiver_version("v1", False, match=False) == "v1"
+    assert effective_counting_perceiver_version("v1", True, match=False) == "v1+x2"
+    assert effective_counting_perceiver_version("v1") == "v1+x2+m"
 
 
 @pytest.mark.unit
@@ -271,3 +270,64 @@ def test_phase3_run_forwards_the_frozen_profile() -> None:
     assert {name: kwargs[name] for name in CONSOLIDATE_KWARGS} == CONSOLIDATE_KWARGS
     # Not passed: the consolidation defaults (on) apply.
     assert {name: kwargs.get(name, on) for name, on in ALWAYS_ON_CONSOLIDATE.items()} == ALWAYS_ON_CONSOLIDATE
+
+
+@pytest.mark.unit
+def test_counting_version_stamp_agrees_between_api_dirty_check_and_scheduler() -> None:
+    # With nothing set, the writer (scheduler / lane config) and the API dirty check must compute
+    # the same stamp, or a namespace is re-counted or reported dirty wrongly.
+    from menhir.services.counting_consolidation import CountingConsolidationConfig
+
+    settings = dataclasses.replace(
+        _scalar_on(), personal_memory_counting_enabled=True)
+    expected = f"{settings.personal_memory_counting_perceiver_version}+x2+m"
+
+    seen: dict[str, object] = {}
+
+    def _next_batch(namespace: str, **kwargs: object) -> list[object]:
+        seen.update(kwargs)
+        return []
+
+    adapter = SimpleNamespace(
+        list_dirty_namespaces=lambda *, limit=500: [], load_next_counting_batch=_next_batch)
+    runtime_ctx = SimpleNamespace(
+        built=SimpleNamespace(graph_adapter=adapter, settings=settings),
+        session=SimpleNamespace(session_id="s", user_id="u"),
+        capabilities=SimpleNamespace(
+            startup_mode="full", neo4j_ready=True, reads_ready=True, queue_writes_ready=True,
+            enrichment_ready=True, scheduler_ready=True, llm_ready=True, embedder_ready=True,
+            graphiti_ready=True, failures=[]),
+    )
+    app = FastAPI()
+    app.include_router(router)
+    app.state.runtime_ctx = runtime_ctx
+    consolidate = AsyncMock(return_value={})
+    with patch.object(api_routes, "_get_backend", return_value=SimpleNamespace()), patch(
+        "menhir.infrastructure.sync_llm.make_sync_chat", return_value=lambda s, u: "[]",
+    ), patch(
+        "menhir.infrastructure.view_embedder.make_view_embedder", return_value=None,
+    ), patch(
+        "menhir.services.scheduler_tasks.consolidate_personal_memory", new=consolidate,
+    ):
+        resp = TestClient(app).post("/api/phase3/run", json={"namespace": "ns-stamp"})
+    assert resp.status_code == 200, resp.text
+    assert seen["perceiver_version"] == expected
+
+    # The API run passes neither knob, so the consolidation defaults decide the writer stamp.
+    assert "counting_extract_v2" not in consolidate.await_args.kwargs
+    assert "counting_match" not in consolidate.await_args.kwargs
+    params = inspect.signature(scheduler_tasks.consolidate_personal_memory).parameters
+    assert effective_counting_perceiver_version(
+        settings.personal_memory_counting_perceiver_version,
+        params["counting_extract_v2"].default, match=params["counting_match"].default) == expected
+
+    scheduler = MaintenanceScheduler(
+        ingest_service=SimpleNamespace(get_queue_depth=lambda: 0), graph_adapter=object())
+    assert effective_counting_perceiver_version(
+        settings.personal_memory_counting_perceiver_version,
+        scheduler.counting_extract_v2, match=scheduler.counting_match) == expected
+
+    config = CountingConsolidationConfig(
+        perceiver_version=settings.personal_memory_counting_perceiver_version)
+    assert effective_counting_perceiver_version(
+        config.perceiver_version, config.extract_v2, config.match) == expected

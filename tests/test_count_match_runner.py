@@ -475,10 +475,11 @@ def test_flag_sweep_default_is_match_off():
 
 @pytest.mark.unit
 def test_effective_perceiver_version_suffixes():
-    assert effective_counting_perceiver_version("v1", False) == "v1"
-    assert effective_counting_perceiver_version("v1", True) == "v1+x2"
+    assert effective_counting_perceiver_version("v1", False, False) == "v1"
+    assert effective_counting_perceiver_version("v1", True, False) == "v1+x2"
     assert effective_counting_perceiver_version("v1", False, True) == "v1+m"
     assert effective_counting_perceiver_version("v1", True, True) == "v1+x2+m"
+    assert effective_counting_perceiver_version("v1") == "v1+x2+m"
 
 
 @pytest.mark.unit

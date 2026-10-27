@@ -200,7 +200,6 @@ def build_memory_services(
             settings.personal_memory_counting_enabled
             and settings.personal_memory_scalar_state_enabled
         ),
-        counting_match_enabled=bool(settings.personal_memory_counting_match_enabled),
     )
     scoring_service = ScoringService()
     lifecycle_service = LifecycleService(
@@ -244,8 +243,6 @@ def build_memory_services(
         scalar_view_authority_enabled=scalar_view_authority_effective(settings),
         scalar_view_collapse_enabled=settings.personal_memory_scalar_view_collapse_enabled,
         scalar_view_echo_drop_enabled=settings.personal_memory_scalar_view_echo_drop_enabled,
-        counting_recall_authority_only=settings.personal_memory_counting_recall_authority_only,
-        counting_wording_enabled=settings.personal_memory_counting_wording_enabled,
         scalar_history_enabled=settings.personal_memory_scalar_history_enabled,
         event_history_authority_enabled=event_history_authority_effective(settings),
         inferred_self_mode=str(getattr(settings, "inferred_self_mode", "off")),

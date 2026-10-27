@@ -571,8 +571,8 @@ async def consolidate_personal_memory(
     enable_counting: bool = False,
     counting_perceiver_version: str = "v1",
     counting_lease_seconds: int = 900,
-    counting_extract_v2: bool = False,
-    counting_match: bool = False,
+    counting_extract_v2: bool = True,
+    counting_match: bool = True,
 ) -> dict[str, object]:
     """Re-derive count/amount Views from each DIRTY namespace's user turns via the gated perception
     boundary, pinning ALL bias guards on (cross-check + coref + verify) so an automatic write never

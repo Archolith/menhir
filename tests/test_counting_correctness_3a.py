@@ -324,7 +324,8 @@ def _run(graph, namespaces, *, batch_size=500):
     out = run_counting_consolidation(
         graph, namespaces=namespaces, counting_llm=_Llm(), build_episodes=_build_episodes,
         k=1, threshold=1.0, call_budget=None, embed=None,
-        config=CountingConsolidationConfig(batch_size=batch_size))
+        config=CountingConsolidationConfig(
+            batch_size=batch_size, extract_v2=False, match=False))
     return out
 
 

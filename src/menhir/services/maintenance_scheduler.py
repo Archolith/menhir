@@ -109,8 +109,8 @@ class MaintenanceScheduler:
     event_history_enabled: bool = False
     counting_enabled: bool = False
     counting_perceiver_version: str = "v1"
-    counting_extract_v2: bool = False
-    counting_match: bool = False
+    counting_extract_v2: bool = True
+    counting_match: bool = True
     counting_lease_seconds: int = 900
     event_history_perceiver_version: str = "v1"
     event_history_batch_size: int = 500

@@ -45,7 +45,8 @@ SCALAR_ON = {
     "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED": "true",
 }
 COUNTING_ON = {**SCALAR_ON, "MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED": "true"}
-MATCH_ON = {**COUNTING_ON, "MENHIR_PERSONAL_MEMORY_COUNTING_MATCH_ENABLED": "true"}
+# Related-count matching and extraction v2 are always on (#168 freeze): counting alone runs both.
+MATCH_ON = COUNTING_ON
 
 COIN = Obs("I have 37 coins", {"attribute": "owned_coin_count", "value_kind": "count",
                                "operation": "absolute", "value": 37})
@@ -194,8 +195,7 @@ async def test_e2e_10_counting_extract_v2(
     namespace = f"e2e10x-{uuid4().hex[:12]}"
     script = _script(GYM, scalar=[COIN])
     with scripted_model(script) as model:
-        env = {**feature_env, **model.env, **COUNTING_ON,
-               "MENHIR_PERSONAL_MEMORY_COUNTING_EXTRACT_V2": "true"}
+        env = {**feature_env, **model.env, **COUNTING_ON}
         with lane_backend(e2e_config, e2e_installed, lane_evidence, env):
             async with stdio_session(e2e_config, e2e_installed.venv_python, lane_evidence,
                                      feature_env=env) as client:
@@ -219,7 +219,7 @@ async def test_e2e_10_counting_extract_v2(
             versions = sorted({str(r["perceiver_version"]) for r in occ})
             lane_evidence.record(
                 "occurrences_carry_the_v2_perceiver_version",
-                passed=len(occ) == 2 and versions == ["v1+x2"],
+                passed=len(occ) == 2 and versions == ["v1+x2+m"],
                 detail={"versions": versions, "stored": result.get("counting_occurrences_stored")},
             )
             views = [v for v in scalar_views(e2e_config, namespace)

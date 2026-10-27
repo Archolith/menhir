@@ -493,7 +493,8 @@ def _bound(*ids):
 
 
 def _run(graph, llm, *, call_budget=None, embed=None, embed_version=None):
-    cfg = dict(perceiver_version="cv1", scalar_perceiver_version="sv1", batch_size=500, match=True)
+    cfg = dict(perceiver_version="cv1", scalar_perceiver_version="sv1", batch_size=500, match=True,
+               extract_v2=False)
     if embed_version is not None:
         cfg["embed_version"] = embed_version
     return run_counting_consolidation(

@@ -118,7 +118,7 @@ async def test_stated_verdict_neither_blocked_nor_counted(
 @pytest.mark.asyncio
 async def test_flag_off_limit_has_no_effect(stub_graphiti_client, stub_memory_graph_adapter):
     res = await _recall(stub_graphiti_client, stub_memory_graph_adapter, limit=1,
-                        counting_enabled=True)
+                        counting_enabled=True, counting_recall_authority_only=False)
     assert len(_counted_attrs(res)) == len(COUNTED)
 
 

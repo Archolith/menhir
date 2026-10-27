@@ -1,7 +1,7 @@
 """E2E-11 - a counting re-version keeps the old count until the new reading is stored.
 
-First backend: counting on, extract v2 off. Two gym visits give a counted View of 2.
-Second backend, same graph: extract v2 on, which changes the counting version, so every
+First backend: counting on, configured perceiver version v1. Two gym visits give a counted View of 2.
+Second backend, same graph: perceiver version v2, which changes the counting version, so every
 page is read again. Every new counting sample is unreadable. The old rows must stay
 current and the View must stay 2; before the re-version safety change the old rows were
 retired before the model ran, so a failed reading left the count at 0.
@@ -68,7 +68,8 @@ async def test_e2e_11_count_reversion_keeps_count(
 
     with scripted_model(script) as model:
         v1 = {**feature_env, **model.env, **COUNTING_ON}
-        v2 = {**v1, "MENHIR_PERSONAL_MEMORY_COUNTING_EXTRACT_V2": "true"}
+        # Extraction v2 is always on, so the re-version trigger is a configured perceiver version bump.
+        v2 = {**v1, "MENHIR_PERSONAL_MEMORY_COUNTING_PERCEIVER_VERSION": "v2"}
 
         with lane_backend(e2e_config, e2e_installed, lane_evidence, v1, name="backend-v1"):
             async with stdio_session(e2e_config, e2e_installed.venv_python, lane_evidence,
@@ -139,7 +140,8 @@ async def test_e2e_11_count_reversion_hands_over_heads(
 
     with scripted_model(script) as model:
         v1 = {**feature_env, **model.env, **COUNTING_ON}
-        v2 = {**v1, "MENHIR_PERSONAL_MEMORY_COUNTING_EXTRACT_V2": "true"}
+        # Extraction v2 is always on, so the re-version trigger is a configured perceiver version bump.
+        v2 = {**v1, "MENHIR_PERSONAL_MEMORY_COUNTING_PERCEIVER_VERSION": "v2"}
 
         with lane_backend(e2e_config, e2e_installed, lane_evidence, v1, name="backend-v1"):
             async with stdio_session(e2e_config, e2e_installed.venv_python, lane_evidence,

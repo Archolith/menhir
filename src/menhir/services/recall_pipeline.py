@@ -1102,7 +1102,7 @@ async def run_recall(
     # list. _occurrence_obs_ids are the injected occurrence observations, dropped below when their
     # slot gets a counted verdict.
     _counted_authority_only = bool(
-        getattr(service, "counting_recall_authority_only", False) and service.counting_enabled)
+        getattr(service, "counting_recall_authority_only", True) and service.counting_enabled)
     _occurrence_obs_ids: set[str] = set()
 
     # --- Observation candidates (Phase 4a.2, flag-gated): inject :TypedAssertion observations ---
@@ -1152,7 +1152,7 @@ async def run_recall(
             )
             _occurrence_slots_injected: set[tuple[str, str, str, str, str]] = set()
             _count_match = bool(service.counting_enabled) and bool(
-                getattr(service.graph_adapter, "counting_match_enabled", False))
+                getattr(service.graph_adapter, "counting_match_enabled", True))
             for hit in obs_hits:
                 try:
                     aid = str(hit.get("assertion_id") or "").strip()
@@ -1653,7 +1653,7 @@ async def run_recall(
                 view_counted = view.get("scalar_basis") == "counted"
                 # Wording flag: a counted View is a lower bound and never leads (F10).
                 count_wording = view_counted and bool(
-                    getattr(service, "counting_wording_enabled", False))
+                    getattr(service, "counting_wording_enabled", True))
                 # A history question ("did I have before") is not answered by the current value, so
                 # the current View is shown but never leads it (#170).
                 view_leads = (
