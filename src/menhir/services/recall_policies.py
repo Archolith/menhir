@@ -261,7 +261,7 @@ def _build_temporal_facts(
     With ``relevance_k`` > 0, up to that many rows with the highest finite
     ``fact_similarity`` take slots first (ties by newest-first order), the remaining slots
     fill from the newest rows, and output stays newest first.
-    With ``ended`` (MENHIR_ANCHORED_TIME_EXPIRY) an unexpired fact whose own end (invalid_at)
+    With ``ended`` (MENHIR_ANCHORED_TIME_RESOLVER) an unexpired fact whose own end (invalid_at)
     is at or before ``now`` is "ended": still believed, no longer true in the world.
     Returns a dict mapping node_uuid -> tuple of TemporalFact.
     """

@@ -1,4 +1,4 @@
-"""MENHIR_ANCHORED_TIME_ATTACH: the blind attach check inside the extraction hook (no network).
+"""MENHIR_ANCHORED_TIME_RESOLVER (attach check): the blind attach check inside the extraction hook (no network).
 
 Covers the policy overlay with a fake attacher (agree, reject, every failure status, no candidates,
 internal error, blind call arguments, flag-off report), the hook pass-through, the persisted
@@ -423,31 +423,32 @@ def test_new_outcomes_render_like_state_start(outcome, valid_at, literal) -> Non
 
 def _clear_env(monkeypatch) -> None:
     for name in ("MENHIR_ANCHORED_TIME_RESOLVER", "MENHIR_ANCHORED_TIME_MODEL",
-                 "MENHIR_ANCHORED_TIME_TIMEOUT_S", "MENHIR_ANCHORED_TIME_ATTACH",
-                 "MENHIR_ANCHORED_TIME_ATTACH_MODEL"):
+                 "MENHIR_ANCHORED_TIME_TIMEOUT_S", "MENHIR_ANCHORED_TIME_ATTACH_MODEL"):
         monkeypatch.delenv(name, raising=False)
 
 
-def test_attach_settings_default_off(monkeypatch) -> None:
+def test_attach_settings_default_model_empty(monkeypatch) -> None:
     _clear_env(monkeypatch)
     for settings in (MemorySettings(), MemorySettings.from_env()):
-        assert settings.anchored_time_attach_enabled is False
+        assert settings.anchored_time_resolver_enabled is True
         assert settings.anchored_time_attach_model == ""
 
 
 def test_attach_settings_read_the_environment(monkeypatch) -> None:
     _clear_env(monkeypatch)
-    monkeypatch.setenv("MENHIR_ANCHORED_TIME_ATTACH", "true")
     monkeypatch.setenv("MENHIR_ANCHORED_TIME_ATTACH_MODEL", " m2 ")
     settings = MemorySettings.from_env()
-    assert settings.anchored_time_attach_enabled is True
     assert settings.anchored_time_attach_model == "m2"
 
 
-def test_attach_feature_flag_registry_entry() -> None:
-    flag = FEATURES["anchored_time_attach_enabled"]
-    assert flag.env_var == "MENHIR_ANCHORED_TIME_ATTACH"
-    assert flag.default is False
+def test_attach_and_expiry_settings_are_retired_into_the_resolver_switch() -> None:
+    assert not hasattr(MemorySettings(), "anchored_time_attach_enabled")
+    assert not hasattr(MemorySettings(), "anchored_time_expiry_enabled")
+    assert "anchored_time_attach_enabled" not in FEATURES
+    assert "anchored_time_expiry_enabled" not in FEATURES
+    flag = FEATURES["anchored_time_resolver_enabled"]
+    assert flag.env_var == "MENHIR_ANCHORED_TIME_RESOLVER"
+    assert flag.default is True
 
 
 # --- 6. client construction -------------------------------------------------------------------
@@ -457,8 +458,10 @@ def _captured_hook(monkeypatch, settings: MemorySettings, **kwargs):
     seen: dict = {}
 
     class _CapturingGraphiti:
-        def __init__(self, **graphiti_kwargs) -> None:
-            seen.update(graphiti_kwargs)
+        def __init__(self, *, edge_expiry_hook=None, preserved_edge_attributes=None,
+                     **graphiti_kwargs) -> None:
+            seen.update(graphiti_kwargs, edge_expiry_hook=edge_expiry_hook,
+                        preserved_edge_attributes=preserved_edge_attributes)
 
     monkeypatch.setattr(graphiti_client, "Graphiti", _CapturingGraphiti)
     graphiti_client.GraphitiClient.from_settings_with_capabilities(settings, **kwargs)
@@ -467,9 +470,9 @@ def _captured_hook(monkeypatch, settings: MemorySettings, **kwargs):
     return hook
 
 
-def test_client_builds_the_attacher_only_with_resolver_and_attach_on(monkeypatch) -> None:
+def test_client_builds_the_attacher_with_the_resolver(monkeypatch) -> None:
     both = MemorySettings(anchored_time_resolver_enabled=True, anchored_time_resolver_model="gpt-6-luna",
-                          anchored_time_resolver_timeout_s=7.0, anchored_time_attach_enabled=True,
+                          anchored_time_resolver_timeout_s=7.0,
                           anchored_time_attach_model="m2")
     hook = _captured_hook(monkeypatch, both)
     attacher = hook._anchored_time_attach
@@ -480,19 +483,29 @@ def test_client_builds_the_attacher_only_with_resolver_and_attach_on(monkeypatch
     assert isinstance(hook._anchored_time, resolver_module.AnchoredTimeResolver)
 
     # No attach model: the resolver's model.
-    inherit = MemorySettings(anchored_time_resolver_enabled=True, anchored_time_resolver_model="gpt-6-luna",
-                             anchored_time_attach_enabled=True)
+    inherit = MemorySettings(anchored_time_resolver_enabled=True, anchored_time_resolver_model="gpt-6-luna")
     assert _captured_hook(monkeypatch, inherit)._anchored_time_attach.model == "gpt-6-luna"
-    default_model = MemorySettings(anchored_time_resolver_enabled=True, anchored_time_attach_enabled=True)
+    default_model = MemorySettings(anchored_time_resolver_enabled=True)
     assert (_captured_hook(monkeypatch, default_model)._anchored_time_attach.model
             == ProviderConfig.for_graphiti_llm(default_model).chat_model)
 
-    # Resolver on, attach off.
-    resolver_only = MemorySettings(anchored_time_resolver_enabled=True)
-    hook = _captured_hook(monkeypatch, resolver_only)
-    assert hook._anchored_time is not None and hook._anchored_time_attach is None
-
-    # Resolver off, attach on: the check has nothing to vet.
-    attach_only = MemorySettings(anchored_time_attach_enabled=True, anchored_time_attach_model="m2")
-    hook = _captured_hook(monkeypatch, attach_only)
+    # Resolver off: the attacher and expiry are off with it, even with an attach model set.
+    off = MemorySettings(anchored_time_resolver_enabled=False, anchored_time_attach_model="m2")
+    hook = _captured_hook(monkeypatch, off)
     assert hook._anchored_time is None and hook._anchored_time_attach is None
+    assert hook._anchored_time_expiry is False
+
+
+def test_empty_env_builds_resolver_attacher_and_expiry_all_on(monkeypatch) -> None:
+    _clear_env(monkeypatch)
+    monkeypatch.delenv("MENHIR_ANCHORED_TIME_RESOLVER", raising=False)
+    hook = _captured_hook(monkeypatch, MemorySettings.from_env())
+    assert isinstance(hook._anchored_time, resolver_module.AnchoredTimeResolver)
+    assert isinstance(hook._anchored_time_attach, AnchoredTimeAttacher)
+    assert hook._anchored_time_expiry is True
+
+    monkeypatch.setenv("MENHIR_ANCHORED_TIME_RESOLVER", "false")
+    hook = _captured_hook(monkeypatch, MemorySettings.from_env())
+    assert hook._anchored_time is None
+    assert hook._anchored_time_attach is None
+    assert hook._anchored_time_expiry is False

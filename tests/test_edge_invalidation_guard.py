@@ -467,8 +467,10 @@ def test_from_settings_passes_guard_hook_and_preserved_source(monkeypatch):
     seen: dict = {}
 
     class _CapturingGraphiti:
-        def __init__(self, uri=None, **kwargs) -> None:
-            seen.update(kwargs, uri=uri)
+        def __init__(self, uri=None, *, edge_expiry_hook=None, preserved_edge_attributes=None,
+                     **kwargs) -> None:
+            seen.update(kwargs, uri=uri, edge_expiry_hook=edge_expiry_hook,
+                        preserved_edge_attributes=preserved_edge_attributes)
 
     monkeypatch.setattr(graphiti_client, "Graphiti", _CapturingGraphiti)
     graphiti_client.GraphitiClient.from_settings_with_capabilities(MemorySettings())

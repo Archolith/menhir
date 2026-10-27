@@ -60,7 +60,7 @@ def _row(*, value=25, attribute="postcard_count", stated_span="I have 25 postcar
 def test_memory_settings_defaults_are_lenient() -> None:
     settings = MemorySettings()
     assert settings.personal_memory_scalar_threshold == 2 / 3
-    assert settings.personal_memory_scalar_state_enabled is False
+    assert settings.personal_memory_scalar_state_enabled is True
 
 
 @pytest.mark.unit
@@ -71,7 +71,7 @@ def test_from_env_clean_environment_round_trips_lenient_defaults(
     settings = MemorySettings.from_env()
     assert settings.personal_memory_scalar_threshold == 2 / 3
     assert settings.personal_memory_scalar_threshold == 0.6666666666666666
-    assert settings.personal_memory_scalar_state_enabled is False
+    assert settings.personal_memory_scalar_state_enabled is True
 
 
 @pytest.mark.unit

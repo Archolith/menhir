@@ -1998,10 +1998,10 @@ async def _apply_anchored_time(
 ) -> None:
     """Overlay resolver-computed ``valid_at`` on final edges. Never fails the episode.
 
-    With ``attacher`` (MENHIR_ANCHORED_TIME_ATTACH) a time is written only when the blind attach
+    With ``attacher`` (built under MENHIR_ANCHORED_TIME_RESOLVER) a time is written only when the blind attach
     check agrees (``_attach_check``); a failed check writes nothing for this episode.
 
-    With ``expiry`` (MENHIR_ANCHORED_TIME_EXPIRY) it also records, per classified point event or
+    With ``expiry`` (MENHIR_ANCHORED_TIME_RESOLVER) it also records, per classified point event or
     state that arrives with its own ``invalid_at`` and no ``expired_at``, that ``invalid_at`` as
     the world end. ``MenhirEdgeExpiryHook`` reads the classification so Graphiti does not expire
     the edge for that end, and the persist step stamps it (P3).
@@ -2253,9 +2253,9 @@ class MenhirExtractionHook:
                  anchored_time_attach: Any | None = None) -> None:
         #: ``AnchoredTimeResolver`` when MENHIR_ANCHORED_TIME_RESOLVER is on, else ``None``.
         self._anchored_time = anchored_time
-        #: MENHIR_ANCHORED_TIME_EXPIRY; only has an effect with a resolver.
+        #: Follows MENHIR_ANCHORED_TIME_RESOLVER; only has an effect with a resolver.
         self._anchored_time_expiry = anchored_time_expiry
-        #: ``AnchoredTimeAttacher`` when MENHIR_ANCHORED_TIME_ATTACH is on; only with a resolver.
+        #: ``AnchoredTimeAttacher`` when MENHIR_ANCHORED_TIME_RESOLVER is on; only with a resolver.
         self._anchored_time_attach = anchored_time_attach
 
     async def extract_single_episode(self, context: Any) -> Any:

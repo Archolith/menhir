@@ -94,8 +94,14 @@ class _DummyGraphiti:
         llm_client: object,
         embedder: object,
         cross_encoder: object | None = None,
+        edge_expiry_hook: object | None = None,
+        preserved_edge_attributes: object | None = None,
         **hook_kwargs: object,
     ) -> None:
+        if edge_expiry_hook is not None:
+            hook_kwargs["edge_expiry_hook"] = edge_expiry_hook
+        if preserved_edge_attributes is not None:
+            hook_kwargs["preserved_edge_attributes"] = preserved_edge_attributes
         self.uri = uri
         self.user = user
         self.password = password

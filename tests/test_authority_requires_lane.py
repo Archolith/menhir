@@ -88,7 +88,7 @@ def test_backend_wiring_requires_lane(monkeypatch, lane, authority):
     assert captured["event_history_authority_enabled"] is (lane and authority)
 
 
-@pytest.mark.parametrize(("settings_kwargs", "expected"), [({}, False), ({"personal_memory_scalar_state_enabled": True}, True)])
+@pytest.mark.parametrize(("settings_kwargs", "expected"), [({}, True), ({"personal_memory_scalar_state_enabled": False}, False)])
 def test_backend_wiring_with_default_authority_follows_lane(monkeypatch, settings_kwargs, expected):
     from menhir.core.bootstrap import build_memory_services
 

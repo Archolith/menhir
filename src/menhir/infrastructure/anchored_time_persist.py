@@ -11,7 +11,7 @@ Menhir-owned step after ``add_episode`` returns. Every write is bound to the cal
 
 Failure never fails ingest: missing properties mean exactly the pre-P2 behavior.
 
-P3 (MENHIR_ANCHORED_TIME_EXPIRY): Graphiti never expires a world-ended edge for its own end
+P3 (world-end expiry under MENHIR_ANCHORED_TIME_RESOLVER): Graphiti never expires a world-ended edge for its own end
 (``MenhirEdgeExpiryHook`` answers ``WORLD_END``), so nothing is ever un-expired here. When a row
 carries ``time_world_end``, the same locked write stamps ``time_expiry = 'world_end'`` on an
 edge that is still live and whose ``invalid_at`` is still that end. The stamp is informational.
@@ -86,7 +86,7 @@ PERSIST_CYPHER = (
     "RETURN count(r) AS written"
 )
 
-#: P3 (MENHIR_ANCHORED_TIME_EXPIRY): same lock and re-check, then stamp the world end on a live
+#: P3 (world-end expiry under MENHIR_ANCHORED_TIME_RESOLVER): same lock and re-check, then stamp the world end on a live
 #: edge whose ``invalid_at`` is still the instant recorded at extraction. Never touches
 #: ``expired_at``: a contradiction that expired or truncated the edge leaves it unstamped.
 EXPIRY_PERSIST_CYPHER = (

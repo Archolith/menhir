@@ -179,6 +179,7 @@ def test_phase3_api_forwards_router_flag(monkeypatch):
         personal_memory_scalar_deterministic_router=True,
         personal_memory_scalar_deterministic_classes=("c_count", "c_money"),
         personal_memory_scalar_state_enabled=True,
+        personal_memory_counting_enabled=False,
         personal_memory_consolidation_chat_model="",
         personal_memory_consolidation_max_tokens=2048,
     )

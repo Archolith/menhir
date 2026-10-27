@@ -1,4 +1,4 @@
-"""Blind attach check (MENHIR_ANCHORED_TIME_ATTACH): prompt blindness, answer parsing, the V1-V3
+"""Blind attach check (runs under MENHIR_ANCHORED_TIME_RESOLVER): prompt blindness, answer parsing, the V1-V3
 veto, the plan_overlay ``attach`` argument and the cached client call. Offline, invented turns only.
 """
 from __future__ import annotations

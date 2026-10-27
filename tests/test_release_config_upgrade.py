@@ -30,9 +30,10 @@ CAMPAIGN_FLAGS = {
 }
 
 
-# Campaign switches that ship on by default. The Warden gate, source memories, scalar view
-# authority and the others retired by the #168 freeze have no switch.
-DEFAULT_ON: set[str] = set()
+# Campaign switches that ship on by default (the scalar lane is a cost switch kept on by the #168
+# freeze). The Warden gate, source memories, scalar view authority and the others retired by the
+# freeze have no switch.
+DEFAULT_ON: set[str] = {"MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED"}
 
 
 @pytest.fixture

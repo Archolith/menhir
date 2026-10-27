@@ -246,7 +246,8 @@ def test_from_settings_wires_statement_order_always_on(monkeypatch):
     seen: dict = {}
 
     class _CapturingGraphiti:
-        def __init__(self, uri=None, **kwargs) -> None:
+        def __init__(self, uri=None, *, edge_expiry_hook=None, preserved_edge_attributes=None,
+                     **kwargs) -> None:
             seen.update(kwargs)
 
     monkeypatch.setattr(graphiti_client, "Graphiti", _CapturingGraphiti)

@@ -48,14 +48,15 @@ SHIPPED_SETTINGS = {
     "personal_memory_event_history_perceiver_version": "v2",
     "personal_memory_counting_perceiver_version": "v1",
     "personal_memory_counting_lease_seconds": 900,
-    # Defaults are not activation: every lane ships off; scalar authority is always on but gated by its lane.
+    # The scalar and counting lanes ship on (#168 freeze, cost switches); the other lanes ship off.
+    # Scalar authority is always on but gated by its lane.
     "personal_memory_consolidation_enabled": False,
-    "personal_memory_scalar_state_enabled": False,
+    "personal_memory_scalar_state_enabled": True,
     "personal_memory_scalar_history_enabled": False,
     "personal_memory_scalar_deterministic_router": False,
     "personal_memory_event_history_enabled": False,
     "personal_memory_event_history_authority_enabled": False,
-    "personal_memory_counting_enabled": False,
+    "personal_memory_counting_enabled": True,
 }
 
 #: What the runtime must hand the scheduler for those settings.
@@ -105,10 +106,12 @@ ALWAYS_ON_CONSOLIDATE = {
 
 
 def _scalar_on() -> MemorySettings:
-    # Scalar on so the runtime builds the consolidation LLM; everything else stays shipped.
+    # Scalar on so the runtime builds the consolidation LLM; counting off (its own test turns it on);
+    # everything else stays shipped.
     return dataclasses.replace(
         MemorySettings(),
         personal_memory_scalar_state_enabled=True,
+        personal_memory_counting_enabled=False,
         artifact_reconcile_mode="off",
         structure_watcher_enabled=False,
     )

@@ -224,23 +224,17 @@ class MemorySettings:
     # anchored speaker marker bind to the inferred self instead of forking "user"; set "off" to opt out.
     inferred_self_mode: str = "enforce"
 
-    # Anchored-time resolver: one extra LLM call per user turn with a temporal cue, overlaying
-    # valid_at on extracted edges. Default off until the live eval gates (L1-L3) pass.
-    anchored_time_resolver_enabled: bool = False
+    # Anchored-time switch: one extra LLM call per user turn with a temporal cue, overlaying
+    # valid_at on extracted edges. It also runs the blind attach check on each resolver time and
+    # records world-end expiry (#168 freeze: folded in, one switch). Default on; set false to opt out.
+    anchored_time_resolver_enabled: bool = True
     #: Model for the resolver call; empty means the ingest chat model.
     anchored_time_resolver_model: str = ""
     anchored_time_resolver_timeout_s: float = 120.0
     #: Render persisted anchored-time contracts in recall and timeline facts (P2). Default off.
     anchored_time_render_enabled: bool = False
-    #: P3: a fact's own end (invalid_at) is world time, not supersession: Graphiti does not expire
-    #: edges for that end alone (MenhirEdgeExpiryHook), and recall labels them "ended". Needs the
-    #: resolver and archolith-graphiti-core>=0.30.2.post3. Default off.
-    anchored_time_expiry_enabled: bool = False
-    #: Blind attachment check (plan menhir-anchored-time-attachment-plan.md 3.1): a second model call
-    #: must quote the same words with the right relation before a resolver time is written.
-    #: Needs the resolver. Default off.
-    anchored_time_attach_enabled: bool = False
-    #: Model for the attach call; empty means the resolver's model.
+    #: Model for the blind attach check (a second model call must quote the same words with the
+    #: right relation before a resolver time is written; runs with the resolver); empty means the resolver's model.
     anchored_time_attach_model: str = ""
 
     # Personal-memory consolidation job (gated perception -> count/amount Views from user turns).
@@ -317,7 +311,7 @@ class MemorySettings:
     # (behind the fresh-only activation gate). Runs on its OWN :ScalarConsolidationWatermark cursor, so
     # enabling it backfills historical namespaces. The perceiver version stamps the cursor + assertions;
     # bumping it revisits history so a newer perceiver can correct prior claims.
-    personal_memory_scalar_state_enabled: bool = False
+    personal_memory_scalar_state_enabled: bool = True
     # v2: deterministic when-discipline (temporal resolver + hedged-value abstention). assertion_key
     # omits valid_at/time_basis and the idempotent rewrite never rewrites temporal fields, so corrected
     # grounding only lands as a NEW interpreted assertion — a version bump makes it supersede v1 by
@@ -389,7 +383,7 @@ class MemorySettings:
     # cursor, so existing evidence is re-perceived and v2 assertions supersede v1 by strict rank.
     personal_memory_event_history_perceiver_version: str = "v2"
     personal_memory_event_history_authority_enabled: bool = False
-    personal_memory_counting_enabled: bool = False
+    personal_memory_counting_enabled: bool = True
     personal_memory_counting_perceiver_version: str = "v1"
     personal_memory_counting_lease_seconds: int = 900
 
@@ -423,7 +417,7 @@ class MemorySettings:
     # n.content_embedding), NEXT TO the ranked results, never fused into them. Always on since
     # the #168 freeze, with the ingest-side episode-content embedding step.
     frontier_source_memory_limit: int = 10          # section size (1..50; validated in RetrievalTuningConfig)
-    frontier_source_memory_max_chars: int = 600  # per-memory content cap (100..4000)
+    frontier_source_memory_max_chars: int = 2000  # per-memory content cap (100..4000)
     frontier_source_memory_pools: bool = False  # group section entries by shared anchors
 
     # HTTP server
@@ -742,7 +736,7 @@ class MemorySettings:
             source_memory_max_chars=self.frontier_source_memory_max_chars,
             source_memory_pools=self.frontier_source_memory_pools,
             enable_anchored_time_render=self.anchored_time_render_enabled,
-            enable_anchored_time_expiry=self.anchored_time_expiry_enabled,
+            enable_anchored_time_expiry=self.anchored_time_resolver_enabled,
             enable_fact_relevance=self.frontier_fact_relevance,
             enable_observation_dedup=self.personal_memory_observation_dedup_enabled,
             enable_verb_facets=self.frontier_verb_facets,
@@ -860,8 +854,6 @@ class MemorySettings:
                 env_var="MENHIR_ANCHORED_TIME_TIMEOUT_S",
             ),
             anchored_time_render_enabled=parse_bool_env(_getenv("MENHIR_ANCHORED_TIME_RENDER", default=str(cls.anchored_time_render_enabled))),
-            anchored_time_expiry_enabled=parse_bool_env(_getenv("MENHIR_ANCHORED_TIME_EXPIRY", default=str(cls.anchored_time_expiry_enabled))),
-            anchored_time_attach_enabled=parse_bool_env(_getenv("MENHIR_ANCHORED_TIME_ATTACH", default=str(cls.anchored_time_attach_enabled))),
             anchored_time_attach_model=(_getenv("MENHIR_ANCHORED_TIME_ATTACH_MODEL", default=cls.anchored_time_attach_model) or "").strip(),
             personal_memory_consolidation_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED", default=str(cls.personal_memory_consolidation_enabled))),
             personal_memory_consolidation_interval_s=_parse_float(

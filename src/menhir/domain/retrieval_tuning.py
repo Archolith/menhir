@@ -318,7 +318,7 @@ class RetrievalTuningConfig:
     # passes an explicit per-call source_memory_limit > 0).
     source_memory_limit: int = 10
     # Per-memory content cap in the section; cut content ends with a trailing ellipsis.
-    source_memory_max_chars: int = 600
+    source_memory_max_chars: int = 2000
     # Group the section's returned memories into anchor-based pools (pure, deterministic).
     source_memory_pools: bool = False
     # Pick the section from a larger pool: drop exact content repeats, then each session's best
@@ -333,8 +333,9 @@ class RetrievalTuningConfig:
     # kept as a per-request knob.
     enable_fact_said_time: bool = True
     # Label unexpired facts whose own end (invalid_at) has passed as "ended" instead of
-    # "current_belief" (MENHIR_ANCHORED_TIME_EXPIRY). Presentation only, like the render flag.
-    enable_anchored_time_expiry: bool = False
+    # "current_belief" (follows MENHIR_ANCHORED_TIME_RESOLVER; settings pass the switch value).
+    # Presentation only, like the render flag.
+    enable_anchored_time_expiry: bool = True
     # Attach the facts most similar to the query, not only the newest (MENHIR_FRONTIER_FACT_RELEVANCE).
     enable_fact_relevance: bool = False
     # One observation per identical stated text in the observation lane (MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED).

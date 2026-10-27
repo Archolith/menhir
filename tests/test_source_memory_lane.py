@@ -555,13 +555,14 @@ def test_settings_defaults_deployment_and_library_on(monkeypatch: pytest.MonkeyP
         monkeypatch.delenv(var, raising=False)
     settings = MemorySettings.from_env()
     assert settings.frontier_source_memory_limit == 10
-    assert settings.frontier_source_memory_max_chars == 600
+    assert settings.frontier_source_memory_max_chars == 2000
     assert settings.frontier_source_memory_pools is False
 
     tuning = settings.retrieval_tuning()
     assert tuning.enable_source_memories is True
     assert tuning.source_memory_limit == 10
-    assert tuning.source_memory_max_chars == 600
+    assert tuning.source_memory_max_chars == 2000
+    assert RetrievalTuningConfig().source_memory_max_chars == 2000
     assert tuning.source_memory_pools is False
 
 

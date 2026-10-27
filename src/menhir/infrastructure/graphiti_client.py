@@ -130,9 +130,9 @@ def _schedule_client_close(client: Any) -> asyncio.Task | None:
 
 
 def edge_expiry_hook_kwargs(enabled: bool, graphiti_cls: Any) -> dict[str, Any]:
-    """``Graphiti(...)`` kwargs for MENHIR_ANCHORED_TIME_EXPIRY: none when off.
+    """``Graphiti(...)`` kwargs for anchored-time expiry (MENHIR_ANCHORED_TIME_RESOLVER): none when off.
 
-    With the flag on, an installed fork without ``edge_expiry_hook`` would silently keep
+    With the switch on, an installed fork without ``edge_expiry_hook`` would silently keep
     expiring ended facts, so startup refuses it instead.
     """
     if not enabled:
@@ -143,7 +143,7 @@ def edge_expiry_hook_kwargs(enabled: bool, graphiti_cls: Any) -> dict[str, Any]:
         params = {}
     if "edge_expiry_hook" not in params:
         raise RuntimeError(
-            "MENHIR_ANCHORED_TIME_EXPIRY=true requires archolith-graphiti-core==0.30.2.post3 "
+            "MENHIR_ANCHORED_TIME_RESOLVER=true requires archolith-graphiti-core==0.30.2.post3 "
             "or later (Graphiti(edge_expiry_hook=...)); the installed graphiti_core has no "
             "edge_expiry_hook. Reinstall Menhir's pinned dependencies or turn the flag off."
         )
@@ -169,7 +169,7 @@ def preserved_edge_attributes_kwargs(
     if "preserved_edge_attributes" not in params:
         if expiry_enabled:
             raise RuntimeError(
-                "MENHIR_ANCHORED_TIME_EXPIRY=true requires archolith-graphiti-core==0.30.2.post6 "
+                "MENHIR_ANCHORED_TIME_RESOLVER=true requires archolith-graphiti-core==0.30.2.post6 "
                 "or later (Graphiti(preserved_edge_attributes=...)); without it a restatement "
                 "can expire a stored ended fact. Reinstall Menhir's pinned dependencies or "
                 "turn the flag off."
@@ -370,17 +370,16 @@ class GraphitiClient:
                     "Anchored-time resolver enabled (model=%s, timeout_s=%s)",
                     anchored_time.model, settings.anchored_time_resolver_timeout_s,
                 )
-                if settings.anchored_time_attach_enabled:
-                    from menhir.infrastructure.anchored_time_attach_client import AnchoredTimeAttacher
+                from menhir.infrastructure.anchored_time_attach_client import AnchoredTimeAttacher
 
-                    # Blind attach check: same unwrapped client and timeout as the resolver.
-                    anchored_time_attach = AnchoredTimeAttacher(
-                        raw_llm_client,
-                        base_url=llama_base_url,
-                        model=settings.anchored_time_attach_model or anchored_time.model,
-                        timeout_s=settings.anchored_time_resolver_timeout_s,
-                    )
-                    logger.info("Anchored-time attach check enabled (model=%s)", anchored_time_attach.model)
+                # Blind attach check: same unwrapped client and timeout as the resolver.
+                anchored_time_attach = AnchoredTimeAttacher(
+                    raw_llm_client,
+                    base_url=llama_base_url,
+                    model=settings.anchored_time_attach_model or anchored_time.model,
+                    timeout_s=settings.anchored_time_resolver_timeout_s,
+                )
+                logger.info("Anchored-time attach check enabled (model=%s)", anchored_time_attach.model)
         embed_base_url = embed_provider.base_url
         embed_dimension = expected_graphiti_embedding_dimension(settings)
         embed_client = (
@@ -428,7 +427,7 @@ class GraphitiClient:
             password=settings.neo4j_password,
             database=settings.neo4j_database,
         )
-        anchored_time_expiry = bool(settings.anchored_time_expiry_enabled)
+        anchored_time_expiry = bool(settings.anchored_time_resolver_enabled)
         return cls(
             client=Graphiti(
                 uri=settings.neo4j_uri,

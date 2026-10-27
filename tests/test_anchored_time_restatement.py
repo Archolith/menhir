@@ -265,9 +265,8 @@ def test_installed_graphiti_accepts_the_preserved_attributes_kwarg() -> None:
 @pytest.mark.parametrize(
     ("flags", "preserved"),
     [
-        ({}, False),
-        ({"anchored_time_resolver_enabled": True}, True),
-        ({"anchored_time_resolver_enabled": True, "anchored_time_expiry_enabled": True}, True),
+        ({"anchored_time_resolver_enabled": False}, False),
+        ({}, True),
     ],
 )
 def test_client_passes_preserved_attributes_to_graphiti(monkeypatch, flags, preserved) -> None:

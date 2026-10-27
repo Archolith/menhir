@@ -1036,7 +1036,7 @@ class AnchoredTimeResult:
     #: From the window placement: "two_options", "year_ambiguous", "ambiguous_anchor" or None.
     ambiguity: str | None = None
     #: P3: the edge's own ``invalid_at`` at extraction time, set only when
-    #: MENHIR_ANCHORED_TIME_EXPIRY is on and the edge is a classified point event or state.
+    #: the anchored-time switch (MENHIR_ANCHORED_TIME_RESOLVER) is on and the edge is a classified point event or state.
     world_end: datetime | None = None
 
 
@@ -1063,13 +1063,13 @@ class AnchoredTimeReport:
     #: The add_episode invocation that produced this report (graphiti_extraction_policy
     #: anchored_time_owner); only that invocation may persist it.
     owner: str | None = None
-    #: P3: MENHIR_ANCHORED_TIME_EXPIRY was on for this episode. ``world_end_kept`` counts the
+    #: P3: world-end expiry (MENHIR_ANCHORED_TIME_RESOLVER) was on for this episode. ``world_end_kept`` counts the
     #: ``WORLD_END`` answers MenhirEdgeExpiryHook gave; ``stamped`` counts the edges the persist
     #: step labelled ``time_expiry = 'world_end'``.
     expiry: bool = False
     world_end_kept: int = 0
     stamped: int = 0
-    #: MENHIR_ANCHORED_TIME_ATTACH: set when the blind check ran for this episode's decisions
+    #: Attach check (MENHIR_ANCHORED_TIME_RESOLVER): set when the blind check ran for this episode's decisions
     #: (``attach_model`` non-empty means the persisted contract is ``at2``). ``attach_status`` is
     #: "" (check off), "no_candidates", "ok", or the check call's failure status.
     attach_prompt_version: str = ""
@@ -1096,7 +1096,7 @@ def plan_overlay(
 ) -> list[AnchoredTimeResult]:
     """Decide the ``valid_at`` overlay for every edge. Pure: same inputs, same decisions.
 
-    ``attach`` (MENHIR_ANCHORED_TIME_ATTACH) maps fact index to the blind check's decision. When
+    ``attach`` (the blind check under MENHIR_ANCHORED_TIME_RESOLVER) maps fact index to the blind check's decision. When
     given, a fact that would be written is written only on ``ATTACH_AGREE``; otherwise its reason
     is the decision (a missing index is ``ATTACH_UNVERIFIED``), and a state window past the speech
     date gets its own reason ``state_future``. ``None`` is exactly the behavior without the check.

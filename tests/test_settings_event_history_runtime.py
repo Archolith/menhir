@@ -173,6 +173,8 @@ def test_runtime_off_path_does_not_create_sync_chat_for_these_paths(monkeypatch)
     settings = MemorySettings(
         personal_memory_consolidation_enabled=False,
         personal_memory_event_history_enabled=False,
+        personal_memory_scalar_state_enabled=False,
+        personal_memory_counting_enabled=False,
         verifier_sync_enabled=False,
         structure_watcher_enabled=False,
         personal_memory_consolidation_audit_enabled=False,
@@ -220,6 +222,7 @@ def test_runtime_registers_only_requested_personal_memory_lanes(
         personal_memory_consolidation_enabled=counter,
         personal_memory_event_history_enabled=event,
         personal_memory_scalar_state_enabled=scalar,
+        personal_memory_counting_enabled=False,
         verifier_sync_enabled=False,
         structure_watcher_enabled=False,
         artifact_reconcile_mode="off",

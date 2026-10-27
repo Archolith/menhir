@@ -1,4 +1,4 @@
-"""Blind attach check call (MENHIR_ANCHORED_TIME_ATTACH): one LLM call, its timeout, and a small cache.
+"""Blind attach check call (runs under MENHIR_ANCHORED_TIME_RESOLVER): one LLM call, its timeout, and a small cache.
 
 Mirrors anchored_time_resolver: ``attach`` never raises except on cancellation, and every failure
 becomes a status. Any non-ok status means no write (V3) in the caller. The prompt and the answer
