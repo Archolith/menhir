@@ -179,6 +179,8 @@ class RecallMemoriesTool(BaseJsonTool):
             payload["candidates_evaluated"] = result.get("candidates_evaluated", 0)
         if result.get("note"):
             payload["note"] = result.get("note")
+        if result.get("query_hint"):
+            payload["query_hint"] = result.get("query_hint")
         if result.get("authority_layer"):
             # Decision-relevant and already bounded by recall (7.J), so compact mode retains it.
             payload["authority_layer"] = result.get("authority_layer")

@@ -103,6 +103,8 @@ _SETTINGS = (
         'personal_memory', 'Counted Views appear only as verdicts, not ranked memories; their occurrence observations leave recall.', True, ()),
     ('personal_memory_counting_wording_enabled', 'MENHIR_PERSONAL_MEMORY_COUNTING_WORDING_ENABLED', False,
         'personal_memory', 'Counted verdicts read "at least N you mentioned" and stay advisory.', True, ()),
+    ('count_anchor_hint_enabled', 'MENHIR_COUNT_ANCHOR_HINT_ENABLED', True,
+        'personal_memory', 'Recall adds a query_hint on anchored count questions ("before the offer on X": X is not counted).', True, ()),
     ('benchmark_mode', 'MENHIR_BENCHMARK_MODE', False, 'runtime', 'Enable benchmark mode.', False, ()),
     ('frontier_bm25', 'MENHIR_FRONTIER_BM25', False, 'frontier', 'Enable frontier bm25.', True, ()),
     ('frontier_content_vector', 'MENHIR_FRONTIER_CONTENT_VECTOR', False, 'frontier',

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from menhir.services.ingest_service import IngestService
 
+from menhir.domain.count_anchor_hint import count_anchor_hint
 from menhir.domain.count_match import match_slot_row
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
 from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FAMILY
@@ -2573,6 +2574,10 @@ async def run_recall(
         trace=retrieval_trace,
         authority_layer=tuple(authority_layer) or None,
         source_memories=source_memories,
+        query_hint=(
+            count_anchor_hint(query)
+            if getattr(service, "count_anchor_hint_enabled", False) else None
+        ),
     )
 
 

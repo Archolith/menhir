@@ -694,6 +694,13 @@ class ContextBuilderService:
                 lines.append(note_line)
                 running_tokens += note_tokens
 
+        if recall_result.query_hint:
+            hint_line = f"Memory note: {recall_result.query_hint}"
+            hint_tokens = _tokens_for(hint_line)
+            if running_tokens + hint_tokens <= effective_budget:
+                lines.append(hint_line)
+                running_tokens += hint_tokens
+
         context = "\n\n".join(lines)
         if todo_section:
             context += todo_section

@@ -218,6 +218,7 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
         authority_layer=result.get("authority_layer"),
         event_authority_layer=result.get("event_authority_layer"),
         source_memories=result.get("source_memories"),
+        query_hint=result.get("query_hint"),
     )
 
 

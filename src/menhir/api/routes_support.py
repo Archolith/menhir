@@ -347,6 +347,7 @@ class RecallResponse(BaseModel):
     authority_layer: list[ScalarAuthorityVerdictResponse] | None = None
     event_authority_layer: list[EventAuthorityVerdictResponse] | None = None
     source_memories: list[SourceMemoryResponse] | None = None
+    query_hint: str | None = None
 
 
 class RecallHistoryRequest(BaseModel):

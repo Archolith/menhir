@@ -438,6 +438,7 @@ class MemorySettings:
     personal_memory_counting_recall_authority_only: bool = False
     # Unit 6: counted verdicts read "at least N you mentioned" and never lead.
     personal_memory_counting_wording_enabled: bool = False
+    count_anchor_hint_enabled: bool = True
     personal_memory_counting_lease_seconds: int = 900
 
     # Benchmark mode — when true, disables the background scheduler,
@@ -1019,6 +1020,10 @@ class MemorySettings:
             personal_memory_counting_wording_enabled=parse_bool_env(_getenv(
                 "MENHIR_PERSONAL_MEMORY_COUNTING_WORDING_ENABLED",
                 default=str(cls.personal_memory_counting_wording_enabled),
+            )),
+            count_anchor_hint_enabled=parse_bool_env(_getenv(
+                "MENHIR_COUNT_ANCHOR_HINT_ENABLED",
+                default=str(cls.count_anchor_hint_enabled),
             )),
             personal_memory_counting_lease_seconds=max(1, int(_getenv(
                 "MENHIR_PERSONAL_MEMORY_COUNTING_LEASE_SECONDS",

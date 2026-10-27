@@ -392,6 +392,9 @@ class RecallResult:
     # memories next to `results`, oldest first. None when the lane is off or failed;
     # `results`/`candidates_evaluated` are identical either way.
     source_memories: tuple[SourceMemory, ...] | None = None
+    # MENHIR_COUNT_ANCHOR_HINT: deterministic query-text hint for anchored count questions.
+    # None when the flag is off or the query does not match; preserves flag-off wire output.
+    query_hint: str | None = None
 
 
 @dataclass(frozen=True)
