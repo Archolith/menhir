@@ -105,6 +105,8 @@ _SETTINGS = (
         'personal_memory', 'Counted verdicts read "at least N you mentioned" and stay advisory.', True, ()),
     ('count_anchor_hint_enabled', 'MENHIR_COUNT_ANCHOR_HINT_ENABLED', True,
         'personal_memory', 'Recall adds a query_hint on anchored count questions ("before the offer on X": X is not counted).', True, ()),
+    ('stale_lead_demotion_enabled', 'MENHIR_STALE_LEAD_DEMOTION_ENABLED', True,
+        'personal_memory', 'A leading count stays advisory when the same subject has a newer count in a related slot (owned_bike_count vs a later bike_purchase_count).', True, ()),
     ('benchmark_mode', 'MENHIR_BENCHMARK_MODE', False, 'runtime', 'Enable benchmark mode.', False, ()),
     ('frontier_bm25', 'MENHIR_FRONTIER_BM25', False, 'frontier', 'Enable frontier bm25.', True, ()),
     ('frontier_content_vector', 'MENHIR_FRONTIER_CONTENT_VECTOR', False, 'frontier',

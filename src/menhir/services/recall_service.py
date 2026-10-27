@@ -102,6 +102,7 @@ class RecallService(RecallSupportMixin):
     counting_recall_authority_only: bool = False  # unit R: counted Views only as verdicts
     counting_wording_enabled: bool = False  # unit 6: "at least N you mentioned", never leads
     count_anchor_hint_enabled: bool = False  # query_hint on anchored count questions
+    stale_lead_demotion_enabled: bool = False  # a count lead with newer related evidence is advisory
     #: When True, a recognized conservative first-person event recall query (non-None namespace) surfaces
     #: a leading/advisory event-history authority layer. Default OFF: no event authority or assertion read.
     event_history_authority_enabled: bool = False

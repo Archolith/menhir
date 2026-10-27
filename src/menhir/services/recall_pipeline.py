@@ -75,6 +75,8 @@ from menhir.infrastructure.paths import repo_root_for_project
 
 logger = logging.getLogger(__name__)
 
+# Distinct newer attributes read per stale-lead check; a full page is treated as unproven (advisory).
+_STALE_LEAD_ATTR_LIMIT = 500
 
 def _inferred_self_on(service: object) -> bool:
     """MENHIR_INFERRED_SELF_MODE observe/enforce: recall reads the inferred self tier too."""
@@ -1365,6 +1367,39 @@ async def run_recall(
                     logger.exception("structured View provenance unavailable; returning head only")
                     return {"contributors": [], "total": 0, "next_offset": None}
 
+            from menhir.domain.stale_lead import DEMOTABLE_VALUE_KINDS, related_attributes
+            _stale_check = bool(getattr(service, "stale_lead_demotion_enabled", False))
+
+            async def _newer_related(
+                subject_uuid: str, attribute: str, value_kind: str, after: Any,
+                before: str | None = None,
+            ) -> list[str] | None:
+                """Attributes of newer related count assertions that make a lead stale.
+
+                [] = the lead stands. None = the read failed; the caller keeps the lead advisory,
+                like every other authority read failure here. Required because a later statement
+                can land in another slot (bike_purchase_count) and never update the lead
+                (owned_bike_count); test_stale_lead_demotion covers it."""
+                if not _stale_check or value_kind not in DEMOTABLE_VALUE_KINDS or not after:
+                    return []
+                try:
+                    rows = await asyncio.to_thread(
+                        service.graph_adapter.newer_subject_assertions,
+                        subject_uuid=subject_uuid, value_kind=value_kind, after=str(after),
+                        before=before, namespace=stamped_namespace(namespace),
+                        limit=_STALE_LEAD_ATTR_LIMIT)
+                except Exception:
+                    logger.exception(
+                        "stale-lead read failed slot=%r; advisory", (subject_uuid, attribute))
+                    return None
+                if len(rows) >= _STALE_LEAD_ATTR_LIMIT:
+                    logger.warning(
+                        "stale-lead read hit its attribute limit slot=%r; advisory",
+                        (subject_uuid, attribute))
+                    return None
+                return sorted({str(r.get("attribute") or "") for r in rows
+                               if related_attributes(attribute, str(r.get("attribute") or ""))})
+
             auth_added = 0
             _counted_verdicts_emitted = 0
             _verdict_min_sim = float(tuning.scalar_verdict_min_similarity or 0.0)
@@ -1416,6 +1451,12 @@ async def run_recall(
                             except Exception:
                                 logger.exception(
                                     "as-of foundation read failed slot=%r; advisory", (subj, attr))
+                            a_stale_by: list[str] | None = []
+                            if a_founded:
+                                # Same fold bound as the as-of value: newer evidence up to <date>.
+                                a_stale_by = await _newer_related(
+                                    subj, attr, vk, st.valid_at, before=_as_of_dt.isoformat())
+                            a_leads = a_founded and a_stale_by == []
                             aname = (f"{st.subject_display or 'user'}'s {attr} as of {_as_of_str} = "
                                      f"{st.value}.")
                             candidate_inputs.append({
@@ -1430,7 +1471,7 @@ async def run_recall(
                                 "bm25_rank": None, "cosine_rank": None, "content_rank": None,
                                 "content_cosine": None, "is_superseded_view": False,
                                 "view_kind": "scalar_state",
-                                "is_scalar_authority": a_founded,
+                                "is_scalar_authority": a_leads,
                             })
                             metadata_by_uuid[auuid] = {
                                 "name": aname, "content": aname,
@@ -1452,7 +1493,7 @@ async def run_recall(
                                 relations,
                             )
                             authority_layer.append(ScalarAuthorityVerdict(
-                                kind="as_of", status="leads" if a_founded else "advisory",
+                                kind="as_of", status="leads" if a_leads else "advisory",
                                 subject_uuid=subj, attribute=attr, scope=scp,
                                 value_kind=vk, unit=un, value=st.value,
                                 valid_at=st.valid_at, view_uuid=None,
@@ -1464,11 +1505,12 @@ async def run_recall(
                                 next_offset=contributor_payload.get("next_offset"),
                             ))
                             _authority_audit.audit(
-                                "authority_annotation", "leads" if a_founded else "advisory",
+                                "authority_annotation", "leads" if a_leads else "advisory",
                                 namespace=stamped_namespace(namespace), subject_uuid=subj,
                                 slot=[attr, scp, vk, un],
                                 details={"kind": "as_of", "as_of": _as_of_str,
-                                         "value": str(st.value), "user_foundation": a_founded})
+                                         "value": str(st.value), "user_foundation": a_founded,
+                                         "related_stale_by": a_stale_by})
                             auth_added += 1
                     continue
                 view = await asyncio.to_thread(
@@ -1502,7 +1544,11 @@ async def run_recall(
                                 if e_founded and tuning.scalar_view_freshness_gate:
                                     expiry_stale_by = newer_unfolded_evidence(
                                         (subj, attr, scp, vk, un), exp.valid_at, _obs_times)
-                                e_leads = bool(e_founded) and not expiry_stale_by
+                                # Same slot (freshness gate) and related slot (stale-lead check).
+                                e_related_by: list[str] | None = []
+                                if e_founded and not expiry_stale_by:
+                                    e_related_by = await _newer_related(subj, attr, vk, exp.valid_at)
+                                e_leads = bool(e_founded) and not expiry_stale_by and e_related_by == []
                                 ename = (
                                     f"{exp.subject_display or 'user'}'s {attr}: EXPIRED. last known "
                                     f"{exp.expired_value} as of {exp.valid_at}; current {attr} UNKNOWN.")
@@ -1550,7 +1596,8 @@ async def run_recall(
                                     slot=[attr, scp, vk, un],
                                     details={"kind": "expiry", "expired_value": str(exp.expired_value),
                                              "valid_at": exp.valid_at, "user_foundation": e_founded,
-                                             "stale_by": list(expiry_stale_by)})
+                                             "stale_by": list(expiry_stale_by),
+                                             "related_stale_by": e_related_by})
                                 auth_added += 1
                     continue
                 if not _projection_is_recall_eligible(view):
@@ -1613,6 +1660,11 @@ async def run_recall(
                     view_stale_by = newer_unfolded_evidence(
                         (subj, attr, scp, vk, un), view.get("valid_at"), _obs_times)
                     view_leads = not view_stale_by
+                # Stale-lead check: a newer count in a related slot keeps the View advisory too.
+                view_related_by: list[str] | None = []
+                if view_leads:
+                    view_related_by = await _newer_related(subj, attr, vk, view.get("valid_at"))
+                    view_leads = view_related_by == []
                 authority_candidate = {
                     "uuid": vuuid, "name": vname, "content": vname,
                     "scope": str(NodeScope.PERSISTENT), "memory_type": "SCALAR_STATE",
@@ -1689,7 +1741,8 @@ async def run_recall(
                     details={"kind": "current", "value": str(view.get("value")),
                              "effective_tier": tier, "tier_foundation": tier_foundation,
                              "user_foundation": user_foundation,
-                             "stale_by": list(view_stale_by)})
+                             "stale_by": list(view_stale_by),
+                             "related_stale_by": view_related_by})
                 auth_added += 1
             logger.debug("scalar-authority injection query=%r added=%d", query[:60], auth_added)
             # Lane summary: how many observations surfaced and how many authority annotations fired,

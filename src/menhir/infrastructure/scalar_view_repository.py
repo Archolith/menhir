@@ -369,6 +369,31 @@ class ScalarViewRepositoryMixin:
         )
         return bool(rows and rows[0].get("founded"))
 
+    def newer_subject_assertions(
+        self, *, subject_uuid: str, value_kind: str, after: str, before: str | None = None,
+        namespace: str | None = None, limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        """One row per attribute that has a materializable assertion about this subject and value
+        kind with valid_at after ``after`` (and at or before ``before`` when given), carrying its
+        newest valid_at. The stale-lead check filters these to related slots; superseded and
+        unbound rows never count as newer evidence. A full page (len == limit) may be truncated."""
+        rows = self.neo4j.execute(
+            f"""
+            MATCH (a:TypedAssertion {{subject_uuid: $u, value_kind: $vk}})
+            WHERE NOT coalesce(a.superseded, false) AND NOT coalesce(a.binding_pending, false)
+              AND a.valid_at > datetime($after)
+              AND ($before IS NULL OR a.valid_at <= datetime($before))
+              AND {tenant_scope_cypher('a')}
+            WITH a.attribute AS attribute, max(a.valid_at) AS newest
+            RETURN attribute, toString(newest) AS valid_at
+            ORDER BY attribute
+            LIMIT $limit
+            """,
+            {"u": subject_uuid, "vk": value_kind, "after": after, "before": before,
+             "limit": max(1, int(limit)), **tenant_scope_params(namespace)},
+        )
+        return [dict(r) for r in rows]
+
     def retire_scalar_state(self, *, view_key: str) -> bool:
         """Expire a current scalar_state View with NO replacement (a slot that vanished or now
         abstains). Retires-in-place (view_current=false, expired_at) — the version is kept for

@@ -2580,6 +2580,10 @@ class MemoryGraphAdapter:
         """True if the View's head traces to a declarant='user' :TurnEvidence foundation (G14/10.G)."""
         return self._views.scalar_view_has_user_foundation(**kwargs)
 
+    def newer_subject_assertions(self, **kwargs: Any) -> list[dict[str, Any]]:
+        """Newer materializable assertions for one subject and value kind (stale-lead check)."""
+        return self._views.newer_subject_assertions(**kwargs)
+
     def draw_scalar_state_provenance_edges(self, **kwargs: Any) -> dict[str, int]:
         """Draw a scalar_state View's CURRENT_ANCHOR/CONTRIBUTED_TO/SUPERSEDED_ANCHOR edges (Phase 3).
 
