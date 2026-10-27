@@ -11,7 +11,7 @@ from menhir.api.routes_support import RecallResponse
 from menhir.config.settings_model import MemorySettings
 from menhir.core.backend_runtime_data_ops import RuntimeProviderDataOpsMixin
 from menhir.domain.count_anchor_hint import count_anchor_hint
-from menhir.domain.recall import RecallResult
+from menhir.domain.recall import RecallResult, ScalarAuthorityVerdict
 from menhir.services.context_builder import ContextBuilderService
 from menhir.services.recall_service import RecallService
 from menhir.services.scoring_service import ScoringService
@@ -142,13 +142,42 @@ async def _context(result: RecallResult) -> str:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_context_appends_memory_note_for_hint_only_when_set() -> None:
+async def test_context_renders_query_note_only_when_set() -> None:
     # Fails if the hint is not rendered, rendered without the prefix, or rendered when None.
     with_hint = await _context(_result(query_hint="anchor says X"))
-    assert "Memory note: anchor says X" in with_hint
+    assert "Query note: anchor says X" in with_hint
+    assert with_hint.index("nothing relevant found") < with_hint.index("Query note:")
     without = await _context(_result())
     assert "anchor says X" not in without
-    assert "Memory note:" not in without
+    assert "Query note:" not in without
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_query_note_sits_between_authority_and_ranked_memories() -> None:
+    # The replay A/B tested this order; fails if the note moves to the tail or above authority.
+    from tests.test_context_builder import _mem
+    verdict = ScalarAuthorityVerdict(
+        kind="current", status="leads", subject_uuid="ent-self", attribute="owned",
+        scope="", value_kind="count", unit="", value=3, valid_at="2026-07-02T00:00:00+00:00",
+        view_uuid="v3", has_foundation=True, contributors=(), contributors_total=0)
+    ctx = await _context(RecallResult(
+        query="q", preset="knowledge", results=[_mem("m1", "n", "c", 0.9)],
+        candidates_evaluated=1, nodes_touched=1, authority_layer=(verdict,),
+        query_hint="anchor says X"))
+    assert ctx.index("[Scalar authority: LEADS]") < ctx.index("Query note:") < ctx.index("[Memory 1]")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_query_note_skipped_when_event_authority_fails_closed() -> None:
+    # The bench returns only the unresolved advisory then; fails if the note is still packed.
+    from tests.test_context_builder import _event_verdict
+    ctx = await _context(_result(
+        query_hint="anchor says X",
+        event_authority_layer=(_event_verdict(status="advisory", gate="anchor", has_foundation=False),)))
+    assert "[Event authority: UNRESOLVED]" in ctx
+    assert "Query note:" not in ctx
 
 
 # --------------------------------------------------------------------------- settings

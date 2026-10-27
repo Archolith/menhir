@@ -548,6 +548,19 @@ class ContextBuilderService:
         # event unresolved instruction was rendered and ranked memories are NOT packed as answer
         # evidence (tempting, but unverified against this selection).
 
+        # Query hint goes after the authority blocks and before the ranked memories: the shape
+        # the #168 replay A/B tested. Skipped when failed closed (no answer evidence to qualify).
+        hint_line = None
+        hint_at = len(lines)
+        if recall_result.query_hint and not fail_closed:
+            candidate = f"Query note: {recall_result.query_hint}"
+            hint_tokens = _tokens_for(candidate)
+            if running_tokens + hint_tokens <= effective_budget:
+                hint_line = candidate
+                running_tokens += hint_tokens
+            else:
+                truncated = True
+
         # Relevance-ranked list first — recall order is the load-bearing signal (an A/B
         # showed a Timeline-first brief buries the answer, which is usually the top-relevance,
         # often-undated memory). Identical to the off path. Skipped entirely when an event
@@ -685,21 +698,19 @@ class ContextBuilderService:
             lines.append("Memory: nothing relevant found for this query.")
             if recall_result.note:
                 lines.append(f"Memory note: {recall_result.note}")
-            running_tokens = _tokens_for("\n\n".join(lines))
-        elif recall_result.note:
-            # Append note if results exist and note is present
-            note_line = f"Memory note: {recall_result.note}"
-            note_tokens = _tokens_for(note_line)
-            if running_tokens + note_tokens <= effective_budget:
-                lines.append(note_line)
-                running_tokens += note_tokens
-
-        if recall_result.query_hint:
-            hint_line = f"Memory note: {recall_result.query_hint}"
-            hint_tokens = _tokens_for(hint_line)
-            if running_tokens + hint_tokens <= effective_budget:
+            if hint_line is not None:
                 lines.append(hint_line)
-                running_tokens += hint_tokens
+            running_tokens = _tokens_for("\n\n".join(lines))
+        else:
+            if hint_line is not None:
+                lines.insert(hint_at, hint_line)
+            if recall_result.note:
+                # Append note if results exist and note is present
+                note_line = f"Memory note: {recall_result.note}"
+                note_tokens = _tokens_for(note_line)
+                if running_tokens + note_tokens <= effective_budget:
+                    lines.append(note_line)
+                    running_tokens += note_tokens
 
         context = "\n\n".join(lines)
         if todo_section:
