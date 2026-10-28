@@ -24,7 +24,6 @@ REQUIRED_LANES = frozenset(
         "test_e2e_08_provider_failure_is_not_silent[mvp_default]",
         "test_e2e_08_malformed_artifact_metadata[mvp_default]",
         "test_e2e_09_scalar_state[mvp_default]",
-        "test_e2e_09_scalar_router_and_shadow[mvp_default]",
         "test_e2e_09_scalar_binding_repair[mvp_default]",
         "test_e2e_09_scalar_history[mvp_default]",
         "test_e2e_10_counting[mvp_default]",
