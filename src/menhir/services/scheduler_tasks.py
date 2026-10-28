@@ -561,9 +561,6 @@ async def consolidate_personal_memory(
     scalar_lineage_limit: int = 5000,
     scalar_embed_version: str | None = None,
     scalar_history_enabled: bool = False,
-    scalar_deterministic_shadow_enabled: bool = False,
-    scalar_deterministic_router_enabled: bool = False,
-    scalar_deterministic_router_promoted_classes: tuple[str, ...] = (),
     enable_event_history: bool = False,
     event_history_perceiver_version: str = "v1",
     event_batch_size: int = 500,
@@ -589,14 +586,6 @@ async def consolidate_personal_memory(
         "counter_state": enable_counter_state,
         "scalar_threshold": scalar_threshold if enable_scalar_state else None,
     }
-    # Preserve the flag-off audit contract: adding a disabled shadow field would change every
-    # consolidation pass payload even when the observe-only feature is not in use.
-    if enable_scalar_state and scalar_deterministic_shadow_enabled:
-        pass_details["scalar_deterministic_shadow"] = True
-    if enable_scalar_state and scalar_deterministic_router_enabled:
-        pass_details["scalar_deterministic_router"] = {
-            "promoted_classes": sorted(set(scalar_deterministic_router_promoted_classes))[:64],
-        }
     if enable_event_history:
         pass_details["event_history"] = True
         pass_details["event_perceiver_version"] = event_history_perceiver_version
@@ -766,9 +755,6 @@ async def consolidate_personal_memory(
                         lineage_limit=scalar_lineage_limit,
                         embed_version=scalar_embed_version,
                         scalar_history_enabled=scalar_history_enabled,
-                        deterministic_shadow_enabled=scalar_deterministic_shadow_enabled,
-                        deterministic_router_enabled=scalar_deterministic_router_enabled,
-                        deterministic_router_promoted_classes=scalar_deterministic_router_promoted_classes,
                         reconcile_attribute=scalar_reconcile_attribute,
                         reconcile_scope=scalar_reconcile_scope,
                         reconcile_subject=scalar_reconcile_subject,

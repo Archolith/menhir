@@ -465,12 +465,6 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
             settings, "personal_memory_scalar_state_perceiver_version", "v2"),
         scalar_threshold=getattr(settings, "personal_memory_scalar_threshold", 1.0),
         scalar_history_enabled=getattr(settings, "personal_memory_scalar_history_enabled", False),
-        scalar_deterministic_shadow_enabled=getattr(
-            settings, "personal_memory_scalar_deterministic_shadow", False),
-        scalar_deterministic_router_enabled=getattr(
-            settings, "personal_memory_scalar_deterministic_router", False),
-        scalar_deterministic_router_promoted_classes=getattr(
-            settings, "personal_memory_scalar_deterministic_classes", ()),
     )
     await scheduler.start()
     snapshot = scheduler.status_snapshot()

@@ -52,7 +52,6 @@ SHIPPED_SETTINGS = {
     "personal_memory_consolidation_enabled": False,
     "personal_memory_scalar_state_enabled": True,
     "personal_memory_scalar_history_enabled": False,
-    "personal_memory_scalar_deterministic_router": False,
     "personal_memory_event_history_enabled": False,
     "personal_memory_event_history_authority_enabled": False,
     "personal_memory_counting_enabled": True,

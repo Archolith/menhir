@@ -89,12 +89,6 @@ async def phase3_run_impl(
         scalar_embed_version=view_embedder_version(settings),
         scalar_history_enabled=getattr(
             settings, "personal_memory_scalar_history_enabled", False),
-        scalar_deterministic_shadow_enabled=getattr(
-            settings, "personal_memory_scalar_deterministic_shadow", False),
-        scalar_deterministic_router_enabled=getattr(
-            settings, "personal_memory_scalar_deterministic_router", False),
-        scalar_deterministic_router_promoted_classes=getattr(
-            settings, "personal_memory_scalar_deterministic_classes", ()),
         enable_event_history=getattr(
             settings, "personal_memory_event_history_enabled", False),
         enable_counting=getattr(settings, "personal_memory_counting_enabled", False),

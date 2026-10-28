@@ -363,13 +363,6 @@ class MemorySettings:
     # stored scalar_history Views are excluded from generic recall (real rollback, not leakage).
     # See `.agent/archive/plans/menhir-scalar-history-projection-plan.md`.
     personal_memory_scalar_history_enabled: bool = False
-    # Observe-only deterministic typed-scalar shadow. When enabled, consolidation runs the pure
-    # deterministic extractor beside the existing LLM gate and emits bounded comparison audit
-    # telemetry. It never changes LLM decisions, writes, authority, or recall behavior.
-    personal_memory_scalar_deterministic_shadow: bool = False
-    # Opt-in deterministic scalar router; default-off preserves the existing LLM path.
-    personal_memory_scalar_deterministic_router: bool = False
-    personal_memory_scalar_deterministic_classes: tuple[str, ...] = ()
     # Event-history projection settings. All OFF by default; the perceiver version
     # stamps the projection cursor so bumping it revisits history.
     personal_memory_event_history_enabled: bool = False
@@ -871,22 +864,6 @@ class MemorySettings:
             personal_memory_consolidation_audit_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_AUDIT_ENABLED", default=str(cls.personal_memory_consolidation_audit_enabled))),
             personal_memory_recall_audit_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_RECALL_AUDIT_ENABLED", default=str(cls.personal_memory_recall_audit_enabled))),
             personal_memory_scalar_history_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED", default=str(cls.personal_memory_scalar_history_enabled))),
-            personal_memory_scalar_deterministic_shadow=parse_bool_env(_getenv(
-                "MENHIR_SCALAR_DETERMINISTIC_SHADOW",
-                default=str(cls.personal_memory_scalar_deterministic_shadow),
-            )),
-            personal_memory_scalar_deterministic_router=parse_bool_env(_getenv(
-                "MENHIR_PERSONAL_MEMORY_SCALAR_DETERMINISTIC_ROUTER",
-                default=str(cls.personal_memory_scalar_deterministic_router),
-            )),
-            personal_memory_scalar_deterministic_classes=tuple(dict.fromkeys(
-                item.strip().lower()
-                for item in parse_csv_env(_getenv(
-                    "MENHIR_PERSONAL_MEMORY_SCALAR_DETERMINISTIC_CLASSES",
-                    default="",
-                ))
-                if item.strip()
-            )),
             personal_memory_event_history_enabled=parse_bool_env(_getenv(
                 "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED",
                 default=str(cls.personal_memory_event_history_enabled),

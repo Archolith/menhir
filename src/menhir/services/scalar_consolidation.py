@@ -116,11 +116,6 @@ class ScalarConsolidationConfig:
     canonical_self: bool = False
     # When True, scalar_history Views are built alongside scalar_state at ingest and repair time.
     scalar_history_enabled: bool = False
-    # Observe-only deterministic shadow comparison; never changes scalar decisions or writes.
-    deterministic_shadow_enabled: bool = False
-    # Opt-in deterministic router; default off preserves the existing LLM route.
-    deterministic_router_enabled: bool = False
-    deterministic_router_promoted_classes: tuple[str, ...] = ()
 
 
 async def select_scalar_targets(
@@ -198,9 +193,6 @@ def run_scalar_consolidation(
             embed=embed,
             embed_version=config.embed_version,
             scalar_history_enabled=config.scalar_history_enabled,
-            deterministic_shadow_enabled=config.deterministic_shadow_enabled,
-            deterministic_router_enabled=config.deterministic_router_enabled,
-            deterministic_router_promoted_classes=config.deterministic_router_promoted_classes,
         )
         scalar_service.ensure_activated()
     except (ScalarStateActivationError, ScalarStateNotActivatedError) as exc:

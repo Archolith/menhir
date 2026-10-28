@@ -1,11 +1,9 @@
 """Pure structural grammar tests for compositional scalar identity."""
 
 from dataclasses import replace
-from types import SimpleNamespace
 
 import pytest
 
-from menhir.services.deterministic_scalar_extractor import DeterministicScalarExtractor
 from menhir.services.structural_scalar_composer import (
     REASON_CLAIM_INCOMPLETE,
     REASON_CONSTRAINT_MISMATCH,
@@ -181,13 +179,13 @@ def test_structural_positive_contract(source, proposal_fields, relation, target,
 def test_possessive_measurement_extracts_and_composes_end_to_end(
     source, expected_target, expected_unit, expected_value
 ):
-    extraction = DeterministicScalarExtractor().extract(
-        [SimpleNamespace(uuid="episode-1", content=source, reference_time=None)]
+    proposal = _proposal(
+        source,
+        attribute=expected_target,
+        value_kind="measurement",
+        unit=expected_unit,
+        value=expected_value,
     )
-
-    assert len(extraction.proposals) == 1
-    proposal = extraction.proposals[0]
-    assert (proposal.unit, proposal.value) == (expected_unit, expected_value)
 
     result = compose_structural_scalar_identity(proposal, source)
 

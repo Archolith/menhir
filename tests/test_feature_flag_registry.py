@@ -124,8 +124,6 @@ def test_known_interactions_and_observation_switches_are_recorded() -> None:
     for key in ("personal_memory_scalar_view_echo_drop_enabled",
                 "personal_memory_observation_dedup_enabled"):
         assert FEATURES[key].requires == ("personal_memory_scalar_state_enabled",)
-    assert FEATURES["personal_memory_scalar_deterministic_shadow"].emission_requires == (
-        "personal_memory_consolidation_audit_enabled",)
     for key in ("frontier_shadow", "personal_memory_recall_audit_enabled",
                 "personal_memory_consolidation_audit_enabled", "MENHIR_FRONTIER_TRACE"):
         assert FEATURES[key].observation_only is True

@@ -63,10 +63,6 @@ _SETTINGS = (
         'personal_memory', 'Record recall audit decisions.', False, ()),
     ('personal_memory_scalar_history_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED', False,
         'personal_memory', 'Enable personal memory scalar history enabled.', True, ()),
-    ('personal_memory_scalar_deterministic_shadow', 'MENHIR_SCALAR_DETERMINISTIC_SHADOW', False, 'personal_memory',
-        'Enable personal memory scalar deterministic shadow.', False, ()),
-    ('personal_memory_scalar_deterministic_router', 'MENHIR_PERSONAL_MEMORY_SCALAR_DETERMINISTIC_ROUTER', False,
-        'personal_memory', 'Enable the optional deterministic scalar router.', True, ()),
     ('personal_memory_event_history_enabled', 'MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED', False,
         'personal_memory', 'Enable personal memory event history enabled.', True, ()),
     ('personal_memory_event_history_authority_enabled', 'MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED',
@@ -196,15 +192,13 @@ _REQUIREMENT_SCOPE = {
 _VERSIONED: frozenset[str] = frozenset()
 _OBSERVATION = frozenset({"shadow_context_composition", "frontier_shadow",
     "personal_memory_consolidation_audit_enabled", "personal_memory_recall_audit_enabled",
-    "personal_memory_scalar_deterministic_shadow", "MENHIR_FRONTIER_TRACE",
+    "MENHIR_FRONTIER_TRACE",
     "MENHIR_BENCH_ACTIVE_RUN_ID", "MENHIR_BENCH_RESULTS_ROOT"})
 
 FEATURES = {
     setting: FeatureFlag(setting, env, default, category, description, recall,
         env_var_aliases=aliases, requires=_REQUIRES.get(setting, ()),
         requirement_scope=_REQUIREMENT_SCOPE.get(setting, ""),
-        emission_requires=("personal_memory_consolidation_audit_enabled",)
-            if setting == "personal_memory_scalar_deterministic_shadow" else (),
         version_bump=setting in _VERSIONED, observation_only=setting in _OBSERVATION)
     for setting, env, default, category, description, recall, aliases in _SETTINGS
 }
@@ -287,4 +281,10 @@ RETIRED = {
     "MENHIR_FRONTIER_BM25": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
     "personal_memory_scalar_view_collapse_enabled": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
     "MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_COLLAPSE_ENABLED": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
+    "personal_memory_scalar_deterministic_shadow": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
+    "MENHIR_SCALAR_DETERMINISTIC_SHADOW": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
+    "personal_memory_scalar_deterministic_router": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
+    "MENHIR_PERSONAL_MEMORY_SCALAR_DETERMINISTIC_ROUTER": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
+    "personal_memory_scalar_deterministic_classes": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
+    "MENHIR_PERSONAL_MEMORY_SCALAR_DETERMINISTIC_CLASSES": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
 }

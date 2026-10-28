@@ -136,11 +136,6 @@ class MaintenanceScheduler:
     scalar_threshold: float = 2 / 3
     # Build advisory scalar_history Views alongside scalar_state at ingest and repair time.
     scalar_history_enabled: bool = False
-    # Observe-only deterministic typed-scalar shadow; default off and behavior-neutral.
-    scalar_deterministic_shadow_enabled: bool = False
-    # Opt-in deterministic scalar router; default off preserves the existing LLM route.
-    scalar_deterministic_router_enabled: bool = False
-    scalar_deterministic_router_promoted_classes: tuple[str, ...] = ()
     lifecycle_consolidation_interval_s: float = 86400.0  # daily
     lifecycle_consolidation_enabled: bool = True
     lifecycle_decay_interval_s: float = 86400.0  # daily
@@ -935,9 +930,6 @@ class MaintenanceScheduler:
             scalar_threshold=self.scalar_threshold,
             scalar_embed_version=self.experience_embed_version,
             scalar_history_enabled=self.scalar_history_enabled,
-            scalar_deterministic_shadow_enabled=self.scalar_deterministic_shadow_enabled,
-            scalar_deterministic_router_enabled=self.scalar_deterministic_router_enabled,
-            scalar_deterministic_router_promoted_classes=self.scalar_deterministic_router_promoted_classes,
             enable_counter_state=self.personal_memory_enabled,
             enable_event_history=self.event_history_enabled,
             enable_counting=self.counting_enabled,

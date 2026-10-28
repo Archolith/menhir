@@ -23,7 +23,6 @@ CAMPAIGN_FLAGS = {
     "MENHIR_FRONTIER_SHADOW": "frontier_shadow",
     "MENHIR_FRONTIER_SOURCE_MEMORY_POOLS": "frontier_source_memory_pools",
     "MENHIR_VERIFIER_SYNC_ENABLED": "verifier_sync_enabled",
-    "MENHIR_SCALAR_DETERMINISTIC_SHADOW": "personal_memory_scalar_deterministic_shadow",
 }
 
 
