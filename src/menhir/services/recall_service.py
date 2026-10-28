@@ -102,8 +102,7 @@ class RecallService(RecallSupportMixin):
     counting_wording_enabled: bool = True  # unit 6: "at least N you mentioned", never leads
     anchored_count_hint: bool = True  # query_hint on anchored count questions (#168: on, knob)
     stale_lead_demotion: bool = True  # a count lead with newer related evidence is advisory
-    #: When True, a recognized conservative first-person event recall query (non-None namespace) surfaces
-    #: a leading/advisory event-history authority layer. Default OFF: no event authority or assertion read.
+    #: On: a first-person event query (non-None namespace) gets an event-history authority layer.
     event_history_authority_enabled: bool = False
     inferred_self_mode: str = "off"  # MENHIR_INFERRED_SELF_MODE; not "off": recall reads both self tiers
     #: Candidate-readonly: never reinforce retrieval via access timestamps, edge weights or lifecycle.

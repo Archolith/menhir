@@ -144,10 +144,13 @@ async def test_e2e_10_counting(
                     "counting_stage_runs_after_scalar_with_k_samples",
                     passed=bool(result.get("counting_enabled"))
                     and len(script.calls("scalar")) == 3 and len(script.calls("counting")) == 3
-                    and result.get("counting_llm_calls") == 3,
-                    detail={k: result.get(k) for k in (
+                    # Related-count decide is always on since the #168 freeze; its calls count too.
+                    and result.get("counting_llm_calls")
+                    == 3 + len(script.calls("default:decide")),
+                    detail={**{k: result.get(k) for k in (
                         "counting_enabled", "counting_llm_calls", "counting_occurrences_stored",
                         "counting_namespaces_failed")},
+                        "decide_calls": len(script.calls("default:decide"))},
                 )
                 occ = _occurrences(e2e_config, namespace, lane_evidence)
                 lane_evidence.record(

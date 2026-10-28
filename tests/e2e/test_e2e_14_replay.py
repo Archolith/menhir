@@ -221,7 +221,8 @@ async def test_e2e_14_replay(
     )
     current_bumped = {attr: [r for r in rows_bump if r["attribute"] == attr and r["current"]]
                       for attr in EXPECTED_VIEWS}
-    bumped_to = {"mug_count": "v3", "gym_visit_count": "v2"}
+    # Counting stamps its effective version: extract v2 (+x2) and match (+m) are always on (#168).
+    bumped_to = {"mug_count": "v3", "gym_visit_count": "v2+x2+m"}
     lane_evidence.record(
         "perceiver_bump_replays_without_duplicates",
         passed=all(calls_bump[name] > calls_idle[name] for name in LANES)
