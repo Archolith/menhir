@@ -43,7 +43,6 @@ class RecallLabTuning(BaseModel):
     enable_fact_edges: bool = False
     fact_edge_k: int = Field(default=20, ge=1, le=200)
     fact_edge_mode: Literal["pointer", "standalone"] = "pointer"
-    similarity_scale: Literal["rrf", "normalized"] = "rrf"
     enable_content_vector: bool = False
     content_vector_replace_name: bool = False
     content_vector_k: int = Field(default=100, ge=1, le=200)

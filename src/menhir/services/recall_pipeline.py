@@ -65,7 +65,7 @@ from menhir.domain.utils import days_ago
 from menhir.domain.verb_facets import verb_facets
 from menhir.services.scheduler_protocols import LifecycleServiceProtocol
 from menhir.services.scoring_service import (
-    GRAPHITI_RRF_DUAL_METHOD_MAX,
+    GRAPHITI_RRF_DUAL_METHOD_MAX,  # noqa: F401  (re-export pinned by test_cf60_scoring_constants_owned_by_domain)
     MIN_SIMILARITY_THRESHOLD,
     ScoringService,
 )
@@ -871,30 +871,6 @@ async def run_recall(
         service, query, namespace, tuning, source_memory_limit,
         include_session=include_session, content_query_vector=content_query_vector,
     ))
-
-    # Plan 1b (staged; default "rrf" == byte-identical): normalize graphiti's
-    # RRF reranker score to [0, 1] so the VECTOR `similarity` lane shares one
-    # scale with the [0, 1] SOURCE_PRIORS, restoring PENDING=1.0's intended
-    # top-pin. This rescales one additive lane and CHANGES ranking, so it is
-    # off by default and measured on the oracle slice before any default flip.
-    # Applied here -- to genuine search scores only, before the pending
-    # fallback and provenance priors -- so those [0, 1] priors are untouched.
-    #
-    # SCOPE: only the search_scored (fused RRF, ~[0, 2]) path needs this. The
-    # attributed-hybrid/content paths already use weighted_rrf's pinned common
-    # ceiling, so dividing again would corrupt Arm-A parity. Guard both paths.
-    if (
-        tuning.similarity_scale == "normalized"
-        and not tuning.enable_bm25
-        and not tuning.enable_content_vector
-        and search_results
-    ):
-        search_results = [
-            (uuid, name, min(1.0, max(0.0, score / GRAPHITI_RRF_DUAL_METHOD_MAX)))
-            for uuid, name, score in search_results
-        ]
-        for uuid, _name, _score in search_results:
-            score_kind_map[uuid] = RetrievalScoreKind.WEIGHTED_RRF_NORMALIZED
 
     # Independent sources below must run even when semantic search is empty or failed.
     # Pending-only fallback is assembled after those sources have had a chance to contribute.
@@ -2222,15 +2198,8 @@ async def run_recall(
     # --- Phase 2: score + rank ---
     _t = perf_counter()
     scoring_trace = ScoringTrace() if trace else None
-    # Under normalized mode (plan 1b) the search-score lane was divided by the
-    # RRF max, so the floor scales by the same factor -> identical membership.
-    _min_similarity = (
-        MIN_SIMILARITY_THRESHOLD / GRAPHITI_RRF_DUAL_METHOD_MAX
-        if tuning.similarity_scale == "normalized"
-        else MIN_SIMILARITY_THRESHOLD
-    )
     scored = service.scoring_service.score_candidates(
-        candidates, preset, min_similarity=_min_similarity, trace=scoring_trace
+        candidates, preset, min_similarity=MIN_SIMILARITY_THRESHOLD, trace=scoring_trace
     )
     _t_phases["scoring"] = int((perf_counter() - _t) * 1000)
 

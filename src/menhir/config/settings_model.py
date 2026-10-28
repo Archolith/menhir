@@ -411,7 +411,6 @@ class MemorySettings:
     frontier_fact_relevance: bool = False  # attach the facts most similar to the query (plus the newest) instead of only the 5 newest
     frontier_verb_facets: bool = False     # append one keyword-matched fact per question verb after ranking (verb-centric questions only)
     frontier_fact_edge_mode: str = "standalone"  # how fact edges enter the pool: "standalone" (terse fact as its own candidate; net-negative at N=30) or "pointer" (hydrate endpoint nodes' rich context; preferred)
-    frontier_similarity_scale: str = "rrf"  # similarity lane scale (plan 1a/1b): "rrf" (today; RRF ~[0,2]) or "normalized" (divide search scores by the pinned RRF max -> [0,1], restoring PENDING's top-pin; ranking change, A/B before default flip)
     frontier_shadow: bool = False          # observe-only oracle/warden pass (trace)
     # Source-memory recall lane: additive section of raw episode memories (cosine over
     # n.content_embedding), NEXT TO the ranked results, never fused into them. Always on since
@@ -730,7 +729,6 @@ class MemorySettings:
             scalar_verdict_min_similarity=self.personal_memory_scalar_verdict_min_similarity,
             scalar_observation_recall=self.personal_memory_scalar_observation_recall,
             fact_edge_mode=self.frontier_fact_edge_mode,
-            similarity_scale=self.frontier_similarity_scale,
             enable_assertion_shadow=self.frontier_shadow,
             source_memory_limit=self.frontier_source_memory_limit,
             source_memory_max_chars=self.frontier_source_memory_max_chars,
@@ -961,7 +959,6 @@ class MemorySettings:
             frontier_fact_relevance=parse_bool_env(_getenv("MENHIR_FRONTIER_FACT_RELEVANCE", default=str(cls.frontier_fact_relevance))),
             frontier_verb_facets=parse_bool_env(_getenv("MENHIR_FRONTIER_VERB_FACETS", default=str(cls.frontier_verb_facets))),
             frontier_fact_edge_mode=_getenv("MENHIR_FRONTIER_FACT_EDGE_MODE", default=cls.frontier_fact_edge_mode).strip().lower(),
-            frontier_similarity_scale=_getenv("MENHIR_FRONTIER_SIMILARITY_SCALE", default=cls.frontier_similarity_scale).strip().lower(),
             frontier_shadow=parse_bool_env(_getenv("MENHIR_FRONTIER_SHADOW", default=str(cls.frontier_shadow))),
             frontier_source_memory_limit=_parse_int(
                 _getenv("MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT", default=str(cls.frontier_source_memory_limit)),

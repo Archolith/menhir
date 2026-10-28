@@ -21,8 +21,6 @@ def test_tuning_config_defaults_reproduce_legacy_behavior() -> None:
     cfg = RetrievalTuningConfig()
     assert cfg.enable_bm25 is False  # default path = single fused search_scored
     assert cfg.hybrid_alpha == 0.5
-    # Plan 1b staged behind a default-off flag: "rrf" == today's scale byte-for-byte.
-    assert cfg.similarity_scale == "rrf"
 
 
 @pytest.mark.unit
@@ -30,13 +28,6 @@ def test_tuning_config_defaults_reproduce_legacy_behavior() -> None:
 def test_tuning_config_rejects_out_of_range_alpha(bad: float) -> None:
     with pytest.raises(ValueError):
         RetrievalTuningConfig(hybrid_alpha=bad)
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize("bad", ["", "cosine", "RRF", "norm"])
-def test_tuning_config_rejects_unknown_similarity_scale(bad: str) -> None:
-    with pytest.raises(ValueError):
-        RetrievalTuningConfig(similarity_scale=bad)
 
 
 @pytest.mark.unit

@@ -101,15 +101,11 @@ class RetrievalScoreKind(str, Enum):
 # 0.15 on that scale admits roughly the top ~12-13 dual / ~6 single hits.
 # test_scoring_service::test_graphiti_rrf_scale_contract pins the rank_const=1
 # assumption against the graphiti package and fails loudly if upstream changes it.
-# Semantic normalization of this lane to [0,1] is a ranking change, staged behind
-# RetrievalTuningConfig.similarity_scale="normalized" (plan 1b); default "rrf" is
-# today's behavior byte-for-byte.
 MIN_SIMILARITY_THRESHOLD = 0.15
 
 # The dual-method (bm25 + cosine) top-hit ceiling of graphiti's RRF reranker score
 # under rank_const=1. This is the scale MIN_SIMILARITY_THRESHOLD and the [0,1]
-# SOURCE_PRIORS are (accidentally) mixed across today; plan 1b's normalized mode
-# divides search scores by this constant to put them on the [0,1] prior scale.
+# SOURCE_PRIORS are (accidentally) mixed across today.
 # Pinned by test_graphiti_rrf_scale_contract so an upstream RRF change is caught.
 GRAPHITI_RRF_DUAL_METHOD_MAX = 2.0
 
@@ -124,14 +120,12 @@ GRAPHITI_RRF_DUAL_METHOD_MAX = 2.0
 # surfaced it); ``FILE_LINKED`` gets a modest baseline so structural neighbors are
 # considered without dominating genuine semantic matches.
 #
-# KNOWN SCALE ACCIDENT (plan 1a, pending 1b): these priors live on [0, 1], but the
+# KNOWN SCALE ACCIDENT (plan 1a): these priors live on [0, 1], but the
 # VECTOR similarity they compete against in the additive formula is graphiti's RRF
 # score on a ~[0, 2] scale (``GRAPHITI_RRF_DUAL_METHOD_MAX``), NOT a cosine. So
 # ``PENDING = 1.0`` does not actually sit at the top today -- it lands mid-rank,
 # around half of a dual-method top VECTOR hit. This is recorded as fact, not fixed
-# here: correcting it rescales one additive lane and therefore changes ranking, so
-# it ships behind ``RetrievalTuningConfig.similarity_scale="normalized"`` (plan 1b,
-# measured on the oracle slice), never by editing these numbers in place.
+# here: correcting it rescales one additive lane and therefore changes ranking.
 SOURCE_PRIORS: dict[CandidateSource, float] = {
     CandidateSource.VECTOR: 0.0,
     CandidateSource.BM25: 0.0,
@@ -271,26 +265,6 @@ class RetrievalTuningConfig:
     #     edge-derived similarity prior. Preserves node richness AND fixes ranking. This is
     #     the default (standalone was the footgun default, measured net-NEGATIVE).
     fact_edge_mode: str = "pointer"
-    # Similarity scale contract (plan 1a/1b). "rrf" == today: graphiti's RRF
-    # reranker score feeds the additive relevance formula on its native ~[0, 2]
-    # scale (see GRAPHITI_RRF_DUAL_METHOD_MAX, owned by this module), and the 0.15 floor
-    # / [0, 1] SOURCE_PRIORS are (by accident) mixed across it. "normalized"
-    # divides the VECTOR/BM25 search scores by that pinned max so `similarity` is
-    # [0, 1] and PENDING=1.0 regains its intended top-pin; the floor scales to
-    # 0.075 in this mode so floor MEMBERSHIP is identical by construction. This
-    # rescales one additive lane and therefore CHANGES ranking, so it ships behind
-    # this flag (default "rrf", byte-for-byte today) and is measured on the bench
-    # oracle slice with a pre-registered parity rule before any default flip --
-    # never by argument (retrieval doc S6).
-    #
-    # MEASURED 2026-07-04 (LongMemEval oracle slice, N=500, llm-judge, recall-only):
-    # rrf 143/500 (0.2860) vs normalized 143/500 (0.2860) -- EXACT parity, with 18
-    # items churned symmetrically (9 win / 9 lose). Meets the >= parity flip rule on
-    # this corpus. Default held at "rrf" pending a multi-corpus check: LongMemEval
-    # under-exercises the PENDING/FILE_LINKED priors this change most affects (pure
-    # recall, no fresh-ingest or file-context at query time), so the global default
-    # flip is not yet claimed on one anecdotal corpus's parity.
-    similarity_scale: str = "rrf"
     # Content-vector lane (plan menhir-content-embedding-recall, Track A). EXPERIMENTAL,
     # default OFF == today's behavior byte-for-byte. When on, recall runs a menhir-owned
     # cosine pass over n.content_embedding (memory summary/content) as a third labeled lane
@@ -358,11 +332,6 @@ class RetrievalTuningConfig:
             raise ValueError(
                 'scalar_observation_recall must be "all", "gated" or "off", '
                 f"got {self.scalar_observation_recall!r}"
-            )
-        if self.similarity_scale not in ("rrf", "normalized"):
-            raise ValueError(
-                f'similarity_scale must be "rrf" or "normalized", '
-                f"got {self.similarity_scale!r}"
             )
         if self.content_vector_weight < 0.0:
             raise ValueError(

@@ -96,8 +96,6 @@ _SETTINGS = (
     ('frontier_verb_facets', 'MENHIR_FRONTIER_VERB_FACETS', False, 'frontier', 'Append one keyword-matched fact per question verb after ranking, for verb-centric questions.', True, ()),
     ('frontier_fact_edge_mode', 'MENHIR_FRONTIER_FACT_EDGE_MODE', 'standalone', 'frontier',
         'Configure frontier fact edge mode.', True, ()),
-    ('frontier_similarity_scale', 'MENHIR_FRONTIER_SIMILARITY_SCALE', 'rrf', 'frontier',
-        'Configure frontier similarity scale.', True, ()),
     ('frontier_shadow', 'MENHIR_FRONTIER_SHADOW', False, 'frontier', 'Enable frontier shadow.', False, ()),
     ('frontier_source_memory_pools', 'MENHIR_FRONTIER_SOURCE_MEMORY_POOLS', False, 'frontier',
         'Enable frontier source memory pools.', True, ()),
@@ -283,4 +281,6 @@ RETIRED = {
     "anchored_time_expiry_enabled": "2026-10-27: folded into MENHIR_ANCHORED_TIME_RESOLVER (#168 freeze)",
     "MENHIR_ANCHORED_TIME_EXPIRY": "2026-10-27: folded into MENHIR_ANCHORED_TIME_RESOLVER (#168 freeze)",
     "MENHIR_FRONTIER_ORACLE_SUBSET": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
+    "frontier_similarity_scale": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
+    "MENHIR_FRONTIER_SIMILARITY_SCALE": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
 }

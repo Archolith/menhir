@@ -18,7 +18,6 @@
   ];
   const advancedFields = [
     ['content_vector_k', 'Content candidates', 'number', { min: 1, max: 200, step: 1 }],
-    ['similarity_scale', 'Similarity scale', 'select', ['rrf', 'normalized']],
     ['enable_fact_edges', 'Fact-edge retrieval', 'bool'],
     ['fact_edge_mode', 'Fact-edge mode', 'select', ['pointer', 'standalone']],
     ['fact_edge_k', 'Fact-edge candidates', 'number', { min: 1, max: 200, step: 1 }],
