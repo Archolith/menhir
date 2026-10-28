@@ -216,13 +216,12 @@ def _body() -> dict[str, Any]:
             {
                 "id": "a",
                 "label": "A",
-                "tuning": {"enable_bm25": True},
+                "tuning": {},
             },
             {
                 "id": "b",
                 "label": "B",
                 "tuning": {
-                    "enable_bm25": True,
                     "enable_verb_facets": True,
                     "facet_weight": 0.7,
                 },
@@ -327,9 +326,9 @@ def test_recall_lab_accepts_all_seven_default_arms() -> None:
 
     assert response.status_code == 200
     assert [arm["id"] for arm in response.json()["arms"]] == [
-        "production", "a", "d", "e", "f", "g", "h",
+        "production", "d", "e", "f", "g", "h",
     ]
-    assert recall.max_active == 7
+    assert recall.max_active == 6
 
 
 @pytest.mark.unit
@@ -358,7 +357,7 @@ def test_recall_lab_runs_arms_concurrently_and_read_only() -> None:
     assert all(call["trace"] is True for call in recall.calls)
     assert all(call["include_warden_status"] is True for call in recall.calls)
     assert all(call["update_access"] is False for call in recall.calls)
-    assert recall.calls[0]["tuning"].enable_bm25 is True
+    assert recall.calls[0]["tuning"].enable_verb_facets is False
     assert recall.calls[1]["tuning"].enable_verb_facets is True
     assert recall.calls[1]["tuning"].facet_weight == 0.7
     assert payload["arms"][1]["results"][0]["source"] == "content_vector"

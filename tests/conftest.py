@@ -1670,7 +1670,7 @@ class StubGraphitiClient:
     build_indices_forces: list[bool] = field(default_factory=list)
     search_scored_results: list[tuple[str, str, float]] = field(default_factory=list)
     search_scored_calls: list[dict[str, object]] = field(default_factory=list)
-    # Per-method ranked hits for the attributed hybrid path (enable_bm25=True).
+    # Per-method ranked hits for the trace rank shadow (search_ranked_by_method).
     ranked_by_method_results: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
     ranked_by_method_calls: list[dict[str, object]] = field(default_factory=list)
     embed_query_result: list[float] = field(default_factory=lambda: [0.1, 0.2])

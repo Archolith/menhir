@@ -26,8 +26,6 @@ class RecallLabTuning(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    hybrid_alpha: float = Field(default=0.5, ge=0.0, le=1.0)
-    enable_bm25: bool = False
     enable_assertion_shadow: bool = True
     enable_facet_shadow: bool = False
     enable_facet_candidates: bool = False
@@ -311,12 +309,6 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
         "label": "Production",
         "enabled": True,
         "tuning": _default_tuning(),
-    },
-    {
-        "id": "a",
-        "label": "A · attributed control",
-        "enabled": True,
-        "tuning": _default_tuning(enable_bm25=True, fusion_admission_policy="production_fused"),
     },
     {
         "id": "d",

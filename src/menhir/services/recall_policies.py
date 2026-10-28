@@ -44,7 +44,7 @@ from menhir.domain.retrieval_trace_models import (
     ViewReachability,
 )
 from menhir.infrastructure.graphiti_client import GraphitiClient
-from menhir.services.hybrid_retrieval import FusionLane, hybrid_search, weighted_rrf_multi
+from menhir.services.hybrid_retrieval import FusionLane, weighted_rrf_multi
 
 if TYPE_CHECKING:
     from menhir.core.bootstrap import UnavailableGraphitiClient

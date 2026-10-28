@@ -78,7 +78,6 @@ _SETTINGS = (
     ('personal_memory_counting_enabled', 'MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED', True,
         'personal_memory', 'Count single happenings ("went to yoga") as scalar occurrences after the scalar phase (LLM calls from the scheduler); builds on scalar state.', True, ()),
     ('benchmark_mode', 'MENHIR_BENCHMARK_MODE', False, 'runtime', 'Enable benchmark mode.', False, ()),
-    ('frontier_bm25', 'MENHIR_FRONTIER_BM25', False, 'frontier', 'Enable frontier bm25.', True, ()),
     ('frontier_fusion_admission_policy', 'MENHIR_FRONTIER_FUSION_ADMISSION_POLICY', 'attributed', 'frontier',
         'Configure frontier fusion admission policy.', True, ()),
     ('frontier_diversity_gate', 'MENHIR_FRONTIER_DIVERSITY_GATE', False, 'frontier',
@@ -288,4 +287,6 @@ RETIRED = {
     "MENHIR_FRONTIER_CONTENT_VECTOR_K": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
     "frontier_content_vector_weight": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
     "MENHIR_FRONTIER_CONTENT_VECTOR_WEIGHT": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
+    "frontier_bm25": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
+    "MENHIR_FRONTIER_BM25": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
 }

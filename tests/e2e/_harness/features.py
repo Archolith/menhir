@@ -26,12 +26,12 @@ Three mechanisms, in increasing power. All are evidence-recorded.
 
 2. An explicit override list, applied on top of the preset::
 
-       MENHIR_E2E_FEATURES="frontier_bm25=on,explorer=off,structure_watcher=off"
+       MENHIR_E2E_FEATURES="frontier_shadow=on,explorer=off,structure_watcher=off"
 
 3. A full powerset sweep over named flags, which parametrizes every lane over all
    2**n combinations::
 
-       MENHIR_E2E_FEATURE_POWERSET="frontier_bm25,frontier_shadow,scalar_state"
+       MENHIR_E2E_FEATURE_POWERSET="frontier_shadow,scalar_state,scalar_history"
 
    Three flags is 8 runs of every lane. This is deliberately opt-in and deliberately
    not defaulted: the combinatorics are the point, and so is the cost.
@@ -138,11 +138,6 @@ FEATURE_REGISTRY: tuple[FeatureFlag, ...] = (
         summary="Per-client token auth. Outside the local-stdio MVP.",
     ),
     # --- default-off research lanes; the plan requires they stay preserved and off
-    _flag(
-        "frontier_bm25",
-        "MENHIR_FRONTIER_BM25",
-        summary="BM25 lexical candidate generation in the frontier retriever.",
-    ),
     _flag(
         "frontier_shadow",
         "MENHIR_FRONTIER_SHADOW",
@@ -278,7 +273,6 @@ PRESETS: dict[str, dict[str, bool]] = {
     "mvp_surface_only": {flag.name: flag.in_mvp_surface for flag in FEATURE_REGISTRY},
     #: Research lanes on, to check they remain non-destructive when an operator opts in.
     "research_on": _baseline(
-        frontier_bm25=True,
         scalar_state=True,
         scalar_history=True,
         event_history=True,

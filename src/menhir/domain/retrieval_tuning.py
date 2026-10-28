@@ -84,7 +84,7 @@ class RetrievalScoreKind(str, Enum):
 # sum_methods 1/(rank+1) -- a dual-method top hit = 2.0, single-method top = 1.0 --
 # so a 0.15 floor behaves as a RANK CUT (~top 12-13 dual / ~top 6 single), not a
 # cosine cutoff. The value is reasonable only by luck of rank_const=1; revisit the
-# scale (rescale or re-document as a rank cut) before tuning hybrid_alpha.
+# scale (rescale or re-document as a rank cut) before tuning it.
 #
 # The floor is SOURCE-AWARE: it only gates candidates whose relevance is a
 # vector-similarity score (CandidateSource.VECTOR). Candidates that were injected
@@ -169,20 +169,11 @@ FLOOR_EXEMPT_SOURCES: frozenset[CandidateSource] = frozenset(
 class RetrievalTuningConfig:
     """Knobs for candidate generation and semantic tuning.
 
-    Defaults reproduce today's behavior exactly: ``enable_bm25=False`` keeps the
-    single fused ``search_scored`` path (which itself already runs BM25 +
-    cosine via graphiti's RRF reranker). Turning ``enable_bm25`` on switches
-    recall to the *attributed* hybrid path that runs vector and BM25 as separate
-    labeled passes and blends them with :attr:`hybrid_alpha`.
-
-    ``hybrid_alpha`` is a rank-fusion weight, not a raw-score weight:
-    ``1.0`` = vector only, ``0.0`` = BM25 only, ``0.5`` = symmetric (equivalent
-    to plain reciprocal-rank fusion). It is left at a neutral default until
-    archolith-bench can tune it per query class; it is a seam, not a tuned value.
+    Defaults reproduce today's behavior exactly: candidate generation is the single
+    fused ``search_scored`` path (which itself already runs BM25 + cosine via
+    graphiti's RRF reranker).
     """
 
-    hybrid_alpha: float = 0.5
-    enable_bm25: bool = False
     enable_cross_encoder_rerank: bool = False
     rerank_top_n: int = 50
     embedding_dimensions: int | None = None
@@ -244,9 +235,8 @@ class RetrievalTuningConfig:
     # evidence its fold ignores (see domain/scalar_view_freshness.py). The verdict is still shown,
     # as advisory. On by default since the #168 freeze; kept as a per-request knob.
     scalar_view_freshness_gate: bool = True
-    # ``attributed`` preserves the existing experimental BM25 behavior. Benchmark
-    # control/treatment arms use ``production_fused`` so BM25 membership alone never
-    # grants a floor exemption that today's opaque Graphiti fusion does not grant.
+    # Benchmark control/treatment arms use ``production_fused`` so a lane's membership
+    # alone never grants a floor exemption that today's opaque Graphiti fusion does not grant.
     fusion_admission_policy: str = "attributed"
     # Source-memory lane (plan menhir-source-memory-lane). When on, recall builds an ADDITIVE
     # source_memories section (raw episode contents by cosine over n.content_embedding, oldest
@@ -283,10 +273,6 @@ class RetrievalTuningConfig:
     enable_verb_facets: bool = False
 
     def __post_init__(self) -> None:
-        if not 0.0 <= self.hybrid_alpha <= 1.0:
-            raise ValueError(
-                f"hybrid_alpha must be in [0.0, 1.0], got {self.hybrid_alpha!r}"
-            )
         # NaN fails this too: it would otherwise silently disable the gate.
         if not 0.0 <= self.scalar_verdict_min_similarity <= 1.0:
             raise ValueError(

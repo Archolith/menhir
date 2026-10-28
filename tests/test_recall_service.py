@@ -1163,66 +1163,10 @@ async def test_recall_service_shutdown_cancels_pending_rehydration_tasks(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_recall_hybrid_path_uses_split_search(
-    stub_graphiti_client, stub_memory_graph_adapter
-) -> None:
-    """enable_bm25 routes recall through the attributed split search, not search_scored."""
-    stub_graphiti_client.ranked_by_method_results = {
-        "cosine_similarity": [("vec-1", "Vector Hit")],
-        "bm25": [("bm25-1", "Exact Match")],
-    }
-    stub_memory_graph_adapter.candidate_metadata = [
-        _meta("vec-1", "Vector Hit"),
-        _meta("bm25-1", "Exact Match"),
-    ]
-    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
-
-    result = await svc.recall("err string", tuning=RetrievalTuningConfig(enable_bm25=True))
-
-    # Split search was used; the legacy fused path was not.
-    assert len(stub_graphiti_client.ranked_by_method_calls) == 1
-    assert stub_graphiti_client.search_scored_calls == []
-    assert {r.uuid for r in result.results} == {"vec-1", "bm25-1"}
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_recall_hybrid_bm25_only_hit_survives_floor(
-    stub_graphiti_client, stub_memory_graph_adapter
-) -> None:
-    """A BM25-only candidate normalizes far below the 0.15 floor but survives by source.
-
-    With alpha=0.99 the vector hit dominates fusion, so the bm25-only candidate's
-    normalized similarity is ~0.01 (< MIN_SIMILARITY_THRESHOLD). Without the
-    source-aware floor it would be dropped; as a BM25 source it must be kept.
-    """
-    stub_graphiti_client.ranked_by_method_results = {
-        "cosine_similarity": [("vec-1", "Vector Hit")],
-        "bm25": [("bm25-1", "Exact Match")],
-    }
-    stub_memory_graph_adapter.candidate_metadata = [
-        _meta("vec-1", "Vector Hit"),
-        _meta("bm25-1", "Exact Match"),
-    ]
-    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
-
-    result = await svc.recall(
-        "err string", tuning=RetrievalTuningConfig(enable_bm25=True, hybrid_alpha=0.99)
-    )
-
-    uuids = {r.uuid for r in result.results}
-    assert "bm25-1" in uuids  # exact lexical hit survives despite ~0.01 similarity
-    # And its computed similarity really is below the floor (proves exemption, not luck).
-    bm25_row = next(r for r in result.results if r.uuid == "bm25-1")
-    assert bm25_row.breakdown.semantic_similarity < 0.15
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
 async def test_recall_default_path_unchanged(
     stub_graphiti_client, stub_memory_graph_adapter
 ) -> None:
-    """Default tuning (enable_bm25=False) keeps the single fused search_scored path."""
+    """Default tuning keeps the single fused search_scored path."""
     _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
     svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
 

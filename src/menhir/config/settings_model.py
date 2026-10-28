@@ -394,11 +394,10 @@ class MemorySettings:
 
     # Frontier retrieval portions, mapped into a RetrievalTuningConfig at the recall entry
     # point via retrieval_tuning(). Most portions default OFF; enable any per deployment via
-    # MENHIR_FRONTIER_BM25 / _SHADOW / etc. (code defaults match .env.example, audit DOC-05).
+    # MENHIR_FRONTIER_SHADOW / etc. (code defaults match .env.example, audit DOC-05).
     # Oracle ranking and the intent lens are always on since #172 and have no setting; see
     # RetrievalTuningConfig. The Warden gate and its contradiction guard are on by default since
     # #173 (set each to false to opt out); the belief gate and evidence anchor (#349) stay opt-in.
-    frontier_bm25: bool = False            # attributed hybrid (vector+BM25) candidate gen
     frontier_fusion_admission_policy: str = "attributed"
     frontier_diversity_gate: bool = False  # reorder by evidence family to prevent spiral (opt-in)
     frontier_belief_gate: bool = False     # add CurrentnessWarden + belief scoring to the chain (opt-in; see #350)
@@ -710,7 +709,6 @@ class MemorySettings:
         from menhir.domain.retrieval_tuning import RetrievalTuningConfig
 
         return RetrievalTuningConfig(
-            enable_bm25=self.frontier_bm25,
             fusion_admission_policy=self.frontier_fusion_admission_policy,
             enable_diversity_gate=self.frontier_diversity_gate,
             enable_belief_gate=self.frontier_belief_gate,
@@ -924,7 +922,6 @@ class MemorySettings:
             # Benchmark mode (LongMemEval Mode B isolation)
             benchmark_mode=parse_bool_env(_getenv("MENHIR_BENCHMARK_MODE", default=str(cls.benchmark_mode))),
             # Frontier portions (default off)
-            frontier_bm25=parse_bool_env(_getenv("MENHIR_FRONTIER_BM25", default=str(cls.frontier_bm25))),
             frontier_fusion_admission_policy=_getenv(
                 "MENHIR_FRONTIER_FUSION_ADMISSION_POLICY",
                 default=cls.frontier_fusion_admission_policy,

@@ -55,7 +55,7 @@ from menhir.domain.retrieval_trace_models import (
     ViewReachability,
 )
 from menhir.infrastructure.graphiti_client import GraphitiClient
-from menhir.services.hybrid_retrieval import FusionLane, hybrid_search, weighted_rrf_multi
+from menhir.services.hybrid_retrieval import FusionLane, weighted_rrf_multi
 
 if TYPE_CHECKING:
     from menhir.core.bootstrap import UnavailableGraphitiClient
@@ -620,11 +620,10 @@ async def run_recall(
             )
         _t_phases["pending_wait"] = int((perf_counter() - _t) * 1000)
 
-    # --- Phase 1: candidate generation (vector, or attributed hybrid) ---
+    # --- Phase 1: candidate generation (vector) ---
     # source_map records each candidate's origin so the scoring floor can be
-    # source-aware. Default path: a single fused vector+BM25 search whose hits
-    # are all attributed VECTOR. Hybrid path (tuning.enable_bm25): vector and
-    # BM25 run as separate labeled passes, fused by hybrid_alpha.
+    # source-aware. A single fused vector+BM25 search whose hits are all
+    # attributed VECTOR.
     _t = perf_counter()
     group_ids = namespace_to_group_ids(namespace)
     source_map: dict[str, CandidateSource] = {}
@@ -638,53 +637,39 @@ async def run_recall(
     # Query embedding from the observation lane, reused by fact-relevance enrichment.
     obs_query_vector: list[float] | None = None
     try:
-        if tuning.enable_bm25:
-            hybrid = await hybrid_search(
-                service.graphiti_client, query, config=tuning,
-                num_results=candidate_k, group_ids=group_ids,
-            )
-            search_results = [(c.uuid, c.name, c.similarity) for c in hybrid]
-            source_map = {c.uuid: c.source for c in hybrid}
-            contributing_source_map = {
-                c.uuid: c.contributing_sources for c in hybrid
-            }
-            score_kind_map = {
-                c.uuid: RetrievalScoreKind.WEIGHTED_RRF_NORMALIZED for c in hybrid
-            }
-        else:
-            search_results = await service.graphiti_client.search_scored(
-                query, num_results=candidate_k, group_ids=group_ids
-            )
-            source_map = {uuid: CandidateSource.VECTOR for uuid, _, _ in search_results}
-            contributing_source_map = {
-                uuid: frozenset({CandidateSource.VECTOR})
-                for uuid, _, _ in search_results
-            }
-            score_kind_map = {
-                uuid: RetrievalScoreKind.GRAPHITI_RRF for uuid, _, _ in search_results
-            }
-            if trace:
-                try:
-                    ranked = await service.graphiti_client.search_ranked_by_method(
-                        query,
-                        methods=["bm25", "cosine_similarity"],
-                        num_results=candidate_k,
-                        group_ids=group_ids,
-                    )
-                    for method, rows in ranked.items():
-                        rank_key = "bm25_rank" if method == "bm25" else "cosine_rank"
-                        for rank, (uuid, _name) in enumerate(rows, start=1):
-                            rank_shadow.setdefault(uuid, {})[rank_key] = rank
-                except Exception as exc:
-                    rank_shadow_warning = (
-                        f"rank_method_shadow_unavailable:{exc.__class__.__name__}"
-                    )
-                    logger.error(
-                        "Rank-method shadow unavailable: %s: %s",
-                        exc.__class__.__name__,
-                        exc,
-                        exc_info=True,
-                    )
+        search_results = await service.graphiti_client.search_scored(
+            query, num_results=candidate_k, group_ids=group_ids
+        )
+        source_map = {uuid: CandidateSource.VECTOR for uuid, _, _ in search_results}
+        contributing_source_map = {
+            uuid: frozenset({CandidateSource.VECTOR})
+            for uuid, _, _ in search_results
+        }
+        score_kind_map = {
+            uuid: RetrievalScoreKind.GRAPHITI_RRF for uuid, _, _ in search_results
+        }
+        if trace:
+            try:
+                ranked = await service.graphiti_client.search_ranked_by_method(
+                    query,
+                    methods=["bm25", "cosine_similarity"],
+                    num_results=candidate_k,
+                    group_ids=group_ids,
+                )
+                for method, rows in ranked.items():
+                    rank_key = "bm25_rank" if method == "bm25" else "cosine_rank"
+                    for rank, (uuid, _name) in enumerate(rows, start=1):
+                        rank_shadow.setdefault(uuid, {})[rank_key] = rank
+            except Exception as exc:
+                rank_shadow_warning = (
+                    f"rank_method_shadow_unavailable:{exc.__class__.__name__}"
+                )
+                logger.error(
+                    "Rank-method shadow unavailable: %s: %s",
+                    exc.__class__.__name__,
+                    exc,
+                    exc_info=True,
+                )
     except Exception as exc:
         search_error = f"graphiti_search_unavailable:{exc.__class__.__name__}"
         logger.error(

@@ -7,9 +7,7 @@
   let arms = structuredClone(initialArms);
 
   const primaryFields = [
-    ['enable_bm25', 'Separate BM25 lane', 'bool'],
     ['enable_facet_candidates', 'Active facet lane', 'bool'],
-    ['hybrid_alpha', 'Name vector weight', 'number', { min: 0, max: 1, step: 0.05 }],
     ['facet_weight', 'Facet weight', 'number', { min: 0, max: 10, step: 0.05 }],
     ['fusion_admission_policy', 'Fusion admission', 'select', ['attributed', 'production_fused']],
   ];
