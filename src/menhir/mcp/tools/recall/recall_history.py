@@ -12,7 +12,7 @@ async def recall_history(
     query: str,
     namespace: str = "",
     limit: int = 30,
-    pools: bool = True,
+    pools: bool = False,
 ) -> str:
     """List saved memories matching a subject in time order (oldest first), with optional pools.
 
@@ -20,7 +20,7 @@ async def recall_history(
         query: Subject to match. Natural language works best.
         namespace: Optional silo to scope this operation to. Empty = default/global behavior.
         limit: Max memories to return (default: 30, max: 50).
-        pools: Group related memories into pools (default: True).
+        pools: Group related memories into pools (default: False; unmeasured, see #396).
     """
     return await RecallHistoryTool().execute(
         query=query, namespace=namespace, limit=limit, pools=pools
@@ -47,13 +47,13 @@ class RecallHistoryTool(BaseJsonTool):
         query: str,
         namespace: str = "",
         limit: int = 30,
-        pools: bool = True,
+        pools: bool = False,
     ) -> str:
         """Drill-down over raw saved memories, oldest first. Use after recall_memories
         for how-something-changed, sequence-of-states, or what-it-was-before questions.
 
         namespace scopes the operation, subject to the client's configured pin.
-        limit defaults to 30 (max 50). pools=true groups related memories.
+        limit defaults to 30 (max 50). pools=true groups related memories (off by default).
 
         Read-only: no access updates. An empty result with a `note` means no embedded
         memory matched, not that no relevant memory exists.

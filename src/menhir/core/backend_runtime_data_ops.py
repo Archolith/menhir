@@ -382,7 +382,7 @@ class RuntimeProviderDataOpsMixin:
         *,
         namespace: str | None = None,
         limit: int = 30,
-        pools: bool = True,
+        pools: bool = False,
     ) -> dict[str, Any]:
         from dataclasses import asdict
 

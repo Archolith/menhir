@@ -141,7 +141,7 @@ class BackendClientOpsMixin:
         *,
         namespace: str | None = None,
         limit: int = 30,
-        pools: bool = True,
+        pools: bool = False,
     ) -> dict[str, Any]:
         return await self._request(
             "recall_history",

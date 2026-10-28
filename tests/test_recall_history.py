@@ -83,6 +83,10 @@ async def test_pools_on_and_off(
     unpooled = await svc.recall_history("q", pools=False)
     assert all(sm.pool_id is None for sm in unpooled.memories)
 
+    # Off by default until #396 measures pools.
+    default = await svc.recall_history("q")
+    assert all(sm.pool_id is None for sm in default.memories)
+
 
 @pytest.mark.asyncio
 async def test_empty_result_sets_note(
@@ -172,7 +176,7 @@ def test_recall_history_request_bounds() -> None:
     from menhir.api.routes_support import RecallHistoryRequest
 
     req = RecallHistoryRequest(query="q")
-    assert req.limit == 30 and req.pools is True and req.namespace is None
+    assert req.limit == 30 and req.pools is False and req.namespace is None
     assert RecallHistoryRequest(query="q", limit=1).limit == 1
     assert RecallHistoryRequest(query="q", limit=50).limit == 50
     with pytest.raises(ValidationError):

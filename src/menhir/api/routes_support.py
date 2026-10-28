@@ -353,7 +353,7 @@ class RecallHistoryRequest(BaseModel):
     query: str
     namespace: str | None = None
     limit: int = Field(default=30, ge=1, le=50)
-    pools: bool = True
+    pools: bool = False  # unmeasured; off until #396
 
 
 class RecallHistoryResponse(BaseModel):

@@ -505,7 +505,7 @@ async def run_recall_history(
     *,
     namespace: str | None = None,
     limit: int = 30,
-    pools: bool = True,
+    pools: bool = False,  # unmeasured; off until #396
 ) -> RecallHistoryResult:
     """recall_history drill-down: matching episode memories, strictly oldest first.
 
