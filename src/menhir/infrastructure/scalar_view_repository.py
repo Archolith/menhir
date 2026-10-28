@@ -533,6 +533,27 @@ class ScalarViewRepositoryMixin:
         )
         return [dict(r) for r in rows]
 
+    def list_recall_visible_scalar_history_views(
+        self, *, subject_uuid: str, namespace: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Agent-facing sibling of `list_scalar_history_views`: recall-visible Views only.
+
+        Required because delete repair rebuilds history with the flag off as OPERATOR-audience
+        Views; test_recall_timeline_history_visibility_live covers that path."""
+        ns_filter = "AND n.group_id = $ns" if namespace is not None else ""
+        rows = self.neo4j.execute(
+            f"""
+            MATCH (n:Entity {{view_kind:'scalar_history', view_subject_uuid:$u}})
+            WHERE coalesce(n.view_current, true) {ns_filter}
+              AND {default_recall_visibility_cypher("n")}
+            RETURN n.uuid AS uuid, n.view_key AS view_key, n.ss_attribute AS attribute,
+                   n.ss_scope AS scope, n.ss_kind AS value_kind, n.ss_unit AS unit,
+                   n.group_id AS namespace
+            """,
+            {"u": subject_uuid, "ns": (namespace or "")},
+        )
+        return [dict(r) for r in rows]
+
     def list_scalar_history_views_for_namespace(
         self, *, namespace: str, limit: int = 100
     ) -> list[dict[str, Any]]:

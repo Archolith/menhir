@@ -157,8 +157,9 @@ async def _typed_histories(
     The default page is the LATEST `history_limit` entries of each View. At most
     `_TYPED_HISTORY_CAP` histories are returned; the caller gets a note when more exist.
     """
+    # Recall-visible only: flag-off delete repair leaves OPERATOR-audience history Views.
     scalar_views = await asyncio.to_thread(
-        adapter.list_scalar_history_views, subject_uuid=subject_uuid, namespace=gid
+        adapter.list_recall_visible_scalar_history_views, subject_uuid=subject_uuid, namespace=gid
     )
     event_views = await asyncio.to_thread(
         adapter.list_event_timeline_views, subject_uuid=subject_uuid, namespace=gid

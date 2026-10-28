@@ -2610,6 +2610,9 @@ class MemoryGraphAdapter:
     def list_scalar_history_views(self, **kwargs: Any) -> list[dict[str, Any]]:
         return self._views.list_scalar_history_views(**kwargs)
 
+    def list_recall_visible_scalar_history_views(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return self._views.list_recall_visible_scalar_history_views(**kwargs)
+
     def list_scalar_history_views_for_namespace(
         self, **kwargs: Any
     ) -> list[dict[str, Any]]:

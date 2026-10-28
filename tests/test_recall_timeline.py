@@ -294,6 +294,7 @@ class _StubAdapter:
         self.search_hits: list[dict[str, Any]] = []
         self.subject_candidates: list[dict[str, Any]] = []
         self.scalar_views: list[dict[str, Any]] = []
+        self.operator_scalar_views: list[dict[str, Any]] = []
         self.event_views: list[dict[str, Any]] = []
         self.scalar_entries: dict[str, list[dict[str, Any]]] = {}
         self.page_calls: list[dict[str, Any]] = []
@@ -344,6 +345,11 @@ class _StubAdapter:
         return self.search_hits[:limit]
 
     def list_scalar_history_views(self, *, subject_uuid, namespace=None):
+        # Unfiltered, like the rebuild's reconciliation query.
+        self.view_calls.append({"kind": "scalar", "namespace": namespace})
+        return self.scalar_views + self.operator_scalar_views
+
+    def list_recall_visible_scalar_history_views(self, *, subject_uuid, namespace=None):
         self.view_calls.append({"kind": "scalar", "namespace": namespace})
         return self.scalar_views
 
@@ -729,6 +735,36 @@ async def test_typed_histories_capped_at_ten_with_note() -> None:
     result = await _svc(adapter).recall_timeline(namespace="ns", subject="Rachel")
     assert len(result.histories) == 10
     assert result.note is not None and "2 more" in result.note
+
+
+@pytest.mark.asyncio
+async def test_typed_histories_skip_operator_audience_scalar_views() -> None:
+    adapter = _StubAdapter([])
+    adapter.subject_candidates = [{"uuid": "entity-1", "name": "Rachel"}]
+    adapter.operator_scalar_views = [{"uuid": "view-op", "attribute": "owned"}]
+    adapter.scalar_entries["view-op"] = [_scalar_entry(1)]
+    result = await _svc(adapter).recall_timeline(namespace="ns", subject="Rachel")
+    assert result.histories == ()
+    assert not [c for c in adapter.history_calls if c["view_uuid"] == "view-op"]
+    paged = await _svc(adapter).recall_timeline(
+        namespace="ns", subject="Rachel", history_view="view-op")
+    assert paged.histories == ()
+
+
+def test_recall_visible_scalar_history_query_applies_visibility() -> None:
+    from menhir.domain.recall_visibility import default_recall_visibility_cypher
+    from menhir.infrastructure.scalar_view_repository import ScalarViewRepositoryMixin
+
+    class _Repo(ScalarViewRepositoryMixin):
+        def __init__(self, neo4j) -> None:
+            self.neo4j = neo4j
+
+    neo4j = _RecordingRepository()
+    _Repo(neo4j).list_recall_visible_scalar_history_views(subject_uuid="entity-1", namespace="ns")
+    query, params = neo4j.calls[0]
+    assert default_recall_visibility_cypher("n") in query
+    assert "view_kind:'scalar_history'" in query and "n.group_id = $ns" in query
+    assert params == {"u": "entity-1", "ns": "ns"}
 
 
 @pytest.mark.asyncio
