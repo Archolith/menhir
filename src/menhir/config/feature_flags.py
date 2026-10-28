@@ -182,7 +182,6 @@ _ENV_ONLY = (
     ('MENHIR_ALLOW_INSECURE_BACKEND_URL', '', 'auth',
         'Permit insecure non-loopback backend transport; empty is disabled.'),
     ('MENHIR_FRONTIER_TRACE', '', 'frontier', 'Optional retrieval diagnostics; empty is disabled.'),
-    ('MENHIR_FRONTIER_ORACLE_SUBSET', '', 'frontier', 'Optional oracle subset; empty keeps the default oracle set.'),
     ('MENHIR_TELEMETRY_BUSY_TIMEOUT_S', '5', 'telemetry', 'SQLite busy timeout in seconds; raw absent default is 5.'),
     ('MENHIR_MCP_TIMEOUT', '120', 'runtime', 'MCP timeout in seconds; raw absent default is 120.'),
     ('MENHIR_RECALL_COMPACT', '', 'frontier', 'Compact recall output; empty keeps full output.'),
@@ -227,7 +226,7 @@ FEATURES = {
 }
 FEATURES.update({
     env: FeatureFlag("", env, default, category, description,
-        recall_affecting=env == "MENHIR_FRONTIER_ORACLE_SUBSET",
+        recall_affecting=False,
         observation_only=env in _OBSERVATION)
     for env, default, category, description in _ENV_ONLY
 })
@@ -283,4 +282,5 @@ RETIRED = {
     "MENHIR_ANCHORED_TIME_ATTACH": "2026-10-27: folded into MENHIR_ANCHORED_TIME_RESOLVER (#168 freeze)",
     "anchored_time_expiry_enabled": "2026-10-27: folded into MENHIR_ANCHORED_TIME_RESOLVER (#168 freeze)",
     "MENHIR_ANCHORED_TIME_EXPIRY": "2026-10-27: folded into MENHIR_ANCHORED_TIME_RESOLVER (#168 freeze)",
+    "MENHIR_FRONTIER_ORACLE_SUBSET": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
 }

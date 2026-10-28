@@ -38,7 +38,6 @@ async def test_warden_verifier_effects_and_sync_disabled_restart(
 ):
     from menhir.services import verifier_sync
 
-    monkeypatch.delenv("MENHIR_FRONTIER_ORACLE_SUBSET", raising=False)
     clock = [BASE]
     monkeypatch.setattr(verifier_sync, "_utc_now_iso", lambda: clock[0])
     content = "The job is disabled."
