@@ -39,12 +39,11 @@ class CandidateSource(str, Enum):
     FACET = "facet"
     STRUCTURE = "structure"
     # Content-vector candidates: a menhir-owned cosine search over n.content_embedding
-    # (the memory's summary/content), as opposed to VECTOR which is graphiti's search over
+    # (the memory's summary/content; lane removed 2026-10-27, member kept for stored traces), as opposed to VECTOR which is graphiti's search over
     # n.name_embedding (the 1-3 word entity name). Rescues PARAPHRASE queries the lexical
     # (BM25) lane cannot reach -- the query's words differ from the memory's, but the
     # meaning matches. Behaves like VECTOR downstream: 0.0 source prior, NOT floor-exempt
     # (it is a semantic-similarity lane, subject to the cosine floor). Experimental,
-    # default-off; gated by RetrievalTuningConfig.enable_content_vector.
     CONTENT_VECTOR = "content_vector"
     # Fact-EDGE candidates: graphiti EDGE_HYBRID search over RELATES_TO edges,
     # whose relevance is the edge's dated fact text (``EntityEdge.fact``), not an
@@ -56,7 +55,7 @@ class CandidateSource(str, Enum):
     # Observation candidates: a menhir-owned cosine search over :TypedAssertion.name_embedding (the
     # typed-scalar observation log's stated_span). The recall pipeline is otherwise :Entity-only, so a
     # typed observation ("I own 20 rare coins") is never a candidate. Behaves like CONTENT_VECTOR
-    # downstream: competes on its real cosine (0.0 source prior, NOT floor-exempt). Gated by
+    # (lane removed 2026-10-27) downstream: competes on its real cosine (0.0 source prior, NOT floor-exempt). Gated by
     # RecallService.scalar_view_authority_enabled (the scalar-view-authority feature; default on,
     # effective only while the scalar lane is on).
     OBSERVATION = "observation"
@@ -129,7 +128,7 @@ GRAPHITI_RRF_DUAL_METHOD_MAX = 2.0
 SOURCE_PRIORS: dict[CandidateSource, float] = {
     CandidateSource.VECTOR: 0.0,
     CandidateSource.BM25: 0.0,
-    # CONTENT_VECTOR competes on its real cosine like VECTOR: no baseline prior, and
+    # CONTENT_VECTOR (lane removed 2026-10-27) competed on its real cosine like VECTOR: no baseline prior, and
     # NOT floor-exempt (absent from FLOOR_EXEMPT_SOURCES below).
     CandidateSource.CONTENT_VECTOR: 0.0,
     CandidateSource.PENDING: 1.0,
@@ -140,7 +139,7 @@ SOURCE_PRIORS: dict[CandidateSource, float] = {
     # was calibrated against node scores — never silently drops a well-ranked
     # fact edge before it reaches the combiner.
     CandidateSource.FACT_EDGE: 0.0,
-    # OBSERVATION competes on its real cosine like CONTENT_VECTOR: no baseline prior, and NOT
+    # OBSERVATION competes on its real cosine like CONTENT_VECTOR (lane removed 2026-10-27): no baseline prior, and NOT
     # floor-exempt (a low-relevance observation should be dropped by the floor, not forced in).
     CandidateSource.OBSERVATION: 0.0,
     # SCALAR_AUTHORITY is deterministically injected (the current value for a surfaced slot), so it
@@ -245,20 +244,6 @@ class RetrievalTuningConfig:
     # evidence its fold ignores (see domain/scalar_view_freshness.py). The verdict is still shown,
     # as advisory. On by default since the #168 freeze; kept as a per-request knob.
     scalar_view_freshness_gate: bool = True
-    # Content-vector lane (plan menhir-content-embedding-recall, Track A). EXPERIMENTAL,
-    # default OFF == today's behavior byte-for-byte. When on, recall runs a menhir-owned
-    # cosine pass over n.content_embedding (memory summary/content) as a third labeled lane
-    # and fuses it via weighted_rrf_multi. Rescues PARAPHRASE queries the lexical (BM25)
-    # lane cannot reach. Benchmark-gated; must not be flipped on without the fusion parity
-    # test passing. See MENHIR_FRONTIER_CONTENT_VECTOR.
-    enable_content_vector: bool = False
-    # Benchmark Arm C: suppress name-vector while retaining BM25 + content-vector.
-    content_vector_replace_name: bool = False
-    # How many content-vector hits to pull (best-first by content cosine) when the lane is
-    # on. Kept comparable to candidate_k so the lane competes on equal footing.
-    content_vector_k: int = 100
-    # This lane's weight in weighted_rrf_multi relative to the name-vector and BM25 lanes.
-    content_vector_weight: float = 0.5
     # ``attributed`` preserves the existing experimental BM25 behavior. Benchmark
     # control/treatment arms use ``production_fused`` so BM25 membership alone never
     # grants a floor exemption that today's opaque Graphiti fusion does not grant.
@@ -313,17 +298,9 @@ class RetrievalTuningConfig:
                 'scalar_observation_recall must be "all", "gated" or "off", '
                 f"got {self.scalar_observation_recall!r}"
             )
-        if self.content_vector_weight < 0.0:
-            raise ValueError(
-                f"content_vector_weight must be >= 0.0, got {self.content_vector_weight!r}"
-            )
         if self.facet_weight < 0.0:
             raise ValueError(
                 f"facet_weight must be >= 0.0, got {self.facet_weight!r}"
-            )
-        if self.content_vector_k < 1:
-            raise ValueError(
-                f"content_vector_k must be >= 1, got {self.content_vector_k!r}"
             )
         if self.fusion_admission_policy not in ("attributed", "production_fused"):
             raise ValueError(

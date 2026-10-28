@@ -200,7 +200,6 @@ async def _build_source_memories(
     source_memory_limit: int | None,
     *,
     include_session: bool,
-    content_query_vector: list[float] | None,
 ) -> tuple[tuple[SourceMemory, ...] | None, str | None, int]:
     """Run the additive source-memory lane; never raises.
 
@@ -218,9 +217,7 @@ async def _build_source_memories(
         return None, None, 0
     started = perf_counter()
     try:
-        query_vector = content_query_vector
-        if query_vector is None:
-            query_vector = await service.graphiti_client.embed_query(query)
+        query_vector = await service.graphiti_client.embed_query(query)
         spread = tuning.source_memory_spread
         if spread:
             from menhir.domain.source_memory_spread import pool_size, spread_by_session
@@ -634,99 +631,14 @@ async def run_recall(
     contributing_source_map: dict[str, frozenset[CandidateSource]] = {}
     score_kind_map: dict[str, RetrievalScoreKind] = {}
     rank_shadow: dict[str, dict[str, int]] = {}
-    content_cosine_map: dict[str, float] = {}
     rank_shadow_warning: str | None = None
     search_error: str | None = None
     facet_active_trace: FacetShadowTrace | None = None
     facet_active_warning: str | None = None
-    # Query embedding computed by the content-vector lane; the source-memory lane
-    # reuses it so the query is embedded at most once per recall.
-    content_query_vector: list[float] | None = None
     # Query embedding from the observation lane, reused by fact-relevance enrichment.
     obs_query_vector: list[float] | None = None
     try:
-        if tuning.enable_content_vector:
-            methods: list[str] = []
-            if not tuning.content_vector_replace_name:
-                methods.append("cosine_similarity")
-            if tuning.enable_bm25:
-                methods.append("bm25")
-            ranked = await service.graphiti_client.search_ranked_by_method(
-                query,
-                methods=methods,
-                num_results=candidate_k,
-                group_ids=group_ids,
-            ) if methods else {}
-            lanes: list[FusionLane] = []
-            if "bm25" in methods:
-                lanes.append(FusionLane(
-                    CandidateSource.BM25,
-                    ranked.get("bm25", []),
-                    weight=1.0 - tuning.hybrid_alpha,
-                ))
-            if "cosine_similarity" in methods:
-                lanes.append(FusionLane(
-                    CandidateSource.VECTOR,
-                    ranked.get("cosine_similarity", []),
-                    weight=tuning.hybrid_alpha if tuning.enable_bm25 else 1.0,
-                ))
-            for method, rows in ranked.items():
-                rank_key = "bm25_rank" if method == "bm25" else "cosine_rank"
-                for rank, (uuid, _name) in enumerate(rows, start=1):
-                    rank_shadow.setdefault(uuid, {})[rank_key] = rank
-            try:
-                query_vector = await service.graphiti_client.embed_query(query)
-                content_query_vector = query_vector
-                content_rows = service.graph_adapter.search_content_embeddings(
-                    query_vector,
-                    limit=tuning.content_vector_k,
-                    group_ids=group_ids,
-                )
-            except Exception as exc:
-                logger.error(
-                    "Content-vector lane unavailable; using remaining lanes: %s: %s",
-                    exc.__class__.__name__,
-                    exc,
-                    exc_info=True,
-                )
-                content_rows = []
-            content_hits: list[tuple[str, str]] = []
-            for rank, row in enumerate(content_rows, start=1):
-                try:
-                    uuid = str(row.get("uuid") or "").strip()
-                    cosine = float(row["cosine"])
-                    if not uuid or not math.isfinite(cosine):
-                        raise ValueError("content-vector row has invalid uuid or cosine")
-                    content_hits.append((uuid, str(row.get("name") or uuid)))
-                    rank_shadow.setdefault(uuid, {})["content_rank"] = rank
-                    content_cosine_map[uuid] = cosine
-                except Exception as exc:
-                    logger.error(
-                        "Recall skipped malformed content-vector row uuid=%r: %s: %s",
-                        row.get("uuid"),
-                        exc.__class__.__name__,
-                        exc,
-                        exc_info=True,
-                    )
-            lanes.append(FusionLane(
-                CandidateSource.CONTENT_VECTOR,
-                content_hits,
-                weight=tuning.content_vector_weight,
-            ))
-            hybrid = weighted_rrf_multi(
-                lanes,
-                limit=candidate_k,
-                admission_policy=tuning.fusion_admission_policy,
-            )
-            search_results = [(c.uuid, c.name, c.similarity) for c in hybrid]
-            source_map = {c.uuid: c.source for c in hybrid}
-            contributing_source_map = {
-                c.uuid: c.contributing_sources for c in hybrid
-            }
-            score_kind_map = {
-                c.uuid: RetrievalScoreKind.WEIGHTED_RRF_NORMALIZED for c in hybrid
-            }
-        elif tuning.enable_bm25:
+        if tuning.enable_bm25:
             hybrid = await hybrid_search(
                 service.graphiti_client, query, config=tuning,
                 num_results=candidate_k, group_ids=group_ids,
@@ -869,7 +781,7 @@ async def run_recall(
     # and is read-only, so if recall exits before awaiting it the task just finishes on its own.
     source_memory_task = asyncio.create_task(_build_source_memories(
         service, query, namespace, tuning, source_memory_limit,
-        include_session=include_session, content_query_vector=content_query_vector,
+        include_session=include_session,
     ))
 
     # Independent sources below must run even when semantic search is empty or failed.
@@ -973,7 +885,7 @@ async def run_recall(
                     "bm25_rank": rank_shadow.get(uuid, {}).get("bm25_rank"),
                     "cosine_rank": rank_shadow.get(uuid, {}).get("cosine_rank"),
                     "content_rank": rank_shadow.get(uuid, {}).get("content_rank"),
-                    "content_cosine": content_cosine_map.get(uuid),
+                    "content_cosine": None,
                     "is_superseded_view": is_superseded_view,
                     "view_kind": meta.get("view_kind"),
                     "status": meta.get("status"),
@@ -2098,7 +2010,7 @@ async def run_recall(
             fact_query_vector: list[float] | None = None
             if tuning.enable_fact_relevance:
                 try:
-                    fact_query_vector = content_query_vector or obs_query_vector
+                    fact_query_vector = obs_query_vector
                     if fact_query_vector is None:
                         fact_query_vector = await service.graphiti_client.embed_query(query)
                 except _PROGRAMMING_ERRORS:

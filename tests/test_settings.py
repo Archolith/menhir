@@ -92,7 +92,6 @@ def test_frontier_portion_defaults() -> None:
     assert t.enable_belief_gate is False
     assert t.enable_evidence_anchor is False
     assert t.enable_bm25 is False
-    assert t.enable_content_vector is False
 
 
 @pytest.mark.unit
@@ -118,17 +117,9 @@ def test_always_on_portions_are_on_without_settings() -> None:
 
 
 @pytest.mark.unit
-def test_content_vector_env_maps_all_tuning_knobs(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MENHIR_FRONTIER_CONTENT_VECTOR", "true")
-    monkeypatch.setenv("MENHIR_FRONTIER_CONTENT_VECTOR_K", "17")
-    monkeypatch.setenv("MENHIR_FRONTIER_CONTENT_VECTOR_WEIGHT", "0.75")
-    monkeypatch.setenv("MENHIR_FRONTIER_CONTENT_VECTOR_REPLACE_NAME", "true")
+def test_fusion_admission_policy_env_maps_to_tuning(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MENHIR_FRONTIER_FUSION_ADMISSION_POLICY", "production_fused")
     tuning = MemorySettings.from_env().retrieval_tuning()
-    assert tuning.enable_content_vector is True
-    assert tuning.content_vector_k == 17
-    assert tuning.content_vector_weight == 0.75
-    assert tuning.content_vector_replace_name is True
     assert tuning.fusion_admission_policy == "production_fused"
 
 

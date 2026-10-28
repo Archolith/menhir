@@ -18,8 +18,7 @@ from menhir.services.scoring_service import ScoringService
 
 
 # ---------------------------------------------------------------------------
-# Read query: predicates, read-only, limit clamp (mirrors test_content_vector_retrieval)
-# ---------------------------------------------------------------------------
+# Read query: predicates, read-only, limit clamp# ---------------------------------------------------------------------------
 
 
 @dataclass

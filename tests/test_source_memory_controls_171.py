@@ -217,7 +217,6 @@ async def _lane(graph: Any, namespace: str | None, model: str | None = None):
         RetrievalTuningConfig(source_memory_pools=False),
         10,
         include_session=True,
-        content_query_vector=Q,
     )
 
 

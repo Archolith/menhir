@@ -8,16 +8,12 @@
 
   const primaryFields = [
     ['enable_bm25', 'Separate BM25 lane', 'bool'],
-    ['enable_content_vector', 'Content vector lane', 'bool'],
-    ['content_vector_replace_name', 'Replace name vector', 'bool'],
     ['enable_facet_candidates', 'Active facet lane', 'bool'],
     ['hybrid_alpha', 'Name vector weight', 'number', { min: 0, max: 1, step: 0.05 }],
-    ['content_vector_weight', 'Content vector weight', 'number', { min: 0, max: 10, step: 0.05 }],
     ['facet_weight', 'Facet weight', 'number', { min: 0, max: 10, step: 0.05 }],
     ['fusion_admission_policy', 'Fusion admission', 'select', ['attributed', 'production_fused']],
   ];
   const advancedFields = [
-    ['content_vector_k', 'Content candidates', 'number', { min: 1, max: 200, step: 1 }],
     ['enable_verb_facets', 'Verb-facet facts', 'bool'],
     ['scalar_verdict_min_similarity', 'Verdict min similarity', 'number', { min: 0, max: 1, step: 0.005 }],
     ['enable_oracle_ranking', 'Oracle ranking', 'bool'],

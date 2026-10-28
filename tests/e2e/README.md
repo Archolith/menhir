@@ -161,7 +161,7 @@ MENHIR_E2E=1 MENHIR_E2E_FEATURE_PRESET=all_off pytest tests/e2e
 MENHIR_E2E=1 MENHIR_E2E_FEATURES="explorer=on,structure_watcher=off" pytest tests/e2e
 
 # Full powerset: every lane runs 2**n times
-MENHIR_E2E=1 MENHIR_E2E_FEATURE_POWERSET="frontier_bm25,frontier_content_vector,scalar_state" \
+MENHIR_E2E=1 MENHIR_E2E_FEATURE_POWERSET="frontier_bm25,frontier_shadow,scalar_state" \
   pytest tests/e2e
 ```
 

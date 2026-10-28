@@ -40,10 +40,6 @@ class RecallLabTuning(BaseModel):
     enable_contradiction_interrupt: bool = True
     enable_belief_gate: bool = False
     enable_evidence_anchor: bool = False
-    enable_content_vector: bool = False
-    content_vector_replace_name: bool = False
-    content_vector_k: int = Field(default=100, ge=1, le=200)
-    content_vector_weight: float = Field(default=0.5, ge=0.0, le=10.0)
     fusion_admission_policy: Literal["attributed", "production_fused"] = "attributed"
     enable_source_memories: bool = True
     source_memory_limit: int = Field(default=10, ge=1, le=50)
@@ -321,27 +317,6 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
         "label": "A · attributed control",
         "enabled": True,
         "tuning": _default_tuning(enable_bm25=True, fusion_admission_policy="production_fused"),
-    },
-    {
-        "id": "b",
-        "label": "B · add content vector",
-        "enabled": True,
-        "tuning": _default_tuning(
-            enable_bm25=True,
-            enable_content_vector=True,
-            fusion_admission_policy="production_fused",
-        ),
-    },
-    {
-        "id": "c",
-        "label": "C · replace name vector",
-        "enabled": True,
-        "tuning": _default_tuning(
-            enable_bm25=True,
-            enable_content_vector=True,
-            content_vector_replace_name=True,
-            fusion_admission_policy="production_fused",
-        ),
     },
     {
         "id": "d",

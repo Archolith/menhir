@@ -399,10 +399,6 @@ class MemorySettings:
     # RetrievalTuningConfig. The Warden gate and its contradiction guard are on by default since
     # #173 (set each to false to opt out); the belief gate and evidence anchor (#349) stay opt-in.
     frontier_bm25: bool = False            # attributed hybrid (vector+BM25) candidate gen
-    frontier_content_vector: bool = False  # add menhir-owned content-embedding cosine lane
-    frontier_content_vector_replace_name: bool = False
-    frontier_content_vector_k: int = 100
-    frontier_content_vector_weight: float = 0.5
     frontier_fusion_admission_policy: str = "attributed"
     frontier_diversity_gate: bool = False  # reorder by evidence family to prevent spiral (opt-in)
     frontier_belief_gate: bool = False     # add CurrentnessWarden + belief scoring to the chain (opt-in; see #350)
@@ -715,10 +711,6 @@ class MemorySettings:
 
         return RetrievalTuningConfig(
             enable_bm25=self.frontier_bm25,
-            enable_content_vector=self.frontier_content_vector,
-            content_vector_replace_name=self.frontier_content_vector_replace_name,
-            content_vector_k=self.frontier_content_vector_k,
-            content_vector_weight=self.frontier_content_vector_weight,
             fusion_admission_policy=self.frontier_fusion_admission_policy,
             enable_diversity_gate=self.frontier_diversity_gate,
             enable_belief_gate=self.frontier_belief_gate,
@@ -933,17 +925,6 @@ class MemorySettings:
             benchmark_mode=parse_bool_env(_getenv("MENHIR_BENCHMARK_MODE", default=str(cls.benchmark_mode))),
             # Frontier portions (default off)
             frontier_bm25=parse_bool_env(_getenv("MENHIR_FRONTIER_BM25", default=str(cls.frontier_bm25))),
-            frontier_content_vector=parse_bool_env(_getenv("MENHIR_FRONTIER_CONTENT_VECTOR", default=str(cls.frontier_content_vector))),
-            frontier_content_vector_replace_name=parse_bool_env(_getenv("MENHIR_FRONTIER_CONTENT_VECTOR_REPLACE_NAME", default=str(cls.frontier_content_vector_replace_name))),
-            frontier_content_vector_k=_parse_int(
-                _getenv("MENHIR_FRONTIER_CONTENT_VECTOR_K", default=str(cls.frontier_content_vector_k)),
-                env_var="MENHIR_FRONTIER_CONTENT_VECTOR_K",
-                minimum=1,
-            ),
-            frontier_content_vector_weight=_parse_float(
-                _getenv("MENHIR_FRONTIER_CONTENT_VECTOR_WEIGHT", default=str(cls.frontier_content_vector_weight)),
-                env_var="MENHIR_FRONTIER_CONTENT_VECTOR_WEIGHT",
-            ),
             frontier_fusion_admission_policy=_getenv(
                 "MENHIR_FRONTIER_FUSION_ADMISSION_POLICY",
                 default=cls.frontier_fusion_admission_policy,

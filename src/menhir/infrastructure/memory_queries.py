@@ -381,33 +381,6 @@ class MemoryQueryRepository:
 
     # --- Recall scoring helpers ---------------------------------------------
 
-    def search_content_embeddings(
-        self,
-        query_vector: list[float],
-        *,
-        limit: int = 50,
-        group_ids: list[str] | None = None,
-    ) -> list[dict[str, object]]:
-        """Return content-embedding cosine hits without mutating graph state."""
-        safe_limit = max(1, min(limit, 500))
-        return self.neo4j.execute(
-            """
-            MATCH (n:Entity)
-            WHERE n.content_embedding IS NOT NULL
-              AND ($group_ids IS NULL OR n.group_id IN $group_ids)
-            WITH n, vector.similarity.cosine(n.content_embedding, $query_vector) AS cosine
-            WHERE cosine IS NOT NULL
-            RETURN n.uuid AS uuid, n.name AS name, cosine
-            ORDER BY cosine DESC, n.uuid
-            LIMIT $limit
-            """,
-            params={
-                "query_vector": query_vector,
-                "group_ids": group_ids,
-                "limit": safe_limit,
-            },
-        )
-
     def search_episode_embeddings(
         self,
         query_vector: list[float],
@@ -724,7 +697,7 @@ class MemoryQueryRepository:
 
         The recall pipeline is otherwise `:Entity`-only (`fetch_candidate_metadata` matches `(n:Entity)`),
         so a typed-scalar observation is never searched. This is the observation lane's candidate search,
-        mirroring `search_content_embeddings` but over the assertion log. Only MATERIALIZABLE observations
+        mirroring `search_episode_embeddings` but over the assertion log. Only MATERIALIZABLE observations
         are candidates -- current (`NOT superseded`) and bound (`NOT binding_pending`); a superseded or
         unbound row must never surface. Scoped by `namespace` (assertions carry `namespace`, not
         `group_id`). Returns the assertion id + `stated_span` (the recall surface / user's own words) +

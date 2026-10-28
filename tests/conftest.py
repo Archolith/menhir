@@ -320,9 +320,7 @@ class StubMemoryGraphAdapter:
     node_freshness: dict[str, str] = field(default_factory=dict)
     rehydrated_nodes: list[dict[str, object]] = field(default_factory=list)
     raw_capture_calls: list[dict[str, object]] = field(default_factory=list)
-    content_embedding_results: list[dict[str, object]] = field(default_factory=list)
-    content_embedding_calls: list[dict[str, object]] = field(default_factory=list)
-    # Source-memory lane (default-off) stubs, mirroring the content-vector pair above.
+    # Source-memory lane (default-off) stubs.
     episode_embedding_results: list[dict[str, object]] = field(default_factory=list)
     episode_embedding_calls: list[dict[str, object]] = field(default_factory=list)
     episode_embeddings_written: dict[str, tuple[list[float], str]] = field(default_factory=dict)
@@ -467,18 +465,6 @@ class StubMemoryGraphAdapter:
 
     def fetch_candidate_metadata(self, node_uuids: list[str]) -> list[dict[str, object]]:
         return self.candidate_metadata
-
-    def search_content_embeddings(
-        self,
-        query_vector: list[float],
-        *,
-        limit: int = 50,
-        group_ids: list[str] | None = None,
-    ) -> list[dict[str, object]]:
-        self.content_embedding_calls.append(
-            {"query_vector": query_vector, "limit": limit, "group_ids": group_ids}
-        )
-        return self.content_embedding_results
 
     def search_episode_embeddings(
         self,

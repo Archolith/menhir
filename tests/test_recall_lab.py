@@ -162,10 +162,10 @@ class _StubRecallService:
         try:
             await asyncio.sleep(0.02)
             tuning = kwargs["tuning"]
-            if self.fail_content_lane and tuning.enable_content_vector:
+            if self.fail_content_lane and tuning.enable_verb_facets:
                 raise RuntimeError("content index unavailable")
-            result = _result(query, content_lane=tuning.enable_content_vector)
-            if self.degrade_content_lane and tuning.enable_content_vector:
+            result = _result(query, content_lane=tuning.enable_verb_facets)
+            if self.degrade_content_lane and tuning.enable_verb_facets:
                 return RecallResult(
                     query=result.query,
                     preset=result.preset,
@@ -223,8 +223,8 @@ def _body() -> dict[str, Any]:
                 "label": "B",
                 "tuning": {
                     "enable_bm25": True,
-                    "enable_content_vector": True,
-                    "content_vector_weight": 0.7,
+                    "enable_verb_facets": True,
+                    "facet_weight": 0.7,
                 },
             },
         ],
@@ -301,7 +301,6 @@ def test_recall_lab_page_renders_default_arms() -> None:
     assert response.status_code == 200
     assert "Recall Lab" in response.text
     assert "Production" in response.text
-    assert "add content vector" in response.text
     assert "Pure read" in response.text
     assert "Blinded LLM judge" in response.text
     assert "one per line" in response.text
@@ -313,7 +312,7 @@ def test_recall_lab_page_renders_default_arms() -> None:
 
 
 @pytest.mark.unit
-def test_recall_lab_accepts_all_nine_default_arms() -> None:
+def test_recall_lab_accepts_all_seven_default_arms() -> None:
     recall = _StubRecallService()
     app = _create_test_app(
         settings=MemorySettings(),
@@ -328,9 +327,9 @@ def test_recall_lab_accepts_all_nine_default_arms() -> None:
 
     assert response.status_code == 200
     assert [arm["id"] for arm in response.json()["arms"]] == [
-        "production", "a", "b", "c", "d", "e", "f", "g", "h",
+        "production", "a", "d", "e", "f", "g", "h",
     ]
-    assert recall.max_active == 9
+    assert recall.max_active == 7
 
 
 @pytest.mark.unit
@@ -360,8 +359,8 @@ def test_recall_lab_runs_arms_concurrently_and_read_only() -> None:
     assert all(call["include_warden_status"] is True for call in recall.calls)
     assert all(call["update_access"] is False for call in recall.calls)
     assert recall.calls[0]["tuning"].enable_bm25 is True
-    assert recall.calls[1]["tuning"].enable_content_vector is True
-    assert recall.calls[1]["tuning"].content_vector_weight == 0.7
+    assert recall.calls[1]["tuning"].enable_verb_facets is True
+    assert recall.calls[1]["tuning"].facet_weight == 0.7
     assert payload["arms"][1]["results"][0]["source"] == "content_vector"
     assert payload["arms"][1]["results"][0]["content_rank"] == 1
 
@@ -460,7 +459,7 @@ def test_recall_lab_blinds_and_aggregates_llm_judging_passes(monkeypatch) -> Non
     assert all(call["temperature"] == 0.0 for call in backend.calls)
     assert all("PRIVATE PRODUCTION LABEL" not in call["user_prompt"] for call in backend.calls)
     assert all("PRIVATE CONTENT LABEL" not in call["user_prompt"] for call in backend.calls)
-    assert all("enable_content_vector" not in call["user_prompt"] for call in backend.calls)
+    assert all("enable_verb_facets" not in call["user_prompt"] for call in backend.calls)
     assert all("R1:" in call["user_prompt"] and "R2:" in call["user_prompt"] for call in backend.calls)
     assert all("_judge_results" not in arm for arm in payload["arms"])
 

@@ -974,17 +974,6 @@ class MemoryGraphAdapter:
         """Fetch scoring-relevant fields for candidate nodes."""
         return self._memory_queries.fetch_candidate_metadata(node_uuids)
 
-    def search_content_embeddings(
-        self,
-        query_vector: list[float],
-        *,
-        limit: int = 50,
-        group_ids: list[str] | None = None,
-    ) -> list[dict[str, object]]:
-        return self._memory_queries.search_content_embeddings(
-            query_vector, limit=limit, group_ids=group_ids
-        )
-
     def search_episode_embeddings(
         self,
         query_vector: list[float],

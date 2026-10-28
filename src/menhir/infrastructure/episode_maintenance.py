@@ -393,7 +393,7 @@ class EpisodeMaintenanceRepository:
                     # BOTH tenancy properties. `namespace` alone is the defense-in-depth
                     # stamp; `group_id` is the load-bearing isolation boundary, and it is
                     # what every namespace-scoped READ predicates on (see
-                    # domain/namespace.py and memory_queries.search_content_embeddings).
+                    # domain/namespace.py and memory_queries.search_episode_embeddings).
                     # This was the ONE :Entity writer of eight that omitted it, so raw
                     # captures were invisible to exactly the scoped recall they exist to
                     # be found by.
