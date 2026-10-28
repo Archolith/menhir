@@ -1510,21 +1510,10 @@ async def run_recall(
                     "tier_foundation": tier_foundation, "user_foundation": user_foundation,
                 }
                 contributor_payload = await _view_contributor_payload(vuuid)
-                if (
-                    getattr(service, "scalar_view_collapse_enabled", False)
-                    and view.get("scalar_basis") == "counted"
-                ):
-                    # Collapse: a counted View states the count; its items are fetched on demand.
-                    _collapsed_total = int(contributor_payload.get("total", 0))
-                    _verdict_contributors = ()
-                    _verdict_total = _collapsed_total
-                    _verdict_truncated = _collapsed_total > 0
-                    _verdict_next_offset = 0 if _collapsed_total > 0 else None
-                else:
-                    _verdict_contributors = _authority_contributors(contributor_payload)
-                    _verdict_total = int(contributor_payload.get("total", 0))
-                    _verdict_truncated = (contributor_payload.get("next_offset") is not None)
-                    _verdict_next_offset = contributor_payload.get("next_offset")
+                _verdict_contributors = _authority_contributors(contributor_payload)
+                _verdict_total = int(contributor_payload.get("total", 0))
+                _verdict_truncated = (contributor_payload.get("next_offset") is not None)
+                _verdict_next_offset = contributor_payload.get("next_offset")
                 authority_layer.append(ScalarAuthorityVerdict(
                     kind="current", status="leads" if view_leads else "advisory",
                     subject_uuid=subj, attribute=attr, scope=scp, value_kind=vk, unit=un,
@@ -1719,14 +1708,13 @@ async def run_recall(
             logger.exception(
                 "counted-occurrence drop failed query=%r; leaving recall unchanged", query[:60])
 
-    # --- Scalar View collapse: drop observations a verdict already carries (flag-gated) ---
+    # --- Scalar View echo drop: drop observations a verdict already carries (flag-gated) ---
     # The verdict states the value/count; an observation echoing the same slot repeats the quote and
     # crowds other memories out of recall. Only emitted verdicts count as covering a slot, so an
     # observation whose View was skipped is kept. Only OBSERVATION candidates are ever dropped.
-    # Runs under collapse (which also hides counted items) or echo-drop alone (counted items stay).
+    # Runs under echo-drop (counted items stay).
     if (
-        (getattr(service, "scalar_view_collapse_enabled", False)
-         or getattr(service, "scalar_view_echo_drop_enabled", False))
+        getattr(service, "scalar_view_echo_drop_enabled", False)
         and service.scalar_view_authority_enabled
         and namespace is not None
         and authority_layer
@@ -1751,13 +1739,13 @@ async def run_recall(
                         continue
                 _kept_inputs.append(_c)
             logger.debug(
-                "scalar-view collapse dropped %d echoed observations",
+                "scalar-view echo drop dropped %d echoed observations",
                 len(candidate_inputs) - len(_kept_inputs),
             )
             candidate_inputs = _kept_inputs
         except Exception:
             logger.exception(
-                "scalar-view collapse failed query=%r; leaving recall unchanged", query[:60]
+                "scalar-view echo drop failed query=%r; leaving recall unchanged", query[:60]
             )
 
     # --- Step 7 canary: current-state View authority suppression (flag-gated) ---

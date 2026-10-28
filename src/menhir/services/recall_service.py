@@ -94,7 +94,6 @@ class RecallService(RecallSupportMixin):
     lifecycle_service: LifecycleServiceProtocol | None = None
     #: Step 7 canary: a current View may suppress an older provenance-linked fact (six gates); off.
     scalar_view_authority_enabled: bool = False
-    scalar_view_collapse_enabled: bool = False  # Views hide their items (drill-down tool); off = unchanged
     scalar_view_echo_drop_enabled: bool = False  # only drop observations echoing a verdict slot
     #: True: scalar_history Views form an advisory recall lane; False: excluded (real rollback).
     scalar_history_enabled: bool = False

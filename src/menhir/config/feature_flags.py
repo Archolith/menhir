@@ -53,8 +53,6 @@ _SETTINGS = (
         False, 'personal_memory', 'Request consolidation reasoning suppression where supported.', False, ()),
     ('personal_memory_scalar_state_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED', True,
         'personal_memory', 'Run the scalar-state lane from the consolidation scheduler (LLM calls); set false to stop it.', True, ()),
-    ('personal_memory_scalar_view_collapse_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_COLLAPSE_ENABLED',
-        False, 'personal_memory', 'Collapse scalar View items into the verdict and drop echoed observations.', True, ()),
     ('personal_memory_scalar_view_echo_drop_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_ECHO_DROP_ENABLED',
         False, 'personal_memory', 'Drop observations that echo a scalar verdict slot; verdict items stay inline.', True, ()),
     ('personal_memory_observation_dedup_enabled', 'MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED',
@@ -185,7 +183,6 @@ _ENV_ONLY = (
 )
 
 _REQUIRES = {
-    "personal_memory_scalar_view_collapse_enabled": ("personal_memory_scalar_state_enabled",),
     "personal_memory_scalar_view_echo_drop_enabled": ("personal_memory_scalar_state_enabled",),
     "personal_memory_observation_dedup_enabled": ("personal_memory_scalar_state_enabled",),
     "personal_memory_event_history_authority_enabled": ("personal_memory_event_history_enabled",),
@@ -193,7 +190,6 @@ _REQUIRES = {
 }
 # These describe scoped prerequisites/data producers; they do not impose runtime validation.
 _REQUIREMENT_SCOPE = {
-    "personal_memory_scalar_view_collapse_enabled": "Collapse only acts on the verdicts the scalar view authority lane emits.",
     "personal_memory_scalar_view_echo_drop_enabled": "Echo drop only acts on the verdicts the scalar view authority lane emits.",
     "personal_memory_observation_dedup_enabled": "Dedup only acts on observations the scalar view authority lane injects.",
     "personal_memory_event_history_authority_enabled": "Event history produces the assertions; recall applies authority only while event history is on.",
@@ -289,4 +285,6 @@ RETIRED = {
     "MENHIR_FRONTIER_CONTENT_VECTOR_WEIGHT": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
     "frontier_bm25": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
     "MENHIR_FRONTIER_BM25": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
+    "personal_memory_scalar_view_collapse_enabled": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
+    "MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_COLLAPSE_ENABLED": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
 }

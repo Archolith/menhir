@@ -483,7 +483,8 @@ Navigate a recorded-time thread of saved memories on demand: page around an inst
 ### `get_scalar_view_items`
 Concept id: `mcp.tool.get_scalar_view_items`
 
-Drill into a scalar View from recall's `authority_layer` (a count or a current value) and page the items it was built from. With `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_COLLAPSE_ENABLED` on, counted Views omit their items from recall and render `built from N items; drill down: get_scalar_view_items(view_uuid=...)`.
+Drill into a scalar View from recall's `authority_layer` (a count or a current value) and page the items it was built from.
+
 - **`view_uuid`** (str, required): The verdict's `view_uuid`.
 - **`offset`** (int, optional): Offset into the items (default: 0).
 - **`limit`** (int, optional): Max items per page (default: 20, max: 50).

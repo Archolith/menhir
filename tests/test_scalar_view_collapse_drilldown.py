@@ -1,8 +1,7 @@
-"""Scalar View collapse (flag) and drill-down (no flag), offline.
+"""Scalar View echo drop (flag) and drill-down (no flag), offline; also the shared fixture hub.
 
-Collapse: counted verdicts drop inline contributors and observations echoing a verdict slot are
-removed from recall. Drill-down: the shared helper, REST route, backend method and MCP tool that
-page the items a View was built from.
+Echo drop: observations echoing a verdict slot are removed from recall. Drill-down: the shared
+helper, REST route, backend method and MCP tool that page the items a View was built from.
 """
 
 from __future__ import annotations
@@ -81,7 +80,7 @@ def _ids(res):
 async def test_flag_off_keeps_observation_and_counted_contributors(
     stub_graphiti_client, stub_memory_graph_adapter,
 ):
-    # Fails if collapse acts without its flag.
+    # Fails if echo drop acts without its flag.
     _wire(stub_memory_graph_adapter, state_view=_state_view("counted"))
     res = await _recall(stub_graphiti_client, stub_memory_graph_adapter, counting_enabled=True)
     assert "obs-postcards-1" in _ids(res)
@@ -101,7 +100,7 @@ async def test_flag_on_drops_echo_observation_keeps_other_slot(
     # Fails if the covered-slot join is missing (echo kept) or too broad (other slot dropped).
     _wire(stub_memory_graph_adapter, state_view=_state_view(), extra_hits=[_other_slot_hit()])
     res = await _recall(stub_graphiti_client, stub_memory_graph_adapter,
-                        scalar_view_collapse_enabled=True)
+                        scalar_view_echo_drop_enabled=True)
     assert res.authority_layer and res.authority_layer[0].kind == "current"
     assert "obs-postcards-1" not in _ids(res)
     assert "obs-other-1" in _ids(res)
@@ -118,7 +117,7 @@ async def test_flag_on_keeps_scalar_history_candidate_in_covered_slot(
           history_view=_postcard_history_view())
     res = await _recall(stub_graphiti_client, stub_memory_graph_adapter,
                         "what was my postcard count before",
-                        scalar_view_collapse_enabled=True, scalar_history_enabled=True)
+                        scalar_view_echo_drop_enabled=True, scalar_history_enabled=True)
     assert "obs-postcards-1" not in _ids(res)
     assert "history-view-postcards" in _ids(res)
 
@@ -131,28 +130,12 @@ async def test_flag_on_keeps_observation_whose_view_was_skipped(
     # Counted View with counting off is skipped -> no verdict -> the observation is the only carrier.
     _wire(stub_memory_graph_adapter, state_view=_state_view("counted"))
     res = await _recall(stub_graphiti_client, stub_memory_graph_adapter,
-                        scalar_view_collapse_enabled=True, counting_enabled=False)
+                        scalar_view_echo_drop_enabled=True, counting_enabled=False)
     assert not res.authority_layer
     assert "obs-postcards-1" in _ids(res)
 
 
-# --------------------------------------------------------------------------- 3. counted verdict
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_flag_on_counted_verdict_has_no_inline_contributors(
-    stub_graphiti_client, stub_memory_graph_adapter,
-):
-    _wire(stub_memory_graph_adapter, state_view=_state_view("counted"))
-    res = await _recall(stub_graphiti_client, stub_memory_graph_adapter,
-                        scalar_view_collapse_enabled=True, counting_enabled=True)
-    verdict = res.authority_layer[0]
-    assert verdict.contributors == ()
-    assert verdict.contributors_total == 1
-    assert verdict.contributors_truncated is True
-    assert verdict.next_offset == 0
-    assert verdict.view_uuid == "sv-1"
-
+# --------------------------------------------------------------------------- 3. stated verdict
 
 @pytest.mark.unit
 @pytest.mark.asyncio
@@ -161,7 +144,7 @@ async def test_flag_on_stated_verdict_keeps_contributors(
 ):
     _wire(stub_memory_graph_adapter, state_view=_state_view())
     res = await _recall(stub_graphiti_client, stub_memory_graph_adapter,
-                        scalar_view_collapse_enabled=True, counting_enabled=True)
+                        scalar_view_echo_drop_enabled=True, counting_enabled=True)
     verdict = res.authority_layer[0]
     assert len(verdict.contributors) == 1
     assert verdict.contributors_truncated is False
