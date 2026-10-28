@@ -184,6 +184,30 @@ def force_all_tests_onto_test_neo4j():
                 os.environ[key] = value
 
 
+@pytest.fixture(scope="module")
+def live_dotenv():
+    """Load the checkout's `.env` for one live-test module, then restore `os.environ` exactly.
+
+    Required because a module-level `load_dotenv()` ran at collection and left `.env` in the
+    environment for the rest of the run, which failed unrelated provider-settings tests.
+    `test_no_import_time_dotenv.py` keeps such calls out of module scope.
+    """
+    from dotenv import load_dotenv
+
+    saved = dict(os.environ)
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if env_path.is_file():
+        load_dotenv(env_path, override=False)
+    try:
+        yield
+    finally:
+        for key in set(os.environ) - set(saved):
+            del os.environ[key]
+        for key, value in saved.items():
+            if os.environ.get(key) != value:
+                os.environ[key] = value
+
+
 @pytest.fixture(autouse=True)
 def isolated_telemetry_db(tmp_path, monkeypatch):
     """Point the telemetry sidecar at a temp DB for EVERY test.
