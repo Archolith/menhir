@@ -24,18 +24,23 @@ mapped into `RetrievalTuningConfig` at the recall entry via `retrieval_tuning()`
 
 | Feature | Flag / env | Gate location | Bench status | Source plan |
 |---|---|---|---|---|
-| Attributed hybrid (vector+BM25) candidate gen | `frontier_bm25` / `MENHIR_FRONTIER_BM25` | recall tuning | neutral-to-negative on LME | `r1-hybrid-candidate-generation.md` |
 | Diversity gate (Guard 4, set-level anti-spiral) | `frontier_diversity_gate` / `MENHIR_FRONTIER_DIVERSITY_GATE` | recall tuning | opt-in (#344) | `menhir-r8-control-rails-plan.md` |
 | Belief gate (CurrentnessWarden + belief scoring; incl. git/structure staleness feed) | `frontier_belief_gate` / `MENHIR_FRONTIER_BELIEF_GATE` | requires `frontier_warden_gate` | opt-in (#173): marks an Entity superseded when any fact edge expired; with git/test/log evidence that scores CONFLICT_SET and the contradiction guard refuses it under the current lens, and the Warden lens ignores "before/previously/used to" history cues. LME 500 q x 3 with it on: quality delta 0, p50 +1.8%, p95 +12.6%, 40% of candidates flagged. Follow-up: #350 | `menhir-belief-gate-activation.md` + `menhir-belief-gate-git-staleness.md` |
 | Evidence-anchor warden (Guard 5) | `frontier_evidence_anchor` / `MENHIR_FRONTIER_EVIDENCE_ANCHOR` | under `warden_gate` | opt-in: provenance comes from the client label, so 3 of 33,861 LME copy-graph entities pass and the strict profile refused all 205 AMA questions; reimplementation in #349 | R8 rails |
-| Fact-edge injection (RELATES_TO into candidate pool) | `frontier_fact_edges` (+ `frontier_fact_edge_mode`) | recall tuning | standalone net-negative at N=30; "pointer" preferred | retrieval fact-edge work |
-| Similarity lane scale | `frontier_similarity_scale` (`rrf` default / `normalized`) | recall tuning | ranking change; A/B before flip | `retrieval-scale-contract-and-gap-remediation.md` (1a/1b) |
 | Shadow pass (observe-only oracle/warden trace) | `frontier_shadow` / `MENHIR_FRONTIER_SHADOW` | recall tuning | observe-only | oracle stack |
-| Deterministic typed-scalar shadow | `personal_memory_scalar_deterministic_shadow` / `MENHIR_SCALAR_DETERMINISTIC_SHADOW` | `TypedScalarPerceptionService` after the LLM gate; audit rows also require consolidation audit | observe-only; held-out agreement/router gates not yet measured | `menhir-deterministic-first-event-scalar-2026-07-30.md` |
 | Event History Phase 3 Consolidation | `personal_memory_event_history_enabled` / `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED` | backfill :TurnEvidence -> assertions via independent watermark cursor | production-capable but default-off; Phase 1-5 complete | `menhir-event-history-plan.md` + commits 048b8d9..51c11cf |
 | Event History Phase 4 Recall Authority | `personal_memory_event_history_authority_enabled` / `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED` | conditional first-person event route probed only when enabled and namespace present | production-capable but default-off; independent of scalar authority | commits 048b8d9..51c11cf |
 | Brief builder (append temporal Timeline in build_context) | `frontier_brief_builder` | removed 2026-10-01, superseded by `recall_timeline` | — | brief-builder work |
 | Anchored-time render (show the persisted time contract as each fact's event time: the resolved window, a plan's planned window, or "event time unknown (said <speech date>)" instead of a speech-date `valid_at`; timeline facts order by window start) | `anchored_time_render_enabled` / `MENHIR_ANCHORED_TIME_RENDER` | `_build_temporal_facts(event_time=...)` in recall enrichment, `_source_time_lines` in the context builder, MCP recall formatter, `timeline_facts(event_time=...)`; contracts are written by the resolver (`anchored_time_persist.py`) whenever it is on, independent of this flag | offline render and flag-off identity tests (`tests/test_anchored_time_render.py`); no live readback yet | workspace `menhir-anchored-time-resolver-p2-plan.md` |
+
+## Removed 2026-10-27
+
+Eleven default-off experiments that were measured and lost, tied, or were deferred were removed
+from `main`: BM25 hybrid, content vector, fact edges, similarity scale, oracle subset, View
+collapse, scalar canonical self, the deterministic scalar shadow and router, and shadow context
+composition. The code is on branch `archive/bucket1-features-2026-10-27`. Per-feature evidence,
+removal commits and restore steps are in
+[`archive/removed-features-2026-10-27.md`](archive/removed-features-2026-10-27.md).
 
 ## Warden profiles and context wiring (2026-10-05)
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-27 - Bucket 1 default-off features removed; kept on an archive branch
+
+- Removed nine default-off features that the #168 freeze did not ship (`be6e3658`..`155d34be`):
+  - the oracle subset;
+  - the similarity scale;
+  - the fact-edge, content-vector and BM25 recall lanes;
+  - scalar collapse;
+  - scalar canonical self;
+  - the deterministic scalar extractor and router;
+  - shadow context composition.
+- The code is kept on `archive/bucket1-features-2026-10-27` (base `d1105b25`).
+  [`archive/removed-features-2026-10-27.md`](archive/removed-features-2026-10-27.md) maps each commit
+  to its files and gives restore steps.
+- Their settings are in `RETIRED`. A stale env export is ignored, and the bench launchers refuse it.
+- Recall Lab arms a, b and c are gone. A request that sets a removed knob gets a 422.
+- Equivalence check: for each unit, an empty env resolves to the same settings, recall tuning, hooks
+  and constructor values as the base, with no differences beyond the removed keys.
+
 ## 2026-10-27 - #168 freeze: tested behavior becomes the default; 23 flags retired
 
 - **Always on, flags retired:**
