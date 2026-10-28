@@ -45,8 +45,6 @@ _SETTINGS = (
         'Anchored time: resolve valid_at on edges from user turns with temporal cues, blind-check each time before it is written, and keep world-ended facts live (labelled ended).', True, ()),
     ('anchored_time_render_enabled', 'MENHIR_ANCHORED_TIME_RENDER', False, 'runtime',
         'Render persisted anchored-time contracts as fact event times in recall and timeline.', True, ()),
-    ('personal_memory_consolidation_enabled', 'MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED', False,
-        'personal_memory', 'Enable personal-memory consolidation.', True, ()),
     ('personal_memory_consolidation_disable_reasoning', 'MENHIR_PERSONAL_MEMORY_CONSOLIDATION_DISABLE_REASONING',
         False, 'personal_memory', 'Request consolidation reasoning suppression where supported.', False, ()),
     ('personal_memory_scalar_state_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED', True,
@@ -289,4 +287,8 @@ RETIRED = {
     "MENHIR_SHADOW_CONTEXT_COMPOSITION": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
     "shadow_composition_timeout_s": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
     "MENHIR_SHADOW_COMPOSITION_TIMEOUT_S": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
+    "personal_memory_consolidation_enabled": "2026-10-28: consolidation counter lane removed (#168; duplicate of the counting lane)",
+    "MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED": "2026-10-28: consolidation counter lane removed (#168; duplicate of the counting lane)",
+    "personal_memory_consolidation_verify_retries": "2026-10-28: consolidation counter lane removed (#168; duplicate of the counting lane)",
+    "MENHIR_PERSONAL_MEMORY_VERIFY_RETRIES": "2026-10-28: consolidation counter lane removed (#168; duplicate of the counting lane)",
 }

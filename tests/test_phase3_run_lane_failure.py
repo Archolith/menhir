@@ -14,7 +14,6 @@ from menhir.services.lane_outcomes import failed_lanes
 
 def _client(graph_adapter) -> TestClient:
     settings = SimpleNamespace(
-        personal_memory_consolidation_enabled=False,
         personal_memory_scalar_state_enabled=True,
         personal_memory_counting_enabled=True,
         personal_memory_event_history_enabled=False,
@@ -49,7 +48,7 @@ def _post(client: TestClient, consolidate=None):
     for p in patches:
         p.start()
     try:
-        return client.post("/api/phase3/run", json={"namespace": "ns-bench", "counter_state": False})
+        return client.post("/api/phase3/run", json={"namespace": "ns-bench"})
     finally:
         for p in patches:
             p.stop()

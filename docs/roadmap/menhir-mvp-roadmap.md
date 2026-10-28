@@ -70,7 +70,7 @@ superseded_by: .agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md
 > - **Write-side consolidation is BUILT** (not in M1-M5, not a gap): the post-LME pivot shipped as
 >   code — D0 retrieval-entropy View-reachability probe (`services/view_entropy.py`,
 >   `infrastructure/view_repository.py`, MCP `ops/view_entropy.py`), D1 QuantState
->   (`services/quantstate_consolidator.py`, `infrastructure/quantstate_repository.py`), event fold
+>   (`infrastructure/quantstate_repository.py`; its consolidator was removed 2026-10-28), event fold
 >   (`services/windowed_fold.py`), and agent-experiential counters
 >   (`services/failure_counter_bridge.py`, `instability_counter_bridge.py`; FailureEvent->QuantState
 >   bridge `f8dd8ab`). It runs write-time / explicitly (scheduler off in bench mode). This is the
@@ -235,8 +235,9 @@ Minimum MVP work:
 
 - Keep capture selective: user prompts only, deterministic triage only, no assistant/tool/full transcript capture.
 - Treat `archolith-bench harness menhir-phase3` as the external regression suite for consumer behavior.
-- Choose the initial enabled namespace(s) and enable `MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED`
-  only after a local smoke run.
+- Choose the initial enabled namespace(s) and enable the scalar/event/counting consolidation lanes
+  only after a local smoke run. (The consolidation counter lane and
+  `MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED` were removed 2026-10-28.)
 - Record one live operator run of `POST /api/phase3/run` or the scheduler job over a known namespace.
 - Document accepted View families and known abstention cases in a runbook or evidence note.
 

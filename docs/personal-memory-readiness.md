@@ -43,14 +43,15 @@ backlog after one.
 ## Knowing a namespace has caught up
 
 `POST /api/phase3/run` reports what is left after its pass:
-- `dirty_after`: counter turns left to read.
+- `dirty_after`: read from the removed counter lane's watermark, which nothing advances now; true
+  once a namespace has user turns.
 - `event_dirty_after`: event turns left (null when the event lane is off).
 - `counting_dirty_after`: counting turns left (null when counting is off).
 - `scalar_repair_pending`: scalar subjects still waiting for a View rebuild.
 
 Gaps:
 - No status field reports scalar turns left to read.
-- `GET /api/phase3/status` reports counter dirtiness only.
+- `GET /api/phase3/status` reports only the removed counter lane's dirtiness (see `dirty_after`).
 
 ## Restart
 
@@ -82,7 +83,6 @@ well keeps the configuration readable, but is not required.
 
 | Lane | Lane flag | Authority flag |
 |---|---|---|
-| Counter | `MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED` | none; counter Views are ordinary memories |
 | Scalar | `MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED` | `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED`; history Views: `MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED` |
 | Event | `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED` | `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED` |
 | Counting | `MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED` (needs scalar) | counted Views are hidden from recall when counting is off |
@@ -100,8 +100,8 @@ What happens (E2E-18):
 - **Turning the lane back on.**
   - **Scalar and event:** they read the turns captured while they were off, from their
     cursors, and do not re-read turns they had already finished.
-  - **Counter:** the counter lane re-reads every user turn of the namespace on any pass that
-    has new turns. Its cursor only marks the namespace dirty.
+  - The consolidation counter lane (`MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED`) was removed
+    2026-10-28. Menhir ignores the setting; the bench launchers refuse it.
   - The Views catch up in that pass.
 
 Removing data is a separate step: see the deletion and erasure tools.

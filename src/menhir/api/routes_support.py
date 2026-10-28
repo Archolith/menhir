@@ -706,7 +706,6 @@ class Phase3RunRequest(BaseModel):
     k: int = Field(default=3, ge=1, le=9)
     source: str = "perception"
     call_budget: int | None = None
-    counter_state: bool = True
 
 
 class Phase3RunResponse(BaseModel):
@@ -752,7 +751,7 @@ class Phase3RunResponse(BaseModel):
     event_assertions_created: int = 0
     event_views_rebuilt: int = 0
     event_llm_calls: int = 0
-    # Per-lane stage counts and no_output/stalled flags (#170 item 4); None on a counter-only pass.
+    # Per-lane stage counts and no_output/stalled flags (#170 item 4); None when neither scalar nor event ran.
     lane_outcomes: dict[str, dict[str, Any]] | None = None
     # False when any lane failed closed for the namespace; failed_lanes then names each one.
     ok: bool = True

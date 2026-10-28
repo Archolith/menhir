@@ -13,7 +13,7 @@ import pytest
 from menhir.services import scheduler_tasks
 from menhir.services.lane_outcomes import lane_outcomes
 from tests.test_consolidate_personal_memory import (
-    _COUNTER_ONLY_KEYS,
+    _NO_LANE_KEYS,
     _FakeGraph,
     _ScalarGraph,
     _empty_llm,
@@ -29,7 +29,7 @@ pytestmark = pytest.mark.unit
 
 def test_disabled_lanes_are_listed_as_disabled():
     out = lane_outcomes({}, enabled={"scalar": True})
-    assert out["counter"] == {"enabled": False}
+    assert "counter" not in out
     assert out["event"] == {"enabled": False}
     assert out["counting"] == {"enabled": False}
     assert out["scalar"]["enabled"] is True
@@ -54,12 +54,6 @@ def test_lane_with_dirty_namespaces_it_never_processed_is_stalled():
 def test_lane_with_no_input_is_neither_flag():
     out = lane_outcomes({}, enabled={"counting": True})
     assert out["counting"]["no_output"] is False and out["counting"]["stalled"] is False
-
-
-def test_counter_rows_come_from_the_argument_not_the_result():
-    out = lane_outcomes({"namespaces_dirty": 1, "namespaces_processed": 1, "views_written": 0},
-                        enabled={"counter": True}, counter_evidence_rows=3)
-    assert out["counter"]["input_rows"] == 3 and out["counter"]["no_output"] is True
 
 
 # ---- scalar stage counts from a real scalar pass over the fake graph ------------------------------
@@ -119,20 +113,20 @@ def _event_pass(monkeypatch, recorded: int) -> dict:
         graph, llm_complete=_empty_llm, k=1, enable_event_history=True))
 
 
-def test_event_success_does_not_hide_an_idle_counter(monkeypatch):
+def test_event_success_reports_beside_disabled_lanes(monkeypatch):
     lanes = _event_pass(monkeypatch, recorded=2)["lane_outcomes"]
     assert lanes["event"]["output"] == 2 and lanes["event"]["no_output"] is False
-    assert lanes["counter"]["input_rows"] == 1 and lanes["counter"]["no_output"] is True
     assert lanes["scalar"] == {"enabled": False} and lanes["counting"] == {"enabled": False}
+    assert "counter" not in lanes
 
 
-def test_idle_event_lane_is_flagged_beside_the_counter(monkeypatch):
+def test_idle_event_lane_is_flagged(monkeypatch):
     lanes = _event_pass(monkeypatch, recorded=0)["lane_outcomes"]
     assert lanes["event"]["no_output"] is True and lanes["event"]["input_rows"] == 2
 
 
-def test_counter_only_pass_keeps_its_exact_shape():
+def test_no_lane_pass_keeps_its_exact_shape():
     graph = _FakeGraph(dirty=["lme-a"], episodes_by_ns={"lme-a": _eps("I spent forty dollars")})
     out = asyncio.run(scheduler_tasks.consolidate_personal_memory(
         graph, llm_complete=_empty_llm, k=1))
-    assert set(out) == _COUNTER_ONLY_KEYS
+    assert set(out) == _NO_LANE_KEYS

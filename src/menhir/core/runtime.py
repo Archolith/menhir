@@ -394,7 +394,6 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         getattr(settings, "personal_memory_recall_audit_enabled", False)
     )
 
-    personal_memory_enabled = getattr(settings, "personal_memory_consolidation_enabled", False)
     event_history_enabled = getattr(settings, "personal_memory_event_history_enabled", False)
     scalar_state_enabled = getattr(settings, "personal_memory_scalar_state_enabled", False)
     counting_enabled = getattr(settings, "personal_memory_counting_enabled", False)
@@ -403,7 +402,7 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
             "personal-memory counting enabled but scalar state is disabled; "
             "counting needs scalar state and will do nothing")
     personal_memory_llm = None
-    if (personal_memory_enabled or event_history_enabled or scalar_state_enabled
+    if (event_history_enabled or scalar_state_enabled
             or counting_enabled) and settings is not None:
         from menhir.infrastructure.sync_llm import make_sync_chat
 
@@ -446,7 +445,6 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         verifier_sync_interval_s=getattr(settings, "verifier_sync_interval_s", 300.0),
         verifier_repo=verifier_repo,
         verifier_context=verifier_context,
-        personal_memory_enabled=personal_memory_enabled,
         event_history_enabled=event_history_enabled,
         counting_enabled=counting_enabled,
         counting_perceiver_version=getattr(
@@ -459,7 +457,6 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         personal_memory_llm=personal_memory_llm,
         personal_memory_k=getattr(settings, "personal_memory_consolidation_k", 3),
         personal_memory_call_budget=getattr(settings, "personal_memory_consolidation_call_budget", 300),
-        personal_memory_verify_retries=getattr(settings, "personal_memory_consolidation_verify_retries", 0),
         scalar_state_enabled=scalar_state_enabled,
         scalar_state_perceiver_version=getattr(
             settings, "personal_memory_scalar_state_perceiver_version", "v2"),

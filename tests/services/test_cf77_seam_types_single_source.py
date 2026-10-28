@@ -3,7 +3,7 @@
 `LlmComplete` and `Embed` describe how a service receives its injected LLM/embedding collaborators.
 They were re-declared per module rather than imported, and the copies did not stay identical:
 
-    quantstate_consolidator.py:22   Embed = Callable[[str], list[float]]
+    quantstate_consolidator.py:22   Embed = Callable[[str], list[float]]   (module since removed)
     every other declaration         Embed = Callable[[str], list[float] | None]
 
 The drifted copy dropped exactly the case a caller has to handle. Every real embedding seam here
@@ -27,9 +27,8 @@ from menhir.services.seam_types import Embed, LlmComplete
 pytestmark = pytest.mark.unit
 
 _CONSUMERS = (
-    "correction_resolver", "event_fold", "event_history_perception", "perception",
-    "quantstate_consolidator", "typed_scalar_proposer_reviewer", "typed_scalar_rules",
-    "verifier_sync",
+    "event_fold", "event_history_perception", "perception",
+    "typed_scalar_proposer_reviewer", "typed_scalar_rules", "verifier_sync",
 )
 
 

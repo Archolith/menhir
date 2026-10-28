@@ -103,7 +103,7 @@ async def test_e2e_11_count_pending_sweep(
                                      feature_env=env) as client:
                 await _capture(e2e_config, client, namespace, KIT_TURNS)
             first = post_json(e2e_config, "/api/phase3/run",
-                              {"namespace": namespace, "k": 3, "counter_state": False,
+                              {"namespace": namespace, "k": 3,
                                "call_budget": FIRST_PASS_BUDGET})
             lane_evidence.attach("phase3-short-budget.json",
                                  json.dumps(first, indent=2, default=str))

@@ -2,7 +2,7 @@
 
 One namespace on one graph goes through four backends, each a restart with different flags:
 
-1. **on**: scalar, event and counter lanes with both authority paths.
+1. **on**: scalar and event lanes with both authority paths.
 2. **lanes off, authority on**: the writers stop, and authority stops with them.
 3. **all off**: recall falls back to ordinary memories.
 4. **back on**: the lanes catch up on the turns captured while they were off.
@@ -40,14 +40,6 @@ from tests.e2e._harness.phase3 import (
 )
 from tests.e2e._harness.scripted_provider import Rule, Script, scripted_model
 from tests.e2e.test_e2e_13_state_semantics import _EVENT_LINE, EVENT_PROMPT
-from tests.e2e.test_e2e_16_counter import (
-    COREF_PROMPT,
-    CROSS_CHECK_PROMPT,
-    EXTRACT_PROMPT,
-    VERIFY_PROMPT,
-    _extract_reply,
-    counters,
-)
 from tests.e2e.test_e2e_17_recall_authority import (
     _ask,
     _event_reply,
@@ -62,14 +54,12 @@ ON = {
     "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED": "true",
     "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED": "true",
     "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED": "true",
-    "MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED": "true",
     # The passes under test are explicit phase3 runs.
     "MENHIR_PERSONAL_MEMORY_CONSOLIDATION_INTERVAL_S": "86400",
 }
 LANES_OFF = {**ON,
              "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED": "false",
-             "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED": "false",
-             "MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED": "false"}
+             "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED": "false"}
 #: Scalar authority is always on (#168 freeze) and follows its lane, so only event authority is
 #: switched off here; the scalar half of this stage equals stage 2.
 ALL_OFF = {**LANES_OFF,
@@ -110,12 +100,11 @@ CRITERIA = [
     "no_unscripted_model_prompt",
 ]
 
-_LANE_RULES = ("scalar", "event", "extract", "cross_check", "coref", "verify")
+_LANE_RULES = ("scalar", "event")
 
 
 def _phase3(config: E2EConfig, evidence: LaneEvidence, namespace: str, label: str) -> dict:
-    result = post_json(config, "/api/phase3/run",
-                       {"namespace": namespace, "k": 3, "counter_state": True})
+    result = post_json(config, "/api/phase3/run", {"namespace": namespace, "k": 3})
     evidence.attach(f"{label}.json", json.dumps(result, indent=2, default=str))
     return result
 
@@ -164,10 +153,6 @@ async def test_e2e_18_opt_out_and_back(
     script = Script([
         Rule("scalar", SCALAR_PROMPT, envelope_reply(COINS)),
         Rule("event", EVENT_PROMPT, _event_reply_with_green),
-        Rule("extract", EXTRACT_PROMPT, _extract_reply),
-        Rule("cross_check", CROSS_CHECK_PROMPT, ['{"total": null}']),
-        Rule("coref", COREF_PROMPT, ['{"same_purchase": true}']),
-        Rule("verify", VERIFY_PROMPT, ['{"correct": true}']),
     ])
     coins_q = "How many coins do I have now?"
     kayak_q = "Which kayak did I buy most recently?"
@@ -186,7 +171,7 @@ async def test_e2e_18_opt_out_and_back(
                                      feature_env=env(ON)) as client:
                 await capture(client, BEFORE)
                 _phase3(e2e_config, lane_evidence, namespace, "phase3-on")
-                on_views, on_counters = scalar_views(e2e_config, namespace), counters(e2e_config, namespace)
+                on_views = scalar_views(e2e_config, namespace)
                 on_coins, _ = await _ask(client, namespace, coins_q, lane_evidence, "coins-on")
                 on_kayak, _ = await _ask(client, namespace, kayak_q, lane_evidence, "kayak-on")
 
@@ -199,7 +184,7 @@ async def test_e2e_18_opt_out_and_back(
                 calls_before_off = _calls(script)
                 off_result = _phase3(e2e_config, lane_evidence, namespace, "phase3-lanes-off")
                 calls_after_off = _calls(script)
-                off_views, off_counters = scalar_views(e2e_config, namespace), counters(e2e_config, namespace)
+                off_views = scalar_views(e2e_config, namespace)
                 off_coins, off_coins_ctx = await _ask(client, namespace, coins_q, lane_evidence,
                                                       "coins-lanes-off")
                 off_kayak, off_kayak_ctx = await _ask(client, namespace, kayak_q, lane_evidence,
@@ -218,7 +203,7 @@ async def test_e2e_18_opt_out_and_back(
                                      feature_env=env(ON)) as client:
                 start = _calls(script)
                 back_result = _phase3(e2e_config, lane_evidence, namespace, "phase3-back-on")
-                back_views, back_counters = scalar_views(e2e_config, namespace), counters(e2e_config, namespace)
+                back_views = scalar_views(e2e_config, namespace)
                 back_coins, _ = await _ask(client, namespace, coins_q, lane_evidence, "coins-back-on")
                 back_kayak, _ = await _ask(client, namespace, kayak_q, lane_evidence, "kayak-back-on")
 
@@ -231,15 +216,11 @@ async def test_e2e_18_opt_out_and_back(
         return ((str(verdict[0].get("object_key")), str(verdict[0].get("status")))
                 if len(verdict) == 1 else ("", ""))
 
-    mugs = {"on": on_counters, "off": off_counters, "back": back_counters}
-    mug_values = {k: {c: v["value"] for c, v in snap.items()} for k, snap in mugs.items()}
-    lane_evidence.attach("counters.json", json.dumps(mug_values, indent=2, default=str))
     lane_evidence.record(
         "lanes_build_state_while_on",
         passed=_coins(on_views) == [37.0] and lead(on_coins) == ("37", "leads")
-        and kayak(on_kayak) == ("blue kayak", "leads") and 15.0 in mug_values["on"].values(),
-        detail={"coins": _coins(on_views), "lead": lead(on_coins), "kayak": kayak(on_kayak),
-                "counters": mug_values["on"]},
+        and kayak(on_kayak) == ("blue kayak", "leads"),
+        detail={"coins": _coins(on_views), "lead": lead(on_coins), "kayak": kayak(on_kayak)},
     )
     lane_evidence.record(
         "lane_off_does_no_model_work",
@@ -248,8 +229,8 @@ async def test_e2e_18_opt_out_and_back(
     )
     lane_evidence.record(
         "lane_off_keeps_stored_state",
-        passed=_coins(off_views) == [37.0] and mug_values["off"] == mug_values["on"],
-        detail={"coins": _coins(off_views), "counters": mug_values["off"]},
+        passed=_coins(off_views) == [37.0],
+        detail={"coins": _coins(off_views)},
     )
     # The newer turns say 42 coins and a green kayak; the frozen 37 and blue kayak must not lead.
     lane_evidence.record(
@@ -270,31 +251,25 @@ async def test_e2e_18_opt_out_and_back(
     )
     scalar_seen = _prompts(script, "scalar", start["scalar"])
     event_seen = _prompts(script, "event", start["event"])
-    extract_seen = _prompts(script, "extract", start["extract"])
-    lane_evidence.attach("back-on-prompts.txt",
-                         f"{scalar_seen}\n\n---\n\n{event_seen}\n\n---\n\n{extract_seen}")
-    # Scalar and event read past their durable cursors. The counter lane re-reads every user turn
-    # of a dirty namespace on each pass by design (load_user_episodes); it is recorded, not asserted.
+    lane_evidence.attach("back-on-prompts.txt", f"{scalar_seen}\n\n---\n\n{event_seen}")
+    # Scalar and event read past their durable cursors.
     backlog = {text for text, _ in WHILE_OFF}
     scalar_turns = _turns_listed(script, "scalar", start["scalar"])
     event_turns = _turns_listed(script, "event", start["event"])
     lane_evidence.record(
         "re_enable_reads_only_the_backlog",
         passed=scalar_turns == backlog and event_turns == backlog,
-        detail={"scalar_turns": sorted(scalar_turns), "event_turns": sorted(event_turns),
-                "counter_turns": sorted(_turns_listed(script, "extract", start["extract"]))},
+        detail={"scalar_turns": sorted(scalar_turns), "event_turns": sorted(event_turns)},
     )
     lane_evidence.record(
         "re_enabled_lanes_catch_up",
         passed=_coins(back_views) == [42.0] and lead(back_coins) == ("42", "leads")
-        and kayak(back_kayak) == ("green kayak", "leads") and 16.0 in mug_values["back"].values(),
-        detail={"coins": _coins(back_views), "lead": lead(back_coins), "kayak": kayak(back_kayak),
-                "counters": mug_values["back"]},
+        and kayak(back_kayak) == ("green kayak", "leads"),
+        detail={"coins": _coins(back_views), "lead": lead(back_coins), "kayak": kayak(back_kayak)},
     )
     lane_evidence.record(
         "phase3_reports_caught_up",
-        passed=back_result.get("dirty_after") is False
-        and back_result.get("event_dirty_after") is False,
+        passed=back_result.get("event_dirty_after") is False,
         detail={k: back_result.get(k) for k in
                 ("dirty_after", "event_dirty_after", "counting_dirty_after", "scalar_repair_pending")},
     )

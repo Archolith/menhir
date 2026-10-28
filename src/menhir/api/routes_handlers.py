@@ -71,14 +71,6 @@ async def phase3_run_impl(
         k=body.k,
         source=body.source,
         call_budget=body.call_budget,
-        verify_retries=getattr(settings, "personal_memory_consolidation_verify_retries", 0),
-        # CF-129: the deployment flag is the kill switch and the API was bypassing it. The
-        # request body defaulted counter_state=True while the scheduler path
-        # (scheduler_tasks.py) honours personal_memory_consolidation_enabled, which defaults
-        # False -- so a default-body POST reached the correction resolver on a stock
-        # deployment while the scheduler never did. Both must now agree.
-        enable_counter_state=body.counter_state
-        and getattr(settings, "personal_memory_consolidation_enabled", False),
         enable_scalar_state=getattr(settings, "personal_memory_scalar_state_enabled", False),
         scalar_state_perceiver_version=getattr(
             settings,
@@ -135,7 +127,7 @@ async def phase3_run_impl(
         abstained=int(result.get("abstained", 0) or 0),
         corrections_applied=int(result.get("corrections_applied", 0) or 0),
         llm_calls=int(result.get("llm_calls", 0) or 0),
-        counter_enabled=bool(body.counter_state and getattr(settings, "personal_memory_consolidation_enabled", False)),
+        counter_enabled=False,
         scalar_llm_calls=int(result.get("scalar_llm_calls", 0) or 0),
         event_dirty_after=event_dirty_after,
         scalar_enabled=bool(getattr(settings, "personal_memory_scalar_state_enabled", False)),

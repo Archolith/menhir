@@ -1,6 +1,6 @@
 """Per-lane outcome report for one personal-memory consolidation pass (#170 item 4).
 
-The pass result is one flat dict shared by four lanes (counter, scalar, event, counting). A busy
+The pass result is one flat dict shared by three lanes (scalar, event, counting). A busy
 lane's counts can make an idle one look fine, so this report lists every lane on its own: whether
 it was enabled, what it read, what each stage produced, and two flags:
 
@@ -19,11 +19,6 @@ from typing import Any
 #: lane -> (dirty key, processed key, failed key or None, input-rows key, primary output key,
 #:          {stage name: result key})
 _LANES: dict[str, tuple[str, str, str | None, str, str, dict[str, str]]] = {
-    "counter": (
-        "namespaces_dirty", "namespaces_processed", None, "counter_evidence_rows", "views_written",
-        {"views_written": "views_written", "abstained": "abstained",
-         "corrections_applied": "corrections_applied"},
-    ),
     "scalar": (
         "scalar_namespaces_dirty", "scalar_namespaces_processed", "scalar_namespaces_failed",
         "scalar_evidence_rows", "scalar_assertions_persisted",
@@ -53,11 +48,10 @@ def _int(value: Any) -> int:
         return 0
 
 
-def lane_outcomes(result: dict[str, Any], *, enabled: dict[str, bool],
-                  counter_evidence_rows: int = 0) -> dict[str, dict[str, Any]]:
+def lane_outcomes(result: dict[str, Any], *, enabled: dict[str, bool]) -> dict[str, dict[str, Any]]:
     """Build the per-lane report from a pass result. ``enabled`` maps lane name -> flag; a lane
     missing from it is reported disabled. Disabled lanes are listed too, so absence is explicit."""
-    source = {**result, "counter_evidence_rows": counter_evidence_rows}
+    source = result
     out: dict[str, dict[str, Any]] = {}
     for lane, (dirty, processed, failed, rows, primary, stages) in _LANES.items():
         on = bool(enabled.get(lane, False))

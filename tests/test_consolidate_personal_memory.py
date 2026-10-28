@@ -1,8 +1,7 @@
 """Orchestration tests for the personal-memory consolidation task (perception prod wiring).
 
-These cover the scheduling wrapper — dirty selection, budget cap, watermarking, guard pinning — not
-the perception gate itself (tested in test_perception*). The fake LLM returns an empty extraction so
-the gate commits nothing; each extract_once still costs one llm call, which drives the budget test.
+These cover the scheduling wrapper for the scalar, event and counting lanes. (The consolidation
+counter lane and its tests were removed 2026-10-28, #168.)
 """
 
 from __future__ import annotations
@@ -15,9 +14,8 @@ from menhir.services import scheduler_tasks
 
 
 class _FakeGraph:
-    """Implements the surface consolidate_personal_memory touches: dirty list, episode load,
-    watermark, and record_counter (perceive_and_fold's fold sink — never reached here since the
-    fake LLM extracts nothing)."""
+    """Implements the surface consolidate_personal_memory touches: dirty list, episode load and
+    watermark."""
 
     def __init__(self, dirty, episodes_by_ns):
         self._dirty = list(dirty)
@@ -53,59 +51,6 @@ def _empty_llm(system: str, user: str) -> str:
 
 
 @pytest.mark.unit
-def test_consolidate_processes_dirty_namespaces_and_watermarks_each() -> None:
-    graph = _FakeGraph(
-        dirty=["lme-a", "lme-b"],
-        episodes_by_ns={"lme-a": _eps("I spent forty dollars on parts"),
-                        "lme-b": _eps("bought another tank today")},
-    )
-    out = asyncio.run(scheduler_tasks.consolidate_personal_memory(
-        graph, llm_complete=_empty_llm, k=2))
-
-    assert out["namespaces_dirty"] == 2
-    assert out["namespaces_processed"] == 2
-    assert graph.loaded == ["lme-a", "lme-b"]
-    assert graph.marked == ["lme-a", "lme-b"]      # both watermarked (abstain still debounces)
-    assert out["llm_calls"] > 0
-
-
-@pytest.mark.unit
-def test_budget_cap_stops_between_namespaces_and_leaves_rest_dirty() -> None:
-    graph = _FakeGraph(
-        dirty=["lme-a", "lme-b", "lme-c"],
-        episodes_by_ns={ns: _eps("spent money on things") for ns in ("lme-a", "lme-b", "lme-c")},
-    )
-    # k=2 -> ~2 llm calls per namespace; a budget of 1 permits only the first namespace.
-    out = asyncio.run(scheduler_tasks.consolidate_personal_memory(
-        graph, llm_complete=_empty_llm, k=2, call_budget=1))
-
-    assert out["namespaces_processed"] == 1
-    assert graph.marked == ["lme-a"]               # only the processed one is watermarked
-    assert "lme-b" not in graph.marked             # the rest stay dirty for the next run
-
-
-@pytest.mark.unit
-def test_empty_namespace_is_watermarked_without_calling_llm() -> None:
-    graph = _FakeGraph(dirty=["lme-empty"], episodes_by_ns={"lme-empty": []})
-    out = asyncio.run(scheduler_tasks.consolidate_personal_memory(
-        graph, llm_complete=_empty_llm, k=3))
-
-    assert out["namespaces_processed"] == 1
-    assert out["llm_calls"] == 0                    # no episodes -> no perception
-    assert graph.marked == ["lme-empty"]           # still debounced
-
-
-@pytest.mark.unit
-def test_explicit_namespaces_override_dirty_query() -> None:
-    graph = _FakeGraph(dirty=["should-not-be-used"], episodes_by_ns={"forced": _eps("hi there friend")})
-    out = asyncio.run(scheduler_tasks.consolidate_personal_memory(
-        graph, llm_complete=_empty_llm, namespaces=["forced"], k=1))
-
-    assert graph.loaded == ["forced"]
-    assert out["namespaces_dirty"] == 1
-
-
-@pytest.mark.unit
 def test_scheduler_registers_consolidation_job_only_when_enabled_and_llm_present() -> None:
     from menhir.services.maintenance_scheduler import MaintenanceScheduler
 
@@ -113,70 +58,29 @@ def test_scheduler_registers_consolidation_job_only_when_enabled_and_llm_present
         def get_queue_depth(self): return 0
 
     common = dict(ingest_service=_Ingest(), graph_adapter=object())
-    off = MaintenanceScheduler(**common, personal_memory_enabled=False, personal_memory_llm=_empty_llm)
+    off = MaintenanceScheduler(**common, personal_memory_llm=_empty_llm)
     assert "consolidate_personal_memory" not in off._jobs
-    no_llm = MaintenanceScheduler(**common, personal_memory_enabled=True, personal_memory_llm=None)
+    no_llm = MaintenanceScheduler(**common, scalar_state_enabled=True, personal_memory_llm=None)
     assert "consolidate_personal_memory" not in no_llm._jobs
-    on = MaintenanceScheduler(**common, personal_memory_enabled=True, personal_memory_llm=_empty_llm)
+    on = MaintenanceScheduler(**common, scalar_state_enabled=True, personal_memory_llm=_empty_llm)
     assert "consolidate_personal_memory" in on._jobs
 
 
-_COUNTER_ONLY_KEYS = {
-    "namespaces_dirty", "namespaces_processed", "views_written", "abstained",
-    "corrections_applied", "llm_calls",
-}
+_NO_LANE_KEYS = {"llm_calls"}
 
 
 @pytest.mark.unit
-def test_flag_off_result_is_byte_identical_and_never_touches_scalar() -> None:
-    # flag OFF: the result shape is EXACTLY the counter-only keys (no scalar_* additive keys), and the
+def test_flag_off_result_has_only_the_call_total_and_never_touches_scalar() -> None:
+    # every lane OFF: the result shape is EXACTLY the call total (no scalar_* additive keys), and the
     # scalar surface is never touched — _FakeGraph has no scalar methods, so any access would AttributeError.
     graph = _FakeGraph(dirty=["lme-a"], episodes_by_ns={"lme-a": _eps("I spent forty dollars on parts")})
     out = asyncio.run(scheduler_tasks.consolidate_personal_memory(graph, llm_complete=_empty_llm, k=2))
-    assert set(out.keys()) == _COUNTER_ONLY_KEYS
+    assert set(out.keys()) == _NO_LANE_KEYS
     assert not hasattr(graph, "scalar_marked")   # the scalar watermark was never stamped
 
 
-@pytest.mark.unit
-def test_scalar_runner_receives_the_counter_phase_call_counter(monkeypatch) -> None:
-    graph = _FakeGraph(
-        dirty=[],
-        episodes_by_ns={"lme-a": _eps("I spent forty dollars on parts")},
-    )
-    captured: dict[str, object] = {}
-
-    def _capture_scalar_runner(*args, **kwargs):
-        captured["counter"] = kwargs["counting_llm"]
-        captured["calls"] = kwargs["counting_llm"].calls
-        captured["budget"] = kwargs["call_budget"]
-        return {"scalar_namespaces_dirty": len(kwargs["scalar_targets"])}
-
-    monkeypatch.setattr(
-        scheduler_tasks,
-        "run_scalar_consolidation",
-        _capture_scalar_runner,
-    )
-
-    out = asyncio.run(
-        scheduler_tasks.consolidate_personal_memory(
-            graph,
-            llm_complete=_empty_llm,
-            namespaces=["lme-a"],
-            k=1,
-            call_budget=5,
-            enable_scalar_state=True,
-        )
-    )
-
-    assert captured["calls"] == out["llm_calls"]
-    assert int(captured["calls"]) > 0
-    assert captured["budget"] == 5
-    assert out["scalar_namespaces_dirty"] == 1
-
-
 class _ScalarGraph(_FakeGraph):
-    """Counter surface + the scalar-shadow surface the C.4.3 coordinator drives. Counter is inert
-    here (no counter-dirty namespaces) so the scalar pass is isolated. Models the resumable scalar
+    """Base surface + the scalar-shadow surface the C.4.3 coordinator drives. Models the resumable scalar
     CURSOR exactly as the Cypher does: pages AFTER the advanced cursor on the MONOTONIC work-discovery
     key `cursor_at = coalesce(created_at, valid_at)` (NOT world-time), so a late-finalized episode
     with an earlier valid_at is still discovered. Each episode dict may carry `created_at` and/or
@@ -724,7 +628,7 @@ def test_scheduler_factory_wires_scalar_state_flag_and_version(monkeypatch) -> N
 
     sched = ms.MaintenanceScheduler(
         ingest_service=_Ingest(), graph_adapter=object(),
-        personal_memory_enabled=True, personal_memory_llm=_empty_llm,
+        personal_memory_llm=_empty_llm,
         scalar_state_enabled=True, scalar_state_perceiver_version="v2")
     asyncio.run(sched._make_consolidate_personal_memory())
 
@@ -750,7 +654,7 @@ def test_scheduler_factory_defaults_scalar_state_off(monkeypatch) -> None:
 
     sched = ms.MaintenanceScheduler(
         ingest_service=_Ingest(), graph_adapter=object(),
-        personal_memory_enabled=True, personal_memory_llm=_empty_llm)
+        personal_memory_llm=_empty_llm)
     asyncio.run(sched._make_consolidate_personal_memory())
 
     assert captured["enable_scalar_state"] is False
@@ -843,41 +747,12 @@ def test_settings_reads_personal_memory_chat_model(monkeypatch) -> None:
 
 
 @pytest.mark.unit
-def test_settings_reads_verify_retries(monkeypatch) -> None:
+def test_settings_verify_retries_is_retired(monkeypatch) -> None:
     from menhir.config import MemorySettings
 
-    # default is 0 (behaviour unchanged); env override is read as an int.
-    monkeypatch.delenv("MENHIR_PERSONAL_MEMORY_VERIFY_RETRIES", raising=False)
-    assert MemorySettings.from_env().personal_memory_consolidation_verify_retries == 0
+    # The counter lane that read it was removed 2026-10-28 (#168): no setting remains.
     monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_VERIFY_RETRIES", "1")
-    assert MemorySettings.from_env().personal_memory_consolidation_verify_retries == 1
-
-
-@pytest.mark.unit
-def test_verify_retries_threads_to_perceive(monkeypatch) -> None:
-    """The consolidation task forwards its verify_retries to perceive_and_fold (default 0)."""
-    seen = {}
-
-    def _spy(**kwargs):
-        seen.update(kwargs)
-        class _R:
-            committed: list = []
-            abstained: list = []
-        return _R()
-
-    monkeypatch.setattr(scheduler_tasks, "perceive_and_fold", _spy, raising=False)
-    import menhir.services.perception as perception
-    monkeypatch.setattr(perception, "perceive_and_fold", _spy)
-
-    graph = _FakeGraph(dirty=["ns-a"], episodes_by_ns={"ns-a": _eps("spent thirty on a helmet")})
-    asyncio.run(scheduler_tasks.consolidate_personal_memory(
-        graph, llm_complete=_empty_llm, k=2, verify_retries=2))
-    assert seen.get("verify_retries") == 2
-
-    seen.clear()
-    graph2 = _FakeGraph(dirty=["ns-a"], episodes_by_ns={"ns-a": _eps("spent thirty on a helmet")})
-    asyncio.run(scheduler_tasks.consolidate_personal_memory(graph2, llm_complete=_empty_llm, k=2))
-    assert seen.get("verify_retries") == 0  # default unchanged
+    assert not hasattr(MemorySettings.from_env(), "personal_memory_consolidation_verify_retries")
 
 
 @pytest.mark.unit
@@ -887,59 +762,6 @@ def test_settings_sum_grounding_is_retired(monkeypatch) -> None:
     # Always on since the #168 freeze: no setting, and a stale env var cannot turn it off.
     monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_SUM_GROUNDING", "0")
     assert not hasattr(MemorySettings.from_env(), "personal_memory_consolidation_sum_grounding")
-
-
-@pytest.mark.unit
-def test_sum_grounding_threads_to_perceive(monkeypatch) -> None:
-    """The consolidation task forwards sum_grounding to perceive_and_fold as enable_sum_grounding."""
-    seen = {}
-
-    def _spy(**kwargs):
-        seen.update(kwargs)
-        class _R:
-            committed: list = []
-            abstained: list = []
-        return _R()
-
-    monkeypatch.setattr(scheduler_tasks, "perceive_and_fold", _spy, raising=False)
-    import menhir.services.perception as perception
-    monkeypatch.setattr(perception, "perceive_and_fold", _spy)
-
-    graph = _FakeGraph(dirty=["ns-a"], episodes_by_ns={"ns-a": _eps("spent thirty on a helmet")})
-    asyncio.run(scheduler_tasks.consolidate_personal_memory(
-        graph, llm_complete=_empty_llm, k=2, sum_grounding=False))
-    assert seen.get("enable_sum_grounding") is False  # per-call knob still turns it off
-
-    seen.clear()
-    graph2 = _FakeGraph(dirty=["ns-a"], episodes_by_ns={"ns-a": _eps("spent thirty on a helmet")})
-    asyncio.run(scheduler_tasks.consolidate_personal_memory(graph2, llm_complete=_empty_llm, k=2))
-    assert seen.get("enable_sum_grounding") is True  # on by default since the #168 freeze
-
-
-@pytest.mark.unit
-def test_all_bias_guards_pinned_on(monkeypatch) -> None:
-    """Decision 5: the prod wrapper must pin cross-check + coref + verify ON (an automatic write must
-    never commit a confident-but-wrong total). Assert perceive_and_fold is called with all three."""
-    seen = {}
-
-    def _spy(**kwargs):
-        seen.update(kwargs)
-        class _R:
-            committed: list = []
-            abstained: list = []
-        return _R()
-
-    monkeypatch.setattr(scheduler_tasks, "perceive_and_fold", _spy, raising=False)
-    # perceive_and_fold is imported inside the task; patch at its source too.
-    import menhir.services.perception as perception
-    monkeypatch.setattr(perception, "perceive_and_fold", _spy)
-
-    graph = _FakeGraph(dirty=["lme-a"], episodes_by_ns={"lme-a": _eps("spent thirty on a helmet")})
-    asyncio.run(scheduler_tasks.consolidate_personal_memory(graph, llm_complete=_empty_llm, k=2))
-
-    assert seen.get("enable_cross_check") is True
-    assert seen.get("enable_coref") is True
-    assert seen.get("enable_verify") is True
 
 
 # ---- event-history consolidation wiring (task: narrow event wiring slice) ----------------------
@@ -994,7 +816,7 @@ def test_event_flag_off_never_discover_or_runs_event_and_adds_no_event_keys(monk
 
     assert "discover" not in captured and "ran" not in captured     # never touched when off
     assert not any(k.startswith("event_") for k in out)             # no event_* result keys
-    assert set(out.keys()) == _COUNTER_ONLY_KEYS                     # byte-identical counter shape
+    assert set(out.keys()) == _NO_LANE_KEYS                          # nothing but the call total
 
 
 @pytest.mark.unit
@@ -1019,7 +841,7 @@ def test_event_flag_on_discover_shares_llm_and_merges_metrics(monkeypatch) -> No
     assert captured["version"] == "v2"                               # configured version flows through
     assert captured["batch"] == 123                                  # configured batch flows through
     assert captured["budget"] == 50                                  # shares the same call budget
-    # the runner spent 3 calls; total llm_calls = counter phase + event phase
+    # the runner spent 3 calls; total llm_calls = the event phase's spend
     assert out["llm_calls"] == captured["calls_after"]
     assert out["llm_calls"] > 0
     assert captured["calls_after"] - captured["calls_before"] == 3   # event spent on the same counter
@@ -1053,7 +875,7 @@ def test_event_explicit_namespaces_bypass_dirty_discovery(monkeypatch) -> None:
 
 
 @pytest.mark.unit
-def test_event_only_call_with_counter_and_scalar_disabled(monkeypatch) -> None:
+def test_event_only_call_with_scalar_disabled(monkeypatch) -> None:
     async def _fake_select(*a, **kw):
         return ["ev-a"]
 
@@ -1065,37 +887,11 @@ def test_event_only_call_with_counter_and_scalar_disabled(monkeypatch) -> None:
                        episodes_by_ns={"ctr-should-be-skipped": _eps("spent money")})
     out = asyncio.run(scheduler_tasks.consolidate_personal_memory(
         graph, llm_complete=_empty_llm, k=2,
-        enable_counter_state=False,
         enable_scalar_state=False,
         enable_event_history=True,
     ))
 
-    assert graph.loaded == []                        # counter phase skipped entirely
-    assert graph.marked == []                        # counter watermark untouched
+    assert graph.loaded == []                        # no episodes loaded outside the event runner
+    assert graph.marked == []                        # no namespace watermarked
     assert captured["targets"] is not None
-    assert out["namespaces_processed"] == 0          # no counter namespaces
     assert out["llm_calls"] == 2                     # only the event phase spent LLM calls
-
-
-@pytest.mark.unit
-def test_event_runner_sees_consumed_budget_same_counter_no_fresh_object(monkeypatch) -> None:
-    async def _fake_select(*a, **kw):
-        return ["ev-a"]
-
-    monkeypatch.setattr(scheduler_tasks, "select_event_targets", _fake_select)
-    _runner, captured = _event_runner_capture()
-    monkeypatch.setattr(scheduler_tasks, "run_event_consolidation", _runner)
-
-    # counter phase consumes llm calls first (k=2 -> per-namespace calls), then the event runner must
-    # observe the SAME counting_llm whose `calls` already reflects that spend.
-    graph = _FakeGraph(dirty=["ctr-a"], episodes_by_ns={"ctr-a": _eps("spent money")})
-    out = asyncio.run(scheduler_tasks.consolidate_personal_memory(
-        graph, llm_complete=_empty_llm, k=2,
-        enable_counter_state=True,
-        enable_scalar_state=False,
-        enable_event_history=True,
-    ))
-
-    assert captured["calls_before"] > 0                            # the consumed counter budget is visible
-    assert captured["calls_after"] == out["llm_calls"]             # same counter, refreshed total
-    assert "counter" in captured                                   # a shared object, not a fresh one

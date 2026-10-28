@@ -520,7 +520,7 @@ async def sync_verifiers_job(
 
 
 # ---------------------------------------------------------------------------
-# Job: consolidate personal memory (perception -> counter Views)
+# Job: consolidate personal memory (scalar, event and counting lanes)
 # ---------------------------------------------------------------------------
 
 class _CallCounter:
@@ -547,9 +547,6 @@ async def consolidate_personal_memory(
     call_budget: int | None = None,
     source: str = "perception",
     max_namespaces: int = 200,
-    verify_retries: int = 0,
-    sum_grounding: bool = True,
-    enable_counter_state: bool = True,
     enable_scalar_state: bool = False,
     scalar_state_perceiver_version: str = "v1",
     scalar_reconcile_attribute: bool = True,
@@ -570,11 +567,10 @@ async def consolidate_personal_memory(
     counting_extract_v2: bool = True,
     counting_match: bool = True,
 ) -> dict[str, object]:
-    """Re-derive count/amount Views from each DIRTY namespace's user turns via the gated perception
-    boundary, pinning ALL bias guards on (cross-check + coref + verify) so an automatic write never
-    commits a confident-but-wrong total. Batch re-fold from all episodes each pass (Law-3 correct).
+    """Run the scalar, event-history and counting consolidation lanes over their dirty namespaces.
     Blocking (k-sample LLM + Neo4j) so it runs on a worker thread. Budget-capped and resumable:
-    a per-namespace watermark debounces both commits and abstains until new user turns arrive."""
+    each lane keeps its own watermark. (The consolidation counter lane was removed 2026-10-28; see
+    branch archive/consolidation-counter-2026-10-28.)"""
     # Ambient correlation id for this pass, so every nested emit (perception, fold, view write,
     # reconcile) replays together. Propagates into the `_run` worker thread via asyncio.to_thread.
     _audit.begin_pass()
@@ -583,7 +579,6 @@ async def consolidate_personal_memory(
         "namespaces": (list(namespaces) if namespaces is not None else None),
         "scalar_state": enable_scalar_state,
         "scalar_perceiver_version": scalar_state_perceiver_version if enable_scalar_state else None,
-        "counter_state": enable_counter_state,
         "scalar_threshold": scalar_threshold if enable_scalar_state else None,
     }
     if enable_event_history:
@@ -596,16 +591,12 @@ async def consolidate_personal_memory(
         pass_details["counting_perceiver_version"] = effective_counting_perceiver_version(
             counting_perceiver_version, counting_extract_v2, match=counting_match)
     _audit.audit("pass", "start", details=pass_details)
-    from menhir.services.perception import Episode, perceive_and_fold
-
-    targets = namespaces if enable_counter_state else []
-    if targets is None:
-        targets = await asyncio.to_thread(graph_adapter.list_dirty_namespaces, limit=max_namespaces)
+    from menhir.services.perception import Episode
 
     # C.4.3 typed-scalar shadow path selects its OWN dirty set (independent, version-stamped
-    # :ScalarConsolidationWatermark cursor), so it never inherits the counter watermark's debounce. An
-    # explicit `namespaces` override applies to both paths; otherwise scalar backfills every namespace
-    # with episodes beyond its cursor for this perceiver_version.
+    # :ScalarConsolidationWatermark cursor). An explicit `namespaces` override applies to all paths;
+    # otherwise scalar backfills every namespace with episodes beyond its cursor for this
+    # perceiver_version.
     scalar_targets: "list[str] | None" = None
     if enable_scalar_state:
         scalar_targets = await select_scalar_targets(
@@ -628,24 +619,7 @@ async def consolidate_personal_memory(
         )
 
     def _run() -> dict[str, object]:
-        from menhir.services.correction_resolver import resolve_corrections
-        from menhir.infrastructure.graph_operations import GraphOperationsJournal
-        from menhir.infrastructure.metric_receipts import MetricReceiptStore
-        from menhir.services.metric_write_coordinator import MetricWriteCoordinator
-
-        # Perception abstention receipts + correction tallies are instrumentation: route them to
-        # the :Metric saga so they stay out of the semantic-recall layer.
-        run_tally = MetricWriteCoordinator(
-            graph_adapter=graph_adapter,
-            journal=GraphOperationsJournal(),
-            receipts=MetricReceiptStore(),
-        )
         counting_llm = _CallCounter(llm_complete)
-        views_written = 0
-        abstained = 0
-        corrections_applied = 0
-        processed = 0
-        counter_evidence_rows = 0
 
         def _build_episodes(rows: list) -> "list[Episode]":
             """Rows -> Episodes, collapsing EXACT duplicate observations.
@@ -685,54 +659,10 @@ async def consolidate_personal_memory(
                 eps.append(Episode(uuid=str(r["uuid"]), content=f"[{stamp[:10]}] {body}"))
             return eps
 
-        for ns in targets:
-            if call_budget is not None and counting_llm.calls >= call_budget:
-                break
-            rows = graph_adapter.load_user_episodes(ns)
-            counter_evidence_rows += len(rows)
-            episodes = _build_episodes(rows)
-            if episodes:
-                res = perceive_and_fold(
-                    episodes=episodes, llm_complete=counting_llm, graph_adapter=graph_adapter,
-                    k=k, threshold=threshold, namespace=ns, source=source, embed=embed,
-                    enable_cross_check=True, enable_coref=True, enable_verify=True,
-                    verify_retries=verify_retries,
-                    enable_stated_span_guard=True,
-                    enable_sum_grounding=sum_grounding,
-                    # F1: record per-veto abstention receipts so a miss is observable in prod instead
-                    # of silent — silent abstention hid exactly the measure-key scatter this task now
-                    # collapses. Routed to the :Metric saga (out of recall) via run_tally.
-                    record_abstentions=True,
-                    run_tally=run_tally,
-                )
-                views_written += len(res.committed)
-                abstained += len(res.abstained)
-                # F2: bind bare numeric corrections ("actually it is 20, not 25") to the unique
-                # value-matching current View. Runs AFTER perceive so the View it corrects exists;
-                # the correction's later recorded_at wins LWW and survives batch re-folds. No LLM.
-                corr = resolve_corrections(
-                    rows, graph_adapter, namespace=ns, source=source, embed=embed,
-                    run_tally=run_tally)
-                corrections_applied += int(corr["corrections_applied"])
-            processed += 1
-            # Watermark on the DB's own clock (#170): the newest recorded_at as of the load, so a
-            # turn recorded during this run stays dirty. now() here is a different clock, and on a
-            # same-host install it stamps past every mid-run turn.
-            newest = str((rows[0].get("newest_recorded_at") if rows else None) or "")
-            graph_adapter.mark_consolidated(
-                ns, at=newest or datetime.now(timezone.utc).isoformat())
-
-        result: dict[str, object] = {
-            "namespaces_dirty": len(targets),
-            "namespaces_processed": processed,
-            "views_written": views_written,
-            "abstained": abstained,
-            "corrections_applied": corrections_applied,
-            "llm_calls": counting_llm.calls,
-        }
+        result: dict[str, object] = {"llm_calls": counting_llm.calls}
 
         # Scalar consolidation is independently dirty-tracked but shares this run's counting LLM,
-        # so the configured budget remains global across counter and scalar phases.
+        # so the configured budget remains global across the scalar, event and counting phases.
         if enable_scalar_state:
             scalar_start_calls = counting_llm.calls
             result.update(
@@ -743,8 +673,7 @@ async def consolidate_personal_memory(
                     counting_llm=counting_llm,
                     build_episodes=_build_episodes,
                     k=k,
-                    # The scalar pass may run at its OWN agreement threshold: the counter path is
-                    # tuned separately and must not move when the scalar gate is relaxed.
+                    # The scalar pass may run at its OWN agreement threshold.
                     threshold=(threshold if scalar_threshold is None else scalar_threshold),
                     call_budget=call_budget,
                     embed=embed,
@@ -775,7 +704,7 @@ async def consolidate_personal_memory(
             if any(sweep.values()):
                 result.update(sweep)
         # Event-history consolidation is independently dirty-tracked but shares this run's counting
-        # LLM, so the configured budget remains global across counter, scalar, and event phases.
+        # LLM, so the configured budget remains global across scalar, counting, and event phases.
         if enable_event_history:
             result.update(
                 run_event_consolidation(
@@ -839,18 +768,16 @@ async def consolidate_personal_memory(
                     for key in ("claimed", "complete", "failed", "terminal_not_rebuildable",
                                 "lost_claim")
                 }
-        # `result` is initialized after the counter pass, then the independent scalar pass.
         # Refresh the shared call count here so API callers see the total work actually spent;
         # otherwise a scalar/event-only run reports zero calls even after consuming k samples.
         result["llm_calls"] = counting_llm.calls
         # Per-lane report (#170 item 4) so one lane's output cannot hide another's inactivity.
-        # Only with a non-counter lane on: a counter-only pass has one lane and keeps its shape.
+        # Only with scalar or event on; a counting-only pass cannot run (counting needs scalars).
         if enable_scalar_state or enable_event_history:
             outcomes = lane_outcomes(
                 result,
-                enabled={"counter": bool(enable_counter_state), "scalar": enable_scalar_state,
+                enabled={"scalar": enable_scalar_state,
                          "event": enable_event_history, "counting": enable_counting},
-                counter_evidence_rows=counter_evidence_rows,
             )
             result["lane_outcomes"] = outcomes
             quiet = sorted(f"{lane}:{flag}" for lane, rep in outcomes.items()

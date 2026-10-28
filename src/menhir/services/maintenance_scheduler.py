@@ -103,7 +103,6 @@ class MaintenanceScheduler:
     verifier_repo: object | None = None
     verifier_context: object | None = None
     personal_memory_interval_s: float = 300.0
-    personal_memory_enabled: bool = False
     personal_memory_llm: Callable[[str, str], str] | None = None
     personal_memory_k: int = 3
     event_history_enabled: bool = False
@@ -115,11 +114,9 @@ class MaintenanceScheduler:
     event_history_perceiver_version: str = "v1"
     event_history_batch_size: int = 500
     personal_memory_call_budget: int | None = None
-    personal_memory_verify_retries: int = 0
-    personal_memory_sum_grounding: bool = True
     # ScalarStateView typed-scalar shadow path (Piece C.4.3), gated inside the same consolidation job.
-    # OFF by default -> the counter path is byte-identical; when on, the job also runs typed-scalar
-    # extract -> gate -> bind -> persist -> rebuild over its own scalar watermark cursor.
+    # When on, the job runs typed-scalar extract -> gate -> bind -> persist -> rebuild over its own
+    # scalar watermark cursor.
     scalar_state_enabled: bool = False
     scalar_state_perceiver_version: str = "v1"
     # Drop the free-text attribute name from the k-sample vote and reconcile it modally afterwards.
@@ -132,7 +129,6 @@ class MaintenanceScheduler:
     scalar_reconcile_scope: bool = True
     scalar_reconcile_subject: bool = True
     # Typed-scalar agreement only. Default 2/3 matches MemorySettings (two of three votes at k=3).
-    # The counter path keeps its existing unanimous threshold.
     scalar_threshold: float = 2 / 3
     # Build advisory scalar_history Views alongside scalar_state at ingest and repair time.
     scalar_history_enabled: bool = False
@@ -206,8 +202,7 @@ class MaintenanceScheduler:
                 interval_s=self.source_embedding_repair_interval_s
             )
         if (
-            (self.personal_memory_enabled or self.event_history_enabled or self.scalar_state_enabled
-             or self.counting_enabled)
+            (self.event_history_enabled or self.scalar_state_enabled or self.counting_enabled)
             and self.personal_memory_llm is not None
         ):
             self._jobs["consolidate_personal_memory"] = _JobState(interval_s=self.personal_memory_interval_s)
@@ -920,8 +915,6 @@ class MaintenanceScheduler:
             embed=self.experience_embed,
             k=self.personal_memory_k,
             call_budget=self.personal_memory_call_budget,
-            verify_retries=self.personal_memory_verify_retries,
-            sum_grounding=self.personal_memory_sum_grounding,
             enable_scalar_state=self.scalar_state_enabled,
             scalar_state_perceiver_version=self.scalar_state_perceiver_version,
             scalar_reconcile_attribute=self.scalar_reconcile_attribute,
@@ -930,7 +923,6 @@ class MaintenanceScheduler:
             scalar_threshold=self.scalar_threshold,
             scalar_embed_version=self.experience_embed_version,
             scalar_history_enabled=self.scalar_history_enabled,
-            enable_counter_state=self.personal_memory_enabled,
             enable_event_history=self.event_history_enabled,
             enable_counting=self.counting_enabled,
             counting_perceiver_version=self.counting_perceiver_version,

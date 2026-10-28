@@ -608,7 +608,7 @@ class TestPhase3:
         assert consolidate.await_args.kwargs["scalar_state_perceiver_version"] == "v2"
         assert consolidate.await_args.kwargs["scalar_history_enabled"] is True
 
-    def test_run_can_skip_counter_state_for_scalar_only_build(self, client):
+    def test_run_ignores_retired_counter_state_field(self, client):
         consolidate = AsyncMock(return_value={"scalar_namespaces_processed": 1, "llm_calls": 3})
         with patch(
             "menhir.infrastructure.sync_llm.make_sync_chat",
@@ -620,10 +620,10 @@ class TestPhase3:
         ):
             resp = client.post(
                 "/api/phase3/run",
-                json={"namespace": "ns-bench", "counter_state": False},
+                json={"namespace": "ns-bench", "counter_state": True},
             )
         assert resp.status_code == 200
-        assert consolidate.await_args.kwargs["enable_counter_state"] is False
+        assert "enable_counter_state" not in consolidate.await_args.kwargs
         assert consolidate.await_args.kwargs["enable_scalar_state"] is True
         assert consolidate.await_args.kwargs["enable_event_history"] is False
 
@@ -905,25 +905,12 @@ def test_phase3_reports_event_watermark_completion(client, fake_runtime_ctx, pen
     with patch("menhir.infrastructure.sync_llm.make_sync_chat", return_value=lambda *args: "[]"), \
          patch("menhir.infrastructure.view_embedder.make_view_embedder", return_value=None), \
          patch("menhir.services.scheduler_tasks.consolidate_personal_memory", new=AsyncMock(return_value={})):
-        response = client.post("/api/phase3/run", json={"namespace": "ns-bench", "counter_state": False})
+        response = client.post("/api/phase3/run", json={"namespace": "ns-bench"})
     assert response.status_code == 200
     assert response.json()["event_dirty_after"] is bool(pending)
     fake_runtime_ctx.built.graph_adapter.load_next_event_evidence_batch.assert_called_once_with(
         "ns-bench", perceiver_version="v9", limit=1,
     )
-
-
-@pytest.mark.parametrize("configured,requested", [(False, False), (False, True), (True, False), (True, True)])
-def test_phase3_counter_enabled_reports_both_gates(client, fake_runtime_ctx, configured, requested):
-    fake_runtime_ctx.built.settings.personal_memory_consolidation_enabled = configured
-    consolidate = AsyncMock(return_value={})
-    with patch("menhir.infrastructure.sync_llm.make_sync_chat", return_value=lambda *args: "[]"), \
-         patch("menhir.infrastructure.view_embedder.make_view_embedder", return_value=None), \
-         patch("menhir.services.scheduler_tasks.consolidate_personal_memory", new=consolidate):
-        response = client.post("/api/phase3/run", json={"namespace": "ns-bench", "counter_state": requested})
-    assert response.status_code == 200
-    assert response.json()["counter_enabled"] is (configured and requested)
-    assert consolidate.await_args.kwargs["enable_counter_state"] is (configured and requested)
 
 
 @pytest.mark.parametrize("show", [False, True])

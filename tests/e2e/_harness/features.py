@@ -159,11 +159,6 @@ FEATURE_REGISTRY: tuple[FeatureFlag, ...] = (
         summary="Event-history extraction.",
     ),
     _flag(
-        "consolidation",
-        "MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED",
-        summary="Background personal-memory consolidation.",
-    ),
-    _flag(
         "recall_audit",
         "MENHIR_PERSONAL_MEMORY_RECALL_AUDIT_ENABLED",
         summary="Recall audit trail.",

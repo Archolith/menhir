@@ -225,9 +225,8 @@ class MemorySettings:
     #: right relation before a resolver time is written; runs with the resolver); empty means the resolver's model.
     anchored_time_attach_model: str = ""
 
-    # Personal-memory consolidation job (gated perception -> count/amount Views from user turns).
-    # Short interval + dirty-namespace filter keeps it cheap; all bias guards pinned on. Default off.
-    personal_memory_consolidation_enabled: bool = False
+    # Personal-memory consolidation job (scalar, event-history and counting lanes over dirty
+    # namespaces). The counter lane (personal_memory_consolidation_enabled) was removed 2026-10-28.
     personal_memory_consolidation_interval_s: float = 300.0
     personal_memory_consolidation_k: int = 3
     personal_memory_consolidation_call_budget: int = 300
@@ -281,20 +280,8 @@ class MemorySettings:
     # .agent/plans/phase3-extractor-matrix-results.md); set this rather than the global model so
     # Graphiti enrichment stays on the cheaper model.
     personal_memory_consolidation_chat_model: str = ""
-    # Bounded retry for the consolidation VERIFIER (Lever C4) — re-runs the full k-sample verifier
-    # vote up to 1+N times, committing on the first attempt that clears (same unanimity bar per
-    # attempt, so precision per commit is unchanged; a flaky-but-correct SUM just gets more chances).
-    # Default 0 = exactly one attempt = behaviour identical to before. See the phase3
-    # consumer-quality-pack live characterization.
-    personal_memory_consolidation_verify_retries: int = 0
-    # Deterministic SUM arithmetic grounding (precision-preserving cross-check adjustment): when a
-    # fold-SUM's amounts are each an explicit price literally in their source span, prove the
-    # arithmetic deterministically and skip the noisy holistic cross-check (the sharper verifier still
-    # audits membership). Always on (#168 freeze; promoted 2026-07-08): live characterization showed the
-    # cross-check-dominated variants jump 40%->90-100% commit with wrong_view_writes=0 across OFF + 2x
-    # ON. consolidate_personal_memory(sum_grounding=...) stays as a per-call knob. See the cross-check-quality pack.
     # ScalarStateView typed-scalar shadow path (Piece C.4.3), gated inside the same consolidation job.
-    # OFF by default: the counter path is byte-identical when off. When on, the job also extracts typed
+    # When on, the job also extracts typed
     # scalars, binds them to resolved entities, and persists :TypedAssertion + rebuilds ScalarStateViews
     # (behind the fresh-only activation gate). Runs on its OWN :ScalarConsolidationWatermark cursor, so
     # enabling it backfills historical namespaces. The perceiver version stamps the cursor + assertions;
@@ -809,7 +796,6 @@ class MemorySettings:
             ),
             anchored_time_render_enabled=parse_bool_env(_getenv("MENHIR_ANCHORED_TIME_RENDER", default=str(cls.anchored_time_render_enabled))),
             anchored_time_attach_model=(_getenv("MENHIR_ANCHORED_TIME_ATTACH_MODEL", default=cls.anchored_time_attach_model) or "").strip(),
-            personal_memory_consolidation_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED", default=str(cls.personal_memory_consolidation_enabled))),
             personal_memory_consolidation_interval_s=_parse_float(
                 _getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_INTERVAL_S", default=str(cls.personal_memory_consolidation_interval_s)),
                 env_var="MENHIR_PERSONAL_MEMORY_CONSOLIDATION_INTERVAL_S",
@@ -831,7 +817,6 @@ class MemorySettings:
             ),
             personal_memory_consolidation_disable_reasoning=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_DISABLE_REASONING", default=str(cls.personal_memory_consolidation_disable_reasoning))),
             personal_memory_consolidation_chat_model=_getenv("MENHIR_PERSONAL_MEMORY_CHAT_MODEL", default=cls.personal_memory_consolidation_chat_model),
-            personal_memory_consolidation_verify_retries=int(_getenv("MENHIR_PERSONAL_MEMORY_VERIFY_RETRIES", default=str(cls.personal_memory_consolidation_verify_retries))),
             personal_memory_scalar_state_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED", default=str(cls.personal_memory_scalar_state_enabled))),
             personal_memory_scalar_state_perceiver_version=_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_STATE_PERCEIVER_VERSION", default=cls.personal_memory_scalar_state_perceiver_version),
             personal_memory_scalar_view_echo_drop_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_ECHO_DROP_ENABLED", default=str(cls.personal_memory_scalar_view_echo_drop_enabled))),

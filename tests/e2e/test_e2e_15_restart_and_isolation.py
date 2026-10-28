@@ -147,7 +147,7 @@ async def test_e2e_15_restart_and_isolation(
 
             with ThreadPoolExecutor(max_workers=1) as pool:
                 pending = pool.submit(post_json, e2e_config, "/api/phase3/run",
-                                      {"namespace": ns["a"], "k": 3, "counter_state": False})
+                                      {"namespace": ns["a"], "k": 3})
                 reached = entered.wait(600)
                 backend.kill()
                 release.set()
