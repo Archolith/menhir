@@ -407,10 +407,8 @@ class MemorySettings:
     frontier_diversity_gate: bool = False  # reorder by evidence family to prevent spiral (opt-in)
     frontier_belief_gate: bool = False     # add CurrentnessWarden + belief scoring to the chain (opt-in; see #350)
     frontier_evidence_anchor: bool = False  # Guard 5 EvidenceAnchorWarden; opt-in: it reads the client label, not the speaker, and refuses ordinary conversation (#349)
-    frontier_fact_edges: bool = False      # inject RELATES_TO fact edges (EntityEdge.fact) into the candidate pool; set TRUE for episodic/"what happened" corpora where the answer is a dated edge fact, not an entity name
     frontier_fact_relevance: bool = False  # attach the facts most similar to the query (plus the newest) instead of only the 5 newest
     frontier_verb_facets: bool = False     # append one keyword-matched fact per question verb after ranking (verb-centric questions only)
-    frontier_fact_edge_mode: str = "standalone"  # how fact edges enter the pool: "standalone" (terse fact as its own candidate; net-negative at N=30) or "pointer" (hydrate endpoint nodes' rich context; preferred)
     frontier_shadow: bool = False          # observe-only oracle/warden pass (trace)
     # Source-memory recall lane: additive section of raw episode memories (cosine over
     # n.content_embedding), NEXT TO the ranked results, never fused into them. Always on since
@@ -725,10 +723,8 @@ class MemorySettings:
             enable_diversity_gate=self.frontier_diversity_gate,
             enable_belief_gate=self.frontier_belief_gate,
             enable_evidence_anchor=self.frontier_evidence_anchor,
-            enable_fact_edges=self.frontier_fact_edges,
             scalar_verdict_min_similarity=self.personal_memory_scalar_verdict_min_similarity,
             scalar_observation_recall=self.personal_memory_scalar_observation_recall,
-            fact_edge_mode=self.frontier_fact_edge_mode,
             enable_assertion_shadow=self.frontier_shadow,
             source_memory_limit=self.frontier_source_memory_limit,
             source_memory_max_chars=self.frontier_source_memory_max_chars,
@@ -955,10 +951,8 @@ class MemorySettings:
             frontier_diversity_gate=parse_bool_env(_getenv("MENHIR_FRONTIER_DIVERSITY_GATE", default=str(cls.frontier_diversity_gate))),
             frontier_belief_gate=parse_bool_env(_getenv("MENHIR_FRONTIER_BELIEF_GATE", default=str(cls.frontier_belief_gate))),
             frontier_evidence_anchor=parse_bool_env(_getenv("MENHIR_FRONTIER_EVIDENCE_ANCHOR", default=str(cls.frontier_evidence_anchor))),
-            frontier_fact_edges=parse_bool_env(_getenv("MENHIR_FRONTIER_FACT_EDGES", default=str(cls.frontier_fact_edges))),
             frontier_fact_relevance=parse_bool_env(_getenv("MENHIR_FRONTIER_FACT_RELEVANCE", default=str(cls.frontier_fact_relevance))),
             frontier_verb_facets=parse_bool_env(_getenv("MENHIR_FRONTIER_VERB_FACETS", default=str(cls.frontier_verb_facets))),
-            frontier_fact_edge_mode=_getenv("MENHIR_FRONTIER_FACT_EDGE_MODE", default=cls.frontier_fact_edge_mode).strip().lower(),
             frontier_shadow=parse_bool_env(_getenv("MENHIR_FRONTIER_SHADOW", default=str(cls.frontier_shadow))),
             frontier_source_memory_limit=_parse_int(
                 _getenv("MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT", default=str(cls.frontier_source_memory_limit)),

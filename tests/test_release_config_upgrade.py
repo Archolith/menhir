@@ -22,7 +22,6 @@ CAMPAIGN_FLAGS = {
     "MENHIR_FRONTIER_DIVERSITY_GATE": "frontier_diversity_gate",
     "MENHIR_FRONTIER_BELIEF_GATE": "frontier_belief_gate",
     "MENHIR_FRONTIER_EVIDENCE_ANCHOR": "frontier_evidence_anchor",
-    "MENHIR_FRONTIER_FACT_EDGES": "frontier_fact_edges",
     "MENHIR_FRONTIER_SHADOW": "frontier_shadow",
     "MENHIR_FRONTIER_SOURCE_MEMORY_POOLS": "frontier_source_memory_pools",
     "MENHIR_VERIFIER_SYNC_ENABLED": "verifier_sync_enabled",

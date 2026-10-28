@@ -31,7 +31,7 @@ Three mechanisms, in increasing power. All are evidence-recorded.
 3. A full powerset sweep over named flags, which parametrizes every lane over all
    2**n combinations::
 
-       MENHIR_E2E_FEATURE_POWERSET="frontier_bm25,frontier_fact_edges,scalar_state"
+       MENHIR_E2E_FEATURE_POWERSET="frontier_bm25,frontier_content_vector,scalar_state"
 
    Three flags is 8 runs of every lane. This is deliberately opt-in and deliberately
    not defaulted: the combinatorics are the point, and so is the cost.
@@ -147,11 +147,6 @@ FEATURE_REGISTRY: tuple[FeatureFlag, ...] = (
         "frontier_content_vector",
         "MENHIR_FRONTIER_CONTENT_VECTOR",
         summary="Content-vector candidate generation.",
-    ),
-    _flag(
-        "frontier_fact_edges",
-        "MENHIR_FRONTIER_FACT_EDGES",
-        summary="FACT-edge expansion during retrieval.",
     ),
     _flag(
         "frontier_shadow",
@@ -290,7 +285,6 @@ PRESETS: dict[str, dict[str, bool]] = {
     "research_on": _baseline(
         frontier_bm25=True,
         frontier_content_vector=True,
-        frontier_fact_edges=True,
         scalar_state=True,
         scalar_history=True,
         event_history=True,

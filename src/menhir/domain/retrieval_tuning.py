@@ -51,7 +51,7 @@ class CandidateSource(str, Enum):
     # entity-node name. This is the candidate the node-only recall path never
     # produced — the answer to a "what happened" query lives on the edge, so the
     # LongMemEval trace found it at edge-rank 2 while node search buried it. Gated
-    # by RetrievalTuningConfig.enable_fact_edges (MENHIR_FRONTIER_FACT_EDGES).
+    # The lane was removed 2026-10-27; the member stays as vocabulary stored traces may contain.
     FACT_EDGE = "fact_edge"
     # Observation candidates: a menhir-owned cosine search over :TypedAssertion.name_embedding (the
     # typed-scalar observation log's stated_span). The recall pipeline is otherwise :Entity-only, so a
@@ -73,7 +73,7 @@ class RetrievalScoreKind(str, Enum):
     GRAPHITI_RRF = "graphiti_rrf"
     WEIGHTED_RRF_NORMALIZED = "weighted_rrf_normalized"
     SOURCE_PRIOR = "source_prior"
-    FACT_EDGE_RRF = "fact_edge_rrf"
+    FACT_EDGE_RRF = "fact_edge_rrf"  # fact-edge lane removed 2026-10-27; kept for stored traces
     VERB_FACET = "verb_facet"
 
 
@@ -234,17 +234,6 @@ class RetrievalTuningConfig:
     # MENHIR_FRONTIER_EVIDENCE_ANCHOR: provenance comes from the client label, so ordinary
     # conversation stored via MCP/REST looks agent-written and is refused (#349).
     enable_evidence_anchor: bool = False
-    # Fact-edge retrieval: in addition to the entity-node candidate pool, run a
-    # graphiti EDGE_HYBRID search and inject the top RELATES_TO fact edges as
-    # CandidateSource.FACT_EDGE candidates (content == EntityEdge.fact). Default
-    # OFF == today's node-only recall. Turn ON for episodic / "what happened"
-    # corpora (LongMemEval) where the answer is a dated fact on an edge, not an
-    # entity name. See MENHIR_FRONTIER_FACT_EDGES and services/recall_service.py.
-    enable_fact_edges: bool = False
-    # How many fact edges to pull when enable_fact_edges is on (best-first by the
-    # edge RRF reranker). Kept modest so edges augment rather than swamp the node
-    # pool; the combiner/floor still rank the merged set.
-    fact_edge_k: int = 20
     # Minimum query similarity (best per slot) for a scalar verdict to be emitted; 0 = off.
     # Neo4j vector.similarity.cosine scale, (1+cos)/2. MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY.
     scalar_verdict_min_similarity: float = 0.0
@@ -256,15 +245,6 @@ class RetrievalTuningConfig:
     # evidence its fold ignores (see domain/scalar_view_freshness.py). The verdict is still shown,
     # as advisory. On by default since the #168 freeze; kept as a per-request knob.
     scalar_view_freshness_gate: bool = True
-    # How a retrieved fact edge enters the candidate pool:
-    #   "standalone" — inject the terse EntityEdge.fact as its own CandidateData (edge-as-
-    #     answer). Measured net-NEGATIVE at N=30 (rung A′, 0.300->0.033): terse floor-exempt
-    #     facts crowd out richer nodes and collapse context. Kept for A/B comparison.
-    #   "pointer"    — edge-as-POINTER: the edge finds the right memory, then we hydrate its
-    #     endpoint entity NODES (rich summaries + surrounding context) into the pool with an
-    #     edge-derived similarity prior. Preserves node richness AND fixes ranking. This is
-    #     the default (standalone was the footgun default, measured net-NEGATIVE).
-    fact_edge_mode: str = "pointer"
     # Content-vector lane (plan menhir-content-embedding-recall, Track A). EXPERIMENTAL,
     # default OFF == today's behavior byte-for-byte. When on, recall runs a menhir-owned
     # cosine pass over n.content_embedding (memory summary/content) as a third labeled lane
