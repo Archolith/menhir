@@ -164,13 +164,18 @@ def test_valid_at_tiebreak_compares_instants_not_strings():
 
 
 @pytest.mark.unit
-def test_dedup_flag_registered_default_off_and_needs_authority(monkeypatch):
+def test_dedup_flag_registered_default_on_and_needs_authority(monkeypatch):
+    # Default on since 2026-10-28 (#399 bucket 3); an explicit false still turns it off.
     feature = FEATURES["personal_memory_observation_dedup_enabled"]
     assert feature.env_var == "MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED"
-    assert feature.default is False
+    assert feature.default is True
     assert "personal_memory_scalar_state_enabled" in feature.requires
-    monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED", "1")
+    monkeypatch.delenv("MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED", raising=False)
     settings = MemorySettings.from_env()
     assert settings.personal_memory_observation_dedup_enabled is True
     assert settings.retrieval_tuning().enable_observation_dedup is True
+    monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED", "false")
+    settings = MemorySettings.from_env()
+    assert settings.personal_memory_observation_dedup_enabled is False
+    assert settings.retrieval_tuning().enable_observation_dedup is False
     assert RetrievalTuningConfig().enable_observation_dedup is False

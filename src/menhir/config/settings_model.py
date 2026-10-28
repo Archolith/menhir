@@ -300,7 +300,8 @@ class MemorySettings:
     # unambiguous current View + complete overlap proof); every other case stays advisory. The
     # decision is computed by menhir.domain.scalar_view_authority.decide_view_authority.
     personal_memory_scalar_view_echo_drop_enabled: bool = False
-    personal_memory_observation_dedup_enabled: bool = False
+    # Default on since 2026-10-28 (#399 bucket 3: no item worse across six o500 shard-1 runs; recall only).
+    personal_memory_observation_dedup_enabled: bool = True
     # 0 = off; else min (1+cos)/2 per verdict slot. 0.675 (raw cosine 0.35): on o500 the gate-off
     # lane emitted verdicts that shared no word with the question for 72% of blocks (#168).
     personal_memory_scalar_verdict_min_similarity: float = 0.675

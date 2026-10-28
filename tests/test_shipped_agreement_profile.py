@@ -50,6 +50,8 @@ SHIPPED_SETTINGS = {
     "personal_memory_scalar_state_enabled": True,
     "personal_memory_scalar_history_enabled": True,
     "personal_memory_counting_enabled": True,
+    # Observation dedup ships on since 2026-10-28 (#399 bucket 3).
+    "personal_memory_observation_dedup_enabled": True,
 }
 
 #: What the runtime must hand the scheduler for those settings.

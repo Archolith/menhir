@@ -52,7 +52,7 @@ _SETTINGS = (
     ('personal_memory_scalar_view_echo_drop_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_ECHO_DROP_ENABLED',
         False, 'personal_memory', 'Drop observations that echo a scalar verdict slot; verdict items stay inline.', True, ()),
     ('personal_memory_observation_dedup_enabled', 'MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED',
-        False, 'personal_memory', 'Inject one observation per identical stated text; counted occurrences are never merged.', True, ()),
+        True, 'personal_memory', 'Inject one observation per identical stated text; counted occurrences are never merged.', True, ()),
     ('personal_memory_consolidation_audit_enabled', 'MENHIR_PERSONAL_MEMORY_CONSOLIDATION_AUDIT_ENABLED', False,
         'personal_memory', 'Enable personal memory consolidation audit enabled.', False, ()),
     ('personal_memory_recall_audit_enabled', 'MENHIR_PERSONAL_MEMORY_RECALL_AUDIT_ENABLED', False,
