@@ -412,7 +412,10 @@ def test_identity_switches_are_wired_through_every_layer():
         source = (root / relative_path).read_text(encoding="utf-8")
         # Reconciliation is always on since the #168 freeze: settings, runtime and the API no longer
         # pass it; the scheduler and service layers carry the default-on knobs.
-        switches = ("canonical_self",)
+        # canonical_self is no longer a setting or scheduler knob; only the service layers carry it.
+        switches = ()
+        if relative_path.endswith(("scalar_consolidation.py", "typed_scalar_service.py")):
+            switches += ("canonical_self",)
         if relative_path.startswith(("src/menhir/services/",)):
             switches += ("reconcile_scope", "reconcile_subject")
         for switch in switches:
@@ -435,8 +438,10 @@ def test_identity_switches_default_to_lenient_policy():
     for name in ("scalar_reconcile_attribute", "scalar_reconcile_scope", "scalar_reconcile_subject"):
         assert params[name].default is True
         assert scheduler[name].default is True
-    assert getattr(MemorySettings, "personal_memory_scalar_canonical_self") is False, \
-        "personal_memory_scalar_canonical_self must default off"
+    assert not hasattr(MemorySettings, "personal_memory_scalar_canonical_self"), \
+        "personal_memory_scalar_canonical_self is retired"
+    assert "scalar_canonical_self" not in params
+    assert "scalar_canonical_self" not in scheduler
 
 
 def test_align_spans_remains_internal_not_settings_reachable():

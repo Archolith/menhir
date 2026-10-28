@@ -256,7 +256,6 @@ def test_phase3_run_forwards_flag_from_settings(monkeypatch):
         personal_memory_scalar_state_enabled=True,
         personal_memory_counting_enabled=False,
         personal_memory_scalar_state_perceiver_version="v1",
-        personal_memory_scalar_canonical_self=False,
         personal_memory_scalar_threshold=1.0,
         personal_memory_scalar_history_enabled=False,
     )

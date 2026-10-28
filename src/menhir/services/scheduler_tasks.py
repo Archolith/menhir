@@ -555,7 +555,6 @@ async def consolidate_personal_memory(
     scalar_reconcile_attribute: bool = True,
     scalar_reconcile_scope: bool = True,
     scalar_reconcile_subject: bool = True,
-    scalar_canonical_self: bool = False,
     scalar_threshold: float | None = None,
     scalar_batch_size: int = 500,
     scalar_repair_limit: int = 200,
@@ -773,7 +772,6 @@ async def consolidate_personal_memory(
                         reconcile_attribute=scalar_reconcile_attribute,
                         reconcile_scope=scalar_reconcile_scope,
                         reconcile_subject=scalar_reconcile_subject,
-                        canonical_self=scalar_canonical_self,
                     ),
                 )
             )
@@ -831,7 +829,6 @@ async def consolidate_personal_memory(
                         reconcile_attribute=scalar_reconcile_attribute,
                         reconcile_scope=scalar_reconcile_scope,
                         reconcile_subject=scalar_reconcile_subject,
-                        canonical_self=scalar_canonical_self,
                         lease_seconds=counting_lease_seconds,
                     ),
                 )

@@ -334,11 +334,6 @@ class MemorySettings:
     personal_memory_scalar_observation_recall: str = "gated"
     # Attribute, scope and subject reconciliation in the k-sample consistency gate are always on
     # (#168 freeze); the consolidation job and scheduler knobs `scalar_reconcile_*` default on.
-    # Fold first-person subjects ('I', 'me', 'my') to the bound self display before the vote, so the
-    # vote key stops contradicting the binder. Measured effect on the LME panel: ZERO cells in every
-    # configuration -- the extraction prompt already emits 'user' almost without exception. Exposed
-    # because the vote key genuinely disagreed with the binder, not because it moved the number.
-    personal_memory_scalar_canonical_self: bool = False
     # Agreement required by the typed-scalar gate only. Default 2/3 is the lenient-agreement policy:
     # at k=3 two agreeing samples commit. The env value also accepts ratio syntax (`2/3`) so
     # operators do not accidentally use
@@ -867,7 +862,6 @@ class MemorySettings:
             personal_memory_observation_dedup_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED", default=str(cls.personal_memory_observation_dedup_enabled))),
             personal_memory_scalar_verdict_min_similarity=_parse_float(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY", default=str(cls.personal_memory_scalar_verdict_min_similarity)), env_var="MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY", minimum=0.0),
             personal_memory_scalar_observation_recall=_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_OBSERVATION_RECALL", default=cls.personal_memory_scalar_observation_recall).strip().lower(),
-            personal_memory_scalar_canonical_self=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_CANONICAL_SELF", default=str(cls.personal_memory_scalar_canonical_self))),
             personal_memory_scalar_threshold=_parse_scalar_threshold(
                 _getenv(
                     "MENHIR_PERSONAL_MEMORY_SCALAR_THRESHOLD",

@@ -463,8 +463,6 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         scalar_state_enabled=scalar_state_enabled,
         scalar_state_perceiver_version=getattr(
             settings, "personal_memory_scalar_state_perceiver_version", "v2"),
-        scalar_canonical_self=getattr(
-            settings, "personal_memory_scalar_canonical_self", False),
         scalar_threshold=getattr(settings, "personal_memory_scalar_threshold", 1.0),
         scalar_history_enabled=getattr(settings, "personal_memory_scalar_history_enabled", False),
         scalar_deterministic_shadow_enabled=getattr(

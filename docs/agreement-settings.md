@@ -15,7 +15,6 @@ Shipping a value is not the same as turning a lane on. Every lane and authority 
 | Samples per turn (k), scalar and counting extraction | 3 | `MENHIR_PERSONAL_MEMORY_CONSOLIDATION_K`; `phase3/run` also takes `k` (1-9) per request |
 | Scalar agreement threshold | 2/3 (two of three samples) | `MENHIR_PERSONAL_MEMORY_SCALAR_THRESHOLD`; write `2/3`, never `0.67` |
 | Scalar reconcile attribute / scope / subject | on / on / on | `..._SCALAR_RECONCILE_ATTRIBUTE`, `_SCOPE`, `_SUBJECT` |
-| Scalar canonical self | off | `..._SCALAR_CANONICAL_SELF` |
 | Scalar span alignment | always on | fixed in code |
 | Scalar verdict min similarity | 0.675 (raw cosine 0.35; 0 = off) | `..._SCALAR_VERDICT_MIN_SIMILARITY` |
 | Scalar observations in ranked recall | `gated` (`all` / `off`) | `..._SCALAR_OBSERVATION_RECALL` |

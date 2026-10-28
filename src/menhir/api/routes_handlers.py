@@ -85,8 +85,6 @@ async def phase3_run_impl(
             "personal_memory_scalar_state_perceiver_version",
             "v1",
         ),
-        scalar_canonical_self=getattr(
-            settings, "personal_memory_scalar_canonical_self", False),
         scalar_threshold=getattr(settings, "personal_memory_scalar_threshold", 1.0),
         scalar_embed_version=view_embedder_version(settings),
         scalar_history_enabled=getattr(

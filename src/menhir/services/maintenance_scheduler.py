@@ -127,11 +127,10 @@ class MaintenanceScheduler:
     # RECALL-affecting when on (more claims clear the gate), not behavior-neutral.
     scalar_reconcile_attribute: bool = True
     # The same identity-smearing defect relocated into scope/subject, plus first-person folding.
-    # Scope/subject ON by default (matching MemorySettings); canonical_self stays OFF.
+    # Scope/subject ON by default (matching MemorySettings).
     # All RECALL-affecting when on, exactly as the attribute switch above.
     scalar_reconcile_scope: bool = True
     scalar_reconcile_subject: bool = True
-    scalar_canonical_self: bool = False
     # Typed-scalar agreement only. Default 2/3 matches MemorySettings (two of three votes at k=3).
     # The counter path keeps its existing unanimous threshold.
     scalar_threshold: float = 2 / 3
@@ -933,7 +932,6 @@ class MaintenanceScheduler:
             scalar_reconcile_attribute=self.scalar_reconcile_attribute,
             scalar_reconcile_scope=self.scalar_reconcile_scope,
             scalar_reconcile_subject=self.scalar_reconcile_subject,
-            scalar_canonical_self=self.scalar_canonical_self,
             scalar_threshold=self.scalar_threshold,
             scalar_embed_version=self.experience_embed_version,
             scalar_history_enabled=self.scalar_history_enabled,
