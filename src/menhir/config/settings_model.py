@@ -332,12 +332,12 @@ class MemorySettings:
     # can never raise into recall, so toggling it changes only what is recorded, never what recall
     # returns. Read it back with menhir.infrastructure.audit_trail.RECALL or the inspect script.
     personal_memory_recall_audit_enabled: bool = False
-    # ScalarHistory projection: advisory, slot-keyed, ordered assertion history Views. OFF by
-    # default. When on, the projection coordinator also builds scalar_history Views alongside
+    # ScalarHistory projection: advisory, slot-keyed, ordered assertion history Views. When on, the projection coordinator also builds scalar_history Views alongside
     # scalar_state, and the recall path includes a dedicated advisory history lane. When off,
     # stored scalar_history Views are excluded from generic recall (real rollback, not leakage).
     # See `.agent/archive/plans/menhir-scalar-history-projection-plan.md`.
-    personal_memory_scalar_history_enabled: bool = False
+    # Default on since 2026-10-28 (#399 bucket 3: o500 A/B neutral to slightly positive, no LLM cost).
+    personal_memory_scalar_history_enabled: bool = True
     # Event-history projection settings. All OFF by default; the perceiver version
     # stamps the projection cursor so bumping it revisits history.
     personal_memory_event_history_enabled: bool = False

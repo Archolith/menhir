@@ -49,7 +49,7 @@ SHIPPED_SETTINGS = {
     # The scalar and counting lanes ship on (#168 freeze, cost switches); the other lanes ship off.
     # Scalar authority is always on but gated by its lane.
     "personal_memory_scalar_state_enabled": True,
-    "personal_memory_scalar_history_enabled": False,
+    "personal_memory_scalar_history_enabled": True,
     "personal_memory_event_history_enabled": False,
     "personal_memory_event_history_authority_enabled": False,
     "personal_memory_counting_enabled": True,

@@ -28,8 +28,9 @@ CAMPAIGN_FLAGS = {
 
 # Campaign switches that ship on by default (the scalar lane is a cost switch kept on by the #168
 # freeze). The Warden gate, source memories, scalar view authority and the others retired by the
-# freeze have no switch.
-DEFAULT_ON: set[str] = {"MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED"}
+# freeze have no switch. Scalar history is on since 2026-10-28 (#399 bucket 3).
+DEFAULT_ON: set[str] = {"MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED",
+                        "MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED"}
 
 
 @pytest.fixture

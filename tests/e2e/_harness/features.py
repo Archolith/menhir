@@ -151,7 +151,7 @@ FEATURE_REGISTRY: tuple[FeatureFlag, ...] = (
     _flag(
         "scalar_history",
         "MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED",
-        summary="Scalar history projection.",
+        summary="Scalar history projection. Default on since 2026-10-28 (#399 bucket 3).",
     ),
     _flag(
         "event_history",

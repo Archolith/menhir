@@ -57,7 +57,7 @@ _SETTINGS = (
         'personal_memory', 'Enable personal memory consolidation audit enabled.', False, ()),
     ('personal_memory_recall_audit_enabled', 'MENHIR_PERSONAL_MEMORY_RECALL_AUDIT_ENABLED', False,
         'personal_memory', 'Record recall audit decisions.', False, ()),
-    ('personal_memory_scalar_history_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED', False,
+    ('personal_memory_scalar_history_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED', True,
         'personal_memory', 'Enable personal memory scalar history enabled.', True, ()),
     ('personal_memory_event_history_enabled', 'MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED', False,
         'personal_memory', 'Enable personal memory event history enabled.', True, ()),
