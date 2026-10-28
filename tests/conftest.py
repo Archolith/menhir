@@ -525,9 +525,6 @@ class StubMemoryGraphAdapter:
     ) -> list[dict[str, object]]:
         return self.temporal_fact_rows
 
-    def search_facts_by_keywords(self, phrases, namespace, limit: int = 50) -> list[dict[str, object]]:
-        return []
-
     def fetch_candidate_provenance(self, node_uuids: list[str]) -> list[dict[str, object]]:
         return self.candidate_provenance_rows
 

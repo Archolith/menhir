@@ -73,7 +73,6 @@ class RetrievalScoreKind(str, Enum):
     WEIGHTED_RRF_NORMALIZED = "weighted_rrf_normalized"
     SOURCE_PRIOR = "source_prior"
     FACT_EDGE_RRF = "fact_edge_rrf"  # fact-edge lane removed 2026-10-27; kept for stored traces
-    VERB_FACET = "verb_facet"
 
 
 # Candidates below this score are noise and should be filtered before scoring.
@@ -262,8 +261,6 @@ class RetrievalTuningConfig:
     enable_anchored_time_expiry: bool = True
     # One observation per identical stated text in the observation lane (MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED).
     enable_observation_dedup: bool = False
-    # Append one keyword-matched fact per question verb after ranking (MENHIR_FRONTIER_VERB_FACETS).
-    enable_verb_facets: bool = False
 
     def __post_init__(self) -> None:
         # NaN fails this too: it would otherwise silently disable the gate.

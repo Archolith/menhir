@@ -11,7 +11,6 @@
     ['facet_weight', 'Facet weight', 'number', { min: 0, max: 10, step: 0.05 }],
   ];
   const advancedFields = [
-    ['enable_verb_facets', 'Verb-facet facts', 'bool'],
     ['scalar_verdict_min_similarity', 'Verdict min similarity', 'number', { min: 0, max: 1, step: 0.005 }],
     ['enable_oracle_ranking', 'Oracle ranking', 'bool'],
     ['oracle_rank_weight', 'Oracle residual weight', 'number', { min: 0, max: 2, step: 0.05 }],

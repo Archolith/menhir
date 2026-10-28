@@ -355,7 +355,6 @@ class MemorySettings:
     # #173 (set each to false to opt out); the belief gate and evidence anchor (#349) stay opt-in.
     frontier_belief_gate: bool = False     # add CurrentnessWarden + belief scoring to the chain (opt-in; see #350)
     frontier_evidence_anchor: bool = False  # Guard 5 EvidenceAnchorWarden; opt-in: it reads the client label, not the speaker, and refuses ordinary conversation (#349)
-    frontier_verb_facets: bool = False     # append one keyword-matched fact per question verb after ranking (verb-centric questions only)
     frontier_shadow: bool = False          # observe-only oracle/warden pass (trace)
     # Source-memory recall lane: additive section of raw episode memories (cosine over
     # n.content_embedding), NEXT TO the ranked results, never fused into them. Always on since
@@ -672,7 +671,6 @@ class MemorySettings:
             enable_anchored_time_render=self.anchored_time_render_enabled,
             enable_anchored_time_expiry=self.anchored_time_resolver_enabled,
             enable_observation_dedup=self.personal_memory_observation_dedup_enabled,
-            enable_verb_facets=self.frontier_verb_facets,
         )
 
     @classmethod
@@ -835,7 +833,6 @@ class MemorySettings:
             # Frontier portions (default off)
             frontier_belief_gate=parse_bool_env(_getenv("MENHIR_FRONTIER_BELIEF_GATE", default=str(cls.frontier_belief_gate))),
             frontier_evidence_anchor=parse_bool_env(_getenv("MENHIR_FRONTIER_EVIDENCE_ANCHOR", default=str(cls.frontier_evidence_anchor))),
-            frontier_verb_facets=parse_bool_env(_getenv("MENHIR_FRONTIER_VERB_FACETS", default=str(cls.frontier_verb_facets))),
             frontier_shadow=parse_bool_env(_getenv("MENHIR_FRONTIER_SHADOW", default=str(cls.frontier_shadow))),
             frontier_source_memory_limit=_parse_int(
                 _getenv("MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT", default=str(cls.frontier_source_memory_limit)),

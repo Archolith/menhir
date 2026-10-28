@@ -49,7 +49,6 @@ from menhir.domain.retrieval_trace_models import (
     AssertionShadowTrace,
     FacetShadowRow,
     FacetShadowTrace,
-    RelevanceBreakdown,
     RetrievalTrace,
     ScoringTrace,
     ViewReachability,
@@ -62,7 +61,6 @@ if TYPE_CHECKING:
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.telemetry import record_mcp_event
 from menhir.domain.utils import days_ago
-from menhir.domain.verb_facets import verb_facets
 from menhir.services.scheduler_protocols import LifecycleServiceProtocol
 from menhir.services.scoring_service import (
     GRAPHITI_RRF_DUAL_METHOD_MAX,  # noqa: F401  (re-export pinned by test_cf60_scoring_constants_owned_by_domain)
@@ -375,124 +373,6 @@ def _drop_counted_occurrence_observations(
                 continue
         kept.append(c)
     return kept
-
-
-_VERB_FACET_MAX = 3
-_VERB_FACET_MAX_SEARCHES = 5
-
-
-async def _admitted_fact_rows(
-    service: Any,
-    rows: list[dict[str, object]],
-    *,
-    include_session: bool,
-    session_id: str | None,
-    namespace: str | None,
-    endpoint_keys: tuple[str, str] = ("source_uuid", "target_uuid"),
-) -> list[dict[str, object]]:
-    """Keep a fact only when both endpoint memories pass ranked recall's admission.
-
-    Required because fact search matches the edge alone: without this a fact from a
-    SESSION-scoped, other-session, GONE or CANDIDATE memory would bypass recall's filters.
-    Missing endpoint metadata fails closed.
-    """
-    src_key, dst_key = endpoint_keys
-    endpoints = sorted({
-        str(row.get(key) or "") for row in rows for key in endpoint_keys
-    } - {""})
-    if not endpoints:
-        return []
-    meta_rows = await asyncio.to_thread(service.graph_adapter.fetch_candidate_metadata, endpoints)
-    meta_by_uuid = {str(m.get("uuid") or ""): m for m in meta_rows}
-    admitted = {
-        uuid for uuid in endpoints
-        if uuid in meta_by_uuid and _memory_admitted(
-            service, meta_by_uuid[uuid], include_session=include_session,
-            session_id=session_id, namespace=namespace,
-        )
-    }
-    return [
-        row for row in rows
-        if str(row.get(src_key) or "") in admitted
-        and str(row.get(dst_key) or "") in admitted
-    ]
-
-
-async def _append_verb_facet_facts(
-    service: Any,
-    query: str,
-    top_results: list[ScoredMemory],
-    namespace: str | None,
-    include_invalidated: bool,
-    preset: QueryPreset,
-    tuning: RetrievalTuningConfig,
-    *,
-    include_session: bool,
-    session_id: str | None,
-) -> list[ScoredMemory]:
-    """Append at most one keyword-matched fact per question verb (max 3), never reordering."""
-    facets = verb_facets(query)
-    if not facets:
-        return top_results
-    seen_uuids = {r.uuid for r in top_results}
-    seen_texts: set[str] = set()
-    for r in top_results:
-        for text in (r.name, r.content, *(tf.fact for tf in r.temporal_facts)):
-            if text is not None and str(text).strip():
-                seen_texts.add(str(text).strip())
-    appended: list[ScoredMemory] = []
-    # The cap counts appended facts; also bound the searches, so a long verb list that
-    # matches nothing cannot run one graph query per verb.
-    for facet in facets[:_VERB_FACET_MAX_SEARCHES]:
-        if len(appended) >= _VERB_FACET_MAX:
-            break
-        rows = await asyncio.to_thread(
-            service.graph_adapter.search_facts_by_keywords, facet.forms, namespace
-        )
-        if not include_invalidated:
-            rows = _filter_to_current_beliefs(rows)
-        rows = await _admitted_fact_rows(
-            service, rows, include_session=include_session, session_id=session_id,
-            namespace=namespace,
-        )
-        for row in rows:
-            uuid = str(row.get("uuid") or "")
-            fact = str(row.get("fact") or "").strip()
-            if not uuid or uuid in seen_uuids or not fact or fact in seen_texts:
-                continue
-            score = float(row.get("score") or 0.0)
-            facts = _build_temporal_facts(
-                [dict(row, node_uuid=uuid)],
-                event_time=tuning.enable_anchored_time_render,
-                ended=tuning.enable_anchored_time_expiry,
-                said_time=tuning.enable_fact_said_time,
-            )
-            appended.append(
-                ScoredMemory(
-                    uuid=uuid,
-                    name=fact,
-                    content=fact,
-                    scope=str(NodeScope.SESSION),
-                    memory_type="SEMANTIC",
-                    # Unranked append: the raw fulltext score (often 5-15) is not on the ranked
-                    # 0-1 scale, and a high final_score would let context dedup prefer this item
-                    # over a ranked memory. The raw score stays in retrieval_score.
-                    final_score=0.0,
-                    breakdown=RelevanceBreakdown(
-                        semantic_similarity=0.0, adjacency_bonus=0.0, recency_bonus=0.0,
-                        prominence_bonus=0.0, conflict_bonus=0.0, type_boost=0.0,
-                        preset=preset.value, alpha=0.0, beta=0.0, gamma=0.0, delta=0.0,
-                    ),
-                    retrieval_score=score,
-                    retrieval_score_kind=RetrievalScoreKind.VERB_FACET,
-                    temporal_facts=facts.get(uuid, ()),
-                    stale_anchor_info={"stale_anchor": False},
-                )
-            )
-            seen_uuids.add(uuid)
-            seen_texts.add(fact)
-            break
-    return [*top_results, *appended]
 
 
 async def run_recall_history(
@@ -1963,7 +1843,6 @@ async def run_recall(
     # --- Provenance (POST-RANK, label-only) ---
     # One batched, namespace-filtered query says who recorded each Entity / fact edge / pending
     # episode. Best-effort: failure leaves provenance=None (no label) and never breaks recall.
-    # Verb-facet items appended later are not filled.
     _t = perf_counter()
     try:
         provenance_uuids = [
@@ -2091,22 +1970,6 @@ async def run_recall(
                 len(top_results),
             )
     _t_phases["post_updates"] = int((perf_counter() - _t) * 1000)
-
-    # --- Verb-facet facts (APPENDED, after post-recall updates) ---
-    # Placed here so appended edge uuids never reach _post_recall_updates (access-stat writes),
-    # the temporal-facts enrichment, or the stale-anchor blocks above.
-    if tuning.enable_verb_facets:
-        _t = perf_counter()
-        try:
-            top_results = await _append_verb_facet_facts(
-                service, query, top_results, namespace, include_invalidated, preset, tuning,
-                include_session=include_session, session_id=session_id,
-            )
-        except _PROGRAMMING_ERRORS:
-            raise
-        except Exception:
-            logger.exception("Verb-facet fact append failed; continuing without it")
-        _t_phases["verb_facets"] = int((perf_counter() - _t) * 1000)
 
     _t_phases["total"] = int((perf_counter() - _t_total) * 1000)
     logger.info(

@@ -86,7 +86,7 @@ set values; the evidence-anchor example is a code-corpus choice, not its code de
 
 Scalar state, scalar/history authority, Wardens and verifier sync remain opt-in.
 The event-history lane was archived (2026-10-28) and its variables are retired.
-The scalar-view echo drop, diversity gate, fact relevance and fusion admission policy settings were removed (2026-10-28) and their variables are retired. Disabling a feature stops its gated paths and leaves persisted data in
+The scalar-view echo drop, diversity gate, fact relevance, fusion admission policy and verb facets settings were removed (2026-10-28) and their variables are retired. Disabling a feature stops its gated paths and leaves persisted data in
 place; this is not a database rollback. Scalar processing can revisit historical evidence
 when enabled or when perceiver versions change. Review namespace/version and historical-data
 obligations before activation; do not run a backfill or ingest simply to upgrade the package.

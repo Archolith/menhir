@@ -64,7 +64,6 @@ _SETTINGS = (
         True, ()),
     ('frontier_evidence_anchor', 'MENHIR_FRONTIER_EVIDENCE_ANCHOR', False, 'frontier',
         'Enable frontier evidence anchor.', True, ()),
-    ('frontier_verb_facets', 'MENHIR_FRONTIER_VERB_FACETS', False, 'frontier', 'Append one keyword-matched fact per question verb after ranking, for verb-centric questions.', True, ()),
     ('frontier_shadow', 'MENHIR_FRONTIER_SHADOW', False, 'frontier', 'Enable frontier shadow.', False, ()),
     ('frontier_source_memory_pools', 'MENHIR_FRONTIER_SOURCE_MEMORY_POOLS', False, 'frontier',
         'Enable frontier source memory pools.', True, ()),
@@ -290,4 +289,6 @@ RETIRED = {
     "MENHIR_FRONTIER_FACT_RELEVANCE": "2026-10-28: removed (#399 bucket 3; o500 A/B changed recall without a measurable gain)",
     "frontier_fusion_admission_policy": "2026-10-28: removed (#399 bucket 3; dead setting, never read by recall)",
     "MENHIR_FRONTIER_FUSION_ADMISSION_POLICY": "2026-10-28: removed (#399 bucket 3; dead setting, never read by recall)",
+    "frontier_verb_facets": "2026-10-28: removed (#399 bucket 3; o500 A/B changed recall on 9 items with no flips)",
+    "MENHIR_FRONTIER_VERB_FACETS": "2026-10-28: removed (#399 bucket 3; o500 A/B changed recall on 9 items with no flips)",
 }
