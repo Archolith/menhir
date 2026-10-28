@@ -121,20 +121,6 @@ class UnavailableLLMAdapter:
     ) -> list[str | None]:
         self._raise()
 
-    async def classify_shadow_context(
-        self,
-        episode_body: str,
-        candidates: list[dict[str, str]],
-    ) -> str | None:
-        self._raise()
-
-    async def break_shadow_tie(
-        self,
-        episode_body: str,
-        tied_candidates: list[dict[str, str]],
-    ) -> str | None:
-        self._raise()
-
 
 @dataclass
 class BuildArtifacts:
@@ -224,8 +210,6 @@ def build_memory_services(
         max_llm_calls_per_enrichment_job=settings.max_llm_calls_per_enrichment_job,
         ingest_concurrency=settings.ingest_concurrency,
         record_detailed_revisions=settings.record_detailed_revisions,
-        shadow_context_composition=settings.shadow_context_composition,
-        shadow_composition_timeout_s=settings.shadow_composition_timeout_s,
         enrichment_enabled=(capabilities.enrichment_ready if capabilities is not None else True),
         enrichment_disabled_reason=(
             "Graphiti/LLM enrichment is unavailable in the current startup mode."

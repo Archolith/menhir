@@ -78,8 +78,6 @@ class IngestQueueMixin:
         enrichment_enabled: bool | None = None,
         enrichment_disabled_reason: str | None = None,
         ingest_concurrency: int | None = None,
-        shadow_context_composition: bool | None = None,
-        shadow_composition_timeout_s: float | None = None,
         source_memories_enabled: bool | None = None,
         assistant_turns_store_only: bool | None = None,
     ) -> None:
@@ -119,19 +117,10 @@ class IngestQueueMixin:
                 # Rebuild lazily so the new bound takes effect (configure runs at
                 # bootstrap, before the worker(s) start).
                 self._ingest_gate_obj = None
-        if shadow_context_composition is not None:
-            self._shadow_context_composition = bool(shadow_context_composition)
-        if shadow_composition_timeout_s is not None:
-            self._shadow_composition_timeout_s = max(1.0, float(shadow_composition_timeout_s))
         if source_memories_enabled is not None:
             self._source_memories_enabled = bool(source_memories_enabled)
         if assistant_turns_store_only is not None:
             self._assistant_turns_store_only = bool(assistant_turns_store_only)
-
-    def _register_shadow_task(self, task: asyncio.Task) -> None:
-        """Track a detached shadow-composition task so shutdown() can drain it."""
-        self._shadow_tasks.add(task)
-        task.add_done_callback(self._shadow_tasks.discard)
 
     def _gate(self) -> IngestGate:
         """The ingestion gate (bounded concurrency + per-namespace serialization)."""
@@ -424,18 +413,6 @@ class IngestQueueMixin:
         self._worker_tasks = []
         self._pending_queue = None
         self._queued_episode_ids.clear()
-        shadow_tasks = list(self._shadow_tasks)
-        for shadow_task in shadow_tasks:
-            if not shadow_task.done():
-                shadow_task.cancel()
-        for shadow_task in shadow_tasks:
-            with contextlib.suppress(asyncio.CancelledError):
-                await shadow_task
-        # Remove only what was actually drained, not a blind clear() -- worker tasks are
-        # cancelled+awaited above before this runs, so a new registration during this drain
-        # is a narrow theoretical race rather than a real path, but difference_update costs
-        # nothing extra and never silently drops a task this loop didn't actually await.
-        self._shadow_tasks.difference_update(shadow_tasks)
         record_lifecycle_event(
             component="ingest_queue",
             event="shutdown",

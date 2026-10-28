@@ -58,16 +58,6 @@ async def test_contradiction_check_answers_on_a_reasoning_model() -> None:
     assert backend.calls[0]["max_tokens"] == llm_module._VERDICT_MAX_TOKENS
 
 
-@pytest.mark.asyncio
-async def test_shadow_tie_break_answers_on_a_reasoning_model() -> None:
-    backend = _ReasoningModelBackend({"shadow_context_composition_tie_break": '{"selected": null}'})
-
-    raw = await _adapter(backend).break_shadow_tie("episode", [{"fact_uuid": "u1", "fact": "f"}])
-
-    assert raw == '{"selected": null}'
-    assert backend.calls[0]["max_tokens"] == llm_module._VERDICT_MAX_TOKENS
-
-
 def test_verdict_budget_clears_reasoning_headroom() -> None:
     # Guards against a later "tidy-up" back to a one-word budget.
     assert llm_module._VERDICT_MAX_TOKENS >= 512

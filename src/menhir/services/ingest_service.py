@@ -119,16 +119,9 @@ class IngestService(IngestQueueMixin, IngestWorkerMixin, IngestIntakeMixin):
     _settings_record_revisions: bool = field(default=True, init=False, repr=False)
     _enrichment_enabled: bool = field(default=True, init=False, repr=False)
     _enrichment_disabled_reason: str = field(default="", init=False, repr=False)
-    # Stage 1 shadow-mode context composition (observe-only; see
-    # .agent/archive/plans/menhir-context-composition-production-integration.md). Off by default.
-    _shadow_context_composition: bool = field(default=False, init=False, repr=False)
-    _shadow_composition_timeout_s: float = field(default=30.0, init=False, repr=False)
     # Source-memory lane: episode-content embedding at ingest. On by default since #168 freeze;
     # kept as a test seam via configure(source_memories_enabled=...).
     _source_memories_enabled: bool = field(default=True, init=False, repr=False)
     # Raw assistant turns are stored, never extracted. On by default since #168 freeze; kept as a
     # test seam via configure(assistant_turns_store_only=...).
     _assistant_turns_store_only: bool = field(default=True, init=False, repr=False)
-    # Detached background shadow-composition tasks, tracked so shutdown() can drain them
-    # instead of leaving "Task was destroyed but it is pending" warnings behind.
-    _shadow_tasks: set[asyncio.Task] = field(default_factory=set, init=False, repr=False)

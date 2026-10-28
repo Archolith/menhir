@@ -95,7 +95,6 @@ BASELINE: dict[str, int] = {
     "infrastructure/view_query_repository.py": 5,
     "infrastructure/work_artifact_repository.py": 8,
     "services/lifecycle_conflicts.py": 1,
-    "services/shadow_context_composition.py": 1,
 }
 
 

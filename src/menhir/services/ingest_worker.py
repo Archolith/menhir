@@ -177,9 +177,6 @@ class IngestWorkerMixin:
                 inferred_self_mode=self._inferred_self_mode,
                 source_memories_enabled=self._source_memories_enabled,
                 get_queue_depth=self.get_queue_depth,
-                shadow_context_composition=self._shadow_context_composition,
-                shadow_composition_timeout_s=self._shadow_composition_timeout_s,
-                register_background_task=self._register_shadow_task,
             )
 
             record_lifecycle_event(

@@ -141,26 +141,6 @@ def test_frontier_portions_from_env_map_to_tuning(monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.unit
-def test_shadow_context_composition_defaults_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stage 1 shadow-mode context composition is off by default (research
-    instrumentation, not a recall/extraction behavior change)."""
-    monkeypatch.delenv("MENHIR_SHADOW_CONTEXT_COMPOSITION", raising=False)
-    monkeypatch.delenv("MENHIR_SHADOW_COMPOSITION_TIMEOUT_S", raising=False)
-    s = MemorySettings.from_env()
-    assert s.shadow_context_composition is False
-    assert s.shadow_composition_timeout_s == 30.0
-
-
-@pytest.mark.unit
-def test_shadow_context_composition_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MENHIR_SHADOW_CONTEXT_COMPOSITION", "true")
-    monkeypatch.setenv("MENHIR_SHADOW_COMPOSITION_TIMEOUT_S", "12.5")
-    s = MemorySettings.from_env()
-    assert s.shadow_context_composition is True
-    assert s.shadow_composition_timeout_s == 12.5
-
-
-@pytest.mark.unit
 def test_graphiti_provider_canonical_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """The canonical GRAPHITI_LLM_PROVIDER var selects the graphiti LLM provider."""
     for var in ("GRAPHITI_LLM_PROVIDER", "MEMORY_GRAPHITI_PROVIDER", "GRAPHITI_PROVIDER"):

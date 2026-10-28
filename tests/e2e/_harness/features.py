@@ -173,11 +173,6 @@ FEATURE_REGISTRY: tuple[FeatureFlag, ...] = (
         "MENHIR_VERIFIER_SYNC_ENABLED",
         summary="Background verifier synchronization.",
     ),
-    _flag(
-        "shadow_context_composition",
-        "MENHIR_SHADOW_CONTEXT_COMPOSITION",
-        summary="Shadow context composition alongside the served path.",
-    ),
 )
 
 _BY_NAME: Mapping[str, FeatureFlag] = {flag.name: flag for flag in FEATURE_REGISTRY}

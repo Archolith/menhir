@@ -145,26 +145,23 @@ async def test_collision_does_not_change_legacy_worker_modes(
 
 
 @pytest.mark.asyncio
-async def test_collision_precedes_shadow_search_publication_intent_and_dispatch(monkeypatch) -> None:
+async def test_collision_precedes_publication_intent_and_dispatch(monkeypatch) -> None:
     events: list[str] = []
     ctx = replace(
         _pipeline_context(events), episode_uuid="projection-collision",
         claimed=_claim("I own postcards. MenhirCurrentSpeaker_"),
-        canonical_self_binding_mode="enforce", shadow_context_composition=True,
+        canonical_self_binding_mode="enforce",
     )
     native = AsyncMock(return_value=SimpleNamespace(
         episode=SimpleNamespace(uuid="remote-1"), nodes=[], edges=[], episodic_edges=[],
     ))
     ctx.graphiti_client.add_episode = native
-    shadow = AsyncMock(return_value=([], None))
-    monkeypatch.setattr(steps, "snapshot_candidate_facts", shadow)
     progress = Mock(return_value=True)
     monkeypatch.setattr(ctx.graph_adapter, "update_episode_processing", progress)
 
     with pytest.raises(ValueError, match="self_subject_endpoint_collision"):
         await steps.run_graphiti_extraction(ctx, finalize_under_gate=False)
 
-    shadow.assert_not_awaited()
     native.assert_not_awaited()
     progress.assert_not_called()
     assert events == []  # No publication-intent write before a deterministic refusal.

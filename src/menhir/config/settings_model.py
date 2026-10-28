@@ -175,18 +175,6 @@ class MemorySettings:
     # providers (e.g. the LongMemEval OpenAI build) to parallelize the drain.
     ingest_concurrency: int = 1
 
-    # Shadow-mode context composition (Stage 1 of the context-composition production-integration
-    # plan, .agent/archive/plans/menhir-context-composition-production-integration.md):
-    # observe-only, never applied. When on, every ingested episode gets a candidate-fact-edge
-    # retrieval + grounded shadow-label classification + eligibility trace logged alongside the real
-    # extraction outcome, with zero effect on what gets extracted or written. Off by default —
-    # this is research instrumentation, not a recall/extraction behavior change. The shadow
-    # LLM work runs OUTSIDE the per-namespace ingest gate as a detached background task (see
-    # shadow_context_composition.py), so shadow_composition_timeout_s bounds only that background
-    # task, never real episode completion latency.
-    shadow_context_composition: bool = False
-    shadow_composition_timeout_s: float = 30.0
-
     # Conflict suppression
     conflict_cooldown_days: int = 0  # 0 = permanent suppression; >0 = re-check after N days
 
@@ -789,11 +777,6 @@ class MemorySettings:
                 _getenv("MENHIR_INGEST_CONCURRENCY", default=str(cls.ingest_concurrency)),
                 env_var="MENHIR_INGEST_CONCURRENCY",
                 minimum=1,
-            ),
-            shadow_context_composition=parse_bool_env(_getenv("MENHIR_SHADOW_CONTEXT_COMPOSITION", default=str(cls.shadow_context_composition))),
-            shadow_composition_timeout_s=_parse_float(
-                _getenv("MENHIR_SHADOW_COMPOSITION_TIMEOUT_S", default=str(cls.shadow_composition_timeout_s)),
-                env_var="MENHIR_SHADOW_COMPOSITION_TIMEOUT_S",
             ),
             # Structure watcher
             structure_watcher_interval_s=_parse_float(

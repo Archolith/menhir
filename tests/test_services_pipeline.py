@@ -3372,11 +3372,10 @@ def test_pid_alive_true_for_current_process_false_for_bogus() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Stage 1 shadow-mode context composition wiring
-# (.agent/archive/plans/menhir-context-composition-production-integration.md)
+# run_graphiti_extraction namespace-boundary fakes
 # ---------------------------------------------------------------------------
 
-class _FakeGraphAdapterForShadow:
+class _FakeGraphAdapterForExtraction:
     def update_episode_processing(self, *args, **kwargs):
         pass
 
@@ -3384,9 +3383,8 @@ class _FakeGraphAdapterForShadow:
         return []
 
 
-class _FakeGraphitiClientForShadow:
-    """Minimal fake satisfying run_graphiti_extraction's real add_episode call plus
-    the shadow snapshot's driver/search_scored lookups (both no-op safe)."""
+class _FakeGraphitiClientForExtraction:
+    """Minimal fake satisfying run_graphiti_extraction's real add_episode call."""
 
     client = type("C", (), {"clients": type("CL", (), {"driver": None})()})()
     search_scored = None
@@ -3404,12 +3402,10 @@ class _FakeGraphitiClientForShadow:
         return _Result()
 
 
-def _build_shadow_test_ctx(
+def _build_extraction_test_ctx(
     *,
-    shadow_on: bool,
-    register=None,
     llm=None,
-    episode_uuid: str = "shadow-ep-1",
+    episode_uuid: str = "extraction-ep-1",
     namespace: str = "default",
     ingest_gate=None,
 ):
@@ -3422,8 +3418,8 @@ def _build_shadow_test_ctx(
         started=0.0,
         processing_attempts=1,
         worker_id="w-1",
-        graph_adapter=_FakeGraphAdapterForShadow(),
-        graphiti_client=_FakeGraphitiClientForShadow(),
+        graph_adapter=_FakeGraphAdapterForExtraction(),
+        graphiti_client=_FakeGraphitiClientForExtraction(),
         lifecycle_service=None,
         llm=llm,
         ingest_gate=ingest_gate or IngestGate(1),
@@ -3433,91 +3429,7 @@ def _build_shadow_test_ctx(
         graphiti_add_episode_timeout_s=5.0,
         graphiti_episode_max_estimated_tokens=8000,
         get_queue_depth=lambda: 0,
-        shadow_context_composition=shadow_on,
-        shadow_composition_timeout_s=5.0,
-        register_background_task=register,
     )
-
-
-@pytest.mark.asyncio
-async def test_run_graphiti_extraction_flag_off_never_touches_shadow_module(monkeypatch):
-    """Flag off => byte-for-byte the old behavior: snapshot_candidate_facts is never
-    called (a call would raise via the monkeypatch below), graphiti_result unchanged."""
-    from menhir.services import enrichment_steps as es
-
-    async def _boom(*args, **kwargs):
-        raise AssertionError("snapshot_candidate_facts must not be called when the flag is off")
-
-    monkeypatch.setattr(es, "snapshot_candidate_facts", _boom)
-
-    ctx = _build_shadow_test_ctx(shadow_on=False)
-    result = await es.run_graphiti_extraction(ctx, finalize_under_gate=False)
-    assert result.episode.uuid == "resolved-ep-1"
-
-
-@pytest.mark.asyncio
-async def test_run_graphiti_extraction_flag_on_returns_before_shadow_task_completes():
-    """Flag on: the gate is released and graphiti_result is returned to the caller
-    BEFORE the detached shadow task finishes -- shadow latency must never leak onto
-    the real completion path."""
-    from menhir.services import enrichment_steps as es
-
-    shadow_started = asyncio.Event()
-    shadow_may_finish = asyncio.Event()
-    shadow_finished = asyncio.Event()
-
-    class _SlowLLM:
-        async def classify_shadow_context(self, episode_body, candidates):
-            shadow_started.set()
-            await shadow_may_finish.wait()
-            return None  # metadata_generation_failed is fine -- we only care about timing
-
-        async def break_shadow_tie(self, episode_body, tied_candidates):
-            return None
-
-    registered = []
-    ctx = _build_shadow_test_ctx(
-        shadow_on=True, llm=_SlowLLM(), register=registered.append,
-    )
-
-    result = await es.run_graphiti_extraction(ctx, finalize_under_gate=False)
-    assert result.episode.uuid == "resolved-ep-1"  # real path completed
-    assert len(registered) == 1  # background task was dispatched + tracked
-
-    task = registered[0]
-    task.add_done_callback(lambda _t: shadow_finished.set())
-    assert not shadow_finished.is_set()  # real return happened before shadow work finished
-
-    shadow_may_finish.set()
-    await asyncio.wait_for(task, timeout=5.0)
-    assert shadow_finished.is_set()
-
-
-@pytest.mark.asyncio
-async def test_run_graphiti_extraction_shadow_exception_never_propagates():
-    """A bug inside shadow processing must never surface as an episode failure."""
-    from menhir.services import enrichment_steps as es
-
-    class _BrokenLLM:
-        async def classify_shadow_context(self, episode_body, candidates):
-            raise RuntimeError("boom")
-
-        async def break_shadow_tie(self, episode_body, tied_candidates):
-            raise RuntimeError("boom")
-
-    registered = []
-    ctx = _build_shadow_test_ctx(
-        shadow_on=True, llm=_BrokenLLM(), register=registered.append,
-    )
-
-    result = await es.run_graphiti_extraction(ctx, finalize_under_gate=False)
-    assert result.episode.uuid == "resolved-ep-1"
-
-    # Draining the background task must not raise either -- _run_shadow_composition_and_log
-    # catches everything internally (compose_shadow_prediction already never raises, but this
-    # confirms the outer wrapper's own safety net too).
-    await asyncio.wait_for(registered[0], timeout=5.0)
-    assert SchedulerLeaseStore._pid_alive(0) is False
 
 
 @pytest.mark.unit
@@ -3562,8 +3474,7 @@ async def test_run_graphiti_finalization_respects_namespace_boundary(
     gate = IngestGate(2)
     first = asyncio.create_task(
         es.run_graphiti_extraction(
-            _build_shadow_test_ctx(
-                shadow_on=False,
+            _build_extraction_test_ctx(
                 episode_uuid="episode-a",
                 namespace="shared",
                 ingest_gate=gate,
@@ -3574,8 +3485,7 @@ async def test_run_graphiti_finalization_respects_namespace_boundary(
     await asyncio.wait_for(first_finalize_started.wait(), timeout=1.0)
     second = asyncio.create_task(
         es.run_graphiti_extraction(
-            _build_shadow_test_ctx(
-                shadow_on=False,
+            _build_extraction_test_ctx(
                 episode_uuid="episode-b",
                 namespace=second_namespace,
                 ingest_gate=gate,
@@ -3612,7 +3522,7 @@ def _build_stamp_ctx(adapter, *, episode_uuid: str, worker_id: str = "w-1"):
         processing_attempts=1,
         worker_id=worker_id,
         graph_adapter=adapter,
-        graphiti_client=_FakeGraphitiClientForShadow(),
+        graphiti_client=_FakeGraphitiClientForExtraction(),
         lifecycle_service=None,
         llm=None,
         ingest_gate=IngestGate(1),

@@ -29,8 +29,6 @@ class FeatureFlag:
 _SETTINGS = (
     ('record_detailed_revisions', 'MENHIR_RECORD_DETAILED_REVISIONS', True, 'runtime',
         'Retain detailed revision provenance.', False, ()),
-    ('shadow_context_composition', 'MENHIR_SHADOW_CONTEXT_COMPOSITION', False, 'runtime',
-        'Observe experimental context composition.', False, ()),
     ('structure_watcher_enabled', 'MENHIR_STRUCTURE_WATCHER_ENABLED', True, 'runtime',
         'Enable background structural watching.', False, ()),
     ('artifact_reconcile_mode', 'MENHIR_ARTIFACT_RECONCILE_MODE', 'audit', 'runtime',
@@ -190,7 +188,7 @@ _REQUIREMENT_SCOPE = {
     "personal_memory_counting_enabled": "The counting lane runs after the scalar phase and reads scalar state.",
 }
 _VERSIONED: frozenset[str] = frozenset()
-_OBSERVATION = frozenset({"shadow_context_composition", "frontier_shadow",
+_OBSERVATION = frozenset({"frontier_shadow",
     "personal_memory_consolidation_audit_enabled", "personal_memory_recall_audit_enabled",
     "MENHIR_FRONTIER_TRACE",
     "MENHIR_BENCH_ACTIVE_RUN_ID", "MENHIR_BENCH_RESULTS_ROOT"})
@@ -287,4 +285,8 @@ RETIRED = {
     "MENHIR_PERSONAL_MEMORY_SCALAR_DETERMINISTIC_ROUTER": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
     "personal_memory_scalar_deterministic_classes": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
     "MENHIR_PERSONAL_MEMORY_SCALAR_DETERMINISTIC_CLASSES": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
+    "shadow_context_composition": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
+    "MENHIR_SHADOW_CONTEXT_COMPOSITION": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
+    "shadow_composition_timeout_s": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
+    "MENHIR_SHADOW_COMPOSITION_TIMEOUT_S": "2026-10-27: removed; archived on archive/bucket1-features-2026-10-27",
 }
