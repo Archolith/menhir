@@ -521,7 +521,7 @@ class StubMemoryGraphAdapter:
         ][:limit]
 
     def fetch_temporal_facts(
-        self, node_uuids: list[str], *, query_vector=None, namespace=None,
+        self, node_uuids: list[str], *, namespace=None,
     ) -> list[dict[str, object]]:
         return self.temporal_fact_rows
 

@@ -115,13 +115,6 @@ def test_always_on_portions_are_on_without_settings() -> None:
 
 
 @pytest.mark.unit
-def test_fusion_admission_policy_env_maps_to_tuning(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MENHIR_FRONTIER_FUSION_ADMISSION_POLICY", "production_fused")
-    tuning = MemorySettings.from_env().retrieval_tuning()
-    assert tuning.fusion_admission_policy == "production_fused"
-
-
-@pytest.mark.unit
 def test_frontier_portions_from_env_map_to_tuning(monkeypatch: pytest.MonkeyPatch) -> None:
     """MENHIR_FRONTIER_* env flags map onto RetrievalTuningConfig; shadow drives assertion_shadow."""
     # Set each explicitly so the mapping is asserted independent of field defaults.

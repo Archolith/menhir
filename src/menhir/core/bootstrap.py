@@ -224,7 +224,6 @@ def build_memory_services(
         ingest_service=ingest_service,
         lifecycle_service=lifecycle_service,
         scalar_view_authority_enabled=scalar_view_authority_effective(settings),
-        scalar_view_echo_drop_enabled=settings.personal_memory_scalar_view_echo_drop_enabled,
         scalar_history_enabled=settings.personal_memory_scalar_history_enabled,
         inferred_self_mode=str(getattr(settings, "inferred_self_mode", "off")),
         counting_enabled=bool(

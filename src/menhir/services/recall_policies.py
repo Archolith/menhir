@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 import os
 import re
 from dataclasses import dataclass, field, replace
@@ -251,16 +250,12 @@ def _build_temporal_facts(
     event_time: bool = False,
     ended: bool = False,
     now: datetime | None = None,
-    relevance_k: int = 0,
     said_time: bool = True,
 ) -> dict[str, tuple[TemporalFact, ...]]:
     """Group fact-edge rows by node_uuid, cap to 5 most recent, and build TemporalFact tuples.
 
     Sorts by created_at DESC (None last), caps to 5 most recent per node,
     and assigns temporal_role based on whether expired_at is None.
-    With ``relevance_k`` > 0, up to that many rows with the highest finite
-    ``fact_similarity`` take slots first (ties by newest-first order), the remaining slots
-    fill from the newest rows, and output stays newest first.
     With ``ended`` (MENHIR_ANCHORED_TIME_RESOLVER) an unexpired fact whose own end (invalid_at)
     is at or before ``now`` is "ended": still believed, no longer true in the world.
     Returns a dict mapping node_uuid -> tuple of TemporalFact.
@@ -286,24 +281,7 @@ def _build_temporal_facts(
             reverse=True,
         )
         # Cap to 5 most recent
-        if relevance_k > 0:
-            scored = [
-                (i, float(r["fact_similarity"]))
-                for i, r in enumerate(sorted_rows)
-                if isinstance(r.get("fact_similarity"), (int, float))
-                and not isinstance(r.get("fact_similarity"), bool)
-                and math.isfinite(r["fact_similarity"])
-            ]
-            # Stable sort: equal similarity keeps the newest-first index order.
-            scored.sort(key=lambda item: -item[1])
-            picked = {i for i, _ in scored[:relevance_k]}
-            for i in range(len(sorted_rows)):
-                if len(picked) >= 5:
-                    break
-                picked.add(i)
-            capped = [sorted_rows[i] for i in sorted(picked)][:5]
-        else:
-            capped = sorted_rows[:5]
+        capped = sorted_rows[:5]
         facts = []
         for row in capped:
             expired_at = row.get("expired_at")

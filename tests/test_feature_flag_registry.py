@@ -135,13 +135,33 @@ def test_event_history_controls_are_retired(monkeypatch, name, env) -> None:
     assert RETIRED[env] == RETIRED[name]
 
 
+@pytest.mark.parametrize("name,env,reason", [
+    ("personal_memory_scalar_view_echo_drop_enabled",
+     "MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_ECHO_DROP_ENABLED",
+     "2026-10-28: removed (#399 bucket 3; redundant with observation dedup in shard-1 repeats)"),
+    ("frontier_diversity_gate", "MENHIR_FRONTIER_DIVERSITY_GATE",
+     "2026-10-28: removed (#399 bucket 3; o500 A/B changed recall without a measurable gain)"),
+    ("frontier_fact_relevance", "MENHIR_FRONTIER_FACT_RELEVANCE",
+     "2026-10-28: removed (#399 bucket 3; o500 A/B changed recall without a measurable gain)"),
+    ("frontier_fusion_admission_policy", "MENHIR_FRONTIER_FUSION_ADMISSION_POLICY",
+     "2026-10-28: removed (#399 bucket 3; dead setting, never read by recall)"),
+])
+def test_bucket3_recall_flags_are_retired(monkeypatch, name, env, reason) -> None:
+    # Fails if a removed recall flag returns as a setting/feature, or loses its retirement reason.
+    assert name not in FEATURES and env not in FEATURES
+    assert name not in {f.name for f in fields(MemorySettings)}
+    monkeypatch.setenv(env, "true")
+    assert not hasattr(MemorySettings.from_env(), name)
+    assert RETIRED[name] == reason
+    assert RETIRED[env] == reason
+
+
 def test_known_interactions_and_observation_switches_are_recorded() -> None:
     for key in ("frontier_belief_gate", "frontier_evidence_anchor"):
         assert FEATURES[key].requires == ()
     # Scalar view authority is always on (#168 freeze): its dependents require the scalar lane itself.
-    for key in ("personal_memory_scalar_view_echo_drop_enabled",
-                "personal_memory_observation_dedup_enabled"):
-        assert FEATURES[key].requires == ("personal_memory_scalar_state_enabled",)
+    assert FEATURES["personal_memory_observation_dedup_enabled"].requires == (
+        "personal_memory_scalar_state_enabled",)
     for key in ("frontier_shadow", "personal_memory_recall_audit_enabled",
                 "personal_memory_consolidation_audit_enabled", "MENHIR_FRONTIER_TRACE"):
         assert FEATURES[key].observation_only is True

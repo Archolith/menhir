@@ -210,8 +210,6 @@ class RetrievalTuningConfig:
     enable_intent_lens: bool = True
     # Warden gate: drop REFUSED candidates from results and label FLAGGED ones. On by default since #168 freeze; kept as a per-request knob.
     enable_warden_gate: bool = True
-    # Diversity gate: reorder results by evidence family to prevent any single source from dominating.
-    enable_diversity_gate: bool = False
     # Contradiction interrupt: append ContradictionWarden to the default warden chain. On by default since #168 freeze; kept as a per-request knob.
     enable_contradiction_interrupt: bool = True
     # Belief gate: append CurrentnessWarden + populate belief_score/evidence from
@@ -235,9 +233,6 @@ class RetrievalTuningConfig:
     # evidence its fold ignores (see domain/scalar_view_freshness.py). The verdict is still shown,
     # as advisory. On by default since the #168 freeze; kept as a per-request knob.
     scalar_view_freshness_gate: bool = True
-    # Benchmark control/treatment arms use ``production_fused`` so a lane's membership
-    # alone never grants a floor exemption that today's opaque Graphiti fusion does not grant.
-    fusion_admission_policy: str = "attributed"
     # Source-memory lane (plan menhir-source-memory-lane). When on, recall builds an ADDITIVE
     # source_memories section (raw episode contents by cosine over n.content_embedding, oldest
     # first) next to the ranked results. Never fused: results/candidates_evaluated are identical
@@ -265,8 +260,6 @@ class RetrievalTuningConfig:
     # "current_belief" (follows MENHIR_ANCHORED_TIME_RESOLVER; settings pass the switch value).
     # Presentation only, like the render flag.
     enable_anchored_time_expiry: bool = True
-    # Attach the facts most similar to the query, not only the newest (MENHIR_FRONTIER_FACT_RELEVANCE).
-    enable_fact_relevance: bool = False
     # One observation per identical stated text in the observation lane (MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED).
     enable_observation_dedup: bool = False
     # Append one keyword-matched fact per question verb after ranking (MENHIR_FRONTIER_VERB_FACETS).
@@ -287,11 +280,6 @@ class RetrievalTuningConfig:
         if self.facet_weight < 0.0:
             raise ValueError(
                 f"facet_weight must be >= 0.0, got {self.facet_weight!r}"
-            )
-        if self.fusion_admission_policy not in ("attributed", "production_fused"):
-            raise ValueError(
-                "fusion_admission_policy must be attributed or production_fused, "
-                f"got {self.fusion_admission_policy!r}"
             )
         if not 1 <= self.source_memory_limit <= 50:
             raise ValueError(

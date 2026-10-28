@@ -116,24 +116,6 @@ async def test_dedup_keeps_named_subject_for_authority_lookup(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_echo_dropped_slot_does_not_take_other_slots_identical_text(
-    stub_graphiti_client, stub_memory_graph_adapter,
-):
-    from tests.test_scalar_view_collapse_drilldown import (
-        _ids, _other_slot_hit, _state_view, _svc, _wire)
-
-    other = _other_slot_hit()
-    other.update(stated_span="17 postcards since I started", cosine=0.90)
-    _wire(stub_memory_graph_adapter, state_view=_state_view(), extra_hits=[other])
-    _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
-    res = await _svc(stub_graphiti_client, stub_memory_graph_adapter,
-                     scalar_view_echo_drop_enabled=True).recall(
-        QUERY, namespace="proj", tuning=RetrievalTuningConfig(enable_observation_dedup=True))
-    assert "obs-other-1" in _ids(res)
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
 async def test_flag_off_keeps_both(stub_graphiti_client, stub_memory_graph_adapter):
     hits = [_hit("obs-a", "17 postcards since I started", 0.80),
             _hit("obs-b", "17 postcards since I started", 0.90)]

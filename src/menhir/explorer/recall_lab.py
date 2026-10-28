@@ -10,7 +10,7 @@ import re
 from dataclasses import asdict, is_dataclass
 from enum import Enum
 from time import perf_counter
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -34,11 +34,9 @@ class RecallLabTuning(BaseModel):
     oracle_rank_weight: float = Field(default=0.25, ge=0.0, le=2.0)
     enable_intent_lens: bool = True
     enable_warden_gate: bool = True
-    enable_diversity_gate: bool = False
     enable_contradiction_interrupt: bool = True
     enable_belief_gate: bool = False
     enable_evidence_anchor: bool = False
-    fusion_admission_policy: Literal["attributed", "production_fused"] = "attributed"
     enable_source_memories: bool = True
     source_memory_limit: int = Field(default=10, ge=1, le=50)
     source_memory_max_chars: int = Field(default=2000, ge=100, le=4000)

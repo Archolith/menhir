@@ -1,7 +1,7 @@
-"""Scalar View echo drop (flag) and drill-down (no flag), offline; also the shared fixture hub.
+"""Scalar View drill-down, offline; also the shared fixture hub.
 
-Echo drop: observations echoing a verdict slot are removed from recall. Drill-down: the shared
-helper, REST route, backend method and MCP tool that page the items a View was built from.
+Drill-down: the shared helper, REST route, backend method and MCP tool that page the items a View
+was built from.
 """
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ from menhir.services.recall_service import RecallService
 from menhir.services.scalar_view_items import fetch_scalar_view_items
 from menhir.services.scoring_service import ScoringService
 from tests.test_scalar_history_recall import (
-    _postcard_history_view,
     _postcard_observation_hit,
     _setup_observation_lane,
     _setup_search_and_metadata,
@@ -90,64 +89,14 @@ async def test_flag_off_keeps_observation_and_counted_contributors(
     assert verdict.contributors_truncated is False
 
 
-# --------------------------------------------------------------------------- 2. observation drop
-
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_flag_on_drops_echo_observation_keeps_other_slot(
-    stub_graphiti_client, stub_memory_graph_adapter,
-):
-    # Fails if the covered-slot join is missing (echo kept) or too broad (other slot dropped).
-    _wire(stub_memory_graph_adapter, state_view=_state_view(), extra_hits=[_other_slot_hit()])
-    res = await _recall(stub_graphiti_client, stub_memory_graph_adapter,
-                        scalar_view_echo_drop_enabled=True)
-    assert res.authority_layer and res.authority_layer[0].kind == "current"
-    assert "obs-postcards-1" not in _ids(res)
-    assert "obs-other-1" in _ids(res)
-    assert "sv-1" in _ids(res)
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_flag_on_keeps_scalar_history_candidate_in_covered_slot(
-    stub_graphiti_client, stub_memory_graph_adapter,
-):
-    # Fails if the drop touches anything but OBSERVATION candidates.
-    _wire(stub_memory_graph_adapter, state_view=_state_view(),
-          history_view=_postcard_history_view())
-    res = await _recall(stub_graphiti_client, stub_memory_graph_adapter,
-                        "what was my postcard count before",
-                        scalar_view_echo_drop_enabled=True, scalar_history_enabled=True)
-    assert "obs-postcards-1" not in _ids(res)
-    assert "history-view-postcards" in _ids(res)
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_flag_on_keeps_observation_whose_view_was_skipped(
-    stub_graphiti_client, stub_memory_graph_adapter,
-):
-    # Counted View with counting off is skipped -> no verdict -> the observation is the only carrier.
-    _wire(stub_memory_graph_adapter, state_view=_state_view("counted"))
-    res = await _recall(stub_graphiti_client, stub_memory_graph_adapter,
-                        scalar_view_echo_drop_enabled=True, counting_enabled=False)
-    assert not res.authority_layer
-    assert "obs-postcards-1" in _ids(res)
-
-
-# --------------------------------------------------------------------------- 3. stated verdict
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_flag_on_stated_verdict_keeps_contributors(
+async def test_default_keeps_echo_observation_without_counting(
     stub_graphiti_client, stub_memory_graph_adapter,
 ):
     _wire(stub_memory_graph_adapter, state_view=_state_view())
-    res = await _recall(stub_graphiti_client, stub_memory_graph_adapter,
-                        scalar_view_echo_drop_enabled=True, counting_enabled=True)
-    verdict = res.authority_layer[0]
-    assert len(verdict.contributors) == 1
-    assert verdict.contributors_truncated is False
+    res = await _recall(stub_graphiti_client, stub_memory_graph_adapter)
+    assert "obs-postcards-1" in _ids(res)
 
 
 # --------------------------------------------------------------------------- 4. context builder

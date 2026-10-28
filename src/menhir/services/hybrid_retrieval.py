@@ -5,8 +5,7 @@ Provides :func:`weighted_rrf_multi`, which fuses labeled, weighted, rank-ordered
 rows carrying each candidate's :class:`CandidateSource`. Fusing on rank, not raw
 score, lets lanes on incomparable scales combine without a scale contract. The
 BM25 hybrid candidate-generation path was removed 2026-10-27 (archived on
-archive/bucket1-features-2026-10-27); the BM25 source and admission precedence
-remain as trace vocabulary.
+archive/bucket1-features-2026-10-27); the BM25 source remains as trace vocabulary.
 """
 
 from __future__ import annotations
@@ -21,9 +20,6 @@ from menhir.services.scoring_service import GRAPHITI_RRF_DUAL_METHOD_MAX
 # test_scoring_service::test_graphiti_rrf_scale_contract. Using the more common
 # k=60 changes ordering, not merely scale, so the benchmark control must use 1.
 RRF_K = 1
-
-ADMISSION_PRODUCTION_FUSED = "production_fused"
-ADMISSION_ATTRIBUTED = "attributed"
 
 
 @dataclass(frozen=True)
@@ -58,45 +54,11 @@ class FusionLane:
     weight: float = 1.0
 
 
-# Admission precedence when a candidate is produced by several lanes. Floor-exempt
-# sources come first, so an exact lexical (BM25) hit is never demoted to a floored
-# source; among the semantic lanes VECTOR precedes CONTENT_VECTOR, so a name-vector
-# hit keeps VECTOR admission even when content-vector also found it -- preserving
-# today's behavior when the content lane is off.
-_ADMISSION_PRECEDENCE: tuple[CandidateSource, ...] = (
-    CandidateSource.BM25,
-    CandidateSource.FILE_LINKED,
-    CandidateSource.PENDING,
-    CandidateSource.FACET,
-    CandidateSource.STRUCTURE,
-    CandidateSource.FACT_EDGE,
-    CandidateSource.VECTOR,
-    CandidateSource.CONTENT_VECTOR,
-)
-
-
-def _admission_source(
-    sources: set[CandidateSource], *, admission_policy: str
-) -> CandidateSource:
-    if admission_policy == ADMISSION_PRODUCTION_FUSED:
-        # Today's opaque graphiti BM25+name-vector path labels every fused hit VECTOR.
-        # Keep that rank-affecting contract for benchmark Arms A/B/C; the complete
-        # lane set remains available in contributing_sources for provenance.
-        return CandidateSource.VECTOR
-    if admission_policy != ADMISSION_ATTRIBUTED:
-        raise ValueError(f"unsupported admission_policy: {admission_policy!r}")
-    for candidate in _ADMISSION_PRECEDENCE:
-        if candidate in sources:
-            return candidate
-    return next(iter(sources))  # defensive: an unlisted source
-
-
 def weighted_rrf_multi(
     lanes: list[FusionLane],
     *,
     k: int = RRF_K,
     limit: int | None = None,
-    admission_policy: str = ADMISSION_PRODUCTION_FUSED,
 ) -> list[HybridCandidate]:
     """Fuse N labeled, weighted, rank-ordered passes by weighted reciprocal-rank fusion.
 
@@ -109,9 +71,8 @@ def weighted_rrf_multi(
     the ceiling merely by existing.
 
     Each candidate records the full set of contributing lane sources and a single
-    rank-affecting admission source. The default ``production_fused`` policy labels
-    every fused hit VECTOR, matching today's opaque graphiti path; ``attributed``
-    retains the existing source-aware hybrid behavior. Ordering is fused-score
+    rank-affecting admission source. Every fused hit is labeled VECTOR, matching
+    today's opaque graphiti path (the production_fused policy). Ordering is fused-score
     descending with stable first-appearance tie-breaks (lanes processed in argument
     order). Zero-weight lanes still contribute membership (a candidate found only by a
     zero-weight lane is present with fused score 0.0), preserving the alpha-endpoint
@@ -147,9 +108,10 @@ def weighted_rrf_multi(
             uuid=uuid,
             name=names[uuid],
             similarity=fused[uuid] * scale,
-            source=_admission_source(
-                contributing[uuid], admission_policy=admission_policy
-            ),
+            # Today's opaque graphiti BM25+name-vector path labels every fused hit VECTOR.
+            # Keep that rank-affecting contract for benchmark Arms A/B/C; the complete
+            # lane set remains available in contributing_sources for provenance.
+            source=CandidateSource.VECTOR,
             contributing_sources=frozenset(contributing[uuid]),
         )
         for uuid in ranked_uuids

@@ -49,8 +49,6 @@ _SETTINGS = (
         False, 'personal_memory', 'Request consolidation reasoning suppression where supported.', False, ()),
     ('personal_memory_scalar_state_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED', True,
         'personal_memory', 'Run the scalar-state lane from the consolidation scheduler (LLM calls); set false to stop it.', True, ()),
-    ('personal_memory_scalar_view_echo_drop_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_ECHO_DROP_ENABLED',
-        False, 'personal_memory', 'Drop observations that echo a scalar verdict slot; verdict items stay inline.', True, ()),
     ('personal_memory_observation_dedup_enabled', 'MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED',
         True, 'personal_memory', 'Inject one observation per identical stated text; counted occurrences are never merged.', True, ()),
     ('personal_memory_consolidation_audit_enabled', 'MENHIR_PERSONAL_MEMORY_CONSOLIDATION_AUDIT_ENABLED', False,
@@ -62,15 +60,10 @@ _SETTINGS = (
     ('personal_memory_counting_enabled', 'MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED', True,
         'personal_memory', 'Count single happenings ("went to yoga") as scalar occurrences after the scalar phase (LLM calls from the scheduler); builds on scalar state.', True, ()),
     ('benchmark_mode', 'MENHIR_BENCHMARK_MODE', False, 'runtime', 'Enable benchmark mode.', False, ()),
-    ('frontier_fusion_admission_policy', 'MENHIR_FRONTIER_FUSION_ADMISSION_POLICY', 'attributed', 'frontier',
-        'Configure frontier fusion admission policy.', True, ()),
-    ('frontier_diversity_gate', 'MENHIR_FRONTIER_DIVERSITY_GATE', False, 'frontier',
-        'Enable frontier diversity gate.', True, ()),
     ('frontier_belief_gate', 'MENHIR_FRONTIER_BELIEF_GATE', False, 'frontier', 'Enable frontier belief gate.',
         True, ()),
     ('frontier_evidence_anchor', 'MENHIR_FRONTIER_EVIDENCE_ANCHOR', False, 'frontier',
         'Enable frontier evidence anchor.', True, ()),
-    ('frontier_fact_relevance', 'MENHIR_FRONTIER_FACT_RELEVANCE', False, 'frontier', 'Attach the facts most similar to the query (3) plus the newest, instead of only the 5 newest.', True, ()),
     ('frontier_verb_facets', 'MENHIR_FRONTIER_VERB_FACETS', False, 'frontier', 'Append one keyword-matched fact per question verb after ranking, for verb-centric questions.', True, ()),
     ('frontier_shadow', 'MENHIR_FRONTIER_SHADOW', False, 'frontier', 'Enable frontier shadow.', False, ()),
     ('frontier_source_memory_pools', 'MENHIR_FRONTIER_SOURCE_MEMORY_POOLS', False, 'frontier',
@@ -169,13 +162,11 @@ _ENV_ONLY = (
 )
 
 _REQUIRES = {
-    "personal_memory_scalar_view_echo_drop_enabled": ("personal_memory_scalar_state_enabled",),
     "personal_memory_observation_dedup_enabled": ("personal_memory_scalar_state_enabled",),
     "personal_memory_counting_enabled": ("personal_memory_scalar_state_enabled",),
 }
 # These describe scoped prerequisites/data producers; they do not impose runtime validation.
 _REQUIREMENT_SCOPE = {
-    "personal_memory_scalar_view_echo_drop_enabled": "Echo drop only acts on the verdicts the scalar view authority lane emits.",
     "personal_memory_observation_dedup_enabled": "Dedup only acts on observations the scalar view authority lane injects.",
     "personal_memory_counting_enabled": "The counting lane runs after the scalar phase and reads scalar state.",
 }
@@ -291,4 +282,12 @@ RETIRED = {
     "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED": "2026-10-28: event-history lane archived (#399 bucket 3; neutral A/B, fail-closed authority regressed)",
     "personal_memory_event_history_perceiver_version": "2026-10-28: event-history lane archived (#399 bucket 3; neutral A/B, fail-closed authority regressed)",
     "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_PERCEIVER_VERSION": "2026-10-28: event-history lane archived (#399 bucket 3; neutral A/B, fail-closed authority regressed)",
+    "personal_memory_scalar_view_echo_drop_enabled": "2026-10-28: removed (#399 bucket 3; redundant with observation dedup in shard-1 repeats)",
+    "MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_ECHO_DROP_ENABLED": "2026-10-28: removed (#399 bucket 3; redundant with observation dedup in shard-1 repeats)",
+    "frontier_diversity_gate": "2026-10-28: removed (#399 bucket 3; o500 A/B changed recall without a measurable gain)",
+    "MENHIR_FRONTIER_DIVERSITY_GATE": "2026-10-28: removed (#399 bucket 3; o500 A/B changed recall without a measurable gain)",
+    "frontier_fact_relevance": "2026-10-28: removed (#399 bucket 3; o500 A/B changed recall without a measurable gain)",
+    "MENHIR_FRONTIER_FACT_RELEVANCE": "2026-10-28: removed (#399 bucket 3; o500 A/B changed recall without a measurable gain)",
+    "frontier_fusion_admission_policy": "2026-10-28: removed (#399 bucket 3; dead setting, never read by recall)",
+    "MENHIR_FRONTIER_FUSION_ADMISSION_POLICY": "2026-10-28: removed (#399 bucket 3; dead setting, never read by recall)",
 }

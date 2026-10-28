@@ -87,8 +87,6 @@ def _inferred_self_on(service: object) -> bool:
 # once surfaced as a wrong answer (swallowed into `assert 0 == 1`) instead of an error. Split them.
 _PROGRAMMING_ERRORS = (TypeError, AttributeError, NameError, KeyError)
 
-# Facts per entity chosen by query similarity when MENHIR_FRONTIER_FACT_RELEVANCE is on.
-_FACT_RELEVANCE_K = 3
 # Synthetic result types with no contributing Graphiti episodes to attribute.
 _NO_PROVENANCE_TYPES = frozenset({"SCALAR_STATE", "SCALAR_HISTORY", "OBSERVATION"})
 
@@ -632,8 +630,6 @@ async def run_recall(
     search_error: str | None = None
     facet_active_trace: FacetShadowTrace | None = None
     facet_active_warning: str | None = None
-    # Query embedding from the observation lane, reused by fact-relevance enrichment.
-    obs_query_vector: list[float] | None = None
     try:
         search_results = await service.graphiti_client.search_scored(
             query, num_results=candidate_k, group_ids=group_ids
@@ -722,7 +718,6 @@ async def run_recall(
                         ),
                     ],
                     limit=candidate_k,
-                    admission_policy="production_fused",
                 )
                 search_results = [(row.uuid, row.name, row.similarity) for row in fused]
                 # FACET changes ranking but does not grant a new floor exemption;
@@ -926,7 +921,6 @@ async def run_recall(
             _authority_audit.begin()
         try:
             obs_vec = await service.graphiti_client.embed_query(query)
-            obs_query_vector = obs_vec
             obs_hits = await asyncio.to_thread(
                 service.graph_adapter.search_assertion_embeddings,
                 obs_vec, limit=10, namespaces=[stamped_namespace(namespace)],
@@ -1706,46 +1700,6 @@ async def run_recall(
             logger.exception(
                 "counted-occurrence drop failed query=%r; leaving recall unchanged", query[:60])
 
-    # --- Scalar View echo drop: drop observations a verdict already carries (flag-gated) ---
-    # The verdict states the value/count; an observation echoing the same slot repeats the quote and
-    # crowds other memories out of recall. Only emitted verdicts count as covering a slot, so an
-    # observation whose View was skipped is kept. Only OBSERVATION candidates are ever dropped.
-    # Runs under echo-drop (counted items stay).
-    if (
-        getattr(service, "scalar_view_echo_drop_enabled", False)
-        and service.scalar_view_authority_enabled
-        and namespace is not None
-        and authority_layer
-    ):
-        try:
-            def _slot_key(subject, attribute, scope, value_kind, unit):
-                return tuple(str(x or "") for x in (subject, attribute, scope, value_kind, unit))
-
-            _covered_slots = {
-                _slot_key(v.subject_uuid, v.attribute, v.scope, v.value_kind, v.unit)
-                for v in authority_layer
-                if v.kind in ("current", "expired", "as_of", "history")
-            }
-            _kept_inputs = []
-            for _c in candidate_inputs:
-                if _c.get("memory_type") == "OBSERVATION":
-                    _m = metadata_by_uuid.get(str(_c["uuid"])) or {}
-                    if _slot_key(
-                        _m.get("subject_uuid"), _m.get("ss_attribute"), _m.get("ss_scope"),
-                        _m.get("ss_value_kind"), _m.get("ss_unit"),
-                    ) in _covered_slots:
-                        continue
-                _kept_inputs.append(_c)
-            logger.debug(
-                "scalar-view echo drop dropped %d echoed observations",
-                len(candidate_inputs) - len(_kept_inputs),
-            )
-            candidate_inputs = _kept_inputs
-        except Exception:
-            logger.exception(
-                "scalar-view echo drop failed query=%r; leaving recall unchanged", query[:60]
-            )
-
     # --- Step 7 canary: current-state View authority suppression (flag-gated) ---
     # When enabled, a current scalar_state View may suppress an older PROVENANCE-LINKED graph
     # fact for an explicit current-state query, but only if all six authority gates pass. Failures
@@ -1978,41 +1932,14 @@ async def run_recall(
             r.uuid for r in top_results if r.memory_type != "EPISODIC_PENDING"
         ]
         if result_uuids_for_facts:
-            fact_query_vector: list[float] | None = None
-            if tuning.enable_fact_relevance:
-                try:
-                    fact_query_vector = obs_query_vector
-                    if fact_query_vector is None:
-                        fact_query_vector = await service.graphiti_client.embed_query(query)
-                except _PROGRAMMING_ERRORS:
-                    raise
-                except Exception:  # recall must not break: fall back to newest-5 facts
-                    logger.exception("Fact relevance query embedding failed; using newest facts")
-                    fact_query_vector = None
-            if fact_query_vector is not None:
-                try:
-                    fact_rows = await asyncio.to_thread(
-                        partial(
-                            service.graph_adapter.fetch_temporal_facts,
-                            result_uuids_for_facts, query_vector=fact_query_vector,
-                            namespace=namespace,
-                        )
-                    )
-                except _PROGRAMMING_ERRORS:
-                    raise
-                except Exception:  # fall back to the newest-5 query rather than no facts
-                    logger.exception("Fact relevance query failed; using newest facts")
-                    fact_query_vector = None
-            if fact_query_vector is None:
-                fact_rows = await asyncio.to_thread(
-                    service.graph_adapter.fetch_temporal_facts, result_uuids_for_facts
-                )
+            fact_rows = await asyncio.to_thread(
+                service.graph_adapter.fetch_temporal_facts, result_uuids_for_facts
+            )
             if not include_invalidated:
                 fact_rows = _filter_to_current_beliefs(fact_rows)
             facts_by_uuid = _build_temporal_facts(
                 fact_rows, event_time=tuning.enable_anchored_time_render,
                 ended=tuning.enable_anchored_time_expiry,
-                relevance_k=_FACT_RELEVANCE_K if fact_query_vector is not None else 0,
                 said_time=tuning.enable_fact_said_time,
             )
             enriched_results = []

@@ -29,7 +29,6 @@ def test_source_priors_and_floor_exemption_are_consistent() -> None:
 # --- weighted_rrf_multi: N-lane fusion (content-vector lane) ----------------
 
 from menhir.services.hybrid_retrieval import (  # noqa: E402
-    ADMISSION_ATTRIBUTED,
     FusionLane,
     weighted_rrf_multi,
 )
@@ -69,18 +68,6 @@ def test_multi_bm25_contribution_does_not_change_production_admission() -> None:
 
 
 @pytest.mark.unit
-def test_multi_attributed_policy_retains_existing_bm25_admission() -> None:
-    out = weighted_rrf_multi(
-        [
-            FusionLane(CandidateSource.BM25, [("x", "x")]),
-            FusionLane(CandidateSource.CONTENT_VECTOR, [("x", "x")]),
-        ],
-        admission_policy=ADMISSION_ATTRIBUTED,
-    )
-    assert out[0].source == CandidateSource.BM25
-
-
-@pytest.mark.unit
 def test_two_lane_order_matches_graphiti_production_rrf() -> None:
     from graphiti_core.search.search_utils import rrf as graphiti_rrf
 
@@ -94,7 +81,6 @@ def test_two_lane_order_matches_graphiti_production_rrf() -> None:
             FusionLane(CandidateSource.BM25, bm25, weight=0.5),
             FusionLane(CandidateSource.VECTOR, vector, weight=0.5),
         ],
-        admission_policy=ADMISSION_ATTRIBUTED,
     )
     assert [candidate.uuid for candidate in actual] == expected
     assert [candidate.similarity for candidate in actual] == expected_scores

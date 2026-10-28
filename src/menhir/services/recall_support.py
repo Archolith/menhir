@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from menhir.services.ingest_service import IngestService
 
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
-from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FAMILY
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
 from menhir.domain.recall import (
     CandidateData,
@@ -634,16 +633,7 @@ class RecallSupportMixin:
         """
         from menhir.domain.oracle_combiner import LogSpaceOracleCombiner
         from menhir.domain.oracles import CandidateMemory, QueryContext
-        from menhir.domain.diversity import diversify
         from menhir.services.assertion_pipeline import AssertionPipeline
-
-        def _family_for(uuid: str) -> str:
-            kinds = metadata_by_uuid.get(uuid, {}).get("evidence_kinds") or ()
-            for k in kinds:
-                fam = _FRONTIER_DIVERSITY_FAMILY.get(str(k))
-                if fam:
-                    return fam
-            return "semantic"
 
         try:
             cmems = []
@@ -684,8 +674,6 @@ class RecallSupportMixin:
                     rank_of,
                     oracle_weight=tuning.oracle_rank_weight,
                 )
-            if tuning.enable_diversity_gate:
-                result = diversify(result, family_of=lambda s: _family_for(s.uuid))
             if tuning.enable_warden_gate:
                 refused = {r.candidate_id for r in outcome.refused}
                 label_of = {r.candidate_id: r.label for r in outcome.flagged}
@@ -698,7 +686,6 @@ class RecallSupportMixin:
                 p for p, on in (
                     ("oracle_ranking", tuning.enable_oracle_ranking),
                     ("warden_gate", tuning.enable_warden_gate),
-                    ("diversity_gate", tuning.enable_diversity_gate),
                     ("intent_lens", tuning.enable_intent_lens),
                     ("belief_gate", tuning.enable_belief_gate),
                 ) if on

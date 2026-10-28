@@ -299,7 +299,6 @@ class MemorySettings:
     # authority gates pass (current-state query + resolved subject + exact slot + grounded evidence +
     # unambiguous current View + complete overlap proof); every other case stays advisory. The
     # decision is computed by menhir.domain.scalar_view_authority.decide_view_authority.
-    personal_memory_scalar_view_echo_drop_enabled: bool = False
     # Default on since 2026-10-28 (#399 bucket 3: no item worse across six o500 shard-1 runs; recall only).
     personal_memory_observation_dedup_enabled: bool = True
     # 0 = off; else min (1+cos)/2 per verdict slot. 0.675 (raw cosine 0.35): on o500 the gate-off
@@ -354,11 +353,8 @@ class MemorySettings:
     # Oracle ranking and the intent lens are always on since #172 and have no setting; see
     # RetrievalTuningConfig. The Warden gate and its contradiction guard are on by default since
     # #173 (set each to false to opt out); the belief gate and evidence anchor (#349) stay opt-in.
-    frontier_fusion_admission_policy: str = "attributed"
-    frontier_diversity_gate: bool = False  # reorder by evidence family to prevent spiral (opt-in)
     frontier_belief_gate: bool = False     # add CurrentnessWarden + belief scoring to the chain (opt-in; see #350)
     frontier_evidence_anchor: bool = False  # Guard 5 EvidenceAnchorWarden; opt-in: it reads the client label, not the speaker, and refuses ordinary conversation (#349)
-    frontier_fact_relevance: bool = False  # attach the facts most similar to the query (plus the newest) instead of only the 5 newest
     frontier_verb_facets: bool = False     # append one keyword-matched fact per question verb after ranking (verb-centric questions only)
     frontier_shadow: bool = False          # observe-only oracle/warden pass (trace)
     # Source-memory recall lane: additive section of raw episode memories (cosine over
@@ -665,8 +661,6 @@ class MemorySettings:
         from menhir.domain.retrieval_tuning import RetrievalTuningConfig
 
         return RetrievalTuningConfig(
-            fusion_admission_policy=self.frontier_fusion_admission_policy,
-            enable_diversity_gate=self.frontier_diversity_gate,
             enable_belief_gate=self.frontier_belief_gate,
             enable_evidence_anchor=self.frontier_evidence_anchor,
             scalar_verdict_min_similarity=self.personal_memory_scalar_verdict_min_similarity,
@@ -677,7 +671,6 @@ class MemorySettings:
             source_memory_pools=self.frontier_source_memory_pools,
             enable_anchored_time_render=self.anchored_time_render_enabled,
             enable_anchored_time_expiry=self.anchored_time_resolver_enabled,
-            enable_fact_relevance=self.frontier_fact_relevance,
             enable_observation_dedup=self.personal_memory_observation_dedup_enabled,
             enable_verb_facets=self.frontier_verb_facets,
         )
@@ -813,7 +806,6 @@ class MemorySettings:
             personal_memory_consolidation_chat_model=_getenv("MENHIR_PERSONAL_MEMORY_CHAT_MODEL", default=cls.personal_memory_consolidation_chat_model),
             personal_memory_scalar_state_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED", default=str(cls.personal_memory_scalar_state_enabled))),
             personal_memory_scalar_state_perceiver_version=_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_STATE_PERCEIVER_VERSION", default=cls.personal_memory_scalar_state_perceiver_version),
-            personal_memory_scalar_view_echo_drop_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_ECHO_DROP_ENABLED", default=str(cls.personal_memory_scalar_view_echo_drop_enabled))),
             personal_memory_observation_dedup_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED", default=str(cls.personal_memory_observation_dedup_enabled))),
             personal_memory_scalar_verdict_min_similarity=_parse_float(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY", default=str(cls.personal_memory_scalar_verdict_min_similarity)), env_var="MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY", minimum=0.0),
             personal_memory_scalar_observation_recall=_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_OBSERVATION_RECALL", default=cls.personal_memory_scalar_observation_recall).strip().lower(),
@@ -841,14 +833,8 @@ class MemorySettings:
             # Benchmark mode (LongMemEval Mode B isolation)
             benchmark_mode=parse_bool_env(_getenv("MENHIR_BENCHMARK_MODE", default=str(cls.benchmark_mode))),
             # Frontier portions (default off)
-            frontier_fusion_admission_policy=_getenv(
-                "MENHIR_FRONTIER_FUSION_ADMISSION_POLICY",
-                default=cls.frontier_fusion_admission_policy,
-            ).strip().lower(),
-            frontier_diversity_gate=parse_bool_env(_getenv("MENHIR_FRONTIER_DIVERSITY_GATE", default=str(cls.frontier_diversity_gate))),
             frontier_belief_gate=parse_bool_env(_getenv("MENHIR_FRONTIER_BELIEF_GATE", default=str(cls.frontier_belief_gate))),
             frontier_evidence_anchor=parse_bool_env(_getenv("MENHIR_FRONTIER_EVIDENCE_ANCHOR", default=str(cls.frontier_evidence_anchor))),
-            frontier_fact_relevance=parse_bool_env(_getenv("MENHIR_FRONTIER_FACT_RELEVANCE", default=str(cls.frontier_fact_relevance))),
             frontier_verb_facets=parse_bool_env(_getenv("MENHIR_FRONTIER_VERB_FACETS", default=str(cls.frontier_verb_facets))),
             frontier_shadow=parse_bool_env(_getenv("MENHIR_FRONTIER_SHADOW", default=str(cls.frontier_shadow))),
             frontier_source_memory_limit=_parse_int(

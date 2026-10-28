@@ -9,7 +9,6 @@
   const primaryFields = [
     ['enable_facet_candidates', 'Active facet lane', 'bool'],
     ['facet_weight', 'Facet weight', 'number', { min: 0, max: 10, step: 0.05 }],
-    ['fusion_admission_policy', 'Fusion admission', 'select', ['attributed', 'production_fused']],
   ];
   const advancedFields = [
     ['enable_verb_facets', 'Verb-facet facts', 'bool'],
@@ -18,7 +17,6 @@
     ['oracle_rank_weight', 'Oracle residual weight', 'number', { min: 0, max: 2, step: 0.05 }],
     ['enable_intent_lens', 'Intent lens', 'bool'],
     ['enable_warden_gate', 'Warden gate', 'bool'],
-    ['enable_diversity_gate', 'Diversity gate', 'bool'],
     ['enable_contradiction_interrupt', 'Contradiction interrupt', 'bool'],
     ['enable_belief_gate', 'Belief gate', 'bool'],
     ['enable_evidence_anchor', 'Evidence anchor', 'bool'],
