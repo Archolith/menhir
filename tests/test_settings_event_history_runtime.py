@@ -1,7 +1,7 @@
-"""Wiring tests for the personal-memory event-history runtime seam.
+"""Wiring tests for the personal-memory runtime seam.
 
-Covers the maintenance scheduler fields/registration/forwarding and the core runtime
-threading of the event-history settings into the scheduler. Uses generic synthetic
+Covers the maintenance scheduler registration/forwarding and the core runtime
+threading of the scalar/counting lane settings into the scheduler. Uses generic synthetic
 assertions; no benchmark ids, answers, or fixture-specific wording.
 """
 
@@ -47,40 +47,37 @@ def _capture_consolidate(monkeypatch) -> dict:
 def test_default_scheduler_registers_no_personal_memory_job() -> None:
     scheduler = MaintenanceScheduler(**_common())
     assert "consolidate_personal_memory" not in scheduler._jobs
-    assert scheduler.event_history_enabled is False
-    assert scheduler.event_history_perceiver_version == "v1"
-    assert scheduler.event_history_batch_size == 500
+    assert scheduler.scalar_state_enabled is False
+    assert scheduler.scalar_state_perceiver_version == "v1"
 
 
 def test_neither_path_registers_when_llm_is_none() -> None:
     scheduler = MaintenanceScheduler(
         **_common(),
-        event_history_enabled=True,
+        scalar_state_enabled=True,
         personal_memory_llm=None,
     )
     assert "consolidate_personal_memory" not in scheduler._jobs
 
 
-def test_event_only_registers_and_forwards_event_on(monkeypatch) -> None:
+def test_scalar_only_registers_and_forwards_scalar_on(monkeypatch) -> None:
     captured = _capture_consolidate(monkeypatch)
     scheduler = MaintenanceScheduler(
         **_common(),
-        event_history_enabled=True,
-        event_history_perceiver_version="v2",
-        event_history_batch_size=777,
+        scalar_state_enabled=True,
+        scalar_state_perceiver_version="v2",
         personal_memory_llm=_llm,
     )
     assert "consolidate_personal_memory" in scheduler._jobs
     asyncio.run(scheduler._make_consolidate_personal_memory())
-    assert captured["enable_event_history"] is True
-    assert captured["event_history_perceiver_version"] == "v2"
-    assert captured["event_batch_size"] == 777
+    assert captured["enable_scalar_state"] is True
+    assert captured["scalar_state_perceiver_version"] == "v2"
 
 
 # --------------------------------------------------------------------------- core runtime wiring
 
 
-def test_runtime_threads_event_settings_when_event_on(monkeypatch) -> None:
+def test_runtime_threads_scalar_settings_when_scalar_on(monkeypatch) -> None:
     import menhir.core.runtime as runtime
 
     captured: dict[str, object] = {}
@@ -104,8 +101,8 @@ def test_runtime_threads_event_settings_when_event_on(monkeypatch) -> None:
         lambda *a, **k: _llm,
     )
     settings = MemorySettings(
-        personal_memory_event_history_enabled=True,
-        personal_memory_event_history_perceiver_version="v2",
+        personal_memory_scalar_state_enabled=True,
+        personal_memory_scalar_state_perceiver_version="v2",
         verifier_sync_enabled=False,
         structure_watcher_enabled=False,
         personal_memory_consolidation_audit_enabled=False,
@@ -122,8 +119,8 @@ def test_runtime_threads_event_settings_when_event_on(monkeypatch) -> None:
         return await runtime._start_scheduler(built)
 
     asyncio.run(_run())
-    assert captured["event_history_enabled"] is True
-    assert captured["event_history_perceiver_version"] == "v2"
+    assert captured["scalar_state_enabled"] is True
+    assert captured["scalar_state_perceiver_version"] == "v2"
     assert captured["personal_memory_llm"] is not None
 
 
@@ -153,7 +150,6 @@ def test_runtime_off_path_does_not_create_sync_chat_for_these_paths(monkeypatch)
     monkeypatch.setattr(runtime, "make_view_embedder", lambda settings: None)
     monkeypatch.setattr(runtime, "view_embedder_version", lambda settings: "test")
     settings = MemorySettings(
-        personal_memory_event_history_enabled=False,
         personal_memory_scalar_state_enabled=False,
         personal_memory_counting_enabled=False,
         verifier_sync_enabled=False,
@@ -173,13 +169,13 @@ def test_runtime_off_path_does_not_create_sync_chat_for_these_paths(monkeypatch)
 
     asyncio.run(_run())
     assert calls == []
-    assert captured["event_history_enabled"] is False
+    assert captured["scalar_state_enabled"] is False
     assert captured["personal_memory_llm"] is None
 
 
-@pytest.mark.parametrize(("event", "scalar"), list(product((False, True), repeat=2)))
+@pytest.mark.parametrize(("counting", "scalar"), list(product((False, True), repeat=2)))
 def test_runtime_registers_only_requested_personal_memory_lanes(
-    monkeypatch, event: bool, scalar: bool,
+    monkeypatch, counting: bool, scalar: bool,
 ) -> None:
     import menhir.core.runtime as runtime
 
@@ -200,9 +196,8 @@ def test_runtime_registers_only_requested_personal_memory_lanes(
     monkeypatch.setattr(runtime, "view_embedder_version", lambda settings: "test")
     captured = _capture_consolidate(monkeypatch)
     settings = MemorySettings(
-        personal_memory_event_history_enabled=event,
         personal_memory_scalar_state_enabled=scalar,
-        personal_memory_counting_enabled=False,
+        personal_memory_counting_enabled=counting,
         verifier_sync_enabled=False,
         structure_watcher_enabled=False,
         artifact_reconcile_mode="off",
@@ -217,12 +212,12 @@ def test_runtime_registers_only_requested_personal_memory_lanes(
     )
 
     scheduler = asyncio.run(runtime._start_scheduler(built))
-    requested = event or scalar
+    requested = counting or scalar
     assert len(chat_requests) == int(requested)
     assert ("consolidate_personal_memory" in scheduler._jobs) is requested
     if requested:
         asyncio.run(scheduler._make_consolidate_personal_memory())
-        assert captured["enable_event_history"] is event
+        assert captured["enable_counting"] is counting
         assert captured["enable_scalar_state"] is scalar
 
 

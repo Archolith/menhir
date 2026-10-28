@@ -296,33 +296,6 @@ class ScalarAuthorityVerdictResponse(BaseModel):
     count_items: str | None = None
 
 
-class EventAuthorityVerdictResponse(BaseModel):
-    """Structured first-person event authority, separate from scalar authority.
-
-    Mirrors the domain ``EventAuthorityVerdict``. ``status`` is ``leads`` or ``advisory``.
-    ``gate`` is an explanatory string (``pass`` for a fully grounded non-generic unique
-    lead; selection-failure gates mirror ``EventRecallGate``). Selected grounding fields
-    are None when a gate failed (advisory).
-    """
-
-    predicate: str
-    object_key: str | None = None
-    object_display: str | None = None
-    valid_at: str | None = None
-    stated_span: str | None = None
-    assertion_key: str | None = None
-    episode_uuid: str | None = None
-    turn_evidence_uuid: str | None = None
-    domain: str | None = None
-    time_basis: str | None = None
-    status: str
-    gate: str
-    reason: str
-    subject_uuid: str
-    has_foundation: bool
-    kind: str
-
-
 class SourceMemoryResponse(BaseModel):
     """One entry of the additive source-memory section (raw episode content, oldest first)."""
 
@@ -344,7 +317,6 @@ class RecallResponse(BaseModel):
     warden_notice: str | None = None
     trace: dict[str, object] | None = None
     authority_layer: list[ScalarAuthorityVerdictResponse] | None = None
-    event_authority_layer: list[EventAuthorityVerdictResponse] | None = None
     source_memories: list[SourceMemoryResponse] | None = None
     query_hint: str | None = None
 
@@ -745,13 +717,15 @@ class Phase3RunResponse(BaseModel):
     counting_decided_swapped: int | None = None
     counting_decided_deferred: int | None = None
     counting_gate_dropped: int | None = None
+    # The event-history lane was archived (#399 bucket 3); these stay as fixed zero/None values so
+    # existing clients keep parsing the response.
     event_namespaces_processed: int = 0
     event_namespaces_failed: int = 0
     event_assertions_recorded: int = 0
     event_assertions_created: int = 0
     event_views_rebuilt: int = 0
     event_llm_calls: int = 0
-    # Per-lane stage counts and no_output/stalled flags (#170 item 4); None when neither scalar nor event ran.
+    # Per-lane stage counts and no_output/stalled flags (#170 item 4); None when the scalar lane did not run.
     lane_outcomes: dict[str, dict[str, Any]] | None = None
     # False when any lane failed closed for the namespace; failed_lanes then names each one.
     ok: bool = True

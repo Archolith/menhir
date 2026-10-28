@@ -3,7 +3,7 @@
 Evidence an agent supplied via add_memory's `user_statement` must never be treated as proof
 the user said something. It may feed typed-scalar perception; it must NOT grant user-tier
 admission, must NOT count as user foundation for recall authority, and must NOT feed the
-counter or event lanes.
+counter lane.
 """
 
 from __future__ import annotations
@@ -197,18 +197,11 @@ def _repo():
 
 class TestLaneExclusions:
     # #170: agent_quoted is the fresh-install input route, so every lane reads it. Authority is
-    # gated downstream (scalar foundation, event-lead foundation guard), not at discovery.
+    # gated downstream (scalar foundation), not at discovery.
     def test_counter_lane_keeps_agent_quoted(self):
         repo = _repo()
         repo.list_dirty_evidence_namespaces()
         repo.load_user_evidence("ns")
-        for query, _ in repo._neo4j.executed:
-            assert "agent_quoted" not in query
-
-    def test_event_lane_keeps_agent_quoted(self):
-        repo = _repo()
-        repo.list_event_dirty_evidence_namespaces(perceiver_version="v1")
-        repo.load_next_event_evidence_batch("ns", perceiver_version="v1")
         for query, _ in repo._neo4j.executed:
             assert "agent_quoted" not in query
 

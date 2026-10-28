@@ -159,11 +159,9 @@ def test_adapter_and_protocol_expose_the_non_destructive_contract():
     """The adapter is the surface every caller actually binds to, and the Protocol is what they
     type-check against; both have to carry the split or callers keep the old contract."""
     from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
-    from menhir.services.event_consolidation import EventConsolidationGraph
 
     assert hasattr(MemoryGraphAdapter, "detect_self_forks")
     assert hasattr(MemoryGraphAdapter, "ensure_self_entity")
-    assert hasattr(EventConsolidationGraph, "detect_self_forks")
 
 
 @pytest.mark.unit

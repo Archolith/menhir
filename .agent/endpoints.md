@@ -464,7 +464,7 @@ List saved memories matching a subject in time order (oldest first), with option
 ### `recall_timeline`
 Concept id: `mcp.tool.recall_timeline`
 
-Navigate a recorded-time thread of saved memories on demand: page around an instant, a window, a memory, or a semantic seed, optionally restricted to one subject's thread, with typed scalar/event histories. Order is RECORDED time (episode `valid_at`).
+Navigate a recorded-time thread of saved memories on demand: page around an instant, a window, a memory, or a semantic seed, optionally restricted to one subject's thread, with typed scalar histories. Order is RECORDED time (episode `valid_at`).
 - Exactly one of `at` / `window_from`+`window_to` / `around` / `cursor` / `query` is required when any is given; `subject` is a filter that combines with every mode and alone means the latest page of the subject thread.
 - **`at`** (str, optional): ISO instant to split the timeline around.
 - **`window_from`** / **`window_to`** (str, optional): ISO instants bounding an ascending window.

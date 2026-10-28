@@ -43,15 +43,12 @@ SHIPPED_SETTINGS = {
     "personal_memory_scalar_verdict_min_similarity": 0.675,
     "personal_memory_scalar_observation_recall": "gated",
     "personal_memory_scalar_state_perceiver_version": "v2",
-    "personal_memory_event_history_perceiver_version": "v2",
     "personal_memory_counting_perceiver_version": "v1",
     "personal_memory_counting_lease_seconds": 900,
-    # The scalar and counting lanes ship on (#168 freeze, cost switches); the other lanes ship off.
+    # The scalar and counting lanes ship on (#168 freeze, cost switches).
     # Scalar authority is always on but gated by its lane.
     "personal_memory_scalar_state_enabled": True,
     "personal_memory_scalar_history_enabled": True,
-    "personal_memory_event_history_enabled": False,
-    "personal_memory_event_history_authority_enabled": False,
     "personal_memory_counting_enabled": True,
 }
 
@@ -62,7 +59,6 @@ SCHEDULER_KWARGS = {
     "personal_memory_interval_s": 300.0,
     "scalar_threshold": 2 / 3,
     "scalar_state_perceiver_version": "v2",
-    "event_history_perceiver_version": "v2",
     "counting_perceiver_version": "v1",
     "counting_lease_seconds": 900,
 }
@@ -74,7 +70,6 @@ CONSOLIDATE_KWARGS = {
     "scalar_state_perceiver_version": "v2",
     "counting_perceiver_version": "v1",
     "counting_lease_seconds": 900,
-    "event_history_perceiver_version": "v2",
 }
 
 #: Always on since the #168 freeze: no setting feeds them, so neither entry point passes a value and
@@ -141,13 +136,10 @@ def test_hard_coded_agreement_constants() -> None:
 
 @pytest.mark.unit
 def test_shipped_perceiver_versions_rank_so_a_bump_can_supersede() -> None:
-    # Scalar and event supersession is strict-rank; a version that ranks 0 can never replace a
+    # Scalar supersession is strict-rank; a version that ranks 0 can never replace a
     # stored CURRENT assertion, so a bump to it would be silently ignored.
     settings = MemorySettings()
-    for version in (
-        settings.personal_memory_scalar_state_perceiver_version,
-        settings.personal_memory_event_history_perceiver_version,
-    ):
+    for version in (settings.personal_memory_scalar_state_perceiver_version,):
         assert perceiver_rank(version) > perceiver_rank("v1.999999") > 0
     assert perceiver_rank("v3") > perceiver_rank("v2.1") > perceiver_rank("v2")
     # Counting compares the version string for equality, so suffixes are fine there.
@@ -214,8 +206,7 @@ def test_scheduler_pass_forwards_the_frozen_profile(monkeypatch: pytest.MonkeyPa
 
     assert "threshold" not in captured  # the unanimous default applies
     assert captured["call_budget"] == 300
-    expected = {k: v for k, v in CONSOLIDATE_KWARGS.items()
-                if k != "event_history_perceiver_version"}
+    expected = dict(CONSOLIDATE_KWARGS)
     expected.update(ALWAYS_ON_CONSOLIDATE)
     assert {name: captured[name] for name in expected} == expected
 

@@ -77,8 +77,7 @@ from menhir.services.recall_policies import (
     _staleness_evidence_for,
 )
 
-from menhir.services.recall_pipeline import (
-    apply_event_history_authority_layer, run_recall, run_recall_history)
+from menhir.services.recall_pipeline import run_recall, run_recall_history
 from menhir.services.recall_support import RecallSupportMixin
 from menhir.services.timeline_service import run_recall_timeline
 
@@ -102,8 +101,6 @@ class RecallService(RecallSupportMixin):
     counting_wording_enabled: bool = True  # unit 6: "at least N you mentioned", never leads
     anchored_count_hint: bool = True  # query_hint on anchored count questions (#168: on, knob)
     stale_lead_demotion: bool = True  # a count lead with newer related evidence is advisory
-    #: On: a first-person event query (non-None namespace) gets an event-history authority layer.
-    event_history_authority_enabled: bool = False
     inferred_self_mode: str = "off"  # MENHIR_INFERRED_SELF_MODE; not "off": recall reads both self tiers
     #: Candidate-readonly: never reinforce retrieval via access timestamps, edge weights or lifecycle.
     read_only: bool = False
@@ -133,7 +130,7 @@ class RecallService(RecallSupportMixin):
         update_access: bool = True,
         source_memory_limit: int | None = None, counted_verdict_limit: int | None = None,
     ) -> RecallResult:
-        result = await run_recall(
+        return await run_recall(
             self, query,
             preset=preset,
             limit=limit,
@@ -154,7 +151,6 @@ class RecallService(RecallSupportMixin):
             update_access=update_access and not self.read_only,
             source_memory_limit=source_memory_limit, counted_verdict_limit=counted_verdict_limit,
         )
-        return await apply_event_history_authority_layer(self, result, query, namespace)
 
     recall_history = run_recall_history  # drill-down; run_recall_history takes the service first
     recall_timeline = run_recall_timeline  # on-demand recorded-time navigation (same delegation)

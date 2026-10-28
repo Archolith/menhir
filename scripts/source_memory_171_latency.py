@@ -9,7 +9,7 @@ Modes:
   recall  -- 195 stratified questions x repeats; each question timed with
              source_memory_limit=0 and =10 in random order (the #171/#210 method).
              --load adds a background writer: TurnEvidence + memory ingest into a separate
-             namespace, and POST /api/phase3/run looping on it (scalar/event lanes on).
+             namespace, and POST /api/phase3/run looping on it (scalar lane on).
   ingest  -- sequential POST /api/memory?wait=true, timed, with the deployment flag
              MENHIR_FRONTIER_SOURCE_MEMORIES set by --flag (it gates the ingest embedding).
 
@@ -94,7 +94,6 @@ def _backend_env(args, provider_url: str, state: Path, port: int, flag: bool) ->
         "OPENAI_EMBED_MODEL": "text-embedding-3-small",
         "MENHIR_FRONTIER_SOURCE_MEMORIES": "true" if flag else "false",
         "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED": "true",
-        "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED": "true",
     })
     return env
 

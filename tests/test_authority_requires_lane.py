@@ -1,6 +1,6 @@
 """Authority is served only while its lane is on (#170, opt-out decision).
 
-With a lane off, its stored Views or event assertions stop updating. Serving them as the current
+With a lane off, its stored Views stop updating. Serving them as the current
 answer would be false-current, so recall must not wire authority on unless the lane is on too.
 Both RecallService construction sites are checked: the backend (core.bootstrap) and the hook CLI
 (cli.bootstrap).
@@ -8,40 +8,26 @@ Both RecallService construction sites are checked: the backend (core.bootstrap) 
 
 from __future__ import annotations
 
-import itertools
 from types import SimpleNamespace
 
 import pytest
 
 from menhir.config import MemorySettings
-from menhir.config.authority_gates import (
-    event_history_authority_effective,
-    scalar_view_authority_effective,
-)
+from menhir.config.authority_gates import scalar_view_authority_effective
 
 pytestmark = pytest.mark.unit
 
-COMBOS = list(itertools.product([False, True], [False, True]))
+LANES = [False, True]
 
 
-def _settings(scalar_lane, event_lane, event_auth):
+def _settings(scalar_lane):
     # Scalar view authority is always on since the #168 freeze: it follows the scalar lane alone.
-    return MemorySettings(
-        personal_memory_scalar_state_enabled=scalar_lane,
-        personal_memory_event_history_enabled=event_lane,
-        personal_memory_event_history_authority_enabled=event_auth,
-    )
+    return MemorySettings(personal_memory_scalar_state_enabled=scalar_lane)
 
 
-@pytest.mark.parametrize(("lane", "authority"), COMBOS)
-def test_effective_authority_needs_both_flags(lane, authority):
-    scalar = _settings(lane, False, False)
-    event = _settings(False, lane, authority)
-    assert scalar_view_authority_effective(scalar) is lane
-    assert event_history_authority_effective(event) is (lane and authority)
-    # The other lane's flags never leak across.
-    assert event_history_authority_effective(scalar) is False
-    assert scalar_view_authority_effective(event) is False
+@pytest.mark.parametrize("lane", LANES)
+def test_effective_authority_follows_lane(lane):
+    assert scalar_view_authority_effective(_settings(lane)) is lane
 
 
 class _Captured(dict):
@@ -61,8 +47,8 @@ class _Inert:
         pass
 
 
-@pytest.mark.parametrize(("lane", "authority"), COMBOS)
-def test_backend_wiring_requires_lane(monkeypatch, lane, authority):
+@pytest.mark.parametrize("lane", LANES)
+def test_backend_wiring_requires_lane(monkeypatch, lane):
     from menhir.core.bootstrap import build_memory_services
 
     class FakeGraphiti:
@@ -82,10 +68,9 @@ def test_backend_wiring_requires_lane(monkeypatch, lane, authority):
     monkeypatch.setattr("menhir.core.bootstrap.LLMAdapter", FakeLLM)
     monkeypatch.setattr("menhir.core.bootstrap.RecallService", _fake_recall(captured))
 
-    build_memory_services(settings=_settings(lane, lane, authority))
+    build_memory_services(settings=_settings(lane))
 
     assert captured["scalar_view_authority_enabled"] is lane
-    assert captured["event_history_authority_enabled"] is (lane and authority)
 
 
 @pytest.mark.parametrize(("settings_kwargs", "expected"), [({}, True), ({"personal_memory_scalar_state_enabled": False}, False)])
@@ -114,8 +99,8 @@ def test_backend_wiring_with_default_authority_follows_lane(monkeypatch, setting
     assert captured["scalar_view_authority_enabled"] is expected
 
 
-@pytest.mark.parametrize(("lane", "authority"), COMBOS)
-def test_hook_cli_wiring_requires_lane(monkeypatch, lane, authority):
+@pytest.mark.parametrize("lane", LANES)
+def test_hook_cli_wiring_requires_lane(monkeypatch, lane):
     from menhir.cli.bootstrap import build_hook_services
 
     class FakeGraphiti:
@@ -130,8 +115,7 @@ def test_hook_cli_wiring_requires_lane(monkeypatch, lane, authority):
     monkeypatch.setattr("menhir.services.recall_service.RecallService", _fake_recall(captured))
     monkeypatch.setattr("menhir.services.context_builder.ContextBuilderService", _Inert)
 
-    services = build_hook_services(settings=_settings(lane, lane, authority))
+    services = build_hook_services(settings=_settings(lane))
 
     assert services.context_builder is not None, "full recall path was not built"
     assert captured["scalar_view_authority_enabled"] is lane
-    assert captured["event_history_authority_enabled"] is (lane and authority)

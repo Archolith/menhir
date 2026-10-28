@@ -152,7 +152,7 @@ async def _typed_histories(
     history_offset: int | None,
     history_limit: int,
 ) -> tuple[tuple[TypedHistory, ...], str | None]:
-    """Page the subject's typed scalar/event histories beside the timeline (plan A5).
+    """Page the subject's typed scalar histories beside the timeline (plan A5).
 
     The default page is the LATEST `history_limit` entries of each View. At most
     `_TYPED_HISTORY_CAP` histories are returned; the caller gets a note when more exist.
@@ -161,23 +161,12 @@ async def _typed_histories(
     scalar_views = await asyncio.to_thread(
         adapter.list_recall_visible_scalar_history_views, subject_uuid=subject_uuid, namespace=gid
     )
-    event_views = await asyncio.to_thread(
-        adapter.list_event_timeline_views, subject_uuid=subject_uuid, namespace=gid
-    )
     descriptors: list[dict[str, Any]] = []
     for view in scalar_views:
         descriptors.append({
             "kind": "scalar",
             "view_uuid": str(view["uuid"]),
             "label": str(view.get("attribute") or view.get("view_key") or view["uuid"]),
-        })
-    for view in event_views:
-        predicate = str(view.get("predicate") or "")
-        domain = view.get("domain")
-        descriptors.append({
-            "kind": "event",
-            "view_uuid": str(view["uuid"]),
-            "label": f"{predicate}[{domain}]" if domain else predicate,
         })
     if history_view is not None:
         descriptors = [d for d in descriptors if d["view_uuid"] == history_view]
@@ -188,10 +177,7 @@ async def _typed_histories(
     for descriptor in descriptors:
         kind = descriptor["kind"]
         view_uuid = descriptor["view_uuid"]
-        if kind == "scalar":
-            reader = adapter.list_scalar_history_entries
-        else:
-            reader = adapter.list_event_timeline_entries
+        reader = adapter.list_scalar_history_entries
         first = await asyncio.to_thread(
             reader, view_uuid=view_uuid, offset=0, limit=1, namespace=gid
         )
@@ -204,10 +190,10 @@ async def _typed_histories(
         entries = tuple(
             TypedHistoryEntry(
                 valid_at=str(raw.get("valid_at") or ""),
-                value=raw.get("object_display") if kind == "event" else raw.get("value"),
-                operation=raw.get("operation") if kind == "scalar" else None,
-                time_basis=raw.get("time_basis") if kind == "event" else None,
-                quote=raw.get("quote") if kind == "event" else raw.get("stated_span"),
+                value=raw.get("value"),
+                operation=raw.get("operation"),
+                time_basis=None,
+                quote=raw.get("stated_span"),
                 episode_uuid=raw.get("episode_uuid"),
             )
             for raw in (page.get("entries") or [])

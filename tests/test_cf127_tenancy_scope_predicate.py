@@ -91,7 +91,6 @@ BASELINE: dict[str, int] = {
     "infrastructure/typed_assertion_reconciliation.py": 3,
     "infrastructure/typed_assertion_repair_repository.py": 2,
     "infrastructure/typed_assertion_write_repository.py": 6,
-    "infrastructure/typed_event_repository.py": 2,
     "infrastructure/view_query_repository.py": 5,
     "infrastructure/work_artifact_repository.py": 8,
     "services/lifecycle_conflicts.py": 1,

@@ -59,10 +59,6 @@ _SETTINGS = (
         'personal_memory', 'Record recall audit decisions.', False, ()),
     ('personal_memory_scalar_history_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED', True,
         'personal_memory', 'Enable personal memory scalar history enabled.', True, ()),
-    ('personal_memory_event_history_enabled', 'MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED', False,
-        'personal_memory', 'Enable personal memory event history enabled.', True, ()),
-    ('personal_memory_event_history_authority_enabled', 'MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED',
-        False, 'personal_memory', 'Enable personal memory event history authority enabled.', True, ()),
     ('personal_memory_counting_enabled', 'MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED', True,
         'personal_memory', 'Count single happenings ("went to yoga") as scalar occurrences after the scalar phase (LLM calls from the scheduler); builds on scalar state.', True, ()),
     ('benchmark_mode', 'MENHIR_BENCHMARK_MODE', False, 'runtime', 'Enable benchmark mode.', False, ()),
@@ -175,14 +171,12 @@ _ENV_ONLY = (
 _REQUIRES = {
     "personal_memory_scalar_view_echo_drop_enabled": ("personal_memory_scalar_state_enabled",),
     "personal_memory_observation_dedup_enabled": ("personal_memory_scalar_state_enabled",),
-    "personal_memory_event_history_authority_enabled": ("personal_memory_event_history_enabled",),
     "personal_memory_counting_enabled": ("personal_memory_scalar_state_enabled",),
 }
 # These describe scoped prerequisites/data producers; they do not impose runtime validation.
 _REQUIREMENT_SCOPE = {
     "personal_memory_scalar_view_echo_drop_enabled": "Echo drop only acts on the verdicts the scalar view authority lane emits.",
     "personal_memory_observation_dedup_enabled": "Dedup only acts on observations the scalar view authority lane injects.",
-    "personal_memory_event_history_authority_enabled": "Event history produces the assertions; recall applies authority only while event history is on.",
     "personal_memory_counting_enabled": "The counting lane runs after the scalar phase and reads scalar state.",
 }
 _VERSIONED: frozenset[str] = frozenset()
@@ -291,4 +285,10 @@ RETIRED = {
     "MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED": "2026-10-28: consolidation counter lane removed (#168; duplicate of the counting lane)",
     "personal_memory_consolidation_verify_retries": "2026-10-28: consolidation counter lane removed (#168; duplicate of the counting lane)",
     "MENHIR_PERSONAL_MEMORY_VERIFY_RETRIES": "2026-10-28: consolidation counter lane removed (#168; duplicate of the counting lane)",
+    "personal_memory_event_history_enabled": "2026-10-28: event-history lane archived (#399 bucket 3; neutral A/B, fail-closed authority regressed)",
+    "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED": "2026-10-28: event-history lane archived (#399 bucket 3; neutral A/B, fail-closed authority regressed)",
+    "personal_memory_event_history_authority_enabled": "2026-10-28: event-history lane archived (#399 bucket 3; neutral A/B, fail-closed authority regressed)",
+    "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED": "2026-10-28: event-history lane archived (#399 bucket 3; neutral A/B, fail-closed authority regressed)",
+    "personal_memory_event_history_perceiver_version": "2026-10-28: event-history lane archived (#399 bucket 3; neutral A/B, fail-closed authority regressed)",
+    "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_PERCEIVER_VERSION": "2026-10-28: event-history lane archived (#399 bucket 3; neutral A/B, fail-closed authority regressed)",
 }

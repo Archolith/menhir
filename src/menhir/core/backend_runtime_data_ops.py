@@ -368,8 +368,6 @@ class RuntimeProviderDataOpsMixin:
             payload.pop("warden_notice", None)
         if payload.get("authority_layer") is None:
             payload.pop("authority_layer", None)
-        if payload.get("event_authority_layer") is None:
-            payload.pop("event_authority_layer", None)
         if payload.get("source_memories") is None:
             payload.pop("source_memories", None)
         if payload.get("query_hint") is None:

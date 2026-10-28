@@ -27,7 +27,7 @@ from menhir.services.seam_types import Embed, LlmComplete
 pytestmark = pytest.mark.unit
 
 _CONSUMERS = (
-    "event_fold", "event_history_perception", "perception",
+    "event_fold", "perception",
     "typed_scalar_proposer_reviewer", "typed_scalar_rules", "verifier_sync",
 )
 

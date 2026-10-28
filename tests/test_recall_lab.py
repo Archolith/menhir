@@ -631,7 +631,6 @@ def test_recall_lab_surfaces_authority_layer() -> None:
     assert verdict["subject_uuid"] == "memory-baseline"
     assert verdict["value"] == 185
     assert verdict["contributors"][0]["stated_span"] == "I spent another $40 on bike lights"
-    assert arm["event_authority_layer"] is None
 
 
 @pytest.mark.unit

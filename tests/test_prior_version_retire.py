@@ -1,8 +1,8 @@
-"""#170 decision 1: scalar and event retire prior-version readings once a turn is re-read and
+"""#170 decision 1: scalar retires prior-version readings once a turn is re-read and
 stored at the new version (counting's rule B), and a lower-version writer cannot make a reading
 current on a turn a higher version has read.
 
-Unit tests drive the two runners with fakes. Online tests run the Cypher against the TEST instance;
+Unit tests drive the scalar runner with fakes. Online tests run the Cypher against the TEST instance;
 each uses a fresh namespace and turn ids and removes what it made.
 """
 
@@ -15,28 +15,20 @@ from typing import Any
 
 import pytest
 
-from menhir.domain.event_history import TypedEventAssertion
 from menhir.domain.typed_assertion import TypedAssertion, perceiver_rank
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.reversion_repository import PerceptionReversionRepository
 from menhir.infrastructure.typed_assertion_repository import TypedAssertionRepository
-from menhir.services.event_consolidation import (
-    EventConsolidationConfig,
-    run_event_consolidation,
-)
 from menhir.services.scalar_consolidation import (
     ScalarConsolidationConfig,
     run_scalar_consolidation,
 )
-from tests.test_event_consolidation import FakeGraph as _EventFakeGraph
-from tests.test_event_consolidation import FakeLlm, _row
 
 _OLD, _NEW, _NEWER = "v1.0", "v1.1", "v1.2"
 _NOW = "2026-07-01T00:00:00+00:00"
 _REVERSION_METHODS = (
     "scalar_prior_version_rows", "scalar_current_version_spans", "scalar_owed_subjects",
-    "retire_scalar_prior_version", "event_prior_version_rows", "event_current_version_spans",
-    "event_owed_lanes", "retire_event_prior_version")
+    "retire_scalar_prior_version")
 
 
 @pytest.mark.unit
@@ -233,92 +225,6 @@ def test_scalar_a_non_semver_version_retires_nothing(monkeypatch):
     assert graph.advances == ["t1"]
 
 
-# -------------------------------------------------------------------------- event runner (unit)
-
-
-class _EventGraph(_EventFakeGraph):
-    def __init__(self, pages, *, prior=None, owed=None, stored=None, retired_lanes=None):
-        super().__init__(pages)
-        self.prior, self.owed = list(prior or []), list(owed or [])
-        self.stored, self.retired_lanes = list(stored or []), list(retired_lanes or [])
-        self.retire_calls: list[dict] = []
-        self.order: list[str] = []
-        self.raise_on_retire: Exception | None = None
-
-    def event_prior_version_rows(self, namespace, turn_ids, *, perceiver_rank):
-        return list(self.prior)
-
-    def event_owed_lanes(self, namespace, turn_ids, *, perceiver_rank):
-        return list(self.owed)
-
-    def event_current_version_spans(self, namespace, turn_ids, *, perceiver_version):
-        return list(self.stored)
-
-    def retire_event_prior_version(self, namespace, turn_ids, *, perceiver_rank,
-                                   perceiver_version, keep_ids=None):
-        self.order.append("retire")
-        if self.raise_on_retire is not None:
-            raise self.raise_on_retire
-        self.retire_calls.append({"turns": list(turn_ids), "keep": list(keep_ids or [])})
-        return {"retired": len(self.retired_lanes), "lanes": list(self.retired_lanes)}
-
-    def rebuild_lanes(self, lanes):
-        self.order.append("rebuild")
-        return super().rebuild_lanes(lanes)
-
-
-_EV_PRIOR = {"assertion_id": "ev-old", "episode_uuid": "t1", "span_start": 0, "span_end": 5,
-             "subject_uuid": "self", "predicate": "purchased", "domain": ""}
-_EV_LANE = {"subject_uuid": "self", "predicate": "purchased", "domain": ""}
-
-
-def _event_run(graph, llm) -> dict:
-    return run_event_consolidation(
-        graph, event_targets=["ns"], counting_llm=llm, call_budget=None,
-        config=EventConsolidationConfig(perceiver_version=_NEW))
-
-
-@pytest.mark.unit
-def test_event_an_abstaining_re_read_retires_then_rebuilds_the_lane_then_advances():
-    # Fails if the old event stays in the timeline, if the lane is rebuilt before the retire (it
-    # would still show the old event), or if the retired lane is not rebuilt at all.
-    graph = _EventGraph([[_row("t1", "nothing new", _NOW, _NOW)]], prior=[_EV_PRIOR],
-                        retired_lanes=[_EV_LANE])
-    out = _event_run(graph, FakeLlm())
-    assert graph.retire_calls == [{"turns": ["t1"], "keep": []}]
-    assert graph.order == ["retire", "rebuild"]
-    assert [(lane.subject_uuid, lane.predicate) for lane in graph.rebuilt_lanes[0]] == [
-        ("self", "purchased")]
-    assert len(graph.advances) == 1 and out["event_prior_version_retired"] == 1
-
-
-@pytest.mark.unit
-def test_event_a_parse_drop_keeps_the_old_reading():
-    # A dropped row means the turn was not read in full; the old reading is carried.
-    bad = '[{"episode": 0, "events": [{"subject": "user"}]}]'
-    graph = _EventGraph([[_row("t1", "x", _NOW, _NOW)]], prior=[_EV_PRIOR])
-    out = _event_run(graph, FakeLlm([bad]))
-    assert out["event_drop_reasons"], "the fixture must produce a parse-level drop"
-    assert graph.retire_calls == [{"turns": ["t1"], "keep": ["ev-old"]}]
-
-
-@pytest.mark.unit
-def test_event_a_failed_retire_fails_the_page_closed():
-    graph = _EventGraph([[_row("t1", "x", _NOW, _NOW)]], prior=[_EV_PRIOR])
-    graph.raise_on_retire = RuntimeError("boom")
-    out = _event_run(graph, FakeLlm())
-    assert graph.advances == [] and out["event_errors"]["reversion_retire_failed"] == 1
-
-
-@pytest.mark.unit
-def test_event_owed_lanes_are_rebuilt_on_the_next_read():
-    graph = _EventGraph([[_row("t1", "x", _NOW, _NOW)]], owed=[_EV_LANE])
-    _event_run(graph, FakeLlm())
-    assert [(lane.subject_uuid, lane.predicate) for lane in graph.rebuilt_lanes[0]] == [
-        ("self", "purchased")]
-    assert len(graph.advances) == 1
-
-
 # -------------------------------------------------------------------------------- online
 
 
@@ -328,7 +234,6 @@ def env(test_neo4j_repo):
     adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
     adapter.bootstrap_phase_one()
     adapter.activate_scalar_state()
-    adapter.activate_event_history()
     test_neo4j_repo.execute(
         "UNWIND $s AS s CREATE (:Entity {uuid: s, namespace: $ns, group_id: $ns}) "
         "WITH count(*) AS _ UNWIND $t AS t "
@@ -340,7 +245,7 @@ def env(test_neo4j_repo):
         "OR n.turn_id STARTS WITH $ns OR n.source_key IN $keys DETACH DELETE n",
         {"ns": ns, "keys": []})
     test_neo4j_repo.execute(
-        "MATCH (h) WHERE (h:TypedAssertionHead OR h:TypedEventAssertionHead) "
+        "MATCH (h) WHERE h:TypedAssertionHead "
         "AND NOT (h)-[:HAS_VERSION]->() DETACH DELETE h")
 
 
@@ -351,15 +256,6 @@ def _scalar(ns, turn, start, pv, *, value=1, subject="s1", tier="agent"):
         stated_span="x" * 5, span_start=start, span_end=start + 5, claim_ordinal=0,
         episode_uuid=f"{ns}:{turn}", valid_at=_NOW, learned_at=_NOW, evidence_tier=tier,
         perceiver_version=pv, namespace=ns)
-
-
-def _event(ns, turn, start, pv, *, predicate="purchased"):
-    return TypedEventAssertion(
-        subject_uuid=f"{ns}:s1", subject_display="user", predicate=predicate,
-        object_key=f"obj-{start}", object_display="thing", valid_at=_NOW, learned_at=_NOW,
-        stated_span="x" * 5, episode_uuid=f"{ns}:{turn}", span_start=start,
-        span_end=start + 5, namespace=ns, turn_evidence_uuid=f"{ns}:{turn}",
-        perceiver_version=pv)
 
 
 def _state(repo, label, source_key):
@@ -462,37 +358,6 @@ def test_a_new_version_reading_on_the_same_head_still_supersedes_in_place(env):
     adapter.record_typed_assertion(_scalar(ns, "t1", 0, _NEW, value=2))
     assert _retire_scalar(adapter, ns, ["t1"], _NEW)["retired"] == 0
     assert _state(repo, "TypedAssertion", old.source_key) == [(_OLD, 0, None), (_NEW, 1, None)]
-
-
-@pytest.mark.online
-def test_event_retire_and_stale_writer_guard(env):
-    repo, adapter, ns = env
-    old = _event(ns, "t1", 0, _OLD)
-    keep = _event(ns, "t1", 10, _OLD, predicate="sold")
-    ids = {k: str(adapter.record_typed_event_assertion(a)["assertion_id"])
-           for k, a in {"old": old, "keep": keep}.items()}
-    turns = [f"{ns}:t1"]
-    prior = adapter.event_prior_version_rows(ns, turns, perceiver_rank=_rank(_NEW))
-    assert sorted(r["assertion_id"] for r in prior) == sorted(ids.values())
-
-    out = adapter.retire_event_prior_version(
-        ns, turns, perceiver_rank=_rank(_NEW), perceiver_version=_NEW, keep_ids=[ids["keep"]])
-    assert out["retired"] == 1
-    assert out["lanes"] == [{"subject_uuid": f"{ns}:s1", "predicate": "purchased", "domain": ""}]
-    assert _state(repo, "TypedEventAssertion", old.source_key) == [(_OLD, 0, "event_reversion")]
-    assert _state(repo, "TypedEventAssertion", keep.source_key)[0][1] == 1
-    assert adapter.event_owed_lanes(ns, turns, perceiver_rank=_rank(_NEW)) == out["lanes"]
-
-    adapter.record_typed_event_assertion(old)                            # stale replay
-    late = _event(ns, "t1", 40, _OLD)
-    adapter.record_typed_event_assertion(late)
-    assert _state(repo, "TypedEventAssertion", old.source_key)[0][1] == 0
-    assert _state(repo, "TypedEventAssertion", late.source_key) == [(_OLD, 0, None)]
-    fresh = _event(ns, "t1", 50, _NEW)
-    adapter.record_typed_event_assertion(fresh)
-    assert _state(repo, "TypedEventAssertion", fresh.source_key) == [(_NEW, 1, None)]
-    assert [(r["episode_uuid"], r["span_start"]) for r in adapter.event_current_version_spans(
-        ns, turns, perceiver_version=_NEW)] == [(f"{ns}:t1", 50)]
 
 
 # ---- the two orders of a concurrent record and retire (the marker lock) ---------------------
@@ -598,7 +463,10 @@ def test_erasing_the_evidence_deletes_its_read_markers(env):
     # Markers are keyed by turn id; erasure must not leave them behind (#170 item 5).
     repo, adapter, ns = env
     adapter.record_typed_assertion(_scalar(ns, "t1", 0, _OLD))
-    adapter.record_typed_event_assertion(_event(ns, "t2", 0, _OLD))
+    # A marker left by the archived event lane (same shape it wrote); erasure must still remove it.
+    repo.execute(
+        "CREATE (:TypedReadMarker {marker_key: 'event:' + $tid, turn_id: $tid, rank: 0, "
+        "perceiver_version: $pv, read_at: datetime()})", {"tid": f"{ns}:t2", "pv": _OLD})
     _retire_scalar(adapter, ns, ["t1"], _NEW)
 
     def markers():

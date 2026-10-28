@@ -1,8 +1,8 @@
-"""E2E-17 - scalar and event authority through MCP recall AND context (#170 item 6).
+"""E2E-17 - scalar authority through MCP recall AND context (#170 item 6).
 
-A View in the graph or a debug endpoint is not enough: these lanes ask the questions an agent
+A View in the graph or a debug endpoint is not enough: this lane asks the questions an agent
 asks, through the stdio ``recall_memories`` and ``build_context`` tools, and check the
-structured verdict and the text the agent would read. Each lane covers current, as-of and
+structured verdict and the text the agent would read. It covers current, as-of and
 history queries, stale-fact suppression, additive leads, provenance and the advisory fallback.
 It then restarts the backend with the authority flag off to show recall falls back to ordinary
 memories.
@@ -37,7 +37,6 @@ from tests.e2e._harness.phase3 import (
     typed_assertions,
 )
 from tests.e2e._harness.scripted_provider import Rule, Script, scripted_model
-from tests.e2e.test_e2e_13_state_semantics import _EVENT_LINE, EVENT_PROMPT
 
 pytestmark = [pytest.mark.e2e, pytest.mark.timeout(1800)]
 
@@ -68,13 +67,6 @@ def _scalar(recall: dict, attribute: str, kind: str | None = None) -> list[dict]
     every query; filtering by slot (and kind) isolates the one asked about."""
     return [v for v in recall.get("authority_layer") or []
             if v.get("attribute") == attribute and (kind is None or v.get("kind") == kind)]
-
-
-def _events(recall: dict) -> list[dict]:
-    layer = recall.get("event_authority_layer")
-    if isinstance(layer, dict):
-        return [layer]
-    return list(layer or [])
 
 
 def _items_text(recall: dict) -> str:
@@ -301,196 +293,3 @@ async def test_e2e_17_scalar_authority(
     lane_evidence.record("no_unscripted_model_prompt", passed=not script.unmatched,
                          detail=script.unmatched[:5])
     close_pass(lane_evidence, SCALAR_CRITERIA)
-
-
-# ---- event --------------------------------------------------------------------------------------
-
-EVENT_AUTHORITY_ON = {
-    "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED": "true",
-    "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED": "true",
-}
-
-#: phrase -> object. The scripted model proposes every one it sees; the lane's gates decide.
-EVENTS = {
-    "I bought a red kayak": "red kayak",
-    "I bought a blue kayak": "blue kayak",
-    "I bought a tent": "tent",
-    "I bought a white lamp": "white lamp",
-    "I bought the white lamp": "white lamp",
-    "I bought a black lamp": "black lamp",
-    "I bought a yellow canoe": "yellow canoe",
-    "I bought a green canoe": "green canoe",
-}
-
-#: Pass 1 is ordinary purchases. Pass 2 corrects the white lamp's date to before the black lamp.
-EVENT_PASSES = [
-    [("I bought a red kayak at the lake shop.", "2026-07-01T10:00:00+00:00"),
-     ("I bought a yellow canoe at the lake.", "2026-07-04T10:00:00+00:00"),
-     ("I bought a tent at the outdoor store.", "2026-07-05T10:00:00+00:00"),
-     ("I bought a black lamp at the market.", "2026-07-06T10:00:00+00:00"),
-     ("I bought a white lamp at the mall.", "2026-07-09T10:00:00+00:00"),
-     ("I bought a blue kayak at the marina.", "2026-07-10T10:00:00+00:00")],
-    [("Actually, I bought the white lamp on 2026-07-02.", "2026-07-11T10:00:00+00:00")],
-]
-
-#: Agent-quoted only. It is captured now, so it is the latest purchase of all.
-CANOE_STATEMENT = "I bought a green canoe at the dock."
-
-
-def _event_reply(call) -> str:
-    envelopes = []
-    for index, text in _EVENT_LINE.findall(call.prompt):
-        events = [{"subject": "user", "predicate": "bought", "object": obj, "object_display": "",
-                   "domain": "", "when": "", "stated_span": phrase}
-                  for phrase, obj in EVENTS.items() if phrase.lower() in text.lower()]
-        envelopes.append({"episode": int(index), "events": events})
-    return json.dumps(envelopes)
-
-
-EVENT_CRITERIA = [
-    "latest_query_leads_with_the_scoped_event",
-    "context_renders_the_event_lead_with_identities",
-    "lead_is_additive_to_ranked_memories",
-    "predecessor_query_selects_the_event_before_the_anchor",
-    "corrected_date_replaces_the_stale_lead",
-    "generic_query_stays_advisory",
-    "agent_quoted_event_stays_advisory",
-    "unresolved_anchor_fails_closed",
-    "third_person_query_gets_no_event_verdict",
-    "authority_off_falls_back_to_ordinary_recall",
-    "no_unscripted_model_prompt",
-]
-
-
-async def test_e2e_17_event_authority(
-    e2e_config: E2EConfig, e2e_installed, fresh_graph, feature_combo: FeatureCombo,
-    feature_env: dict[str, str], lane_evidence: LaneEvidence,
-) -> None:
-    namespace = f"e2e17e-{uuid4().hex[:12]}"
-    script = Script([Rule("event", EVENT_PROMPT, _event_reply)])
-    with scripted_model(script) as model:
-        env = {**feature_env, **model.env, **EVENT_AUTHORITY_ON}
-        with lane_backend(e2e_config, e2e_installed, lane_evidence, env):
-            async with stdio_session(e2e_config, e2e_installed.venv_python, lane_evidence,
-                                     feature_env=env) as client:
-                lamp_before = None
-                for number, turns in enumerate(EVENT_PASSES, start=1):
-                    for text, at in turns:
-                        await admit_turn(client, namespace, text,
-                                         record_turn(e2e_config, namespace, text, occurred_at=at))
-                    if number == 1:
-                        canoe = _text(await client.call_tool("add_memory", {
-                            "text": "The user told me about a canoe purchase.",
-                            "namespace": namespace, "user_statement": CANOE_STATEMENT}))
-                        assert "episode_id" in canoe, canoe[:400]
-                    run_phase3(e2e_config, lane_evidence, namespace, label=f"phase3-pass{number}")
-                    if number == 1:
-                        lamp_before, _ = await _ask(
-                            client, namespace, "Which lamp did I buy most recently?",
-                            lane_evidence, "lamp-before-correction")
-
-                kayak, kayak_ctx = await _ask(
-                    client, namespace, "Which kayak did I buy most recently?", lane_evidence,
-                    "kayak-latest")
-                before_tent, _ = await _ask(
-                    client, namespace, "What did I buy before getting the tent?", lane_evidence,
-                    "before-tent")
-                lamp_after, _ = await _ask(
-                    client, namespace, "Which lamp did I buy most recently?", lane_evidence,
-                    "lamp-after-correction")
-                generic, _ = await _ask(
-                    client, namespace, "Which item did I buy most recently?", lane_evidence,
-                    "generic")
-                canoes, _ = await _ask(
-                    client, namespace, "Which canoe did I buy most recently?", lane_evidence,
-                    "canoe-latest")
-                anchor, anchor_ctx = await _ask(
-                    client, namespace, "Before I bought the drone, which tent do I own?",
-                    lane_evidence, "anchor-guard")
-                friend, _ = await _ask(
-                    client, namespace, "Which kayak did my friend buy most recently?",
-                    lane_evidence, "third-person")
-
-        off_env = {**env, "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED": "false"}
-        with lane_backend(e2e_config, e2e_installed, lane_evidence, off_env, name="backend-off"):
-            async with stdio_session(e2e_config, e2e_installed.venv_python, lane_evidence,
-                                     feature_env=off_env) as client:
-                kayak_off, kayak_off_ctx = await _ask(
-                    client, namespace, "Which kayak did I buy most recently?", lane_evidence,
-                    "kayak-off")
-
-    lead = _events(kayak)
-    lane_evidence.record(
-        "latest_query_leads_with_the_scoped_event",
-        passed=len(lead) == 1 and lead[0].get("status") == "leads" and lead[0].get("gate") == "pass"
-        and lead[0].get("object_key") == "blue kayak" and lead[0].get("has_foundation") is True
-        and str(lead[0].get("valid_at", "")).startswith("2026-07-10")
-        and lead[0].get("stated_span") == "I bought a blue kayak"
-        and bool(lead[0].get("episode_uuid")) and bool(lead[0].get("turn_evidence_uuid")),
-        detail=lead,
-    )
-    lane_evidence.record(
-        "context_renders_the_event_lead_with_identities",
-        passed="[Event authority: LEADS (authoritative)]" in kayak_ctx
-        and "I bought a blue kayak" in kayak_ctx and "identities:" in kayak_ctx
-        and bool(lead) and str(lead[0].get("turn_evidence_uuid")) in kayak_ctx,
-        detail=kayak_ctx[:3000],
-    )
-    lane_evidence.record(
-        "lead_is_additive_to_ranked_memories",
-        passed=bool(lead) and "kayak" in _items_text(kayak),
-        detail={"items": kayak.get("count")},
-    )
-    prev = _events(before_tent)
-    lane_evidence.record(
-        "predecessor_query_selects_the_event_before_the_anchor",
-        passed=len(prev) == 1 and prev[0].get("kind") == "predecessor"
-        and prev[0].get("object_key") == "yellow canoe",
-        detail=prev,
-    )
-    lamp_old = _events(lamp_before or {})
-    lamp_new = _events(lamp_after)
-    lane_evidence.record(
-        "corrected_date_replaces_the_stale_lead",
-        passed=len(lamp_old) == 1 and lamp_old[0].get("object_key") == "white lamp"
-        and len(lamp_new) == 1 and lamp_new[0].get("object_key") == "black lamp"
-        and lamp_new[0].get("status") == "leads",
-        detail={"before": lamp_old, "after": lamp_new},
-    )
-    gen = _events(generic)
-    lane_evidence.record(
-        "generic_query_stays_advisory",
-        passed=len(gen) == 1 and gen[0].get("status") == "advisory" and gen[0].get("gate") == "route",
-        detail=gen,
-    )
-    canoe_verdict = _events(canoes)
-    lane_evidence.record(
-        "agent_quoted_event_stays_advisory",
-        passed=len(canoe_verdict) == 1 and canoe_verdict[0].get("status") == "advisory"
-        and canoe_verdict[0].get("gate") == "foundation"
-        and canoe_verdict[0].get("object_key") == "green canoe"
-        and canoe_verdict[0].get("has_foundation") is False,
-        detail=canoe_verdict,
-    )
-    guard = _events(anchor)
-    lane_evidence.record(
-        "unresolved_anchor_fails_closed",
-        passed=len(guard) == 1 and guard[0].get("gate") == "anchor"
-        and guard[0].get("status") != "leads" and "[Event authority: UNRESOLVED]" in anchor_ctx,
-        detail={"verdicts": guard, "context": anchor_ctx[:2000]},
-    )
-    lane_evidence.record(
-        "third_person_query_gets_no_event_verdict",
-        passed=not _events(friend),
-        detail=_events(friend),
-    )
-    lane_evidence.record(
-        "authority_off_falls_back_to_ordinary_recall",
-        passed="event_authority_layer" not in kayak_off and "kayak" in _items_text(kayak_off)
-        and "[Event authority" not in kayak_off_ctx,
-        detail={"keys": sorted(kayak_off), "context": kayak_off_ctx[:1500]},
-    )
-    lane_evidence.attach("model-calls.json", script.evidence())
-    lane_evidence.record("no_unscripted_model_prompt", passed=not script.unmatched,
-                         detail=script.unmatched[:5])
-    close_pass(lane_evidence, EVENT_CRITERIA)

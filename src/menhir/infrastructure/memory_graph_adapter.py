@@ -106,8 +106,6 @@ class MemoryGraphAdapter:
         self._tool_events = ToolEventRepository(self.neo4j)
         from menhir.infrastructure.typed_assertion_repository import TypedAssertionRepository
         self._typed_assertions = TypedAssertionRepository(self.neo4j)
-        from menhir.infrastructure.typed_event_repository import TypedEventAssertionRepository
-        self._typed_event_assertions = TypedEventAssertionRepository(self.neo4j)
         from menhir.infrastructure.reversion_repository import PerceptionReversionRepository
         self._reversion = PerceptionReversionRepository(self.neo4j)
 
@@ -279,66 +277,6 @@ class MemoryGraphAdapter:
             counting_enabled=self.counting_enabled if counting_enabled is None else counting_enabled,
             count_match=self.counting_match_enabled if count_match is None else count_match)
 
-    # -------------------------------------------------------------------------
-    # Typed-event assertion delegates → TypedEventAssertionRepository
-    # -------------------------------------------------------------------------
-
-    def activate_event_history(self) -> dict[str, Any]:
-        """Bring the event-assertion DDL online (idempotent, IF NOT EXISTS)."""
-        return self._typed_event_assertions.activate()
-
-    def record_typed_event_assertion(self, assertion: Any) -> dict[str, Any]:
-        """Persist one :TypedEventAssertion to the durable event log."""
-        return self._typed_event_assertions.record_event_assertion(assertion)
-
-    def event_assertions_for_lane(
-        self,
-        lane: Any,
-        *,
-        include_superseded: bool = False,
-        materializable_only: bool = False,
-    ) -> list[Any]:
-        """Reconstructed assertions in one event lane (exact namespace/subject/predicate/domain)."""
-        return self._typed_event_assertions.assertions_for_lane(
-            lane,
-            include_superseded=include_superseded,
-            materializable_only=materializable_only,
-        )
-
-    def event_assertions_for_subject_predicate(
-        self,
-        subject_uuid: str,
-        predicate: str,
-        *,
-        namespace: str | None = None,
-        include_superseded: bool = False,
-        materializable_only: bool = True,
-    ) -> list[Any]:
-        """Reconstructed assertions for an exact normalized subject_uuid + predicate across ALL actual
-        domain lanes (optionally namespace-scoped); no domain filter/override. Default excludes
-        superseded and binding-pending (safe for recall)."""
-        return self._typed_event_assertions.assertions_for_subject_predicate(
-            subject_uuid,
-            predicate,
-            namespace=namespace,
-            include_superseded=include_superseded,
-            materializable_only=materializable_only,
-        )
-
-    def typed_event_assertion_by_key(self, assertion_key: str) -> Any:
-        """Reconstruct the event assertion with `assertion_key`, or None."""
-        return self._typed_event_assertions.assertion_by_key(assertion_key)
-
-    def current_typed_event_assertion_for_source(self, source_key: str) -> Any:
-        """Reconstruct the CURRENT event assertion for a binding-stable source_key, or None."""
-        return self._typed_event_assertions.current_for_source(source_key)
-
-    def event_history_service(self) -> Any:
-        """Build an `EventHistoryService` bound to this adapter's event-assertion log (source) and
-        to the adapter itself as the event-lane timeline View sink."""
-        from menhir.services.event_history_service import EventHistoryService
-        return EventHistoryService(self._typed_event_assertions, self)
-
     def run_view_projection_repairs(
         self, namespaces: list[str], *, owner_id: str, scalar_history_enabled: bool = False,
         limit: int = 25,
@@ -350,7 +288,6 @@ class MemoryGraphAdapter:
             ViewProjectionRepairRepository(self.neo4j),
             scalar_rebuilder=self.scalar_state_service(
                 scalar_history_enabled=scalar_history_enabled),
-            event_rebuilder=self.event_history_service(),
         )
         return service.run_pending(owner_id=owner_id, limit=limit, namespaces=namespaces)
 
@@ -852,13 +789,14 @@ class MemoryGraphAdapter:
 
         In addition to the ``group_id`` partition (which already covers the namespace-keyed
         :EventConsolidationWatermark cursor) and the scalar/episode namespace rows, counts the
-        durable event log: every :TypedEventAssertion in the namespace and every
+        legacy event log (event-history lane archived): every :TypedEventAssertion in the namespace and every
         :TypedEventAssertionHead that HAS_VERSION to an event assertion in the namespace.
         """
         namespace_clause = (
             " OR (n:Episodic AND n.namespace = $namespace)"
             " OR ((n:TypedAssertion OR n:TypedAssertionHead OR "
             "n:ScalarConsolidationWatermark OR n:TurnEvidence) AND n.namespace = $namespace)"
+            # legacy event-history data cleanup, kept after the lane was archived so erasure stays complete
             " OR (n:TypedEventAssertion AND n.namespace = $namespace)"
             " OR (n:TypedEventAssertionHead AND EXISTS {"
             " MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion) WHERE ev.namespace = $namespace})"
@@ -907,6 +845,7 @@ class MemoryGraphAdapter:
             " OR (n:Episodic AND n.namespace = $namespace)"
             " OR ((n:TypedAssertion OR n:TypedAssertionHead OR "
             "n:ScalarConsolidationWatermark OR n:TurnEvidence) AND n.namespace = $namespace)"
+            # legacy event-history data cleanup, kept after the lane was archived so erasure stays complete
             " OR (n:TypedEventAssertion AND n.namespace = $namespace)"
             " OR (n:TypedEventAssertionHead AND EXISTS {"
             " MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion) WHERE ev.namespace = $namespace})"
@@ -1764,30 +1703,6 @@ class MemoryGraphAdapter:
         reads :TurnEvidence unconditionally since #271)."""
         return self._turn_evidence.evidence_exists()
 
-    # --- event-consolidation cursor (Event History consolidation source) ---
-    # These delegates read canonical :TurnEvidence ONLY — no Episodic fallback and no global
-    # `evidence_exists` switch. They advance an independent :EventConsolidationWatermark keyed by the
-    # namespace string in `group_id`, so event consolidation never disturbs the scalar/counter cursors.
-    def list_event_dirty_evidence_namespaces(
-        self, *, perceiver_version: str, limit: int = 200,
-    ) -> list[str]:
-        return self._turn_evidence.list_event_dirty_evidence_namespaces(
-            perceiver_version=perceiver_version, limit=limit)
-
-    def load_next_event_evidence_batch(
-        self, namespace: str, *, perceiver_version: str, limit: int = 500,
-    ) -> list[dict[str, Any]]:
-        return self._turn_evidence.load_next_event_evidence_batch(
-            namespace, perceiver_version=perceiver_version, limit=limit)
-
-    def advance_event_cursor(
-        self, namespace: str, *, cursor_at: str, cursor_uuid: str,
-        perceiver_version: str, at: str,
-    ) -> None:
-        self._turn_evidence.advance_event_cursor(
-            namespace, cursor_at=cursor_at, cursor_uuid=cursor_uuid,
-            perceiver_version=perceiver_version, at=at)
-
     # --- counting-consolidation cursor (counting lane; never reads past the scalar cursor) ---
     def list_counting_dirty_namespaces(
         self, *, perceiver_version: str, scalar_perceiver_version: str, limit: int = 200,
@@ -1882,32 +1797,6 @@ class MemoryGraphAdapter:
         perceiver_version: str, keep_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         return self._reversion.retire_scalar_prior_version(
-            namespace, turn_ids, perceiver_rank=perceiver_rank,
-            perceiver_version=perceiver_version, keep_ids=keep_ids)
-
-    def event_prior_version_rows(
-        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
-    ) -> list[dict[str, Any]]:
-        return self._reversion.event_prior_version_rows(
-            namespace, turn_ids, perceiver_rank=perceiver_rank)
-
-    def event_current_version_spans(
-        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
-    ) -> list[dict[str, Any]]:
-        return self._reversion.event_current_version_spans(
-            namespace, turn_ids, perceiver_version=perceiver_version)
-
-    def event_owed_lanes(
-        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
-    ) -> list[dict[str, Any]]:
-        return self._reversion.event_owed_lanes(
-            namespace, turn_ids, perceiver_rank=perceiver_rank)
-
-    def retire_event_prior_version(
-        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
-        perceiver_version: str, keep_ids: list[str] | None = None,
-    ) -> dict[str, Any]:
-        return self._reversion.retire_event_prior_version(
             namespace, turn_ids, perceiver_rank=perceiver_rank,
             perceiver_version=perceiver_version, keep_ids=keep_ids)
 
@@ -2638,32 +2527,6 @@ class MemoryGraphAdapter:
     def list_views(self, *, kind: str | None = None, namespace: str | None = None,
                    limit: int = 100) -> list[dict[str, Any]]:
         return self._views.list_views(kind=kind, namespace=namespace, limit=limit)
-
-    # --- event-lane timeline (Event History Phase 2B.2) ---
-
-    def record_event_timeline(self, **kwargs: Any) -> dict[str, Any]:
-        """Upsert the entity-anchored, predicate/domain event-lane timeline View."""
-        return self._views.record_event_timeline(**kwargs)
-
-    def fetch_event_timeline(self, **kwargs: Any) -> dict[str, Any] | None:
-        """Current event-lane timeline View for (subject_uuid, predicate[, domain])."""
-        return self._views.fetch_event_timeline(**kwargs)
-
-    def list_event_timeline_views(self, **kwargs: Any) -> list[dict[str, Any]]:
-        """Current event-lane timeline Views for one resolved entity."""
-        return self._views.list_event_timeline_views(**kwargs)
-
-    def retire_event_timeline(self, **kwargs: Any) -> bool:
-        """Expire a current event-lane timeline View with no replacement."""
-        return self._views.retire_event_timeline(**kwargs)
-
-    def draw_event_timeline_entries(self, **kwargs: Any) -> dict[str, int]:
-        """Atomically rewrite a View's EVENT_HISTORY_ENTRY edges to an exact ordered assertion set."""
-        return self._views.draw_event_timeline_entries(**kwargs)
-
-    def list_event_timeline_entries(self, **kwargs: Any) -> dict[str, Any]:
-        """Paginated EVENT_HISTORY_ENTRY contributors for one event-lane timeline View."""
-        return self._views.list_event_timeline_entries(**kwargs)
 
     # --- Metric class (operator-only instrumentation; :Metric label, Metric plan A3) ---
 

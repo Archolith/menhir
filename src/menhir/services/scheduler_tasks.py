@@ -33,11 +33,6 @@ from menhir.services.counting_consolidation import (
     run_counting_consolidation,
     sweep_counting_flag_state,
 )
-from menhir.services.event_consolidation import (
-    EventConsolidationConfig,
-    run_event_consolidation,
-    select_event_targets,
-)
 from menhir.services.failure_counter_bridge import sync_failure_counters
 from menhir.services.lane_outcomes import lane_outcomes
 from menhir.services.instability_counter_bridge import sync_instability_counters
@@ -520,7 +515,7 @@ async def sync_verifiers_job(
 
 
 # ---------------------------------------------------------------------------
-# Job: consolidate personal memory (scalar, event and counting lanes)
+# Job: consolidate personal memory (scalar and counting lanes)
 # ---------------------------------------------------------------------------
 
 class _CallCounter:
@@ -558,16 +553,13 @@ async def consolidate_personal_memory(
     scalar_lineage_limit: int = 5000,
     scalar_embed_version: str | None = None,
     scalar_history_enabled: bool = False,
-    enable_event_history: bool = False,
-    event_history_perceiver_version: str = "v1",
-    event_batch_size: int = 500,
     enable_counting: bool = False,
     counting_perceiver_version: str = "v1",
     counting_lease_seconds: int = 900,
     counting_extract_v2: bool = True,
     counting_match: bool = True,
 ) -> dict[str, object]:
-    """Run the scalar, event-history and counting consolidation lanes over their dirty namespaces.
+    """Run the scalar and counting consolidation lanes over their dirty namespaces.
     Blocking (k-sample LLM + Neo4j) so it runs on a worker thread. Budget-capped and resumable:
     each lane keeps its own watermark. (The consolidation counter lane was removed 2026-10-28; see
     branch archive/consolidation-counter-2026-10-28.)"""
@@ -581,9 +573,6 @@ async def consolidate_personal_memory(
         "scalar_perceiver_version": scalar_state_perceiver_version if enable_scalar_state else None,
         "scalar_threshold": scalar_threshold if enable_scalar_state else None,
     }
-    if enable_event_history:
-        pass_details["event_history"] = True
-        pass_details["event_perceiver_version"] = event_history_perceiver_version
     # Counting only runs with scalars on; off keeps the pass payload byte-identical.
     enable_counting = bool(enable_counting and enable_scalar_state)
     if enable_counting:
@@ -603,18 +592,6 @@ async def consolidate_personal_memory(
             graph_adapter,
             namespaces=namespaces,
             perceiver_version=scalar_state_perceiver_version,
-            max_namespaces=max_namespaces,
-        )
-
-    # Event-history backfill selects its OWN dirty set (independent, version-stamped
-    # :EventConsolidationWatermark cursor). An explicit `namespaces` override applies to all paths;
-    # otherwise event discovery returns the event-dirty namespaces bounded by max_namespaces.
-    event_targets: "list[str] | None" = None
-    if enable_event_history:
-        event_targets = await select_event_targets(
-            graph_adapter,
-            namespaces=namespaces,
-            perceiver_version=event_history_perceiver_version,
             max_namespaces=max_namespaces,
         )
 
@@ -662,7 +639,7 @@ async def consolidate_personal_memory(
         result: dict[str, object] = {"llm_calls": counting_llm.calls}
 
         # Scalar consolidation is independently dirty-tracked but shares this run's counting LLM,
-        # so the configured budget remains global across the scalar, event and counting phases.
+        # so the configured budget remains global across the scalar and counting phases.
         if enable_scalar_state:
             scalar_start_calls = counting_llm.calls
             result.update(
@@ -703,22 +680,7 @@ async def consolidate_personal_memory(
             # Keys only when the sweep did something, so the counting-off payload is unchanged.
             if any(sweep.values()):
                 result.update(sweep)
-        # Event-history consolidation is independently dirty-tracked but shares this run's counting
-        # LLM, so the configured budget remains global across scalar, counting, and event phases.
-        if enable_event_history:
-            result.update(
-                run_event_consolidation(
-                    graph_adapter,
-                    event_targets=event_targets or [],
-                    counting_llm=counting_llm,
-                    call_budget=call_budget,
-                    config=EventConsolidationConfig(
-                        perceiver_version=event_history_perceiver_version,
-                        batch_size=event_batch_size,
-                    ),
-                )
-            )
-        # The counting lane builds on scalars: it runs after the scalar and event phases, only over
+        # The counting lane builds on scalars: it runs after the scalar phase, only over
         # turns the scalar cursor has passed, and shares the budget (scalars first, counting last).
         # Off: no calls, no counting watermark, no counting_* result keys.
         if enable_counting:
@@ -752,10 +714,8 @@ async def consolidate_personal_memory(
         # namespaces this pass covered, after their lanes (#170 item 5). A failure is logged and the
         # receipts stay claimable; it never fails the pass. Key present only when work was claimed.
         run_repairs = getattr(graph_adapter, "run_view_projection_repairs", None)
-        repair_namespaces = sorted({str(n) for n in [*(namespaces or []), *(scalar_targets or []),
-                                                     *(event_targets or [])] if n})
-        if (enable_scalar_state or enable_event_history) and repair_namespaces \
-                and callable(run_repairs):
+        repair_namespaces = sorted({str(n) for n in [*(namespaces or []), *(scalar_targets or [])] if n})
+        if enable_scalar_state and repair_namespaces and callable(run_repairs):
             try:
                 repairs = run_repairs(repair_namespaces, owner_id=f"consolidation:{uuid4().hex}",
                                       scalar_history_enabled=scalar_history_enabled)
@@ -769,15 +729,14 @@ async def consolidate_personal_memory(
                                 "lost_claim")
                 }
         # Refresh the shared call count here so API callers see the total work actually spent;
-        # otherwise a scalar/event-only run reports zero calls even after consuming k samples.
+        # otherwise a scalar-only run reports zero calls even after consuming k samples.
         result["llm_calls"] = counting_llm.calls
         # Per-lane report (#170 item 4) so one lane's output cannot hide another's inactivity.
-        # Only with scalar or event on; a counting-only pass cannot run (counting needs scalars).
-        if enable_scalar_state or enable_event_history:
+        # Only with scalar on; a counting-only pass cannot run (counting needs scalars).
+        if enable_scalar_state:
             outcomes = lane_outcomes(
                 result,
-                enabled={"scalar": enable_scalar_state,
-                         "event": enable_event_history, "counting": enable_counting},
+                enabled={"scalar": enable_scalar_state, "counting": enable_counting},
             )
             result["lane_outcomes"] = outcomes
             quiet = sorted(f"{lane}:{flag}" for lane, rep in outcomes.items()

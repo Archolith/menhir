@@ -273,37 +273,6 @@ class ScalarAuthorityVerdict:
 
 
 @dataclass(frozen=True)
-class EventAuthorityVerdict:
-    """Structured first-person event authority, separate from scalar authority.
-
-    Immutable advisory/lead verdict for a conservative ``did I`` event recall query, layered onto
-    ``RecallResult.event_authority_layer`` and distinct from ``ScalarAuthorityVerdict``. ``status``
-    is ``leads`` or ``advisory``. ``gate`` is an explanatory string (``pass`` for a fully grounded
-    non-generic unique lead; selection-failure gates mirror ``EventRecallGate``; ``route`` marks a
-    unique generic selection; ``foundation`` marks an unverified foundation). Selected grounding
-    fields are None when a gate failed (advisory). Never derived from ``learned_at``: authority rests
-    on ``valid_at`` plus exact quote/evidence identity.
-    """
-
-    predicate: str
-    object_key: str | None
-    object_display: str | None
-    valid_at: str | None
-    stated_span: str | None
-    assertion_key: str | None
-    episode_uuid: str | None
-    turn_evidence_uuid: str | None
-    domain: str | None
-    time_basis: str | None
-    status: str  # leads | advisory
-    gate: str  # pass | route | foundation | scope | anchor | ambiguity | time | no_candidate | ...
-    reason: str
-    subject_uuid: str
-    has_foundation: bool
-    kind: str  # latest | predecessor | generic_advisory | anchor_guard
-
-
-@dataclass(frozen=True)
 class SourceMemory:
     """One entry of the additive source-memory section (raw episode content, not fused).
 
@@ -385,9 +354,6 @@ class RecallResult:
     # Phase 4c/7.J: an explicit authority layer, separate from flat ranked candidates. None when the
     # authority feature is disabled or no verdict was produced, preserving flag-off wire output.
     authority_layer: tuple[ScalarAuthorityVerdict, ...] | None = None
-    # First-person event authority, separate from scalar authority. None when the authority feature
-    # is disabled, no verdict was produced, or the query abstained; preserves flag-off wire output.
-    event_authority_layer: tuple[EventAuthorityVerdict, ...] | None = None
     # Source-memory lane: additive section of raw episode
     # memories next to `results`, oldest first. None when the lane is off or failed;
     # `results`/`candidates_evaluated` are identical either way.

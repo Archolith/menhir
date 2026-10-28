@@ -105,14 +105,11 @@ class MaintenanceScheduler:
     personal_memory_interval_s: float = 300.0
     personal_memory_llm: Callable[[str, str], str] | None = None
     personal_memory_k: int = 3
-    event_history_enabled: bool = False
     counting_enabled: bool = False
     counting_perceiver_version: str = "v1"
     counting_extract_v2: bool = True
     counting_match: bool = True
     counting_lease_seconds: int = 900
-    event_history_perceiver_version: str = "v1"
-    event_history_batch_size: int = 500
     personal_memory_call_budget: int | None = None
     # ScalarStateView typed-scalar shadow path (Piece C.4.3), gated inside the same consolidation job.
     # When on, the job runs typed-scalar extract -> gate -> bind -> persist -> rebuild over its own
@@ -202,7 +199,7 @@ class MaintenanceScheduler:
                 interval_s=self.source_embedding_repair_interval_s
             )
         if (
-            (self.event_history_enabled or self.scalar_state_enabled or self.counting_enabled)
+            (self.scalar_state_enabled or self.counting_enabled)
             and self.personal_memory_llm is not None
         ):
             self._jobs["consolidate_personal_memory"] = _JobState(interval_s=self.personal_memory_interval_s)
@@ -923,14 +920,11 @@ class MaintenanceScheduler:
             scalar_threshold=self.scalar_threshold,
             scalar_embed_version=self.experience_embed_version,
             scalar_history_enabled=self.scalar_history_enabled,
-            enable_event_history=self.event_history_enabled,
             enable_counting=self.counting_enabled,
             counting_perceiver_version=self.counting_perceiver_version,
             counting_extract_v2=self.counting_extract_v2,
             counting_match=self.counting_match,
             counting_lease_seconds=self.counting_lease_seconds,
-            event_history_perceiver_version=self.event_history_perceiver_version,
-            event_batch_size=self.event_history_batch_size,
         )
 
     async def _make_consolidate_lifecycle(self) -> dict[str, object]:

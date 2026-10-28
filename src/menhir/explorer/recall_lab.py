@@ -419,7 +419,7 @@ def _trace_row(trace: object | None, uuid: str) -> object | None:
 
 
 def _redact_authority_verdicts(verdicts: list[dict[str, Any]], *, reveal: bool) -> list[dict[str, Any]]:
-    """Mask the free-text fields ScalarAuthorityVerdict/EventAuthorityVerdict carry.
+    """Mask the free-text fields ScalarAuthorityVerdict carries.
 
     ``value`` and each contributor's ``stated_span`` (a quoted evidence excerpt) are memory
     content, not structural metadata -- neither is in privacy.REDACTED_FIELDS (that vocabulary
@@ -445,8 +445,6 @@ def _redact_authority_verdicts(verdicts: list[dict[str, Any]], *, reveal: bool) 
                 v[_audit_key] = MASK
         if "object_display" in v:
             v["object_display"] = redact_text(v["object_display"], reveal=False)
-        # EventAuthorityVerdict carries its own top-level stated_span (no contributors list);
-        # ScalarAuthorityVerdict's is nested per-contributor below. Cover both shapes.
         if "stated_span" in v:
             v["stated_span"] = redact_text(v["stated_span"], reveal=False)
         contributors = v.get("contributors")
@@ -544,11 +542,10 @@ def _serialize_result(result: object, *, reveal: bool) -> dict[str, Any]:
         }
         memories.append(redact_mapping(row, reveal=reveal))
 
-    # Mirrors api/routes.py's RecallResponse.authority_layer/event_authority_layer: dataclass
-    # field names already match ScalarAuthorityVerdictResponse/EventAuthorityVerdictResponse,
+    # Mirrors api/routes.py's RecallResponse.authority_layer: dataclass
+    # field names already match ScalarAuthorityVerdictResponse,
     # so asdict() round-trips cleanly through the same JSON shape /api/recall emits.
     authority_layer = _value(result, "authority_layer")
-    event_authority_layer = _value(result, "event_authority_layer")
     # Source-memory lane (default-off): the additive section, serialized next to the
     # ranked results exactly as /api/recall emits it (field names already match
     # SourceMemoryResponse, so asdict round-trips cleanly).
@@ -571,10 +568,6 @@ def _serialize_result(result: object, *, reveal: bool) -> dict[str, Any]:
         "authority_layer": (
             _redact_authority_verdicts([asdict(v) for v in authority_layer], reveal=reveal)
             if authority_layer else None
-        ),
-        "event_authority_layer": (
-            _redact_authority_verdicts([asdict(v) for v in event_authority_layer], reveal=reveal)
-            if event_authority_layer else None
         ),
         "source_memories": (
             [

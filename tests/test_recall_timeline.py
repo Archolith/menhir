@@ -295,7 +295,6 @@ class _StubAdapter:
         self.subject_candidates: list[dict[str, Any]] = []
         self.scalar_views: list[dict[str, Any]] = []
         self.operator_scalar_views: list[dict[str, Any]] = []
-        self.event_views: list[dict[str, Any]] = []
         self.scalar_entries: dict[str, list[dict[str, Any]]] = {}
         self.page_calls: list[dict[str, Any]] = []
         self.facts_calls: list[dict[str, Any]] = []
@@ -353,10 +352,6 @@ class _StubAdapter:
         self.view_calls.append({"kind": "scalar", "namespace": namespace})
         return self.scalar_views
 
-    def list_event_timeline_views(self, *, subject_uuid, namespace=None):
-        self.view_calls.append({"kind": "event", "namespace": namespace})
-        return self.event_views
-
     def list_scalar_history_entries(self, *, view_uuid, offset=0, limit=16, namespace=None):
         self.history_calls.append({"view_uuid": view_uuid, "offset": offset, "limit": limit,
                                    "namespace": namespace})
@@ -365,11 +360,6 @@ class _StubAdapter:
         end = offset + len(page)
         return {"entries": page, "total": len(entries),
                 "next_offset": end if end < len(entries) else None}
-
-    def list_event_timeline_entries(self, *, view_uuid, offset=0, limit=50, namespace=None):
-        self.history_calls.append({"view_uuid": view_uuid, "offset": offset, "limit": limit,
-                                   "namespace": namespace})
-        return {"entries": [], "total": 0, "next_offset": None}
 
     def touch_retrieved_nodes(self, node_uuids):
         self.touched.extend(node_uuids)

@@ -63,7 +63,6 @@
     <a id='tab-scalar-roles' class='task-tab' role='tab' href='#scalar-roles' aria-controls='scalar-roles' aria-selected='false' tabindex='-1'>Scalar Roles</a>
     <a id='tab-scalar-state' class='task-tab' role='tab' href='#scalar-state' aria-controls='scalar-state' aria-selected='false' tabindex='-1'>Scalar State</a>
     <a id='tab-scalar-history' class='task-tab' role='tab' href='#scalar-history' aria-controls='scalar-history' aria-selected='false' tabindex='-1'>Scalar History</a>
-    <a id='tab-event-history' class='task-tab' role='tab' href='#event-history' aria-controls='event-history' aria-selected='false' tabindex='-1'>Event History</a>
     <a id='tab-memory' class='task-tab' role='tab' href='#memory' aria-controls='memory' aria-selected='false' tabindex='-1'>Memory</a>
     <a id='tab-recall-packet' class='task-tab' role='tab' href='#recall-packet' aria-controls='recall-packet' aria-selected='false' tabindex='-1'>Recall Packet</a>
     <a id='tab-answer-path' class='task-tab' role='tab' href='#answer-path' aria-controls='answer-path' aria-selected='false' tabindex='-1'>Answer Path</a>
@@ -151,7 +150,6 @@
           <strong>{{ role.name }}</strong>
           <span class='scalar-role-question'>{{ role.answers }}</span>
           <span class='scalar-role-purpose'>{{ role.role }}</span>
-          {% if role.id == 'event-history' and role.assertion_count %}<span class='muted'>{{ role.assertion_count }} grounded event assertion{{ '' if role.assertion_count == 1 else 's' }}</span>{% endif %}
         </a>
         {% endfor %}
       </div>
@@ -205,45 +203,6 @@
       {% endfor %}
       {% else %}
       <div class='tab-empty'>No scalar-history view was materialized for this task.</div>
-      {% endif %}
-    </section>
-
-    <section id='event-history' class='graph-block task-tab-section' tabindex='-1'>
-      <div class='scalar-section-title'><div><span class='scalar-role-system'>EVENT SCALAR</span><h3>EventHistory Views <span class='count'>({{ task.live_graph.event_views | length }})</span></h3></div><p>Query-specific answer to <b>“What happened latest or immediately before it?”</b> Events stay separate occurrences; this view never implies current ownership.</p></div>
-      {% if task.live_graph.event_views %}
-      {% for ev in task.live_graph.event_views %}
-      <article class='view-card event'>
-        <div class='view-state'>ORDERED OCCURRENCES</div>
-        <div><b>{{ ev.subject }}</b> · {{ ev.predicate }}{% if ev.domain %} · {{ ev.domain }}{% endif %}</div>
-        <div class='chips'><span>{{ ev.entry_count or (ev.entries | length) }} occurrences</span><span class='derivation-badge event'>event derivation</span><span>{{ ev.contributor_ids | length }} contributors</span></div>
-        {% if ev.entries %}
-        <table class='history-table event-history-table'>
-          <thead><tr><th>source time</th><th>occurrence</th><th>grounding quote</th></tr></thead>
-          <tbody>
-            {% for entry in ev.entries %}
-            <tr><td>{{ entry.when[:16] if entry.when else '—' }}</td><td>{{ entry.what }}{% if entry.object_key %} <span class='muted'>({{ entry.object_key }})</span>{% endif %}</td><td>“{{ entry.quote }}”</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-        {% endif %}
-      </article>
-      {% endfor %}
-      {% else %}
-      <div class='tab-empty'>No event-history view was materialized for this task. That can be correct when the conversation contains state or numeric changes but no admitted completed occurrence.</div>
-      {% endif %}
-
-      {% if task.live_graph.event_assertions %}
-      <details class='event-assertion-details'>
-        <summary>Grounded event assertions ({{ task.live_graph.event_assertions | length }})</summary>
-        {% for event in task.live_graph.event_assertions %}
-        <article class='assertion-card event-assertion {{ "superseded" if event.superseded else "" }}'>
-          <div class='assertion-summary'><b>{{ event.subject }}</b> → <b>{{ event.predicate }}</b> → <strong>{{ event.object_display }}</strong></div>
-          <div class='assertion-meta'><span>{{ event.domain or 'general' }}</span><span>{{ event.evidence_tier }}</span><span>{{ event.time_basis }}</span>{% if event.binding_pending %}<span class='badge warn'>binding pending</span>{% endif %}{% if event.superseded %}<span class='badge warn'>superseded version</span>{% endif %}</div>
-          <div class='assertion-quote'>“{{ event.stated_span }}”</div>
-          <div class='muted'>happened {{ event.valid_at[:16] if event.valid_at else '—' }} · learned {{ event.learned_at[:16] if event.learned_at else '—' }}</div>
-        </article>
-        {% endfor %}
-      </details>
       {% endif %}
     </section>
 
@@ -341,10 +300,9 @@
   <section class='live-section unavailable'>
     <section id='turns' class='graph-block task-tab-section' tabindex='-1'><h3>TurnEvidence</h3><div class='tab-empty'>Live graph data is unavailable for this run.</div></section>
     <section id='assertions' class='graph-block task-tab-section' tabindex='-1'><h3>TypedAssertions</h3><div class='tab-empty'>Live graph data is unavailable for this run.</div></section>
-    <section id='scalar-roles' class='graph-block task-tab-section' tabindex='-1'><h3>Scalar Roles</h3><div class='scalar-role-grid'><div class='scalar-role-card scalar-state'><span class='scalar-role-system'>Scalar State</span><strong>Current Scalar</strong><span>What is true now?</span></div><div class='scalar-role-card scalar-history'><span class='scalar-role-system'>Scalar History</span><strong>Change Scalar</strong><span>How did the value change?</span></div><div class='scalar-role-card event-history'><span class='scalar-role-system'>Event History</span><strong>Event Scalar</strong><span>What happened latest or immediately before it?</span></div></div><div class='tab-empty'>Role definitions are available, but live graph counts and contents are unavailable for this run.</div></section>
+    <section id='scalar-roles' class='graph-block task-tab-section' tabindex='-1'><h3>Scalar Roles</h3><div class='scalar-role-grid'><div class='scalar-role-card scalar-state'><span class='scalar-role-system'>Scalar State</span><strong>Current Scalar</strong><span>What is true now?</span></div><div class='scalar-role-card scalar-history'><span class='scalar-role-system'>Scalar History</span><strong>Change Scalar</strong><span>How did the value change?</span></div></div><div class='tab-empty'>Role definitions are available, but live graph counts and contents are unavailable for this run.</div></section>
     <section id='scalar-state' class='graph-block task-tab-section' tabindex='-1'><h3>ScalarState Views</h3><div class='tab-empty'>Live graph data is unavailable for this run.</div></section>
     <section id='scalar-history' class='graph-block task-tab-section' tabindex='-1'><h3>ScalarHistory Views</h3><div class='tab-empty'>Live graph data is unavailable for this run.</div></section>
-    <section id='event-history' class='graph-block task-tab-section' tabindex='-1'><h3>EventHistory Views</h3><div class='tab-empty'>Live graph data is unavailable for this run.</div></section>
     <section id='memory' class='graph-block task-tab-section' tabindex='-1'><h3>Memory</h3><div class='tab-empty'>Live graph data is unavailable for this run.</div></section>
     <section id='recall-packet' class='graph-block task-tab-section' tabindex='-1'><h3>Typed Recall Packet</h3><div class='tab-empty'>Live graph data is unavailable, so the inspection packet cannot be built.</div></section>
   </section>
@@ -471,7 +429,6 @@
 .scalar-role-card:hover { border-color: var(--accent); background: rgba(56,189,248,0.05); }
 .scalar-role-card.scalar-state { border-top-color: #10b981; }
 .scalar-role-card.scalar-history { border-top-color: #f59e0b; }
-.scalar-role-card.event-history { border-top-color: #a78bfa; }
 .scalar-role-card strong { font-size: 1rem; }
 .scalar-role-topline { display: flex; justify-content: space-between; gap: 0.5rem; align-items: center; }
 .scalar-role-system { color: var(--text-muted); font-size: 0.62rem; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; }
@@ -537,8 +494,6 @@
 .view-card { }
 .view-state { font-size: 0.65rem; text-transform: uppercase; font-weight: 700; margin-bottom: 0.25rem; color: var(--accent); }
 .view-card.advisory .view-state { color: #f59e0b; }
-.view-card.event { border-left: 3px solid #a78bfa; }
-.view-card.event .view-state { color: #a78bfa; }
 .view-value { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.25rem; }
 .chips { display: flex; gap: 0.4rem; font-size: 0.7rem; color: var(--text-muted); flex-wrap: wrap; margin: 0.35rem 0; }
 .history-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin: 0.5rem 0; }
@@ -555,11 +510,6 @@
 .derivation-badge.delta { color: #f59e0b; background: rgba(245,158,11,0.1); }
 .derivation-badge.mixed { color: #58a6ff; background: rgba(88,166,255,0.1); }
 .derivation-badge.unknown { color: #8b949e; background: rgba(139,148,158,0.1); }
-.derivation-badge.event { color: #a78bfa; background: rgba(167,139,250,0.12); }
-.event-assertion-details { margin-top: 0.75rem; border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; }
-.event-assertion-details summary { cursor: pointer; font-size: 0.78rem; font-weight: 650; }
-.event-assertion-details[open] summary { margin-bottom: 0.75rem; }
-.event-assertion.superseded { opacity: 0.72; }
 .badge.warn { color: #f59e0b; background: rgba(245,158,11,0.1); }
 .task-footer { margin-top: 2rem; }
 .back-link { color: var(--accent); text-decoration: none; font-size: 0.9rem; }

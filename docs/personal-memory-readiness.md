@@ -1,7 +1,7 @@
 # Personal-memory lanes: readiness, restart and opt-out
 
-The counter, scalar, event and counting lanes are asynchronous. A user turn is captured
-immediately, but the scalar value, event or count it implies appears in recall only after a
+The scalar and counting lanes are asynchronous. A user turn is captured
+immediately, but the scalar value or count it implies appears in recall only after a
 consolidation pass has read it. This page says when that happens, how to tell that a namespace
 has caught up, what a restart does, and how to turn a lane off and back on. Every lane ships
 off. For the agreement settings and the perceiver-version rules, see `agreement-settings.md`.
@@ -13,11 +13,9 @@ off. For the agreement settings and the perceiver-version rules, see `agreement-
    `turn_evidence_uuid`). The raw memory is recallable straight away, through the ranked items
    and `source_memories`.
 2. **Pass.** A consolidation pass reads each lane's turns past that lane's durable cursor. It
-   writes assertions and rebuilds the affected Views. Lanes run in this order: counter, scalar,
-   event, counting.
-3. **Recall.** Once the View exists, `recall_memories` returns a verdict in `authority_layer` or
-   `event_authority_layer`, and `build_context` renders it as `[Scalar authority: ...]` or
-   `[Event authority: ...]`. A lane's verdicts appear only while both its lane flag and its authority flag are on.
+   writes assertions and rebuilds the affected Views. Lanes run in this order: scalar, counting.
+3. **Recall.** Once the View exists, `recall_memories` returns a verdict in `authority_layer`,
+   and `build_context` renders it as `[Scalar authority: ...]`. A lane's verdicts appear only while both its lane flag and its authority flag are on.
 
 ## When a pass runs
 
@@ -45,7 +43,6 @@ backlog after one.
 `POST /api/phase3/run` reports what is left after its pass:
 - `dirty_after`: read from the removed counter lane's watermark, which nothing advances now; true
   once a namespace has user turns.
-- `event_dirty_after`: event turns left (null when the event lane is off).
 - `counting_dirty_after`: counting turns left (null when counting is off).
 - `scalar_repair_pending`: scalar subjects still waiting for a View rebuild.
 
@@ -84,22 +81,21 @@ well keeps the configuration readable, but is not required.
 | Lane | Lane flag | Authority flag |
 |---|---|---|
 | Scalar | `MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED` | `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED`; history Views: `MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED` |
-| Event | `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED` | `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED` |
 | Counting | `MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED` (needs scalar) | counted Views are hidden from recall when counting is off |
 
 What happens (E2E-18):
 - **The lane stops.** A pass makes no model calls for it, and its stored Views and assertions
   stay as they were. Turning a lane off is not a rollback.
 - **Authority stops with its lane.** Authority is applied only while its lane flag is on
-  (`config/authority_gates.py`), even if the authority flag is left on. The stored Views and
-  events no longer update, so serving them as current would give a changed value its old
+  (`config/authority_gates.py`), even if the authority flag is left on. The stored Views no longer
+  update, so serving them as current would give a changed value its old
   number. Recall serves ordinary memories instead.
 - **Scalar authority default.** The scalar authority flag now defaults on (owner decision
   2026-10-23), but it is inert until the scalar lane is enabled.
 - **With both off,** recall returns ordinary memories and `source_memories`, with no verdicts.
 - **Turning the lane back on.**
-  - **Scalar and event:** they read the turns captured while they were off, from their
-    cursors, and do not re-read turns they had already finished.
+  - **Scalar:** it reads the turns captured while it was off, from its cursor, and does not
+    re-read turns it had already finished.
   - The consolidation counter lane (`MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED`) was removed
     2026-10-28. Menhir ignores the setting; the bench launchers refuse it.
   - The Views catch up in that pass.

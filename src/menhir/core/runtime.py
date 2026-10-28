@@ -394,7 +394,6 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         getattr(settings, "personal_memory_recall_audit_enabled", False)
     )
 
-    event_history_enabled = getattr(settings, "personal_memory_event_history_enabled", False)
     scalar_state_enabled = getattr(settings, "personal_memory_scalar_state_enabled", False)
     counting_enabled = getattr(settings, "personal_memory_counting_enabled", False)
     if counting_enabled and not scalar_state_enabled:
@@ -402,8 +401,7 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
             "personal-memory counting enabled but scalar state is disabled; "
             "counting needs scalar state and will do nothing")
     personal_memory_llm = None
-    if (event_history_enabled or scalar_state_enabled
-            or counting_enabled) and settings is not None:
+    if (scalar_state_enabled or counting_enabled) and settings is not None:
         from menhir.infrastructure.sync_llm import make_sync_chat
 
         pm_model = getattr(settings, "personal_memory_consolidation_chat_model", "") or None
@@ -414,7 +412,7 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
                 settings, "personal_memory_consolidation_disable_reasoning", False)))
         if personal_memory_llm is None:
             logger.warning(
-                "personal-memory consolidation, event history, or scalar state enabled but no sync chat provider; job disabled")
+                "personal-memory consolidation or scalar state enabled but no sync chat provider; job disabled")
 
     scheduler = MaintenanceScheduler(
         ingest_service=built.ingest_service,
@@ -445,14 +443,11 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         verifier_sync_interval_s=getattr(settings, "verifier_sync_interval_s", 300.0),
         verifier_repo=verifier_repo,
         verifier_context=verifier_context,
-        event_history_enabled=event_history_enabled,
         counting_enabled=counting_enabled,
         counting_perceiver_version=getattr(
             settings, "personal_memory_counting_perceiver_version", "v1"),
         counting_lease_seconds=getattr(
             settings, "personal_memory_counting_lease_seconds", 900),
-        event_history_perceiver_version=getattr(
-            settings, "personal_memory_event_history_perceiver_version", "v1"),
         personal_memory_interval_s=getattr(settings, "personal_memory_consolidation_interval_s", 300.0),
         personal_memory_llm=personal_memory_llm,
         personal_memory_k=getattr(settings, "personal_memory_consolidation_k", 3),

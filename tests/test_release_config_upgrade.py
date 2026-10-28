@@ -15,8 +15,6 @@ pytestmark = pytest.mark.unit
 CAMPAIGN_FLAGS = {
     "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED": "personal_memory_scalar_state_enabled",
     "MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED": "personal_memory_scalar_history_enabled",
-    "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED": "personal_memory_event_history_enabled",
-    "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED": "personal_memory_event_history_authority_enabled",
     "MENHIR_FRONTIER_DIVERSITY_GATE": "frontier_diversity_gate",
     "MENHIR_FRONTIER_BELIEF_GATE": "frontier_belief_gate",
     "MENHIR_FRONTIER_EVIDENCE_ANCHOR": "frontier_evidence_anchor",
@@ -164,13 +162,3 @@ def test_documented_campaign_names_are_present_but_commented() -> None:
     for key in CAMPAIGN_FLAGS:
         assert f"# {key}=" in text
         assert key not in active
-
-
-def test_short_event_names_are_not_supported_aliases(
-    monkeypatch: pytest.MonkeyPatch, clean_campaign_env: None,
-) -> None:
-    monkeypatch.setenv("MENHIR_EVENT_HISTORY_ENABLED", "true")
-    monkeypatch.setenv("MENHIR_EVENT_HISTORY_AUTHORITY_ENABLED", "true")
-    settings = MemorySettings.from_env()
-    assert settings.personal_memory_event_history_enabled is False
-    assert settings.personal_memory_event_history_authority_enabled is False

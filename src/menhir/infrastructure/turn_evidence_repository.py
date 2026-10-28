@@ -511,66 +511,6 @@ class TurnEvidenceRepository:
         )
         return [dict(r) for r in rows]
 
-    # ---- event-consolidation discovery (event-history cursor) ----------------------------------
-    # The typed-event path needs an INDEPENDENT, truncation-safe cursor over canonical user
-    # TurnEvidence. It is a SEPARATE label (:EventConsolidationWatermark) keyed by the namespace string
-    # in `group_id` — deliberately NOT :ScalarConsolidationWatermark or :ConsolidationWatermark — so
-    # event consolidation advances without disturbing the scalar/counter cursors. Same truncation-safe
-    # ordering as the scalar path: (recorded_at, turn_id). Only role=user, declarant=user, nonempty
-    # text participates. `valid_at` = occurred_at or recorded_at; the caller advances the cursor with
-    # the monotonic `cursor_at` (recorded_at), never world-time.
-
-    def list_event_dirty_evidence_namespaces(
-        self, *, perceiver_version: str, limit: int = 200,
-    ) -> list[str]:
-        """Namespaces with at least one role=user :TurnEvidence BEYOND the event cursor for
-        `perceiver_version` (never event-consolidated, a different perceiver_version, or evidence past
-        the stored `cursor_at`). Independent of scalar and counter consolidation. agent_quoted is
-        included (#170); event authority demotes a lead founded on it to advisory."""
-        rows = self._neo4j.execute(
-            _cursor_dirty_query("EventConsolidationWatermark"),
-            params={"pv": str(perceiver_version), "limit": int(limit), **_silo_params()},
-        )
-        return [str(r["namespace"]) for r in rows]
-
-    def load_next_event_evidence_batch(
-        self, namespace: str, *, perceiver_version: str, limit: int = 500,
-    ) -> list[dict[str, Any]]:
-        """The next page of role=user :TurnEvidence for a namespace AFTER its event cursor (for
-        `perceiver_version`), oldest first by (recorded_at, turn_id). A cursor stamped by a different
-        perceiver_version is IGNORED (reset). Rows are shaped like the scalar loader: `uuid`=turn_id,
-        `cursor_at`=recorded_at (the monotonic key the caller advances the cursor with),
-        `valid_at`=occurred_at when supplied and recorded_at otherwise, `content`=raw prompt text,
-        plus generic source fields (source_kind, session_id) genuinely useful to future Episode
-        construction. Bounded by `limit` — a full page means more may remain."""
-        rows = self._neo4j.execute(
-            _cursor_batch_query(
-                "EventConsolidationWatermark",
-                extra_return=",\n           t.source_kind AS source_kind,"
-                             "\n           t.session_id AS session_id"),
-            params={"pv": str(perceiver_version), "limit": int(limit),
-                    **_silo_params(namespace)},
-        )
-        return [dict(r) for r in rows]
-
-    def advance_event_cursor(
-        self, namespace: str, *, cursor_at: str, cursor_uuid: str,
-        perceiver_version: str, at: str,
-    ) -> None:
-        """Advance the namespace's event cursor to the last TurnEvidence ACTUALLY processed, keyed on
-        its monotonic `cursor_at` (recorded_at, NOT world-time), stamping the perceiver_version. The
-        watermark is :EventConsolidationWatermark, keyed by the namespace string in `group_id` — fully
-        independent of the scalar/counter cursors. Called after each processed batch so a partial
-        backfill resumes exactly where it stopped. Every spelling key of the silo moves (#170)."""
-        self._neo4j.execute(
-            """
-            UNWIND $keys AS k
-            MERGE (w:EventConsolidationWatermark {group_id: k})
-            """ + advance_keys_cypher(),
-            params={"cursor_at": cursor_at, "cu": cursor_uuid,
-                    "pv": str(perceiver_version), "at": at, **_silo_params(namespace)},
-        )
-
     # ---- counting-consolidation discovery (counting lane, builds on scalars) -------------------
     # The counting lane has its OWN cursor (:CountingConsolidationWatermark, keyed by the namespace
     # string in `group_id`) but may only read turns the scalar lane has FINISHED: a turn is eligible
@@ -943,6 +883,7 @@ class TurnEvidenceRepository:
         """
         namespace_key = normalize_namespace(namespace)
         operation_id = uuid4().hex
+        # legacy event-history data cleanup, kept after the lane was archived so erasure stays complete
         purge_query = """
             MERGE (f:EvidenceNamespaceFence {namespace_key: $namespace_key})
             ON CREATE SET f.generation = 0, f.created_at = datetime()

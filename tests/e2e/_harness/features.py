@@ -154,11 +154,6 @@ FEATURE_REGISTRY: tuple[FeatureFlag, ...] = (
         summary="Scalar history projection. Default on since 2026-10-28 (#399 bucket 3).",
     ),
     _flag(
-        "event_history",
-        "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED",
-        summary="Event-history extraction.",
-    ),
-    _flag(
         "recall_audit",
         "MENHIR_PERSONAL_MEMORY_RECALL_AUDIT_ENABLED",
         summary="Recall audit trail.",
@@ -265,7 +260,6 @@ PRESETS: dict[str, dict[str, bool]] = {
     "research_on": _baseline(
         scalar_state=True,
         scalar_history=True,
-        event_history=True,
     ),
 }
 

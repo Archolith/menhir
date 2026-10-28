@@ -338,13 +338,6 @@ class MemorySettings:
     # See `.agent/archive/plans/menhir-scalar-history-projection-plan.md`.
     # Default on since 2026-10-28 (#399 bucket 3: o500 A/B neutral to slightly positive, no LLM cost).
     personal_memory_scalar_history_enabled: bool = True
-    # Event-history projection settings. All OFF by default; the perceiver version
-    # stamps the projection cursor so bumping it revisits history.
-    personal_memory_event_history_enabled: bool = False
-    # v2 grounds event dates in source evidence (#155); bumping the default resets the projection
-    # cursor, so existing evidence is re-perceived and v2 assertions supersede v1 by strict rank.
-    personal_memory_event_history_perceiver_version: str = "v2"
-    personal_memory_event_history_authority_enabled: bool = False
     personal_memory_counting_enabled: bool = True
     personal_memory_counting_perceiver_version: str = "v1"
     personal_memory_counting_lease_seconds: int = 900
@@ -832,18 +825,6 @@ class MemorySettings:
             personal_memory_consolidation_audit_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_AUDIT_ENABLED", default=str(cls.personal_memory_consolidation_audit_enabled))),
             personal_memory_recall_audit_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_RECALL_AUDIT_ENABLED", default=str(cls.personal_memory_recall_audit_enabled))),
             personal_memory_scalar_history_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED", default=str(cls.personal_memory_scalar_history_enabled))),
-            personal_memory_event_history_enabled=parse_bool_env(_getenv(
-                "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED",
-                default=str(cls.personal_memory_event_history_enabled),
-            )),
-            personal_memory_event_history_perceiver_version=_getenv(
-                "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_PERCEIVER_VERSION",
-                default=cls.personal_memory_event_history_perceiver_version,
-            ),
-            personal_memory_event_history_authority_enabled=parse_bool_env(_getenv(
-                "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED",
-                default=str(cls.personal_memory_event_history_authority_enabled),
-            )),
             personal_memory_counting_enabled=parse_bool_env(_getenv(
                 "MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED",
                 default=str(cls.personal_memory_counting_enabled),

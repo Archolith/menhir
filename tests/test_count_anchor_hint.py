@@ -166,15 +166,3 @@ async def test_query_note_sits_between_authority_and_ranked_memories() -> None:
         candidates_evaluated=1, nodes_touched=1, authority_layer=(verdict,),
         query_hint="anchor says X"))
     assert ctx.index("[Scalar authority: LEADS]") < ctx.index("Query note:") < ctx.index("[Memory 1]")
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_query_note_skipped_when_event_authority_fails_closed() -> None:
-    # The bench returns only the unresolved advisory then; fails if the note is still packed.
-    from tests.test_context_builder import _event_verdict
-    ctx = await _context(_result(
-        query_hint="anchor says X",
-        event_authority_layer=(_event_verdict(status="advisory", gate="anchor", has_foundation=False),)))
-    assert "[Event authority: UNRESOLVED]" in ctx
-    assert "Query note:" not in ctx

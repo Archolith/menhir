@@ -940,53 +940,6 @@ def test_build_memory_services_applies_graphiti_timeout_setting(monkeypatch: pyt
 
 
 @pytest.mark.unit
-def test_build_memory_services_wires_event_history_authority_flag(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from menhir.core.bootstrap import build_memory_services
-    from menhir.config import MemorySettings
-
-    class FakeNeo4jRepository:
-        def __init__(self, **kwargs: object) -> None:
-            return None
-
-    class FakeMemoryGraphAdapter:
-        def __init__(self, neo4j: object, counting_enabled: bool = False,
-                     counting_match_enabled: bool = False) -> None:
-            self.neo4j = neo4j
-
-    class FakeGraphitiClient:
-        @classmethod
-        def from_settings_with_capabilities(cls, settings: object, **kwargs: object) -> object:
-            return SimpleNamespace()
-
-    class FakeLLMAdapter:
-        @classmethod
-        def from_settings(cls, settings: object) -> object:
-            return SimpleNamespace()
-
-    captured: dict[str, object] = {}
-
-    class FakeRecallService:
-        def __init__(self, **kwargs: object) -> None:
-            captured.update(kwargs)
-
-    monkeypatch.setattr("menhir.core.bootstrap.Neo4jRepository", FakeNeo4jRepository)
-    monkeypatch.setattr("menhir.core.bootstrap.MemoryGraphAdapter", FakeMemoryGraphAdapter)
-    monkeypatch.setattr("menhir.core.bootstrap.GraphitiClient", FakeGraphitiClient)
-    monkeypatch.setattr("menhir.core.bootstrap.LLMAdapter", FakeLLMAdapter)
-    monkeypatch.setattr("menhir.core.bootstrap.RecallService", FakeRecallService)
-
-    settings = MemorySettings(
-        personal_memory_event_history_authority_enabled=True,
-        personal_memory_event_history_enabled=True,
-    )
-    build_memory_services(settings=settings)
-
-    assert captured["event_history_authority_enabled"] is True
-
-
-@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_process_pending_episode_marks_failed_when_graphiti_raises(
     stub_memory_graph_adapter: "StubMemoryGraphAdapter",

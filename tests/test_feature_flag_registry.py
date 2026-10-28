@@ -117,6 +117,24 @@ def test_retired_controls_have_no_live_settings_or_readers(evidence) -> None:
         assert key not in FEATURES
 
 
+@pytest.mark.parametrize("name,env", [
+    ("personal_memory_event_history_enabled", "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED"),
+    ("personal_memory_event_history_authority_enabled",
+     "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED"),
+    ("personal_memory_event_history_perceiver_version",
+     "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_PERCEIVER_VERSION"),
+])
+def test_event_history_controls_are_retired(monkeypatch, name, env) -> None:
+    # Fails if an archived event-history control returns as a setting/feature, or loses its
+    # retirement reason (field and env names are both recorded).
+    assert name not in FEATURES and env not in FEATURES
+    assert name not in {f.name for f in fields(MemorySettings)}
+    monkeypatch.setenv(env, "true")
+    assert not hasattr(MemorySettings.from_env(), name)
+    assert RETIRED[name].startswith("2026-10-28: event-history lane archived")
+    assert RETIRED[env] == RETIRED[name]
+
+
 def test_known_interactions_and_observation_switches_are_recorded() -> None:
     for key in ("frontier_belief_gate", "frontier_evidence_anchor"):
         assert FEATURES[key].requires == ()

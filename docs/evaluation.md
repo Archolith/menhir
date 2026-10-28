@@ -27,7 +27,7 @@ separate acceptance tests and evidence.
 
 Several read-side experiments, including oracle ranking, warden and belief gates, and
 other frontier retrieval controls, were neutral or negative in the retained evaluation.
-They remain disabled by default. Typed scalar and event-history authority also remain
+They remain disabled by default. Typed scalar authority also remains
 opt-in until their extraction, replay, namespace, repair, and held-out evaluation gates
 are satisfied.
 

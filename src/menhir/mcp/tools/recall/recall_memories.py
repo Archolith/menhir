@@ -184,9 +184,6 @@ class RecallMemoriesTool(BaseJsonTool):
         if result.get("authority_layer"):
             # Decision-relevant and already bounded by recall (7.J), so compact mode retains it.
             payload["authority_layer"] = result.get("authority_layer")
-        if result.get("event_authority_layer"):
-            # Decision-relevant and already bounded by recall (7.J), so compact mode retains it.
-            payload["event_authority_layer"] = result.get("event_authority_layer")
         if result.get("source_memories"):
             # Decision-relevant (raw source text + its time) and bounded by limit, so compact
             # mode retains it alongside the ranked results.

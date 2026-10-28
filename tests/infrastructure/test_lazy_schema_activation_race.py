@@ -1,8 +1,7 @@
 """Lazy schema activation must tolerate concurrent first use.
 
 Production symptom: 30 concurrent ``POST /api/phase3/run`` on a fresh graph returned HTTP 500 with
-``Neo.ClientError.Schema.EquivalentSchemaRuleAlreadyExists`` from ``activate_scalar_state`` (scalar)
-and, by the same mechanism, ``TypedEventAssertionRepository.activate`` (event history). Neo4j 5 can
+``Neo.ClientError.Schema.EquivalentSchemaRuleAlreadyExists`` from ``activate_scalar_state``. Neo4j 5 can
 raise that for ``CREATE INDEX|CONSTRAINT ... IF NOT EXISTS`` when two transactions create the same
 rule together; the rule exists afterwards, so it is success. The offline tests use a fake driver that
 reproduces the race; the online test fires real concurrent first activations.
@@ -19,7 +18,6 @@ import pytest
 from menhir.infrastructure.schema import get_scalar_state_activation_queries
 from menhir.infrastructure.schema_ddl import execute_schema_statement, schema_rule_name
 from menhir.infrastructure.typed_assertion_repository import TypedAssertionRepository
-from menhir.infrastructure.typed_event_repository import TypedEventAssertionRepository
 
 EQUIVALENT = "Neo.ClientError.Schema.EquivalentSchemaRuleAlreadyExists"
 
@@ -131,13 +129,6 @@ def test_scalar_activation_awaits_only_created_rules_after_ddl() -> None:
     _assert_awaits_exactly_created_rules(neo.queries, neo.params)
 
 
-def test_event_activation_awaits_only_created_rules_after_ddl() -> None:
-    neo = _RecordingNeo4j()
-    TypedEventAssertionRepository(neo).activate()
-    _assert_awaits_exactly_created_rules(neo.queries, neo.params)
-    assert len(neo.queries) - sum("CREATE" in q for q in neo.queries) == 9  # one await per CREATE
-
-
 def test_await_timeout_propagates() -> None:
     class _Neo(_RecordingNeo4j):
         def execute(self, query, params=None, **_):
@@ -146,7 +137,7 @@ def test_await_timeout_propagates() -> None:
             return super().execute(query, params)
 
     with pytest.raises(_FakeClientError):
-        TypedEventAssertionRepository(_Neo()).activate()
+        TypedAssertionRepository(_Neo()).activate_scalar_state()
 
 
 def _run_concurrently(callables) -> list[BaseException]:
@@ -173,13 +164,6 @@ def test_concurrent_first_scalar_activation_succeeds_for_every_caller() -> None:
     assert "typed_assertion_operation_idx" in neo.created
 
 
-def test_concurrent_first_event_activation_succeeds_for_every_caller() -> None:
-    neo = _RacingNeo4j()
-    repos = [TypedEventAssertionRepository(neo) for _ in range(8)]
-    assert _run_concurrently([r.activate for r in repos]) == []
-    assert "typed_event_assertion_lane_idx" in neo.created
-
-
 # ---------------------------------------------------------------------------
 # Online: real Neo4j, real concurrent first activation.
 # ---------------------------------------------------------------------------
@@ -187,16 +171,6 @@ def test_concurrent_first_event_activation_succeeds_for_every_caller() -> None:
 
 def _drop_lazy_rules(neo) -> None:
     names = {n for q in get_scalar_state_activation_queries() if (n := schema_rule_name(q))}
-    names |= {
-        "typed_event_assertion_head_source_key_unique",
-        "typed_event_assertion_key_unique",
-        "typed_event_assertion_id_unique",
-        "event_consolidation_watermark_group_id_unique",
-        "typed_event_assertion_lane_idx",
-        "typed_event_assertion_source_idx",
-        "typed_event_assertion_episode_idx",
-        "typed_event_assertion_valid_at_idx",
-    }
     for name in sorted(names):  # constraints first: DROP INDEX on a constraint-backed name errors
         neo.execute(f"DROP CONSTRAINT {name} IF EXISTS")
     for name in sorted(names):
@@ -215,6 +189,5 @@ def test_online_concurrent_first_activation_does_not_raise(test_neo4j_repo) -> N
         adapters = [MemoryGraphAdapter(test_neo4j_repo) for _ in range(n)]
         errors = _run_concurrently(
             [lambda a=a: ensure_scalar_state_activated(a) for a in adapters]
-            + [a.activate_event_history for a in adapters]
         )
         assert errors == [], [f"{type(e).__name__}: {e}" for e in errors]

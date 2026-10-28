@@ -1193,7 +1193,6 @@ def create_explorer_router() -> Any:
             arm.get("results") or [],
             body.query,
             authority_layer=arm.get("authority_layer") or [],
-            event_authority_layer=arm.get("event_authority_layer") or [],
             max_chars=body.max_chars,
             max_general=body.max_general,
         )
@@ -1208,7 +1207,6 @@ def create_explorer_router() -> Any:
                     "candidates_evaluated": arm.get("candidates_evaluated"),
                     "elapsed_ms": arm.get("elapsed_ms"),
                     "authority_layer": arm.get("authority_layer"),
-                    "event_authority_layer": arm.get("event_authority_layer"),
                 },
                 "packet": packet,
             }

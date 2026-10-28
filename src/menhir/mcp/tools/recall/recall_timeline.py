@@ -75,7 +75,7 @@ class RecallTimelineTool(BaseJsonTool):
     description = (
         "Navigate a recorded-time thread of saved memories on demand: page around an "
         "instant, a window, a memory, or a semantic seed, optionally restricted to one "
-        "subject's thread, with typed scalar/event histories. Use when a question needs "
+        "subject's thread, with typed scalar histories. Use when a question needs "
         "what was known at a time or how a thread unfolded."
     )
 

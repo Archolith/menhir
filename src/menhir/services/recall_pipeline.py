@@ -114,8 +114,6 @@ from menhir.services.recall_policies import (
     _staleness_evidence_for,
 )
 
-from menhir.services.event_history_authority import event_authority_for_query
-from menhir.services.event_history_recall import classify_event_query
 
 
 def _valid_at_sort_key(raw: object) -> float:
@@ -2344,68 +2342,3 @@ async def run_recall(
             if getattr(service, "anchored_count_hint", True) else None
         ),
     )
-
-
-def _event_lead_has_user_foundation(service: Any, verdict: Any) -> bool:
-    """A lead must rest on captured user words (#170). The event lane reads agent_quoted evidence,
-    which is never user foundation, so a lead founded on it (or on a non-user declarant) is
-    demoted to advisory. A failed or empty lookup fails closed. Episode-grounded leads (no
-    turn_evidence_uuid) and adapters without the lookup (test doubles) keep their prior behavior."""
-    turn_id = str(getattr(verdict, "turn_evidence_uuid", None) or "").strip()
-    fetch = getattr(service.graph_adapter, "fetch_turn_evidence", None)
-    if not turn_id or fetch is None:
-        return True
-    try:
-        evidence = fetch(turn_id)
-    except Exception:
-        logger.warning("event lead foundation lookup failed turn=%r; advisory", turn_id,
-                       exc_info=True)
-        return False
-    return bool(evidence) and evidence.get("declarant") == "user" and (
-        str(evidence.get("source_kind") or "") != "agent_quoted")
-
-
-async def apply_event_history_authority_layer(
-    service: Any,
-    result: RecallResult,
-    query: str,
-    namespace: str | None,
-) -> RecallResult:
-    """Layer an advisory/lead event-history authority verdict onto a recall result.
-
-    Recognized conservative first-person event queries only; every other query, and any probe
-    failure, returns *result* unchanged. Kept out of ``event_history_authority`` (the pure verdict
-    layer) because this does repository I/O (``graph_adapter.event_assertions_for_subject_predicate``),
-    which that module explicitly documents itself as never doing.
-    """
-    if not service.event_history_authority_enabled or namespace is None:
-        return result
-    try:
-        stamped = stamped_namespace(namespace)
-        subject_uuid = self_uuid_for_namespace(namespace)
-        # Probe recognition WITHOUT repository I/O: the pure helper over empty assertions returns
-        # None exactly when the query is not a recognized conservative first-person event route
-        # (third-party / nested-attributed / unclassified / malformed). No repo call in that case.
-        probe = event_authority_for_query(
-            query, (), subject_uuid=subject_uuid, namespace=stamped,
-            foundation_verified=False)
-        if probe is None:
-            return result
-        route = classify_event_query(query)
-        assertions = service.graph_adapter.event_assertions_for_subject_predicate(
-            subject_uuid, route.predicate,
-            namespace=stamped, include_superseded=False, materializable_only=True)
-        verdict = event_authority_for_query(
-            query, assertions, subject_uuid=subject_uuid, namespace=stamped,
-            foundation_verified=True)
-        if (verdict is not None and verdict.status == "leads"
-                and not _event_lead_has_user_foundation(service, verdict)):
-            verdict = event_authority_for_query(
-                query, assertions, subject_uuid=subject_uuid, namespace=stamped,
-                foundation_verified=False)
-        if verdict is not None:
-            return replace(result, event_authority_layer=(verdict,))
-    except Exception:
-        logger.exception(
-            "event-history authority probe failed; returning original result")
-    return result

@@ -7,7 +7,7 @@ import sys
 from dataclasses import dataclass
 
 from menhir.config import MemorySettings
-from menhir.config.authority_gates import event_history_authority_effective, scalar_view_authority_effective
+from menhir.config.authority_gates import scalar_view_authority_effective
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.neo4j import Neo4jRepository
 
@@ -71,7 +71,6 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
             lifecycle_service=None,
             scalar_view_authority_enabled=scalar_view_authority_effective(settings),
             scalar_view_echo_drop_enabled=settings.personal_memory_scalar_view_echo_drop_enabled,
-            event_history_authority_enabled=event_history_authority_effective(settings),
             # Same tier view as the backend's recall (core/bootstrap.py), so hook context agrees.
             inferred_self_mode=str(getattr(settings, "inferred_self_mode", "enforce")),
             counting_enabled=counting_enabled,

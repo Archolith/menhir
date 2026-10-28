@@ -165,15 +165,6 @@ class _Scalar:
         return {"complete": True}
 
 
-class _Events:
-    def __init__(self) -> None:
-        self.calls: list[tuple[Any, dict[str, Any]]] = []
-
-    def rebuild_lane(self, lane: Any, **kwargs: Any) -> dict[str, Any]:
-        self.calls.append((lane, kwargs))
-        return {"complete": True}
-
-
 @pytest.mark.unit
 def test_dispatches_scalar_kinds_to_existing_deterministic_apis() -> None:
     store = _Store([
@@ -181,7 +172,7 @@ def test_dispatches_scalar_kinds_to_existing_deterministic_apis() -> None:
         _claim(repair_key="history", view_kind="scalar_history", view_subtype="scalar_history"),
     ])
     scalar = _Scalar()
-    service = ViewProjectionRepairService(store, scalar_rebuilder=scalar, event_rebuilder=_Events())
+    service = ViewProjectionRepairService(store, scalar_rebuilder=scalar)
 
     result = service.run_pending(owner_id="worker-f", limit=5, lease_seconds=60)
 
@@ -196,41 +187,22 @@ def test_dispatches_scalar_kinds_to_existing_deterministic_apis() -> None:
 
 
 @pytest.mark.unit
-def test_dispatches_event_timeline_from_persisted_lane_identity() -> None:
-    claim = _claim(
-        view_kind="timeline",
-        view_subtype="event_timeline",
-        predicate="purchased",
-        domain="collecting",
-    )
-    store = _Store([claim])
-    events = _Events()
-    service = ViewProjectionRepairService(store, scalar_rebuilder=_Scalar(), event_rebuilder=events)
+def test_archived_event_timeline_receipts_are_terminal_not_rebuildable() -> None:
+    # The event-history rebuild was archived: a receipt for an event timeline (by subtype or by
+    # source family, with or without lane fields) is terminal, not a failure and not a rebuild.
+    store = _Store([
+        _claim(repair_key="by-subtype", view_kind="timeline", view_subtype="event_timeline",
+               predicate="purchased", domain="collecting"),
+        _claim(repair_key="by-family", view_kind="timeline", view_subtype="",
+               source_family="typed_event_assertions", predicate=""),
+    ])
+    service = ViewProjectionRepairService(store, scalar_rebuilder=_Scalar())
 
     result = service.run_pending(owner_id="worker-f")
 
-    lane, kwargs = events.calls[0]
-    assert lane.key == ("ns", "subject-1", "purchased", "collecting")
-    assert kwargs == {"source": "view-projection-repair"}
-    assert result["complete"] == 1
-
-
-@pytest.mark.unit
-def test_event_source_family_with_missing_lane_fields_fails_instead_of_becoming_legacy() -> None:
-    claim = _claim(
-        view_kind="timeline",
-        view_subtype="",
-        source_family="typed_event_assertions",
-        predicate="",
-    )
-    store = _Store([claim])
-    service = ViewProjectionRepairService(store, scalar_rebuilder=_Scalar(), event_rebuilder=_Events())
-
-    result = service.run_pending(owner_id="worker-f")
-
-    assert result["failed"] == 1
-    assert "predicate" in store.failed[0][1]
-    assert store.terminal == []
+    assert [key for key, _ in store.terminal] == ["by-subtype", "by-family"]
+    assert result["terminal_not_rebuildable"] == 2
+    assert result["failed"] == 0
 
 
 @pytest.mark.unit
@@ -239,7 +211,7 @@ def test_legacy_timeline_and_admission_audit_are_terminal() -> None:
         _claim(repair_key="timeline", view_kind="timeline", view_subtype="legacy_timeline"),
         _claim(repair_key="audit", view_kind="admission_audit", view_subtype="admission_audit"),
     ])
-    service = ViewProjectionRepairService(store, scalar_rebuilder=_Scalar(), event_rebuilder=_Events())
+    service = ViewProjectionRepairService(store, scalar_rebuilder=_Scalar())
 
     result = service.run_pending(owner_id="worker-f")
 
@@ -250,14 +222,12 @@ def test_legacy_timeline_and_admission_audit_are_terminal() -> None:
 @pytest.mark.unit
 def test_counter_is_retryable_failure_without_fake_deterministic_rebuild() -> None:
     scalar = _Scalar()
-    events = _Events()
     store = _Store([_claim(view_kind="counter", view_subtype="counter")])
-    service = ViewProjectionRepairService(store, scalar_rebuilder=scalar, event_rebuilder=events)
+    service = ViewProjectionRepairService(store, scalar_rebuilder=scalar)
 
     result = service.run_pending(owner_id="worker-f")
 
     assert scalar.calls == []
-    assert events.calls == []
     assert "namespace-wide reperception" in store.failed[0][1]
     assert result["failed"] == 1
 
@@ -270,8 +240,7 @@ def test_incomplete_rebuild_records_actionable_failure_details() -> None:
 
     store = _Store([_claim()])
     service = ViewProjectionRepairService(
-        store, scalar_rebuilder=_IncompleteScalar(), event_rebuilder=_Events()
-    )
+        store, scalar_rebuilder=_IncompleteScalar())
 
     service.run_pending(owner_id="worker-f")
 
@@ -286,8 +255,7 @@ def test_completion_rejected_after_dispatch_is_reported_as_lost_claim() -> None:
 
     store = _LostStore([_claim()])
     service = ViewProjectionRepairService(
-        store, scalar_rebuilder=_Scalar(), event_rebuilder=_Events()
-    )
+        store, scalar_rebuilder=_Scalar())
 
     result = service.run_pending(owner_id="worker-f")
 
@@ -298,7 +266,7 @@ def test_completion_rejected_after_dispatch_is_reported_as_lost_claim() -> None:
 @pytest.mark.unit
 def test_missing_erasure_receipt_identity_fails_closed_and_pass_is_empty_idempotent() -> None:
     store = _Store([_claim(subject_uuid="")])
-    service = ViewProjectionRepairService(store, scalar_rebuilder=_Scalar(), event_rebuilder=_Events())
+    service = ViewProjectionRepairService(store, scalar_rebuilder=_Scalar())
 
     result = service.run_pending(owner_id="worker-f")
 
@@ -307,8 +275,7 @@ def test_missing_erasure_receipt_identity_fails_closed_and_pass_is_empty_idempot
 
     empty = _Store([])
     second = ViewProjectionRepairService(
-        empty, scalar_rebuilder=_Scalar(), event_rebuilder=_Events()
-    ).run_pending(owner_id="worker-f")
+        empty, scalar_rebuilder=_Scalar()).run_pending(owner_id="worker-f")
     assert second == {
         "claimed": 0,
         "complete": 0,

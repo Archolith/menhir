@@ -87,24 +87,6 @@ def _grounding_quote(sources: Iterable[dict[str, Any]]) -> str | None:
     return None
 
 
-def _event_assertion_for_entry(
-    entry: dict[str, Any],
-    assertions: Iterable[dict[str, Any]],
-) -> dict[str, Any] | None:
-    entry_time = _text(entry.get("when"))
-    entry_key = _text(entry.get("object_key"))
-    entry_quote = _text(entry.get("quote"))
-    for assertion in assertions:
-        if entry_time and _text(assertion.get("valid_at")) != entry_time:
-            continue
-        if entry_key and _text(assertion.get("object_key")) != entry_key:
-            continue
-        if entry_quote and _text(assertion.get("stated_span")) != entry_quote:
-            continue
-        return assertion
-    return None
-
-
 def _render_entry(entry: dict[str, Any]) -> list[str]:
     kind = _text(entry.get("kind")) or "content"
     authority = _text(entry.get("authority")) or "context"
@@ -277,89 +259,6 @@ def build_typed_recall_packet(live_graph: dict[str, Any]) -> dict[str, Any]:
                     "sources": sources,
                 }
             )
-
-    event_assertions = list(live_graph.get("event_assertions") or [])
-    covered_event_keys: set[str] = set()
-    for view in live_graph.get("event_views") or []:
-        if not view.get("current"):
-            continue
-        contributor_ids = [
-            _text(value) for value in view.get("contributor_ids") or [] if _text(value)
-        ]
-        for index, entry in enumerate(view.get("entries") or []):
-            assertion = _event_assertion_for_entry(entry, event_assertions)
-            if assertion is None and index < len(contributor_ids):
-                assertion = next(
-                    (
-                        candidate
-                        for candidate in event_assertions
-                        if _text(candidate.get("assertion_key")) == contributor_ids[index]
-                    ),
-                    None,
-                )
-            assertion = assertion or {}
-            assertion_key = _text(assertion.get("assertion_key"))
-            if assertion_key:
-                covered_event_keys.add(assertion_key)
-            source_ids = [
-                source_id
-                for source_id in (
-                    _text(assertion.get("id")),
-                    assertion_key,
-                    _text(assertion.get("evidence_id")),
-                    _text(assertion.get("turn_evidence_id")),
-                )
-                if source_id
-            ]
-            section_entries["completed_events"].append(
-                {
-                    "id": f"{_text(view.get('id'))}:{index}",
-                    "kind": "event_history",
-                    "authority": "completed",
-                    "derivation": "event",
-                    "subject": _text(view.get("subject")),
-                    "attribute": _text(view.get("predicate")),
-                    "scope": _text(view.get("domain")),
-                    "value": _text(entry.get("what") or assertion.get("object_display")),
-                    "valid_at": entry.get("when") or assertion.get("valid_at"),
-                    "learned_at": assertion.get("learned_at"),
-                    "source_quote": _text(
-                        entry.get("quote") or assertion.get("stated_span")
-                    )
-                    or None,
-                    "source_ids": source_ids,
-                }
-            )
-
-    for assertion in event_assertions:
-        assertion_key = _text(assertion.get("assertion_key"))
-        if assertion.get("superseded") or assertion_key in covered_event_keys:
-            continue
-        section_entries["completed_events"].append(
-            {
-                "id": _text(assertion.get("id")),
-                "kind": "event_assertion",
-                "authority": "completed",
-                "derivation": "event",
-                "subject": _text(assertion.get("subject")),
-                "attribute": _text(assertion.get("predicate")),
-                "scope": _text(assertion.get("domain")),
-                "value": _text(assertion.get("object_display")),
-                "valid_at": assertion.get("valid_at"),
-                "learned_at": assertion.get("learned_at"),
-                "source_quote": _text(assertion.get("stated_span")) or None,
-                "source_ids": [
-                    source_id
-                    for source_id in (
-                        _text(assertion.get("id")),
-                        assertion_key,
-                        _text(assertion.get("evidence_id")),
-                        _text(assertion.get("turn_evidence_id")),
-                    )
-                    if source_id
-                ],
-            }
-        )
 
     seen_content: set[tuple[str, str, str, str]] = set()
     for item in live_graph.get("memory_inventory") or []:

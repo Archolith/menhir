@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from menhir.domain.event_history import EventLane
 from menhir.infrastructure.view_projection_repair import ViewProjectionRepairClaim
 
 
@@ -41,10 +40,6 @@ class ScalarProjectionRebuilder(Protocol):
     ) -> dict[str, Any]: ...
 
 
-class EventProjectionRebuilder(Protocol):
-    def rebuild_lane(self, lane: EventLane, *, source: str = "event-history") -> dict[str, Any]: ...
-
-
 class ViewProjectionRepairService:
     """Claim, dispatch, and conditionally finalize one bounded queue pass."""
 
@@ -55,11 +50,9 @@ class ViewProjectionRepairService:
         store: RepairStore,
         *,
         scalar_rebuilder: ScalarProjectionRebuilder,
-        event_rebuilder: EventProjectionRebuilder,
     ) -> None:
         self._store = store
         self._scalar = scalar_rebuilder
-        self._events = event_rebuilder
 
     def run_pending(
         self,
@@ -127,29 +120,11 @@ class ViewProjectionRepairService:
                 return self._rebuild_outcome(result)
 
             if kind == "timeline":
-                event_lane = (
-                    claim.view_subtype == "event_timeline"
-                    or claim.source_family == "typed_event_assertions"
-                    or bool(claim.predicate)
+                return (
+                    "terminal_not_rebuildable",
+                    "timeline has no deterministic source-log rebuild API "
+                    "(the event-history rebuild was archived)",
                 )
-                if claim.view_subtype == "legacy_timeline" or not event_lane:
-                    return (
-                        "terminal_not_rebuildable",
-                        "legacy timeline has no deterministic source-log rebuild API",
-                    )
-                missing = self._missing(claim, "view_key", "subject_uuid", "predicate")
-                if missing:
-                    return "failed", self._missing_receipt_error(missing)
-                result = self._events.rebuild_lane(
-                    EventLane(
-                        subject_uuid=claim.subject_uuid,
-                        predicate=claim.predicate,
-                        namespace=claim.namespace,
-                        domain=claim.domain or None,
-                    ),
-                    source="view-projection-repair",
-                )
-                return self._rebuild_outcome(result)
 
             if kind == "counter":
                 return (

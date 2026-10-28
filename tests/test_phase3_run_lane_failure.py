@@ -16,7 +16,6 @@ def _client(graph_adapter) -> TestClient:
     settings = SimpleNamespace(
         personal_memory_scalar_state_enabled=True,
         personal_memory_counting_enabled=True,
-        personal_memory_event_history_enabled=False,
     )
     runtime_ctx = SimpleNamespace(
         built=SimpleNamespace(settings=settings, graph_adapter=graph_adapter),
@@ -74,26 +73,25 @@ def test_counting_failure_inside_consolidation_is_reported_not_ok():
         {"lane": "counting", "namespaces": ["ns-bench"], "failed": 1}]
 
 
-def test_event_failure_is_reported_not_ok():
-    consolidate = AsyncMock(return_value={"event_namespaces_failed": 2})
+def test_scalar_failure_inside_consolidation_is_reported_not_ok():
+    consolidate = AsyncMock(return_value={"scalar_namespaces_failed": 2})
     resp = _post(_client(_adapter()), consolidate)
     data = resp.json()
     assert data["ok"] is False
     assert data["failed_lanes"] == [
-        {"lane": "event", "namespaces": ["ns-bench"], "failed": 2}]
+        {"lane": "scalar", "namespaces": ["ns-bench"], "failed": 2}]
 
 
 def test_clean_run_is_ok_and_counter_shape_unchanged():
     consolidate = AsyncMock(return_value={
         "namespaces_dirty": 1, "namespaces_processed": 1, "counting_namespaces_failed": 0,
-        "counting_namespaces_processed": 1, "event_namespaces_failed": 0})
+        "counting_namespaces_processed": 1, "scalar_namespaces_failed": 0})
     resp = _post(_client(_adapter()), consolidate)
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True
     assert data["failed_lanes"] == []
     assert data["counting_namespaces_failed"] == 0
-    assert data["event_namespaces_failed"] == 0
     assert data["counting_namespaces_processed"] == 1
 
 

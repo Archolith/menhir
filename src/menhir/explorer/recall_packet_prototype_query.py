@@ -263,7 +263,6 @@ def build_query_filtered_recall_packet(
     query: str,
     *,
     authority_layer: Iterable[dict[str, Any]] = (),
-    event_authority_layer: Iterable[dict[str, Any]] = (),
     max_chars: int = DEFAULT_QUERY_PACKET_MAX_CHARS,
     max_general: int = 4,
 ) -> dict[str, Any]:
@@ -284,8 +283,7 @@ def build_query_filtered_recall_packet(
     )
     retrieved_ids = {_text(row.get("uuid")) for row in results if _text(row.get("uuid"))}
     scalar_authority_ids = _authority_ids(authority_layer)
-    event_authority_ids = _authority_ids(event_authority_layer)
-    selected_ids = retrieved_ids | scalar_authority_ids | event_authority_ids
+    selected_ids = retrieved_ids | scalar_authority_ids
     source = _section_map(full_packet)
 
     current = [

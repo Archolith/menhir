@@ -7,8 +7,8 @@ minted MEMBER_OF edges into an entity named "Reminder", which is exactly the sil
 docstring's cost model forbids.
 
 Chosen fix: **(a) implement the asserted guard.** A closed, conservative verb allowlist
-(`_LIST_VERBS`) matched at word boundaries, the same style as `_ACQUISITION_VERBS` in
-services/event_history_recall.py. No stemming, no synonyms, no part-of-speech call. One verb-bearing
+(`_LIST_VERBS`) matched at word boundaries, the same style as the acquisition-verb
+allowlists elsewhere. No stemming, no synonyms, no part-of-speech call. One verb-bearing
 item refuses the WHOLE block. (b) was not chosen because the positive controls -- genuine NAMED
 lists -- pass without any exceptions, so a conservative allowlist is safe here.
 """

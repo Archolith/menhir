@@ -411,38 +411,16 @@ class TestBackendRoundTrip:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_recall_omits_none_event_authority_layer(self, backend_client):
-        # Flag-off wire shape: when recall returns no event verdict, the structured
-        # event_authority_layer must be omitted exactly like the scalar authority_layer.
+    async def test_recall_omits_none_authority_layer(self, backend_client):
+        # Flag-off wire shape: when recall returns no scalar verdict, the structured
+        # authority_layer is omitted.
         bc, ctx = backend_client
         ctx.built.recall_service.recall = AsyncMock(return_value={
             "query": "test", "preset": "knowledge", "results": [],
-            "candidates_evaluated": 0,
-            "authority_layer": None, "event_authority_layer": None,
+            "candidates_evaluated": 0, "authority_layer": None,
         })
         result = await bc.recall("test query")
         assert "authority_layer" not in result
-        assert "event_authority_layer" not in result
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_recall_retains_event_authority_layer_verdict(self, backend_client):
-        # Flag-on wire shape: a real event verdict must be preserved through serialization.
-        bc, ctx = backend_client
-        verdict = {
-            "predicate": "acquired", "object_key": "notebook-b",
-            "valid_at": "2026-02-05T00:00:00Z", "status": "leads",
-            "gate": "pass", "reason": "unique grounded lead",
-            "subject_uuid": "self", "has_foundation": True, "kind": "latest",
-        }
-        ctx.built.recall_service.recall = AsyncMock(return_value={
-            "query": "test", "preset": "knowledge", "results": [],
-            "candidates_evaluated": 0,
-            "event_authority_layer": (verdict,),
-        })
-        result = await bc.recall("test query")
-        assert result["event_authority_layer"][0]["status"] == "leads"
-        assert result["event_authority_layer"][0]["object_key"] == "notebook-b"
 
     @pytest.mark.unit
     @pytest.mark.asyncio

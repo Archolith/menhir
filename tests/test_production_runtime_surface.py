@@ -304,15 +304,7 @@ async def test_candidate_recall_forces_access_updates_off(monkeypatch) -> None:
         observed.update(kwargs)
         return object()
 
-    async def identity_layer(service, result, query, namespace):
-        return result
-
     monkeypatch.setattr(recall_module, "run_recall", fake_recall)
-    monkeypatch.setattr(
-        recall_module,
-        "apply_event_history_authority_layer",
-        identity_layer,
-    )
     service = RecallService(
         graphiti_client=object(),
         graph_adapter=object(),

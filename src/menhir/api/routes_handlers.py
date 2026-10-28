@@ -81,27 +81,13 @@ async def phase3_run_impl(
         scalar_embed_version=view_embedder_version(settings),
         scalar_history_enabled=getattr(
             settings, "personal_memory_scalar_history_enabled", False),
-        enable_event_history=getattr(
-            settings, "personal_memory_event_history_enabled", False),
         enable_counting=getattr(settings, "personal_memory_counting_enabled", False),
         counting_perceiver_version=getattr(
             settings, "personal_memory_counting_perceiver_version", "v1"),
         counting_lease_seconds=getattr(
             settings, "personal_memory_counting_lease_seconds", 900),
-        event_history_perceiver_version=getattr(
-            settings, "personal_memory_event_history_perceiver_version", "v1"),
-        event_batch_size=getattr(
-            settings, "personal_memory_event_history_batch_size", 500),
     )
     dirty_after = ns in await asyncio.to_thread(adapter.list_dirty_namespaces, limit=500)
-    event_dirty_after = None
-    if getattr(settings, "personal_memory_event_history_enabled", False):
-        event_dirty_after = bool(await asyncio.to_thread(
-            adapter.load_next_event_evidence_batch,
-            ns,
-            perceiver_version=getattr(settings, "personal_memory_event_history_perceiver_version", "v1"),
-            limit=1,
-        ))
     counting_dirty_after = None
     if (getattr(settings, "personal_memory_counting_enabled", False)
             and getattr(settings, "personal_memory_scalar_state_enabled", False)):
@@ -129,14 +115,11 @@ async def phase3_run_impl(
         llm_calls=int(result.get("llm_calls", 0) or 0),
         counter_enabled=False,
         scalar_llm_calls=int(result.get("scalar_llm_calls", 0) or 0),
-        event_dirty_after=event_dirty_after,
         scalar_enabled=bool(getattr(settings, "personal_memory_scalar_state_enabled", False)),
         scalar_namespaces_processed=int(result.get("scalar_namespaces_processed", 0) or 0),
         scalar_states_written=int(result.get("scalar_states_written", 0) or 0),
         scalar_advisory=int(result.get("scalar_advisory", 0) or 0),
         scalar_repair_pending=int(result.get("scalar_repair_pending", 0) or 0),
-        event_history_enabled=bool(
-            getattr(settings, "personal_memory_event_history_enabled", False)),
         counting_enabled=bool(getattr(settings, "personal_memory_counting_enabled", False)),
         counting_namespaces_processed=int(
             result.get("counting_namespaces_processed", 0) or 0),
@@ -159,16 +142,6 @@ async def phase3_run_impl(
         counting_decided_swapped=result.get("counting_decided_swapped"),
         counting_decided_deferred=result.get("counting_decided_deferred"),
         counting_gate_dropped=result.get("counting_gate_dropped"),
-        event_namespaces_processed=int(
-            result.get("event_namespaces_processed", 0) or 0),
-        event_namespaces_failed=int(
-            result.get("event_namespaces_failed", 0) or 0),
-        event_assertions_recorded=int(
-            result.get("event_assertions_recorded", 0) or 0),
-        event_assertions_created=int(
-            result.get("event_assertions_created", 0) or 0),
-        event_views_rebuilt=int(result.get("event_views_rebuilt", 0) or 0),
-        event_llm_calls=int(result.get("event_llm_calls", 0) or 0),
         lane_outcomes=result.get("lane_outcomes"),
     )
 

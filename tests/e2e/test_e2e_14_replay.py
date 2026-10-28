@@ -2,14 +2,13 @@
 
 A host hook that fires twice for one prompt (same ``prompt_id``), a user who genuinely says the
 same thing again (a new ``prompt_id``), a Phase 3 pass with nothing new to read, and a restart
-with every perceiver version bumped so the scalar, event and counting lanes read every turn
+with every perceiver version bumped so the scalar and counting lanes read every turn
 again. None of these may duplicate a claim or move a View.
 """
 
 from __future__ import annotations
 
 import json
-import re
 from uuid import uuid4
 
 import pytest
@@ -30,44 +29,28 @@ from tests.e2e._harness.phase3 import (
     run_phase3,
     scalar_views,
 )
-from tests.e2e._harness.scripted_provider import Call, Rule, Script, scripted_model
+from tests.e2e._harness.scripted_provider import Rule, Script, scripted_model
 from tests.e2e._harness.stack import graph_query
 
 pytestmark = [pytest.mark.e2e, pytest.mark.timeout(1800)]
 
-EVENT_PROMPT = "extract COMPLETED ACQUISITION EVENTS only"
-_EVENT_LINE = re.compile(r"^\[(\d+)\] (.*)$", re.MULTILINE)
-
 LANES_ON = {
     "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED": "true",
-    "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED": "true",
     "MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED": "true",
 }
 BUMPED = {
     "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_PERCEIVER_VERSION": "v3",
-    "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_PERCEIVER_VERSION": "v3",
     "MENHIR_PERSONAL_MEMORY_COUNTING_PERCEIVER_VERSION": "v2",
 }
-LANES = ("scalar", "event", "counting")
+LANES = ("scalar", "counting")
 
 MUGS = [Obs("I have 12 mugs", {"attribute": "mug_count", "value_kind": "count",
                                "operation": "absolute", "value": 12})]
 GYM = [Obs("I went to the gym", {"attribute": "gym_visit_count", "value_kind": "count",
                                  "operation": "occurrence", "value": 1, "importance": "tracked"})]
-EVENTS = {"I bought a teapot": "teapot"}
 #: The View values every replay must leave in place: the mugs restated, two gym visits.
 EXPECTED_VIEWS = {"gym_visit_count": 2.0, "mug_count": 12.0}
 EXPECTED = sorted(EXPECTED_VIEWS.items())
-
-
-def _event_reply(call: Call) -> str:
-    envelopes = []
-    for index, text in _EVENT_LINE.findall(call.prompt):
-        events = [{"subject": "user", "predicate": "bought", "object": obj, "object_display": "",
-                   "domain": "", "when": "", "stated_span": phrase}
-                  for phrase, obj in EVENTS.items() if phrase.lower() in text.lower()]
-        envelopes.append({"episode": int(index), "events": events})
-    return json.dumps(envelopes)
 
 
 def capture(config: E2EConfig, namespace: str, text: str, *, at: str, prompt_id: str) -> dict:
@@ -89,28 +72,10 @@ def _assertions(config: E2EConfig, namespace: str) -> list[dict]:
     )
 
 
-def _timeline_entries(config: E2EConfig, namespace: str) -> list[dict]:
-    rows = graph_query(
-        config,
-        "MATCH (v:Entity {view_kind: 'timeline'}) WHERE v.group_id = $ns "
-        "AND coalesce(v.view_current, true) AND NOT coalesce(v.retired, false) "
-        "RETURN v.uuid AS uuid, v.view_payload AS payload",
-        ns=namespace,
-    )
-    out = []
-    for row in rows:
-        payload = json.loads(row["payload"]) if row["payload"] else []
-        entries = payload.get("entries", []) if isinstance(payload, dict) else payload
-        out.extend({"view": row["uuid"], **e} for e in entries)
-    return out
-
-
 def _state(config: E2EConfig, namespace: str) -> dict:
     return {
         "views": sorted((v["uuid"], v["attribute"], str(v["value"]))
                         for v in scalar_views(config, namespace)),
-        "timeline": sorted((e["view"], e.get("object_key"), e.get("when"))
-                           for e in _timeline_entries(config, namespace)),
     }
 
 
@@ -135,9 +100,8 @@ async def test_e2e_14_replay(
 ) -> None:
     namespace = f"e2e14r-{uuid4().hex[:12]}"
     script = Script([Rule("scalar", SCALAR_PROMPT, envelope_reply(MUGS)),
-                     Rule("counting", COUNTING_PROMPT, envelope_reply(GYM)),
-                     Rule("event", EVENT_PROMPT, _event_reply)])
-    mugs, teapot = "I have 12 mugs in the cupboard.", "I bought a teapot at the market."
+                     Rule("counting", COUNTING_PROMPT, envelope_reply(GYM))])
+    mugs = "I have 12 mugs in the cupboard."
     gym, gym_again = "Today I went to the gym after work.", "Saturday I went to the gym with Sam."
     with scripted_model(script) as model:
         env = {**feature_env, **model.env, **LANES_ON}
@@ -145,8 +109,6 @@ async def test_e2e_14_replay(
             fired = {
                 "mugs": [capture(e2e_config, namespace, mugs, at="2026-07-01T10:00:00+00:00",
                                  prompt_id="p-mugs") for _ in range(2)],
-                "teapot": [capture(e2e_config, namespace, teapot, at="2026-07-02T10:00:00+00:00",
-                                   prompt_id="p-teapot") for _ in range(2)],
                 "gym": [capture(e2e_config, namespace, gym, at="2026-07-04T18:00:00+00:00",
                                 prompt_id="p-gym") for _ in range(2)],
             }
@@ -158,7 +120,6 @@ async def test_e2e_14_replay(
             async with stdio_session(e2e_config, e2e_installed.venv_python, lane_evidence,
                                      feature_env=env) as client:
                 for text, turn in ((mugs, fired["mugs"][0]["turn_id"]),
-                                   (teapot, fired["teapot"][0]["turn_id"]),
                                    (gym, fired["gym"][0]["turn_id"]),
                                    (mugs, again["turn_id"]),
                                    (gym_again, second_gym["turn_id"])):
@@ -167,7 +128,6 @@ async def test_e2e_14_replay(
             run_phase3(e2e_config, lane_evidence, namespace, label="phase3-first")
             after_first = _state(e2e_config, namespace)
             rows_first = _assertions(e2e_config, namespace)
-            entries_first = _timeline_entries(e2e_config, namespace)
             calls_first = {name: len(script.calls(name)) for name in LANES}
 
             run_phase3(e2e_config, lane_evidence, namespace, label="phase3-idle")
@@ -180,15 +140,12 @@ async def test_e2e_14_replay(
             run_phase3(e2e_config, lane_evidence, namespace, label="phase3-bumped")
             after_bump = _state(e2e_config, namespace)
             rows_bump = _assertions(e2e_config, namespace)
-            entries_bump = _timeline_entries(e2e_config, namespace)
             calls_bump = {name: len(script.calls(name)) for name in LANES}
 
     lane_evidence.attach("captures.json", json.dumps(
         {**fired, "again": again, "second_gym": second_gym}, indent=2))
     lane_evidence.attach("assertions.json", json.dumps({"first": rows_first, "bumped": rows_bump},
                                                        indent=2, default=str))
-    lane_evidence.attach("timeline.json", json.dumps({"first": entries_first, "bumped": entries_bump},
-                                                     indent=2, default=str))
 
     lane_evidence.record(
         "double_fired_capture_is_one_turn",
@@ -203,10 +160,8 @@ async def test_e2e_14_replay(
     lane_evidence.record(
         "double_fired_turn_yields_one_claim_per_lane",
         passed=all(len(s) == 2 and len(set(s)) == 2 for s in sources.values())
-        and [e.get("object_key") for e in entries_first] == ["teapot"]
         and ("gym_visit_count", 2.0) in _values(after_first),
-        detail={"assertion_sources": sources, "views": _values(after_first),
-                "timeline": [e.get("object_key") for e in entries_first]},
+        detail={"assertion_sources": sources, "views": _values(after_first)},
     )
     lane_evidence.record(
         "genuine_restatement_keeps_one_view",
@@ -228,11 +183,9 @@ async def test_e2e_14_replay(
         passed=all(calls_bump[name] > calls_idle[name] for name in LANES)
         and _values(after_bump) == EXPECTED
         and all(len(rows) == 2 and {r["version"] for r in rows} == {bumped_to[attr]}
-                for attr, rows in current_bumped.items())
-        and [e.get("object_key") for e in entries_bump] == ["teapot"],
+                for attr, rows in current_bumped.items()),
         detail={"calls": calls_bump, "views": after_bump["views"],
-                "current_rows": current_bumped,
-                "timeline": [e.get("object_key") for e in entries_bump]},
+                "current_rows": current_bumped},
     )
     lane_evidence.attach("model-calls.json", script.evidence())
     lane_evidence.record("no_unscripted_model_prompt", passed=not script.unmatched,

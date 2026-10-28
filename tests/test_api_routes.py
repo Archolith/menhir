@@ -114,7 +114,6 @@ def fake_runtime_ctx():
     graph_adapter = SimpleNamespace(
         list_dirty_namespaces=lambda *, limit=500: ["ns-bench"],
         count_turn_evidence=lambda ns: 2,
-        load_next_event_evidence_batch=Mock(return_value=[]),
         list_counters=lambda *, namespace=None, limit=100: [
             {"subject": "movies", "counter": "watchlist", "value": 20,
              "valid_at": "2026-07-01T00:00:00Z"},
@@ -238,31 +237,6 @@ class TestRecall:
 
         assert data["authority_layer"][0]["status"] == "leads"
         assert data["authority_layer"][0]["value"] == 37
-
-    def test_recall_threads_leading_event_authority_verdict(self, client, fake_backend):
-        fake_backend.recall.return_value["event_authority_layer"] = [{
-            "predicate": "acquired", "object_key": "notebook-b",
-            "object_display": "a red notebook", "valid_at": "2026-02-05T00:00:00Z",
-            "stated_span": "I bought a red notebook.", "assertion_key": "a1",
-            "episode_uuid": "ep-1", "turn_evidence_uuid": "te-1",
-            "domain": "acquisition", "time_basis": "explicit", "status": "leads",
-            "gate": "pass", "reason": "unique grounded lead",
-            "subject_uuid": "self", "has_foundation": True, "kind": "latest",
-        }]
-
-        data = client.post(
-            "/api/recall",
-            json={"query": "which notebook did I buy most recently?"},
-        ).json()
-
-        verdict = data["event_authority_layer"][0]
-        assert verdict["status"] == "leads"
-        assert verdict["gate"] == "pass"
-        assert verdict["object_key"] == "notebook-b"
-        assert verdict["valid_at"] == "2026-02-05T00:00:00Z"
-        assert verdict["stated_span"] == "I bought a red notebook."
-        assert verdict["kind"] == "latest"
-        assert verdict["time_basis"] == "explicit"
 
     def test_scalar_authority_contributor_expansion(self, client):
         response = client.get(
@@ -625,7 +599,7 @@ class TestPhase3:
         assert resp.status_code == 200
         assert "enable_counter_state" not in consolidate.await_args.kwargs
         assert consolidate.await_args.kwargs["enable_scalar_state"] is True
-        assert consolidate.await_args.kwargs["enable_event_history"] is False
+        assert "enable_event_history" not in consolidate.await_args.kwargs
 
     def test_run_503_when_no_chat_provider(self, client):
         with patch(
@@ -640,7 +614,7 @@ class TestPhase3:
         resp = client.post("/api/phase3/run", json={"namespace": ""})
         assert resp.status_code == 422
 
-    def test_run_off_event_history_defaults_forwarded_and_metrics_zero(self, client):
+    def test_run_reports_archived_event_history_fields_as_fixed_defaults(self, client):
         consolidate = AsyncMock(return_value={})
         with patch(
             "menhir.infrastructure.sync_llm.make_sync_chat",
@@ -653,11 +627,11 @@ class TestPhase3:
             resp = client.post("/api/phase3/run", json={"namespace": "ns-bench"})
         assert resp.status_code == 200
         kwargs = consolidate.await_args.kwargs
-        assert kwargs["enable_event_history"] is False
-        assert kwargs["event_history_perceiver_version"] == "v1"
-        assert kwargs["event_batch_size"] == 500
+        assert "enable_event_history" not in kwargs
+        assert "event_batch_size" not in kwargs
         data = resp.json()
         assert data["event_history_enabled"] is False
+        assert data["event_dirty_after"] is None
         for key in (
             "event_namespaces_processed",
             "event_namespaces_failed",
@@ -667,43 +641,6 @@ class TestPhase3:
             "event_llm_calls",
         ):
             assert data[key] == 0
-
-    def test_run_event_history_on_forwards_and_reports_bounded_metrics(
-        self, client, fake_runtime_ctx
-    ):
-        fake_runtime_ctx.built.settings.personal_memory_event_history_enabled = True
-        fake_runtime_ctx.built.settings.personal_memory_event_history_perceiver_version = "v9"
-        fake_runtime_ctx.built.settings.personal_memory_event_history_batch_size = 42
-        consolidate = AsyncMock(return_value={
-            "event_namespaces_processed": 3,
-            "event_namespaces_failed": 1,
-            "event_assertions_recorded": 11,
-            "event_assertions_created": 7,
-            "event_views_rebuilt": 2,
-            "event_llm_calls": 4,
-        })
-        with patch(
-            "menhir.infrastructure.sync_llm.make_sync_chat",
-            return_value=lambda prompt, user: "x",
-        ), patch(
-            "menhir.infrastructure.view_embedder.make_view_embedder", return_value=None
-        ), patch(
-            "menhir.services.scheduler_tasks.consolidate_personal_memory", new=consolidate
-        ):
-            resp = client.post("/api/phase3/run", json={"namespace": "ns-bench"})
-        assert resp.status_code == 200
-        kwargs = consolidate.await_args.kwargs
-        assert kwargs["enable_event_history"] is True
-        assert kwargs["event_history_perceiver_version"] == "v9"
-        assert kwargs["event_batch_size"] == 42
-        data = resp.json()
-        assert data["event_history_enabled"] is True
-        assert data["event_namespaces_processed"] == 3
-        assert data["event_namespaces_failed"] == 1
-        assert data["event_assertions_recorded"] == 11
-        assert data["event_assertions_created"] == 7
-        assert data["event_views_rebuilt"] == 2
-        assert data["event_llm_calls"] == 4
 
     def test_status_reports_dirty_and_evidence(self, client):
         resp = client.get("/api/phase3/status", params={"namespace": "ns-bench"})
@@ -895,22 +832,6 @@ def test_rest_bootstrap_context_keeps_lifecycle_state(client, fake_backend):
     assert "not current guidance" in payload["relevant"][0]["lifecycle_note"]
     assert payload["recent"][0]["status"] == "completed"
     assert "not an outstanding obligation" in payload["recent"][0]["lifecycle_note"]
-
-
-@pytest.mark.parametrize("pending", [[], [{"uuid": "unprocessed-evidence"}]])
-def test_phase3_reports_event_watermark_completion(client, fake_runtime_ctx, pending):
-    fake_runtime_ctx.built.settings.personal_memory_event_history_enabled = True
-    fake_runtime_ctx.built.settings.personal_memory_event_history_perceiver_version = "v9"
-    fake_runtime_ctx.built.graph_adapter.load_next_event_evidence_batch.return_value = pending
-    with patch("menhir.infrastructure.sync_llm.make_sync_chat", return_value=lambda *args: "[]"), \
-         patch("menhir.infrastructure.view_embedder.make_view_embedder", return_value=None), \
-         patch("menhir.services.scheduler_tasks.consolidate_personal_memory", new=AsyncMock(return_value={})):
-        response = client.post("/api/phase3/run", json={"namespace": "ns-bench"})
-    assert response.status_code == 200
-    assert response.json()["event_dirty_after"] is bool(pending)
-    fake_runtime_ctx.built.graph_adapter.load_next_event_evidence_batch.assert_called_once_with(
-        "ns-bench", perceiver_version="v9", limit=1,
-    )
 
 
 @pytest.mark.parametrize("show", [False, True])

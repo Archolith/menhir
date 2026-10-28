@@ -15,7 +15,6 @@ from menhir.domain.recall_provenance import provenance_label
 from menhir.domain.recall_visibility import memory_lifecycle_note
 
 from menhir.domain.recall import (
-    EventAuthorityVerdict,
     QueryPreset,
     RecallResult,
     ScoredMemory,
@@ -201,27 +200,6 @@ def _source_time_lines(memory: ScoredMemory) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-#: Gates that represent a failed event selection (no resolved object). Only these gates fail closed;
-#: any other advisory gate is not inferred as unresolved.
-_SELECTION_FAIL_CLOSED_GATES = frozenset(
-    {"anchor", "ambiguity", "time", "scope", "no_candidate"}
-)
-
-
-def _event_selection_failed(verdict: EventAuthorityVerdict) -> bool:
-    """True when an event advisory's selection itself failed to resolve an object.
-
-    Fail-closed applies only to an ``advisory`` whose gate is a selection-failure gate
-    (``anchor``, ``ambiguity``, ``time``, ``scope``, ``no_candidate``). Route/foundation/evidence
-    advisories carry a resolved selection and stay advisory; a future advisory gate that is not a
-    selection failure must not be inferred as unresolved from ``object_key`` alone.
-    """
-    return (
-        verdict.status == "advisory"
-        and verdict.gate in _SELECTION_FAIL_CLOSED_GATES
-    )
-
-
 def _occurrence_contributor_line(contributor: Any) -> str:
     """Occurrence line: the event date when grounded, else only when it was mentioned (never 'valid')."""
     line = f"  - {contributor.relation}: {contributor.stated_span}"
@@ -395,164 +373,83 @@ class ContextBuilderService:
         if not ranked_notice_fits:
             memories = []
 
-        # Fail-closed determination, computed FIRST so it gates scalar authority too. Any event
-        # advisory whose selection itself failed to resolve an object (explicit selection-failure
-        # gates anchor/ambiguity/time/scope/no_candidate) means "did I" cannot be answered from
-        # grounded evidence. We render only the unresolved instruction: current-state scalar
-        # authority, ranked memories, and the supplementary timeline are ALL suppressed as answer
-        # evidence — scalar authority answers the present, not a missing historical anchor, and
-        # would mislead a temporal-before query.
-        fail_closed = any(
-            _event_selection_failed(v)
-            for v in (recall_result.event_authority_layer or ())
-        )
-
         # Phase 4c/7.J: authority is a distinct verdict layer, packed BEFORE ranked memories. The
         # bounded contributors carry relation labels + user wording so the consuming LLM can narrate
         # the transition without re-adjudicating which value is current. Disabled/no-verdict path
-        # adds no lines and preserves the historical context byte-for-byte. Suppressed entirely
-        # when an event verdict failed closed (current-state scalar must not answer a temporal query).
-        if not fail_closed:
-            for verdict in recall_result.authority_layer or ():
-                shown_value = (
-                    f"at least {verdict.value} you mentioned" if verdict.lower_bound
-                    else verdict.value
-                )
-                if verdict.lower_bound:
-                    _uncertain = verdict.count_uncertain
-                    if (
-                        isinstance(_uncertain, (int, float))
-                        and not isinstance(_uncertain, bool)
-                        and _uncertain > 0
-                    ):
-                        shown_value = (
-                            f"at least {verdict.value} you mentioned, plus "
-                            f"{_fmt_count(_uncertain)} more that may be repeats"
-                        )
-                if verdict.kind == "history":
-                    _history_n = (
-                        verdict.contributors_total if verdict.contributors_total > 0
-                        else len(verdict.contributors)
-                    )
-                    heading = (
-                        f"[Scalar authority: {verdict.status.upper()}] {verdict.attribute} "
-                        f"history, {_history_n} entries (history"
-                        + (f", valid {verdict.valid_at}" if verdict.valid_at else "")
-                        + ")"
-                    )
-                else:
-                    heading = (
-                        f"[Scalar authority: {verdict.status.upper()}] {verdict.attribute} = "
-                        f"{shown_value} ({verdict.kind}"
-                        + (f", valid {verdict.valid_at}" if verdict.valid_at else "")
-                        + ")"
-                    )
-                authority_lines = [heading]
-                if verdict.lower_bound:
-                    authority_lines.extend(_count_match_lines(verdict))
-                for contributor in verdict.contributors:
-                    if contributor.operation == "occurrence":
-                        authority_lines.append(_occurrence_contributor_line(contributor))
-                        continue
-                    authority_lines.append(
-                        f"  - {contributor.relation}: {contributor.stated_span} "
-                        f"(valid {contributor.valid_at or 'unknown'})"
-                    )
+        # adds no lines and preserves the historical context byte-for-byte.
+        for verdict in recall_result.authority_layer or ():
+            shown_value = (
+                f"at least {verdict.value} you mentioned" if verdict.lower_bound
+                else verdict.value
+            )
+            if verdict.lower_bound:
+                _uncertain = verdict.count_uncertain
                 if (
-                    verdict.contributors_truncated
-                    and not verdict.contributors
-                    and verdict.contributors_total > 0
-                    and verdict.view_uuid
+                    isinstance(_uncertain, (int, float))
+                    and not isinstance(_uncertain, bool)
+                    and _uncertain > 0
                 ):
-                    authority_lines.append(
-                        f"  - built from {verdict.contributors_total} items; "
-                        f"drill down: get_scalar_view_items(view_uuid={verdict.view_uuid})"
+                    shown_value = (
+                        f"at least {verdict.value} you mentioned, plus "
+                        f"{_fmt_count(_uncertain)} more that may be repeats"
                     )
-                elif verdict.contributors_truncated:
-                    authority_lines.append(
-                        f"  - provenance truncated: {verdict.contributors_total} total; "
-                        f"continue at offset {verdict.next_offset} for View {verdict.view_uuid or 'synthetic'}"
-                    )
-                authority_block = "\n".join(authority_lines)
-                authority_tokens = _tokens_for(authority_block)
-                if running_tokens + authority_tokens > effective_budget:
-                    truncated = True
-                    break
-                lines.append(authority_block)
-                running_tokens += authority_tokens
-
-        # First-person event authority, packed after the scalar authority blocks and before
-        # ranked memories. A fully-grounded verdict is rendered as explicitly authoritative/
-        # preferred while preserving its grounding fields (predicate, selected object display/key,
-        # valid_at, time_basis, domain, exact stated_span quote, episode/TurnEvidence identities,
-        # gate). An advisory whose selection itself failed to resolve an object (selection-failure
-        # gates: anchor/ambiguity/time/scope/no_candidate, i.e. resolution failed) fails closed:
-        # it renders an explicit unresolved instruction and packs NEITHER ranked memories NOR the
-        # supplementary timeline as answer evidence. Route/foundation/evidence advisories carry a
-        # resolved selection, stay advisory, and block only when resolution itself failed.
-        # Disabled/no-verdict path adds no lines and preserves the historical context byte-for-byte.
-        for verdict in recall_result.event_authority_layer or ():
-            if verdict.status == "leads":
+            if verdict.kind == "history":
+                _history_n = (
+                    verdict.contributors_total if verdict.contributors_total > 0
+                    else len(verdict.contributors)
+                )
                 heading = (
-                    f"[Event authority: LEADS (authoritative)] {verdict.predicate} = "
-                    f"{verdict.object_display} (key: {verdict.object_key}, kind {verdict.kind}"
+                    f"[Scalar authority: {verdict.status.upper()}] {verdict.attribute} "
+                    f"history, {_history_n} entries (history"
                     + (f", valid {verdict.valid_at}" if verdict.valid_at else "")
                     + ")"
                 )
-                event_lines = [heading]
-                if verdict.time_basis:
-                    event_lines.append(f"  - time basis: {verdict.time_basis}")
-                if verdict.domain:
-                    event_lines.append(f"  - domain: {verdict.domain}")
-                if verdict.stated_span:
-                    event_lines.append(f'  - source quote: "{verdict.stated_span}"')
-                event_lines.append(
-                    "  - identities: episode "
-                    f"{verdict.episode_uuid or 'unknown'}, turn evidence "
-                    f"{verdict.turn_evidence_uuid or 'unknown'}"
-                )
-                event_lines.append(f"  - gate: {verdict.gate}")
-                event_lines.append(
-                    "  - instruction: prefer the selected object over any conflicting "
-                    "related memory"
-                )
-            elif _event_selection_failed(verdict):
-                heading = (
-                    f"[Event authority: UNRESOLVED] {verdict.predicate} "
-                    f"(kind {verdict.kind})"
-                )
-                event_lines = [heading]
-                event_lines.append(f"  - gate: {verdict.gate}")
-                event_lines.append(f"  - reason: {verdict.reason}")
-                event_lines.append(
-                    "  - instruction: do not infer an answer from ranked memories or "
-                    "timeline; report unresolved"
-                )
             else:
                 heading = (
-                    f"[Event authority: ADVISORY] {verdict.predicate} "
-                    f"(kind {verdict.kind})"
+                    f"[Scalar authority: {verdict.status.upper()}] {verdict.attribute} = "
+                    f"{shown_value} ({verdict.kind}"
+                    + (f", valid {verdict.valid_at}" if verdict.valid_at else "")
+                    + ")"
                 )
-                event_lines = [heading]
-                event_lines.append(f"  - gate: {verdict.gate}")
-                event_lines.append(f"  - reason: {verdict.reason}")
-            event_block = "\n".join(event_lines)
-            event_tokens = _tokens_for(event_block)
-            if running_tokens + event_tokens > effective_budget:
+            authority_lines = [heading]
+            if verdict.lower_bound:
+                authority_lines.extend(_count_match_lines(verdict))
+            for contributor in verdict.contributors:
+                if contributor.operation == "occurrence":
+                    authority_lines.append(_occurrence_contributor_line(contributor))
+                    continue
+                authority_lines.append(
+                    f"  - {contributor.relation}: {contributor.stated_span} "
+                    f"(valid {contributor.valid_at or 'unknown'})"
+                )
+            if (
+                verdict.contributors_truncated
+                and not verdict.contributors
+                and verdict.contributors_total > 0
+                and verdict.view_uuid
+            ):
+                authority_lines.append(
+                    f"  - built from {verdict.contributors_total} items; "
+                    f"drill down: get_scalar_view_items(view_uuid={verdict.view_uuid})"
+                )
+            elif verdict.contributors_truncated:
+                authority_lines.append(
+                    f"  - provenance truncated: {verdict.contributors_total} total; "
+                    f"continue at offset {verdict.next_offset} for View {verdict.view_uuid or 'synthetic'}"
+                )
+            authority_block = "\n".join(authority_lines)
+            authority_tokens = _tokens_for(authority_block)
+            if running_tokens + authority_tokens > effective_budget:
                 truncated = True
                 break
-            lines.append(event_block)
-            running_tokens += event_tokens
-
-        # Fail-closed already determined above (before scalar authority). When it is set, the
-        # event unresolved instruction was rendered and ranked memories are NOT packed as answer
-        # evidence (tempting, but unverified against this selection).
+            lines.append(authority_block)
+            running_tokens += authority_tokens
 
         # Query hint goes after the authority blocks and before the ranked memories: the shape
-        # the #168 replay A/B tested. Skipped when failed closed (no answer evidence to qualify).
+        # the #168 replay A/B tested.
         hint_line = None
         hint_at = len(lines)
-        if recall_result.query_hint and not fail_closed:
+        if recall_result.query_hint:
             candidate = f"Query note: {recall_result.query_hint}"
             hint_tokens = _tokens_for(candidate)
             if running_tokens + hint_tokens <= effective_budget:
@@ -563,113 +460,111 @@ class ContextBuilderService:
 
         # Relevance-ranked list first — recall order is the load-bearing signal (an A/B
         # showed a Timeline-first brief buries the answer, which is usually the top-relevance,
-        # often-undated memory). Identical to the off path. Skipped entirely when an event
-        # verdict failed closed so tempting memories are not packed as answer evidence.
-        if not fail_closed:
-            for idx, mem in enumerate(memories, start=1):
-                name = mem.name
-                content = mem.content or ""
+        # often-undated memory). Identical to the off path.
+        for idx, mem in enumerate(memories, start=1):
+            name = mem.name
+            content = mem.content or ""
 
-                # Build verdict markers: append inline after name when features that produce
-                # them are active. Markers only activate when their gates are on (warden_label
-                # needs enable_warden_gate; is_superseded_view needs include_superseded).
-                markers = []
-                lifecycle_note = memory_lifecycle_note(
-                    status=mem.status, artifact_status=mem.artifact_status, superseded_by=mem.superseded_by,
+            # Build verdict markers: append inline after name when features that produce
+            # them are active. Markers only activate when their gates are on (warden_label
+            # needs enable_warden_gate; is_superseded_view needs include_superseded).
+            markers = []
+            lifecycle_note = memory_lifecycle_note(
+                status=mem.status, artifact_status=mem.artifact_status, superseded_by=mem.superseded_by,
+            )
+            if lifecycle_note:
+                markers.append(lifecycle_note)
+            if getattr(mem, "is_scalar_authority", False):
+                markers.append("current authority")
+            if mem.is_superseded_view:
+                markers.append("superseded view")
+            if mem.warden_label is not None:
+                markers.append(f"flagged: {mem.warden_label.value}")
+            if mem.breakdown.conflict_bonus == 1.0:
+                markers.append("unresolved conflict")
+            provenance_marker = provenance_label(getattr(mem, "provenance", None))
+            if provenance_marker:
+                markers.append(provenance_marker)
+
+            if markers:
+                name_with_markers = f"{name} ({', '.join(markers)})"
+            else:
+                name_with_markers = name
+
+            if include_scores:
+                line = f"[Memory {idx}] (score: {mem.final_score:.2f}) {name_with_markers}: {content}"
+            else:
+                line = f"[Memory {idx}] {name_with_markers}: {content}"
+            line = "\n".join((line, *_source_time_lines(mem)))
+            if mem.needs_review:
+                # Pack the warning atomically with its memory under the token budget.
+                line += (
+                    "\n  Review required: " + (mem.review_reason or "source state changed")
+                    + ". Verify the source before asserting this memory as current truth."
                 )
-                if lifecycle_note:
-                    markers.append(lifecycle_note)
-                if getattr(mem, "is_scalar_authority", False):
-                    markers.append("current authority")
-                if mem.is_superseded_view:
-                    markers.append("superseded view")
-                if mem.warden_label is not None:
-                    markers.append(f"flagged: {mem.warden_label.value}")
-                if mem.breakdown.conflict_bonus == 1.0:
-                    markers.append("unresolved conflict")
-                provenance_marker = provenance_label(getattr(mem, "provenance", None))
-                if provenance_marker:
-                    markers.append(provenance_marker)
 
-                if markers:
-                    name_with_markers = f"{name} ({', '.join(markers)})"
-                else:
-                    name_with_markers = name
-
-                if include_scores:
-                    line = f"[Memory {idx}] (score: {mem.final_score:.2f}) {name_with_markers}: {content}"
-                else:
-                    line = f"[Memory {idx}] {name_with_markers}: {content}"
-                line = "\n".join((line, *_source_time_lines(mem)))
-                if mem.needs_review:
-                    # Pack the warning atomically with its memory under the token budget.
-                    line += (
-                        "\n  Review required: " + (mem.review_reason or "source state changed")
-                        + ". Verify the source before asserting this memory as current truth."
-                    )
-
+            tokens = _tokens_for(line)
+            if mem.verifier_evidence:
+                line += "\n" + "\n".join(e.context_line() for e in mem.verifier_evidence)
                 tokens = _tokens_for(line)
-                if mem.verifier_evidence:
-                    line += "\n" + "\n".join(e.context_line() for e in mem.verifier_evidence)
-                    tokens = _tokens_for(line)
 
-                # Stale-anchor advisory: atomic with the memory line.
-                # If the memory is stale, check memory + advisory combined budget.
-                # Never include a stale memory without its advisory.
-                stale_info = mem.stale_anchor_info
-                is_stale = stale_info is not None and stale_info.get("stale_anchor")
-                if is_stale:
-                    stale_path = stale_info.get("path") or "unknown"
-                    verification = stale_info.get("stale_verification")
-                    if verification and isinstance(verification, dict):
-                        v_outcome = str(verification.get("outcome") or "")
-                        if v_outcome == "still_valid":
-                            advisory_line = (
-                                f"  ⚠️ Stale file anchor: {stale_path} changed after "
-                                f"this memory, but it was later verified against the "
-                                f"current file. Use with normal caution."
-                            )
-                        elif v_outcome == "outdated":
-                            advisory_line = (
-                                f"  ⚠️ Stale file anchor: {stale_path} — this memory "
-                                f"was verified against the current file and appears "
-                                f"outdated. Do not rely on it. Update or supersede it."
-                            )
-                        else:
-                            advisory_line = (
-                                f"  ⚠️ Stale file anchor: {stale_path} changed after "
-                                f"this memory was anchored. Before relying, inspect "
-                                f"the current file. If outdated, update or supersede it."
-                            )
+            # Stale-anchor advisory: atomic with the memory line.
+            # If the memory is stale, check memory + advisory combined budget.
+            # Never include a stale memory without its advisory.
+            stale_info = mem.stale_anchor_info
+            is_stale = stale_info is not None and stale_info.get("stale_anchor")
+            if is_stale:
+                stale_path = stale_info.get("path") or "unknown"
+                verification = stale_info.get("stale_verification")
+                if verification and isinstance(verification, dict):
+                    v_outcome = str(verification.get("outcome") or "")
+                    if v_outcome == "still_valid":
+                        advisory_line = (
+                            f"  ⚠️ Stale file anchor: {stale_path} changed after "
+                            f"this memory, but it was later verified against the "
+                            f"current file. Use with normal caution."
+                        )
+                    elif v_outcome == "outdated":
+                        advisory_line = (
+                            f"  ⚠️ Stale file anchor: {stale_path} — this memory "
+                            f"was verified against the current file and appears "
+                            f"outdated. Do not rely on it. Update or supersede it."
+                        )
                     else:
                         advisory_line = (
-                            f"  ⚠️ Stale file anchor: {stale_path} changed after this "
-                            f"memory was anchored. Before relying on this memory, inspect "
+                            f"  ⚠️ Stale file anchor: {stale_path} changed after "
+                            f"this memory was anchored. Before relying, inspect "
                             f"the current file. If outdated, update or supersede it."
                         )
-                    advisory_tokens = _tokens_for(advisory_line)
-                    total_tokens = tokens + advisory_tokens
                 else:
-                    total_tokens = tokens
-                    advisory_line = None
-                    advisory_tokens = 0
+                    advisory_line = (
+                        f"  ⚠️ Stale file anchor: {stale_path} changed after this "
+                        f"memory was anchored. Before relying on this memory, inspect "
+                        f"the current file. If outdated, update or supersede it."
+                    )
+                advisory_tokens = _tokens_for(advisory_line)
+                total_tokens = tokens + advisory_tokens
+            else:
+                total_tokens = tokens
+                advisory_line = None
+                advisory_tokens = 0
 
-                if running_tokens + total_tokens > effective_budget:
-                    truncated = True
-                    continue
+            if running_tokens + total_tokens > effective_budget:
+                truncated = True
+                continue
 
-                lines.append(line)
-                memory_ids.append(mem.uuid)
-                running_tokens += tokens
-                if is_stale:
-                    lines.append(advisory_line)
-                    running_tokens += advisory_tokens
+            lines.append(line)
+            memory_ids.append(mem.uuid)
+            running_tokens += tokens
+            if is_stale:
+                lines.append(advisory_line)
+                running_tokens += advisory_tokens
 
         # Source-memory lane (additive):
         # the session's most similar raw episode memories (up to the limit) with their own time, packed AFTER the
         # ranked list so it supplements rather than displaces relevance order. A
         # per-request knob-off (or lane failure) adds no lines and preserves the context byte-for-byte.
-        if not fail_closed and recall_result.source_memories:
+        if recall_result.source_memories:
             source_lines = ["Source memories (raw episodes, oldest first):"]
             for sm in recall_result.source_memories:
                 pool_tag = (

@@ -1286,6 +1286,7 @@ class MemoryQueryRepository:
         self, node_uuid: str, *, operation_id: str, namespace_key: str
     ) -> dict[str, Any]:
         """Apply one erasure after locking and revalidating its preflight namespace."""
+        # legacy event-history data cleanup, kept after the lane was archived so erasure stays complete
         rows = self.neo4j.execute(
             """
             MERGE (f:EvidenceNamespaceFence {namespace_key: $namespace_key})
@@ -1624,6 +1625,7 @@ class MemoryQueryRepository:
         of resuming them. Folding the label into this MATCH makes its removal atomic with the rest
         of the partition, which is the only way that durability argument holds."""
         namespace_key = normalize_namespace(namespace)
+        # legacy event-history data cleanup, kept after the lane was archived so erasure stays complete
         rows = self.neo4j.execute(
             """
             MERGE (f:EvidenceNamespaceFence {namespace_key: $namespace_key})

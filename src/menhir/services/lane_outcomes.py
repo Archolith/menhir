@@ -1,6 +1,6 @@
 """Per-lane outcome report for one personal-memory consolidation pass (#170 item 4).
 
-The pass result is one flat dict shared by three lanes (scalar, event, counting). A busy
+The pass result is one flat dict shared by two lanes (scalar, counting). A busy
 lane's counts can make an idle one look fine, so this report lists every lane on its own: whether
 it was enabled, what it read, what each stage produced, and two flags:
 
@@ -26,12 +26,6 @@ _LANES: dict[str, tuple[str, str, str | None, str, str, dict[str, str]]] = {
          "persisted": "scalar_assertions_persisted", "bound": "scalar_states_written",
          "binding_mismatched": "scalar_binding_mismatched", "advisory": "scalar_advisory",
          "views_rebuilt": "scalar_views_rebuilt"},
-    ),
-    "event": (
-        "event_namespaces_dirty", "event_namespaces_processed", "event_namespaces_failed",
-        "event_evidence_rows", "event_assertions_recorded",
-        {"proposals": "event_proposals", "admitted": "event_proposals_admitted",
-         "recorded": "event_assertions_recorded", "views_rebuilt": "event_views_rebuilt"},
     ),
     "counting": (
         "counting_namespaces_dirty", "counting_namespaces_processed", "counting_namespaces_failed",

@@ -195,7 +195,7 @@ Repository-relative todo locations use the same rule: paths and optional symbols
 ranges are normalized, while unresolved references remain unresolved instead of being
 guessed.
 
-Some read-side authority gates, event-history authority, deterministic scalar routing,
+Some read-side authority gates, deterministic scalar routing,
 and retrieval experiments remain opt-in. The
 [activation ledger](.agent/default-off-features.md) records their actual default state
 and the evidence required before activation.
@@ -277,8 +277,7 @@ The scalar assertion, persistence, fold, repair, and inspection infrastructure i
 implemented. Scalar-state activation and recall authority remain opt-in while the system
 is checked against held-out extraction, namespace, replay, and repair cases. The
 deterministic extractor and router are also default-off; the extractor can run as an
-observe-only shadow without changing persistence or recall. Event-history authority
-follows the same rollout discipline and remains default-off.
+observe-only shadow without changing persistence or recall.
 
 ### Why ingestion comes first
 

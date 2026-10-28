@@ -1,7 +1,8 @@
 """E2E-15 - a backend killed mid-pass, and two namespaces side by side (#170 item 5).
 
 Two namespaces hold the same kinds of claim with different values: mugs, gym visits and a
-purchase. The Phase 3 pass for namespace A is held inside its event-lane model call, and the
+purchase. The Phase 3 pass for namespace A is held inside its counting-lane model call, after
+the scalar stage has committed, and the
 backend is killed there (no shutdown path). A fresh backend on the same graph must finish that
 pass exactly once and resume its cursors. Throughout, no model prompt may list turns from both
 namespaces, and each namespace's Views and recall must carry only its own values.
@@ -11,6 +12,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
@@ -34,15 +36,11 @@ from tests.e2e._harness.phase3 import (
     scalar_views,
 )
 from tests.e2e._harness.scripted_provider import Call, Rule, Script, scripted_model
-from tests.e2e._harness.stack import graph_query
 from tests.e2e.test_e2e_14_replay import (
-    _EVENT_LINE,
-    EVENT_PROMPT,
     GYM,
     LANES,
     LANES_ON,
     _assertions,
-    _timeline_entries,
     capture,
 )
 
@@ -52,7 +50,6 @@ MUGS = [Obs("I have 12 mugs", {"attribute": "mug_count", "value_kind": "count",
                                "operation": "absolute", "value": 12}),
         Obs("I have 7 mugs", {"attribute": "mug_count", "value_kind": "count",
                               "operation": "absolute", "value": 7})]
-EVENTS = {"I bought a teapot": "teapot", "I bought a kettle": "kettle"}
 
 TURNS = {
     "a": [("I have 12 mugs in the cupboard.", "2026-07-01T10:00:00+00:00"),
@@ -64,11 +61,15 @@ TURNS = {
           ("On Friday I went to the gym at dawn.", "2026-07-03T07:00:00+00:00")],
 }
 EXPECTED = {
-    "a": {"views": [("gym_visit_count", 2.0), ("mug_count", 12.0)], "timeline": ["teapot"],
+    "a": {"views": [("gym_visit_count", 2.0), ("mug_count", 12.0)],
           "claims": {"mug_count": 1, "gym_visit_count": 2}},
-    "b": {"views": [("gym_visit_count", 1.0), ("mug_count", 7.0)], "timeline": ["kettle"],
+    "b": {"views": [("gym_visit_count", 1.0), ("mug_count", 7.0)],
           "claims": {"mug_count": 1, "gym_visit_count": 1}},
 }
+
+#: The killed backend dies holding namespace A's counting lease, and only expiry frees it
+#: (counting_consolidation claims per pass), so the test shortens the lease and waits it out.
+COUNTING_LEASE_S = 30
 
 
 def _snapshot(config: E2EConfig, namespace: str) -> dict:
@@ -77,10 +78,6 @@ def _snapshot(config: E2EConfig, namespace: str) -> dict:
     return {
         "views": sorted((v["attribute"], float(v["value"])) for v in views),
         "view_uuids": {v["attribute"]: v["uuid"] for v in views},
-        "timeline": sorted(str(e.get("object_key")) for e in _timeline_entries(config, namespace)),
-        "events": [r["object"] for r in graph_query(
-            config, "MATCH (a:TypedEventAssertion) WHERE a.namespace = $ns "
-            "RETURN a.object_key AS object ORDER BY object", ns=namespace)],
         "claims": {attr: {"sources": len({r["source"] for r in rows if r["attribute"] == attr}),
                           "current": sum(1 for r in rows if r["attribute"] == attr and r["current"])}
                    for attr in ("mug_count", "gym_visit_count")},
@@ -88,8 +85,7 @@ def _snapshot(config: E2EConfig, namespace: str) -> dict:
 
 
 def _exactly_once(snap: dict, expected: dict) -> bool:
-    return (snap["views"] == expected["views"] and snap["timeline"] == expected["timeline"]
-            and snap["events"] == expected["timeline"]
+    return (snap["views"] == expected["views"]
             and all(snap["claims"][attr] == {"sources": n, "current": n}
                     for attr, n in expected["claims"].items()))
 
@@ -100,7 +96,7 @@ def _text(result: object) -> str:
 
 
 CRITERIA = [
-    "pass_was_killed_inside_the_event_stage",
+    "pass_was_killed_inside_the_counting_stage",
     "killed_pass_finishes_exactly_once_after_restart",
     "restarted_backend_does_not_reread_finished_work",
     "prompts_never_mix_namespaces",
@@ -119,24 +115,21 @@ async def test_e2e_15_restart_and_isolation(
     entered, release = threading.Event(), threading.Event()
     held: list[bool] = []
 
-    def event_reply(call: Call) -> str:
-        # Hold namespace A's first event call open until the backend has been killed.
-        if not held and "teapot" in call.prompt:
+    counting_answer = envelope_reply(GYM)
+
+    def counting_reply(call: Call) -> str:
+        # Hold namespace A's first counting call open until the backend has been killed.
+        if not held and "gym after work" in call.prompt:
             held.append(True)
             entered.set()
             release.wait(300)
-        return json.dumps([
-            {"episode": int(index), "events": [
-                {"subject": "user", "predicate": "bought", "object": obj, "object_display": "",
-                 "domain": "", "when": "", "stated_span": phrase}
-                for phrase, obj in EVENTS.items() if phrase.lower() in text.lower()]}
-            for index, text in _EVENT_LINE.findall(call.prompt)])
+        return counting_answer(call)
 
     script = Script([Rule("scalar", SCALAR_PROMPT, envelope_reply(MUGS)),
-                     Rule("counting", COUNTING_PROMPT, envelope_reply(GYM)),
-                     Rule("event", EVENT_PROMPT, event_reply)])
+                     Rule("counting", COUNTING_PROMPT, counting_reply)])
     with scripted_model(script) as model:
-        env = {**feature_env, **model.env, **LANES_ON}
+        env = {**feature_env, **model.env, **LANES_ON,
+               "MENHIR_PERSONAL_MEMORY_COUNTING_LEASE_SECONDS": str(COUNTING_LEASE_S)}
         with lane_backend(e2e_config, e2e_installed, lane_evidence, env, name="backend-killed") as backend:
             async with stdio_session(e2e_config, e2e_installed.venv_python, lane_evidence,
                                      feature_env=env) as client:
@@ -150,6 +143,7 @@ async def test_e2e_15_restart_and_isolation(
                                       {"namespace": ns["a"], "k": 3})
                 reached = entered.wait(600)
                 backend.kill()
+                killed_at = time.monotonic()
                 release.set()
                 try:
                     pending.result(timeout=300)
@@ -159,6 +153,7 @@ async def test_e2e_15_restart_and_isolation(
             mid = _snapshot(e2e_config, ns["a"])
             calls_at_kill = {name: len(script.calls(name)) for name in LANES}
 
+        time.sleep(max(0.0, COUNTING_LEASE_S + 5 - (time.monotonic() - killed_at)))
         with lane_backend(e2e_config, e2e_installed, lane_evidence, env, name="backend-restarted"):
             run_phase3(e2e_config, lane_evidence, ns["a"], label="phase3-a-resumed")
             resumed = _snapshot(e2e_config, ns["a"])
@@ -181,8 +176,10 @@ async def test_e2e_15_restart_and_isolation(
     lane_evidence.attach("recall.json", json.dumps(recalled, indent=2))
 
     lane_evidence.record(
-        "pass_was_killed_inside_the_event_stage",
-        passed=reached and bool(interrupted) and mid["timeline"] == [] and mid["events"] == [],
+        "pass_was_killed_inside_the_counting_stage",
+        passed=reached and bool(interrupted)
+        and mid["claims"]["gym_visit_count"] == {"sources": 0, "current": 0}
+        and "gym_visit_count" not in mid["view_uuids"],
         detail={"reached": reached, "interrupted": interrupted, "mid": mid,
                 "calls_at_kill": calls_at_kill},
     )
@@ -191,8 +188,8 @@ async def test_e2e_15_restart_and_isolation(
         passed=_exactly_once(resumed, EXPECTED["a"]),
         detail={"resumed": resumed, "calls_resumed": calls_resumed},
     )
-    # A lane whose stage committed before the kill resumes from its cursor; the interrupted lane
-    # (event) and the one not yet reached (counting) run on the restarted backend.
+    # The scalar stage committed before the kill and resumes from its cursor; the interrupted lane
+    # (counting) runs on the restarted backend.
     lane_evidence.record(
         "restarted_backend_does_not_reread_finished_work",
         passed=mid["claims"]["mug_count"]["current"] == 1
