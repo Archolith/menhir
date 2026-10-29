@@ -24,7 +24,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 
 from menhir.domain.belief import QueryIntent
-from menhir.domain.belief_evidence import assemble_belief_evidence, score_candidate_belief
 from menhir.domain.intent_affinity import task_intents_to_lens
 from menhir.domain.oracles import CandidateMemory, QueryContext
 from menhir.domain.query_intent import classify_intent
@@ -33,7 +32,6 @@ from menhir.domain.self_reinforcement import SupportProfile
 from menhir.domain.truth.labels import WardenLabel
 from menhir.domain.warden import (
     ContradictionWarden,
-    CurrentnessWarden,
     EvidenceAnchorWarden,
     OracleAdmissionWarden,
     ScopeWarden,
@@ -93,7 +91,7 @@ class AssertionPipeline:
     def __init__(self, combiner, *, executor: OracleExecutor | None = None,
                  wardens: list[Warden] | None = None, auto_intent: bool = True,
                  contradiction_interrupt: bool = False,
-                 belief_gate: bool = False, evidence_anchor: bool = True) -> None:
+                 evidence_anchor: bool = True) -> None:
         self.executor = executor or OracleExecutor(default_oracles())
         self.combiner = combiner
         # The handoff chain: scope (metadata) + anti-spiral (evidence) + oracle-axis (packet).
@@ -104,14 +102,11 @@ class AssertionPipeline:
         if evidence_anchor:
             default.append(EvidenceAnchorWarden())
         default.append(OracleAdmissionWarden())
-        if belief_gate:
-            default.append(CurrentnessWarden())
         if contradiction_interrupt:
             default.append(ContradictionWarden())
         self.wardens = wardens or default
         self.chain = WardenChain(self.wardens)
         self.auto_intent = auto_intent
-        self.belief_gate = belief_gate
 
     def _resolve_intent(self, query: QueryContext) -> QueryContext:
         """Derive the temporal lens from the query text when the caller did not pin one.
@@ -144,16 +139,8 @@ class AssertionPipeline:
         for rank, cid in enumerate(ranked_ids):
             candidate = by_id[cid]
             packet = packets[cid]
-            belief_score = (
-                score_candidate_belief(cid, candidate.content, candidate.metadata)
-                if self.belief_gate else None
-            )
-            evidence = (
-                assemble_belief_evidence(candidate.metadata) if self.belief_gate else ()
-            )
             ctx = WardenContext(
                 candidate_id=cid, intent=intent,
-                belief_score=belief_score, evidence=evidence,
                 query_scope=q_scope, candidate_scope=_candidate_scope(candidate),
                 support_profile=_support_profile(candidate), oracle_packet=packet,
                 recorded_conflict=(bool(candidate.metadata.get("conflict_group_id"))

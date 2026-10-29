@@ -54,9 +54,6 @@ from menhir.services.scoring_service import (
     MIN_SIMILARITY_THRESHOLD,
     ScoringService,
 )
-from menhir.domain.git_staleness import BeliefCommitContext, derive_structural_staleness
-from menhir.services.change_log_provider import CachedGitChangeLog, ChangeLogProvider
-from menhir.infrastructure.paths import repo_root_for_project
 
 logger = logging.getLogger(__name__)
 
@@ -65,16 +62,13 @@ from menhir.services.recall_policies import (
     FILE_LINKED_BASELINE_SIMILARITY,
     PENDING_ENTITY_SIMILARITY,
     _authority_contributors,
-    _belief_markers_from_facts,
     _blend_oracle_order,
     _build_temporal_facts,
     _filter_to_current_beliefs,
     _frontier_trace_enabled,
     _oracle_similarity,
     _query_wants_history,
-    _repo_path_for,
     _select_candidate_content,
-    _staleness_evidence_for,
 )
 
 from menhir.services.recall_pipeline import run_recall, run_recall_history
@@ -104,7 +98,6 @@ class RecallService(RecallSupportMixin):
     #: Candidate-readonly: never reinforce retrieval via access timestamps, edge weights or lifecycle.
     read_only: bool = False
     _rehydration_tasks: set[asyncio.Task[None]] = field(default_factory=set)
-    _change_log_provider: ChangeLogProvider = field(default_factory=CachedGitChangeLog)
 
     async def recall(
         self,

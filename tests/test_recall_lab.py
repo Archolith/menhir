@@ -162,10 +162,10 @@ class _StubRecallService:
         try:
             await asyncio.sleep(0.02)
             tuning = kwargs["tuning"]
-            if self.fail_content_lane and tuning.enable_belief_gate:
+            if self.fail_content_lane and tuning.enable_facet_candidates:
                 raise RuntimeError("content index unavailable")
-            result = _result(query, content_lane=tuning.enable_belief_gate)
-            if self.degrade_content_lane and tuning.enable_belief_gate:
+            result = _result(query, content_lane=tuning.enable_facet_candidates)
+            if self.degrade_content_lane and tuning.enable_facet_candidates:
                 return RecallResult(
                     query=result.query,
                     preset=result.preset,
@@ -222,7 +222,7 @@ def _body() -> dict[str, Any]:
                 "id": "b",
                 "label": "B",
                 "tuning": {
-                    "enable_belief_gate": True,
+                    "enable_facet_candidates": True,
                     "facet_weight": 0.7,
                 },
             },
@@ -357,8 +357,8 @@ def test_recall_lab_runs_arms_concurrently_and_read_only() -> None:
     assert all(call["trace"] is True for call in recall.calls)
     assert all(call["include_warden_status"] is True for call in recall.calls)
     assert all(call["update_access"] is False for call in recall.calls)
-    assert recall.calls[0]["tuning"].enable_belief_gate is False
-    assert recall.calls[1]["tuning"].enable_belief_gate is True
+    assert recall.calls[0]["tuning"].enable_facet_candidates is False
+    assert recall.calls[1]["tuning"].enable_facet_candidates is True
     assert recall.calls[1]["tuning"].facet_weight == 0.7
     assert payload["arms"][1]["results"][0]["source"] == "content_vector"
     assert payload["arms"][1]["results"][0]["content_rank"] == 1
@@ -458,7 +458,7 @@ def test_recall_lab_blinds_and_aggregates_llm_judging_passes(monkeypatch) -> Non
     assert all(call["temperature"] == 0.0 for call in backend.calls)
     assert all("PRIVATE PRODUCTION LABEL" not in call["user_prompt"] for call in backend.calls)
     assert all("PRIVATE CONTENT LABEL" not in call["user_prompt"] for call in backend.calls)
-    assert all("enable_belief_gate" not in call["user_prompt"] for call in backend.calls)
+    assert all("enable_facet_candidates" not in call["user_prompt"] for call in backend.calls)
     assert all("R1:" in call["user_prompt"] and "R2:" in call["user_prompt"] for call in backend.calls)
     assert all("_judge_results" not in arm for arm in payload["arms"])
 

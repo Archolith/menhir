@@ -7,14 +7,12 @@ The three object types in menhir's recall/knowledge stack:
                         the agent's current-truth context (admit / flag / attenuate / refuse)
     Mutator  write   -> the persistence boundary
 
-A Warden consumes a candidate + context (belief score, evidence, query intent, session
-retrieval stats — the signals produced by Oracles and by the Chronostratum temporal/git
-modules) and returns a WardenVerdict. It does NOT score (Oracle) and does NOT write
-(Mutator). The concrete wardens wrap the policies already built as pure functions:
+A Warden consumes a candidate + context (query intent, session retrieval stats — the
+signals produced by Oracles) and returns a WardenVerdict. It does NOT score (Oracle) and
+does NOT write (Mutator). The concrete wardens wrap the policies already built as pure
+functions:
 
-    CurrentnessWarden  <- belief.currentness_bucket (superseded -> refuse/flag, fed by
-                          temporal.py / git_staleness.py supersession signals)
-    ExhaustionWarden   <- exhaustion.exhaustion_decision (unproductive loop -> attenuate/refuse)
+    ExhaustionWarden  <- exhaustion.exhaustion_decision (unproductive loop -> attenuate/refuse)
 
 Multiple wardens compose through WardenChain (most-restrictive-wins), the way Oracles
 compose through a combiner.
@@ -26,15 +24,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Protocol, runtime_checkable
 
-from menhir.domain.belief import (
-    BeliefEvidence,
-    BeliefScore,
-    QueryIntent,
-    RecallBucket,
-    currentness_bucket,
-    is_superseded_belief,
-    is_unsafe_belief,
-)
+from menhir.domain.belief import QueryIntent
 from menhir.domain.exhaustion import ExhaustionDecision, RetrievalStats, exhaustion_decision
 from menhir.domain.oracles import OraclePacket, OraclePolarity, OracleTarget
 from menhir.domain.scope import MemoryScope, scope_conflict
@@ -80,8 +70,6 @@ class WardenContext:
     """Everything a warden might read about one candidate. Each warden uses what it needs."""
 
     candidate_id: str
-    belief_score: BeliefScore | None = None
-    evidence: tuple[BeliefEvidence, ...] = ()
     intent: QueryIntent = QueryIntent.CURRENT
     retrieval_stats: RetrievalStats | None = None
     query_scope: MemoryScope | None = None      # where the query is asked
@@ -96,37 +84,6 @@ class Warden(Protocol):
     name: str
 
     def evaluate(self, ctx: WardenContext) -> WardenVerdict: ...
-
-
-# bucket -> (decision, label) for the currentness warden.
-_BUCKET_DECISION: dict[RecallBucket, tuple[WardenDecision, WardenLabel | None]] = {
-    RecallBucket.SAFE_TO_ASSERT: (WardenDecision.ADMIT, None),
-    RecallBucket.MENTION_WITH_UNCERTAINTY: (WardenDecision.FLAG, WardenLabel.UNCERTAIN),
-    RecallBucket.CONFLICT_SET: (WardenDecision.FLAG, WardenLabel.CONFLICT),
-    RecallBucket.HISTORICAL_ONLY: (WardenDecision.FLAG, WardenLabel.HISTORICAL),
-    RecallBucket.ANERGIC_CURRENT: (WardenDecision.REFUSE, None),
-    RecallBucket.BLOCKED: (WardenDecision.REFUSE, None),
-    RecallBucket.DO_NOT_ASSERT: (WardenDecision.REFUSE, None),
-}
-
-
-@dataclass
-class CurrentnessWarden:
-    """Guards against asserting superseded beliefs as current truth (belief currentness)."""
-
-    name: str = "currentness"
-
-    def evaluate(self, ctx: WardenContext) -> WardenVerdict:
-        score = ctx.belief_score
-        if score is None:
-            return WardenVerdict(WardenDecision.ADMIT, self.name, reason="no belief score")
-        superseded = is_superseded_belief(list(ctx.evidence))
-        unsafe = is_unsafe_belief(score, is_superseded=superseded)
-        bucket = currentness_bucket(
-            base=score.bucket, intent=ctx.intent, is_superseded=superseded, is_unsafe=unsafe
-        )
-        decision, label = _BUCKET_DECISION[bucket]
-        return WardenVerdict(decision, self.name, reason=f"bucket={bucket.value}", label=label)
 
 
 @dataclass
@@ -248,8 +205,7 @@ class OracleAdmissionWarden:
 class ContradictionWarden:
     """Guard 7 (ContradictionInterrupt): a contradiction interrupts CURRENT assertion.
 
-    Contradiction (recorded unresolved conflict, oracle CONFLICT/CONTRADICT, or belief
-    CONFLICT_SET bucket) means the
+    Contradiction (recorded unresolved conflict or oracle CONFLICT/CONTRADICT) means the
     candidate must not enter current-truth context until resolved -> REFUSE under current
     intent; historical intent still gets it, labeled 'conflict' (history is preserved). This
     is stricter than OracleAdmissionWarden's FLAG; most-restrictive-wins makes the REFUSE win
@@ -259,10 +215,8 @@ class ContradictionWarden:
     name: str = "contradiction"
 
     def _contradicted(self, ctx: WardenContext) -> bool:
-        """Check recorded conflict, belief score and oracle results."""
+        """Check recorded conflict and oracle results."""
         if ctx.recorded_conflict:
-            return True
-        if ctx.belief_score is not None and ctx.belief_score.bucket is RecallBucket.CONFLICT_SET:
             return True
         packet = ctx.oracle_packet
         if packet is not None:

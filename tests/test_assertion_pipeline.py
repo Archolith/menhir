@@ -14,7 +14,7 @@ from menhir.domain.oracles import (
     OracleTarget,
     QueryContext,
 )
-from menhir.domain.warden import CurrentnessWarden, OracleAdmissionWarden, WardenContext, WardenDecision
+from menhir.domain.warden import OracleAdmissionWarden, WardenContext, WardenDecision
 from menhir.services.assertion_pipeline import AssertionPipeline
 from menhir.services.retrieval_oracles import default_oracles
 
@@ -222,7 +222,7 @@ async def test_contradiction_warden_default_off_does_not_refuse() -> None:
     assert "contradicted" not in refused_ids
 
 
-# --- belief_gate tests --------------------------------------------------------
+# --- recorded conflict -> optional contradiction guard ------------------------
 
 
 @pytest.mark.asyncio
@@ -237,7 +237,7 @@ async def test_recorded_conflict_reaches_optional_guard_without_mock_oracle(
     enabled: bool, intent: str, group: str | None, status: str | None, unresolved: bool,
 ) -> None:
     pipe = AssertionPipeline(LogSpaceOracleCombiner(), auto_intent=False,
-                             contradiction_interrupt=enabled, belief_gate=False)
+                             contradiction_interrupt=enabled)
     candidate = CandidateMemory(id="c", content="configuration fact", metadata={
         "similarity": .85, "evidence_kinds": ("git",),
         "conflict_group_id": group, "conflict_status": status,
@@ -250,27 +250,6 @@ async def test_recorded_conflict_reaches_optional_guard_without_mock_oracle(
     assert result.label == ("conflict" if expected is WardenDecision.FLAG else None)
     if enabled and unresolved:
         assert f"contradiction:{expected.value}" in result.reason
-
-
-def test_belief_gate_off_excludes_currentness_warden() -> None:
-    p = AssertionPipeline(LogSpaceOracleCombiner(), belief_gate=False)
-    assert not any(isinstance(w, CurrentnessWarden) for w in p.wardens)
-
-
-def test_belief_gate_on_includes_currentness_warden() -> None:
-    p = AssertionPipeline(LogSpaceOracleCombiner(), belief_gate=True)
-    assert any(isinstance(w, CurrentnessWarden) for w in p.wardens)
-
-
-@pytest.mark.asyncio
-async def test_belief_gate_on_refuses_superseded_under_current_intent() -> None:
-    p = AssertionPipeline(LogSpaceOracleCombiner(), belief_gate=True, auto_intent=False)
-    q = QueryContext(text="what is true now", intent="current")
-    cands = [CandidateMemory(id="u1", content="the patch fixed it",
-                             metadata={"similarity": 0.9, "belief_superseded": True})]
-    outcome = await p.run(q, cands)
-    # a superseded belief must not land in admitted-as-current
-    assert all(r.candidate_id != "u1" for r in outcome.admitted)
 
 
 # --- tie order: ties keep the caller's order, not candidate-id order ---------

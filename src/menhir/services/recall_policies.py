@@ -57,9 +57,6 @@ from menhir.services.scoring_service import (
     MIN_SIMILARITY_THRESHOLD,
     ScoringService,
 )
-from menhir.domain.git_staleness import BeliefCommitContext, derive_structural_staleness
-from menhir.services.change_log_provider import CachedGitChangeLog, ChangeLogProvider
-from menhir.infrastructure.paths import repo_root_for_project
 
 logger = logging.getLogger(__name__)
 
@@ -187,51 +184,6 @@ def _select_candidate_content(meta: dict[str, object], *, preset: QueryPreset) -
     else:
         chosen = content or summary
     return str(chosen) if chosen else None
-
-
-def _belief_markers_from_facts(
-    rows: list[dict[str, object]],
-) -> dict[str, dict[str, bool]]:
-    """Per-uuid belief markers from temporal fact-rows: has-any-temporal, and superseded
-    when any fact for that uuid has expired_at set (belief invalidation)."""
-    markers: dict[str, dict[str, bool]] = {}
-    for row in rows:
-        uuid = str(row.get("node_uuid") or "")
-        if not uuid:
-            continue
-        m = markers.setdefault(uuid, {"belief_superseded": False, "belief_has_temporal": True})
-        if row.get("expired_at") is not None:
-            m["belief_superseded"] = True
-    return markers
-
-
-def _repo_path_for(project: str) -> str | None:
-    """Best-effort on-disk repo path for a project, or None."""
-    try:
-        root = repo_root_for_project(project)
-        return str(root) if root is not None else None
-    except Exception:
-        return None
-
-
-def _staleness_evidence_for(meta, *, provider, repo_resolver):
-    """Best-effort git staleness evidence for one candidate's metadata. () on any miss."""
-    anchors = [str(p) for p in (meta.get("anchor_paths") or ())]
-    project = meta.get("anchor_project")
-    if not anchors or not project:
-        return ()
-    repo = repo_resolver(str(project))
-    if not repo:
-        return ()
-    commit = meta.get("belief_commit")
-    ctx = BeliefCommitContext(commit=str(commit)) if commit else None
-    changes = provider.changes(repo, since_commit=(str(commit) if commit else None), paths=anchors)
-    verdict = derive_structural_staleness(
-        anchors=anchors,
-        believed_at=(str(meta.get("created_at")) if meta.get("created_at") else None),
-        changes=changes, belief_context=ctx,
-    )
-    return verdict.evidence
 
 
 def _filter_to_current_beliefs(rows: list[dict[str, object]]) -> list[dict[str, object]]:

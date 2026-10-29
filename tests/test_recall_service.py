@@ -1409,7 +1409,7 @@ async def test_recall_frontier_off_by_default_is_old_order(
 
     result = await svc.recall("test query", tuning=RetrievalTuningConfig(
         enable_oracle_ranking=False, enable_intent_lens=False, enable_warden_gate=False,
-        enable_contradiction_interrupt=False, enable_belief_gate=False))
+        enable_contradiction_interrupt=False))
 
     assert [r.uuid for r in result.results] == ["entity-1", "entity-2"]
     assert all(r.warden_label is None for r in result.results)
@@ -1425,8 +1425,7 @@ async def test_recall_oracle_ranking_alone_leaves_warden_receipt_disabled(
     Warden receipt: no guard is configured, so the state stays "disabled" with no notice."""
     _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
     svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
-    no_guards = RetrievalTuningConfig(enable_warden_gate=False, enable_contradiction_interrupt=False,
-                                      enable_belief_gate=False)
+    no_guards = RetrievalTuningConfig(enable_warden_gate=False, enable_contradiction_interrupt=False)
 
     result = await svc.recall("test query", include_warden_status=True, tuning=no_guards)
 
@@ -1491,7 +1490,7 @@ async def test_recall_warden_gate_drops_superseded(
     svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
 
     base = await svc.recall("alpha beta", tuning=RetrievalTuningConfig(
-        enable_warden_gate=False, enable_contradiction_interrupt=False, enable_belief_gate=False))
+        enable_warden_gate=False, enable_contradiction_interrupt=False))
     assert {r.uuid for r in base.results} == {"entity-1", "entity-2"}   # off: both kept
 
     gated = await svc.recall("alpha beta",
@@ -1623,65 +1622,11 @@ async def test_recall_multi_project_anchor_left_unscoped(
 async def test_recall_warden_defaults(
     stub_graphiti_client, stub_memory_graph_adapter
 ) -> None:
-    """The Warden gate and contradiction interrupt default on (#173); the belief gate and the
-    evidence anchor default off, matching their MENHIR_FRONTIER_* settings (#173, #349)."""
+    """The Warden gate and contradiction interrupt default on (#173); the evidence anchor
+    defaults off, matching its MENHIR_FRONTIER_* setting (#349)."""
     t = RetrievalTuningConfig()
-    assert (t.enable_warden_gate, t.enable_belief_gate, t.enable_contradiction_interrupt) == (True, False, True)
+    assert (t.enable_warden_gate, t.enable_contradiction_interrupt) == (True, True)
     assert t.enable_evidence_anchor is False
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_recall_belief_gate_without_warden_gate_is_inert_and_warns(
-    stub_graphiti_client, stub_memory_graph_adapter
-) -> None:
-    """belief_gate adds CurrentnessWarden but does NOT apply verdicts without warden_gate.
-
-    A superseded candidate stays in results (verdict computed, not applied), and recall emits
-    a 'belief_gate has no effect without warden_gate' note so the gate is not silently inert."""
-    _two_cands(stub_graphiti_client, stub_memory_graph_adapter, c1="current fact", c2="old fact")
-    stub_memory_graph_adapter.temporal_fact_rows = [
-        {"node_uuid": "entity-1", "expired_at": None},
-        {"node_uuid": "entity-2", "expired_at": "2025-01-02"},   # superseded belief
-    ]
-    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
-
-    gated = await svc.recall("test", tuning=RetrievalTuningConfig(
-        enable_belief_gate=True, enable_warden_gate=False))
-
-    # inert: superseded candidate is NOT dropped because warden_gate did not apply the chain
-    assert "entity-2" in {r.uuid for r in gated.results}
-    assert "belief_gate has no effect without warden_gate" in (gated.note or "")
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_recall_belief_gate_with_warden_gate_drops_superseded_belief(
-    stub_graphiti_client, stub_memory_graph_adapter
-) -> None:
-    """With BOTH belief_gate and warden_gate, CurrentnessWarden's verdict is applied.
-
-    entity-2 is superseded only via belief markers (temporal facts), which warden_gate alone
-    does not fetch or see -- so the gating is the belief gate's marginal contribution."""
-    _two_cands(stub_graphiti_client, stub_memory_graph_adapter, c1="current fact", c2="old fact")
-    stub_memory_graph_adapter.temporal_fact_rows = [
-        {"node_uuid": "entity-1", "expired_at": None},
-        {"node_uuid": "entity-2", "expired_at": "2025-01-02"},   # superseded belief
-    ]
-    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
-
-    # warden_gate alone: belief markers are not fetched, supersession invisible -> entity-2 kept
-    warden_only = await svc.recall("test", tuning=RetrievalTuningConfig(
-        enable_warden_gate=True, enable_belief_gate=False))
-    assert "entity-2" in {r.uuid for r in warden_only.results}
-
-    # belief_gate + warden_gate: CurrentnessWarden runs AND the chain is applied -> entity-2 gated
-    both = await svc.recall("test", tuning=RetrievalTuningConfig(
-        enable_warden_gate=True, enable_belief_gate=True))
-    e2 = [r for r in both.results if r.uuid == "entity-2"]
-    assert (not e2) or (e2[0].warden_label is not None)   # refused (dropped) or flagged
-    assert "belief_gate" in (both.note or "") and "warden_gate" in (both.note or "")
-    assert "has no effect" not in (both.note or "")
 
 
 @pytest.mark.unit
@@ -1689,9 +1634,8 @@ async def test_recall_belief_gate_with_warden_gate_drops_superseded_belief(
 async def test_recall_default_keeps_anchored_entity_with_one_expired_fact(
     stub_graphiti_client, stub_memory_graph_adapter
 ) -> None:
-    """#173 counterexample: the belief gate marks an Entity superseded when any of its fact edges
-    expired; with git evidence that scores CONFLICT_SET and the contradiction guard refuses it
-    under the current lens. Shipped defaults (belief gate off) must keep it."""
+    """#173 counterexample: an anchored Entity with one expired fact edge must be kept under
+    shipped defaults (the removed belief gate used to refuse it)."""
     _two_cands(stub_graphiti_client, stub_memory_graph_adapter, c1="project name", c2="other")
     stub_memory_graph_adapter.temporal_fact_rows = [
         {"node_uuid": "entity-1", "fact": "renamed to menhir", "expired_at": None},
@@ -1705,31 +1649,6 @@ async def test_recall_default_keeps_anchored_entity_with_one_expired_fact(
 
     default = await svc.recall("What is the project called?")
     assert "entity-1" in {r.uuid for r in default.results}
-
-    belief = await svc.recall("What is the project called?",
-                              tuning=RetrievalTuningConfig(enable_belief_gate=True))
-    assert "entity-1" not in {r.uuid for r in belief.results}  # why the belief gate stays opt-in
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_recall_belief_gate_temporal_fetch_failure_degrades(
-    stub_graphiti_client, stub_memory_graph_adapter, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Belief marker fetch is best-effort: DB failure treats candidates as untimed."""
-    _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
-    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
-
-    def _boom(node_uuids: list[str]) -> list[dict[str, object]]:
-        raise RuntimeError("temporal fetch unavailable")
-
-    monkeypatch.setattr(stub_memory_graph_adapter, "fetch_temporal_facts", _boom)
-
-    result = await svc.recall("test query", tuning=RetrievalTuningConfig(
-        enable_belief_gate=True, enable_warden_gate=False))
-
-    assert [r.uuid for r in result.results] == ["entity-1", "entity-2"]
-    assert "belief_gate" in (result.note or "")
 
 
 @pytest.mark.unit
@@ -1768,79 +1687,6 @@ def test_compact_scored_item_surfaces_warden_label() -> None:
         compact=True,
     )
     assert item["warden_label"] == "historical"
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_recall_belief_gate_with_git_staleness_evidence(
-    stub_graphiti_client, stub_memory_graph_adapter, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Git staleness evidence (LATER_CONTRADICTED) gates entity-2 when both belief_gate and
-    warden_gate are on. entity-2 has belief_commit="C" + created_at set, and its provenance
-    includes anchor_paths=["a.py"] + anchor_projects=["proj"]. A fake ChangeLogProvider
-    reports a change to a.py after commit C, yielding LATER_CONTRADICTED. With both gates on,
-    entity-2 is gated (dropped or flagged); with gates off, both results returned."""
-    _two_cands(stub_graphiti_client, stub_memory_graph_adapter, c1="alpha", c2="beta")
-    now = datetime.now(timezone.utc)
-    stub_memory_graph_adapter.candidate_metadata = [
-        {
-            "uuid": "entity-1", "name": "Entity One", "scope": "PERSISTENT", "type": "SEMANTIC",
-            "content": "alpha", "summary": None, "last_accessed": now,
-            "edge_count": 1, "sharpness": 0.2, "freshness": "ACTIVE", "user_flagged": False,
-        },
-        {
-            "uuid": "entity-2", "name": "Entity Two", "scope": "PERSISTENT", "type": "SEMANTIC",
-            "content": "beta", "summary": None, "last_accessed": now,
-            "edge_count": 1, "sharpness": 0.2, "freshness": "ACTIVE", "user_flagged": False,
-            "belief_commit": "C", "created_at": now.isoformat(),
-        },
-    ]
-    stub_memory_graph_adapter.candidate_provenance_rows = [
-        {"uuid": "entity-1", "evidence_node_kinds": ["git"],
-         "anchor_paths": [], "anchor_projects": [], "episode_sources": []},
-        {"uuid": "entity-2", "evidence_node_kinds": ["git"],
-         "anchor_paths": ["a.py"], "anchor_projects": ["proj"], "episode_sources": []},
-    ]
-
-    # Fake git change log: a.py changed after commit C (git-stale).
-    from menhir.domain.git_staleness import GitChange
-    class FakeChangeLogProvider:
-        def changes(self, repo_path: str, *, since_commit: str | None, paths: list[str]):
-            # Simulate a change to a.py after commit C (descends from C)
-            if "a.py" in paths and since_commit == "C":
-                return [GitChange(
-                    target="a.py", changed_at="2026-02-01T00:00:00Z", kind="file",
-                    commit="D", descends_from=frozenset({"C"})
-                )]
-            return []
-
-    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
-    svc._change_log_provider = FakeChangeLogProvider()
-
-    # Monkeypatch _repo_path_for to return a dummy path so no real git is invoked.
-    import menhir.services.recall_pipeline as rs
-    monkeypatch.setattr(rs, "_repo_path_for", lambda project: "/repo" if project == "proj" else None)
-
-    # With gates off: both candidates returned in search order.
-    off_result = await svc.recall("alpha beta", tuning=RetrievalTuningConfig(
-        enable_warden_gate=False, enable_contradiction_interrupt=False, enable_belief_gate=False))
-    off_uuids = [r.uuid for r in off_result.results]
-    assert set(off_uuids) == {"entity-1", "entity-2"}
-
-    # With gates on: entity-2 (git-stale) is gated out or flagged.
-    gated_result = await svc.recall(
-        "alpha beta",
-        tuning=RetrievalTuningConfig(enable_belief_gate=True, enable_warden_gate=True)
-    )
-    gated_uuids = [r.uuid for r in gated_result.results]
-    e2_rows = [r for r in gated_result.results if r.uuid == "entity-2"]
-    # Either dropped (not in results) or flagged (has warden_label).
-    if e2_rows:
-        assert e2_rows[0].warden_label is not None
-    else:
-        assert "entity-2" not in gated_uuids
-    assert "belief_gate" in (gated_result.note or "")
-    assert "warden_gate" in (gated_result.note or "")
 
 
 def _one_observation_hit():

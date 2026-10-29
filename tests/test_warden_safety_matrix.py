@@ -42,7 +42,7 @@ CONTROLS = (
     Control("historical_conflict", "useful", conflict=True, historical=True),
 )
 PROFILES = {"off": (False, False), "strict": (True, True), "conversational": (True, False)}
-OPTIONAL_GUARDS = ((False, False), (True, False), (False, True), (True, True))
+OPTIONAL_GUARDS = (False, True)
 
 
 def summarize(rows: list[dict]) -> dict[str, int]:
@@ -88,11 +88,11 @@ async def test_offline_profile_safety_matrix(
                           "No ingest, graph, model calls or deployed enforcement evidence"],
                   controls=[asdict(c) for c in CONTROLS], runs=[])
     baseline_scores = {}
-    for currentness, contradiction in OPTIONAL_GUARDS:
+    for contradiction in OPTIONAL_GUARDS:
         for profile, (gate, anchor) in PROFILES.items():
             tuning = RetrievalTuningConfig(enable_assertion_shadow=False,
                 enable_warden_gate=gate, enable_evidence_anchor=anchor,
-                enable_intent_lens=True, enable_belief_gate=currentness,
+                enable_intent_lens=True,
                 enable_contradiction_interrupt=contradiction)
             rows = []
             for case in CONTROLS:
@@ -119,7 +119,7 @@ async def test_offline_profile_safety_matrix(
                 assert not result.warden_status.metadata_gaps
                 # Oracle ranking always runs the chain (#172), so any configured guard is computed.
                 expected_state = ("applied" if gate else "computed_not_applied"
-                                  if currentness or contradiction else "disabled")
+                                  if contradiction else "disabled")
                 assert result.warden_status.state == expected_state
                 warnings = []
                 if result.results:
@@ -133,16 +133,15 @@ async def test_offline_profile_safety_matrix(
                         warnings.append("temporal:expired_fact")
                 returned = bool(result.results)
                 score = result.results[0].final_score if returned else None
-                if profile == "off" and not currentness and not contradiction:
+                if profile == "off" and not contradiction:
                     baseline_scores[case.name] = score
                 elif returned:
                     assert score == baseline_scores[case.name]
                 # Pin current behavior, including known gaps, without relabeling gold.
                 expected = not (gate and (case.name == "wrong_scope"
                     or (anchor and case.evidence != "git")
-                    or (contradiction and case.name == "recorded_conflict")
-                    or (currentness and contradiction and case.name == "stale_current")))
-                assert returned == expected, (profile, currentness, contradiction, case.name, result)
+                    or (contradiction and case.name == "recorded_conflict")))
+                assert returned == expected, (profile, contradiction, case.name, result)
                 if gate:
                     assert result.warden_status.evaluated == 1
                     assert result.warden_status.refused == int(not returned)
@@ -152,14 +151,12 @@ async def test_offline_profile_safety_matrix(
                         assert "warden:conflict" in warnings
                 if case.resolved:
                     assert not warnings
-                if gate and currentness and case.historical and case.expired:
-                    assert "warden:historical" in warnings
                 rows.append(dict(control=case.name, query=query, gold=case.gold, returned=returned,
                     final_score=score, warnings=warnings, warden=asdict(result.warden_status)))
-            report["runs"].append(dict(profile=profile, currentness=currentness,
+            report["runs"].append(dict(profile=profile,
                 contradiction=contradiction,
                 tuning=asdict(tuning), rows=rows, counts=summarize(rows)))
     path = tmp_path / "warden-safety-controls.json"
     path.write_text(json.dumps(report, indent=2, default=str) + "\n", encoding="utf-8")
     record_property("warden_safety_report", json.dumps(report, sort_keys=True, default=str))
-    assert len(report["runs"]) == 12
+    assert len(report["runs"]) == 6

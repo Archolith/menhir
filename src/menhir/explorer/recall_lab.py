@@ -35,7 +35,6 @@ class RecallLabTuning(BaseModel):
     enable_intent_lens: bool = True
     enable_warden_gate: bool = True
     enable_contradiction_interrupt: bool = True
-    enable_belief_gate: bool = False
     enable_evidence_anchor: bool = False
     enable_source_memories: bool = True
     source_memory_limit: int = Field(default=10, ge=1, le=50)
@@ -320,7 +319,6 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
             # Strict profile: pinned so the #173 default flip does not change this arm.
             enable_evidence_anchor=True,
             enable_contradiction_interrupt=False,
-            enable_belief_gate=False,
         ),
     },
     {
@@ -335,7 +333,6 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
             enable_warden_gate=True,
             enable_evidence_anchor=False,
             enable_contradiction_interrupt=False,
-            enable_belief_gate=False,
         ),
     },
     {
@@ -350,7 +347,6 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
             enable_intent_lens=False,
             enable_warden_gate=False,
             enable_contradiction_interrupt=False,
-            enable_belief_gate=False,
         ),
     },
     {
@@ -363,7 +359,6 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
             enable_intent_lens=True,
             enable_warden_gate=False,
             enable_contradiction_interrupt=False,
-            enable_belief_gate=False,
         ),
     },
     {
@@ -378,7 +373,6 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
             enable_warden_gate=False,
             enable_evidence_anchor=False,
             enable_contradiction_interrupt=False,
-            enable_belief_gate=False,
         ),
     },
 ]

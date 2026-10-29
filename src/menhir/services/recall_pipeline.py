@@ -67,9 +67,6 @@ from menhir.services.scoring_service import (
     MIN_SIMILARITY_THRESHOLD,
     ScoringService,
 )
-from menhir.domain.git_staleness import BeliefCommitContext, derive_structural_staleness
-from menhir.services.change_log_provider import CachedGitChangeLog, ChangeLogProvider
-from menhir.infrastructure.paths import repo_root_for_project
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +91,6 @@ from menhir.services.recall_policies import (
     FILE_LINKED_BASELINE_SIMILARITY,
     PENDING_ENTITY_SIMILARITY,
     _authority_contributors,
-    _belief_markers_from_facts,
     _blend_oracle_order,
     _build_temporal_facts,
     _filter_to_current_beliefs,
@@ -102,12 +98,10 @@ from menhir.services.recall_policies import (
     _oracle_similarity,
     _query_wants_history,
     _render_scalar_history_content,
-    _repo_path_for,
     _scalar_history_evidence_days_ago,
     _scalar_history_has_occurrences,
     _scalar_history_records_change,
     _select_candidate_content,
-    _staleness_evidence_for,
 )
 
 
@@ -466,7 +460,6 @@ async def run_recall(
     configured_guards = tuple(name for name, enabled in (
         ("scope", tuning.enable_warden_gate), ("oracle_admission", tuning.enable_warden_gate),
         ("evidence_anchor", tuning.enable_evidence_anchor and tuning.enable_warden_gate),
-        ("currentness", tuning.enable_belief_gate),
         ("contradiction", tuning.enable_contradiction_interrupt),
     ) if enabled)
     warden_status = WardenExecutionStatus(
@@ -1726,7 +1719,6 @@ async def run_recall(
     frontier_active = (
         tuning.enable_oracle_ranking
         or tuning.enable_warden_gate
-        or tuning.enable_belief_gate
         or (trace and tuning.enable_assertion_shadow)
     )
     # Oracle ranking is not a Warden: with no guard configured, running the frontier must not
@@ -1735,31 +1727,6 @@ async def run_recall(
     if frontier_active and candidate_inputs:
         _t = perf_counter()
         await service._attach_frontier_metadata(eligible_uuids, metadata_by_uuid, warden_status=guard_status)
-        if tuning.enable_belief_gate:
-            try:
-                fact_rows = await asyncio.to_thread(
-                    service.graph_adapter.fetch_temporal_facts, eligible_uuids
-                )
-                for uuid, marks in _belief_markers_from_facts(fact_rows).items():
-                    metadata_by_uuid.setdefault(uuid, {}).update(marks)
-            except Exception:
-                warden_status.add_gap("temporal_facts_unavailable")
-                logger.exception(
-                    "Belief-gate temporal fact fetch failed for %d uuids; "
-                    "candidates treated as untimed", len(eligible_uuids),
-                )
-            try:
-                for _uuid in eligible_uuids:
-                    _m = metadata_by_uuid.get(_uuid)
-                    if _m is None:
-                        continue
-                    _ev = _staleness_evidence_for(
-                        _m, provider=service._change_log_provider, repo_resolver=_repo_path_for)
-                    if _ev:
-                        _m["staleness_evidence"] = _ev
-            except Exception:
-                warden_status.add_gap("staleness_unavailable")
-                logger.exception("Belief-gate staleness pass failed; continuing without staleness")
         _t_phases["frontier_metadata"] = int((perf_counter() - _t) * 1000)
 
     # --- Phase 2: score + rank ---
@@ -1774,7 +1741,7 @@ async def run_recall(
     # Applied to the survivors BEFORE the limit slice so it shapes which make the cut.
     # Oracle ranking is on by default (#172); with every portion off this block is skipped.
     frontier_note: str | None = None
-    if scored and (tuning.enable_oracle_ranking or tuning.enable_warden_gate or tuning.enable_belief_gate):
+    if scored and (tuning.enable_oracle_ranking or tuning.enable_warden_gate):
         _t = perf_counter()
         scored, frontier_note = await service._apply_frontier(
             query, namespace, scored, metadata_by_uuid, tuning,

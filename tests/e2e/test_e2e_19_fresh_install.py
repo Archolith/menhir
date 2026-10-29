@@ -367,7 +367,6 @@ async def test_e2e_19_fresh_install_shipped_defaults(
                               if values.get(k) != expected.get(k))
             promoted = (values.get("MENHIR_CANONICAL_SELF_BINDING_MODE") == "enforce"
                         and values.get("MENHIR_INFERRED_SELF_MODE") == "enforce"
-                        and values.get("MENHIR_FRONTIER_BELIEF_GATE") is False
                         and values.get("MENHIR_FRONTIER_EVIDENCE_ANCHOR") is False
                         and values.get("MENHIR_BENCHMARK_MODE") is False)
             env_file_ok = eff.get("env_file") == str(home.env_path)
@@ -413,7 +412,6 @@ async def test_e2e_19_fresh_install_shipped_defaults(
                     and {"scope", "oracle_admission", "contradiction"} <= configured
                     and {"scope", "oracle_admission"} <= set(ws.get("applied_guards") or [])
                     and "evidence_anchor" not in configured
-                    and "currentness" not in configured
                     and bool(sources) and ORIGINAL_AMOUNT in built),
                     detail={"warden_status": ws,
                             "source_memories": len(sources) if sources else 0,

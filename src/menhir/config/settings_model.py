@@ -350,8 +350,7 @@ class MemorySettings:
     # MENHIR_FRONTIER_SHADOW / etc. (code defaults match .env.example, audit DOC-05).
     # Oracle ranking and the intent lens are always on since #172 and have no setting; see
     # RetrievalTuningConfig. The Warden gate and its contradiction guard are on by default since
-    # #173 (set each to false to opt out); the belief gate and evidence anchor (#349) stay opt-in.
-    frontier_belief_gate: bool = False     # add CurrentnessWarden + belief scoring to the chain (opt-in; see #350)
+    # #173 (set each to false to opt out); the evidence anchor (#349) stays opt-in.
     frontier_evidence_anchor: bool = False  # Guard 5 EvidenceAnchorWarden; opt-in: it reads the client label, not the speaker, and refuses ordinary conversation (#349)
     frontier_shadow: bool = False          # observe-only oracle/warden pass (trace)
     # Source-memory recall lane: additive section of raw episode memories (cosine over
@@ -658,7 +657,6 @@ class MemorySettings:
         from menhir.domain.retrieval_tuning import RetrievalTuningConfig
 
         return RetrievalTuningConfig(
-            enable_belief_gate=self.frontier_belief_gate,
             enable_evidence_anchor=self.frontier_evidence_anchor,
             scalar_verdict_min_similarity=self.personal_memory_scalar_verdict_min_similarity,
             scalar_observation_recall=self.personal_memory_scalar_observation_recall,
@@ -827,7 +825,6 @@ class MemorySettings:
             # Benchmark mode (LongMemEval Mode B isolation)
             benchmark_mode=parse_bool_env(_getenv("MENHIR_BENCHMARK_MODE", default=str(cls.benchmark_mode))),
             # Frontier portions (default off)
-            frontier_belief_gate=parse_bool_env(_getenv("MENHIR_FRONTIER_BELIEF_GATE", default=str(cls.frontier_belief_gate))),
             frontier_evidence_anchor=parse_bool_env(_getenv("MENHIR_FRONTIER_EVIDENCE_ANCHOR", default=str(cls.frontier_evidence_anchor))),
             frontier_shadow=parse_bool_env(_getenv("MENHIR_FRONTIER_SHADOW", default=str(cls.frontier_shadow))),
             frontier_source_memory_limit=_parse_int(

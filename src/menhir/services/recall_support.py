@@ -55,9 +55,6 @@ from menhir.services.scoring_service import (
     MIN_SIMILARITY_THRESHOLD,
     ScoringService,
 )
-from menhir.domain.git_staleness import BeliefCommitContext, derive_structural_staleness
-from menhir.services.change_log_provider import CachedGitChangeLog, ChangeLogProvider
-from menhir.infrastructure.paths import repo_root_for_project
 
 logger = logging.getLogger(__name__)
 
@@ -67,16 +64,13 @@ from menhir.services.recall_policies import (
     FILE_LINKED_BASELINE_SIMILARITY,
     PENDING_ENTITY_SIMILARITY,
     _authority_contributors,
-    _belief_markers_from_facts,
     _blend_oracle_order,
     _build_temporal_facts,
     _filter_to_current_beliefs,
     _frontier_trace_enabled,
     _oracle_similarity,
     _query_wants_history,
-    _repo_path_for,
     _select_candidate_content,
-    _staleness_evidence_for,
 )
 
 
@@ -515,7 +509,6 @@ class RecallSupportMixin:
             LogSpaceOracleCombiner(),
             auto_intent=tuning.enable_intent_lens if tuning else False,
             contradiction_interrupt=tuning.enable_contradiction_interrupt if tuning else False,
-            belief_gate=tuning.enable_belief_gate if tuning else False,
             evidence_anchor=tuning.enable_evidence_anchor if tuning else True,
         )
         resolved_lens = pipeline._resolve_intent(qctx).intent
@@ -650,7 +643,6 @@ class RecallSupportMixin:
             pipeline = AssertionPipeline(
                 LogSpaceOracleCombiner(), auto_intent=tuning.enable_intent_lens,
                 contradiction_interrupt=tuning.enable_contradiction_interrupt,
-                belief_gate=tuning.enable_belief_gate,
                 evidence_anchor=tuning.enable_evidence_anchor,
             )
             outcome = await pipeline.run(qctx, cmems)
@@ -687,21 +679,9 @@ class RecallSupportMixin:
                     ("oracle_ranking", tuning.enable_oracle_ranking),
                     ("warden_gate", tuning.enable_warden_gate),
                     ("intent_lens", tuning.enable_intent_lens),
-                    ("belief_gate", tuning.enable_belief_gate),
                 ) if on
             ]
             note = ("frontier: " + ",".join(portions)) if portions else None
-            # belief_gate only ADDS CurrentnessWarden to the chain; warden_gate is the master
-            # switch that APPLIES the chain's verdicts (drop REFUSED / label FLAGGED). With
-            # belief_gate on but warden_gate off, those verdicts are computed and discarded —
-            # warn so the gate is not silently inert.
-            if tuning.enable_belief_gate and not tuning.enable_warden_gate:
-                warn = (
-                    "belief_gate has no effect without warden_gate "
-                    "(belief verdicts computed but not applied)"
-                )
-                logger.warning("recall frontier: %s query=%r", warn, query[:60])
-                note = f"{note} | {warn}" if note else warn
             if warden_status is not None:
                 warden_status.state = (
                     ("applied" if len(outcome.ranked) == len(scored) else "partial")
@@ -781,13 +761,6 @@ class RecallSupportMixin:
                     meta["evidence_kinds"] = tuple(sorted(kinds))
                     if len(anchor_projects) == 1:
                         meta["project"] = next(iter(anchor_projects))
-                    anchor_paths = [
-                        str(p) for p in (row.get("anchor_paths") or []) if p
-                    ]
-                    if anchor_paths:
-                        meta["anchor_paths"] = tuple(anchor_paths)
-                    if len(anchor_projects) == 1:
-                        meta["anchor_project"] = next(iter(anchor_projects))
             except Exception as exc:
                 if warden_status is not None:
                     warden_status.add_gap("provenance_malformed_row")

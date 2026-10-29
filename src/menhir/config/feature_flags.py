@@ -58,8 +58,6 @@ _SETTINGS = (
     ('personal_memory_counting_enabled', 'MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED', True,
         'personal_memory', 'Count single happenings ("went to yoga") as scalar occurrences after the scalar phase (LLM calls from the scheduler); builds on scalar state.', True, ()),
     ('benchmark_mode', 'MENHIR_BENCHMARK_MODE', False, 'runtime', 'Enable benchmark mode.', False, ()),
-    ('frontier_belief_gate', 'MENHIR_FRONTIER_BELIEF_GATE', False, 'frontier', 'Enable frontier belief gate.',
-        True, ()),
     ('frontier_evidence_anchor', 'MENHIR_FRONTIER_EVIDENCE_ANCHOR', False, 'frontier',
         'Enable frontier evidence anchor.', True, ()),
     ('frontier_shadow', 'MENHIR_FRONTIER_SHADOW', False, 'frontier', 'Enable frontier shadow.', False, ()),
@@ -291,4 +289,6 @@ RETIRED = {
     "MENHIR_FRONTIER_VERB_FACETS": "2026-10-28: removed (#399 bucket 3; o500 A/B changed recall on 9 items with no flips)",
     "anchored_time_render_enabled": "2026-10-29: removed (#400; at-tr-ku 211 A/B 198 vs 198, flips +4/-4)",
     "MENHIR_ANCHORED_TIME_RENDER": "2026-10-29: removed (#400; at-tr-ku 211 A/B 198 vs 198, flips +4/-4)",
+    "frontier_belief_gate": "2026-10-29: removed (#399 bucket 2; quality delta 0, p95 +12.6%)",
+    "MENHIR_FRONTIER_BELIEF_GATE": "2026-10-29: removed (#399 bucket 2; quality delta 0, p95 +12.6%)",
 }

@@ -81,7 +81,7 @@ def test_client_tokens_enabled_from_env(monkeypatch: pytest.MonkeyPatch, raw: st
 @pytest.mark.unit
 def test_frontier_portion_defaults() -> None:
     """Oracle ranking and the intent lens are always on (#172); the Warden gate and its
-    contradiction guard are on by default (#173); the belief gate, the evidence anchor and the
+    contradiction guard are on by default (#173); the evidence anchor and the
     other frontier portions default OFF and are opt-in via MENHIR_FRONTIER_* (audit DOC-05)."""
     t = MemorySettings().retrieval_tuning()
     assert t.enable_oracle_ranking is True
@@ -89,7 +89,6 @@ def test_frontier_portion_defaults() -> None:
     assert t.enable_assertion_shadow is False
     assert t.enable_warden_gate is True
     assert t.enable_contradiction_interrupt is True
-    assert t.enable_belief_gate is False
     assert t.enable_evidence_anchor is False
 
 
@@ -118,17 +117,15 @@ def test_always_on_portions_are_on_without_settings() -> None:
 def test_frontier_portions_from_env_map_to_tuning(monkeypatch: pytest.MonkeyPatch) -> None:
     """MENHIR_FRONTIER_* env flags map onto RetrievalTuningConfig; shadow drives assertion_shadow."""
     # Set each explicitly so the mapping is asserted independent of field defaults.
-    monkeypatch.setenv("MENHIR_FRONTIER_BELIEF_GATE", "1")
     monkeypatch.setenv("MENHIR_FRONTIER_SHADOW", "yes")
     # Retired flags (#172) are ignored: Oracle ranking and the intent lens stay on.
     monkeypatch.setenv("MENHIR_FRONTIER_ORACLE_RANKING", "0")
     monkeypatch.setenv("MENHIR_FRONTIER_INTENT_LENS", "0")
     s = MemorySettings.from_env()
-    assert (s.frontier_belief_gate, s.frontier_shadow) == (True, True)
+    assert s.frontier_shadow is True
     t = s.retrieval_tuning()
     assert t.enable_oracle_ranking is True
     assert t.enable_warden_gate is True
-    assert t.enable_belief_gate is True
     assert t.enable_assertion_shadow is True   # frontier_shadow -> tuning.enable_assertion_shadow
     assert t.enable_intent_lens is True
 

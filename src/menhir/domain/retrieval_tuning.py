@@ -211,11 +211,6 @@ class RetrievalTuningConfig:
     enable_warden_gate: bool = True
     # Contradiction interrupt: append ContradictionWarden to the default warden chain. On by default since #168 freeze; kept as a per-request knob.
     enable_contradiction_interrupt: bool = True
-    # Belief gate: append CurrentnessWarden + populate belief_score/evidence from
-    # candidate metadata temporal markers. Default OFF (#173, #350): an Entity is marked superseded
-    # when any of its fact edges expired, and with the contradiction guard an anchored one is
-    # then refused under the current lens. Only belief-bearing candidates are scored.
-    enable_belief_gate: bool = False
     # Evidence-anchor gate (Guard 5 / EvidenceAnchorWarden): refuse candidates whose support is
     # synthetic-only / has no external anchor (user/log/test/git/file). OFF by default, matching
     # MENHIR_FRONTIER_EVIDENCE_ANCHOR: provenance comes from the client label, so ordinary
