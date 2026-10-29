@@ -5,6 +5,7 @@
 - `infrastructure/todo_repository.py`: `search_by_query` takes `namespace` and keeps only the caller's namespace plus the default bucket (`None` stays unrestricted), the rule `list_todos` and `get_todo` use. The search parameter is renamed `query_text`.
 - `infrastructure/memory_graph_adapter.py`: `list_todos_matching_query` forwards `namespace`.
 - `services/context_builder.py`: `build_context` passes its `namespace` to the todo search. REST `/api/context`, the MCP `build_context` tool and the hook now show matching todos.
+- `core/backend_runtime_admin_ops.py`: `close_todo` and `delete_todo` call `_require_own_todo`, as supersede/resolve/reopen/link already did. Through `/api/internal/backend/{op}` a client pinned to one namespace could close or delete another namespace's todo by uuid (the MCP `close_todo` tool already checked; the internal ops did not). Unpinned callers are unchanged. Test: new `tests/core/test_todo_close_delete_ownership.py`.
 - Tests: new `tests/test_context_todo_namespace_live.py` (online: namespaces A, B and default; scoped to A shows A and default, never B). `tests/test_todo.py`: namespace scoping tests, and the existing parameter test asserts `query_text` and no `query` key. `tests/test_context_builder.py`: the namespace reaches the todo search.
 - `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
 

@@ -527,6 +527,7 @@ class RuntimeProviderAdminOpsMixin:
         )
 
     async def close_todo(self, uuid: str) -> bool:
+        await self._require_own_todo(uuid)
         return bool(await self._off_loop(self.built.graph_adapter.close_todo, uuid))
 
     async def _require_own_todo(self, todo_uuid: str) -> None:
@@ -591,6 +592,7 @@ class RuntimeProviderAdminOpsMixin:
         )
 
     async def delete_todo(self, uuid: str) -> bool:
+        await self._require_own_todo(uuid)
         return bool(await self._off_loop(self.built.graph_adapter.delete_todo, uuid))
 
     async def close_stale_todos(
