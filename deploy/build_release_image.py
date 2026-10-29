@@ -213,10 +213,14 @@ def inspect_image(image_tag: str, expected: dict[str, str]) -> tuple[str, dict[s
     actual = {name: labels.get(label) for name, label in LABELS.items()}
     if actual != expected:
         raise BuildImageError(f"built image labels do not match derived inputs: {actual!r}")
+    return image_id, actual, canonical_sha256(config)
+
+
+def canonical_sha256(config: dict[str, Any]) -> str:
     encoded = json.dumps(
         config, ensure_ascii=True, separators=(",", ":"), sort_keys=True,
     ).encode("ascii")
-    return image_id, actual, hashlib.sha256(encoded).hexdigest()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _validate_scanner_image(value: Any, scanner: str) -> str:
@@ -580,6 +584,60 @@ def create_validation_bundle(args: argparse.Namespace) -> dict[str, Any]:
     return metadata
 
 
+OCI_MANIFEST_MEDIA_TYPE = "application/vnd.oci.image.manifest.v1+json"
+MAX_MANIFEST_BYTES = 4 * 1024 * 1024
+
+
+def archive_manifest_digests(archive: Path, config_digest: str) -> frozenset[str]:
+    """Digests of the image manifests in ``archive``'s OCI index whose config is
+    ``config_digest``. Each manifest blob must hash to its digest. An archive without an OCI
+    index, or one that cannot be read, yields no digests."""
+    found: set[str] = set()
+    try:
+        with tarfile.open(archive, mode="r:") as tar:
+            index_member = tar.extractfile("index.json")
+            if index_member is None:
+                return frozenset()
+            index = json.loads(index_member.read(MAX_MANIFEST_BYTES))
+            entries = index.get("manifests") if isinstance(index, dict) else None
+            for entry in entries if isinstance(entries, list) else []:
+                if not isinstance(entry, dict) or entry.get("mediaType") != OCI_MANIFEST_MEDIA_TYPE:
+                    continue
+                digest = entry.get("digest")
+                if not isinstance(digest, str) or DIGEST_RE.fullmatch(digest) is None:
+                    continue
+                blob = tar.extractfile(f"blobs/sha256/{digest.removeprefix('sha256:')}")
+                raw = blob.read(MAX_MANIFEST_BYTES + 1) if blob is not None else b""
+                if len(raw) > MAX_MANIFEST_BYTES or "sha256:" + sha256_bytes(raw) != digest:
+                    raise BuildImageError("image archive manifest does not match its digest")
+                manifest = json.loads(raw)
+                config = manifest.get("config") if isinstance(manifest, dict) else None
+                if isinstance(config, dict) and config.get("digest") == config_digest:
+                    found.add(digest)
+    except (KeyError, tarfile.TarError, ValueError):
+        return frozenset()
+    return frozenset(found)
+
+
+def archive_image_config(archive: Path, config_digest: str) -> dict[str, Any]:
+    """The ``config`` section of ``archive``'s config blob ``config_digest``, hash-checked."""
+    try:
+        with tarfile.open(archive, mode="r:") as tar:
+            blob = tar.extractfile(f"blobs/sha256/{config_digest.removeprefix('sha256:')}")
+            raw = blob.read(MAX_MANIFEST_BYTES + 1) if blob is not None else b""
+    except (KeyError, tarfile.TarError) as exc:
+        raise BuildImageError("image archive has no readable config blob") from exc
+    if len(raw) > MAX_MANIFEST_BYTES or "sha256:" + sha256_bytes(raw) != config_digest:
+        raise BuildImageError("image archive config does not match its digest")
+    try:
+        config = json.loads(raw).get("config")
+    except (ValueError, AttributeError) as exc:
+        raise BuildImageError("image archive config is malformed") from exc
+    if not isinstance(config, dict):
+        raise BuildImageError("image archive config is malformed")
+    return config
+
+
 def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> tuple[dict[str, Any], dict[str, Any]]:
     if not args.metadata or not args.identity or not args.image_archive:
         raise BuildImageError("verification requires metadata, identity, and image archive inputs")
@@ -696,9 +754,24 @@ def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> t
     image_id, actual_labels, config_sha256 = inspect_image(image_tag, expected_labels)
     expected_image_id = _require_sha256(metadata.get("image_id"), "image ID", prefixed=True)
     expected_config = _require_sha256(metadata.get("config_sha256"), "config SHA-256")
-    if image_id != expected_image_id or identity.get("image_id") != image_id:
+    if identity.get("image_id") != expected_image_id:
+        raise BuildImageError("validation metadata and identity disagree on image ID")
+    if identity.get("config_sha256") != expected_config:
+        raise BuildImageError("validation metadata and identity disagree on image config")
+    # The classic image store reports the config digest as the image ID and renders the
+    # config with its legacy empty fields, which is what validation recorded. The containerd
+    # store (Docker 29 default) reports the manifest digest and renders the config as stored.
+    # That path is accepted only for a manifest of this archive, whose bytes the identity
+    # pinned above, and its loaded config must equal the archive's config blob.
+    if image_id == expected_image_id:
+        config_matches = config_sha256 == expected_config
+    elif image_id in archive_manifest_digests(archive, expected_image_id):
+        config_matches = config_sha256 == canonical_sha256(
+            archive_image_config(archive, expected_image_id),
+        )
+    else:
         raise BuildImageError("loaded image ID does not match validation identity")
-    if config_sha256 != expected_config or identity.get("config_sha256") != config_sha256:
+    if not config_matches:
         raise BuildImageError("loaded image config does not match validation identity")
     if actual_labels != labels:
         raise BuildImageError("loaded image labels do not match validation metadata")

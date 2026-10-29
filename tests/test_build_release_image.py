@@ -676,3 +676,156 @@ def test_publication_schema_2_emits_digest_only_image_reference(
     assert publication["candidate_tag"] == candidate_tag
     assert publication["candidate_ref"] == f"{candidate_tag}@{REGISTRY_DIGEST}"
     assert json.loads(output.read_text(encoding="ascii")) == publication
+
+
+# ---------------------------------------------------------------------------
+# containerd image store: the loaded image ID is the manifest digest
+# ---------------------------------------------------------------------------
+
+def _oci_archive(
+    path: Path, *, config_digest: str = IMAGE_ID, tamper: bool = False,
+    media_type: str = "application/vnd.oci.image.manifest.v1+json",
+) -> str:
+    """Write a `docker save`-shaped OCI archive and return its manifest digest."""
+    import io
+    import tarfile
+
+    manifest = _json_bytes({
+        "schemaVersion": 2,
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "config": {"mediaType": "application/vnd.oci.image.config.v1+json",
+                   "digest": config_digest, "size": 10},
+        "layers": [],
+    })
+    digest = "sha256:" + hashlib.sha256(manifest).hexdigest()
+    index = _json_bytes({"schemaVersion": 2, "manifests": [
+        {"mediaType": media_type, "digest": digest, "size": len(manifest)},
+    ]})
+    with tarfile.open(path, mode="w:") as tar:
+        for name, data in (("index.json", index),
+                           (f"blobs/sha256/{digest[7:]}", manifest + (b" " if tamper else b""))):
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    return digest
+
+
+def test_archive_manifest_digest_names_the_validated_config(tmp_path: Path) -> None:
+    archive = tmp_path / "image.tar"
+    digest = _oci_archive(archive)
+    assert MODULE.archive_manifest_digests(archive, IMAGE_ID) == frozenset({digest})
+
+
+def test_archive_manifest_for_another_config_is_not_accepted(tmp_path: Path) -> None:
+    archive = tmp_path / "image.tar"
+    _oci_archive(archive, config_digest="sha256:" + "a" * 64)
+    assert MODULE.archive_manifest_digests(archive, IMAGE_ID) == frozenset()
+
+
+def test_archive_manifest_whose_bytes_do_not_match_its_digest_is_refused(tmp_path: Path) -> None:
+    archive = tmp_path / "image.tar"
+    _oci_archive(archive, tamper=True)
+    with pytest.raises(MODULE.BuildImageError, match="does not match its digest"):
+        MODULE.archive_manifest_digests(archive, IMAGE_ID)
+
+
+def test_archive_without_an_oci_manifest_yields_no_digest(tmp_path: Path) -> None:
+    nested = tmp_path / "index-of-index.tar"
+    _oci_archive(nested, media_type="application/vnd.oci.image.index.v1+json")
+    not_tar = tmp_path / "not-a-tar"
+    not_tar.write_bytes(b"sealed release image")
+    assert MODULE.archive_manifest_digests(nested, IMAGE_ID) == frozenset()
+    assert MODULE.archive_manifest_digests(not_tar, IMAGE_ID) == frozenset()
+
+
+BLOB_CONFIG = {"User": "10001:10001", "Labels": {"a": "b"}}
+
+
+def _verify_with_loaded_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, loaded_id: str, archive_digests: frozenset[str],
+    *, loaded_config_sha256: str = CONFIG_SHA256, blob_config: dict[str, Any] = BLOB_CONFIG,
+) -> list[tuple[Path, str]]:
+    args, metadata, _identity = _validation_bundle(tmp_path / "release-candidate")
+    asked: list[tuple[Path, str]] = []
+    monkeypatch.setattr(MODULE, "git_commit", lambda _repo, **_kwargs: COMMIT)
+    monkeypatch.setattr(
+        MODULE, "inspect_image",
+        lambda _tag, _expected: (loaded_id, metadata["labels"], loaded_config_sha256),
+    )
+    monkeypatch.setattr(
+        MODULE, "archive_manifest_digests",
+        lambda archive, config: asked.append((archive, config)) or archive_digests,
+    )
+    monkeypatch.setattr(
+        MODULE, "archive_image_config",
+        lambda archive, config: asked.append((archive, config)) or blob_config,
+    )
+    MODULE.verify_validation_bundle(args, load_image=False)
+    return asked
+
+
+def test_verification_accepts_the_archive_manifest_digest_as_the_loaded_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_digest = "sha256:" + "c" * 64
+    asked = _verify_with_loaded_id(
+        tmp_path, monkeypatch, manifest_digest, frozenset({manifest_digest}),
+        loaded_config_sha256=MODULE.canonical_sha256(BLOB_CONFIG),
+    )
+    archive = (tmp_path / "release-candidate" / "release-image.tar").resolve()
+    assert asked == [(archive, IMAGE_ID), (archive, IMAGE_ID)]
+
+
+def test_verification_rejects_a_manifest_id_whose_loaded_config_differs_from_the_blob(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_digest = "sha256:" + "c" * 64
+    with pytest.raises(MODULE.BuildImageError, match="loaded image config does not match"):
+        _verify_with_loaded_id(
+            tmp_path, monkeypatch, manifest_digest, frozenset({manifest_digest}),
+            loaded_config_sha256=MODULE.canonical_sha256({"User": "root"}),
+        )
+
+
+def test_verification_with_the_config_digest_still_requires_the_recorded_config_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(MODULE.BuildImageError, match="loaded image config does not match"):
+        _verify_with_loaded_id(
+            tmp_path, monkeypatch, IMAGE_ID, frozenset(),
+            loaded_config_sha256=MODULE.canonical_sha256(BLOB_CONFIG),
+        )
+
+
+def test_archive_image_config_is_hash_checked(tmp_path: Path) -> None:
+    import io
+    import tarfile
+
+    blob = _json_bytes({"config": BLOB_CONFIG, "rootfs": {}})
+    digest = "sha256:" + hashlib.sha256(blob).hexdigest()
+    good, bad = tmp_path / "good.tar", tmp_path / "bad.tar"
+    for path, data in ((good, blob), (bad, blob + b" ")):
+        with tarfile.open(path, mode="w:") as tar:
+            info = tarfile.TarInfo(f"blobs/sha256/{digest[7:]}")
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    assert MODULE.archive_image_config(good, digest) == BLOB_CONFIG
+    with pytest.raises(MODULE.BuildImageError, match="does not match its digest"):
+        MODULE.archive_image_config(bad, digest)
+    with pytest.raises(MODULE.BuildImageError, match="no readable config blob"):
+        MODULE.archive_image_config(good, "sha256:" + "e" * 64)
+
+
+def test_verification_rejects_a_loaded_id_the_archive_does_not_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(MODULE.BuildImageError, match="loaded image ID does not match"):
+        _verify_with_loaded_id(
+            tmp_path, monkeypatch, "sha256:" + "d" * 64, frozenset({"sha256:" + "c" * 64}),
+        )
+
+
+def test_verification_with_the_config_digest_does_not_open_the_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _verify_with_loaded_id(tmp_path, monkeypatch, IMAGE_ID, frozenset()) == []
