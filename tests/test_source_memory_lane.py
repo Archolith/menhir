@@ -383,54 +383,6 @@ async def test_context_builder_appends_source_memories_section(
 
 
 # ---------------------------------------------------------------------------
-# Pools (pure module)
-# ---------------------------------------------------------------------------
-
-
-def _sm(uuid: str, content: str) -> SourceMemory:
-    return SourceMemory(
-        uuid=uuid, content=content, reference_time=None, cosine=1.0, source=None
-    )
-
-
-def test_extract_anchors_ignores_step_labels_and_finds_identities() -> None:
-    from menhir.domain.source_memory_pools import extract_anchors
-
-    anchors = extract_anchors("edited src/app.py at step 3; run cd 3; see test_foo_bar")
-    assert "src/app.py" in anchors
-    assert "test_foo_bar" in anchors
-    assert "cd 3" in anchors
-    assert not any(a.startswith("step") for a in anchors)
-
-
-def test_pools_deterministic_and_disjoint() -> None:
-    from menhir.domain.source_memory_pools import assign_pools
-
-    memories = [
-        _sm("a", "touched src/app.py and src/util.py"),
-        _sm("b", "rewrote src/app.py for the fix"),
-        _sm("c", "unrelated memory about nothing"),
-    ]
-    forward = assign_pools(list(memories))
-    backward = assign_pools(list(reversed(memories)))
-
-    ids_forward = {m.uuid: pid for m, pid, _anchor in forward if pid}
-    ids_backward = {m.uuid: pid for m, pid, _anchor in backward if pid}
-    assert ids_forward == ids_backward
-    assert set(ids_forward) == {"a", "b"}  # 'c' shares no anchor with >= 2
-    # Each memory in at most one pool.
-    assert len([1 for _m, pid, _a in forward if pid]) == 2
-
-
-def test_pools_ignores_single_memory_anchors() -> None:
-    from menhir.domain.source_memory_pools import assign_pools
-
-    memories = [_sm("a", "only one file src/unique.py"), _sm("b", "different entirely")]
-    results = assign_pools(memories)
-    assert all(pid is None for _m, pid, _anchor in results)
-
-
-# ---------------------------------------------------------------------------
 # Ingest step
 # ---------------------------------------------------------------------------
 
@@ -549,30 +501,25 @@ def test_settings_defaults_deployment_and_library_on(monkeypatch: pytest.MonkeyP
     for var in (
         "MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT",
         "MENHIR_FRONTIER_SOURCE_MEMORY_MAX_CHARS",
-        "MENHIR_FRONTIER_SOURCE_MEMORY_POOLS",
     ):
         monkeypatch.delenv(var, raising=False)
     settings = MemorySettings.from_env()
     assert settings.frontier_source_memory_limit == 10
     assert settings.frontier_source_memory_max_chars == 2000
-    assert settings.frontier_source_memory_pools is False
 
     tuning = settings.retrieval_tuning()
     assert tuning.enable_source_memories is True
     assert tuning.source_memory_limit == 10
     assert tuning.source_memory_max_chars == 2000
     assert RetrievalTuningConfig().source_memory_max_chars == 2000
-    assert tuning.source_memory_pools is False
 
 
 def test_settings_env_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT", "25")
     monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_MAX_CHARS", "1200")
-    monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_POOLS", "1")
     settings = MemorySettings.from_env()
     assert settings.frontier_source_memory_limit == 25
     assert settings.frontier_source_memory_max_chars == 1200
-    assert settings.frontier_source_memory_pools is True
 
 
 def test_settings_env_bounds_fail_at_startup(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -629,7 +576,7 @@ def test_recall_response_omits_source_memories_when_none() -> None:
         query="q", preset="knowledge", results=[], candidates_evaluated=0,
         source_memories=[{
             "uuid": "ep-1", "content": "c", "reference_time": None,
-            "cosine": 0.5, "source": None, "pool_id": None, "pool_anchor": None,
+            "cosine": 0.5, "source": None,
         }],
     ).model_dump(exclude_none=True)
     assert payload["source_memories"][0]["uuid"] == "ep-1"
@@ -648,7 +595,7 @@ async def test_mcp_payload_keeps_source_memories_key(
             "candidates_evaluated": 0,
             "source_memories": [
                 {"uuid": "ep-1", "content": "c", "reference_time": "2026-01-01",
-                 "cosine": 0.5, "source": None, "pool_id": None, "pool_anchor": None}
+                 "cosine": 0.5, "source": None}
             ],
         }
 

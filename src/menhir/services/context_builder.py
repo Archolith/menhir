@@ -564,13 +564,8 @@ class ContextBuilderService:
         if recall_result.source_memories:
             source_lines = ["Source memories (raw episodes, oldest first):"]
             for sm in recall_result.source_memories:
-                pool_tag = (
-                    f" [pool {sm.pool_id} via {sm.pool_anchor}]"
-                    if sm.pool_id
-                    else ""
-                )
                 source_lines.append(
-                    f"  - {sm.reference_time or 'unknown time'} | {sm.content}{pool_tag}"
+                    f"  - {sm.reference_time or 'unknown time'} | {sm.content}"
                 )
             source_block = "\n".join(source_lines)
             source_tokens = _tokens_for(source_block)

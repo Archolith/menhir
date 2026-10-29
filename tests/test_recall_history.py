@@ -65,30 +65,6 @@ async def test_limit_clamped_to_read_query_bounds(
 
 
 @pytest.mark.asyncio
-async def test_pools_on_and_off(
-    stub_graphiti_client, stub_memory_graph_adapter
-) -> None:
-    stub_memory_graph_adapter.episode_embedding_results = [
-        _episode_row("ep-1", "touched src/app.py for the fix", "2026-01-01", 0.9),
-        _episode_row("ep-2", "rewrote src/app.py later", "2026-02-01", 0.8),
-        _episode_row("ep-3", "unrelated content entirely", "2026-03-01", 0.7),
-    ]
-    svc = _svc(stub_graphiti_client, stub_memory_graph_adapter)
-
-    pooled = await svc.recall_history("q", pools=True)
-    by_uuid = {sm.uuid: sm for sm in pooled.memories}
-    assert by_uuid["ep-1"].pool_id and by_uuid["ep-1"].pool_id == by_uuid["ep-2"].pool_id
-    assert by_uuid["ep-3"].pool_id is None
-
-    unpooled = await svc.recall_history("q", pools=False)
-    assert all(sm.pool_id is None for sm in unpooled.memories)
-
-    # Off by default until #396 measures pools.
-    default = await svc.recall_history("q")
-    assert all(sm.pool_id is None for sm in default.memories)
-
-
-@pytest.mark.asyncio
 async def test_empty_result_sets_note(
     stub_graphiti_client, stub_memory_graph_adapter
 ) -> None:
@@ -176,7 +152,7 @@ def test_recall_history_request_bounds() -> None:
     from menhir.api.routes_support import RecallHistoryRequest
 
     req = RecallHistoryRequest(query="q")
-    assert req.limit == 30 and req.pools is False and req.namespace is None
+    assert req.limit == 30 and req.namespace is None
     assert RecallHistoryRequest(query="q", limit=1).limit == 1
     assert RecallHistoryRequest(query="q", limit=50).limit == 50
     with pytest.raises(ValidationError):
@@ -213,7 +189,7 @@ def test_recall_history_response_shape_and_note_omission() -> None:
         query="q",
         memories=[{
             "uuid": "ep-1", "content": "c", "reference_time": "2026-01-01",
-            "cosine": 0.5, "source": None, "pool_id": None, "pool_anchor": None,
+            "cosine": 0.5, "source": None,
         }],
     ).model_dump(exclude_none=True)
     assert payload["memories"][0]["uuid"] == "ep-1"
@@ -244,11 +220,9 @@ async def test_mcp_payload_shape(monkeypatch: pytest.MonkeyPatch) -> None:
         "query": "q",
         "memories": [
             {"uuid": "ep-1", "content": "c", "reference_time": "2026-01-01",
-             "cosine": 0.5, "source": "claude-code", "pool_id": None,
-             "pool_anchor": None},
+             "cosine": 0.5, "source": "claude-code"},
             {"uuid": "ep-2", "content": "d", "reference_time": "2026-02-01",
-             "cosine": 0.4, "source": None, "pool_id": "pool:abc",
-             "pool_anchor": "src/app.py"},
+             "cosine": 0.4, "source": None},
         ],
     }
     tool = RecallHistoryTool()
@@ -260,8 +234,9 @@ async def test_mcp_payload_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     assert payload["memories"][0] == {
         "time": "2026-01-01", "content": "c", "uuid": "ep-1", "source": "claude-code",
     }
-    assert payload["memories"][1]["pool_id"] == "pool:abc"
-    assert payload["memories"][1]["pool_anchor"] == "src/app.py"
+    assert payload["memories"][1] == {
+        "time": "2026-02-01", "content": "d", "uuid": "ep-2", "source": None,
+    }
     assert "note" not in payload
 
 

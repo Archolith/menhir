@@ -237,13 +237,6 @@ async def _build_source_memories(
                 source=row.get("source") or None,
             ))
         section.sort(key=lambda sm: (sm.reference_time or "", sm.uuid))
-        if tuning.source_memory_pools and section:
-            from menhir.domain.source_memory_pools import assign_pools
-
-            section = [
-                replace(sm, pool_id=pool_id, pool_anchor=anchor)
-                for sm, pool_id, anchor in assign_pools(section)
-            ]
         return tuple(section), None, int((perf_counter() - started) * 1000)
     except Exception as exc:
         logger.error(
@@ -375,7 +368,6 @@ async def run_recall_history(
     *,
     namespace: str | None = None,
     limit: int = 30,
-    pools: bool = False,  # unmeasured; off until #396
 ) -> RecallHistoryResult:
     """recall_history drill-down: matching episode memories, strictly oldest first.
 
@@ -413,13 +405,6 @@ async def run_recall_history(
             source=row.get("source") or None,
         ))
     memories.sort(key=lambda sm: (sm.reference_time or "", sm.uuid))
-    if pools and memories:
-        from menhir.domain.source_memory_pools import assign_pools
-
-        memories = [
-            replace(sm, pool_id=pool_id, pool_anchor=anchor)
-            for sm, pool_id, anchor in assign_pools(memories)
-        ]
     return RecallHistoryResult(
         query=stripped,
         memories=tuple(memories),

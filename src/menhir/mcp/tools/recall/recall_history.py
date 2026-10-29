@@ -12,18 +12,16 @@ async def recall_history(
     query: str,
     namespace: str = "",
     limit: int = 30,
-    pools: bool = False,
 ) -> str:
-    """List saved memories matching a subject in time order (oldest first), with optional pools.
+    """List saved memories matching a subject in time order (oldest first).
 
     Args:
         query: Subject to match. Natural language works best.
         namespace: Optional silo to scope this operation to. Empty = default/global behavior.
         limit: Max memories to return (default: 30, max: 50).
-        pools: Group related memories into pools (default: False; unmeasured, see #396).
     """
     return await RecallHistoryTool().execute(
-        query=query, namespace=namespace, limit=limit, pools=pools
+        query=query, namespace=namespace, limit=limit
     )
 
 
@@ -37,8 +35,8 @@ class RecallHistoryTool(BaseJsonTool):
     destructive_hint = False
     open_world_hint = False
     description = (
-        "List saved memories matching a subject in time order (oldest first), with "
-        "optional pools. Use after recall_memories when a question needs how something "
+        "List saved memories matching a subject in time order (oldest first). "
+        "Use after recall_memories when a question needs how something "
         "changed, the sequence of states, or what it was before."
     )
 
@@ -47,13 +45,12 @@ class RecallHistoryTool(BaseJsonTool):
         query: str,
         namespace: str = "",
         limit: int = 30,
-        pools: bool = False,
     ) -> str:
         """Drill-down over raw saved memories, oldest first. Use after recall_memories
         for how-something-changed, sequence-of-states, or what-it-was-before questions.
 
         namespace scopes the operation, subject to the client's configured pin.
-        limit defaults to 30 (max 50). pools=true groups related memories (off by default).
+        limit defaults to 30 (max 50).
 
         Read-only: no access updates. An empty result with a `note` means no embedded
         memory matched, not that no relevant memory exists.
@@ -64,7 +61,6 @@ class RecallHistoryTool(BaseJsonTool):
                 query,
                 namespace=namespace or None,
                 limit=limit,
-                pools=pools,
             )
         except ValueError:
             return self.render_json(
@@ -83,11 +79,6 @@ class RecallHistoryTool(BaseJsonTool):
                     "content": m.get("content"),
                     "uuid": m.get("uuid"),
                     "source": m.get("source"),
-                    **(
-                        {"pool_id": m.get("pool_id"), "pool_anchor": m.get("pool_anchor")}
-                        if m.get("pool_id")
-                        else {}
-                    ),
                 }
                 for m in result.get("memories", []) or []
             ],

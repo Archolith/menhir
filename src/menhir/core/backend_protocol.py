@@ -164,7 +164,6 @@ class MemoryBackend(Protocol):
         *,
         namespace: str | None = None,
         limit: int = 30,
-        pools: bool = False,
     ) -> dict[str, Any]:
         """Drill-down: matching source memories oldest first. Returns
         RecallHistoryResult-shaped dict."""

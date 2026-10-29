@@ -232,8 +232,6 @@ class RetrievalTuningConfig:
     source_memory_limit: int = 10
     # Per-memory content cap in the section; cut content ends with a trailing ellipsis.
     source_memory_max_chars: int = 2000
-    # Group the section's returned memories into anchor-based pools (pure, deterministic).
-    source_memory_pools: bool = False
     # Pick the section from a larger pool: drop exact content repeats, then each session's best
     # memory before more from the same session (domain/source_memory_spread.py). On by default
     # since #168 freeze; kept as a per-request knob.

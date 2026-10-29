@@ -38,7 +38,6 @@ class RecallLabTuning(BaseModel):
     enable_source_memories: bool = True
     source_memory_limit: int = Field(default=10, ge=1, le=50)
     source_memory_max_chars: int = Field(default=2000, ge=100, le=4000)
-    source_memory_pools: bool = False
     source_memory_spread: bool = True
     scalar_verdict_min_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
 

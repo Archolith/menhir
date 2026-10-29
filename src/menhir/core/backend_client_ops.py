@@ -141,7 +141,6 @@ class BackendClientOpsMixin:
         *,
         namespace: str | None = None,
         limit: int = 30,
-        pools: bool = False,
     ) -> dict[str, Any]:
         return await self._request(
             "recall_history",
@@ -149,7 +148,6 @@ class BackendClientOpsMixin:
                 "query": query,
                 "namespace": namespace,
                 "limit": int(limit),
-                "pools": bool(pools),
             },
         )
 

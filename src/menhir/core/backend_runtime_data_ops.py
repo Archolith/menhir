@@ -380,12 +380,11 @@ class RuntimeProviderDataOpsMixin:
         *,
         namespace: str | None = None,
         limit: int = 30,
-        pools: bool = False,
     ) -> dict[str, Any]:
         from dataclasses import asdict
 
         result = await self.built.recall_service.recall_history(
-            query, namespace=namespace, limit=limit, pools=pools
+            query, namespace=namespace, limit=limit
         )
         payload = _to_jsonable(asdict(result))
         if payload.get("note") is None:

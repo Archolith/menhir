@@ -453,13 +453,12 @@ Search memories by semantic similarity. Returns ranked results with relevance sc
 ### `recall_history`
 Concept id: `mcp.tool.recall_history`
 
-List saved memories matching a subject in time order (oldest first), with optional pools.
+List saved memories matching a subject in time order (oldest first).
 - **`query`** (str): Subject to match. Natural language works best.
 - **`namespace`** (str, optional): Silo to scope the operation to. Empty = default/global behavior.
 - **`limit`** (int, optional): Max memories to return (default: 30, max: 50).
-- **`pools`** (bool, optional): Group related memories into pools (default: true).
 - Read-only drill-down: no access updates, no ranking changes.
-- Returns compact JSON with `query`, `count`, and `memories[]` (`time`, `content`, `uuid`, `source`, plus `pool_id`/`pool_anchor` when pooled). A `note` is set (with empty `memories`) when no embedded memory matched — run `scripts/backfill_episode_embeddings.py` for pre-flag memories.
+- Returns compact JSON with `query`, `count`, and `memories[]` (`time`, `content`, `uuid`, `source`). A `note` is set (with empty `memories`) when no embedded memory matched — run `scripts/backfill_episode_embeddings.py` for pre-flag memories.
 
 ### `recall_timeline`
 Concept id: `mcp.tool.recall_timeline`
@@ -816,7 +815,7 @@ Close stale TODO items that have been open for too long.
 
 `recall_memories` is a standalone semantic search — no bootstrap dependency, returns ranked results with score breakdowns. Use it mid-task when you need targeted retrieval for a specific question.
 
-`recall_history` is a read-only drill-down over raw saved memories strictly in time order (oldest first), with optional pools. Use it after `recall_memories` when a question needs how something changed, the sequence of states, or what it was before.
+`recall_history` is a read-only drill-down over raw saved memories strictly in time order (oldest first). Use it after `recall_memories` when a question needs how something changed, the sequence of states, or what it was before.
 
 ### `build_context`
 Concept id: `mcp.tool.build_context`

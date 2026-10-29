@@ -282,8 +282,6 @@ class SourceMemory:
     reference_time: str | None
     cosine: float
     source: str | None
-    pool_id: str | None = None
-    pool_anchor: str | None = None
 
 
 @dataclass(frozen=True)

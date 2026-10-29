@@ -303,8 +303,6 @@ class SourceMemoryResponse(BaseModel):
     reference_time: str | None = None
     cosine: float
     source: str | None = None
-    pool_id: str | None = None
-    pool_anchor: str | None = None
 
 
 class RecallResponse(BaseModel):
@@ -324,7 +322,6 @@ class RecallHistoryRequest(BaseModel):
     query: str
     namespace: str | None = None
     limit: int = Field(default=30, ge=1, le=50)
-    pools: bool = False  # unmeasured; off until #396
 
 
 class RecallHistoryResponse(BaseModel):

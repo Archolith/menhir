@@ -233,7 +233,6 @@ async def recall_history(request: Request, body: RecallHistoryRequest) -> Recall
             body.query,
             namespace=_resolve_namespace(request, body.namespace),
             limit=body.limit,
-            pools=body.pools,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -246,8 +245,6 @@ async def recall_history(request: Request, body: RecallHistoryRequest) -> Recall
                 reference_time=m.get("reference_time"),
                 cosine=float(m.get("cosine") or 0.0),
                 source=m.get("source"),
-                pool_id=m.get("pool_id"),
-                pool_anchor=m.get("pool_anchor"),
             )
             for m in result.get("memories", []) or []
         ],

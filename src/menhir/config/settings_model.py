@@ -357,7 +357,6 @@ class MemorySettings:
     # the #168 freeze, with the ingest-side episode-content embedding step.
     frontier_source_memory_limit: int = 10          # section size (1..50; validated in RetrievalTuningConfig)
     frontier_source_memory_max_chars: int = 2000  # per-memory content cap (100..4000)
-    frontier_source_memory_pools: bool = False  # group section entries by shared anchors
 
     # HTTP server
     api_host: str = "127.0.0.1"
@@ -661,7 +660,6 @@ class MemorySettings:
             enable_assertion_shadow=self.frontier_shadow,
             source_memory_limit=self.frontier_source_memory_limit,
             source_memory_max_chars=self.frontier_source_memory_max_chars,
-            source_memory_pools=self.frontier_source_memory_pools,
             enable_anchored_time_expiry=self.anchored_time_resolver_enabled,
             enable_observation_dedup=self.personal_memory_observation_dedup_enabled,
         )
@@ -836,7 +834,6 @@ class MemorySettings:
                 minimum=100,
                 maximum=4000,
             ),
-            frontier_source_memory_pools=parse_bool_env(_getenv("MENHIR_FRONTIER_SOURCE_MEMORY_POOLS", default=str(cls.frontier_source_memory_pools))),
             # HTTP server
             api_host=_getenv("MENHIR_API_HOST", default=cls.api_host),
             api_port=_parse_int(

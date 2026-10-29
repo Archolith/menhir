@@ -153,6 +153,8 @@ def test_event_history_controls_are_retired(monkeypatch, name, env) -> None:
      "2026-10-29: removed (#399 bucket 2; quality delta 0, p95 +12.6%)"),
     ("frontier_evidence_anchor", "MENHIR_FRONTIER_EVIDENCE_ANCHOR",
      "2026-10-29: removed (#399 bucket 2; 3 of 33,861 entities pass)"),
+    ("frontier_source_memory_pools", "MENHIR_FRONTIER_SOURCE_MEMORY_POOLS",
+     "2026-10-29: removed (#399 bucket 2; indistinguishable from no pools on AMA)"),
 ])
 def test_bucket3_recall_flags_are_retired(monkeypatch, name, env, reason) -> None:
     # Fails if a removed recall flag returns as a setting/feature, or loses its retirement reason.
