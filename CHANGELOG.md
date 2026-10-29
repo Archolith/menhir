@@ -16,6 +16,8 @@ New settings let the cost lanes run on a local OpenAI-compatible server (#399 it
 - `MENHIR_PERSONAL_MEMORY_CHAT_TIMEOUT_S`: per-request timeout for the personal-memory chat (0, the default, keeps the 30 s `DEFAULT_REQUEST_TIMEOUT_S`). A local model at ~20 tok/s needs minutes per lane call.
 - Tests: `tests/test_local_model_routing_settings.py`.
 
+`.agent/workflows/run_and_test.md` gains the owner's standing benchmark rule: run as parallel as the system can handle within reason (every namespace of a staged fixture at once), and paid runs under $0.25 need no go-ahead when a cost monitor with a manual ceiling covers them.
+
 ## 2026-10-29 - Anchored-time render removed
 
 `MENHIR_ANCHORED_TIME_RENDER` (default off) showed each fact's persisted anchored-time contract as its event time in recall, context and timeline. Paired A/B on a resolver-on graph of 211 LongMemEval items (78 knowledge-update, 133 temporal-reasoning): off 198/211, on 198/211, flips +4/-4, with render text in 169 contexts (#400). It is removed; the code is kept on `archive/anchored-time-render-2026-10-29`. The anchored-time resolver and its `time_*` edge properties are unchanged.
