@@ -2253,9 +2253,9 @@ class MemoryGraphAdapter:
         )
 
     def list_todos_matching_query(
-        self, query: str, *, limit: int = 3
+        self, query: str, *, limit: int = 3, namespace: str | None = None
     ) -> list[dict[str, Any]]:
-        return self._todos.search_by_query(query, limit=limit)
+        return self._todos.search_by_query(query, limit=limit, namespace=namespace)
 
     # -------------------------------------------------------------------------
     # TEMPORAL delegates → TemporalRepository

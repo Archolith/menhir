@@ -370,7 +370,9 @@ def test_search_by_query_passes_query_and_words() -> None:
     repo.search_by_query("fix auth middleware", limit=3)
 
     params = neo4j.calls[0]["params"]
-    assert params["query"] == "fix auth middleware"
+    assert params["query_text"] == "fix auth middleware"
+    # #401: a "query" key collides with session.run(query, **params) and raised TypeError.
+    assert "query" not in params
     assert "middleware" in params["words"]
     assert params["limit"] == 3
 
@@ -407,6 +409,28 @@ def test_search_by_query_returns_rows() -> None:
 
     assert len(result) == 1
     assert result[0]["uuid"] == "a"
+
+
+@pytest.mark.unit
+def test_search_by_query_scopes_to_namespace_plus_default() -> None:
+    neo4j = _StubNeo4j(responses=[[]])
+    repo = TodoRepository(neo4j)
+
+    repo.search_by_query("middleware", namespace="ns-a")
+
+    call = neo4j.calls[0]
+    assert call["params"]["namespaces"] == ["ns-a", DEFAULT_TODO_NAMESPACE]
+    assert "t.namespace IN $namespaces" in call["query"]
+
+
+@pytest.mark.unit
+def test_search_by_query_without_namespace_is_unrestricted() -> None:
+    neo4j = _StubNeo4j(responses=[[]])
+    repo = TodoRepository(neo4j)
+
+    repo.search_by_query("middleware")
+
+    assert neo4j.calls[0]["params"]["namespaces"] is None
 
 
 # ---------------------------------------------------------------------------

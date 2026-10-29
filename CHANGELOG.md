@@ -1,3 +1,13 @@
+## 2026-10-28 - Context todos are scoped to the caller's namespace and appear again
+
+`build_context` adds up to 3 keyword-matched open todos ("Related open TODOs"). That search never ran: it passed a Cypher parameter named `query`, which collides with `session.run(query, **params)` in `Neo4jClient.execute`, and the raised TypeError was swallowed, so the section was always empty. It also had no namespace filter, so once fixed it would have shown other namespaces' todos (#401).
+
+- `infrastructure/todo_repository.py`: `search_by_query` takes `namespace` and keeps only the caller's namespace plus the default bucket (`None` stays unrestricted), the rule `list_todos` and `get_todo` use. The search parameter is renamed `query_text`.
+- `infrastructure/memory_graph_adapter.py`: `list_todos_matching_query` forwards `namespace`.
+- `services/context_builder.py`: `build_context` passes its `namespace` to the todo search. REST `/api/context`, the MCP `build_context` tool and the hook now show matching todos.
+- Tests: new `tests/test_context_todo_namespace_live.py` (online: namespaces A, B and default; scoped to A shows A and default, never B). `tests/test_todo.py`: namespace scoping tests, and the existing parameter test asserts `query_text` and no `query` key. `tests/test_context_builder.py`: the namespace reaches the todo search.
+- `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
+
 ## 2026-10-26 - Episodes over ~8 KB can be written again
 
 Neo4j cannot index a property value over about 8 KB, and `episodic_content_idx` (a RANGE index on `:Episodic(content)`, added 2026-08-18) made every longer episode fail to write; an LME build died on a 9,838-byte episode. Nothing seeks that index any more (its content prefix scan is gone, and text search uses Graphiti's FULLTEXT `episode_content`).
@@ -109,11 +119,5 @@ In the LME pilot a counting namespace failed inside the pass (a provider 500), y
 - `services/lane_outcomes.py`: new `failed_lanes()` reads each lane's failed counter; the scalar lane now has one.
 - `services/scalar_consolidation.py`: when scalar-state activation is refused, `scalar_namespaces_failed` counts the scalar targets. Before, the lane was skipped with only a log warning, the same way the event lane already reports its activation refusal.
 - Tests: new `tests/test_phase3_run_lane_failure.py`.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-10-21 - E2E work root is always absolute; dev group installs build
-
-- `tests/e2e/conftest.py`, `tests/e2e/_harness/config.py`: `MENHIR_E2E_WORK_ROOT` is resolved to an absolute path. A relative root broke E2E-20's upgrade step, where pip runs from another cwd and could not find the candidate wheel.
-- `pyproject.toml`, `uv.lock`: the `dev` group adds `build` (the wheel frontend E2E-19/20 use; CI already installs it), so `uv sync` is enough for a local E2E run. The relock also adds platform markers to `secretstorage`'s dependencies.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
 

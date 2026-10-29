@@ -659,6 +659,21 @@ class TestTodoBudgetContract:
         assert result_with_todos.token_estimate <= 300 * 1.1  # 10% tolerance for estimation
 
     @pytest.mark.asyncio
+    async def test_todo_lookup_receives_caller_namespace(self):
+        """#401: the todo section must be scoped to the caller's namespace."""
+        mock_adapter = MagicMock()
+        mock_adapter.list_todos_matching_query.return_value = []
+        mock_recall = AsyncMock()
+        mock_recall.recall = AsyncMock(return_value=_recall_result([]))
+        svc = ContextBuilderService(recall_service=mock_recall, graph_adapter=mock_adapter)
+
+        await svc.build_context("auth middleware", namespace="ns-a")
+
+        mock_adapter.list_todos_matching_query.assert_called_once_with(
+            "auth middleware", limit=3, namespace="ns-a"
+        )
+
+    @pytest.mark.asyncio
     async def test_no_todos_no_section(self):
         """When no matching TODOs exist the section is not appended."""
         mock_adapter = MagicMock()

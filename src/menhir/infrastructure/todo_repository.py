@@ -957,21 +957,29 @@ class TodoRepository:
         query: str,
         *,
         limit: int = 3,
+        namespace: str | None = None,
     ) -> list[dict[str, Any]]:
         """Find open todos whose content matches the query (keyword-based).
 
         Matches if the full query string appears in content, or if any
         significant word (>= 5 chars) from the query appears in content.
         Returns priority-sorted results.
+
+        ``namespace`` follows ``list_todos``: a supplied namespace narrows to that
+        silo plus ``DEFAULT_NAMESPACE``; ``None`` is unrestricted.
         """
         safe_limit = max(1, min(limit, 50))
         words = _query_words(query)
+        namespaces = (
+            [normalize_namespace(namespace), DEFAULT_NAMESPACE] if namespace else None
+        )
         return self.neo4j.execute(
             """
-            WITH toLower($query) AS q, $words AS words
+            WITH toLower($query_text) AS q, $words AS words
             MATCH (t:Todo {status: 'open'})
-            WHERE toLower(t.content) CONTAINS q
-              OR any(word IN words WHERE toLower(t.content) CONTAINS word)
+            WHERE (toLower(t.content) CONTAINS q
+                   OR any(word IN words WHERE toLower(t.content) CONTAINS word))
+              AND ($namespaces IS NULL OR t.namespace IN $namespaces)
             RETURN
                 t.uuid     AS uuid,
                 t.content  AS content,
@@ -985,7 +993,14 @@ class TodoRepository:
                 END
             LIMIT $limit
             """,
-            {"query": query.lower(), "words": words, "limit": safe_limit},
+            {
+                # Not "query": Neo4jClient.execute spreads params into session.run(query, ...),
+                # so that key raised TypeError and build_context silently dropped its todos.
+                "query_text": query.lower(),
+                "words": words,
+                "limit": safe_limit,
+                "namespaces": namespaces,
+            },
         )
 
     def close_stale_todos(

@@ -312,6 +312,7 @@ class ContextBuilderService:
                     self.graph_adapter.list_todos_matching_query,
                     query,
                     limit=3,
+                    namespace=namespace,
                 )
                 if matching_todos:
                     todo_lines = []
