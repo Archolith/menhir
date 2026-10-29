@@ -1,3 +1,20 @@
+## 2026-10-21 - Lazy scalar and event schema activation survives concurrent first use
+
+In the LME pilot, 3 of 30 concurrent first `POST /api/phase3/run` calls on a fresh graph returned 500 with `Neo.ClientError.Schema.EquivalentSchemaRuleAlreadyExists`. Neo4j 5 raises it when two transactions create the same rule at once, even with `IF NOT EXISTS`.
+
+- `infrastructure/schema_ddl.py` (new):
+  - `execute_schema_statement` treats only `EquivalentSchemaRuleAlreadyExists` as success. Name or schema conflicts and every other error still raise.
+  - `await_schema_online` waits, bounded at 60 s per rule, for the named rules to come ONLINE. A timeout propagates.
+- `infrastructure/typed_assertion_reconciliation.py` (`activate_scalar_state`), `infrastructure/typed_event_repository.py` (`activate`):
+  - Run their DDL through the helper.
+  - Then wait only for the rules they created. Otherwise a caller that lost the race could see the winner's index still POPULATING and fail the scalar ONLINE check.
+  - Unrelated indexes are not awaited.
+- Tests: new `tests/infrastructure/test_lazy_schema_activation_race.py`.
+  - Offline: the fake-driver race, the codes that are re-raised, and the await order and timeout.
+  - Online: 16 concurrent `ensure_scalar_state_activated` plus 16 event activations on a fresh schema, 3 rounds. It fails without the fix.
+- Changed test: `test_activate_runs_idempotent_ddl` in `tests/test_typed_event_repository.py` now separates the `CALL db.awaitIndex` waits from the DDL statements it checks.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-10-21 - POST /api/phase3/run reports lanes that failed
 
 In the LME pilot a counting namespace failed inside the pass (a provider 500), yet the request returned 200 with nothing marking it failed, so the bench recorded it as done.

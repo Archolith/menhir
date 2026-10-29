@@ -1,3 +1,14 @@
+## 2026-10-29 - Bucket-2 flags removed: belief gate, evidence anchor, source-memory pools
+
+The three remaining default-off recall flags from #399 bucket 2 are removed; the code is kept on `archive/bucket2-flags-2026-10-29`. All six names are in `feature_flags.RETIRED`, and `tests/test_feature_flag_registry.py` checks each retirement. Default recall is unchanged.
+
+- `FRONTIER_BELIEF_GATE` (quality delta 0, p95 +12.6%): deleted `domain/belief_evidence.py` and `services/change_log_provider.py`; removed CurrentnessWarden, `WardenContext.belief_score`, the ContradictionWarden conflict-set branch, and the frontier metadata's `anchor_paths`/`anchor_project` writes (no reader). `domain/git_staleness.py` keeps only `GitChange` and `_parse`.
+- `FRONTIER_EVIDENCE_ANCHOR` (3 of 33,861 entities pass): removed EvidenceAnchorWarden, `WardenContext.support_profile`, the assertion pipeline's `evidence_anchor` kwarg, and SupportProfile / ReinforcementVerdict / assess_reinforcement. Its True fallbacks were unreachable in production. Recall Lab drops arm D.
+- `FRONTIER_SOURCE_MEMORY_POOLS` (indistinguishable from no pools on AMA): deleted `domain/source_memory_pools.py`; removed `SourceMemory.pool_id`/`pool_anchor`, the pool branches in `recall_pipeline` and `context_builder`, and the `pools` parameter on MCP `recall_history`, `POST /recall/history` and the backend layers. Null `pool_id`/`pool_anchor` keys no longer appear; a REST request that still sends `pools` is accepted and ignored.
+- `.env.example`, `.agent/default-off-features.md`, `.agent/endpoints.md` and `.agent/tasks-mcp.md` drop the removed names.
+- Tests: the pools, belief-gate, git-staleness and evidence-anchor tests are deleted with their code; the warden chain pin is now `("scope", "oracle_admission", "contradiction")`.
+- `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
+
 ## 2026-10-29 - Anchored-time render removed
 
 `MENHIR_ANCHORED_TIME_RENDER` (default off) showed each fact's persisted anchored-time contract as its event time in recall, context and timeline. Paired A/B on a resolver-on graph of 211 LongMemEval items (78 knowledge-update, 133 temporal-reasoning): off 198/211, on 198/211, flips +4/-4, with render text in 169 contexts (#400). It is removed; the code is kept on `archive/anchored-time-render-2026-10-29`. The anchored-time resolver and its `time_*` edge properties are unchanged.
@@ -105,21 +116,4 @@ For resumable LME ingest (#168). A client that retries a submit after a timeout 
 - Tests:
   - New: `tests/test_idempotent_episode_submit.py`, `tests/test_heartbeat_lease_renewal.py` and `tests/test_attempt_ownership_fences.py`, each with a `_live` variant.
   - Changed test stubs (signature only, adding `claim_started_at`): `tests/conftest.py`, `tests/test_services_pipeline.py`, `tests/test_verbatim_skip_worker.py`.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-10-21 - Lazy scalar and event schema activation survives concurrent first use
-
-In the LME pilot, 3 of 30 concurrent first `POST /api/phase3/run` calls on a fresh graph returned 500 with `Neo.ClientError.Schema.EquivalentSchemaRuleAlreadyExists`. Neo4j 5 raises it when two transactions create the same rule at once, even with `IF NOT EXISTS`.
-
-- `infrastructure/schema_ddl.py` (new):
-  - `execute_schema_statement` treats only `EquivalentSchemaRuleAlreadyExists` as success. Name or schema conflicts and every other error still raise.
-  - `await_schema_online` waits, bounded at 60 s per rule, for the named rules to come ONLINE. A timeout propagates.
-- `infrastructure/typed_assertion_reconciliation.py` (`activate_scalar_state`), `infrastructure/typed_event_repository.py` (`activate`):
-  - Run their DDL through the helper.
-  - Then wait only for the rules they created. Otherwise a caller that lost the race could see the winner's index still POPULATING and fail the scalar ONLINE check.
-  - Unrelated indexes are not awaited.
-- Tests: new `tests/infrastructure/test_lazy_schema_activation_race.py`.
-  - Offline: the fake-driver race, the codes that are re-raised, and the await order and timeout.
-  - Online: 16 concurrent `ensure_scalar_state_activated` plus 16 event activations on a fresh schema, 3 rounds. It fails without the fix.
-- Changed test: `test_activate_runs_idempotent_ddl` in `tests/test_typed_event_repository.py` now separates the `CALL db.awaitIndex` waits from the DDL statements it checks.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
