@@ -10,7 +10,7 @@ defaults > 0 because perception's k-sample self-consistency needs sampling diver
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from menhir.config import MemorySettings
 from menhir.infrastructure.observability import (
@@ -33,6 +33,7 @@ SyncChat = Callable[[str, str], str]
 def make_sync_chat(
     settings: MemorySettings, *, temperature: float = 0.7, max_tokens: int = 512,
     model: str | None = None, disable_reasoning: bool = False,
+    extra_body: Mapping[str, Any] | None = None,
 ) -> SyncChat | None:
     """Return a sync `(system, user) -> str` chat callable, or None when no usable chat provider is
     configured (missing api key / model). None lets callers disable the job rather than crash.
@@ -43,7 +44,10 @@ def make_sync_chat(
     `extra_body`, which is passed through verbatim, so it is only meaningful on providers that accept
     it (OpenRouter) and is an error on those that do not (api.openai.com rejects an unknown
     `reasoning` field). Callers must therefore treat it as opt-in, never a default. Reasoning tokens
-    are counted inside `max_tokens`, so disabling them buys content headroom as well as cost."""
+    are counted inside `max_tokens`, so disabling them buys content headroom as well as cost.
+
+    `extra_body` is merged over the `disable_reasoning` body (it wins on a key collision), e.g. a
+    local server's `chat_template_kwargs`. Empty/None adds nothing."""
     cfg = ProviderConfig.for_chat(settings)
     if not cfg.api_key or not cfg.chat_model:
         logger.info("sync chat seam unavailable: no api_key/chat_model for the configured provider")
@@ -90,9 +94,9 @@ def make_sync_chat(
 
     # Built once, outside the per-call path: an empty dict means the request is byte-identical
     # to before, so the default configuration cannot be perturbed by this option existing.
-    extra: dict[str, Any] = (
-        {"extra_body": {"reasoning": {"enabled": False}}} if disable_reasoning else {}
-    )
+    body: dict[str, Any] = {"reasoning": {"enabled": False}} if disable_reasoning else {}
+    body.update(extra_body or {})
+    extra: dict[str, Any] = {"extra_body": body} if body else {}
 
     def _complete(system: str, user: str) -> str:
         handle = start_llm_usage_call(

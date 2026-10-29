@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+import json
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from .settings_helpers import (
@@ -32,6 +33,20 @@ ARTIFACT_RECONCILE_MODES: frozenset[str] = frozenset({"off", "audit", "safe_appl
 def _normalize_reconcile_mode(raw: str) -> str:
     mode = (raw or "").strip().lower()
     return mode if mode in ARTIFACT_RECONCILE_MODES else "audit"
+
+
+def parse_extra_body(raw: str, *, env_name: str) -> dict[str, Any]:
+    """Parse a raw JSON-object env value into a dict; empty/whitespace means {}."""
+    text = (raw or "").strip()
+    if not text:
+        return {}
+    try:
+        value = json.loads(text)
+    except ValueError as exc:
+        raise ValueError(f"{env_name} must be a JSON object: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{env_name} must be a JSON object, got {type(value).__name__}")
+    return value
 
 
 def _parse_scalar_threshold(raw: str) -> float:
@@ -222,6 +237,12 @@ class MemorySettings:
     #: Model for the blind attach check (a second model call must quote the same words with the
     #: right relation before a resolver time is written; runs with the resolver); empty means the resolver's model.
     anchored_time_attach_model: str = ""
+    #: Separate OpenAI-compatible endpoint for the resolver and attach check; empty = the ingest client.
+    #: Requires anchored_time_resolver_model when the resolver is enabled.
+    anchored_time_base_url: str = ""
+    anchored_time_api_key: str = field(default="not-needed", repr=False)
+    #: Raw JSON object merged into resolver/attach request extra_body; empty = nothing added.
+    anchored_time_extra_body: str = ""
 
     # Personal-memory consolidation job (scalar, event-history and counting lanes over dirty
     # namespaces). The counter lane (personal_memory_consolidation_enabled) was removed 2026-10-28.
@@ -278,6 +299,9 @@ class MemorySettings:
     # .agent/plans/phase3-extractor-matrix-results.md); set this rather than the global model so
     # Graphiti enrichment stays on the cheaper model.
     personal_memory_consolidation_chat_model: str = ""
+    #: Raw JSON object merged into the personal-memory chat request's extra_body (e.g. a local
+    #: server's chat_template_kwargs); empty = nothing added.
+    personal_memory_consolidation_chat_extra_body: str = ""
     # ScalarStateView typed-scalar shadow path (Piece C.4.3), gated inside the same consolidation job.
     # When on, the job also extracts typed
     # scalars, binds them to resolved entities, and persists :TypedAssertion + rebuilds ScalarStateViews
@@ -500,6 +524,20 @@ class MemorySettings:
         if not self.anchored_time_resolver_timeout_s > 0:
             raise ValueError(
                 f"anchored_time_resolver_timeout_s must be > 0, got {self.anchored_time_resolver_timeout_s}"
+            )
+        parse_extra_body(self.anchored_time_extra_body, env_name="MENHIR_ANCHORED_TIME_EXTRA_BODY")
+        parse_extra_body(
+            self.personal_memory_consolidation_chat_extra_body,
+            env_name="MENHIR_PERSONAL_MEMORY_CHAT_EXTRA_BODY",
+        )
+        if (
+            self.anchored_time_resolver_enabled
+            and self.anchored_time_base_url
+            and not self.anchored_time_resolver_model
+        ):
+            raise ValueError(
+                "MENHIR_ANCHORED_TIME_BASE_URL requires MENHIR_ANCHORED_TIME_MODEL "
+                "(the ingest model name must not be sent to a different server)"
             )
         if self.api_port < 1 or self.api_port > 65535:
             raise ValueError(f"api_port must be 1-65535, got {self.api_port}")
@@ -771,6 +809,9 @@ class MemorySettings:
                 env_var="MENHIR_ANCHORED_TIME_TIMEOUT_S",
             ),
             anchored_time_attach_model=(_getenv("MENHIR_ANCHORED_TIME_ATTACH_MODEL", default=cls.anchored_time_attach_model) or "").strip(),
+            anchored_time_base_url=(_getenv("MENHIR_ANCHORED_TIME_BASE_URL", default=cls.anchored_time_base_url) or "").strip(),
+            anchored_time_api_key=_getenv("MENHIR_ANCHORED_TIME_API_KEY", default=cls.anchored_time_api_key),
+            anchored_time_extra_body=(_getenv("MENHIR_ANCHORED_TIME_EXTRA_BODY", default=cls.anchored_time_extra_body) or "").strip(),
             personal_memory_consolidation_interval_s=_parse_float(
                 _getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_INTERVAL_S", default=str(cls.personal_memory_consolidation_interval_s)),
                 env_var="MENHIR_PERSONAL_MEMORY_CONSOLIDATION_INTERVAL_S",
@@ -792,6 +833,7 @@ class MemorySettings:
             ),
             personal_memory_consolidation_disable_reasoning=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_DISABLE_REASONING", default=str(cls.personal_memory_consolidation_disable_reasoning))),
             personal_memory_consolidation_chat_model=_getenv("MENHIR_PERSONAL_MEMORY_CHAT_MODEL", default=cls.personal_memory_consolidation_chat_model),
+            personal_memory_consolidation_chat_extra_body=(_getenv("MENHIR_PERSONAL_MEMORY_CHAT_EXTRA_BODY", default=cls.personal_memory_consolidation_chat_extra_body) or "").strip(),
             personal_memory_scalar_state_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED", default=str(cls.personal_memory_scalar_state_enabled))),
             personal_memory_scalar_state_perceiver_version=_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_STATE_PERCEIVER_VERSION", default=cls.personal_memory_scalar_state_perceiver_version),
             personal_memory_observation_dedup_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED", default=str(cls.personal_memory_observation_dedup_enabled))),

@@ -47,6 +47,7 @@ else:
     _GRAPHITI_IMPORT_ERROR = None
 
 from menhir.config import MemorySettings  # noqa: E402
+from menhir.config.settings_model import parse_extra_body  # noqa: E402
 from menhir.infrastructure.circuit_breaker import CircuitBreaker  # noqa: E402
 from menhir.infrastructure.embedding_cache import get_embedding_cache  # noqa: E402
 from menhir.infrastructure.embedding_dimensions import expected_graphiti_embedding_dimension  # noqa: E402
@@ -360,24 +361,38 @@ class GraphitiClient:
                 # Unwrapped client: the resolver adds provider extras, shaping and the one 429
                 # backoff layer itself. Not the generic client: its language instruction would
                 # change the frozen prompt.
+                at_client = raw_llm_client
+                at_base_url = llama_base_url
+                if settings.anchored_time_base_url:
+                    at_base_url = settings.anchored_time_base_url
+                    at_client = build_async_openai_client(
+                        base_url=at_base_url,
+                        api_key=settings.anchored_time_api_key,
+                        settings=settings,
+                    )
+                at_extra_body = parse_extra_body(
+                    settings.anchored_time_extra_body, env_name="MENHIR_ANCHORED_TIME_EXTRA_BODY"
+                )
                 anchored_time = AnchoredTimeResolver(
-                    raw_llm_client,
-                    base_url=llama_base_url,
+                    at_client,
+                    base_url=at_base_url,
                     model=settings.anchored_time_resolver_model or llm_provider.chat_model,
                     timeout_s=settings.anchored_time_resolver_timeout_s,
+                    extra_body=at_extra_body,
                 )
                 logger.info(
-                    "Anchored-time resolver enabled (model=%s, timeout_s=%s)",
-                    anchored_time.model, settings.anchored_time_resolver_timeout_s,
+                    "Anchored-time resolver enabled (model=%s, timeout_s=%s, base_url=%s)",
+                    anchored_time.model, settings.anchored_time_resolver_timeout_s, at_base_url,
                 )
                 from menhir.infrastructure.anchored_time_attach_client import AnchoredTimeAttacher
 
                 # Blind attach check: same unwrapped client and timeout as the resolver.
                 anchored_time_attach = AnchoredTimeAttacher(
-                    raw_llm_client,
-                    base_url=llama_base_url,
+                    at_client,
+                    base_url=at_base_url,
                     model=settings.anchored_time_attach_model or anchored_time.model,
                     timeout_s=settings.anchored_time_resolver_timeout_s,
+                    extra_body=at_extra_body,
                 )
                 logger.info("Anchored-time attach check enabled (model=%s)", anchored_time_attach.model)
         embed_base_url = embed_provider.base_url

@@ -402,14 +402,19 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
             "counting needs scalar state and will do nothing")
     personal_memory_llm = None
     if (scalar_state_enabled or counting_enabled) and settings is not None:
+        from menhir.config.settings_model import parse_extra_body
         from menhir.infrastructure.sync_llm import make_sync_chat
 
         pm_model = getattr(settings, "personal_memory_consolidation_chat_model", "") or None
+        pm_extra_body = parse_extra_body(
+            getattr(settings, "personal_memory_consolidation_chat_extra_body", "") or "",
+            env_name="MENHIR_PERSONAL_MEMORY_CHAT_EXTRA_BODY")
         personal_memory_llm = make_sync_chat(
             settings, model=pm_model,
             max_tokens=getattr(settings, "personal_memory_consolidation_max_tokens", 8192),
             disable_reasoning=bool(getattr(
-                settings, "personal_memory_consolidation_disable_reasoning", False)))
+                settings, "personal_memory_consolidation_disable_reasoning", False)),
+            **({"extra_body": pm_extra_body} if pm_extra_body else {}))
         if personal_memory_llm is None:
             logger.warning(
                 "personal-memory consolidation or scalar state enabled but no sync chat provider; job disabled")

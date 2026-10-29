@@ -1,4 +1,4 @@
-## 2026-10-29 - Bucket-2 flags removed: belief gate, evidence anchor, source-memory pools
+## 2026-10-29 - Bucket-2 flags removed (belief gate, evidence anchor, pools); local-model routing settings
 
 The three remaining default-off recall flags from #399 bucket 2 are removed; the code is kept on `archive/bucket2-flags-2026-10-29`. All six names are in `feature_flags.RETIRED`, and `tests/test_feature_flag_registry.py` checks each retirement. Default recall is unchanged.
 
@@ -8,6 +8,12 @@ The three remaining default-off recall flags from #399 bucket 2 are removed; the
 - `.env.example`, `.agent/default-off-features.md`, `.agent/endpoints.md` and `.agent/tasks-mcp.md` drop the removed names.
 - Tests: the pools, belief-gate, git-staleness and evidence-anchor tests are deleted with their code; the warden chain pin is now `("scope", "oracle_admission", "contradiction")`.
 - `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
+
+New settings let the cost lanes run on a local OpenAI-compatible server (#399 item 3). With them unset, clients, base URLs, request bodies and the `make_sync_chat` call are unchanged.
+
+- `MENHIR_ANCHORED_TIME_BASE_URL` / `MENHIR_ANCHORED_TIME_API_KEY`: a separate endpoint for the anchored-time resolver and attach check. It requires `MENHIR_ANCHORED_TIME_MODEL` while the resolver is on, so the ingest model name is never sent to another server.
+- `MENHIR_ANCHORED_TIME_EXTRA_BODY` and `MENHIR_PERSONAL_MEMORY_CHAT_EXTRA_BODY`: JSON objects merged into those requests' `extra_body` (e.g. `{"chat_template_kwargs":{"enable_thinking":false}}`). The setting wins over model-profile extras and `disable_reasoning`. A value that is not a JSON object fails at settings load and names the env var.
+- Tests: `tests/test_local_model_routing_settings.py`.
 
 ## 2026-10-29 - Anchored-time render removed
 

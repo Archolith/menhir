@@ -41,17 +41,22 @@ async def phase3_run_impl(
     settings = getattr(runtime_ctx.built, "settings", None)
     if settings is None:
         raise HTTPException(status_code=503, detail="phase 3 consolidation unavailable")
+    from menhir.config.settings_model import parse_extra_body
     from menhir.infrastructure.sync_llm import make_sync_chat
     from menhir.infrastructure.view_embedder import make_view_embedder, view_embedder_version
     from menhir.services.lane_outcomes import failed_lanes
     from menhir.services.scheduler_tasks import consolidate_personal_memory
 
     pm_model = getattr(settings, "personal_memory_consolidation_chat_model", "") or None
+    pm_extra_body = parse_extra_body(
+        getattr(settings, "personal_memory_consolidation_chat_extra_body", "") or "",
+        env_name="MENHIR_PERSONAL_MEMORY_CHAT_EXTRA_BODY")
     chat = make_sync_chat(
         settings, model=pm_model,
         max_tokens=getattr(settings, "personal_memory_consolidation_max_tokens", 8192),
         disable_reasoning=bool(getattr(
-            settings, "personal_memory_consolidation_disable_reasoning", False)))
+            settings, "personal_memory_consolidation_disable_reasoning", False)),
+        **({"extra_body": pm_extra_body} if pm_extra_body else {}))
     if chat is None:
         raise HTTPException(
             status_code=503,

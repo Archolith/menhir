@@ -15,7 +15,7 @@ import hashlib
 import json
 import logging
 import time
-from typing import Any
+from typing import Any, Mapping
 
 from menhir.infrastructure.anchored_time import PROMPT_VERSION, build_messages, parse_items
 from menhir.infrastructure.graphiti_llm_adapter import _provider_extra_body
@@ -67,10 +67,12 @@ class AnchoredTimeResolver:
         model: str,
         timeout_s: float,
         cache_size: int = 256,
+        extra_body: Mapping[str, Any] | None = None,
     ) -> None:
         # ``client`` must be unwrapped (no retry of its own): acreate_chat_completion adds the
         # one backoff layer, and a wrapped client would nest a second.
         self._client = client
+        self._extra_body: dict[str, Any] = dict(extra_body or {})
         self._base_url = base_url
         self.model = model
         self._timeout_s = float(timeout_s)
@@ -92,7 +94,7 @@ class AnchoredTimeResolver:
             items, missing = hit
             return ResolverOutcome("ok", items=_copy_items(items), missing_events=missing, cached=True)
         request = build_request(self.model, turn, speech_date, facts)
-        extra = _provider_extra_body(self.model, self._base_url)
+        extra = {**_provider_extra_body(self.model, self._base_url), **self._extra_body}
         if extra:
             request["extra_body"] = extra
         started = time.monotonic()
