@@ -23,6 +23,13 @@ New settings let the cost lanes run on a local OpenAI-compatible server (#399 it
 - authlib 1.7.2 to 1.9.1 (also GHSA-8m4g, GHSA-7vr2 High); fastmcp and fastmcp-slim 3.4.4 to 3.4.11 (GHSA-7xgj-8392-5q4r); opentelemetry-api 1.43.0 to 1.45.2 (CVE-2026-114603); dnspython 2.8.0 to 2.9.1 (GHSA-45c3, High). `pyproject.toml` ranges are unchanged.
 - Release image base: `python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159` (Debian 13.7, Python 3.12.16, no Critical findings). Its High findings are 14 Debian OS-package CVEs that Debian marks won't-fix.
 
+Enrichment status of a verbatim-skipped episode follows its evidence projection. A client episode whose text its turn's projection extracts is set READY (`verbatim_skipped`) without extraction while that projection may still be PENDING or ENRICHING, so `get_enrichment_status(wait=True)` could return READY before anything was extracted (E2E `test_e2e_09_scalar_binding_repair` failed on Windows at 9abaa3d1).
+
+- `domain/verbatim_skip_status.py`: `effective_processing_row` reports such a client as the projection's progress while the projection is unfinished, READY with the projection's enriched episode and touch counts once it is READY, and PENDING (`verbatim_skip_projection_lost`) while a FAILED or deleted projection waits for `reenable_verbatim_skips`.
+- `fetch_episode_processing` also returns `extraction_skipped_for` and `skip_projection`; its raw state is unchanged, so lease fences, enqueue/requeue checks and `force_release_lease` still see the client's own row.
+- Status and wait readers use the effective row: `get_enrichment_status`, `watch_enrichment` and `add_memory_and_track` (MCP wait loop), `get_episode_trace`, `wait_for_episode_processing` (REST `POST /memory?wait=true`, `ingest_episode`) and recall's pending-episode wait. `list_enrichment_queue`, the explorer and READY counts still list the client row as READY.
+- Tests: `tests/test_verbatim_skip_status.py`; `tests/test_verbatim_skip_live.py` gains the status read against Neo4j.
+
 ## 2026-10-29 - Anchored-time render removed
 
 `MENHIR_ANCHORED_TIME_RENDER` (default off) showed each fact's persisted anchored-time contract as its event time in recall, context and timeline. Paired A/B on a resolver-on graph of 211 LongMemEval items (78 knowledge-update, 133 temporal-reasoning): off 198/211, on 198/211, flips +4/-4, with render text in 169 contexts (#400). It is removed; the code is kept on `archive/anchored-time-render-2026-10-29`. The anchored-time resolver and its `time_*` edge properties are unchanged.

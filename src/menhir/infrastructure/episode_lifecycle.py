@@ -21,6 +21,7 @@ from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.self_identity import inferred_self_uuid_for_namespace
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.utils import source_confidence_for
+from menhir.domain.verbatim_skip_status import SKIP_PROJECTION_FIELDS
 from menhir.infrastructure.cypher import (
     Cypher,
     EPISODE_PROCESSING_FIELDS,
@@ -1397,11 +1398,20 @@ class EpisodeLifecycleRepository:
         # 0.29.2 upgrade canary (this path only runs during background enrichment
         # finalize, which the offline test suite doesn't exercise against a real
         # Neo4j server).
+        # The raw row is what work fences read. `extraction_skipped_for` and `skip_projection`
+        # let status readers compute a verbatim-skipped client's effective state
+        # (domain.verbatim_skip_status.effective_processing_row); fences ignore them.
+        projection_map = ", ".join(f".{field}" for field in SKIP_PROJECTION_FIELDS)
         query = (
             Cypher()
             .match("(n:Episodic)")
             .where("n.uuid = $episode_uuid")
-            .return_fields(MEMORY_RETURN_FIELDS)
+            .optional_match("(p:Episodic {uuid: n.extraction_skipped_for})")
+            .return_fields(
+                MEMORY_RETURN_FIELDS,
+                "n.extraction_skipped_for AS extraction_skipped_for",
+                f"CASE WHEN p IS NULL THEN null ELSE p {{{projection_map}}} END AS skip_projection",
+            )
             .limit("1")
             .build()
         )

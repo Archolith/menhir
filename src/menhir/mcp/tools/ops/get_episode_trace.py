@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.domain.utils import decode_json_value
+from menhir.domain.verbatim_skip_status import effective_processing_row
 from menhir.mcp.formatters import _coerce_iso, _require_episode_uuid
 from menhir.mcp.ownership import foreign_object_refusal
 from menhir.mcp.tools.base import BaseJsonTool
@@ -79,6 +80,7 @@ class GetEpisodeTraceTool(BaseJsonTool):
         if refusal:
             return refusal
         row = await backend.fetch_episode_processing(normalized_uuid)
+        row = effective_processing_row(row)
         task_events = await backend.fetch_episode_task_events(
             episode_uuid=normalized_uuid,
             limit=max(1, min(limit, 50)),

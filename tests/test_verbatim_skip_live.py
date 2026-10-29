@@ -364,3 +364,51 @@ def test_revoked_client_is_listed_pending_for_the_worker(test_neo4j_repo, repo, 
     assert w["client"] in repo.reenable_verbatim_skips(limit=500)
 
     assert w["client"] in repo.list_pending_episode_uuids(max_attempts=3, limit=500)
+
+
+# 10 ------------------------------------------------------------------------------------------
+@pytest.mark.online
+def test_skipped_client_status_follows_its_projection(test_neo4j_repo, repo, tag):
+    from menhir.domain.verbatim_skip_status import (
+        PROJECTION_LOST_SUBSTAGE,
+        effective_processing_row,
+    )
+
+    w = _world(test_neo4j_repo, repo, tag)
+    claimed = _claim(repo, w["client"])
+    assert repo.mark_episode_verbatim_skipped(
+        w["client"], worker_id="worker-a", claim_started_at=claimed["processing_started_at"]) == w["proj"]
+
+    # Projection still PENDING: the raw client row is READY, the effective row is not.
+    raw_row = repo.fetch_episode_processing(w["client"])
+    assert raw_row["processing_state"] == "READY"
+    assert raw_row["extraction_skipped_for"] == w["proj"]
+    assert raw_row["skip_projection"]["processing_state"] == "PENDING"
+    assert effective_processing_row(raw_row)["processing_state"] == "PENDING"
+
+    # Projection READY with a resolved episode: effective row is READY and carries it.
+    resolved = _uid("resolved")
+    test_neo4j_repo.execute(
+        "MATCH (p:Episodic {uuid: $u}) SET p.processing_state = 'READY', p.resolved_episode_uuid = $r",
+        params={"u": w["proj"], "r": resolved})
+    eff = effective_processing_row(repo.fetch_episode_processing(w["client"]))
+    assert eff["processing_state"] == "READY"
+    assert eff["resolved_episode_uuid"] == resolved
+
+    # Projection FAILED: the client reports PENDING / projection lost.
+    test_neo4j_repo.execute("MATCH (p:Episodic {uuid: $u}) SET p.processing_state = 'FAILED'",
+                            params={"u": w["proj"]})
+    eff = effective_processing_row(repo.fetch_episode_processing(w["client"]))
+    assert eff["processing_state"] == "PENDING"
+    assert eff["processing_substage"] == PROJECTION_LOST_SUBSTAGE
+    # the raw row is untouched for work fences
+    assert repo.fetch_episode_processing(w["client"])["processing_state"] == "READY"
+
+
+# 11 ------------------------------------------------------------------------------------------
+@pytest.mark.online
+def test_normal_episode_has_no_skip_fields(test_neo4j_repo, repo, tag):
+    w = _world(test_neo4j_repo, repo, tag)
+    row = repo.fetch_episode_processing(w["client"])
+    assert row["extraction_skipped_for"] is None
+    assert row["skip_projection"] is None

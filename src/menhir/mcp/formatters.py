@@ -15,6 +15,7 @@ from menhir.domain.models import ProcessingState
 from menhir.domain.recall_provenance import provenance_label
 from menhir.domain.recall_visibility import memory_lifecycle_note
 from menhir.domain.utils import excerpt
+from menhir.domain.verbatim_skip_status import effective_processing_row
 from menhir.services.stale_labeling import (
     STALE_ACTION, STALE_ACTION_OUTDATED,
     STALE_ADVISORY, STALE_ADVISORY_OUTDATED, STALE_ADVISORY_STILL_VALID,
@@ -399,6 +400,8 @@ async def _collect_episode_status(
             current = await backend.fetch_episode_processing(episode_uuid)
         else:
             current = backend.graph_adapter.fetch_episode_processing(episode_uuid)
+        # A verbatim-skipped client is READY before the projection that extracts it is.
+        current = effective_processing_row(current)
         if current is None:
             break
 

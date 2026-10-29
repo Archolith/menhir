@@ -23,6 +23,7 @@ from menhir.domain.ingest import (
     is_constraint_violation,
 )
 from menhir.domain.models import ProcessingState
+from menhir.domain.verbatim_skip_status import effective_processing_row
 from menhir.infrastructure import GraphitiClient, LLMAdapter, MemoryGraphAdapter
 from menhir.infrastructure.git_log import current_head
 from menhir.infrastructure.paths import repo_root_for_project
@@ -422,7 +423,9 @@ class IngestIntakeMixin:
 
         deadline = perf_counter() + max(0.0, timeout_s)
         while perf_counter() < deadline:
-            row = await asyncio.to_thread(self.graph_adapter.fetch_episode_processing, episode_uuid)
+            # A verbatim-skipped client is READY before the projection that extracts it is.
+            row = effective_processing_row(
+                await asyncio.to_thread(self.graph_adapter.fetch_episode_processing, episode_uuid))
             if row is None:
                 return None
             # ProcessingState is a (str, Enum) mixin. str(ProcessingState.READY) returns
@@ -436,7 +439,8 @@ class IngestIntakeMixin:
             if row.get("processing_state") in (ProcessingState.READY, ProcessingState.FAILED):
                 return row
             await asyncio.sleep(poll_interval_s)
-        return await asyncio.to_thread(self.graph_adapter.fetch_episode_processing, episode_uuid)
+        return effective_processing_row(
+            await asyncio.to_thread(self.graph_adapter.fetch_episode_processing, episode_uuid))
 
 
     async def ingest_episode(

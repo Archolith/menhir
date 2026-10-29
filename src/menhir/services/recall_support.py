@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from menhir.services.ingest_service import IngestService
 
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
+from menhir.domain.verbatim_skip_status import effective_processing_row
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
 from menhir.domain.recall import (
     CandidateData,
@@ -313,7 +314,8 @@ class RecallSupportMixin:
             row_uuid = str(row.get("uuid") or "")
             refreshed = updated_rows_by_uuid.get(row_uuid)
             if refreshed is None:
-                refreshed = await asyncio.to_thread(self.graph_adapter.fetch_episode_processing, row_uuid)
+                refreshed = effective_processing_row(
+                    await asyncio.to_thread(self.graph_adapter.fetch_episode_processing, row_uuid))
             if refreshed is not None and self._session_scope_admitted(
                 str(refreshed.get("scope") or NodeScope.SESSION), refreshed.get("session_id"),
                 include_session=include_session, session_id=session_id,
