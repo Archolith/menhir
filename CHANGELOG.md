@@ -13,6 +13,7 @@ New settings let the cost lanes run on a local OpenAI-compatible server (#399 it
 
 - `MENHIR_ANCHORED_TIME_BASE_URL` / `MENHIR_ANCHORED_TIME_API_KEY`: a separate endpoint for the anchored-time resolver and attach check. It requires `MENHIR_ANCHORED_TIME_MODEL` while the resolver is on, so the ingest model name is never sent to another server.
 - `MENHIR_ANCHORED_TIME_EXTRA_BODY` and `MENHIR_PERSONAL_MEMORY_CHAT_EXTRA_BODY`: JSON objects merged into those requests' `extra_body` (e.g. `{"chat_template_kwargs":{"enable_thinking":false}}`). The setting wins over model-profile extras and `disable_reasoning`. A value that is not a JSON object fails at settings load and names the env var.
+- `MENHIR_PERSONAL_MEMORY_CHAT_TIMEOUT_S`: per-request timeout for the personal-memory chat (0, the default, keeps the 30 s `DEFAULT_REQUEST_TIMEOUT_S`). A local model at ~20 tok/s needs minutes per lane call.
 - Tests: `tests/test_local_model_routing_settings.py`.
 
 ## 2026-10-29 - Anchored-time render removed

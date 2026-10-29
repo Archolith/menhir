@@ -33,7 +33,7 @@ SyncChat = Callable[[str, str], str]
 def make_sync_chat(
     settings: MemorySettings, *, temperature: float = 0.7, max_tokens: int = 512,
     model: str | None = None, disable_reasoning: bool = False,
-    extra_body: Mapping[str, Any] | None = None,
+    extra_body: Mapping[str, Any] | None = None, timeout_s: float | None = None,
 ) -> SyncChat | None:
     """Return a sync `(system, user) -> str` chat callable, or None when no usable chat provider is
     configured (missing api key / model). None lets callers disable the job rather than crash.
@@ -47,7 +47,10 @@ def make_sync_chat(
     are counted inside `max_tokens`, so disabling them buys content headroom as well as cost.
 
     `extra_body` is merged over the `disable_reasoning` body (it wins on a key collision), e.g. a
-    local server's `chat_template_kwargs`. Empty/None adds nothing."""
+    local server's `chat_template_kwargs`. Empty/None adds nothing.
+
+    `timeout_s` replaces the per-request timeout (None = DEFAULT_REQUEST_TIMEOUT_S), for a slow
+    local server; SDK retries stay off either way."""
     cfg = ProviderConfig.for_chat(settings)
     if not cfg.api_key or not cfg.chat_model:
         logger.info("sync chat seam unavailable: no api_key/chat_model for the configured provider")
@@ -86,7 +89,7 @@ def make_sync_chat(
         client = OpenAI(
             api_key=cfg.api_key,
             base_url=base_url or None,
-            timeout=DEFAULT_REQUEST_TIMEOUT_S,
+            timeout=DEFAULT_REQUEST_TIMEOUT_S if timeout_s is None else float(timeout_s),
             max_retries=0,
         )
         client_holder["client"] = client

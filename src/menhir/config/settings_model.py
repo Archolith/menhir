@@ -302,6 +302,9 @@ class MemorySettings:
     #: Raw JSON object merged into the personal-memory chat request's extra_body (e.g. a local
     #: server's chat_template_kwargs); empty = nothing added.
     personal_memory_consolidation_chat_extra_body: str = ""
+    #: Per-request timeout (seconds) for the personal-memory chat; 0 = the sync-chat default (30 s).
+    #: Raise it for a slow local server.
+    personal_memory_consolidation_chat_timeout_s: float = 0.0
     # ScalarStateView typed-scalar shadow path (Piece C.4.3), gated inside the same consolidation job.
     # When on, the job also extracts typed
     # scalars, binds them to resolved entities, and persists :TypedAssertion + rebuilds ScalarStateViews
@@ -530,6 +533,11 @@ class MemorySettings:
             self.personal_memory_consolidation_chat_extra_body,
             env_name="MENHIR_PERSONAL_MEMORY_CHAT_EXTRA_BODY",
         )
+        if not self.personal_memory_consolidation_chat_timeout_s >= 0:
+            raise ValueError(
+                "personal_memory_consolidation_chat_timeout_s must be >= 0, got "
+                f"{self.personal_memory_consolidation_chat_timeout_s}"
+            )
         if (
             self.anchored_time_resolver_enabled
             and self.anchored_time_base_url
@@ -834,6 +842,10 @@ class MemorySettings:
             personal_memory_consolidation_disable_reasoning=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_DISABLE_REASONING", default=str(cls.personal_memory_consolidation_disable_reasoning))),
             personal_memory_consolidation_chat_model=_getenv("MENHIR_PERSONAL_MEMORY_CHAT_MODEL", default=cls.personal_memory_consolidation_chat_model),
             personal_memory_consolidation_chat_extra_body=(_getenv("MENHIR_PERSONAL_MEMORY_CHAT_EXTRA_BODY", default=cls.personal_memory_consolidation_chat_extra_body) or "").strip(),
+            personal_memory_consolidation_chat_timeout_s=_parse_float(
+                _getenv("MENHIR_PERSONAL_MEMORY_CHAT_TIMEOUT_S", default=str(cls.personal_memory_consolidation_chat_timeout_s)),
+                env_var="MENHIR_PERSONAL_MEMORY_CHAT_TIMEOUT_S",
+            ),
             personal_memory_scalar_state_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED", default=str(cls.personal_memory_scalar_state_enabled))),
             personal_memory_scalar_state_perceiver_version=_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_STATE_PERCEIVER_VERSION", default=cls.personal_memory_scalar_state_perceiver_version),
             personal_memory_observation_dedup_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED", default=str(cls.personal_memory_observation_dedup_enabled))),

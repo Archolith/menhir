@@ -291,3 +291,47 @@ def test_wiring_set_builds_separate_client(monkeypatch) -> None:
         assert obj._client is at_client
         assert obj._base_url == "http://127.0.0.1:9099/v1"
         assert obj._extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
+
+
+def _sync_chat_client_kwargs(monkeypatch, **chat_kwargs) -> dict:
+    import openai
+
+    from menhir.infrastructure import sync_llm
+
+    class _Cfg:
+        api_key = "k"
+        chat_model = "global-model"
+        base_url = "http://127.0.0.1:9099/v1"
+        kind = ProviderKind.LOCAL
+
+    init: dict = {}
+
+    class _OpenAI:
+        def __init__(self, **kw):
+            init.update(kw)
+            resp = type("R", (), {"usage": None, "choices": [
+                type("Ch", (), {"message": type("M", (), {"content": "ok"})()})()]})()
+            self.chat = type("C", (), {"completions": type("P", (), {"create": lambda _s, **k: resp})()})()
+
+    monkeypatch.setattr(ProviderConfig, "for_chat", classmethod(lambda cls, s: _Cfg()))
+    monkeypatch.setattr(openai, "OpenAI", _OpenAI)
+    chat = sync_llm.make_sync_chat(object(), **chat_kwargs)
+    assert chat is not None and chat("sys", "usr") == "ok"
+    return init
+
+
+def test_sync_chat_timeout_default_and_override(monkeypatch) -> None:
+    from menhir.infrastructure.providers import DEFAULT_REQUEST_TIMEOUT_S
+
+    assert _sync_chat_client_kwargs(monkeypatch)["timeout"] == DEFAULT_REQUEST_TIMEOUT_S
+    kw = _sync_chat_client_kwargs(monkeypatch, timeout_s=900)
+    assert kw["timeout"] == 900.0 and kw["max_retries"] == 0
+
+
+def test_chat_timeout_setting(monkeypatch) -> None:
+    _clear_env(monkeypatch)
+    assert MemorySettings().personal_memory_consolidation_chat_timeout_s == 0.0
+    monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_CHAT_TIMEOUT_S", "900")
+    assert MemorySettings.from_env().personal_memory_consolidation_chat_timeout_s == 900.0
+    with pytest.raises(ValueError, match="chat_timeout_s"):
+        MemorySettings(personal_memory_consolidation_chat_timeout_s=-1)
