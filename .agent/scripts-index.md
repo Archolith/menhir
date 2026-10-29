@@ -205,7 +205,7 @@ Update `results/lme-ku-buildout/LEDGER.md` after every buildout run.
 | `entropy.sh` / `.py` | D0 retrieval-entropy instrument, deterministic, GPT-free |
 | `perception_write.py` / `perception_delta.py` / `perception_tune.py` | Arm C gated-perception write + delta + threshold tuning |
 | `capstone.sh` | Arm C end-to-end Event->Fold->View measurement |
-| `msc_sweep.sh` / `ablation_sweep.sh` | minimal-sufficient-context and per-oracle ablation sweeps |
+| `msc_sweep.sh` | minimal-sufficient-context sweep |
 | `acquisition_window.py` | windowed acquisition counts over the D0 counting slice |
 | `reflection_rescue_survey.py` | survey assistant turns in the KU fixture |
 | `oracle_entity_grouping_probe.py` | oracle entity-grouping sidecar experiment |
