@@ -1503,51 +1503,6 @@ async def test_recall_warden_gate_drops_superseded(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_recall_warden_gate_refuses_agent_only_provenance(
-    stub_graphiti_client, stub_memory_graph_adapter
-) -> None:
-    """A candidate whose only provenance is an agent-harness episode source (claude-code ->
-    agent_inference) has no external anchor, so EvidenceAnchorWarden refuses it (rule zero)."""
-    _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
-    stub_memory_graph_adapter.candidate_provenance_rows = [
-        {"uuid": "entity-1", "evidence_node_kinds": [],
-         "anchor_projects": [], "episode_sources": ["claude-code"]},
-        {"uuid": "entity-2", "evidence_node_kinds": [],
-         "anchor_projects": [], "episode_sources": ["claude-code"]},
-    ]
-    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
-
-    gated = await svc.recall("test query", tuning=RetrievalTuningConfig(
-        enable_warden_gate=True, enable_evidence_anchor=True))
-
-    assert gated.results == []          # agent-only provenance -> no external anchor -> refused
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_recall_warden_gate_admits_structural_anchor(
-    stub_graphiti_client, stub_memory_graph_adapter
-) -> None:
-    """A structural ANCHORED_TO link derives a `file` anchor, which admits the candidate even
-    with no Evidence node and an agent-only episode source."""
-    _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
-    stub_memory_graph_adapter.candidate_provenance_rows = [
-        {"uuid": "entity-1", "evidence_node_kinds": [],
-         "anchor_projects": ["menhir"], "episode_sources": ["claude-code"]},
-        {"uuid": "entity-2", "evidence_node_kinds": [],
-         "anchor_projects": [], "episode_sources": ["user"]},
-    ]
-    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
-
-    gated = await svc.recall("test query", tuning=RetrievalTuningConfig(
-        enable_warden_gate=True, enable_evidence_anchor=True))
-
-    ids = {r.uuid for r in gated.results}
-    assert ids == {"entity-1", "entity-2"}   # file anchor + user source both admit
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
 async def test_recall_warden_gate_refuses_cross_project_scope(
     stub_graphiti_client, stub_memory_graph_adapter
 ) -> None:
@@ -1622,11 +1577,9 @@ async def test_recall_multi_project_anchor_left_unscoped(
 async def test_recall_warden_defaults(
     stub_graphiti_client, stub_memory_graph_adapter
 ) -> None:
-    """The Warden gate and contradiction interrupt default on (#173); the evidence anchor
-    defaults off, matching its MENHIR_FRONTIER_* setting (#349)."""
+    """The Warden gate and contradiction interrupt default on (#173)."""
     t = RetrievalTuningConfig()
     assert (t.enable_warden_gate, t.enable_contradiction_interrupt) == (True, True)
-    assert t.enable_evidence_anchor is False
 
 
 @pytest.mark.unit

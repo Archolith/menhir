@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 from menhir.domain.self_reinforcement import (
-    ReinforcementVerdict,
-    SupportProfile,
     TouchOutcome,
-    assess_reinforcement,
     durable_heat_allowed,
     evidence_kind_for_source,
     has_external_anchor,
@@ -72,25 +69,3 @@ def test_meta_depth_budget() -> None:
     assert within_meta_depth_budget(2) is True
     assert within_meta_depth_budget(3) is False
     assert within_meta_depth_budget(3, budget=4) is True
-
-
-# --- combined assertion-boundary verdict (Guards 2/3/5) --------------------
-
-def test_assess_ok_with_anchor_and_shallow_chain() -> None:
-    p = SupportProfile(support_kinds=("git", "agent_inference"), meta_depth=1)
-    assert assess_reinforcement(p) is ReinforcementVerdict.OK
-
-
-def test_assess_needs_evidence_when_synthetic_only() -> None:
-    p = SupportProfile(support_kinds=("agent_inference", "llm_summary"), meta_depth=1)
-    assert assess_reinforcement(p) is ReinforcementVerdict.NEEDS_EVIDENCE
-
-
-def test_assess_needs_evidence_when_empty_support() -> None:
-    assert assess_reinforcement(SupportProfile()) is ReinforcementVerdict.NEEDS_EVIDENCE
-
-
-def test_assess_over_depth_flagged_first() -> None:
-    # deep meta chain is suspect even with a real anchor
-    p = SupportProfile(support_kinds=("git",), meta_depth=5)
-    assert assess_reinforcement(p) is ReinforcementVerdict.OVER_DEPTH

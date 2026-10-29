@@ -48,8 +48,7 @@ async def _wait_until(predicate, *, timeout_s: float = 10.0, interval_s: float =
 
 @pytest.mark.unit
 @pytest.mark.parametrize("hook", [False, True])
-@pytest.mark.parametrize("anchor", [False, True])
-def test_context_builders_receive_configured_warden_profile(monkeypatch, stub_graphiti_client, hook, anchor):
+def test_context_builders_receive_configured_warden_profile(monkeypatch, stub_graphiti_client, hook):
     from menhir.cli.bootstrap import build_hook_services
 
     monkeypatch.setattr("menhir.core.bootstrap.Neo4jRepository", lambda **kwargs: SimpleNamespace())
@@ -63,7 +62,7 @@ def test_context_builders_receive_configured_warden_profile(monkeypatch, stub_gr
         lambda settings: stub_graphiti_client,
     )
     monkeypatch.setattr("menhir.core.bootstrap.LLMAdapter.from_settings", lambda settings: SimpleNamespace())
-    settings = MemorySettings(frontier_evidence_anchor=anchor)
+    settings = MemorySettings()
     built = build_hook_services(settings) if hook else build_memory_services(settings)
     assert built.context_builder is not None
     assert built.context_builder.retrieval_tuning == settings.retrieval_tuning()

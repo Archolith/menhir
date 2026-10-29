@@ -509,7 +509,6 @@ class RecallSupportMixin:
             LogSpaceOracleCombiner(),
             auto_intent=tuning.enable_intent_lens if tuning else False,
             contradiction_interrupt=tuning.enable_contradiction_interrupt if tuning else False,
-            evidence_anchor=tuning.enable_evidence_anchor if tuning else True,
         )
         resolved_lens = pipeline._resolve_intent(qctx).intent
         outcome = await pipeline.run(qctx, cmems)
@@ -643,7 +642,6 @@ class RecallSupportMixin:
             pipeline = AssertionPipeline(
                 LogSpaceOracleCombiner(), auto_intent=tuning.enable_intent_lens,
                 contradiction_interrupt=tuning.enable_contradiction_interrupt,
-                evidence_anchor=tuning.enable_evidence_anchor,
             )
             outcome = await pipeline.run(qctx, cmems)
 

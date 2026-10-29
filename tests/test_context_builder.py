@@ -254,17 +254,13 @@ async def test_context_marks_memory_without_temporal_facts_source_time_unknown()
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-@pytest.mark.parametrize("warden,anchor,sources,expected", [
-    (False, False, ["claude-code"], {"entity-1", "entity-2"}),
-    (False, True, ["claude-code"], {"entity-1", "entity-2"}),
-    (True, True, ["claude-code"], set()),
-    (True, False, ["claude-code"], {"entity-1"}),
-    (True, True, ["user"], {"entity-1"}),
-    (True, True, [], set()),
-    (True, False, [], {"entity-1"}),
+@pytest.mark.parametrize("warden,sources,expected", [
+    (False, ["claude-code"], {"entity-1", "entity-2"}),
+    (True, ["claude-code"], {"entity-1"}),
+    (True, [], {"entity-1"}),
 ])
 async def test_context_applies_configured_warden_profile(
-    stub_graphiti_client, stub_memory_graph_adapter, warden, anchor, sources, expected,
+    stub_graphiti_client, stub_memory_graph_adapter, warden, sources, expected,
 ) -> None:
     from menhir.config import MemorySettings
     from tests.test_recall_service import _build_recall_service, _two_cands
@@ -283,7 +279,7 @@ async def test_context_applies_configured_warden_profile(
     from dataclasses import replace
 
     tuning = replace(
-        MemorySettings(frontier_evidence_anchor=anchor).retrieval_tuning(),
+        MemorySettings().retrieval_tuning(),
         enable_warden_gate=warden, enable_source_memories=False,
     )
     recall = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)

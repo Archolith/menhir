@@ -459,7 +459,6 @@ async def run_recall(
     tuning = tuning or RetrievalTuningConfig()
     configured_guards = tuple(name for name, enabled in (
         ("scope", tuning.enable_warden_gate), ("oracle_admission", tuning.enable_warden_gate),
-        ("evidence_anchor", tuning.enable_evidence_anchor and tuning.enable_warden_gate),
         ("contradiction", tuning.enable_contradiction_interrupt),
     ) if enabled)
     warden_status = WardenExecutionStatus(

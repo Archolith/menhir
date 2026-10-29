@@ -81,7 +81,7 @@ def test_client_tokens_enabled_from_env(monkeypatch: pytest.MonkeyPatch, raw: st
 @pytest.mark.unit
 def test_frontier_portion_defaults() -> None:
     """Oracle ranking and the intent lens are always on (#172); the Warden gate and its
-    contradiction guard are on by default (#173); the evidence anchor and the
+    contradiction guard are on by default (#173); the
     other frontier portions default OFF and are opt-in via MENHIR_FRONTIER_* (audit DOC-05)."""
     t = MemorySettings().retrieval_tuning()
     assert t.enable_oracle_ranking is True
@@ -89,16 +89,13 @@ def test_frontier_portion_defaults() -> None:
     assert t.enable_assertion_shadow is False
     assert t.enable_warden_gate is True
     assert t.enable_contradiction_interrupt is True
-    assert t.enable_evidence_anchor is False
 
 
 @pytest.mark.unit
 def test_frontier_portions_env_can_enable_default_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """A default-OFF portion can be turned ON via env (the opt-in toggle works)."""
-    monkeypatch.setenv("MENHIR_FRONTIER_EVIDENCE_ANCHOR", "1")
     monkeypatch.setenv("MENHIR_FRONTIER_SHADOW", "true")
     t = MemorySettings.from_env().retrieval_tuning()
-    assert t.enable_evidence_anchor is True
     assert t.enable_assertion_shadow is True
 
 

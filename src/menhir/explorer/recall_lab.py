@@ -35,7 +35,6 @@ class RecallLabTuning(BaseModel):
     enable_intent_lens: bool = True
     enable_warden_gate: bool = True
     enable_contradiction_interrupt: bool = True
-    enable_evidence_anchor: bool = False
     enable_source_memories: bool = True
     source_memory_limit: int = Field(default=10, ge=1, le=50)
     source_memory_max_chars: int = Field(default=2000, ge=100, le=4000)
@@ -307,21 +306,6 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
         "tuning": _default_tuning(),
     },
     {
-        "id": "d",
-        "label": "D · active facet + warden + oracle",
-        "enabled": True,
-        "tuning": _default_tuning(
-            enable_facet_candidates=True,
-            facet_weight=0.5,
-            enable_oracle_ranking=True,
-            enable_intent_lens=True,
-            enable_warden_gate=True,
-            # Strict profile: pinned so the #173 default flip does not change this arm.
-            enable_evidence_anchor=True,
-            enable_contradiction_interrupt=False,
-        ),
-    },
-    {
         "id": "e",
         "label": "E · production base + frontier (soft evidence)",
         "enabled": True,
@@ -331,7 +315,6 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
             enable_oracle_ranking=True,
             enable_intent_lens=True,
             enable_warden_gate=True,
-            enable_evidence_anchor=False,
             enable_contradiction_interrupt=False,
         ),
     },
@@ -371,7 +354,6 @@ DEFAULT_ARMS: list[dict[str, Any]] = [
             enable_oracle_ranking=True,
             enable_intent_lens=True,
             enable_warden_gate=False,
-            enable_evidence_anchor=False,
             enable_contradiction_interrupt=False,
         ),
     },

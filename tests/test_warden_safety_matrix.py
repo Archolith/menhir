@@ -41,7 +41,7 @@ CONTROLS = (
     Control("resolved_conflict", "useful", conflict=True, resolved=True),
     Control("historical_conflict", "useful", conflict=True, historical=True),
 )
-PROFILES = {"off": (False, False), "strict": (True, True), "conversational": (True, False)}
+PROFILES = {"off": False, "conversational": True}
 OPTIONAL_GUARDS = (False, True)
 
 
@@ -89,9 +89,9 @@ async def test_offline_profile_safety_matrix(
                   controls=[asdict(c) for c in CONTROLS], runs=[])
     baseline_scores = {}
     for contradiction in OPTIONAL_GUARDS:
-        for profile, (gate, anchor) in PROFILES.items():
+        for profile, gate in PROFILES.items():
             tuning = RetrievalTuningConfig(enable_assertion_shadow=False,
-                enable_warden_gate=gate, enable_evidence_anchor=anchor,
+                enable_warden_gate=gate,
                 enable_intent_lens=True,
                 enable_contradiction_interrupt=contradiction)
             rows = []
@@ -139,7 +139,6 @@ async def test_offline_profile_safety_matrix(
                     assert score == baseline_scores[case.name]
                 # Pin current behavior, including known gaps, without relabeling gold.
                 expected = not (gate and (case.name == "wrong_scope"
-                    or (anchor and case.evidence != "git")
                     or (contradiction and case.name == "recorded_conflict")))
                 assert returned == expected, (profile, contradiction, case.name, result)
                 if gate:
@@ -159,4 +158,4 @@ async def test_offline_profile_safety_matrix(
     path = tmp_path / "warden-safety-controls.json"
     path.write_text(json.dumps(report, indent=2, default=str) + "\n", encoding="utf-8")
     record_property("warden_safety_report", json.dumps(report, sort_keys=True, default=str))
-    assert len(report["runs"]) == 6
+    assert len(report["runs"]) == 4

@@ -232,29 +232,15 @@ def _body() -> dict[str, Any]:
 
 @pytest.mark.unit
 def test_recall_lab_frontier_preset_uses_active_facet() -> None:
-    arm = next(item for item in DEFAULT_ARMS if item["id"] == "d")
+    arm = next(item for item in DEFAULT_ARMS if item["id"] == "e")
     tuning = arm["tuning"]
 
-    assert "active facet" in arm["label"]
+    assert "production base + frontier" in arm["label"]
     assert tuning["enable_facet_candidates"] is True
     assert tuning["enable_facet_shadow"] is False
     assert tuning["enable_oracle_ranking"] is True
     assert tuning["enable_intent_lens"] is True
     assert tuning["enable_warden_gate"] is True
-    assert tuning["enable_evidence_anchor"] is True
-
-
-@pytest.mark.unit
-def test_recall_lab_working_frontier_preserves_d_and_softens_evidence_gate() -> None:
-    d_arm = next(item for item in DEFAULT_ARMS if item["id"] == "d")
-    e_arm = next(item for item in DEFAULT_ARMS if item["id"] == "e")
-
-    expected = dict(d_arm["tuning"])
-    expected["enable_evidence_anchor"] = False
-
-    assert "production base + frontier" in e_arm["label"]
-    assert e_arm["tuning"] == expected
-    assert d_arm["tuning"]["enable_evidence_anchor"] is True
 
 
 @pytest.mark.unit
@@ -303,7 +289,6 @@ def test_recall_lab_page_renders_default_arms() -> None:
     assert "Pure read" in response.text
     assert "Blinded LLM judge" in response.text
     assert "one per line" in response.text
-    assert "active facet + warden + oracle" in response.text
     assert "production base + frontier" in response.text
     assert "production base + facet ranking only" in response.text
     assert "production base + oracle ranking only" in response.text
@@ -326,9 +311,9 @@ def test_recall_lab_accepts_all_seven_default_arms() -> None:
 
     assert response.status_code == 200
     assert [arm["id"] for arm in response.json()["arms"]] == [
-        "production", "d", "e", "f", "g", "h",
+        "production", "e", "f", "g", "h",
     ]
-    assert recall.max_active == 6
+    assert recall.max_active == 5
 
 
 @pytest.mark.unit

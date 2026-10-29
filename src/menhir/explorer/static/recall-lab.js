@@ -17,7 +17,6 @@
     ['enable_intent_lens', 'Intent lens', 'bool'],
     ['enable_warden_gate', 'Warden gate', 'bool'],
     ['enable_contradiction_interrupt', 'Contradiction interrupt', 'bool'],
-    ['enable_evidence_anchor', 'Evidence anchor', 'bool'],
     ['enable_assertion_shadow', 'Assertion shadow (trace)', 'bool'],
     ['enable_facet_shadow', 'Facet shadow (trace)', 'bool'],
   ];

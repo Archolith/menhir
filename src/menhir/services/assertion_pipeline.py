@@ -14,8 +14,8 @@ current-truth context. The result is bucketed like the belief recall packet:
     flagged    -> shown but labeled (historical / conflict / uncertain) — FLAG
     refused    -> kept out of current-truth context (superseded / wrong-scope / unsafe) — REFUSE
 
-Wardens read one shared snapshot: ScopeWarden + EvidenceAnchorWarden read the candidate
-metadata (scope, evidence_kinds), OracleAdmissionWarden reads the OraclePacket (currentness/
+Wardens read one shared snapshot: ScopeWarden reads the candidate
+metadata (scope), OracleAdmissionWarden reads the OraclePacket (currentness/
 conflict). No double-application — each warden owns a disjoint axis.
 """
 
@@ -28,11 +28,9 @@ from menhir.domain.intent_affinity import task_intents_to_lens
 from menhir.domain.oracles import CandidateMemory, QueryContext
 from menhir.domain.query_intent import classify_intent
 from menhir.domain.scope import MemoryScope
-from menhir.domain.self_reinforcement import SupportProfile
 from menhir.domain.truth.labels import WardenLabel
 from menhir.domain.warden import (
     ContradictionWarden,
-    EvidenceAnchorWarden,
     OracleAdmissionWarden,
     ScopeWarden,
     Warden,
@@ -79,29 +77,16 @@ def _candidate_scope(candidate: CandidateMemory) -> MemoryScope:
     return MemoryScope(repo=s("repo"), project=s("project"), branch=s("branch"), namespace=s("namespace"))
 
 
-def _support_profile(candidate: CandidateMemory) -> SupportProfile:
-    kinds = tuple(str(k) for k in candidate.metadata.get("evidence_kinds", ()))
-    meta_depth = int(candidate.metadata.get("meta_depth", 0) or 0)
-    return SupportProfile(support_kinds=kinds, meta_depth=meta_depth)
-
-
 class AssertionPipeline:
     """Run observe (oracles) -> rank (combiner) -> decide (wardens) for a query."""
 
     def __init__(self, combiner, *, executor: OracleExecutor | None = None,
                  wardens: list[Warden] | None = None, auto_intent: bool = True,
-                 contradiction_interrupt: bool = False,
-                 evidence_anchor: bool = True) -> None:
+                 contradiction_interrupt: bool = False) -> None:
         self.executor = executor or OracleExecutor(default_oracles())
         self.combiner = combiner
-        # The handoff chain: scope (metadata) + anti-spiral (evidence) + oracle-axis (packet).
-        # evidence_anchor drops the anti-spiral Guard 5 for anecdotal corpora, where every
-        # recalled fact is LLM-extracted from conversation (no external code/test/git anchor)
-        # and Guard 5 would otherwise refuse the entire result set.
-        default = [ScopeWarden()]
-        if evidence_anchor:
-            default.append(EvidenceAnchorWarden())
-        default.append(OracleAdmissionWarden())
+        # The handoff chain: scope (metadata) + oracle-axis (packet).
+        default = [ScopeWarden(), OracleAdmissionWarden()]
         if contradiction_interrupt:
             default.append(ContradictionWarden())
         self.wardens = wardens or default
@@ -142,7 +127,7 @@ class AssertionPipeline:
             ctx = WardenContext(
                 candidate_id=cid, intent=intent,
                 query_scope=q_scope, candidate_scope=_candidate_scope(candidate),
-                support_profile=_support_profile(candidate), oracle_packet=packet,
+                oracle_packet=packet,
                 recorded_conflict=(bool(candidate.metadata.get("conflict_group_id"))
                                    and candidate.metadata.get("conflict_status") == "unresolved"),
             )

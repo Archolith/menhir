@@ -28,11 +28,6 @@ from menhir.domain.belief import QueryIntent
 from menhir.domain.exhaustion import ExhaustionDecision, RetrievalStats, exhaustion_decision
 from menhir.domain.oracles import OraclePacket, OraclePolarity, OracleTarget
 from menhir.domain.scope import MemoryScope, scope_conflict
-from menhir.domain.self_reinforcement import (
-    ReinforcementVerdict,
-    SupportProfile,
-    assess_reinforcement,
-)
 from menhir.domain.truth.labels import WardenLabel
 
 
@@ -74,7 +69,6 @@ class WardenContext:
     retrieval_stats: RetrievalStats | None = None
     query_scope: MemoryScope | None = None      # where the query is asked
     candidate_scope: MemoryScope | None = None  # where the candidate memory lives
-    support_profile: SupportProfile | None = None  # provenance for the anti-spiral guard
     oracle_packet: OraclePacket | None = None   # the R7 combiner output for this candidate
     recorded_conflict: bool = False  # persisted conflict group with unresolved status
 
@@ -126,37 +120,13 @@ class ScopeWarden:
 
 
 @dataclass
-class EvidenceAnchorWarden:
-    """Guards against self-reinforcement: a current-truth assertion needs a non-self anchor
-    and a shallow support chain (R8 SelfReinforcementGuard, Guards 2/3/5).
-
-    Refuses a synthetic-only / unanchored claim (retrieval & LLM-summaries are attention,
-    not truth -- rule zero); flags a too-deep memory-call chain. Permissive when no support
-    profile is supplied (absence is unknown, not non-self)."""
-
-    name: str = "evidence_anchor"
-
-    def evaluate(self, ctx: WardenContext) -> WardenVerdict:
-        profile = ctx.support_profile
-        if profile is None:
-            return WardenVerdict(WardenDecision.ADMIT, self.name, reason="no support profile")
-        verdict = assess_reinforcement(profile)
-        if verdict is ReinforcementVerdict.NEEDS_EVIDENCE:
-            return WardenVerdict(WardenDecision.REFUSE, self.name, reason="synthetic-only / no external anchor")
-        if verdict is ReinforcementVerdict.OVER_DEPTH:
-            return WardenVerdict(WardenDecision.FLAG, self.name, reason="meta-memory chain too deep", label=WardenLabel.SUSPICIOUS_CHAIN)
-        return WardenVerdict(WardenDecision.ADMIT, self.name, reason="externally anchored")
-
-
-@dataclass
 class OracleAdmissionWarden:
     """Decides admission from the R7 OraclePacket's currentness/historicality/conflict axis.
 
     This is the Oracle->Warden handoff: the oracle pipeline RANKS (the packet), this warden
     DECIDES whether the ranked candidate may enter current-truth context. It reads the
     per-result targets/polarities (the same temporal/conflict signals, now in oracle form) —
-    NOT scope (ScopeWarden owns that) and NOT synthetic support (EvidenceAnchorWarden owns
-    that), so the chain composes without double-applying.
+    NOT scope (ScopeWarden owns that), so the chain composes without double-applying.
 
       currentness CONTRADICT + current intent  -> REFUSE (superseded; don't assert as current)
       currentness CONTRADICT + historical intent -> ADMIT (that's what they asked for)

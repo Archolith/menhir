@@ -350,8 +350,7 @@ class MemorySettings:
     # MENHIR_FRONTIER_SHADOW / etc. (code defaults match .env.example, audit DOC-05).
     # Oracle ranking and the intent lens are always on since #172 and have no setting; see
     # RetrievalTuningConfig. The Warden gate and its contradiction guard are on by default since
-    # #173 (set each to false to opt out); the evidence anchor (#349) stays opt-in.
-    frontier_evidence_anchor: bool = False  # Guard 5 EvidenceAnchorWarden; opt-in: it reads the client label, not the speaker, and refuses ordinary conversation (#349)
+    # #173 (set each to false to opt out).
     frontier_shadow: bool = False          # observe-only oracle/warden pass (trace)
     # Source-memory recall lane: additive section of raw episode memories (cosine over
     # n.content_embedding), NEXT TO the ranked results, never fused into them. Always on since
@@ -657,7 +656,6 @@ class MemorySettings:
         from menhir.domain.retrieval_tuning import RetrievalTuningConfig
 
         return RetrievalTuningConfig(
-            enable_evidence_anchor=self.frontier_evidence_anchor,
             scalar_verdict_min_similarity=self.personal_memory_scalar_verdict_min_similarity,
             scalar_observation_recall=self.personal_memory_scalar_observation_recall,
             enable_assertion_shadow=self.frontier_shadow,
@@ -825,7 +823,6 @@ class MemorySettings:
             # Benchmark mode (LongMemEval Mode B isolation)
             benchmark_mode=parse_bool_env(_getenv("MENHIR_BENCHMARK_MODE", default=str(cls.benchmark_mode))),
             # Frontier portions (default off)
-            frontier_evidence_anchor=parse_bool_env(_getenv("MENHIR_FRONTIER_EVIDENCE_ANCHOR", default=str(cls.frontier_evidence_anchor))),
             frontier_shadow=parse_bool_env(_getenv("MENHIR_FRONTIER_SHADOW", default=str(cls.frontier_shadow))),
             frontier_source_memory_limit=_parse_int(
                 _getenv("MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT", default=str(cls.frontier_source_memory_limit)),

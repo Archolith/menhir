@@ -151,6 +151,8 @@ def test_event_history_controls_are_retired(monkeypatch, name, env) -> None:
      "2026-10-29: removed (#400; at-tr-ku 211 A/B 198 vs 198, flips +4/-4)"),
     ("frontier_belief_gate", "MENHIR_FRONTIER_BELIEF_GATE",
      "2026-10-29: removed (#399 bucket 2; quality delta 0, p95 +12.6%)"),
+    ("frontier_evidence_anchor", "MENHIR_FRONTIER_EVIDENCE_ANCHOR",
+     "2026-10-29: removed (#399 bucket 2; 3 of 33,861 entities pass)"),
 ])
 def test_bucket3_recall_flags_are_retired(monkeypatch, name, env, reason) -> None:
     # Fails if a removed recall flag returns as a setting/feature, or loses its retirement reason.
@@ -163,8 +165,6 @@ def test_bucket3_recall_flags_are_retired(monkeypatch, name, env, reason) -> Non
 
 
 def test_known_interactions_and_observation_switches_are_recorded() -> None:
-    for key in ("frontier_evidence_anchor",):
-        assert FEATURES[key].requires == ()
     # Scalar view authority is always on (#168 freeze): its dependents require the scalar lane itself.
     assert FEATURES["personal_memory_observation_dedup_enabled"].requires == (
         "personal_memory_scalar_state_enabled",)

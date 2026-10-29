@@ -211,11 +211,6 @@ class RetrievalTuningConfig:
     enable_warden_gate: bool = True
     # Contradiction interrupt: append ContradictionWarden to the default warden chain. On by default since #168 freeze; kept as a per-request knob.
     enable_contradiction_interrupt: bool = True
-    # Evidence-anchor gate (Guard 5 / EvidenceAnchorWarden): refuse candidates whose support is
-    # synthetic-only / has no external anchor (user/log/test/git/file). OFF by default, matching
-    # MENHIR_FRONTIER_EVIDENCE_ANCHOR: provenance comes from the client label, so ordinary
-    # conversation stored via MCP/REST looks agent-written and is refused (#349).
-    enable_evidence_anchor: bool = False
     # Minimum query similarity (best per slot) for a scalar verdict to be emitted; 0 = off.
     # Neo4j vector.similarity.cosine scale, (1+cos)/2. MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY.
     scalar_verdict_min_similarity: float = 0.0

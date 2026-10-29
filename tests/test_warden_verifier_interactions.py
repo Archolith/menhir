@@ -80,7 +80,7 @@ async def test_warden_verifier_effects_and_sync_disabled_restart(
         episode_sources=["claude-code"] if evidence_kind == "agent" else [])]
     stub_graphiti_client.search_scored_results = [("belief", "configuration", .85)]
     tuning = RetrievalTuningConfig(enable_assertion_shadow=False,
-        enable_warden_gate=warden, enable_evidence_anchor=True,
+        enable_warden_gate=warden,
         enable_contradiction_interrupt=warden, enable_intent_lens=True)
     query = "have we already tried this configuration" if historical else "configuration"
     report = dict(schema_version=1, qualified_for_defaults=False, arm=arm, case=case,
@@ -88,7 +88,7 @@ async def test_warden_verifier_effects_and_sync_disabled_restart(
         limits=["Authored single-candidate controls, not answer-quality/cost qualification",
                 "Sync is invoked or skipped directly; scheduler wiring is tested separately",
                 "Restart recreates services over offline persisted-state stubs"], phases=[])
-    expected_returned = not (warden and (evidence_kind == "agent" or (conflict and not historical)))
+    expected_returned = not (warden and (conflict and not historical))
     persisted = deepcopy(rows)
     for phase in ("after_probe", "restart_sync_disabled"):
         if phase == "restart_sync_disabled":

@@ -15,7 +15,6 @@ pytestmark = pytest.mark.unit
 CAMPAIGN_FLAGS = {
     "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED": "personal_memory_scalar_state_enabled",
     "MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED": "personal_memory_scalar_history_enabled",
-    "MENHIR_FRONTIER_EVIDENCE_ANCHOR": "frontier_evidence_anchor",
     "MENHIR_FRONTIER_SHADOW": "frontier_shadow",
     "MENHIR_FRONTIER_SOURCE_MEMORY_POOLS": "frontier_source_memory_pools",
     "MENHIR_VERIFIER_SYNC_ENABLED": "verifier_sync_enabled",

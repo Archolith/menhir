@@ -5,11 +5,9 @@ from __future__ import annotations
 from menhir.domain.belief import QueryIntent
 from menhir.domain.exhaustion import RetrievalStats
 from menhir.domain.scope import MemoryScope
-from menhir.domain.self_reinforcement import SupportProfile
 from menhir.domain.oracles import OraclePacket, OraclePolarity, OracleResult, OracleTarget
 from menhir.domain.warden import (
     ContradictionWarden,
-    EvidenceAnchorWarden,
     ExhaustionWarden,
     ScopeWarden,
     WardenChain,
@@ -69,27 +67,6 @@ def test_scope_admits_same_and_unknown() -> None:
     assert ScopeWarden().evaluate(same).decision is WardenDecision.ADMIT
     unknown = WardenContext("c")  # no scope on either side
     assert ScopeWarden().evaluate(unknown).decision is WardenDecision.ADMIT
-
-
-def test_evidence_anchor_warden_refuses_synthetic_only() -> None:
-    """Rule zero: a claim backed only by LLM/retrieval self-support is refused as current truth."""
-    ctx = WardenContext("c", support_profile=SupportProfile(support_kinds=("agent_inference", "llm_summary")))
-    assert EvidenceAnchorWarden().evaluate(ctx).decision is WardenDecision.REFUSE
-
-
-def test_evidence_anchor_warden_admits_externally_anchored() -> None:
-    ctx = WardenContext("c", support_profile=SupportProfile(support_kinds=("git", "agent_inference"), meta_depth=1))
-    assert EvidenceAnchorWarden().evaluate(ctx).decision is WardenDecision.ADMIT
-
-
-def test_evidence_anchor_warden_flags_deep_meta_chain() -> None:
-    ctx = WardenContext("c", support_profile=SupportProfile(support_kinds=("git",), meta_depth=5))
-    v = EvidenceAnchorWarden().evaluate(ctx)
-    assert v.decision is WardenDecision.FLAG and v.label == "suspicious_chain"
-
-
-def test_evidence_anchor_warden_admits_without_profile() -> None:
-    assert EvidenceAnchorWarden().evaluate(WardenContext("c")).decision is WardenDecision.ADMIT
 
 
 def test_scope_warden_refuses_wrong_repo_inside_a_chain() -> None:

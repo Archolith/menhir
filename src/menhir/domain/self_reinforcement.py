@@ -21,7 +21,6 @@ policy consumed by the mutator side.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from enum import Enum
 
 # Evidence-kind constants — SSOT lives in domain/truth/kinds.py.
@@ -96,37 +95,3 @@ def durable_heat_allowed(*, outcome: str | None) -> bool:
 def within_meta_depth_budget(meta_depth: int, *, budget: int = _DEFAULT_META_DEPTH_BUDGET) -> bool:
     """Guard 3 (MetaMemoryDepthBudget): is a memory-call-hint chain within the depth cap?"""
     return meta_depth <= budget
-
-
-@dataclass(frozen=True)
-class SupportProfile:
-    """The provenance of a candidate's support, for the assertion-boundary guards.
-
-    ``support_kinds`` are the evidence-source kinds backing the candidate; ``meta_depth`` is
-    the memory-call-hint chain length that surfaced it."""
-
-    support_kinds: tuple[str, ...] = ()
-    meta_depth: int = 0
-
-
-class ReinforcementVerdict(str, Enum):
-    """The anti-spiral decision on whether a candidate may be asserted as current truth."""
-
-    OK = "ok"                       # has external anchor, real support, within depth
-    NEEDS_EVIDENCE = "needs_evidence"  # synthetic-only / no anchor -> not current truth
-    OVER_DEPTH = "over_depth"        # meta-memory chain too deep -> suspicious
-
-
-def assess_reinforcement(
-    profile: SupportProfile, *, meta_budget: int = _DEFAULT_META_DEPTH_BUDGET
-) -> ReinforcementVerdict:
-    """Combine Guards 2/3/5 into one assertion-boundary verdict.
-
-    Order: an over-budget meta chain is flagged first (the chain itself is suspect); then a
-    synthetic-only / unanchored support set means the claim needs external evidence before it
-    can be current truth; otherwise OK."""
-    if not within_meta_depth_budget(profile.meta_depth, budget=meta_budget):
-        return ReinforcementVerdict.OVER_DEPTH
-    if is_synthetic_only(profile.support_kinds) or not has_external_anchor(profile.support_kinds):
-        return ReinforcementVerdict.NEEDS_EVIDENCE
-    return ReinforcementVerdict.OK
