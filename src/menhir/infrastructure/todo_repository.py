@@ -54,6 +54,9 @@ TODO_AGE_DAYS_CYPHER = "duration.inDays(datetime(n.created_at), datetime()).days
 #: definition too.
 TODO_STALE_AFTER_DAYS = 30
 
+#: Matches a namespace-scoped ``search_by_query`` reads before its Python namespace filter.
+_SEARCH_SCAN_CAP = 200
+
 #: Shared silo. Every :Todo carries a non-null namespace -- "unscoped" is not
 #: representable. Reads that request a silo also see this bucket, so todos
 #: written before namespacing (backfilled to 'default') stay visible.
@@ -966,25 +969,31 @@ class TodoRepository:
         Returns priority-sorted results.
 
         ``namespace`` follows ``list_todos``: a supplied namespace narrows to that
-        silo plus ``DEFAULT_NAMESPACE``; ``None`` is unrestricted.
+        silo plus ``DEFAULT_NAMESPACE``; ``None`` is unrestricted (#401).
+
+        The namespace filter runs in PYTHON, for the reason ``todo_supersession`` gives: the
+        todo rule "own silo OR default bucket" is not ``tenant_scope_cypher``'s rule, and a
+        hand-written Cypher predicate is what CF-127's ratchet stops. Scoped calls scan up to
+        ``_SEARCH_SCAN_CAP`` matches before filtering, so a silo past that cap gets fewer
+        todos, never another silo's.
         """
         safe_limit = max(1, min(limit, 50))
         words = _query_words(query)
         namespaces = (
             [normalize_namespace(namespace), DEFAULT_NAMESPACE] if namespace else None
         )
-        return self.neo4j.execute(
+        rows = self.neo4j.execute(
             """
             WITH toLower($query_text) AS q, $words AS words
             MATCH (t:Todo {status: 'open'})
-            WHERE (toLower(t.content) CONTAINS q
-                   OR any(word IN words WHERE toLower(t.content) CONTAINS word))
-              AND ($namespaces IS NULL OR t.namespace IN $namespaces)
+            WHERE toLower(t.content) CONTAINS q
+               OR any(word IN words WHERE toLower(t.content) CONTAINS word)
             RETURN
-                t.uuid     AS uuid,
-                t.content  AS content,
-                t.code_ref AS code_ref,
-                t.priority AS priority
+                t.uuid      AS uuid,
+                t.content   AS content,
+                t.code_ref  AS code_ref,
+                t.priority  AS priority,
+                t.namespace AS ns
             ORDER BY
                 CASE t.priority
                     WHEN 'high'   THEN 0
@@ -998,10 +1007,19 @@ class TodoRepository:
                 # so that key raised TypeError and build_context silently dropped its todos.
                 "query_text": query.lower(),
                 "words": words,
-                "limit": safe_limit,
-                "namespaces": namespaces,
+                "limit": safe_limit if namespaces is None else _SEARCH_SCAN_CAP,
             },
         )
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            record = dict(row)
+            ns = record.pop("ns", None)
+            if namespaces is not None and (ns or DEFAULT_TODO_NAMESPACE) not in namespaces:
+                continue
+            out.append(record)
+            if len(out) >= safe_limit:
+                break
+        return out
 
     def close_stale_todos(
         self, *, older_than_days: int = 60, dry_run: bool = True, namespace: str | None = None

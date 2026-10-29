@@ -411,26 +411,39 @@ def test_search_by_query_returns_rows() -> None:
     assert result[0]["uuid"] == "a"
 
 
+def _ns_rows() -> list[dict]:
+    return [
+        {"uuid": "b1", "content": "middleware b", "priority": "high", "code_ref": None, "ns": "ns-b"},
+        {"uuid": "a1", "content": "middleware a", "priority": "high", "code_ref": None, "ns": "ns-a"},
+        {"uuid": "d1", "content": "middleware d", "priority": "normal", "code_ref": None,
+         "ns": DEFAULT_TODO_NAMESPACE},
+        {"uuid": "a2", "content": "middleware a2", "priority": "low", "code_ref": None, "ns": "ns-a"},
+    ]
+
+
 @pytest.mark.unit
 def test_search_by_query_scopes_to_namespace_plus_default() -> None:
-    neo4j = _StubNeo4j(responses=[[]])
+    """#401: a scoped caller sees its own silo plus the default bucket, never another silo, and
+    the limit applies after filtering."""
+    neo4j = _StubNeo4j(responses=[_ns_rows()])
     repo = TodoRepository(neo4j)
 
-    repo.search_by_query("middleware", namespace="ns-a")
+    result = repo.search_by_query("middleware", limit=2, namespace="ns-a")
 
-    call = neo4j.calls[0]
-    assert call["params"]["namespaces"] == ["ns-a", DEFAULT_TODO_NAMESPACE]
-    assert "t.namespace IN $namespaces" in call["query"]
+    assert [r["uuid"] for r in result] == ["a1", "d1"]
+    assert all("ns" not in r for r in result)
+    assert neo4j.calls[0]["params"]["limit"] > 2  # scans past the limit before filtering
 
 
 @pytest.mark.unit
 def test_search_by_query_without_namespace_is_unrestricted() -> None:
-    neo4j = _StubNeo4j(responses=[[]])
+    neo4j = _StubNeo4j(responses=[_ns_rows()])
     repo = TodoRepository(neo4j)
 
-    repo.search_by_query("middleware")
+    result = repo.search_by_query("middleware", limit=3)
 
-    assert neo4j.calls[0]["params"]["namespaces"] is None
+    assert [r["uuid"] for r in result] == ["b1", "a1", "d1"]
+    assert neo4j.calls[0]["params"]["limit"] == 3
 
 
 # ---------------------------------------------------------------------------
