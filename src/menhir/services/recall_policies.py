@@ -15,7 +15,6 @@ if TYPE_CHECKING:
 
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
 from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FAMILY
-from menhir.domain.event_time import event_time_text
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
 from menhir.domain.recall import (
     CandidateData,
@@ -247,7 +246,6 @@ def _filter_to_current_beliefs(rows: list[dict[str, object]]) -> list[dict[str, 
 def _build_temporal_facts(
     rows: list[dict[str, object]],
     *,
-    event_time: bool = False,
     ended: bool = False,
     now: datetime | None = None,
     said_time: bool = True,
@@ -299,8 +297,7 @@ def _build_temporal_facts(
                 expired_at=expired_at,
                 is_current_belief=is_current,
                 temporal_role=temporal_role,
-                event_time=event_time_text(row) if event_time else None,
-                # Drop a trailing zone id like [UTC] (Neo4j toString), as event_time does.
+                # Drop a trailing zone id like [UTC] (Neo4j toString).
                 said_at=(str(row.get("said_at")).split("[", 1)[0].strip()
                          if said_time and row.get("said_at") else None),
             )

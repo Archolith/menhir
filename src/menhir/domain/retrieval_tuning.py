@@ -248,9 +248,6 @@ class RetrievalTuningConfig:
     # memory before more from the same session (domain/source_memory_spread.py). On by default
     # since #168 freeze; kept as a per-request knob.
     source_memory_spread: bool = True
-    # Render persisted anchored-time contracts as fact event times (MENHIR_ANCHORED_TIME_RENDER).
-    # Presentation only: ranking and admission are identical with it on or off.
-    enable_anchored_time_render: bool = False
     # Put each fact edge's statement time (its reference_time) on recall temporal facts as
     # said_at, rendered as "said <time>". Presentation only. On by default since #168 freeze;
     # kept as a per-request knob.

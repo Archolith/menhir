@@ -31,7 +31,6 @@ mapped into `RetrievalTuningConfig` at the recall entry via `retrieval_tuning()`
 | Event History Phase 3 Consolidation | `personal_memory_event_history_enabled` / `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED` | backfill :TurnEvidence -> assertions via independent watermark cursor | production-capable but default-off; Phase 1-5 complete | `menhir-event-history-plan.md` + commits 048b8d9..51c11cf |
 | Event History Phase 4 Recall Authority | `personal_memory_event_history_authority_enabled` / `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED` | conditional first-person event route probed only when enabled and namespace present | production-capable but default-off; independent of scalar authority | commits 048b8d9..51c11cf |
 | Brief builder (append temporal Timeline in build_context) | `frontier_brief_builder` | removed 2026-10-01, superseded by `recall_timeline` | — | brief-builder work |
-| Anchored-time render (show the persisted time contract as each fact's event time: the resolved window, a plan's planned window, or "event time unknown (said <speech date>)" instead of a speech-date `valid_at`; timeline facts order by window start) | `anchored_time_render_enabled` / `MENHIR_ANCHORED_TIME_RENDER` | `_build_temporal_facts(event_time=...)` in recall enrichment, `_source_time_lines` in the context builder, MCP recall formatter, `timeline_facts(event_time=...)`; contracts are written by the resolver (`anchored_time_persist.py`) whenever it is on, independent of this flag | offline render and flag-off identity tests (`tests/test_anchored_time_render.py`); no live readback yet | workspace `menhir-anchored-time-resolver-p2-plan.md` |
 
 ## Removed 2026-10-27
 
@@ -104,8 +103,6 @@ listed in `RETIRED` (`config/feature_flags.py`); component knobs stay as per-req
 | Scalar reconcile attribute/scope/subject, scalar View authority (follows the scalar lane), View freshness gate, sum grounding | retired | always on | `d022a7ed` |
 | Counting recall authority-only, wording, extraction v2, related-count matching (stamp `+x2+m`) | retired | always on | `9ec4d08c` |
 | Assistant turns stored only | retired | always on | `bdad118c` |
-
-Anchored-time render (`MENHIR_ANCHORED_TIME_RENDER`) stays off: it did not run in the window.
 
 ### Graduated to default-on 2026-09-30: source-memory recall lane
 

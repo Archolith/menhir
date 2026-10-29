@@ -222,7 +222,6 @@ class RecallTemporalFact(BaseModel):
     expired_at: str | None = None
     is_current_belief: bool = True
     temporal_role: str = "current_belief"
-    event_time: str | None = None
     said_at: str | None = None
 
 
@@ -340,7 +339,6 @@ class RecallTimelineFactResponse(BaseModel):
     invalid_at: str | None = None
     expired_at: str | None = None
     time_basis: str = "world"
-    event_time: str | None = None
 
 
 class RecallTimelineEntryResponse(BaseModel):

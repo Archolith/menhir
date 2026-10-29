@@ -341,11 +341,7 @@ def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, obj
 
 
 def _with_event_time(item: dict, tf: object) -> dict:
-    """Adds ``event_time`` (MENHIR_ANCHORED_TIME_RENDER) and ``said_at``
-    only when set, else unchanged."""
-    event_time = _tf(tf, "event_time")
-    if event_time:
-        item["event_time"] = event_time
+    """Adds ``said_at`` only when set, else unchanged."""
     said_at = _tf(tf, "said_at")
     if said_at:
         item["said_at"] = said_at
@@ -364,15 +360,7 @@ def _format_when(tf: object) -> str:
     created_at = _tf(tf, "created_at")
     expired_at = _tf(tf, "expired_at")
 
-    event_time = _tf(tf, "event_time")
-    if event_time:
-        # A plan has not happened, and an unverified recorded date is not an occurrence date:
-        # their text already says "planned ..." / "recorded ...".
-        happened = (str(event_time) if str(event_time).startswith(("planned", "recorded"))
-                    else f"happened {event_time}")
-        if invalid_at:
-            happened = f"{happened} until {invalid_at}"
-    elif invalid_at:
+    if invalid_at:
         happened = f"happened {valid_at or '?'} until {invalid_at}"
     elif valid_at:
         happened = f"happened from {valid_at}"

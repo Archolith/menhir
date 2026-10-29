@@ -1,3 +1,15 @@
+## 2026-10-29 - Anchored-time render removed
+
+`MENHIR_ANCHORED_TIME_RENDER` (default off) showed each fact's persisted anchored-time contract as its event time in recall, context and timeline. Paired A/B on a resolver-on graph of 211 LongMemEval items (78 knowledge-update, 133 temporal-reasoning): off 198/211, on 198/211, flips +4/-4, with render text in 169 contexts (#400). It is removed; the code is kept on `archive/anchored-time-render-2026-10-29`. The anchored-time resolver and its `time_*` edge properties are unchanged.
+
+- Deleted `domain/event_time.py`. `TemporalFact.event_time`, `TimelineFact.event_time` and the matching REST response fields are gone; with the flag off they were always unset and never emitted.
+- `infrastructure/cypher.py`: `FACT_TEMPORAL_FIELDS` no longer projects the nine `time_*` contract columns, which only the renderer read.
+- `infrastructure/memory_queries.py`, `memory_graph_adapter.py`, `services/timeline_service.py`, `core/backend_runtime_data_ops.py`: the timeline `event_time` parameter is gone; the query is the former flag-off text.
+- `services/recall_policies.py`, `recall_pipeline.py`, `context_builder.py`, `mcp/formatters.py`, `explorer/recall_lab.py`: the render branches are gone; flag-off output is unchanged.
+- Settings: `anchored_time_render_enabled` and `RetrievalTuning.enable_anchored_time_render` removed; both names are in `feature_flags.RETIRED`. `.env.example` and `.agent/default-off-features.md` drop the flag.
+- Tests: deleted `tests/test_anchored_time_render.py`, `test_anchored_time_render_review.py`, `test_anchored_time_render_review_r2.py`, and the render cases in `test_anchored_time_state_start.py` and `test_anchored_time_attach_hook.py`. `tests/test_feature_flag_registry.py` checks the retirement.
+- `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
+
 ## 2026-10-28 - Context todos are scoped to the caller's namespace and appear again
 
 `build_context` adds up to 3 keyword-matched open todos ("Related open TODOs"). That search never ran: it passed a Cypher parameter named `query`, which collides with `session.run(query, **params)` in `Neo4jClient.execute`, and the raised TypeError was swallowed, so the section was always empty. It also had no namespace filter, so once fixed it would have shown other namespaces' todos (#401).
@@ -111,14 +123,3 @@ In the LME pilot, 3 of 30 concurrent first `POST /api/phase3/run` calls on a fre
   - Online: 16 concurrent `ensure_scalar_state_activated` plus 16 event activations on a fresh schema, 3 rounds. It fails without the fix.
 - Changed test: `test_activate_runs_idempotent_ddl` in `tests/test_typed_event_repository.py` now separates the `CALL db.awaitIndex` waits from the DDL statements it checks.
 - `CHANGELOG-archive.md`: retain the oldest former current entry.
-
-## 2026-10-21 - POST /api/phase3/run reports lanes that failed
-
-In the LME pilot a counting namespace failed inside the pass (a provider 500), yet the request returned 200 with nothing marking it failed, so the bench recorded it as done.
-
-- `api/routes_support.py`, `api/routes_handlers.py`: `Phase3RunResponse` gains `ok` (false when any lane failed closed for the namespace) and `failed_lanes` (lane, namespace, failed count). The status stays 200 and the existing counters are unchanged.
-- `services/lane_outcomes.py`: new `failed_lanes()` reads each lane's failed counter; the scalar lane now has one.
-- `services/scalar_consolidation.py`: when scalar-state activation is refused, `scalar_namespaces_failed` counts the scalar targets. Before, the lane was skipped with only a log warning, the same way the event lane already reports its activation refusal.
-- Tests: new `tests/test_phase3_run_lane_failure.py`.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
-

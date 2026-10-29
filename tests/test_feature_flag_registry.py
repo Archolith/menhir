@@ -147,6 +147,8 @@ def test_event_history_controls_are_retired(monkeypatch, name, env) -> None:
      "2026-10-28: removed (#399 bucket 3; dead setting, never read by recall)"),
     ("frontier_verb_facets", "MENHIR_FRONTIER_VERB_FACETS",
      "2026-10-28: removed (#399 bucket 3; o500 A/B changed recall on 9 items with no flips)"),
+    ("anchored_time_render_enabled", "MENHIR_ANCHORED_TIME_RENDER",
+     "2026-10-29: removed (#400; at-tr-ku 211 A/B 198 vs 198, flips +4/-4)"),
 ])
 def test_bucket3_recall_flags_are_retired(monkeypatch, name, env, reason) -> None:
     # Fails if a removed recall flag returns as a setting/feature, or loses its retirement reason.

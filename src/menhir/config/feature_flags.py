@@ -43,8 +43,6 @@ _SETTINGS = (
         'Configure agent-inferred user-inferred self node mode (off | observe | enforce).', True, ()),
     ('anchored_time_resolver_enabled', 'MENHIR_ANCHORED_TIME_RESOLVER', True, 'runtime',
         'Anchored time: resolve valid_at on edges from user turns with temporal cues, blind-check each time before it is written, and keep world-ended facts live (labelled ended).', True, ()),
-    ('anchored_time_render_enabled', 'MENHIR_ANCHORED_TIME_RENDER', False, 'runtime',
-        'Render persisted anchored-time contracts as fact event times in recall and timeline.', True, ()),
     ('personal_memory_consolidation_disable_reasoning', 'MENHIR_PERSONAL_MEMORY_CONSOLIDATION_DISABLE_REASONING',
         False, 'personal_memory', 'Request consolidation reasoning suppression where supported.', False, ()),
     ('personal_memory_scalar_state_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED', True,
@@ -291,4 +289,6 @@ RETIRED = {
     "MENHIR_FRONTIER_FUSION_ADMISSION_POLICY": "2026-10-28: removed (#399 bucket 3; dead setting, never read by recall)",
     "frontier_verb_facets": "2026-10-28: removed (#399 bucket 3; o500 A/B changed recall on 9 items with no flips)",
     "MENHIR_FRONTIER_VERB_FACETS": "2026-10-28: removed (#399 bucket 3; o500 A/B changed recall on 9 items with no flips)",
+    "anchored_time_render_enabled": "2026-10-29: removed (#400; at-tr-ku 211 A/B 198 vs 198, flips +4/-4)",
+    "MENHIR_ANCHORED_TIME_RENDER": "2026-10-29: removed (#400; at-tr-ku 211 A/B 198 vs 198, flips +4/-4)",
 }

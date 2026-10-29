@@ -116,9 +116,6 @@ class TemporalFact:
     # "current_belief" | "superseded_belief" | "ended" (believed, but its own end has passed;
     # only with the anchored-time switch, MENHIR_ANCHORED_TIME_RESOLVER, on).
     temporal_role: str
-    # Rendered anchored-time event time; set only when MENHIR_ANCHORED_TIME_RENDER is on and the
-    # edge carries a persisted contract.
-    event_time: str | None = None
     # When the fact was said: the edge's reference_time (statement time, not world time). Set only
     # when the fact-said-time knob is on (default).
     said_at: str | None = None

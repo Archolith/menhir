@@ -17,7 +17,6 @@ from graphiti_core.edges import EntityEdge  # noqa: E402
 
 from menhir.config.feature_flags import FEATURES  # noqa: E402
 from menhir.config.settings_model import MemorySettings  # noqa: E402
-from menhir.domain.event_time import EventTime  # noqa: E402
 import menhir.infrastructure.anchored_time_resolver as resolver_module  # noqa: E402
 import menhir.infrastructure.graphiti_client as graphiti_client  # noqa: E402
 import menhir.infrastructure.graphiti_extraction_policy as policy  # noqa: E402
@@ -391,31 +390,6 @@ def test_contract_stays_at1_without_an_attach_model() -> None:
     (row,) = contract_rows(bare, ["e0"], date(2023, 5, 14))
     assert row["time_contract"] == "at1|pv|gpt-x"
     assert set(row) == {"uuid", *CONTRACT_PROPERTIES}
-
-
-# --- 4. render --------------------------------------------------------------------------------
-
-_NEW_OUTCOMES = ("state_future", "attach_rejected", "attach_unverified")
-
-
-def _render(outcome: str, valid_at: str | None) -> str:
-    return EventTime(
-        basis="speech_relative", expression="a month ago", kind="point_event", granularity="month",
-        window_start="2023-04-01", window_end="2023-04-30", outcome=outcome, speech_date="2023-05-14",
-    ).render(valid_at)
-
-
-@pytest.mark.parametrize("outcome", _NEW_OUTCOMES)
-@pytest.mark.parametrize(("valid_at", "literal"), [
-    ("2023-04-15T00:00:00Z", "event time unknown (said 2023-05-14)"),  # inside the window: a copy of it
-    ("2023-01-02T00:00:00Z", "2023-01-02"),                            # outside it: Graphiti's own date
-    ("2023-05-14T15:00:00Z", "event time unknown (said 2023-05-14)"),  # the speech date
-])
-def test_new_outcomes_render_like_state_start(outcome, valid_at, literal) -> None:
-    out = _render(outcome, valid_at)
-    assert out == _render("state_start", valid_at)
-    assert out == literal
-    assert "~2023-04" not in out and "a month ago" not in out
 
 
 # --- 5. settings and flag ---------------------------------------------------------------------

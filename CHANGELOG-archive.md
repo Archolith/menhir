@@ -1,3 +1,13 @@
+## 2026-10-21 - POST /api/phase3/run reports lanes that failed
+
+In the LME pilot a counting namespace failed inside the pass (a provider 500), yet the request returned 200 with nothing marking it failed, so the bench recorded it as done.
+
+- `api/routes_support.py`, `api/routes_handlers.py`: `Phase3RunResponse` gains `ok` (false when any lane failed closed for the namespace) and `failed_lanes` (lane, namespace, failed count). The status stays 200 and the existing counters are unchanged.
+- `services/lane_outcomes.py`: new `failed_lanes()` reads each lane's failed counter; the scalar lane now has one.
+- `services/scalar_consolidation.py`: when scalar-state activation is refused, `scalar_namespaces_failed` counts the scalar targets. Before, the lane was skipped with only a log warning, the same way the event lane already reports its activation refusal.
+- Tests: new `tests/test_phase3_run_lane_failure.py`.
+- `CHANGELOG-archive.md`: retain the oldest former current entry.
+
 ## 2026-10-21 - E2E work root is always absolute; dev group installs build
 
 - `tests/e2e/conftest.py`, `tests/e2e/_harness/config.py`: `MENHIR_E2E_WORK_ROOT` is resolved to an absolute path. A relative root broke E2E-20's upgrade step, where pip runs from another cwd and could not find the candidate wheel.

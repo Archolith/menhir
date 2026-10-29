@@ -955,11 +955,11 @@ class MemoryGraphAdapter:
         )
 
     def timeline_facts(
-        self, *, episode_uuids: list[str], namespace: str | None, event_time: bool = False
+        self, *, episode_uuids: list[str], namespace: str | None
     ) -> dict[str, list[dict[str, object]]]:
         """RELATES_TO facts grouped per episode (recall_timeline, read-only)."""
         return self._memory_queries.timeline_facts(
-            episode_uuids=episode_uuids, namespace=namespace, event_time=event_time
+            episode_uuids=episode_uuids, namespace=namespace
         )
 
     def resolve_timeline_subject(
