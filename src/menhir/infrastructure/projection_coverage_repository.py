@@ -51,9 +51,12 @@ class ProjectionCoverageRepository:
             f"""
             MATCH (a:TypedAssertion {{subject_uuid: $subject_uuid}})
             WHERE {tenant_scope_cypher("a")}
+            OPTIONAL MATCH (te:TurnEvidence {{turn_id: a.episode_uuid}})
+            OPTIONAL MATCH (source_ep:Episodic)-[:ADMITTED_ON]->(te)
+            WITH a, te, collect(DISTINCT source_ep.uuid) AS admitted_episode_uuids
             OPTIONAL MATCH (h:TypedAssertionHead {{source_key: a.source_key}})
             OPTIONAL MATCH (h)-[:CURRENT]->(cur:TypedAssertion)
-            WITH a, h, collect(cur) AS currents
+            WITH a, te, admitted_episode_uuids, h, collect(cur) AS currents
             RETURN a.assertion_id AS assertion_id, a.assertion_key AS assertion_key,
                    a.claim_key AS claim_key, a.source_key AS source_key,
                    a.subject_uuid AS subject_uuid, a.subject_display AS subject_display,
@@ -63,10 +66,22 @@ class ProjectionCoverageRepository:
                    a.operation AS operation, a.value AS value, a.value_json AS value_json,
                    a.stated_span AS stated_span,
                    toString(a.valid_at) AS valid_at, toString(a.learned_at) AS learned_at,
-                   a.episode_uuid AS episode_uuid, a.evidence_tier AS evidence_tier,
+                   CASE WHEN te IS NULL THEN coalesce(a.episode_uuid, '')
+                        ELSE coalesce(admitted_episode_uuids[0], '') END AS episode_uuid,
+                   CASE WHEN te IS NULL THEN coalesce(a.episode_uuid, '')
+                        ELSE coalesce(admitted_episode_uuids[0], '') END AS source_episode_uuid,
+                   CASE WHEN te IS NULL THEN '' ELSE coalesce(te.turn_id, '') END AS turn_id,
+                   a.episode_uuid AS grounding_id, a.time_basis AS time_basis,
+                   a.evidence_tier AS evidence_tier,
                    a.perceiver_version AS perceiver_version,
                    coalesce(a.absolute_semantics, 'ordinary') AS absolute_semantics,
                    coalesce(a.importance, '') AS importance,
+                   coalesce(a.count_object, '') AS count_object,
+                   coalesce(a.count_item, '') AS count_item,
+                   coalesce(a.count_action, '') AS count_action,
+                   coalesce(a.count_status, '') AS count_status,
+                   coalesce(a.count_target_id, '') AS count_target_id,
+                   coalesce(a.count_family, '') AS count_family,
                    coalesce(a.superseded, false) AS superseded,
                    a.superseded_by AS superseded_by,
                    coalesce(a.binding_pending, false) AS binding_pending,

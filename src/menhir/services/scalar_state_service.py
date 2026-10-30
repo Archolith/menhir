@@ -173,6 +173,12 @@ def _count_match_audit(state: Any) -> dict[str, Any]:
     }
 
 
+def _evaluation_time(as_of: datetime | None) -> datetime:
+    """The fold's evaluation time for a rebuild: the given `as_of`, else now(UTC), exactly the
+    writer's rule (`valid_at <= now`, UTC, inclusive). Call it once per rebuild."""
+    return as_of if as_of is not None else datetime.now(timezone.utc)
+
+
 def _projection_complete(result: Any) -> bool:
     """Return whether a rebuild result is safe to use as a durable completion proof."""
     if not isinstance(result, dict) or result.get("complete") is False:
@@ -212,7 +218,8 @@ class ScalarStateService:
         materializable (fully-bound, current) assertions — a binding_pending row must never
         materialize a View. `namespace` (C.4.4) scopes the fold to ONE silo so it never mixes two
         tenants' assertions sharing a subject_uuid; None = all (unchanged behavior). `as_of` (Phase B)
-        is the evaluation time: future assertions (`valid_at > as_of`) are ignored; None = now(UTC)."""
+        is the evaluation time: future assertions (`valid_at > as_of`) are ignored; None = NO time filter
+        (a pure set-fold). Rebuilds and the authority/expiry reads resolve now(UTC) before calling."""
         rows = self._assertions.materializable_assertions_for_entity(subject_uuid, namespace=namespace)
         return fold_assertions(rows, as_of=as_of, include_occurrences=self._counting_enabled,
                                count_match=self._count_match)
@@ -256,12 +263,10 @@ class ScalarStateService:
         that vanished, moved via a semantic correction, or now abstains). `namespace` scopes BOTH the
         fold read and the View write/retire to one silo (C.4.4), so a scoped rebuild never folds or
         retires another tenant's state; None = all. `as_of` (Phase B) is the evaluation time, threaded
-        through the single fold so live and rebuild are identical for the same (rows, as_of). `None` = no
-        time filter (a pure replay of the given rows, backward-compatible) -- the live activation default
-        (now(UTC)) is deliberately NOT flipped here; it is opt-in until the perceiver produces real future
-        `valid_at`s to filter, per the Phase B plan. Returns {written, retired, abstained, expired,
-        results}. Idempotent."""
-        result = self.fold_entity(subject_uuid, namespace=namespace, as_of=as_of)
+        through the single fold so live and rebuild are identical for the same (rows, as_of). `None` =
+        now(UTC), exactly as the live fold (future-dated assertions are not folded). Returns
+        {written, retired, abstained, expired, results}. Idempotent."""
+        result = self.fold_entity(subject_uuid, namespace=namespace, as_of=_evaluation_time(as_of))
 
         desired_slots: set[tuple[str, str, str, str]] = set()
         written: list[dict[str, Any]] = []
@@ -427,7 +432,7 @@ class ScalarStateService:
             if not self._counting_enabled:
                 # Counting off: history must not list occurrences either (same rule as fold_entity).
                 rows = [r for r in rows if str(r.get("operation")) != "occurrence"]
-            result = build_history(rows, as_of=as_of, max_entries=max_entries,
+            result = build_history(rows, as_of=_evaluation_time(as_of), max_entries=max_entries,
                                    **({"count_match": True} if self._count_match else {}))
         except Exception as exc:  # noqa: BLE001 - durable marker must remain retryable
             logger.exception("scalar_history source/build failed for %s", subject_uuid)
@@ -578,6 +583,8 @@ class ScalarStateService:
         `history_enabled` gates whether scalar_history is built. Callers should thread the
         feature flag value from settings.
         """
+        # One evaluation time for both projections.
+        as_of = _evaluation_time(as_of)
         state_result = self.rebuild_scalar_state(
             subject_uuid, namespace=namespace, source=source, as_of=as_of)
 

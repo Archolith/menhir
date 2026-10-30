@@ -131,7 +131,7 @@ def test_service_uses_assertions_not_views_to_choose_fold_members() -> None:
         [_matching_view([current])],
     )
 
-    report = ProjectionCoverageService(source).audit_entity(SUBJECT, namespace=NS)
+    report = ProjectionCoverageService(source, counting_enabled=True, count_match=True).audit_entity(SUBJECT, namespace=NS)
 
     assert report.clean is True
     roles = {record.assertion_id: record.fold_role for record in report.accounting}
@@ -148,7 +148,7 @@ def test_projection_pending_remains_distinct_from_matching_view_parity() -> None
     current = _row("current", projection_pending=True)
     source = FakeSource([current], [_matching_view([current])])
 
-    report = ProjectionCoverageService(source).audit_entity(SUBJECT, namespace=NS)
+    report = ProjectionCoverageService(source, counting_enabled=True, count_match=True).audit_entity(SUBJECT, namespace=NS)
 
     assert report.clean is True
     assert report.accounting[0].projection_status is ProjectionStatus.PROJECTION_PENDING
@@ -175,7 +175,7 @@ def test_custom_eligibility_is_evaluated_once_and_shared_with_report() -> None:
     eligibility = CountingEligibility()
     source = FakeSource([current, retracted], [_matching_view([current])])
 
-    report = ProjectionCoverageService(source).audit_entity(
+    report = ProjectionCoverageService(source, counting_enabled=True, count_match=True).audit_entity(
         SUBJECT,
         namespace=NS,
         eligibility_source=eligibility,
@@ -192,7 +192,7 @@ def test_missing_view_is_reported_without_attempting_repair() -> None:
     current = _row("current")
     source = FakeSource([current], [])
 
-    report = ProjectionCoverageService(source).audit_entity(SUBJECT, namespace=NS)
+    report = ProjectionCoverageService(source, counting_enabled=True, count_match=True).audit_entity(SUBJECT, namespace=NS)
 
     assert [violation.kind for violation in report.parity_violations] == [
         ParityViolationKind.MISSING_VIEW
@@ -207,7 +207,7 @@ def test_missing_view_is_reported_without_attempting_repair() -> None:
 def test_batch_is_bounded_and_preserves_entity_failures() -> None:
     good = _row("good")
     source = FakeSource([good], [_matching_view([good])], fail_subject="broken")
-    service = ProjectionCoverageService(source)
+    service = ProjectionCoverageService(source, counting_enabled=True, count_match=True)
 
     batch = service.audit_entities([(SUBJECT, NS), ("broken", NS)])
 

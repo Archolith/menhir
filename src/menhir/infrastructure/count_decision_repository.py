@@ -78,8 +78,12 @@ _REDECIDE_COOLED = _redecide(tenant_scope_cypher("t"), cooled=True)
 _REDECIDE_ANY_NAMESPACE = _redecide(
     "coalesce(t.namespace, t.group_id, '') = coalesce(a.namespace, a.group_id, '')", cooled=True)
 
-#: the decision SET shared by plain decisions (d) on node a.
+#: the decision SET shared by plain decisions (d) on node a. `projection_pending` is the durable
+#: "View is stale" obligation, set in the same statement as the decision; the runner clears it
+#: (`mark_projection_complete`) only after a confirmed rebuild, and the scalar repair pass
+#: (`repair_pending_bindings`) rebuilds any row left flagged.
 _SET_DECISION = """
+    a.projection_pending = true,
     a.count_status = d.status, a.count_target_id = d.target_id,
     a.count_family = d.family, a.count_vote = d.vote, a.count_reason = d.reason,
     a.count_truncated = d.truncated, a.count_decided_at = datetime(),

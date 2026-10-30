@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from menhir.domain.projection_coverage import (
@@ -51,6 +52,18 @@ class _CachedEligibilitySource:
         return self._decisions[key]
 
 
+class _CountingOffEligibility:
+    """With counting off the writer folds no occurrences, so none may be expected to materialize."""
+
+    def __init__(self, source: AssertionEligibilitySource) -> None:
+        self._source = source
+
+    def eligibility_for(self, assertion: dict[str, Any]) -> EligibilityDecision:
+        if str(assertion.get("operation")) == "occurrence":
+            return EligibilityDecision(EligibilityRole.OPERATOR_VETOED, "counting_disabled")
+        return self._source.eligibility_for(assertion)
+
+
 @dataclass(frozen=True)
 class ProjectionCoverageBatchFailure:
     subject_uuid: str
@@ -74,8 +87,21 @@ class ProjectionCoverageService:
 
     MAX_BATCH = 200
 
-    def __init__(self, source: ProjectionCoverageSource) -> None:
+    def __init__(
+        self,
+        source: ProjectionCoverageSource,
+        *,
+        counting_enabled: bool,
+        count_match: bool,
+        as_of: datetime | None = None,
+    ) -> None:
+        """`counting_enabled` and `count_match` must be the writer's: the adapter's
+        `counting_enabled` and `counting_match_enabled`, exactly as `scalar_state_service()` passes
+        them to ScalarStateService (match is off whenever counting is off)."""
         self._source = source
+        self._counting_enabled = bool(counting_enabled)
+        self._count_match = bool(count_match) and self._counting_enabled
+        self._as_of = as_of
 
     def audit_entity(
         self,
@@ -114,9 +140,10 @@ class ProjectionCoverageService:
                     f"spans multiple namespaces: {rendered}"
                 )
 
-        cached_eligibility = _CachedEligibilitySource(
-            eligibility_source or DefaultAssertionEligibilitySource()
-        )
+        base_eligibility = eligibility_source or DefaultAssertionEligibilitySource()
+        if not self._counting_enabled:
+            base_eligibility = _CountingOffEligibility(base_eligibility)
+        cached_eligibility = _CachedEligibilitySource(base_eligibility)
 
         materializable: list[dict[str, Any]] = []
         for assertion in assertions:
@@ -131,9 +158,15 @@ class ProjectionCoverageService:
                 continue
             materializable.append(assertion)
 
-        # Deliberately use the existing scalar fold unchanged. Projection Coverage v1 audits the same
-        # durable set-fold contract used by the original P1 design; Views never choose these members.
-        fold = fold_assertions(materializable)
+        # Same fold parameters as the writer: match mode as configured and evaluation at now (UTC,
+        # inclusive, computed once), so a correct match-mode View is not reported orphan/missing.
+        # Views never choose these members.
+        fold = fold_assertions(
+            materializable,
+            as_of=self._as_of or datetime.now(timezone.utc),
+            include_occurrences=self._counting_enabled,
+            count_match=self._count_match,
+        )
         return build_projection_coverage_report(
             subject_uuid=subject_uuid,
             namespace=namespace,

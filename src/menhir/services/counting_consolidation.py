@@ -536,8 +536,10 @@ def run_counting_consolidation(
                                           retired_subjects, page_rows,
                                           history=config.scalar_history_enabled)
                     if match and episodes:
-                        # Rows were stored undecided (they fold as uncertain); decide them now,
-                        # before the cursor moves, so a crash here leaves the page to re-read.
+                        # Rows were stored undecided (they fold as uncertain); decide them now.
+                        # A crash before the decision leaves them undecided for the undecided
+                        # sweep; a decision carries projection_pending until its rebuild is
+                        # confirmed, so the cursor may move past a failed rebuild.
                         _decide_and_rebuild(
                             decide_ctx,
                             graph_adapter.count_occurrences_by_ids(
@@ -753,8 +755,37 @@ def _decide_and_rebuild(
     for d in outcome.decisions:
         ctx.tally[str(d["status"])] = ctx.tally.get(str(d["status"]), 0) + 1
     ctx.tally["swapped"] = ctx.tally.get("swapped", 0) + int(written.get("swapped") or 0)
+    # record_count_decisions set projection_pending on every decided row in the decision statement.
+    # Clear it per subject only after a confirmed rebuild; on a failure the flag stays and the
+    # scalar repair pass rebuilds the subject (isolated per subject, so one failure stops no other).
+    decided_ids = {str(d["assertion_id"]) for d in outcome.decisions} | {
+        str(s["candidate_id"]) for s in outcome.swaps}
+    by_subject: dict[str, list[str]] = {}
+    for r in candidates:
+        rid = str(r.get("assertion_id") or "")
+        if rid in decided_ids:
+            by_subject.setdefault(str(r.get("subject_uuid") or ""), []).append(rid)
     for subject in subjects:
-        _rebuild_subject(ctx.state_service, subject, ns, history=ctx.history)
+        try:
+            if _rebuild_incomplete(
+                    _rebuild_subject(ctx.state_service, subject, ns, history=ctx.history)):
+                logger.warning("counting: rebuild after decisions incomplete for %s in %s; "
+                               "projection_pending left for the repair pass", subject, ns)
+                continue
+            if by_subject.get(subject):
+                ctx.graph.mark_projection_complete(by_subject[subject])
+        except Exception:
+            logger.exception("counting: rebuild after decisions failed for %s in %s; "
+                             "projection_pending left for the repair pass", subject, ns)
+
+
+def _rebuild_incomplete(result: Any) -> bool:
+    """True when a rebuild result explicitly reports an incomplete projection (a dict failing
+    `_rebuild_succeeded`). Unlike `_rebuild_succeeded` (a missing dict counts as failed), a result
+    that is not a dict is not treated as failed: result-less test sinks; the real service returns one."""
+    from menhir.services.typed_scalar_persistence import _rebuild_succeeded
+
+    return isinstance(result, dict) and not _rebuild_succeeded(result)
 
 
 def _rebuild_subject(state_service: Any, subject: str, namespace: str, *, history: bool) -> Any:
@@ -808,8 +839,14 @@ def _rebuild_subjects(
     """Rebuild each subject once; returns those whose rebuild completed."""
     from menhir.services.typed_scalar_persistence import _rebuild_succeeded
 
-    return {s for s in sorted(set(subjects) - {""})
-            if _rebuild_succeeded(_rebuild_subject(state_service, s, namespace, history=history))}
+    done: set[str] = set()
+    for s in sorted(set(subjects) - {""}):
+        try:
+            if _rebuild_succeeded(_rebuild_subject(state_service, s, namespace, history=history)):
+                done.add(s)
+        except Exception:
+            logger.exception("counting: owed rebuild failed for %s in %s", s, namespace)
+    return done
 
 
 def _rebuild_page(
@@ -861,15 +898,33 @@ def sweep_counting_flag_state(
                 scalar_history_enabled=scalar_history_enabled, counting_enabled=enabled,
                 **({"count_match": True} if match else {}))
             after = ""
+            ns_failed = 0
             while True:
                 subjects = graph_adapter.counting_sweep_subjects(
                     namespace, limit=subject_limit, after=after)
                 for subject in subjects:
-                    _rebuild_subject(svc, subject, namespace, history=scalar_history_enabled)
-                    rebuilt += 1
+                    try:
+                        result = _rebuild_subject(
+                            svc, subject, namespace, history=scalar_history_enabled)
+                    except Exception:
+                        logger.exception("counting: flag sweep rebuild failed for %s in %s",
+                                         subject, namespace)
+                        ns_failed += 1
+                        continue
+                    if _rebuild_incomplete(result):
+                        ns_failed += 1
+                    else:
+                        rebuilt += 1
                 if len(subjects) < subject_limit:
                     break
                 after = subjects[-1]
+            if ns_failed:
+                # A View built under the old flag may remain: leave the marker so the next pass retries.
+                failed += 1
+                logger.warning(
+                    "counting: flag sweep for %s left unmarked; %d subject rebuild(s) incomplete",
+                    namespace, ns_failed)
+                continue
             graph_adapter.mark_counting_flag_state(
                 namespace, enabled=enabled, at=datetime.now(timezone.utc).isoformat(),
                 **match_kwargs)

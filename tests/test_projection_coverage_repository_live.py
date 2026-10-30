@@ -140,7 +140,8 @@ def _seed_view(
 
 
 def _service(test_neo4j_repo) -> ProjectionCoverageService:
-    return ProjectionCoverageService(ProjectionCoverageRepository(test_neo4j_repo))
+    return ProjectionCoverageService(
+        ProjectionCoverageRepository(test_neo4j_repo), counting_enabled=True, count_match=True)
 
 
 def test_projection_coverage_live_clean_pending_and_history(test_neo4j_repo) -> None:
@@ -216,7 +217,7 @@ def test_projection_coverage_live_missing_current_head_fails_closed(test_neo4j_r
     assert rows[0]["head_current_count"] == 0
     assert rows[0]["head_current_assertion_id"] == "__missing_current__"
 
-    report = ProjectionCoverageService(source).audit_entity(subject, namespace=NS)
+    report = ProjectionCoverageService(source, counting_enabled=True, count_match=True).audit_entity(subject, namespace=NS)
     record = report.accounting[0]
     assert record.binding_status is BindingStatus.BINDING_MISMATCH
     assert record.fold_role is None
