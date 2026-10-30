@@ -23,9 +23,9 @@ def _edge(fact: str, src: str = "user", tgt: str = "jazz") -> SimpleNamespace:
     )
 
 
-def _prune(*edges):
+def _prune(*edges, names=None):
     uuids = sorted({u for e in edges for u in (e.source_node_uuid, e.target_node_uuid)})
-    nodes = [SimpleNamespace(uuid=u) for u in uuids]
+    nodes = [SimpleNamespace(uuid=u, name=(names or {}).get(u, u)) for u in uuids]
     edge_list = list(edges)
     return prune_contained_edges(nodes, edge_list, {u: [0] for u in uuids}), edge_list
 
@@ -77,8 +77,10 @@ def test_inverse_polarity_on_another_endpoint_pair_is_kept() -> None:
 )
 @pytest.mark.parametrize("pairs", ["same", "cross"])
 def test_negated_or_embedded_pairs_are_kept(keeper: str, inner: str, pairs: str) -> None:
-    inner_edge = _edge(inner) if pairs == "same" else _edge(inner, "ann", "jazz")
-    (pruned, _), edges = _prune(_edge(keeper), inner_edge)
+    # Cross: the source is the keeper's and the target node is named "Jazz" in its fact, so only
+    # the markers keep the inner edge.
+    inner_edge = _edge(inner) if pairs == "same" else _edge(inner, "user", "jazz2")
+    (pruned, _), edges = _prune(_edge(keeper), inner_edge, names={"jazz2": "Jazz"})
 
     assert pruned == 0
     assert {e.fact for e in edges} == {keeper, inner}
@@ -111,9 +113,9 @@ async def test_extraction_hook_keeps_negated_and_denied_facts(monkeypatch) -> No
 
     extracted = [
         _edge("The user denies that she likes jazz.", "user", "jazz"),
-        _edge("The user likes jazz.", "self", "jazz"),
+        _edge("The user likes jazz.", "user", "jazz2"),
         _edge("The user does not like jazz played at loud clubs.", "user", "clubs"),
-        _edge("The user does not like jazz.", "self", "jazz"),
+        _edge("The user does not like jazz.", "user", "jazz2"),
     ]
 
     class _FakeClients:
@@ -128,7 +130,9 @@ async def test_extraction_hook_keeps_negated_and_denied_facts(monkeypatch) -> No
 
     async def fake_extract(clients, episode, previous_episodes, **kwargs):
         uuids = sorted({u for e in extracted for u in (e.source_node_uuid, e.target_node_uuid)})
-        return [SimpleNamespace(uuid=u, name=u) for u in uuids], list(extracted), {
+        return [
+            SimpleNamespace(uuid=u, name="Jazz" if u == "jazz2" else u) for u in uuids
+        ], list(extracted), {
             u: [0] for u in uuids}
 
     monkeypatch.setattr(policy, "extract_nodes_and_edges", fake_extract)
