@@ -181,3 +181,68 @@ def test_ties_in_valid_at_order_by_episode_then_id():
     dec, sets = _decide([x, y])
     assert [s.candidate["assertion_id"] for s in sets] == ["y", "x"]
     assert dec["y"]["status"] == "counted" and dec["x"]["status"] == "uncertain"
+
+
+@pytest.mark.unit
+def test_relation_needles_are_a_superset_of_token_relation():
+    # Fails if a row sharing a relation token with the candidate is missed by every needle.
+    from menhir.domain.count_match import relation_needles
+
+    cand = _r("c", count_object="model kit")
+    needles = relation_needles(cand)
+    assert needles == ("model", "kit")
+    rows = [
+        _r("r1", count_object="model kits"),
+        _r("r2", count_object="", attribute="model_kit_count"),
+        _r("r3", count_object="Museum", attribute="museum_visit_count"),
+    ]
+    for r in rows:
+        shares = bool(set(relation_tokens(cand)) & set(relation_tokens(r)))
+        blob = " ".join(str(r.get(f) or "").lower() for f in ("count_family", "count_object", "attribute"))
+        assert shares == any(n in blob for n in needles) or not shares
+        if shares:
+            assert any(n in blob for n in needles)
+    kitten = _r("k", count_object="kitten", attribute="kitten_count")
+    assert not set(relation_tokens(cand)) & set(relation_tokens(kitten))
+    # "kit" is a substring of "kitten": a superset may over-match, never under-match.
+    assert relation_needles(_r("b", count_object="batteries")) == ("batter",)
+    assert any(n in "battery" for n in relation_needles(_r("b", count_object="batteries")))
+    assert relation_needles(_r("e", count_object="", attribute="")) == ()
+
+
+@pytest.mark.unit
+def test_under_the_cap_decisions_are_unchanged():
+    # Fails if the needle-filtered pool relates or truncates any candidate differently from the full pool.
+    from menhir.domain.count_match import relation_needles
+
+    objs = ["model kit", "model train", "kit car", "batteries", "battery", "museum", "kitten"]
+    pool = []
+    for i in range(30):
+        obj = objs[i % len(objs)]
+        pool.append(_r(f"p{i}", day=1 + i % 9, subject_uuid=f"s{i % 2}",
+                       value_kind="count" if i % 3 else "money", count_object=obj,
+                       attribute=obj.replace(" ", "_") + "_count"))
+    cands = [_r("c1", 20, subject_uuid="s0", count_object="model kit"),
+             _r("c2", 21, subject_uuid="s1", count_object="batteries", value_kind="money"),
+             _r("c3", 22, subject_uuid="s0", count_object="kit car")]
+    cosine = {("c1", "p5"): 0.9, ("c3", "p2"): 0.95}
+    cos_ids = {"p5", "p2"}
+
+    def keep(c):
+        needles = relation_needles(c)
+
+        def hit(r):
+            blob = " ".join(str(r.get(f) or "").lower() for f in ("count_family", "count_object", "attribute"))
+            return any(n in blob for n in needles)
+        return [r for r in pool if r["subject_uuid"] == c["subject_uuid"]
+                and r["value_kind"] == c["value_kind"] and (hit(r) or r["assertion_id"] in cos_ids)]
+
+    filtered = {}
+    for c in cands:
+        for r in keep(c):
+            filtered[r["assertion_id"]] = r
+    full = related_sets(cands, pool, cosine=cosine)
+    part = related_sets(cands, list(filtered.values()), cosine=cosine)
+    for a, b in zip(full, part):
+        assert [r["assertion_id"] for r in a.related] == [r["assertion_id"] for r in b.related]
+        assert a.truncated == b.truncated

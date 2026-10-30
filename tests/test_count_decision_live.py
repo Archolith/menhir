@@ -218,3 +218,41 @@ def test_flag_marker_records_the_match_mode_and_a_match_flip_sweeps(env):
     assert ns not in adapter.counting_flag_sweep_targets(enabled=True, namespaces=[ns], limit=10)
     assert ns in adapter.counting_flag_sweep_targets(enabled=True, namespaces=[ns], limit=10,
                                                      match=True)
+
+
+@pytest.mark.online
+def test_related_pull_ignores_a_full_other_family(env):
+    # Fails if a subject's full pool of another family still caps/truncates a new candidate's pull.
+    from menhir.domain.count_match import RELATED_POOL_LIMIT, relation_needles
+
+    repo, adapter, ns, other = env
+    _seed(repo, ns, [{"id": f"m{i}", "status": "counted", "obj": "museum",
+                      "attr": "museum_visit_count"} for i in range(2001)])
+    _seed(repo, ns, [
+        {"id": "k1", "status": "counted", "obj": "Model Kits"},
+        {"id": "k2", "status": "counted", "obj": "", "attr": "model_kit_count"},
+        {"id": "kmoney", "status": "counted", "kind": "money"},
+        {"id": "ksubj", "status": "counted", "subj": "someone-else"},
+        {"id": "cand", "obj": "model kit"},
+    ])
+    cand = {"assertion_id": f"{ns}:cand", "subject_uuid": "self", "value_kind": "count",
+            "count_object": "model kit", "attribute": "model_kit_count"}
+    probe = {"id": cand["assertion_id"], "subject_uuid": "self", "value_kind": "count",
+             "needles": list(relation_needles(cand))}
+    rows = adapter.related_counted_occurrences(ns, [probe], limit=RELATED_POOL_LIMIT)
+    assert sorted(r["assertion_id"].split(":", 1)[1] for r in rows) == ["k1", "k2"]
+    assert all(r["probe_ids"] == [probe["id"]] for r in rows)
+
+    museum = {"id": "museum-probe", "subject_uuid": "self", "value_kind": "count",
+              "needles": ["museum"]}
+    full = adapter.related_counted_occurrences(ns, [museum], limit=2000)
+    assert len(full) == 2000 and all(r["probe_ids"] == ["museum-probe"] for r in full)
+
+    concert = {"assertion_id": f"{ns}:concert", "subject_uuid": "self", "value_kind": "count",
+               "count_object": "concert", "attribute": "concert_count", "valid_at": _t(10**6),
+               "episode_uuid": "e-c"}
+    cprobe = {"id": concert["assertion_id"], "subject_uuid": "self", "value_kind": "count",
+              "needles": list(relation_needles(concert))}
+    pool = adapter.related_counted_occurrences(ns, [cprobe], limit=RELATED_POOL_LIMIT)
+    d, = conservative_decisions(related_sets([concert], pool))
+    assert d["status"] == "counted" and d["reason"] == "no_related"

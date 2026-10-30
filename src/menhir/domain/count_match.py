@@ -34,7 +34,7 @@ MATCH_VERSION_SUFFIX = "+m"
 RELATED_PER_CANDIDATE = 10
 RELATED_PER_PAGE = 40
 
-#: counted rows pulled per page as the related pool; a full pool marks every candidate truncated.
+#: counted rows pulled per related probe; a full probe marks the candidates of that probe truncated.
 RELATED_POOL_LIMIT = 2000
 
 #: undecided occurrences decided per namespace pass (crash leftovers, repaired bindings).
@@ -138,6 +138,19 @@ def relation_tokens(row: dict[str, Any]) -> tuple[str, ...]:
     return family_tokens(attribute.replace("_", " "))
 
 
+def relation_needles(row: dict[str, Any]) -> tuple[str, ...]:
+    """Substrings a stored row must contain (in family, object or attribute, lowercased) to share a
+    relation token with `row`. A provable superset of the token relation: a row shares token `c`
+    only if one of its fields has a lowercase word `w` with `_singular(w) == c`; `_singular` returns
+    `w`, `w[:-1]` or `w[:-3] + "y"`, so `c` (or `c[:-1]` when `c` ends in "y") is a substring of `w`."""
+    out: list[str] = []
+    for t in relation_tokens(row):
+        needle = t[:-1] if t.endswith("y") and len(t) > 1 else t
+        if needle and needle not in out:
+            out.append(needle)
+    return tuple(out)
+
+
 def _order_key(row: dict[str, Any]) -> tuple[str, str, str]:
     return (str(row.get("valid_at") or ""), str(row.get("episode_uuid") or ""),
             str(row.get("assertion_id") or ""))
@@ -155,7 +168,7 @@ class RelatedSet:
 
 def related_sets(
     candidates: list[dict[str, Any]], pool: list[dict[str, Any]], *,
-    pool_truncated: bool = False,
+    pool_truncated: bool = False, truncated_ids: "frozenset[str] | set[str]" = frozenset(),
     per_candidate: int = RELATED_PER_CANDIDATE, per_page: int = RELATED_PER_PAGE,
     cosine: dict[tuple[str, str], float] | None = None, min_cosine: float = 1.0,
 ) -> list[RelatedSet]:
@@ -188,7 +201,7 @@ def related_sets(
             if score > 0 or cos >= min_cosine:
                 scored.append((score, cos, other_id, other))
         scored.sort(key=lambda t: (-t[0], -t[1], t[2]))
-        truncated = bool(pool_truncated) or len(scored) > per_candidate
+        truncated = bool(pool_truncated) or cand_id in truncated_ids or len(scored) > per_candidate
         sent = [row for _, _, _, row in scored[:per_candidate]]
         if len(sent) > remaining:
             sent = sent[:max(remaining, 0)]
@@ -244,6 +257,7 @@ __all__ = [
     "normalize_family",
     "related_score",
     "related_sets",
+    "relation_needles",
     "relation_tokens",
     "row_family",
     "status_of",

@@ -1819,6 +1819,13 @@ class MemoryGraphAdapter:
         return CountDecisionRepository(self.neo4j).counted_occurrences_for_subjects(
             namespace, subject_uuids, limit=limit)
 
+    def related_counted_occurrences(
+        self, namespace: str, probes: list[dict[str, Any]], *, limit: int,
+    ) -> list[dict[str, Any]]:
+        from menhir.infrastructure.count_decision_repository import CountDecisionRepository
+        return CountDecisionRepository(self.neo4j).related_counted_occurrences(
+            namespace, probes, limit=limit)
+
     def undecided_count_occurrences(
         self, namespace: str, *, perceiver_version: str, limit: int,
     ) -> list[dict[str, Any]]:

@@ -150,6 +150,39 @@ class CountDecisionRepository:
         )
         return [dict(r) for r in rows]
 
+    def related_counted_occurrences(
+        self, namespace: str, probes: list[dict[str, Any]], *, limit: int,
+    ) -> list[dict[str, Any]]:
+        """For each probe {id, subject_uuid, value_kind, needles}: the newest `limit` current counted
+        occurrences of that subject and value_kind whose family, object or attribute contains any
+        needle (a superset of the token relation). One row per distinct occurrence, oldest first,
+        with `probe_ids` listing the probes whose capped pull contained it."""
+        payload = [
+            {"id": str(p["id"]), "subject": str(p.get("subject_uuid") or ""),
+             "kind": str(p.get("value_kind") or "").strip().lower(),
+             "needles": [str(n).lower() for n in (p.get("needles") or []) if n]}
+            for p in probes
+        ]
+        payload = [p for p in payload if p["subject"] and p["needles"]]
+        if not payload:
+            return []
+        rows = self._neo4j.execute(
+            "UNWIND $probes AS p CALL { WITH p MATCH (a:TypedAssertion) WHERE a.subject_uuid = p.subject AND "
+            + tenant_scope_cypher("a") + " AND " + _LIVE_OCCURRENCE + " AND " + _counted("a")
+            + """ AND toLower(trim(coalesce(a.value_kind, ''))) = p.kind
+              AND any(n IN p.needles WHERE toLower(coalesce(a.count_family, '')) CONTAINS n
+                      OR toLower(coalesce(a.count_object, '')) CONTAINS n
+                      OR toLower(coalesce(a.attribute, '')) CONTAINS n)
+              WITH a ORDER BY a.valid_at DESC, a.assertion_id DESC LIMIT $limit
+              RETURN a AS a
+            }
+            WITH a, collect(p.id) AS probe_ids
+            RETURN probe_ids, """ + _OCCURRENCE_FIELDS
+            + " ORDER BY valid_at ASC, assertion_id ASC",
+            params={"probes": payload, "limit": int(limit), **tenant_scope_params(namespace)},
+        )
+        return [dict(r) for r in rows]
+
     def cosine_related_counted(
         self, namespace: str, probes: list[dict[str, Any]], *, embed_version: str,
         min_cosine: float, per_probe: int,

@@ -127,6 +127,9 @@ class _Graph:
     def counted_occurrences_for_subjects(self, namespace, subjects, **kw):
         return []
 
+    def related_counted_occurrences(self, namespace, probes, **kw):
+        return []
+
     def undecided_count_occurrences(self, namespace, **kw):
         return []
 

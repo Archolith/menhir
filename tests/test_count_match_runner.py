@@ -24,7 +24,7 @@ from menhir.services.counting_consolidation import (
 )
 
 _NEW_METHODS = (
-    "count_occurrences_by_ids", "counted_occurrences_for_subjects",
+    "count_occurrences_by_ids", "related_counted_occurrences",
     "undecided_count_occurrences", "record_count_decisions",
 )
 
@@ -139,6 +139,21 @@ class _Graph:
     def counted_occurrences_for_subjects(self, namespace, subjects, **kw):
         self._log("counted_occurrences_for_subjects", namespace, list(subjects), **kw)
         return list(self.pool)
+
+    def related_counted_occurrences(self, namespace, probes, **kw):
+        self._log("related_counted_occurrences", namespace, list(probes), **kw)
+        by_id: dict[str, dict] = {}
+        for p in probes:
+            fields = ("count_family", "count_object", "attribute")
+            hits = [r for r in self.pool
+                    if r.get("subject_uuid") == p["subject_uuid"]
+                    and str(r.get("value_kind") or "").strip().lower() == p["value_kind"]
+                    and any(n in str(r.get(f) or "").lower() for n in p["needles"] for f in fields)]
+            hits.sort(key=lambda r: (str(r.get("valid_at")), str(r.get("assertion_id"))), reverse=True)
+            for r in hits[:kw["limit"]]:
+                row = by_id.setdefault(r["assertion_id"], {**r, "probe_ids": []})
+                row["probe_ids"].append(p["id"])
+        return list(by_id.values())
 
     def undecided_count_occurrences(self, namespace, **kw):
         self._log("undecided_count_occurrences", namespace, **kw)
@@ -344,7 +359,7 @@ def test_page_of_only_decided_rows_records_nothing(perception):
     })
     out = _run(graph, match=True)
     assert graph.of("record_count_decisions") == []
-    assert graph.of("counted_occurrences_for_subjects") == []
+    assert graph.of("related_counted_occurrences") == []
     assert "rebuild" not in graph.names()
     assert out["counting_decided_counted"] == 0 and out["counting_decided_uncertain"] == 0
 
@@ -407,25 +422,40 @@ def test_match_off_never_sweeps_undecided(perception):
 
 # ------------------------------------------------------------------ C.6 full pool
 
+def _museum(i):
+    return _occ(f"p{i}", 1, count_object="museum", attribute="museum_visit_count")
+
+
 @pytest.mark.unit
-@pytest.mark.parametrize("pool_size,status", [
-    (RELATED_POOL_LIMIT - 1, "counted"),
-    (RELATED_POOL_LIMIT, "uncertain"),
-])
-def test_a_full_related_pool_forces_every_candidate_uncertain(perception, pool_size, status):
-    # Fails if a pool cut off at the limit is trusted as complete (a related row may be missing).
+def test_a_full_pool_in_another_family_does_not_freeze_the_subject(perception):
+    # Fails if a full pool of unrelated rows (another family, same subject) truncates a new candidate.
     perception.results = [{"bound": True, "assertion_id": "a1"}]
-    pool = [_occ(f"p{i}", 1, subject="elsewhere") for i in range(pool_size)]  # none related
+    pool = [_museum(i) for i in range(RELATED_POOL_LIMIT + 1)]
     graph = _Graph(pages=[[_row(1)]], occ_by_id={"a1": _occ("a1", 1)}, pool=pool)
     out = _run(graph, match=True)
-    pool_call, = graph.of("counted_occurrences_for_subjects")
-    assert pool_call[1] == ("ns-1", ["s1"]) and pool_call[2]["limit"] == RELATED_POOL_LIMIT
+    probe_call, = graph.of("related_counted_occurrences")
+    assert probe_call[2]["limit"] == RELATED_POOL_LIMIT
     rec, = graph.of("record_count_decisions")
     d, = rec[1][1]
-    assert d["status"] == status
-    if status == "uncertain":
-        assert d["reason"] == "truncated"
-        assert out["counting_decided_uncertain"] == 1 and out["counting_decided_counted"] == 0
+    assert d["status"] == "counted" and d["reason"] == "no_related" and d["truncated"] is False
+    assert out["counting_decided_counted"] == 1
+
+
+@pytest.mark.unit
+def test_a_full_probe_marks_only_its_own_candidates_truncated(perception):
+    # Fails if one full probe (museum) truncates a candidate of another family on the same page.
+    perception.results = [{"bound": True, "assertion_id": "a1"}, {"bound": True, "assertion_id": "a2"}]
+    pool = [_museum(i) for i in range(RELATED_POOL_LIMIT)]
+    graph = _Graph(
+        pages=[[_row(1), _row(2)]],
+        occ_by_id={"a1": _occ("a1", 1, count_object="museum", attribute="museum_visit_count"),
+                   "a2": _occ("a2", 2)},
+        pool=pool)
+    _run(graph, match=True)
+    rec, = graph.of("record_count_decisions")
+    by_id = {d["assertion_id"]: d for d in rec[1][1]}
+    assert by_id["a1"]["status"] != "counted" and by_id["a1"]["truncated"] is True
+    assert by_id["a2"]["status"] == "counted" and by_id["a2"]["truncated"] is False
 
 
 # ------------------------------------------------------------------ C.7 flag sweep

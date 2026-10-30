@@ -436,6 +436,9 @@ class _Graph:
     def counted_occurrences_for_subjects(self, namespace, subjects, **kw):
         return list(self.pool)
 
+    def related_counted_occurrences(self, namespace, probes, **kw):
+        return [{**r, "probe_ids": [p["id"] for p in probes]} for r in self.pool]
+
     def undecided_count_occurrences(self, namespace, **kw):
         return list(self.undecided.get(namespace, []))
 

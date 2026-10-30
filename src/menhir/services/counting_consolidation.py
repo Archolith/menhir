@@ -48,6 +48,7 @@ from menhir.domain.count_match import (
     RELATED_POOL_LIMIT,
     UNDECIDED_SWEEP_LIMIT,
     related_sets,
+    relation_needles,
     relation_tokens,
 )
 from menhir.domain.typed_assertion import COUNTING_OPERATIONS
@@ -225,8 +226,8 @@ class CountMatchGraph(Protocol):
         self, namespace: str, assertion_ids: list[str], *, perceiver_version: str,
     ) -> list[dict[str, Any]]: ...
 
-    def counted_occurrences_for_subjects(
-        self, namespace: str, subject_uuids: list[str], *, limit: int,
+    def related_counted_occurrences(
+        self, namespace: str, probes: list[dict[str, Any]], *, limit: int,
     ) -> list[dict[str, Any]]: ...
 
     def undecided_count_occurrences(
@@ -696,8 +697,29 @@ def _decide_and_rebuild(
         return
     ns = ctx.namespace
     subjects = sorted({str(r.get("subject_uuid") or "") for r in candidates} - {""})
-    pool = list(ctx.graph.counted_occurrences_for_subjects(ns, subjects, limit=RELATED_POOL_LIMIT))
-    pool_truncated = len(pool) >= RELATED_POOL_LIMIT
+    probe_of: dict[str, str] = {}
+    probes_by_key: dict[tuple[str, str, tuple[str, ...]], dict[str, Any]] = {}
+    for c in candidates:
+        cid = str(c.get("assertion_id") or "")
+        subject = str(c.get("subject_uuid") or "")
+        needles = relation_needles(c)
+        if not subject or not needles:
+            continue
+        kind = str(c.get("value_kind") or "").strip().lower()
+        probe = probes_by_key.setdefault((subject, kind, needles), {
+            "id": cid, "subject_uuid": subject, "value_kind": kind, "needles": list(needles)})
+        probe_of[cid] = probe["id"]
+    pool: list[dict[str, Any]] = []
+    truncated_ids: set[str] = set()
+    if probes_by_key:
+        per_probe: dict[str, int] = {}
+        for row in ctx.graph.related_counted_occurrences(
+                ns, list(probes_by_key.values()), limit=RELATED_POOL_LIMIT):
+            for pid in row.get("probe_ids") or ():
+                per_probe[str(pid)] = per_probe.get(str(pid), 0) + 1
+            pool.append({k: v for k, v in row.items() if k != "probe_ids"})
+        truncated_ids = {cid for cid, pid in probe_of.items()
+                         if per_probe.get(pid, 0) >= RELATED_POOL_LIMIT}
     vectors = _key_vectors(ctx, candidates)
     cosine: dict[tuple[str, str], float] = {}
     if vectors:
@@ -719,7 +741,7 @@ def _decide_and_rebuild(
         for i, a in enumerate(ids):
             for b in ids[i + 1:]:
                 cosine[(a, b)] = cosine[(b, a)] = _cosine(vectors[a], vectors[b])
-    sets = related_sets(candidates, pool, pool_truncated=pool_truncated, cosine=cosine,
+    sets = related_sets(candidates, pool, truncated_ids=truncated_ids, cosine=cosine,
                         min_cosine=COSINE_MIN)
     need = [rs for rs in sets if rs.related and relation_tokens(rs.candidate)]
     voted: dict[str, tuple[str, str, str, str]] = {}
