@@ -112,7 +112,7 @@ def fake_runtime_ctx():
         failures=[],
     )
     graph_adapter = SimpleNamespace(
-        list_dirty_namespaces=lambda *, limit=500: ["ns-bench"],
+        list_scalar_dirty_namespaces=lambda *, perceiver_version, limit=500: ["ns-bench"],
         count_turn_evidence=lambda ns: 2,
         list_counters=lambda *, namespace=None, limit=100: [
             {"subject": "movies", "counter": "watchlist", "value": 20,

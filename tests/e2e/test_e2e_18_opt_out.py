@@ -220,8 +220,8 @@ async def test_e2e_18_opt_out_and_back(
         passed=_coins(back_views) == [42.0] and lead(back_coins) == ("42", "leads"),
         detail={"coins": _coins(back_views), "lead": lead(back_coins)},
     )
-    # dirty_after reads the removed counter lane's watermark, so caught-up is shown directly: the
-    # back-on pass succeeded and a further pass finds no scalar work.
+    # dirty_after reads the scalar cursor; caught-up is also shown directly: the back-on pass
+    # succeeded and a further pass finds no scalar work.
     lane_evidence.record(
         "phase3_reports_caught_up",
         passed=back_result.get("ok") is True and not back_result.get("failed_lanes")

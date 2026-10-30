@@ -41,14 +41,14 @@ backlog after one.
 ## Knowing a namespace has caught up
 
 `POST /api/phase3/run` reports what is left after its pass:
-- `dirty_after`: read from the removed counter lane's watermark, which nothing advances now; true
-  once a namespace has user turns.
+- `dirty_after`: scalar user turns left to read, from the scalar lane's cursor at the configured
+  perceiver version. False when the scalar lane is off (nothing would consume that work).
 - `counting_dirty_after`: counting turns left (null when counting is off).
 - `scalar_repair_pending`: scalar subjects still waiting for a View rebuild.
 
 Gaps:
-- No status field reports scalar turns left to read.
-- `GET /api/phase3/status` reports only the removed counter lane's dirtiness (see `dirty_after`).
+- `GET /api/phase3/status` `dirty` has the same meaning as `dirty_after` (scalar turns left to
+  read); it does not cover counting turns.
 
 ## Restart
 

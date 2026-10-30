@@ -226,7 +226,8 @@ def test_always_on_switches_default_on_at_every_production_entry_point() -> None
 @pytest.mark.unit
 def test_phase3_run_forwards_the_frozen_profile() -> None:
     consolidate = AsyncMock(return_value={})
-    adapter = SimpleNamespace(list_dirty_namespaces=lambda *, limit=500: [])
+    adapter = SimpleNamespace(
+        list_scalar_dirty_namespaces=lambda *, perceiver_version, limit=500: [])
     runtime_ctx = SimpleNamespace(
         built=SimpleNamespace(graph_adapter=adapter, settings=_scalar_on()),
         session=SimpleNamespace(session_id="s", user_id="u"),
@@ -272,7 +273,8 @@ def test_counting_version_stamp_agrees_between_api_dirty_check_and_scheduler() -
         return []
 
     adapter = SimpleNamespace(
-        list_dirty_namespaces=lambda *, limit=500: [], load_next_counting_batch=_next_batch)
+        list_scalar_dirty_namespaces=lambda *, perceiver_version, limit=500: [],
+        load_next_counting_batch=_next_batch)
     runtime_ctx = SimpleNamespace(
         built=SimpleNamespace(graph_adapter=adapter, settings=settings),
         session=SimpleNamespace(session_id="s", user_id="u"),

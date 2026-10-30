@@ -29,6 +29,21 @@ from .routes_support import (
 )
 
 
+async def _scalar_dirty(adapter: Any, settings: Any, namespace: str) -> bool:
+    """Whether the live scalar cursor still has work for `namespace`.
+
+    Same selector and perceiver version the scheduler uses (`select_scalar_targets`). With the
+    scalar lane off nothing consumes that work, so it is never reported dirty."""
+    if settings is None or not getattr(settings, "personal_memory_scalar_state_enabled", False):
+        return False
+    dirty = await asyncio.to_thread(
+        adapter.list_scalar_dirty_namespaces,
+        perceiver_version=getattr(settings, "personal_memory_scalar_state_perceiver_version", "v1"),
+        limit=500,
+    )
+    return namespace in dirty
+
+
 async def phase3_run_impl(
     request: Request,
     body: Phase3RunRequest,
@@ -69,7 +84,7 @@ async def phase3_run_impl(
     # of the action, not a filter on it -- forcing the pin here would silently re-aim the run at
     # the caller's own silo and consolidate data it did not ask to touch. Refused instead.
     ns = require_namespace_target(body.namespace, action="run consolidation over")
-    selected = ns in await asyncio.to_thread(adapter.list_dirty_namespaces, limit=500)
+    selected = await _scalar_dirty(adapter, settings, ns)
     result = await consolidate_personal_memory(
         adapter,
         llm_complete=chat,
@@ -94,7 +109,7 @@ async def phase3_run_impl(
         counting_lease_seconds=getattr(
             settings, "personal_memory_counting_lease_seconds", 900),
     )
-    dirty_after = ns in await asyncio.to_thread(adapter.list_dirty_namespaces, limit=500)
+    dirty_after = await _scalar_dirty(adapter, settings, ns)
     counting_dirty_after = None
     if (getattr(settings, "personal_memory_counting_enabled", False)
             and getattr(settings, "personal_memory_scalar_state_enabled", False)):
@@ -159,12 +174,13 @@ async def phase3_status_impl(
     *,
     require_phase3_adapter: Callable[[Request], tuple[Any, Any]],
 ) -> Phase3StatusResponse:
-    _, adapter = require_phase3_adapter(request)
+    runtime_ctx, adapter = require_phase3_adapter(request)
+    settings = getattr(getattr(runtime_ctx, "built", None), "settings", None)
     # A read, so the pin forces rather than refuses -- the caller gets a correct answer about
     # its own silo instead of an error. Without this, `?namespace=` was taken verbatim and a
     # pinned client could count another tenant's turn evidence.
     namespace = resolve_namespace_filter(namespace) or namespace
-    dirty = namespace in await asyncio.to_thread(adapter.list_dirty_namespaces, limit=500)
+    dirty = await _scalar_dirty(adapter, settings, namespace)
     turn_evidence = await asyncio.to_thread(adapter.count_turn_evidence, namespace)
     return Phase3StatusResponse(namespace=namespace, dirty=dirty, turn_evidence=int(turn_evidence))
 
