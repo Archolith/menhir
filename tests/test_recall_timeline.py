@@ -340,7 +340,8 @@ class _StubAdapter:
     def resolve_timeline_subject(self, *, subject, namespace):
         return self.subject_candidates
 
-    def search_episode_embeddings(self, query_vector, *, limit=10, namespace=None):
+    def search_episode_embeddings(self, query_vector, *, limit=10, namespace=None,
+                                  resolved_only=False):
         return self.search_hits[:limit]
 
     def list_scalar_history_views(self, *, subject_uuid, namespace=None):
@@ -490,7 +491,7 @@ async def test_query_mode_seed_search_filters_on_current_embedding_model() -> No
 
     class _ModelAdapter(_StubAdapter):
         def search_episode_embeddings(self, query_vector, *, limit=10, namespace=None,
-                                      model=None):
+                                      model=None, resolved_only=False):
             calls.append({"limit": limit, "namespace": namespace, "model": model})
             return self.search_hits[:limit]
 
@@ -502,7 +503,7 @@ async def test_query_mode_seed_search_filters_on_current_embedding_model() -> No
     adapter = _ModelAdapter([_row("ep-1", "2026-01-01")])
     adapter.search_hits = [_row("ep-1", "2026-01-01")]
     await _svc(adapter, graphiti).recall_timeline(namespace="ns", query="auth", limit=1)
-    assert calls == [{"limit": 1, "namespace": "ns", "model": "text-embedding-3-small"}]
+    assert calls == [{"limit": 20, "namespace": "ns", "model": "text-embedding-3-small"}]
 
 
 @pytest.mark.asyncio

@@ -919,10 +919,13 @@ class MemoryGraphAdapter:
         limit: int = 10,
         namespace: str | None = None,
         model: str | None = None,
+        subject_uuid: str | None = None,
+        resolved_only: bool = False,
     ) -> list[dict[str, object]]:
         """Source-memory lane search over :Episodic content embeddings (read-only)."""
         return self._memory_queries.search_episode_embeddings(
-            query_vector, limit=limit, namespace=namespace, model=model
+            query_vector, limit=limit, namespace=namespace, model=model,
+            subject_uuid=subject_uuid, resolved_only=resolved_only,
         )
 
     def timeline_page(

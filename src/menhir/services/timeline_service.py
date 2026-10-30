@@ -38,7 +38,15 @@ _EPOCH = "1970-01-01T00:00:00Z"
 #: At most this many typed histories are paged beside a subject timeline.
 _TYPED_HISTORY_CAP = 10
 
+#: Candidate hits fetched in query mode, tried in rank order until one has a timeline position.
+_QUERY_ANCHOR_CANDIDATES = 20
+
 _QUERY_NO_HIT_NOTE = "No embedded memories matched, so there is no timeline to anchor on."
+
+_QUERY_NO_ANCHOR_NOTE = (
+    "Matching memories were found, but none of the top matches could be placed on the "
+    "timeline."
+)
 
 _HISTORY_TRUNCATION_NOTE = "Only the first {shown} typed histories are shown; {hidden} more exist."
 
@@ -364,43 +372,43 @@ async def run_recall_timeline(
         stripped = str(query).strip()
         query_vector = await service.graphiti_client.embed_query(stripped)
         # The hit is a receipt (queue-node) uuid; `timeline_anchor` resolves it (T1).
+        # The subject constraint runs inside the search, before its LIMIT.
+        subject_kwargs = {"subject_uuid": subject_uuid} if subject_uuid else {}
         hits = await asyncio.to_thread(
-            adapter.search_episode_embeddings, query_vector, limit=1, namespace=namespace,
-            **_embedding_model_kwargs(service),
+            adapter.search_episode_embeddings, query_vector,
+            limit=_QUERY_ANCHOR_CANDIDATES, namespace=namespace,
+            resolved_only=True, **_embedding_model_kwargs(service), **subject_kwargs,
         )
         if not hits:
-            return TimelineResult(
-                thread="subject" if subject_uuid else "namespace",
-                subject_uuid=subject_uuid,
-                subject_name=subject_name,
-                entries=(),
-                prev_cursor=None,
-                next_cursor=None,
-                histories=(),
-                note=_QUERY_NO_HIT_NOTE,
-            )
-        seed_uuid = str(hits[0]["uuid"])
-        anchor_row = await asyncio.to_thread(
-            adapter.timeline_anchor, uuid=seed_uuid, namespace=namespace,
-            subject_uuid=subject_uuid,
-        )
-        if anchor_row is None:
-            raise ValueError("unknown or hidden memory")
-        anchor_key = _row_key(anchor_row)
-        count_before = safe_limit // 2
-        count_after = safe_limit - count_before - 1
-        if count_before:
-            before_probed = True
-            before_rows, before_more = await _probe_page(
-                adapter, namespace=namespace, subject_uuid=subject_uuid,
-                side="before", key=anchor_key, count=count_before,
-            )
-        if count_after:
-            after_probed = True
-            after_rows, after_more = await _probe_page(
-                adapter, namespace=namespace, subject_uuid=subject_uuid,
-                side="after", key=anchor_key, count=count_after,
-            )
+            note = _QUERY_NO_HIT_NOTE
+        else:
+            # Anchor on the best-ranked hit that can anchor: store-only receipts (assistant
+            # turns, verbatim-skipped clients) have no timeline position.
+            for hit in hits:
+                anchor_row = await asyncio.to_thread(
+                    adapter.timeline_anchor, uuid=str(hit["uuid"]), namespace=namespace,
+                    subject_uuid=subject_uuid,
+                )
+                if anchor_row is not None:
+                    break
+            if anchor_row is None:
+                note = _QUERY_NO_ANCHOR_NOTE
+        if anchor_row is not None:
+            anchor_key = _row_key(anchor_row)
+            count_before = safe_limit // 2
+            count_after = safe_limit - count_before - 1
+            if count_before:
+                before_probed = True
+                before_rows, before_more = await _probe_page(
+                    adapter, namespace=namespace, subject_uuid=subject_uuid,
+                    side="before", key=anchor_key, count=count_before,
+                )
+            if count_after:
+                after_probed = True
+                after_rows, after_more = await _probe_page(
+                    adapter, namespace=namespace, subject_uuid=subject_uuid,
+                    side="after", key=anchor_key, count=count_after,
+                )
     else:  # subject alone: the latest page of the subject thread
         before_probed = True
         before_rows, before_more = await _probe_page(
@@ -455,7 +463,7 @@ async def run_recall_timeline(
             history_limit=safe_history_limit,
         )
         if history_note is not None:
-            note = history_note
+            note = f"{note} {history_note}" if note else history_note
 
     return TimelineResult(
         thread="subject" if subject_uuid else "namespace",

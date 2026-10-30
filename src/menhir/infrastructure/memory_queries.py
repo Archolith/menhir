@@ -364,11 +364,18 @@ class MemoryQueryRepository:
         limit: int = 10,
         namespace: str | None = None,
         model: str | None = None,
+        subject_uuid: str | None = None,
+        resolved_only: bool = False,
     ) -> list[dict[str, object]]:
         """Cosine hits over Menhir `:Episodic` content embeddings (source-memory lane).
 
+        With ``resolved_only``, only receipts whose resolved Graphiti episode can anchor a timeline
+        are searched (store-only receipts and hidden/FAILED/foreign episodes have no position).
+
         With ``model``, only vectors stamped by that embedder are compared: a different model of
-        the same dimension lives in a different space (audit F2).
+        the same dimension lives in a different space (audit F2). With ``subject_uuid``, only
+        receipts whose resolved episode mentions that entity are searched, so the constraint
+        applies before ``LIMIT`` (recall_timeline query + subject).
 
         Read-only; pairs with the ingest-side `set_episode_content_embedding` write.
         Uses the same shared structural/visibility predicates and the shared
@@ -404,6 +411,31 @@ class MemoryQueryRepository:
             )
             params["embedding_model"] = model
             params["legacy_embedding_models"] = list(LEGACY_EMBEDDING_MODELS)
+        if resolved_only or subject_uuid is not None:
+            # The resolved episode must itself be one `timeline_anchor` could return (same
+            # shared predicates), so hidden/FAILED/foreign episodes do not use up LIMIT slots.
+            episode_pattern = "(g:Episodic)"
+            if subject_uuid is not None:
+                episode_pattern = "(:Entity {uuid:$subject_uuid})<-[:MENTIONS]-(g:Episodic)"
+                params["subject_uuid"] = subject_uuid
+            # Same prefilter as `_timeline_episode_where`, so a hit here is one it can anchor.
+            prefilter = (
+                [tenant_scope_prefilter_cypher("g")]
+                if namespace_spellings(namespace) is not None else []
+            )
+            where.append(
+                f"EXISTS {{ MATCH {episode_pattern}"
+                " WHERE g.uuid = n.resolved_episode_uuid AND "
+                + " AND ".join([
+                    *prefilter,
+                    "g.valid_at IS NOT NULL",
+                    "coalesce(g.processing_state, '') <> 'FAILED'",
+                    non_structural_memory_cypher("g"),
+                    default_recall_visibility_cypher("g"),
+                    tenant_scope_cypher("g"),
+                ])
+                + " }"
+            )
         # menhir #171: when scoped, lead with the index-friendly prefilter so the planner can
         # seek the :Episodic(namespace)/:Episodic(group_id) RANGE indexes. It is a superset;
         # tenant_scope_cypher below still decides membership. Unscoped (None) is unchanged.

@@ -29,7 +29,8 @@ async def recall_timeline(
 
     Args:
         namespace: Optional silo to scope this operation to. Empty = default/global behavior.
-        query: Semantic seed: the timeline anchors on the best-matching memory.
+        query: Semantic seed: the timeline anchors on the best-matching memory that has a
+            timeline position.
         subject: Entity name or uuid; restricts the timeline to that entity's thread.
         at: ISO instant to split the timeline around.
         window_from: ISO instant starting an ascending time window.
