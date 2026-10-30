@@ -9,11 +9,13 @@ one question explicitly open: whether redaction covers `recall_lab_runs.query`.
 `schema_migrations.py:320`) and classified every content column NAMESPACE_KEYED in
 `erasure_inventory`. `erasure_purge` walks `CONTENT_COLUMNS` generically, so both are covered.
 
-*Redaction of `query`: CONFIRMED ABSENT, and that is intentional.* The write path stores the query
-verbatim; `request_json` carries it again; `result_json` carries full memory `content` and `name` per
-hit. A redacted lab run would record nothing -- the query IS the experiment's independent variable.
-So the fix is not to redact, it is to guarantee the rows stay erasable and to stop the comment above
-the schema reading as a privacy assurance.
+*Redaction of `query`: absent for reveal-written runs, and that is intentional.* The write path
+stores the query verbatim; `request_json` carries it again; `result_json` carries full memory
+`content` and `name` per hit. (Update: a run written while redaction is ON now stores the masked
+query, request and result, and the history routes redact at read time; see explorer/recall_lab.py.)
+For reveal-written runs the query IS the experiment's independent variable, so the fix is not to
+redact, it is to guarantee the rows stay erasable and to stop the comment above the schema
+reading as a privacy assurance.
 
 Which makes THE PURGE the load-bearing thing, so it is proven by executing it. Declaring a column
 NAMESPACE_KEYED and having a purge reach it are different claims (trap T17), and the inventory is

@@ -19,7 +19,13 @@ import menhir
 from menhir.config import MemorySettings
 from menhir.config.settings import is_loopback_host
 from menhir.explorer.feature_taxonomy import classify, parent_order
-from menhir.explorer.recall_lab import DEFAULT_ARMS, RecallLabRequest, run_recall_lab
+from menhir.explorer.recall_lab import (
+    DEFAULT_ARMS,
+    RecallLabRequest,
+    redact_recall_lab_history_row,
+    redact_recall_lab_request,
+    run_recall_lab,
+)
 from menhir.explorer.recall_packet_prototype import (
     QUERY_FILTERED_PACKET_VERSION,
     build_query_filtered_recall_packet,
@@ -722,16 +728,17 @@ def create_explorer_router() -> Any:
                 status_code=503,
                 detail="Recall Lab requires the full Menhir runtime",
             )
+        reveal = _reveal(request)
         payload = await run_recall_lab(
             recall_service,
             body,
-            reveal=_reveal(request),
+            reveal=reveal,
             judge_llm=_runtime_llm(request),
         )
         store = _recall_lab_store(request)
         run_id = await asyncio.to_thread(
             store.record_recall_lab_run,
-            request_payload=body.model_dump(mode="json"),
+            request_payload=redact_recall_lab_request(body.model_dump(mode="json"), reveal=reveal),
             result_payload=payload,
         )
         payload["saved"] = run_id is not None
@@ -744,7 +751,8 @@ def create_explorer_router() -> Any:
             _recall_lab_store(request).fetch_recall_lab_runs,
             limit=limit,
         )
-        return JSONResponse({"runs": rows})
+        reveal = _reveal(request)
+        return JSONResponse({"runs": [redact_recall_lab_history_row(r, reveal=reveal) for r in rows]})
 
     @router.get("/explorer/api/recall-lab/history/{run_id}", response_class=JSONResponse)
     async def recall_lab_history_detail(request: Request, run_id: int) -> JSONResponse:
@@ -754,7 +762,7 @@ def create_explorer_router() -> Any:
         )
         if row is None:
             raise HTTPException(status_code=404, detail="Recall Lab run not found")
-        return JSONResponse(row)
+        return JSONResponse(redact_recall_lab_history_row(row, reveal=_reveal(request)))
 
     @router.get("/explorer/extraction-lab", response_class=HTMLResponse)
     async def extraction_lab_dashboard(request: Request) -> HTMLResponse:

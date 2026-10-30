@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import random
 import re
+import secrets
 from dataclasses import asdict, is_dataclass
 from enum import Enum
 from time import perf_counter
@@ -14,9 +17,12 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from menhir.domain.models import MemoryType, NodeScope
 from menhir.domain.recall import QueryPreset
-from menhir.domain.retrieval_tuning import RetrievalTuningConfig
-from menhir.privacy import MASK, redact_mapping, redact_text
+from menhir.domain.retrieval_tuning import CandidateSource, RetrievalScoreKind, RetrievalTuningConfig
+from menhir.domain.truth.labels import WardenLabel
+from menhir.domain.typed_assertion import ASSERTION_OPERATIONS, EVIDENCE_TIERS, VALUE_KINDS
+from menhir.privacy import MASK, redact_text
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +104,8 @@ class RecallLabJudgeScore(BaseModel):
 
 
 class RecallLabJudgeResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # The judge echoes memory text; keep pydantic from copying it into validation errors.
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     winner: str
     ranking: list[str] = Field(min_length=1)
@@ -390,65 +397,274 @@ def _trace_row(trace: object | None, uuid: str) -> object | None:
     return None
 
 
+# Keys known to carry NO memory content: ids, kinds/enums, counts, timestamps, scores, booleans.
+# Redaction is an ALLOWLIST over this set: any other key -- including one added to a domain
+# dataclass tomorrow -- is masked by default. Free-form slot names (attribute, relation, unit),
+# values, quoted spans, sentences, names and fact text are deliberately absent.
+#
+# A key on the list is not enough on its own: the VALUE must also fit the key's shape, because
+# several of these labels are authored by an LLM or a caller rather than by the system. Ids must
+# be opaque tokens (synthetic ids that embed slot text are replaced by a salted hash); enum-like
+# keys must carry a value from a closed vocabulary (anything else is masked); scores, counts and
+# timestamps must have the matching primitive type.
+_ID_KEYS: frozenset[str] = frozenset({
+    "uuid", "id", "subject_uuid", "view_uuid", "episode_uuid", "assertion_id",
+})
+_TIME_KEYS: frozenset[str] = frozenset({
+    "valid_at", "invalid_at", "created_at", "expired_at", "said_at", "event_at",
+    "mentioned_at", "reference_time",
+})
+_NUMBER_KEYS: frozenset[str] = frozenset({
+    "rank", "contributors_total", "contributors_truncated", "next_offset", "has_foundation",
+    "lower_bound", "is_current_belief", "corroborated", "is_superseded_view",
+    "is_scalar_authority",
+    "final_score", "retrieval_score", "similarity", "bm25_rank", "cosine_rank", "content_rank",
+    "content_cosine", "cosine", "semantic_similarity", "adjacency_bonus", "recency_bonus",
+    "prominence_bonus", "conflict_bonus", "type_boost", "alpha", "beta", "gamma", "delta",
+})
+# Children of these are walked by the same allowlist; a bare string under one is masked.
+_CONTAINER_KEYS: frozenset[str] = frozenset({"contributors", "temporal_facts", "score_parts"})
+_VOCAB: dict[str, frozenset[str]] = {
+    "scope": frozenset({s.value for s in NodeScope} | {f"NodeScope.{s.name}" for s in NodeScope}),
+    "kind": frozenset({"current", "expired", "as_of", "history"}),
+    "status": frozenset({"leads", "advisory"}),
+    "value_kind": frozenset(VALUE_KINDS),
+    "operation": frozenset(ASSERTION_OPERATIONS),
+    "evidence_tier": frozenset(EVIDENCE_TIERS),
+    "basis": frozenset({"counted"}),
+    "event_basis": frozenset({"explicit"}),
+    "memory_type": frozenset(
+        {m.value for m in MemoryType}
+        | {"SCALAR_STATE", "SCALAR_HISTORY", "OBSERVATION", "EPISODIC_PENDING", "Entity"}
+    ),
+    "source": frozenset({s.value for s in CandidateSource}),
+    "contributing_sources": frozenset({s.value for s in CandidateSource}),
+    "temporal_role": frozenset({"current_belief", "superseded_belief", "ended"}),
+    "retrieval_score_kind": frozenset({k.value for k in RetrievalScoreKind}),
+    "warden_label": frozenset({w.value for w in WardenLabel}),
+    "preset": frozenset({p.value for p in QueryPreset}),
+}
+_REDACTION_SAFE_KEYS: frozenset[str] = (
+    _ID_KEYS | _TIME_KEYS | _NUMBER_KEYS | _CONTAINER_KEYS | frozenset(_VOCAB)
+)
+_OPAQUE_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+_HASHED_ID_RE = re.compile(r"h~[0-9a-f]{16}")
+_TIME_RE = re.compile(r"[0-9][0-9T:+\-.Z ]{3,39}")
+# Per-process secret: ids built from low-entropy slot text (attribute/scope/unit) could be
+# recovered from a plain hash by guessing, so the hash is keyed. Stable within a process (the
+# page matches baseline rows by id), different across restarts.
+_HASH_SALT: bytes = secrets.token_bytes(32)
+
+
+def _stable_hash(text: str) -> str:
+    digest = hmac.new(_HASH_SALT, text.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"h~{digest[:16]}"
+
+
+def _mask_value(value: Any) -> Any:
+    """Mask everything under a non-allowlisted key, recursively; numbers and bools too.
+
+    Dict keys inside masked data are data too, so they are replaced by a stable hash.
+    """
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return {
+            (key if _HASHED_ID_RE.fullmatch(str(key)) else _stable_hash(str(key))): _mask_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_mask_value(item) for item in value]
+    if isinstance(value, str):
+        return value if not value.strip() else MASK
+    return MASK
+
+
+def _safe_id(value: Any) -> Any:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return _mask_value(value)
+    if not value.strip():
+        return value
+    if _HASHED_ID_RE.fullmatch(value) or _OPAQUE_ID_RE.fullmatch(value):
+        return value
+    return _stable_hash(value)
+
+
+def _safe_vocab(key: str, value: Any) -> Any:
+    vocab = _VOCAB[key]
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value if value in vocab else _mask_value(value)
+    if isinstance(value, (list, tuple)):
+        return [item if isinstance(item, str) and item in vocab else _mask_value(item) for item in value]
+    return _mask_value(value)
+
+
+def _redact_allowlist(obj: Any, *, reveal: bool) -> Any:
+    """Allowlist redaction for any structure Recall Lab emits (rows, verdicts, facts, nested).
+
+    Only keys in ``_REDACTION_SAFE_KEYS`` pass through, and only with a value of the right shape
+    (opaque id, closed-vocabulary label, number, timestamp); every other value is masked with
+    ``MASK`` (strings, numbers, booleans, and everything nested under it). Dicts and lists
+    are walked recursively. With ``reveal`` the input is returned untouched.
+    """
+    if reveal:
+        return obj
+    if isinstance(obj, dict):
+        out: dict[Any, Any] = {}
+        for key, value in obj.items():
+            if key in _ID_KEYS:
+                out[key] = _safe_id(value)
+            elif key in _VOCAB:
+                out[key] = _safe_vocab(key, value)
+            elif key in _NUMBER_KEYS:
+                out[key] = value if value is None or isinstance(value, (int, float, bool)) else _mask_value(value)
+            elif key in _TIME_KEYS:
+                ok = value is None or (isinstance(value, str) and _TIME_RE.fullmatch(value))
+                out[key] = value if ok else _mask_value(value)
+            elif key in _CONTAINER_KEYS:
+                if isinstance(value, dict):
+                    out[key] = _redact_allowlist(value, reveal=False)
+                elif isinstance(value, (list, tuple)):
+                    out[key] = [
+                        _redact_allowlist(item, reveal=False) if isinstance(item, dict) else _mask_value(item)
+                        for item in value
+                    ]
+                else:
+                    out[key] = _mask_value(value)
+            else:
+                out[key] = _mask_value(value)
+        return out
+    if isinstance(obj, (list, tuple)):
+        return [_redact_allowlist(item, reveal=False) for item in obj]
+    return _mask_value(obj)
+
+
+_ERROR_CLASS_RE = re.compile(
+    r"\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*(?::.*)?", re.DOTALL
+)
+_ERROR_CLASS_SUFFIXES = ("Error", "Exception", "Exit", "Timeout", "Warning", "Interrupt")
+_STATIC_JUDGE_ERRORS = frozenset({
+    "Recall Lab judge skipped: fewer than two healthy retrieval arms",
+    "Recall Lab judge requires an available runtime LLM",
+})
+
+# Keys known to carry no memory content, by level. Everything else is masked (fail closed),
+# including keys written by older code (e.g. a stored ``event_authority_layer``).
+_WALKED_ARM_KEYS: frozenset[str] = frozenset({"results", "authority_layer", "source_memories"})
+_SAFE_ARM_KEYS: frozenset[str] = frozenset({
+    "id", "label", "enabled", "ok", "degraded", "elapsed_ms", "tuning", "candidates_evaluated",
+    "nodes_touched", "service_ms", "preset", "phases", "warden_status", "warden_notice", "note",
+    "search_error", "rank_shadow_warning",
+})
+_SAFE_PAYLOAD_KEYS: frozenset[str] = frozenset({
+    "preset", "namespace", "limit", "candidate_k", "include_session", "include_superseded",
+    "include_invalidated", "judge", "judge_passes", "saved", "saved_run_id",
+})
+_SAFE_JUDGMENT_KEYS: frozenset[str] = frozenset({
+    "ok", "skipped", "passes_requested", "passes_completed", "stable", "winner_id",
+    "winner_label", "tied_ids", "tie_votes", "winner_votes", "average_scores", "model",
+    "elapsed_ms",
+})
+_SAFE_PASS_KEYS: frozenset[str] = frozenset({"winner_id", "ranking_ids", "scores"})
+
+
+def _redact_error_text(text: Any) -> Any:
+    """Reduce an exception string to its class name; anything else is masked."""
+    if not isinstance(text, str) or not text.strip():
+        return text
+    if text in _STATIC_JUDGE_ERRORS:
+        return text
+    match = _ERROR_CLASS_RE.fullmatch(text)
+    if match and match.group(1).rsplit(".", 1)[-1].endswith(_ERROR_CLASS_SUFFIXES):
+        return match.group(1)
+    return MASK
+
+
+def _redact_keys(obj: dict[str, Any], safe: frozenset[str]) -> dict[str, Any]:
+    return {k: (v if k in safe else _mask_value(v)) for k, v in obj.items()}
+
+
+def _redact_judgment(judgment: Any) -> Any:
+    if not isinstance(judgment, dict):
+        return _mask_value(judgment)
+    out = _redact_keys(judgment, _SAFE_JUDGMENT_KEYS | {"error", "passes"})
+    if "error" in judgment:
+        out["error"] = _redact_error_text(judgment["error"])
+    if isinstance(judgment.get("passes"), (list, tuple)):
+        out["passes"] = [
+            _redact_keys(p, _SAFE_PASS_KEYS) if isinstance(p, dict) else _mask_value(p)
+            for p in judgment["passes"]
+        ]
+    elif "passes" in judgment:
+        out["passes"] = _mask_value(judgment["passes"])
+    return out
+
+
+def redact_recall_lab_payload(payload: Any, *, reveal: bool) -> Any:
+    """Payload-level redactor for a Recall Lab result (live response or a stored run).
+
+    One code path for every surface: live ``run``, history detail, and stored rows written
+    before any fix. Idempotent, so running it over an already-redacted payload changes nothing.
+    A viewer without ``reveal`` never receives memory content or query text; with ``reveal``
+    the payload is returned untouched.
+    """
+    if reveal or not isinstance(payload, dict):
+        return payload
+    out = _redact_keys(payload, _SAFE_PAYLOAD_KEYS | {"query", "arms", "judgment"})
+    if "query" in payload:
+        out["query"] = redact_text(payload["query"], reveal=False)
+    if isinstance(payload.get("arms"), (list, tuple)):
+        arms = []
+        for arm in payload["arms"]:
+            if not isinstance(arm, dict):
+                arms.append(_mask_value(arm))
+                continue
+            a = _redact_keys(
+                {k: v for k, v in arm.items() if k != "_judge_results"},
+                _SAFE_ARM_KEYS | _WALKED_ARM_KEYS | {"error", "query"},
+            )
+            for key in _WALKED_ARM_KEYS:
+                if key in a:
+                    a[key] = _redact_allowlist(a[key], reveal=False)
+            if "query" in a:
+                a["query"] = redact_text(a["query"], reveal=False)
+            if "error" in a:
+                a["error"] = _redact_error_text(a["error"])
+            arms.append(a)
+        out["arms"] = arms
+    elif "arms" in payload:
+        out["arms"] = _mask_value(payload["arms"])
+    if "judgment" in payload:
+        out["judgment"] = _redact_judgment(payload["judgment"])
+    return out
+
+
+def redact_recall_lab_request(request_payload: dict[str, Any], *, reveal: bool) -> dict[str, Any]:
+    """Request payload as it should be stored: a run written under redaction keeps no raw query."""
+    return redact_recall_lab_payload(request_payload, reveal=reveal)
+
+
+def redact_recall_lab_history_row(row: Any, *, reveal: bool) -> Any:
+    """Read-time redaction for a saved-run list row or a history detail row."""
+    if reveal or not isinstance(row, dict):
+        return row
+    out = dict(row)
+    if "query" in out:
+        out["query"] = redact_text(out["query"], reveal=False)
+    if isinstance(out.get("request"), dict):
+        out["request"] = redact_recall_lab_payload(out["request"], reveal=False)
+    if isinstance(out.get("result"), dict):
+        out["result"] = redact_recall_lab_payload(out["result"], reveal=False)
+    return out
+
+
 def _redact_authority_verdicts(verdicts: list[dict[str, Any]], *, reveal: bool) -> list[dict[str, Any]]:
-    """Mask the free-text fields ScalarAuthorityVerdict carries.
-
-    ``value`` and each contributor's ``stated_span`` (a quoted evidence excerpt) are memory
-    content, not structural metadata -- neither is in privacy.REDACTED_FIELDS (that vocabulary
-    predates this authority-layer shape), so redact_mapping's flat field-name match can't cover
-    them. Everything else (kind/status/subject_uuid/attribute/scope/valid_at/view_uuid/
-    has_foundation/predicate/object_key/...) is structural and passes through unchanged.
-
-    ``value`` is masked unconditionally (not via redact_text) because it is often non-string
-    (a spend amount, a duration, a count) -- redact_text only masks strings, so routing a
-    numeric authority value through it would silently leak the exact figure in redacted mode.
-    The match-audit fields ``count_uncertain``/``count_actions``/``count_items`` (item names, action
-    words and an exact figure) are memory content too and are masked the same way.
-    """
-    if reveal:
-        return verdicts
-    out: list[dict[str, Any]] = []
-    for verdict in verdicts:
-        v = dict(verdict)
-        if "value" in v and v["value"] not in (None, ""):
-            v["value"] = MASK
-        for _audit_key in ("count_uncertain", "count_actions", "count_items"):
-            if _audit_key in v and v[_audit_key] not in (None, ""):
-                v[_audit_key] = MASK
-        if "object_display" in v:
-            v["object_display"] = redact_text(v["object_display"], reveal=False)
-        if "stated_span" in v:
-            v["stated_span"] = redact_text(v["stated_span"], reveal=False)
-        contributors = v.get("contributors")
-        # asdict() preserves tuple-typed fields as tuples, not lists (ScalarAuthorityVerdict
-        # declares contributors: tuple[...]) -- check both, and always emit a list back out.
-        if isinstance(contributors, (list, tuple)):
-            v["contributors"] = [
-                {**c, "stated_span": redact_text(c.get("stated_span"), reveal=False)}
-                if isinstance(c, dict) else c
-                for c in contributors
-            ]
-        out.append(v)
-    return out
-
-
-def _redact_temporal_facts(facts: list[dict[str, Any]], *, reveal: bool) -> list[dict[str, Any]]:
-    """Mask ``fact`` (the free-text bi-temporal fact string) on each TemporalFact dict.
-
-    Same gap as authority_layer: ``fact`` is memory content, not in privacy.REDACTED_FIELDS
-    (that vocabulary predates this shape), so redact_mapping's flat field-name match can't
-    reach it. valid_at/invalid_at/created_at/expired_at/is_current_belief/temporal_role are
-    structural (dates and an enum-like role label) and pass through unchanged.
-    """
-    if reveal:
-        return facts
-    out: list[dict[str, Any]] = []
-    for fact in facts:
-        f = dict(fact)
-        if "fact" in f:
-            f["fact"] = redact_text(f["fact"], reveal=False)
-        out.append(f)
-    return out
+    """Allowlist-redact authority verdicts (see ``_redact_allowlist``)."""
+    return _redact_allowlist(verdicts, reveal=reveal)
 
 
 def _serialize_result(result: object, *, reveal: bool) -> dict[str, Any]:
@@ -497,12 +713,9 @@ def _serialize_result(result: object, *, reveal: bool) -> dict[str, Any]:
             # Recall Lab silently omitted it, so any "previously vs now" / supersession
             # reasoning the answer prompt depends on this for was uniformly unavailable
             # across every Recall Lab arm regardless of tuning.
-            "temporal_facts": _redact_temporal_facts(
-                [asdict(t) for t in _value(memory, "temporal_facts", ()) or ()],
-                reveal=reveal,
-            ),
+            "temporal_facts": [asdict(t) for t in _value(memory, "temporal_facts", ()) or ()],
         }
-        memories.append(redact_mapping(row, reveal=reveal))
+        memories.append(_redact_allowlist(row, reveal=reveal))
 
     # Mirrors api/routes.py's RecallResponse.authority_layer: dataclass
     # field names already match ScalarAuthorityVerdictResponse,
@@ -533,7 +746,7 @@ def _serialize_result(result: object, *, reveal: bool) -> dict[str, Any]:
         ),
         "source_memories": (
             [
-                redact_mapping(asdict(sm), reveal=reveal)
+                _redact_allowlist(asdict(sm), reveal=reveal)
                 for sm in source_memories
             ]
             if source_memories else None
@@ -654,4 +867,4 @@ async def run_recall_lab(
     }
     if judgment is not None:
         payload["judgment"] = judgment
-    return payload
+    return redact_recall_lab_payload(payload, reveal=reveal)
