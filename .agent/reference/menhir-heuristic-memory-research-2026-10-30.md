@@ -14,6 +14,8 @@ artifact_status: COMPLETE
 **Source baseline:** [`Archolith/menhir` `main` at `0e07898361fb0d6bebf36389c7c02f9aede9cea5`](https://github.com/Archolith/menhir/tree/0e07898361fb0d6bebf36389c7c02f9aede9cea5) (29 October 2026 UTC)  
 **Question:** What techniques from high-quality antivirus heuristic engines can improve Menhir's ability to notice, retain, and later retrieve consequential information?
 
+**Discussion follow-up:** [Conversation Capture, Temporal Context, and Secret Handling](menhir-conversation-capture-follow-up-2026-10-30.md) records subsequent review findings and the proposed capture architecture. Both documents remain post-MVP research references.
+
 ## Executive assessment
 
 The useful analogy is not “identify bad memories.” It is **detect consequential patterns from imperfect signals, investigate them proportionately, and take an action appropriate to the evidence and the cost of a mistake**. Antivirus engines distinguish cheap static signatures, behavioral sequences, anomaly signals, reputation, deeper investigation, and enforceable policy. An analogous memory system should distinguish *capture*, *importance detection*, *truth/admission*, *retention*, *current-state derivation*, and *query-time relevance*.

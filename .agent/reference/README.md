@@ -7,7 +7,7 @@ reference may constrain a current design, preserve negative benchmark evidence, 
 option, or supply research consumed by an active plan. Executable ownership belongs in
 [`../plans/`](../plans/); completed and superseded work belongs in [`../archive/`](../archive/).
 
-This index routes all 15 Markdown references and the one intentionally unverified PDF exactly once.
+This index routes all 16 Markdown references and the one intentionally unverified PDF exactly once.
 
 ## Current design laws and inventories
 
@@ -30,6 +30,7 @@ This index routes all 15 Markdown references and the one intentionally unverifie
 | Document | Use it for |
 |---|---|
 | [`menhir-heuristic-memory-research-2026-10-30.md`](menhir-heuristic-memory-research-2026-10-30.md) | Post-MVP heuristic memory detection and recall research; transition detection, bounded retroactive linking, and shadow evaluation. Proposal only; no active implementation ownership. |
+| [`menhir-conversation-capture-follow-up-2026-10-30.md`](menhir-conversation-capture-follow-up-2026-10-30.md) | Follow-up on complete capture within enabled conversations, bounded temporal context, secret handling before storage, and post-MVP evaluation. |
 | [`fresh-neo4j-memory-benchmark-plan.md`](fresh-neo4j-memory-benchmark-plan.md) | A possible post-MVP disposable-graph benchmark suite; not current launch ownership. |
 | [`menhir-belief-supersession-temporal-chains-research.md`](menhir-belief-supersession-temporal-chains-research.md) | Saved broader temporal-chain research; explicitly not active. |
 | [`crossdating-relative-chronologies.md`](crossdating-relative-chronologies.md) | Ordered-but-undated chronology and alignment design. |

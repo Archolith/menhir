@@ -1,7 +1,8 @@
-## 2026-10-30 - Post-MVP heuristic memory research
+## 2026-10-30 - Post-MVP heuristic memory research and conversation capture
 
 - `.agent/reference/menhir-heuristic-memory-research-2026-10-30.md`: preserve the supplied research proposal with artifact metadata and explicit post-MVP scheduling; no implementation or production changes.
-- `.agent/reference/README.md`: index the research under saved research and future options.
+- `.agent/reference/README.md`: index both research documents under saved research and future options.
+- `.agent/reference/menhir-conversation-capture-follow-up-2026-10-30.md`: record the discussion of enabled conversation capture, temporal neighbors, secret filtering, retention/erasure, and staged evaluation; link it from the original research.
 - `CHANGELOG-archive.md`: retain the oldest former current entry (10-entry limit).
 
 ## 2026-10-29 - Bucket-2 flags removed (belief gate, evidence anchor, pools); local-model routing settings
