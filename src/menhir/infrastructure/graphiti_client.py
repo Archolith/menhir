@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import inspect
 import logging
+import os
 from dataclasses import dataclass, field
 from functools import partial
 from datetime import datetime
@@ -443,6 +444,8 @@ class GraphitiClient:
             database=settings.neo4j_database,
         )
         anchored_time_expiry = bool(settings.anchored_time_resolver_enabled)
+        # CF-272: the graphiti fork sends PostHog telemetry per Graphiti() unless this is falsey; set after every .env loader.
+        os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")
         return cls(
             client=Graphiti(
                 uri=settings.neo4j_uri,
