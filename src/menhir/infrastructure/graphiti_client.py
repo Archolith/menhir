@@ -36,7 +36,16 @@ except ImportError as exc:
     # install may overwrite fork files and fail during graphiti_core.__init__,
     # before our adapter can check the required symbol.
     if "GraphitiRequestTooLargeError" not in str(exc):
-        raise
+        # CF-305: uninstalling upstream after both were installed leaves a broken shared package
+        # ("cannot import name 'Graphiti' from 'graphiti_core'"); name the repair, not just the symbol.
+        if "graphiti_core" not in f"{exc} {getattr(exc, 'name', '') or ''}":
+            raise
+        raise ImportError(
+            f"graphiti_core is broken or incomplete ({exc}). Menhir requires "
+            "archolith-graphiti-core==0.31.2.post1, which shares the graphiti_core package with "
+            "upstream graphiti-core. Use a fresh virtual environment or uninstall both "
+            "graphiti-core distributions before reinstalling Menhir (see docs/post-install.md)."
+        ) from exc
     raise ImportError(
         "graphiti_core is missing GraphitiRequestTooLargeError. Menhir requires "
         "archolith-graphiti-core==0.31.2.post1; an older graphiti-core install may have "
@@ -129,6 +138,38 @@ def _schedule_client_close(client: Any) -> asyncio.Task | None:
     except RuntimeError:
         return None
     return loop.create_task(aclose())
+
+
+FORK_HOOK_PARAMETERS = (
+    "single_episode_extraction_hook",
+    "identity_gate_hook",
+    "candidate_filter_hook",
+    "node_pre_resolution_hook",
+)
+
+
+def require_graphiti_fork_hooks(graphiti_cls: Any) -> None:
+    """Refuse an installed ``graphiti_core`` whose ``Graphiti`` lacks the fork's hook parameters.
+
+    CF-305: the fork and upstream ``graphiti-core`` share one import package, so an upstream
+    install over the fork leaves no hooks and ``Graphiti(...)`` would raise a bare ``TypeError``.
+    A ``**kwargs`` signature is a test double; an unreadable signature counts as missing.
+    """
+    try:
+        params = inspect.signature(graphiti_cls.__init__).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return
+    missing = [name for name in FORK_HOOK_PARAMETERS if name not in params]
+    if missing:
+        raise RuntimeError(
+            "The installed graphiti_core is not the Archolith fork: Graphiti() has no "
+            f"{', '.join(missing)} parameter. Upstream graphiti-core shares the graphiti_core "
+            "import package and has replaced or shadowed archolith-graphiti-core. Fix: reinstall "
+            "the fork in a clean virtual environment (uninstall graphiti-core and "
+            "archolith-graphiti-core, then install archolith-graphiti-core==0.31.2.post1)."
+        )
 
 
 def edge_expiry_hook_kwargs(enabled: bool, graphiti_cls: Any) -> dict[str, Any]:
@@ -446,6 +487,7 @@ class GraphitiClient:
         anchored_time_expiry = bool(settings.anchored_time_resolver_enabled)
         # CF-272: the graphiti fork sends PostHog telemetry per Graphiti() unless this is falsey; set after every .env loader.
         os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")
+        require_graphiti_fork_hooks(Graphiti)
         return cls(
             client=Graphiti(
                 uri=settings.neo4j_uri,

@@ -638,6 +638,31 @@ def archive_image_config(archive: Path, config_digest: str) -> dict[str, Any]:
     return config
 
 
+def require_image_matches_sealed_candidate(
+    *, image_id: str, config_sha256: str, expected_image_id: str, expected_config: str,
+    archive: Path | None, id_error: str, config_error: str,
+) -> None:
+    """Accept a loaded or pulled image as the sealed candidate, or raise.
+
+    The classic image store reports the config digest as the image ID and renders the config
+    with its legacy empty fields, which is what validation recorded. The containerd store
+    (Docker 29 default) reports the manifest digest and renders the config as stored. That
+    path is accepted only for a manifest of ``archive`` (whose bytes the identity pinned), and
+    the image's config must then equal the archive's config blob. Without an ``archive`` only
+    the classic form is accepted.
+    """
+    if image_id == expected_image_id:
+        config_matches = config_sha256 == expected_config
+    elif archive is not None and image_id in archive_manifest_digests(archive, expected_image_id):
+        config_matches = config_sha256 == canonical_sha256(
+            archive_image_config(archive, expected_image_id),
+        )
+    else:
+        raise BuildImageError(id_error)
+    if not config_matches:
+        raise BuildImageError(config_error)
+
+
 def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> tuple[dict[str, Any], dict[str, Any]]:
     if not args.metadata or not args.identity or not args.image_archive:
         raise BuildImageError("verification requires metadata, identity, and image archive inputs")
@@ -763,16 +788,13 @@ def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> t
     # store (Docker 29 default) reports the manifest digest and renders the config as stored.
     # That path is accepted only for a manifest of this archive, whose bytes the identity
     # pinned above, and its loaded config must equal the archive's config blob.
-    if image_id == expected_image_id:
-        config_matches = config_sha256 == expected_config
-    elif image_id in archive_manifest_digests(archive, expected_image_id):
-        config_matches = config_sha256 == canonical_sha256(
-            archive_image_config(archive, expected_image_id),
-        )
-    else:
-        raise BuildImageError("loaded image ID does not match validation identity")
-    if not config_matches:
-        raise BuildImageError("loaded image config does not match validation identity")
+    require_image_matches_sealed_candidate(
+        image_id=image_id, config_sha256=config_sha256,
+        expected_image_id=expected_image_id, expected_config=expected_config,
+        archive=archive,
+        id_error="loaded image ID does not match validation identity",
+        config_error="loaded image config does not match validation identity",
+    )
     if actual_labels != labels:
         raise BuildImageError("loaded image labels do not match validation metadata")
     return metadata, identity
@@ -806,25 +828,32 @@ def remote_manifest_digest(image_tag: str) -> str | None:
 
 
 def _verify_remote_candidate(
-    *, repository: str, digest: str, metadata: dict[str, Any],
+    *, repository: str, digest: str, metadata: dict[str, Any], archive: Path | None = None,
 ) -> None:
     digest_ref = f"{repository}@{digest}"
     subprocess.run(["docker", "pull", digest_ref], check=True)
     remote_id, remote_labels, remote_config = inspect_image(
         digest_ref, metadata["labels"],
     )
-    if remote_id != metadata["image_id"]:
-        raise BuildImageError("registry candidate image ID differs from the sealed candidate")
-    if remote_config != metadata["config_sha256"]:
-        raise BuildImageError("registry candidate config differs from the sealed candidate")
+    require_image_matches_sealed_candidate(
+        image_id=remote_id, config_sha256=remote_config,
+        expected_image_id=metadata["image_id"], expected_config=metadata["config_sha256"],
+        archive=archive,
+        id_error="registry candidate image ID differs from the sealed candidate",
+        config_error="registry candidate config differs from the sealed candidate",
+    )
     if remote_labels != metadata["labels"]:
         raise BuildImageError("registry candidate labels differ from the sealed candidate")
     if remote_manifest_digest(digest_ref) != digest:
         raise BuildImageError("digest-pinned registry candidate did not verify")
 
 
-def publish_candidate(metadata: dict[str, Any]) -> tuple[str, bool, str]:
+def publish_candidate(
+    metadata: dict[str, Any], *, archive: Path | None = None,
+) -> tuple[str, bool, str]:
     image_tag = metadata["image_tag"]
+    # Passed through only when known, so the verifier is called exactly as before otherwise.
+    archive_kwargs: dict[str, Path] = {} if archive is None else {"archive": archive}
     repository, separator, _version = image_tag.rpartition(":")
     if not separator:
         raise BuildImageError("release image tag is malformed")
@@ -833,28 +862,34 @@ def publish_candidate(metadata: dict[str, Any]) -> tuple[str, bool, str]:
     existing = remote_manifest_digest(candidate_tag)
     if existing is not None:
         _verify_remote_candidate(
-            repository=repository, digest=existing, metadata=metadata,
+            repository=repository, digest=existing, metadata=metadata, **archive_kwargs,
         )
         return existing, True, candidate_tag
 
     existing = remote_manifest_digest(candidate_tag)
     if existing is not None:
         _verify_remote_candidate(
-            repository=repository, digest=existing, metadata=metadata,
+            repository=repository, digest=existing, metadata=metadata, **archive_kwargs,
         )
         return existing, True, candidate_tag
     published_digest = _push_digest(candidate_tag)
     if remote_manifest_digest(candidate_tag) != published_digest:
         raise BuildImageError("candidate tag changed during registry verification")
     _verify_remote_candidate(
-        repository=repository, digest=published_digest, metadata=metadata,
+        repository=repository, digest=published_digest, metadata=metadata, **archive_kwargs,
     )
     return published_digest, False, candidate_tag
 
 
 def publish_bundle(args: argparse.Namespace) -> dict[str, Any]:
     metadata, identity = verify_validation_bundle(args, load_image=True)
-    digest, idempotent, candidate_tag = publish_candidate(metadata)
+    # verify_validation_bundle pinned args.image_archive to the identity-bound archive.
+    image_archive = getattr(args, "image_archive", None)
+    digest, idempotent, candidate_tag = (
+        publish_candidate(metadata)
+        if image_archive is None
+        else publish_candidate(metadata, archive=image_archive.resolve())
+    )
     repository = metadata["image_tag"].rpartition(":")[0]
     publication = {
         "schema": 2,

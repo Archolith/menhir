@@ -544,6 +544,13 @@ python -m pip install -e . --group dev
 
 The dependency-group command requires pip 25.1 or newer.
 
+Menhir depends on `archolith-graphiti-core`, a fork that installs into the same `graphiti_core`
+import package as upstream `graphiti-core`. Installing upstream into the same environment
+replaces the fork's files, and uninstalling it afterwards breaks the fork; `pip check` reports
+neither. Menhir refuses to build its Graphiti client when the fork's hook parameters are absent
+and names the fix: create a clean virtual environment (or uninstall both `graphiti-core` and
+`archolith-graphiti-core`) and reinstall Menhir.
+
 `menhir setup` is the idempotent post-install step. It creates `.env` only when missing and,
 in a checkout, enables the repository-managed Git hooks without replacing a custom hooks path
 (outside a checkout there is no working tree, so that step reports itself skipped).

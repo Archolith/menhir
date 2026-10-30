@@ -1,7 +1,7 @@
 {
   "components": [
     {
-      "bom-ref": "Authlib==1.7.2",
+      "bom-ref": "Authlib==1.9.1",
       "description": "The ultimate Python library in building OAuth and OpenID Connect servers and clients.",
       "externalReferences": [
         {
@@ -50,9 +50,9 @@
         }
       ],
       "name": "Authlib",
-      "purl": "pkg:pypi/authlib@1.7.2",
+      "purl": "pkg:pypi/authlib@1.9.1",
       "type": "library",
-      "version": "1.7.2"
+      "version": "1.9.1"
     },
     {
       "bom-ref": "Jinja2==3.1.6",
@@ -141,7 +141,7 @@
       "version": "3.0.3"
     },
     {
-      "bom-ref": "PyJWT==2.13.0",
+      "bom-ref": "PyJWT==2.15.0",
       "description": "JSON Web Token implementation in Python",
       "externalReferences": [
         {
@@ -165,9 +165,9 @@
           "value": "crypto"
         }
       ],
-      "purl": "pkg:pypi/pyjwt@2.13.0",
+      "purl": "pkg:pypi/pyjwt@2.15.0",
       "type": "library",
-      "version": "2.13.0"
+      "version": "2.15.0"
     },
     {
       "bom-ref": "PyYAML==6.0.3",
@@ -365,7 +365,7 @@
       "version": "0.7.0"
     },
     {
-      "bom-ref": "anyio==4.14.1",
+      "bom-ref": "anyio==4.15.1",
       "description": "High-level concurrency and networking framework on top of asyncio or Trio",
       "externalReferences": [
         {
@@ -398,68 +398,23 @@
         }
       ],
       "name": "anyio",
-      "purl": "pkg:pypi/anyio@4.14.1",
+      "purl": "pkg:pypi/anyio@4.15.1",
       "type": "library",
-      "version": "4.14.1"
+      "version": "4.15.1"
     },
     {
-      "bom-ref": "archolith-mcp-framework==0.2.0",
-      "description": "Shared FastMCP infrastructure for Archolith-compatible MCP servers.",
+      "bom-ref": "archolith-graphiti-core==0.31.2.post1",
+      "description": "A temporal graph building library",
       "externalReferences": [
-        {
-          "comment": "PackageSource: VCS 'git'",
-          "type": "vcs",
-          "url": "https://github.com/Archolith/archolith-mcp-framework.git#0a7c300cf50d724a2d5a8e8c1e664c7e8a5fa2eb"
-        }
-      ],
-      "name": "archolith-mcp-framework",
-      "properties": [
-        {
-          "name": "cdx:python:package:source:vcs:commit_id",
-          "value": "0a7c300cf50d724a2d5a8e8c1e664c7e8a5fa2eb"
-        },
-        {
-          "name": "cdx:python:package:source:vcs:requested_revision",
-          "value": "v0.2.0"
-        }
-      ],
-      "purl": "pkg:pypi/archolith-mcp-framework@0.2.0?vcs_url=git%2Bhttps://github.com/Archolith/archolith-mcp-framework.git%400a7c300cf50d724a2d5a8e8c1e664c7e8a5fa2eb",
-      "type": "library",
-      "version": "0.2.0"
-    },
-    {
-      "bom-ref": "archolith-menhir==0.2.0",
-      "description": "Evidence-backed graph memory and code-impact analysis for coding agents.",
-      "externalReferences": [
-        {
-          "comment": "PackageSource: Local",
-          "type": "distribution",
-          "url": "file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Documentation",
-          "type": "documentation",
-          "url": "https://github.com/Archolith/menhir#readme"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Issues",
-          "type": "issue-tracker",
-          "url": "https://github.com/Archolith/menhir/issues"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Security",
-          "type": "other",
-          "url": "https://github.com/Archolith/menhir/security/policy"
-        },
         {
           "comment": "from packaging metadata Project-URL: Repository",
           "type": "vcs",
-          "url": "https://github.com/Archolith/menhir"
+          "url": "https://github.com/Archolith/graphiti"
         },
         {
           "comment": "from packaging metadata Project-URL: Homepage",
           "type": "website",
-          "url": "https://archolith.dev"
+          "url": "https://github.com/Archolith/graphiti"
         }
       ],
       "licenses": [
@@ -470,19 +425,23 @@
           }
         }
       ],
-      "name": "archolith-menhir",
+      "name": "archolith-graphiti-core",
+      "purl": "pkg:pypi/archolith-graphiti-core@0.31.2.post1",
+      "type": "library",
+      "version": "0.31.2.post1"
+    },
+    {
+      "bom-ref": "archolith-mcp-framework==0.2.0",
+      "description": "Shared FastMCP infrastructure for Archolith-compatible MCP servers.",
+      "name": "archolith-mcp-framework",
+      "purl": "pkg:pypi/archolith-mcp-framework@0.2.0",
       "type": "library",
       "version": "0.2.0"
     },
     {
-      "bom-ref": "archolith-oauth==0.2.0",
+      "bom-ref": "archolith-oauth==0.3.1",
       "description": "Reusable OAuth 2.1 building blocks for Archolith services and remote MCP resources.",
       "externalReferences": [
-        {
-          "comment": "PackageSource: VCS 'git'",
-          "type": "vcs",
-          "url": "https://github.com/Archolith/archolith_oauth.git#19042194ee4e4234da97f478beec85345c3a7110"
-        },
         {
           "comment": "from packaging metadata Project-URL: Repository",
           "type": "vcs",
@@ -498,19 +457,9 @@
         }
       ],
       "name": "archolith-oauth",
-      "properties": [
-        {
-          "name": "cdx:python:package:source:vcs:commit_id",
-          "value": "19042194ee4e4234da97f478beec85345c3a7110"
-        },
-        {
-          "name": "cdx:python:package:source:vcs:requested_revision",
-          "value": "19042194ee4e4234da97f478beec85345c3a7110"
-        }
-      ],
-      "purl": "pkg:pypi/archolith-oauth@0.2.0?vcs_url=git%2Bhttps://github.com/Archolith/archolith_oauth.git%4019042194ee4e4234da97f478beec85345c3a7110",
+      "purl": "pkg:pypi/archolith-oauth@0.3.1",
       "type": "library",
-      "version": "0.2.0"
+      "version": "0.3.1"
     },
     {
       "bom-ref": "attrs==26.1.0",
@@ -619,6 +568,16 @@
             "acknowledgement": "declared",
             "id": "MIT"
           }
+        },
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "name": "declared license of 'beartype'",
+            "text": {
+              "content": "MIT License\n\nCopyright (c) 2014-2025 Beartype authors.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.",
+              "contentType": "text/plain"
+            }
+          }
         }
       ],
       "name": "beartype",
@@ -690,7 +649,7 @@
       "version": "0.9.25"
     },
     {
-      "bom-ref": "certifi==2026.6.17",
+      "bom-ref": "certifi==2026.10.23",
       "description": "Python package for providing Mozilla's CA Bundle.",
       "externalReferences": [
         {
@@ -719,9 +678,9 @@
         }
       ],
       "name": "certifi",
-      "purl": "pkg:pypi/certifi@2026.6.17",
+      "purl": "pkg:pypi/certifi@2026.10.23",
       "type": "library",
-      "version": "2026.6.17"
+      "version": "2026.10.23"
     },
     {
       "bom-ref": "cffi==2.1.0",
@@ -876,7 +835,7 @@
       "version": "0.4.6"
     },
     {
-      "bom-ref": "cryptography==50.0.0",
+      "bom-ref": "cryptography==50.0.1",
       "description": "cryptography is a package which provides cryptographic recipes and primitives to Python developers.",
       "externalReferences": [
         {
@@ -912,9 +871,9 @@
         }
       ],
       "name": "cryptography",
-      "purl": "pkg:pypi/cryptography@50.0.0",
+      "purl": "pkg:pypi/cryptography@50.0.1",
       "type": "library",
-      "version": "50.0.0"
+      "version": "50.0.1"
     },
     {
       "bom-ref": "cyclopts==4.21.0",
@@ -960,6 +919,27 @@
             "acknowledgement": "declared",
             "name": "License :: OSI Approved :: Apache Software License"
           }
+        },
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "name": "declared license file: LICENSE",
+            "text": {
+              "content": "QXBhY2hlIExpY2Vuc2UKICAgICAgICAgICAgICAgICAgICAgICAgICAgVmVyc2lvbiAyLjAsIEphbnVhcnkgMjAwNAogICAgICAgICAgICAgICAgICAgICAgICBodHRwOi8vd3d3LmFwYWNoZS5vcmcvbGljZW5zZXMvCgogICBURVJNUyBBTkQgQ09ORElUSU9OUyBGT1IgVVNFLCBSRVBST0RVQ1RJT04sIEFORCBESVNUUklCVVRJT04KCiAgIDEuIERlZmluaXRpb25zLgoKICAgICAgIkxpY2Vuc2UiIHNoYWxsIG1lYW4gdGhlIHRlcm1zIGFuZCBjb25kaXRpb25zIGZvciB1c2UsIHJlcHJvZHVjdGlvbiwKICAgICAgYW5kIGRpc3RyaWJ1dGlvbiBhcyBkZWZpbmVkIGJ5IFNlY3Rpb25zIDEgdGhyb3VnaCA5IG9mIHRoaXMgZG9jdW1lbnQuCgogICAgICAiTGljZW5zb3IiIHNoYWxsIG1lYW4gdGhlIGNvcHlyaWdodCBvd25lciBvciBlbnRpdHkgYXV0aG9yaXplZCBieQogICAgICB0aGUgY29weXJpZ2h0IG93bmVyIHRoYXQgaXMgZ3JhbnRpbmcgdGhlIExpY2Vuc2UuCgogICAgICAiTGVnYWwgRW50aXR5IiBzaGFsbCBtZWFuIHRoZSB1bmlvbiBvZiB0aGUgYWN0aW5nIGVudGl0eSBhbmQgYWxsCiAgICAgIG90aGVyIGVudGl0aWVzIHRoYXQgY29udHJvbCwgYXJlIGNvbnRyb2xsZWQgYnksIG9yIGFyZSB1bmRlciBjb21tb24KICAgICAgY29udHJvbCB3aXRoIHRoYXQgZW50aXR5LiBGb3IgdGhlIHB1cnBvc2VzIG9mIHRoaXMgZGVmaW5pdGlvbiwKICAgICAgImNvbnRyb2wiIG1lYW5zIChpKSB0aGUgcG93ZXIsIGRpcmVjdCBvciBpbmRpcmVjdCwgdG8gY2F1c2UgdGhlCiAgICAgIGRpcmVjdGlvbiBvciBtYW5hZ2VtZW50IG9mIHN1Y2ggZW50aXR5LCB3aGV0aGVyIGJ5IGNvbnRyYWN0IG9yCiAgICAgIG90aGVyd2lzZSwgb3IgKGlpKSBvd25lcnNoaXAgb2YgZmlmdHkgcGVyY2VudCAoNTAlKSBvciBtb3JlIG9mIHRoZQogICAgICBvdXRzdGFuZGluZyBzaGFyZXMsIG9yIChpaWkpIGJlbmVmaWNpYWwgb3duZXJzaGlwIG9mIHN1Y2ggZW50aXR5LgoKICAgICAgIllvdSIgKG9yICJZb3VyIikgc2hhbGwgbWVhbiBhbiBpbmRpdmlkdWFsIG9yIExlZ2FsIEVudGl0eQogICAgICBleGVyY2lzaW5nIHBlcm1pc3Npb25zIGdyYW50ZWQgYnkgdGhpcyBMaWNlbnNlLgoKICAgICAgIlNvdXJjZSIgZm9ybSBzaGFsbCBtZWFuIHRoZSBwcmVmZXJyZWQgZm9ybSBmb3IgbWFraW5nIG1vZGlmaWNhdGlvbnMsCiAgICAgIGluY2x1ZGluZyBidXQgbm90IGxpbWl0ZWQgdG8gc29mdHdhcmUgc291cmNlIGNvZGUsIGRvY3VtZW50YXRpb24KICAgICAgc291cmNlLCBhbmQgY29uZmlndXJhdGlvbiBmaWxlcy4KCiAgICAgICJPYmplY3QiIGZvcm0gc2hhbGwgbWVhbiBhbnkgZm9ybSByZXN1bHRpbmcgZnJvbSBtZWNoYW5pY2FsCiAgICAgIHRyYW5zZm9ybWF0aW9uIG9yIHRyYW5zbGF0aW9uIG9mIGEgU291cmNlIGZvcm0sIGluY2x1ZGluZyBidXQKICAgICAgbm90IGxpbWl0ZWQgdG8gY29tcGlsZWQgb2JqZWN0IGNvZGUsIGdlbmVyYXRlZCBkb2N1bWVudGF0aW9uLAogICAgICBhbmQgY29udmVyc2lvbnMgdG8gb3RoZXIgbWVkaWEgdHlwZXMuCgogICAgICAiV29yayIgc2hhbGwgbWVhbiB0aGUgd29yayBvZiBhdXRob3JzaGlwLCB3aGV0aGVyIGluIFNvdXJjZSBvcgogICAgICBPYmplY3QgZm9ybSwgbWFkZSBhdmFpbGFibGUgdW5kZXIgdGhlIExpY2Vuc2UsIGFzIGluZGljYXRlZCBieSBhCiAgICAgIGNvcHlyaWdodCBub3RpY2UgdGhhdCBpcyBpbmNsdWRlZCBpbiBvciBhdHRhY2hlZCB0byB0aGUgd29yawogICAgICAoYW4gZXhhbXBsZSBpcyBwcm92aWRlZCBpbiB0aGUgQXBwZW5kaXggYmVsb3cpLgoKICAgICAgIkRlcml2YXRpdmUgV29ya3MiIHNoYWxsIG1lYW4gYW55IHdvcmssIHdoZXRoZXIgaW4gU291cmNlIG9yIE9iamVjdAogICAgICBmb3JtLCB0aGF0IGlzIGJhc2VkIG9uIChvciBkZXJpdmVkIGZyb20pIHRoZSBXb3JrIGFuZCBmb3Igd2hpY2ggdGhlCiAgICAgIGVkaXRvcmlhbCByZXZpc2lvbnMsIGFubm90YXRpb25zLCBlbGFib3JhdGlvbnMsIG9yIG90aGVyIG1vZGlmaWNhdGlvbnMKICAgICAgcmVwcmVzZW50LCBhcyBhIHdob2xlLCBhbiBvcmlnaW5hbCB3b3JrIG9mIGF1dGhvcnNoaXAuIEZvciB0aGUgcHVycG9zZXMKICAgICAgb2YgdGhpcyBMaWNlbnNlLCBEZXJpdmF0aXZlIFdvcmtzIHNoYWxsIG5vdCBpbmNsdWRlIHdvcmtzIHRoYXQgcmVtYWluCiAgICAgIHNlcGFyYWJsZSBmcm9tLCBvciBtZXJlbHkgbGluayAob3IgYmluZCBieSBuYW1lKSB0byB0aGUgaW50ZXJmYWNlcyBvZiwKICAgICAgdGhlIFdvcmsgYW5kIERlcml2YXRpdmUgV29ya3MgdGhlcmVvZi4KCiAgICAgICJDb250cmlidXRpb24iIHNoYWxsIG1lYW4gYW55IHdvcmsgb2YgYXV0aG9yc2hpcCwgaW5jbHVkaW5nCiAgICAgIHRoZSBvcmlnaW5hbCB2ZXJzaW9uIG9mIHRoZSBXb3JrIGFuZCBhbnkgbW9kaWZpY2F0aW9ucyBvciBhZGRpdGlvbnMKICAgICAgdG8gdGhhdCBXb3JrIG9yIERlcml2YXRpdmUgV29ya3MgdGhlcmVvZiwgdGhhdCBpcyBpbnRlbnRpb25hbGx5CiAgICAgIHN1Ym1pdHRlZCB0byBMaWNlbnNvciBmb3IgaW5jbHVzaW9uIGluIHRoZSBXb3JrIGJ5IHRoZSBjb3B5cmlnaHQgb3duZXIKICAgICAgb3IgYnkgYW4gaW5kaXZpZHVhbCBvciBMZWdhbCBFbnRpdHkgYXV0aG9yaXplZCB0byBzdWJtaXQgb24gYmVoYWxmIG9mCiAgICAgIHRoZSBjb3B5cmlnaHQgb3duZXIuIEZvciB0aGUgcHVycG9zZXMgb2YgdGhpcyBkZWZpbml0aW9uLCAic3VibWl0dGVkIgogICAgICBtZWFucyBhbnkgZm9ybSBvZiBlbGVjdHJvbmljLCB2ZXJiYWwsIG9yIHdyaXR0ZW4gY29tbXVuaWNhdGlvbiBzZW50CiAgICAgIHRvIHRoZSBMaWNlbnNvciBvciBpdHMgcmVwcmVzZW50YXRpdmVzLCBpbmNsdWRpbmcgYnV0IG5vdCBsaW1pdGVkIHRvCiAgICAgIGNvbW11bmljYXRpb24gb24gZWxlY3Ryb25pYyBtYWlsaW5nIGxpc3RzLCBzb3VyY2UgY29kZSBjb250cm9sIHN5c3RlbXMsCiAgICAgIGFuZCBpc3N1ZSB0cmFja2luZyBzeXN0ZW1zIHRoYXQgYXJlIG1hbmFnZWQgYnksIG9yIG9uIGJlaGFsZiBvZiwgdGhlCiAgICAgIExpY2Vuc29yIGZvciB0aGUgcHVycG9zZSBvZiBkaXNjdXNzaW5nIGFuZCBpbXByb3ZpbmcgdGhlIFdvcmssIGJ1dAogICAgICBleGNsdWRpbmcgY29tbXVuaWNhdGlvbiB0aGF0IGlzIGNvbnNwaWN1b3VzbHkgbWFya2VkIG9yIG90aGVyd2lzZQogICAgICBkZXNpZ25hdGVkIGluIHdyaXRpbmcgYnkgdGhlIGNvcHlyaWdodCBvd25lciBhcyAiTm90IGEgQ29udHJpYnV0aW9uLiIKCiAgICAgICJDb250cmlidXRvciIgc2hhbGwgbWVhbiBMaWNlbnNvciBhbmQgYW55IGluZGl2aWR1YWwgb3IgTGVnYWwgRW50aXR5CiAgICAgIG9uIGJlaGFsZiBvZiB3aG9tIGEgQ29udHJpYnV0aW9uIGhhcyBiZWVuIHJlY2VpdmVkIGJ5IExpY2Vuc29yIGFuZAogICAgICBzdWJzZXF1ZW50bHkgaW5jb3Jwb3JhdGVkIHdpdGhpbiB0aGUgV29yay4KCiAgIDIuIEdyYW50IG9mIENvcHlyaWdodCBMaWNlbnNlLiBTdWJqZWN0IHRvIHRoZSB0ZXJtcyBhbmQgY29uZGl0aW9ucyBvZgogICAgICB0aGlzIExpY2Vuc2UsIGVhY2ggQ29udHJpYnV0b3IgaGVyZWJ5IGdyYW50cyB0byBZb3UgYSBwZXJwZXR1YWwsCiAgICAgIHdvcmxkd2lkZSwgbm9uLWV4Y2x1c2l2ZSwgbm8tY2hhcmdlLCByb3lhbHR5LWZyZWUsIGlycmV2b2NhYmxlCiAgICAgIGNvcHlyaWdodCBsaWNlbnNlIHRvIHJlcHJvZHVjZSwgcHJlcGFyZSBEZXJpdmF0aXZlIFdvcmtzIG9mLAogICAgICBwdWJsaWNseSBkaXNwbGF5LCBwdWJsaWNseSBwZXJmb3JtLCBzdWJsaWNlbnNlLCBhbmQgZGlzdHJpYnV0ZSB0aGUKICAgICAgV29yayBhbmQgc3VjaCBEZXJpdmF0aXZlIFdvcmtzIGluIFNvdXJjZSBvciBPYmplY3QgZm9ybS4KCiAgIDMuIEdyYW50IG9mIFBhdGVudCBMaWNlbnNlLiBTdWJqZWN0IHRvIHRoZSB0ZXJtcyBhbmQgY29uZGl0aW9ucyBvZgogICAgICB0aGlzIExpY2Vuc2UsIGVhY2ggQ29udHJpYnV0b3IgaGVyZWJ5IGdyYW50cyB0byBZb3UgYSBwZXJwZXR1YWwsCiAgICAgIHdvcmxkd2lkZSwgbm9uLWV4Y2x1c2l2ZSwgbm8tY2hhcmdlLCByb3lhbHR5LWZyZWUsIGlycmV2b2NhYmxlCiAgICAgIChleGNlcHQgYXMgc3RhdGVkIGluIHRoaXMgc2VjdGlvbikgcGF0ZW50IGxpY2Vuc2UgdG8gbWFrZSwgaGF2ZSBtYWRlLAogICAgICB1c2UsIG9mZmVyIHRvIHNlbGwsIHNlbGwsIGltcG9ydCwgYW5kIG90aGVyd2lzZSB0cmFuc2ZlciB0aGUgV29yaywKICAgICAgd2hlcmUgc3VjaCBsaWNlbnNlIGFwcGxpZXMgb25seSB0byB0aG9zZSBwYXRlbnQgY2xhaW1zIGxpY2Vuc2FibGUKICAgICAgYnkgc3VjaCBDb250cmlidXRvciB0aGF0IGFyZSBuZWNlc3NhcmlseSBpbmZyaW5nZWQgYnkgdGhlaXIKICAgICAgQ29udHJpYnV0aW9uKHMpIGFsb25lIG9yIGJ5IGNvbWJpbmF0aW9uIG9mIHRoZWlyIENvbnRyaWJ1dGlvbihzKQogICAgICB3aXRoIHRoZSBXb3JrIHRvIHdoaWNoIHN1Y2ggQ29udHJpYnV0aW9uKHMpIHdhcyBzdWJtaXR0ZWQuIElmIFlvdQogICAgICBpbnN0aXR1dGUgcGF0ZW50IGxpdGlnYXRpb24gYWdhaW5zdCBhbnkgZW50aXR5IChpbmNsdWRpbmcgYQogICAgICBjcm9zcy1jbGFpbSBvciBjb3VudGVyY2xhaW0gaW4gYSBsYXdzdWl0KSBhbGxlZ2luZyB0aGF0IHRoZSBXb3JrCiAgICAgIG9yIGEgQ29udHJpYnV0aW9uIGluY29ycG9yYXRlZCB3aXRoaW4gdGhlIFdvcmsgY29uc3RpdHV0ZXMgZGlyZWN0CiAgICAgIG9yIGNvbnRyaWJ1dG9yeSBwYXRlbnQgaW5mcmluZ2VtZW50LCB0aGVuIGFueSBwYXRlbnQgbGljZW5zZXMKICAgICAgZ3JhbnRlZCB0byBZb3UgdW5kZXIgdGhpcyBMaWNlbnNlIGZvciB0aGF0IFdvcmsgc2hhbGwgdGVybWluYXRlCiAgICAgIGFzIG9mIHRoZSBkYXRlIHN1Y2ggbGl0aWdhdGlvbiBpcyBmaWxlZC4KCiAgIDQuIFJlZGlzdHJpYnV0aW9uLiBZb3UgbWF5IHJlcHJvZHVjZSBhbmQgZGlzdHJpYnV0ZSBjb3BpZXMgb2YgdGhlCiAgICAgIFdvcmsgb3IgRGVyaXZhdGl2ZSBXb3JrcyB0aGVyZW9mIGluIGFueSBtZWRpdW0sIHdpdGggb3Igd2l0aG91dAogICAgICBtb2RpZmljYXRpb25zLCBhbmQgaW4gU291cmNlIG9yIE9iamVjdCBmb3JtLCBwcm92aWRlZCB0aGF0IFlvdQogICAgICBtZWV0IHRoZSBmb2xsb3dpbmcgY29uZGl0aW9uczoKCiAgICAgIChhKSBZb3UgbXVzdCBnaXZlIGFueSBvdGhlciByZWNpcGllbnRzIG9mIHRoZSBXb3JrIG9yCiAgICAgICAgICBEZXJpdmF0aXZlIFdvcmtzIGEgY29weSBvZiB0aGlzIExpY2Vuc2U7IGFuZAoKICAgICAgKGIpIFlvdSBtdXN0IGNhdXNlIGFueSBtb2RpZmllZCBmaWxlcyB0byBjYXJyeSBwcm9taW5lbnQgbm90aWNlcwogICAgICAgICAgc3RhdGluZyB0aGF0IFlvdSBjaGFuZ2VkIHRoZSBmaWxlczsgYW5kCgogICAgICAoYykgWW91IG11c3QgcmV0YWluLCBpbiB0aGUgU291cmNlIGZvcm0gb2YgYW55IERlcml2YXRpdmUgV29ya3MKICAgICAgICAgIHRoYXQgWW91IGRpc3RyaWJ1dGUsIGFsbCBjb3B5cmlnaHQsIHBhdGVudCwgdHJhZGVtYXJrLCBhbmQKICAgICAgICAgIGF0dHJpYnV0aW9uIG5vdGljZXMgZnJvbSB0aGUgU291cmNlIGZvcm0gb2YgdGhlIFdvcmssCiAgICAgICAgICBleGNsdWRpbmcgdGhvc2Ugbm90aWNlcyB0aGF0IGRvIG5vdCBwZXJ0YWluIHRvIGFueSBwYXJ0IG9mCiAgICAgICAgICB0aGUgRGVyaXZhdGl2ZSBXb3JrczsgYW5kCgogICAgICAoZCkgSWYgdGhlIFdvcmsgaW5jbHVkZXMgYSAiTk9USUNFIiB0ZXh0IGZpbGUgYXMgcGFydCBvZiBpdHMKICAgICAgICAgIGRpc3RyaWJ1dGlvbiwgdGhlbiBhbnkgRGVyaXZhdGl2ZSBXb3JrcyB0aGF0IFlvdSBkaXN0cmlidXRlIG11c3QKICAgICAgICAgIGluY2x1ZGUgYSByZWFkYWJsZSBjb3B5IG9mIHRoZSBhdHRyaWJ1dGlvbiBub3RpY2VzIGNvbnRhaW5lZAogICAgICAgICAgd2l0aGluIHN1Y2ggTk9USUNFIGZpbGUsIGV4Y2x1ZGluZyB0aG9zZSBub3RpY2VzIHRoYXQgZG8gbm90CiAgICAgICAgICBwZXJ0YWluIHRvIGFueSBwYXJ0IG9mIHRoZSBEZXJpdmF0aXZlIFdvcmtzLCBpbiBhdCBsZWFzdCBvbmUKICAgICAgICAgIG9mIHRoZSBmb2xsb3dpbmcgcGxhY2VzOiB3aXRoaW4gYSBOT1RJQ0UgdGV4dCBmaWxlIGRpc3RyaWJ1dGVkCiAgICAgICAgICBhcyBwYXJ0IG9mIHRoZSBEZXJpdmF0aXZlIFdvcmtzOyB3aXRoaW4gdGhlIFNvdXJjZSBmb3JtIG9yCiAgICAgICAgICBkb2N1bWVudGF0aW9uLCBpZiBwcm92aWRlZCBhbG9uZyB3aXRoIHRoZSBEZXJpdmF0aXZlIFdvcmtzOyBvciwKICAgICAgICAgIHdpdGhpbiBhIGRpc3BsYXkgZ2VuZXJhdGVkIGJ5IHRoZSBEZXJpdmF0aXZlIFdvcmtzLCBpZiBhbmQKICAgICAgICAgIHdoZXJldmVyIHN1Y2ggdGhpcmQtcGFydHkgbm90aWNlcyBub3JtYWxseSBhcHBlYXIuIFRoZSBjb250ZW50cwogICAgICAgICAgb2YgdGhlIE5PVElDRSBmaWxlIGFyZSBmb3IgaW5mb3JtYXRpb25hbCBwdXJwb3NlcyBvbmx5IGFuZAogICAgICAgICAgZG8gbm90IG1vZGlmeSB0aGUgTGljZW5zZS4gWW91IG1heSBhZGQgWW91ciBvd24gYXR0cmlidXRpb24KICAgICAgICAgIG5vdGljZXMgd2l0aGluIERlcml2YXRpdmUgV29ya3MgdGhhdCBZb3UgZGlzdHJpYnV0ZSwgYWxvbmdzaWRlCiAgICAgICAgICBvciBhcyBhbiBhZGRlbmR1bSB0byB0aGUgTk9USUNFIHRleHQgZnJvbSB0aGUgV29yaywgcHJvdmlkZWQKICAgICAgICAgIHRoYXQgc3VjaCBhZGRpdGlvbmFsIGF0dHJpYnV0aW9uIG5vdGljZXMgY2Fubm90IGJlIGNvbnN0cnVlZAogICAgICAgICAgYXMgbW9kaWZ5aW5nIHRoZSBMaWNlbnNlLgoKICAgICAgWW91IG1heSBhZGQgWW91ciBvd24gY29weXJpZ2h0IHN0YXRlbWVudCB0byBZb3VyIG1vZGlmaWNhdGlvbnMgYW5kCiAgICAgIG1heSBwcm92aWRlIGFkZGl0aW9uYWwgb3IgZGlmZmVyZW50IGxpY2Vuc2UgdGVybXMgYW5kIGNvbmRpdGlvbnMKICAgICAgZm9yIHVzZSwgcmVwcm9kdWN0aW9uLCBvciBkaXN0cmlidXRpb24gb2YgWW91ciBtb2RpZmljYXRpb25zLCBvcgogICAgICBmb3IgYW55IHN1Y2ggRGVyaXZhdGl2ZSBXb3JrcyBhcyBhIHdob2xlLCBwcm92aWRlZCBZb3VyIHVzZSwKICAgICAgcmVwcm9kdWN0aW9uLCBhbmQgZGlzdHJpYnV0aW9uIG9mIHRoZSBXb3JrIG90aGVyd2lzZSBjb21wbGllcyB3aXRoCiAgICAgIHRoZSBjb25kaXRpb25zIHN0YXRlZCBpbiB0aGlzIExpY2Vuc2UuCgogICA1LiBTdWJtaXNzaW9uIG9mIENvbnRyaWJ1dGlvbnMuIFVubGVzcyBZb3UgZXhwbGljaXRseSBzdGF0ZSBvdGhlcndpc2UsCiAgICAgIGFueSBDb250cmlidXRpb24gaW50ZW50aW9uYWxseSBzdWJtaXR0ZWQgZm9yIGluY2x1c2lvbiBpbiB0aGUgV29yawogICAgICBieSBZb3UgdG8gdGhlIExpY2Vuc29yIHNoYWxsIGJlIHVuZGVyIHRoZSB0ZXJtcyBhbmQgY29uZGl0aW9ucyBvZgogICAgICB0aGlzIExpY2Vuc2UsIHdpdGhvdXQgYW55IGFkZGl0aW9uYWwgdGVybXMgb3IgY29uZGl0aW9ucy4KICAgICAgTm90d2l0aHN0YW5kaW5nIHRoZSBhYm92ZSwgbm90aGluZyBoZXJlaW4gc2hhbGwgc3VwZXJzZWRlIG9yIG1vZGlmeQogICAgICB0aGUgdGVybXMgb2YgYW55IHNlcGFyYXRlIGxpY2Vuc2UgYWdyZWVtZW50IHlvdSBtYXkgaGF2ZSBleGVjdXRlZAogICAgICB3aXRoIExpY2Vuc29yIHJlZ2FyZGluZyBzdWNoIENvbnRyaWJ1dGlvbnMuCgogICA2LiBUcmFkZW1hcmtzLiBUaGlzIExpY2Vuc2UgZG9lcyBub3QgZ3JhbnQgcGVybWlzc2lvbiB0byB1c2UgdGhlIHRyYWRlCiAgICAgIG5hbWVzLCB0cmFkZW1hcmtzLCBzZXJ2aWNlIG1hcmtzLCBvciBwcm9kdWN0IG5hbWVzIG9mIHRoZSBMaWNlbnNvciwKICAgICAgZXhjZXB0IGFzIHJlcXVpcmVkIGZvciByZWFzb25hYmxlIGFuZCBjdXN0b21hcnkgdXNlIGluIGRlc2NyaWJpbmcgdGhlCiAgICAgIG9yaWdpbiBvZiB0aGUgV29yayBhbmQgcmVwcm9kdWNpbmcgdGhlIGNvbnRlbnQgb2YgdGhlIE5PVElDRSBmaWxlLgoKICAgNy4gRGlzY2xhaW1lciBvZiBXYXJyYW50eS4gVW5sZXNzIHJlcXVpcmVkIGJ5IGFwcGxpY2FibGUgbGF3IG9yCiAgICAgIGFncmVlZCB0byBpbiB3cml0aW5nLCBMaWNlbnNvciBwcm92aWRlcyB0aGUgV29yayAoYW5kIGVhY2gKICAgICAgQ29udHJpYnV0b3IgcHJvdmlkZXMgaXRzIENvbnRyaWJ1dGlvbnMpIG9uIGFuICJBUyBJUyIgQkFTSVMsCiAgICAgIFdJVEhPVVQgV0FSUkFOVElFUyBPUiBDT05ESVRJT05TIE9GIEFOWSBLSU5ELCBlaXRoZXIgZXhwcmVzcyBvcgogICAgICBpbXBsaWVkLCBpbmNsdWRpbmcsIHdpdGhvdXQgbGltaXRhdGlvbiwgYW55IHdhcnJhbnRpZXMgb3IgY29uZGl0aW9ucwogICAgICBvZiBUSVRMRSwgTk9OLUlORlJJTkdFTUVOVCwgTUVSQ0hBTlRBQklMSVRZLCBvciBGSVRORVNTIEZPUiBBCiAgICAgIFBBUlRJQ1VMQVIgUFVSUE9TRS4gWW91IGFyZSBzb2xlbHkgcmVzcG9uc2libGUgZm9yIGRldGVybWluaW5nIHRoZQogICAgICBhcHByb3ByaWF0ZW5lc3Mgb2YgdXNpbmcgb3IgcmVkaXN0cmlidXRpbmcgdGhlIFdvcmsgYW5kIGFzc3VtZSBhbnkKICAgICAgcmlza3MgYXNzb2NpYXRlZCB3aXRoIFlvdXIgZXhlcmNpc2Ugb2YgcGVybWlzc2lvbnMgdW5kZXIgdGhpcyBMaWNlbnNlLgoKICAgOC4gTGltaXRhdGlvbiBvZiBMaWFiaWxpdHkuIEluIG5vIGV2ZW50IGFuZCB1bmRlciBubyBsZWdhbCB0aGVvcnksCiAgICAgIHdoZXRoZXIgaW4gdG9ydCAoaW5jbHVkaW5nIG5lZ2xpZ2VuY2UpLCBjb250cmFjdCwgb3Igb3RoZXJ3aXNlLAogICAgICB1bmxlc3MgcmVxdWlyZWQgYnkgYXBwbGljYWJsZSBsYXcgKHN1Y2ggYXMgZGVsaWJlcmF0ZSBhbmQgZ3Jvc3NseQogICAgICBuZWdsaWdlbnQgYWN0cykgb3IgYWdyZWVkIHRvIGluIHdyaXRpbmcsIHNoYWxsIGFueSBDb250cmlidXRvciBiZQogICAgICBsaWFibGUgdG8gWW91IGZvciBkYW1hZ2VzLCBpbmNsdWRpbmcgYW55IGRpcmVjdCwgaW5kaXJlY3QsIHNwZWNpYWwsCiAgICAgIGluY2lkZW50YWwsIG9yIGNvbnNlcXVlbnRpYWwgZGFtYWdlcyBvZiBhbnkgY2hhcmFjdGVyIGFyaXNpbmcgYXMgYQogICAgICByZXN1bHQgb2YgdGhpcyBMaWNlbnNlIG9yIG91dCBvZiB0aGUgdXNlIG9yIGluYWJpbGl0eSB0byB1c2UgdGhlCiAgICAgIFdvcmsgKGluY2x1ZGluZyBidXQgbm90IGxpbWl0ZWQgdG8gZGFtYWdlcyBmb3IgbG9zcyBvZiBnb29kd2lsbCwKICAgICAgd29yayBzdG9wcGFnZSwgY29tcHV0ZXIgZmFpbHVyZSBvciBtYWxmdW5jdGlvbiwgb3IgYW55IGFuZCBhbGwKICAgICAgb3RoZXIgY29tbWVyY2lhbCBkYW1hZ2VzIG9yIGxvc3NlcyksIGV2ZW4gaWYgc3VjaCBDb250cmlidXRvcgogICAgICBoYXMgYmVlbiBhZHZpc2VkIG9mIHRoZSBwb3NzaWJpbGl0eSBvZiBzdWNoIGRhbWFnZXMuCgogICA5LiBBY2NlcHRpbmcgV2FycmFudHkgb3IgQWRkaXRpb25hbCBMaWFiaWxpdHkuIFdoaWxlIHJlZGlzdHJpYnV0aW5nCiAgICAgIHRoZSBXb3JrIG9yIERlcml2YXRpdmUgV29ya3MgdGhlcmVvZiwgWW91IG1heSBjaG9vc2UgdG8gb2ZmZXIsCiAgICAgIGFuZCBjaGFyZ2UgYSBmZWUgZm9yLCBhY2NlcHRhbmNlIG9mIHN1cHBvcnQsIHdhcnJhbnR5LCBpbmRlbW5pdHksCiAgICAgIG9yIG90aGVyIGxpYWJpbGl0eSBvYmxpZ2F0aW9ucyBhbmQvb3IgcmlnaHRzIGNvbnNpc3RlbnQgd2l0aCB0aGlzCiAgICAgIExpY2Vuc2UuIEhvd2V2ZXIsIGluIGFjY2VwdGluZyBzdWNoIG9ibGlnYXRpb25zLCBZb3UgbWF5IGFjdCBvbmx5CiAgICAgIG9uIFlvdXIgb3duIGJlaGFsZiBhbmQgb24gWW91ciBzb2xlIHJlc3BvbnNpYmlsaXR5LCBub3Qgb24gYmVoYWxmCiAgICAgIG9mIGFueSBvdGhlciBDb250cmlidXRvciwgYW5kIG9ubHkgaWYgWW91IGFncmVlIHRvIGluZGVtbmlmeSwKICAgICAgZGVmZW5kLCBhbmQgaG9sZCBlYWNoIENvbnRyaWJ1dG9yIGhhcm1sZXNzIGZvciBhbnkgbGlhYmlsaXR5CiAgICAgIGluY3VycmVkIGJ5LCBvciBjbGFpbXMgYXNzZXJ0ZWQgYWdhaW5zdCwgc3VjaCBDb250cmlidXRvciBieSByZWFzb24KICAgICAgb2YgeW91ciBhY2NlcHRpbmcgYW55IHN1Y2ggd2FycmFudHkgb3IgYWRkaXRpb25hbCBsaWFiaWxpdHkuCgogICBFTkQgT0YgVEVSTVMgQU5EIENPTkRJVElPTlMKCiAgIEFQUEVORElYOiBIb3cgdG8gYXBwbHkgdGhlIEFwYWNoZSBMaWNlbnNlIHRvIHlvdXIgd29yay4KCiAgICAgIFRvIGFwcGx5IHRoZSBBcGFjaGUgTGljZW5zZSB0byB5b3VyIHdvcmssIGF0dGFjaCB0aGUgZm9sbG93aW5nCiAgICAgIGJvaWxlcnBsYXRlIG5vdGljZSwgd2l0aCB0aGUgZmllbGRzIGVuY2xvc2VkIGJ5IGJyYWNrZXRzICJ7fSIKICAgICAgcmVwbGFjZWQgd2l0aCB5b3VyIG93biBpZGVudGlmeWluZyBpbmZvcm1hdGlvbi4gKERvbid0IGluY2x1ZGUKICAgICAgdGhlIGJyYWNrZXRzISkgIFRoZSB0ZXh0IHNob3VsZCBiZSBlbmNsb3NlZCBpbiB0aGUgYXBwcm9wcmlhdGUKICAgICAgY29tbWVudCBzeW50YXggZm9yIHRoZSBmaWxlIGZvcm1hdC4gV2UgYWxzbyByZWNvbW1lbmQgdGhhdCBhCiAgICAgIGZpbGUgb3IgY2xhc3MgbmFtZSBhbmQgZGVzY3JpcHRpb24gb2YgcHVycG9zZSBiZSBpbmNsdWRlZCBvbiB0aGUKICAgICAgc2FtZSAicHJpbnRlZCBwYWdlIiBhcyB0aGUgY29weXJpZ2h0IG5vdGljZSBmb3IgZWFzaWVyCiAgICAgIGlkZW50aWZpY2F0aW9uIHdpdGhpbiB0aGlyZC1wYXJ0eSBhcmNoaXZlcy4KCiAgIENvcHlyaWdodCB7eXl5eX0ge25hbWUgb2YgY29weXJpZ2h0IG93bmVyfQoKICAgTGljZW5zZWQgdW5kZXIgdGhlIEFwYWNoZSBMaWNlbnNlLCBWZXJzaW9uIDIuMCAodGhlICJMaWNlbnNlIik7CiAgIHlvdSBtYXkgbm90IHVzZSB0aGlzIGZpbGUgZXhjZXB0IGluIGNvbXBsaWFuY2Ugd2l0aCB0aGUgTGljZW5zZS4KICAgWW91IG1heSBvYnRhaW4gYSBjb3B5IG9mIHRoZSBMaWNlbnNlIGF0CgogICAgICAgaHR0cDovL3d3dy5hcGFjaGUub3JnL2xpY2Vuc2VzL0xJQ0VOU0UtMi4wCgogICBVbmxlc3MgcmVxdWlyZWQgYnkgYXBwbGljYWJsZSBsYXcgb3IgYWdyZWVkIHRvIGluIHdyaXRpbmcsIHNvZnR3YXJlCiAgIGRpc3RyaWJ1dGVkIHVuZGVyIHRoZSBMaWNlbnNlIGlzIGRpc3RyaWJ1dGVkIG9uIGFuICJBUyBJUyIgQkFTSVMsCiAgIFdJVEhPVVQgV0FSUkFOVElFUyBPUiBDT05ESVRJT05TIE9GIEFOWSBLSU5ELCBlaXRoZXIgZXhwcmVzcyBvciBpbXBsaWVkLgogICBTZWUgdGhlIExpY2Vuc2UgZm9yIHRoZSBzcGVjaWZpYyBsYW5ndWFnZSBnb3Zlcm5pbmcgcGVybWlzc2lvbnMgYW5kCiAgIGxpbWl0YXRpb25zIHVuZGVyIHRoZSBMaWNlbnNlLgoK",
+              "contentType": "text/plain",
+              "encoding": "base64"
+            }
+          }
+        },
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "name": "declared license of 'distro'",
+            "text": {
+              "content": "Apache License, Version 2.0",
+              "contentType": "text/plain"
+            }
+          }
         }
       ],
       "name": "distro",
@@ -968,7 +948,7 @@
       "version": "1.9.0"
     },
     {
-      "bom-ref": "dnspython==2.8.0",
+      "bom-ref": "dnspython==2.9.1",
       "description": "DNS toolkit",
       "externalReferences": [
         {
@@ -1001,9 +981,9 @@
         }
       ],
       "name": "dnspython",
-      "purl": "pkg:pypi/dnspython@2.8.0",
+      "purl": "pkg:pypi/dnspython@2.9.1",
       "type": "library",
-      "version": "2.8.0"
+      "version": "2.9.1"
     },
     {
       "bom-ref": "docstring_parser==0.18.0",
@@ -1095,29 +1075,6 @@
       "version": "1.3.1"
     },
     {
-      "bom-ref": "execnet==2.1.2",
-      "description": "execnet: rapid multi-Python deployment",
-      "externalReferences": [
-        {
-          "comment": "from packaging metadata Project-URL: Homepage",
-          "type": "website",
-          "url": "https://execnet.readthedocs.io/en/latest/"
-        }
-      ],
-      "licenses": [
-        {
-          "license": {
-            "acknowledgement": "declared",
-            "id": "MIT"
-          }
-        }
-      ],
-      "name": "execnet",
-      "purl": "pkg:pypi/execnet@2.1.2",
-      "type": "library",
-      "version": "2.1.2"
-    },
-    {
       "bom-ref": "fastapi==0.139.0",
       "description": "FastAPI framework, high performance, easy to learn, fast to code, ready for production",
       "externalReferences": [
@@ -1161,7 +1118,7 @@
       "version": "0.139.0"
     },
     {
-      "bom-ref": "fastmcp==3.4.4",
+      "bom-ref": "fastmcp==3.4.11",
       "description": "The fast, Pythonic way to build MCP servers and clients.",
       "externalReferences": [
         {
@@ -1189,12 +1146,12 @@
         }
       ],
       "name": "fastmcp",
-      "purl": "pkg:pypi/fastmcp@3.4.4",
+      "purl": "pkg:pypi/fastmcp@3.4.11",
       "type": "library",
-      "version": "3.4.4"
+      "version": "3.4.11"
     },
     {
-      "bom-ref": "fastmcp-slim==3.4.4",
+      "bom-ref": "fastmcp-slim==3.4.11",
       "description": "The dependency-slim FastMCP package.",
       "externalReferences": [
         {
@@ -1260,37 +1217,9 @@
           "value": "tasks"
         }
       ],
-      "purl": "pkg:pypi/fastmcp-slim@3.4.4",
+      "purl": "pkg:pypi/fastmcp-slim@3.4.11",
       "type": "library",
-      "version": "3.4.4"
-    },
-    {
-      "bom-ref": "graphiti-core==0.29.2",
-      "description": "A temporal graph building library",
-      "externalReferences": [
-        {
-          "comment": "from packaging metadata Project-URL: Repository",
-          "type": "vcs",
-          "url": "https://github.com/getzep/graphiti"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Homepage",
-          "type": "website",
-          "url": "https://help.getzep.com/graphiti/graphiti/overview"
-        }
-      ],
-      "licenses": [
-        {
-          "license": {
-            "acknowledgement": "declared",
-            "id": "Apache-2.0"
-          }
-        }
-      ],
-      "name": "graphiti-core",
-      "purl": "pkg:pypi/graphiti-core@0.29.2",
-      "type": "library",
-      "version": "0.29.2"
+      "version": "3.4.11"
     },
     {
       "bom-ref": "griffelib==2.1.0",
@@ -1330,6 +1259,39 @@
       "purl": "pkg:pypi/h11@0.16.0",
       "type": "library",
       "version": "0.16.0"
+    },
+    {
+      "bom-ref": "holidays==0.106",
+      "description": "Open World Holidays Framework",
+      "externalReferences": [
+        {
+          "comment": "from packaging metadata Project-URL: Documentation",
+          "type": "documentation",
+          "url": "https://holidays.readthedocs.io/en/latest/"
+        },
+        {
+          "comment": "from packaging metadata Project-URL: Changelog",
+          "type": "release-notes",
+          "url": "https://github.com/vacanza/holidays/releases/"
+        },
+        {
+          "comment": "from packaging metadata Project-URL: Repository",
+          "type": "vcs",
+          "url": "https://github.com/vacanza/holidays/"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "id": "MIT"
+          }
+        }
+      ],
+      "name": "holidays",
+      "purl": "pkg:pypi/holidays@0.106",
+      "type": "library",
+      "version": "0.106"
     },
     {
       "bom-ref": "httpcore==1.0.9",
@@ -1465,29 +1427,6 @@
       "version": "3.18"
     },
     {
-      "bom-ref": "iniconfig==2.3.0",
-      "description": "brain-dead simple config-ini parsing",
-      "externalReferences": [
-        {
-          "comment": "from packaging metadata Project-URL: Homepage",
-          "type": "website",
-          "url": "https://github.com/pytest-dev/iniconfig"
-        }
-      ],
-      "licenses": [
-        {
-          "license": {
-            "acknowledgement": "declared",
-            "id": "MIT"
-          }
-        }
-      ],
-      "name": "iniconfig",
-      "purl": "pkg:pypi/iniconfig@2.3.0",
-      "type": "library",
-      "version": "2.3.0"
-    },
-    {
       "bom-ref": "jaraco.classes==3.4.0",
       "description": "Utility functions for Python class constructs",
       "externalReferences": [
@@ -1502,6 +1441,17 @@
           "license": {
             "acknowledgement": "declared",
             "id": "MIT"
+          }
+        },
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "name": "declared license file: LICENSE",
+            "text": {
+              "content": "UGVybWlzc2lvbiBpcyBoZXJlYnkgZ3JhbnRlZCwgZnJlZSBvZiBjaGFyZ2UsIHRvIGFueSBwZXJzb24gb2J0YWluaW5nIGEgY29weQpvZiB0aGlzIHNvZnR3YXJlIGFuZCBhc3NvY2lhdGVkIGRvY3VtZW50YXRpb24gZmlsZXMgKHRoZSAiU29mdHdhcmUiKSwgdG8KZGVhbCBpbiB0aGUgU29mdHdhcmUgd2l0aG91dCByZXN0cmljdGlvbiwgaW5jbHVkaW5nIHdpdGhvdXQgbGltaXRhdGlvbiB0aGUKcmlnaHRzIHRvIHVzZSwgY29weSwgbW9kaWZ5LCBtZXJnZSwgcHVibGlzaCwgZGlzdHJpYnV0ZSwgc3VibGljZW5zZSwgYW5kL29yCnNlbGwgY29waWVzIG9mIHRoZSBTb2Z0d2FyZSwgYW5kIHRvIHBlcm1pdCBwZXJzb25zIHRvIHdob20gdGhlIFNvZnR3YXJlIGlzCmZ1cm5pc2hlZCB0byBkbyBzbywgc3ViamVjdCB0byB0aGUgZm9sbG93aW5nIGNvbmRpdGlvbnM6CgpUaGUgYWJvdmUgY29weXJpZ2h0IG5vdGljZSBhbmQgdGhpcyBwZXJtaXNzaW9uIG5vdGljZSBzaGFsbCBiZSBpbmNsdWRlZCBpbgphbGwgY29waWVzIG9yIHN1YnN0YW50aWFsIHBvcnRpb25zIG9mIHRoZSBTb2Z0d2FyZS4KClRIRSBTT0ZUV0FSRSBJUyBQUk9WSURFRCAiQVMgSVMiLCBXSVRIT1VUIFdBUlJBTlRZIE9GIEFOWSBLSU5ELCBFWFBSRVNTIE9SCklNUExJRUQsIElOQ0xVRElORyBCVVQgTk9UIExJTUlURUQgVE8gVEhFIFdBUlJBTlRJRVMgT0YgTUVSQ0hBTlRBQklMSVRZLApGSVRORVNTIEZPUiBBIFBBUlRJQ1VMQVIgUFVSUE9TRSBBTkQgTk9OSU5GUklOR0VNRU5ULiBJTiBOTyBFVkVOVCBTSEFMTCBUSEUKQVVUSE9SUyBPUiBDT1BZUklHSFQgSE9MREVSUyBCRSBMSUFCTEUgRk9SIEFOWSBDTEFJTSwgREFNQUdFUyBPUiBPVEhFUgpMSUFCSUxJVFksIFdIRVRIRVIgSU4gQU4gQUNUSU9OIE9GIENPTlRSQUNULCBUT1JUIE9SIE9USEVSV0lTRSwgQVJJU0lORwpGUk9NLCBPVVQgT0YgT1IgSU4gQ09OTkVDVElPTiBXSVRIIFRIRSBTT0ZUV0FSRSBPUiBUSEUgVVNFIE9SIE9USEVSIERFQUxJTkdTCklOIFRIRSBTT0ZUV0FSRS4K",
+              "contentType": "text/plain",
+              "encoding": "base64"
+            }
           }
         }
       ],
@@ -1833,13 +1783,13 @@
       "version": "4.2.0"
     },
     {
-      "bom-ref": "mcp==1.28.1",
+      "bom-ref": "mcp==1.30.0",
       "description": "Model Context Protocol SDK",
       "externalReferences": [
         {
           "comment": "from packaging metadata Project-URL: Documentation",
           "type": "documentation",
-          "url": "https://py.sdk.modelcontextprotocol.io/"
+          "url": "https://py.sdk.modelcontextprotocol.io/v1/"
         },
         {
           "comment": "from packaging metadata Project-URL: Issues",
@@ -1866,9 +1816,9 @@
         }
       ],
       "name": "mcp",
-      "purl": "pkg:pypi/mcp@1.28.1",
+      "purl": "pkg:pypi/mcp@1.30.0",
       "type": "library",
-      "version": "1.28.1"
+      "version": "1.30.0"
     },
     {
       "bom-ref": "mdurl==0.1.2",
@@ -2091,7 +2041,7 @@
       "version": "0.5.1"
     },
     {
-      "bom-ref": "opentelemetry-api==1.43.0",
+      "bom-ref": "opentelemetry-api==1.45.2",
       "description": "OpenTelemetry Python API",
       "externalReferences": [
         {
@@ -2114,9 +2064,9 @@
         }
       ],
       "name": "opentelemetry-api",
-      "purl": "pkg:pypi/opentelemetry-api@1.43.0",
+      "purl": "pkg:pypi/opentelemetry-api@1.45.2",
       "type": "library",
-      "version": "1.43.0"
+      "version": "1.45.2"
     },
     {
       "bom-ref": "packaging==25.0",
@@ -2182,44 +2132,6 @@
       "version": "0.6.0"
     },
     {
-      "bom-ref": "pip==26.1.2",
-      "description": "The PyPA recommended tool for installing Python packages.",
-      "externalReferences": [
-        {
-          "comment": "from packaging metadata Project-URL: Documentation",
-          "type": "documentation",
-          "url": "https://pip.pypa.io"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Source",
-          "type": "other",
-          "url": "https://github.com/pypa/pip"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Changelog",
-          "type": "release-notes",
-          "url": "https://pip.pypa.io/en/stable/news/"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Homepage",
-          "type": "website",
-          "url": "https://pip.pypa.io/"
-        }
-      ],
-      "licenses": [
-        {
-          "license": {
-            "acknowledgement": "declared",
-            "id": "MIT"
-          }
-        }
-      ],
-      "name": "pip",
-      "purl": "pkg:pypi/pip@26.1.2",
-      "type": "library",
-      "version": "26.1.2"
-    },
-    {
       "bom-ref": "platformdirs==4.10.0",
       "description": "A small Python package for determining appropriate platform-specific dirs, e.g. a `user data dir`.",
       "externalReferences": [
@@ -2261,22 +2173,6 @@
       "purl": "pkg:pypi/platformdirs@4.10.0",
       "type": "library",
       "version": "4.10.0"
-    },
-    {
-      "bom-ref": "pluggy==1.6.0",
-      "description": "plugin and hook calling mechanisms for python",
-      "licenses": [
-        {
-          "license": {
-            "acknowledgement": "declared",
-            "id": "MIT"
-          }
-        }
-      ],
-      "name": "pluggy",
-      "purl": "pkg:pypi/pluggy@1.6.0",
-      "type": "library",
-      "version": "1.6.0"
     },
     {
       "bom-ref": "posthog==7.22.1",
@@ -2510,6 +2406,16 @@
             "acknowledgement": "declared",
             "name": "License :: OSI Approved :: BSD License"
           }
+        },
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "name": "declared license of 'pyperclip'",
+            "text": {
+              "content": "BSD",
+              "contentType": "text/plain"
+            }
+          }
         }
       ],
       "name": "pyperclip",
@@ -2518,167 +2424,64 @@
       "version": "1.11.0"
     },
     {
-      "bom-ref": "pytest==9.1.1",
-      "description": "pytest: simple powerful testing with Python",
-      "externalReferences": [
-        {
-          "comment": "from packaging metadata Project-URL: Tracker",
-          "type": "issue-tracker",
-          "url": "https://github.com/pytest-dev/pytest/issues"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Contact",
-          "type": "other",
-          "url": "https://docs.pytest.org/en/stable/contact.html"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Funding",
-          "type": "other",
-          "url": "https://docs.pytest.org/en/stable/sponsor.html"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Source",
-          "type": "other",
-          "url": "https://github.com/pytest-dev/pytest"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Changelog",
-          "type": "release-notes",
-          "url": "https://docs.pytest.org/en/stable/changelog.html"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Homepage",
-          "type": "website",
-          "url": "https://docs.pytest.org/en/latest/"
-        }
-      ],
-      "licenses": [
-        {
-          "license": {
-            "acknowledgement": "declared",
-            "id": "MIT"
-          }
-        }
-      ],
-      "name": "pytest",
-      "purl": "pkg:pypi/pytest@9.1.1",
-      "type": "library",
-      "version": "9.1.1"
-    },
-    {
-      "bom-ref": "pytest-asyncio==1.4.0",
-      "description": "Pytest support for asyncio",
+      "bom-ref": "python-dateutil==2.9.0.post0",
+      "description": "Extensions to the standard Python datetime module",
       "externalReferences": [
         {
           "comment": "from packaging metadata Project-URL: Documentation",
           "type": "documentation",
-          "url": "https://pytest-asyncio.readthedocs.io"
+          "url": "https://dateutil.readthedocs.io/en/stable/"
         },
         {
-          "comment": "from packaging metadata Project-URL: Bug Tracker",
-          "type": "issue-tracker",
-          "url": "https://github.com/pytest-dev/pytest-asyncio/issues"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Source Code",
+          "comment": "from packaging metadata Project-URL: Source",
           "type": "other",
-          "url": "https://github.com/pytest-dev/pytest-asyncio"
+          "url": "https://github.com/dateutil/dateutil"
         },
-        {
-          "comment": "from packaging metadata Project-URL: Changelog",
-          "type": "release-notes",
-          "url": "https://pytest-asyncio.readthedocs.io/en/stable/reference/changelog.html"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Homepage",
-          "type": "website",
-          "url": "https://github.com/pytest-dev/pytest-asyncio"
-        }
-      ],
-      "licenses": [
-        {
-          "license": {
-            "acknowledgement": "declared",
-            "id": "Apache-2.0"
-          }
-        }
-      ],
-      "name": "pytest-asyncio",
-      "purl": "pkg:pypi/pytest-asyncio@1.4.0",
-      "type": "library",
-      "version": "1.4.0"
-    },
-    {
-      "bom-ref": "pytest-timeout==2.4.0",
-      "description": "pytest plugin to abort hanging tests",
-      "externalReferences": [
         {
           "comment": "from packaging metadata: Home-page",
           "type": "website",
-          "url": "https://github.com/pytest-dev/pytest-timeout"
+          "url": "https://github.com/dateutil/dateutil"
         }
       ],
       "licenses": [
         {
           "license": {
             "acknowledgement": "declared",
-            "id": "MIT"
+            "name": "License :: OSI Approved :: Apache Software License"
           }
         },
         {
           "license": {
             "acknowledgement": "declared",
-            "name": "License :: DFSG approved"
+            "name": "License :: OSI Approved :: BSD License"
           }
-        }
-      ],
-      "name": "pytest-timeout",
-      "purl": "pkg:pypi/pytest-timeout@2.4.0",
-      "type": "library",
-      "version": "2.4.0"
-    },
-    {
-      "bom-ref": "pytest-xdist==3.8.0",
-      "description": "pytest xdist plugin for distributed testing, most importantly across multiple CPUs",
-      "externalReferences": [
-        {
-          "comment": "from packaging metadata Project-URL: Documentation",
-          "type": "documentation",
-          "url": "https://pytest-xdist.readthedocs.io/en/latest"
         },
-        {
-          "comment": "from packaging metadata Project-URL: Tracker",
-          "type": "issue-tracker",
-          "url": "https://github.com/pytest-dev/pytest-xdist/issues"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Source",
-          "type": "other",
-          "url": "https://github.com/pytest-dev/pytest-xdist"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Changelog",
-          "type": "release-notes",
-          "url": "https://pytest-xdist.readthedocs.io/en/latest/changelog.html"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Homepage",
-          "type": "website",
-          "url": "https://github.com/pytest-dev/pytest-xdist"
-        }
-      ],
-      "licenses": [
         {
           "license": {
             "acknowledgement": "declared",
-            "id": "MIT"
+            "name": "declared license file: LICENSE",
+            "text": {
+              "content": "Q29weXJpZ2h0IDIwMTctIFBhdWwgR2Fuc3NsZSA8cGF1bEBnYW5zc2xlLmlvPgpDb3B5cmlnaHQgMjAxNy0gZGF0ZXV0aWwgY29udHJpYnV0b3JzIChzZWUgQVVUSE9SUyBmaWxlKQoKICAgTGljZW5zZWQgdW5kZXIgdGhlIEFwYWNoZSBMaWNlbnNlLCBWZXJzaW9uIDIuMCAodGhlICJMaWNlbnNlIik7CiAgIHlvdSBtYXkgbm90IHVzZSB0aGlzIGZpbGUgZXhjZXB0IGluIGNvbXBsaWFuY2Ugd2l0aCB0aGUgTGljZW5zZS4KICAgWW91IG1heSBvYnRhaW4gYSBjb3B5IG9mIHRoZSBMaWNlbnNlIGF0CgogICAgICAgaHR0cDovL3d3dy5hcGFjaGUub3JnL2xpY2Vuc2VzL0xJQ0VOU0UtMi4wCgogICBVbmxlc3MgcmVxdWlyZWQgYnkgYXBwbGljYWJsZSBsYXcgb3IgYWdyZWVkIHRvIGluIHdyaXRpbmcsIHNvZnR3YXJlCiAgIGRpc3RyaWJ1dGVkIHVuZGVyIHRoZSBMaWNlbnNlIGlzIGRpc3RyaWJ1dGVkIG9uIGFuICJBUyBJUyIgQkFTSVMsCiAgIFdJVEhPVVQgV0FSUkFOVElFUyBPUiBDT05ESVRJT05TIE9GIEFOWSBLSU5ELCBlaXRoZXIgZXhwcmVzcyBvciBpbXBsaWVkLgogICBTZWUgdGhlIExpY2Vuc2UgZm9yIHRoZSBzcGVjaWZpYyBsYW5ndWFnZSBnb3Zlcm5pbmcgcGVybWlzc2lvbnMgYW5kCiAgIGxpbWl0YXRpb25zIHVuZGVyIHRoZSBMaWNlbnNlLgoKVGhlIGFib3ZlIGxpY2Vuc2UgYXBwbGllcyB0byBhbGwgY29udHJpYnV0aW9ucyBhZnRlciAyMDE3LTEyLTAxLCBhcyB3ZWxsIGFzCmFsbCBjb250cmlidXRpb25zIHRoYXQgaGF2ZSBiZWVuIHJlLWxpY2Vuc2VkIChzZWUgQVVUSE9SUyBmaWxlIGZvciB0aGUgbGlzdCBvZgpjb250cmlidXRvcnMgd2hvIGhhdmUgcmUtbGljZW5zZWQgdGhlaXIgY29kZSkuCi0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCmRhdGV1dGlsIC0gRXh0ZW5zaW9ucyB0byB0aGUgc3RhbmRhcmQgUHl0aG9uIGRhdGV0aW1lIG1vZHVsZS4KCkNvcHlyaWdodCAoYykgMjAwMy0yMDExIC0gR3VzdGF2byBOaWVtZXllciA8Z3VzdGF2b0BuaWVtZXllci5uZXQ+CkNvcHlyaWdodCAoYykgMjAxMi0yMDE0IC0gVG9taSBQaWV2aWzDpGluZW4gPHRvbWkucGlldmlsYWluZW5AaWtpLmZpPgpDb3B5cmlnaHQgKGMpIDIwMTQtMjAxNiAtIFlhcm9uIGRlIExlZXV3IDxtZUBqYXJvbmRsLm5ldD4KQ29weXJpZ2h0IChjKSAyMDE1LSAgICAgLSBQYXVsIEdhbnNzbGUgPHBhdWxAZ2Fuc3NsZS5pbz4KQ29weXJpZ2h0IChjKSAyMDE1LSAgICAgLSBkYXRldXRpbCBjb250cmlidXRvcnMgKHNlZSBBVVRIT1JTIGZpbGUpCgpBbGwgcmlnaHRzIHJlc2VydmVkLgoKUmVkaXN0cmlidXRpb24gYW5kIHVzZSBpbiBzb3VyY2UgYW5kIGJpbmFyeSBmb3Jtcywgd2l0aCBvciB3aXRob3V0Cm1vZGlmaWNhdGlvbiwgYXJlIHBlcm1pdHRlZCBwcm92aWRlZCB0aGF0IHRoZSBmb2xsb3dpbmcgY29uZGl0aW9ucyBhcmUgbWV0OgoKICAgICogUmVkaXN0cmlidXRpb25zIG9mIHNvdXJjZSBjb2RlIG11c3QgcmV0YWluIHRoZSBhYm92ZSBjb3B5cmlnaHQgbm90aWNlLAogICAgICB0aGlzIGxpc3Qgb2YgY29uZGl0aW9ucyBhbmQgdGhlIGZvbGxvd2luZyBkaXNjbGFpbWVyLgogICAgKiBSZWRpc3RyaWJ1dGlvbnMgaW4gYmluYXJ5IGZvcm0gbXVzdCByZXByb2R1Y2UgdGhlIGFib3ZlIGNvcHlyaWdodCBub3RpY2UsCiAgICAgIHRoaXMgbGlzdCBvZiBjb25kaXRpb25zIGFuZCB0aGUgZm9sbG93aW5nIGRpc2NsYWltZXIgaW4gdGhlIGRvY3VtZW50YXRpb24KICAgICAgYW5kL29yIG90aGVyIG1hdGVyaWFscyBwcm92aWRlZCB3aXRoIHRoZSBkaXN0cmlidXRpb24uCiAgICAqIE5laXRoZXIgdGhlIG5hbWUgb2YgdGhlIGNvcHlyaWdodCBob2xkZXIgbm9yIHRoZSBuYW1lcyBvZiBpdHMKICAgICAgY29udHJpYnV0b3JzIG1heSBiZSB1c2VkIHRvIGVuZG9yc2Ugb3IgcHJvbW90ZSBwcm9kdWN0cyBkZXJpdmVkIGZyb20KICAgICAgdGhpcyBzb2Z0d2FyZSB3aXRob3V0IHNwZWNpZmljIHByaW9yIHdyaXR0ZW4gcGVybWlzc2lvbi4KClRISVMgU09GVFdBUkUgSVMgUFJPVklERUQgQlkgVEhFIENPUFlSSUdIVCBIT0xERVJTIEFORCBDT05UUklCVVRPUlMKIkFTIElTIiBBTkQgQU5ZIEVYUFJFU1MgT1IgSU1QTElFRCBXQVJSQU5USUVTLCBJTkNMVURJTkcsIEJVVCBOT1QKTElNSVRFRCBUTywgVEhFIElNUExJRUQgV0FSUkFOVElFUyBPRiBNRVJDSEFOVEFCSUxJVFkgQU5EIEZJVE5FU1MgRk9SCkEgUEFSVElDVUxBUiBQVVJQT1NFIEFSRSBESVNDTEFJTUVELiBJTiBOTyBFVkVOVCBTSEFMTCBUSEUgQ09QWVJJR0hUIE9XTkVSIE9SCkNPTlRSSUJVVE9SUyBCRSBMSUFCTEUgRk9SIEFOWSBESVJFQ1QsIElORElSRUNULCBJTkNJREVOVEFMLCBTUEVDSUFMLApFWEVNUExBUlksIE9SIENPTlNFUVVFTlRJQUwgREFNQUdFUyAoSU5DTFVESU5HLCBCVVQgTk9UIExJTUlURUQgVE8sClBST0NVUkVNRU5UIE9GIFNVQlNUSVRVVEUgR09PRFMgT1IgU0VSVklDRVM7IExPU1MgT0YgVVNFLCBEQVRBLCBPUgpQUk9GSVRTOyBPUiBCVVNJTkVTUyBJTlRFUlJVUFRJT04pIEhPV0VWRVIgQ0FVU0VEIEFORCBPTiBBTlkgVEhFT1JZIE9GCkxJQUJJTElUWSwgV0hFVEhFUiBJTiBDT05UUkFDVCwgU1RSSUNUIExJQUJJTElUWSwgT1IgVE9SVCAoSU5DTFVESU5HCk5FR0xJR0VOQ0UgT1IgT1RIRVJXSVNFKSBBUklTSU5HIElOIEFOWSBXQVkgT1VUIE9GIFRIRSBVU0UgT0YgVEhJUwpTT0ZUV0FSRSwgRVZFTiBJRiBBRFZJU0VEIE9GIFRIRSBQT1NTSUJJTElUWSBPRiBTVUNIIERBTUFHRS4KClRoZSBhYm92ZSBCU0QgTGljZW5zZSBBcHBsaWVzIHRvIGFsbCBjb2RlLCBldmVuIHRoYXQgYWxzbyBjb3ZlcmVkIGJ5IEFwYWNoZSAyLjAu",
+              "contentType": "text/plain",
+              "encoding": "base64"
+            }
+          }
+        },
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "name": "declared license of 'python-dateutil'",
+            "text": {
+              "content": "Dual License",
+              "contentType": "text/plain"
+            }
           }
         }
       ],
-      "name": "pytest-xdist",
-      "purl": "pkg:pypi/pytest-xdist@3.8.0",
+      "name": "python-dateutil",
+      "purl": "pkg:pypi/python-dateutil@2.9.0.post0",
       "type": "library",
-      "version": "3.8.0"
+      "version": "2.9.0.post0"
     },
     {
       "bom-ref": "python-dotenv==1.2.2",
@@ -2762,6 +2565,17 @@
             "acknowledgement": "declared",
             "id": "MIT"
           }
+        },
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "name": "declared license file: LICENSE.txt",
+            "text": {
+              "content": "Q29weXJpZ2h0IChjKSAyMDAzLTIwMTkgU3R1YXJ0IEJpc2hvcCA8c3R1YXJ0QHN0dWFydGJpc2hvcC5uZXQ+CgpQZXJtaXNzaW9uIGlzIGhlcmVieSBncmFudGVkLCBmcmVlIG9mIGNoYXJnZSwgdG8gYW55IHBlcnNvbiBvYnRhaW5pbmcgYQpjb3B5IG9mIHRoaXMgc29mdHdhcmUgYW5kIGFzc29jaWF0ZWQgZG9jdW1lbnRhdGlvbiBmaWxlcyAodGhlICJTb2Z0d2FyZSIpLAp0byBkZWFsIGluIHRoZSBTb2Z0d2FyZSB3aXRob3V0IHJlc3RyaWN0aW9uLCBpbmNsdWRpbmcgd2l0aG91dCBsaW1pdGF0aW9uCnRoZSByaWdodHMgdG8gdXNlLCBjb3B5LCBtb2RpZnksIG1lcmdlLCBwdWJsaXNoLCBkaXN0cmlidXRlLCBzdWJsaWNlbnNlLAphbmQvb3Igc2VsbCBjb3BpZXMgb2YgdGhlIFNvZnR3YXJlLCBhbmQgdG8gcGVybWl0IHBlcnNvbnMgdG8gd2hvbSB0aGUKU29mdHdhcmUgaXMgZnVybmlzaGVkIHRvIGRvIHNvLCBzdWJqZWN0IHRvIHRoZSBmb2xsb3dpbmcgY29uZGl0aW9uczoKClRoZSBhYm92ZSBjb3B5cmlnaHQgbm90aWNlIGFuZCB0aGlzIHBlcm1pc3Npb24gbm90aWNlIHNoYWxsIGJlIGluY2x1ZGVkIGluCmFsbCBjb3BpZXMgb3Igc3Vic3RhbnRpYWwgcG9ydGlvbnMgb2YgdGhlIFNvZnR3YXJlLgoKVEhFIFNPRlRXQVJFIElTIFBST1ZJREVEICJBUyBJUyIsIFdJVEhPVVQgV0FSUkFOVFkgT0YgQU5ZIEtJTkQsIEVYUFJFU1MgT1IKSU1QTElFRCwgSU5DTFVESU5HIEJVVCBOT1QgTElNSVRFRCBUTyBUSEUgV0FSUkFOVElFUyBPRiBNRVJDSEFOVEFCSUxJVFksCkZJVE5FU1MgRk9SIEEgUEFSVElDVUxBUiBQVVJQT1NFIEFORCBOT05JTkZSSU5HRU1FTlQuIElOIE5PIEVWRU5UIFNIQUxMClRIRSBBVVRIT1JTIE9SIENPUFlSSUdIVCBIT0xERVJTIEJFIExJQUJMRSBGT1IgQU5ZIENMQUlNLCBEQU1BR0VTIE9SIE9USEVSCkxJQUJJTElUWSwgV0hFVEhFUiBJTiBBTiBBQ1RJT04gT0YgQ09OVFJBQ1QsIFRPUlQgT1IgT1RIRVJXSVNFLCBBUklTSU5HCkZST00sIE9VVCBPRiBPUiBJTiBDT05ORUNUSU9OIFdJVEggVEhFIFNPRlRXQVJFIE9SIFRIRSBVU0UgT1IgT1RIRVIKREVBTElOR1MgSU4gVEhFIFNPRlRXQVJFLgo=",
+              "contentType": "text/plain",
+              "encoding": "base64"
+            }
+          }
         }
       ],
       "name": "pytz",
@@ -2809,6 +2623,16 @@
           "license": {
             "acknowledgement": "declared",
             "id": "Python-2.0"
+          }
+        },
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "name": "declared license of 'pywin32'",
+            "text": {
+              "content": "PSF",
+              "contentType": "text/plain"
+            }
           }
         }
       ],
@@ -2892,6 +2716,27 @@
       "purl": "pkg:pypi/referencing@0.37.0",
       "type": "library",
       "version": "0.37.0"
+    },
+    {
+      "bom-ref": "regex==2026.9.29",
+      "description": "Alternative regular expression module, to replace re.",
+      "externalReferences": [
+        {
+          "comment": "from packaging metadata Project-URL: Homepage",
+          "type": "website",
+          "url": "https://github.com/mrabarnett/mrab-regex"
+        }
+      ],
+      "licenses": [
+        {
+          "acknowledgement": "declared",
+          "expression": "Apache-2.0 AND CNRI-Python"
+        }
+      ],
+      "name": "regex",
+      "purl": "pkg:pypi/regex@2026.9.29",
+      "type": "library",
+      "version": "2026.9.29"
     },
     {
       "bom-ref": "requests==2.34.2",
@@ -3067,12 +2912,67 @@
             "acknowledgement": "declared",
             "id": "ISC"
           }
+        },
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "name": "declared license file: LICENSE",
+            "text": {
+              "content": "Q29weXJpZ2h0IChjKSAyMDE4LCBUenUtcGluZyBDaHVuZyA8dXJhbnVzanJAZ21haWwuY29tPgoKUGVybWlzc2lvbiB0byB1c2UsIGNvcHksIG1vZGlmeSwgYW5kIGRpc3RyaWJ1dGUgdGhpcyBzb2Z0d2FyZSBmb3IgYW55CnB1cnBvc2Ugd2l0aCBvciB3aXRob3V0IGZlZSBpcyBoZXJlYnkgZ3JhbnRlZCwgcHJvdmlkZWQgdGhhdCB0aGUgYWJvdmUKY29weXJpZ2h0IG5vdGljZSBhbmQgdGhpcyBwZXJtaXNzaW9uIG5vdGljZSBhcHBlYXIgaW4gYWxsIGNvcGllcy4KClRIRSBTT0ZUV0FSRSBJUyBQUk9WSURFRCAiQVMgSVMiIEFORCBUSEUgQVVUSE9SIERJU0NMQUlNUyBBTEwgV0FSUkFOVElFUwpXSVRIIFJFR0FSRCBUTyBUSElTIFNPRlRXQVJFIElOQ0xVRElORyBBTEwgSU1QTElFRCBXQVJSQU5USUVTIE9GCk1FUkNIQU5UQUJJTElUWSBBTkQgRklUTkVTUy4gSU4gTk8gRVZFTlQgU0hBTEwgVEhFIEFVVEhPUiBCRSBMSUFCTEUgRk9SCkFOWSBTUEVDSUFMLCBESVJFQ1QsIElORElSRUNULCBPUiBDT05TRVFVRU5USUFMIERBTUFHRVMgT1IgQU5ZIERBTUFHRVMKV0hBVFNPRVZFUiBSRVNVTFRJTkcgRlJPTSBMT1NTIE9GIFVTRSwgREFUQSBPUiBQUk9GSVRTLCBXSEVUSEVSIElOIEFOCkFDVElPTiBPRiBDT05UUkFDVCwgTkVHTElHRU5DRSBPUiBPVEhFUiBUT1JUSU9VUyBBQ1RJT04sIEFSSVNJTkcgT1VUIE9GCk9SIElOIENPTk5FQ1RJT04gV0lUSCBUSEUgVVNFIE9SIFBFUkZPUk1BTkNFIE9GIFRISVMgU09GVFdBUkUuCg==",
+              "contentType": "text/plain",
+              "encoding": "base64"
+            }
+          }
+        },
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "name": "declared license of 'shellingham'",
+            "text": {
+              "content": "ISC License",
+              "contentType": "text/plain"
+            }
+          }
         }
       ],
       "name": "shellingham",
       "purl": "pkg:pypi/shellingham@1.5.4",
       "type": "library",
       "version": "1.5.4"
+    },
+    {
+      "bom-ref": "six==1.17.0",
+      "description": "Python 2 and 3 compatibility utilities",
+      "externalReferences": [
+        {
+          "comment": "from packaging metadata: Home-page",
+          "type": "website",
+          "url": "https://github.com/benjaminp/six"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "id": "MIT"
+          }
+        },
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "name": "declared license file: LICENSE",
+            "text": {
+              "content": "Q29weXJpZ2h0IChjKSAyMDEwLTIwMjQgQmVuamFtaW4gUGV0ZXJzb24KClBlcm1pc3Npb24gaXMgaGVyZWJ5IGdyYW50ZWQsIGZyZWUgb2YgY2hhcmdlLCB0byBhbnkgcGVyc29uIG9idGFpbmluZyBhIGNvcHkgb2YKdGhpcyBzb2Z0d2FyZSBhbmQgYXNzb2NpYXRlZCBkb2N1bWVudGF0aW9uIGZpbGVzICh0aGUgIlNvZnR3YXJlIiksIHRvIGRlYWwgaW4KdGhlIFNvZnR3YXJlIHdpdGhvdXQgcmVzdHJpY3Rpb24sIGluY2x1ZGluZyB3aXRob3V0IGxpbWl0YXRpb24gdGhlIHJpZ2h0cyB0bwp1c2UsIGNvcHksIG1vZGlmeSwgbWVyZ2UsIHB1Ymxpc2gsIGRpc3RyaWJ1dGUsIHN1YmxpY2Vuc2UsIGFuZC9vciBzZWxsIGNvcGllcyBvZgp0aGUgU29mdHdhcmUsIGFuZCB0byBwZXJtaXQgcGVyc29ucyB0byB3aG9tIHRoZSBTb2Z0d2FyZSBpcyBmdXJuaXNoZWQgdG8gZG8gc28sCnN1YmplY3QgdG8gdGhlIGZvbGxvd2luZyBjb25kaXRpb25zOgoKVGhlIGFib3ZlIGNvcHlyaWdodCBub3RpY2UgYW5kIHRoaXMgcGVybWlzc2lvbiBub3RpY2Ugc2hhbGwgYmUgaW5jbHVkZWQgaW4gYWxsCmNvcGllcyBvciBzdWJzdGFudGlhbCBwb3J0aW9ucyBvZiB0aGUgU29mdHdhcmUuCgpUSEUgU09GVFdBUkUgSVMgUFJPVklERUQgIkFTIElTIiwgV0lUSE9VVCBXQVJSQU5UWSBPRiBBTlkgS0lORCwgRVhQUkVTUyBPUgpJTVBMSUVELCBJTkNMVURJTkcgQlVUIE5PVCBMSU1JVEVEIFRPIFRIRSBXQVJSQU5USUVTIE9GIE1FUkNIQU5UQUJJTElUWSwgRklUTkVTUwpGT1IgQSBQQVJUSUNVTEFSIFBVUlBPU0UgQU5EIE5PTklORlJJTkdFTUVOVC4gSU4gTk8gRVZFTlQgU0hBTEwgVEhFIEFVVEhPUlMgT1IKQ09QWVJJR0hUIEhPTERFUlMgQkUgTElBQkxFIEZPUiBBTlkgQ0xBSU0sIERBTUFHRVMgT1IgT1RIRVIgTElBQklMSVRZLCBXSEVUSEVSCklOIEFOIEFDVElPTiBPRiBDT05UUkFDVCwgVE9SVCBPUiBPVEhFUldJU0UsIEFSSVNJTkcgRlJPTSwgT1VUIE9GIE9SIElOCkNPTk5FQ1RJT04gV0lUSCBUSEUgU09GVFdBUkUgT1IgVEhFIFVTRSBPUiBPVEhFUiBERUFMSU5HUyBJTiBUSEUgU09GVFdBUkUuCg==",
+              "contentType": "text/plain",
+              "encoding": "base64"
+            }
+          }
+        }
+      ],
+      "name": "six",
+      "purl": "pkg:pypi/six@1.17.0",
+      "type": "library",
+      "version": "1.17.0"
     },
     {
       "bom-ref": "sniffio==1.3.1",
@@ -3089,6 +2989,39 @@
             "license": {
               "acknowledgement": "declared",
               "name": "License :: OSI Approved :: Apache Software License"
+            }
+          },
+          {
+            "license": {
+              "acknowledgement": "declared",
+              "name": "declared license file: LICENSE",
+              "text": {
+                "content": "VGhpcyBzb2Z0d2FyZSBpcyBtYWRlIGF2YWlsYWJsZSB1bmRlciB0aGUgdGVybXMgb2YgKmVpdGhlciogb2YgdGhlCmxpY2Vuc2VzIGZvdW5kIGluIExJQ0VOU0UuQVBBQ0hFMiBvciBMSUNFTlNFLk1JVC4gQ29udHJpYnV0aW9ucyB0byBhcmUKbWFkZSB1bmRlciB0aGUgdGVybXMgb2YgKmJvdGgqIHRoZXNlIGxpY2Vuc2VzLgo=",
+                "contentType": "text/plain",
+                "encoding": "base64"
+              }
+            }
+          },
+          {
+            "license": {
+              "acknowledgement": "declared",
+              "name": "declared license file: LICENSE.APACHE2",
+              "text": {
+                "content": "CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIEFwYWNoZSBMaWNlbnNlCiAgICAgICAgICAgICAgICAgICAgICAgICAgIFZlcnNpb24gMi4wLCBKYW51YXJ5IDIwMDQKICAgICAgICAgICAgICAgICAgICAgICAgaHR0cDovL3d3dy5hcGFjaGUub3JnL2xpY2Vuc2VzLwoKICAgVEVSTVMgQU5EIENPTkRJVElPTlMgRk9SIFVTRSwgUkVQUk9EVUNUSU9OLCBBTkQgRElTVFJJQlVUSU9OCgogICAxLiBEZWZpbml0aW9ucy4KCiAgICAgICJMaWNlbnNlIiBzaGFsbCBtZWFuIHRoZSB0ZXJtcyBhbmQgY29uZGl0aW9ucyBmb3IgdXNlLCByZXByb2R1Y3Rpb24sCiAgICAgIGFuZCBkaXN0cmlidXRpb24gYXMgZGVmaW5lZCBieSBTZWN0aW9ucyAxIHRocm91Z2ggOSBvZiB0aGlzIGRvY3VtZW50LgoKICAgICAgIkxpY2Vuc29yIiBzaGFsbCBtZWFuIHRoZSBjb3B5cmlnaHQgb3duZXIgb3IgZW50aXR5IGF1dGhvcml6ZWQgYnkKICAgICAgdGhlIGNvcHlyaWdodCBvd25lciB0aGF0IGlzIGdyYW50aW5nIHRoZSBMaWNlbnNlLgoKICAgICAgIkxlZ2FsIEVudGl0eSIgc2hhbGwgbWVhbiB0aGUgdW5pb24gb2YgdGhlIGFjdGluZyBlbnRpdHkgYW5kIGFsbAogICAgICBvdGhlciBlbnRpdGllcyB0aGF0IGNvbnRyb2wsIGFyZSBjb250cm9sbGVkIGJ5LCBvciBhcmUgdW5kZXIgY29tbW9uCiAgICAgIGNvbnRyb2wgd2l0aCB0aGF0IGVudGl0eS4gRm9yIHRoZSBwdXJwb3NlcyBvZiB0aGlzIGRlZmluaXRpb24sCiAgICAgICJjb250cm9sIiBtZWFucyAoaSkgdGhlIHBvd2VyLCBkaXJlY3Qgb3IgaW5kaXJlY3QsIHRvIGNhdXNlIHRoZQogICAgICBkaXJlY3Rpb24gb3IgbWFuYWdlbWVudCBvZiBzdWNoIGVudGl0eSwgd2hldGhlciBieSBjb250cmFjdCBvcgogICAgICBvdGhlcndpc2UsIG9yIChpaSkgb3duZXJzaGlwIG9mIGZpZnR5IHBlcmNlbnQgKDUwJSkgb3IgbW9yZSBvZiB0aGUKICAgICAgb3V0c3RhbmRpbmcgc2hhcmVzLCBvciAoaWlpKSBiZW5lZmljaWFsIG93bmVyc2hpcCBvZiBzdWNoIGVudGl0eS4KCiAgICAgICJZb3UiIChvciAiWW91ciIpIHNoYWxsIG1lYW4gYW4gaW5kaXZpZHVhbCBvciBMZWdhbCBFbnRpdHkKICAgICAgZXhlcmNpc2luZyBwZXJtaXNzaW9ucyBncmFudGVkIGJ5IHRoaXMgTGljZW5zZS4KCiAgICAgICJTb3VyY2UiIGZvcm0gc2hhbGwgbWVhbiB0aGUgcHJlZmVycmVkIGZvcm0gZm9yIG1ha2luZyBtb2RpZmljYXRpb25zLAogICAgICBpbmNsdWRpbmcgYnV0IG5vdCBsaW1pdGVkIHRvIHNvZnR3YXJlIHNvdXJjZSBjb2RlLCBkb2N1bWVudGF0aW9uCiAgICAgIHNvdXJjZSwgYW5kIGNvbmZpZ3VyYXRpb24gZmlsZXMuCgogICAgICAiT2JqZWN0IiBmb3JtIHNoYWxsIG1lYW4gYW55IGZvcm0gcmVzdWx0aW5nIGZyb20gbWVjaGFuaWNhbAogICAgICB0cmFuc2Zvcm1hdGlvbiBvciB0cmFuc2xhdGlvbiBvZiBhIFNvdXJjZSBmb3JtLCBpbmNsdWRpbmcgYnV0CiAgICAgIG5vdCBsaW1pdGVkIHRvIGNvbXBpbGVkIG9iamVjdCBjb2RlLCBnZW5lcmF0ZWQgZG9jdW1lbnRhdGlvbiwKICAgICAgYW5kIGNvbnZlcnNpb25zIHRvIG90aGVyIG1lZGlhIHR5cGVzLgoKICAgICAgIldvcmsiIHNoYWxsIG1lYW4gdGhlIHdvcmsgb2YgYXV0aG9yc2hpcCwgd2hldGhlciBpbiBTb3VyY2Ugb3IKICAgICAgT2JqZWN0IGZvcm0sIG1hZGUgYXZhaWxhYmxlIHVuZGVyIHRoZSBMaWNlbnNlLCBhcyBpbmRpY2F0ZWQgYnkgYQogICAgICBjb3B5cmlnaHQgbm90aWNlIHRoYXQgaXMgaW5jbHVkZWQgaW4gb3IgYXR0YWNoZWQgdG8gdGhlIHdvcmsKICAgICAgKGFuIGV4YW1wbGUgaXMgcHJvdmlkZWQgaW4gdGhlIEFwcGVuZGl4IGJlbG93KS4KCiAgICAgICJEZXJpdmF0aXZlIFdvcmtzIiBzaGFsbCBtZWFuIGFueSB3b3JrLCB3aGV0aGVyIGluIFNvdXJjZSBvciBPYmplY3QKICAgICAgZm9ybSwgdGhhdCBpcyBiYXNlZCBvbiAob3IgZGVyaXZlZCBmcm9tKSB0aGUgV29yayBhbmQgZm9yIHdoaWNoIHRoZQogICAgICBlZGl0b3JpYWwgcmV2aXNpb25zLCBhbm5vdGF0aW9ucywgZWxhYm9yYXRpb25zLCBvciBvdGhlciBtb2RpZmljYXRpb25zCiAgICAgIHJlcHJlc2VudCwgYXMgYSB3aG9sZSwgYW4gb3JpZ2luYWwgd29yayBvZiBhdXRob3JzaGlwLiBGb3IgdGhlIHB1cnBvc2VzCiAgICAgIG9mIHRoaXMgTGljZW5zZSwgRGVyaXZhdGl2ZSBXb3JrcyBzaGFsbCBub3QgaW5jbHVkZSB3b3JrcyB0aGF0IHJlbWFpbgogICAgICBzZXBhcmFibGUgZnJvbSwgb3IgbWVyZWx5IGxpbmsgKG9yIGJpbmQgYnkgbmFtZSkgdG8gdGhlIGludGVyZmFjZXMgb2YsCiAgICAgIHRoZSBXb3JrIGFuZCBEZXJpdmF0aXZlIFdvcmtzIHRoZXJlb2YuCgogICAgICAiQ29udHJpYnV0aW9uIiBzaGFsbCBtZWFuIGFueSB3b3JrIG9mIGF1dGhvcnNoaXAsIGluY2x1ZGluZwogICAgICB0aGUgb3JpZ2luYWwgdmVyc2lvbiBvZiB0aGUgV29yayBhbmQgYW55IG1vZGlmaWNhdGlvbnMgb3IgYWRkaXRpb25zCiAgICAgIHRvIHRoYXQgV29yayBvciBEZXJpdmF0aXZlIFdvcmtzIHRoZXJlb2YsIHRoYXQgaXMgaW50ZW50aW9uYWxseQogICAgICBzdWJtaXR0ZWQgdG8gTGljZW5zb3IgZm9yIGluY2x1c2lvbiBpbiB0aGUgV29yayBieSB0aGUgY29weXJpZ2h0IG93bmVyCiAgICAgIG9yIGJ5IGFuIGluZGl2aWR1YWwgb3IgTGVnYWwgRW50aXR5IGF1dGhvcml6ZWQgdG8gc3VibWl0IG9uIGJlaGFsZiBvZgogICAgICB0aGUgY29weXJpZ2h0IG93bmVyLiBGb3IgdGhlIHB1cnBvc2VzIG9mIHRoaXMgZGVmaW5pdGlvbiwgInN1Ym1pdHRlZCIKICAgICAgbWVhbnMgYW55IGZvcm0gb2YgZWxlY3Ryb25pYywgdmVyYmFsLCBvciB3cml0dGVuIGNvbW11bmljYXRpb24gc2VudAogICAgICB0byB0aGUgTGljZW5zb3Igb3IgaXRzIHJlcHJlc2VudGF0aXZlcywgaW5jbHVkaW5nIGJ1dCBub3QgbGltaXRlZCB0bwogICAgICBjb21tdW5pY2F0aW9uIG9uIGVsZWN0cm9uaWMgbWFpbGluZyBsaXN0cywgc291cmNlIGNvZGUgY29udHJvbCBzeXN0ZW1zLAogICAgICBhbmQgaXNzdWUgdHJhY2tpbmcgc3lzdGVtcyB0aGF0IGFyZSBtYW5hZ2VkIGJ5LCBvciBvbiBiZWhhbGYgb2YsIHRoZQogICAgICBMaWNlbnNvciBmb3IgdGhlIHB1cnBvc2Ugb2YgZGlzY3Vzc2luZyBhbmQgaW1wcm92aW5nIHRoZSBXb3JrLCBidXQKICAgICAgZXhjbHVkaW5nIGNvbW11bmljYXRpb24gdGhhdCBpcyBjb25zcGljdW91c2x5IG1hcmtlZCBvciBvdGhlcndpc2UKICAgICAgZGVzaWduYXRlZCBpbiB3cml0aW5nIGJ5IHRoZSBjb3B5cmlnaHQgb3duZXIgYXMgIk5vdCBhIENvbnRyaWJ1dGlvbi4iCgogICAgICAiQ29udHJpYnV0b3IiIHNoYWxsIG1lYW4gTGljZW5zb3IgYW5kIGFueSBpbmRpdmlkdWFsIG9yIExlZ2FsIEVudGl0eQogICAgICBvbiBiZWhhbGYgb2Ygd2hvbSBhIENvbnRyaWJ1dGlvbiBoYXMgYmVlbiByZWNlaXZlZCBieSBMaWNlbnNvciBhbmQKICAgICAgc3Vic2VxdWVudGx5IGluY29ycG9yYXRlZCB3aXRoaW4gdGhlIFdvcmsuCgogICAyLiBHcmFudCBvZiBDb3B5cmlnaHQgTGljZW5zZS4gU3ViamVjdCB0byB0aGUgdGVybXMgYW5kIGNvbmRpdGlvbnMgb2YKICAgICAgdGhpcyBMaWNlbnNlLCBlYWNoIENvbnRyaWJ1dG9yIGhlcmVieSBncmFudHMgdG8gWW91IGEgcGVycGV0dWFsLAogICAgICB3b3JsZHdpZGUsIG5vbi1leGNsdXNpdmUsIG5vLWNoYXJnZSwgcm95YWx0eS1mcmVlLCBpcnJldm9jYWJsZQogICAgICBjb3B5cmlnaHQgbGljZW5zZSB0byByZXByb2R1Y2UsIHByZXBhcmUgRGVyaXZhdGl2ZSBXb3JrcyBvZiwKICAgICAgcHVibGljbHkgZGlzcGxheSwgcHVibGljbHkgcGVyZm9ybSwgc3VibGljZW5zZSwgYW5kIGRpc3RyaWJ1dGUgdGhlCiAgICAgIFdvcmsgYW5kIHN1Y2ggRGVyaXZhdGl2ZSBXb3JrcyBpbiBTb3VyY2Ugb3IgT2JqZWN0IGZvcm0uCgogICAzLiBHcmFudCBvZiBQYXRlbnQgTGljZW5zZS4gU3ViamVjdCB0byB0aGUgdGVybXMgYW5kIGNvbmRpdGlvbnMgb2YKICAgICAgdGhpcyBMaWNlbnNlLCBlYWNoIENvbnRyaWJ1dG9yIGhlcmVieSBncmFudHMgdG8gWW91IGEgcGVycGV0dWFsLAogICAgICB3b3JsZHdpZGUsIG5vbi1leGNsdXNpdmUsIG5vLWNoYXJnZSwgcm95YWx0eS1mcmVlLCBpcnJldm9jYWJsZQogICAgICAoZXhjZXB0IGFzIHN0YXRlZCBpbiB0aGlzIHNlY3Rpb24pIHBhdGVudCBsaWNlbnNlIHRvIG1ha2UsIGhhdmUgbWFkZSwKICAgICAgdXNlLCBvZmZlciB0byBzZWxsLCBzZWxsLCBpbXBvcnQsIGFuZCBvdGhlcndpc2UgdHJhbnNmZXIgdGhlIFdvcmssCiAgICAgIHdoZXJlIHN1Y2ggbGljZW5zZSBhcHBsaWVzIG9ubHkgdG8gdGhvc2UgcGF0ZW50IGNsYWltcyBsaWNlbnNhYmxlCiAgICAgIGJ5IHN1Y2ggQ29udHJpYnV0b3IgdGhhdCBhcmUgbmVjZXNzYXJpbHkgaW5mcmluZ2VkIGJ5IHRoZWlyCiAgICAgIENvbnRyaWJ1dGlvbihzKSBhbG9uZSBvciBieSBjb21iaW5hdGlvbiBvZiB0aGVpciBDb250cmlidXRpb24ocykKICAgICAgd2l0aCB0aGUgV29yayB0byB3aGljaCBzdWNoIENvbnRyaWJ1dGlvbihzKSB3YXMgc3VibWl0dGVkLiBJZiBZb3UKICAgICAgaW5zdGl0dXRlIHBhdGVudCBsaXRpZ2F0aW9uIGFnYWluc3QgYW55IGVudGl0eSAoaW5jbHVkaW5nIGEKICAgICAgY3Jvc3MtY2xhaW0gb3IgY291bnRlcmNsYWltIGluIGEgbGF3c3VpdCkgYWxsZWdpbmcgdGhhdCB0aGUgV29yawogICAgICBvciBhIENvbnRyaWJ1dGlvbiBpbmNvcnBvcmF0ZWQgd2l0aGluIHRoZSBXb3JrIGNvbnN0aXR1dGVzIGRpcmVjdAogICAgICBvciBjb250cmlidXRvcnkgcGF0ZW50IGluZnJpbmdlbWVudCwgdGhlbiBhbnkgcGF0ZW50IGxpY2Vuc2VzCiAgICAgIGdyYW50ZWQgdG8gWW91IHVuZGVyIHRoaXMgTGljZW5zZSBmb3IgdGhhdCBXb3JrIHNoYWxsIHRlcm1pbmF0ZQogICAgICBhcyBvZiB0aGUgZGF0ZSBzdWNoIGxpdGlnYXRpb24gaXMgZmlsZWQuCgogICA0LiBSZWRpc3RyaWJ1dGlvbi4gWW91IG1heSByZXByb2R1Y2UgYW5kIGRpc3RyaWJ1dGUgY29waWVzIG9mIHRoZQogICAgICBXb3JrIG9yIERlcml2YXRpdmUgV29ya3MgdGhlcmVvZiBpbiBhbnkgbWVkaXVtLCB3aXRoIG9yIHdpdGhvdXQKICAgICAgbW9kaWZpY2F0aW9ucywgYW5kIGluIFNvdXJjZSBvciBPYmplY3QgZm9ybSwgcHJvdmlkZWQgdGhhdCBZb3UKICAgICAgbWVldCB0aGUgZm9sbG93aW5nIGNvbmRpdGlvbnM6CgogICAgICAoYSkgWW91IG11c3QgZ2l2ZSBhbnkgb3RoZXIgcmVjaXBpZW50cyBvZiB0aGUgV29yayBvcgogICAgICAgICAgRGVyaXZhdGl2ZSBXb3JrcyBhIGNvcHkgb2YgdGhpcyBMaWNlbnNlOyBhbmQKCiAgICAgIChiKSBZb3UgbXVzdCBjYXVzZSBhbnkgbW9kaWZpZWQgZmlsZXMgdG8gY2FycnkgcHJvbWluZW50IG5vdGljZXMKICAgICAgICAgIHN0YXRpbmcgdGhhdCBZb3UgY2hhbmdlZCB0aGUgZmlsZXM7IGFuZAoKICAgICAgKGMpIFlvdSBtdXN0IHJldGFpbiwgaW4gdGhlIFNvdXJjZSBmb3JtIG9mIGFueSBEZXJpdmF0aXZlIFdvcmtzCiAgICAgICAgICB0aGF0IFlvdSBkaXN0cmlidXRlLCBhbGwgY29weXJpZ2h0LCBwYXRlbnQsIHRyYWRlbWFyaywgYW5kCiAgICAgICAgICBhdHRyaWJ1dGlvbiBub3RpY2VzIGZyb20gdGhlIFNvdXJjZSBmb3JtIG9mIHRoZSBXb3JrLAogICAgICAgICAgZXhjbHVkaW5nIHRob3NlIG5vdGljZXMgdGhhdCBkbyBub3QgcGVydGFpbiB0byBhbnkgcGFydCBvZgogICAgICAgICAgdGhlIERlcml2YXRpdmUgV29ya3M7IGFuZAoKICAgICAgKGQpIElmIHRoZSBXb3JrIGluY2x1ZGVzIGEgIk5PVElDRSIgdGV4dCBmaWxlIGFzIHBhcnQgb2YgaXRzCiAgICAgICAgICBkaXN0cmlidXRpb24sIHRoZW4gYW55IERlcml2YXRpdmUgV29ya3MgdGhhdCBZb3UgZGlzdHJpYnV0ZSBtdXN0CiAgICAgICAgICBpbmNsdWRlIGEgcmVhZGFibGUgY29weSBvZiB0aGUgYXR0cmlidXRpb24gbm90aWNlcyBjb250YWluZWQKICAgICAgICAgIHdpdGhpbiBzdWNoIE5PVElDRSBmaWxlLCBleGNsdWRpbmcgdGhvc2Ugbm90aWNlcyB0aGF0IGRvIG5vdAogICAgICAgICAgcGVydGFpbiB0byBhbnkgcGFydCBvZiB0aGUgRGVyaXZhdGl2ZSBXb3JrcywgaW4gYXQgbGVhc3Qgb25lCiAgICAgICAgICBvZiB0aGUgZm9sbG93aW5nIHBsYWNlczogd2l0aGluIGEgTk9USUNFIHRleHQgZmlsZSBkaXN0cmlidXRlZAogICAgICAgICAgYXMgcGFydCBvZiB0aGUgRGVyaXZhdGl2ZSBXb3Jrczsgd2l0aGluIHRoZSBTb3VyY2UgZm9ybSBvcgogICAgICAgICAgZG9jdW1lbnRhdGlvbiwgaWYgcHJvdmlkZWQgYWxvbmcgd2l0aCB0aGUgRGVyaXZhdGl2ZSBXb3Jrczsgb3IsCiAgICAgICAgICB3aXRoaW4gYSBkaXNwbGF5IGdlbmVyYXRlZCBieSB0aGUgRGVyaXZhdGl2ZSBXb3JrcywgaWYgYW5kCiAgICAgICAgICB3aGVyZXZlciBzdWNoIHRoaXJkLXBhcnR5IG5vdGljZXMgbm9ybWFsbHkgYXBwZWFyLiBUaGUgY29udGVudHMKICAgICAgICAgIG9mIHRoZSBOT1RJQ0UgZmlsZSBhcmUgZm9yIGluZm9ybWF0aW9uYWwgcHVycG9zZXMgb25seSBhbmQKICAgICAgICAgIGRvIG5vdCBtb2RpZnkgdGhlIExpY2Vuc2UuIFlvdSBtYXkgYWRkIFlvdXIgb3duIGF0dHJpYnV0aW9uCiAgICAgICAgICBub3RpY2VzIHdpdGhpbiBEZXJpdmF0aXZlIFdvcmtzIHRoYXQgWW91IGRpc3RyaWJ1dGUsIGFsb25nc2lkZQogICAgICAgICAgb3IgYXMgYW4gYWRkZW5kdW0gdG8gdGhlIE5PVElDRSB0ZXh0IGZyb20gdGhlIFdvcmssIHByb3ZpZGVkCiAgICAgICAgICB0aGF0IHN1Y2ggYWRkaXRpb25hbCBhdHRyaWJ1dGlvbiBub3RpY2VzIGNhbm5vdCBiZSBjb25zdHJ1ZWQKICAgICAgICAgIGFzIG1vZGlmeWluZyB0aGUgTGljZW5zZS4KCiAgICAgIFlvdSBtYXkgYWRkIFlvdXIgb3duIGNvcHlyaWdodCBzdGF0ZW1lbnQgdG8gWW91ciBtb2RpZmljYXRpb25zIGFuZAogICAgICBtYXkgcHJvdmlkZSBhZGRpdGlvbmFsIG9yIGRpZmZlcmVudCBsaWNlbnNlIHRlcm1zIGFuZCBjb25kaXRpb25zCiAgICAgIGZvciB1c2UsIHJlcHJvZHVjdGlvbiwgb3IgZGlzdHJpYnV0aW9uIG9mIFlvdXIgbW9kaWZpY2F0aW9ucywgb3IKICAgICAgZm9yIGFueSBzdWNoIERlcml2YXRpdmUgV29ya3MgYXMgYSB3aG9sZSwgcHJvdmlkZWQgWW91ciB1c2UsCiAgICAgIHJlcHJvZHVjdGlvbiwgYW5kIGRpc3RyaWJ1dGlvbiBvZiB0aGUgV29yayBvdGhlcndpc2UgY29tcGxpZXMgd2l0aAogICAgICB0aGUgY29uZGl0aW9ucyBzdGF0ZWQgaW4gdGhpcyBMaWNlbnNlLgoKICAgNS4gU3VibWlzc2lvbiBvZiBDb250cmlidXRpb25zLiBVbmxlc3MgWW91IGV4cGxpY2l0bHkgc3RhdGUgb3RoZXJ3aXNlLAogICAgICBhbnkgQ29udHJpYnV0aW9uIGludGVudGlvbmFsbHkgc3VibWl0dGVkIGZvciBpbmNsdXNpb24gaW4gdGhlIFdvcmsKICAgICAgYnkgWW91IHRvIHRoZSBMaWNlbnNvciBzaGFsbCBiZSB1bmRlciB0aGUgdGVybXMgYW5kIGNvbmRpdGlvbnMgb2YKICAgICAgdGhpcyBMaWNlbnNlLCB3aXRob3V0IGFueSBhZGRpdGlvbmFsIHRlcm1zIG9yIGNvbmRpdGlvbnMuCiAgICAgIE5vdHdpdGhzdGFuZGluZyB0aGUgYWJvdmUsIG5vdGhpbmcgaGVyZWluIHNoYWxsIHN1cGVyc2VkZSBvciBtb2RpZnkKICAgICAgdGhlIHRlcm1zIG9mIGFueSBzZXBhcmF0ZSBsaWNlbnNlIGFncmVlbWVudCB5b3UgbWF5IGhhdmUgZXhlY3V0ZWQKICAgICAgd2l0aCBMaWNlbnNvciByZWdhcmRpbmcgc3VjaCBDb250cmlidXRpb25zLgoKICAgNi4gVHJhZGVtYXJrcy4gVGhpcyBMaWNlbnNlIGRvZXMgbm90IGdyYW50IHBlcm1pc3Npb24gdG8gdXNlIHRoZSB0cmFkZQogICAgICBuYW1lcywgdHJhZGVtYXJrcywgc2VydmljZSBtYXJrcywgb3IgcHJvZHVjdCBuYW1lcyBvZiB0aGUgTGljZW5zb3IsCiAgICAgIGV4Y2VwdCBhcyByZXF1aXJlZCBmb3IgcmVhc29uYWJsZSBhbmQgY3VzdG9tYXJ5IHVzZSBpbiBkZXNjcmliaW5nIHRoZQogICAgICBvcmlnaW4gb2YgdGhlIFdvcmsgYW5kIHJlcHJvZHVjaW5nIHRoZSBjb250ZW50IG9mIHRoZSBOT1RJQ0UgZmlsZS4KCiAgIDcuIERpc2NsYWltZXIgb2YgV2FycmFudHkuIFVubGVzcyByZXF1aXJlZCBieSBhcHBsaWNhYmxlIGxhdyBvcgogICAgICBhZ3JlZWQgdG8gaW4gd3JpdGluZywgTGljZW5zb3IgcHJvdmlkZXMgdGhlIFdvcmsgKGFuZCBlYWNoCiAgICAgIENvbnRyaWJ1dG9yIHByb3ZpZGVzIGl0cyBDb250cmlidXRpb25zKSBvbiBhbiAiQVMgSVMiIEJBU0lTLAogICAgICBXSVRIT1VUIFdBUlJBTlRJRVMgT1IgQ09ORElUSU9OUyBPRiBBTlkgS0lORCwgZWl0aGVyIGV4cHJlc3Mgb3IKICAgICAgaW1wbGllZCwgaW5jbHVkaW5nLCB3aXRob3V0IGxpbWl0YXRpb24sIGFueSB3YXJyYW50aWVzIG9yIGNvbmRpdGlvbnMKICAgICAgb2YgVElUTEUsIE5PTi1JTkZSSU5HRU1FTlQsIE1FUkNIQU5UQUJJTElUWSwgb3IgRklUTkVTUyBGT1IgQQogICAgICBQQVJUSUNVTEFSIFBVUlBPU0UuIFlvdSBhcmUgc29sZWx5IHJlc3BvbnNpYmxlIGZvciBkZXRlcm1pbmluZyB0aGUKICAgICAgYXBwcm9wcmlhdGVuZXNzIG9mIHVzaW5nIG9yIHJlZGlzdHJpYnV0aW5nIHRoZSBXb3JrIGFuZCBhc3N1bWUgYW55CiAgICAgIHJpc2tzIGFzc29jaWF0ZWQgd2l0aCBZb3VyIGV4ZXJjaXNlIG9mIHBlcm1pc3Npb25zIHVuZGVyIHRoaXMgTGljZW5zZS4KCiAgIDguIExpbWl0YXRpb24gb2YgTGlhYmlsaXR5LiBJbiBubyBldmVudCBhbmQgdW5kZXIgbm8gbGVnYWwgdGhlb3J5LAogICAgICB3aGV0aGVyIGluIHRvcnQgKGluY2x1ZGluZyBuZWdsaWdlbmNlKSwgY29udHJhY3QsIG9yIG90aGVyd2lzZSwKICAgICAgdW5sZXNzIHJlcXVpcmVkIGJ5IGFwcGxpY2FibGUgbGF3IChzdWNoIGFzIGRlbGliZXJhdGUgYW5kIGdyb3NzbHkKICAgICAgbmVnbGlnZW50IGFjdHMpIG9yIGFncmVlZCB0byBpbiB3cml0aW5nLCBzaGFsbCBhbnkgQ29udHJpYnV0b3IgYmUKICAgICAgbGlhYmxlIHRvIFlvdSBmb3IgZGFtYWdlcywgaW5jbHVkaW5nIGFueSBkaXJlY3QsIGluZGlyZWN0LCBzcGVjaWFsLAogICAgICBpbmNpZGVudGFsLCBvciBjb25zZXF1ZW50aWFsIGRhbWFnZXMgb2YgYW55IGNoYXJhY3RlciBhcmlzaW5nIGFzIGEKICAgICAgcmVzdWx0IG9mIHRoaXMgTGljZW5zZSBvciBvdXQgb2YgdGhlIHVzZSBvciBpbmFiaWxpdHkgdG8gdXNlIHRoZQogICAgICBXb3JrIChpbmNsdWRpbmcgYnV0IG5vdCBsaW1pdGVkIHRvIGRhbWFnZXMgZm9yIGxvc3Mgb2YgZ29vZHdpbGwsCiAgICAgIHdvcmsgc3RvcHBhZ2UsIGNvbXB1dGVyIGZhaWx1cmUgb3IgbWFsZnVuY3Rpb24sIG9yIGFueSBhbmQgYWxsCiAgICAgIG90aGVyIGNvbW1lcmNpYWwgZGFtYWdlcyBvciBsb3NzZXMpLCBldmVuIGlmIHN1Y2ggQ29udHJpYnV0b3IKICAgICAgaGFzIGJlZW4gYWR2aXNlZCBvZiB0aGUgcG9zc2liaWxpdHkgb2Ygc3VjaCBkYW1hZ2VzLgoKICAgOS4gQWNjZXB0aW5nIFdhcnJhbnR5IG9yIEFkZGl0aW9uYWwgTGlhYmlsaXR5LiBXaGlsZSByZWRpc3RyaWJ1dGluZwogICAgICB0aGUgV29yayBvciBEZXJpdmF0aXZlIFdvcmtzIHRoZXJlb2YsIFlvdSBtYXkgY2hvb3NlIHRvIG9mZmVyLAogICAgICBhbmQgY2hhcmdlIGEgZmVlIGZvciwgYWNjZXB0YW5jZSBvZiBzdXBwb3J0LCB3YXJyYW50eSwgaW5kZW1uaXR5LAogICAgICBvciBvdGhlciBsaWFiaWxpdHkgb2JsaWdhdGlvbnMgYW5kL29yIHJpZ2h0cyBjb25zaXN0ZW50IHdpdGggdGhpcwogICAgICBMaWNlbnNlLiBIb3dldmVyLCBpbiBhY2NlcHRpbmcgc3VjaCBvYmxpZ2F0aW9ucywgWW91IG1heSBhY3Qgb25seQogICAgICBvbiBZb3VyIG93biBiZWhhbGYgYW5kIG9uIFlvdXIgc29sZSByZXNwb25zaWJpbGl0eSwgbm90IG9uIGJlaGFsZgogICAgICBvZiBhbnkgb3RoZXIgQ29udHJpYnV0b3IsIGFuZCBvbmx5IGlmIFlvdSBhZ3JlZSB0byBpbmRlbW5pZnksCiAgICAgIGRlZmVuZCwgYW5kIGhvbGQgZWFjaCBDb250cmlidXRvciBoYXJtbGVzcyBmb3IgYW55IGxpYWJpbGl0eQogICAgICBpbmN1cnJlZCBieSwgb3IgY2xhaW1zIGFzc2VydGVkIGFnYWluc3QsIHN1Y2ggQ29udHJpYnV0b3IgYnkgcmVhc29uCiAgICAgIG9mIHlvdXIgYWNjZXB0aW5nIGFueSBzdWNoIHdhcnJhbnR5IG9yIGFkZGl0aW9uYWwgbGlhYmlsaXR5LgoKICAgRU5EIE9GIFRFUk1TIEFORCBDT05ESVRJT05TCgogICBBUFBFTkRJWDogSG93IHRvIGFwcGx5IHRoZSBBcGFjaGUgTGljZW5zZSB0byB5b3VyIHdvcmsuCgogICAgICBUbyBhcHBseSB0aGUgQXBhY2hlIExpY2Vuc2UgdG8geW91ciB3b3JrLCBhdHRhY2ggdGhlIGZvbGxvd2luZwogICAgICBib2lsZXJwbGF0ZSBub3RpY2UsIHdpdGggdGhlIGZpZWxkcyBlbmNsb3NlZCBieSBicmFja2V0cyAiW10iCiAgICAgIHJlcGxhY2VkIHdpdGggeW91ciBvd24gaWRlbnRpZnlpbmcgaW5mb3JtYXRpb24uIChEb24ndCBpbmNsdWRlCiAgICAgIHRoZSBicmFja2V0cyEpICBUaGUgdGV4dCBzaG91bGQgYmUgZW5jbG9zZWQgaW4gdGhlIGFwcHJvcHJpYXRlCiAgICAgIGNvbW1lbnQgc3ludGF4IGZvciB0aGUgZmlsZSBmb3JtYXQuIFdlIGFsc28gcmVjb21tZW5kIHRoYXQgYQogICAgICBmaWxlIG9yIGNsYXNzIG5hbWUgYW5kIGRlc2NyaXB0aW9uIG9mIHB1cnBvc2UgYmUgaW5jbHVkZWQgb24gdGhlCiAgICAgIHNhbWUgInByaW50ZWQgcGFnZSIgYXMgdGhlIGNvcHlyaWdodCBub3RpY2UgZm9yIGVhc2llcgogICAgICBpZGVudGlmaWNhdGlvbiB3aXRoaW4gdGhpcmQtcGFydHkgYXJjaGl2ZXMuCgogICBDb3B5cmlnaHQgW3l5eXldIFtuYW1lIG9mIGNvcHlyaWdodCBvd25lcl0KCiAgIExpY2Vuc2VkIHVuZGVyIHRoZSBBcGFjaGUgTGljZW5zZSwgVmVyc2lvbiAyLjAgKHRoZSAiTGljZW5zZSIpOwogICB5b3UgbWF5IG5vdCB1c2UgdGhpcyBmaWxlIGV4Y2VwdCBpbiBjb21wbGlhbmNlIHdpdGggdGhlIExpY2Vuc2UuCiAgIFlvdSBtYXkgb2J0YWluIGEgY29weSBvZiB0aGUgTGljZW5zZSBhdAoKICAgICAgIGh0dHA6Ly93d3cuYXBhY2hlLm9yZy9saWNlbnNlcy9MSUNFTlNFLTIuMAoKICAgVW5sZXNzIHJlcXVpcmVkIGJ5IGFwcGxpY2FibGUgbGF3IG9yIGFncmVlZCB0byBpbiB3cml0aW5nLCBzb2Z0d2FyZQogICBkaXN0cmlidXRlZCB1bmRlciB0aGUgTGljZW5zZSBpcyBkaXN0cmlidXRlZCBvbiBhbiAiQVMgSVMiIEJBU0lTLAogICBXSVRIT1VUIFdBUlJBTlRJRVMgT1IgQ09ORElUSU9OUyBPRiBBTlkgS0lORCwgZWl0aGVyIGV4cHJlc3Mgb3IgaW1wbGllZC4KICAgU2VlIHRoZSBMaWNlbnNlIGZvciB0aGUgc3BlY2lmaWMgbGFuZ3VhZ2UgZ292ZXJuaW5nIHBlcm1pc3Npb25zIGFuZAogICBsaW1pdGF0aW9ucyB1bmRlciB0aGUgTGljZW5zZS4K",
+                "contentType": "text/plain",
+                "encoding": "base64"
+              }
+            }
+          },
+          {
+            "license": {
+              "acknowledgement": "declared",
+              "name": "declared license file: LICENSE.MIT",
+              "text": {
+                "content": "VGhlIE1JVCBMaWNlbnNlIChNSVQpCgpQZXJtaXNzaW9uIGlzIGhlcmVieSBncmFudGVkLCBmcmVlIG9mIGNoYXJnZSwgdG8gYW55IHBlcnNvbiBvYnRhaW5pbmcKYSBjb3B5IG9mIHRoaXMgc29mdHdhcmUgYW5kIGFzc29jaWF0ZWQgZG9jdW1lbnRhdGlvbiBmaWxlcyAodGhlCiJTb2Z0d2FyZSIpLCB0byBkZWFsIGluIHRoZSBTb2Z0d2FyZSB3aXRob3V0IHJlc3RyaWN0aW9uLCBpbmNsdWRpbmcKd2l0aG91dCBsaW1pdGF0aW9uIHRoZSByaWdodHMgdG8gdXNlLCBjb3B5LCBtb2RpZnksIG1lcmdlLCBwdWJsaXNoLApkaXN0cmlidXRlLCBzdWJsaWNlbnNlLCBhbmQvb3Igc2VsbCBjb3BpZXMgb2YgdGhlIFNvZnR3YXJlLCBhbmQgdG8KcGVybWl0IHBlcnNvbnMgdG8gd2hvbSB0aGUgU29mdHdhcmUgaXMgZnVybmlzaGVkIHRvIGRvIHNvLCBzdWJqZWN0IHRvCnRoZSBmb2xsb3dpbmcgY29uZGl0aW9uczoKClRoZSBhYm92ZSBjb3B5cmlnaHQgbm90aWNlIGFuZCB0aGlzIHBlcm1pc3Npb24gbm90aWNlIHNoYWxsIGJlCmluY2x1ZGVkIGluIGFsbCBjb3BpZXMgb3Igc3Vic3RhbnRpYWwgcG9ydGlvbnMgb2YgdGhlIFNvZnR3YXJlLgoKVEhFIFNPRlRXQVJFIElTIFBST1ZJREVEICJBUyBJUyIsIFdJVEhPVVQgV0FSUkFOVFkgT0YgQU5ZIEtJTkQsCkVYUFJFU1MgT1IgSU1QTElFRCwgSU5DTFVESU5HIEJVVCBOT1QgTElNSVRFRCBUTyBUSEUgV0FSUkFOVElFUyBPRgpNRVJDSEFOVEFCSUxJVFksIEZJVE5FU1MgRk9SIEEgUEFSVElDVUxBUiBQVVJQT1NFIEFORApOT05JTkZSSU5HRU1FTlQuIElOIE5PIEVWRU5UIFNIQUxMIFRIRSBBVVRIT1JTIE9SIENPUFlSSUdIVCBIT0xERVJTIEJFCkxJQUJMRSBGT1IgQU5ZIENMQUlNLCBEQU1BR0VTIE9SIE9USEVSIExJQUJJTElUWSwgV0hFVEhFUiBJTiBBTiBBQ1RJT04KT0YgQ09OVFJBQ1QsIFRPUlQgT1IgT1RIRVJXSVNFLCBBUklTSU5HIEZST00sIE9VVCBPRiBPUiBJTiBDT05ORUNUSU9OCldJVEggVEhFIFNPRlRXQVJFIE9SIFRIRSBVU0UgT1IgT1RIRVIgREVBTElOR1MgSU4gVEhFIFNPRlRXQVJFLgo=",
+                "contentType": "text/plain",
+                "encoding": "base64"
+              }
             }
           }
         ]
@@ -3218,12 +3151,59 @@
             "acknowledgement": "declared",
             "name": "License :: OSI Approved :: Apache Software License"
           }
+        },
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "name": "declared license of 'tenacity'",
+            "text": {
+              "content": "Apache 2.0",
+              "contentType": "text/plain"
+            }
+          }
         }
       ],
       "name": "tenacity",
       "purl": "pkg:pypi/tenacity@9.1.4",
       "type": "library",
       "version": "9.1.4"
+    },
+    {
+      "bom-ref": "tiktoken==0.14.0",
+      "description": "tiktoken is a fast BPE tokeniser for use with OpenAI's models",
+      "externalReferences": [
+        {
+          "comment": "from packaging metadata Project-URL: changelog",
+          "type": "release-notes",
+          "url": "https://github.com/openai/tiktoken/blob/main/CHANGELOG.md"
+        },
+        {
+          "comment": "from packaging metadata Project-URL: repository",
+          "type": "vcs",
+          "url": "https://github.com/openai/tiktoken"
+        },
+        {
+          "comment": "from packaging metadata Project-URL: homepage",
+          "type": "website",
+          "url": "https://github.com/openai/tiktoken"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "name": "declared license of 'tiktoken'",
+            "text": {
+              "content": "MIT License\n\nCopyright (c) 2022 OpenAI, Shantanu Jain\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
+              "contentType": "text/plain"
+            }
+          }
+        }
+      ],
+      "name": "tiktoken",
+      "purl": "pkg:pypi/tiktoken@0.14.0",
+      "type": "library",
+      "version": "0.14.0"
     },
     {
       "bom-ref": "tqdm==4.68.4",
@@ -3411,6 +3391,16 @@
             "acknowledgement": "declared",
             "id": "MIT"
           }
+        },
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "name": "declared license of 'uncalled-for'",
+            "text": {
+              "content": "# Released under MIT License\n\nCopyright (c) 2025 Chris Guidry.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.",
+              "contentType": "text/plain"
+            }
+          }
         }
       ],
       "name": "uncalled-for",
@@ -3419,7 +3409,7 @@
       "version": "0.3.2"
     },
     {
-      "bom-ref": "urllib3==2.7.0",
+      "bom-ref": "urllib3==2.8.0",
       "description": "HTTP library with thread-safe connection pooling, file post, and more.",
       "externalReferences": [
         {
@@ -3438,6 +3428,11 @@
           "url": "https://github.com/urllib3/urllib3"
         },
         {
+          "comment": "from packaging metadata Project-URL: Security policy",
+          "type": "other",
+          "url": "https://urllib3.readthedocs.io/en/latest/security.html"
+        },
+        {
           "comment": "from packaging metadata Project-URL: Changelog",
           "type": "release-notes",
           "url": "https://github.com/urllib3/urllib3/blob/main/CHANGES.rst"
@@ -3452,9 +3447,9 @@
         }
       ],
       "name": "urllib3",
-      "purl": "pkg:pypi/urllib3@2.7.0",
+      "purl": "pkg:pypi/urllib3@2.8.0",
       "type": "library",
-      "version": "2.7.0"
+      "version": "2.8.0"
     },
     {
       "bom-ref": "uvicorn==0.51.0",
@@ -3595,10 +3590,10 @@
   "dependencies": [
     {
       "dependsOn": [
-        "cryptography==50.0.0",
+        "cryptography==50.0.1",
         "joserfc==1.7.3"
       ],
-      "ref": "Authlib==1.7.2"
+      "ref": "Authlib==1.9.1"
     },
     {
       "dependsOn": [
@@ -3611,10 +3606,10 @@
     },
     {
       "dependsOn": [
-        "cryptography==50.0.0",
+        "cryptography==50.0.1",
         "typing_extensions==4.16.0"
       ],
-      "ref": "PyJWT==2.13.0"
+      "ref": "PyJWT==2.15.0"
     },
     {
       "ref": "PyYAML==6.0.3"
@@ -3646,46 +3641,38 @@
         "idna==3.18",
         "typing_extensions==4.16.0"
       ],
-      "ref": "anyio==4.14.1"
+      "ref": "anyio==4.15.1"
     },
     {
       "dependsOn": [
-        "fastmcp==3.4.4",
-        "pytest-asyncio==1.4.0",
-        "pytest==9.1.1"
+        "certifi==2026.10.23",
+        "httpx==0.28.1",
+        "neo4j==6.2.0",
+        "numpy==2.5.1",
+        "openai==2.45.0",
+        "opentelemetry-api==1.45.2",
+        "posthog==7.22.1",
+        "pydantic==2.13.4",
+        "python-dotenv==1.2.2",
+        "tenacity==9.1.4"
+      ],
+      "ref": "archolith-graphiti-core==0.31.2.post1"
+    },
+    {
+      "dependsOn": [
+        "fastmcp==3.4.11"
       ],
       "ref": "archolith-mcp-framework==0.2.0"
     },
     {
       "dependsOn": [
-        "Jinja2==3.1.6",
-        "archolith-mcp-framework==0.2.0",
-        "archolith-oauth==0.2.0",
-        "fastapi==0.139.0",
-        "fastmcp==3.4.4",
-        "graphiti-core==0.29.2",
-        "httpx==0.28.1",
-        "joserfc==1.7.3",
-        "neo4j==6.2.0",
-        "pydantic==2.13.4",
-        "python-dotenv==1.2.2",
-        "rich==15.0.0",
-        "starlette==1.3.1",
-        "typer==0.26.8",
-        "uvicorn==0.51.0"
-      ],
-      "ref": "archolith-menhir==0.2.0"
-    },
-    {
-      "dependsOn": [
+        "cryptography==50.0.1",
         "fastapi==0.139.0",
         "httpx==0.28.1",
         "joserfc==1.7.3",
-        "pytest-asyncio==1.4.0",
-        "pytest==9.1.1",
         "python-multipart==0.0.32"
       ],
-      "ref": "archolith-oauth==0.2.0"
+      "ref": "archolith-oauth==0.3.1"
     },
     {
       "ref": "attrs==26.1.0"
@@ -3697,9 +3684,8 @@
       "dependsOn": [
         "Pygments==2.20.0",
         "click==8.4.2",
-        "fastmcp==3.4.4",
+        "fastmcp==3.4.11",
         "numpy==2.5.1",
-        "pytest==9.1.1",
         "typer==0.26.8",
         "typing_extensions==4.16.0"
       ],
@@ -3709,13 +3695,10 @@
       "ref": "cachetools==7.1.4"
     },
     {
-      "dependsOn": [
-        "pytest==9.1.1"
-      ],
       "ref": "caio==0.9.25"
     },
     {
-      "ref": "certifi==2026.6.17"
+      "ref": "certifi==2026.10.23"
     },
     {
       "dependsOn": [
@@ -3740,7 +3723,7 @@
         "cffi==2.1.0",
         "typing_extensions==4.16.0"
       ],
-      "ref": "cryptography==50.0.0"
+      "ref": "cryptography==50.0.1"
     },
     {
       "dependsOn": [
@@ -3748,7 +3731,6 @@
         "attrs==26.1.0",
         "docstring_parser==0.18.0",
         "pydantic==2.13.4",
-        "pytest==9.1.1",
         "rich-rst==2.1.0",
         "rich==15.0.0",
         "typing_extensions==4.16.0"
@@ -3760,39 +3742,26 @@
     },
     {
       "dependsOn": [
-        "cryptography==50.0.0",
-        "httpcore==1.0.9",
-        "httpx==0.28.1",
-        "idna==3.18",
-        "pytest==9.1.1"
+        "cryptography==50.0.1",
+        "idna==3.18"
       ],
-      "ref": "dnspython==2.8.0"
+      "ref": "dnspython==2.9.1"
     },
     {
-      "dependsOn": [
-        "pytest==9.1.1"
-      ],
       "ref": "docstring_parser==0.18.0"
     },
     {
       "dependsOn": [
-        "dnspython==2.8.0",
+        "dnspython==2.9.1",
         "idna==3.18"
       ],
       "ref": "email-validator==2.3.0"
     },
     {
       "dependsOn": [
-        "pytest==9.1.1",
         "typing_extensions==4.16.0"
       ],
       "ref": "exceptiongroup==1.3.1"
-    },
-    {
-      "dependsOn": [
-        "pytest==9.1.1"
-      ],
-      "ref": "execnet==2.1.2"
     },
     {
       "dependsOn": [
@@ -3813,9 +3782,10 @@
     },
     {
       "dependsOn": [
-        "Authlib==1.7.2",
-        "PyJWT==2.13.0",
+        "Authlib==1.9.1",
+        "PyJWT==2.15.0",
         "PyYAML==6.0.3",
+        "certifi==2026.10.23",
         "cyclopts==4.21.0",
         "exceptiongroup==1.3.1",
         "griffelib==2.1.0",
@@ -3823,10 +3793,10 @@
         "joserfc==1.7.3",
         "jsonref==1.1.0",
         "jsonschema-path==0.5.0",
-        "mcp==1.28.1",
+        "mcp==1.30.0",
         "openai==2.45.0",
         "openapi-pydantic==0.5.1",
-        "opentelemetry-api==1.43.0",
+        "opentelemetry-api==1.45.2",
         "packaging==25.0",
         "platformdirs==4.10.0",
         "py-key-value-aio==0.4.5",
@@ -3843,33 +3813,16 @@
         "watchfiles==1.2.0",
         "websockets==16.1"
       ],
-      "ref": "fastmcp-slim==3.4.4"
+      "ref": "fastmcp-slim==3.4.11"
     },
     {
       "dependsOn": [
-        "fastmcp-slim==3.4.4"
+        "fastmcp-slim==3.4.11"
       ],
-      "ref": "fastmcp==3.4.4"
+      "ref": "fastmcp==3.4.11"
     },
     {
       "dependsOn": [
-        "neo4j==6.2.0",
-        "numpy==2.5.1",
-        "openai==2.45.0",
-        "opentelemetry-api==1.43.0",
-        "posthog==7.22.1",
-        "pydantic==2.13.4",
-        "pytest-asyncio==1.4.0",
-        "pytest-xdist==3.8.0",
-        "pytest==9.1.1",
-        "python-dotenv==1.2.2",
-        "tenacity==9.1.4"
-      ],
-      "ref": "graphiti-core==0.29.2"
-    },
-    {
-      "dependsOn": [
-        "pip==26.1.2",
         "platformdirs==4.10.0"
       ],
       "ref": "griffelib==2.1.0"
@@ -3879,8 +3832,14 @@
     },
     {
       "dependsOn": [
-        "anyio==4.14.1",
-        "certifi==2026.6.17",
+        "python-dateutil==2.9.0.post0"
+      ],
+      "ref": "holidays==0.106"
+    },
+    {
+      "dependsOn": [
+        "anyio==4.15.1",
+        "certifi==2026.10.23",
         "h11==0.16.0"
       ],
       "ref": "httpcore==1.0.9"
@@ -3891,8 +3850,8 @@
     {
       "dependsOn": [
         "Pygments==2.20.0",
-        "anyio==4.14.1",
-        "certifi==2026.6.17",
+        "anyio==4.15.1",
+        "certifi==2026.10.23",
         "click==8.4.2",
         "httpcore==1.0.9",
         "idna==3.18",
@@ -3901,32 +3860,21 @@
       "ref": "httpx==0.28.1"
     },
     {
-      "dependsOn": [
-        "pytest==9.1.1"
-      ],
       "ref": "idna==3.18"
     },
     {
-      "ref": "iniconfig==2.3.0"
-    },
-    {
       "dependsOn": [
-        "more-itertools==11.1.0",
-        "pytest==9.1.1"
+        "more-itertools==11.1.0"
       ],
       "ref": "jaraco.classes==3.4.0"
     },
     {
-      "dependsOn": [
-        "pytest==9.1.1"
-      ],
       "ref": "jaraco.context==6.1.2"
     },
     {
       "dependsOn": [
         "jaraco.classes==3.4.0",
-        "more-itertools==11.1.0",
-        "pytest==9.1.1"
+        "more-itertools==11.1.0"
       ],
       "ref": "jaraco.functools==4.5.0"
     },
@@ -3935,7 +3883,7 @@
     },
     {
       "dependsOn": [
-        "cryptography==50.0.0"
+        "cryptography==50.0.1"
       ],
       "ref": "joserfc==1.7.3"
     },
@@ -3973,7 +3921,6 @@
         "jaraco.classes==3.4.0",
         "jaraco.context==6.1.2",
         "jaraco.functools==4.5.0",
-        "pytest==9.1.1",
         "pywin32-ctypes==0.2.3"
       ],
       "ref": "keyring==25.7.0"
@@ -3982,16 +3929,14 @@
       "dependsOn": [
         "PyYAML==6.0.3",
         "mdurl==0.1.2",
-        "pytest-timeout==2.4.0",
-        "pytest==9.1.1",
         "requests==2.34.2"
       ],
       "ref": "markdown-it-py==4.2.0"
     },
     {
       "dependsOn": [
-        "PyJWT==2.13.0",
-        "anyio==4.14.1",
+        "PyJWT==2.15.0",
+        "anyio==4.15.1",
         "httpx-sse==0.4.3",
         "httpx==0.28.1",
         "jsonschema==4.26.0",
@@ -4009,7 +3954,7 @@
         "uvicorn==0.51.0",
         "websockets==16.1"
       ],
-      "ref": "mcp==1.28.1"
+      "ref": "mcp==1.30.0"
     },
     {
       "ref": "mdurl==0.1.2"
@@ -4029,7 +3974,7 @@
     },
     {
       "dependsOn": [
-        "anyio==4.14.1",
+        "anyio==4.15.1",
         "distro==1.9.0",
         "httpx==0.28.1",
         "jiter==0.16.0",
@@ -4052,7 +3997,7 @@
       "dependsOn": [
         "typing_extensions==4.16.0"
       ],
-      "ref": "opentelemetry-api==1.43.0"
+      "ref": "opentelemetry-api==1.45.2"
     },
     {
       "ref": "packaging==25.0"
@@ -4061,30 +4006,20 @@
       "ref": "pathable==0.6.0"
     },
     {
-      "ref": "pip==26.1.2"
-    },
-    {
       "ref": "platformdirs==4.10.0"
-    },
-    {
-      "dependsOn": [
-        "pytest==9.1.1"
-      ],
-      "ref": "pluggy==1.6.0"
     },
     {
       "dependsOn": [
         "backoff==2.2.1",
         "distro==1.9.0",
-        "fastmcp==3.4.4",
-        "mcp==1.28.1",
+        "fastmcp==3.4.11",
+        "mcp==1.30.0",
         "openai==2.45.0",
         "packaging==25.0",
         "pydantic==2.13.4",
-        "pytest-asyncio==1.4.0",
-        "pytest-timeout==2.4.0",
-        "pytest==9.1.1",
+        "python-dateutil==2.9.0.post0",
         "requests==2.34.2",
+        "tiktoken==0.14.0",
         "typing_extensions==4.16.0"
       ],
       "ref": "posthog==7.22.1"
@@ -4092,10 +4027,10 @@
     {
       "dependsOn": [
         "aiofile==3.11.1",
-        "anyio==4.14.1",
+        "anyio==4.15.1",
         "beartype==0.22.9",
         "cachetools==7.1.4",
-        "cryptography==50.0.0",
+        "cryptography==50.0.1",
         "keyring==25.7.0",
         "pydantic==2.13.4",
         "pytz==2026.2",
@@ -4136,36 +4071,9 @@
     },
     {
       "dependsOn": [
-        "pytest==9.1.1",
-        "typing_extensions==4.16.0"
+        "six==1.17.0"
       ],
-      "ref": "pytest-asyncio==1.4.0"
-    },
-    {
-      "dependsOn": [
-        "pytest==9.1.1"
-      ],
-      "ref": "pytest-timeout==2.4.0"
-    },
-    {
-      "dependsOn": [
-        "execnet==2.1.2",
-        "pytest==9.1.1"
-      ],
-      "ref": "pytest-xdist==3.8.0"
-    },
-    {
-      "dependsOn": [
-        "Pygments==2.20.0",
-        "attrs==26.1.0",
-        "colorama==0.4.6",
-        "exceptiongroup==1.3.1",
-        "iniconfig==2.3.0",
-        "packaging==25.0",
-        "pluggy==1.6.0",
-        "requests==2.34.2"
-      ],
-      "ref": "pytest==9.1.1"
+      "ref": "python-dateutil==2.9.0.post0"
     },
     {
       "dependsOn": [
@@ -4194,18 +4102,20 @@
       "ref": "referencing==0.37.0"
     },
     {
+      "ref": "regex==2026.9.29"
+    },
+    {
       "dependsOn": [
-        "certifi==2026.6.17",
+        "certifi==2026.10.23",
         "charset-normalizer==3.4.9",
         "idna==3.18",
-        "urllib3==2.7.0"
+        "urllib3==2.8.0"
       ],
       "ref": "requests==2.34.2"
     },
     {
       "dependsOn": [
         "Pygments==2.20.0",
-        "pytest==9.1.1",
         "rich==15.0.0"
       ],
       "ref": "rich-rst==2.1.0"
@@ -4218,17 +4128,44 @@
       "ref": "rich==15.0.0"
     },
     {
+      "dependsOn": [
+        "Jinja2==3.1.6",
+        "archolith-graphiti-core==0.31.2.post1",
+        "archolith-mcp-framework==0.2.0",
+        "archolith-oauth==0.3.1",
+        "fastapi==0.139.0",
+        "fastmcp==3.4.11",
+        "holidays==0.106",
+        "httpx==0.28.1",
+        "joserfc==1.7.3",
+        "neo4j==6.2.0",
+        "pydantic==2.13.4",
+        "python-dotenv==1.2.2",
+        "python-multipart==0.0.32",
+        "rich==15.0.0",
+        "starlette==1.3.1",
+        "tenacity==9.1.4",
+        "tiktoken==0.14.0",
+        "typer==0.26.8",
+        "uvicorn==0.51.0"
+      ],
+      "ref": "root-component"
+    },
+    {
       "ref": "rpds-py==2026.6.3"
     },
     {
       "ref": "shellingham==1.5.4"
     },
     {
+      "ref": "six==1.17.0"
+    },
+    {
       "ref": "sniffio==1.3.1"
     },
     {
       "dependsOn": [
-        "anyio==4.14.1",
+        "anyio==4.15.1",
         "fastapi==0.139.0",
         "pydantic==2.13.4",
         "starlette==1.3.1",
@@ -4240,7 +4177,7 @@
       "dependsOn": [
         "Jinja2==3.1.6",
         "PyYAML==6.0.3",
-        "anyio==4.14.1",
+        "anyio==4.15.1",
         "httpx==0.28.1",
         "python-multipart==0.0.32",
         "typing_extensions==4.16.0"
@@ -4248,10 +4185,14 @@
       "ref": "starlette==1.3.1"
     },
     {
-      "dependsOn": [
-        "pytest==9.1.1"
-      ],
       "ref": "tenacity==9.1.4"
+    },
+    {
+      "dependsOn": [
+        "regex==2026.9.29",
+        "requests==2.34.2"
+      ],
+      "ref": "tiktoken==0.14.0"
     },
     {
       "dependsOn": [
@@ -4282,7 +4223,7 @@
       "ref": "uncalled-for==0.3.2"
     },
     {
-      "ref": "urllib3==2.7.0"
+      "ref": "urllib3==2.8.0"
     },
     {
       "dependsOn": [
@@ -4298,7 +4239,7 @@
     },
     {
       "dependsOn": [
-        "anyio==4.14.1"
+        "anyio==4.15.1"
       ],
       "ref": "watchfiles==1.2.0"
     },
@@ -4307,6 +4248,81 @@
     }
   ],
   "metadata": {
+    "component": {
+      "bom-ref": "root-component",
+      "description": "Provenance, governed context, and code-impact analysis for coding agents.",
+      "externalReferences": [
+        {
+          "comment": "from pyproject urls: Documentation",
+          "type": "documentation",
+          "url": "https://github.com/Archolith/menhir#readme"
+        },
+        {
+          "comment": "from pyproject urls: Issues",
+          "type": "issue-tracker",
+          "url": "https://github.com/Archolith/menhir/issues"
+        },
+        {
+          "comment": "from pyproject urls: Security",
+          "type": "other",
+          "url": "https://github.com/Archolith/menhir/security/policy"
+        },
+        {
+          "comment": "from pyproject urls: Repository",
+          "type": "vcs",
+          "url": "https://github.com/Archolith/menhir"
+        },
+        {
+          "comment": "from pyproject urls: Homepage",
+          "type": "website",
+          "url": "https://archolith.dev"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "id": "Apache-2.0"
+          }
+        },
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "name": "declared license file: LICENSE",
+            "text": {
+              "content": "CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIEFwYWNoZSBMaWNlbnNlCiAgICAgICAgICAgICAgICAgICAgICAgICAgIFZlcnNpb24gMi4wLCBKYW51YXJ5IDIwMDQKICAgICAgICAgICAgICAgICAgICAgICAgaHR0cDovL3d3dy5hcGFjaGUub3JnL2xpY2Vuc2VzLwoKICAgVEVSTVMgQU5EIENPTkRJVElPTlMgRk9SIFVTRSwgUkVQUk9EVUNUSU9OLCBBTkQgRElTVFJJQlVUSU9OCgogICAxLiBEZWZpbml0aW9ucy4KCiAgICAgICJMaWNlbnNlIiBzaGFsbCBtZWFuIHRoZSB0ZXJtcyBhbmQgY29uZGl0aW9ucyBmb3IgdXNlLCByZXByb2R1Y3Rpb24sCiAgICAgIGFuZCBkaXN0cmlidXRpb24gYXMgZGVmaW5lZCBieSBTZWN0aW9ucyAxIHRocm91Z2ggOSBvZiB0aGlzIGRvY3VtZW50LgoKICAgICAgIkxpY2Vuc29yIiBzaGFsbCBtZWFuIHRoZSBjb3B5cmlnaHQgb3duZXIgb3IgZW50aXR5IGF1dGhvcml6ZWQgYnkKICAgICAgdGhlIGNvcHlyaWdodCBvd25lciB0aGF0IGlzIGdyYW50aW5nIHRoZSBMaWNlbnNlLgoKICAgICAgIkxlZ2FsIEVudGl0eSIgc2hhbGwgbWVhbiB0aGUgdW5pb24gb2YgdGhlIGFjdGluZyBlbnRpdHkgYW5kIGFsbAogICAgICBvdGhlciBlbnRpdGllcyB0aGF0IGNvbnRyb2wsIGFyZSBjb250cm9sbGVkIGJ5LCBvciBhcmUgdW5kZXIgY29tbW9uCiAgICAgIGNvbnRyb2wgd2l0aCB0aGF0IGVudGl0eS4gRm9yIHRoZSBwdXJwb3NlcyBvZiB0aGlzIGRlZmluaXRpb24sCiAgICAgICJjb250cm9sIiBtZWFucyAoaSkgdGhlIHBvd2VyLCBkaXJlY3Qgb3IgaW5kaXJlY3QsIHRvIGNhdXNlIHRoZQogICAgICBkaXJlY3Rpb24gb3IgbWFuYWdlbWVudCBvZiBzdWNoIGVudGl0eSwgd2hldGhlciBieSBjb250cmFjdCBvcgogICAgICBvdGhlcndpc2UsIG9yIChpaSkgb3duZXJzaGlwIG9mIGZpZnR5IHBlcmNlbnQgKDUwJSkgb3IgbW9yZSBvZiB0aGUKICAgICAgb3V0c3RhbmRpbmcgc2hhcmVzLCBvciAoaWlpKSBiZW5lZmljaWFsIG93bmVyc2hpcCBvZiBzdWNoIGVudGl0eS4KCiAgICAgICJZb3UiIChvciAiWW91ciIpIHNoYWxsIG1lYW4gYW4gaW5kaXZpZHVhbCBvciBMZWdhbCBFbnRpdHkKICAgICAgZXhlcmNpc2luZyBwZXJtaXNzaW9ucyBncmFudGVkIGJ5IHRoaXMgTGljZW5zZS4KCiAgICAgICJTb3VyY2UiIGZvcm0gc2hhbGwgbWVhbiB0aGUgcHJlZmVycmVkIGZvcm0gZm9yIG1ha2luZyBtb2RpZmljYXRpb25zLAogICAgICBpbmNsdWRpbmcgYnV0IG5vdCBsaW1pdGVkIHRvIHNvZnR3YXJlIHNvdXJjZSBjb2RlLCBkb2N1bWVudGF0aW9uCiAgICAgIHNvdXJjZSwgYW5kIGNvbmZpZ3VyYXRpb24gZmlsZXMuCgogICAgICAiT2JqZWN0IiBmb3JtIHNoYWxsIG1lYW4gYW55IGZvcm0gcmVzdWx0aW5nIGZyb20gbWVjaGFuaWNhbAogICAgICB0cmFuc2Zvcm1hdGlvbiBvciB0cmFuc2xhdGlvbiBvZiBhIFNvdXJjZSBmb3JtLCBpbmNsdWRpbmcgYnV0CiAgICAgIG5vdCBsaW1pdGVkIHRvIGNvbXBpbGVkIG9iamVjdCBjb2RlLCBnZW5lcmF0ZWQgZG9jdW1lbnRhdGlvbiwKICAgICAgYW5kIGNvbnZlcnNpb25zIHRvIG90aGVyIG1lZGlhIHR5cGVzLgoKICAgICAgIldvcmsiIHNoYWxsIG1lYW4gdGhlIHdvcmsgb2YgYXV0aG9yc2hpcCwgd2hldGhlciBpbiBTb3VyY2Ugb3IKICAgICAgT2JqZWN0IGZvcm0sIG1hZGUgYXZhaWxhYmxlIHVuZGVyIHRoZSBMaWNlbnNlLCBhcyBpbmRpY2F0ZWQgYnkgYQogICAgICBjb3B5cmlnaHQgbm90aWNlIHRoYXQgaXMgaW5jbHVkZWQgaW4gb3IgYXR0YWNoZWQgdG8gdGhlIHdvcmsKICAgICAgKGFuIGV4YW1wbGUgaXMgcHJvdmlkZWQgaW4gdGhlIEFwcGVuZGl4IGJlbG93KS4KCiAgICAgICJEZXJpdmF0aXZlIFdvcmtzIiBzaGFsbCBtZWFuIGFueSB3b3JrLCB3aGV0aGVyIGluIFNvdXJjZSBvciBPYmplY3QKICAgICAgZm9ybSwgdGhhdCBpcyBiYXNlZCBvbiAob3IgZGVyaXZlZCBmcm9tKSB0aGUgV29yayBhbmQgZm9yIHdoaWNoIHRoZQogICAgICBlZGl0b3JpYWwgcmV2aXNpb25zLCBhbm5vdGF0aW9ucywgZWxhYm9yYXRpb25zLCBvciBvdGhlciBtb2RpZmljYXRpb25zCiAgICAgIHJlcHJlc2VudCwgYXMgYSB3aG9sZSwgYW4gb3JpZ2luYWwgd29yayBvZiBhdXRob3JzaGlwLiBGb3IgdGhlIHB1cnBvc2VzCiAgICAgIG9mIHRoaXMgTGljZW5zZSwgRGVyaXZhdGl2ZSBXb3JrcyBzaGFsbCBub3QgaW5jbHVkZSB3b3JrcyB0aGF0IHJlbWFpbgogICAgICBzZXBhcmFibGUgZnJvbSwgb3IgbWVyZWx5IGxpbmsgKG9yIGJpbmQgYnkgbmFtZSkgdG8gdGhlIGludGVyZmFjZXMgb2YsCiAgICAgIHRoZSBXb3JrIGFuZCBEZXJpdmF0aXZlIFdvcmtzIHRoZXJlb2YuCgogICAgICAiQ29udHJpYnV0aW9uIiBzaGFsbCBtZWFuIGFueSB3b3JrIG9mIGF1dGhvcnNoaXAsIGluY2x1ZGluZwogICAgICB0aGUgb3JpZ2luYWwgdmVyc2lvbiBvZiB0aGUgV29yayBhbmQgYW55IG1vZGlmaWNhdGlvbnMgb3IgYWRkaXRpb25zCiAgICAgIHRvIHRoYXQgV29yayBvciBEZXJpdmF0aXZlIFdvcmtzIHRoZXJlb2YsIHRoYXQgaXMgaW50ZW50aW9uYWxseQogICAgICBzdWJtaXR0ZWQgdG8gTGljZW5zb3IgZm9yIGluY2x1c2lvbiBpbiB0aGUgV29yayBieSB0aGUgY29weXJpZ2h0IG93bmVyCiAgICAgIG9yIGJ5IGFuIGluZGl2aWR1YWwgb3IgTGVnYWwgRW50aXR5IGF1dGhvcml6ZWQgdG8gc3VibWl0IG9uIGJlaGFsZiBvZgogICAgICB0aGUgY29weXJpZ2h0IG93bmVyLiBGb3IgdGhlIHB1cnBvc2VzIG9mIHRoaXMgZGVmaW5pdGlvbiwgInN1Ym1pdHRlZCIKICAgICAgbWVhbnMgYW55IGZvcm0gb2YgZWxlY3Ryb25pYywgdmVyYmFsLCBvciB3cml0dGVuIGNvbW11bmljYXRpb24gc2VudAogICAgICB0byB0aGUgTGljZW5zb3Igb3IgaXRzIHJlcHJlc2VudGF0aXZlcywgaW5jbHVkaW5nIGJ1dCBub3QgbGltaXRlZCB0bwogICAgICBjb21tdW5pY2F0aW9uIG9uIGVsZWN0cm9uaWMgbWFpbGluZyBsaXN0cywgc291cmNlIGNvZGUgY29udHJvbCBzeXN0ZW1zLAogICAgICBhbmQgaXNzdWUgdHJhY2tpbmcgc3lzdGVtcyB0aGF0IGFyZSBtYW5hZ2VkIGJ5LCBvciBvbiBiZWhhbGYgb2YsIHRoZQogICAgICBMaWNlbnNvciBmb3IgdGhlIHB1cnBvc2Ugb2YgZGlzY3Vzc2luZyBhbmQgaW1wcm92aW5nIHRoZSBXb3JrLCBidXQKICAgICAgZXhjbHVkaW5nIGNvbW11bmljYXRpb24gdGhhdCBpcyBjb25zcGljdW91c2x5IG1hcmtlZCBvciBvdGhlcndpc2UKICAgICAgZGVzaWduYXRlZCBpbiB3cml0aW5nIGJ5IHRoZSBjb3B5cmlnaHQgb3duZXIgYXMgIk5vdCBhIENvbnRyaWJ1dGlvbi4iCgogICAgICAiQ29udHJpYnV0b3IiIHNoYWxsIG1lYW4gTGljZW5zb3IgYW5kIGFueSBpbmRpdmlkdWFsIG9yIExlZ2FsIEVudGl0eQogICAgICBvbiBiZWhhbGYgb2Ygd2hvbSBhIENvbnRyaWJ1dGlvbiBoYXMgYmVlbiByZWNlaXZlZCBieSBMaWNlbnNvciBhbmQKICAgICAgc3Vic2VxdWVudGx5IGluY29ycG9yYXRlZCB3aXRoaW4gdGhlIFdvcmsuCgogICAyLiBHcmFudCBvZiBDb3B5cmlnaHQgTGljZW5zZS4gU3ViamVjdCB0byB0aGUgdGVybXMgYW5kIGNvbmRpdGlvbnMgb2YKICAgICAgdGhpcyBMaWNlbnNlLCBlYWNoIENvbnRyaWJ1dG9yIGhlcmVieSBncmFudHMgdG8gWW91IGEgcGVycGV0dWFsLAogICAgICB3b3JsZHdpZGUsIG5vbi1leGNsdXNpdmUsIG5vLWNoYXJnZSwgcm95YWx0eS1mcmVlLCBpcnJldm9jYWJsZQogICAgICBjb3B5cmlnaHQgbGljZW5zZSB0byByZXByb2R1Y2UsIHByZXBhcmUgRGVyaXZhdGl2ZSBXb3JrcyBvZiwKICAgICAgcHVibGljbHkgZGlzcGxheSwgcHVibGljbHkgcGVyZm9ybSwgc3VibGljZW5zZSwgYW5kIGRpc3RyaWJ1dGUgdGhlCiAgICAgIFdvcmsgYW5kIHN1Y2ggRGVyaXZhdGl2ZSBXb3JrcyBpbiBTb3VyY2Ugb3IgT2JqZWN0IGZvcm0uCgogICAzLiBHcmFudCBvZiBQYXRlbnQgTGljZW5zZS4gU3ViamVjdCB0byB0aGUgdGVybXMgYW5kIGNvbmRpdGlvbnMgb2YKICAgICAgdGhpcyBMaWNlbnNlLCBlYWNoIENvbnRyaWJ1dG9yIGhlcmVieSBncmFudHMgdG8gWW91IGEgcGVycGV0dWFsLAogICAgICB3b3JsZHdpZGUsIG5vbi1leGNsdXNpdmUsIG5vLWNoYXJnZSwgcm95YWx0eS1mcmVlLCBpcnJldm9jYWJsZQogICAgICAoZXhjZXB0IGFzIHN0YXRlZCBpbiB0aGlzIHNlY3Rpb24pIHBhdGVudCBsaWNlbnNlIHRvIG1ha2UsIGhhdmUgbWFkZSwKICAgICAgdXNlLCBvZmZlciB0byBzZWxsLCBzZWxsLCBpbXBvcnQsIGFuZCBvdGhlcndpc2UgdHJhbnNmZXIgdGhlIFdvcmssCiAgICAgIHdoZXJlIHN1Y2ggbGljZW5zZSBhcHBsaWVzIG9ubHkgdG8gdGhvc2UgcGF0ZW50IGNsYWltcyBsaWNlbnNhYmxlCiAgICAgIGJ5IHN1Y2ggQ29udHJpYnV0b3IgdGhhdCBhcmUgbmVjZXNzYXJpbHkgaW5mcmluZ2VkIGJ5IHRoZWlyCiAgICAgIENvbnRyaWJ1dGlvbihzKSBhbG9uZSBvciBieSBjb21iaW5hdGlvbiBvZiB0aGVpciBDb250cmlidXRpb24ocykKICAgICAgd2l0aCB0aGUgV29yayB0byB3aGljaCBzdWNoIENvbnRyaWJ1dGlvbihzKSB3YXMgc3VibWl0dGVkLiBJZiBZb3UKICAgICAgaW5zdGl0dXRlIHBhdGVudCBsaXRpZ2F0aW9uIGFnYWluc3QgYW55IGVudGl0eSAoaW5jbHVkaW5nIGEKICAgICAgY3Jvc3MtY2xhaW0gb3IgY291bnRlcmNsYWltIGluIGEgbGF3c3VpdCkgYWxsZWdpbmcgdGhhdCB0aGUgV29yawogICAgICBvciBhIENvbnRyaWJ1dGlvbiBpbmNvcnBvcmF0ZWQgd2l0aGluIHRoZSBXb3JrIGNvbnN0aXR1dGVzIGRpcmVjdAogICAgICBvciBjb250cmlidXRvcnkgcGF0ZW50IGluZnJpbmdlbWVudCwgdGhlbiBhbnkgcGF0ZW50IGxpY2Vuc2VzCiAgICAgIGdyYW50ZWQgdG8gWW91IHVuZGVyIHRoaXMgTGljZW5zZSBmb3IgdGhhdCBXb3JrIHNoYWxsIHRlcm1pbmF0ZQogICAgICBhcyBvZiB0aGUgZGF0ZSBzdWNoIGxpdGlnYXRpb24gaXMgZmlsZWQuCgogICA0LiBSZWRpc3RyaWJ1dGlvbi4gWW91IG1heSByZXByb2R1Y2UgYW5kIGRpc3RyaWJ1dGUgY29waWVzIG9mIHRoZQogICAgICBXb3JrIG9yIERlcml2YXRpdmUgV29ya3MgdGhlcmVvZiBpbiBhbnkgbWVkaXVtLCB3aXRoIG9yIHdpdGhvdXQKICAgICAgbW9kaWZpY2F0aW9ucywgYW5kIGluIFNvdXJjZSBvciBPYmplY3QgZm9ybSwgcHJvdmlkZWQgdGhhdCBZb3UKICAgICAgbWVldCB0aGUgZm9sbG93aW5nIGNvbmRpdGlvbnM6CgogICAgICAoYSkgWW91IG11c3QgZ2l2ZSBhbnkgb3RoZXIgcmVjaXBpZW50cyBvZiB0aGUgV29yayBvcgogICAgICAgICAgRGVyaXZhdGl2ZSBXb3JrcyBhIGNvcHkgb2YgdGhpcyBMaWNlbnNlOyBhbmQKCiAgICAgIChiKSBZb3UgbXVzdCBjYXVzZSBhbnkgbW9kaWZpZWQgZmlsZXMgdG8gY2FycnkgcHJvbWluZW50IG5vdGljZXMKICAgICAgICAgIHN0YXRpbmcgdGhhdCBZb3UgY2hhbmdlZCB0aGUgZmlsZXM7IGFuZAoKICAgICAgKGMpIFlvdSBtdXN0IHJldGFpbiwgaW4gdGhlIFNvdXJjZSBmb3JtIG9mIGFueSBEZXJpdmF0aXZlIFdvcmtzCiAgICAgICAgICB0aGF0IFlvdSBkaXN0cmlidXRlLCBhbGwgY29weXJpZ2h0LCBwYXRlbnQsIHRyYWRlbWFyaywgYW5kCiAgICAgICAgICBhdHRyaWJ1dGlvbiBub3RpY2VzIGZyb20gdGhlIFNvdXJjZSBmb3JtIG9mIHRoZSBXb3JrLAogICAgICAgICAgZXhjbHVkaW5nIHRob3NlIG5vdGljZXMgdGhhdCBkbyBub3QgcGVydGFpbiB0byBhbnkgcGFydCBvZgogICAgICAgICAgdGhlIERlcml2YXRpdmUgV29ya3M7IGFuZAoKICAgICAgKGQpIElmIHRoZSBXb3JrIGluY2x1ZGVzIGEgIk5PVElDRSIgdGV4dCBmaWxlIGFzIHBhcnQgb2YgaXRzCiAgICAgICAgICBkaXN0cmlidXRpb24sIHRoZW4gYW55IERlcml2YXRpdmUgV29ya3MgdGhhdCBZb3UgZGlzdHJpYnV0ZSBtdXN0CiAgICAgICAgICBpbmNsdWRlIGEgcmVhZGFibGUgY29weSBvZiB0aGUgYXR0cmlidXRpb24gbm90aWNlcyBjb250YWluZWQKICAgICAgICAgIHdpdGhpbiBzdWNoIE5PVElDRSBmaWxlLCBleGNsdWRpbmcgdGhvc2Ugbm90aWNlcyB0aGF0IGRvIG5vdAogICAgICAgICAgcGVydGFpbiB0byBhbnkgcGFydCBvZiB0aGUgRGVyaXZhdGl2ZSBXb3JrcywgaW4gYXQgbGVhc3Qgb25lCiAgICAgICAgICBvZiB0aGUgZm9sbG93aW5nIHBsYWNlczogd2l0aGluIGEgTk9USUNFIHRleHQgZmlsZSBkaXN0cmlidXRlZAogICAgICAgICAgYXMgcGFydCBvZiB0aGUgRGVyaXZhdGl2ZSBXb3Jrczsgd2l0aGluIHRoZSBTb3VyY2UgZm9ybSBvcgogICAgICAgICAgZG9jdW1lbnRhdGlvbiwgaWYgcHJvdmlkZWQgYWxvbmcgd2l0aCB0aGUgRGVyaXZhdGl2ZSBXb3Jrczsgb3IsCiAgICAgICAgICB3aXRoaW4gYSBkaXNwbGF5IGdlbmVyYXRlZCBieSB0aGUgRGVyaXZhdGl2ZSBXb3JrcywgaWYgYW5kCiAgICAgICAgICB3aGVyZXZlciBzdWNoIHRoaXJkLXBhcnR5IG5vdGljZXMgbm9ybWFsbHkgYXBwZWFyLiBUaGUgY29udGVudHMKICAgICAgICAgIG9mIHRoZSBOT1RJQ0UgZmlsZSBhcmUgZm9yIGluZm9ybWF0aW9uYWwgcHVycG9zZXMgb25seSBhbmQKICAgICAgICAgIGRvIG5vdCBtb2RpZnkgdGhlIExpY2Vuc2UuIFlvdSBtYXkgYWRkIFlvdXIgb3duIGF0dHJpYnV0aW9uCiAgICAgICAgICBub3RpY2VzIHdpdGhpbiBEZXJpdmF0aXZlIFdvcmtzIHRoYXQgWW91IGRpc3RyaWJ1dGUsIGFsb25nc2lkZQogICAgICAgICAgb3IgYXMgYW4gYWRkZW5kdW0gdG8gdGhlIE5PVElDRSB0ZXh0IGZyb20gdGhlIFdvcmssIHByb3ZpZGVkCiAgICAgICAgICB0aGF0IHN1Y2ggYWRkaXRpb25hbCBhdHRyaWJ1dGlvbiBub3RpY2VzIGNhbm5vdCBiZSBjb25zdHJ1ZWQKICAgICAgICAgIGFzIG1vZGlmeWluZyB0aGUgTGljZW5zZS4KCiAgICAgIFlvdSBtYXkgYWRkIFlvdXIgb3duIGNvcHlyaWdodCBzdGF0ZW1lbnQgdG8gWW91ciBtb2RpZmljYXRpb25zIGFuZAogICAgICBtYXkgcHJvdmlkZSBhZGRpdGlvbmFsIG9yIGRpZmZlcmVudCBsaWNlbnNlIHRlcm1zIGFuZCBjb25kaXRpb25zCiAgICAgIGZvciB1c2UsIHJlcHJvZHVjdGlvbiwgb3IgZGlzdHJpYnV0aW9uIG9mIFlvdXIgbW9kaWZpY2F0aW9ucywgb3IKICAgICAgZm9yIGFueSBzdWNoIERlcml2YXRpdmUgV29ya3MgYXMgYSB3aG9sZSwgcHJvdmlkZWQgWW91ciB1c2UsCiAgICAgIHJlcHJvZHVjdGlvbiwgYW5kIGRpc3RyaWJ1dGlvbiBvZiB0aGUgV29yayBvdGhlcndpc2UgY29tcGxpZXMgd2l0aAogICAgICB0aGUgY29uZGl0aW9ucyBzdGF0ZWQgaW4gdGhpcyBMaWNlbnNlLgoKICAgNS4gU3VibWlzc2lvbiBvZiBDb250cmlidXRpb25zLiBVbmxlc3MgWW91IGV4cGxpY2l0bHkgc3RhdGUgb3RoZXJ3aXNlLAogICAgICBhbnkgQ29udHJpYnV0aW9uIGludGVudGlvbmFsbHkgc3VibWl0dGVkIGZvciBpbmNsdXNpb24gaW4gdGhlIFdvcmsKICAgICAgYnkgWW91IHRvIHRoZSBMaWNlbnNvciBzaGFsbCBiZSB1bmRlciB0aGUgdGVybXMgYW5kIGNvbmRpdGlvbnMgb2YKICAgICAgdGhpcyBMaWNlbnNlLCB3aXRob3V0IGFueSBhZGRpdGlvbmFsIHRlcm1zIG9yIGNvbmRpdGlvbnMuCiAgICAgIE5vdHdpdGhzdGFuZGluZyB0aGUgYWJvdmUsIG5vdGhpbmcgaGVyZWluIHNoYWxsIHN1cGVyc2VkZSBvciBtb2RpZnkKICAgICAgdGhlIHRlcm1zIG9mIGFueSBzZXBhcmF0ZSBsaWNlbnNlIGFncmVlbWVudCB5b3UgbWF5IGhhdmUgZXhlY3V0ZWQKICAgICAgd2l0aCBMaWNlbnNvciByZWdhcmRpbmcgc3VjaCBDb250cmlidXRpb25zLgoKICAgNi4gVHJhZGVtYXJrcy4gVGhpcyBMaWNlbnNlIGRvZXMgbm90IGdyYW50IHBlcm1pc3Npb24gdG8gdXNlIHRoZSB0cmFkZQogICAgICBuYW1lcywgdHJhZGVtYXJrcywgc2VydmljZSBtYXJrcywgb3IgcHJvZHVjdCBuYW1lcyBvZiB0aGUgTGljZW5zb3IsCiAgICAgIGV4Y2VwdCBhcyByZXF1aXJlZCBmb3IgcmVhc29uYWJsZSBhbmQgY3VzdG9tYXJ5IHVzZSBpbiBkZXNjcmliaW5nIHRoZQogICAgICBvcmlnaW4gb2YgdGhlIFdvcmsgYW5kIHJlcHJvZHVjaW5nIHRoZSBjb250ZW50IG9mIHRoZSBOT1RJQ0UgZmlsZS4KCiAgIDcuIERpc2NsYWltZXIgb2YgV2FycmFudHkuIFVubGVzcyByZXF1aXJlZCBieSBhcHBsaWNhYmxlIGxhdyBvcgogICAgICBhZ3JlZWQgdG8gaW4gd3JpdGluZywgTGljZW5zb3IgcHJvdmlkZXMgdGhlIFdvcmsgKGFuZCBlYWNoCiAgICAgIENvbnRyaWJ1dG9yIHByb3ZpZGVzIGl0cyBDb250cmlidXRpb25zKSBvbiBhbiAiQVMgSVMiIEJBU0lTLAogICAgICBXSVRIT1VUIFdBUlJBTlRJRVMgT1IgQ09ORElUSU9OUyBPRiBBTlkgS0lORCwgZWl0aGVyIGV4cHJlc3Mgb3IKICAgICAgaW1wbGllZCwgaW5jbHVkaW5nLCB3aXRob3V0IGxpbWl0YXRpb24sIGFueSB3YXJyYW50aWVzIG9yIGNvbmRpdGlvbnMKICAgICAgb2YgVElUTEUsIE5PTi1JTkZSSU5HRU1FTlQsIE1FUkNIQU5UQUJJTElUWSwgb3IgRklUTkVTUyBGT1IgQQogICAgICBQQVJUSUNVTEFSIFBVUlBPU0UuIFlvdSBhcmUgc29sZWx5IHJlc3BvbnNpYmxlIGZvciBkZXRlcm1pbmluZyB0aGUKICAgICAgYXBwcm9wcmlhdGVuZXNzIG9mIHVzaW5nIG9yIHJlZGlzdHJpYnV0aW5nIHRoZSBXb3JrIGFuZCBhc3N1bWUgYW55CiAgICAgIHJpc2tzIGFzc29jaWF0ZWQgd2l0aCBZb3VyIGV4ZXJjaXNlIG9mIHBlcm1pc3Npb25zIHVuZGVyIHRoaXMgTGljZW5zZS4KCiAgIDguIExpbWl0YXRpb24gb2YgTGlhYmlsaXR5LiBJbiBubyBldmVudCBhbmQgdW5kZXIgbm8gbGVnYWwgdGhlb3J5LAogICAgICB3aGV0aGVyIGluIHRvcnQgKGluY2x1ZGluZyBuZWdsaWdlbmNlKSwgY29udHJhY3QsIG9yIG90aGVyd2lzZSwKICAgICAgdW5sZXNzIHJlcXVpcmVkIGJ5IGFwcGxpY2FibGUgbGF3IChzdWNoIGFzIGRlbGliZXJhdGUgYW5kIGdyb3NzbHkKICAgICAgbmVnbGlnZW50IGFjdHMpIG9yIGFncmVlZCB0byBpbiB3cml0aW5nLCBzaGFsbCBhbnkgQ29udHJpYnV0b3IgYmUKICAgICAgbGlhYmxlIHRvIFlvdSBmb3IgZGFtYWdlcywgaW5jbHVkaW5nIGFueSBkaXJlY3QsIGluZGlyZWN0LCBzcGVjaWFsLAogICAgICBpbmNpZGVudGFsLCBvciBjb25zZXF1ZW50aWFsIGRhbWFnZXMgb2YgYW55IGNoYXJhY3RlciBhcmlzaW5nIGFzIGEKICAgICAgcmVzdWx0IG9mIHRoaXMgTGljZW5zZSBvciBvdXQgb2YgdGhlIHVzZSBvciBpbmFiaWxpdHkgdG8gdXNlIHRoZQogICAgICBXb3JrIChpbmNsdWRpbmcgYnV0IG5vdCBsaW1pdGVkIHRvIGRhbWFnZXMgZm9yIGxvc3Mgb2YgZ29vZHdpbGwsCiAgICAgIHdvcmsgc3RvcHBhZ2UsIGNvbXB1dGVyIGZhaWx1cmUgb3IgbWFsZnVuY3Rpb24sIG9yIGFueSBhbmQgYWxsCiAgICAgIG90aGVyIGNvbW1lcmNpYWwgZGFtYWdlcyBvciBsb3NzZXMpLCBldmVuIGlmIHN1Y2ggQ29udHJpYnV0b3IKICAgICAgaGFzIGJlZW4gYWR2aXNlZCBvZiB0aGUgcG9zc2liaWxpdHkgb2Ygc3VjaCBkYW1hZ2VzLgoKICAgOS4gQWNjZXB0aW5nIFdhcnJhbnR5IG9yIEFkZGl0aW9uYWwgTGlhYmlsaXR5LiBXaGlsZSByZWRpc3RyaWJ1dGluZwogICAgICB0aGUgV29yayBvciBEZXJpdmF0aXZlIFdvcmtzIHRoZXJlb2YsIFlvdSBtYXkgY2hvb3NlIHRvIG9mZmVyLAogICAgICBhbmQgY2hhcmdlIGEgZmVlIGZvciwgYWNjZXB0YW5jZSBvZiBzdXBwb3J0LCB3YXJyYW50eSwgaW5kZW1uaXR5LAogICAgICBvciBvdGhlciBsaWFiaWxpdHkgb2JsaWdhdGlvbnMgYW5kL29yIHJpZ2h0cyBjb25zaXN0ZW50IHdpdGggdGhpcwogICAgICBMaWNlbnNlLiBIb3dldmVyLCBpbiBhY2NlcHRpbmcgc3VjaCBvYmxpZ2F0aW9ucywgWW91IG1heSBhY3Qgb25seQogICAgICBvbiBZb3VyIG93biBiZWhhbGYgYW5kIG9uIFlvdXIgc29sZSByZXNwb25zaWJpbGl0eSwgbm90IG9uIGJlaGFsZgogICAgICBvZiBhbnkgb3RoZXIgQ29udHJpYnV0b3IsIGFuZCBvbmx5IGlmIFlvdSBhZ3JlZSB0byBpbmRlbW5pZnksCiAgICAgIGRlZmVuZCwgYW5kIGhvbGQgZWFjaCBDb250cmlidXRvciBoYXJtbGVzcyBmb3IgYW55IGxpYWJpbGl0eQogICAgICBpbmN1cnJlZCBieSwgb3IgY2xhaW1zIGFzc2VydGVkIGFnYWluc3QsIHN1Y2ggQ29udHJpYnV0b3IgYnkgcmVhc29uCiAgICAgIG9mIHlvdXIgYWNjZXB0aW5nIGFueSBzdWNoIHdhcnJhbnR5IG9yIGFkZGl0aW9uYWwgbGlhYmlsaXR5LgoKICAgRU5EIE9GIFRFUk1TIEFORCBDT05ESVRJT05TCgogICBBUFBFTkRJWDogSG93IHRvIGFwcGx5IHRoZSBBcGFjaGUgTGljZW5zZSB0byB5b3VyIHdvcmsuCgogICAgICBUbyBhcHBseSB0aGUgQXBhY2hlIExpY2Vuc2UgdG8geW91ciB3b3JrLCBhdHRhY2ggdGhlIGZvbGxvd2luZwogICAgICBib2lsZXJwbGF0ZSBub3RpY2UsIHdpdGggdGhlIGZpZWxkcyBlbmNsb3NlZCBieSBicmFja2V0cyAiW10iCiAgICAgIHJlcGxhY2VkIHdpdGggeW91ciBvd24gaWRlbnRpZnlpbmcgaW5mb3JtYXRpb24uIChEb24ndCBpbmNsdWRlCiAgICAgIHRoZSBicmFja2V0cyEpICBUaGUgdGV4dCBzaG91bGQgYmUgZW5jbG9zZWQgaW4gdGhlIGFwcHJvcHJpYXRlCiAgICAgIGNvbW1lbnQgc3ludGF4IGZvciB0aGUgZmlsZSBmb3JtYXQuIFdlIGFsc28gcmVjb21tZW5kIHRoYXQgYQogICAgICBmaWxlIG9yIGNsYXNzIG5hbWUgYW5kIGRlc2NyaXB0aW9uIG9mIHB1cnBvc2UgYmUgaW5jbHVkZWQgb24gdGhlCiAgICAgIHNhbWUgInByaW50ZWQgcGFnZSIgYXMgdGhlIGNvcHlyaWdodCBub3RpY2UgZm9yIGVhc2llcgogICAgICBpZGVudGlmaWNhdGlvbiB3aXRoaW4gdGhpcmQtcGFydHkgYXJjaGl2ZXMuCgogICBDb3B5cmlnaHQgW3l5eXldIFtuYW1lIG9mIGNvcHlyaWdodCBvd25lcl0KCiAgIExpY2Vuc2VkIHVuZGVyIHRoZSBBcGFjaGUgTGljZW5zZSwgVmVyc2lvbiAyLjAgKHRoZSAiTGljZW5zZSIpOwogICB5b3UgbWF5IG5vdCB1c2UgdGhpcyBmaWxlIGV4Y2VwdCBpbiBjb21wbGlhbmNlIHdpdGggdGhlIExpY2Vuc2UuCiAgIFlvdSBtYXkgb2J0YWluIGEgY29weSBvZiB0aGUgTGljZW5zZSBhdAoKICAgICAgIGh0dHA6Ly93d3cuYXBhY2hlLm9yZy9saWNlbnNlcy9MSUNFTlNFLTIuMAoKICAgVW5sZXNzIHJlcXVpcmVkIGJ5IGFwcGxpY2FibGUgbGF3IG9yIGFncmVlZCB0byBpbiB3cml0aW5nLCBzb2Z0d2FyZQogICBkaXN0cmlidXRlZCB1bmRlciB0aGUgTGljZW5zZSBpcyBkaXN0cmlidXRlZCBvbiBhbiAiQVMgSVMiIEJBU0lTLAogICBXSVRIT1VUIFdBUlJBTlRJRVMgT1IgQ09ORElUSU9OUyBPRiBBTlkgS0lORCwgZWl0aGVyIGV4cHJlc3Mgb3IgaW1wbGllZC4KICAgU2VlIHRoZSBMaWNlbnNlIGZvciB0aGUgc3BlY2lmaWMgbGFuZ3VhZ2UgZ292ZXJuaW5nIHBlcm1pc3Npb25zIGFuZAogICBsaW1pdGF0aW9ucyB1bmRlciB0aGUgTGljZW5zZS4K",
+              "contentType": "text/plain",
+              "encoding": "base64"
+            }
+          }
+        },
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "name": "declared license file: NOTICE",
+            "text": {
+              "content": "TWVuaGlyCkNvcHlyaWdodCAyMDI2IEFyY2hvbGl0aCBjb250cmlidXRvcnMKClRoaXMgcHJvZHVjdCBpbmNsdWRlcyBzb2Z0d2FyZSBkZXZlbG9wZWQgYXMgcGFydCBvZiB0aGUgQXJjaG9saXRoIHByb2plY3QuCgpMaWNlbnNlZCB1bmRlciB0aGUgQXBhY2hlIExpY2Vuc2UsIFZlcnNpb24gMi4wICh0aGUgIkxpY2Vuc2UiKTsKeW91IG1heSBub3QgdXNlIHRoaXMgZmlsZSBleGNlcHQgaW4gY29tcGxpYW5jZSB3aXRoIHRoZSBMaWNlbnNlLgpZb3UgbWF5IG9idGFpbiBhIGNvcHkgb2YgdGhlIExpY2Vuc2UgYXQKCiAgICBodHRwOi8vd3d3LmFwYWNoZS5vcmcvbGljZW5zZXMvTElDRU5TRS0yLjAKCi0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0KVEhJUkQtUEFSVFkgQ09OVEVOVDogTG9uZ01lbUV2YWwKLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLQoKVGhpcyBwcm9kdWN0IGluY2x1ZGVzIGNvbnZlcnNhdGlvbiBkYXRhIGRlcml2ZWQgZnJvbSB0aGUgTG9uZ01lbUV2YWwKYmVuY2htYXJrLCB1c2VkIGFzIGV2YWx1YXRpb24gZml4dHVyZXMgaW4gdGhlIEV4dHJhY3Rpb24gTGFiIHJlc2VhcmNoCm1vZHVsZXMgdW5kZXIgbWVuaGlyL2V4cGxvcmVyLzoKCiAgICBleHRyYWN0aW9uX2xhYl9maXh0dXJlcy5weQogICAgZXh0cmFjdGlvbl9sYWJfY29udGV4dF9zZWxlY3Rpb24ucHkKICAgIGV4dHJhY3Rpb25fbGFiX2VsaWdpYmlsaXR5X2ZpeHR1cmVzLnB5CiAgICBleHRyYWN0aW9uX2xhYl9tZXRhZGF0YV9wcm9kdWN0aW9uLnB5CgpMb25nTWVtRXZhbDogQmVuY2htYXJraW5nIENoYXQgQXNzaXN0YW50cyBvbiBMb25nLVRlcm0gSW50ZXJhY3RpdmUgTWVtb3J5CkRpIFd1LCBIb25nd2VpIFdhbmcsIFdlbmhhbyBZdSwgWXV3ZWkgWmhhbmcsIEthaS1XZWkgQ2hhbmcsIERvbmcgWXUKSUNMUiAyMDI1IC0tIGFyWGl2OjI0MTAuMTA4MTMKaHR0cHM6Ly9naXRodWIuY29tL3hpYW93dTAxNjIvTG9uZ01lbUV2YWwKCkxvbmdNZW1FdmFsIGlzIGRpc3RyaWJ1dGVkIHVuZGVyIHRoZSBNSVQgTGljZW5zZS4gSXRzIGNvcHlyaWdodCBub3RpY2UgYW5kCnBlcm1pc3Npb24gbm90aWNlIGFyZSByZXByb2R1Y2VkIGJlbG93IGluIGZ1bGwsIGFzIHRoYXQgbGljZW5zZSByZXF1aXJlczoKCiAgICBNSVQgTGljZW5zZQoKICAgIENvcHlyaWdodCAoYykgMjAyNCBEaSBXdQoKICAgIFBlcm1pc3Npb24gaXMgaGVyZWJ5IGdyYW50ZWQsIGZyZWUgb2YgY2hhcmdlLCB0byBhbnkgcGVyc29uIG9idGFpbmluZyBhIGNvcHkKICAgIG9mIHRoaXMgc29mdHdhcmUgYW5kIGFzc29jaWF0ZWQgZG9jdW1lbnRhdGlvbiBmaWxlcyAodGhlICJTb2Z0d2FyZSIpLCB0byBkZWFsCiAgICBpbiB0aGUgU29mdHdhcmUgd2l0aG91dCByZXN0cmljdGlvbiwgaW5jbHVkaW5nIHdpdGhvdXQgbGltaXRhdGlvbiB0aGUgcmlnaHRzCiAgICB0byB1c2UsIGNvcHksIG1vZGlmeSwgbWVyZ2UsIHB1Ymxpc2gsIGRpc3RyaWJ1dGUsIHN1YmxpY2Vuc2UsIGFuZC9vciBzZWxsCiAgICBjb3BpZXMgb2YgdGhlIFNvZnR3YXJlLCBhbmQgdG8gcGVybWl0IHBlcnNvbnMgdG8gd2hvbSB0aGUgU29mdHdhcmUgaXMKICAgIGZ1cm5pc2hlZCB0byBkbyBzbywgc3ViamVjdCB0byB0aGUgZm9sbG93aW5nIGNvbmRpdGlvbnM6CgogICAgVGhlIGFib3ZlIGNvcHlyaWdodCBub3RpY2UgYW5kIHRoaXMgcGVybWlzc2lvbiBub3RpY2Ugc2hhbGwgYmUgaW5jbHVkZWQgaW4gYWxsCiAgICBjb3BpZXMgb3Igc3Vic3RhbnRpYWwgcG9ydGlvbnMgb2YgdGhlIFNvZnR3YXJlLgoKICAgIFRIRSBTT0ZUV0FSRSBJUyBQUk9WSURFRCAiQVMgSVMiLCBXSVRIT1VUIFdBUlJBTlRZIE9GIEFOWSBLSU5ELCBFWFBSRVNTIE9SCiAgICBJTVBMSUVELCBJTkNMVURJTkcgQlVUIE5PVCBMSU1JVEVEIFRPIFRIRSBXQVJSQU5USUVTIE9GIE1FUkNIQU5UQUJJTElUWSwKICAgIEZJVE5FU1MgRk9SIEEgUEFSVElDVUxBUiBQVVJQT1NFIEFORCBOT05JTkZSSU5HRU1FTlQuIElOIE5PIEVWRU5UIFNIQUxMIFRIRQogICAgQVVUSE9SUyBPUiBDT1BZUklHSFQgSE9MREVSUyBCRSBMSUFCTEUgRk9SIEFOWSBDTEFJTSwgREFNQUdFUyBPUiBPVEhFUgogICAgTElBQklMSVRZLCBXSEVUSEVSIElOIEFOIEFDVElPTiBPRiBDT05UUkFDVCwgVE9SVCBPUiBPVEhFUldJU0UsIEFSSVNJTkcgRlJPTSwKICAgIE9VVCBPRiBPUiBJTiBDT05ORUNUSU9OIFdJVEggVEhFIFNPRlRXQVJFIE9SIFRIRSBVU0UgT1IgT1RIRVIgREVBTElOR1MgSU4gVEhFCiAgICBTT0ZUV0FSRS4K",
+              "contentType": "text/plain",
+              "encoding": "base64"
+            }
+          }
+        },
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "name": "declared license file: THIRD-PARTY-LICENSES.txt",
+            "text": {
+              "content": "VEhJUkQtUEFSVFkgTElDRU5TRVMKPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PQoKTWVuaGlyIChhcmNob2xpdGgtbWVuaGlyKSBpcyBsaWNlbnNlZCB1bmRlciB0aGUgQXBhY2hlIExpY2Vuc2UsIFZlcnNpb24gMi4wLgpTZWUgTElDRU5TRSBhbmQgTk9USUNFLgoKVGhpcyBmaWxlIGxpc3RzIHRoZSBydW50aW1lIGRlcGVuZGVuY3kgY2xvc3VyZSByZXNvbHZlZCBmcm9tIHV2LmxvY2sgKGFsbCBleHRyYXMsCmRldmVsb3BtZW50IGFuZCB0ZXN0LW9ubHkgZGVwZW5kZW5jaWVzIGV4Y2x1ZGVkKSBhbmQgdGhlIGxpY2Vuc2UgZWFjaCBwYWNrYWdlIGRlY2xhcmVzCmluIGl0cyBkaXN0cmlidXRpb24gbWV0YWRhdGEuIEVhY2ggcGFja2FnZSByZW1haW5zIHVuZGVyIGl0cyBvd24gbGljZW5zZTsgdGhpcyBsaXN0IGlzCmluZm9ybWF0aW9uYWwgYW5kIGRvZXMgbm90IHJlbGljZW5zZSBhbnl0aGluZy4KCkdFTkVSQVRFRCBGSUxFIC0tIGRvIG5vdCBlZGl0IGJ5IGhhbmQuIFJlZ2VuZXJhdGUgd2l0aDoKICAgIHB5dGhvbiBzY3JpcHRzL2dlbmVyYXRlX2xpY2Vuc2VfbWFuaWZlc3QucHkKCkdlbmVyYXRlZDogMjAyNi0xMC0zMCAgfCAgZGVyaXZlZCBmcm9tIHV2LmxvY2sgIHwgIDk5IHBhY2thZ2VzCgpQYWNrYWdlICAgICAgICAgICAgICAgICAgICBWZXJzaW9uICAgICAgIExpY2Vuc2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBTb3VyY2UKLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLSAgLS0tLS0tLS0tLS0tICAtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLSAgLS0tLS0tCmFpb2ZpbGUgICAgICAgICAgICAgICAgICAgIDMuMTEuMSAgICAgICAgQXBhY2hlLTIuMCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9tb3NxdWl0by9haW9maWxlCmFubm90YXRlZC1kb2MgICAgICAgICAgICAgIDAuMC40ICAgICAgICAgTUlUICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9mYXN0YXBpL2Fubm90YXRlZC1kb2MKYW5ub3RhdGVkLXR5cGVzICAgICAgICAgICAgMC43LjAgICAgICAgICBNSVQgTGljZW5zZSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL2Fubm90YXRlZC10eXBlcy9hbm5vdGF0ZWQtdHlwZXMKYW55aW8gICAgICAgICAgICAgICAgICAgICAgNC4xNS4xICAgICAgICBNSVQgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL2Fncm9uaG9sbS9hbnlpbwphcmNob2xpdGgtZ3JhcGhpdGktY29yZSAgICAwLjMxLjIucG9zdDEgIEFwYWNoZS0yLjAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vQXJjaG9saXRoL2dyYXBoaXRpCmFyY2hvbGl0aC1tY3AtZnJhbWV3b3JrICAgIDAuMi4wICAgICAgICAgTUlUCmFyY2hvbGl0aC1vYXV0aCAgICAgICAgICAgIDAuMy4xICAgICAgICAgQXBhY2hlLTIuMCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9jdGhhcnZleS9hcmNob2xpdGhfb2F1dGgKYXR0cnMgICAgICAgICAgICAgICAgICAgICAgMjYuMS4wICAgICAgICBNSVQgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly93d3cuYXR0cnMub3JnLwphdXRobGliICAgICAgICAgICAgICAgICAgICAxLjkuMSAgICAgICAgIEJTRCBMaWNlbnNlICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vYXV0aGxpYi9hdXRobGliCmJhY2tvZmYgICAgICAgICAgICAgICAgICAgIDIuMi4xICAgICAgICAgTUlUIExpY2Vuc2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9saXRsL2JhY2tvZmYKYmVhcnR5cGUgICAgICAgICAgICAgICAgICAgMC4yMi45ICAgICAgICBNSVQgTGljZW5zZSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9iZWFydHlwZS5yZWFkdGhlZG9jcy5pbwpjYWNoZXRvb2xzICAgICAgICAgICAgICAgICA3LjEuNCAgICAgICAgIE1JVCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vdGtlbS9jYWNoZXRvb2xzLwpjYWlvICAgICAgICAgICAgICAgICAgICAgICAwLjkuMjUgICAgICAgIEFwYWNoZS0yLjAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vbW9zcXVpdG8vY2Fpby8KY2VydGlmaSAgICAgICAgICAgICAgICAgICAgMjAyNi4xMC4yMyAgICBNb3ppbGxhIFB1YmxpYyBMaWNlbnNlIDIuMCAoTVBMIDIuMCkgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL2NlcnRpZmkvcHl0aG9uLWNlcnRpZmkKY2ZmaSAgICAgICAgICAgICAgICAgICAgICAgMi4xLjAgICAgICAgICBNSVQtMCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL3B5dGhvbi1jZmZpL2NmZmkKY2hhcnNldC1ub3JtYWxpemVyICAgICAgICAgMy40LjkgICAgICAgICBNSVQgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL2phd2FoL2NoYXJzZXRfbm9ybWFsaXplci9ibG9iL21hc3Rlci9DSEFOR0VMT0cubWQKY2xpY2sgICAgICAgICAgICAgICAgICAgICAgOC40LjIgICAgICAgICBCU0QtMy1DbGF1c2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL3BhbGxldHMvY2xpY2svCmNvbG9yYW1hICAgICAgICAgICAgICAgICAgIDAuNC42ICAgICAgICAgQlNEIExpY2Vuc2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS90YXJ0bGV5L2NvbG9yYW1hCmNyeXB0b2dyYXBoeSAgICAgICAgICAgICAgIDUwLjAuMSAgICAgICAgQXBhY2hlLTIuMCBPUiBCU0QtMy1DbGF1c2UgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9weWNhL2NyeXB0b2dyYXBoeQpjeWNsb3B0cyAgICAgICAgICAgICAgICAgICA0LjIxLjAgICAgICAgIEFwYWNoZS0yLjAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vQnJpYW5QdWdoL2N5Y2xvcHRzCmRpc3RybyAgICAgICAgICAgICAgICAgICAgIDEuOS4wICAgICAgICAgQXBhY2hlIFNvZnR3YXJlIExpY2Vuc2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9weXRob24tZGlzdHJvL2Rpc3RybwpkbnNweXRob24gICAgICAgICAgICAgICAgICAyLjkuMSAgICAgICAgIElTQyAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL3d3dy5kbnNweXRob24ub3JnCmRvY3N0cmluZy1wYXJzZXIgICAgICAgICAgIDAuMTguMCAgICAgICAgTUlUIExpY2Vuc2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9yci0vZG9jc3RyaW5nX3BhcnNlcgplbWFpbC12YWxpZGF0b3IgICAgICAgICAgICAyLjMuMCAgICAgICAgIFRoZSBVbmxpY2Vuc2UgKFVubGljZW5zZSkgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vSm9zaERhdGEvcHl0aG9uLWVtYWlsLXZhbGlkYXRvcgpleGNlcHRpb25ncm91cCAgICAgICAgICAgICAxLjMuMSAgICAgICAgIE1JVCBMaWNlbnNlICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vYWdyb25ob2xtL2V4Y2VwdGlvbmdyb3VwCmZhc3RhcGkgICAgICAgICAgICAgICAgICAgIDAuMTM5LjAgICAgICAgTUlUICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9mYXN0YXBpL2Zhc3RhcGkKZmFzdG1jcCAgICAgICAgICAgICAgICAgICAgMy40LjExICAgICAgICBBcGFjaGUtMi4wICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9nb2Zhc3RtY3AuY29tCmZhc3RtY3Atc2xpbSAgICAgICAgICAgICAgIDMuNC4xMSAgICAgICAgQXBhY2hlLTIuMCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ29mYXN0bWNwLmNvbQpncmlmZmVsaWIgICAgICAgICAgICAgICAgICAyLjEuMCAgICAgICAgIElTQwpoMTEgICAgICAgICAgICAgICAgICAgICAgICAwLjE2LjAgICAgICAgIE1JVCBMaWNlbnNlICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vcHl0aG9uLWh5cGVyL2gxMQpob2xpZGF5cyAgICAgICAgICAgICAgICAgICAwLjEwNiAgICAgICAgIE1JVCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vdmFjYW56YS9ob2xpZGF5cy8KaHR0cGNvcmUgICAgICAgICAgICAgICAgICAgMS4wLjkgICAgICAgICBCU0QtMy1DbGF1c2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly93d3cuZW5jb2RlLmlvL2h0dHBjb3JlLwpodHRweCAgICAgICAgICAgICAgICAgICAgICAwLjI4LjEgICAgICAgIEJTRCBMaWNlbnNlICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vZW5jb2RlL2h0dHB4Cmh0dHB4LXNzZSAgICAgICAgICAgICAgICAgIDAuNC4zICAgICAgICAgTUlUICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9mbG9yaW1vbmRtYW5jYS9odHRweC1zc2UKaWRuYSAgICAgICAgICAgICAgICAgICAgICAgMy4xOCAgICAgICAgICBCU0QtMy1DbGF1c2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL2tqZC9pZG5hCmphcmFjby1jbGFzc2VzICAgICAgICAgICAgIDMuNC4wICAgICAgICAgTUlUIExpY2Vuc2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9qYXJhY28vamFyYWNvLmNsYXNzZXMKamFyYWNvLWNvbnRleHQgICAgICAgICAgICAgNi4xLjIgICAgICAgICBNSVQgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL2phcmFjby9qYXJhY28uY29udGV4dApqYXJhY28tZnVuY3Rvb2xzICAgICAgICAgICA0LjUuMCAgICAgICAgIE1JVCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vamFyYWNvL2phcmFjby5mdW5jdG9vbHMKamVlcG5leSAgICAgICAgICAgICAgICAgICAgMC45LjAgICAgICAgICBNSVQgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRsYWIuY29tL3Rha2x1eXZlci9qZWVwbmV5CmppbmphMiAgICAgICAgICAgICAgICAgICAgIDMuMS42ICAgICAgICAgQlNEIExpY2Vuc2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9wYWxsZXRzL2ppbmphLwpqaXRlciAgICAgICAgICAgICAgICAgICAgICAwLjE2LjAgICAgICAgIE1JVCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vcHlkYW50aWMvaml0ZXIvCmpvc2VyZmMgICAgICAgICAgICAgICAgICAgIDEuNy4zICAgICAgICAgQlNEIExpY2Vuc2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9hdXRobGliL2pvc2VyZmMKanNvbnJlZiAgICAgICAgICAgICAgICAgICAgMS4xLjAgICAgICAgICBNSVQgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL2dhenBhY2hva2luZy9qc29ucmVmCmpzb25zY2hlbWEgICAgICAgICAgICAgICAgIDQuMjYuMCAgICAgICAgTUlUICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9weXRob24tanNvbnNjaGVtYS9qc29uc2NoZW1hCmpzb25zY2hlbWEtcGF0aCAgICAgICAgICAgIDAuNS4wICAgICAgICAgQXBhY2hlIFNvZnR3YXJlIExpY2Vuc2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9wMWMydS9qc29uc2NoZW1hLXBhdGgKanNvbnNjaGVtYS1zcGVjaWZpY2F0aW9ucyAgMjAyNS45LjEgICAgICBNSVQgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL3B5dGhvbi1qc29uc2NoZW1hL2pzb25zY2hlbWEtc3BlY2lmaWNhdGlvbnMKa2V5cmluZyAgICAgICAgICAgICAgICAgICAgMjUuNy4wICAgICAgICBNSVQgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL2phcmFjby9rZXlyaW5nCm1hcmtkb3duLWl0LXB5ICAgICAgICAgICAgIDQuMi4wICAgICAgICAgTUlUIExpY2Vuc2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9leGVjdXRhYmxlYm9va3MvbWFya2Rvd24taXQtcHkKbWFya3Vwc2FmZSAgICAgICAgICAgICAgICAgMy4wLjMgICAgICAgICBCU0QtMy1DbGF1c2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL3BhbGxldHMvbWFya3Vwc2FmZS8KbWNwICAgICAgICAgICAgICAgICAgICAgICAgMS4zMC4wICAgICAgICBNSVQgTGljZW5zZSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9tb2RlbGNvbnRleHRwcm90b2NvbC5pbwptZHVybCAgICAgICAgICAgICAgICAgICAgICAwLjEuMiAgICAgICAgIE1JVCBMaWNlbnNlICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vZXhlY3V0YWJsZWJvb2tzL21kdXJsCm1vcmUtaXRlcnRvb2xzICAgICAgICAgICAgIDExLjEuMCAgICAgICAgTUlUICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9tb3JlLWl0ZXJ0b29scy9tb3JlLWl0ZXJ0b29scwpuZW80aiAgICAgICAgICAgICAgICAgICAgICA2LjIuMCAgICAgICAgIEFwYWNoZS0yLjAgQU5EIFB5dGhvbi0yLjAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL25lbzRqLmNvbS8KbnVtcHkgICAgICAgICAgICAgICAgICAgICAgMi41LjEgICAgICAgICBCU0QtMy1DbGF1c2UgQU5EIDBCU0QgQU5EIE1JVCBBTkQgWmxpYiBBTkQgQ0MwLTEuMCAgaHR0cHM6Ly9udW1weS5vcmcKb3BlbmFpICAgICAgICAgICAgICAgICAgICAgMi40NS4wICAgICAgICBBcGFjaGUgU29mdHdhcmUgTGljZW5zZSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL29wZW5haS9vcGVuYWktcHl0aG9uCm9wZW5hcGktcHlkYW50aWMgICAgICAgICAgIDAuNS4xICAgICAgICAgTUlUIExpY2Vuc2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9taWtlLW9ha2xleS9vcGVuYXBpLXB5ZGFudGljCm9wZW50ZWxlbWV0cnktYXBpICAgICAgICAgIDEuNDUuMiAgICAgICAgQXBhY2hlLTIuMCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9vcGVuLXRlbGVtZXRyeS9vcGVudGVsZW1ldHJ5LXB5dGhvbi90cmVlL21haW4vb3BlbnRlbGVtZXRyeS1hcGkKcGFja2FnaW5nICAgICAgICAgICAgICAgICAgMjUuMCAgICAgICAgICBBcGFjaGUgU29mdHdhcmUgTGljZW5zZSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL3B5cGEvcGFja2FnaW5nCnBhdGhhYmxlICAgICAgICAgICAgICAgICAgIDAuNi4wICAgICAgICAgQXBhY2hlIFNvZnR3YXJlIExpY2Vuc2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9wMWMydS9wYXRoYWJsZQpwbGF0Zm9ybWRpcnMgICAgICAgICAgICAgICA0LjEwLjAgICAgICAgIE1JVCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vdG94LWRldi9wbGF0Zm9ybWRpcnMKcG9zdGhvZyAgICAgICAgICAgICAgICAgICAgNy4yMi4xICAgICAgICBNSVQgTGljZW5zZSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL3Bvc3Rob2cvcG9zdGhvZy1weXRob24KcHkta2V5LXZhbHVlLWFpbyAgICAgICAgICAgMC40LjUgICAgICAgICBBcGFjaGUtMi4wCnB5Y3BhcnNlciAgICAgICAgICAgICAgICAgIDMuMCAgICAgICAgICAgQlNELTMtQ2xhdXNlICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9lbGliZW4vcHljcGFyc2VyCnB5ZGFudGljICAgICAgICAgICAgICAgICAgIDIuMTMuNCAgICAgICAgTUlUICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9weWRhbnRpYy9weWRhbnRpYwpweWRhbnRpYy1jb3JlICAgICAgICAgICAgICAyLjQ2LjQgICAgICAgIE1JVCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vcHlkYW50aWMvcHlkYW50aWMKcHlkYW50aWMtc2V0dGluZ3MgICAgICAgICAgMi4xNC4yICAgICAgICBNSVQgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL3B5ZGFudGljL3B5ZGFudGljLXNldHRpbmdzCnB5Z21lbnRzICAgICAgICAgICAgICAgICAgIDIuMjAuMCAgICAgICAgQlNELTItQ2xhdXNlICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vcHlnbWVudHMub3JnCnB5and0ICAgICAgICAgICAgICAgICAgICAgIDIuMTUuMCAgICAgICAgTUlUICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9qcGFkaWxsYS9weWp3dApweXBlcmNsaXAgICAgICAgICAgICAgICAgICAxLjExLjAgICAgICAgIEJTRCBMaWNlbnNlICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vYXN3ZWlnYXJ0L3B5cGVyY2xpcApweXRob24tZGF0ZXV0aWwgICAgICAgICAgICAyLjkuMC5wb3N0MCAgIEJTRCBMaWNlbnNlICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vZGF0ZXV0aWwvZGF0ZXV0aWwKcHl0aG9uLWRvdGVudiAgICAgICAgICAgICAgMS4yLjIgICAgICAgICBCU0QtMy1DbGF1c2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL3RoZXNrdW1hci9weXRob24tZG90ZW52CnB5dGhvbi1tdWx0aXBhcnQgICAgICAgICAgIDAuMC4zMiAgICAgICAgQXBhY2hlLTIuMCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9LbHVkZXgvcHl0aG9uLW11bHRpcGFydApweXR6ICAgICAgICAgICAgICAgICAgICAgICAyMDI2LjIgICAgICAgIE1JVCBMaWNlbnNlICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwOi8vcHl0aG9uaG9zdGVkLm9yZy9weXR6CnB5d2luMzIgICAgICAgICAgICAgICAgICAgIDMxMiAgICAgICAgICAgUHl0aG9uIFNvZnR3YXJlIEZvdW5kYXRpb24gTGljZW5zZSAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9taGFtbW9uZC9weXdpbjMyCnB5d2luMzItY3R5cGVzICAgICAgICAgICAgIDAuMi4zICAgICAgICAgQlNELTMtQ2xhdXNlICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9lbnRob3VnaHQvcHl3aW4zMi1jdHlwZXMKcHl5YW1sICAgICAgICAgICAgICAgICAgICAgNi4wLjMgICAgICAgICBNSVQgTGljZW5zZSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9weXlhbWwub3JnLwpyZWZlcmVuY2luZyAgICAgICAgICAgICAgICAwLjM3LjAgICAgICAgIE1JVCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vcHl0aG9uLWpzb25zY2hlbWEvcmVmZXJlbmNpbmcKcmVnZXggICAgICAgICAgICAgICAgICAgICAgMjAyNi45LjI5ICAgICBBcGFjaGUtMi4wIEFORCBDTlJJLVB5dGhvbiAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL21yYWJhcm5ldHQvbXJhYi1yZWdleApyZXF1ZXN0cyAgICAgICAgICAgICAgICAgICAyLjM0LjIgICAgICAgIEFwYWNoZSBTb2Z0d2FyZSBMaWNlbnNlICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vcHNmL3JlcXVlc3RzCnJpY2ggICAgICAgICAgICAgICAgICAgICAgIDE1LjAuMCAgICAgICAgTUlUIExpY2Vuc2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9UZXh0dWFsaXplL3JpY2gKcmljaC1yc3QgICAgICAgICAgICAgICAgICAgMi4xLjAgICAgICAgICBNSVQgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL3dhc2ktbWFzdGVyL3JpY2gtcnN0CnJwZHMtcHkgICAgICAgICAgICAgICAgICAgIDIwMjYuNi4zICAgICAgTUlUICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9jcmF0ZS1weS9ycGRzCnNlY3JldHN0b3JhZ2UgICAgICAgICAgICAgIDMuNS4wICAgICAgICAgQlNELTMtQ2xhdXNlICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9taXR5YTU3L3NlY3JldHN0b3JhZ2UKc2hlbGxpbmdoYW0gICAgICAgICAgICAgICAgMS41LjQgICAgICAgICBJU0MgTGljZW5zZSAoSVNDTCkgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL3NhcnVnYWt1L3NoZWxsaW5naGFtCnNpeCAgICAgICAgICAgICAgICAgICAgICAgIDEuMTcuMCAgICAgICAgTUlUIExpY2Vuc2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9iZW5qYW1pbnAvc2l4CnNuaWZmaW8gICAgICAgICAgICAgICAgICAgIDEuMy4xICAgICAgICAgTUlUIExpY2Vuc2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9weXRob24tdHJpby9zbmlmZmlvCnNzZS1zdGFybGV0dGUgICAgICAgICAgICAgIDMuNC41ICAgICAgICAgQlNELTMtQ2xhdXNlICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9zeXNpZC9zc2Utc3RhcmxldHRlCnN0YXJsZXR0ZSAgICAgICAgICAgICAgICAgIDEuMy4xICAgICAgICAgQlNELTMtQ2xhdXNlICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9LbHVkZXgvc3RhcmxldHRlCnRlbmFjaXR5ICAgICAgICAgICAgICAgICAgIDkuMS40ICAgICAgICAgQXBhY2hlIFNvZnR3YXJlIExpY2Vuc2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9qZC90ZW5hY2l0eQp0aWt0b2tlbiAgICAgICAgICAgICAgICAgICAwLjE0LjAgICAgICAgIE1JVCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vb3BlbmFpL3Rpa3Rva2VuCnRxZG0gICAgICAgICAgICAgICAgICAgICAgIDQuNjguNCAgICAgICAgTVBMLTIuMCBBTkQgTUlUICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGh0dHBzOi8vdHFkbS5naXRodWIuaW8KdHlwZXIgICAgICAgICAgICAgICAgICAgICAgMC4yNi44ICAgICAgICBNSVQgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL2Zhc3RhcGkvdHlwZXIKdHlwaW5nLWV4dGVuc2lvbnMgICAgICAgICAgNC4xNi4wICAgICAgICBQU0YtMi4wICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL3B5dGhvbi90eXBpbmdfZXh0ZW5zaW9ucwp0eXBpbmctaW5zcGVjdGlvbiAgICAgICAgICAwLjQuMiAgICAgICAgIE1JVCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vcHlkYW50aWMvdHlwaW5nLWluc3BlY3Rpb24KdW5jYWxsZWQtZm9yICAgICAgICAgICAgICAgMC4zLjIgICAgICAgICBNSVQgTGljZW5zZSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL2NocmlzZ3VpZHJ5L3VuY2FsbGVkLWZvcgp1cmxsaWIzICAgICAgICAgICAgICAgICAgICAyLjguMCAgICAgICAgIE1JVCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vdXJsbGliMy91cmxsaWIzL2Jsb2IvbWFpbi9DSEFOR0VTLnJzdAp1dmljb3JuICAgICAgICAgICAgICAgICAgICAwLjUxLjAgICAgICAgIEJTRC0zLUNsYXVzZSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL3V2aWNvcm4uZGV2Lwp3YXRjaGZpbGVzICAgICAgICAgICAgICAgICAxLjIuMCAgICAgICAgIE1JVCBMaWNlbnNlICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBodHRwczovL2dpdGh1Yi5jb20vc2FtdWVsY29sdmluL3dhdGNoZmlsZXMKd2Vic29ja2V0cyAgICAgICAgICAgICAgICAgMTYuMSAgICAgICAgICBCU0QtMy1DbGF1c2UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgaHR0cHM6Ly9naXRodWIuY29tL3B5dGhvbi13ZWJzb2NrZXRzL3dlYnNvY2tldHMK",
+              "contentType": "text/plain",
+              "encoding": "base64"
+            }
+          }
+        }
+      ],
+      "name": "archolith-menhir",
+      "type": "application",
+      "version": "0.2.3"
+    },
     "properties": [
       {
         "name": "cdx:reproducible",
@@ -4362,7 +4378,7 @@
           ],
           "name": "cyclonedx-py",
           "type": "application",
-          "version": "7.3.1"
+          "version": "7.6.0"
         },
         {
           "description": "Python library for CycloneDX",

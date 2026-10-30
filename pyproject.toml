@@ -27,6 +27,8 @@ dependencies = [
     "neo4j>=6.2,<7",
     "pydantic>=2.0,<3",
     "python-dotenv>=1.0",
+    # request.form() in api/oauth_authorize.py and api/oauth_token.py (CF-306)
+    "python-multipart>=0.0.32,<1",
     "rich>=13.9,<16",
     "starlette>=1.0.1,<2",
     # OpenAI 429 backoff (openai_rate_limit.py); already locked via archolith-graphiti-core
