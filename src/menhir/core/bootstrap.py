@@ -8,6 +8,7 @@ from typing import Any
 
 from menhir.config import MemorySettings
 from menhir.config.authority_gates import scalar_view_authority_effective
+from menhir.config.feature_flags import warn_retired_settings_set_false
 from menhir.core.runtime_preflight import RuntimeCapabilities
 from menhir.infrastructure import GraphitiClient, LLMAdapter, MemoryGraphAdapter, Neo4jRepository
 from menhir.services import CandidateService, ContextBuilderService, IngestService, RecallService, ScoringService, LifecycleService
@@ -148,6 +149,7 @@ def build_memory_services(
 ) -> BuildArtifacts:
     """Build collaborators for the v1 memory pipeline."""
     settings = settings or MemorySettings.from_env()
+    warn_retired_settings_set_false()
     neo4j = Neo4jRepository(
         uri=settings.neo4j_uri,
         database=settings.neo4j_database,
@@ -204,7 +206,7 @@ def build_memory_services(
         graphiti_add_episode_timeout_s=float(settings.graphiti_add_episode_timeout_seconds),
         graphiti_episode_max_estimated_tokens=int(settings.graphiti_episode_max_estimated_tokens),
         canonical_self_binding_mode=str(getattr(settings, "canonical_self_binding_mode", "off")),
-        inferred_self_mode=str(getattr(settings, "inferred_self_mode", "off")),
+        inferred_self_mode=str(getattr(settings, "inferred_self_mode", "enforce")),
         max_llm_calls_per_session_window=settings.max_llm_calls_per_session_window,
         llm_session_window_seconds=settings.llm_session_window_seconds,
         max_llm_calls_per_enrichment_job=settings.max_llm_calls_per_enrichment_job,
@@ -225,7 +227,7 @@ def build_memory_services(
         lifecycle_service=lifecycle_service,
         scalar_view_authority_enabled=scalar_view_authority_effective(settings),
         scalar_history_enabled=settings.personal_memory_scalar_history_enabled,
-        inferred_self_mode=str(getattr(settings, "inferred_self_mode", "off")),
+        inferred_self_mode=str(getattr(settings, "inferred_self_mode", "enforce")),
         counting_enabled=bool(
             settings.personal_memory_counting_enabled
             and settings.personal_memory_scalar_state_enabled

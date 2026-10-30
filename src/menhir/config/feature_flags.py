@@ -5,7 +5,12 @@ value, before consumer-specific fallbacks; their descriptions name those fallbac
 """
 from __future__ import annotations
 
+import logging
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -292,3 +297,26 @@ RETIRED = {
     "frontier_source_memory_pools": "2026-10-29: removed (#399 bucket 2; indistinguishable from no pools on AMA)",
     "MENHIR_FRONTIER_SOURCE_MEMORY_POOLS": "2026-10-29: removed (#399 bucket 2; indistinguishable from no pools on AMA)",
 }
+
+_FALSE_VALUES = frozenset({"0", "false", "no", "off"})
+
+
+def warn_retired_settings_set_false(environ: Mapping[str, str] | None = None) -> list[str]:
+    """Log one startup warning naming retired settings explicitly set to false. Warn only.
+
+    Only names are logged, never values. Returns the sorted names warned about.
+    """
+    env = os.environ if environ is None else environ
+    names = sorted(
+        key
+        for key, value in env.items()
+        if key.upper() in RETIRED
+        and key.upper().startswith("MENHIR_")
+        and str(value).strip().lower() in _FALSE_VALUES
+    )
+    if names:
+        logger.warning(
+            "Retired settings are set to false and are ignored (the behaviour is no longer switchable): %s",
+            ", ".join(names),
+        )
+    return names
