@@ -1,3 +1,9 @@
+## 2026-10-30 - Post-MVP heuristic memory research
+
+- `.agent/reference/menhir-heuristic-memory-research-2026-10-30.md`: preserve the supplied research proposal with artifact metadata and explicit post-MVP scheduling; no implementation or production changes.
+- `.agent/reference/README.md`: index the research under saved research and future options.
+- `CHANGELOG-archive.md`: retain the oldest former current entry (10-entry limit).
+
 ## 2026-10-29 - Bucket-2 flags removed (belief gate, evidence anchor, pools); local-model routing settings
 
 The three remaining default-off recall flags from #399 bucket 2 are removed; the code is kept on `archive/bucket2-flags-2026-10-29`. All six names are in `feature_flags.RETIRED`, and `tests/test_feature_flag_registry.py` checks each retirement. Default recall is unchanged.
@@ -117,26 +123,3 @@ For agent-written memories (#168, plan `menhir-agent-memory-writer-plan-2026-10-
 - Tests: new upgrade test in `tests/test_release_config_upgrade.py` (unset versus pinned) and a default-wiring test in `tests/test_authority_requires_lane.py`. Changed: `DEFAULT_ON` in `tests/test_release_config_upgrade.py` and the shipped value in `tests/test_shipped_agreement_profile.py`.
 - `CHANGELOG-archive.md`: the oldest former current entry moved there (10-entry limit).
 
-## 2026-10-22 - Idempotent episode submit; enrichment leases renew up to a 3-hour ceiling
-
-For resumable LME ingest (#168). A client that retries a submit after a timeout no longer creates a duplicate episode, and long enrichment no longer loses its lease at 900 s.
-
-- Idempotent submit (`domain/ingest.py`, `services/ingest_intake.py`, `infrastructure/episode_lifecycle.py`, `infrastructure/schema.py`, `api/routes.py`, `api/routes_support.py`, `core/backend_*`):
-  - `POST /memory` accepts an optional `idempotency_key` (1-256 chars), scoped to the normalized namespace.
-  - The episode stores a digest of the key plus a request digest: content, diff, source, flagged, bootstrap scope, occurred_at, role, turn evidence and user statement. Session and user are excluded because the route mints a fresh session when the caller names none.
-  - New uniqueness constraint `episodic_ingest_key_unique`.
-  - Same key and same request: returns the first episode with `idempotent_replay=true` and its current `processing_state`, and writes nothing.
-  - Same key with a different request: returns 409, or 400 over the internal `/backend` dispatch.
-  - A lost create race re-reads the winner.
-  - Without a key, behavior is unchanged.
-- Lease renewal (`services/ingest_worker.py`, `infrastructure/episode_stamping.py`, `services/ingest_service.py`):
-  - The 5 s processing heartbeat now extends `processing_lease_expires_at` by the lease length while the claim is younger than `max_enrichment_seconds` (10800).
-  - Renewal is fenced on ENRICHING, the owner and the claim instant.
-  - The heartbeat loop stops when the fence reports the attempt lost, and survives transient driver errors.
-  - The worker bounds the enrichment body with the same ceiling. Exceeding it raises `EnrichmentDeadlineExceeded` (`enrichment_deadline_exceeded`, manual review).
-- Ownership fences (`infrastructure/episode_lifecycle.py`, `services/enrichment_steps.py`): `mark_episode_ready` and `mark_episode_failed` also match the claim instant when it is given, so a stale attempt from the same process cannot finish a newer claim.
-- `infrastructure/memory_queries.py`: deleting an unfinished episode also removes its ingest key and request digest.
-- Tests:
-  - New: `tests/test_idempotent_episode_submit.py`, `tests/test_heartbeat_lease_renewal.py` and `tests/test_attempt_ownership_fences.py`, each with a `_live` variant.
-  - Changed test stubs (signature only, adding `claim_started_at`): `tests/conftest.py`, `tests/test_services_pipeline.py`, `tests/test_verbatim_skip_worker.py`.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
