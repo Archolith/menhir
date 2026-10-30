@@ -38,6 +38,7 @@ from menhir.infrastructure.cypher import (
 )
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.verifier_repository import candidate_verifier_evidence_cypher
+from menhir.services.embedding_identity import LEGACY_EMBEDDING_MODELS
 
 logger = logging.getLogger(__name__)
 
@@ -397,8 +398,12 @@ class MemoryQueryRepository:
             **tenant_scope_params(namespace),
         }
         if model is not None:
-            where.append("coalesce(n.content_embedding_model, '') = $embedding_model")
+            where.append(
+                "(coalesce(n.content_embedding_model, '') = $embedding_model"
+                " OR coalesce(n.content_embedding_model, '') IN $legacy_embedding_models)"
+            )
             params["embedding_model"] = model
+            params["legacy_embedding_models"] = list(LEGACY_EMBEDDING_MODELS)
         # menhir #171: when scoped, lead with the index-friendly prefilter so the planner can
         # seek the :Episodic(namespace)/:Episodic(group_id) RANGE indexes. It is a superset;
         # tenant_scope_cypher below still decides membership. Unscoped (None) is unchanged.

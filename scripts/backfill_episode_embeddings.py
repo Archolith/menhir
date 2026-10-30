@@ -60,14 +60,16 @@ def _resolve_embedder(settings: Any) -> tuple[Any, str]:
         raise RuntimeError(
             f"Graphiti embed provider is not OpenAI-compatible: {provider.kind.value}"
         )
-    if not provider.embed_model:
+    # Stripped: the stamp must equal the selector's and recall's comparable_model() form.
+    embed_model = (provider.embed_model or "").strip()
+    if not embed_model:
         raise RuntimeError("Graphiti embed model is blank.")
     client = build_async_openai_client(
         base_url=provider.base_url,
         api_key=provider.api_key,
         settings=settings,
     )
-    return client, provider.embed_model
+    return client, embed_model
 
 
 async def _embed_text(client: Any, *, model: str, text: str) -> list[float]:
