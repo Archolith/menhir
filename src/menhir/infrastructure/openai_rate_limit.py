@@ -16,7 +16,7 @@ with ``max_retries=0``, and a throttle there used to return a None verdict), the
 async embeddings endpoint (Graphiti's embedder), the Graphiti reranker
 (``RateLimitedChatClient``), and the sync view embedder. Chat on the
 instrumented client is not wrapped, so the proxy's retry is never nested inside another.
-``LLMAdapter._chat_text`` retries remain for non-429 faults and wrap the inner 429 retry.
+``LLMAdapter._chat_text`` retries only non-429 faults; a 429 that reaches it ends the call (CF-262).
 
 Backoff sleeps are reported to the ``RateLimitBackoffClock`` bound in the current context, if
 any. ``await_with_backoff_aware_timeout`` binds one, so an enclosing deadline (today

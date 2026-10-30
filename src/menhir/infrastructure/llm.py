@@ -11,6 +11,7 @@ from html import escape as _html_escape
 
 from menhir.config import MemorySettings
 from menhir.infrastructure.observability import LlmUsageControlSignal
+from menhir.infrastructure.openai_rate_limit import describe_provider_error, rate_limit_category
 from menhir.infrastructure.providers import (
     ChatBackend,
     ProviderConfig,
@@ -201,6 +202,18 @@ class LLMAdapter:
                 logger.warning("LLM %s timed out; not retrying: %s", operation, exc)
                 return None
             except Exception as exc:
+                category = rate_limit_category(exc)
+                if category is not None:
+                    # CF-262. Provider 429s belong to the inner rate-limit backoff: it already
+                    # retried throttling and stops at once on quota. Retrying here multiplied
+                    # requests (about 9x6) and retried billing states.
+                    logger.error(
+                        "LLM %s hit a provider 429 (%s); not retrying in the outer loop: %s",
+                        operation,
+                        category,
+                        describe_provider_error(exc),
+                    )
+                    return None
                 last_error = exc
                 if attempt < max_retries:
                     delay = min(retry_base_delay_s * (2 ** attempt), 60.0)
