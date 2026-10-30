@@ -21,7 +21,7 @@ from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.self_identity import inferred_self_uuid_for_namespace
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.utils import source_confidence_for
-from menhir.domain.verbatim_skip_status import SKIP_PROJECTION_FIELDS
+from menhir.domain.verbatim_skip_status import skip_projection_map_cypher
 from menhir.infrastructure.cypher import (
     Cypher,
     EPISODE_PROCESSING_FIELDS,
@@ -205,11 +205,17 @@ class EpisodeLifecycleRepository:
 
     def find_episode_by_ingest_key(self, ingest_key: str) -> dict | None:
         """The anchor `:Episodic` stamped with this ingest key, or None (unique by constraint)."""
+        # The replay REPORTS the anchor's status, so it carries what effective_processing_row
+        # needs to project a verbatim-skipped client onto its evidence projection.
         rows = self.neo4j.execute(
-            """
-            MATCH (n:Episodic {ingest_key: $ingest_key})
+            f"""
+            MATCH (n:Episodic {{ingest_key: $ingest_key}})
+            OPTIONAL MATCH (p:Episodic {{uuid: n.extraction_skipped_for}})
             RETURN n.uuid AS uuid,
                    n.processing_state AS processing_state,
+                   n.processing_substage AS processing_substage,
+                   n.extraction_skipped_for AS extraction_skipped_for,
+                   {skip_projection_map_cypher("p")} AS skip_projection,
                    n.namespace AS namespace,
                    n.ingest_request_sha256 AS ingest_request_sha256
             LIMIT 1
@@ -222,6 +228,9 @@ class EpisodeLifecycleRepository:
         return {
             "uuid": row["uuid"],
             "processing_state": row["processing_state"],
+            "processing_substage": row.get("processing_substage"),
+            "extraction_skipped_for": row.get("extraction_skipped_for"),
+            "skip_projection": row.get("skip_projection"),
             "namespace": row["namespace"],
             "ingest_request_sha256": row["ingest_request_sha256"],
         }
@@ -1401,7 +1410,6 @@ class EpisodeLifecycleRepository:
         # The raw row is what work fences read. `extraction_skipped_for` and `skip_projection`
         # let status readers compute a verbatim-skipped client's effective state
         # (domain.verbatim_skip_status.effective_processing_row); fences ignore them.
-        projection_map = ", ".join(f".{field}" for field in SKIP_PROJECTION_FIELDS)
         query = (
             Cypher()
             .match("(n:Episodic)")
@@ -1410,7 +1418,7 @@ class EpisodeLifecycleRepository:
             .return_fields(
                 MEMORY_RETURN_FIELDS,
                 "n.extraction_skipped_for AS extraction_skipped_for",
-                f"CASE WHEN p IS NULL THEN null ELSE p {{{projection_map}}} END AS skip_projection",
+                f"{skip_projection_map_cypher('p')} AS skip_projection",
             )
             .limit("1")
             .build()

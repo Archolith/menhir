@@ -40,6 +40,9 @@ SKIP_PROJECTION_FIELDS = (
     "processing_started_at",
     "processing_completed_at",
     "processing_error",
+    "processing_attempts",
+    "processing_owner",
+    "processing_lease_expires_at",
     "resolved_episode_uuid",
     "enriched_nodes_touched",
     "enriched_edges_touched",
@@ -66,6 +69,104 @@ _IN_FLIGHT_FIELDS = (
     "processing_started_at",
     "processing_error",
 )
+
+
+def _identifier(name: str, what: str) -> str:
+    if not name or not name.isidentifier():
+        raise ValueError(f"{what} must be a Cypher identifier, got {name!r}")
+    return name
+
+
+def verbatim_skipped_cypher(node: str = "n") -> str:
+    """Cypher predicate equal to ``is_verbatim_skipped`` for the node bound to ``node``."""
+    node = _identifier(node, "node")
+    return (
+        f"({node}.processing_state = '{ProcessingState.READY.value}'"
+        f" AND {node}.processing_substage = '{VERBATIM_SKIPPED_SUBSTAGE}'"
+        f" AND coalesce({node}.extraction_skipped_for, '') <> '')"
+    )
+
+
+def skip_projection_lookup_cypher(node: str = "n", projection: str = "p") -> str:
+    """Clause binding ``projection`` to the evidence projection of a skipped ``node``, else null.
+
+    Only a node with ``extraction_skipped_for`` set pays for the ``:Episodic {uuid}`` lookup, and
+    ``head(collect(...))`` keeps one row per ``node`` even when the uuid is held twice.
+    """
+    node = _identifier(node, "node")
+    projection = _identifier(projection, "projection")
+    return (
+        f"CALL ({node}) {{ "
+        f"WITH {node} WHERE {node}.extraction_skipped_for IS NOT NULL "
+        f"OPTIONAL MATCH ({projection}:Episodic {{uuid: {node}.extraction_skipped_for}}) "
+        f"RETURN head(collect({projection})) AS {projection} "
+        f"UNION "
+        f"WITH {node} WHERE {node}.extraction_skipped_for IS NULL "
+        f"RETURN null AS {projection} }}"
+    )
+
+
+def skip_projection_map_cypher(projection: str = "p") -> str:
+    """Expression for the ``skip_projection`` column ``effective_processing_row`` reads."""
+    projection = _identifier(projection, "projection")
+    fields = ", ".join(f".{field}" for field in SKIP_PROJECTION_FIELDS)
+    return f"CASE WHEN {projection} IS NULL THEN null ELSE {projection} {{{fields}}} END"
+
+
+def effective_state_cypher(node: str = "n", projection: str = "p") -> str:
+    """Cypher expression equal to ``effective_processing_row(...)["processing_state"]``."""
+    node = _identifier(node, "node")
+    projection = _identifier(projection, "projection")
+    return (
+        f"CASE WHEN {verbatim_skipped_cypher(node)} "
+        f"THEN CASE WHEN {projection}.processing_state IN "
+        f"['{ProcessingState.READY.value}', '{ProcessingState.PENDING.value}', "
+        f"'{ProcessingState.ENRICHING.value}'] "
+        f"THEN {projection}.processing_state ELSE '{ProcessingState.PENDING.value}' END "
+        f"ELSE {node}.processing_state END"
+    )
+
+
+def projected_field_cypher(field: str, node: str = "n", projection: str = "p") -> str:
+    """Cypher for a column ``effective_processing_row`` takes from a READY projection.
+
+    Those are the enriched episode, touch counts and completion time: a skipped client reports its
+    projection's once the projection is READY, and its own otherwise.
+    """
+    node = _identifier(node, "node")
+    projection = _identifier(projection, "projection")
+    field = _identifier(field, "field")
+    return (
+        f"CASE WHEN {verbatim_skipped_cypher(node)} "
+        f"AND {projection}.processing_state = '{ProcessingState.READY.value}' "
+        f"THEN {projection}.{field} ELSE {node}.{field} END"
+    )
+
+
+#: Status keys a memory row carries that the projection speaks for (see ``overlay_effective_status``).
+_OVERLAY_EXTRA_KEYS = frozenset({
+    "resolved_episode_uuid", "enriched_nodes_touched", "enriched_edges_touched",
+})
+
+
+def overlay_effective_status(
+    row: dict[str, Any], processing_row: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Return ``row`` with its status keys taken from ``effective_processing_row(processing_row)``.
+
+    For a memory row (``MEMORY_RETURN_FIELDS``, which carries no ``skip_projection``) that is a
+    verbatim-skipped client. Only keys the row already has are replaced.
+    """
+    effective = effective_processing_row(processing_row)
+    if effective is None:
+        return row
+    return {
+        **row,
+        **{
+            key: value for key, value in effective.items()
+            if key in row and (key.startswith("processing_") or key in _OVERLAY_EXTRA_KEYS)
+        },
+    }
 
 
 def is_verbatim_skipped(row: Mapping[str, Any]) -> bool:

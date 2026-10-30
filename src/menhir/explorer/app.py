@@ -32,6 +32,13 @@ from menhir.explorer.recall_packet_prototype import (
 )
 from menhir.explorer.extraction_lab import ExtractionLabRequest, run_extraction_lab
 from menhir.explorer.bench_runs import BenchRunCatalog, BenchRunTaskReader, CONTRACT_VERSION, _outcome_counts, _filtered_task_ids, _nav_neighbors, _normalize_outcome, _outcome_from_primary
+from menhir.domain.verbatim_skip_status import (
+    effective_processing_row,
+    effective_state_cypher,
+    projected_field_cypher,
+    skip_projection_lookup_cypher,
+    skip_projection_map_cypher,
+)
 from menhir.privacy import redact_mapping, redact_rows
 from menhir.infrastructure import Neo4jRepository
 from menhir.infrastructure.pending_actions import PendingActionStore
@@ -88,6 +95,8 @@ def _recent_episodes(repo: Neo4jRepository, limit: int = 12) -> list[dict[str, A
     return repo.execute(
         """
         MATCH (e:Episodic)
+        WITH e ORDER BY e.created_at DESC LIMIT $limit
+        """ + skip_projection_lookup_cypher("e", "p") + """
         RETURN
             e.uuid AS uuid,
             coalesce(e.name, e.uuid) AS name,
@@ -95,26 +104,84 @@ def _recent_episodes(repo: Neo4jRepository, limit: int = 12) -> list[dict[str, A
             e.source AS source,
             toString(e.created_at) AS created_at,
             left(coalesce(e.content, ''), 140) AS preview,
-            coalesce(e.enriched_nodes_touched, 0) AS nodes_touched,
-            coalesce(e.enriched_edges_touched, 0) AS edges_touched
+            coalesce(""" + projected_field_cypher("enriched_nodes_touched", "e", "p") + """, 0) AS nodes_touched,
+            coalesce(""" + projected_field_cypher("enriched_edges_touched", "e", "p") + """, 0) AS edges_touched
         ORDER BY e.created_at DESC
-        LIMIT $limit
         """,
         params={"limit": limit},
     )
 
 
+# A verbatim-skipped client is READY before the projection that extracts it is; the lists below
+# REPORT status, so they follow domain.verbatim_skip_status.effective_processing_row. The Cypher
+# below only decides MEMBERSHIP (which rows) -- the columns shown come from `_project_status_rows`,
+# which runs the same rule in Python, so a row's badge and its stage, progress, steps and
+# completion time always describe the same episode.
+_EFFECTIVE_STATE_CYPHER = (
+    "\n        " + skip_projection_lookup_cypher("e", "p")
+    + "\n        WITH e, p, " + effective_state_cypher("e", "p") + " AS effective_state\n"
+)
+
+# The raw columns `effective_processing_row` needs, returned with every projected list.
+_SKIP_COLUMNS_CYPHER = (
+    "e.processing_state AS processing_state,\n"
+    "            e.processing_substage AS processing_substage,\n"
+    "            e.extraction_skipped_for AS extraction_skipped_for,\n"
+    "            " + skip_projection_map_cypher("p") + " AS skip_projection,\n"
+)
+
+_SKIP_HELPER_KEYS = (
+    "processing_substage", "extraction_skipped_for", "skip_projection",
+    "extraction_projection_uuid",
+)
+
+
+def _project_status_rows(
+    rows: list[dict[str, Any]], *, completed_key: str | None = None
+) -> list[dict[str, Any]]:
+    """Run each listed row through ``effective_processing_row`` and coerce what it copied.
+
+    A row that is not a verbatim skip is unchanged apart from the helper columns being dropped.
+    """
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        effective = effective_processing_row(row)
+        is_skip = effective is not None and effective is not row
+        projected = dict(effective if is_skip else row)
+        if is_skip:
+            projected["processing_progress"] = float(projected.get("processing_progress") or 0.0)
+            for key in (
+                "processing_steps_total", "processing_steps_completed",
+                "processing_llm_tasks_attempt", "processing_llm_tasks_total",
+            ):
+                projected[key] = int(projected.get(key) or 0)
+            for key in ("processing_llm_last_task_at", "processing_heartbeat_at"):
+                if projected.get(key) is not None:
+                    projected[key] = str(projected[key])
+            if projected.get("processing_started_at") is not None and "queued_at" in projected:
+                projected["queued_at"] = str(projected["processing_started_at"])
+            if completed_key and projected.get("processing_completed_at") is not None:
+                projected[completed_key] = str(projected["processing_completed_at"])
+        for key in (*_SKIP_HELPER_KEYS, "processing_started_at", "processing_completed_at"):
+            projected.pop(key, None)
+        out.append(projected)
+    return out
+
+
 def _queued_episodes(repo: Neo4jRepository, limit: int = 12) -> list[dict[str, Any]]:
-    return repo.execute(
+    rows = repo.execute(
         """
         MATCH (e:Episodic)
         WHERE e.processing_state IN ['PENDING', 'ENRICHING']
+           OR (e.processing_state = 'READY' AND e.processing_substage = 'verbatim_skipped')
+        """ + _EFFECTIVE_STATE_CYPHER + """
+        WHERE effective_state IN ['PENDING', 'ENRICHING']
         RETURN
             e.uuid AS uuid,
             coalesce(e.name, e.uuid) AS name,
             e.session_id AS session_id,
             e.source AS source,
-            e.processing_state AS processing_state,
+            """ + _SKIP_COLUMNS_CYPHER + """
             e.processing_stage AS processing_stage,
             coalesce(toFloat(e.processing_progress), 0.0) AS processing_progress,
             coalesce(toInteger(e.processing_steps_total), 0) AS processing_steps_total,
@@ -132,6 +199,7 @@ def _queued_episodes(repo: Neo4jRepository, limit: int = 12) -> list[dict[str, A
         """,
         params={"limit": limit},
     )
+    return _project_status_rows(rows)
 
 
 def _failed_episodes(repo: Neo4jRepository, limit: int = 12) -> list[dict[str, Any]]:
@@ -157,15 +225,18 @@ def _failed_episodes(repo: Neo4jRepository, limit: int = 12) -> list[dict[str, A
 
 
 def _recovered_episodes(repo: Neo4jRepository, limit: int = 12) -> list[dict[str, Any]]:
-    return repo.execute(
+    rows = repo.execute(
         """
         MATCH (e:Episodic)
         WHERE e.processing_state = 'READY' AND toInteger(e.processing_attempts) > 1
+        """ + _EFFECTIVE_STATE_CYPHER + """
+        WHERE effective_state = 'READY'
         RETURN
             e.uuid AS uuid,
             coalesce(e.name, e.uuid) AS name,
             e.session_id AS session_id,
             e.source AS source,
+            """ + _SKIP_COLUMNS_CYPHER + """
             e.processing_stage AS processing_stage,
             coalesce(toFloat(e.processing_progress), 0.0) AS processing_progress,
             coalesce(toInteger(e.processing_attempts), 0) AS processing_attempts,
@@ -176,18 +247,22 @@ def _recovered_episodes(repo: Neo4jRepository, limit: int = 12) -> list[dict[str
         """,
         params={"limit": limit},
     )
+    return _project_status_rows(rows, completed_key="recovered_at")
 
 
 def _successful_episodes(repo: Neo4jRepository, limit: int = 12) -> list[dict[str, Any]]:
-    return repo.execute(
+    rows = repo.execute(
         """
         MATCH (e:Episodic)
         WHERE e.processing_state = 'READY' AND coalesce(toInteger(e.processing_attempts), 0) <= 1
+        """ + _EFFECTIVE_STATE_CYPHER + """
+        WHERE effective_state = 'READY'
         RETURN
             e.uuid AS uuid,
             coalesce(e.name, e.uuid) AS name,
             e.session_id AS session_id,
             e.source AS source,
+            """ + _SKIP_COLUMNS_CYPHER + """
             e.processing_stage AS processing_stage,
             coalesce(toFloat(e.processing_progress), 0.0) AS processing_progress,
             coalesce(toInteger(e.processing_attempts), 0) AS processing_attempts,
@@ -198,6 +273,7 @@ def _successful_episodes(repo: Neo4jRepository, limit: int = 12) -> list[dict[st
         """,
         params={"limit": limit},
     )
+    return _project_status_rows(rows, completed_key="completed_at")
 
 
 def _recent_sessions(repo: Neo4jRepository, limit: int = 12) -> list[dict[str, Any]]:
@@ -297,6 +373,7 @@ def _node_detail(repo: Neo4jRepository, uuid: str) -> dict[str, Any] | None:
             created_at: toString(e.created_at),
             session_id: e.session_id
         })[0..10] AS episodes
+        """ + skip_projection_lookup_cypher("n", "p") + """
         RETURN {
             uuid: n.uuid,
             name: coalesce(n.name, n.uuid),
@@ -309,8 +386,8 @@ def _node_detail(repo: Neo4jRepository, uuid: str) -> dict[str, Any] | None:
             freshness: n.freshness,
             sharpness: n.sharpness,
             emotions: n.emotions,
-            nodes_touched: n.enriched_nodes_touched,
-            edges_touched: n.enriched_edges_touched,
+            nodes_touched: """ + projected_field_cypher("enriched_nodes_touched", "n", "p") + """,
+            edges_touched: """ + projected_field_cypher("enriched_edges_touched", "n", "p") + """,
             created_at: toString(n.created_at),
             last_accessed: toString(n.last_accessed),
             content: n.content,

@@ -26,6 +26,7 @@ from menhir.domain.recall_visibility import default_recall_visibility_cypher
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.episode_nodes import menhir_queue_episode_cypher
 from menhir.domain.recall import adjacency_edge_pattern
+from menhir.domain.verbatim_skip_status import effective_state_cypher, skip_projection_lookup_cypher
 from menhir.infrastructure.cypher import (
     Cypher,
     ENTITY_METADATA_FIELDS,
@@ -123,17 +124,20 @@ class MemoryQueryRepository:
         producer that captures turns and never reports the pairing.
         """
 
-        group_ids = namespace_to_group_ids(namespace)
+        # Menhir's queue anchors carry `namespace` but no `group_id`, so the scope is the shared
+        # tenancy predicate (namespace over group_id), not a bare group_id match.
         params: dict[str, Any] = {}
         node_filter = ""
-        if group_ids is not None:
-            node_filter = " AND n.group_id IN $group_ids"
-            params["group_ids"] = group_ids
+        if namespace_spellings(namespace) is not None:
+            node_filter = f" AND {tenant_scope_cypher('n')}"
+            params.update(tenant_scope_params(namespace))
 
         rows = self.neo4j.execute(
             f"""
             MATCH (n)
             WHERE (n:Entity OR n:Episodic){node_filter}
+            {skip_projection_lookup_cypher("n", "p")}
+            WITH n, {effective_state_cypher("n", "p")} AS effective_state
             RETURN count(n) AS total_memories,
                    count(CASE WHEN n:Entity THEN 1 END) AS entity_count,
                    count(CASE WHEN n:Episodic THEN 1 END) AS episode_count,
@@ -141,10 +145,10 @@ class MemoryQueryRepository:
                    count(CASE WHEN n.scope = 'SESSION' THEN 1 END) AS session_count,
                    count(CASE WHEN n.scope = 'PERSISTENT' THEN 1 END) AS persistent_count,
                    count(CASE WHEN n.scope = 'PROMOTED' THEN 1 END) AS promoted_count,
-                   count(CASE WHEN n:Episodic AND n.processing_state = 'PENDING' THEN 1 END) AS pending_count,
-                   count(CASE WHEN n:Episodic AND n.processing_state = 'ENRICHING' THEN 1 END) AS enriching_count,
-                   count(CASE WHEN n:Episodic AND n.processing_state = 'READY' THEN 1 END) AS ready_count,
-                   count(CASE WHEN n:Episodic AND n.processing_state = 'FAILED' THEN 1 END) AS failed_count
+                   count(CASE WHEN n:Episodic AND effective_state = 'PENDING' THEN 1 END) AS pending_count,
+                   count(CASE WHEN n:Episodic AND effective_state = 'ENRICHING' THEN 1 END) AS enriching_count,
+                   count(CASE WHEN n:Episodic AND effective_state = 'READY' THEN 1 END) AS ready_count,
+                   count(CASE WHEN n:Episodic AND effective_state = 'FAILED' THEN 1 END) AS failed_count
             """,
             params or None,
         )

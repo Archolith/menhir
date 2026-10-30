@@ -15,7 +15,11 @@ from menhir.domain.models import ProcessingState
 from menhir.domain.recall_provenance import provenance_label
 from menhir.domain.recall_visibility import memory_lifecycle_note
 from menhir.domain.utils import excerpt
-from menhir.domain.verbatim_skip_status import effective_processing_row
+from menhir.domain.verbatim_skip_status import (
+    VERBATIM_SKIPPED_SUBSTAGE,
+    effective_processing_row,
+    overlay_effective_status,
+)
 from menhir.services.stale_labeling import (
     STALE_ACTION, STALE_ACTION_OUTDATED,
     STALE_ADVISORY, STALE_ADVISORY_OUTDATED, STALE_ADVISORY_STILL_VALID,
@@ -129,6 +133,29 @@ def _count_unresolved_members(row: dict[str, object] | None) -> int:
         return 0
     members = _coerce_conflict_members(row)
     return sum(1 for member in members if str(member.get("status") or "") == "unresolved")
+
+
+async def _project_skipped_memory_rows(
+    backend: Any, rows: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    """Make a memory row's processing status the one ``effective_processing_row`` reports.
+
+    Memory rows (``MEMORY_RETURN_FIELDS``) carry the client's own READY, which for a
+    verbatim-skipped episode means "never extract this row", not "extracted". Only such rows
+    are looked up again, by the uuid the caller's scoped read already returned.
+    """
+    out: list[dict[str, object]] = []
+    for row in rows:
+        if (
+            row.get("uuid")
+            and row.get("processing_state") == ProcessingState.READY
+            and row.get("processing_substage") == VERBATIM_SKIPPED_SUBSTAGE
+        ):
+            row = overlay_effective_status(
+                row, await backend.fetch_episode_processing(str(row["uuid"]))
+            )
+        out.append(row)
+    return out
 
 
 # ---------------------------------------------------------------------------

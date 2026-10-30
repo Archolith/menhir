@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from menhir.domain.namespace import namespace_to_group_id
+from menhir.domain.verbatim_skip_status import skip_projection_lookup_cypher, skip_projection_map_cypher
 from menhir.infrastructure.cypher import (
     Cypher,
     EPISODE_PROCESSING_FIELDS,
@@ -178,13 +179,18 @@ class EpisodeMaintenanceRepository:
         safe_limit = max(1, min(limit, 200))
         states = [str(state).strip().upper() for state in (processing_states or []) if str(state).strip()]
         ns = str(namespace).strip() if namespace is not None else ""
+        # The listing is filtered on the raw state (it is the queue); the extra columns let
+        # reporters of a row's status project a verbatim-skipped client.
         query = (
             Cypher()
             .match("(n:Episodic)")
             .where_if(bool(states), "n.processing_state IN $states")
             .where_if(bool(ns), "coalesce(n.namespace, 'default') = $namespace")
+            .raw(skip_projection_lookup_cypher("n", "p"))
             .return_fields(
                 EPISODE_PROCESSING_FIELDS,
+                "n.extraction_skipped_for AS extraction_skipped_for",
+                f"{skip_projection_map_cypher('p')} AS skip_projection",
                 "n.resolved_episode_uuid AS resolved_episode_uuid",
                 "n.session_id AS session_id",
                 "n.source AS source",

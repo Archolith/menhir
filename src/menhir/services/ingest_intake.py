@@ -402,7 +402,8 @@ class IngestIntakeMixin:
 
         if existing.get("ingest_request_sha256") != digest:
             raise IdempotencyKeyConflict("idempotency_key was already used with a different request")
-        state = existing.get("processing_state")
+        # A verbatim-skipped client is READY before the projection that extracts it is.
+        state = (effective_processing_row(existing) or existing).get("processing_state")
         return IngestResult(
             episode_id=str(existing.get("uuid") or ""),
             status=IngestStatus.QUEUED,
