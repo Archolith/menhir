@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from menhir.infrastructure.erasure_subjects import ErasureSubjectStore
+from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.infrastructure.telemetry.erasure_purge import (
     ErasureSubjects,
@@ -251,7 +252,11 @@ class ErasureCoordinator:
         try:
             graph_deleted = int(delete_graph() or 0)
         except Exception as exc:  # noqa: BLE001
-            self.journal.record_attempt(op_id, error=f"{type(exc).__name__}: {exc}")
+            self.journal.record_attempt(
+                op_id,
+                error=f"{type(exc).__name__}: {exc}",
+                owner_token=oo.process_owner_token(),
+            )
             raise
 
         try:
@@ -261,13 +266,18 @@ class ErasureCoordinator:
                 self.subjects.mark_purged(op_id, conn=conn)
                 conn.commit()
         except Exception as exc:  # noqa: BLE001
-            self.journal.record_attempt(op_id, error=f"{type(exc).__name__}: {exc}")
+            self.journal.record_attempt(
+                op_id,
+                error=f"{type(exc).__name__}: {exc}",
+                owner_token=oo.process_owner_token(),
+            )
             raise
 
         if leftover:
             self.journal.mark_needs_review(
                 op_id,
                 observed_error=f"{RESIDUAL_CONTENT}: {sorted(leftover)}",
+                owner_token=oo.process_owner_token(),
             )
             return {
                 "reason": RESIDUAL_CONTENT,
@@ -288,7 +298,7 @@ class ErasureCoordinator:
             )
             stranded, stranded_known = {}, False
 
-        self.journal.mark_committed(op_id)
+        self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
         purged_total = sum(result.rows_affected.values())
         if graph_deleted:
             reason = ERASED
@@ -341,11 +351,13 @@ class ErasureCoordinator:
         op_id = str(row.get("op_id") or "")
         outcome, diagnostics = self.classify_prepared_row(row)
         if outcome == SKIP:
-            self.journal.mark_committed(op_id)
+            self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
             return SKIPPED, dict(diagnostics)
         if outcome == WOULD_NEEDS_REVIEW:
             observed = str(diagnostics.get("observed_error"))
-            self.journal.mark_needs_review(op_id, observed_error=observed)
+            self.journal.mark_needs_review(
+                op_id, observed_error=observed, owner_token=oo.process_owner_token()
+            )
             return DRIFTED, {"observed_error": observed}
 
         pending = self.subjects.fetch_subjects(op_id, unpurged_only=True)
@@ -361,11 +373,14 @@ class ErasureCoordinator:
         }
         purge = _subjects_for_uuids(node_uuids, namespaces=frozenset(namespaces))
 
-        result = self._erase_and_verify(
-            op_id=op_id,
-            purge=purge,
-            delete_graph=lambda: self._replay_graph_deletes(namespaces, node_uuids),
-        )
+        # CF-271/F5: the replay mutates the graph and sidecar exactly as the first attempt does, so it
+        # holds the same ownership heartbeat and revocation predicate the dispatcher's claim began.
+        with owned_mutation(self.journal, op_id, operation_kind=ERASURE_KIND):
+            result = self._erase_and_verify(
+                op_id=op_id,
+                purge=purge,
+                delete_graph=lambda: self._replay_graph_deletes(namespaces, node_uuids),
+            )
         if result.get("reason") == RESIDUAL_CONTENT:
             return DRIFTED, {
                 "observed_error": (

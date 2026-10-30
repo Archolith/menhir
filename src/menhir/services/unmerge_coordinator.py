@@ -35,7 +35,9 @@ from typing import Any
 
 from menhir.domain import merge_delta as md
 from menhir.domain import merge_snapshot as ms
+from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
+from menhir.infrastructure.graph_operations_transitions import StaleTransitionError
 from menhir.services.merge_coordinator import (
     MergeDrift,
     _canonical,
@@ -46,6 +48,7 @@ from menhir.services.saga_writer_heartbeat import owned_mutation
 from menhir.services.saga_reconcile_outcomes import (
     DRIFTED,
     FAILED,
+    LIVE_OWNER,
     REPLAYED,
     SKIP,
     SKIPPED,
@@ -382,7 +385,7 @@ class UnmergeCoordinator:
 
         if outcome == WOULD_MARK_ALREADY_APPLIED:
             # A previous attempt already restored it and crashed before COMMITTED.
-            self.journal.mark_committed(op_id)
+            self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
             self._mark_merge_reversed(str(request["merge_op_id"]))
             self._fire_unmerge_hook(
                 survivor_uuid=survivor_uuid, absorbed_uuid=absorbed_uuid,
@@ -395,7 +398,11 @@ class UnmergeCoordinator:
         # FAIL CLOSED: a request with no frozen precondition cannot be verified, so it must NOT be
         # applied. Waving it through would mutate a possibly-drifted graph with no check at all.
         if outcome == WOULD_NEEDS_REVIEW:
-            self.journal.mark_needs_review(op_id, observed_error=diag["observed_error"])
+            self.journal.mark_needs_review(
+                op_id,
+                observed_error=diag["observed_error"],
+                owner_token=oo.process_owner_token(),
+            )
             if expected_before is None:
                 raise MergeDrift(
                     f"op {op_id} has no frozen precondition; NOT mutating (fail closed)"
@@ -413,7 +420,11 @@ class UnmergeCoordinator:
                 **plan,
             )
         except Exception as exc:  # noqa: BLE001
-            self.journal.record_attempt(op_id, error=f"{type(exc).__name__}: {exc}")
+            self.journal.record_attempt(
+                op_id,
+                error=f"{type(exc).__name__}: {exc}",
+                owner_token=oo.process_owner_token(),
+            )
             raise
 
         after_fp = merge_state_fingerprint(
@@ -424,12 +435,13 @@ class UnmergeCoordinator:
                 op_id,
                 observed_error=f"unmerge after-state mismatch expected={expected_after} "
                                f"actual={after_fp}",
+                owner_token=oo.process_owner_token(),
             )
             raise MergeDrift(
                 f"unmerge after-state drift for {survivor_uuid} <- {absorbed_uuid} (op {op_id})"
             )
 
-        self.journal.mark_committed(op_id)
+        self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
         self._mark_merge_reversed(str(request["merge_op_id"]))
         self._fire_unmerge_hook(
             survivor_uuid=survivor_uuid, absorbed_uuid=absorbed_uuid,
@@ -569,11 +581,16 @@ class UnmergeCoordinator:
             )
         except (TypeError, ValueError, ms.SnapshotSchemaError) as exc:
             observed = f"unreplayable row: {exc}"
-            self.journal.mark_needs_review(op_id, observed_error=observed)
+            self.journal.mark_needs_review(
+                op_id, observed_error=observed, owner_token=oo.process_owner_token()
+            )
             return DRIFTED, {"observed_error": observed}
         try:
             self._apply(request, plan)
             return REPLAYED, {}
+        except StaleTransitionError as exc:
+            logger.warning("unmerge saga: op %s moved under the replay (stale): %s", op_id, exc)
+            return LIVE_OWNER, {"observed_error": f"stale transition: {exc}", "stale": True}
         except MergeDrift as exc:
             return DRIFTED, {"observed_error": str(exc)}
         except Exception as exc:  # noqa: BLE001 -- reported per row; one bad row must not abort

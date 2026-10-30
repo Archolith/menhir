@@ -32,11 +32,14 @@ from typing import Any, Protocol
 
 from menhir.domain import merge_eligibility as me
 from menhir.domain import merge_snapshot as ms
+from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
+from menhir.infrastructure.graph_operations_transitions import StaleTransitionError
 from menhir.services.saga_writer_heartbeat import owned_mutation
 from menhir.services.saga_reconcile_outcomes import (
     DRIFTED,
     FAILED,
+    LIVE_OWNER,
     REPLAYED,
     SKIP,
     SKIPPED,
@@ -332,7 +335,7 @@ class MergeCoordinator:
         # Already applied by an attempt that crashed before COMMITTED: the survivor carries THIS
         # op's marker, so replaying is a no-op.
         if outcome == WOULD_MARK_ALREADY_APPLIED:
-            self.journal.mark_committed(op_id)
+            self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
             return {"merged": 1, "replayed": True, "op_id": op_id}
 
         # Neither expected state -> quarantine. A background replay must never paper over a graph
@@ -343,7 +346,11 @@ class MergeCoordinator:
         # missing-precondition case too, which is the misreport this finding is about -- an
         # operator reading it goes hunting for a competing writer that was never there.
         if outcome == WOULD_NEEDS_REVIEW:
-            self.journal.mark_needs_review(op_id, observed_error=diag["observed_error"])
+            self.journal.mark_needs_review(
+                op_id,
+                observed_error=diag["observed_error"],
+                owner_token=oo.process_owner_token(),
+            )
             raise MergeDrift(
                 f"merge {survivor_uuid} <- {absorbed_uuid} (op {op_id}): "
                 f"{diag['observed_error']}; NOT mutating"
@@ -363,7 +370,11 @@ class MergeCoordinator:
                 operation_id=op_id, expected_fact_uuids=expected_facts,
             )
         except Exception as exc:  # noqa: BLE001
-            self.journal.record_attempt(op_id, error=f"{type(exc).__name__}: {exc}")
+            self.journal.record_attempt(
+                op_id,
+                error=f"{type(exc).__name__}: {exc}",
+                owner_token=oo.process_owner_token(),
+            )
             raise
 
         if not result.get("merged"):
@@ -377,7 +388,11 @@ class MergeCoordinator:
                 # Graph is exactly as it was: nothing to adjudicate and nothing to replay. FAILED is
                 # terminal and RELEASES the pair fence -- quarantining here would lock the pair out
                 # forever over a benign, non-destructive abstention.
-                self.journal.mark_failed(op_id, reason=f"repository abstained: {reason}")
+                self.journal.mark_failed(
+                    op_id,
+                    reason=f"repository abstained: {reason}",
+                    owner_token=oo.process_owner_token(),
+                )
                 return {"merged": 0, "reason": reason, "op_id": op_id}
             # It claimed to abstain but the graph moved: that is exactly the ambiguity NEEDS_REVIEW
             # exists for.
@@ -387,6 +402,7 @@ class MergeCoordinator:
                     f"repository abstained ({reason}) but the graph is not at the expected "
                     f"before-state: observed={post_fp} expected_before={expected_before} state={post}"
                 ),
+                owner_token=oo.process_owner_token(),
             )
             raise MergeDrift(
                 f"merge {survivor_uuid} <- {absorbed_uuid} (op {op_id}): repository abstained but "
@@ -401,12 +417,13 @@ class MergeCoordinator:
                 op_id,
                 observed_error=f"after-state mismatch expected={expected_after} actual={actual} "
                                f"state={after}",
+                owner_token=oo.process_owner_token(),
             )
             raise MergeDrift(
                 f"merge after-state drift for {survivor_uuid} <- {absorbed_uuid} (op {op_id})"
             )
 
-        self.journal.mark_committed(op_id)
+        self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
         out = dict(result)
         out["op_id"] = op_id
         return out
@@ -475,11 +492,18 @@ class MergeCoordinator:
         try:
             request = json.loads(row["request_json"])
         except (TypeError, ValueError):
-            self.journal.mark_needs_review(op_id, observed_error="unparseable request_json")
+            self.journal.mark_needs_review(
+                op_id,
+                observed_error="unparseable request_json",
+                owner_token=oo.process_owner_token(),
+            )
             return DRIFTED, {"observed_error": "unparseable request_json"}
         try:
             self._apply(request)
             return REPLAYED, {}
+        except StaleTransitionError as exc:
+            logger.warning("merge saga: op %s moved under the replay (stale): %s", op_id, exc)
+            return LIVE_OWNER, {"observed_error": f"stale transition: {exc}", "stale": True}
         except MergeDrift as exc:
             logger.warning("merge saga: op %s drifted; left NEEDS_REVIEW", op_id)
             return DRIFTED, {"observed_error": str(exc)}

@@ -60,13 +60,13 @@ class _Journal:
     def prepare(self, **kw: Any) -> None:
         self.events.append(("prepare", str(kw.get("op_id"))))
 
-    def record_attempt(self, op_id: str, error: str = "") -> None:
+    def record_attempt(self, op_id: str, error: str = "", owner_token=None) -> None:
         self.events.append(("attempt", op_id))
 
-    def mark_needs_review(self, op_id: str, observed_error: str = "") -> None:
+    def mark_needs_review(self, op_id: str, observed_error: str = "", owner_token=None) -> None:
         self.events.append(("needs_review", op_id))
 
-    def mark_committed(self, op_id: str) -> None:
+    def mark_committed(self, op_id: str, owner_token=None) -> None:
         self.events.append(("committed", op_id))
 
     # WriterHeartbeat renews through the journal; accept and record whatever it calls.

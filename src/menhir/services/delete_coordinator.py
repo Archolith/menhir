@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from menhir.domain import merge_snapshot as ms
+from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.services.merge_coordinator import _canonical
 from menhir.services.saga_writer_heartbeat import owned_mutation
@@ -209,7 +210,11 @@ class DeleteCoordinator:
                 protect_retention=(kind == "SESSION_TTL_DELETE"),
             )
         except Exception as exc:  # noqa: BLE001
-            self.journal.record_attempt(op_id, error=f"{type(exc).__name__}: {exc}")
+            self.journal.record_attempt(
+                op_id,
+                error=f"{type(exc).__name__}: {exc}",
+                owner_token=oo.process_owner_token(),
+            )
             raise
 
         deleted = sorted(deleted)
@@ -223,10 +228,11 @@ class DeleteCoordinator:
             self.journal.mark_needs_review(
                 op_id,
                 observed_error=f"nodes reported deleted are still present: {still_present}",
+                owner_token=oo.process_owner_token(),
             )
             raise DeleteDrift(f"{kind} (op {op_id}): {still_present} still present after delete")
 
-        self.journal.mark_committed(op_id)
+        self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
         return {
             "op_id": op_id,
             "deleted": deleted,
@@ -344,11 +350,13 @@ class DeleteCoordinator:
         if outcome == SKIP:
             return SKIPPED, {}
         if outcome == WOULD_MARK_ALREADY_APPLIED:
-            self.journal.mark_committed(op_id)
+            self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
             return REPLAYED, {}
         if outcome == WOULD_NEEDS_REVIEW:
             observed = diagnostics["observed_error"]
-            self.journal.mark_needs_review(op_id, observed_error=observed)
+            self.journal.mark_needs_review(
+                op_id, observed_error=observed, owner_token=oo.process_owner_token()
+            )
             diag: dict[str, Any] = {"observed_error": observed}
             if "survivors" in diagnostics:
                 diag["survivors"] = diagnostics["survivors"]

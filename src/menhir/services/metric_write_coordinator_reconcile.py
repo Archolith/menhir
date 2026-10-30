@@ -15,10 +15,13 @@ from collections.abc import Mapping
 
 from typing import Any
 
+from menhir.infrastructure import operation_owner as oo
+from menhir.infrastructure.graph_operations_transitions import StaleTransitionError
 from menhir.services.metric_write_coordinator_common import MetricDrift, state_fingerprint
 from menhir.services.saga_reconcile_outcomes import (
     DRIFTED,
     FAILED,
+    LIVE_OWNER,
     REPLAYED,
     SKIP,
     SKIPPED,
@@ -172,7 +175,7 @@ class MetricReconcileMixin:
         # (2) Already applied by a previous attempt that crashed before COMMITTED. The receipt
         # pointer proves THIS op produced it, so replaying is a no-op, not a conflict.
         if outcome == WOULD_MARK_ALREADY_APPLIED:
-            self.journal.mark_committed(op_id)
+            self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
             return {
                 "uuid": str(request["metric_uuid"]), "view_key": key, "op_id": op_id,
                 "created": False, "replayed": True,
@@ -185,7 +188,11 @@ class MetricReconcileMixin:
         # applied. Waving it through would mutate a possibly-drifted graph with no check at all --
         # the opposite of the guarantee this contract exists to provide.
         if outcome == WOULD_NEEDS_REVIEW:
-            self.journal.mark_needs_review(op_id, observed_error=diag["observed_error"])
+            self.journal.mark_needs_review(
+                op_id,
+                observed_error=diag["observed_error"],
+                owner_token=oo.process_owner_token(),
+            )
             if expected_before is None:
                 raise MetricDrift(
                     f"op {op_id} for {key!r} has no frozen precondition; NOT mutating (fail closed)"
@@ -209,7 +216,11 @@ class MetricReconcileMixin:
                 node_uuid=str(request["metric_uuid"]),
             )
         except Exception as exc:  # noqa: BLE001
-            self.journal.record_attempt(op_id, error=f"{type(exc).__name__}: {exc}")
+            self.journal.record_attempt(
+                op_id,
+                error=f"{type(exc).__name__}: {exc}",
+                owner_token=oo.process_owner_token(),
+            )
             raise
 
         # LWW stale-skip: the counter kind is an LWW register, so _write_version REFUSES to let a
@@ -225,6 +236,7 @@ class MetricReconcileMixin:
                     "LWW stale-skip: the graph holds a NEWER version than this operation's frozen "
                     f"valid_at ({request.get('valid_at')}); the write was refused, not applied"
                 ),
+                owner_token=oo.process_owner_token(),
             )
             raise MetricDrift(
                 f"stale replay for {key!r} (op {op_id}): a newer version is current; NOT applied"
@@ -235,14 +247,16 @@ class MetricReconcileMixin:
         actual = state_fingerprint(after, view_key=key)
         if expected_after and actual != expected_after:
             self.journal.mark_needs_review(
-                op_id, observed_error=f"after-state mismatch expected={expected_after} actual={actual}"
+                op_id,
+                observed_error=f"after-state mismatch expected={expected_after} actual={actual}",
+                owner_token=oo.process_owner_token(),
             )
             raise MetricDrift(
                 f"after-state drift for {key!r} (op {op_id}): expected {expected_after}, "
                 f"observed {actual}"
             )
 
-        self.journal.mark_committed(op_id)
+        self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
         res["op_id"] = op_id
         return res
 
@@ -304,7 +318,11 @@ class MetricReconcileMixin:
         try:
             request = json.loads(row["request_json"])
         except (TypeError, ValueError):
-            self.journal.mark_needs_review(op_id, observed_error="unparseable request_json")
+            self.journal.mark_needs_review(
+                op_id,
+                observed_error="unparseable request_json",
+                owner_token=oo.process_owner_token(),
+            )
             return DRIFTED, {"observed_error": "unparseable request_json"}
         try:
             self._apply(request)
@@ -312,6 +330,9 @@ class MetricReconcileMixin:
                 "metric saga: replayed PREPARED op %s (%s)", op_id, request.get("view_key")
             )
             return REPLAYED, {}
+        except StaleTransitionError as exc:
+            logger.warning("metric saga: op %s moved under the replay (stale): %s", op_id, exc)
+            return LIVE_OWNER, {"observed_error": f"stale transition: {exc}", "stale": True}
         except MetricDrift as exc:
             logger.warning("metric saga: op %s drifted; left NEEDS_REVIEW", op_id)
             return DRIFTED, {"observed_error": str(exc)}
