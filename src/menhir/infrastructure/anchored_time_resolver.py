@@ -126,7 +126,7 @@ class AnchoredTimeResolver:
             return ResolverOutcome("empty", latency_s=latency)
         try:
             items, missing = parse_items(content)
-        except (ValueError, TypeError, AttributeError):  # json.JSONDecodeError is a ValueError
+        except (ValueError, TypeError, AttributeError, RecursionError):  # JSONDecodeError is a ValueError
             return ResolverOutcome("parse_error", latency_s=latency)
         if self._cache_size:
             self._cache[key] = (_copy_items(items), len(missing))

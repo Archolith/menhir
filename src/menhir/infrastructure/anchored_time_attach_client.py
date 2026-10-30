@@ -122,7 +122,7 @@ class AnchoredTimeAttacher:
             return AttachOutcome("empty", latency_s=latency)
         try:
             answers = parse_answers(content)
-        except (ValueError, TypeError, AttributeError):  # json.JSONDecodeError is a ValueError
+        except (ValueError, TypeError, AttributeError, RecursionError):  # JSONDecodeError is a ValueError
             return AttachOutcome("parse_error", latency_s=latency)
         if self._cache_size:
             self._cache[key] = _copy_answers(answers)

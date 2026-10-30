@@ -2062,6 +2062,10 @@ async def _apply_anchored_time(
             return
         items = outcome.items
         report.missing_events = outcome.missing_events
+        report.malformed_items = sum(1 for it in items.values() if it.get("guard") == "malformed")
+        if report.malformed_items:
+            logger.warning("Anchored-time resolver returned %d malformed item(s) episode_id=%s",
+                           report.malformed_items, receipt.episode_key)
         drops = set(clause_guard(turn, facts, items)) | set(state_start_guard(turn, facts, items))
         report.guard_drops = tuple(sorted(drops))
         results = plan_overlay(inputs, items, speech_date, speech_time.tzinfo)
@@ -2073,11 +2077,22 @@ async def _apply_anchored_time(
         for edge, result in zip(edges, results):
             if result.new_valid_at is not None:
                 edge.valid_at = result.new_valid_at
-        report.results = tuple(results)
+        # A planning_error item (a bug, not an unplaceable time) is kept out of the report so the
+        # persist step records no false outcome for it. Nothing replays it, so repairing it after a
+        # fix is a manual step. The expiry hook finds no result for its edge and answers EXPIRE
+        # (upstream).
+        report.planning_errors = sum(r.reason == "planning_error" for r in results)
+        report.results = tuple(r for r in results if r.reason != "planning_error")
         report.overridden = sum(r.written for r in results)
         report.kept_inside_window = sum(r.reason == "graphiti_inside_window" for r in results)
         report.plan_not_written = sum(r.reason == "plan" for r in results)
         report.status = "ok"
+        if report.planning_errors:
+            logger.warning(
+                "Anchored-time planning_error items=%d of %d episode_id=%s; those facts keep Graphiti times "
+                "and no contract is persisted for them (repair is manual)",
+                report.planning_errors, report.facts, receipt.episode_key,
+            )
         logger.info(
             "Anchored-time resolver episode_id=%s prompt=%s model=%s facts=%d overridden=%d "
             "kept_inside=%d plan_not_written=%d guard_drops=%d cached=%s latency_s=%s",
@@ -2129,7 +2144,7 @@ async def _attach_check(
                 receipt.episode_key, outcome.status, outcome.error_class or "-",
             )
     final = plan_overlay(inputs, items, speech_date, speech_tz,
-                         attach=decide_all(turn, candidates, answers))
+                         attach=decide_all(turn, candidates, answers), log_errors=False)  # first pass logged
     report.attach_rejected = sum(r.reason == "attach_rejected" for r in final)
     report.attach_unverified = sum(r.reason == "attach_unverified" for r in final)
     logger.info(

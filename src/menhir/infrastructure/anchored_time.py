@@ -13,11 +13,33 @@ from dataclasses import dataclass, field
 from datetime import MAXYEAR, MINYEAR, date, datetime, timedelta, timezone, tzinfo
 import functools
 import json
+import logging
 import math
+import os.path
 import re
+import traceback
 from typing import Mapping, Sequence
 
 import holidays
+
+_log = logging.getLogger(__name__)
+
+
+def _frames(exc: BaseException, limit: int = 8) -> str:
+    """Innermost-first ``file:line:function`` frames of ``exc``. Never its message: messages can
+    carry fact text."""
+    tb = traceback.extract_tb(exc.__traceback__)[-limit:]
+    return " <- ".join(f"{os.path.basename(f.filename)}:{f.lineno}:{f.name}" for f in reversed(tb))
+
+
+def _swallowed(where: str, exc: BaseException) -> None:
+    """Debug line for an input-driven exception turned into "unusable" (class and frames only)."""
+    _log.debug("anchored_time: %s unusable (%s) at %s", where, type(exc).__name__, _frames(exc))
+
+
+def _clean_str(value: str) -> str:
+    """``value`` without lone surrogates, which the Neo4j packer cannot encode."""
+    return value.encode("utf-8", "replace").decode("utf-8")
 
 PROMPT_VERSION = "a7797891"
 
@@ -134,7 +156,21 @@ def _month_window(y: int, m: int) -> tuple[date, date]:
     return date(y, m, 1), date(y, m, calendar.monthrange(y, m)[1])
 
 
-def _shift(d: date, amount: float, unit: str, sign: int) -> date:
+_MAX_YEARS = 10_000
+_MAX_AMOUNT = {"day": 3_652_425, "week": 521_775, "month": 12 * _MAX_YEARS, "year": _MAX_YEARS}
+_MAX_COUNT = {**_MAX_AMOUNT, "weekend": 521_775, "quarter": 4 * _MAX_YEARS, "season": _MAX_YEARS}
+
+
+def _shift(d: date, amount: float, unit: str, sign: int) -> date | None:
+    """d moved by amount units; None when the result is not a representable date."""
+    try:
+        return _shift_unsafe(d, amount, unit, sign)
+    except (OverflowError, ValueError) as exc:
+        _swallowed("shift", exc)
+        return None
+
+
+def _shift_unsafe(d: date, amount: float, unit: str, sign: int) -> date:
     if unit == "day":
         return d + timedelta(days=sign * amount)
     if unit == "week":
@@ -187,7 +223,19 @@ def _this_season(ref: date, name: str, kind: str) -> tuple[tuple[date, date], st
 
 
 def _calendar(ref: date, cal: dict) -> tuple[date, date] | None:
-    which, unit, name = cal.get("which"), cal.get("unit"), (cal.get("name") or "").lower()
+    """Calendar window; None when unusable or outside the representable date range."""
+    try:
+        return _calendar_unsafe(ref, cal)
+    except (OverflowError, ValueError) as exc:
+        _swallowed("calendar", exc)
+        return None
+
+
+def _calendar_unsafe(ref: date, cal: dict) -> tuple[date, date] | None:
+    which, unit, name = cal.get("which"), cal.get("unit"), cal.get("name") or ""
+    if not (isinstance(which, str) and isinstance(unit, str) and isinstance(name, str)):
+        return None
+    name = name.lower()
     step = {"last": -1, "this": 0, "next": 1, "past": -1, "upcoming": 1}.get(which)
     if step is None:
         return None
@@ -199,7 +247,12 @@ def _calendar(ref: date, cal: dict) -> tuple[date, date] | None:
     else:
         try:
             count = max(1, int(raw))
-        except (TypeError, ValueError):  # an unreadable count is not guessed as 1
+        except (TypeError, ValueError, OverflowError):  # an unreadable count is not guessed as 1
+            return None
+        # Only a calendar that multiplies by the count is bounded by it ("this week" ignores it).
+        uses_count = (step != 0 and unit in ("quarter", "day", "week", "weekend", "month", "year")) \
+            or (unit == "season" and step < 0)
+        if uses_count and count > _MAX_COUNT[unit]:
             return None
     if unit == "weekday" and name in _WD and which in ("past", "upcoming"):  # bare weekday, by tense
         k = _WD.index(name)
@@ -302,7 +355,7 @@ def _explicit(ref: date, value: str, kind: str) -> tuple[date, date] | None:
 _MONTH_NAMES = ("january", "february", "march", "april", "may", "june", "july", "august",
                 "september", "october", "november", "december")
 _MONTH_WORD = re.compile(r"\b(" + "|".join(_MONTH_NAMES) + r"|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\b",
-                         re.I)
+                         re.I)  # re.I folds "ſ" (U+017F) to "s": _checked_date skips matches that are not a month
 
 
 def _date_month(value: str) -> int | None:
@@ -322,7 +375,8 @@ def _checked_date(item: dict) -> str | None:
     """
     expression = str(item.get("expression") or "")
     prefixes = [n[:3] for n in _MONTH_NAMES]  # unique per month
-    named = {prefixes.index(w.group(1).lower()[:3]) + 1 for w in _MONTH_WORD.finditer(expression)}
+    named = {prefixes.index(p) + 1 for p in (w.group(1).lower()[:3] for w in _MONTH_WORD.finditer(expression))
+             if p in prefixes}
     value = str(item.get("date") or "").strip()
     if len(named) != 1:
         return value
@@ -424,6 +478,15 @@ def _year_ambiguity(ref: date, chosen, other) -> str | None:
 
 
 def _place(ref: date, items: dict[int, dict], i: int, n_facts: int | None, depth: int = 0):
+    """(window, ambiguity) for fact i; (None, None) when its dates leave the representable range."""
+    try:
+        return _place_unsafe(ref, items, i, n_facts, depth)
+    except (OverflowError, ValueError) as exc:  # date arithmetic past date.min..date.max (date.max + 1 day)
+        _swallowed("place", exc)
+        return None, None
+
+
+def _place_unsafe(ref: date, items: dict[int, dict], i: int, n_facts: int | None, depth: int = 0):
     """(window, ambiguity) for fact i. ambiguity: None, "two_options" (its own calendar names two
     candidate days), "year_ambiguous" (a yearless date whose other occurrence is nearer the speech
     date) or "ambiguous_anchor" (a fact it is anchored to is ambiguous)."""
@@ -434,6 +497,7 @@ def _place(ref: date, items: dict[int, dict], i: int, n_facts: int | None, depth
         return None, None
     basis, kind = it.get("basis"), it.get("kind") or "point_event"
     off, cal = it.get("offset") or None, it.get("calendar") or None
+    off, cal = (off if isinstance(off, dict) else None), (cal if isinstance(cal, dict) else None)
     if basis == "explicit_date":
         value = _checked_date(it)
         if value is None:
@@ -448,13 +512,19 @@ def _place(ref: date, items: dict[int, dict], i: int, n_facts: int | None, depth
             w = _calendar(ref, cal)
             return w, _two_options_of(cal, w)
         amount, sign = (_amount(off), _sign(off)) if off else (None, None)
-        if amount is None or sign is None or off.get("unit") not in _TOL:
+        if amount is None or sign is None or not isinstance(off.get("unit"), str) or off["unit"] not in _TOL:
             return None, None
         c = _shift(ref, amount, off["unit"], sign)
+        if c is None:
+            return None, None
         tol = (_TOL_APPROX if off.get("approx") else _TOL)[off["unit"]]
-        return (c - timedelta(days=tol), c + timedelta(days=tol)), None
+        try:
+            return (c - timedelta(days=tol), c + timedelta(days=tol)), None
+        except OverflowError:
+            return None, None
     if basis == "event_anchored":
-        anchor = it.get("anchor") or {}
+        anchor = it.get("anchor")
+        anchor = anchor if isinstance(anchor, dict) else {}
         anc = anchor.get("fact")
         if anc is None:
             w = _holiday_anchored(ref, anchor.get("event"), it.get("expression"), off, cal, kind)
@@ -479,7 +549,8 @@ def _place(ref: date, items: dict[int, dict], i: int, n_facts: int | None, depth
 
 
 def _sign(off: dict) -> int | None:
-    return {"after": 1, "before": -1}.get(off.get("direction"))
+    direction = off.get("direction")
+    return {"after": 1, "before": -1}.get(direction) if isinstance(direction, str) else None
 
 
 def _amount(off: dict) -> float | None:
@@ -489,9 +560,14 @@ def _amount(off: dict) -> float | None:
         return None
     try:
         a = float(a)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: an int too large for a float
         return None
-    return a if math.isfinite(a) and a >= 0 else None
+    if not (math.isfinite(a) and a >= 0):
+        return None
+    unit = off.get("unit")
+    if a > _MAX_AMOUNT.get(unit if isinstance(unit, str) else "", _MAX_AMOUNT["day"]):  # beyond the calendar
+        return None
+    return a
 
 
 def _from_anchor(aw: tuple[date, date], off: dict | None, cal: dict | None):
@@ -512,11 +588,16 @@ def _from_anchor(aw: tuple[date, date], off: dict | None, cal: dict | None):
     if off.get("amount") is None:  # "before the trip" / "after the move": open interval
         return (aw[1], None) if sign > 0 else (None, aw[0])
     amount, unit = _amount(off), off.get("unit")
-    if amount is None or unit not in _TOL:  # e.g. hours: keep Graphiti's timestamp
+    if amount is None or not isinstance(unit, str) or unit not in _TOL:  # e.g. hours: keep Graphiti's timestamp
         return None
     tol = (_TOL_APPROX if off.get("approx") else _TOL)[unit]
     s, e = _shift(aw[0], amount, unit, sign), _shift(aw[1], amount, unit, sign)
-    return s - timedelta(days=tol), e + timedelta(days=tol)
+    if s is None or e is None:
+        return None
+    try:
+        return s - timedelta(days=tol), e + timedelta(days=tol)
+    except OverflowError:
+        return None
 
 
 _HOLIDAY_WHICH = {"last": "last", "this past": "last", "next": "next", "this coming": "next", "this": "this"}
@@ -662,7 +743,7 @@ def _sentence_initial(turn: str, pos: int) -> bool:
 
 
 def _norm(expr) -> str:
-    return (expr or "").strip().strip('"').lower()
+    return expr.strip().strip('"').lower() if isinstance(expr, str) else ""
 
 
 def clause_guard(turn: str, facts: list[str], items: dict[int, dict]) -> list[int]:
@@ -873,6 +954,23 @@ def _start_reason(turn: str, low: str, pos: int, expr: str, it: dict, fact: str)
     return None
 
 
+def _item_start_reason(turn: str, low: str, rank: dict, i: int, it: dict, facts: list[str]) -> str | None:
+    raw = it.get("expression")
+    expr = _fold(raw.strip().strip('"')) if isinstance(raw, str) else ""
+    basis = it.get("basis")
+    if not expr or not isinstance(basis, str) or basis not in DATED_BASES or not (0 <= i < len(facts)):
+        return None
+    reason, where = None, _occurrences(low, expr)
+    if len(where) > _MAX_OCCURRENCES:  # bounded work; any "since" use drops, else a state is unplaced
+        sinced = any(_since_operator(low, p, expr, it.get("basis"))[0] for p in where)
+        reason = "causal_since" if sinced else ("state_start" if it.get("kind") == "state" else None)
+        where = []
+    for pos in where:
+        found = _start_reason(turn, low, pos, expr, it, facts[i])
+        reason = max(reason, found, key=rank.get)
+    return reason
+
+
 def state_start_guard(turn: str, facts: list[str], items: dict[int, dict]) -> list[int]:
     """Mutates items: marks times that do not date the fact's own start. Returns marked indices.
 
@@ -896,18 +994,14 @@ def state_start_guard(turn: str, facts: list[str], items: dict[int, dict]) -> li
     rank = {None: 0, "state_start": 1, "causal_since": 2}
     dropped = []
     for i, it in items.items():
-        raw = it.get("expression")
-        expr = _fold(raw.strip().strip('"')) if isinstance(raw, str) else ""
-        if not expr or it.get("basis") not in DATED_BASES or not (0 <= i < len(facts)):
+        try:
+            reason = _item_start_reason(turn, low, rank, i, it, facts)
+        except Exception as exc:  # a coding bug: this item becomes planning_error, nothing is recorded for it
+            _log.warning("anchored_time: state_start_guard item %d failed (%s) at %s", i, type(exc).__name__,
+                         _frames(exc))
+            items[i] = {**it, "basis": "none", "offset": None, "calendar": None, "date": None,
+                        "anchor": None, "guard": GUARD_ERROR}
             continue
-        reason, where = None, _occurrences(low, expr)
-        if len(where) > _MAX_OCCURRENCES:  # bounded work; any "since" use drops, else a state is unplaced
-            sinced = any(_since_operator(low, p, expr, it.get("basis"))[0] for p in where)
-            reason = "causal_since" if sinced else ("state_start" if it.get("kind") == "state" else None)
-            where = []
-        for pos in where:
-            found = _start_reason(turn, low, pos, expr, it, facts[i])
-            reason = max(reason, found, key=rank.get)
         if reason == "causal_since":
             items[i] = {**it, "basis": "none", "offset": None, "calendar": None, "date": None,
                         "anchor": None, "guard": reason}
@@ -930,9 +1024,65 @@ def _fact_index(value) -> int | None:
         return None
     if isinstance(value, int):
         return value if value >= 0 else None
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
+    if isinstance(value, str) and value.strip().isdecimal():  # isdigit() also accepts "²", int() does not
+        try:
+            return int(value.strip())
+        except ValueError:  # beyond the interpreter's integer-string digit limit
+            return None
     return None
+
+
+_ITEM_STR_FIELDS = ("basis", "kind", "expression", "date", "guard")
+_ITEM_DICT_FIELDS = ("offset", "calendar", "anchor")
+
+
+#: Stands in for a nested list/object inside offset/calendar/anchor: truthy and not a number, so
+#: every reader rejects it exactly as it rejected the original (unreadable, never "absent").
+_NON_SCALAR = ["?"]
+
+
+def _malformed(it: dict, i: int, fields: list[str]) -> dict:
+    """The undated form of an item with a mistyped field: guard "malformed" (counted by the caller,
+    reason ``guard``), its string ``kind`` kept, else a kind outside ``WORLD_END_KINDS``."""
+    _log.warning("anchored_time: item %d malformed field(s): %s", i, ",".join(fields))
+    kind = it.get("kind")
+    return {"i": i, "basis": "none", "kind": _clean_str(kind) if isinstance(kind, str) else "none",
+            "guard": "malformed"}
+
+
+def _clean_item(it: dict, i: int) -> dict:
+    """One resolver item with its field types enforced, so a malformed field makes only this item
+    unusable (``_malformed``). Lone surrogates in any string are replaced (they would fail the
+    Neo4j write of the whole episode). A numeric ``date`` ("in 2019": 2019) is read as its digits.
+    Nested non-scalars in offset/calendar/anchor become ``_NON_SCALAR``."""
+    out = dict(it)
+    bad: list[str] = []
+    for key in _ITEM_STR_FIELDS:
+        value = out.get(key)
+        if value is None:
+            continue
+        if key == "date" and isinstance(value, (int, float)) and not isinstance(value, bool):
+            value = str(value)
+        if not isinstance(value, str):
+            bad.append(key)
+            continue
+        out[key] = _clean_str(value)
+    for key in _ITEM_DICT_FIELDS:
+        if key not in out:
+            continue
+        value = out[key]
+        if not isinstance(value, dict):
+            if value:
+                bad.append(key)
+            out[key] = None
+            continue
+        out[key] = {
+            (_clean_str(k) if isinstance(k, str) else k):
+            (_clean_str(v) if isinstance(v, str) else v if v is None or isinstance(v, (int, float, bool))
+             else _NON_SCALAR)
+            for k, v in value.items()
+        }
+    return _malformed(it, i, bad) if bad else out
 
 
 def parse_items(content: str) -> tuple[dict[int, dict], list]:
@@ -950,7 +1100,7 @@ def parse_items(content: str) -> tuple[dict[int, dict], list]:
             continue
         if i in items:
             duplicated.add(i)  # two items for one fact: neither is trusted
-        items[i] = it
+        items[i] = _clean_item(it, i)
     for i in duplicated:
         del items[i]
     missing = out.get("missing_events") or []
@@ -993,9 +1143,13 @@ def _graphiti_dates(value: datetime, speech_tz: tzinfo | None) -> set[date]:
 
     Graphiti stores UTC, so speech at 23:00-05:00 comes back dated the next day in UTC.
     """
-    dates = {_utc_date(value), value.date()}
-    if speech_tz is not None:
-        dates.add(_aware(value).astimezone(speech_tz).date())
+    dates = {value.date()}
+    try:
+        dates.add(_utc_date(value))
+        if speech_tz is not None:
+            dates.add(_aware(value).astimezone(speech_tz).date())
+    except (OverflowError, ValueError) as exc:  # a conversion past datetime.min/max has no such date
+        _swallowed("graphiti_dates", exc)
     return dates
 
 
@@ -1003,6 +1157,10 @@ def _graphiti_dates(value: datetime, speech_tz: tzinfo | None) -> set[date]:
 ATTACH_AGREE = "agree"
 ATTACH_REJECTED = "attach_rejected"
 ATTACH_UNVERIFIED = "attach_unverified"
+#: plan_overlay reason for an item whose planning raised (a bug, not an unplaceable time).
+PLANNING_ERROR = "planning_error"
+#: Item guard set when a guard raised on the item; plan_overlay turns it into PLANNING_ERROR.
+GUARD_ERROR = "guard_error"
 
 
 @dataclass(frozen=True)
@@ -1052,6 +1210,13 @@ class AnchoredTimeReport:
     overridden: int = 0
     kept_inside_window: int = 0
     plan_not_written: int = 0
+    #: Items whose planning or guard raised (reason ``planning_error``, a coding bug); kept out of
+    #: ``results`` so no false outcome is persisted for them. Nothing replays them: repairing one
+    #: after a fix is a manual step.
+    planning_errors: int = 0
+    #: Items the resolver returned with a mistyped field (guard "malformed", reason ``guard``): bad
+    #: model output, distinct from "no time stated".
+    malformed_items: int = 0
     guard_drops: tuple[int, ...] = ()
     missing_events: int = 0
     latency_s: float | None = None
@@ -1093,8 +1258,14 @@ def plan_overlay(
     speech_date: date,
     speech_tz: tzinfo | None = None,
     attach: Mapping[int, str] | None = None,
+    *,
+    log_errors: bool = True,
 ) -> list[AnchoredTimeResult]:
     """Decide the ``valid_at`` overlay for every edge. Pure: same inputs, same decisions.
+
+    An item whose planning raises gets reason ``planning_error`` (nothing written) and one warning
+    with the item index, the exception class and its frames, never its message; the other items
+    are planned as usual. ``log_errors=False`` silences that warning for a repeat call.
 
     ``attach`` (the blind check under MENHIR_ANCHORED_TIME_RESOLVER) maps fact index to the blind check's decision. When
     given, a fact that would be written is written only on ``ATTACH_AGREE``; otherwise its reason
@@ -1110,72 +1281,105 @@ def plan_overlay(
     """
     results: list[AnchoredTimeResult] = []
     for i, edge in enumerate(edges):
-        item = items.get(i) or {}
-        basis = str(item.get("basis") or "none")
-        kind = str(item.get("kind") or "point_event")
-        window, ambiguity = (_place(speech_date, items, i, len(edges)) if basis in DATED_BASES
-                             else (None, None))
-        start, end = window if window else (None, None)
-        anchor = item.get("anchor") if isinstance(item.get("anchor"), dict) else None
-        anchor_ref = None
-        if anchor:
-            idx = anchor.get("fact")
-            if isinstance(idx, int) and 0 <= idx < len(edges) and idx != i:
-                anchor_ref = edges[idx].uuid
-            elif anchor.get("event"):
-                anchor_ref = str(anchor.get("event"))
-        offset = item.get("offset") if isinstance(item.get("offset"), dict) else None
-        cal = item.get("calendar") if isinstance(item.get("calendar"), dict) else None
-        new_valid_at = None
-        if not item:
-            reason = "no_item"
-        elif basis not in DATED_BASES:
-            reason = "guard" if item.get("guard") else "undated"
-        elif window is None or start is None or end is None:
-            reason = "open_or_unplaceable"
-        elif kind == "plan":
-            reason = "plan"
-        else:
-            mid = window_midpoint((start, end))
-            candidate = datetime(mid.year, mid.month, mid.day, tzinfo=timezone.utc)
-            g_dates = _graphiti_dates(edge.valid_at, speech_tz) if edge.valid_at is not None else set()
-            if item.get("guard") == "state_start" or (kind == "state" and end > speech_date):
-                # The time dates another event, or a state not begun when it was said, so its window
-                # is not this fact's start even when Graphiti's date falls inside it.
-                reason = ("state_future" if attach is not None and item.get("guard") != "state_start"
-                          else "state_start")
-            elif any(start <= d <= end for d in g_dates):
-                reason = "graphiti_inside_window"
-            elif g_dates and speech_date not in g_dates:
-                # Offline over 18 runs: overriding Graphiti's own dates only ever lost facts.
-                reason = "graphiti_resolved"
-            elif ambiguity:  # "two_options", "year_ambiguous", or "ambiguous_anchor" from an anchor
-                reason = ambiguity
-            elif edge.invalid_at is not None and _aware(edge.invalid_at) <= candidate:
-                reason = "would_invert_interval"
-            elif attach is not None and attach.get(i) != ATTACH_AGREE:
-                # V1-V3: the blind check did not point at the same words with the right relation.
-                reason = ATTACH_REJECTED if attach.get(i) == ATTACH_REJECTED else ATTACH_UNVERIFIED
-            else:
-                reason = "written"
-                new_valid_at = candidate
-        results.append(AnchoredTimeResult(
-            edge_uuid=edge.uuid,
-            fact_index=i,
-            expression=item.get("expression") if isinstance(item.get("expression"), str) else None,
-            basis=basis,
-            kind=kind,
-            granularity=granularity_of(item) if basis in DATED_BASES else None,
-            window_start=start,
-            window_end=end,
-            anchor_ref=anchor_ref,
-            anchor_offset=offset or cal,
-            planned_window=(start, end) if kind == "plan" and window else None,
-            guard=item.get("guard") if isinstance(item.get("guard"), str) else None,
-            written=new_valid_at is not None,
-            reason=reason,
-            graphiti_valid_at=edge.valid_at,
-            new_valid_at=new_valid_at,
-            ambiguity=ambiguity,
-        ))
+        if (items.get(i) or {}).get("guard") == GUARD_ERROR:  # a guard already failed on this item
+            results.append(_planning_error(i, edge))
+            continue
+        try:
+            results.append(_plan_item(edges, items, i, edge, speech_date, speech_tz, attach))
+        except Exception as exc:  # one item's failure never takes the batch with it
+            if log_errors:
+                _log.warning("anchored_time: item %d edge %s planning_error %s at %s", i, edge.uuid,
+                             type(exc).__name__, _frames(exc))
+            results.append(_planning_error(i, edge))
     return results
+
+
+def _planning_error(i: int, edge: EdgeTimeInput) -> AnchoredTimeResult:
+    """The result of an item whose planning raised: unresolved, nothing written, and a distinct
+    reason so a coding bug is not mistaken for an unplaceable time. The caller keeps it out of the
+    persisted contract."""
+    return AnchoredTimeResult(
+        edge_uuid=edge.uuid, fact_index=i, expression=None, basis="none", kind="none", granularity=None,
+        window_start=None, window_end=None, anchor_ref=None, anchor_offset=None, planned_window=None,
+        guard=None, written=False, reason=PLANNING_ERROR, graphiti_valid_at=None, new_valid_at=None,
+    )
+
+
+def _plan_item(
+    edges: Sequence[EdgeTimeInput],
+    items: dict[int, dict],
+    i: int,
+    edge: EdgeTimeInput,
+    speech_date: date,
+    speech_tz: tzinfo | None,
+    attach: Mapping[int, str] | None,
+) -> AnchoredTimeResult:
+    item = items.get(i) or {}
+    basis = _clean_str(str(item.get("basis") or "none"))
+    kind = _clean_str(str(item.get("kind") or "point_event"))
+    window, ambiguity = (_place(speech_date, items, i, len(edges)) if basis in DATED_BASES
+                         else (None, None))
+    start, end = window if window else (None, None)
+    anchor = item.get("anchor") if isinstance(item.get("anchor"), dict) else None
+    anchor_ref = None
+    if anchor:
+        idx = anchor.get("fact")
+        if isinstance(idx, int) and 0 <= idx < len(edges) and idx != i:
+            anchor_ref = edges[idx].uuid
+        elif anchor.get("event"):
+            anchor_ref = _clean_str(str(anchor.get("event")))
+    offset = item.get("offset") if isinstance(item.get("offset"), dict) else None
+    cal = item.get("calendar") if isinstance(item.get("calendar"), dict) else None
+    new_valid_at = None
+    if not item:
+        reason = "no_item"
+    elif basis not in DATED_BASES:
+        reason = "guard" if item.get("guard") else "undated"
+    elif window is None or start is None or end is None:
+        reason = "open_or_unplaceable"
+    elif kind == "plan":
+        reason = "plan"
+    else:
+        mid = window_midpoint((start, end))
+        candidate = datetime(mid.year, mid.month, mid.day, tzinfo=timezone.utc)
+        g_dates = _graphiti_dates(edge.valid_at, speech_tz) if edge.valid_at is not None else set()
+        if item.get("guard") == "state_start" or (kind == "state" and end > speech_date):
+            # The time dates another event, or a state not begun when it was said, so its window
+            # is not this fact's start even when Graphiti's date falls inside it.
+            reason = ("state_future" if attach is not None and item.get("guard") != "state_start"
+                      else "state_start")
+        elif any(start <= d <= end for d in g_dates):
+            reason = "graphiti_inside_window"
+        elif g_dates and speech_date not in g_dates:
+            # Offline over 18 runs: overriding Graphiti's own dates only ever lost facts.
+            reason = "graphiti_resolved"
+        elif ambiguity:  # "two_options", "year_ambiguous", or "ambiguous_anchor" from an anchor
+            reason = ambiguity
+        elif edge.invalid_at is not None and _aware(edge.invalid_at) <= candidate:
+            reason = "would_invert_interval"
+        elif attach is not None and attach.get(i) != ATTACH_AGREE:
+            # V1-V3: the blind check did not point at the same words with the right relation.
+            reason = ATTACH_REJECTED if attach.get(i) == ATTACH_REJECTED else ATTACH_UNVERIFIED
+        else:
+            reason = "written"
+            new_valid_at = candidate
+    expression = item.get("expression")
+    return AnchoredTimeResult(
+        edge_uuid=edge.uuid,
+        fact_index=i,
+        expression=_clean_str(expression) if isinstance(expression, str) else None,
+        basis=basis,
+        kind=kind,
+        granularity=granularity_of(item) if basis in DATED_BASES else None,
+        window_start=start,
+        window_end=end,
+        anchor_ref=anchor_ref,
+        anchor_offset=offset or cal,
+        planned_window=(start, end) if kind == "plan" and window else None,
+        guard=item.get("guard") if isinstance(item.get("guard"), str) else None,
+        written=new_valid_at is not None,
+        reason=reason,
+        graphiti_valid_at=edge.valid_at,
+        new_valid_at=new_valid_at,
+        ambiguity=ambiguity,
+    )
