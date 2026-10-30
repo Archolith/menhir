@@ -419,6 +419,7 @@ FACT_TEMPORAL_FIELDS = (
 # Menhir's own similarity/bridge links are RELATES_TO edges with no fact text. Queries that read
 # edges as facts need this, or those links take fact slots meant for real facts.
 # CASE so a non-string fact is skipped instead of trim() failing the whole query.
+# `IS :: STRING NOT NULL` requires Neo4j >= 5.10; Menhir as a whole needs 5.26 (README prerequisites).
 FACT_TEXT_PRESENT = (
     "CASE WHEN r.fact IS :: STRING NOT NULL THEN trim(r.fact) <> '' ELSE false END"
 )

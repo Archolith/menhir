@@ -101,7 +101,7 @@ report and starts nothing. The steps below are the same path taken manually.
 
 ## 2. Configure and verify the runtime
 
-Edit `.env` for one Neo4j 5 + APOC instance and one supported LLM/embedding configuration. Never put
+Edit `.env` for one Neo4j 5.26+ + APOC instance and one supported LLM/embedding configuration. Never put
 real credentials in `.env.example` or an agent instruction file.
 
 Then run:

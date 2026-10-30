@@ -122,6 +122,8 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str, tuple[str, ...]]:
             if current_key is None:
                 errors.append("frontmatter_list_item_without_key")
                 continue
+            if current_key in refused_keys:
+                continue
             item = line.lstrip()[2:].strip().strip("'\"")
             existing = mapping.get(current_key)
             if isinstance(existing, list):
@@ -144,6 +146,7 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str, tuple[str, ...]]:
             errors.append(f"duplicate_frontmatter_key:{key}")
             mapping.pop(key, None)
             refused_keys.add(key)
+            current_key = key
             continue
         if value.startswith("[") and value.endswith("]"):
             items = [
@@ -192,8 +195,13 @@ def read_document_metadata(
         if key in DERIVED_KEYS:
             errors.append(f"derived_key_declared:{key}")
 
-    declared_uuid = _single_value(mapping.get("artifact_uuid"))
-    if declared_uuid is not None:
+    raw_uuid = mapping.get("artifact_uuid")
+    declared_uuid = _single_value(raw_uuid)
+    if isinstance(raw_uuid, list):
+        # A list is ambiguous about which element is the identity: refuse, never take the first.
+        errors.append("invalid_artifact_uuid")
+        declared_uuid = None
+    elif declared_uuid is not None:
         if not _UUID_RE.match(declared_uuid):
             errors.append("invalid_artifact_uuid")
             declared_uuid = None

@@ -324,7 +324,10 @@ class ContextBuilderService:
                     )
                     todo_tokens, _ = estimate_tokens(todo_section)
             except Exception:
-                pass
+                logger.warning(
+                    "build_context: TODO search failed; continuing without TODOs",
+                    exc_info=True,
+                )
 
         # Determine effective budget using the process-wide estimation mode constant.
         # Reserve tokens for the TODO section so the total stays within max_tokens.

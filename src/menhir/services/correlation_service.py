@@ -38,6 +38,15 @@ from menhir.services.correlation_service_types import (
     CorrelationResult,
 )
 
+__all__ = [
+    "CORRELATION_CONFLICT_THRESHOLD",
+    "CORRELATION_MERGE_THRESHOLD",
+    "CORRELATION_RELATED_THRESHOLD",
+    "CorrelationBatchResult",
+    "CorrelationResult",
+    "CorrelationService",
+]
+
 if TYPE_CHECKING:
     from menhir.infrastructure.llm import LLMAdapter
 

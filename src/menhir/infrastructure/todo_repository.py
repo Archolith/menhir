@@ -969,7 +969,9 @@ class TodoRepository:
         Returns priority-sorted results.
 
         ``namespace`` follows ``list_todos``: a supplied namespace narrows to that
-        silo plus ``DEFAULT_NAMESPACE``; ``None`` is unrestricted (#401).
+        silo plus ``DEFAULT_NAMESPACE``; ``None`` is unrestricted (#401). Unscoped = global
+        BY DESIGN (CF-294), matching the other tools' empty-namespace behaviour; pinned
+        clients always arrive with a namespace.
 
         The namespace filter runs in PYTHON, for the reason ``todo_supersession`` gives: the
         todo rule "own silo OR default bucket" is not ``tenant_scope_cypher``'s rule, and a
@@ -982,6 +984,9 @@ class TodoRepository:
         namespaces = (
             [normalize_namespace(namespace), DEFAULT_NAMESPACE] if namespace else None
         )
+        # CF-299 (accepted): the scoped scan is capped at _SEARCH_SCAN_CAP across all silos
+        # and filtered in Python, so a busy silo can crowd others out of the window. The
+        # filter can only drop rows, never admit another silo's, so the failure is "fewer".
         rows = self.neo4j.execute(
             """
             WITH toLower($query_text) AS q, $words AS words

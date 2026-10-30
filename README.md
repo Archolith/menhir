@@ -332,7 +332,8 @@ running HTTP backend before launching it.
   the simplest route is [uv](https://docs.astral.sh/uv/): `uv python install 3.12` then
   `uv venv --seed --python 3.12 && source .venv/bin/activate` (`--seed` gives the venv a `pip`;
   uv omits it by default).
-- Neo4j 5 with APOC. `menhir up --compose-neo4j` starts one for you; you need Docker on the
+- Neo4j 5.26 (LTS) or newer with APOC (queries use `CALL () {}` scoped subqueries and dynamic
+  labels, which need 5.26). `menhir up --compose-neo4j` starts one for you; you need Docker on the
   machine running `menhir` for that, and nothing else.
 - a local OpenAI-compatible server (llama.cpp, Ollama, LM Studio, vLLM) or OpenAI
 
@@ -577,7 +578,7 @@ telemetry, and experimental flags.
 
 #### Start Neo4j
 
-The root compose file starts a local Neo4j 5 instance with APOC:
+The root compose file starts a local Neo4j 5 (5.26+) instance with APOC:
 
 ```bash
 docker compose up -d

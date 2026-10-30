@@ -8,6 +8,11 @@ queries centralised for easier reuse and testability.
 from __future__ import annotations
 
 
+# View text limits. These MUST equal the truncation in view_write_repository.py (name[:300],
+# summary[:1000]), which still uses literals; the migration below applies the same limits.
+VIEW_NAME_MAX_CHARS = 300
+VIEW_SUMMARY_MAX_CHARS = 1000
+
 MEMORY_NODE_LABELS = ("Entity", "Episodic")
 EDGE_LABELS = ("RELATES_TO", "NEXT_EPISODE", "HAS_MEMBER", "HAS_EPISODE", "MENTIONS")
 
@@ -427,8 +432,10 @@ def get_scalar_state_activation_queries() -> list[str]:
         # older writer during a rolling deploy -- into view_name/view_summary. Newer text wins.
         "MATCH (n:Entity) WHERE n.view_kind IN ['scalar_state', 'scalar_history'] "
         "AND (coalesce(n.name, '') <> '' OR coalesce(n.summary, '') <> '') "
-        "SET n.view_name = CASE WHEN coalesce(n.name, '') <> '' THEN n.name ELSE n.view_name END, "
-        "n.view_summary = CASE WHEN coalesce(n.summary, '') <> '' THEN n.summary "
+        "SET n.view_name = CASE WHEN coalesce(n.name, '') <> '' "
+        f"THEN substring(n.name, 0, {VIEW_NAME_MAX_CHARS}) ELSE n.view_name END, "
+        "n.view_summary = CASE WHEN coalesce(n.summary, '') <> '' "
+        f"THEN substring(n.summary, 0, {VIEW_SUMMARY_MAX_CHARS}) "
         "ELSE n.view_summary END, n.name = '', n.summary = ''",
         # Counting-lane fence: one watermark per namespace, or concurrent claims split the fence.
         # Pre-constraint stores may hold duplicates from the old unconstrained MERGE; delete every
