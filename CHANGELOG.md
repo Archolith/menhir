@@ -1,3 +1,48 @@
+## 2026-10-30 - Delta-audit remediation (CF-259..CF-306)
+
+Fixes from the 2026-10-29 delta audit (`ca3f762f..0e078983`). The root findings register ("Delta audit 2026-10-29") carries each CF's status and commit, and lists the residuals. CF-277 and CF-285 are held for owner decisions, CF-259 is partial, and a new High finding is filed as CF-307 (a Graphiti-wrapped 429 parks the episode in manual_review).
+
+Operator-visible changes:
+
+- **Telemetry:** Graphiti fork PostHog telemetry is off by default. Menhir sets `GRAPHITI_TELEMETRY_ENABLED=false` at client construction unless the operator set it, and `GRAPHITI_TELEMETRY_ENABLED=true` turns it back on (CF-272).
+- **Install:** the documented Neo4j floor is 5.26 (README, `docs/post-install.md`). `python-multipart` is declared. A missing or incomplete `graphiti_core` now fails with a message naming `archolith-graphiti-core==0.31.2.post1` (CF-297, CF-303..306).
+- **Embedding model:** the episode embedding stamp now records the configured embedding model instead of `unknown`, so the source-memory model filter applies. Legacy `''`/`unknown` stamps still match. After changing the embedding model, run the source-memory embedding repair job; recall otherwise skips vectors made by another model (CF-260).
+- **Settings:** the flex request timeout is validated at settings load. A non-numeric, non-finite or non-positive value fails startup and names the env var, even when the flex tier is unused (CF-286). A retired flag explicitly set to false logs a startup warning (CF-301).
+- **Redaction:** JWKS failure logs redact URLs fail-closed (CF-300). Recall Lab redaction is an allowlist on every route (CF-269).
+- **LLM retry:** the outer LLM retry no longer retries provider 429s; the rate-limit layer owns them (CF-262). One bad anchored-time item drops only itself, not the episode (CF-263).
+
+Behaviour fixes:
+
+- **Extraction:**
+  - The contained-edge prune keeps a fact when the keeper cannot see its endpoint. Prune counts on gpt-6 profiles may drop (CF-259).
+  - Status reporters follow the verbatim-skip projection everywhere, including `list_enrichment_queue`, the explorer and READY counts (CF-261).
+- **Counting and scalar state:**
+  - The related pool is fetched per candidate (CF-264).
+  - An entity merge re-arms moved counted rows for re-decision (CF-265).
+  - Rebuild failures stay owed, and rebuilds and coverage audits fold with the writer's parameters (CF-266, CF-267, CF-270, CF-290).
+  - The LME repair script uses the runtime counting and history flags (CF-289).
+  - A zero-row counted View clears stale `CONTRIBUTED_TO` edges (CF-291).
+  - `purge_scalar_state_nodes` also removes history Views and `scalar:` read markers (CF-292).
+  - Phase3 dirty signals read the live scalar cursor (CF-273).
+- **Recall:**
+  - `recall_timeline` query mode anchors past unanchorable hits (CF-268).
+  - CLI hook recall honours scalar history like the backend (CF-278).
+  - `fetch_temporal_facts` drops its unused `namespace` parameter (CF-279).
+  - A failed recall cancels its source-memory task (CF-281).
+  - Receipts name scalar Views by `view_name` (CF-282).
+  - Typed-history `prev_offset` is clamped at 0 (CF-283).
+  - `agent_quoted` matching ignores case, surrounding whitespace and `-`/`_` in Python and in the two scalar foundation queries (CF-287).
+- **Graph-op journal:**
+  - Transitions are owner-checked compare-and-set (CF-271).
+  - The committed-pairs scan pages by keyset on `(created_at, rowid)` (CF-275).
+  - Telemetry SQLite connections close when their `with` block exits (CF-276).
+- **Eval script:** `scripts/eval_anchored_time.py` routes the resolver like production, reserves budget before each call, and stops before scoring a set the cap cut short (CF-288).
+- **By design, documented:** CF-274, CF-280, CF-294, CF-299. CF-284's premise was false: nothing calls `_belief_commit_context`.
+
+Tests: each unit added counterexample tests; online tests ran against a throwaway Neo4j 5.26. Full offline suite: 12,234 passed, 914 skipped, 1 failed, 14 errors in 10m48s. The failure was `test_large_module_boundaries` (`telemetry/store.py` at 426 lines against its 425 cap, from the CF-269 comment), fixed in ee0e88d0 and rerun green. The 14 errors are `test_beacon_generation`, which requires `MENHIR_TEST_BEACON_PYTHON` and fails loudly when it is unset (an environment gate).
+
+`CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
+
 ## 2026-10-29 - Bucket-2 flags removed (belief gate, evidence anchor, pools); local-model routing settings
 
 The three remaining default-off recall flags from #399 bucket 2 are removed; the code is kept on `archive/bucket2-flags-2026-10-29`. All six names are in `feature_flags.RETIRED`, and `tests/test_feature_flag_registry.py` checks each retirement. Default recall is unchanged.
@@ -116,27 +161,3 @@ For agent-written memories (#168, plan `menhir-agent-memory-writer-plan-2026-10-
 - `docs/agreement-settings.md`, `docs/personal-memory-readiness.md`, `src/menhir/domain/retrieval_tuning.py`, `.agent/default-off-features.md`, `.agent/plans/menhir-scalar-default-enablement-plan.md`: defaults and notes updated. `RecallService`'s own dataclass default stays `False`; bootstrap passes the effective gate.
 - Tests: new upgrade test in `tests/test_release_config_upgrade.py` (unset versus pinned) and a default-wiring test in `tests/test_authority_requires_lane.py`. Changed: `DEFAULT_ON` in `tests/test_release_config_upgrade.py` and the shipped value in `tests/test_shipped_agreement_profile.py`.
 - `CHANGELOG-archive.md`: the oldest former current entry moved there (10-entry limit).
-
-## 2026-10-22 - Idempotent episode submit; enrichment leases renew up to a 3-hour ceiling
-
-For resumable LME ingest (#168). A client that retries a submit after a timeout no longer creates a duplicate episode, and long enrichment no longer loses its lease at 900 s.
-
-- Idempotent submit (`domain/ingest.py`, `services/ingest_intake.py`, `infrastructure/episode_lifecycle.py`, `infrastructure/schema.py`, `api/routes.py`, `api/routes_support.py`, `core/backend_*`):
-  - `POST /memory` accepts an optional `idempotency_key` (1-256 chars), scoped to the normalized namespace.
-  - The episode stores a digest of the key plus a request digest: content, diff, source, flagged, bootstrap scope, occurred_at, role, turn evidence and user statement. Session and user are excluded because the route mints a fresh session when the caller names none.
-  - New uniqueness constraint `episodic_ingest_key_unique`.
-  - Same key and same request: returns the first episode with `idempotent_replay=true` and its current `processing_state`, and writes nothing.
-  - Same key with a different request: returns 409, or 400 over the internal `/backend` dispatch.
-  - A lost create race re-reads the winner.
-  - Without a key, behavior is unchanged.
-- Lease renewal (`services/ingest_worker.py`, `infrastructure/episode_stamping.py`, `services/ingest_service.py`):
-  - The 5 s processing heartbeat now extends `processing_lease_expires_at` by the lease length while the claim is younger than `max_enrichment_seconds` (10800).
-  - Renewal is fenced on ENRICHING, the owner and the claim instant.
-  - The heartbeat loop stops when the fence reports the attempt lost, and survives transient driver errors.
-  - The worker bounds the enrichment body with the same ceiling. Exceeding it raises `EnrichmentDeadlineExceeded` (`enrichment_deadline_exceeded`, manual review).
-- Ownership fences (`infrastructure/episode_lifecycle.py`, `services/enrichment_steps.py`): `mark_episode_ready` and `mark_episode_failed` also match the claim instant when it is given, so a stale attempt from the same process cannot finish a newer claim.
-- `infrastructure/memory_queries.py`: deleting an unfinished episode also removes its ingest key and request digest.
-- Tests:
-  - New: `tests/test_idempotent_episode_submit.py`, `tests/test_heartbeat_lease_renewal.py` and `tests/test_attempt_ownership_fences.py`, each with a `_live` variant.
-  - Changed test stubs (signature only, adding `claim_started_at`): `tests/conftest.py`, `tests/test_services_pipeline.py`, `tests/test_verbatim_skip_worker.py`.
-- `CHANGELOG-archive.md`: retain the oldest former current entry.
