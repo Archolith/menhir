@@ -8,6 +8,7 @@ import logging
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from time import monotonic, perf_counter
+from typing import Any
 from uuid import UUID
 
 from menhir.core.reader_identity import normalize_reader_id as _normalize_reader_id
