@@ -139,7 +139,6 @@ _SAFE_TELEMETRY_STRING_KEYS = frozenset(
         "client_name",
         "cluster_id",
         "cursor",
-        "decision",
         "document_type",
         "endpoint",
         "episode_uuid",

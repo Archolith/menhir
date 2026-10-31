@@ -78,7 +78,6 @@ def test_f1_commit_refused_event_keeps_op_identity_in_the_store(tmp_path, store)
         "op_id": op_id,
         "operation_kind": "ENTITY_MERGE",
         "journal_state": "FAILED",
-        "decision": "commit_refused_after_graph_work",
     }]
 
 
@@ -93,6 +92,40 @@ def test_f2_stale_commit_after_new_owner_committed_is_refused(tmp_path, store):
 
     assert _row(journal, op_id) == ("COMMITTED", "owner-B")
     assert [e["journal_state"] for e in _commit_events(store)] == ["COMMITTED"]
+
+
+def test_f2_stale_commit_log_names_the_other_owner(tmp_path, store, caplog):
+    journal = GraphOperationsJournal(db_path=tmp_path / "ops.db")
+    op_id = _prepare(journal, "owner-A")
+    _take_over(journal, op_id, "owner-B")
+    journal.mark_committed(op_id, owner_token="owner-B")
+
+    with caplog.at_level("ERROR"), pytest.raises(StaleTransitionError):
+        journal.mark_committed(op_id, owner_token="owner-A")
+    assert any("another owner already committed" in r.getMessage() for r in caplog.records)
+
+
+def test_f2_guard_is_commit_only(tmp_path, store):
+    """Fix review FR-9: an already-FAILED row stays idempotent for a different token."""
+    journal = GraphOperationsJournal(db_path=tmp_path / "ops.db")
+    op_id = _prepare(journal, "owner-A")
+    _take_over(journal, op_id, "owner-B")
+    journal.mark_failed(op_id, reason="reconciler", owner_token="owner-B")
+
+    journal.mark_failed(op_id, reason="stale writer", owner_token="owner-A")
+    assert _row(journal, op_id) == ("FAILED", "owner-B")
+
+
+def test_f2_tokenless_caller_on_a_row_another_owner_committed_stays_idempotent(tmp_path, store):
+    """Fix review FR-9: the guard applies only to a caller that presents a token."""
+    journal = GraphOperationsJournal(db_path=tmp_path / "ops.db")
+    op_id = _prepare(journal, "owner-A")
+    _take_over(journal, op_id, "owner-B")
+    journal.mark_committed(op_id, owner_token="owner-B")
+
+    journal.mark_committed(op_id)
+    assert _row(journal, op_id) == ("COMMITTED", "owner-B")
+    assert _commit_events(store) == []
 
 
 def test_f2_same_owner_repeat_commit_stays_idempotent(tmp_path, store):

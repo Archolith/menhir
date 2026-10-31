@@ -69,12 +69,21 @@ class _GraphOperationsTransitionsMixin:
             "op_id": op_id,
             "operation_kind": row.get("operation_kind"),
             "journal_state": row.get("state"),
-            "decision": "commit_refused_after_graph_work",
         }
+        if details["journal_state"] == "COMMITTED":
+            situation = (
+                "another owner already committed this operation, so this writer's graph work may "
+                "have been applied a second time"
+            )
+        else:
+            situation = (
+                f"the graph may hold this operation's after-state while the journal says "
+                f"{details['journal_state']}"
+            )
         _logger.error(
-            "Graph operation commit refused after the caller's graph work; the graph may hold "
-            "this operation's after-state while the journal says %s (CF-271 F2): op_id=%s kind=%s",
-            details["journal_state"], op_id, details["operation_kind"],
+            "Graph operation commit refused after the caller's graph work; %s (CF-271 F2): "
+            "op_id=%s kind=%s",
+            situation, op_id, details["operation_kind"],
         )
         try:
             from menhir.infrastructure.telemetry.recorders import record_failure_event
