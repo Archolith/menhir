@@ -1,6 +1,6 @@
 ## 2026-10-30 - Delta-audit remediation (CF-259..CF-306)
 
-Fixes from the 2026-10-29 delta audit (`ca3f762f..0e078983`). The root findings register ("Delta audit 2026-10-29") carries each CF's status and commit, and lists the residuals. CF-277 is held for an owner decision, CF-285 is closed by design (dates stay UTC), and a new High finding is filed as CF-307 (a Graphiti-wrapped 429 parks the episode in manual_review).
+Fixes from the 2026-10-29 delta audit (`ca3f762f..0e078983`). The root findings register ("Delta audit 2026-10-29") carries each CF's status and commit, and lists the residuals. CF-277 is held for an owner decision, CF-285 is closed by design (dates stay UTC), and a new High finding, CF-307, is fixed (see LLM retry below).
 
 Operator-visible changes:
 
@@ -9,7 +9,7 @@ Operator-visible changes:
 - **Embedding model:** the episode embedding stamp now records the configured embedding model instead of `unknown`, so the source-memory model filter applies. Legacy `''`/`unknown` stamps still match. After changing the embedding model, run the source-memory embedding repair job; recall otherwise skips vectors made by another model (CF-260).
 - **Settings:** the flex request timeout is validated at settings load. A non-numeric, non-finite or non-positive value fails startup and names the env var, even when the flex tier is unused (CF-286). A retired flag explicitly set to false logs a startup warning (CF-301).
 - **Redaction:** JWKS failure logs redact URLs fail-closed (CF-300). Recall Lab redaction is an allowlist on every route (CF-269).
-- **LLM retry:** the outer LLM retry no longer retries provider 429s; the rate-limit layer owns them (CF-262). One bad anchored-time item drops only itself, not the episode (CF-263).
+- **LLM retry:** the outer LLM retry no longer retries provider 429s; the rate-limit layer owns them (CF-262). One bad anchored-time item drops only itself, not the episode (CF-263). A provider 429 that Graphiti rewraps as its own `RateLimitError` ("Rate limit exceeded", no "429" in the text) now requeues the episode like a raw 429, instead of parking it in `manual_review` for good. An `insufficient_quota` 429 still parks (CF-307).
 - **Extraction on gpt-6:** the contained-edge prune is off for the gpt-6 profile, the only one that enabled it, so no shipped profile prunes. Token containment cannot tell whose fact an edge states, so the prune could delete a user's own fact and its node. gpt-6 extractions now keep restated sub-facts as redundant edges, and `contained_edges_pruned` stays 0. The code is kept; re-enabling it needs a meaning-based check (#402, CF-259).
 
 Behaviour fixes:

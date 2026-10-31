@@ -155,7 +155,7 @@ async def test_normal_rate_limit_429_keeps_todays_behaviour(clock) -> None:
         with pytest.raises(GraphitiRateLimitError) as caught:
             await _add(client)
         assert not isinstance(caught.value, ProviderQuotaExhaustedError)
-    assert classify_enrichment_failure(caught.value) == "manual_review"  # unchanged: no 429 marker
+    assert classify_enrichment_failure(caught.value) == "retryable"  # CF-307: was manual_review
     assert client.circuit_breaker_snapshots()["llm"]["state"] == "closed"
 
     with pytest.raises(GraphitiRateLimitError):
