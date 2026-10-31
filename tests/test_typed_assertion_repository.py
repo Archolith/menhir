@@ -835,3 +835,24 @@ def test_purge_scalar_state_nodes_deletes_log_views_and_watermarks():
     # ...and the scheduling cursor, or a purged namespace would look already-consolidated and never
     # backfill against the fresh store.
     assert "MATCH (w:ScalarConsolidationWatermark) DETACH DELETE w" in q
+
+
+@pytest.mark.unit
+def test_rebind_rearms_counted_occurrences_in_the_same_statement():
+    fake = FakeNeo4j(default=[{"rebound": 1, "source_keys": ["sk"]}])
+    TypedAssertionRepository(fake).rebind_assertions(
+        absorbed_uuid="ent-a", survivor_uuid="ent-b", merge_op_id="op-1")
+    q, _ = fake.executed[-1]
+    assert "a.count_status = 'uncertain'" in q
+    assert "'merged'" in q
+    assert "a.count_attempts = 0" in q
+    assert "a.projection_pending = true" in q
+
+
+@pytest.mark.unit
+def test_restore_rearms_moved_rows_and_cross_subject_repeats():
+    fake = FakeNeo4j(default=[{"restored": 1, "source_keys": ["sk"], "from_uuids": ["ent-a"]}])
+    TypedAssertionRepository(fake).restore_rebound_assertions(merge_op_id="op-1")
+    q, _ = fake.executed[-1]
+    assert "count_target_id: m.assertion_id" in q
+    assert "t.count_attempts = 0" in q

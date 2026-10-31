@@ -756,11 +756,14 @@ def _decide_and_rebuild(
             voted = vote(samples, [str(rs.candidate["assertion_id"]) for rs in need], k=DECIDE_K)
     outcome = apply_decide_rules(sets, voted, decided=decided,
                                  current_version=ctx.perceiver_version)
+    subject_of = {str(c["assertion_id"]): c.get("subject_uuid") for c in candidates}
     for d in outcome.decisions:
         d["key_embedding"] = vectors.get(d["assertion_id"])
         d["embed_version"] = ctx.embed_version
         d["redecide"] = redecide
+        d["subject_uuid"] = subject_of.get(str(d["assertion_id"]))
     for s in outcome.swaps:
+        s["subject_uuid"] = subject_of.get(str(s["candidate_id"]))
         s["key_embedding"] = vectors.get(s["candidate_id"])
         s["embed_version"] = ctx.embed_version
         s["redecide"] = redecide

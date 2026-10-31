@@ -256,3 +256,120 @@ def test_related_pull_ignores_a_full_other_family(env):
     pool = adapter.related_counted_occurrences(ns, [cprobe], limit=RELATED_POOL_LIMIT)
     d, = conservative_decisions(related_sets([concert], pool))
     assert d["status"] == "counted" and d["reason"] == "no_related"
+
+
+# --------------------------------------------------------------------------- CF-265 merge re-arm
+
+def _rows(repo, ns, ids):
+    rows = repo.execute(
+        "MATCH (a:TypedAssertion) WHERE a.assertion_id IN $ids RETURN a.assertion_id AS id, "
+        "a.count_status AS status, a.count_reason AS reason, a.count_attempts AS attempts, "
+        "a.subject_uuid AS subj, a.projection_pending AS pending, a.count_decided_at AS decided, "
+        "a.count_target_id AS target",
+        {"ids": [f"{ns}:{i}" for i in ids]})
+    return {r["id"].split(":", 1)[1]: dict(r) for r in rows}
+
+
+@pytest.mark.online
+def test_merge_rearms_counted_rows_and_the_happening_counts_once(env):
+    from menhir.domain.count_decide import apply_decide_rules
+    from menhir.infrastructure.typed_assertion_repository import TypedAssertionRepository
+
+    repo, adapter, ns, _ = env
+    _seed(repo, ns, [
+        {"id": "y", "subj": "ent-b", "status": "counted", "ep": "turn-1"},
+        {"id": "x", "subj": "ent-a", "status": "counted", "ep": "turn-2"},
+        {"id": "z", "subj": "ent-b", "status": "counted", "obj": "museum",
+         "attr": "museum_visit_count"},
+    ])
+    tar = TypedAssertionRepository(repo)
+    out = tar.rebind_assertions(absorbed_uuid="ent-a", survivor_uuid="ent-b",
+                                merge_op_id=f"{ns}-op", namespace=ns)
+    assert out["rebound"] == 1
+    st = _rows(repo, ns, ["x", "y", "z"])
+    x = st["x"]
+    assert (x["status"], x["reason"], x["attempts"], x["subj"], x["pending"], x["decided"]) == (
+        "uncertain", "merged", 0, "ent-b", True, None)
+    assert st["y"]["status"] == "counted" and st["z"]["status"] == "counted"
+    assert st["y"]["subj"] == "ent-b" and st["z"]["subj"] == "ent-b"
+
+    rows = adapter.redecide_count_occurrences(
+        ns, perceiver_version=_PV, max_attempts=3, limit=100, cooldown_s=3600,
+        exclude_run_id="other-run")
+    assert [r["assertion_id"] for r in rows] == [f"{ns}:x"]
+    assert ns in adapter.pending_decision_namespaces(
+        perceiver_version=_PV, max_attempts=3, limit=1000, cooldown_s=3600)
+
+    cand = rows[0]
+    pool = adapter.related_counted_occurrences(
+        ns, [{"id": cand["assertion_id"], "subject_uuid": "ent-b", "value_kind": "count",
+              "needles": ["model kit"]}], limit=50)
+    assert [r["assertion_id"] for r in pool] == [f"{ns}:y"]
+    pool = [{k: v for k, v in r.items() if k != "probe_ids"} for r in pool]
+    sets = related_sets([cand], pool)
+    assert [r["assertion_id"] for r in sets[0].related] == [f"{ns}:y"]
+    outcome = apply_decide_rules(
+        sets, {cand["assertion_id"]: ("repeat", f"{ns}:y", "model kit", "3/3")},
+        decided=True, current_version=_PV)
+    assert [d["status"] for d in outcome.decisions] == ["repeat"]
+    for d in outcome.decisions:
+        d["redecide"] = True
+        d["subject_uuid"] = "ent-b"
+    claim = adapter.claim_counting_namespace(ns, run_id="run-a", lease_seconds=_LEASE, now=_t(0))
+    res = adapter.record_count_decisions(
+        ns, outcome.decisions, perceiver_version=_PV, run_id="run-a",
+        incarnation=claim["incarnation"], epoch=claim["epoch"])
+    assert res["written"] == 1
+    counted = adapter.counted_occurrences_for_subjects(ns, ["ent-b"], limit=10)
+    assert [r["assertion_id"] for r in counted if r.get("count_object") == "model kit"] == [
+        f"{ns}:y"]
+    x = _rows(repo, ns, ["x"])["x"]
+    assert (x["status"], x["target"]) == ("repeat", f"{ns}:y")
+
+    again = tar.rebind_assertions(absorbed_uuid="ent-a", survivor_uuid="ent-b",
+                                  merge_op_id=f"{ns}-op", namespace=ns)
+    assert again["rebound"] == 0
+    assert _rows(repo, ns, ["x"])["x"]["status"] == "repeat"
+
+
+@pytest.mark.online
+def test_unmerge_rearms_cross_subject_repeats(env):
+    from menhir.infrastructure.typed_assertion_repository import TypedAssertionRepository
+
+    repo, adapter, ns, _ = env
+    _seed(repo, ns, [
+        {"id": "x", "subj": "ent-a", "status": "counted"},
+        {"id": "y", "subj": "ent-b", "status": "counted"},
+    ])
+    tar = TypedAssertionRepository(repo)
+    tar.rebind_assertions(absorbed_uuid="ent-a", survivor_uuid="ent-b",
+                          merge_op_id=f"{ns}-op", namespace=ns)
+    _seed(repo, ns, [{"id": "w", "subj": "ent-b", "status": "repeat", "ep": "turn-9"}])
+    repo.execute(
+        "MATCH (a:TypedAssertion {assertion_id: $x}) SET a.count_status = 'repeat', "
+        "a.count_target_id = $y, a.count_attempts = 3 "
+        "WITH 1 AS _ MATCH (w:TypedAssertion {assertion_id: $w}) "
+        "SET w.count_target_id = $x, w.count_attempts = 3",
+        {"x": f"{ns}:x", "y": f"{ns}:y", "w": f"{ns}:w"})
+    out = tar.restore_rebound_assertions(merge_op_id=f"{ns}-op", namespace=ns)
+    assert out["restored"] == 1
+    st = _rows(repo, ns, ["x", "w"])
+    assert (st["x"]["subj"], st["x"]["attempts"]) == ("ent-a", 0)
+    assert st["w"]["attempts"] == 0
+    ids = {r["assertion_id"] for r in adapter.redecide_count_occurrences(
+        ns, perceiver_version=_PV, max_attempts=3, limit=100, exclude_run_id="other-run")}
+    assert ids == {f"{ns}:x", f"{ns}:w"}
+
+
+@pytest.mark.online
+def test_decision_write_skips_a_row_whose_subject_moved(env):
+    repo, adapter, ns, _ = env
+    _seed(repo, ns, [{"id": "x", "subj": "ent-a"}])
+    claim = adapter.claim_counting_namespace(ns, run_id="run-a", lease_seconds=_LEASE, now=_t(0))
+    repo.execute("MATCH (a:TypedAssertion {assertion_id: $id}) SET a.subject_uuid = 'ent-b'",
+                 {"id": f"{ns}:x"})
+    out = _record(adapter, ns, claim, "run-a", [_decision(ns, "x", subject_uuid="ent-a")])
+    assert out == {"fence_ok": True, "written": 0}
+    assert _status(repo, ns, ["x"])["x"]["status"] is None
+    out = _record(adapter, ns, claim, "run-a", [_decision(ns, "x")])
+    assert out == {"fence_ok": True, "written": 1}

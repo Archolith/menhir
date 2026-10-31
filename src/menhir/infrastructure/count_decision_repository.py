@@ -107,6 +107,7 @@ def _payload(d: dict[str, Any]) -> dict[str, Any]:
         "redecide": bool(d.get("redecide", False)),
         "key_embedding": [float(x) for x in vec] if vec else None,
         "embed_version": str(d.get("embed_version") or "") or None,
+        "subject": str(d.get("subject_uuid") or "") or None,
     }
 
 
@@ -301,6 +302,7 @@ class CountDecisionRepository:
                 MATCH (a:TypedAssertion {assertion_id: d.assertion_id})
                 WHERE """ + tenant_scope_cypher("a") + " AND " + _CURRENT_OCCURRENCE + """
                       AND (a.count_status IS NULL OR d.redecide)
+                      AND (d.subject IS NULL OR a.subject_uuid = d.subject)
                 SET """ + _SET_DECISION + """
                 RETURN count(a) AS written
             }
@@ -310,6 +312,7 @@ class CountDecisionRepository:
                 MATCH (a:TypedAssertion {assertion_id: d.candidate_id})
                 WHERE """ + tenant_scope_cypher("a") + " AND " + _CURRENT_OCCURRENCE + """
                       AND (a.count_status IS NULL OR d.redecide)
+                      AND (d.subject IS NULL OR a.subject_uuid = d.subject)
                 MATCH (t:TypedAssertion {assertion_id: d.target_id})
                 WHERE """ + tenant_scope_cypher("t") + " AND " + _current("t") + """
                       AND t.count_status = 'counted' AND t.subject_uuid = a.subject_uuid

@@ -49,6 +49,12 @@ class TypedAssertionReconciliationMixin:
                             r.source_key = a.source_key, r.namespace = a.namespace,
                             r.rebound_at = datetime()
             SET a.subject_uuid = $survivor, a.rebound_at = datetime()
+            // CF-265: a moved decided occurrence is re-armed; a counted one is re-decided against the survivor's pool
+            FOREACH (_ IN CASE WHEN a.operation = 'occurrence' AND a.count_status IS NOT NULL THEN [1] ELSE [] END |
+                SET a.count_attempts = 0, a.count_decided_at = null, a.projection_pending = true,
+                    a.count_merge_op_id = $op)
+            FOREACH (_ IN CASE WHEN a.operation = 'occurrence' AND a.count_status = 'counted' THEN [1] ELSE [] END |
+                SET a.count_status = 'uncertain', a.count_reason = 'merged', a.count_target_id = null)
             WITH collect(a) AS moved, collect(DISTINCT a.source_key) AS source_keys
             OPTIONAL MATCH (s:Entity {{uuid: $survivor}})
             FOREACH (a IN CASE WHEN s IS NULL THEN [] ELSE moved END |
@@ -91,6 +97,9 @@ class TypedAssertionReconciliationMixin:
             OPTIONAL MATCH (:Entity {{uuid: to_uuid}})-[rel:HAS_ASSERTION]->(a)
             DELETE rel
             SET a.subject_uuid = from_uuid
+            // CF-265: re-arm the moved-back occurrence so it is decided again under its original subject
+            FOREACH (_ IN CASE WHEN a.operation = 'occurrence' AND a.count_status IS NOT NULL THEN [1] ELSE [] END |
+                SET a.count_attempts = 0, a.count_decided_at = null, a.projection_pending = true)
             WITH a, r, from_uuid, sk
             OPTIONAL MATCH (b:Entity {{uuid: from_uuid}})
             FOREACH (_ IN CASE WHEN b IS NULL THEN [] ELSE [1] END |
@@ -101,6 +110,15 @@ class TypedAssertionReconciliationMixin:
             FOREACH (_ IN CASE WHEN h IS NULL THEN [] ELSE [1] END | SET h.subject_uuid = from_uuid)
             WITH collect(DISTINCT a) AS moved, collect(DISTINCT sk) AS source_keys,
                  collect(DISTINCT from_uuid) AS from_uuids, collect(r) AS records
+            // CF-265: re-arm survivor rows demoted to repeats of a moved row (now another subject)
+            CALL {{
+                WITH moved
+                UNWIND moved AS m
+                MATCH (t:TypedAssertion {{count_target_id: m.assertion_id}})
+                WHERE t.count_status IN ['repeat', 'same_event'] AND t.subject_uuid <> m.subject_uuid
+                  AND coalesce(t.namespace, '') = coalesce(m.namespace, '')
+                SET t.count_attempts = 0, t.count_decided_at = null, t.projection_pending = true
+            }}
             FOREACH (r IN records | DELETE r)
             RETURN size(moved) AS restored, source_keys, from_uuids
             """,
