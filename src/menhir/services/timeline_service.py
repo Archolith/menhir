@@ -203,7 +203,7 @@ async def _typed_histories(
             )
             for raw in (page.get("entries") or [])
         )
-        prev_offset = offset - history_limit if offset > 0 else None
+        prev_offset = max(0, offset - history_limit) if offset > 0 else None
         histories.append(TypedHistory(
             kind=kind,
             view_uuid=view_uuid,

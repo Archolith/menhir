@@ -991,14 +991,9 @@ class MemoryGraphAdapter:
         """Hydrate surfaced :TypedAssertion observations by id (Phase 4a.2 observation lane)."""
         return self._memory_queries.fetch_assertion_candidate_metadata(assertion_ids)
 
-    def fetch_temporal_facts(
-        self,
-        node_uuids: list[str],
-        *,
-        namespace: str | None = None,
-    ) -> list[dict[str, object]]:
+    def fetch_temporal_facts(self, node_uuids: list[str]) -> list[dict[str, object]]:
         """Fetch bi-temporal fact-edge state for candidate nodes."""
-        return self._memory_queries.fetch_temporal_facts(node_uuids, namespace=namespace)
+        return self._memory_queries.fetch_temporal_facts(node_uuids)
 
     def fetch_candidate_fact_edges(
         self, node_uuids: list[str]

@@ -70,6 +70,7 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
             ingest_service=None,
             lifecycle_service=None,
             scalar_view_authority_enabled=scalar_view_authority_effective(settings),
+            scalar_history_enabled=bool(getattr(settings, "personal_memory_scalar_history_enabled", False)),
             # Same tier view as the backend's recall (core/bootstrap.py), so hook context agrees.
             inferred_self_mode=str(getattr(settings, "inferred_self_mode", "enforce")),
             counting_enabled=counting_enabled,

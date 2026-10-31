@@ -196,6 +196,9 @@ async def _build_source_memories(
     that limit (an explicit request enables the lane for this call even when the flag is off).
     The lane is also off for ``include_session=False`` calls: the section carries
     SESSION-scoped raw episodes, and that flag means promoted knowledge only.
+    Scoped by namespace only: ``session_id`` is deliberately not applied, because the lane (and
+    its session spread, #386) exists to surface other sessions' episodes in the same namespace;
+    the #148 own-session rule governs ranked SESSION-scope candidates, not this section.
     """
     if source_memory_limit is None:
         effective_limit = tuning.source_memory_limit if tuning.enable_source_memories else 0
@@ -412,7 +415,19 @@ async def run_recall_history(
     )
 
 
-async def run_recall(
+async def run_recall(service: Any, query: str, **kwargs: Any) -> RecallResult:
+    """Recall entry point (parameters: ``_run_recall``). Cancels any lane task still running
+    when recall raises or is cancelled, so no embed/Neo4j work outlives the call."""
+    owned: list[asyncio.Task[Any]] = []
+    try:
+        return await _run_recall(service, query, owned_tasks=owned, **kwargs)
+    finally:
+        for task in owned:
+            if not task.done():
+                task.cancel()
+
+
+async def _run_recall(
     service: Any,
     query: str,
     *,
@@ -435,6 +450,7 @@ async def run_recall(
     update_access: bool = True,
     source_memory_limit: int | None = None,
     counted_verdict_limit: int | None = None,
+    owned_tasks: list[asyncio.Task[Any]],
 ) -> RecallResult:
     # update_access=False makes recall a pure read: no last_accessed touches, no
     # edge-weight reinforcement, no rehydration scheduling. For measurement probes
@@ -613,11 +629,12 @@ async def run_recall(
     # metadata and adjacency phases instead of adding to them. Its query embedding is a cache
     # hit (Graphiti's vector search just embedded the same text). Awaited below where it was
     # awaited before, so results, notes and return paths are unchanged. The helper never raises
-    # and is read-only, so if recall exits before awaiting it the task just finishes on its own.
+    # and is read-only. If recall raises before awaiting it, ``run_recall`` cancels it.
     source_memory_task = asyncio.create_task(_build_source_memories(
         service, query, namespace, tuning, source_memory_limit,
         include_session=include_session,
     ))
+    owned_tasks.append(source_memory_task)
 
     # Independent sources below must run even when semantic search is empty or failed.
     # Pending-only fallback is assembled after those sources have had a chance to contribute.
@@ -1630,7 +1647,7 @@ async def run_recall(
             )
 
     # --- Source-memory lane (additive; default OFF) ---
-    # AMA-Bench supersession A/B: the session's most similar episode memories by embedding
+    # AMA-Bench supersession A/B: the namespace's most similar episode memories (across sessions) by embedding
     # similarity, each with its time, NEXT TO the ranked results (never fused) fixed 41
     # answers and broke 19 (sign test p=0.006); "latest X" stale answers fell 9 -> 3.
     # Runs on EVERY return path (including the no-candidate fallbacks) so the section

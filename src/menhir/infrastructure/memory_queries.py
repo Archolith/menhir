@@ -786,12 +786,7 @@ class MemoryQueryRepository:
             params={"uuids": node_uuids, "belief_commit_key": "belief_commit"},
         )
 
-    def fetch_temporal_facts(
-        self,
-        node_uuids: list[str],
-        *,
-        namespace: str | None = None,
-    ) -> list[dict[str, object]]:
+    def fetch_temporal_facts(self, node_uuids: list[str]) -> list[dict[str, object]]:
         """Fetch bi-temporal fact-edge state for candidate entity nodes.
 
         Only edges with fact text count: link edges without it would take the per-node slots
@@ -872,8 +867,8 @@ class MemoryQueryRepository:
         Each id resolves as exactly one of: an Entity (contributing episodes are the
         ``MENTIONS`` episodes), a RELATES_TO fact edge (episodes whose uuid is in
         ``r.episodes``), or a pending anchor (the anchor is itself the episode). Entities and
-        edges are tenant-scoped to ``namespace`` (no filter when None, as in
-        ``fetch_temporal_facts``); anchors are scoped the same way.
+        edges are tenant-scoped to ``namespace`` (no filter when None);
+        anchors are scoped the same way.
 
         Per contributing Graphiti episode the query joins Menhir's receipt anchor
         (``receipt.resolved_episode_uuid = epi.uuid``, indexed; see ``fetch_node_receipts``):
@@ -966,7 +961,7 @@ class MemoryQueryRepository:
                      END
                    ) WHERE e IS NOT NULL ] AS episodes
             RETURN n.uuid AS uuid,
-                   n.name AS name,
+                   coalesce(n['view_name'], n.name) AS name,
                    n.view_kind AS view_kind,
                    episodes,
                    [ (n)-[supported_by]->(ev:Evidence)
