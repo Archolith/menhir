@@ -35,6 +35,7 @@ Behaviour fixes:
   - `agent_quoted` matching ignores case, surrounding whitespace and `-`/`_` in Python and in the two scalar foundation queries (CF-287).
 - **Graph-op journal:**
   - Transitions are owner-checked compare-and-set (CF-271).
+  - A refused `mark_committed` now logs at ERROR and writes a failure event (`failure_stage="commit_refused_after_graph_work"`). Every caller commits only after its own graph work, so the graph may hold the after-state while the journal says FAILED. The journal state is not changed; escalating to NEEDS_REVIEW is #404 (CF-271 F2).
   - The committed-pairs scan pages by keyset on `(created_at, rowid)` (CF-275).
   - Telemetry SQLite connections close when their `with` block exits (CF-276).
 - **Eval script:** `scripts/eval_anchored_time.py` routes the resolver like production, reserves budget before each call, and stops before scoring a set the cap cut short (CF-288).

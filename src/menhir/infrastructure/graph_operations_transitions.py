@@ -9,6 +9,7 @@ mixin; every method runs against the facade's ``self.db_path``.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from typing import Any
 
@@ -19,6 +20,8 @@ from menhir.infrastructure.graph_operations_model import (
 )
 from menhir.infrastructure.telemetry import connect_telemetry_db
 from menhir.clock import utc_now_iso as _utc_now_iso
+
+_logger = logging.getLogger(__name__)
 
 
 class StaleTransitionError(GraphOperationError):
@@ -39,14 +42,54 @@ class _GraphOperationsTransitionsMixin:
 
         Does NOT touch expected_after_sha256: the postcondition fingerprint is frozen at
         PREPARE (plan E1) and commit only verifies-then-transitions (plan E4).
+
+        Every caller commits only after its own graph work, so a refused commit means that work
+        may be in the graph while the journal says otherwise. CF-271 F2: leave a durable record.
         """
-        self._transition(
-            op_id,
-            to_state="COMMITTED",
-            allowed_from={"PREPARED"},
-            set_committed_at=True,
-            owner_token=owner_token,
+        try:
+            self._transition(
+                op_id,
+                to_state="COMMITTED",
+                allowed_from={"PREPARED"},
+                set_committed_at=True,
+                owner_token=owner_token,
+            )
+        except StaleTransitionError as exc:
+            self._record_commit_lost(op_id, exc)
+            raise
+
+    def _record_commit_lost(self, op_id: str, exc: StaleTransitionError) -> None:
+        """Best effort: never mask the StaleTransitionError the caller must see."""
+        row: dict[str, Any] = {}
+        try:
+            row = dict(self.get(op_id) or {})  # type: ignore[attr-defined]
+        except Exception:  # diagnostics only
+            _logger.debug("could not read %s for the commit-refused record", op_id, exc_info=True)
+        details = {
+            "op_id": op_id,
+            "operation_kind": row.get("operation_kind"),
+            "journal_state": row.get("state"),
+            "decision": "commit_refused_after_graph_work",
+        }
+        _logger.error(
+            "Graph operation commit refused after the caller's graph work; the graph may hold "
+            "this operation's after-state while the journal says %s (CF-271 F2): op_id=%s kind=%s",
+            details["journal_state"], op_id, details["operation_kind"],
         )
+        try:
+            from menhir.infrastructure.telemetry.recorders import record_failure_event
+
+            record_failure_event(
+                operation="graph_operation_commit",
+                failure_stage="commit_refused_after_graph_work",
+                classification="manual_review",
+                retryable=False,
+                error_type=type(exc).__name__,
+                error=str(exc),
+                details=details,
+            )
+        except Exception:  # the log line above is the fallback record
+            _logger.warning("could not persist the commit-refused event for %s", op_id, exc_info=True)
 
     def mark_needs_review(
         self,
