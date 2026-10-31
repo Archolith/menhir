@@ -1,3 +1,16 @@
+## 2026-10-23 - Recall results say who said them; scalar view authority defaults on
+
+For agent-written memories (#168, plan `menhir-agent-memory-writer-plan-2026-10-23` P1b and P2).
+
+- `domain/recall_provenance.py` (new), `domain/recall.py`, `infrastructure/memory_queries.py`, `infrastructure/memory_graph_adapter.py`, `services/recall_pipeline.py`: each Entity, fact-edge and pending-episode result carries `provenance` (`said_by` user / agent / mixed / unknown, `sources`, `first_seen_at`, up to 5 `turn_evidence_ids`). One batched, namespace-scoped query per recall (`fetch_result_provenance`) classifies every contributing episode by its source against `GATE_APPROVED_HUMAN_SOURCES`; best-effort, so a failure leaves it unset. View, history and observation items, nodes with no contributing episode, and verb-facet facts appended later carry none.
+- `mcp/formatters.py`, `services/context_builder.py`, `api/routes.py`, `api/routes_support.py`: non-user items get a label (`agent-recorded`, `user + agent`, `provenance unknown`) and the MCP `provenance` key; output for user-stated items and items without provenance is unchanged. The same rule applies to REST `/recall`, `recall_context_memories` and `memory://search`. The receipt source wins over Graphiti's placeholder `message` source; hub-entity turn ids are bounded to the earliest 5 episodes with a 10s query timeout.
+- Tests (new): `tests/test_recall_provenance.py`, `tests/test_recall_provenance_pipeline.py`, `tests/test_recall_provenance_rendering.py`, `tests/test_result_provenance_online.py` (online).
+
+- `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: `personal_memory_scalar_view_authority_enabled` defaults to `true` (owner decision 2026-10-23, #168). `config/authority_gates.py` still applies it only while `personal_memory_scalar_state_enabled` is on, and the lane stays off by default, so a default install behaves as before; a deployment that turns the lane on now gets View authority without a second flag. Collapse, echo-drop and observation-dedup stay off. Opt out with `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED=false`.
+- `docs/agreement-settings.md`, `docs/personal-memory-readiness.md`, `src/menhir/domain/retrieval_tuning.py`, `.agent/default-off-features.md`, `.agent/plans/menhir-scalar-default-enablement-plan.md`: defaults and notes updated. `RecallService`'s own dataclass default stays `False`; bootstrap passes the effective gate.
+- Tests: new upgrade test in `tests/test_release_config_upgrade.py` (unset versus pinned) and a default-wiring test in `tests/test_authority_requires_lane.py`. Changed: `DEFAULT_ON` in `tests/test_release_config_upgrade.py` and the shipped value in `tests/test_shipped_agreement_profile.py`.
+- `CHANGELOG-archive.md`: the oldest former current entry moved there (10-entry limit).
+
 ## 2026-10-22 - Idempotent episode submit; enrichment leases renew up to a 3-hour ceiling
 
 For resumable LME ingest (#168). A client that retries a submit after a timeout no longer creates a duplicate episode, and long enrichment no longer loses its lease at 900 s.

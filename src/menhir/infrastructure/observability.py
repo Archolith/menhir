@@ -16,6 +16,7 @@ import openai
 from openai import AsyncOpenAI
 
 from menhir.config import MemorySettings
+from menhir.infrastructure.dns_cache import CachingDNSTransport
 from menhir.infrastructure.openai_rate_limit import (
     acall_with_rate_limit_backoff,
     find_quota_exhaustion,
@@ -684,14 +685,18 @@ class _LocalAsyncOpenAI(AsyncOpenAI):
         return {}
 
 
-def _build_http_client(base_url: str) -> httpx.AsyncClient | None:
+def _build_http_client(base_url: str) -> httpx.AsyncClient:
+    """The client's httpx client; both kinds resolve hostnames through the shared DNS cache (#409)."""
     if not _should_bypass_local_auth(base_url):
-        return None
+        # The SDK's own defaults (timeout, connection limits, redirects); only resolution changes.
+        return openai.DefaultAsyncHttpxClient(
+            transport=CachingDNSTransport(limits=openai.DEFAULT_CONNECTION_LIMITS)
+        )
 
     async def _strip_auth(request: httpx.Request) -> None:
         request.headers.pop("Authorization", None)
 
-    return httpx.AsyncClient(event_hooks={"request": [_strip_auth]})
+    return httpx.AsyncClient(event_hooks={"request": [_strip_auth]}, transport=CachingDNSTransport())
 
 
 class _NoSdkRateLimitRetry:

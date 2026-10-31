@@ -1,3 +1,13 @@
+## 2026-10-31 - LLM clients resolve each host once (#409)
+
+Under 500-way ingest every default-executor thread can be busy with sync Neo4j calls. asyncio resolves hostnames on that same pool, so each new OpenAI connection waited behind graph I/O and hit the SDK's 5 s connect timeout. Graphiti embeds failed with `APITimeoutError`, and source-memory embeds were skipped.
+
+- `infrastructure/dns_cache.py` (new): an httpcore network backend that resolves each host once per 5 minutes on its own 2-thread pool. Concurrent lookups for a host share one call. It connects to the cached IPs in order, re-resolves after every address fails, and leaves IP literals alone. TLS still verifies the hostname, because httpcore passes it as `server_hostname`.
+- `infrastructure/observability.py`: every client `build_async_openai_client` returns uses it. Remote clients get `openai.DefaultAsyncHttpxClient`, keeping the SDK's timeout, connection limits and redirects; the local-llama client keeps httpx defaults.
+- Not fixed here: graph I/O itself still shares the default executor, and a plain `TimeoutError` from the 300 s episode deadline still parks the episode as `manual_review` (#409).
+- Tests: new `tests/infrastructure/test_dns_cache.py`. Changed: `tests/test_observability.py` now expects remote clients to get an `http_client`.
+- `CHANGELOG-archive.md`: the oldest former current entry moved there (10-entry limit).
+
 ## 2026-10-30 - Delta-audit remediation (CF-259..CF-306)
 
 Fixes from the 2026-10-29 delta audit (`ca3f762f..0e078983`). The root findings register ("Delta audit 2026-10-29") carries each CF's status and commit, and lists the residuals. CF-277 is held for an owner decision, CF-285 is closed by design (dates stay UTC), and a new High finding, CF-307, is fixed (see LLM retry below).
@@ -149,17 +159,4 @@ For agent-written memories (#168, plan `menhir-agent-memory-writer-plan-2026-10-
 - A kept contradiction is written after a successful `add_episode` as an `:EdgeInvalidationConflict` record (`status: 'unresolved'`, one per kept/cause edge pair; a repeat bumps `seen_count` and never reopens a resolved record). Entity nodes and the entity conflict groups are untouched. These records are not yet listed by `list_conflicts`.
 - Known gap (fork): an edge whose own window is inverted or empty is expired by its own end without asking the hook.
 - Tests (new): `tests/test_edge_invalidation_guard.py`, `tests/test_edge_invalidation_guard_online.py`, `tests/test_edge_source_preserved_live.py`. Changed for 0.31.2: test doubles that now receive `query_vector` / `identity_properties` / `max_tokens`, the preserved-attributes expectation in `tests/test_anchored_time_restatement.py`, the restated-attributes assertion in `tests/test_anchored_time_expiry_live.py`, the timeout allow-list, and the `ScoredMemory` field set (adds `provenance`, missed in #375).
-- `CHANGELOG-archive.md`: the oldest former current entry moved there (10-entry limit).
-
-## 2026-10-23 - Recall results say who said them; scalar view authority defaults on
-
-For agent-written memories (#168, plan `menhir-agent-memory-writer-plan-2026-10-23` P1b and P2).
-
-- `domain/recall_provenance.py` (new), `domain/recall.py`, `infrastructure/memory_queries.py`, `infrastructure/memory_graph_adapter.py`, `services/recall_pipeline.py`: each Entity, fact-edge and pending-episode result carries `provenance` (`said_by` user / agent / mixed / unknown, `sources`, `first_seen_at`, up to 5 `turn_evidence_ids`). One batched, namespace-scoped query per recall (`fetch_result_provenance`) classifies every contributing episode by its source against `GATE_APPROVED_HUMAN_SOURCES`; best-effort, so a failure leaves it unset. View, history and observation items, nodes with no contributing episode, and verb-facet facts appended later carry none.
-- `mcp/formatters.py`, `services/context_builder.py`, `api/routes.py`, `api/routes_support.py`: non-user items get a label (`agent-recorded`, `user + agent`, `provenance unknown`) and the MCP `provenance` key; output for user-stated items and items without provenance is unchanged. The same rule applies to REST `/recall`, `recall_context_memories` and `memory://search`. The receipt source wins over Graphiti's placeholder `message` source; hub-entity turn ids are bounded to the earliest 5 episodes with a 10s query timeout.
-- Tests (new): `tests/test_recall_provenance.py`, `tests/test_recall_provenance_pipeline.py`, `tests/test_recall_provenance_rendering.py`, `tests/test_result_provenance_online.py` (online).
-
-- `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: `personal_memory_scalar_view_authority_enabled` defaults to `true` (owner decision 2026-10-23, #168). `config/authority_gates.py` still applies it only while `personal_memory_scalar_state_enabled` is on, and the lane stays off by default, so a default install behaves as before; a deployment that turns the lane on now gets View authority without a second flag. Collapse, echo-drop and observation-dedup stay off. Opt out with `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED=false`.
-- `docs/agreement-settings.md`, `docs/personal-memory-readiness.md`, `src/menhir/domain/retrieval_tuning.py`, `.agent/default-off-features.md`, `.agent/plans/menhir-scalar-default-enablement-plan.md`: defaults and notes updated. `RecallService`'s own dataclass default stays `False`; bootstrap passes the effective gate.
-- Tests: new upgrade test in `tests/test_release_config_upgrade.py` (unset versus pinned) and a default-wiring test in `tests/test_authority_requires_lane.py`. Changed: `DEFAULT_ON` in `tests/test_release_config_upgrade.py` and the shipped value in `tests/test_shipped_agreement_profile.py`.
 - `CHANGELOG-archive.md`: the oldest former current entry moved there (10-entry limit).
