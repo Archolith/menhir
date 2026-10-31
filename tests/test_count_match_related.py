@@ -56,15 +56,16 @@ def test_no_related_is_counted_with_normalized_family():
 
 
 @pytest.mark.unit
-def test_truncation_at_eleven_related_but_not_at_ten():
+def test_truncation_one_past_the_per_candidate_bound_but_not_at_it():
     # Fails if the per-candidate bound is off by one.
-    pool10 = [_r(f"p{i:02d}", 1) for i in range(RELATED_PER_CANDIDATE)]
+    cap = RELATED_PER_CANDIDATE
+    pool10 = [_r(f"p{i:02d}", 1) for i in range(cap)]
     dec10, sets10 = _decide([_r("n", 9)], pool=pool10)
-    assert len(sets10[0].related) == 10 and sets10[0].truncated is False
+    assert len(sets10[0].related) == cap and sets10[0].truncated is False
     assert dec10["n"]["status"] == "uncertain" and dec10["n"]["reason"] == "related_undecided"
 
     dec11, sets11 = _decide([_r("n", 9)], pool=pool10 + [_r("p99", 1)])
-    assert len(sets11[0].related) == 10 and sets11[0].truncated is True
+    assert len(sets11[0].related) == cap and sets11[0].truncated is True
     assert dec11["n"]["status"] == "uncertain" and dec11["n"]["reason"] == "truncated"
     assert dec11["n"]["truncated"] is True
 
@@ -103,13 +104,14 @@ def test_page_budget_cuts_a_candidate_that_was_within_per_candidate():
 
 @pytest.mark.unit
 def test_page_budget_with_real_defaults():
-    # Five candidates (own subject each), each related to 10 own pool rows. The page budget is 40,
-    # so the first four are whole and the fifth has nothing left: truncated, never counted.
-    assert RELATED_PER_PAGE == 40 and RELATED_PER_CANDIDATE == 10
-    pool = [_r(f"p{s}-{i:02d}", 1, subject_uuid=f"s{s}") for s in range(5) for i in range(10)]
+    # Five candidates (own subject each), each related to a full set of own pool rows. The page
+    # budget holds four full sets, so the fifth has nothing left: truncated, never counted.
+    cap = RELATED_PER_CANDIDATE
+    assert RELATED_PER_PAGE == 4 * cap
+    pool = [_r(f"p{s}-{i:02d}", 1, subject_uuid=f"s{s}") for s in range(5) for i in range(cap)]
     cands = [_r(f"c{s}", 2 + s, subject_uuid=f"s{s}") for s in range(5)]
     sets = related_sets(cands, pool)
-    assert [len(s.related) for s in sets] == [10, 10, 10, 10, 0]
+    assert [len(s.related) for s in sets] == [cap, cap, cap, cap, 0]
     assert [s.truncated for s in sets] == [False, False, False, False, True]
     dec = conservative_decisions(sets)
     assert [d["status"] for d in dec] == ["uncertain"] * 4 + ["uncertain"]

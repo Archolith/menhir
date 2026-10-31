@@ -18,7 +18,7 @@ Behaviour fixes:
   - The contained-edge prune keeps a fact when the keeper cannot see its endpoint (CF-259, before it was switched off; see above).
   - Status reporters follow the verbatim-skip projection everywhere, including `list_enrichment_queue`, the explorer and READY counts (CF-261).
 - **Counting and scalar state:**
-  - The related pool is fetched per candidate (CF-264). Known issue: past 10 related rows a candidate is never counted, so recurring counts plateau at about 11 (Archolith/menhir#405, pre-freeze).
+  - The related pool is fetched per candidate (CF-264). The decide step now sends up to 50 related rows per candidate and 200 per page, up from 10 and 40, so a recurring happening counts up to 51 times instead of stopping at about 11. Decide prompts can be up to 5x longer. Known issue: past 50 related rows a candidate is still never counted (#405 mitigated; removing the cap is post-MVP Archolith/menhir#407).
   - An entity merge re-arms moved counted rows for re-decision (CF-265).
   - Rebuild failures stay owed, and rebuilds and coverage audits fold with the writer's parameters (CF-266, CF-267, CF-270, CF-290).
   - The LME repair script uses the runtime counting and history flags (CF-289).

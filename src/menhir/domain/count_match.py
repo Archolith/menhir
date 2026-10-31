@@ -30,9 +30,10 @@ TARGETED_STATUSES: frozenset[str] = frozenset({REPEAT, SAME_EVENT})
 MATCH_VERSION_SUFFIX = "+m"
 
 #: related counts sent per candidate, and per page in total (R3-4). Past either bound the candidate's
-#: related set is truncated, and a truncated candidate may never be decided `counted`.
-RELATED_PER_CANDIDATE = 10
-RELATED_PER_PAGE = 40
+#: related set is truncated, and a truncated candidate may never be decided `counted`, so a recurring
+#: happening stops counting at RELATED_PER_CANDIDATE + 1 (#405 raised 10/40; #407 removes the cap).
+RELATED_PER_CANDIDATE = 50
+RELATED_PER_PAGE = 200
 
 #: counted rows pulled per related probe; a full probe marks the candidates of that probe truncated.
 RELATED_POOL_LIMIT = 2000

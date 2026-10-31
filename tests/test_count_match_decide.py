@@ -22,7 +22,7 @@ from menhir.domain.count_decide import (
     parse_decide_response,
     vote,
 )
-from menhir.domain.count_match import RelatedSet, related_sets
+from menhir.domain.count_match import RELATED_PER_CANDIDATE, RelatedSet, related_sets
 from menhir.domain.scalar_state_fold import fold_assertions
 from menhir.services.counting_consolidation import (
     CountingConsolidationConfig,
@@ -221,8 +221,9 @@ def test_retelling_in_a_later_page_is_a_repeat_of_the_pool_row():
 
 
 def _truncated_setup():
-    # ten pool rows share two tokens with the candidate; the real match shares one -> rank 11
-    pool = [_counted(f"p{i:02d}", 1) for i in range(10)]
+    # a full cap of pool rows share two tokens with the candidate; the real match shares one ->
+    # ranked one past the cap
+    pool = [_counted(f"p{i:02d}", 1) for i in range(RELATED_PER_CANDIDATE)]
     pool.append(_counted("p99-true", 1, count_object="kit", attribute="kit_count"))
     sets = related_sets([_occ("c1", 5)], pool)
     rs, = sets
@@ -246,6 +247,27 @@ def test_truncated_candidate_voted_repeat_of_a_sent_row_is_a_repeat():
                              current_version=CUR)
     d, = out.decisions
     assert d["status"] == "repeat" and d["target_id"] == "p03" and d["truncated"] is True
+
+
+@pytest.mark.unit
+def test_recurring_happening_counts_past_the_old_plateau_of_eleven():
+    # #405: fails if a recurring happening, voted new on each later date, stops counting at 11.
+    # The cap still bounds it (one past the cap stays uncertain); #407 removes the cap.
+    from datetime import datetime, timedelta, timezone
+
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    pool: list[dict] = []
+    statuses: list[str] = []
+    for i in range(RELATED_PER_CANDIDATE + 2):
+        cand = _occ(f"c{i:03d}", 1, valid_at=(start + timedelta(days=i)).isoformat())
+        out = apply_decide_rules(related_sets([cand], pool), {cand["assertion_id"]: _v("counted")},
+                                 decided=True, current_version=CUR)
+        d, = out.decisions
+        statuses.append(d["status"])
+        if d["status"] == "counted":
+            pool.append(dict(cand, count_status="counted"))
+    assert statuses.count("counted") == RELATED_PER_CANDIDATE + 1 > 11
+    assert statuses == ["counted"] * (RELATED_PER_CANDIDATE + 1) + ["uncertain"]
 
 
 @pytest.mark.unit
