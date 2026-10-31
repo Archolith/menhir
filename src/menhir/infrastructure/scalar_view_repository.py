@@ -340,7 +340,7 @@ class ScalarViewRepositoryMixin:
             f"""
             MATCH (v:Entity {{uuid: $view_uuid}})-[:CURRENT_ANCHOR]->(a:TypedAssertion)
             MATCH (te:TurnEvidence {{declarant: 'user'}})-[:FOUNDS]->(a)
-            WHERE coalesce(te.source_kind, '') <> 'agent_quoted' AND {tenant_scope_cypher('te')}
+            WHERE replace(toLower(trim(coalesce(te.source_kind, ''))), '-', '_') <> 'agent_quoted' AND {tenant_scope_cypher('te')}
             RETURN count(te) > 0 AS founded
             """,
             {"view_uuid": view_uuid, **tenant_scope_params(namespace)},
@@ -361,7 +361,7 @@ class ScalarViewRepositoryMixin:
             f"""
             MATCH (te:TurnEvidence {{declarant: 'user'}})-[:FOUNDS]->(a:TypedAssertion)
             WHERE a.assertion_id IN $ids
-                  AND coalesce(te.source_kind, '') <> 'agent_quoted'
+                  AND replace(toLower(trim(coalesce(te.source_kind, ''))), '-', '_') <> 'agent_quoted'
                   AND {tenant_scope_cypher('te')}
             RETURN count(te) > 0 AS founded
             """,

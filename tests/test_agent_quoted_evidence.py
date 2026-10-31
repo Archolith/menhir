@@ -231,7 +231,7 @@ class TestFoundationExclusions:
         repo.neo4j = fake
         assert repo.scalar_view_has_user_foundation(view_uuid="v1") is True
         query = fake.executed[-1][0]
-        assert "coalesce(te.source_kind, '') <> 'agent_quoted'" in query
+        assert "replace(toLower(trim(coalesce(te.source_kind, ''))), '-', '_') <> 'agent_quoted'" in query
 
     def test_assertions_foundation_excludes_agent_quoted(self):
         fake = FakeNeo4j([{"founded": True}])
@@ -239,7 +239,7 @@ class TestFoundationExclusions:
         repo.neo4j = fake
         assert repo.assertions_have_user_foundation(assertion_ids=["a1"]) is True
         query = fake.executed[-1][0]
-        assert "coalesce(te.source_kind, '') <> 'agent_quoted'" in query
+        assert "replace(toLower(trim(coalesce(te.source_kind, ''))), '-', '_') <> 'agent_quoted'" in query
 
 
 # ---- evidence projection stays reachable for agent-quoted turns --------------------------------

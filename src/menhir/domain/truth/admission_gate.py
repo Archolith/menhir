@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from menhir.domain.truth.assertion_spans import claim_is_grounded, normalize_claim_text
+from menhir.domain.turn_role import is_agent_quoted
 
 
 @dataclass(frozen=True)
@@ -122,7 +123,7 @@ def evaluate_user_tier_claim(
     # Agent-quoted evidence -> deny. The text on such a turn was supplied BY AN AGENT (e.g. via
     # the add_memory `user_statement` parameter), not captured from a real user turn, so citing
     # it must never upgrade a user-tier claim: an agent could otherwise mint its own grounds.
-    if str(turn_evidence.get("source_kind") or "") == "agent_quoted":
+    if is_agent_quoted(turn_evidence.get("source_kind")):
         return AdmissionVerdict(
             granted=False,
             effective_source="agent_inference",

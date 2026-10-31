@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import json
+import math
+import os
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
@@ -46,6 +48,24 @@ def parse_extra_body(raw: str, *, env_name: str) -> dict[str, Any]:
         raise ValueError(f"{env_name} must be a JSON object: {exc}") from exc
     if not isinstance(value, dict):
         raise ValueError(f"{env_name} must be a JSON object, got {type(value).__name__}")
+    return value
+
+
+DEFAULT_FLEX_TIMEOUT_S = 900.0
+
+
+def parse_flex_timeout_s(raw: str | None) -> float:
+    """Parse MENHIR_OPENAI_FLEX_TIMEOUT_S; blank/None means the default."""
+    text = (raw or "").strip()
+    if not text:
+        return DEFAULT_FLEX_TIMEOUT_S
+    message = f"MENHIR_OPENAI_FLEX_TIMEOUT_S must be a positive number of seconds, got {raw!r}"
+    try:
+        value = float(text)
+    except ValueError as exc:
+        raise ValueError(message) from exc
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(message)
     return value
 
 
@@ -533,6 +553,7 @@ class MemorySettings:
             self.personal_memory_consolidation_chat_extra_body,
             env_name="MENHIR_PERSONAL_MEMORY_CHAT_EXTRA_BODY",
         )
+        parse_flex_timeout_s(os.getenv("MENHIR_OPENAI_FLEX_TIMEOUT_S"))
         if not self.personal_memory_consolidation_chat_timeout_s >= 0:
             raise ValueError(
                 "personal_memory_consolidation_chat_timeout_s must be >= 0, got "

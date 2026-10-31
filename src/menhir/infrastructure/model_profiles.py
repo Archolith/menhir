@@ -19,11 +19,13 @@ from __future__ import annotations
 import os
 from typing import Any, ClassVar, Literal
 
+from menhir.config.settings_model import DEFAULT_FLEX_TIMEOUT_S, parse_flex_timeout_s
+
 StructuredOutputMode = Literal["json_schema", "json_object"]
 
 SERVICE_TIER_ENV = "MENHIR_OPENAI_SERVICE_TIER"
 FLEX_TIMEOUT_ENV = "MENHIR_OPENAI_FLEX_TIMEOUT_S"
-DEFAULT_FLEX_TIMEOUT_S = 900.0
+__all__ = ["DEFAULT_FLEX_TIMEOUT_S"]
 
 
 def _lower(value: Any) -> str:
@@ -99,7 +101,7 @@ class OpenAIReasoningProfile(ModelProfile):
         if tier and _is_openai_endpoint(base_url) and "service_tier" not in out:
             out["service_tier"] = tier
             if tier == "flex" and "timeout" not in out:
-                out["timeout"] = float(os.getenv(FLEX_TIMEOUT_ENV) or DEFAULT_FLEX_TIMEOUT_S)
+                out["timeout"] = parse_flex_timeout_s(os.getenv(FLEX_TIMEOUT_ENV))
         return out
 
 

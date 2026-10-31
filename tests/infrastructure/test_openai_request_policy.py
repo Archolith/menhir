@@ -112,3 +112,11 @@ def test_graphiti_proxy_applies_policy(monkeypatch) -> None:
         "service_tier": "flex",
         "timeout": DEFAULT_FLEX_TIMEOUT_S,
     }
+
+
+def test_flex_timeout_env_parses_through_the_shared_parser(monkeypatch: pytest.MonkeyPatch) -> None:
+    from menhir.infrastructure.model_profiles import parse_flex_timeout_s
+
+    monkeypatch.setenv(FLEX_TIMEOUT_ENV, "120")
+    assert parse_flex_timeout_s(__import__("os").getenv(FLEX_TIMEOUT_ENV)) == 120.0
+    assert DEFAULT_FLEX_TIMEOUT_S == 900.0

@@ -17,6 +17,19 @@ UNKNOWN_TURN_ROLE = "unknown"
 STORE_ONLY_TURN_ROLES: frozenset[str] = frozenset({"assistant"})
 
 
+AGENT_QUOTED_SOURCE_KIND = "agent_quoted"
+
+
+def normalize_source_kind(value: object) -> str:
+    """Canonical spelling of a TurnEvidence source_kind (stripped, lowercased, '-' as '_')."""
+    return str(value or "").strip().lower().replace("-", "_")
+
+
+def is_agent_quoted(source_kind: object) -> bool:
+    """True when a TurnEvidence source_kind marks agent-supplied words, in any spelling."""
+    return normalize_source_kind(source_kind) == AGENT_QUOTED_SOURCE_KIND
+
+
 def normalize_turn_role(value: object) -> str | None:
     """A member of TURN_ROLES (str, stripped, lowercased), else None."""
     if not isinstance(value, str):
@@ -41,7 +54,7 @@ def resolve_turn_role(claimed: Mapping[str, Any]) -> str:
         and isinstance(content, str)
         and isinstance(text, str)
         and content.strip() == text.strip()
-        and claimed.get("turn_evidence_source_kind") != "agent_quoted"
+        and not is_agent_quoted(claimed.get("turn_evidence_source_kind"))
         and normalize_namespace(claimed.get("namespace"))
         == normalize_namespace(claimed.get("turn_evidence_namespace"))
     ):

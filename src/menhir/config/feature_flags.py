@@ -150,7 +150,7 @@ _ENV_ONLY = (
     ('MENHIR_RECALL_COMPACT', '', 'frontier', 'Compact recall output; empty keeps full output.'),
     ('MENHIR_OPENAI_SERVICE_TIER', '', 'runtime',
         'OpenAI service tier on the OpenAI endpoint (e.g. flex); empty sends no tier.'),
-    ('MENHIR_OPENAI_FLEX_TIMEOUT_S', None, 'runtime', 'Per-request timeout under the flex tier; absent uses 900.'),
+    ('MENHIR_OPENAI_FLEX_TIMEOUT_S', None, 'runtime', 'Per-request timeout under the flex tier; absent uses 900; must be a positive number (checked at startup).'),
     ('MENHIR_OPENAI_RATE_LIMIT_MAX_ATTEMPTS', None, 'runtime',
         'Attempts per OpenAI call on 429 backoff; absent or invalid uses 6.'),
     ('MENHIR_OPENAI_RATE_LIMIT_MAX_WAIT_S', None, 'runtime',

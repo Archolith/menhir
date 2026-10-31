@@ -157,3 +157,23 @@ def test_graphiti_provider_canonical_beats_alias(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("GRAPHITI_LLM_PROVIDER", "openai")
     monkeypatch.setenv("GRAPHITI_PROVIDER", "local")
     assert MemorySettings.from_env().graphiti_provider == "openai"
+
+
+@pytest.mark.unit
+def test_parse_flex_timeout_s() -> None:
+    from menhir.config.settings_model import parse_flex_timeout_s
+
+    assert parse_flex_timeout_s(None) == 900.0
+    assert parse_flex_timeout_s("") == 900.0
+    assert parse_flex_timeout_s("  ") == 900.0
+    assert parse_flex_timeout_s("120") == 120.0
+    for bad in ("15m", "0", "-1", "nan", "inf"):
+        with pytest.raises(ValueError, match="MENHIR_OPENAI_FLEX_TIMEOUT_S"):
+            parse_flex_timeout_s(bad)
+
+
+@pytest.mark.unit
+def test_settings_reject_invalid_flex_timeout_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MENHIR_OPENAI_FLEX_TIMEOUT_S", "15m")
+    with pytest.raises(ValueError, match="MENHIR_OPENAI_FLEX_TIMEOUT_S"):
+        MemorySettings.from_env()

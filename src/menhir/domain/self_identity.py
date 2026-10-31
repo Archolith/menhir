@@ -40,6 +40,7 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from menhir.domain.namespace import normalize_namespace
+from menhir.domain.turn_role import is_agent_quoted
 
 __all__ = [
     "FIRST_PERSON_SELF_ALIASES",
@@ -355,8 +356,7 @@ def self_subject_endpoint_for_claim(
 
 
 def _is_agent_quoted(claimed: Mapping[str, Any]) -> bool:
-    kind = str(claimed.get("turn_evidence_source_kind") or "").strip().lower()
-    return kind.replace("-", "_") == "agent_quoted"
+    return is_agent_quoted(claimed.get("turn_evidence_source_kind"))
 
 
 # ---------------------------------------------------------------------------
