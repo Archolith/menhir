@@ -149,12 +149,19 @@ def test_fact_tokens_keep_digits_and_negations() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("model", "kept_edges"), [("gpt-6-luna", 1), ("gpt-4o-mini", 2)])
-async def test_extraction_hook_prunes_only_under_the_gpt6_profile(
-    monkeypatch, model: str, kept_edges: int
+@pytest.mark.parametrize(
+    ("model", "force_prune", "kept_edges"),
+    [("gpt-6-luna", False, 2), ("gpt-4o-mini", False, 2), ("gpt-6-luna", True, 1)],
+)
+async def test_extraction_hook_prunes_only_when_the_profile_enables_it(
+    monkeypatch, model: str, force_prune: bool, kept_edges: int
 ) -> None:
     pytest.importorskip("graphiti_core")
     import menhir.infrastructure.graphiti_extraction_policy as policy
+    from menhir.infrastructure.model_profiles import Gpt6Profile
+
+    if force_prune:  # CF-259: off for every shipped profile; the hook path is still exercised
+        monkeypatch.setattr(Gpt6Profile, "prune_contained_edges", True)
 
     full = _edge("user", "jeans", "The user bought new black jeans from Levi's.")
     restated = _edge("jeans", "levis", "The user's black jeans are from Levi's.")
@@ -197,12 +204,12 @@ async def test_extraction_hook_prunes_only_under_the_gpt6_profile(
 @pytest.mark.parametrize(
     ("model", "expected"),
     [
-        ("gpt-6-luna", True),
+        ("gpt-6-luna", False),
         ("gpt-4o-mini", False),
         ("openai/gpt-4o-mini", False),
         ("gpt-5.6", False),
         ("deepseek-v4-flash", False),
     ],
 )
-def test_pruning_is_enabled_only_for_the_gpt6_profile(model: str, expected: bool) -> None:
+def test_pruning_is_off_for_every_shipped_profile(model: str, expected: bool) -> None:
     assert resolve_model_profile(model).prune_contained_edges is expected

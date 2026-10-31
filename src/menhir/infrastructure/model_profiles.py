@@ -149,8 +149,10 @@ class Gpt6Profile(OpenAIReasoningProfile):
 
     name = "gpt-6"
     prefixes = ("gpt-6",)
-    #: b7 (item 0a995998) still restated sub-facts on other endpoint pairs despite the block.
-    prune_contained_edges = True
+    #: Off (CF-259): token containment cannot tell whose fact an edge states, so the prune could
+    #: delete a user's own fact. The cross-pair restatement it targeted (b7, item 0a995998) is
+    #: left in the graph until a meaning-based check replaces it.
+    prune_contained_edges = False
 
     def extraction_instructions(self) -> str:
         return _GPT6_EXTRACTION_INSTRUCTIONS

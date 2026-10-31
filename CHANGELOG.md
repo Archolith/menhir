@@ -1,6 +1,6 @@
 ## 2026-10-30 - Delta-audit remediation (CF-259..CF-306)
 
-Fixes from the 2026-10-29 delta audit (`ca3f762f..0e078983`). The root findings register ("Delta audit 2026-10-29") carries each CF's status and commit, and lists the residuals. CF-277 and CF-285 are held for owner decisions, CF-259 is partial, and a new High finding is filed as CF-307 (a Graphiti-wrapped 429 parks the episode in manual_review).
+Fixes from the 2026-10-29 delta audit (`ca3f762f..0e078983`). The root findings register ("Delta audit 2026-10-29") carries each CF's status and commit, and lists the residuals. CF-277 is held for an owner decision, CF-285 is closed by design (dates stay UTC), and a new High finding is filed as CF-307 (a Graphiti-wrapped 429 parks the episode in manual_review).
 
 Operator-visible changes:
 
@@ -10,11 +10,12 @@ Operator-visible changes:
 - **Settings:** the flex request timeout is validated at settings load. A non-numeric, non-finite or non-positive value fails startup and names the env var, even when the flex tier is unused (CF-286). A retired flag explicitly set to false logs a startup warning (CF-301).
 - **Redaction:** JWKS failure logs redact URLs fail-closed (CF-300). Recall Lab redaction is an allowlist on every route (CF-269).
 - **LLM retry:** the outer LLM retry no longer retries provider 429s; the rate-limit layer owns them (CF-262). One bad anchored-time item drops only itself, not the episode (CF-263).
+- **Extraction on gpt-6:** the contained-edge prune is off for the gpt-6 profile, the only one that enabled it, so no shipped profile prunes. Token containment cannot tell whose fact an edge states, so the prune could delete a user's own fact and its node. gpt-6 extractions now keep restated sub-facts as redundant edges, and `contained_edges_pruned` stays 0. The code is kept; re-enabling it needs a meaning-based check (#402, CF-259).
 
 Behaviour fixes:
 
 - **Extraction:**
-  - The contained-edge prune keeps a fact when the keeper cannot see its endpoint. Prune counts on gpt-6 profiles may drop (CF-259).
+  - The contained-edge prune keeps a fact when the keeper cannot see its endpoint (CF-259, before it was switched off; see above).
   - Status reporters follow the verbatim-skip projection everywhere, including `list_enrichment_queue`, the explorer and READY counts (CF-261).
 - **Counting and scalar state:**
   - The related pool is fetched per candidate (CF-264).
