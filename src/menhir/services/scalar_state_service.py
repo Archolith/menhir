@@ -341,7 +341,8 @@ class ScalarStateService:
             # Stated Views pass empty occurrence lists, so their edges are unchanged.
             view_uuid = res.get("uuid")
             occurrence_ids = list(getattr(state, "contributed_occurrence_ids", ()) or ())
-            if (view_uuid and (state.anchor_id or occurrence_ids)
+            if (view_uuid
+                    and (state.anchor_id or occurrence_ids or state.basis == "counted")
                     and hasattr(self._views, "draw_scalar_state_provenance_edges")):
                 try:
                     self._views.draw_scalar_state_provenance_edges(

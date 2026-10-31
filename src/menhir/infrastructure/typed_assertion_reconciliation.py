@@ -299,7 +299,9 @@ class TypedAssertionReconciliationMixin:
         event-log/lifecycle nodes (:TypedAssertion, :TypedAssertionHead, :AssertionRebind,
         :ScalarReconcile, :ScalarProjectionRepair), every materialized `kind='scalar_state'` View
         (:Entity, ALL versions, not
-        only current), AND the scheduling state (:ScalarConsolidationWatermark). Deleting the log
+        only current) plus every `view_kind='scalar_history'` View, the `scalar:`-keyed
+        :TypedReadMarker rows (so purged episodes refold; `event:` markers are left alone), AND the
+        scheduling state (:ScalarConsolidationWatermark). Deleting the log
         without its Views would leave stale projections recallable after their supporting assertions
         are gone; deleting only current Views would leave orphaned historical versions; and leaving
         the watermarks behind would make a purged namespace look already-consolidated so the fresh
@@ -315,10 +317,15 @@ class TypedAssertionReconciliationMixin:
             CALL { MATCH (rr:ScalarProjectionRepair) DETACH DELETE rr
                    RETURN count(rr) AS projection_repairs }
             CALL { MATCH (v:Entity {view_kind: 'scalar_state'}) DETACH DELETE v RETURN count(v) AS views }
+            CALL { MATCH (hv:Entity {view_kind: 'scalar_history'}) DETACH DELETE hv
+                   RETURN count(hv) AS history_views }
+            CALL { MATCH (rm:TypedReadMarker) WHERE rm.marker_key STARTS WITH 'scalar:'
+                   DETACH DELETE rm RETURN count(rm) AS read_markers }
             CALL { MATCH (w:ScalarConsolidationWatermark) DETACH DELETE w RETURN count(w) AS scalar_marks }
             CALL { MATCH (cw:CountingConsolidationWatermark) DETACH DELETE cw
                    RETURN count(cw) AS counting_marks }
-            RETURN assertions, heads, rebinds, receipts, projection_repairs, views,
+            RETURN assertions, heads, rebinds, receipts, projection_repairs,
+                   views + history_views AS views, read_markers,
                    scalar_marks + counting_marks AS watermarks
             """,
         )
@@ -330,5 +337,6 @@ class TypedAssertionReconciliationMixin:
             "receipts": int(row.get("receipts", 0) or 0),
             "projection_repairs": int(row.get("projection_repairs", 0) or 0),
             "views": int(row.get("views", 0) or 0),
+            "read_markers": int(row.get("read_markers", 0) or 0),
             "watermarks": int(row.get("watermarks", 0) or 0),
         }
