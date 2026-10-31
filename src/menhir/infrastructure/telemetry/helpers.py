@@ -31,8 +31,20 @@ def default_telemetry_db_path() -> Path:
 _SQLITE_BUSY_TIMEOUT_S = float(os.getenv("MENHIR_TELEMETRY_BUSY_TIMEOUT_S", "5"))
 
 
+class _ClosingConnection(sqlite3.Connection):
+    """Connection whose ``with`` block commits/rolls back and then closes it."""
+
+    def __exit__(self, exc_type, exc, tb):  # type: ignore[no-untyped-def]
+        try:
+            return super().__exit__(exc_type, exc, tb)
+        finally:
+            self.close()
+
+
 def connect_telemetry_db(db_path: Path) -> sqlite3.Connection:
     """Single connect seam for every store sharing the telemetry DB file.
+
+    The ``with`` block now closes the connection; do not use it after the block.
 
     Applies ``MENHIR_TELEMETRY_BUSY_TIMEOUT_S`` and the WAL journal mode to all of them.
     WAL is set here rather than in any single store's init because at least five stores
@@ -44,7 +56,7 @@ def connect_telemetry_db(db_path: Path) -> sqlite3.Connection:
     # will not create parents, and several stores reach this seam before TelemetryStore
     # has run its own mkdir.
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path, timeout=_SQLITE_BUSY_TIMEOUT_S)
+    conn = sqlite3.connect(db_path, timeout=_SQLITE_BUSY_TIMEOUT_S, factory=_ClosingConnection)
     try:
         conn.execute(f"PRAGMA busy_timeout = {int(_SQLITE_BUSY_TIMEOUT_S * 1000)}")
     except sqlite3.Error:  # pragma: no cover - a pragma failure must never break a connect
