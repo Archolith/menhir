@@ -61,7 +61,8 @@ class _GraphOperationsPrepareMixin:
                         owner_lease_expires_at TEXT,
                         owner_death_attested_by TEXT,
                         owner_death_attested_at TEXT,
-                        owner_death_attested_for_token TEXT
+                        owner_death_attested_for_token TEXT,
+                        resolved_by_token     TEXT
                     )
                     """
                 )
@@ -83,6 +84,9 @@ class _GraphOperationsPrepareMixin:
                     "owner_death_attested_by",
                     "owner_death_attested_at",
                     "owner_death_attested_for_token",
+                    # CF-271 review F-2: the token that last moved the row. owner_token is cleared
+                    # on leaving PREPARED, so without this a stale commit reads as idempotent.
+                    "resolved_by_token",
                 ):
                     if column not in operation_columns:
                         # Column names are literals from the tuple above, never caller input.

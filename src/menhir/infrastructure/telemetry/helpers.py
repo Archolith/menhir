@@ -139,6 +139,7 @@ _SAFE_TELEMETRY_STRING_KEYS = frozenset(
         "client_name",
         "cluster_id",
         "cursor",
+        "decision",
         "document_type",
         "endpoint",
         "episode_uuid",
@@ -148,6 +149,9 @@ _SAFE_TELEMETRY_STRING_KEYS = frozenset(
         "from_commit",
         "from_status",
         "group_id",
+        # Saga-journal identity on a commit-refused failure event (CF-271 F2): server-minted
+        # op_id hex, the operation kind and the journal state are enum-shaped, never user text.
+        "journal_state",
         "keep_uuid",
         "kind",
         "memory_uuid",
@@ -157,7 +161,9 @@ _SAFE_TELEMETRY_STRING_KEYS = frozenset(
         "node_uuid",
         "observed_integrity",
         "old_uuid",
+        "op_id",
         "operation",
+        "operation_kind",
         "phase",
         "preset",
         "priority",

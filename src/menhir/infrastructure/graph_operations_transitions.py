@@ -212,6 +212,9 @@ class _GraphOperationsTransitionsMixin:
             if last_error is not None:
                 sets.append("last_error = ?")
                 params.append(last_error)
+            if owner_token is not None:
+                sets.append("resolved_by_token = ?")
+                params.append(owner_token)
             # Retire the live-owner claim the moment the row leaves PREPARED (CF-20b). PREPARED is
             # the only state in which "someone is executing this right now" can be true, so any
             # transition out of it ends the claim.
@@ -242,13 +245,28 @@ class _GraphOperationsTransitionsMixin:
             )
             if cursor.rowcount == 0:
                 row = conn.execute(
-                    "SELECT state FROM graph_operations WHERE op_id = ?", (op_id,)
+                    "SELECT state, resolved_by_token FROM graph_operations WHERE op_id = ?",
+                    (op_id,),
                 ).fetchone()
                 conn.rollback()
                 if row is None:
                     raise GraphOperationError(f"no operation {op_id!r}")
                 current = row["state"]
+                resolved_by = row["resolved_by_token"]
                 if current == to_state:
+                    # CF-271 review F-2: a commit another owner made is not this writer's success.
+                    # test_cf271_stale_commit_after_takeover exercises it. NULL (legacy or
+                    # tokenless move) stays idempotent: there is no evidence of a second owner.
+                    if (
+                        to_state == "COMMITTED"
+                        and owner_token is not None
+                        and resolved_by is not None
+                        and resolved_by != owner_token
+                    ):
+                        raise StaleTransitionError(
+                            f"{op_id!r} is already COMMITTED by another owner; this writer's "
+                            "commit is refused"
+                        )
                     return  # idempotent
                 if current in allowed_from:
                     raise StaleTransitionError(
