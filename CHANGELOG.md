@@ -3,6 +3,7 @@
 Under 500-way ingest every default-executor thread can be busy with sync Neo4j calls. asyncio resolves hostnames on that same pool, so each new OpenAI connection waited behind graph I/O and hit the SDK's 5 s connect timeout. Graphiti embeds failed with `APITimeoutError`, and source-memory embeds were skipped.
 
 - `infrastructure/dns_cache.py` (new): an httpcore network backend that resolves each host once per 5 minutes on its own 2-thread pool. Concurrent lookups for a host share one call. It connects to the cached IPs in order, re-resolves after every address fails, and leaves IP literals alone. TLS still verifies the hostname, because httpcore passes it as `server_hostname`.
+- Follow-up: each lookup runs on its own short-lived thread, in a copy of the caller's context, instead of a `ThreadPoolExecutor`, which the CF-79 ratchet bans. The thread is listed in `_KNOWN_RAW_THREADS`, and the lookup's `wait_for` is listed in `_TIMEOUTS_ALLOWED`. Neither makes a model call.
 - `infrastructure/observability.py`: every client `build_async_openai_client` returns uses it. Remote clients get `openai.DefaultAsyncHttpxClient`, keeping the SDK's timeout, connection limits and redirects; the local-llama client keeps httpx defaults.
 - Not fixed here: graph I/O itself still shares the default executor, and a plain `TimeoutError` from the 300 s episode deadline still parks the episode as `manual_review` (#409).
 - Tests: new `tests/infrastructure/test_dns_cache.py`. Changed: `tests/test_observability.py` now expects remote clients to get an `http_client`.

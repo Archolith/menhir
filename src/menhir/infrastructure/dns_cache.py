@@ -2,8 +2,8 @@
 
 asyncio resolves hostnames on the loop's default executor, the same pool the sync Neo4j
 driver's ``asyncio.to_thread`` calls run on. When graph I/O holds every worker, each new
-connection's lookup queues behind it and the connect times out. This backend resolves on its
-own small executor, caches the addresses, and connects to an IP. TLS is unchanged: httpcore
+connection's lookup queues behind it and the connect times out. This backend resolves on a
+short-lived thread of its own, caches the addresses, and connects to an IP. TLS is unchanged: httpcore
 passes the request's hostname to ``start_tls`` as ``server_hostname``, so SNI and certificate
 checks still use the name, not the IP.
 """
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextvars
 import ipaddress
 import logging
 import socket
@@ -51,17 +52,25 @@ def _is_ip_literal(host: str) -> bool:
     return True
 
 
-_executor_lock = threading.Lock()
-_executor: concurrent.futures.ThreadPoolExecutor | None = None
+def _resolve_on_own_thread(resolver: Resolver, host: str, port: int) -> concurrent.futures.Future[list[str]]:
+    """Run one lookup on a short-lived thread, so it never queues behind graph I/O on the
+    default executor. The thread runs in a copy of the caller's context, like asyncio.to_thread
+    (CF-79). Callers coalesce misses per (host, port), so there is at most one thread per key."""
+    future: concurrent.futures.Future[list[str]] = concurrent.futures.Future()
+    context = contextvars.copy_context()
 
+    def _run() -> None:
+        if not future.set_running_or_notify_cancel():
+            return
+        try:
+            result = context.run(resolver, host, port)
+        except BaseException as exc:  # noqa: BLE001 -- delivered to the awaiting caller
+            future.set_exception(exc)
+        else:
+            future.set_result(result)
 
-def _dns_executor() -> concurrent.futures.ThreadPoolExecutor:
-    """A dedicated pool, so lookups never queue behind graph I/O on the default executor."""
-    global _executor
-    with _executor_lock:
-        if _executor is None:
-            _executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="menhir-dns")
-        return _executor
+    threading.Thread(target=_run, name=f"menhir-dns-{host}", daemon=True).start()
+    return future
 
 
 class CachingResolverBackend(httpcore.AsyncNetworkBackend):
@@ -109,7 +118,10 @@ class CachingResolverBackend(httpcore.AsyncNetworkBackend):
             future = self._inflight.get(key)
             if future is None:
                 # One lookup per key at a time; concurrent misses all wait on it.
-                future = (self._executor or _dns_executor()).submit(self._resolver, host, port)
+                if self._executor is not None:
+                    future = self._executor.submit(self._resolver, host, port)
+                else:
+                    future = _resolve_on_own_thread(self._resolver, host, port)
                 self._inflight[key] = future
                 future.add_done_callback(lambda f, key=key: self._settle(key, f))
         # shield: one caller's timeout must not cancel the lookup other callers share.

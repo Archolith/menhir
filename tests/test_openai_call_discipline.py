@@ -64,6 +64,7 @@ _TIMEOUTS_ALLOWED: dict[str, tuple[int, str]] = {
         "before its lease stops renewing (backoff-aware would outlive the lease)",
     ),
     "services/maintenance_scheduler.py": (3, "stop / lease-lost event waits"),
+    INFRA + "dns_cache.py": (1, "connect-timeout bound on a getaddrinfo lookup (no OpenAI call)"),
 }
 
 

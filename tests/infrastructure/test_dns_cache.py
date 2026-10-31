@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextvars
 import threading
 import time
 
@@ -122,7 +123,8 @@ async def test_saturated_default_executor_does_not_delay_resolution(executor) ->
     release = threading.Event()
     blockers = [loop.run_in_executor(None, release.wait, 10) for _ in range(workers)]
     try:
-        backend, inner = _backend(_CountingResolver(["203.0.113.7"]), executor)
+        # No injected executor: the production per-lookup thread.
+        backend, inner = _backend(_CountingResolver(["203.0.113.7"]), None)
         started = time.monotonic()
         await backend.connect_tcp("api.example.test", 443, timeout=5)
         assert time.monotonic() - started < 1.0
@@ -130,6 +132,26 @@ async def test_saturated_default_executor_does_not_delay_resolution(executor) ->
     finally:
         release.set()
         await asyncio.gather(*blockers)
+
+
+_CALLER_MARK: contextvars.ContextVar[str] = contextvars.ContextVar("dns_caller_mark", default="")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_lookup_thread_runs_in_the_callers_context() -> None:
+    """CF-79: a raw thread starts with a fresh context; the lookup thread must carry the caller's."""
+    seen: list[str] = []
+
+    def resolver(host: str, port: int) -> list[str]:
+        seen.append(_CALLER_MARK.get())
+        return ["203.0.113.7"]
+
+    _CALLER_MARK.set("caller")
+    backend, _ = _backend(resolver, None)
+    await backend.connect_tcp("api.example.test", 443, timeout=5)
+
+    assert seen == ["caller"]
 
 
 @pytest.mark.unit
