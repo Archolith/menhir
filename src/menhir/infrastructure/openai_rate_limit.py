@@ -55,7 +55,25 @@ DEFAULT_MAX_WAIT_S = 60.0
 #: How far backoff may push a backoff-aware deadline, as a multiple of its timeout. Bounds an
 #: operation that stays throttled indefinitely.
 DEFAULT_BACKOFF_MAX_EXTENSION = 3.0
-_NOT_RETRYABLE_CODES = frozenset({"insufficient_quota"})
+#: Billing states a wait cannot fix. Compatible providers use other codes for the same state, and
+#: some send only the message (CF-262 F7), so codes, prefixes and the message are all checked.
+_NOT_RETRYABLE_CODES = frozenset({"insufficient_quota", "billing_hard_limit_reached"})
+_NOT_RETRYABLE_CODE_PREFIXES = ("credit_balance_",)
+_NOT_RETRYABLE_MESSAGE_MARKERS = ("exceeded your current quota",)
+
+
+def _is_billing_value(value: object) -> bool:
+    return isinstance(value, str) and (
+        value in _NOT_RETRYABLE_CODES or value.startswith(_NOT_RETRYABLE_CODE_PREFIXES)
+    )
+
+
+def is_billing_state(exc: BaseException) -> bool:
+    """Whether a provider status error says billing/quota, by code, type or message."""
+    if _is_billing_value(getattr(exc, "code", None)) or _is_billing_value(getattr(exc, "type", None)):
+        return True
+    message = str(getattr(exc, "message", "") or "").lower()
+    return any(marker in message for marker in _NOT_RETRYABLE_MESSAGE_MARKERS)
 
 
 class RateLimitBackoffClock:
@@ -130,7 +148,7 @@ def bind_backoff_clock(clock: RateLimitBackoffClock) -> Iterator[RateLimitBackof
 def is_retryable_rate_limit(exc: BaseException) -> bool:
     if not isinstance(exc, openai.RateLimitError):
         return False
-    return exc.code not in _NOT_RETRYABLE_CODES and exc.type not in _NOT_RETRYABLE_CODES
+    return not is_billing_state(exc)
 
 
 QUOTA_REASON_CODE = "provider_quota_exhausted"
@@ -151,9 +169,7 @@ def find_quota_exhaustion(exc: BaseException | None) -> openai.RateLimitError | 
     seen: set[int] = set()
     while exc is not None and id(exc) not in seen:
         seen.add(id(exc))
-        if isinstance(exc, openai.RateLimitError) and (
-            exc.code in _NOT_RETRYABLE_CODES or exc.type in _NOT_RETRYABLE_CODES
-        ):
+        if isinstance(exc, openai.RateLimitError) and is_billing_state(exc):
             return exc
         exc = exc.__cause__ or exc.__context__
     return None
@@ -208,7 +224,7 @@ def rate_limit_category(exc: BaseException | None) -> str | None:
         value for value in (getattr(status_error, "code", None), getattr(status_error, "type", None))
         if isinstance(value, str)
     }
-    if codes & _NOT_RETRYABLE_CODES:
+    if is_billing_state(status_error):
         return "quota"
     if codes & _FLEX_CAPACITY_CODES:
         return "flex_capacity"

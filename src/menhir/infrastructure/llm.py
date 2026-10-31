@@ -11,7 +11,11 @@ from html import escape as _html_escape
 
 from menhir.config import MemorySettings
 from menhir.infrastructure.observability import LlmUsageControlSignal
-from menhir.infrastructure.openai_rate_limit import describe_provider_error, rate_limit_category
+from menhir.infrastructure.openai_rate_limit import (
+    describe_provider_error,
+    find_provider_status_error,
+    rate_limit_category,
+)
 from menhir.infrastructure.providers import (
     ChatBackend,
     ProviderConfig,
@@ -20,6 +24,9 @@ from menhir.infrastructure.providers import (
 )
 _COMPRESS_MAX_RETRIES = 8
 _COMPRESS_RETRY_BASE_DELAY = 2.0
+#: 4xx statuses that can succeed on a later attempt: request timeout and conflict (429 is handled
+#: before this by the rate-limit layer).
+_RETRYABLE_4XX = frozenset({408, 409})
 # Verdict calls answer in a word or a small JSON object, but on reasoning models max_tokens also covers
 # hidden reasoning: at 64 tokens most identity-judge calls ended empty (#203). The answer stays short;
 # this is headroom, not a longer output.
@@ -212,6 +219,18 @@ class LLMAdapter:
                         operation,
                         category,
                         describe_provider_error(exc),
+                    )
+                    return None
+                # CF-262 F2. A 4xx other than timeout/conflict (auth, bad request, 402 balance) or
+                # an unimplemented backend fails the same way every time; retrying only waits.
+                status = getattr(find_provider_status_error(exc), "status_code", None)
+                if isinstance(exc, NotImplementedError) or (
+                    isinstance(status, int) and 400 <= status < 500 and status not in _RETRYABLE_4XX
+                ):
+                    logger.error(
+                        "LLM %s failed with a non-recoverable error; not retrying: %s",
+                        operation,
+                        describe_provider_error(exc) if status is not None else exc,
                     )
                     return None
                 last_error = exc
