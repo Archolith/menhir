@@ -360,14 +360,12 @@ class McpTelemetryStore(
                     ON recall_receipts (operation, created_at)
                     """
                 )
-                # Durable Recall Lab experiments. CF-179: `query`, `request_json` and
-                # `result_json` hold RAW user text at rest when the run was written with reveal
-                # on (`privacy_redact` defaults False). A run written under redaction stores the
-                # masked query, request and result (explorer/recall_lab.py), so it records no
-                # raw text; history routes also redact at read time. Erasability is the control
-                # for reveal-written rows: both lab tables are namespace-keyed in
-                # `erasure_inventory` and reached by `erasure_purge`. Proven by executing the
-                # purge in `tests/test_cf179_lab_table_erasure.py`.
+                # Durable Recall Lab experiments. CF-179: `query`, `request_json` and `result_json`
+                # hold RAW user text only for runs written with reveal on (`privacy_redact` is
+                # False by default); redacted runs store masked text (explorer/recall_lab.py), and
+                # history routes redact at read. Erasability covers reveal rows: both lab tables
+                # are namespace-keyed in `erasure_inventory` and reached by `erasure_purge`
+                # (proven in `tests/test_cf179_lab_table_erasure.py`).
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS recall_lab_runs (
