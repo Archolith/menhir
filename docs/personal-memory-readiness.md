@@ -3,8 +3,9 @@
 The scalar and counting lanes are asynchronous. A user turn is captured
 immediately, but the scalar value or count it implies appears in recall only after a
 consolidation pass has read it. This page says when that happens, how to tell that a namespace
-has caught up, what a restart does, and how to turn a lane off and back on. Every lane ships
-off. For the agreement settings and the perceiver-version rules, see `agreement-settings.md`.
+has caught up, what a restart does, and how to turn a lane off and back on. The scalar lane,
+scalar history and counting ship on. For the agreement settings and the perceiver-version rules,
+see `agreement-settings.md`.
 
 ## From turn to recall
 
@@ -15,7 +16,8 @@ off. For the agreement settings and the perceiver-version rules, see `agreement-
 2. **Pass.** A consolidation pass reads each lane's turns past that lane's durable cursor. It
    writes assertions and rebuilds the affected Views. Lanes run in this order: scalar, counting.
 3. **Recall.** Once the View exists, `recall_memories` returns a verdict in `authority_layer`,
-   and `build_context` renders it as `[Scalar authority: ...]`. A lane's verdicts appear only while both its lane flag and its authority flag are on.
+   and `build_context` renders it as `[Scalar authority: ...]`. A lane's verdicts appear only while its lane flag is on;
+   scalar authority has no separate flag (see "Opting out").
 
 ## When a pass runs
 
@@ -75,23 +77,21 @@ Gaps:
 ## Opting out
 
 To turn a lane off, set its flag to `false`, then restart the backend and the stdio bridge. Its
-authority stops too, whatever the authority flag says. Setting the authority flag to `false` as
-well keeps the configuration readable, but is not required.
+authority stops too.
 
-| Lane | Lane flag | Authority flag |
+| Lane | Lane flag | Authority |
 |---|---|---|
-| Scalar | `MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED` | `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED`; history Views: `MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED` |
+| Scalar | `MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED`; history Views: `MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED` | always on while the lane is on. `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED` was retired 2026-10-27 (#168 freeze) and no longer turns it off |
 | Counting | `MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED` (needs scalar) | counted Views are hidden from recall when counting is off |
 
 What happens (E2E-18):
 - **The lane stops.** A pass makes no model calls for it, and its stored Views and assertions
   stay as they were. Turning a lane off is not a rollback.
 - **Authority stops with its lane.** Authority is applied only while its lane flag is on
-  (`config/authority_gates.py`), even if the authority flag is left on. The stored Views no longer
-  update, so serving them as current would give a changed value its old
-  number. Recall serves ordinary memories instead.
-- **Scalar authority default.** The scalar authority flag now defaults on (owner decision
-  2026-10-23), but it is inert until the scalar lane is enabled.
+  (`config/authority_gates.py`). The stored Views no longer update, so serving them as current
+  would give a changed value its old number. Recall serves ordinary memories instead.
+- **Scalar authority default.** Scalar authority is on whenever the scalar lane is on, and the
+  scalar lane ships on, so a default install serves scalar authority.
 - **With both off,** recall returns ordinary memories and `source_memories`, with no verdicts.
 - **Turning the lane back on.**
   - **Scalar:** it reads the turns captured while it was off, from its cursor, and does not
@@ -101,3 +101,27 @@ What happens (E2E-18):
   - The Views catch up in that pass.
 
 Removing data is a separate step: see the deletion and erasure tools.
+
+## Known limitation: source grounding by scalar kind
+
+A scalar value becomes a current View when at least 2 of 3 model samples agree on it. For some
+kinds Menhir also checks the value against the user's own words before storing it:
+
+| Kind | Checked against the source |
+|---|---|
+| money, measurement | yes: the value must appear in the quoted span |
+| count | yes: corrected from the number in the span |
+| clock_time | partly: a contradicted time is corrected; an hour-only or ranged time abstains |
+| duration, frequency, weekday, status, boolean | **no**: the value is the model's reading (boolean has a polarity check only) |
+
+For the unchecked kinds, a value the model misreads (for example a negation read as the positive)
+is stored, becomes the current View and leads recall if 2 of 3 samples agree on it.
+
+Measured on release candidate 44933985 (#169): with `gpt-6-luna`, 161 test and held-out sentences
+gave 67 committed values and none wrong, including negations, ended states and third-party
+statements. The local default chat model was not measured.
+
+Scalar authority has no separate switch. The only way to stop serving these values as current
+is to turn the scalar lane off (`MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED=false`), which
+stops every scalar View, including the checked kinds. Extending the check to every kind is
+planned after the MVP.
