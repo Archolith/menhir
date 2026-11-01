@@ -410,6 +410,28 @@ def test_recall_lab_does_not_judge_degraded_arms(caplog) -> None:
 
 
 @pytest.mark.unit
+def test_recall_lab_judge_skipped_log_redacts_query_and_errors(caplog) -> None:
+    # #103: the warning is emitted outside redact_recall_lab_payload.
+    recall = _StubRecallService(fail_content_lane=True)
+    body = _body()
+    body["judge"] = True
+    app = _create_test_app(
+        settings=MemorySettings(),
+        repo=_StubExplorerRepo(),
+        recall_service=recall,
+        llm=_StubJudgeLLM(_StubJudgeBackend()),
+    )
+    with caplog.at_level("WARNING"), TestClient(app) as client:
+        response = client.post("/explorer/api/recall-lab/run", json=body)
+
+    assert response.json()["judgment"]["skipped"] is True
+    assert "Recall Lab judge skipped" in caplog.text
+    assert "find the launch decision" not in caplog.text
+    assert "content index unavailable" not in caplog.text
+    assert "RuntimeError" in caplog.text
+
+
+@pytest.mark.unit
 def test_recall_lab_blinds_and_aggregates_llm_judging_passes(monkeypatch) -> None:
     monkeypatch.setattr(
         "menhir.explorer.recall_lab.random.SystemRandom.shuffle",
