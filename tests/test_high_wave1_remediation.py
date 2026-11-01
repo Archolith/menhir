@@ -773,7 +773,7 @@ async def test_three_retryable_failures_leave_the_episode_claimable_not_parked()
     ingest = SimpleNamespace(requeued=[])
     for name in ("get_queue_depth", "get_context_window_retry_attempts", "get_llm_session_window_seconds"):
         setattr(ingest, name, getattr(_RequeueIngest(), name))
-    ingest.requeue_failed_episode = _RequeueIngest().requeue_failed_episode.__get__(ingest)
+    ingest.requeue_failed_episode = _RequeueIngest.requeue_failed_episode.__get__(ingest)
     with patch("menhir.services.scheduler_tasks.record_failure_event"):
         action = await retry_process_candidate(
             SimpleNamespace(find_completed_episode_artifact=lambda **k: None),
@@ -821,7 +821,7 @@ async def test_three_manual_review_failures_still_consume_attempts_and_park() ->
     ingest = SimpleNamespace(requeued=[])
     for name in ("get_queue_depth", "get_context_window_retry_attempts", "get_llm_session_window_seconds"):
         setattr(ingest, name, getattr(_RequeueIngest(), name))
-    ingest.requeue_failed_episode = _RequeueIngest().requeue_failed_episode.__get__(ingest)
+    ingest.requeue_failed_episode = _RequeueIngest.requeue_failed_episode.__get__(ingest)
     with patch("menhir.services.scheduler_tasks.record_failure_event"):
         action = await retry_process_candidate(
             SimpleNamespace(find_completed_episode_artifact=lambda **k: None),
@@ -903,7 +903,7 @@ async def test_scheduler_exhausts_on_the_transient_cap_for_retryable_rows() -> N
     ingest = SimpleNamespace(requeued=[])
     for name in ("get_queue_depth", "get_context_window_retry_attempts", "get_llm_session_window_seconds"):
         setattr(ingest, name, getattr(_RequeueIngest(), name))
-    ingest.requeue_failed_episode = _RequeueIngest().requeue_failed_episode.__get__(ingest)
+    ingest.requeue_failed_episode = _RequeueIngest.requeue_failed_episode.__get__(ingest)
     with patch("menhir.services.scheduler_tasks.record_failure_event"):
         action = await retry_process_candidate(
             SimpleNamespace(find_completed_episode_artifact=lambda **k: None),

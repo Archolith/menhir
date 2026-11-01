@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -77,7 +78,8 @@ async def test_source_memory_task_cancelled_when_recall_raises():
     from menhir.domain.retrieval_tuning import RetrievalTuningConfig
 
     cancelled = {"flag": False}
-    started = asyncio.Event()
+    # A threading.Event, because _boom waits on it from the to_thread worker.
+    started = threading.Event()
 
     class _Client:
         async def search_scored(self, query, num_results, group_ids):
@@ -92,6 +94,10 @@ async def test_source_memory_task_cancelled_when_recall_raises():
                 raise
 
     def _boom(uuids):
+        # Hold the failure until the source-memory lane is embedding, so recall always
+        # cancels an in-flight lane. Without this, 3.13 resumes recall first and the
+        # lane is cancelled before its first step.
+        started.wait(timeout=5)
         raise RuntimeError("metadata down")
 
     service = SimpleNamespace(

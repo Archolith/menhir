@@ -57,10 +57,31 @@ def test_production_paths_cannot_be_redirected_without_explicit_test_mode() -> N
     assert 'else\n    [ "$(id -u)" -eq 0 ]' in source
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="bash is unavailable")
+def _bash() -> str | None:
+    """A runnable bash. On Windows, System32\\bash.exe is the WSL launcher, which fails
+    without an installed distro; use Git for Windows' bash instead."""
+    found = shutil.which("bash")
+    if found is None or Path(found).parent.name.lower() != "system32":
+        return found
+    git = shutil.which("git")
+    if git is None:
+        return None
+    # git.exe sits in <Git>\cmd or <Git>\mingw64\bin; bash.exe is in <Git>\bin.
+    for root in Path(git).resolve().parents[:3]:
+        git_bash = root / "bin" / "bash.exe"
+        if git_bash.is_file():
+            return str(git_bash)
+    return None
+
+
+BASH = _bash()
+
+
+@pytest.mark.skipif(BASH is None, reason="bash is unavailable")
 def test_local_backup_wrapper_has_valid_bash_syntax() -> None:
+    assert BASH is not None
     result = subprocess.run(
-        ["bash", "-n", "deploy/menhir-backup-local.sh"],
+        [BASH, "-n", "deploy/menhir-backup-local.sh"],
         cwd=REPO_ROOT,
         text=True,
         capture_output=True,
