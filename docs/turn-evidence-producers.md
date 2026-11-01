@@ -118,7 +118,7 @@ python scripts/hooks/menhir_codex_turn_evidence.py --health
 
 | Var | Meaning |
 |-----|---------|
-| `MENHIR_TURNS_URL` | Endpoint. Default `http://127.0.0.1:8090/api/turn-evidence`. |
+| `MENHIR_TURNS_URL` | Endpoint. Default `http://127.0.0.1:8100/api/turn-evidence`. |
 | `MENHIR_AGENT_KEY` | Bearer token (agent tier). Unset => unauthenticated POST attempt. |
 | `MENHIR_TURN_NAMESPACE` | Namespace override; else inferred from the cwd/project basename. |
 | `MENHIR_TURN_HOOK_LOG` | Failure-log path; else `<home>/.claude/menhir-turn-hook.log`. |

@@ -93,14 +93,27 @@ What happens (E2E-18):
 - **Scalar authority default.** Scalar authority is on whenever the scalar lane is on, and the
   scalar lane ships on, so a default install serves scalar authority.
 - **With both off,** recall returns ordinary memories and `source_memories`, with no verdicts.
-- **Turning the lane back on.**
-  - **Scalar:** it reads the turns captured while it was off, from its cursor, and does not
-    re-read turns it had already finished.
-  - The consolidation counter lane (`MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED`) was removed
-    2026-10-28. Menhir ignores the setting; the bench launchers refuse it.
-  - The Views catch up in that pass.
+- **Turning the lane back on.** It reads the turns captured while it was off, from its cursor,
+  and does not re-read turns it had already finished. The Views catch up in that pass.
 
-Removing data is a separate step: see the deletion and erasure tools.
+The consolidation counter lane (`MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED`) was removed
+2026-10-28. Menhir ignores the setting; the bench launchers refuse it.
+
+Removing data is a separate step: see the deletion and erasure tools, and the erasure limitation
+below.
+
+## Known limitation: erasure keeps extracted knowledge
+
+`delete_memory` and the erasure saga remove the memory node and its `:Episodic` twin, the captured
+evidence turns and their projections, the scalar assertions bound to or grounded on the memory,
+and its sidecar rows. They do not remove the `:Entity` nodes or `RELATES_TO` fact edges that
+enrichment extracted from the memory, and an entity summary or fact can restate the erased
+content (#417).
+
+Entities are shared: one entity can be supported by many memories, so deleting every entity a
+memory mentions would destroy other memories' knowledge. Until the post-MVP fix removes what only
+the erased memory supports, the way to remove everything is to delete the whole namespace
+(`DELETE /api/namespace/{namespace}`, operator tier).
 
 ## Known limitation: source grounding by scalar kind
 

@@ -25,11 +25,13 @@ separate acceptance tests and evidence.
 
 ## What the evidence changed
 
-Several read-side experiments, including oracle ranking, warden and belief gates, and
-other frontier retrieval controls, were neutral or negative in the retained evaluation.
-They remain disabled by default. Typed scalar authority also remains
-opt-in until their extraction, replay, namespace, repair, and held-out evaluation gates
-are satisfied.
+Before release, the read-side experiments were either adopted or removed. Oracle ranking,
+the intent lens and the warden gate are always on. The belief gate, the diversity gate,
+source-memory pools and the other entries in `feature_flags.RETIRED` were removed; each entry
+records its date and reason (for example, the belief gate had a quality delta of 0 and added
+12.6% to p95 latency). The scalar, scalar-history and counting lanes ship on, and scalar
+authority applies while the scalar lane is on; see
+[personal-memory readiness](personal-memory-readiness.md) for their known limitation.
 
 This is the intended governance loop:
 
@@ -38,7 +40,8 @@ recorded evidence -> bounded comparison -> activation decision -> default state
 ```
 
 The repository's [default-off feature ledger](../.agent/default-off-features.md) records
-the current activation state. The
+activation decisions; `src/menhir/config/feature_flags.py` is the authority for current
+defaults. The
 [research-versus-shipped inventory](research/process/research-vs-shipped-inventory.md)
 separates runtime behavior from prototypes and research. LongMemEval attribution is
 recorded in the repository [`NOTICE`](../NOTICE).

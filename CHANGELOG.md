@@ -3,7 +3,7 @@
 The frozen MVP release candidate `44933985` (#123) gets its own version: 0.2.3 is already on PyPI.
 
 - `pyproject.toml`, `uv.lock`: version 0.2.3 -> 0.3.0. No dependency changes.
-- No code changes since `44933985`. `docs/personal-memory-readiness.md` gained the scalar grounding known limitation (#412; post-MVP follow-up #411).
+- No source changes since `44933985`. Outside `src/`: offline tests also run on Windows/py3.12 and Ubuntu/py3.13, test fixes for those platforms, and community files (CONTRIBUTING, Code of Conduct, issue and PR templates). `docs/personal-memory-readiness.md` gained the scalar grounding known limitation (#412; post-MVP follow-up #411).
 - `CHANGELOG-archive.md`: the oldest former current entry moved there (10-entry limit).
 
 ## 2026-10-31 - LLM clients resolve each host once (#409)

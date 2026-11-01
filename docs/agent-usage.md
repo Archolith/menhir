@@ -33,6 +33,7 @@ Every MCP client receives a short version of this contract as the server instruc
 ## Write discipline
 
 - Store durable facts, decisions, corrections, verified failures, and reusable operator knowledge.
+  Write a decision together with its reason and the alternative rejected.
 - Do not store secrets, raw credentials, transient progress narration, or facts that have not been checked.
 - For a recall-critical semantic write in the local-stdio MVP, choose `add_memory_and_track` as the
   original write. Plain `add_memory` is fire-and-forget and provides no immediate-recall guarantee.
@@ -103,6 +104,9 @@ separate MVP retention work; this workflow does not certify them.
 
 ## Menhir as a Beacon memory provider
 
+> **Deferred after the MVP (#120).** `get_beacon_evidence` and `menhir beacon generate` ship in
+> 0.3.0 but are not part of the supported MVP surface; their behavior may change.
+
 Beacon builds beacons; Menhir answers what it has indexed. The read-only MCP tool
 `get_beacon_evidence(project_id | repository)` returns a `beacon-memory-evidence-1.1` document for one
 indexed project, bound to the repository and git commit it was indexed from. Beacon calls it:
@@ -122,7 +126,7 @@ index and moves only the recorded commit. The tool reads the graph only -- no fi
 writes -- and is available to readonly, agent and operator clients.
 
 The older `menhir beacon generate` path below is kept until Beacon's end-to-end lane runs
-against this provider (plan Phase 3B removes it).
+against this provider.
 
 ## Beacon generation (issue #120)
 
@@ -165,7 +169,7 @@ after it republishes even though the scan fingerprint is unchanged.
 - Expected refusals (`re-ingest first`, freshness or CAS refusals, an unusable interpreter, a
   Beacon build/validate failure) print one `beacon generate refused: ...` line and exit with
   code 2; a traceback means an unexpected error.
-- **First ingest after upgrading to scanner schema 7 is a full re-scan** of every project: the
+- **First ingest after a scanner schema bump (currently 10) is a full re-scan** of every project: the
   schema version is part of the scan fingerprint, so stored fingerprints are invalidated. That
   re-scan indexes the `.agent` orientation docs as `document` entities (and prunes them again
   when the files are removed), so overview entity counts change once per project. Generation

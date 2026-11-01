@@ -6,7 +6,8 @@ what a perceiver-version change does to stored readings. `tests/test_shipped_agr
 pins every value below and checks that the runtime scheduler and `POST /api/phase3/run` both pass
 them through.
 
-Shipping a value is not the same as turning a lane on. Every lane and authority flag ships off.
+The scalar, scalar-history and counting lanes ship on. Scalar authority has no separate switch: it
+applies while the scalar lane is on (see `personal-memory-readiness.md`).
 
 ## Shipped profile
 
@@ -14,11 +15,11 @@ Shipping a value is not the same as turning a lane on. Every lane and authority 
 |---|---|---|
 | Samples per turn (k), scalar and counting extraction | 3 | `MENHIR_PERSONAL_MEMORY_CONSOLIDATION_K`; `phase3/run` also takes `k` (1-9) per request |
 | Scalar agreement threshold | 2/3 (two of three samples) | `MENHIR_PERSONAL_MEMORY_SCALAR_THRESHOLD`; write `2/3`, never `0.67` |
-| Scalar reconcile attribute / scope / subject | on / on / on | `..._SCALAR_RECONCILE_ATTRIBUTE`, `_SCOPE`, `_SUBJECT` |
+| Scalar reconcile attribute / scope / subject | on / on / on | always on (the `..._SCALAR_RECONCILE_*` settings were retired 2026-10-27 and are ignored) |
 | Scalar span alignment | always on | fixed in code |
 | Scalar verdict min similarity | 0.675 (raw cosine 0.35; 0 = off) | `..._SCALAR_VERDICT_MIN_SIMILARITY` |
 | Scalar observations in ranked recall | `gated` (`all` / `off`) | `..._SCALAR_OBSERVATION_RECALL` |
-| Scalar View freshness gate | on | `..._SCALAR_VIEW_FRESHNESS_GATE` |
+| Scalar View freshness gate | on | always on (`..._SCALAR_VIEW_FRESHNESS_GATE` was retired 2026-10-27 and is ignored) |
 | Counting match-decide vote | k=3, threshold 2/3 | fixed (`domain/count_decide.py`) |
 | Sampling temperature | 0.7 | fixed (`make_sync_chat`) |
 | Max tokens per call | 8192 | `..._CONSOLIDATION_MAX_TOKENS` |
@@ -39,9 +40,8 @@ scheduled pass uses the 300-call budget.
 | | Strict (before 2026-09-29) | Shipped | LME bench (`serve.sh`) |
 |---|---|---|---|
 | Scalar threshold | 1.0 | 2/3 | 2/3 |
-| Reconcile attribute / scope / subject | off | on | on |
-| Canonical self | off | off | off |
-| Scalar lane | off | off | on (env) |
+| Reconcile attribute / scope / subject | off | on (fixed) | on |
+| Scalar lane | off | on | on (env) |
 | Scalar View authority (effective only while the lane is on) | off | on | on (env) |
 | Chat model | global | global | set by env |
 
@@ -56,8 +56,9 @@ Measurements on the frozen LME panel:
 The bench reaches its profile only through env vars. No code path changes agreement settings in
 benchmark mode.
 
-To go back to the strict profile, set `..._SCALAR_THRESHOLD=1` and the three reconcile flags to
-`false`. On a namespace that already has data, also bump the scalar perceiver version (see below).
+The strict profile cannot be fully restored: reconciliation is always on. Setting
+`..._SCALAR_THRESHOLD=1` restores the strict threshold. On a namespace that already has data, also
+bump the scalar perceiver version (see below).
 
 ## Perceiver versions and replay
 
@@ -107,8 +108,7 @@ To go back to the strict profile, set `..._SCALAR_THRESHOLD=1` and the three rec
 ### Rules for changing slot identity
 
 Any change that can move a stored fact to a different slot needs these rules. That includes
-attribute, scope, subject, unit or value-kind normalization, the reconcile flags and canonical
-self.
+attribute, scope, subject, unit or value-kind normalization, and reconciliation.
 
 1. Bump the lane's perceiver version to a strictly higher SemVer, such as `v2` to `v2.1`.
 2. Never roll back by lowering the version. Ship the old behavior under a higher version instead.
@@ -125,7 +125,7 @@ limited by the per-pass budget. #334 measures backlog recovery.
 ## Known divergences (not changed)
 
 - The `getattr` fallbacks in `core/runtime.py` and `api/routes_handlers.py` still use the strict
-  values (threshold 1.0, reconcile off). The `MaintenanceScheduler` dataclass also defaults the
+  threshold 1.0 and perceiver version `v1`. The `MaintenanceScheduler` dataclass also defaults the
   scalar and counting perceiver versions to `v1`. None of these apply when the settings object is
   `MemorySettings`. The freeze test checks both entry points with real settings.
 - `gate_typed_scalars` itself defaults to threshold 1.0 with reconcile off. Every production caller
