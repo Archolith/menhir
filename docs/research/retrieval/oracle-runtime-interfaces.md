@@ -5,7 +5,8 @@
 supported-by-spike
 
 > **2026-07-11:** the *retrieval*-altitude oracles this doc references (R4-R7) are now ported into
-> `src` but benched neutral-to-negative on LongMemEval (default-off). The *task*-altitude / composite
+> `src` but benched neutral-to-negative on LongMemEval (default-off then; Oracle ranking is always on
+> since #172). The *task*-altitude / composite
 > layer this doc actually owns (`OracleInput` / `OracleFinding`, `ColdStartOracle`) is still
 > **spec-only** — it depends on the unsequenced L3/L4 GAP. See [`README.md`](README.md) and the SOS
 > build-status note.

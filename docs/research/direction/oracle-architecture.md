@@ -5,7 +5,8 @@
 active
 
 > **2026-07-11:** architectural direction, not current state. The oracle pipeline/combiner described
-> here is built but benched neutral-to-negative on LongMemEval and ships default-off; the ColdStartBrief
+> here is built but benched neutral-to-negative on LongMemEval (default-off then; Oracle ranking is
+> always on since #172); the ColdStartBrief
 > half is unbuilt (L3/L4 GAP). The current active build direction is write-time consolidation. See the
 > build-status note in [`semantic-operating-system.md`](semantic-operating-system.md).
 

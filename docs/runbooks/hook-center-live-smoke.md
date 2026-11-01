@@ -24,21 +24,11 @@ throwaway Menhir instance.
 
 ## Prerequisites
 
-- Python 3.11+
-- A throwaway Menhir server running on `http://127.0.0.1:8099` (or custom URL)
+- Python 3.12+
+- Docker, or a disposable Neo4j named by `MENHIR_TEST_NEO4J_URI`
 
-### Starting a throwaway Menhir instance
-
-From the menhir repo root:
-
-```bash
-# Using the dev launch config (adjust to your local setup)
-menhir --port 8099 --benchmark-mode
-```
-
-Or via your local Docker/test compose setup targeting port 8099.
-
-The smoke script does **not** start Menhir automatically — it expects a running server.
+By default the script starts its own throwaway Neo4j-backed Menhir. To target a server you already
+run instead, pass `--url` or set `MENHIR_SMOKE_URL` (and `MENHIR_AGENT_KEY` if it needs a key).
 
 ## Running the smoke
 

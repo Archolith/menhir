@@ -72,25 +72,38 @@ upgrade configuration. No promotion is authorized by this audit.
 
 To opt out, set explicit `false` in the selected configuration and remove any conflicting
 process/service override, then restart the backend and workers that captured the settings.
-For example, the already-shipped source-memory lane uses:
+For example, the scalar lane (counting reads its state, so turn counting off with it) uses:
 
 ```dotenv
-MENHIR_FRONTIER_SOURCE_MEMORIES=false
+MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED=false
 ```
 
-This disables its recall section and new ingest-side episode-content embedding step. It does
-not delete stored embeddings or undo earlier writes. Boolean switches accept `true`, `1`, or
+This stops the lane's model calls and its recall authority. It does not delete stored Views or
+undo earlier writes. Retired settings (`feature_flags.RETIRED`, for example
+`MENHIR_FRONTIER_SOURCE_MEMORIES`) are ignored: the startup log warns when one is set to false,
+and the feature it named stays on or stays removed. Boolean switches accept `true`, `1`, or
 `yes` (case-insensitive); `false`, `0`, `no`, blank and unrecognized strings all load as false.
 Use explicit `false` rather than a blank or misspelled opt-out. Commented template lines do not
 set values; the evidence-anchor example is a code-corpus choice, not its code default.
 
-Scalar state, scalar/history authority, Wardens and verifier sync remain opt-in.
+Scalar state, scalar history and counting ship on, and they run model calls over captured user
+turns from the maintenance scheduler; opt out with `MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED`,
+`MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED` and `MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED`
+(see [readiness](personal-memory-readiness.md)). Scalar authority follows the scalar lane, and the
+warden gate is always on. Verifier sync remains opt-in. Before leaving the scalar lane on, read the
+known limitations below.
 The event-history lane was archived (2026-10-28) and its variables are retired.
 The scalar-view echo drop, diversity gate, fact relevance, fusion admission policy and verb facets settings were removed (2026-10-28) and their variables are retired. Disabling a feature stops its gated paths and leaves persisted data in
 place; this is not a database rollback. Scalar processing can revisit historical evidence
 when enabled or when perceiver versions change. Review namespace/version and historical-data
 obligations before activation; do not run a backfill or ingest simply to upgrade the package.
 Keep configuration and verified data backups for a separately approved deployment rollback.
+
+**Known limitations in 0.3.0.** Five scalar kinds (duration, frequency, weekday, status, boolean)
+are not checked against the source text (#169; see
+[source grounding by scalar kind](personal-memory-readiness.md#known-limitation-source-grounding-by-scalar-kind)).
+Deleting or erasing a memory keeps the entities and fact edges extracted from it (#417; see
+[erasure](personal-memory-readiness.md#known-limitation-erasure-keeps-extracted-knowledge)).
 
 ## 1b. Or do it in one step
 
@@ -192,13 +205,13 @@ because it changes login-time behavior. Inspect it with:
 
 Remove it with `.\scripts\start-server.ps1 uninstall-task`.
 
-## 5b. Preview a remote structure sync (code the server cannot see)
+## 5b. Remote structure sync (code the server cannot see)
 
 `ingest_project` scans its path in the server process, so it only works when the code and the
 server are on the same machine. If your Menhir runs elsewhere, `menhir sync` is the path being
 built for that -- a sanitized snapshot of your repository, uploaded over MCP.
 
-The local half works today:
+Preview first; this is local only:
 
 ```powershell
 menhir sync . --check
@@ -212,7 +225,11 @@ uncommitted edits show up and ignored files never do.
 Real `.env` files and private keys block the preview rather than being quietly skipped. If one is
 genuinely safe to send, add `--allow-path <path>`; the override applies to that run only.
 
-Uploading is not available yet: plain `menhir sync` refuses and says why.
+Plain `menhir sync` (no `--check`) builds the same plan and **uploads** it to
+`MENHIR_BACKEND_URL` with `MENHIR_OPERATOR_KEY`, unless a refusal stands. The server accepts it only
+when `MENHIR_SNAPSHOT_RECEIVE_MODE` is set (default off, which leaves the receive tools
+unregistered). An accepted upload is only staged on the server: nothing is extracted or written to
+the graph yet.
 
 ## 6. Give agents the operating contract
 

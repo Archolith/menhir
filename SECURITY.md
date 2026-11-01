@@ -13,7 +13,8 @@ about a week. There is no bounty.
 
 ## Supported Versions
 
-Only the `main` branch receives fixes. There are no backported security releases.
+Fixes land on `main` and ship in the next release; the latest 0.3.x release is the supported
+version. There are no backported security releases.
 
 ## Scope
 
@@ -41,8 +42,10 @@ These are deliberate and documented, so please do not report them as findings:
 - **Loopback no-auth mode.** With no key configured, the server serves an unauthenticated
   API on loopback. It refuses to bind a non-loopback address in that state unless
   `MENHIR_ALLOW_INSECURE_REMOTE_NO_AUTH=1` is set, which is documented as unsafe.
-- **`x-yawn-*` identity headers.** Accepted as deprecated aliases for `x-menhir-*`. They
-  pass through the same trust gate as the canonical headers and are ignored in OAuth mode.
+- **Erasure keeps extracted entities and facts (#417).** Deleting or erasing a memory does
+  not remove the entities and fact edges extracted from it, which can restate its content.
+  Deleting the namespace removes them. A fix is planned after 0.3.0; see the README's known
+  limitations.
 - **Stored memory content reaches the LLM unsanitized.** The contradiction check and the
   edge-fact repair / compression paths pass stored content into prompts without
   sanitization, so content written into memory can influence those LLM calls. This is a

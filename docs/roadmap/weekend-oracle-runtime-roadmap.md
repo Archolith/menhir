@@ -2,6 +2,10 @@
 
 ## Status
 
+**Historical.** This was a three-day plan from before a real embedder was available; the window has
+passed and a real embedder is now the default. See `oracle-integration-plan.md` for what was built.
+The text below is unchanged.
+
 Short-term roadmap for the three-day window before a real embedder is available.
 
 The current R2 facet benchmark has been human-hardened and is a good candidate checkpoint. The next promotion decision is blocked on a real embedder and live graph. This roadmap focuses on work that will remain valuable regardless of which embedder wins.

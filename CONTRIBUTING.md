@@ -32,9 +32,10 @@ cover your change before you push.
 | Job | Command |
 |---|---|
 | lint | `pip install ruff`, then `ruff check --select F811 .` and `ruff check --select F821,ASYNC src` |
-| offline | `pytest` (online tests skip themselves without `--run-online`) |
+| offline | `pytest` (online tests skip themselves without `--run-online`). The two Beacon test files fail unless `MENHIR_TEST_BEACON_PYTHON` points at a Python with Beacon installed; without one, add `--deselect tests/test_beacon_e2e6.py --deselect tests/test_beacon_generation.py` |
+| offline, other platforms | the same suite on Windows with Python 3.12 and on Ubuntu with Python 3.13 |
 | online | `docker compose -f docker-compose.test.yml up -d` (a throwaway Neo4j on port 7688, the tests' default), then `pytest -m "online and not needs_llm" --run-online` |
-| stdio E2E | `MENHIR_E2E=1 pytest tests/e2e`; see [tests/e2e/README.md](tests/e2e/README.md) |
+| stdio E2E | `MENHIR_E2E=1 pytest tests/e2e`; it needs Docker and its own disposable Neo4j on port 7689 (or `MENHIR_E2E_NEO4J_URI`). See [tests/e2e/README.md](tests/e2e/README.md) |
 
 Tests never need a paid model. Lanes that need one use a local deterministic fake.
 
@@ -51,8 +52,9 @@ as they are; they are the proof that behaviour did not change.
   environment variables.
 - All required CI checks must pass before a merge.
 
-[AGENTS.md](AGENTS.md) has the full repository rules, written for coding agents but binding on
-everyone.
+[AGENTS.md](AGENTS.md) has the full repository rules, written for coding agents. The rules
+apply to everyone; the steps that use the maintainer's Menhir MCP server are optional for human
+contributors.
 
 ## Releases
 

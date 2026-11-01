@@ -69,14 +69,14 @@ detector survives as the fallback. Verified build status (`menhir-frontier`, 202
 |---|---|---|---|
 | Oracles (Semantic/Structure/Scope/Temporal/Evidence/Intent) | `services/retrieval_oracles.py`, `domain/oracles.py` | BUILT; `oracle_ranking`+`intent_lens` ON in prod | none |
 | LogSpaceOracleCombiner / OraclePacket | `domain/oracle_combiner.py` | BUILT | none |
-| Wardens + WardenChain | `domain/warden.py` | BUILT; `warden_gate` OFF (opt-in), shadow ON | none |
-| Retrieval trace / `OraclePacket.rationale` / AssertionShadowTrace | `domain/retrieval_trace.py`, `services/assertion_pipeline.py` | BUILT (shadow pass live) | none |
+| Wardens + WardenChain | `domain/warden.py` | BUILT; warden gate always on | none |
+| Retrieval trace / `OraclePacket.rationale` / AssertionShadowTrace | `domain/retrieval_trace_models.py`, `services/assertion_pipeline.py` | BUILT (shadow pass live) | none |
 | Belief scorer + currentness bucket | `domain/belief.py` | BUILT; gated from live recall | none |
 | Artifacts (Decision/Failure/Incident) + `:Evidence` node + R9-lite write boundary | `domain/artifacts.py`, `infrastructure/artifact_repository.py`, `services/artifact_service.py`, `services/memory_oracle_service.py` | BUILT; MCP/API wiring gated | none |
 | Candidate tier + dedup/merge (Jaccard 0.70/0.85/0.95) | `infrastructure/candidate_repository.py`, `candidate_service.py`, `correlation_queries.py` | BUILT | none |
 | Git staleness / bitemporal / durable file id | `domain/git_staleness.py`, `temporal.py`, `repo_snapshot.py` | BUILT; gated | none |
 | Doc Drift Watch | `docs/roadmap/doc-drift-watch-mvp.md` | DESIGNED / bench-only | none (v0 forbids LLM-only flags) |
-| ColdStartBrief v0 / ColdStartOracle | `archolith_bench/l4/brief.py`; `docs/research/cold-start-brief.md` | BENCH-only / designed | designed: LLM out -> HYPOTHESIS only |
+| ColdStartBrief v0 / ColdStartOracle | `archolith_bench/l4/brief.py`; `docs/research/schemas/cold-start-brief.md` | BENCH-only / designed | designed: LLM out -> HYPOTHESIS only |
 | **LLM semantic-node proposer** | `docs/roadmap/l3l4-hybrid-sketch.md` Phase B-0 | **DESIGNED-ONLY (not in src or bench)** | would be the LLM |
 | Contradiction confirmation `confirm_contradiction` | shipped `menhir` conflict pipeline | SHIPPED — the one existing LLM reviewer | yes (advisory) |
 

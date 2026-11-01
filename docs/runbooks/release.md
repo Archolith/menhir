@@ -17,8 +17,8 @@ workflow did not consult CI and shipped both. Both were yanked; v0.2.3 carried t
 1. Land everything on `main` and push. Wait for `tests.yml` to go green on that commit.
 2. Bump `version` in `pyproject.toml` and add a `## <date> - vX.Y.Z ...` heading to
    `CHANGELOG.md`. Commit and push that too -- the gate requires HEAD == `origin/main`.
-3. Make sure the throwaway test Neo4j is up (`docker compose` service
-   `menhir-neo4j-test`, bolt://localhost:7688). The online lane is mandatory; an
+3. Make sure the throwaway test Neo4j is up (`docker compose -f docker-compose.test.yml up -d`:
+   service `neo4j-test`, container `menhir-neo4j-test`, bolt://127.0.0.1:7688). The online lane is mandatory; an
    unreachable instance is a failure, not a skip.
 4. Check:
 

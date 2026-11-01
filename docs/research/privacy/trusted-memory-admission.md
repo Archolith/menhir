@@ -143,8 +143,8 @@ EXISTS (provenance / trust tier -- ALREADY SHIPPED, recall-time):
                                BeliefScore -> CurrentnessWarden bucket.
   domain/warden.py +           the DECIDE layer; recall_service._apply_frontier runs the
   recall_service               oracle combiner + warden gate over scoring survivors
-                               (shipped 2026-06-29; warden_gate default OFF because the
-                               agent-written store is evidence-sparse and would over-refuse).
+                               (shipped 2026-06-29; the warden gate was default OFF until the
+                               #168 freeze and is now always on).
   namespace                    first-class param on add_memory / recall (silo scoping).
   scope tiers                  PERSISTENT / SESSION / CANDIDATE; add_candidate + conflict
                                pipeline implement propose -> review -> accept.

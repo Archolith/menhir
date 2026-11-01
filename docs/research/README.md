@@ -20,6 +20,13 @@ A concept is not part of menhir until it has at least one of:
 Otherwise it remains a parked research note or issue comment.
 ```
 
+> **2026-11-01 — correction for 0.3.0.** The July notes in this corpus say the read-side stack ships
+> default-off. That is no longer true: Oracle ranking and the intent lens are always on (#172), and the
+> warden gate is always on (#168). The belief gate, diversity gate, evidence anchor, BM25 switch and
+> other experiments were removed. `RETIRED` in `src/menhir/config/feature_flags.py` records each one's
+> date and reason. The July bench verdicts stand as history. Statuses in the tables below predate
+> these changes.
+>
 > **2026-07-11 — active-direction correction (read before the cluster / reading order below).**
 > This corpus is organized around the **read-side retrieval pipeline** (candidate -> oracle -> combine
 > -> rails) and labels it the "active pipeline." That is now **historical framing**: the oracle/warden
@@ -33,7 +40,7 @@ Otherwise it remains a parked research note or issue comment.
 > `.agent/memory-aggregation-under-uncertainty.md`. The three July owner plans were archived under
 > `.agent/archive/plans/` on 2026-08-10 after their useful rationale was routed into those current
 > docs. See the execution ladder's "Bench verdicts — reconciliation" for why the read-side pivoted.
-> The mechanism-ownership tables below remain accurate; only the "what to build next" framing changed.
+> The mechanism-ownership tables below were accurate on that date; only the "what to build next" framing changed.
 >
 > **2026-08-09 — the pivot now has a number.** The write-side arc scored **0.910 (71/78)** on the
 > 78-item LongMemEval knowledge-update oracle fixture against a `no_memory` arm of 6/78 — a +0.833
@@ -128,8 +135,8 @@ docs/research/        forward research notes (this corpus): positioning, retriev
    prior-art/memtrace-comparison.md, prior-art/repowise-comparison.md,
    prior-art/fluxmem-connectivity-prior-art.md, prior-art/athena-public-comparison.md,
    prior-art/m3-memory-comparison.md, prior-art/atlaso-comparison.md,
-   prior-art/tencentdb-agent-memory-comparison.md
-   Athena, M3, and TencentDB pin analyzed revisions; FluxMem pins the paper version.
+   prior-art/tencentdb-agent-memory-comparison.md, prior-art/utopia-comparison.md
+   Athena, M3, TencentDB, and Utopia pin analyzed revisions; FluxMem pins the paper version.
    Scion is a dated proprietary design account (no released source code on 2026-10-13);
    Memtrace and Repowise remain unpinned, while Atlaso is a dated closed-system snapshot.
    Re-verify unpinned or closed-system claims before citing them in a decision.

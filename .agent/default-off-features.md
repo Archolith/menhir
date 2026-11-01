@@ -2,9 +2,9 @@
 
 **Purpose.** A single place to track features that are **code-complete and shipped but default-off**,
 so activation is a deliberate decision, not a rediscovery. A plan being archived as "code-complete"
-does NOT mean its feature is live — most of the frontier retrieval stack ships off by design (the
-2026-07-04 read-side bench verdict: neutral-to-negative on LongMemEval, so it does not earn being on
-by default). This ledger is the bridge between "built" and "on".
+does NOT mean its feature is live. This ledger is the bridge between "built" and "on". Sections
+below the active table are dated records of each decision; `src/menhir/config/feature_flags.py` is
+the authority for current defaults.
 
 The governing rollout decision is
 [ADR 0007](adr/0007-evidence-gated-default-off-feature-activation.md).
@@ -19,16 +19,22 @@ flag is set (or a bench lift verdict flips the default). Enabling any of these i
 
 ## Active default-off features
 
-Anchor for the flags: `src/menhir/config/settings.py` (Frontier retrieval block, ~L225-245),
-mapped into `RetrievalTuningConfig` at the recall entry via `retrieval_tuning()`.
+Anchor for the flags: `src/menhir/config/feature_flags.py`. Auth, deployment and benchmark switches
+that are off by default (OAuth, client tokens, benchmark mode and similar) are configuration rather
+than experiments and are not listed.
 
-| Feature | Flag / env | Gate location | Bench status | Source plan |
-|---|---|---|---|---|
-| Diversity gate (Guard 4, set-level anti-spiral) | `frontier_diversity_gate` / `MENHIR_FRONTIER_DIVERSITY_GATE` | recall tuning | opt-in (#344) | `menhir-r8-control-rails-plan.md` |
-| Shadow pass (observe-only oracle/warden trace) | `frontier_shadow` / `MENHIR_FRONTIER_SHADOW` | recall tuning | observe-only | oracle stack |
-| Event History Phase 3 Consolidation | `personal_memory_event_history_enabled` / `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED` | backfill :TurnEvidence -> assertions via independent watermark cursor | production-capable but default-off; Phase 1-5 complete | `menhir-event-history-plan.md` + commits 048b8d9..51c11cf |
-| Event History Phase 4 Recall Authority | `personal_memory_event_history_authority_enabled` / `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED` | conditional first-person event route probed only when enabled and namespace present | production-capable but default-off; independent of scalar authority | commits 048b8d9..51c11cf |
-| Brief builder (append temporal Timeline in build_context) | `frontier_brief_builder` | removed 2026-10-01, superseded by `recall_timeline` | — | brief-builder work |
+| Feature | Flag / env | Status | Source plan |
+|---|---|---|---|
+| Shadow pass (observe-only oracle/warden trace) | `frontier_shadow` / `MENHIR_FRONTIER_SHADOW` | observe-only | oracle stack |
+| Verifier sync | `verifier_sync_enabled` / `MENHIR_VERIFIER_SYNC_ENABLED` | opt-in; see "Warden profiles" below | — |
+| Consolidation audit | `personal_memory_consolidation_audit_enabled` / `MENHIR_PERSONAL_MEMORY_CONSOLIDATION_AUDIT_ENABLED` | opt-in diagnostics | — |
+| Recall audit | `personal_memory_recall_audit_enabled` / `MENHIR_PERSONAL_MEMORY_RECALL_AUDIT_ENABLED` | opt-in diagnostics | — |
+
+## Removed 2026-10-28 and 2026-10-29 (#399)
+
+The event-history lane, the diversity gate, the belief gate, source-memory pools, the evidence anchor
+and others were removed. `RETIRED` in `feature_flags.py` records each one's date and reason. Some
+older sections below still describe them as opt-in; those sections are dated records.
 
 ## Removed 2026-10-27
 
@@ -148,5 +154,5 @@ Verifier sync is not a Warden and stays opt-in.
 
 ---
 
-**Last reconciled:** 2026-08-07; event history (Phase 3 consolidation + Phase 4 recall authority)
-added against `src/menhir/config/settings_model.py` and commits 048b8d9..51c11cf.
+**Last reconciled:** 2026-11-01 against `src/menhir/config/feature_flags.py` at `402b54c7` (the active
+table and the removal record; the dated sections were left as written).
