@@ -8,6 +8,11 @@ A reconciliation of the research corpus against the shipped code so a fresh chai
 exists or assume what doesn't. This is a point-in-time snapshot; it drifts as code lands — re-audit
 before trusting it.
 
+> **2026-11-01: this snapshot predates #168, #172 and #399 and was not re-audited for 0.3.0.** Its
+> "default-off" and "ships OFF" statements are out of date: Oracle ranking, the intent lens and the
+> warden gate are always on, and `domain/diversity.py` and the belief gate were removed. See `RETIRED`
+> in `src/menhir/config/feature_flags.py`.
+
 > ## 2026-07-11 reconciliation (READ FIRST — corrects the dated deltas below)
 >
 > Verified against `main` @ current HEAD. Four deltas since the 06-28/29 audit:

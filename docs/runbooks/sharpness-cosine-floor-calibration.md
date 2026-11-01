@@ -1,6 +1,6 @@
 # Sharpness Cosine-Floor Calibration — runbook
 
-`SHARPNESS_COSINE_FLOOR` (in `src/menhir/services/lifecycle_service.py`) is the genuine
+`SHARPNESS_COSINE_FLOOR` (in `src/menhir/services/lifecycle_models.py`) is the genuine
 cosine-similarity threshold used to count a memory's true neighbors. Sharpness
 (`1 / (1 + neighbor_count)`) is the sole gate on the lifecycle compress/promote arms, so this
 floor decides how aggressively lifecycle treats memories as duplicates vs unique.
@@ -33,8 +33,8 @@ no lifecycle actions — only MATCH reads and cosine searches. It exercises the 
 (reads ready); aborts if unavailable.
 
 ```
-cd projects/archolith/menhir
-.venv/Scripts/python.exe scripts/probe/probe_sharpness_cosine_floor.py \
+# from the repository root
+python scripts/probe/probe_sharpness_cosine_floor.py \
   --sample 150 --seed 0 \
   --floors 0.75,0.80,0.85,0.90 \
   --out .agent/test_tmp/f2-cosine-floor-probe.md
@@ -56,7 +56,7 @@ Choose the **smallest** floor meeting all three (the script auto-suggests it):
 
 ## Apply the decision
 
-1. Set `SHARPNESS_COSINE_FLOOR = <winner>` in `src/menhir/services/lifecycle_service.py`.
+1. Set `SHARPNESS_COSINE_FLOOR = <winner>` in `src/menhir/services/lifecycle_models.py`.
 2. Update the constant's comment there with the new winning-row numbers and date.
 3. Record the run in "Last result" below (table + rationale).
 
@@ -86,5 +86,4 @@ embedder change invalidates this floor and requires a re-run.
 
 ## Related
 
-- Constant + inline comment: `src/menhir/services/lifecycle_service.py` (`SHARPNESS_COSINE_FLOOR`).
-- Implementation plan (P3): `plans/lifecycle-f2-lawful-sharpness-implementation.md`.
+- Constant + inline comment: `src/menhir/services/lifecycle_models.py` (`SHARPNESS_COSINE_FLOOR`).

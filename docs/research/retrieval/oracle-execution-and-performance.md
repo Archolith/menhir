@@ -8,11 +8,11 @@ Condition #3 below is met by R1: source-aware candidate priors now let non-vecto
 (BM25/facet/structure/file) candidates survive the similarity floor
 (`domain/retrieval_tuning.py`, `services/scoring_service.py`, `services/recall_service.py`).
 Condition #1 (named MemoryMutator write boundary) remains open. Condition #2's phase-timing trace
-is now built (`domain/retrieval_trace.py`, R0 RetrievalTrace — per-phase timings + per-candidate
+is now built (`domain/retrieval_trace_models.py`, R0 RetrievalTrace — per-phase timings + per-candidate
 source, opt-in `recall(trace=True)`), though the per-phase latency *budget* is not yet wired.
 
 > **2026-07-11:** the oracle pipeline these operational concerns wrap is built but benched
-> neutral-to-negative on LongMemEval and ships default-off; the active build direction is write-time
+> neutral-to-negative on LongMemEval (it shipped default-off then; always on since #172); the active build direction is write-time
 > consolidation. See [`README.md`](README.md).
 
 ## Promotion condition

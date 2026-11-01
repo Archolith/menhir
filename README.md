@@ -205,10 +205,11 @@ before activation; `src/menhir/config/feature_flags.py` is the authority for cur
 ## Evaluation posture
 
 Menhir uses benchmark evidence as an activation gate. A retained LongMemEval-derived
-corpus includes temporal-reasoning and knowledge-update questions, but the current run is
-diagnostic: it used the Oracle corpus, a non-fresh graph, and a dirty source revision, and
-it did not run the full-haystack LME-S protocol. There is no current public headline
-score.
+corpus includes temporal-reasoning and knowledge-update questions. The 0.3.0 release gate ran
+on a fresh graph of the 500-question Oracle corpus at the frozen release candidate; retrieval and
+LLM-judged answer-quality results are recorded separately in
+[tracker #123](https://github.com/Archolith/menhir/issues/123) (Gate E). It did not run the
+full-haystack LME-S protocol, so this README quotes no headline score.
 
 That evidence has still been operationally useful. Several retrieval experiments were removed
 before release (the belief gate, the diversity gate, source-memory pools and the others listed in

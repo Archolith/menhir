@@ -9,8 +9,8 @@ Research direction and architectural synthesis.
 > **Build-status note (2026-07-11) — vision vs. current code.** This is the target architecture, not
 > current state. Where it stands on `main`: **Program A** (deterministic structural foundation) is
 > shipped (`ingest_project`, `structural_anchoring`, `structure_queries`). **Program E**'s oracle
-> pipeline/combiner is **built but benched neutral-to-negative on LongMemEval** and ships default-off
-> (`config/settings.py` frontier_* all False); the ColdStartBrief/context-assembly half depends on the
+> pipeline/combiner is **built but benched neutral-to-negative on LongMemEval** (default-off then;
+> Oracle ranking is always on since #172); the ColdStartBrief/context-assembly half depends on the
 > L3/L4 GAP and is unbuilt. **Programs B/D** (L3/L4 semantic + institutional overlay) remain design-only
 > (schemas exist, unsequenced — the "GAP"). The **current active build direction is write-time
 > consolidation** (Track W in `.agent/plans/menhir-research-execution-ladder.md`): maintain

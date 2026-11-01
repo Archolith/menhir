@@ -11,12 +11,13 @@ checks, regressions, and controlled retrieval comparisons. The available corpus 
 temporal-reasoning and knowledge-update questions, which are useful for exercising time
 ordering, updates, and supersession behavior.
 
-The currently retained Menhir run is diagnostic evidence, not a headline accuracy
-result. It used the official Oracle corpus, a dirty Menhir source tree, and a pre-existing
-graph that was not freshly ingested for the run. It measured retrieval support against a
-vector-only Graphiti baseline; it did not run the full-haystack LME-S protocol. Those
-conditions prevent a clean public score or a general claim that Menhir outperforms vector
-retrieval.
+The 0.3.0 release gate ran on a fresh graph of the 500-question official Oracle corpus at the
+frozen release candidate `44933985`. It recorded two different things, which must not be confused:
+retrieval support against a same-graph vector-only Graphiti baseline, and answer quality from
+recall-only answers scored by an LLM judge. Results are in
+[tracker #123](https://github.com/Archolith/menhir/issues/123) (Gate E). It did not run the
+full-haystack LME-S protocol, so it does not support a general claim that Menhir outperforms
+vector retrieval.
 
 LongMemEval also cannot establish Menhir-specific structural properties by itself. It
 does not test repository coverage, blast-radius completeness, Git-to-graph time joins,
@@ -50,4 +51,4 @@ recorded in the repository [`NOTICE`](../NOTICE).
 
 Menhir publishes a benchmark number only when a current benchmark authority names the
 exact dataset variant, command, source commit, date, method, baseline, and evidence
-artifact. There is no active public headline number at this time.
+artifact. This page quotes no headline number; the release-gate record is in tracker #123.

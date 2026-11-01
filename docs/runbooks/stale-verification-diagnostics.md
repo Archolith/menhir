@@ -33,8 +33,6 @@ the anchor's `dirty_at`.
 - No deletion or expiration
 - No ranking or filtering changes
 - No lifecycle mutation
-- No Phase 3 changes
-- No TurnEvidence changes
 - No file content capture
 - No transcript capture
 
@@ -43,18 +41,18 @@ is diagnostics-only — it never marks a stale memory fresh.
 
 ## CLI usage
 
+Pass `--url` (or set `MENHIR_URL`). With neither set, the script falls back to port 8090, not the
+server's default port 8100, and fails to connect on a default install.
+
 ```bash
 # Human-readable output
 python scripts/maintenance/report_stale_verifications.py \
-  --project smoke-hook-center-stale-lane
-
-# With explicit server URL
-python scripts/maintenance/report_stale_verifications.py \
-  --url http://127.0.0.1:8099 \
+  --url http://127.0.0.1:8100 \
   --project smoke-hook-center-stale-lane
 
 # JSON mode (parseable JSON only on stdout)
 python scripts/maintenance/report_stale_verifications.py \
+  --url http://127.0.0.1:8100 \
   --project smoke-hook-center-stale-lane --json
 ```
 

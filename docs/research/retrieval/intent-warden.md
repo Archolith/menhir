@@ -13,7 +13,8 @@ that gate has since graduated. The "Warden" framing resolved to an oracle (see t
 oracle-vs-warden pairing rule below).
 
 > **2026-07-11:** `IntentOracle`'s own bench graduated (this `supported-by-eval` stands), but the
-> oracle-ranking path it runs under (`frontier_oracle_ranking`) ships **default-off**, and the aggregate
+> oracle-ranking path it runs under then shipped default-off (always on since #172, along with the
+> intent lens), and the aggregate
 > oracle stack benched neutral-to-negative on LongMemEval; the active build direction is write-time
 > consolidation.
 
