@@ -831,11 +831,10 @@ async def run_recall_lab(
                 for arm in arms
                 if arm not in healthy_arms
             ]
-            # Logs sit outside redact_recall_lab_payload, so redact here too (#103).
             logger.warning(
                 "Recall Lab judge skipped for query=%r: fewer than two healthy arms; failures=%s",
-                redact_text(request.query, reveal=False),
-                [{**f, "error": _redact_error_text(f["error"])} for f in failures],
+                request.query,
+                failures,
             )
             judgment = {
                 "ok": False,
