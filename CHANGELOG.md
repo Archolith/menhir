@@ -1,3 +1,11 @@
+## 2026-11-01 - v0.3.0: release version for candidate 44933985 (#123)
+
+The frozen MVP release candidate `44933985` (#123) gets its own version: 0.2.3 is already on PyPI.
+
+- `pyproject.toml`, `uv.lock`: version 0.2.3 -> 0.3.0. No dependency changes.
+- No code changes since `44933985`. `docs/personal-memory-readiness.md` gained the scalar grounding known limitation (#412; post-MVP follow-up #411).
+- `CHANGELOG-archive.md`: the oldest former current entry moved there (10-entry limit).
+
 ## 2026-10-31 - LLM clients resolve each host once (#409)
 
 Under 500-way ingest every default-executor thread can be busy with sync Neo4j calls. asyncio resolves hostnames on that same pool, so each new OpenAI connection waited behind graph I/O and hit the SDK's 5 s connect timeout. Graphiti embeds failed with `APITimeoutError`, and source-memory embeds were skipped.
@@ -149,15 +157,3 @@ On o500 the scalar lane lost to lanes-off (0.618 vs 0.686): off-topic verdicts a
 - `domain/retrieval_tuning.py`, `services/recall_pipeline.py`: the mode, validated to the three values.
 - `.env.example`, `docs/agreement-settings.md`, `tests/test_shipped_agreement_profile.py`: the new default and setting. `tests/test_scalar_verdict_min_similarity.py`: default assertion. `tests/test_scalar_observation_recall.py` (new).
 - `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
-
-## 2026-10-24 - Agent episodes cannot supersede user-stated facts; Graphiti fork 0.31.2.post1
-
-For agent-written memories (#168, plan `menhir-agent-memory-writer-plan-2026-10-23` P1).
-
-- `pyproject.toml`, `uv.lock`: `archolith-graphiti-core==0.31.2.post1` (upstream Graphiti 0.31.2 plus the fork's hooks, including the new `EdgeInvalidationHook`); pins, docs and release checks updated.
-- `infrastructure/graphiti_edge_invalidation.py` (new), `infrastructure/graphiti_client.py`: `MenhirEdgeInvalidationHook` is always installed. Information whose source is not in `GATE_APPROVED_HUMAN_SOURCES` never expires or truncates a stored edge whose stored `r.source` is human; the authority is the cause edge's source (its stored source, else this call's `source_description`, bound per `add_episode` call in a ContextVar). A human cause may still supersede anything. Lookup errors keep the edge (fail closed). Startup refuses a fork without the seam.
-- `r.source` now survives duplicate resolution: `source` is always in `preserved_edge_attributes`. Before, a paraphrased restatement cleared the stored edge's attributes and the full-replace save dropped `r.source`, so stamping gave the edge to the restating source.
-- A kept contradiction is written after a successful `add_episode` as an `:EdgeInvalidationConflict` record (`status: 'unresolved'`, one per kept/cause edge pair; a repeat bumps `seen_count` and never reopens a resolved record). Entity nodes and the entity conflict groups are untouched. These records are not yet listed by `list_conflicts`.
-- Known gap (fork): an edge whose own window is inverted or empty is expired by its own end without asking the hook.
-- Tests (new): `tests/test_edge_invalidation_guard.py`, `tests/test_edge_invalidation_guard_online.py`, `tests/test_edge_source_preserved_live.py`. Changed for 0.31.2: test doubles that now receive `query_vector` / `identity_properties` / `max_tokens`, the preserved-attributes expectation in `tests/test_anchored_time_restatement.py`, the restated-attributes assertion in `tests/test_anchored_time_expiry_live.py`, the timeout allow-list, and the `ScoredMemory` field set (adds `provenance`, missed in #375).
-- `CHANGELOG-archive.md`: the oldest former current entry moved there (10-entry limit).
