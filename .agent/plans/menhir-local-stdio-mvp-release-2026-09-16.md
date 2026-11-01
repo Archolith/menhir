@@ -2,7 +2,7 @@
 artifact_schema: 1
 artifact_uuid: dbde430c-9be1-4131-aa85-871a8e99e5ef
 artifact_type: plan
-artifact_status: APPROVED
+artifact_status: IMPLEMENTED
 ---
 
 # Menhir local-stdio MVP release plan
@@ -11,7 +11,7 @@ artifact_status: APPROVED
 **Owner:** Menhir  
 **Purpose:** Define, audit, test, benchmark, and close a bounded local MVP without absorbing the entire Menhir backlog.
 
-**Current gate:** Gate B audit and pre-freeze Gate C acceptance are complete. The post-v0.2.3 fixes and the Opus review follow-up are merged through [PR #187](https://github.com/Archolith/menhir/pull/187); its four required checks passed on the reviewed head. Phase A inventory and the five-item Oracle harness preflight are recorded below. Phase D remains open for exact merged-commit checks, current release-container evidence, wheel identity, and configuration freeze before naming an RC. No RC, deployment, #119 repair, or final release is authorized by this status.
+**Current gate:** Closed 2026-11-01 for the 0.3.0 release, by owner instruction. RC `44933985`; `src/` at the release head is identical to it. Evidence and the release identity are in [tracker #123](https://github.com/Archolith/menhir/issues/123). This plan's scope is the local-stdio release. Production deployment, including the #119 repair and Gate D ship-together items (a) and (b), stays in the release window in the private `Archolith/menhir-deploy` repository and is not authorized by this status.
 
 ## 1. MVP contract
 
@@ -445,16 +445,16 @@ Re-run the complete E2E campaign from Phase C using the exact RC commit/package 
 
 ### Required decisions
 
-- [ ] Review every open issue modified or discovered during this program.
-- [ ] Record disposition against the MVP contract.
-- [ ] No unresolved BLOCKER remains.
-- [ ] Every DOCUMENTED LIMITATION appears in user-facing MVP docs.
-- [ ] Post-MVP items remain open without delaying release.
-- [ ] Update evaluation docs with new canonical benchmark evidence.
-- [ ] Update MVP/README install and stdio instructions to match the tested path exactly.
-- [ ] Document the Graphiti fork distribution, version, and supported upgrade path.
-- [ ] Record exact release commit and evidence links.
-- [ ] Transition this plan to IMPLEMENTED only after all mandatory gates pass.
+- [x] Review every open issue modified or discovered during this program.
+- [x] Record disposition against the MVP contract. Open issues are labelled `post-mvp` or `research`, or are trackers.
+- [x] No unresolved BLOCKER remains on the supported local path. #119 keeps its `mvp-blocker` label: its code is merged, and its production repair runs in the release window after this tag, by owner decision.
+- [x] Every DOCUMENTED LIMITATION appears in user-facing MVP docs (README "Known limitations", #417, #169, #120).
+- [x] Post-MVP items remain open without delaying release.
+- [x] Update evaluation docs with new canonical benchmark evidence (`docs/evaluation.md` points to Gate E in #123 and quotes no score).
+- [x] Update MVP/README install and stdio instructions to match the tested path exactly.
+- [x] Document the Graphiti fork distribution, version, and supported upgrade path.
+- [x] Record exact release commit and evidence links (#123).
+- [x] Transition this plan to IMPLEMENTED only after all mandatory gates pass. Gate E and Gate F carry the owner waivers recorded in #123.
 
 ## 11. Initial issue disposition hypotheses
 
