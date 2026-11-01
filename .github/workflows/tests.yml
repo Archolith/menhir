@@ -142,6 +142,58 @@ jobs:
         working-directory: menhir
         run: pytest -v
 
+  # The same offline suite on the other supported platform and the newest Python that
+  # `requires-python = ">=3.12"` admits. Windows 11 is a primary supported platform and was
+  # otherwise only covered by manual runs. A separate job, so `offline-tests` keeps its name.
+  offline-tests-platforms:
+    name: offline-tests (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    # Windows runners are slower than Linux ones; the Linux job takes about 6 minutes.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            python: "3.12"
+          - os: ubuntu-latest
+            python: "3.13"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout menhir
+        uses: actions/checkout@v4
+        with:
+          path: menhir
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: "pip"
+          cache-dependency-path: menhir/pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ./menhir pytest pytest-asyncio pytest-xdist pytest-timeout
+
+      - name: Install isolated Beacon integration dependency
+        run: |
+          python -m venv "$RUNNER_TEMP/beacon-env"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            beacon_python="$RUNNER_TEMP/beacon-env/Scripts/python.exe"
+          else
+            beacon_python="$RUNNER_TEMP/beacon-env/bin/python"
+          fi
+          "$beacon_python" -m pip install "git+https://github.com/Archolith/beacon.git@1cc3352b90004f3b76f1c5ed49ee4235c606a52f"
+          echo "MENHIR_TEST_BEACON_PYTHON=$beacon_python" >> "$GITHUB_ENV"
+
+      - name: Run offline tests
+        working-directory: menhir
+        run: pytest -v
+
   # The unit job cannot see the behaviour this project actually depends on: supersession under
   # the real uniqueness constraint, provenance edges, TurnEvidence grounding and deletion repair
   # are all `online` and were therefore never run by CI. The offline scalar-View suite drives
