@@ -37,6 +37,7 @@ except ImportError as exc:
     ) from exc
 from graphiti_core.llm_client.client import get_extraction_language_instruction
 from graphiti_core.llm_client.config import LLMConfig
+from graphiti_core.llm_client.errors import OutputTruncatedError
 from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
 from graphiti_core.llm_client.request_guard import (
     RequestGuard,
@@ -67,7 +68,9 @@ _TRUNCATION_CHAR_THRESHOLD = 500
 
 
 def _looks_like_truncation(exc: Exception) -> bool:
-    """Return True if *exc* looks like a JSON parse failure caused by output truncation."""
+    """Return True if the provider reported truncation or a JSON offset suggests it."""
+    if isinstance(exc, OutputTruncatedError):
+        return True
     offset = _truncation_offset(exc)
     return offset is not None and offset >= _TRUNCATION_CHAR_THRESHOLD
 
