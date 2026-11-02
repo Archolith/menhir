@@ -117,24 +117,41 @@ the erased memory supports, the way to remove everything is to delete the whole 
 
 ## Known limitation: source grounding by scalar kind
 
-A scalar value becomes a current View when at least 2 of 3 model samples agree on it. For some
-kinds Menhir also checks the value against the user's own words before storing it:
+A scalar value becomes a current View when at least 2 of 3 model samples agree on it and it
+passes a check against the user's own words:
 
 | Kind | Checked against the source |
 |---|---|
-| money, measurement | yes: the value must appear in the quoted span |
-| count | yes: corrected from the number in the span |
-| clock_time | partly: a contradicted time is corrected; an hour-only or ranged time abstains |
-| duration, frequency, weekday, status, boolean | **no**: the value is the model's reading (boolean has a polarity check only) |
+| money, measurement | the value must appear in the quoted span |
+| count | corrected from the number in the span |
+| clock_time | a contradicted time is corrected; an hour-only or ranged time abstains |
+| duration | the amount and unit must be in the span, compared in seconds |
+| frequency | the count and period must be in the span, or read directly from wording like "every other week" |
+| weekday | the named day must be in the span |
+| status | every word of the value must be in the span |
+| boolean | the attribute must be named in the span; false needs a stated negative or ended state |
 
-For the unchecked kinds, a value the model misreads (for example a negation read as the positive)
-is stored, becomes the current View and leads recall if 2 of 3 samples agree on it.
+For duration, frequency, weekday, status and boolean (since 0.3.1, #411), the value is also
+dropped when the clause before it negates or hedges it, or when the sentence is a question. The
+clause is read from the source, so a quote cannot leave the negation out. Status and true
+booleans are dropped in the past tense ("I was married"), and when a "who" or "whose" clause
+puts the value on someone else.
 
-Measured on release candidate 44933985 (#169): with `gpt-6-luna`, 161 test and held-out sentences
-gave 67 committed values and none wrong, including negations, ended states and third-party
-statements. The local default chat model was not measured.
+**What these checks do not do:**
+
+- They are English patterns. A value they cannot read is dropped, so a true fact can be missed.
+  Replayed on the 44 values in these kinds from the #169 `gpt-6-luna` run, all judged right by
+  one rater, 38 pass and 6 are dropped.
+- They confirm the words are present, not who they are about. "My wife is retired" stored as the
+  user's status passes.
+- An `expire` row is exempt, because it ends a value the quote need not restate ("I quit my job").
+- Values stored before 0.3.1 are not rechecked.
+
+Measured at 0.3.1 with scripted model values: 0 unsafe admissions on the 64-case #169 grounding
+matrix (13 at 44933985) and 0 of 160 rows on the held-out LongMemEval panel (33 at 44933985). The
+panel found no first-person status or boolean statements, so those two kinds rest on the matrix
+and hand-written counterexamples. The local default chat model has not been measured.
 
 Scalar authority has no separate switch. The only way to stop serving these values as current
 is to turn the scalar lane off (`MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED=false`), which
-stops every scalar View, including the checked kinds. Extending the check to every kind is
-planned after the MVP.
+stops every scalar View.
