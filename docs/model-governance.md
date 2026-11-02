@@ -3,7 +3,7 @@
 **Purpose:** record every configurable LLM and embedding role Menhir invokes, where its
 code default is defined, and how an operator changes it without a silent model upgrade.
 
-**Verified against source:** 2026-11-01, package version `0.3.0`, Python `>=3.12`.
+**Verified against source:** 2026-11-01, package version `0.3.1`, Python `>=3.12`.
 
 This document records source behavior. It does not claim which models a live deployment
 currently uses. Deployment selection belongs in that deployment's protected environment
@@ -50,7 +50,7 @@ its generation. AI and graph client versions in that artifact are:
 |---|---:|
 | `openai` | 2.45.0 |
 | `archolith-graphiti-core` | 0.31.2.post1 |
-| `joserfc` | 1.7.3 |
+| `joserfc` | 1.7.7 |
 | `neo4j` | 6.2.0 |
 | `pydantic` | 2.13.4 |
 
