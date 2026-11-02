@@ -47,6 +47,8 @@ MATCH (s:Episodic)
 WHERE s.processing_state IS NOT NULL OR s.resolved_episode_uuid IS NOT NULL
 OPTIONAL MATCH (g:Episodic {{uuid: s.resolved_episode_uuid}})
 OPTIONAL MATCH (g)-[:MENTIONS]->(e:Entity)
+// Legacy graphs can hold parallel MENTIONS edges; each pair is one candidate.
+WITH DISTINCT s, g, e
 OPTIONAL MATCH (s)-[r:RETENTION_SOURCE]->(e)
 RETURN s.uuid AS source_uuid, s.name AS source_name,
        s.processing_state AS source_state, s.namespace AS source_namespace,
@@ -253,6 +255,7 @@ def apply(repo: Any, approved: list[dict[str, Any]]) -> int:
               AND ({non_structural_memory_cypher("e")})
               AND {same_tenant_cypher("s", "g")}
               AND {same_tenant_cypher("s", "e")}
+            WITH DISTINCT s, e
             MERGE (s)-[r:RETENTION_SOURCE]->(e)
             ON CREATE SET r.direct = true
             RETURN count(r) AS matched, collect(r.direct) AS direct_values
