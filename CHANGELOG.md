@@ -1,3 +1,19 @@
+## 2026-11-02 - Retry LLM replies cut off at the output limit; Graphiti fork 0.31.2.post2
+
+A reply cut off at the output token limit could be parsed into a nested fragment, so the retry with
+a higher limit never ran, or the fragment was accepted. The fork now raises `OutputTruncatedError`
+when the provider reports `finish_reason=length`, and Menhir treats that as truncation.
+
+- `infrastructure/graphiti_llm_adapter.py`: `_looks_like_truncation` returns true for
+  `OutputTruncatedError` at any reply length. The retry limits are unchanged: 4096, 8192, 16384,
+  then 16384 with a request for a smaller extraction.
+- `tests/test_graphiti_truncation_retry.py`: real-client tests for the escalation.
+- `pyproject.toml`, `uv.lock`: `archolith-graphiti-core==0.31.2.post2`; pins, docs and release
+  checks updated.
+
+A prose-wrapped reply that is cut off, when the provider does not report `length`, can still parse
+to a fragment.
+
 ## 2026-11-01 - v0.3.1: scalar values checked against their source (#411)
 
 Hotfix on 0.3.0. A wrong value in five scalar kinds could become a current View if 2 of 3 model

@@ -53,7 +53,7 @@ wheels = [
 
 [[package]]
 name = "archolith-graphiti-core"
-version = "0.31.2.post1"
+version = "0.31.2.post2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "certifi" },
@@ -66,9 +66,9 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "tenacity" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/69/6f/d53b06d34f9ee853cefbacee77bb1df1de468fa71b9c5ac11fe3247d4957/archolith_graphiti_core-0.31.2.post1.tar.gz", hash = "sha256:bc5eb8c8011336fe839133017a9b5d307d9f5ba2411a8ad46353f754a215c3c3", size = 7334510, upload-time = "2026-10-24T03:03:04.369Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/97/d3aeb2b35a5d53e88e1304b8ae7b4d145a486db51a8bb437c61247fd4ee5/archolith_graphiti_core-0.31.2.post2.tar.gz", hash = "sha256:092ce309dfa18decc5529cabadd933a3c32d5ebd5576b0ed62d0905e7a7c07cf", size = 7336625, upload-time = "2026-11-02T19:35:33.018Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/16/34/13ad470587a8601d17968664ed3794698e1c9aa49b3a793adb79ff558d2b/archolith_graphiti_core-0.31.2.post1-py3-none-any.whl", hash = "sha256:a926c12cea211371bf35a12a83861154cd93190d6b1bd49a2d14afd51505907d", size = 444760, upload-time = "2026-10-24T03:03:02.492Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/e2/7ba08cf9726e42d83841f9a55807696d3654fdf3b482ed70a5fd33ca70f4/archolith_graphiti_core-0.31.2.post2-py3-none-any.whl", hash = "sha256:d20231c040931dd267ad2affb30fbd2e0e309a8de997922e9607056ba164fa5c", size = 445284, upload-time = "2026-11-02T19:35:31.222Z" },
 ]
 
 [[package]]
@@ -120,7 +120,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "archolith-graphiti-core", specifier = "==0.31.2.post1" },
+    { name = "archolith-graphiti-core", specifier = "==0.31.2.post2" },
     { name = "archolith-mcp-framework", specifier = "==0.2.0" },
     { name = "archolith-oauth", specifier = "==0.3.1" },
     { name = "fastapi", specifier = ">=0.115,<1" },
