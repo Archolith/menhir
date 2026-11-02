@@ -39,6 +39,10 @@ SCANNER_REPOSITORIES = {
 SEVERITIES = ("Unknown", "Negligible", "Low", "Medium", "High", "Critical")
 MAX_EVIDENCE_BYTES = 256 * 1024 * 1024
 CANONICAL_SOURCE_REPOSITORY = "Archolith/menhir"
+MAX_FAILURE_DETAIL_CHARS = 1000
+CREDENTIAL_RE = re.compile(
+    r"(?i)\b(?:bearer|basic)\s+\S+|\bgh[pousr]_\w+|\bgithub_pat_\w+|\beyJ[\w-]+\.[\w.-]+"
+)
 
 
 class BuildImageError(RuntimeError):
@@ -961,11 +965,27 @@ def parser() -> argparse.ArgumentParser:
     return value
 
 
+def _failure_message(exc: Exception) -> str:
+    """One line, because the workflow reports the last line matching the failure prefix."""
+    message = str(exc)
+    if isinstance(exc, subprocess.CalledProcessError):
+        for output in (exc.stderr, exc.stdout):
+            if isinstance(output, bytes):
+                output = output.decode("utf-8", errors="replace")
+            detail = " ".join((output or "").split())
+            if detail:
+                # Redact before trimming, so a cut can't leave part of a credential.
+                detail = CREDENTIAL_RE.sub("[redacted]", detail)
+                message = f"{message}: {detail[-MAX_FAILURE_DETAIL_CHARS:]}"
+                break
+    return message
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         metadata = run(parser().parse_args(argv))
     except (BuildImageError, OSError, subprocess.CalledProcessError, ValueError) as exc:
-        print(f"release image operation failed: {exc}")
+        print(f"release image operation failed: {_failure_message(exc)}")
         return 1
     print(json.dumps(metadata, indent=2, sort_keys=True))
     return 0
