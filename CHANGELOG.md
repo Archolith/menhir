@@ -1,3 +1,11 @@
+## 2026-11-02 - v0.3.2: retry replies cut off at the output limit
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`,
+  `docs/model-governance.md`, `docs/post-install.md`: version 0.3.2. No dependency changes in this
+  commit.
+- Includes the truncation retry and fork 0.31.2.post2 (#424), the parallel `MENTIONS` retention fix
+  (#422) and the release command error report (#420).
+
 ## 2026-11-02 - Retry LLM replies cut off at the output limit; Graphiti fork 0.31.2.post2
 
 A reply cut off at the output token limit could be parsed into a nested fragment, so the retry with
