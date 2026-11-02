@@ -13,6 +13,12 @@ name: Publish to PyPI
 # tests (the v0.2.2 incident: PyPI published a tag whose tests.yml was red on the same SHA).
 # What this workflow additionally verifies is the thing tests.yml cannot see: that the built
 # artifacts are installable, correctly versioned, and expose the entry points users depend on.
+#
+# One tag publishes the whole release, in order: PyPI, the release image, the image's version
+# tag, the GitHub release. This file stays the top-level workflow and keeps its name because
+# PyPI's trusted publisher is bound to it and cannot be a reusable workflow. To finish a failed
+# release, re-run the failed jobs, or dispatch this workflow ON THE TAG; finished stages are
+# skipped. See docs/runbooks/release.md.
 
 on:
   push:
@@ -28,7 +34,49 @@ on:
 permissions:
   contents: read
 
+# Required because a dispatched retry can race the tag's own run; both would publish.
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
+  resolve:
+    name: resolve release inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+      image_version: ${{ steps.plan.outputs.image_version }}
+      python_base: ${{ steps.plan.outputs.python_base }}
+      existing_image_digest: ${{ steps.plan.outputs.existing_image_digest }}
+      commit_sha: ${{ steps.source.outputs.commit_sha }}
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Record the tagged commit
+        id: source
+        run: echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Derive release inputs and find finished stages
+        id: plan
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          python deploy/release_pipeline.py plan \
+            --tag "$RELEASE_TAG" \
+            --github-ref "$GITHUB_REF" \
+            --image ghcr.io/archolith/menhir \
+            --python-base-file deploy/release-python-base.txt
+
   # Enforceable exact-SHA test gate -- see the file header and the incident note below.
   test-gate:
     name: require green tests on the exact tagged commit
@@ -83,8 +131,10 @@ jobs:
   build:
     name: verify release artifacts
     runs-on: ubuntu-latest
-    needs: test-gate
+    needs: [resolve, test-gate]
     timeout-minutes: 20
+    outputs:
+      already_published: ${{ steps.pypi-state.outputs.already_published }}
     steps:
       - name: Check out tagged source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -133,6 +183,12 @@ jobs:
           python -m build
           python -m twine check dist/*
           check-wheel-contents --ignore W009 dist/*.whl
+
+      - name: Use the published files if PyPI already has this version
+        id: pypi-state
+        env:
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+        run: python deploy/release_pipeline.py pypi-state --version "$RELEASE_VERSION" --dist-dir dist
 
       - name: Smoke the installed wheel
         env:
@@ -183,6 +239,7 @@ jobs:
   publish:
     name: trusted publish to PyPI
     needs: build
+    if: ${{ needs.build.outputs.already_published == 'false' }}
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -203,9 +260,75 @@ jobs:
           packages-dir: dist/
           attestations: true
 
+  image:
+    name: build and publish release image
+    needs: [resolve, build, publish]
+    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.publish.result == 'success' || needs.build.outputs.already_published == 'true') && needs.resolve.outputs.existing_image_digest == '' }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/release-image.yml
+    with:
+      version: ${{ needs.resolve.outputs.image_version }}
+      image: ghcr.io/archolith/menhir
+      ref: ${{ needs.resolve.outputs.tag }}
+      python_base: ${{ needs.resolve.outputs.python_base }}
+      push: true
+
+  image-tag:
+    name: tag release image with its version
+    needs: [resolve, image]
+    if: ${{ !cancelled() && needs.image.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: menhir-release-publication
+    permissions:
+      contents: read
+      packages: write
+      attestations: read
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.commit_sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      # The same identity menhir-deploy's upgrade command checks, so a mismatch stops the
+      # release here instead of at deploy time.
+      - name: Verify the image the way an upgrade will
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_DIGEST: ${{ needs.image.outputs.registry_digest }}
+          SOURCE_COMMIT: ${{ needs.resolve.outputs.commit_sha }}
+        run: |
+          gh attestation verify "oci://ghcr.io/archolith/menhir@$IMAGE_DIGEST" \
+            --repo Archolith/menhir \
+            --signer-workflow Archolith/menhir/.github/workflows/release-image.yml \
+            --source-digest "$SOURCE_COMMIT" \
+            --deny-self-hosted-runners
+
+      - name: Tag the verified digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_DIGEST: ${{ needs.image.outputs.registry_digest }}
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          python deploy/release_pipeline.py tag-image \
+            --image ghcr.io/archolith/menhir \
+            --tag "$RELEASE_VERSION" \
+            --digest "$IMAGE_DIGEST"
+
   github-release:
     name: create GitHub release
-    needs: publish
+    needs: [resolve, build, publish, image-tag]
+    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.publish.result == 'success' || needs.build.outputs.already_published == 'true') && (needs.image-tag.result == 'success' || needs.resolve.outputs.existing_image_digest != '') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -227,5 +350,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "GitHub release $RELEASE_TAG already exists; leaving it unchanged."
+            exit 0
+          fi
           gh release create "$RELEASE_TAG" dist/* checksums/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
