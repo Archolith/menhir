@@ -357,7 +357,8 @@ def watch_publish(ctx: Context) -> None:
     proc = run(
         ["gh", "run", "watch", str(run_id), "--exit-status", "--interval", "30", "-R", GH_REPO],
         check=False,
-        timeout=3600,
+        # The run now includes the image build; its job timeouts add up to over two hours.
+        timeout=3 * 3600,
     )
     view = run(["gh", "run", "view", str(run_id), "--json", "jobs", "-R", GH_REPO])
     for job in json.loads(view.stdout or "{}").get("jobs", []):
