@@ -403,7 +403,7 @@
       "version": "4.15.1"
     },
     {
-      "bom-ref": "archolith-graphiti-core==0.31.2.post1",
+      "bom-ref": "archolith-graphiti-core==0.31.2.post2",
       "description": "A temporal graph building library",
       "externalReferences": [
         {
@@ -426,9 +426,9 @@
         }
       ],
       "name": "archolith-graphiti-core",
-      "purl": "pkg:pypi/archolith-graphiti-core@0.31.2.post1",
+      "purl": "pkg:pypi/archolith-graphiti-core@0.31.2.post2",
       "type": "library",
-      "version": "0.31.2.post1"
+      "version": "0.31.2.post2"
     },
     {
       "bom-ref": "archolith-mcp-framework==0.2.0",
@@ -3656,7 +3656,7 @@
         "python-dotenv==1.2.2",
         "tenacity==9.1.4"
       ],
-      "ref": "archolith-graphiti-core==0.31.2.post1"
+      "ref": "archolith-graphiti-core==0.31.2.post2"
     },
     {
       "dependsOn": [
@@ -4130,7 +4130,7 @@
     {
       "dependsOn": [
         "Jinja2==3.1.6",
-        "archolith-graphiti-core==0.31.2.post1",
+        "archolith-graphiti-core==0.31.2.post2",
         "archolith-mcp-framework==0.2.0",
         "archolith-oauth==0.3.1",
         "fastapi==0.139.0",

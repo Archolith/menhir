@@ -42,13 +42,13 @@ except ImportError as exc:
             raise
         raise ImportError(
             f"graphiti_core is broken or incomplete ({exc}). Menhir requires "
-            "archolith-graphiti-core==0.31.2.post1, which shares the graphiti_core package with "
+            "archolith-graphiti-core==0.31.2.post2, which shares the graphiti_core package with "
             "upstream graphiti-core. Use a fresh virtual environment or uninstall both "
             "graphiti-core distributions before reinstalling Menhir (see docs/post-install.md)."
         ) from exc
     raise ImportError(
         "graphiti_core is missing GraphitiRequestTooLargeError. Menhir requires "
-        "archolith-graphiti-core==0.31.2.post1; an older graphiti-core install may have "
+        "archolith-graphiti-core==0.31.2.post2; an older graphiti-core install may have "
         "overwritten the fork's shared graphiti_core files. Use a fresh virtual environment "
         "or uninstall both graphiti-core distributions before reinstalling Menhir "
         "(see docs/post-install.md)."
@@ -168,7 +168,7 @@ def require_graphiti_fork_hooks(graphiti_cls: Any) -> None:
             f"{', '.join(missing)} parameter. Upstream graphiti-core shares the graphiti_core "
             "import package and has replaced or shadowed archolith-graphiti-core. Fix: reinstall "
             "the fork in a clean virtual environment (uninstall graphiti-core and "
-            "archolith-graphiti-core, then install archolith-graphiti-core==0.31.2.post1)."
+            "archolith-graphiti-core, then install archolith-graphiti-core==0.31.2.post2)."
         )
 
 

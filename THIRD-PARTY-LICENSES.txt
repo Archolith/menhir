@@ -20,7 +20,7 @@ aiofile                    3.11.1        Apache-2.0                             
 annotated-doc              0.0.4         MIT                                                 https://github.com/fastapi/annotated-doc
 annotated-types            0.7.0         MIT License                                         https://github.com/annotated-types/annotated-types
 anyio                      4.15.1        MIT                                                 https://github.com/agronholm/anyio
-archolith-graphiti-core    0.31.2.post1  Apache-2.0                                          https://github.com/Archolith/graphiti
+archolith-graphiti-core    0.31.2.post2  Apache-2.0                                          https://github.com/Archolith/graphiti
 archolith-mcp-framework    0.2.0         MIT
 archolith-oauth            0.3.1         Apache-2.0                                          https://github.com/ctharvey/archolith_oauth
 attrs                      26.1.0        MIT                                                 https://www.attrs.org/
