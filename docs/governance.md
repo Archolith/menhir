@@ -38,7 +38,7 @@ single-operator trust model and are not a general multi-tenant isolation claim.
 ## SBOM
 
 The checked-in SBOM is CycloneDX 1.6 JSON with `reproducible=true` and 97 components,
-plus `archolith-menhir` 0.3.0 as the root component. It was generated on Windows, so the
+plus `archolith-menhir` 0.3.1 as the root component. It was generated on Windows, so the
 Linux-only `jeepney` and `secretstorage` from the lock are not inventoried. Representative
 versions in that generated environment are:
 
@@ -48,7 +48,7 @@ versions in that generated environment are:
 | `archolith-oauth` | 0.3.1 |
 | `fastapi` | 0.139.0 |
 | `archolith-graphiti-core` | 0.31.2.post1 |
-| `joserfc` | 1.7.3 |
+| `joserfc` | 1.7.7 |
 | `neo4j` | 6.2.0 |
 | `openai` | 2.45.0 |
 | `pydantic` | 2.13.4 |

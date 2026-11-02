@@ -1,3 +1,23 @@
+## 2026-11-01 - v0.3.1: scalar values checked against their source (#411)
+
+Hotfix on 0.3.0. A wrong value in five scalar kinds could become a current View if 2 of 3 model
+samples agreed on it, because nothing compared it with what the user said.
+
+- `services/typed_scalar_rules.py`: `parse_scalar_row` now drops a duration, frequency, weekday,
+  status or boolean value the source does not state, or that the source negates, hedges or asks
+  about. The clause is read from the source, so a short quote cannot leave a negation out. Status
+  and true booleans are also dropped in the past tense or in a "who" clause. `expire` rows are
+  exempt.
+- `uv.lock`: `joserfc` 1.7.3 -> 1.7.7 (GHSA-jpxq-7h8p-2q76, GHSA-9pg5-8c7x-5hfx).
+- `tests/test_scalar_source_grounding_411.py` (new). `tests/test_boolean_polarity_consistency.py`:
+  three cases asserted `has_passport` from unrelated sentences and now name their own attribute.
+- `docs/personal-memory-readiness.md`, `docs/post-install.md`, `README.md`: what the checks do and
+  do not cover.
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `docs/governance.md`: version 0.3.1.
+
+Values stored before 0.3.1 are not rechecked. The benchmark was not rerun for this hotfix, so the
+Gate E results in #123 describe 0.3.0.
+
 ## 2026-11-01 - v0.3.0: release version for candidate 44933985 (#123)
 
 The frozen MVP release candidate `44933985` (#123) gets its own version: 0.2.3 is already on PyPI.
@@ -147,14 +167,4 @@ o500 (#168): a View kept leading with a stale value when the newer statement was
 - `domain/retrieval_tuning.py`, `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: the two settings; the shipped settings default on, the `RetrievalTuningConfig` engine defaults stay off.
 - `docs/agreement-settings.md`, `tests/test_shipped_agreement_profile.py`: the freshness gate in the shipped profile.
 - Tests: new `tests/test_scalar_view_freshness.py`, `tests/test_fact_said_time.py`.
-- `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
-
-## 2026-10-25 - Scalar verdict gate on by default; observation recall gated by default
-
-On o500 the scalar lane lost to lanes-off (0.618 vs 0.686): off-topic verdicts and raw observation quotes took the slots of answer-bearing memories (#168). With both changes, counted-rw scores 0.694 (lanes-off 0.686; parity, not yet a significant gain).
-
-- `config/settings_model.py`: `MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY` defaults to 0.675 (raw cosine 0.35, #300's bench value), was 0 (off).
-- `MENHIR_PERSONAL_MEMORY_SCALAR_OBSERVATION_RECALL` (new; `gated` default, `all`, `off`): which raw observations enter the ranked list. `gated` keeps those at or above the verdict gate; `all` is the old behavior; `off` keeps none. Slots still feed the authority and history lanes, and a skipped observation still resolves the query subject (G17).
-- `domain/retrieval_tuning.py`, `services/recall_pipeline.py`: the mode, validated to the three values.
-- `.env.example`, `docs/agreement-settings.md`, `tests/test_shipped_agreement_profile.py`: the new default and setting. `tests/test_scalar_verdict_min_similarity.py`: default assertion. `tests/test_scalar_observation_recall.py` (new).
 - `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).

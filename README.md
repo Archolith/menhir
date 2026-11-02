@@ -23,7 +23,7 @@ client authority. [Model Context Protocol](https://modelcontextprotocol.io/) is 
 surface alongside REST, a local explorer, and a stdio bridge; it is not the product
 category.
 
-The current package version is `0.3.0`. Menhir is built for a single operator, requires
+The current package version is `0.3.1`. Menhir is built for a single operator, requires
 Python 3.12 or newer, and is designed for local or operator-controlled deployment. Read the
 [known limitations](#known-limitations) before relying on it for personal memory.
 
@@ -667,7 +667,7 @@ the private `Archolith/menhir-deploy` repository.
 
 ## Known limitations
 
-These are known gaps in 0.3.0, each with a planned fix after the MVP:
+These are known gaps in 0.3.1, each with a planned fix:
 
 - **Erasure leaves extracted knowledge behind (#417).** `delete_memory` and the erasure tools
   remove the memory, its episode, captured evidence turns, their projections and its scalar
@@ -675,9 +675,11 @@ These are known gaps in 0.3.0, each with a planned fix after the MVP:
   an entity summary or fact can restate the erased content. Entities are shared across
   memories, so they are not deleted with one memory. To remove everything, delete the whole
   namespace.
-- **Some scalar kinds are not checked against the source (#169).** Duration, frequency,
-  weekday, status and boolean values are the model's reading; a misread value can become the
-  current View if 2 of 3 samples agree. The only switch is turning the scalar lane off. See
+- **Scalar source checks are pattern-based (#411).** Since 0.3.1, duration, frequency, weekday,
+  status and boolean values must be stated in the source and not negated or hedged. The checks
+  are English patterns: they drop what they cannot read, and they can miss a misattribution such
+  as "my wife is retired" stored as the user's status. Values stored before 0.3.1 are not
+  rechecked. See
   [source grounding by scalar kind](docs/personal-memory-readiness.md#known-limitation-source-grounding-by-scalar-kind).
 - **Beacon memory provider deferred (#120).** `get_beacon_evidence` and `menhir beacon generate`
   ship but are not part of the supported MVP surface.
