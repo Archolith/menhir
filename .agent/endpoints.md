@@ -647,6 +647,17 @@ List design questions recorded on artifacts, in the order their author wrote the
 - Answers "what design questions remain?" and "which plans are blocked?" without reading
   markdown. Each question carries an addressable `question_uuid`.
 
+### `review_inbox`
+Concept id: `mcp.tool.review_inbox`
+
+One read-only view of everything waiting on the owner's decision.
+- **`namespace`** (str, optional): Silo. Empty spans all. Candidates are not
+  namespace-scoped, so they are listed only when this is empty.
+- **`per_category`** (int, optional): Items per section (default 5, clamped to 1..25).
+- Sections: unresolved conflicts, failed enrichments, candidates, stale open TODOs, open
+  artifact questions. Each has a count (`N+` when more exist), items, and an `Act with:` line.
+  A failing section renders `unavailable (<ExceptionType>)` and the rest still render.
+
 ### `get_artifact_relationships`
 Concept id: `mcp.tool.get_artifact_relationships`
 

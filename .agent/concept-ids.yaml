@@ -284,6 +284,9 @@ mcp:
   mcp.tool.list_artifact_questions:
     owner: endpoints.md
     meaning: List open, answered, or deferred design questions recorded on artifacts
+  mcp.tool.review_inbox:
+    owner: endpoints.md
+    meaning: Read-only inbox of conflicts, failed enrichments, candidates, stale TODOs and open questions awaiting a decision
   mcp.tool.get_artifact_relationships:
     owner: endpoints.md
     meaning: Show an artifact's declared relationships, subjects, and referenced todos
