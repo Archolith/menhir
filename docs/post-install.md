@@ -232,6 +232,14 @@ when `MENHIR_SNAPSHOT_RECEIVE_MODE` is set (default off, which leaves the receiv
 unregistered). An accepted upload is only staged on the server: nothing is extracted or written to
 the graph yet.
 
+## 5c. Which tools are actually used (`menhir tool-usage`)
+
+`menhir tool-usage` reports per-tool and per-client MCP call counts from the local telemetry
+sidecar, including registered tools with zero calls, to inform tool-surface pruning. It is read-only
+and needs no running server. Options: `--since-hours N` (default 720), `--by tool|client`, `--json`,
+`--all-operations`. For a hosted deployment run it inside the app container, e.g.
+`docker exec <app container> menhir tool-usage`.
+
 ## 6. Give agents the operating contract
 
 Use [`agent-usage.md`](agent-usage.md) as the explanation and copy
