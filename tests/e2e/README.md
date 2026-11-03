@@ -19,6 +19,17 @@ criteria; it does not redefine them.
 | E2E-6 | public Graphiti fork in a clean Menhir wheel and sealed image | wheel/stdio path implemented; container path runs with an exact-commit no-publish bundle |
 | E2E-7 | restart and interrupted work | **implemented** |
 | E2E-8 | isolation and adversarial (carries #88's regression pin) | 10 supported criteria implemented, including missing-fork refusal, a real structural scan-cap check, and OS-level denied traversal |
+| E2E-9 | typed scalar state through the installed stack | **implemented** |
+| E2E-10 | counting of single happenings through the installed stack | **implemented** |
+| E2E-11 | count-match gate: bridge quotes, family-keyed history, pending sweep, re-version safety | **implemented** |
+| E2E-12 | each consolidation lane measured on its own (#170 item 4) | **implemented** |
+| E2E-13 | state semantics: corrections, out-of-order dates, expiry, ambiguity, numberless stop (#170 item 5) | **implemented** |
+| E2E-14 | deletion, and duplicate or replayed input (#170 item 5) | **implemented** |
+| E2E-15 | backend killed mid-pass, and two namespaces side by side (#170 item 5) | **implemented** |
+| E2E-17 | scalar authority through MCP recall and context (#170 item 6) | **implemented** |
+| E2E-18 | opting a lane out and back in across restarts (#170 item 10) | **implemented** |
+| E2E-19 | fresh install with shipped defaults (#168 final-gate item 59) | **implemented** |
+| E2E-20 | checkout config and upgrade (#168 final-gate item 60) | **implemented** |
 
 E2E-6 downloads the exact public Graphiti fork wheel named by `uv.lock`, checks its hash
 and every installed Python source file, constructs the installed Menhir Graphiti client
