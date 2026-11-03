@@ -397,7 +397,10 @@ run them by hand.
 
 Keep `menhir up` (or `menhir serve`) running, then configure a local MCP client to launch
 the stdio bridge with the same Python installation as Menhir. The bridge connects to the
-running backend; it does not start one. A fresh loopback install needs no key:
+running backend; it does not start one. A fresh loopback install needs no key, but with no key
+every loopback request gets the operator tier: the agent sees every registered tool, including
+scheduler, lease, client and namespace administration. To give an agent a smaller tool set, set
+up an agent key as described below.
 
 ```json
 {
@@ -459,7 +462,8 @@ curl -fsS -X POST http://127.0.0.1:8100/mcp-http \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | tail -c 400
 ```
 
-Expect a JSON-RPC result listing the tools your key's tier can call, including `add_memory`,
+Expect a JSON-RPC result listing the tools your key's tier can call (with no key configured,
+that is the operator tier and every tool), including `add_memory`,
 `recall_memories`, `query_structure`, and `build_context`. A `401` means a key is configured
 and the request needs `-H "Authorization: Bearer <key>"`; anything else means the server is not
 serving MCP yet -- check `/api/ready` first.
