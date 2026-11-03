@@ -2,10 +2,12 @@
 artifact_schema: 1
 artifact_uuid: 5739b12e-217a-4c56-a7a7-248371d5f8a2
 artifact_type: plan
-artifact_status: IMPLEMENTING
+artifact_status: IMPLEMENTED
 ---
 
 # Post-v0.2.3 audit remediation
+
+**Disposition:** IMPLEMENTED by merged PR #184 (2026-09-28); releases 0.3.0-0.3.2 have since shipped. Retained as the historical work package.
 
 ## Why
 

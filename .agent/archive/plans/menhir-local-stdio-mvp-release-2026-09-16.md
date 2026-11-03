@@ -7,6 +7,8 @@ artifact_status: IMPLEMENTED
 
 # Menhir local-stdio MVP release plan
 
+**Disposition:** IMPLEMENTED. Released as v0.3.0 (2026-11-01); tracker #123 closed as completed 2026-11-02. Retained as the historical release plan.
+
 **Date:** 2026-09-16  
 **Owner:** Menhir  
 **Purpose:** Define, audit, test, benchmark, and close a bounded local MVP without absorbing the entire Menhir backlog.
@@ -164,7 +166,7 @@ E2E remain open.
 
 ### A2. Reconcile current work in flight
 
-- [x] Inventory all open Menhir issues and active plans against the MVP contract in the [Phase A inventory](../reviews/menhir-local-stdio-mvp-phase-a-inventory-2026-09-16.md).
+- [x] Inventory all open Menhir issues and active plans against the MVP contract in the [Phase A inventory](../../reviews/menhir-local-stdio-mvp-phase-a-inventory-2026-09-16.md).
 - [x] Mark each BLOCKER / FIX IF CHEAP / DOCUMENTED LIMITATION / POST-MVP / RESEARCH. The later [#120 deferral](https://github.com/Archolith/menhir/issues/120) supersedes that inventory's Beacon blocker classification.
 - [ ] Do not merge unrelated architecture cleanup into the MVP lane.
 - [ ] Keep already-approved correctness work that directly affects a required surface.
@@ -264,7 +266,7 @@ The audit is a code-and-contract review, not an E2E run. It asks whether the imp
 
 **Gate B:** every HIGH/critical correctness or data-loss finding on a supported path is fixed or explicitly proven unreachable under the MVP contract. The audit artifact is COMPLETE before RC freeze.
 
-**Gate B result:** COMPLETE on merged `0f8deac5`; see the [audit](../reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md) and its exact-main CI and no-publish image receipts.
+**Gate B result:** COMPLETE on merged `0f8deac5`; see the [audit](../../reviews/menhir-local-stdio-mvp-release-audit-2026-09-27.md) and its exact-main CI and no-publish image receipts.
 
 ## 6. Phase C — pre-freeze black-box E2E campaign
 
