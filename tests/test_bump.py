@@ -120,6 +120,12 @@ def test_every_mention_of_the_current_version_is_bumped_or_exempt() -> None:
     assert missed == []
 
 
+def test_the_script_names_no_real_version() -> None:
+    # An example version in bump.py would fail the two mention checks at that very release.
+    source = (ROOT / "scripts" / "bump.py").read_text(encoding="utf-8")
+    assert re.findall(r"[0-9]+\.[0-9]+\.[0-9]+", source) == []
+
+
 def test_fork_file_table_is_complete() -> None:
     # A new mention of the pin, or a removed one, must fail here rather than at bump time.
     version = bump.current_fork_version(ROOT).encode()

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Prepare a release PR: bump Menhir's version or the Graphiti fork pin.
 
-    python scripts/bump.py version 0.3.3 --summary "what changed" --pr
-    python scripts/bump.py fork 0.31.2.post3 --commit <fork sha> --summary "what changed" --pr
+    python scripts/bump.py version X.Y.Z --summary "what changed" --pr
+    python scripts/bump.py fork X.Y.Z.postN --commit <fork sha> --summary "what changed" --pr
 
 Every edit must find the text it expects, the expected number of times, or nothing is written.
 `uv lock --check` then runs, and a failure restores every file. uv.lock is edited directly because
 `uv lock` from a different uv version rewrites unrelated lines. With --pr the result is committed
 on a new branch and opened as a pull request; without it the edits stay in the working tree.
 
-Tagging stays in scripts/release.py. Historical lines such as "since 0.3.1" are left alone.
+Tagging stays in scripts/release.py. Historical lines such as "since X.Y.Z" are left alone.
 """
 from __future__ import annotations
 
@@ -212,7 +212,7 @@ def fork_edits(
     root: Path, new: str, *, commit: str, release: ForkRelease, summary: str, date: str,
 ) -> list[Edit]:
     if FORK_VERSION_RE.fullmatch(new) is None:
-        raise BumpError(f"fork version must look like 0.31.2.post3, got {new!r}")
+        raise BumpError(f"fork version must be X.Y.Z or X.Y.Z.postN, got {new!r}")
     if COMMIT_RE.fullmatch(commit) is None:
         raise BumpError("fork commit must be a full 40-character SHA")
     old = current_fork_version(root)
