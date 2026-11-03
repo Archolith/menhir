@@ -73,10 +73,12 @@ The MCP telemetry sidecar (SQLite) lives at `<state dir>/mcp_telemetry.db` (`MEN
   `min(20)` / `min(limit, 200)` in `infrastructure/telemetry/store.py`) so a large `limit` cannot
   amplify a read.
 
-Operator practice: the DB is disposable local state. If a launch benchmark or a Hook Center smoke
-run inflates it, delete the file (or point `MENHIR_MCP_TELEMETRY_DB` at a throwaway path for the
-run) — no migration needed; it is recreated on next start. Non-revision tables are append-only
-(low operational debt; a full retention sweep across all telemetry tables is post-MVP).
+Operator practice: the DB is not disposable. It holds the only unmerge copy, the erasure journal
+and suppression record, and the rehydration archive. Deleting the file is not a supported way to
+erase data. To keep a launch benchmark or a Hook Center smoke run out of it, point
+`MENHIR_MCP_TELEMETRY_DB` at a throwaway path for the run. Tiered pruning has shipped
+(observability tables 30 days, diagnostic tables 90 days, revisions 14 days); some tables are never
+pruned. See [your data](../your-data.md).
 
 ---
 

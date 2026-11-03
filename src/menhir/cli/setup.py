@@ -536,6 +536,8 @@ def setup(
             else:
                 typer.echo("Next: run 'menhir up' to start the server.")
         typer.echo("Optional capture integrations: docs/post-install.md and scripts/hooks/README.md")
+        if not check:
+            typer.echo("What Menhir stores and how to remove it: docs/your-data.md")
     except typer.Exit:
         raise
     except (OSError, SetupError, ValueError, json.JSONDecodeError) as exc:

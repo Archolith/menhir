@@ -327,6 +327,8 @@ running HTTP backend before launching it.
 
 ## Quick start
 
+Before you store anything, [`docs/your-data.md`](docs/your-data.md) lists what Menhir keeps, for how long, and how to remove it.
+
 ### Prerequisites
 
 - Python 3.12 or newer. On a full OS install check with `python3 --version` (minimal container
@@ -494,8 +496,9 @@ unlinked nodes -- and small models refuse more readily than large ones.
 To prove the whole path without leaving test data behind, write into a throwaway namespace,
 recall from it, then delete that namespace. Deleting a single memory removes the episode and
 its projections but keeps the entities and fact edges extracted from it, and those can restate
-its content (see [known limitations](#known-limitations)). The namespace teardown is the
-clean-up that actually leaves nothing.
+its content (see [known limitations](#known-limitations)). The namespace teardown removes the
+namespace's memories and derived graph data, but it refuses `default` and does not remove TODOs,
+WorkArtifacts or the shared code-structure graph (see [`docs/your-data.md`](docs/your-data.md)).
 
 Namespace deletion requires the operator tier, and `menhir setup` does not write an operator key
 -- `.env` has no `MENHIR_OPERATOR_KEY` line at all, only a comment naming it. Add one, then restart
@@ -669,12 +672,13 @@ the private `Archolith/menhir-deploy` repository.
 
 These are known gaps in 0.3.2, each with a planned fix:
 
-- **Erasure leaves extracted knowledge behind (#417).** `delete_memory` and the erasure tools
-  remove the memory, its episode, captured evidence turns, their projections and its scalar
-  assertions. They do not remove the entities and fact edges enrichment extracted from it, and
+- **Erasure leaves extracted knowledge behind (#423).** `delete_memory` removes the memory, its
+  episode, captured evidence turns, their projections and its scalar assertions. It does not
+  remove the entities and fact edges enrichment extracted from it, and
   an entity summary or fact can restate the erased content. Entities are shared across
-  memories, so they are not deleted with one memory. To remove everything, delete the whole
-  namespace.
+  memories, so they are not deleted with one memory. Deleting a non-default namespace removes
+  its memories and derived graph data, but not TODOs, WorkArtifacts or the shared code-structure
+  graph, and `default` cannot be deleted. See [`docs/your-data.md`](docs/your-data.md).
 - **Scalar source checks are pattern-based (#411).** Since 0.3.1, duration, frequency, weekday,
   status and boolean values must be stated in the source and not negated or hedged. The checks
   are English patterns: they drop what they cannot read, and they can miss a misattribution such
@@ -688,7 +692,8 @@ These are known gaps in 0.3.2, each with a planned fix:
 
 Menhir is a single-operator service, not a multi-tenant boundary. Run a separate instance
 for each operator or trust domain. The full threat model and known limitations are in
-[`docs/security-posture.md`](docs/security-posture.md).
+[`docs/security-posture.md`](docs/security-posture.md). The full inventory of stored data and
+its retention is in [`docs/your-data.md`](docs/your-data.md).
 
 With no key configured, the server refuses non-loopback binds. Bypassing that guard with
 `MENHIR_ALLOW_INSECURE_REMOTE_NO_AUTH=1` is unsafe and is intended only for an isolated
