@@ -1,3 +1,14 @@
+## 2026-11-02 - One command prepares a version or fork bump
+
+`scripts/bump.py` replaces the by-hand edits before a release. No runtime code changes.
+
+- `scripts/bump.py`: `version` and `fork` subcommands update every file that states the version or
+  pin, or write nothing if an expected line has moved. `uv lock --check` must pass, and `--pr` opens
+  the pull request. Tagging stays in `scripts/release.py`.
+- `tests/test_bump.py`: covers partial writes, restores, and CRLF files. It also fails if a new file
+  names the current version or fork pin and the bump would miss it.
+- `docs/runbooks/release.md`: step 2 and the fork pin procedure.
+
 ## 2026-11-02 - One tag publishes the whole release
 
 A `v*` tag now publishes PyPI, the release image, the image's version tag and the GitHub release

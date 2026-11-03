@@ -15,8 +15,13 @@ workflow did not consult CI and shipped both. Both were yanked; v0.2.3 carried t
 ## Steps
 
 1. Land everything on `main` and push. Wait for `tests.yml` to go green on that commit.
-2. Bump `version` in `pyproject.toml` and add a `## <date> - vX.Y.Z ...` heading to
-   `CHANGELOG.md`. Commit and push that too -- the gate requires HEAD == `origin/main`.
+2. Open the version bump and get it merged. The gate requires HEAD == `origin/main`.
+
+       python scripts/bump.py version X.Y.Z --summary "what this release does" --pr
+
+   This updates `pyproject.toml`, `uv.lock`, `sbom.json`, the docs that state the current
+   version and `CHANGELOG.md`. It writes nothing if any expected line has moved. Check the
+   CHANGELOG entry in the PR before merging. Without `--pr`, the edits stay in the working tree.
 3. Make sure the throwaway test Neo4j is up (`docker compose -f docker-compose.test.yml up -d`:
    service `neo4j-test`, container `menhir-neo4j-test`, bolt://127.0.0.1:7688). The online lane is mandatory; an
    unreachable instance is a failure, not a skip.
@@ -43,6 +48,17 @@ and the Python base comes from `deploy/release-python-base.txt` at the tagged co
 that file in a normal PR to move the base.
 
 Deploying stays a separate, manual step: `tools/menhirctl.ps1 upgrade X.Y.Z` from menhir-deploy.
+
+## Moving the Graphiti fork pin
+
+Publish the fork release first, then, from a clean `main`:
+
+    python scripts/bump.py fork 0.31.2.postN --commit <full fork commit> --summary "what changed" --pr
+
+The script reads the file URLs, hashes and sizes from PyPI and updates the pin, `uv.lock`, and every
+file that names the fork version. The `--commit` value isn't checked against the fork repository, so
+copy it from the fork's release. If `uv lock --check` fails, every file is restored: the release
+changed dependencies and needs a real re-lock with the pinned uv version, by hand.
 
 ## If a release stops partway
 
