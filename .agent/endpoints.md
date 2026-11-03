@@ -402,6 +402,18 @@ enrichment already leased by a worker continues to completion. Use `resume_sched
 restart the loop.
 - Returns scheduler state after pause (`was_running`, `scheduler_running`, `lease_acquired`).
 
+### `acknowledge_warning`
+Concept id: `mcp.tool.acknowledge_warning`
+Required tier: `operator`
+
+Silence an operator warning (`provider_auth`, `provider_billing` or `failed_episodes`) in
+`add_memory`, `add_memory_and_track`, `recall_context_memories`, `read_flagged_memories` and
+`build_context` output. The ack covers the current incident only: a provider warning comes back
+after the condition clears and recurs, and `failed_episodes` comes back when an episode fails
+after the ack. `get_memory_stats` keeps listing acknowledged warnings while they are active.
+- `subject`: LLM call kind (`chat`, `embedding`, `response`) for provider kinds; empty acks all.
+- Returns what was acknowledged, or that nothing was active.
+
 ### `resume_scheduler`
 Concept id: `mcp.tool.resume_scheduler`
 Required tier: `operator`

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from datetime import timezone
 from typing import Any
 from uuid import uuid4
 
@@ -95,6 +96,24 @@ def admission_provenance_state(*, turn_evidence_count: int, admission_edge_count
     return ADMISSION_LINKED if admission_edge_count > 0 else ADMISSION_NEVER_LINKED
 
 
+def _iso_utc_or_none(value: Any) -> str | None:
+    """Serialise a Neo4j DateTime / datetime / ISO string as an ISO-8601 UTC string."""
+
+    if value is None:
+        return None
+    if hasattr(value, "to_native"):
+        value = value.to_native()
+    if isinstance(value, str):
+        from menhir.infrastructure.telemetry.operator_warnings_store import parse_iso_utc
+
+        value = parse_iso_utc(value)
+        if value is None:
+            return None
+    if getattr(value, "tzinfo", None) is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat(timespec="microseconds")
+
+
 class MemoryQueryRepository:
     """Encapsulates memory read/query operations and simple mutations (flag, delete)."""
 
@@ -148,7 +167,9 @@ class MemoryQueryRepository:
                    count(CASE WHEN n:Episodic AND effective_state = 'PENDING' THEN 1 END) AS pending_count,
                    count(CASE WHEN n:Episodic AND effective_state = 'ENRICHING' THEN 1 END) AS enriching_count,
                    count(CASE WHEN n:Episodic AND effective_state = 'READY' THEN 1 END) AS ready_count,
-                   count(CASE WHEN n:Episodic AND effective_state = 'FAILED' THEN 1 END) AS failed_count
+                   count(CASE WHEN n:Episodic AND effective_state = 'FAILED' THEN 1 END) AS failed_count,
+                   max(CASE WHEN n:Episodic AND effective_state = 'FAILED'
+                            THEN n.processing_completed_at END) AS latest_failed_at
             """,
             params or None,
         )
@@ -186,7 +207,9 @@ class MemoryQueryRepository:
             "enriching_count": 0,
             "ready_count": 0,
             "failed_count": 0,
+            "latest_failed_at": None,
         }
+        overview["latest_failed_at"] = _iso_utc_or_none(overview.get("latest_failed_at"))
         overview["turn_evidence_count"] = int(admission.get("turn_evidence_count") or 0)
         overview["admission_edge_count"] = int(admission.get("admission_edge_count") or 0)
         overview["admission_provenance"] = admission_provenance_state(

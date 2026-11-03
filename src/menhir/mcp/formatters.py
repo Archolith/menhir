@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from time import monotonic, perf_counter
@@ -648,6 +649,106 @@ async def _standing_unrecallable_count(backend: object) -> int:
     return count
 
 
+async def _legacy_operator_warnings(backend: object) -> list[dict[str, Any]]:
+    """Today's computation: in-process singletons plus the standing FAILED count, all unacked."""
+    from menhir.infrastructure.observability import (
+        last_provider_auth_failure,
+        last_provider_quota_exhaustion,
+    )
+
+    entries: list[dict[str, Any]] = []
+    auth_failure = last_provider_auth_failure()
+    if auth_failure is not None:
+        entries.append(
+            {"kind": "provider_auth", "subject": auth_failure.kind, "acked": False,
+             "summary": auth_failure.summary(), "legacy": True}
+        )
+    quota_exhaustion = last_provider_quota_exhaustion()
+    if quota_exhaustion is not None:
+        entries.append(
+            {"kind": "provider_billing", "subject": quota_exhaustion.kind, "acked": False,
+             "summary": quota_exhaustion.summary(), "legacy": True}
+        )
+    unrecallable = await _standing_unrecallable_count(backend)
+    if unrecallable > 0:
+        entries.append(
+            {"kind": "failed_episodes", "subject": "global", "acked": False,
+             "count": unrecallable, "summary": "", "legacy": True}
+        )
+    return entries
+
+
+async def _fetch_operator_warnings(backend: object) -> list[dict[str, Any]]:
+    payload = await backend.get_operator_warnings()
+    warnings = payload.get("warnings") if isinstance(payload, dict) else None
+    if not isinstance(warnings, list):
+        raise TypeError("get_operator_warnings returned an unexpected payload")
+    return warnings
+
+
+async def _active_operator_warnings(backend: object) -> list[dict[str, Any]]:
+    """All active warnings, acknowledged ones included; legacy fallback on any failure."""
+    try:
+        return await _fetch_operator_warnings(backend)
+    except Exception:  # noqa: BLE001 - older serve / fake backend / backend error
+        logger.debug("get_operator_warnings unavailable; using legacy warnings", exc_info=True)
+        return await _legacy_operator_warnings(backend)
+
+
+async def _unacked_operator_warnings(backend: object) -> list[dict[str, Any]]:
+    """Unacknowledged operator warnings from the backend; any failure falls back to the legacy path."""
+    try:
+        warnings = await _fetch_operator_warnings(backend)
+    except Exception:  # noqa: BLE001 - older serve / fake backend / backend error
+        logger.debug("get_operator_warnings unavailable; using legacy warnings", exc_info=True)
+        return await _legacy_operator_warnings(backend)
+    return [w for w in warnings if not w.get("acked")]
+
+
+def _operator_warning_line(entry: dict[str, Any]) -> str:
+    kind = entry["kind"]
+    if kind == "provider_auth":
+        text = (
+            f"WARNING: {entry['summary']}. New memories are stored but cannot be "
+            "enriched or recalled until the provider credential (e.g. OPENAI_API_KEY) is fixed; "
+            "failed episodes are retried automatically once a call succeeds."
+        )
+    elif kind == "provider_billing":
+        text = (
+            f"WARNING: {entry['summary']}. Enrichment cannot progress until provider "
+            "credits are added; stop waiting on queued episodes."
+        )
+    else:
+        unrecallable = int(entry.get("count") or 0)
+        text = (
+            f"WARNING: {unrecallable} earlier "
+            f"{'memory is' if unrecallable == 1 else 'memories are'} FAILED and NOT recallable "
+            f"-- the text is stored but has no entities, so recall cannot return it. "
+            f"This write may end the same way; check get_enrichment_status(episode_id) if it matters."
+        )
+    if not entry.get("legacy"):
+        text += f' An operator can silence it with acknowledge_warning(kind="{kind}").'
+    return text
+
+
+def _benchmark_mode() -> bool:
+    from menhir.config.settings_helpers import parse_bool_env
+
+    return parse_bool_env(os.getenv("MENHIR_BENCHMARK_MODE", ""))
+
+
+async def session_start_operator_warnings(backend: object) -> list[dict[str, Any]]:
+    """Unacked warnings for session-start surfaces; empty in benchmark mode so bench output is unchanged."""
+    if _benchmark_mode():
+        return []
+    return await _unacked_operator_warnings(backend)
+
+
+async def session_start_warning_lines(backend: object) -> list[str]:
+    """Rendered unacked warning lines for session-start surfaces (empty when none)."""
+    return [_operator_warning_line(w) for w in await session_start_operator_warnings(backend)]
+
+
 async def _queue_summary(backend: object) -> str:
     # NOTE: this helper runs AFTER a durable mutation, so it must never raise --
     # its failure is cosmetic and the write is already committed. A suppressed
@@ -684,31 +785,8 @@ async def _queue_summary(backend: object) -> str:
         f"scheduler={scheduler_state}"
     )
 
-    from menhir.infrastructure.observability import last_provider_auth_failure
-
-    auth_failure = last_provider_auth_failure()
-    if auth_failure is not None:
-        summary += (
-            f"\nWARNING: {auth_failure.summary()}. New memories are stored but cannot be "
-            "enriched or recalled until the provider credential (e.g. OPENAI_API_KEY) is fixed; "
-            "failed episodes are retried automatically once a call succeeds."
-        )
-    from menhir.infrastructure.observability import last_provider_quota_exhaustion
-
-    quota_exhaustion = last_provider_quota_exhaustion()
-    if quota_exhaustion is not None:
-        summary += (
-            f"\nWARNING: {quota_exhaustion.summary()}. Enrichment cannot progress until provider "
-            "credits are added; stop waiting on queued episodes."
-        )
-    unrecallable = await _standing_unrecallable_count(backend)
-    if unrecallable > 0:
-        summary += (
-            f"\nWARNING: {unrecallable} earlier "
-            f"{'memory is' if unrecallable == 1 else 'memories are'} FAILED and NOT recallable "
-            f"-- the text is stored but has no entities, so recall cannot return it. "
-            f"This write may end the same way; check get_enrichment_status(episode_id) if it matters."
-        )
+    for entry in await _unacked_operator_warnings(backend):
+        summary += "\n" + _operator_warning_line(entry)
     return summary
 
 

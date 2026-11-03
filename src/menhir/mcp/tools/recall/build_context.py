@@ -117,6 +117,12 @@ class BuildContextTool(BaseTextTool):
         if temporal_header:
             lines.append(temporal_header)
             lines.append("")
+        from menhir.mcp.formatters import session_start_warning_lines
+
+        warning_lines = await session_start_warning_lines(backend)
+        if warning_lines:
+            lines.extend(warning_lines)
+            lines.append("")
         lines.append(str(result.get("context") or ""))
         lines.append("")
         lines.append("---")

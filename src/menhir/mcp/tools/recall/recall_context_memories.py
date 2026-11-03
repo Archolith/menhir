@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from menhir.domain.bootstrap_scope import bootstrap_selection
 from menhir.domain.structural_memory import is_structural_memory_row
-from menhir.mcp.formatters import _compact_memory_item, _normalize_reader_id
+from menhir.mcp.formatters import (
+    _compact_memory_item,
+    _normalize_reader_id,
+    session_start_warning_lines,
+)
 from menhir.mcp.lifecycle import _has_recent_flagged_bootstrap_read
 from menhir.mcp.tools.base import BaseJsonTool
 from menhir.mcp.contracts import ToolScope
@@ -183,6 +187,7 @@ class RecallContextMemoriesTool(BaseJsonTool):
         except Exception:
             pass  # non-critical; don't block bootstrap
 
+        operator_warnings = await session_start_warning_lines(backend)
         return self.render_recall_json(
             {
                 "reader_id": normalized_reader_id,
@@ -200,5 +205,6 @@ class RecallContextMemoriesTool(BaseJsonTool):
                 "relevant": [_compact_memory_item(row, tag="relevant") for row in relevant_rows],
                 "recent": [_compact_memory_item(row, tag="recent") for row in non_flagged_recent],
                 "stale_todo_warning": stale_warning or None,
+                **({"operator_warnings": operator_warnings} if operator_warnings else {}),
             }
         )

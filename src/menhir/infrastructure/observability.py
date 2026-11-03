@@ -311,6 +311,8 @@ def complete_llm_usage_call(
 ) -> None:
     clear_provider_auth_failure()
     clear_provider_quota_exhaustion(handle.kind)
+    _notify_provider_warning("resolve", "provider_auth", None)
+    _notify_provider_warning("resolve", "provider_billing", handle.kind)
     try:
         normalized = _normalized_usage(usage if usage is not None else _value(result, "usage"))
         service_tier = _value(result, "service_tier") if result is not None else None
@@ -345,6 +347,29 @@ def complete_llm_usage_call(
             duration_ms=int((perf_counter() - handle.started_at) * 1000),
             report_only=handle.report_only,
         )
+
+
+#: Serve-only sink with ``record(kind, subject)`` / ``resolve(kind, subject|None)``. None keeps
+#: the in-memory-only behaviour (CLI, bridge processes, tests).
+_provider_warning_sink: Any = None
+
+
+def set_provider_warning_sink(sink: Any) -> None:
+    global _provider_warning_sink
+    _provider_warning_sink = sink
+
+
+def _notify_provider_warning(action: str, kind: str, subject: str | None) -> None:
+    sink = _provider_warning_sink
+    if sink is None:
+        return
+    try:
+        if action == "record":
+            sink.record(kind, subject or "")
+        else:
+            sink.resolve(kind, subject)
+    except Exception:  # noqa: BLE001 - never raised into the LLM call path
+        logger.warning("operator warning sink failed (%s %s)", action, kind, exc_info=True)
 
 
 @dataclass(frozen=True)
@@ -402,6 +427,7 @@ def record_provider_auth_failure(handle: LLMCallHandle, error: BaseException) ->
         at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         detail=detail,
     )
+    _notify_provider_warning("record", "provider_auth", handle.kind)
 
 
 def clear_provider_auth_failure() -> None:
@@ -444,6 +470,7 @@ def record_provider_quota_exhaustion(handle: LLMCallHandle) -> None:
         model=handle.model,
         at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
     )
+    _notify_provider_warning("record", "provider_billing", handle.kind)
 
 
 def clear_provider_quota_exhaustion(kind: str | None = None) -> None:

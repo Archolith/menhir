@@ -569,6 +569,16 @@ class MemoryBackend(Protocol):
         """
         ...
 
+    async def get_operator_warnings(self) -> dict[str, Any]:
+        """Active operator warnings: ``{"warnings": [{kind, subject, acked, ...}]}``."""
+        ...
+
+    async def acknowledge_operator_warning(
+        self, kind: str, subject: str = "", actor: str = ""
+    ) -> dict[str, Any]:
+        """Acknowledge the active warning(s) of ``kind``; empty ``subject`` means every subject."""
+        ...
+
     async def circuit_breaker_snapshots(self) -> dict[str, dict[str, Any]]:
         """Get circuit breaker state for LLM/embed/reranker clients."""
         ...

@@ -31,6 +31,10 @@ from menhir.infrastructure.telemetry.llm_usage_store import (
     TelemetryLLMUsageStoreMixin,
     initialize_llm_usage_schema,
 )
+from menhir.infrastructure.telemetry.operator_warnings_store import (
+    TelemetryOperatorWarningsMixin,
+    initialize_operator_warnings_schema,
+)
 from menhir.infrastructure.telemetry.recall_store import TelemetryRecallStoreMixin
 
 
@@ -40,6 +44,7 @@ class McpTelemetryStore(
     TelemetryLifecycleStoreMixin,
     TelemetryRecallStoreMixin,
     TelemetryLLMUsageStoreMixin,
+    TelemetryOperatorWarningsMixin,
 ):
     """Append-only SQLite store for MCP latency and outcome tracking."""
 
@@ -164,6 +169,7 @@ class McpTelemetryStore(
                     """
                 )
                 initialize_llm_usage_schema(conn)
+                initialize_operator_warnings_schema(conn)
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS lifecycle_events (

@@ -1,5 +1,6 @@
 """Ops tool group — enrichment management, scheduler, diagnostics, stats, todos, artifacts."""
 
+from .acknowledge_warning import AcknowledgeWarningTool
 from .add_todo import AddTodoTool
 from .audit_artifact_corpus import AuditArtifactCorpusTool
 from .list_artifact_questions import ArtifactQuestionsTool
@@ -55,6 +56,7 @@ OPS_TOOLS = [
     ForceSchedulerTakeoverTool,
     PauseSchedulerTool,
     ResumeSchedulerTool,
+    AcknowledgeWarningTool,
     RecoverOrphansTool,
     GetMemoryStatsTool,
     ViewEntropyTool,

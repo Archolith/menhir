@@ -75,6 +75,22 @@ class GetMemoryStatsTool(BaseTextTool):
         lines.append(f"## menhir — last {since_hours}h")
         lines.append("")
 
+        # ── Warnings (active, including acknowledged ones) ──
+        from menhir.mcp.formatters import _active_operator_warnings
+
+        active_warnings = await _active_operator_warnings(backend)
+        if active_warnings:
+            lines.append("### Warnings")
+            for w in active_warnings:
+                status = (
+                    f"acknowledged by {w.get('acked_by') or 'unknown'} at {w.get('acked_at')}"
+                    if w.get("acked")
+                    else "UNACKNOWLEDGED"
+                )
+                detail = w.get("summary") or f"{w.get('count', '?')} FAILED episode(s)"
+                lines.append(f"  {w['kind']}/{w['subject']}: {detail} [{status}]")
+            lines.append("")
+
         # ── Graph Overview ──
         # Labelled with the silo it covers. The sections below are deployment-wide, and saying so
         # is what stops a reader computing a ratio across the boundary.

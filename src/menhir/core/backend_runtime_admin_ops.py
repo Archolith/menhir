@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from menhir.config import redact_uri_credentials
@@ -9,6 +10,8 @@ from menhir.core.tenancy import require_own_object
 from menhir.infrastructure.providers import ProviderConfig
 
 from .backend_shared import _to_jsonable
+
+logger = logging.getLogger(__name__)
 
 
 class SchedulerStartBlockedInBenchmarkMode(RuntimeError):
@@ -314,6 +317,89 @@ class RuntimeProviderAdminOpsMixin:
                 self.built.graph_adapter.fetch_memory_overview, namespace
             )
         )
+
+    async def get_operator_warnings(self, _fresh: bool = False) -> dict[str, Any]:
+        from time import monotonic
+
+        from menhir.infrastructure.observability import (
+            last_provider_auth_failure,
+            last_provider_quota_exhaustion,
+        )
+        from menhir.infrastructure.telemetry.operator_warnings_store import (
+            build_operator_warnings,
+        )
+
+        rows = await self._off_loop(self.telemetry.list_operator_warnings)
+        failed_count = 0
+        latest_failed_at = None
+        # The overview is a full-graph aggregate and add_memory polls this on every write, so
+        # reuse it for 60s (the same TTL the legacy count used). Acks read it fresh.
+        cached = getattr(self, "_warning_failed_cache", None)
+        try:
+            if cached is not None and not _fresh and monotonic() < cached[0]:
+                failed_count, latest_failed_at = cached[1], cached[2]
+            else:
+                overview = await self.fetch_memory_overview()
+                failed_count = int((overview or {}).get("failed_count") or 0)
+                latest_failed_at = (overview or {}).get("latest_failed_at")
+                self._warning_failed_cache = (monotonic() + 60.0, failed_count, latest_failed_at)
+        except Exception:  # noqa: BLE001 - provider warnings must still be reported
+            logger.debug("could not read FAILED count for operator warnings", exc_info=True)
+        return {
+            "warnings": build_operator_warnings(
+                rows,
+                auth_failure=last_provider_auth_failure(),
+                quota_exhaustion=last_provider_quota_exhaustion(),
+                failed_count=failed_count,
+                latest_failed_at=latest_failed_at,
+            )
+        }
+
+    async def acknowledge_operator_warning(
+        self, kind: str, subject: str = "", actor: str = ""
+    ) -> dict[str, Any]:
+        from menhir.clock import utc_now_iso
+        from menhir.infrastructure.telemetry.operator_warnings_store import (
+            KIND_FAILED_EPISODES,
+            WARNING_KINDS,
+        )
+
+        if kind not in WARNING_KINDS:
+            raise ValueError(f"unknown warning kind {kind!r}; expected one of {list(WARNING_KINDS)}")
+        actor = actor.strip() or "unknown"
+        current = (await self.get_operator_warnings(_fresh=True))["warnings"]
+        candidates = [
+            w for w in current if w["kind"] == kind and (not subject or w["subject"] == subject)
+        ]
+        acknowledged: list[str] = []
+        already: list[str] = []
+        for w in candidates:
+            if w["acked"]:
+                already.append(w["subject"])
+                continue
+            if not w["durable"]:
+                await self._off_loop(
+                    self.telemetry.record_operator_warning_occurrence, kind, w["subject"]
+                )
+            watermark = None
+            if kind == KIND_FAILED_EPISODES:
+                watermark = w.get("latest_failed_at") or utc_now_iso()
+            ok = await self._off_loop(
+                self.telemetry.ack_operator_warning,
+                kind,
+                w["subject"],
+                actor,
+                watermark,
+                w["first_seen_at"] if w["durable"] else None,
+            )
+            if ok:
+                acknowledged.append(w["subject"])
+        return {
+            "kind": kind,
+            "active": len(candidates),
+            "acknowledged": acknowledged,
+            "already_acknowledged": already,
+        }
 
     async def circuit_breaker_snapshots(self) -> dict[str, dict[str, Any]]:
         return _to_jsonable(
