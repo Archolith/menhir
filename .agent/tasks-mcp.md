@@ -26,8 +26,6 @@ Use this file when the work is about tool selection, resource usage, bootstrap r
   - `mcp.tool.recall_context_memories`
   - `mcp.tool.recall_memories`
   - `mcp.tool.recall_history`
-- Codex lean path:
-  - use `memory_gateway(action="bootstrap_context", payload_json=...)` to perform the two-phase bootstrap without registering the full recall tool set in prompt context
 - then open:
   - [endpoints.md](endpoints.md)
 - register and pass one stable explicit workspace key at project/session start; do not infer it from the current working directory
@@ -41,28 +39,11 @@ its relevant/recent reads, including client pins. An omitted namespace remains u
 receipt feature (#116) is deferred for MVP; these corrections do not add a scope receipt.
 
 - **Session start bootstrap** → `read_flagged_memories` then `recall_context_memories` (two-phase, returns flagged + relevant + recent)
-- **Codex token-light bootstrap** → `memory_gateway(action="bootstrap_context", payload_json=...)` on the Codex gateway server
 - **Mid-task targeted search** → `recall_memories` (standalone semantic search, no bootstrap dependency)
 - **How something changed / sequence of states** → `recall_history` (time-ordered drill-down, oldest first)
 - **What was known at a time / how a thread unfolded** → `recall_timeline` (recorded-time navigation: at/window/around/cursor/query, optional subject thread, typed histories)
 - **Token-budgeted context block** → `build_context` (packs memories + TODOs within a token limit)
 - **How long since last access** → `get_client_context` (no recall, just identity + elapsed time)
-
-### Codex gateway payloads
-
-When Codex only exposes the lean `memory_gateway`, call:
-
-```text
-memory_gateway(action="help", payload_json="{}")
-memory_gateway(action="recall", payload_json="{\"query\":\"auth decisions\",\"preset\":\"knowledge\",\"limit\":5}")
-memory_gateway(action="search", payload_json="{\"query\":\"auth decisions\",\"preset\":\"knowledge\",\"limit\":5}")  # alias for recall
-memory_gateway(action="query_structure", payload_json="{\"query_type\":\"overview\",\"project\":\"menhir\"}")
-memory_gateway(action="add_memory", payload_json="{\"text\":\"Stable fact\",\"source\":\"session note\",\"diff\":\"\"}")
-# Aliases accepted: text (canonical), content, summary — precedence: text > content > summary
-```
-
-The gateway currently exposes `bootstrap_context`, `read_flagged`, `recall_context`, `recall`, `query_structure`, `build_context`, `add_memory`, `get_client_context`, `flag_memory`, `delete_memory`, `ingest_project`, `ingest_document`, `add_todo`, `list_todos`, and `close_todo`.
-`search` is accepted as an alias for `recall`.
 
 ### Decide: TODO or memory?
 - **TODO** (`add_todo`): explicit task with open/closed lifecycle, optionally file-linked. Use when the item needs to be tracked and deliberately closed.
@@ -94,7 +75,7 @@ The gateway currently exposes `bootstrap_context`, `read_flagged`, `recall_conte
 
 ### When MCP tools fail or return errors
 
-MCP tools require the HTTP backend (`menhir serve`) running on port 8090. The backend is not auto-started — if it is down, all MCP tool calls will fail.
+MCP tools need the HTTP backend (`menhir serve`, default port 8100). The stdio bridge (`python -m menhir.mcp.server`) connects to it and doesn't start one, so if the backend is down every MCP tool call fails.
 
 Diagnostic steps:
 1. Check `memory://system/dependency-health` — lightweight Neo4j socket check, does not require full runtime init
@@ -103,7 +84,7 @@ Diagnostic steps:
 
 The CLI hook (`menhir hook run`) bypasses the HTTP backend entirely and talks directly to Neo4j. Hook output may still work even when MCP tools are failing.
 
-The `session-init.sh` hook fires `yawn.scheduler` as a background process at session start. If the scheduler is not running, enrichment will stall but recall and ingest queuing still work.
+`menhir serve` runs the maintenance scheduler in-process once enrichment is ready (not under `MENHIR_BENCHMARK_MODE`). If it isn't running, enrichment stalls, but recall and ingest queuing still work.
 
 ## Recall Quality and Confidence Floor
 
