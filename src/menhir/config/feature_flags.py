@@ -155,6 +155,8 @@ _ENV_ONLY = (
         'Attempts per OpenAI call on 429 backoff; absent or invalid uses 6.'),
     ('MENHIR_OPENAI_RATE_LIMIT_MAX_WAIT_S', None, 'runtime',
         'Longest single 429 backoff sleep in seconds; absent or invalid uses 60.'),
+    ('MENHIR_RELEASE_COMMIT', '', 'runtime',
+        'Build metadata (not a feature flag): release git SHA reported by /readyz; empty or invalid reports unknown.'),
 )
 
 _REQUIRES = {

@@ -185,6 +185,15 @@ after it republishes even though the scan fingerprint is unchanged.
 - If tool discovery is incomplete, use the MCP client's tool discovery mechanism instead of inventing a
   tool name or argument.
 
+## After a server deploy
+
+- A remote Menhir reports `build.version`, `build.commit`, and `build.mcp_metadata_sha256` on `/readyz`.
+  After a deploy, run `python scripts/release/check_served_metadata.py <base-url>` (add
+  `--expect-commit <sha>`) to confirm the server serves the instructions and tools this package expects.
+- MCP clients read server instructions and the tool list when they connect, so they pick up changes only
+  after reconnecting. `/clear` in Claude Code does not reconnect; restart the session or reconnect the MCP
+  server.
+
 ## Ready-to-copy default
 
 The maintained, paste-ready instruction block is
