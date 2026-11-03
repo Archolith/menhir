@@ -155,13 +155,15 @@ QUOTA_REASON_CODE = "provider_quota_exhausted"
 
 
 class ProviderQuotaExhaustedError(Exception):
-    """The provider refused with 429 insufficient_quota: a billing state, not throttling."""
+    """The provider refused with 429 insufficient_quota or 402 Payment Required: a billing state, not throttling."""
 
     reason_code = QUOTA_REASON_CODE
 
 
-def find_quota_exhaustion(exc: BaseException | None) -> openai.RateLimitError | None:
+def find_quota_exhaustion(exc: BaseException | None) -> openai.APIStatusError | None:
     """The insufficient_quota openai error in ``exc``'s __cause__/__context__ chain, if any.
+
+    A 402 Payment Required status error also counts.
 
     Graphiti rewraps the openai error as its own RateLimitError (``raise ... from e``), which
     loses the quota code, so the chain is walked rather than only ``exc`` itself.
@@ -170,6 +172,8 @@ def find_quota_exhaustion(exc: BaseException | None) -> openai.RateLimitError | 
     while exc is not None and id(exc) not in seen:
         seen.add(id(exc))
         if isinstance(exc, openai.RateLimitError) and is_billing_state(exc):
+            return exc
+        if isinstance(exc, openai.APIStatusError) and getattr(exc, "status_code", None) == 402:
             return exc
         exc = exc.__cause__ or exc.__context__
     return None
@@ -182,8 +186,8 @@ def quota_exhausted_error(exc: BaseException | None) -> ProviderQuotaExhaustedEr
     if find_quota_exhaustion(exc) is None:
         return None
     error = ProviderQuotaExhaustedError(
-        f"{QUOTA_REASON_CODE}: the provider returned 429 insufficient_quota (credits "
-        "exhausted); waiting will not help - add credits, then re-enrich"
+        f"{QUOTA_REASON_CODE}: the provider refused for billing (429 insufficient_quota or "
+        "402 payment required); waiting will not help - add credits, then re-enrich"
     )
     error.__cause__ = exc
     return error
