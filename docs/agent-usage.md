@@ -30,6 +30,13 @@ Every MCP client receives a short version of this contract as the server instruc
 7. At the end of meaningful work, store durable lessons with `add_memory`. Attach a bounded Git diff when
    code paths matter. Record remaining work as a todo with a repository-relative code reference.
 
+### Compact recall for chat clients
+
+By default a recall response includes up to 10 raw source memories of up to 2000 characters each. Chat
+clients with tight context can set `MENHIR_RECALL_COMPACT=1` on the server, or pass `compact=true` per call.
+Compact mode drops per-item breakdowns and bounds source memories to 5 entries of 1000 characters, marking
+cut entries with `truncated: true`. Pass `compact=false` to get the full form.
+
 ## Write discipline
 
 - Store durable facts, decisions, corrections, verified failures, and reusable operator knowledge.
