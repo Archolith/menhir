@@ -73,9 +73,9 @@ There is no `erase_memory` MCP tool and no data export command.
   https://github.com/Archolith/menhir/issues/423). A summary or fact can restate the erased content.
 - Views built from an erased memory are marked retired but stay as nodes.
 - `delete_namespace` cannot remove the `default` namespace, and it skips `:Todo`, `:WorkArtifact`
-  and the code-structure graph (tracking issue pending).
+  and the code-structure graph (#476, https://github.com/Archolith/menhir/issues/476).
 - `graph_operations` snapshots are full copies of merged and TTL-deleted nodes. They are never
-  pruned and erasure does not reach them (tracking issue pending).
+  pruned and erasure does not reach them (#475, https://github.com/Archolith/menhir/issues/475).
 - `merge_audit`, `llm_usage_events`, the registries and `erasure_subjects` are never pruned.
   Erased ids stay in `erasure_subjects` permanently.
 - The SQLite file never shrinks. Menhir does not run VACUUM.
