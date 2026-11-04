@@ -1,5 +1,6 @@
 ## 2026-11-04 - FalkorDBLite compatibility spike (#109)
 
+- `.agent/memory-backlog.md`: links the phased workspace roadmap and conditional LLM token budget.
 - `.agent/memory-backlog.md`: future adapter gates, rollback evidence and the separate Windows fork investigation.
 - `scripts/falkordblite_compatibility.py`: opt-in isolated storage probe for the checkout's Graphiti
   fork, entity/edge replay, vector/fulltext search, rollback failures and orderly restart persistence.

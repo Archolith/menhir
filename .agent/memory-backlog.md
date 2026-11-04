@@ -21,6 +21,8 @@ This file covers:
 ### `memory.backlog.embedded_graph`
 
 - Owner: [issue #109](https://github.com/Archolith/menhir/issues/109); first-run experience: #461.
+- Phased work and LLM token estimates: [workspace roadmap](https://github.com/ctharvey/workspace-meta/blob/master/.agent/plans/menhir-falkordblite-roadmap.md),
+  `C:\Users\thron\IdeaProjects\.agent\plans\menhir-falkordblite-roadmap.md`.
 - Evidence: [2026-11-04 FalkorDBLite compatibility spike](reference/menhir-falkordblite-compatibility.md).
   Persistence and Graphiti search primitives passed on Linux. Callback failures and Redis MULTI/EXEC
   retained partial mutations; the current driver mapping cannot preserve Menhir's explicit rollback contract.
