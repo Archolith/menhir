@@ -76,6 +76,9 @@ Concept id: `runtime.stack`
 
 - Python 3.12+
 - Neo4j 5 (remote systemd service via bolt)
+- Issue #109's standalone `scripts/falkordblite_compatibility.py` probes temporary local storage
+  without changing runtime wiring. See [compatibility results](reference/menhir-falkordblite-compatibility.md):
+  basic persistence/search work, but the current Falkor driver does not preserve callback rollback.
 - `archolith-graphiti-core==0.31.2.post2` (Archolith soft fork of `getzep/graphiti`,
   baseline `v0.31.2`; it still imports as `graphiti_core`). Menhir policy uses its explicit
   hooks without runtime monkeypatching. Published from fork tag `v0.31.2.post2` at

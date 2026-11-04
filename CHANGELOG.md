@@ -1,3 +1,13 @@
+## 2026-11-04 - FalkorDBLite compatibility spike (#109)
+
+- `scripts/falkordblite_compatibility.py`: opt-in isolated storage probe for the checkout's Graphiti
+  fork, entity/edge replay, vector/fulltext search, rollback failures and orderly restart persistence.
+- `tests/test_falkordblite_compatibility.py`: offline refusal and result-reporting checks.
+- `.agent/reference/menhir-falkordblite-compatibility.md`: measured transaction blockers, Windows
+  limitation and remaining acceptance gates; indexed in `.agent/reference/README.md` and
+  `.agent/scripts-index.md`, with the investigation boundary recorded in `.agent/architecture.md`.
+  Runtime storage and dependencies remain unchanged. Older changelog entries remain in Git history.
+
 ## 2026-11-02 - Usability charter and guardrails
 
 Documentation only. Sets who Menhir must work for and the rules that keep new work usable.
@@ -147,87 +157,3 @@ Behaviour fixes:
 Tests: each unit added counterexample tests; online tests ran against a throwaway Neo4j 5.26. Full offline suite: 12,234 passed, 914 skipped, 1 failed, 14 errors in 10m48s. The failure was `test_large_module_boundaries` (`telemetry/store.py` at 426 lines against its 425 cap, from the CF-269 comment), fixed in ee0e88d0 and rerun green. The 14 errors are `test_beacon_generation`, which requires `MENHIR_TEST_BEACON_PYTHON` and fails loudly when it is unset (an environment gate).
 
 `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
-
-## 2026-10-29 - Bucket-2 flags removed (belief gate, evidence anchor, pools); local-model routing settings
-
-The three remaining default-off recall flags from #399 bucket 2 are removed; the code is kept on `archive/bucket2-flags-2026-10-29`. All six names are in `feature_flags.RETIRED`, and `tests/test_feature_flag_registry.py` checks each retirement. Default recall is unchanged.
-
-- `FRONTIER_BELIEF_GATE` (quality delta 0, p95 +12.6%): deleted `domain/belief_evidence.py` and `services/change_log_provider.py`; removed CurrentnessWarden, `WardenContext.belief_score`, the ContradictionWarden conflict-set branch, and the frontier metadata's `anchor_paths`/`anchor_project` writes (no reader). `domain/git_staleness.py` keeps only `GitChange` and `_parse`.
-- `FRONTIER_EVIDENCE_ANCHOR` (3 of 33,861 entities pass): removed EvidenceAnchorWarden, `WardenContext.support_profile`, the assertion pipeline's `evidence_anchor` kwarg, and SupportProfile / ReinforcementVerdict / assess_reinforcement. Its True fallbacks were unreachable in production. Recall Lab drops arm D.
-- `FRONTIER_SOURCE_MEMORY_POOLS` (indistinguishable from no pools on AMA): deleted `domain/source_memory_pools.py`; removed `SourceMemory.pool_id`/`pool_anchor`, the pool branches in `recall_pipeline` and `context_builder`, and the `pools` parameter on MCP `recall_history`, `POST /recall/history` and the backend layers. Null `pool_id`/`pool_anchor` keys no longer appear; a REST request that still sends `pools` is accepted and ignored.
-- `.env.example`, `.agent/default-off-features.md`, `.agent/endpoints.md` and `.agent/tasks-mcp.md` drop the removed names.
-- Tests: the pools, belief-gate, git-staleness and evidence-anchor tests are deleted with their code; the warden chain pin is now `("scope", "oracle_admission", "contradiction")`.
-- `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
-
-New settings let the cost lanes run on a local OpenAI-compatible server (#399 item 3). With them unset, clients, base URLs, request bodies and the `make_sync_chat` call are unchanged.
-
-- `MENHIR_ANCHORED_TIME_BASE_URL` / `MENHIR_ANCHORED_TIME_API_KEY`: a separate endpoint for the anchored-time resolver and attach check. It requires `MENHIR_ANCHORED_TIME_MODEL` while the resolver is on, so the ingest model name is never sent to another server.
-- `MENHIR_ANCHORED_TIME_EXTRA_BODY` and `MENHIR_PERSONAL_MEMORY_CHAT_EXTRA_BODY`: JSON objects merged into those requests' `extra_body` (e.g. `{"chat_template_kwargs":{"enable_thinking":false}}`). The setting wins over model-profile extras and `disable_reasoning`. A value that is not a JSON object fails at settings load and names the env var.
-- `MENHIR_PERSONAL_MEMORY_CHAT_TIMEOUT_S`: per-request timeout for the personal-memory chat (0, the default, keeps the 30 s `DEFAULT_REQUEST_TIMEOUT_S`). A local model at ~20 tok/s needs minutes per lane call.
-- Tests: `tests/test_local_model_routing_settings.py`.
-
-`.agent/workflows/run_and_test.md` gains the owner's standing benchmark rule: run as parallel as the system can handle within reason (every namespace of a staged fixture at once), and paid runs under $0.25 need no go-ahead when a cost monitor with a manual ceiling covers them.
-
-`uv.lock` upgrades five dependencies with security fixes. The no-publish release image for 9abaa3d1 failed its vulnerability policy on authlib GHSA-6v38-4h7w-rj9h (Critical, published 2026-10-27) and on CPython 3.12.14 in the pinned base (CVE-2026-19445, Critical).
-
-- authlib 1.7.2 to 1.9.1 (also GHSA-8m4g, GHSA-7vr2 High); fastmcp and fastmcp-slim 3.4.4 to 3.4.11 (GHSA-7xgj-8392-5q4r); opentelemetry-api 1.43.0 to 1.45.2 (CVE-2026-114603); dnspython 2.8.0 to 2.9.1 (GHSA-45c3, High). `pyproject.toml` ranges are unchanged.
-- Release image base: `python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159` (Debian 13.7, Python 3.12.16, no Critical findings). Its High findings are 14 Debian OS-package CVEs that Debian marks won't-fix.
-
-Enrichment status of a verbatim-skipped episode follows its evidence projection. A client episode whose text its turn's projection extracts is set READY (`verbatim_skipped`) without extraction while that projection may still be PENDING or ENRICHING, so `get_enrichment_status(wait=True)` could return READY before anything was extracted (E2E `test_e2e_09_scalar_binding_repair` failed on Windows at 9abaa3d1).
-
-- `domain/verbatim_skip_status.py`: `effective_processing_row` reports such a client as the projection's progress while the projection is unfinished, READY with the projection's enriched episode and touch counts once it is READY, and PENDING (`verbatim_skip_projection_lost`) while a FAILED or deleted projection waits for `reenable_verbatim_skips`.
-- `fetch_episode_processing` also returns `extraction_skipped_for` and `skip_projection`; its raw state is unchanged, so lease fences, enqueue/requeue checks and `force_release_lease` still see the client's own row.
-- Status and wait readers use the effective row: `get_enrichment_status`, `watch_enrichment` and `add_memory_and_track` (MCP wait loop), `get_episode_trace`, `wait_for_episode_processing` (REST `POST /memory?wait=true`, `ingest_episode`) and recall's pending-episode wait. `list_enrichment_queue`, the explorer and READY counts still list the client row as READY.
-- Tests: `tests/test_verbatim_skip_status.py`; `tests/test_verbatim_skip_live.py` gains the status read against Neo4j.
-
-`deploy/build_release_image.py --mode verify` works on a Docker host with the containerd image store (Docker 29 default). There `docker image inspect` reports the manifest digest as the image ID and renders the config without the classic store's empty legacy fields, so a correct bundle failed with "loaded image ID does not match validation identity" (E2E-6 container lane, 7030e78f). A loaded ID that is not the recorded config digest is now accepted only when it is the digest of a manifest in the archive's OCI index whose config is the recorded image ID, with the manifest blob hash-checked. Its loaded config must then equal the archive's hash-checked config blob. The classic path still requires the recorded config hash. Tests: `tests/test_build_release_image.py`.
-
-## 2026-10-29 - Anchored-time render removed
-
-`MENHIR_ANCHORED_TIME_RENDER` (default off) showed each fact's persisted anchored-time contract as its event time in recall, context and timeline. Paired A/B on a resolver-on graph of 211 LongMemEval items (78 knowledge-update, 133 temporal-reasoning): off 198/211, on 198/211, flips +4/-4, with render text in 169 contexts (#400). It is removed; the code is kept on `archive/anchored-time-render-2026-10-29`. The anchored-time resolver and its `time_*` edge properties are unchanged.
-
-- Deleted `domain/event_time.py`. `TemporalFact.event_time`, `TimelineFact.event_time` and the matching REST response fields are gone; with the flag off they were always unset and never emitted.
-- `infrastructure/cypher.py`: `FACT_TEMPORAL_FIELDS` no longer projects the nine `time_*` contract columns, which only the renderer read.
-- `infrastructure/memory_queries.py`, `memory_graph_adapter.py`, `services/timeline_service.py`, `core/backend_runtime_data_ops.py`: the timeline `event_time` parameter is gone; the query is the former flag-off text.
-- `services/recall_policies.py`, `recall_pipeline.py`, `context_builder.py`, `mcp/formatters.py`, `explorer/recall_lab.py`: the render branches are gone; flag-off output is unchanged.
-- Settings: `anchored_time_render_enabled` and `RetrievalTuning.enable_anchored_time_render` removed; both names are in `feature_flags.RETIRED`. `.env.example` and `.agent/default-off-features.md` drop the flag.
-- Tests: deleted `tests/test_anchored_time_render.py`, `test_anchored_time_render_review.py`, `test_anchored_time_render_review_r2.py`, and the render cases in `test_anchored_time_state_start.py` and `test_anchored_time_attach_hook.py`. `tests/test_feature_flag_registry.py` checks the retirement.
-- `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
-
-## 2026-10-28 - Context todos are scoped to the caller's namespace and appear again
-
-`build_context` adds up to 3 keyword-matched open todos ("Related open TODOs"). That search never ran: it passed a Cypher parameter named `query`, which collides with `session.run(query, **params)` in `Neo4jClient.execute`, and the raised TypeError was swallowed, so the section was always empty. It also had no namespace filter, so once fixed it would have shown other namespaces' todos (#401).
-
-- `infrastructure/todo_repository.py`: `search_by_query` takes `namespace` and keeps only the caller's namespace plus the default bucket (`None` stays unrestricted), the rule `list_todos` and `get_todo` use. The filter runs in Python like `todo_supersession`'s, so there is no new hand-written tenancy predicate (CF-127 ratchet). Scoped searches read up to 200 matches before filtering. The search parameter is renamed `query_text`.
-- `infrastructure/memory_graph_adapter.py`: `list_todos_matching_query` forwards `namespace`.
-- `services/context_builder.py`: `build_context` passes its `namespace` to the todo search. REST `/api/context`, the MCP `build_context` tool and the hook now show matching todos.
-- `core/backend_runtime_admin_ops.py`: `close_todo` and `delete_todo` call `_require_own_todo`, as supersede/resolve/reopen/link already did. Through `/api/internal/backend/{op}` a client pinned to one namespace could close or delete another namespace's todo by uuid (the MCP `close_todo` tool already checked; the internal ops did not). Unpinned callers are unchanged. Test: new `tests/core/test_todo_close_delete_ownership.py`.
-- Tests: new `tests/test_context_todo_namespace_live.py` (online: namespaces A, B and default; scoped to A shows A and default, never B). `tests/test_todo.py`: namespace scoping tests, and the existing parameter test asserts `query_text` and no `query` key. `tests/test_context_builder.py`: the namespace reaches the todo search.
-- `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
-
-## 2026-10-26 - Episodes over ~8 KB can be written again
-
-Neo4j cannot index a property value over about 8 KB, and `episodic_content_idx` (a RANGE index on `:Episodic(content)`, added 2026-08-18) made every longer episode fail to write; an LME build died on a 9,838-byte episode. Nothing seeks that index any more (its content prefix scan is gone, and text search uses Graphiti's FULLTEXT `episode_content`).
-
-- `infrastructure/schema.py`: the index is no longer created; `RETIRED_INDEXES` lists it and `get_retired_index_queries()` drops it (`DROP INDEX ... IF EXISTS`).
-- `infrastructure/memory_graph_adapter.py`: `retire_obsolete_indexes()` runs those drops and returns failures.
-- `core/bootstrap.py`: `prepare_memory_runtime` runs the drops on every writer start, before the readiness gate, because phase-one bootstrap is skipped on any install whose required indexes are online (every existing graph). A failed drop is logged and reported as `retired_index_failures`; startup continues. Candidate-readonly startup does not drop.
-- Tests: new `tests/test_retired_content_index.py` (unit, plus an online test that reproduces the failed write with the old index and passes after the drop). `tests/test_degraded_startup.py`: its fake adapter gains the new method.
-- `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
-
-## 2026-10-25 - Fact said time drops the Neo4j zone id; freshness A/B numbers corrected
-
-- `services/recall_policies.py`: `said_at` drops a trailing zone id (`2023-11-30T20:25:00Z[UTC]` -> `2023-11-30T20:25:00Z`), as `domain/event_time.py` does for event times. Test: `tests/test_fact_said_time.py`.
-- `CHANGELOG.md`: the freshness gate entry quoted 0.746 for both fixes, measured with the first, broader gate; as shipped it is 0.738 (re-measured).
-- `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).
-
-## 2026-10-25 - View freshness gate and fact statement time, both on by default
-
-o500 (#168): a View kept leading with a stale value when the newer statement was a same-slot occurrence the fold ignores, and fact lines carried only event time, so a later statement about an earlier event read as older. Recall-only o500 A/B (one run per arm): both off 0.712, said time 0.738 (+0.026, paired 95% CI +0.002 to +0.048). A first gate version also demoted on newer statements in other slots of the same subject; E2E-17 showed this is wrong (a newer book count demoted the coin count), and on o500 only 1 of its 15 demotions changed an answer (a win, from a same-slot occurrence), so the shipped gate keeps only the same-slot rule. Re-measured as shipped: gate alone 0.714, gate and said time 0.738; the gate fired once in 500 questions (that win, no losses).
-
-- `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_FRESHNESS_GATE` (new, on; requires scalar view authority): `domain/scalar_view_freshness.py` (new) finds occurrences in the verdict's exact slot with a later `valid_at`. `services/recall_pipeline.py`: a current (not counted) View or expiry verdict with one is advisory instead of leading; `has_foundation` is unchanged and the audit records `stale_by`. Hits kept out of the ranked list still count; occurrences reach recall only with the counting lane on.
-- `MENHIR_FRONTIER_FACT_SAID_TIME` (new, on): fact queries (`infrastructure/cypher.py`, `infrastructure/memory_queries.py`) read the edge `reference_time` as `said_at`; with the flag on, `TemporalFact.said_at`, the API item (`api/routes_support.py`, `mcp/formatters.py`) and the context line (`services/context_builder.py`: `<happened> | said <date> | <fact>`) carry it.
-- `domain/retrieval_tuning.py`, `config/settings_model.py`, `config/feature_flags.py`, `.env.example`: the two settings; the shipped settings default on, the `RetrievalTuningConfig` engine defaults stay off.
-- `docs/agreement-settings.md`, `tests/test_shipped_agreement_profile.py`: the freshness gate in the shipped profile.
-- Tests: new `tests/test_scalar_view_freshness.py`, `tests/test_fact_said_time.py`.
-- `CHANGELOG-archive.md`: the oldest dated entry moved there (10-entry limit).

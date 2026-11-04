@@ -105,6 +105,10 @@ Read the handoff doc before running any of them; they are phases of one experime
 `run_shadow_contrastive_judge_lab.py`. These make real API calls -- check cost before running.
 
 ### Smoke tests
+`falkordblite_compatibility.py` is the opt-in issue #109 storage spike: temporary embedded
+database only, pinned fork, failure injection, search and restart checks. See
+`reference/menhir-falkordblite-compatibility.md` for install pins and the measured no-go result.
+
 `smoke/run_all.py` runs every self-serving smoke. Auth/OAuth: `auth_shapes_smoke.py`,
 `oauth_local_smoke.py`, `auth0_live_smoke.py`. Hook Center: `hook_center_live_smoke.py`,
 `hook_center_stale_lane_smoke.py`. Extraction regressions: `suburbs_extraction_live_smoke.py`,
