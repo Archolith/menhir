@@ -127,6 +127,16 @@ def _isolate_client_restrictions(monkeypatch):
         monkeypatch.setenv(var, "")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_operator_warning_cache():
+    """The FAILED-count snapshot for operator warnings is process-wide; no test may inherit it."""
+    from menhir.core import backend_runtime_admin_ops as admin_ops
+
+    admin_ops._failed_overview_cache = None
+    yield
+    admin_ops._failed_overview_cache = None
+
+
 @pytest.fixture(autouse=True, scope="session")
 def force_all_tests_onto_test_neo4j():
     """SAFETY (2026-07-13): no test may ever connect to the PRODUCTION graph.

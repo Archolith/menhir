@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
+
+logger = logging.getLogger(__name__)
 
 P95_TARGET_ENV = "MENHIR_ENRICHMENT_P95_TARGET_SECONDS"
 DEFAULT_P95_TARGET_S = 120.0
@@ -61,6 +64,33 @@ _USER_OPS = frozenset({
 _SCHEDULER_PREFIX = "scheduler_"
 
 
+async def _warning_section(backend: object) -> list[str]:
+    """The ``### Warnings`` block. Never raises: a malformed entry must not fail the stats call.
+
+    The caller-visible set comes from `_active_operator_warnings`, which drops
+    ``failed_episodes`` for a pinned caller and the acknowledging identity below operator tier.
+    """
+    from menhir.mcp.formatters import _active_operator_warnings
+
+    try:
+        rendered: list[str] = []
+        for w in await _active_operator_warnings(backend):
+            if not isinstance(w, dict):
+                continue
+            if not w.get("acked"):
+                status = "UNACKNOWLEDGED"
+            elif w.get("acked_by"):
+                status = f"acknowledged by {w.get('acked_by')} at {w.get('acked_at')}"
+            else:
+                status = "acknowledged"
+            detail = w.get("summary") or f"{w.get('count', '?')} FAILED episode(s)"
+            rendered.append(f"  {w.get('kind') or '?'}/{w.get('subject') or '?'}: {detail} [{status}]")
+    except Exception:  # noqa: BLE001 - advisory section; the rest of the stats still render
+        logger.debug("could not render operator warnings in get_memory_stats", exc_info=True)
+        return []
+    return ["### Warnings", *rendered, ""] if rendered else []
+
+
 class GetMemoryStatsTool(BaseTextTool):
     name = "get_memory_stats"
     # NAMESPACED as of the owner ruling 2026-08-21 (CF-33 / CF-36).
@@ -108,20 +138,7 @@ class GetMemoryStatsTool(BaseTextTool):
         lines.append("")
 
         # ── Warnings (active, including acknowledged ones) ──
-        from menhir.mcp.formatters import _active_operator_warnings
-
-        active_warnings = await _active_operator_warnings(backend)
-        if active_warnings:
-            lines.append("### Warnings")
-            for w in active_warnings:
-                status = (
-                    f"acknowledged by {w.get('acked_by') or 'unknown'} at {w.get('acked_at')}"
-                    if w.get("acked")
-                    else "UNACKNOWLEDGED"
-                )
-                detail = w.get("summary") or f"{w.get('count', '?')} FAILED episode(s)"
-                lines.append(f"  {w['kind']}/{w['subject']}: {detail} [{status}]")
-            lines.append("")
+        lines.extend(await _warning_section(backend))
 
         # ── Graph Overview ──
         # Labelled with the silo it covers. The sections below are deployment-wide, and saying so
