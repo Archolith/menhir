@@ -236,9 +236,17 @@ the graph yet.
 
 `menhir tool-usage` reports per-tool and per-client MCP call counts from the local telemetry
 sidecar, including registered tools with zero calls, to inform tool-surface pruning. It is read-only
-and needs no running server. Options: `--since-hours N` (default 720), `--by tool|client`, `--json`,
-`--all-operations`. For a hosted deployment run it inside the app container, e.g.
-`docker exec <app container> menhir tool-usage`.
+and needs no running server. Options: `--since-hours N` (default 720, at most 87600 = 10 years),
+`--by tool|client`, `--json`, `--all-operations`. Only `kind = tool` events count towards a
+registered tool; `--all-operations` lists everything else that was recorded, with its kind. For a
+hosted deployment run it inside the app container, e.g. `docker exec <app container> menhir tool-usage`.
+
+"No calls" only means "no calls recorded". The sidecar prunes `mcp_events` after
+`MENHIR_TELEMETRY_OBSERVABILITY_RETENTION_DAYS` (default 30 days), and a new or recently reset
+database has little history. When the requested window starts before the oldest recorded event, the
+text summary says where the history actually begins. Read the report only as far back as that.
+Failures (missing, locked, unreadable or not-yet-migrated database) print one line to stderr and
+exit 1, so `--json` output on stdout is always either the report or empty.
 
 ## 6. Give agents the operating contract
 
