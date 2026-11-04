@@ -58,6 +58,7 @@ AGENT_ALLOWED_TOOLS = frozenset(
 )
 OPERATOR_REQUIRED_TOOLS = frozenset(
     {
+        "acknowledge_warning",
         "get_provenance",
         "get_episode_trace",
         "ingest_document",

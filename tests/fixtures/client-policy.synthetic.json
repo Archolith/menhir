@@ -39,10 +39,11 @@
       }
     }
   },
-  "canonical_digest": "ac4bd7c8799200f73485e5ce7b2379b871baa091ad040824d3dba9fb5e15dfcd",
+  "canonical_digest": "a877ea1ed61cde050c9f78e15ca66818d028e0487ac5a1989db2868028c10746",
   "clients": {
     "example-chatgpt-web": {
       "allowed_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory",
         "add_memory_and_track",
@@ -127,6 +128,7 @@
     },
     "example-claude-web": {
       "allowed_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory",
         "add_memory_and_track",
@@ -220,6 +222,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory",
         "add_memory_and_track",
@@ -289,6 +292,7 @@
     },
     "https://chatgpt.com/oauth/client.json": {
       "allowed_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory",
         "add_memory_and_track",
@@ -383,6 +387,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory_and_track",
         "audit_artifact_corpus",
@@ -442,6 +447,7 @@
     },
     "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=claude": {
       "allowed_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory",
         "add_memory_and_track",
@@ -536,6 +542,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory_and_track",
         "audit_artifact_corpus",
@@ -595,6 +602,7 @@
     },
     "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=codex": {
       "allowed_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory",
         "add_memory_and_track",
@@ -689,6 +697,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory_and_track",
         "audit_artifact_corpus",
@@ -765,6 +774,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory_and_track",
         "audit_artifact_corpus",
@@ -841,6 +851,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory_and_track",
         "audit_artifact_corpus",
@@ -917,6 +928,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory_and_track",
         "audit_artifact_corpus",
@@ -993,6 +1005,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory_and_track",
         "audit_artifact_corpus",
@@ -1052,6 +1065,7 @@
     },
     "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=wsl-claude": {
       "allowed_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory",
         "add_memory_and_track",
@@ -1146,6 +1160,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory_and_track",
         "audit_artifact_corpus",
@@ -1222,6 +1237,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory_and_track",
         "audit_artifact_corpus",

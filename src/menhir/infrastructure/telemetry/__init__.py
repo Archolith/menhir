@@ -33,6 +33,15 @@ def enable_llm_usage_telemetry() -> None:
 
     set_default_llm_usage_callback(lambda event: record_llm_usage_event(event=event))
 
+
+def enable_operator_warning_persistence() -> None:
+    """Persist provider auth/billing failures so they survive restarts and can be acknowledged."""
+
+    from menhir.infrastructure.observability import set_provider_warning_sink
+    from menhir.infrastructure.telemetry.operator_warnings_store import OperatorWarningSink
+
+    set_provider_warning_sink(OperatorWarningSink())
+
 __all__ = [
     "build_episode_task_id",
     "McpTelemetryStore",
@@ -50,4 +59,5 @@ __all__ = [
     "record_memory_revision",
     "record_merge",
     "enable_llm_usage_telemetry",
+    "enable_operator_warning_persistence",
 ]

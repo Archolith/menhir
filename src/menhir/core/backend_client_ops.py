@@ -576,6 +576,17 @@ class BackendClientOpsMixin:
     async def fetch_memory_overview(self, namespace: str | None = None) -> dict[str, Any]:
         return await self._request("fetch_memory_overview", {"namespace": namespace})
 
+    async def get_operator_warnings(self) -> dict[str, Any]:
+        return await self._request("get_operator_warnings")
+
+    async def acknowledge_operator_warning(
+        self, kind: str, subject: str = "", actor: str = ""
+    ) -> dict[str, Any]:
+        return await self._request(
+            "acknowledge_operator_warning",
+            {"kind": kind, "subject": subject, "actor": actor},
+        )
+
     async def circuit_breaker_snapshots(self) -> dict[str, dict[str, Any]]:
         return await self._request("circuit_breaker_snapshots")
 

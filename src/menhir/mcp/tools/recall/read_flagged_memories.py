@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from menhir.domain.bootstrap_scope import bootstrap_selection
 from menhir.domain.structural_memory import is_structural_memory_row
-from menhir.mcp.formatters import _compact_memory_item, _normalize_reader_id
+from menhir.mcp.formatters import (
+    _compact_memory_item,
+    _normalize_reader_id,
+    session_start_warning_lines,
+)
 from menhir.mcp.lifecycle import _remember_flagged_bootstrap_read
 from menhir.mcp.tools.base import BaseJsonTool
 from menhir.mcp.contracts import ToolScope
@@ -80,6 +84,7 @@ class ReadFlaggedMemoriesTool(BaseJsonTool):
         _remember_flagged_bootstrap_read(
             normalized_reader_id, flagged_version, workspace=ws, namespace=ns
         )
+        operator_warnings = await session_start_warning_lines(backend)
         return self.render_recall_json(
             {
                 "reader_id": normalized_reader_id,
@@ -88,5 +93,6 @@ class ReadFlaggedMemoriesTool(BaseJsonTool):
                 "flagged_version": flagged_version,
                 "flagged_count": len(rows),
                 "items": [_compact_memory_item(row, tag="flagged") for row in rows],
+                **({"operator_warnings": operator_warnings} if operator_warnings else {}),
             }
         )

@@ -169,7 +169,7 @@ def classify_enrichment_failure(error: object | None, *, error_type: object | No
     ):
         return "manual_review"
 
-    # Billing state (429 insufficient_quota): never retryable, and must not hit the "429" marker.
+    # Billing state (HTTP 402, or insufficient_quota 429): never retryable, and must not hit the "429" marker.
     # Exceptions are matched through their cause chain; persisted text by reason code/provider code.
     quota_text = _normalize_error_text(error)
     if (

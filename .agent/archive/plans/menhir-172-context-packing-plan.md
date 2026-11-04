@@ -1,10 +1,12 @@
 ---
 artifact_schema: 1
 artifact_type: plan
-artifact_status: ACTIVE
+artifact_status: IMPLEMENTED
 ---
 
 # menhir -- #172 build_context packing: declare tiktoken, skip oversized memories
+
+**Disposition:** IMPLEMENTED by merged PR #211 (`2132c4d4`); issue #172 closed as completed 2026-11-01 (remaining work tracked in #345). Retained as the historical work package.
 
 Project Scope: `Archolith/menhir`, worktree `C:/Users/thron/IdeaProjects/.agent/worktrees/menhir-172-context`,
 branch `fix/172-context-packing`, base `origin/main` `1f6eb392`. Nothing outside this worktree.

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-#: Hard-open cooldown after insufficient_quota: one half-open probe per hour, not per 30 s.
+#: Hard-open cooldown after a billing refusal (402, or insufficient_quota 429): one half-open probe per hour, not per 30 s.
 QUOTA_COOLDOWN_SECONDS = 3600.0
 
 
@@ -245,7 +245,7 @@ class CircuitBreaker:
                     )
                     logger.warning(
                         "Circuit breaker %s hard-open: %s (next probe in %.0fs)",
-                        self.name, QUOTA_REASON_CODE, QUOTA_COOLDOWN_SECONDS,
+                        self.name, quota_error, QUOTA_COOLDOWN_SECONDS,
                     )
                 elif should_trip_circuit(exc):
                     self._failures += 1

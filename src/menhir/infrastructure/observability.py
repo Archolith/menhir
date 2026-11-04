@@ -311,6 +311,11 @@ def complete_llm_usage_call(
 ) -> None:
     clear_provider_auth_failure()
     clear_provider_quota_exhaustion(handle.kind)
+    # Per kind, not every subject: with separate chat and embedding providers, a chat success
+    # says nothing about the embedding credential, and resolving it re-opened the row as a
+    # new incident on the next embedding failure, so an ack could never hold (#488 F3).
+    _notify_provider_warning("resolve", "provider_auth", handle.kind)
+    _notify_provider_warning("resolve", "provider_billing", handle.kind)
     try:
         normalized = _normalized_usage(usage if usage is not None else _value(result, "usage"))
         service_tier = _value(result, "service_tier") if result is not None else None
@@ -345,6 +350,29 @@ def complete_llm_usage_call(
             duration_ms=int((perf_counter() - handle.started_at) * 1000),
             report_only=handle.report_only,
         )
+
+
+#: Serve-only sink with ``record(kind, subject)`` / ``resolve(kind, subject|None)``. None keeps
+#: the in-memory-only behaviour (CLI, bridge processes, tests).
+_provider_warning_sink: Any = None
+
+
+def set_provider_warning_sink(sink: Any) -> None:
+    global _provider_warning_sink
+    _provider_warning_sink = sink
+
+
+def _notify_provider_warning(action: str, kind: str, subject: str | None) -> None:
+    sink = _provider_warning_sink
+    if sink is None:
+        return
+    try:
+        if action == "record":
+            sink.record(kind, subject or "")
+        else:
+            sink.resolve(kind, subject)
+    except Exception:  # noqa: BLE001 - never raised into the LLM call path
+        logger.warning("operator warning sink failed (%s %s)", action, kind, exc_info=True)
 
 
 @dataclass(frozen=True)
@@ -402,6 +430,7 @@ def record_provider_auth_failure(handle: LLMCallHandle, error: BaseException) ->
         at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         detail=detail,
     )
+    _notify_provider_warning("record", "provider_auth", handle.kind)
 
 
 def clear_provider_auth_failure() -> None:
@@ -417,16 +446,18 @@ def last_provider_auth_failure() -> ProviderAuthFailure | None:
 
 @dataclass(frozen=True)
 class ProviderQuotaExhaustion:
-    """The most recent insufficient_quota 429 from an LLM provider, process-wide."""
+    """The most recent billing refusal (HTTP 402, or a billing-coded 429/4xx) from an LLM provider, process-wide."""
 
     kind: str
     endpoint: str | None
     model: str | None
     at: str  # ISO-8601 UTC
+    status: int | None = None
 
     def summary(self) -> str:
+        status = f" (HTTP {self.status})" if self.status is not None else ""
         return (
-            f"provider_quota_exhausted: the LLM provider returned 429 insufficient_quota at "
+            f"provider_quota_exhausted: the LLM provider refused for billing{status} at "
             f"{self.at} on {self.endpoint or self.kind}{f' ({self.model})' if self.model else ''}"
         )
 
@@ -434,7 +465,7 @@ class ProviderQuotaExhaustion:
 _provider_quota_exhaustion: ProviderQuotaExhaustion | None = None
 
 
-def record_provider_quota_exhaustion(handle: LLMCallHandle) -> None:
+def record_provider_quota_exhaustion(handle: LLMCallHandle, status: int | None = None) -> None:
     global _provider_quota_exhaustion
     from datetime import datetime, timezone
 
@@ -443,7 +474,9 @@ def record_provider_quota_exhaustion(handle: LLMCallHandle) -> None:
         endpoint=handle.endpoint,
         model=handle.model,
         at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        status=status,
     )
+    _notify_provider_warning("record", "provider_billing", handle.kind)
 
 
 def clear_provider_quota_exhaustion(kind: str | None = None) -> None:
@@ -460,8 +493,9 @@ def last_provider_quota_exhaustion() -> ProviderQuotaExhaustion | None:
 def fail_llm_usage_call(handle: LLMCallHandle, error: BaseException) -> None:
     if is_provider_auth_error(error):
         record_provider_auth_failure(handle, error)
-    if find_quota_exhaustion(error) is not None:
-        record_provider_quota_exhaustion(handle)
+    quota_error = find_quota_exhaustion(error)
+    if quota_error is not None:
+        record_provider_quota_exhaustion(handle, quota_error.status_code)
     _emit_llm_usage_event(
         handle.kind,
         phase="failed",

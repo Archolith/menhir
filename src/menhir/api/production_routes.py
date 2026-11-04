@@ -6,6 +6,7 @@ import base64
 import asyncio
 import hmac
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -15,9 +16,12 @@ from fastapi.responses import JSONResponse
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from menhir import __version__
 from menhir.api.oauth import JWKS_REFRESH_STATS
+from menhir.mcp.served_metadata import release_commit, served_mcp_metadata_digest
 
 
+_LOG = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -72,6 +76,13 @@ async def readyz(request: Request) -> JSONResponse:
             failures.append("sole_writer_scheduler_unavailable")
 
     ready = not failures
+    try:
+        mcp_digest = await served_mcp_metadata_digest(
+            getattr(request.app.state, "mcp_http_instance", None)
+        )
+    except Exception as exc:  # diagnostic only; never affects readiness
+        _LOG.warning("readyz mcp metadata digest unavailable: %s", type(exc).__name__)
+        mcp_digest = "unavailable"
     return JSONResponse(
         status_code=200 if ready else 503,
         content={
@@ -84,6 +95,12 @@ async def readyz(request: Request) -> JSONResponse:
             "failures": failures,
             # Diagnostic only; never affects readiness. Counts are per process.
             "oauth_jwks": JWKS_REFRESH_STATS.snapshot(),
+            # Diagnostic only; never affects readiness or the status code.
+            "build": {
+                "version": __version__,
+                "commit": release_commit(),
+                "mcp_metadata_sha256": mcp_digest,
+            },
         },
     )
 

@@ -629,7 +629,8 @@ class HealthResponse(BaseModel):
     # Set when the LLM provider has rejected our credentials since the last successful
     # call: a server can be "ok" and "full" and still unable to enrich anything.
     provider_auth_failure: str | None = None
-    # Set after an insufficient_quota 429 until a call of that kind succeeds: enrichment cannot
+    # Set after a billing refusal (HTTP 402 or insufficient_quota 429) until a call of that kind
+    # succeeds: enrichment cannot
     # progress until credits are added, so a polling driver should stop instead of waiting.
     provider_quota_exhausted: str | None = None
     startup_mode: str | None = None
@@ -810,6 +811,8 @@ _BACKEND_METHODS = {
     "fetch_recent_lifecycle_events",
     "record_conflict_resolution",
     "fetch_memory_overview",
+    "get_operator_warnings",
+    "acknowledge_operator_warning",
     "circuit_breaker_snapshots",
     "embedding_cache_stats",
     "get_provider_config",
@@ -860,6 +863,7 @@ _OP_TIER_OPERATOR = {
     "scheduler_force_takeover", "scheduler_pause", "scheduler_resume",
     "promote_candidate", "reject_candidate", "approve_candidate",
     "promote_memory",
+    "acknowledge_operator_warning",
     # CF-257 phase 0. Raised from agent tier. This op writes a structure payload the CALLER
     # produced, and judges it using a `root_path` the same caller supplied -- so the server
     # classifies a path string, never the directory that actually produced the payload. A remote

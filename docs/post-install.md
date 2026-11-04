@@ -103,7 +103,7 @@ Keep configuration and verified data backups for a separately approved deploymen
 weekday, status, boolean) are English patterns, and values stored before 0.3.1 are not rechecked
 (#411; see
 [source grounding by scalar kind](personal-memory-readiness.md#known-limitation-source-grounding-by-scalar-kind)).
-Deleting or erasing a memory keeps the entities and fact edges extracted from it (#417; see
+Deleting or erasing a memory keeps the entities and fact edges extracted from it (#423; see
 [erasure](personal-memory-readiness.md#known-limitation-erasure-keeps-extracted-knowledge)).
 
 ## 1b. Or do it in one step
@@ -231,6 +231,22 @@ Plain `menhir sync` (no `--check`) builds the same plan and **uploads** it to
 when `MENHIR_SNAPSHOT_RECEIVE_MODE` is set (default off, which leaves the receive tools
 unregistered). An accepted upload is only staged on the server: nothing is extracted or written to
 the graph yet.
+
+## 5c. Which tools are actually used (`menhir tool-usage`)
+
+`menhir tool-usage` reports per-tool and per-client MCP call counts from the local telemetry
+sidecar, including registered tools with zero calls, to inform tool-surface pruning. It is read-only
+and needs no running server. Options: `--since-hours N` (default 720, at most 87600 = 10 years),
+`--by tool|client`, `--json`, `--all-operations`. Only `kind = tool` events count towards a
+registered tool; `--all-operations` lists everything else that was recorded, with its kind. For a
+hosted deployment run it inside the app container, e.g. `docker exec <app container> menhir tool-usage`.
+
+"No calls" only means "no calls recorded". The sidecar prunes `mcp_events` after
+`MENHIR_TELEMETRY_OBSERVABILITY_RETENTION_DAYS` (default 30 days), and a new or recently reset
+database has little history. When the requested window starts before the oldest recorded event, the
+text summary says where the history actually begins. Read the report only as far back as that.
+Failures (missing, locked, unreadable or not-yet-migrated database) print one line to stderr and
+exit 1, so `--json` output on stdout is always either the report or empty.
 
 ## 6. Give agents the operating contract
 

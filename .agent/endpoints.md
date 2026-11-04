@@ -185,8 +185,6 @@ Queue a memory for enrichment. Use this to remember facts, preferences, decision
 - **`role`** (str, optional): Speaker of `text`, exactly one of `user`, `assistant`, `tool`, `agent`, `system`. Same contract as `POST /api/memory` `role`; a matching linked turn evidence overrides it. An invalid value returns `Cannot store memory: invalid role ...` and nothing is written. Checked on every path, but has no effect for `type="TEMPORAL"` with `valid_at` (no extraction).
 - Response now appends a one-line queue snapshot: `queue_depth`, current `active_enriching` count, and scheduler state.
 
-**Gateway alias behavior**: `memory_gateway(action="add_memory", payload_json='{"text":"..."}')` accepts `text` (preferred), `content`, or `summary` for the memory content field.
-
 ### `add_memory_and_track`
 Concept id: `mcp.tool.add_memory_and_track`
 
@@ -402,6 +400,18 @@ enrichment already leased by a worker continues to completion. Use `resume_sched
 restart the loop.
 - Returns scheduler state after pause (`was_running`, `scheduler_running`, `lease_acquired`).
 
+### `acknowledge_warning`
+Concept id: `mcp.tool.acknowledge_warning`
+Required tier: `operator`
+
+Silence an operator warning (`provider_auth`, `provider_billing` or `failed_episodes`) in
+`add_memory`, `add_memory_and_track`, `recall_context_memories`, `read_flagged_memories` and
+`build_context` output. The ack covers the current incident only: a provider warning comes back
+after the condition clears and recurs, and `failed_episodes` comes back when an episode fails
+after the ack. `get_memory_stats` keeps listing acknowledged warnings while they are active.
+- `subject`: LLM call kind (`chat`, `embedding`, `response`) for provider kinds; empty acks all.
+- Returns what was acknowledged, or that nothing was active.
+
 ### `resume_scheduler`
 Concept id: `mcp.tool.resume_scheduler`
 Required tier: `operator`
@@ -447,7 +457,6 @@ Search memories by semantic similarity. Returns ranked results with relevance sc
 - **`file_context`** (str, optional): File path whose structural neighborhood should inject linked semantic candidates.
 - **`file_context_project`** (str, optional): Optional project disambiguation for `file_context`.
 - **`trace`** (bool, optional): Observe-only diagnostics. On the default fused path, records BM25 and cosine ranks without changing returned ordering; failures are warnings, not recall failures.
-- Gateway alias: `memory_gateway(action="search", payload_json="{...}")` dispatches to the same behavior as `action="recall"`.
 - Returns compact JSON with top results, short summaries, a compact score breakdown (`sim`, `adj`, `rec`, `prom`), and explicit `retrieval_score`, `retrieval_score_kind`, and `relevance_basis`. Legacy `relevance` is retained and explicitly labeled unvalidated.
 
 ### `recall_history`
@@ -888,6 +897,7 @@ Concept id: `mcp.tool.get_memory_stats`
 Return operational health summary for the memory system.
 - **`since_hours`** (int, optional): Lookback window in hours (default: 24).
 - Returns 6 sections: ingestion rate, recall latency (p50/p95), failure summary, enrichment queue depth, circuit breaker state, and lifecycle summary.
+- The enrichment p95 is graded against `MENHIR_ENRICHMENT_P95_TARGET_SECONDS` (default 120; `0` turns the grade off). 120 s comes from the Phase 2b enrichment SLO (CHANGELOG 2026-03-29: "95% of episodes READY within 120s", a spot-check on the live Neo4j + llama.cpp stack in `post-v1-todo.md`); it isn't derived from a measured baseline and assumes no particular model or provider. Set it to your own measured p95 plus headroom.
 
 ### `view_entropy`
 Concept id: `mcp.tool.view_entropy`

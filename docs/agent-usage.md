@@ -19,7 +19,8 @@ Every MCP client receives a short version of this contract as the server instruc
    could change the work, especially when the repository and its Git history do not record the rationale.
    Start with one focused query naming the component and the decision, and rephrase only if evidence is
    missing. Pass `file_context` and `file_context_project` for code-related questions. Recall returns
-   summaries and facts; read the linked source excerpts with `get_provenance(node_uuid=...)` when wording or
+   summaries and facts, plus a separate `source_memories` section of raw source episodes by default; read
+   the linked source excerpts with `get_provenance(node_uuid=...)` when wording or
    rationale matters, and distinguish recorded reasons from inference. When the question needs how
    something changed, the sequence of states, or what it was before, follow with `recall_history`
    (time-ordered matching memories, oldest first).
@@ -29,6 +30,15 @@ Every MCP client receives a short version of this contract as the server instruc
    records retrieval quality; it does not alter memory ranking.
 7. At the end of meaningful work, store durable lessons with `add_memory`. Attach a bounded Git diff when
    code paths matter. Record remaining work as a todo with a repository-relative code reference.
+
+### Compact recall for chat clients
+
+By default a recall response includes up to 10 raw source memories of up to 2000 characters each; these are
+deployment defaults (`MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT`, `MENHIR_FRONTIER_SOURCE_MEMORY_MAX_CHARS`). Chat
+clients with tight context can set `MENHIR_RECALL_COMPACT=1` on the server, or pass `compact=true` per call.
+Compact mode drops per-item breakdowns and asks for at most 5 source memories, never more than the
+deployment default. An explicit `source_memory_limit` keeps its count and only the 1000-character cut
+applies. Cut entries end in "…" and carry `truncated: true`. Pass `compact=false` to get the full form.
 
 ## Write discipline
 
@@ -184,6 +194,20 @@ after it republishes even though the scan fingerprint is unchanged.
 - If recall marks a file anchor stale, inspect the current file before acting on the memory.
 - If tool discovery is incomplete, use the MCP client's tool discovery mechanism instead of inventing a
   tool name or argument.
+
+## After a server deploy
+
+- A Menhir started with `MENHIR_STARTUP_SCOPE=production` reports `build.version`, `build.commit`, and
+  `build.mcp_metadata_sha256` on `/readyz`. Other startup scopes do not serve `/readyz`.
+- After a deploy, run `python scripts/release/check_served_metadata.py <base-url>` (add
+  `--expect-commit <sha>`) to confirm the server serves the instructions and tools this package expects.
+  The script is not in the wheel: run it from a checkout with menhir installed at the version the
+  server should run, since it computes the expected digest locally. If the server runs with snapshot
+  receive mode on, pass the same mode with `--snapshot-mode`. Exit codes: 0 match, 1 a compared field
+  differs, 2 the check could not be made.
+- MCP clients read server instructions and the tool list when they connect, so they pick up changes only
+  after reconnecting. `/clear` in Claude Code does not reconnect; restart the session or reconnect the MCP
+  server.
 
 ## Ready-to-copy default
 

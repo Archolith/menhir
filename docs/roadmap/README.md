@@ -2,7 +2,7 @@
 
 Build-sequencing and strategic-direction notes. Grouped by altitude so it's clear what authorizes implementation and what is a proposal. None of the proposals or strategic notes is a ladder rung by itself — the dependency-ordered build order lives in [`../../.agent/plans/menhir-research-execution-ladder.md`](../../.agent/plans/menhir-research-execution-ladder.md).
 
-The 0.3.0 MVP release is governed by [`../../.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`](../../.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md) and [tracker #123](https://github.com/Archolith/menhir/issues/123). Nothing below is part of that scope unless the release plan says so.
+The 0.3.0 MVP release is governed by [`../../.agent/archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md`](../../.agent/archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md) and [tracker #123](https://github.com/Archolith/menhir/issues/123). Nothing below is part of that scope unless the release plan says so.
 
 ## Superseded and historical
 
