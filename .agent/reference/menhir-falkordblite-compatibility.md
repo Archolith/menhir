@@ -84,6 +84,10 @@ Mapping those callbacks to FalkorDriverSession.execute_write changes their failu
 
 ## Still unqualified from #109
 
+Future implementation gates are indexed in [the memory backlog](../memory-backlog.md#memorybacklogembedded_graph).
+The [Archolith FalkorDBLite fork](https://github.com/Archolith/falkordblite) owns the separate
+Windows portability investigation; adding Windows binaries will not resolve the transaction blocker.
+
 No runtime adapter was introduced. Menhir `add_memory`, actual enrichment, full namespace and
 uniqueness invariants, projection-lifecycle concurrency/atomicity, saga/retry safety, Menhir-native
 schema readiness and representative backup/export remain **NOT RUN**. Related issue #258's

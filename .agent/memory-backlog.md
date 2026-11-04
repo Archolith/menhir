@@ -18,6 +18,23 @@ This file covers:
 
 ## Sections
 
+### `memory.backlog.embedded_graph`
+
+- Owner: [issue #109](https://github.com/Archolith/menhir/issues/109); first-run experience: #461.
+- Evidence: [2026-11-04 FalkorDBLite compatibility spike](reference/menhir-falkordblite-compatibility.md).
+  Persistence and Graphiti search primitives passed on Linux. Callback failures and Redis MULTI/EXEC
+  retained partial mutations; the current driver mapping cannot preserve Menhir's explicit rollback contract.
+- Before an adapter refactor, demonstrate how each projection/structure publication transaction preserves
+  its invariants, including Python validation, concurrency, failure and ambiguous-commit behavior.
+  A single-query rewrite is an open design option, not a verified fix.
+- Qualify Neo4j-specific schema, identity, vector and temporal query variants, then the complete #109
+  end-to-end checklist. Include non-Neo4j stale-save expiry protection from #258.
+- Native Windows is a separate gate. Linux in Docker/WSL does not establish native support.
+  The [Archolith FalkorDBLite fork](https://github.com/Archolith/falkordblite) investigates packaging,
+  process lifecycle and native Redis/FalkorDB module portability; see its
+  [Windows assessment](https://github.com/Archolith/falkordblite/blob/docs/windows-feasibility/docs/windows-support.md).
+  Keep Neo4j supported meanwhile.
+
 ### `memory.backlog.open_questions`
 - source sections: `Open Questions`
 - use for:
