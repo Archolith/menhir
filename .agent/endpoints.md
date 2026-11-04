@@ -877,7 +877,7 @@ Concept id: `mcp.tool.get_memory_stats`
 Return operational health summary for the memory system.
 - **`since_hours`** (int, optional): Lookback window in hours (default: 24).
 - Returns 6 sections: ingestion rate, recall latency (p50/p95), failure summary, enrichment queue depth, circuit breaker state, and lifecycle summary.
-- The enrichment p95 is graded against `MENHIR_ENRICHMENT_P95_TARGET_SECONDS` (default 120; `0` turns the grade off). 120 s is the 2026-04 operator target (95% of episodes READY within two minutes on a hosted model); it isn't derived from a measured baseline. Set it to your own measured p95 plus headroom, or 0 to turn the grade off, especially on local inference.
+- The enrichment p95 is graded against `MENHIR_ENRICHMENT_P95_TARGET_SECONDS` (default 120; `0` turns the grade off). 120 s comes from the Phase 2b enrichment SLO (CHANGELOG 2026-03-29: "95% of episodes READY within 120s", a spot-check on the live Neo4j + llama.cpp stack in `post-v1-todo.md`); it isn't derived from a measured baseline and assumes no particular model or provider. Set it to your own measured p95 plus headroom.
 
 ### `view_entropy`
 Concept id: `mcp.tool.view_entropy`
