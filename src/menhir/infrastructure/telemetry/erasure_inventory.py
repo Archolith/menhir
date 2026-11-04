@@ -340,6 +340,17 @@ NON_CONTENT_COLUMNS: frozenset[tuple[str, str]] = frozenset(
         # Token counter and provider tier identifier (shape-checked); no content.
         ("llm_usage_events", "cache_write_input_tokens"),
         ("llm_usage_events", "service_tier"),
+        # operator_warnings -- warning kind, LLM call kind, state, timestamps and the acknowledging
+        # client name (server-side identity); no user or memory content.
+        ("operator_warnings", "kind"),
+        ("operator_warnings", "subject"),
+        ("operator_warnings", "state"),
+        ("operator_warnings", "first_seen_at"),
+        ("operator_warnings", "last_seen_at"),
+        ("operator_warnings", "acked_at"),
+        ("operator_warnings", "acked_by"),
+        ("operator_warnings", "ack_watermark"),
+        ("operator_warnings", "resolved_at"),
         # lifecycle_events
         ("lifecycle_events", "recorded_at"),
         ("lifecycle_events", "phase"),

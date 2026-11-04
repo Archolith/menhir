@@ -13,7 +13,11 @@ from menhir.config import MemorySettings
 from menhir.core import build_memory_services, prepare_memory_runtime
 from menhir.core.runtime_preflight import collect_runtime_capabilities
 from menhir.domain import new_session
-from menhir.infrastructure.telemetry import enable_llm_usage_telemetry, record_lifecycle_event
+from menhir.infrastructure.telemetry import (
+    enable_llm_usage_telemetry,
+    enable_operator_warning_persistence,
+    record_lifecycle_event,
+)
 from menhir.infrastructure.view_embedder import make_view_embedder, view_embedder_version
 from menhir.services import MaintenanceScheduler
 from menhir.services.embedding_identity import embedder_model_name
@@ -676,6 +680,7 @@ async def _initialize_services(
     settings = settings or MemorySettings.from_env()
     if not candidate_readonly:
         enable_llm_usage_telemetry()
+        enable_operator_warning_persistence()
 
     # The venv-path guard is auto-scoped by preflight (venv_guard_applies): enforced
     # only for a source checkout that carries its own .venv, skipped for pip/pipx/

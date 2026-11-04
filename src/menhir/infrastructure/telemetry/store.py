@@ -26,10 +26,17 @@ from menhir.infrastructure.telemetry.helpers import (
     connect_telemetry_db,
     default_telemetry_db_path,
 )
-from menhir.infrastructure.telemetry.lifecycle_store import TelemetryLifecycleStoreMixin
+from menhir.infrastructure.telemetry.lifecycle_store import (
+    TelemetryLifecycleStoreMixin,
+    initialize_lifecycle_schema,
+)
 from menhir.infrastructure.telemetry.llm_usage_store import (
     TelemetryLLMUsageStoreMixin,
     initialize_llm_usage_schema,
+)
+from menhir.infrastructure.telemetry.operator_warnings_store import (
+    TelemetryOperatorWarningsMixin,
+    initialize_operator_warnings_schema,
 )
 from menhir.infrastructure.telemetry.recall_store import TelemetryRecallStoreMixin
 
@@ -40,6 +47,7 @@ class McpTelemetryStore(
     TelemetryLifecycleStoreMixin,
     TelemetryRecallStoreMixin,
     TelemetryLLMUsageStoreMixin,
+    TelemetryOperatorWarningsMixin,
 ):
     """Append-only SQLite store for MCP latency and outcome tracking."""
 
@@ -164,70 +172,8 @@ class McpTelemetryStore(
                     """
                 )
                 initialize_llm_usage_schema(conn)
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS lifecycle_events (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        recorded_at TEXT NOT NULL,
-                        phase TEXT NOT NULL,
-                        event TEXT NOT NULL,
-                        status TEXT NOT NULL,
-                        episode_uuid TEXT,
-                        details_json TEXT
-                    )
-                    """
-                )
-                conn.execute(
-                    """
-                    CREATE INDEX IF NOT EXISTS idx_lifecycle_events_phase_recorded
-                    ON lifecycle_events (phase, recorded_at)
-                    """
-                )
-                lifecycle_columns = {
-                    row[1]
-                    for row in conn.execute(
-                        "PRAGMA table_info(lifecycle_events)"
-                    ).fetchall()
-                }
-                if "episode_uuid" not in lifecycle_columns:
-                    conn.execute(
-                        "ALTER TABLE lifecycle_events ADD COLUMN episode_uuid TEXT"
-                    )
-                conn.execute(
-                    """
-                    CREATE INDEX IF NOT EXISTS idx_lifecycle_events_episode_recorded
-                    ON lifecycle_events (episode_uuid, recorded_at)
-                    """
-                )
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS lifecycle_actions (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        recorded_at TEXT NOT NULL,
-                        action TEXT NOT NULL,
-                        node_uuid TEXT NOT NULL,
-                        session_id TEXT,
-                        trigger TEXT NOT NULL,
-                        before_freshness TEXT,
-                        after_freshness TEXT,
-                        llm_used INTEGER,
-                        duration_ms INTEGER,
-                        notes TEXT
-                    )
-                    """
-                )
-                conn.execute(
-                    """
-                    CREATE INDEX IF NOT EXISTS idx_lifecycle_actions_node
-                    ON lifecycle_actions(node_uuid, recorded_at DESC)
-                    """
-                )
-                conn.execute(
-                    """
-                    CREATE INDEX IF NOT EXISTS idx_lifecycle_actions_action
-                    ON lifecycle_actions(action, recorded_at DESC)
-                    """
-                )
+                initialize_operator_warnings_schema(conn)
+                initialize_lifecycle_schema(conn)
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS memory_revisions (

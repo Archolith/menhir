@@ -21,6 +21,7 @@ from menhir.mcp.tools.ops.recover_orphans import RecoverOrphansTool
 # assert cannot see any of them regress by deletion. Equality asserts both that
 # nothing expected was dropped and that nothing was added without updating this list.
 EXPECTED_TOOL_NAMES = frozenset({
+    "acknowledge_warning",
     "add_candidate",
     "add_memory",
     "add_memory_and_track",
