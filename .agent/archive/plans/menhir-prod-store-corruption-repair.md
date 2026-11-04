@@ -1,7 +1,8 @@
 # Plan: menhir prod Neo4j store corruption - diagnosis and validated repair
 
-Status: DIAGNOSIS COMPLETE / REPAIR VALIDATED ON COPY / NOT YET APPLIED TO PROD
-**Last verified:** 2026-08-18 — NOT VERIFIABLE OFFLINE — treat as LIVE. Status says the repair is validated on a copy but NOT YET APPLIED TO PROD, and nothing in this workspace can confirm prod Neo4j state (bolt://192.168.86.33:7687). The only mentions of `property record id:964518 / owner NODE:-1` are inside this plan. Someone must check prod directly before this is closed.
+Status: RESOLVED (2026-07-25, section 9): the repaired snapshot was migrated off the faulty host instead of repairing in place.
+**Disposition (2026-11-02):** resolved. Section 9 records the migration of the repaired store to healthy hardware, and on 2026-11-03 full `:Entity` scans ran without error on the current production store (`menhir-prod-neo4j`, Neo4j 5.26.30 on the VPS) during the embedding health check. Workspace TODO 8bac8d81 closed. The 2026-08-18 stamp below predates noticing section 9.
+**Previously verified:** 2026-08-18 — NOT VERIFIABLE OFFLINE — treat as LIVE. Status says the repair is validated on a copy but NOT YET APPLIED TO PROD, and nothing in this workspace can confirm prod Neo4j state (bolt://192.168.86.33:7687). The only mentions of `property record id:964518 / owner NODE:-1` are inside this plan. Someone must check prod directly before this is closed.
 
 Date: 2026-07-25
 Prod: bolt://192.168.86.33:7687 - Neo4j 5.26.26 Community
