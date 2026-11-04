@@ -185,8 +185,6 @@ Queue a memory for enrichment. Use this to remember facts, preferences, decision
 - **`role`** (str, optional): Speaker of `text`, exactly one of `user`, `assistant`, `tool`, `agent`, `system`. Same contract as `POST /api/memory` `role`; a matching linked turn evidence overrides it. An invalid value returns `Cannot store memory: invalid role ...` and nothing is written. Checked on every path, but has no effect for `type="TEMPORAL"` with `valid_at` (no extraction).
 - Response now appends a one-line queue snapshot: `queue_depth`, current `active_enriching` count, and scheduler state.
 
-**Gateway alias behavior**: `memory_gateway(action="add_memory", payload_json='{"text":"..."}')` accepts `text` (preferred), `content`, or `summary` for the memory content field.
-
 ### `add_memory_and_track`
 Concept id: `mcp.tool.add_memory_and_track`
 
@@ -447,7 +445,6 @@ Search memories by semantic similarity. Returns ranked results with relevance sc
 - **`file_context`** (str, optional): File path whose structural neighborhood should inject linked semantic candidates.
 - **`file_context_project`** (str, optional): Optional project disambiguation for `file_context`.
 - **`trace`** (bool, optional): Observe-only diagnostics. On the default fused path, records BM25 and cosine ranks without changing returned ordering; failures are warnings, not recall failures.
-- Gateway alias: `memory_gateway(action="search", payload_json="{...}")` dispatches to the same behavior as `action="recall"`.
 - Returns compact JSON with top results, short summaries, a compact score breakdown (`sim`, `adj`, `rec`, `prom`), and explicit `retrieval_score`, `retrieval_score_kind`, and `relevance_basis`. Legacy `relevance` is retained and explicitly labeled unvalidated.
 
 ### `recall_history`
