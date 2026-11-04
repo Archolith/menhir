@@ -14,6 +14,7 @@ This index routes the current execution owners listed below exactly once.
 
 | Document | Current ownership |
 |---|---|
+| [`menhir-461-embedded-graph.md`](menhir-461-embedded-graph.md) | PROPOSED: #461 onboarding option comparison → #109 embedded storage viability → #258 fork expiry correctness; native Windows packaging is an unresolved prerequisite. |
 | Deployment control-plane architecture reset (no plan file) | The private `Archolith/menhir-deploy` repository is live and production runs Menhir 0.3.2 (released 2026-11-02). No plan in this directory governs it; deployment work is tracked in that repository. |
 | [`menhir-168-phase0-baseline-contract.md`](menhir-168-phase0-baseline-contract.md) | Pinned baseline, ratified limits and evidence contract for the #168 new-install-defaults campaign (tracker #168 still open); every paid or live run needs a fresh owner go-ahead. |
 | [`menhir-feature-flag-registry.md`](menhir-feature-flag-registry.md) | P1–P3 candidate implements a 98-entry metadata inventory, consistency tests and commented environment backfill; merge/CI and optional P4–P5 remain. |
