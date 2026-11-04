@@ -1,6 +1,6 @@
 # Current plan index
 
-Status: current execution routing index, audited 2026-09-16.
+Status: current execution routing index, audited 2026-11-02.
 
 This directory contains executable ownership: active plans, partially implemented plans with a
 named residual, and owner decisions that still control whether work exists. Lower-priority work is
@@ -14,10 +14,8 @@ This index routes the current execution owners listed below exactly once.
 
 | Document | Current ownership |
 |---|---|
-| [`menhir-local-main-safety-reconciliation-2026-09-28.md`](menhir-local-main-safety-reconciliation-2026-09-28.md) | Port the three missing local-main MVP safety fixes onto current GitHub main before RC selection. |
-| [`menhir-post-v023-audit-remediation-2026-09-28.md`](menhir-post-v023-audit-remediation-2026-09-28.md) | Fix the release-to-main Astra audit findings before naming an MVP release candidate. |
-| [`menhir-local-stdio-mvp-release-2026-09-16.md`](menhir-local-stdio-mvp-release-2026-09-16.md) | Gate B audit and pre-freeze Gate C E2Es complete; Phase D named-RC preparation, the fresh full-Oracle LongMemEval gate, frozen-RC rerun, and final release remain. Beacon is deferred. |
-| Deployment control-plane architecture reset | Private `Archolith/menhir-deploy` repository. Only the repository-census Phase 0 is eligible to start; implementation remains blocked. |
+| Deployment control-plane architecture reset (no plan file) | The private `Archolith/menhir-deploy` repository is live and production runs Menhir 0.3.2 (released 2026-11-02). No plan in this directory governs it; deployment work is tracked in that repository. |
+| [`menhir-168-phase0-baseline-contract.md`](menhir-168-phase0-baseline-contract.md) | Pinned baseline, ratified limits and evidence contract for the #168 new-install-defaults campaign (tracker #168 still open); every paid or live run needs a fresh owner go-ahead. |
 | [`menhir-feature-flag-registry.md`](menhir-feature-flag-registry.md) | P1–P3 candidate implements a 98-entry metadata inventory, consistency tests and commented environment backfill; merge/CI and optional P4–P5 remain. |
 | [`menhir-core-promotion-restack-2026-08-31.md`](menhir-core-promotion-restack-2026-08-31.md) | Restack core-promotion PRs #11–#42 from the bottom branch, preserve tranche boundaries, and repair definition-scoped bounded recovery in tranches 5 and 9. |
 | [`menhir-research-execution-ladder.md`](menhir-research-execution-ladder.md) | Dependency-ordered research → code → bench sequence. Read-side rungs are closed; Track W6 is the remaining write-side rung. |
@@ -37,12 +35,26 @@ This index routes the current execution owners listed below exactly once.
 | [`menhir-mcp-snapshot-ingest-2026-09-16.md`](menhir-mcp-snapshot-ingest-2026-09-16.md) | P0 code half and P1: wire contract, selection policy, bundler, `menhir sync --check`, 118 tests. | P0's transport measurement, which gates P2; then P2-P6. Every `SnapshotLimits` value is provisional until an owner sets it (open decision 1). |
 | [`menhir-compositional-scalar-identity-2026-08-05.md`](menhir-compositional-scalar-identity-2026-08-05.md) | Phases 1–4 and bounded panels. | Preregistered larger-population evidence and any promotion decision. |
 | [`menhir-deterministic-first-event-scalar-2026-07-30.md`](menhir-deterministic-first-event-scalar-2026-07-30.md) | Phase 1/2A and bounded smoke. | Population gates, frozen evaluation, and class-level promotion decisions. |
+| [`menhir-scalar-default-enablement-plan.md`](menhir-scalar-default-enablement-plan.md) | Steps 1–5 (agent-quoted evidence, value-in-quote, decimal equality, evidence-only input, lenient defaults; PRs #195–#199). | Steps 6–7 are marked not started in the plan and the perceiver-version rule for existing graphs is open; later #168 freeze commits (e.g. `cc931186`) changed defaults, so the plan's status line is unconfirmed against main. |
+| [`menhir-snapshot-p3-extraction-design-2026-09-17.md`](menhir-snapshot-p3-extraction-design-2026-09-17.md) | P3 threat model and mechanism (APPROVED 2026-09-17); the archive validator is built. | The writing half of extraction is not built. Child of the snapshot-ingest plan above. |
+| [`menhir-source-memory-lane-plan.md`](menhir-source-memory-lane-plan.md) | Source-memory recall lane step 1, merged (#206, default on in #208). | None identified; executor prompt kept as history. Archive candidate once the owner confirms (not confirmed here). |
+| [`menhir-recall-history-plan.md`](menhir-recall-history-plan.md) | `recall_history` drill-down tool, merged (#207); pools later defaulted off (#396) and removed (#399). | None identified; archive candidate (not confirmed here). |
+| [`menhir-recall-timeline-plan.md`](menhir-recall-timeline-plan.md) | `recall_timeline` on-demand time navigation, merged (#213) with follow-ups (e.g. CF-268). | None identified; archive candidate (not confirmed here). |
+| [`menhir-recall-timeline-phaseA-fixes.md`](menhir-recall-timeline-phaseA-fixes.md) | Binding review fixes F1+ for `recall_timeline` phase A (timeline Cypher ordering, `subject` as a thread filter). | Companion to the timeline plan; no separate residual confirmed. Archive with it. |
 | [`typed-recall-packet-prototype.md`](typed-recall-packet-prototype.md) | Scalar/event inspection packet. | Admitted intent-state integration after the Intent State View exists. |
 
 ## Owner decision required
 
-None open. Context-composition Stages 2–4 were deferred by the owner on 2026-10-23; see
+Context-composition Stages 2–4 were deferred by the owner on 2026-10-23; see
 [`../archive/plans/menhir-context-composition-production-integration.md`](../archive/plans/menhir-context-composition-production-integration.md).
+
+| Document | Decision needed |
+|---|---|
+| [`menhir-cf17-admission-gate-remediation-deepseek.md`](menhir-cf17-admission-gate-remediation-deepseek.md) | CF-17 (token-overlap admission gate admits contradicting claims) was CONFIRMED High with remediation pending as of 2026-08-18; whether and how to execute it is not decided here, and its current state on main is unverified. |
+| [`menhir-post-install-and-agent-defaults-plan.md`](menhir-post-install-and-agent-defaults-plan.md) | Plan says work sits on an unmerged branch: merge it or close it. `menhir setup` has since landed in `src/menhir/cli/setup.py`, so the plan may be superseded; unconfirmed. |
+| [`menhir-snapshot-multi-tenant-architecture-2026-09-20.md`](menhir-snapshot-multi-tenant-architecture-2026-09-20.md) | PROPOSED, no implementation: ownership for the snapshot graph-write path before wide deployment. |
+| [`menhir-snapshot-p4-graph-write-design-2026-09-17.md`](menhir-snapshot-p4-graph-write-design-2026-09-17.md) | PROPOSED, not approved: how a partial P4 graph write stays survivable. |
+| [`menhir-snapshot-wiring-to-working-sync-2026-09-20.md`](menhir-snapshot-wiring-to-working-sync-2026-09-20.md) | PROPOSED, no implementation: connect the built post-upload sync stages end to end (tenancy position in issue #127). |
 
 ## Maintenance rule
 

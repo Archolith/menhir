@@ -1,10 +1,12 @@
 ---
 artifact_schema: 1
 artifact_type: plan
-artifact_status: ACTIVE
+artifact_status: IMPLEMENTED
 ---
 
 # menhir -- #171 source-memory section: pass the #168 latency limit
+
+**Disposition:** IMPLEMENTED by merged PR #210 (`fefc02b3`); issue #171 closed as completed 2026-10-20 (remaining opt-in retrieval sources moved to #348). Retained as the historical work package.
 
 Project Scope: `Archolith/menhir`, branch `perf/171-source-memory-latency`, base `origin/main` `1f6eb392`.
 

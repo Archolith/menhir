@@ -3,7 +3,7 @@
 Harness for the local-stdio MVP release plan's **Phase C** (pre-freeze E2Es) and
 **Phase F** (the same eight lanes rerun on the frozen RC).
 
-Authority: `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md` §6 owns the
+Authority: `.agent/archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md` §6 owns the
 acceptance criteria. Tracking roll-up: issue #123. This directory implements those
 criteria; it does not redefine them.
 
