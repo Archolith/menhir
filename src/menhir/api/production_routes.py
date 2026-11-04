@@ -77,7 +77,9 @@ async def readyz(request: Request) -> JSONResponse:
 
     ready = not failures
     try:
-        mcp_digest = await served_mcp_metadata_digest()
+        mcp_digest = await served_mcp_metadata_digest(
+            getattr(request.app.state, "mcp_http_instance", None)
+        )
     except Exception as exc:  # diagnostic only; never affects readiness
         _LOG.warning("readyz mcp metadata digest unavailable: %s", type(exc).__name__)
         mcp_digest = "unavailable"

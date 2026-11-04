@@ -1,7 +1,7 @@
 """Build metadata a deploy check can compare against the running server.
 
-The digest covers what MCP clients cache at connect time: the server instructions and the
-unfiltered tool catalog (name, description, input schema). It is diagnostic only.
+The digest covers the server instructions and the unfiltered tool catalog (name, description,
+input schema) that MCP clients read at connect time. It is diagnostic only.
 """
 
 from __future__ import annotations
@@ -11,6 +11,8 @@ import hashlib
 import json
 import os
 import re
+from dataclasses import dataclass
+from typing import Any
 
 _COMMIT_RE = re.compile(r"[0-9a-f]{7,40}")
 
@@ -44,23 +46,51 @@ def _get_lock() -> asyncio.Lock:
     return _digest_lock
 
 
-async def _compute_digest() -> str:
+@dataclass(frozen=True)
+class MetadataDigest:
+    """A served-metadata digest and the number of tools it covers."""
+
+    sha256: str
+    tool_count: int
+
+
+def _normalized_description(description: str | None) -> str | None:
+    """Description text as hashed: each line stripped of surrounding whitespace.
+
+    CPython 3.13 strips docstring indentation at compile time and 3.12 does not, so the same
+    source serves differently indented descriptions. ``inspect.cleandoc`` cannot undo that: a
+    served description is the curated line plus the stripped docstring, so one of its lines is
+    never indented and the common margin is zero. Stripping per line keeps the digest equal
+    across interpreter versions; the served text is not changed.
+    """
+
+    if description is None:
+        return None
+    return "\n".join(line.strip() for line in description.splitlines())
+
+
+async def compute_metadata(server: Any = None) -> MetadataDigest:
+    """Digest *server*'s instructions and unfiltered tool catalog. Not cached.
+
+    With no server, builds the remote MCP surface the HTTP app serves.
+    """
+
     from mcp.server.fastmcp import FastMCP
 
-    from menhir.api.mcp_remote import create_remote_tool_only_mcp
-    from menhir.mcp import instructions
+    if server is None:
+        from menhir.api.mcp_remote import create_remote_tool_only_mcp
 
-    server = create_remote_tool_only_mcp()
+        server = create_remote_tool_only_mcp()
     # Base-class call: bypasses the tier/client filtering override so the result
     # does not depend on request context.
     tools = await FastMCP.list_tools(server)
     document = {
-        "instructions": instructions.SERVER_INSTRUCTIONS,
+        "instructions": server.instructions,
         "tools": sorted(
             (
                 {
                     "name": tool.name,
-                    "description": tool.description,
+                    "description": _normalized_description(tool.description),
                     "inputSchema": tool.inputSchema,
                 }
                 for tool in tools
@@ -71,16 +101,29 @@ async def _compute_digest() -> str:
     canonical = json.dumps(
         document, sort_keys=True, separators=(",", ":"), ensure_ascii=False
     )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return MetadataDigest(
+        sha256=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        tool_count=len(tools),
+    )
 
 
-async def served_mcp_metadata_digest() -> str:
-    """Return the sha256 hex digest of served MCP instructions and tool catalog."""
+async def _compute_digest(server: Any = None) -> str:
+    return (await compute_metadata(server)).sha256
+
+
+async def served_mcp_metadata_digest(server: Any = None) -> str:
+    """Return the sha256 hex digest of served MCP instructions and tool catalog.
+
+    Pass the FastMCP instance the process serves when there is one; without it a twin is built.
+    The first successful call computes the digest and caches it for the process.
+    """
 
     global _digest_cache
     if _digest_cache is not None:
         return _digest_cache
     async with _get_lock():
         if _digest_cache is None:
-            _digest_cache = await _compute_digest()
+            _digest_cache = await (
+                _compute_digest() if server is None else _compute_digest(server)
+            )
         return _digest_cache
