@@ -17,6 +17,9 @@ Grouping the same memories into pools was neutral (43/20). Recall today returns 
 and never the memories themselves. Design notes: `.agent/plans/menhir-general-state-timelines-2026-09-29.md`
 section 4.1c (owner's copy; not required to implement this).
 
+Reproducing: the AMA-Bench harness is archolith-bench PR #11 (`feat/ama-bench-state-updating`,
+unmerged). The arm settings for these runs aren't recorded in either repo.
+
 ## Behavior (contract)
 
 1. **Flag, default OFF.** With every new setting at its default, recall output, ingest and every
