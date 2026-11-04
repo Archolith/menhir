@@ -1,3 +1,18 @@
+## 2026-11-02 - Usability charter and guardrails
+
+Documentation only. Sets who Menhir must work for and the rules that keep new work usable.
+
+- `docs/usability/README.md`: audiences, nine principles, and which guardrails are enforced in code.
+- `docs/usability/tool-design.md`: rules for MCP tool names, descriptions, arguments, output, errors,
+  safety and lifecycle.
+- `docs/usability/agent-facing-text.md`: rules for server instructions, tool descriptions, the AGENTS
+  template and hook output, including when a change needs an agent evaluation.
+- `docs/usability/first-run.md`: standards for the first-run journeys and the gaps against them
+  (#429-#441).
+- `docs/usability/documentation.md`: rules for docs, and which document owns each fact.
+- `AGENTS.md`, `CONTRIBUTING.md`, `.github/pull_request_template.md`: point contributors and agents at
+  the guides; the PR template gains a usability checklist.
+
 ## 2026-11-02 - One command prepares a version or fork bump
 
 `scripts/bump.py` replaces the by-hand edits before a release. No runtime code changes.
