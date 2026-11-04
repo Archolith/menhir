@@ -48,19 +48,25 @@ def _rate_limit_429() -> openai.RateLimitError:
     )
 
 
-def _client_402() -> tuple[GraphitiClient, dict]:
+def _client_with_error(make_error) -> tuple[GraphitiClient, dict]:
+    state = {"calls": 0, "creates": 0}
+
     async def create(**kwargs):
-        raise _status(402)
+        state["creates"] += 1
+        raise make_error()
 
     fake = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
     llm = MenhirOpenAIGenericClient(config=LLMConfig(api_key="k", model="m"), client=fake)
-    state = {"calls": 0}
 
     async def native_add_episode(**kwargs):
         state["calls"] += 1
         await llm.generate_response([Message(role="system", content="s"), Message(role="user", content="u")])
 
     return GraphitiClient(client=SimpleNamespace(add_episode=native_add_episode)), state
+
+
+def _client_402() -> tuple[GraphitiClient, dict]:
+    return _client_with_error(lambda: _status(402))
 
 
 async def _add(client: GraphitiClient) -> None:
@@ -110,6 +116,7 @@ async def test_402_hard_opens_the_breaker_and_never_probes_on_the_30s_cadence(cl
     with pytest.raises(ProviderQuotaExhaustedError):
         await _add(client)
     assert state["calls"] == 1
+    assert state["creates"] == 1, "the adapter retried a billing refusal against the provider"
     snap = client.circuit_breaker_snapshots()["llm"]
     assert snap["state"] == "open" and snap["reason"] == QUOTA_REASON_CODE
 
@@ -119,14 +126,83 @@ async def test_402_hard_opens_the_breaker_and_never_probes_on_the_30s_cadence(cl
             await _add(client)
         assert opened.value.snapshot["reason"] == QUOTA_REASON_CODE
     assert state["calls"] == 1, "a half-open probe reached the provider inside the hard-open window"
+    assert state["creates"] == 1
 
 
-def test_classify_grades_a_402_as_manual_review() -> None:
-    err = _status(402)
+@pytest.mark.parametrize("code", [400, 403])
+def test_billing_coded_non_429_status_error_is_detected(code: int) -> None:
+    err = _status(code, {"code": "billing_hard_limit_reached", "message": "x"})
+    assert find_quota_exhaustion(err) is err
+
+
+@pytest.mark.parametrize("code", [400, 403])
+async def test_billing_coded_non_429_hard_opens_the_breaker_without_retry(code: int, clock) -> None:
+    client, state = _client_with_error(
+        lambda: _status(code, {"code": "billing_hard_limit_reached", "message": "x"})
+    )
+    with pytest.raises(ProviderQuotaExhaustedError) as raised:
+        await _add(client)
+    assert f"HTTP {code}, billing_hard_limit_reached" in str(raised.value)
+    assert state["creates"] == 1
+    snap = client.circuit_breaker_snapshots()["llm"]
+    assert snap["state"] == "open" and snap["reason"] == QUOTA_REASON_CODE
+
+
+@pytest.mark.parametrize("code", [400, 403])
+async def test_unmarked_non_429_status_error_does_not_hard_open_the_breaker(code: int, clock) -> None:
+    client, state = _client_with_error(lambda: _status(code, {"code": "invalid_request", "message": "x"}))
+    with pytest.raises(Exception) as raised:
+        await _add(client)
+    assert not isinstance(raised.value, ProviderQuotaExhaustedError)
+    snap = client.circuit_breaker_snapshots()["llm"]
+    assert snap["state"] == "closed" and "reason" not in snap
+
+
+def _insufficient_quota_429() -> openai.RateLimitError:
+    return openai.RateLimitError(
+        "429",
+        response=httpx.Response(429, request=_REQ),
+        body={"code": "insufficient_quota", "type": "insufficient_quota", "message": "x"},
+    )
+
+
+def test_persisted_message_names_the_status() -> None:
+    m402 = quota_exhausted_error(_status(402))
+    assert str(m402) == (
+        "provider_quota_exhausted: the provider refused for billing (HTTP 402); "
+        "waiting will not help - add credits, then re-enrich"
+    )
+    m429 = quota_exhausted_error(_insufficient_quota_429())
+    assert str(m429) == (
+        "provider_quota_exhausted: the provider refused for billing (HTTP 429, insufficient_quota); "
+        "waiting will not help - add credits, then re-enrich"
+    )
+
+
+def test_summary_names_the_status() -> None:
+    handle = LLMCallHandle(
+        call_id="c", kind="chat", model="m", endpoint="chat.completions.create",
+        operation=None, started_at=0.0, report_only=False,
+    )
+    try:
+        fail_llm_usage_call(handle, _status(402))
+        assert "refused for billing (HTTP 402)" in last_provider_quota_exhaustion().summary()
+        fail_llm_usage_call(handle, _insufficient_quota_429())
+        summary = last_provider_quota_exhaustion().summary()
+        assert summary.startswith("provider_quota_exhausted: ") and "(HTTP 429)" in summary
+    finally:
+        clear_provider_quota_exhaustion()
+
+
+@pytest.mark.parametrize("make", [lambda: _status(402), _insufficient_quota_429])
+def test_classify_grades_billing_as_manual_review(make) -> None:
+    err = make()
     assert classify_enrichment_failure(err, error_type=type(err).__name__) == "manual_review"
     wrapped = quota_exhausted_error(err)
     assert wrapped is not None
     assert classify_enrichment_failure(wrapped, error_type=type(wrapped).__name__) == "manual_review"
+    text = str(wrapped)
+    assert classify_enrichment_failure(text, error_type="ProviderQuotaExhaustedError") == "manual_review"
 
 
 def test_fail_llm_usage_call_records_a_402_quota_condition() -> None:

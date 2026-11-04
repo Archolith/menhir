@@ -417,16 +417,18 @@ def last_provider_auth_failure() -> ProviderAuthFailure | None:
 
 @dataclass(frozen=True)
 class ProviderQuotaExhaustion:
-    """The most recent insufficient_quota 429 from an LLM provider, process-wide."""
+    """The most recent billing refusal (HTTP 402, or a billing-coded 429/4xx) from an LLM provider, process-wide."""
 
     kind: str
     endpoint: str | None
     model: str | None
     at: str  # ISO-8601 UTC
+    status: int | None = None
 
     def summary(self) -> str:
+        status = f" (HTTP {self.status})" if self.status is not None else ""
         return (
-            f"provider_quota_exhausted: the LLM provider returned 429 insufficient_quota at "
+            f"provider_quota_exhausted: the LLM provider refused for billing{status} at "
             f"{self.at} on {self.endpoint or self.kind}{f' ({self.model})' if self.model else ''}"
         )
 
@@ -434,7 +436,7 @@ class ProviderQuotaExhaustion:
 _provider_quota_exhaustion: ProviderQuotaExhaustion | None = None
 
 
-def record_provider_quota_exhaustion(handle: LLMCallHandle) -> None:
+def record_provider_quota_exhaustion(handle: LLMCallHandle, status: int | None = None) -> None:
     global _provider_quota_exhaustion
     from datetime import datetime, timezone
 
@@ -443,6 +445,7 @@ def record_provider_quota_exhaustion(handle: LLMCallHandle) -> None:
         endpoint=handle.endpoint,
         model=handle.model,
         at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        status=status,
     )
 
 
@@ -460,8 +463,9 @@ def last_provider_quota_exhaustion() -> ProviderQuotaExhaustion | None:
 def fail_llm_usage_call(handle: LLMCallHandle, error: BaseException) -> None:
     if is_provider_auth_error(error):
         record_provider_auth_failure(handle, error)
-    if find_quota_exhaustion(error) is not None:
-        record_provider_quota_exhaustion(handle)
+    quota_error = find_quota_exhaustion(error)
+    if quota_error is not None:
+        record_provider_quota_exhaustion(handle, quota_error.status_code)
     _emit_llm_usage_event(
         handle.kind,
         phase="failed",
