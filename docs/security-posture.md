@@ -27,8 +27,10 @@ Primary threats considered:
 - DoS / resource amplification (JWKS refetch, rate-limit table growth, open DCR).
 - Reverse-proxy trust confusion (peer-address vs. real-client collapse).
 
-**Data removal limit (0.3.0, #417).** Deleting or erasing a memory does not remove the entities
-and fact edges extracted from it, which can restate its content; only namespace deletion does. See
+**Data removal limit (0.3.0, #423).** Deleting or erasing a memory does not remove the entities
+and fact edges extracted from it, which can restate its content. Namespace deletion removes a
+non-default namespace's memories and derived graph data, but refuses `default` and does not remove
+TODOs, WorkArtifacts or the shared structure graph (see [your data](your-data.md)). See
 [erasure](personal-memory-readiness.md#known-limitation-erasure-keeps-extracted-knowledge).
 
 Not in scope here: OS/network hardening of the VPS, TLS termination (delegated to the
@@ -244,8 +246,8 @@ which would otherwise (a) satisfy the loopback bootstrap check for internet call
 
 ## 10. Data and secret handling
 
-- Tokens (client + OAuth) never stored in plaintext; client tokens sha256-only, OAuth tokens
-  never persisted at all.
+- Client tokens are stored sha256-only. OAuth access tokens are not persisted; refresh tokens
+  are stored in `menhir_oauth_as.db` when refresh is enabled (30-day TTL).
 - Static-key comparison is constant-time (`hmac.compare_digest`).
 - `WWW-Authenticate` challenge components are server-controlled literals/config; caller
   strings never reach the header (quote/backslash escaped).
