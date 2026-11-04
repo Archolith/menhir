@@ -25,7 +25,8 @@ Linux wheels, with no Windows wheel. The Linux run below does not qualify the Wi
 
 Use a disposable **Linux** Python 3.12 environment. The instrument accepts no existing database
 path or service address: every run creates a new temporary embedded database and removes it.
-Run from this checkout, retaining its `pyproject.toml`; the script reads the fork pin there.
+Run from this checkout, retaining `pyproject.toml`, `src/menhir` and both probe scripts;
+the script reads the fork pin there and loads this checkout's repository code.
 
 ```sh
 python -m pip install 'archolith-graphiti-core[falkordb,falkordblite]==0.31.2.post2' 'falkordblite==0.11.0'
@@ -84,13 +85,71 @@ Mapping those callbacks to FalkorDriverSession.execute_write changes their failu
 
 ## Still unqualified from #109
 
+### Transaction follow-up: P0/P1 (2026-11-04)
+
+An AST scan of all 664 Python files under `src/menhir` and `scripts` at baseline `209b6005`
+found eight direct runtime `execute_write` call sites, one operator backfill call and the
+existing Graphiti probe call. The sole direct `begin_transaction` is in `Neo4jRepository`.
+This inventories static transaction entry points, not all Cypher semantics, alias calls or
+the entire P0 capability/writer matrix.
+
+| Runtime/operation owner | Transaction requirement | Qualification state |
+|---|---|---|
+| `projection_lifecycle_repository_writes.publish_definition` | Read/lock current version, validate in Python, update definition and invalidate work | Guarded single-query candidate passes bounded live checks. |
+| Same module: `dirty_targets`, `retire_targets` | Validate definition and advance exact target generations together | Candidate not implemented. |
+| Same module: `reconcile_all_targets` | Read complete membership, compute additions/removals, apply both atomically | Python set computation needs a deliberate replacement strategy. |
+| `projection_lifecycle_repository_reads.commit` | Fence, callback writes, Python result validation, receipt/certificate in one transaction | Actual callback rejection counterexamples reproduced. |
+| `memory_graph_adapter.write_project_structure` | Identity/generation lock plus multi-query project publication/pruning | Not qualified for FalkorDB. |
+| Same module: `write_document`, `refresh_indexed_binding` | Identity lock and structural writes/metadata together | Not qualified for FalkorDB. |
+| `scripts/backfill_legacy_retention.main` | Revalidate manifest, then apply all reviewed links or none | Operator-only; retains Neo4j requirement. |
+
+Related contract owners include `scalar_projection_materializer.py` (graph reads, Python fold,
+View writes, persisted-state hash verification), `structure_queries.py`, namespace helpers,
+schema constraints and graph/SQLite saga recovery. Existing projection tests own the callback
+rollback reference behavior; raw reads/search/schema and Graphiti internal batches still need
+the broader P0 audit. No backend abstraction was wired into runtime construction.
+
+The probe now calls `falkordblite_projection_proof.py` against fresh temporary graphs:
+
+- A positive control runs real `ProjectionLifecycleRepository.publish_definition`,
+  `dirty_targets` and `commit`, and installs/certifies a synthetic View successfully.
+- The deliberately unsafe autocommit facade translates only `datetime()` to a fixed string
+  parameter. With real Menhir lifecycle commit code and a synthetic materializer, an empty hash and an existing
+  conflicting receipt both raise the expected error **after leaving the View at value 2**;
+  rollback should have retained its original value 1. These are expected failed gates, not fixes.
+- The guarded `PUBLISH_DEFINITION` candidate makes its decision before mutation in one graph
+  query. Advance/replay, stale version, conflicting hash, duplicate definition identity,
+  certificate invalidation and unrelated-definition preservation pass.
+- An invalid map property injected after definition/work mutations inside that candidate query
+  raises and restores the complete prior graph snapshot.
+- Eight pairs of concurrent version-2/version-3 publishers end at exactly one version-3
+  definition with no missing/extra work-generation invalidation. Both linearization orders
+  were observed in the initial eight-pair run; this is not exhaustive concurrency qualification.
+- The orderly-restart check remains separate. Worker connections are disconnected after they
+  join, so pooled sockets cannot be mistaken for independent runtime owners during shutdown.
+
+**P1 remains unpassed; P0 is a bounded transaction inventory, not a completed backend audit.**
+The candidate covers definition publication only, without runtime deployment. It does not
+support arbitrary client callbacks, structure batches, post-write Python hash checks or all
+existing/invalid data shapes. Process death, transport-level ambiguous commits and complete
+native uniqueness/readiness qualification are not claimed.
+
+The next design should prepare a bounded materialization payload before mutation, then validate
+every relevant input/generation and persist payload plus receipt atomically. Its rejection,
+hash/provenance and concurrent-input behavior must match the existing callback contract before
+an adapter can proceed. This is a proposed contract change, not a proven solution or evidence
+that an engine rewrite is necessary. Do not move folds outside transactions without that proof.
+Large single-query batches must also account for upstream memory/rollback risks #1482/#1062;
+this experiment deliberately uses small fixtures and does not run their crash/OOM reproducers.
+
 Future implementation gates are indexed in [the memory backlog](../memory-backlog.md#memorybacklogembedded_graph).
 The [Archolith FalkorDBLite fork](https://github.com/Archolith/falkordblite) owns the separate
 Windows portability investigation; adding Windows binaries will not resolve the transaction blocker.
 
-No runtime adapter was introduced. Menhir `add_memory`, actual enrichment, full namespace and
-uniqueness invariants, projection-lifecycle concurrency/atomicity, saga/retry safety, Menhir-native
-schema readiness and representative backup/export remain **NOT RUN**. Related issue #258's
+No runtime adapter was introduced. Full qualification of Menhir `add_memory`, actual enrichment,
+namespace/uniqueness invariants, all projection-lifecycle concurrency/atomicity paths, saga/retry
+safety, Menhir-native schema readiness and representative backup/export remains **NOT RUN**;
+the bounded follow-up does not replace those gates. Related issue #258's
 stale-save expiry protection on non-Neo4j backends is another required check, not resolved here.
 Crash durability, concurrent processes, Linux arm64, macOS, Windows binaries, native dependency
 bundling and redistribution obligations remain unqualified.
@@ -112,6 +171,15 @@ Redis pipelining or MULTI/EXEC alone is insufficient evidence. Retain Neo4j mean
 - `menhir artifacts validate . --repository menhir`: 19 existing findings. A validation of the
   `.agent` corpus archived from baseline HEAD returned the same 19 findings; no new findings.
 - Full repository CI and the complete #109 checklist are not claimed by this investigation.
+- Follow-up local selection: `pytest tests/test_falkordblite_compatibility.py
+  tests/infrastructure/test_projection_lifecycle_repository.py -q --tb=short`:
+  21 passed, 4 online Neo4j checks skipped, one upstream Pydantic warning. The new live
+  projection checks run as executable assertions in the disposable Falkor probe.
+- Final local selection also included `tests/infrastructure/test_scalar_projection_materializer.py`:
+  25 passed, 4 online checks skipped; default Ruff and the scoped correctness/async gates passed.
+- Final expanded native probe: 22 checks, 13 passing and 9 failed compatibility gates. The nine
+  failures are the prior seven incompatibilities plus the two Menhir materialization refusal
+  counterexamples; the publication candidate and orderly-restart checks passed. Exit code remains 1.
 
 ## Upstream evidence
 

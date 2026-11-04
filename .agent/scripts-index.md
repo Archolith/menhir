@@ -108,6 +108,9 @@ Read the handoff doc before running any of them; they are phases of one experime
 `falkordblite_compatibility.py` is the opt-in issue #109 storage spike: temporary embedded
 database only, pinned fork, failure injection, search and restart checks. See
 `reference/menhir-falkordblite-compatibility.md` for install pins and the measured no-go result.
+Its helper `falkordblite_projection_proof.py` exercises real Menhir materialization callbacks
+and a single-query definition-publication candidate, including refusal/failure and publisher races.
+Run it through the compatibility probe; it is not a runtime backend adapter.
 
 `smoke/run_all.py` runs every self-serving smoke. Auth/OAuth: `auth_shapes_smoke.py`,
 `oauth_local_smoke.py`, `auth0_live_smoke.py`. Hook Center: `hook_center_live_smoke.py`,

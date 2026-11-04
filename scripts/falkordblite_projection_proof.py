@@ -1,0 +1,269 @@
+"""Bounded #109 transaction experiments, called only by the isolated compatibility probe.
+
+Nothing here is a runtime repository adapter. The autocommit facade deliberately demonstrates
+the unsafe mapping; the guarded publication query is a candidate for one operation only.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+from typing import Any
+
+# Validate BEFORE any mutation; one graph query owns the whole publication decision and write.
+# Timestamp values are supplied explicitly because this runtime has no Neo4j datetime() value.
+PUBLISH_DEFINITION = """
+OPTIONAL MATCH (d:ProjectionDefinitionState {definition_id:$definition_id})
+WITH collect(d) AS states
+WITH CASE
+    WHEN size(states)>1 THEN 'corrupt'
+    WHEN size(states)=0 THEN 'advance'
+    WHEN coalesce(states[0].current_version,0)>$version THEN 'stale'
+    WHEN coalesce(states[0].current_version,0)=$version
+         AND coalesce(states[0].semantic_hash,'')<>$hash THEN 'conflict'
+    WHEN coalesce(states[0].current_version,0)=$version THEN 'replay'
+    ELSE 'advance' END AS action
+FOREACH (ignored IN CASE WHEN action IN ['advance','replay'] THEN [1] ELSE [] END |
+    MERGE (d:ProjectionDefinitionState {definition_id:$definition_id})
+    ON CREATE SET d.created_at=$now
+    SET d.current_version=$version, d.semantic_hash=$hash,
+        d.coordination_epoch=coalesce(d.coordination_epoch,0)+1,
+        d.published_at=CASE WHEN action='advance' THEN $now ELSE d.published_at END
+)
+WITH action
+OPTIONAL MATCH (w:ProjectionWorkState {definition_id:$definition_id})
+WITH action, collect(w) AS works
+FOREACH (w IN CASE WHEN action='advance' THEN works ELSE [] END |
+    SET w.definition_version=$version, w.generation=coalesce(w.generation,0)+1,
+        w.reason='definition_published', w.dirty_at=$now,
+        w.certified_definition_version=null, w.certified_generation=null,
+        w.certified_projection_hash=null, w.certified_derivation_id=null,
+        w.certified_receipt_key=null, w.certified_at=null
+)
+RETURN action, CASE WHEN action='advance' THEN size(works) ELSE 0 END AS invalidated
+"""
+
+
+class AutocommitProbeRepository:
+    """Unsafe facade for exercising actual Menhir callbacks against real Falkor storage.
+
+    Only datetime construction is translated. No query batching or pretend rollback is added.
+    Do not wire this facade into Menhir runtime construction.
+    """
+
+    def __init__(self, graph: Any) -> None:
+        self.graph = graph
+
+    def execute(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        result = self.graph.query(
+            query.replace("datetime()", "$probe_now"),
+            {
+                **(params or {}),
+                "probe_now": "2026-11-04T00:00:00Z",
+            },
+        )
+        columns = [column[1] for column in result.header]
+        return [dict(zip(columns, row, strict=True)) for row in result.result_set]
+
+    def execute_write(self, work: Callable[..., Any]) -> Any:
+        return work(self)
+
+
+def projection_proofs(db: Any) -> list[tuple[str, Callable[[], object]]]:
+    """Return independently recorded live checks on separate disposable graph fixtures."""
+    from redis.exceptions import ResponseError
+
+    from menhir.domain.projection import ProjectionDefinition, ProjectionTarget
+    from menhir.domain.projection_lifecycle import ProjectionLifecycleCorruptionError
+    from menhir.infrastructure.projection_lifecycle_repository import (
+        ProjectionLifecycleRepository,
+    )
+    from menhir.infrastructure.projection_lifecycle_repository_encoding import (
+        _receipt_key,
+    )
+
+    def require(condition: bool, message: str) -> None:
+        if not condition:
+            raise AssertionError(message)
+
+    def definition(version: int = 1) -> ProjectionDefinition:
+        return ProjectionDefinition(
+            definition_id="proof",
+            version=version,
+            input_assertion_types=frozenset({"proof"}),
+            output_view_kind="proof",
+            assertion_id_resolver=str,
+            assertion_type_resolver=lambda _row: "proof",
+            target_resolver=lambda _row: None,
+            fold=lambda *_args: None,
+        )
+
+    def original_fixture(name: str) -> tuple[Any, Any, Any]:
+        graph = db.select_graph(name)
+        repository = ProjectionLifecycleRepository(AutocommitProbeRepository(graph))
+        repository.publish_definition(definition(), semantic_hash="h1")
+        (token,) = repository.dirty_targets(
+            definition(),
+            [ProjectionTarget(subject_id="subject", namespace="tenant-a")],
+            reason="proof",
+        )
+        graph.query("CREATE (:ProjectionProofView {value:1})")
+        return graph, repository, token
+
+    def view_value(graph: Any) -> object:
+        return graph.query("MATCH (n:ProjectionProofView) RETURN n.value").result_set
+
+    def original_commit(mode: str) -> object:
+        graph, repository, token = original_fixture("menhir109_callback_" + mode)
+        if mode == "receipt_conflict":
+            graph.query(
+                "CREATE (:ProjectionDerivationReceipt {receipt_key:$key, derivation_id:'other'})",
+                {"key": _receipt_key(token.work_key, token.generation)},
+            )
+
+        def materialize(tx: Any, _token: Any) -> str:
+            tx.execute("MATCH (n:ProjectionProofView) SET n.value=2")
+            return "" if mode == "blank_hash" else "h2"
+
+        if mode == "accept":
+            certificate = repository.commit(token, derivation_id="derive", materialize=materialize)
+            require(certificate.projection_hash == "h2", "positive control did not certify")
+            require(view_value(graph) == [[2]], "positive control did not install View")
+            return "real Menhir commit callback installed and certified the fixture"
+
+        try:
+            repository.commit(token, derivation_id="derive", materialize=materialize)
+        except ValueError as exc:
+            require(mode == "blank_hash" and "materialized projection_hash" in str(exc), str(exc))
+        except ProjectionLifecycleCorruptionError as exc:
+            require(mode == "receipt_conflict" and "receipt/certificate" in str(exc), str(exc))
+        else:
+            raise AssertionError("negative control did not reject materialization")
+        remaining = view_value(graph)
+        require(remaining == [[1]], f"real Menhir {mode} refusal left View {remaining}, expected original [[1]]")
+        return remaining
+
+    def publish(graph: Any, version: int, semantic_hash: str) -> tuple[str, int]:
+        rows = graph.query(
+            PUBLISH_DEFINITION,
+            {
+                "definition_id": "proof",
+                "version": version,
+                "hash": semantic_hash,
+                "now": "2026-11-04T00:00:00Z",
+            },
+        ).result_set
+        require(len(rows) == 1, f"publication returned {rows}")
+        return str(rows[0][0]), int(rows[0][1])
+
+    def snapshot(graph: Any) -> list[str]:
+        rows = graph.query("MATCH (n) RETURN labels(n), properties(n)").result_set
+        return sorted(json.dumps(row, sort_keys=True) for row in rows)
+
+    def seed(graph: Any) -> None:
+        require(publish(graph, 1, "h1") == ("advance", 0), "fresh publication failed")
+        graph.query(
+            "CREATE (:ProjectionWorkState {definition_id:'proof', generation:1, namespace:'tenant-a', "
+            "certified_generation:1, certified_projection_hash:'old'}) "
+            "CREATE (:ProjectionWorkState {definition_id:'unrelated', generation:7, namespace:'tenant-b'})"
+        )
+
+    def guarded_publication() -> object:
+        graph = db.select_graph("menhir109_guarded_publish")
+        seed(graph)
+        require(publish(graph, 2, "h2") == ("advance", 1), "advance did not invalidate exactly one target")
+        require(publish(graph, 2, "h2") == ("replay", 0), "replay was not idempotent")
+        before = snapshot(graph)
+        require(publish(graph, 1, "h1") == ("stale", 0), "stale publisher not refused")
+        require(snapshot(graph) == before, "stale refusal mutated graph")
+        require(publish(graph, 2, "different") == ("conflict", 0), "hash reuse not refused")
+        require(snapshot(graph) == before, "hash conflict mutated graph")
+        rows = graph.query(
+            "MATCH (w:ProjectionWorkState) RETURN w.definition_id, w.generation, "
+            "w.certified_generation, w.certified_projection_hash ORDER BY w.definition_id"
+        ).result_set
+        require(rows == [["proof", 2, None, None], ["unrelated", 7, None, None]], f"wrong work state {rows}")
+        return "advance, replay, stale/hash refusal, invalidation and unrelated target preservation passed"
+
+    def corrupt_identity() -> object:
+        graph = db.select_graph("menhir109_duplicate_definition")
+        graph.query(
+            "CREATE (:ProjectionDefinitionState {definition_id:'proof', current_version:1}), "
+            "(:ProjectionDefinitionState {definition_id:'proof', current_version:2})"
+        )
+        before = snapshot(graph)
+        require(publish(graph, 3, "h3") == ("corrupt", 0), "duplicate identity not refused")
+        require(snapshot(graph) == before, "corruption refusal mutated graph")
+        return "duplicate definition refused before writes"
+
+    def query_failure_rollback() -> object:
+        graph = db.select_graph("menhir109_guarded_query_failure")
+        seed(graph)
+        before = snapshot(graph)
+        # Fail after the definition and work updates, inside the same graph query.
+        failing = PUBLISH_DEFINITION.rsplit("RETURN action", 1)[0] + (
+            "CREATE (bad:ProofInvalid) SET bad.value={nested:1} RETURN 1"
+        )
+        try:
+            graph.query(
+                failing,
+                {
+                    "definition_id": "proof",
+                    "version": 2,
+                    "hash": "h2",
+                    "now": "failure-injection",
+                },
+            )
+        except ResponseError as exc:
+            require("Property values" in str(exc), f"unexpected failure injection: {exc}")
+        else:
+            raise AssertionError("invalid map property did not fail")
+        require(snapshot(graph) == before, "failed atomic query retained definition/work updates")
+        return "single-query failure restored the complete pre-publication graph snapshot"
+
+    def concurrent_publication() -> object:
+        outcomes = []
+        try:
+            for iteration in range(8):
+                name = f"menhir109_concurrent_{iteration}"
+                graph = db.select_graph(name)
+                seed(graph)
+                barrier = Barrier(2)
+
+                def race(version: int, *, graph_name: str = name, start: Barrier = barrier) -> tuple[str, int]:
+                    start.wait(timeout=10)
+                    return publish(db.select_graph(graph_name), version, f"h{version}")
+
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    low = pool.submit(race, 2)
+                    high = pool.submit(race, 3)
+                    results = [low.result(timeout=20), high.result(timeout=20)]
+                rows = graph.query(
+                    "MATCH (d:ProjectionDefinitionState) RETURN d.current_version, d.semantic_hash"
+                ).result_set
+                require(rows == [[3, "h3"]], f"publication moved backwards or duplicated identity: {rows}")
+                require(results[1] == ("advance", 1), f"higher version failed: {results}")
+                expected = 3 if results[0][0] == "advance" else 2
+                require(results[0][0] in ("advance", "stale"), f"unexpected lower result {results}")
+                rows = graph.query(
+                    "MATCH (w:ProjectionWorkState {definition_id:'proof'}) RETURN w.generation"
+                ).result_set
+                require(rows == [[expected]], f"lost/extra invalidation: {rows}; results={results}")
+                outcomes.append(results)
+            return {"pairs": len(outcomes), "outcomes": outcomes, "final_version": 3}
+        finally:
+            # Joined workers can leave multiple pooled sockets. Close them before the probe's
+            # orderly-restart check so redislite does not mistake them for other live owners.
+            db.client.connection_pool.disconnect()
+
+    return [
+        ("menhir_materialization_positive_control", lambda: original_commit("accept")),
+        ("menhir_blank_hash_rollback", lambda: original_commit("blank_hash")),
+        ("menhir_receipt_conflict_rollback", lambda: original_commit("receipt_conflict")),
+        ("guarded_definition_publication", guarded_publication),
+        ("guarded_definition_duplicate_refusal", corrupt_identity),
+        ("guarded_definition_query_failure_rollback", query_failure_rollback),
+        ("guarded_definition_concurrent_publishers", concurrent_publication),
+    ]

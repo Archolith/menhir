@@ -16,6 +16,7 @@ import importlib.metadata
 import json
 import os
 import platform
+import sys
 import tempfile
 import tomllib
 from collections.abc import Callable
@@ -279,6 +280,12 @@ def main() -> int:
                     report["modules"] = db.client.module_list()
                     checks.extend(query_probes(db))
                     checks.extend(asyncio.run(graphiti_probes(db)))
+                    # Exercise this checkout's repository code without installing the full service.
+                    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+                    from falkordblite_projection_proof import projection_proofs
+
+                    for name, operation in projection_proofs(db):
+                        checks.append(check(name, operation))
                     checks.append(check("restart_persistence", lambda: persistence_probe(db, path)))
                 finally:
                     db.close()

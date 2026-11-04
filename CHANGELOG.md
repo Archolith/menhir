@@ -1,5 +1,9 @@
 ## 2026-11-04 - FalkorDBLite compatibility spike (#109)
 
+- `scripts/falkordblite_projection_proof.py`: real Menhir materialization rejection counterexamples
+  and a guarded single-query publication candidate with injected-failure and competing-writer checks;
+  integrated into the isolated probe. The callback transaction gate remains unpassed.
+- `.agent/reference/menhir-falkordblite-compatibility.md`: bounded transaction inventory and P1 results.
 - `.agent/memory-backlog.md`: links the phased workspace roadmap and conditional LLM token budget.
 - `.agent/memory-backlog.md`: future adapter gates, rollback evidence and the separate Windows fork investigation.
 - `scripts/falkordblite_compatibility.py`: opt-in isolated storage probe for the checkout's Graphiti
