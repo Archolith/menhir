@@ -351,6 +351,16 @@ def test_setup_ends_with_the_readiness_report_and_one_next_command(tmp_path: Pat
 
 
 @pytest.mark.unit
+def test_setup_apply_points_at_the_your_data_guide(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _make_checkout(tmp_path / "menhir")
+    monkeypatch.delenv("ENV_FILE", raising=False)
+    monkeypatch.setattr("menhir.cli.up.report_readiness", lambda checkout: (object(), False))
+    result = CliRunner().invoke(app, ["setup", "--repo", str(repo)])
+    assert result.exit_code == 0, result.output
+    assert "docs/your-data.md" in result.output
+
+
+@pytest.mark.unit
 def test_bare_menhir_runs_the_readiness_check_inside_a_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _make_checkout(tmp_path / "menhir")
     monkeypatch.chdir(repo)

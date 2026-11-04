@@ -1,7 +1,6 @@
 """
 Smoke test: verify Neo4j connection only. No LLM calls.
 Run: python smoke_test.py
-For full LLM pipeline test, run: python integration_test.py
 """
 import os
 import sys

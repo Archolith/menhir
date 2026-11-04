@@ -155,6 +155,8 @@ _ENV_ONLY = (
         'Attempts per OpenAI call on 429 backoff; absent or invalid uses 6.'),
     ('MENHIR_OPENAI_RATE_LIMIT_MAX_WAIT_S', None, 'runtime',
         'Longest single 429 backoff sleep in seconds; absent or invalid uses 60.'),
+    ('MENHIR_ENRICHMENT_P95_TARGET_SECONDS', None, 'telemetry',
+        'Enrichment p95 target graded by get_memory_stats; absent or invalid uses 120, 0 turns the grade off.'),
 )
 
 _REQUIRES = {

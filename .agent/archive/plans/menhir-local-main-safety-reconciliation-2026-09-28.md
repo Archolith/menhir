@@ -2,10 +2,12 @@
 artifact_schema: 1
 artifact_uuid: 8787a0c8-ce2a-4ec4-88b2-1af91f60e53d
 artifact_type: plan
-artifact_status: IMPLEMENTING
+artifact_status: IMPLEMENTED
 ---
 
 # Reconcile local-main MVP safety fixes
+
+**Disposition:** IMPLEMENTED by merged PR #185 (`ed2b3b61`, 2026-09-28); releases 0.3.0-0.3.2 have since shipped. Retained as the historical work package.
 
 ## Why
 

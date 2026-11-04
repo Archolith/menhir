@@ -2,8 +2,40 @@
 
 from __future__ import annotations
 
+import math
+import os
+
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
+
+P95_TARGET_ENV = "MENHIR_ENRICHMENT_P95_TARGET_SECONDS"
+DEFAULT_P95_TARGET_S = 120.0
+
+
+def enrichment_p95_target_seconds() -> float:
+    """Enrichment p95 target in seconds; 0 turns grading off. Never raises."""
+    raw = os.environ.get(P95_TARGET_ENV)
+    if raw is None or not raw.strip():
+        return DEFAULT_P95_TARGET_S
+    try:
+        value = float(raw.strip())
+    except ValueError:
+        return DEFAULT_P95_TARGET_S
+    if not math.isfinite(value) or value < 0:
+        return DEFAULT_P95_TARGET_S
+    return value
+
+
+def format_p95(p95_ms: float | None, target_s: float) -> str:
+    """Render the p95 line value, graded against target_s (0 = no grade)."""
+    if p95_ms is None:
+        return "n/a"
+    p95_s = f"{p95_ms / 1000:.1f}s"
+    if target_s <= 0:
+        return p95_s
+    target_label = f"{target_s:g}s"
+    flag = "ok" if p95_ms <= target_s * 1000 else "MISS"
+    return f"{p95_s}  (target {target_label}: {flag})"
 
 
 async def get_memory_stats(since_hours: int = 24, namespace: str = "") -> str:
@@ -93,13 +125,7 @@ class GetMemoryStatsTool(BaseTextTool):
         failed_enrichment = total - ok
         avg_s = f"{enrichment['avg_duration_ms'] / 1000:.1f}s" if enrichment["avg_duration_ms"] else "n/a"
         p95_ms = enrichment.get("p95_duration_ms")
-        slo_target_ms = 120_000
-        if p95_ms is not None:
-            p95_s = f"{p95_ms / 1000:.1f}s"
-            slo_flag = " ok" if p95_ms <= slo_target_ms else " MISS"
-            p95_str = f"{p95_s}  (p95 SLO:{slo_flag})"
-        else:
-            p95_str = "n/a"
+        p95_str = format_p95(p95_ms, enrichment_p95_target_seconds())
         lines.append(f"  Queued:      {total:>6}")
         lines.append(f"  Completed:   {ok:>6}  ({enrichment['success_rate_pct']}%)")
         if failed_enrichment > 0:
