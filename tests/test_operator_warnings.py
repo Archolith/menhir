@@ -163,7 +163,7 @@ def test_billing_success_of_other_kind_does_not_resolve_but_any_success_resolves
     _succeed("embedding")
     by_kind = {w["kind"]: w for w in _warnings(backend)}
     assert "provider_billing" in by_kind  # embedding success must not clear chat billing
-    assert "provider_auth" not in by_kind  # any success clears auth
+    assert "provider_auth" in by_kind  # auth clears per call kind (#488 F3)
     _succeed("chat")
     assert _warnings(backend) == []
 

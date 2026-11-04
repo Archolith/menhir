@@ -158,7 +158,8 @@ class OperatorWarningSink:
 
     Success calls are hot, so ``resolve`` returns without touching SQLite unless an
     active key of that kind is known in-process. The known set is reloaded from the store
-    at most every ``RELOAD_S`` seconds, so rows another process recorded still get resolved.
+    at most every ``RELOAD_S`` seconds, so rows another process recorded still get resolved,
+    and after every resolve that ran (or failed), so a row re-opened meanwhile is not lost.
     """
 
     RELOAD_S = 60.0
@@ -199,12 +200,40 @@ class OperatorWarningSink:
                 }
                 if not hits:
                     return
-            self._get_store().resolve_operator_warning(kind, subject)
-            with self._lock:
-                if self._active is not None:
-                    self._active -= hits
+            try:
+                self._get_store().resolve_operator_warning(kind, subject)
+            finally:
+                # Never subtract ``hits``: a failure recorded while the UPDATE ran re-opened one
+                # of those keys, and dropping it hid a live row from every success for up to
+                # RELOAD_S -- long enough for an ack to carry into the next incident (#488 F2).
+                # Reloading costs one read, and only after a resolve actually ran.
+                with self._lock:
+                    self._active = None
         except Exception:  # noqa: BLE001 - must never break the LLM call path
+            with self._lock:
+                self._active = None
             logger.warning("could not resolve operator warning %s/%s", kind, subject, exc_info=True)
+
+
+def redact_operator_warnings_for_caller(
+    warnings: list[dict[str, Any]], *, pinned: bool, tier: str
+) -> list[dict[str, Any]]:
+    """Drop what this caller may not see (#488 F5).
+
+    A namespace-pinned caller gets no ``failed_episodes``: that count spans every silo.
+    Provider warnings stay -- they are deployment-wide process state. Below operator tier the
+    acknowledging identity is withheld and ``acked`` stays. An unbound tier is an in-process
+    call outside any request (every HTTP and stdio request binds one) and sees everything.
+    """
+
+    out: list[dict[str, Any]] = []
+    for warning in warnings:
+        if pinned and warning.get("kind") == KIND_FAILED_EPISODES:
+            continue
+        if tier and tier != "operator":
+            warning = {**warning, "acked_by": None, "acked_at": None}
+        out.append(warning)
+    return out
 
 
 def build_operator_warnings(
