@@ -147,7 +147,7 @@ _ENV_ONLY = (
     ('MENHIR_FRONTIER_TRACE', '', 'frontier', 'Optional retrieval diagnostics; empty is disabled.'),
     ('MENHIR_TELEMETRY_BUSY_TIMEOUT_S', '5', 'telemetry', 'SQLite busy timeout in seconds; raw absent default is 5.'),
     ('MENHIR_MCP_TIMEOUT', '120', 'runtime', 'MCP timeout in seconds; raw absent default is 120.'),
-    ('MENHIR_RECALL_COMPACT', '', 'frontier', 'Compact recall output; empty keeps full output.'),
+    ('MENHIR_RECALL_COMPACT', '', 'frontier', 'Compact recall output, also asks for at most 5 source memories cut to 1000 chars each (an explicit source_memory_limit keeps its count); suggested for chat clients; empty keeps full output.'),
     ('MENHIR_OPENAI_SERVICE_TIER', '', 'runtime',
         'OpenAI service tier on the OpenAI endpoint (e.g. flex); empty sends no tier.'),
     ('MENHIR_OPENAI_FLEX_TIMEOUT_S', None, 'runtime', 'Per-request timeout under the flex tier; absent uses 900; must be a positive number (checked at startup).'),
@@ -157,6 +157,8 @@ _ENV_ONLY = (
         'Longest single 429 backoff sleep in seconds; absent or invalid uses 60.'),
     ('MENHIR_RELEASE_COMMIT', '', 'runtime',
         'Build metadata (not a feature flag): release git SHA reported by /readyz; empty or invalid reports unknown.'),
+    ('MENHIR_ENRICHMENT_P95_TARGET_SECONDS', None, 'telemetry',
+        'Enrichment p95 target graded by get_memory_stats; absent or invalid uses 120, 0 turns the grade off.'),
 )
 
 _REQUIRES = {

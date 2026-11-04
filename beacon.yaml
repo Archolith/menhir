@@ -86,7 +86,7 @@ canonical_docs:
     role: workflow
   - path: .agent/plans/README.md
     role: reference
-  - path: .agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md
+  - path: .agent/archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md
     role: implementation_plan
   - path: .agent/plans/menhir-research-execution-ladder.md
     role: implementation_plan

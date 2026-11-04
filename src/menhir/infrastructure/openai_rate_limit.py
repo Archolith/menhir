@@ -155,13 +155,18 @@ QUOTA_REASON_CODE = "provider_quota_exhausted"
 
 
 class ProviderQuotaExhaustedError(Exception):
-    """The provider refused with 429 insufficient_quota: a billing state, not throttling."""
+    """The provider refused for billing (HTTP 402, or a billing-coded 4xx such as a 429
+    insufficient_quota): a billing state that waiting cannot fix, not throttling."""
 
     reason_code = QUOTA_REASON_CODE
 
 
-def find_quota_exhaustion(exc: BaseException | None) -> openai.RateLimitError | None:
-    """The insufficient_quota openai error in ``exc``'s __cause__/__context__ chain, if any.
+def find_quota_exhaustion(exc: BaseException | None) -> openai.APIStatusError | None:
+    """The billing-exhaustion openai error in ``exc``'s __cause__/__context__ chain, if any.
+
+    That is a 429 ``RateLimitError`` whose code/type/message says billing (``insufficient_quota``),
+    or any ``APIStatusError`` that is a 402 Payment Required (whatever its body) or carries a
+    billing marker (for example a 403 ``billing_hard_limit_reached``).
 
     Graphiti rewraps the openai error as its own RateLimitError (``raise ... from e``), which
     loses the quota code, so the chain is walked rather than only ``exc`` itself.
@@ -171,6 +176,8 @@ def find_quota_exhaustion(exc: BaseException | None) -> openai.RateLimitError | 
         seen.add(id(exc))
         if isinstance(exc, openai.RateLimitError) and is_billing_state(exc):
             return exc
+        if isinstance(exc, openai.APIStatusError) and (exc.status_code == 402 or is_billing_state(exc)):
+            return exc
         exc = exc.__cause__ or exc.__context__
     return None
 
@@ -179,11 +186,16 @@ def quota_exhausted_error(exc: BaseException | None) -> ProviderQuotaExhaustedEr
     """``exc`` itself if already a quota error, else a new one chained to it, else None."""
     if isinstance(exc, ProviderQuotaExhaustedError):
         return exc
-    if find_quota_exhaustion(exc) is None:
+    matched = find_quota_exhaustion(exc)
+    if matched is None:
         return None
+    code = getattr(matched, "code", None)
+    detail = f"HTTP {matched.status_code}"
+    if isinstance(code, str) and _SAFE_TOKEN.fullmatch(code):
+        detail += f", {code}"
     error = ProviderQuotaExhaustedError(
-        f"{QUOTA_REASON_CODE}: the provider returned 429 insufficient_quota (credits "
-        "exhausted); waiting will not help - add credits, then re-enrich"
+        f"{QUOTA_REASON_CODE}: the provider refused for billing ({detail}); "
+        "waiting will not help - add credits, then re-enrich"
     )
     error.__cause__ = exc
     return error

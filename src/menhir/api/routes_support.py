@@ -629,7 +629,8 @@ class HealthResponse(BaseModel):
     # Set when the LLM provider has rejected our credentials since the last successful
     # call: a server can be "ok" and "full" and still unable to enrich anything.
     provider_auth_failure: str | None = None
-    # Set after an insufficient_quota 429 until a call of that kind succeeds: enrichment cannot
+    # Set after a billing refusal (HTTP 402 or insufficient_quota 429) until a call of that kind
+    # succeeds: enrichment cannot
     # progress until credits are added, so a polling driver should stop instead of waiting.
     provider_quota_exhausted: str | None = None
     startup_mode: str | None = None

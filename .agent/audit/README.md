@@ -13,6 +13,7 @@ modify source.
 | `PROBE-PROTOCOL.md` | The rule binding report sections to probe checks. |
 | `MODULE-MAP.md` | The 11-module partition, exhaustive and disjoint. |
 | `AUDIT-FIT.md` | Which workspace audit types fit Menhir, and where they do not. |
+| `TEST-INSTRUMENT-TRAPS.md` | Tests that passed while asserting nothing (T-series), working-tree hazards, and standing method rules. Read before writing a guard test. |
 | `prompts/compound-audit.md` | All eight audit types in one pass. |
 | `prompts/single-type-audit.md` | One audit type, maximum depth. |
 | `prompts/verify-and-plan.md` | Confirm or refute a reported finding, then plan the fix. |

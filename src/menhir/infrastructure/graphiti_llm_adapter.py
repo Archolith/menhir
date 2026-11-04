@@ -53,6 +53,7 @@ from menhir.infrastructure.graphiti_helpers import (
     _raw_preview,
 )
 from menhir.infrastructure.openai_calls import ResilientChatClient, acreate_chat_completion
+from menhir.infrastructure.openai_rate_limit import find_quota_exhaustion
 from menhir.infrastructure.model_profiles import resolve_model_profile
 
 logger = logging.getLogger(__name__)
@@ -550,6 +551,9 @@ class MenhirOpenAIGenericClient(OpenAIGenericClient):
             ):
                 raise
             except Exception as exc:
+                if find_quota_exhaustion(exc) is not None:
+                    # Billing state (402 etc.): a retry cannot help and would burn provider calls.
+                    raise
                 last_error = exc
                 if retry_count >= _LOCAL_MODEL_MAX_RETRIES:
                     logger.error(

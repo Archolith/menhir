@@ -6,7 +6,7 @@ installed package.
 
 Usage:
     python scripts/release/check_served_metadata.py https://menhir.example.com
-    python scripts/release/check_served_metadata.py URL --expect-commit <sha> --expect-version 0.3.2
+    python scripts/release/check_served_metadata.py URL --expect-commit <sha> --expect-version <version>
 
 Exit codes: 0 all fields match, 1 mismatch, 2 fetch or parse error.
 """

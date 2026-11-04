@@ -10,7 +10,7 @@ informs: dbde430c-9be1-4131-aa85-871a8e99e5ef
 
 **Date:** 2026-09-16  
 **Repository:** `Archolith/menhir`  
-**Primary execution authority:** `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`  
+**Primary execution authority:** `.agent/archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md`  
 **Phase-A inventory:** `.agent/reviews/menhir-local-stdio-mvp-phase-a-inventory-2026-09-16.md`
 
 ## Session objective
@@ -33,7 +33,7 @@ The release plan also requires an independent audit, black-box stdio E2Es, resta
 
 Plan:
 
-`.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md`
+`.agent/archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md`
 
 Artifact UUID: `dbde430c-9be1-4131-aa85-871a8e99e5ef`  
 Status: `APPROVED`

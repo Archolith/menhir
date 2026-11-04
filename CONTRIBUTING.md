@@ -48,6 +48,8 @@ as they are; they are the proof that behaviour did not change.
 - Commit messages use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`,
   `fix:`, `refactor:`, `docs:`, `chore:`, `ci:`, `test:`.
 - Add an entry to the top of `CHANGELOG.md` for a change users would notice.
+- If the change touches anything a user or an agent sees (an MCP tool, its output, agent
+  instructions, setup, defaults or docs), check it against [docs/usability/](docs/usability/README.md).
 - Never commit secrets. Configuration for LLM providers, embeddings, Neo4j and auth lives in
   environment variables.
 - All required CI checks must pass before a merge.

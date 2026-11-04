@@ -1394,7 +1394,7 @@ async def handle_enrichment_failure(
     """
 
     duration_ms = int((perf_counter() - ctx.started) * 1000)
-    # A Graphiti-wrapped insufficient_quota 429 reads "Rate limit exceeded"; record the real cause.
+    # A Graphiti-wrapped billing refusal (402 or insufficient_quota 429) reads as a generic error; record the real cause.
     exc = quota_exhausted_error(exc) or exc
     error_type = type(exc).__name__
     classification = classify_enrichment_failure(exc, error_type=error_type)

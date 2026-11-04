@@ -3,7 +3,7 @@
 Core bot-facing docs for `menhir`.
 
 > **New chain / swapping in a fresh LLM?** For current local-MVP sequencing, start with
-> [`plans/menhir-local-stdio-mvp-release-2026-09-16.md`](plans/menhir-local-stdio-mvp-release-2026-09-16.md)
+> [`archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md`](archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md)
 > and tracker #123, which holds the live release gates. The code-verified finding
 > ledger is [`verified-current-findings-main-2026-07-10.md`](verified-current-findings-main-2026-07-10.md).
 > Historical frontier/oracle context is archived at
@@ -49,7 +49,7 @@ Start with one file:
 - shipped-but-default-off features (what's built but not live) -> `default-off-features.md`
 - conflict-resolution history and suppression-recording semantics -> `conflict-resolution-history-proposal.md`
 - exploring new View shapes (design exploration, not settled) -> `memory-view-kinds-frontier-transfer.md`
-- current local-MVP release plan -> `plans/menhir-local-stdio-mvp-release-2026-09-16.md` (gates: tracker #123)
+- current local-MVP release plan -> `archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md` (gates: tracker #123)
 - current executable plans and dependency order -> `plans/README.md`
 - useful non-executable design, research, and negative evidence -> `reference/README.md`
 
@@ -154,5 +154,5 @@ Fall back to Grep/Read only when you need actual file content. Use `ingest_proje
 - This project is a long-lived graph memory service and is expected to run with a Neo4j backend.
 - The codebase is a **complete v1 service** (graph/MCP/REST/runtime, OAuth, Hook Center, Phase 3
   consolidation). The local MVP release is 0.3.0; see
-  `plans/menhir-local-stdio-mvp-release-2026-09-16.md` and tracker #123 for its gates.
+  `archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md` and tracker #123 for its gates.
 - Keep external service usage (Graphiti + LLM endpoints) behind environment variables in `.env` only.
