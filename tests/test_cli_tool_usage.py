@@ -15,17 +15,13 @@ from menhir.infrastructure.telemetry.store import McpTelemetryStore
 runner = CliRunner()
 
 
-def _fake_tool(name: str) -> type:
-    return type(f"Fake_{name}", (), {"name": name})
-
-
 @pytest.fixture
 def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> McpTelemetryStore:
     path = tmp_path / "mcp_telemetry.db"
     monkeypatch.setenv("MENHIR_MCP_TELEMETRY_DB", str(path))
     monkeypatch.setattr(
-        "menhir.mcp.tools.registered_tools",
-        lambda: [_fake_tool(n) for n in ("alpha", "beta", "gamma")],
+        "menhir.api.mcp_remote.production_tool_catalog",
+        lambda: frozenset({"alpha", "beta", "gamma"}),
     )
     return McpTelemetryStore(db_path=path)
 

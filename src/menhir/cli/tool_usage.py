@@ -55,11 +55,11 @@ def tool_usage(
         typer.echo("--by must be 'tool' or 'client'", err=True)
         raise typer.Exit(2)
 
+    from menhir.api.mcp_remote import production_tool_catalog
     from menhir.infrastructure.paths import telemetry_db_path
     import sqlite3
 
     from menhir.infrastructure.telemetry.tool_usage_query import fetch_tool_usage_readonly
-    from menhir.mcp.tools import registered_tools
 
     db_path = telemetry_db_path()
     if not db_path.exists():
@@ -77,7 +77,7 @@ def tool_usage(
             )
             raise typer.Exit(1)
         raise
-    registered = sorted({str(cls.name) for cls in registered_tools()})
+    registered = sorted(production_tool_catalog())
     registered_set = set(registered)
 
     tool_stats = [u for u in usage if u["operation"] in registered_set]
