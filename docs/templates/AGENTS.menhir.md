@@ -11,7 +11,7 @@ the recorded reasons: decisions, rejected alternatives, incidents, preferences, 
    its Git history do not record the rationale. Start with one focused query naming the component and the
    decision; rephrase only if evidence is missing. Pass `file_context` and `file_context_project` when the
    question concerns code.
-3. Recall returns summaries and facts. When wording or rationale matters, read the linked source excerpts
+3. Recall returns summaries and facts, plus a separate section of raw source episodes by default. When wording or rationale matters, read the linked source excerpts
    with `get_provenance(node_uuid=...)`. Cite what you use and distinguish recorded reasons from inference.
 4. For structural questions, call `query_structure(query_type="projects")` first. The structural project key
    for this repository is `<project-key>`. If it is absent, run `ingest_project` before trusting empty results.
