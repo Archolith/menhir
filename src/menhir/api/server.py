@@ -61,6 +61,8 @@ def create_app(*, settings: MemorySettings | None = None) -> FastAPI:
     app.state.oauth_refresh_store = prereqs["oauth_refresh_store"]
     app.state.client_policy = prereqs["client_policy"]
     app.state.mutation_fence_active = False
+    # The served MCP instance, so /readyz digests what clients actually get.
+    app.state.mcp_http_instance = mcp_http_instance
 
     register_exception_handlers(app)
     configure_cors(app, settings)
