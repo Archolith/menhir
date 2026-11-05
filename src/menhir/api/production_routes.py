@@ -17,7 +17,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from menhir import __version__
-from menhir.api.auth import _duplicate_sensitive_headers
+from menhir.api.auth import _duplicate_sensitive_headers, authenticate_oauth_bearer
 from menhir.api.oauth import JWKS_REFRESH_STATS, OAuthAuthenticationError
 from menhir.mcp.served_metadata import release_commit, served_mcp_metadata_digest
 
@@ -52,9 +52,9 @@ async def _caller_may_see_build(request: Request) -> bool:
     """True only for a request the MCP endpoint would also let past authentication.
 
     /readyz sits outside BearerAuthMiddleware because health checks carry no credential, so this
-    repeats that middleware's checks for a request that sends Authorization: duplicate headers,
-    the Bearer scheme, the token, then the client policy. Any doubt means no build block rather
-    than an error, because a bad token must not change the readiness answer.
+    runs the middleware's own checks: the duplicate-header refusal, then authenticate_oauth_bearer.
+    Any doubt means no build block rather than an error, because a bad token must not change the
+    readiness answer.
     """
 
     value = request.headers.get("authorization")
@@ -63,19 +63,16 @@ async def _caller_may_see_build(request: Request) -> bool:
     if _duplicate_sensitive_headers(request.headers.raw):
         _LOG.info("readyz build block refused: duplicate_header")
         return False
-    if not value.startswith("Bearer "):
-        return False
-    verifier = getattr(request.app.state, "oauth_verifier", None)
     policy = getattr(request.app.state, "client_policy", None)
-    if verifier is None or policy is None:
+    if policy is None:
+        # The middleware accepts with no policy; production always has one, so refuse here.
         _LOG.info("readyz build block refused: not_configured")
         return False
     try:
-        principal = await verifier.verify_access_token(value[len("Bearer "):])
-        policy.require_client(
-            client_id=principal.client_id,
-            scopes=principal.scopes,
-            tier=principal.tier,
+        await authenticate_oauth_bearer(
+            value,
+            verifier=getattr(request.app.state, "oauth_verifier", None),
+            client_policy=policy,
         )
     except OAuthAuthenticationError as exc:
         # Required because this route answers 200/503 either way, so the log is the only signal.

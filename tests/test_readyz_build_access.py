@@ -371,11 +371,30 @@ async def test_a_duplicate_authorization_is_logged_whatever_comes_first(caplog, 
         (b"authorization", first),
         _BEARER,
         verifier=_verifier(_principal()),
-        policy=SimpleNamespace(require_client=print),
+        policy=SimpleNamespace(require_client=lambda **_kwargs: None),
     )
     with caplog.at_level(logging.INFO, logger=production_routes.__name__):
         assert await _caller_may_see_build(request) is False
     assert "duplicate_header" in caplog.text
+
+
+async def test_the_route_runs_the_middlewares_own_check(monkeypatch) -> None:
+    """One function decides for both routes, so they cannot drift apart."""
+    from menhir.api import auth
+
+    calls: list[str] = []
+
+    async def shared(value: str, **_kwargs: Any) -> tuple[Any, Any]:
+        calls.append(value)
+        return _principal(), None
+
+    monkeypatch.setattr(production_routes, "authenticate_oauth_bearer", shared)
+    request = _request(_BEARER, verifier=object(), policy=object())
+    assert await _caller_may_see_build(request) is True
+    assert calls == ["Bearer t"]
+    assert production_routes.authenticate_oauth_bearer is not auth.authenticate_oauth_bearer
+    monkeypatch.undo()
+    assert production_routes.authenticate_oauth_bearer is auth.authenticate_oauth_bearer
 
 
 async def test_a_caller_with_no_token_is_not_logged_as_refused(caplog) -> None:

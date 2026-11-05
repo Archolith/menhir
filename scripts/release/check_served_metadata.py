@@ -96,7 +96,7 @@ def fetch_readyz(base_url: str, timeout: float, token: str | None = None) -> dic
     """GET ``/readyz`` and return the parsed JSON body (503 bodies are still parsed)."""
 
     if _scheme(base_url) not in ("http", "https"):
-        raise CheckError("the base URL must start with http:// or https://")
+        raise CheckError("the base URL must be a valid http:// or https:// URL")
     headers = {"Accept": "application/json"}
     if token:
         _require_safe_token_url(base_url)
