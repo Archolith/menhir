@@ -106,9 +106,12 @@ Concept id: `runtime.stack`
   by CLI/environment configuration. The TEMPORAL owner has native create/read/complete variants;
   core phase-one schema/readiness now uses native operational index/constraint metadata and shared
   data-default backfills. Failed validation or incomplete backfills refuse writer startup; redundant
-  bootstrap is skipped when those requirements remain complete. Normal enrichment/recall, feature
-  activation DDL and remaining query owners are still open. Both Redis clients have explicit zero
-  transport retries.
+  bootstrap is skipped when those requirements remain complete. A controlled-model queued ingestion,
+  enrichment and recall slice now runs on that shared graph, including source/provenance reads.
+  Graphiti group clones retain the owned physical graph; logical tenancy remains property-scoped.
+  Episode lease/retry clocks and claim hydration have explicit native mappings. Feature activation,
+  correlation merge/veto queries, scalar transitions and remaining query owners are still open.
+  Both Redis clients have explicit zero transport retries.
   Unsupported callback transactions fail before invocation; no query translator is installed.
 - `archolith-graphiti-core==0.31.2.post2` (Archolith soft fork of `getzep/graphiti`,
   baseline `v0.31.2`; it still imports as `graphiti_core`). Menhir policy uses its explicit

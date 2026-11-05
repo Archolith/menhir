@@ -174,8 +174,8 @@ A disposable Linux test builds the real Menhir services with the shared reposito
 Graphiti index initialization, creates/lists/completes a namespaced TEMPORAL memory through the
 actual graph adapter, saves/reads an entity through Graphiti, checks the same entity/time from
 Menhir, compares canonical instants in the store, then closes/reopens the file and reads it again.
-No LLM/embedder service calls are made: full `add_memory` enrichment/recall is still next, alongside
-Menhir-native schema/readiness and required query variants. No standalone proof helper was added.
+No LLM/embedder service calls were made in this initial slice. The following milestones add native
+startup and controlled-model queued enrichment/recall. No standalone proof helper was added.
 
 Verification: **168 local tests passed, 6 skipped**, covering the changed owners plus neighboring
 Graphiti, degraded-startup, service-pipeline and authority contracts. One skip is the Windows host's
@@ -213,7 +213,7 @@ environment, and **5 existing Neo4j bootstrap integration tests passed**. The fi
 case also passed a targeted rerun asserting a different server PID after close/reopen. Live checks
 cover startup interruption/recovery, idempotent readiness, retained user metadata, duplicate-data
 refusal and both zero-retry pools. Static checks pass on the changed owners. No full CI claimed.
-Normal `add_memory` enrichment/recall remains the next runtime slice; backend selection stays internal.
+That milestone left queued enrichment/recall as the next slice; backend selection stays internal.
 
 ## Reproduce
 
@@ -737,6 +737,46 @@ Redis pipelining or MULTI/EXEC alone is insufficient evidence. Retain Neo4j mean
   10 remaining failed compatibility gates. All 13 compound-project cases passed, including zero
   and multiple completion-marker rejection. Orderly restart preserved the complete project graph,
   native temporal values and guard library. The aggregate decision remains BLOCKED; no full CI claimed.
+
+### Queued enrichment and recall milestone (2026-11-05)
+
+The normal `IngestService.ingest_episode` durable queue/worker now reaches actual Graphiti
+extraction, persistence, Menhir stamping/retention and `RecallService.recall` on disposable Lite
+storage. Model, embedding and reranker outputs are controlled; external HTTP is forbidden by the
+test. Production feature flags are unchanged. The test refuses swallowed backend exceptions and
+error logs, checks namespace isolation, requires extracted entities/facts, drains the worker and
+asserts that only the owned physical graph exists.
+
+Graphiti clones normally select a graph per group. Menhir instead keeps these clones on its owned
+graph, with logical `group_id` tenancy, so direct repositories can see and retain extracted nodes.
+The existing provider is reused through a private subclass. No adapter service or fork-wide change
+is needed. Episode query owners bind canonical UTC clock/deadline parameters, preserve claim-attempt
+fences and hydrate claimed event/lease times before handing them to the worker. Neo4j keeps its
+existing temporal expressions. Shared reset policy accepts the explicit backend clock.
+
+Required recall variants use native vector cosine, string fact guards, UTC access stamps and
+collection-based View receipt validation. Receipt collections include every incoming relationship;
+duplicates, missing/wrongly typed evidence, foreign tenants and extra incoming edges fail closed.
+Native result provenance keeps joins inside each UNION branch because the native planner cannot
+resolve filtered node aliases exported by a correlated UNION; it preserves receipt precedence,
+earliest timestamps, first-five receipt selection, distinct turn ids and namespace scoping.
+
+This is a bounded semantic ingestion profile with distinct entities. It does not qualify scalar
+View refresh/retirement, correlation merges/vetoes (the existing `=~` predicate is unsupported),
+resolved-only timeline queries, erasure, mixed-format import, every maintenance operation, or atomic
+callback owners. In particular, `execute_write` still refuses callbacks before invocation. Continue
+with the required native query/atomic owners in the existing minimal completion order; do not
+activate T5 or open Windows/engine work. No public backend selection or production readiness claim.
+
+Local selection: **359 passed, 5 skipped** across episode lifecycle, heartbeat, reset/query building,
+idempotent submission, namespace isolation, retention, recall visibility/provenance/source lanes and
+shared Falkor repository/schema contracts. These focused tests cover the changed owners and their
+immediate policy callers; the complete repository suite and exact-SHA CI were not run. Live Linux
+pipeline/receipt/time/provenance checks are in `tests/infrastructure/test_falkor_pipeline.py`.
+The final native selection passed **36 tests**: that file plus `test_falkor.py` and
+`test_falkor_schema.py`, including shared runtime/readiness and file restart. Scoped
+F811/F821/ASYNC checks and default Ruff on the runtime, shared policy and new tests pass.
+Artifact validation retains the same 19 baseline findings, none on the edited reference.
 
 ## Upstream evidence
 

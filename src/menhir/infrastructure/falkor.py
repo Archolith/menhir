@@ -88,7 +88,16 @@ class FalkorLiteRepository:
                 # options. Install its async retry policy only after that constructor returns.
                 client = FalkorDB(unix_socket_path=db.client.socket_file, retry=SyncRetry(NoBackoff(), 0))
                 client.connection.set_retry(Retry(NoBackoff(), 0))
-                self._driver = FalkorDriver(falkor_db=client, database=self.database)
+
+                class SharedGraphDriver(FalkorDriver):
+                    """Menhir tenants are group_id properties within the owned graph."""
+
+                    def clone(self, database: str) -> Any:
+                        # Graphiti requests a database clone for each logical group. Menhir's
+                        # direct repositories and policy joins must see those same records.
+                        return self
+
+                self._driver = SharedGraphDriver(falkor_db=client, database=self.database)
             return self._driver
 
     def execute(

@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from datetime import timezone
+from datetime import UTC, datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -23,7 +23,7 @@ from menhir.domain.namespace import (
     tenant_scope_params,
     tenant_scope_prefilter_cypher,
 )
-from menhir.domain.recall_visibility import default_recall_visibility_cypher
+from menhir.domain.recall_visibility import default_recall_visibility_cypher, view_live_provenance_cypher
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.episode_nodes import menhir_queue_episode_cypher
 from menhir.domain.recall import adjacency_edge_pattern
@@ -38,6 +38,7 @@ from menhir.infrastructure.cypher import (
     non_derived_view_cypher,
     SHADOW_CANDIDATE_FACT_EDGE_FIELDS,
 )
+from menhir.infrastructure.falkor import FalkorLiteRepository, encode_instant
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.verifier_repository import candidate_verifier_evidence_cypher
 from menhir.services.embedding_identity import LEGACY_EMBEDDING_MODELS
@@ -119,6 +120,12 @@ class MemoryQueryRepository:
 
     def __init__(self, neo4j: Neo4jRepository) -> None:
         self.neo4j = neo4j
+
+    @property
+    def _fact_text_present(self) -> str:
+        if isinstance(self.neo4j, FalkorLiteRepository):
+            return "CASE WHEN typeOf(r.fact) = 'String' THEN trim(r.fact) <> '' ELSE false END"
+        return FACT_TEXT_PRESENT
 
     # --- Overview & listing -------------------------------------------------
 
@@ -417,6 +424,14 @@ class MemoryQueryRepository:
         `non_structural_memory_cypher`.
         """
         safe_limit = max(1, min(limit, 50))
+        native = isinstance(self.neo4j, FalkorLiteRepository)
+        evidence_lookup = (
+            "CALL { WITH n OPTIONAL MATCH (e)-[:MENTIONS]->(n) RETURN collect(e) AS view_evidence } WITH n, view_evidence"
+            if native else ""
+        )
+        visibility = default_recall_visibility_cypher(
+            "n", incoming_evidence="view_evidence" if native else None
+        )
         where = [
             "n.content_embedding IS NOT NULL",
             "size(n.content_embedding) = size($query_vector)",
@@ -424,7 +439,7 @@ class MemoryQueryRepository:
             "n.processing_state IS NOT NULL",
             "n.processing_state <> 'FAILED'",
             non_structural_memory_cypher("n"),
-            default_recall_visibility_cypher("n"),
+            visibility,
         ]
         params: dict[str, Any] = {
             "query_vector": query_vector,
@@ -469,11 +484,20 @@ class MemoryQueryRepository:
         if namespace_spellings(namespace) is not None:
             where.insert(0, tenant_scope_prefilter_cypher("n"))
         where.append(tenant_scope_cypher("n"))
+        cosine = (
+            "1 - vec.cosineDistance(vecf32(n.content_embedding), vecf32($query_vector))"
+            if isinstance(self.neo4j, FalkorLiteRepository)
+            else "vector.similarity.cosine(n.content_embedding, $query_vector)"
+        )
+        if native:
+            where.remove(visibility)
+            evidence_lookup += " WHERE " + visibility
         return self.neo4j.execute(
             f"""
             MATCH (n:Episodic)
             WHERE {" AND ".join(where)}
-            WITH n, vector.similarity.cosine(n.content_embedding, $query_vector) AS cosine
+            {evidence_lookup}
+            WITH n, {cosine} AS cosine
             WHERE cosine IS NOT NULL
             RETURN n.uuid AS uuid, n.content AS content, n.source AS source,
                    n.session_id AS session_id,
@@ -734,14 +758,19 @@ class MemoryQueryRepository:
         `group_id`). Returns the assertion id + `stated_span` (the recall surface / user's own words) +
         cosine + the slot/subject identity a downstream deterministic View-authority lookup needs."""
         safe_limit = max(1, min(limit, 500))
+        cosine = (
+            "1 - vec.cosineDistance(vecf32(a.name_embedding), vecf32($query_vector))"
+            if isinstance(self.neo4j, FalkorLiteRepository)
+            else "vector.similarity.cosine(a.name_embedding, $query_vector)"
+        )
         return self.neo4j.execute(
-            """
+            f"""
             MATCH (a:TypedAssertion)
             WHERE a.name_embedding IS NOT NULL
               AND NOT coalesce(a.superseded, false)
               AND NOT coalesce(a.binding_pending, false)
               AND ($namespaces IS NULL OR a.namespace IN $namespaces)
-            WITH a, vector.similarity.cosine(a.name_embedding, $query_vector) AS cosine
+            WITH a, {cosine} AS cosine
             WHERE cosine IS NOT NULL
             RETURN a.assertion_id AS assertion_id, a.stated_span AS stated_span, cosine,
                    a.subject_uuid AS subject_uuid, a.subject_display AS subject_display,
@@ -799,14 +828,24 @@ class MemoryQueryRepository:
             else field
             for field in ENTITY_METADATA_FIELDS
         )
-        query = (Cypher()
-            .match("(n:Entity)")
-            .where("n.uuid IN $uuids")
-            .return_fields((*metadata_fields, candidate_verifier_evidence_cypher()))
-            .build())
+        params: dict[str, Any] = {"uuids": node_uuids, "belief_commit_key": "belief_commit"}
+        if isinstance(self.neo4j, FalkorLiteRepository):
+            metadata_fields = tuple(
+                ("CASE WHEN NOT coalesce(n.is_view,false) THEN true ELSE "
+                 + view_live_provenance_cypher("n", incoming_evidence="view_evidence") + " END AS view_provenance_live")
+                if field.endswith(" AS view_provenance_live") else
+                "CASE WHEN n.target_date IS NOT NULL AND n.target_date < $today THEN true ELSE false END AS target_date_passed"
+                if field.endswith(" AS target_date_passed") else field
+                for field in metadata_fields
+            )
+            params["today"] = datetime.now(UTC).date().isoformat()
+        builder = Cypher().match("(n:Entity)").where("n.uuid IN $uuids")
+        if isinstance(self.neo4j, FalkorLiteRepository):
+            builder.raw("CALL { WITH n OPTIONAL MATCH (e)-[:MENTIONS]->(n) RETURN collect(e) AS view_evidence }")
+        query = builder.return_fields((*metadata_fields, candidate_verifier_evidence_cypher())).build()
         return self.neo4j.execute(
             query,
-            params={"uuids": node_uuids, "belief_commit_key": "belief_commit"},
+            params=params,
         )
 
     def fetch_temporal_facts(self, node_uuids: list[str]) -> list[dict[str, object]]:
@@ -819,7 +858,7 @@ class MemoryQueryRepository:
             return []
         query = (Cypher()
             .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
-            .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT}")
+            .where(f"n.uuid IN $uuids AND {self._fact_text_present}")
             .return_fields(FACT_TEMPORAL_FIELDS)
             .build())
         return self.neo4j.execute(query, params={"uuids": node_uuids})
@@ -841,7 +880,7 @@ class MemoryQueryRepository:
             return []
         query = (Cypher()
             .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
-            .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT}")
+            .where(f"n.uuid IN $uuids AND {self._fact_text_present}")
             .return_fields(SHADOW_CANDIDATE_FACT_EDGE_FIELDS)
             .build())
         return self.neo4j.execute(query, params={"uuids": node_uuids})
@@ -941,6 +980,46 @@ class MemoryQueryRepository:
                           acc + [ (r)-[:ADMITTED_ON]->(t:TurnEvidence) | t.turn_id ])
                      AS all_turn_ids
         """
+        if isinstance(self.neo4j, FalkorLiteRepository):
+            # Keep relationship joins inside each UNION branch: the native planner cannot
+            # resolve node/property filters against aliases exported by a correlated UNION.
+            episode_receipt = """
+                OPTIONAL MATCH (receipt:Episodic {resolved_episode_uuid: epi.uuid})
+                OPTIONAL MATCH (receipt)-[:ADMITTED_ON]->(t:TurnEvidence)
+                RETURN epi.uuid AS episode_uuid, receipt.uuid AS receipt_uuid,
+                       coalesce(receipt.source, epi.source) AS source,
+                       toString(coalesce(receipt.reference_time, epi.valid_at, epi.created_at)) AS first_seen,
+                       collect(DISTINCT t.turn_id) AS turn_ids
+            """
+            query = f"""
+                UNWIND $uuids AS id
+                CALL {{
+                    WITH id
+                    MATCH (n:Entity {{uuid:id}}) WHERE {tenant_scope_cypher('n')}
+                    MATCH (epi:Episodic)-[:MENTIONS]->(n)
+                    {episode_receipt}
+                    UNION
+                    WITH id
+                    MATCH ()-[r:RELATES_TO {{uuid:id}}]->() WHERE {tenant_scope_cypher('r')}
+                    UNWIND coalesce(r.episodes, []) AS episode_id
+                    WITH DISTINCT id, episode_id
+                    MATCH (epi:Episodic {{uuid:episode_id}})
+                    {episode_receipt}
+                    UNION
+                    WITH id
+                    MATCH (a:Episodic {{uuid:id}}) WHERE {tenant_scope_cypher('a')}
+                    OPTIONAL MATCH (a)-[:ADMITTED_ON]->(t:TurnEvidence)
+                    RETURN null AS episode_uuid, a.uuid AS receipt_uuid, a.source AS source,
+                           toString(a.reference_time) AS first_seen, collect(DISTINCT t.turn_id) AS turn_ids
+                }}
+                WITH id, collect(DISTINCT source) AS sources, min(first_seen) AS first_seen_at,
+                     collect({{fs:first_seen, turns:turn_ids, receipt:receipt_uuid}}) AS eps
+                UNWIND eps AS e
+                WITH id, sources, first_seen_at, e ORDER BY e.fs
+                WITH id, sources, first_seen_at, collect(CASE WHEN e.receipt IS NOT NULL THEN e.turns END)[0..5] AS earliest
+                RETURN id AS uuid, sources, first_seen_at,
+                       reduce(acc=[], turns IN earliest | acc + turns) AS all_turn_ids
+            """
         rows = self.neo4j.execute(
             query,
             params={"uuids": uuids, **tenant_scope_params(namespace)},
@@ -1046,14 +1125,19 @@ class MemoryQueryRepository:
         """Update last_accessed for retrieved nodes, return count touched."""
         if not node_uuids:
             return 0
+        native = isinstance(self.neo4j, FalkorLiteRepository)
+        now_expression = "$retrieved_at" if native else "datetime()"
+        params = {"uuids": node_uuids}
+        if native:
+            params["retrieved_at"] = encode_instant(datetime.now(UTC))
         rows = self.neo4j.execute(
-            """
+            f"""
             MATCH (n:Entity)
             WHERE n.uuid IN $uuids
-            SET n.last_accessed = datetime()
+            SET n.last_accessed = {now_expression}
             RETURN count(n) AS touched
             """,
-            params={"uuids": node_uuids},
+            params=params,
         )
         return int(rows[0].get("touched", 0)) if rows else 0
 

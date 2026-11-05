@@ -9,7 +9,7 @@ def _canonical_tenant_cypher(variable: str) -> str:
     return f"CASE WHEN {tenant} = '' THEN 'default' ELSE {tenant} END"
 
 
-def view_live_provenance_cypher(variable: str = "n") -> str:
+def view_live_provenance_cypher(variable: str = "n", *, incoming_evidence: str | None = None) -> str:
     """Return exact incoming-``MENTIONS``/receipt set equality for one View.
 
     UUID existence elsewhere in the graph is insufficient: lifecycle authority is the relationship
@@ -18,6 +18,9 @@ def view_live_provenance_cypher(variable: str = "n") -> str:
     the View may have no additional incoming ``MENTIONS`` relationships. Each evidence node must
     also belong to the View's canonical tenant; legacy ``''`` and ``'default'`` spellings are
     equivalent, but a cross-tenant relationship never establishes live provenance.
+
+    ``incoming_evidence`` names a code-owned collection bound by a native query. It must
+    include every incoming relationship, including duplicate and incorrectly typed endpoints.
     """
 
     contributors = f"coalesce({variable}.episode_uuids, [])"
@@ -35,6 +38,13 @@ def view_live_provenance_cypher(variable: str = "n") -> str:
         f"AND {evidence_tenant} = {view_tenant} }})"
     )
     incoming_mentions = f"COUNT {{ MATCH ()-[:MENTIONS]->({variable}) }}"
+    if incoming_evidence is not None:
+        every_receipt_is_linked = (
+            f"all(eid IN {contributors} WHERE any(e IN {incoming_evidence} WHERE "
+            f"((e:Episodic AND e.uuid = eid) OR (e:TurnEvidence AND e.turn_id = eid)) "
+            f"AND {evidence_tenant} = {view_tenant}))"
+        )
+        incoming_mentions = f"size({incoming_evidence})"
     return (
         f"size({contributors}) > 0 "
         f"AND {every_receipt_is_unique} "
@@ -43,7 +53,7 @@ def view_live_provenance_cypher(variable: str = "n") -> str:
     )
 
 
-def default_recall_visibility_cypher(variable: str = "n") -> str:
+def default_recall_visibility_cypher(variable: str = "n", *, incoming_evidence: str | None = None) -> str:
     """Return the fail-closed predicate used by generic recall/listing surfaces.
 
     Ordinary memories remain visible unless they are candidates or gone. A materialized View has a
@@ -63,7 +73,7 @@ def default_recall_visibility_cypher(variable: str = "n") -> str:
         f"AND {variable}.view_audience = 'RECALL' "
         f"AND coalesce({variable}.view_current, {variable}.qs_current, false) "
         f"AND NOT coalesce({variable}.retired, false) "
-        f"AND {view_live_provenance_cypher(variable)}"
+        f"AND {view_live_provenance_cypher(variable, incoming_evidence=incoming_evidence)}"
         f"))"
     )
 

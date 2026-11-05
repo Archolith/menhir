@@ -9,6 +9,7 @@ from menhir.domain.namespace import stamped_namespace, tenant_scope_cypher, tena
 from menhir.domain.retention import RETENTION_SOURCE_RELATIONSHIP, same_tenant_cypher
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.infrastructure.cypher import Cypher
+from menhir.infrastructure.episode_lifecycle import _EpisodeGraphTime
 from menhir.infrastructure.schema import EDGE_LABELS
 
 
@@ -25,7 +26,7 @@ class PolicyStampResult:
 _EDGE_TYPE_PATTERN = "|".join(EDGE_LABELS)
 
 
-class EpisodeStampingRepository:
+class EpisodeStampingRepository(_EpisodeGraphTime):
     """Post-ingest stamping and live processing metadata updates."""
 
     neo4j: Any
@@ -50,7 +51,7 @@ class EpisodeStampingRepository:
         if not source_episode_uuid or any(not uuid for uuid in entity_uuids):
             raise ValueError("Retention provenance requires nonempty source and entity UUIDs")
         unique_entity_uuids = list(dict.fromkeys(entity_uuids))
-        rows = self.neo4j.execute(
+        rows = self._execute(
             f"""
             OPTIONAL MATCH (source:Episodic {{uuid: $source_episode_uuid}})
             WITH source, source IS NOT NULL AND ({tenant_scope_cypher("source")}) AS source_valid
@@ -120,7 +121,7 @@ class EpisodeStampingRepository:
                 "n.session_id = $session_id",
                 "n.user_id = $user_id",
                 "n.namespace = $namespace",
-                "n.created_at = coalesce(n.created_at, datetime())",
+                f"n.created_at = coalesce(n.created_at, {self._clock_expression})",
                 "n.last_accessed = coalesce(n.last_accessed, n.created_at)",
             ]
             episodic_params = {
@@ -148,7 +149,7 @@ class EpisodeStampingRepository:
                 .return_raw("count(DISTINCT n) AS nodes_touched")
                 .build()
             )
-            episodic_rows = self.neo4j.execute(episodic_query, params=episodic_params)
+            episodic_rows = self._execute(episodic_query, params=episodic_params)
             if episodic_rows:
                 nodes_touched += int(episodic_rows[0].get("nodes_touched", 0))
 
@@ -166,7 +167,7 @@ class EpisodeStampingRepository:
                 " ELSE coalesce(n.user_id, $user_id) END",
                 "n.namespace = CASE WHEN locked THEN n.namespace"
                 " ELSE coalesce(n.namespace, $namespace) END",
-                "n.created_at = coalesce(n.created_at, datetime())",
+                f"n.created_at = coalesce(n.created_at, {self._clock_expression})",
                 "n.last_accessed = coalesce(n.last_accessed, n.created_at)",
             ]
             entity_params = {
@@ -194,7 +195,7 @@ class EpisodeStampingRepository:
                 .return_raw("count(DISTINCT n) AS nodes_touched")
                 .build()
             )
-            entity_rows = self.neo4j.execute(entity_query, params=entity_params)
+            entity_rows = self._execute(entity_query, params=entity_params)
             if entity_rows:
                 nodes_touched += int(entity_rows[0].get("nodes_touched", 0))
 
@@ -208,13 +209,13 @@ class EpisodeStampingRepository:
                         "r.scope = coalesce(r.scope, 'SESSION')",
                         "r.weight = coalesce(toFloat(r.weight), 1.0)",
                         "r.source = coalesce(r.source, $source)",
-                        "r.created_at = coalesce(r.created_at, datetime())",
+                        f"r.created_at = coalesce(r.created_at, {self._clock_expression})",
                     )
                 )
                 .return_raw("count(DISTINCT r) AS edges_touched")
                 .build()
             )
-            edge_rows = self.neo4j.execute(
+            edge_rows = self._execute(
                 edge_query,
                 params={
                     "uuids": unique_edge_uuids,
@@ -255,7 +256,7 @@ class EpisodeStampingRepository:
                 "n.processing_substage_started_at = CASE"
                 " WHEN $substage = n.processing_substage"
                 " THEN n.processing_substage_started_at"
-                " ELSE datetime() END"
+                f" ELSE {self._clock_expression} END"
             )
             params["substage"] = substage
         if progress is not None:
@@ -300,7 +301,7 @@ class EpisodeStampingRepository:
                 sets.append("n.processing_llm_active_endpoint = $llm_active_endpoint")
                 params["llm_active_endpoint"] = llm_active_endpoint
         if heartbeat:
-            sets.append("n.processing_heartbeat_at = datetime()")
+            sets.append(f"n.processing_heartbeat_at = {self._clock_expression}")
         if not sets:
             return False
 
@@ -315,7 +316,7 @@ class EpisodeStampingRepository:
             .return_raw("count(n) AS updated")
             .build()
         )
-        rows = self.neo4j.execute(query, params=params)
+        rows = self._execute(query, params=params)
         return bool(rows and int(rows[0].get("updated", 0)) > 0)
 
     def touch_episode_processing_heartbeat(
@@ -348,18 +349,19 @@ class EpisodeStampingRepository:
                     "n.uuid = $episode_uuid",
                     "n.processing_state = 'ENRICHING'",
                     "n.processing_owner = $worker_id",
-                    "n.processing_started_at IS NOT NULL AND n.processing_started_at.epochSeconds = datetime($claim_started_at).epochSeconds AND n.processing_started_at.nanosecond = datetime($claim_started_at).nanosecond",
+                    f"n.processing_started_at IS NOT NULL AND {self._claim_instant_expression}",
                 )
                 .set(
                     [
-                        "n.processing_heartbeat_at = datetime()",
-                        "n.processing_lease_expires_at = CASE WHEN datetime() < n.processing_started_at + duration({seconds: $max_enrichment_seconds}) THEN datetime() + duration({seconds: $lease_seconds}) ELSE n.processing_lease_expires_at END",
+                        f"n.processing_heartbeat_at = {self._clock_expression}",
+                        f"n.processing_lease_expires_at = CASE WHEN {self._within_enrichment_window_expression} THEN "
+                        f"{self._lease_deadline_expression} ELSE n.processing_lease_expires_at END",
                     ]
                 )
                 .return_raw("count(n) AS updated")
                 .build()
             )
-            rows = self.neo4j.execute(
+            rows = self._execute(
                 renew_query,
                 params={
                     "episode_uuid": episode_uuid,
@@ -379,11 +381,11 @@ class EpisodeStampingRepository:
                 "n.uuid = $episode_uuid",
                 "($worker_id IS NULL OR (n.processing_state = 'ENRICHING' AND n.processing_owner = $worker_id))",
             )
-            .set("n.processing_heartbeat_at = datetime()")
+            .set(f"n.processing_heartbeat_at = {self._clock_expression}")
             .return_raw("count(n) AS updated")
             .build()
         )
-        rows = self.neo4j.execute(query, params={"episode_uuid": episode_uuid, "worker_id": worker_id})
+        rows = self._execute(query, params={"episode_uuid": episode_uuid, "worker_id": worker_id})
         return bool(rows and int(rows[0].get("updated", 0)) > 0)
 
     def increment_episode_llm_usage(
@@ -410,7 +412,7 @@ class EpisodeStampingRepository:
         }
         sets: list[str] = [
             "n.processing_llm_tasks_total = coalesce(toInteger(n.processing_llm_tasks_total), 0) + $task_delta",
-            "n.processing_substage_started_at = datetime()",
+            f"n.processing_substage_started_at = {self._clock_expression}",
         ]
         params: dict[str, Any] = {"episode_uuid": episode_uuid, "task_delta": delta}
         if phase_normalized == "started":
@@ -422,7 +424,7 @@ class EpisodeStampingRepository:
         params["substage"] = substage_map.get(phase_normalized, "llm_activity_observed")
         sets.append("n.processing_substage = $substage")
         if phase_normalized in ("started", "completed", "failed"):
-            sets.append("n.processing_llm_last_task_at = datetime()")
+            sets.append(f"n.processing_llm_last_task_at = {self._clock_expression}")
         if phase_normalized == "failed" and error is not None:
             params["error"] = error
             sets.append("n.processing_error = $error")
@@ -440,5 +442,5 @@ class EpisodeStampingRepository:
             sets.append("n.processing_llm_active_task = $task")
 
         query = Cypher().match("(n:Episodic)").where("n.uuid = $episode_uuid").set(sets).return_raw("count(n) AS updated").build()
-        rows = self.neo4j.execute(query, params=params)
+        rows = self._execute(query, params=params)
         return bool(rows and int(rows[0].get("updated", 0)) > 0)

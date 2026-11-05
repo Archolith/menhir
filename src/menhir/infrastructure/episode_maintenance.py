@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from menhir.domain.namespace import namespace_to_group_id
+from menhir.infrastructure.episode_lifecycle import _EpisodeGraphTime
 from menhir.domain.verbatim_skip_status import skip_projection_lookup_cypher, skip_projection_map_cypher
 from menhir.infrastructure.cypher import (
     Cypher,
@@ -22,16 +23,17 @@ _EXHAUSTED_EPISODE_FETCH_LIMIT = 200
 _ORPHAN_EPISODE_MIN_AGE_DAYS = 7
 
 
-class EpisodeMaintenanceRepository:
+class EpisodeMaintenanceRepository(_EpisodeGraphTime):
     """Scheduled reset, recovery, and cleanup operations."""
 
     neo4j: Any
 
     def reset_stale_enriching_episodes(self, *, max_attempts: int) -> int:
         query = build_reset_or_fail_query(
+            now_expression=self._clock_expression,
             where=[
                 "n.processing_state = 'ENRICHING'",
-                "(n.processing_lease_expires_at < datetime() OR n.processing_lease_expires_at IS NULL)",
+                f"(n.processing_lease_expires_at < {self._clock_expression} OR n.processing_lease_expires_at IS NULL)",
             ],
             exhausted_substage=(
                 "CASE WHEN n.processing_lease_expires_at IS NULL"
@@ -54,11 +56,12 @@ class EpisodeMaintenanceRepository:
                 " ELSE 'lease_expired_reset' END"
             ),
         )
-        rows = self.neo4j.execute(query, params={"max_attempts": max(1, max_attempts)})
+        rows = self._execute(query, params={"max_attempts": max(1, max_attempts)})
         return int(rows[0].get("reset", 0)) if rows else 0
 
     def reset_orphaned_enriching_episodes(self, *, max_attempts: int) -> int:
         query = build_reset_or_fail_query(
+            now_expression=self._clock_expression,
             where=[
                 "n.processing_state = 'ENRICHING'",
                 "(n.processing_owner IS NULL OR trim(toString(n.processing_owner)) = '')",
@@ -68,7 +71,7 @@ class EpisodeMaintenanceRepository:
             exhausted_error="'orphaned_enriching_reset_attempts_exhausted'",
             reset_error="'orphaned_enriching_reset'",
         )
-        rows = self.neo4j.execute(query, params={"max_attempts": max(1, max_attempts)})
+        rows = self._execute(query, params={"max_attempts": max(1, max_attempts)})
         return int(rows[0].get("reset", 0)) if rows else 0
 
     def fail_exhausted_pending_episodes(self, *, max_attempts: int) -> int:
@@ -84,7 +87,7 @@ class EpisodeMaintenanceRepository:
                     "n.processing_state = 'FAILED'",
                     "n.processing_stage = 'failed'",
                     "n.processing_substage = 'pending_attempts_exhausted'",
-                    "n.processing_substage_started_at = datetime()",
+                    f"n.processing_substage_started_at = {self._clock_expression}",
                     "n.processing_progress = 100.0",
                     "n.processing_steps_completed = coalesce("
                     " toInteger(n.processing_steps_total),"
@@ -92,9 +95,9 @@ class EpisodeMaintenanceRepository:
                     *LLM_RESET_SET,
                     "n.processing_owner = null",
                     "n.processing_lease_expires_at = null",
-                    "n.processing_heartbeat_at = datetime()",
+                    f"n.processing_heartbeat_at = {self._clock_expression}",
                     "n.processing_started_at = null",
-                    "n.processing_completed_at = datetime()",
+                    f"n.processing_completed_at = {self._clock_expression}",
                     "n.processing_error = CASE"
                     " WHEN n.processing_error IS NULL OR trim(toString(n.processing_error)) = ''"
                     " THEN 'pending_attempts_exhausted'"
@@ -104,7 +107,7 @@ class EpisodeMaintenanceRepository:
             .return_raw("count(n) AS failed")
             .build()
         )
-        rows = self.neo4j.execute(query, params={"max_attempts": max(1, max_attempts)})
+        rows = self._execute(query, params={"max_attempts": max(1, max_attempts)})
         return int(rows[0].get("failed", 0)) if rows else 0
 
     def force_reset_failed_episode(self, episode_uuid: str) -> bool:
@@ -122,7 +125,7 @@ class EpisodeMaintenanceRepository:
                     "n.processing_attempts = 0",
                     "n.processing_owner = null",
                     "n.processing_lease_expires_at = null",
-                    "n.processing_heartbeat_at = datetime()",
+                    f"n.processing_heartbeat_at = {self._clock_expression}",
                     "n.processing_started_at = null",
                     "n.processing_completed_at = null",
                     "n.processing_error = null",
@@ -131,11 +134,12 @@ class EpisodeMaintenanceRepository:
             .return_raw("count(n) AS reset")
             .build()
         )
-        rows = self.neo4j.execute(query, {"uuid": episode_uuid})
+        rows = self._execute(query, {"uuid": episode_uuid})
         return bool(rows and int(rows[0].get("reset", 0)) > 0)
 
     def force_release_episode_lease(self, episode_uuid: str, *, max_attempts: int) -> bool:
         query = build_reset_or_fail_query(
+            now_expression=self._clock_expression,
             match="(n:Episodic {uuid: $uuid})",
             where=["n.processing_state = 'ENRICHING'"],
             exhausted_substage="'lease_released_attempts_exhausted'",
@@ -144,11 +148,12 @@ class EpisodeMaintenanceRepository:
             reset_error="'manual_lease_release'",
             return_alias="released",
         )
-        rows = self.neo4j.execute(query, {"uuid": episode_uuid, "max_attempts": max(1, max_attempts)})
+        rows = self._execute(query, {"uuid": episode_uuid, "max_attempts": max(1, max_attempts)})
         return bool(rows and int(rows[0].get("released", 0)) > 0)
 
     def release_worker_episode_leases(self, worker_id: str, *, max_attempts: int) -> int:
         query = build_reset_or_fail_query(
+            now_expression=self._clock_expression,
             where=[
                 "n.processing_state = 'ENRICHING'",
                 "n.processing_owner = $worker_id",
@@ -159,7 +164,7 @@ class EpisodeMaintenanceRepository:
             reset_error="'worker_shutdown_release'",
             return_alias="released",
         )
-        rows = self.neo4j.execute(query, {"worker_id": worker_id, "max_attempts": max(1, max_attempts)})
+        rows = self._execute(query, {"worker_id": worker_id, "max_attempts": max(1, max_attempts)})
         return int(rows[0].get("released", 0)) if rows else 0
 
     def list_episode_processing(
@@ -203,7 +208,7 @@ class EpisodeMaintenanceRepository:
         params: dict[str, Any] = {"states": states, "limit": safe_limit}
         if ns:
             params["namespace"] = ns
-        return self.neo4j.execute(query, params=params)
+        return self._execute(query, params=params)
 
     def fetch_stale_enriching_episodes(
         self,
@@ -217,7 +222,7 @@ class EpisodeMaintenanceRepository:
             .match("(n:Episodic)")
             .where(
                 "n.processing_state = 'ENRICHING'",
-                "(n.processing_lease_expires_at < datetime()"
+                f"(n.processing_lease_expires_at < {self._clock_expression}"
                 " OR ($include_missing_lease = true AND n.processing_lease_expires_at IS NULL))",
             )
             .return_fields(
@@ -229,7 +234,7 @@ class EpisodeMaintenanceRepository:
             .limit()
             .build()
         )
-        return self.neo4j.execute(query, params={"include_missing_lease": include_missing_lease, "limit": safe_limit})
+        return self._execute(query, params={"include_missing_lease": include_missing_lease, "limit": safe_limit})
 
     def reset_zero_extraction_episodes(self) -> int:
         query = (
@@ -259,7 +264,7 @@ class EpisodeMaintenanceRepository:
                     "n.processing_llm_tasks_attempt = 0",
                     "n.processing_owner = null",
                     "n.processing_lease_expires_at = null",
-                    "n.processing_heartbeat_at = datetime()",
+                    f"n.processing_heartbeat_at = {self._clock_expression}",
                     "n.processing_error = 'zero_extraction_reset'",
                     "n.processing_attempts = 0",
                 )
@@ -267,7 +272,7 @@ class EpisodeMaintenanceRepository:
             .return_raw("count(n) AS reset")
             .build()
         )
-        rows = self.neo4j.execute(query)
+        rows = self._execute(query)
         return int(rows[0].get("reset", 0)) if rows else 0
 
     def count_pending_episodes(self, session_id: str | None = None) -> int:
@@ -282,7 +287,7 @@ class EpisodeMaintenanceRepository:
             .return_raw("count(n) AS pending")
             .build()
         )
-        rows = self.neo4j.execute(query, params=params)
+        rows = self._execute(query, params=params)
         return int(rows[0].get("pending", 0)) if rows else 0
 
     def cleanup_orphan_episodes(self, session_id: str | None = None, *, dry_run: bool = False) -> int:
@@ -330,7 +335,7 @@ class EpisodeMaintenanceRepository:
         )
         if dry_run:
             query = query_builder.return_raw("count(n) AS eligible").build()
-            rows = self.neo4j.execute(query, params=params)
+            rows = self._execute(query, params=params)
             return int(rows[0].get("eligible", 0)) if rows else 0
         query = (
             query_builder
@@ -339,7 +344,7 @@ class EpisodeMaintenanceRepository:
             .return_raw("collect(deleted_uuid) AS deleted_uuids, count(*) AS deleted")
             .build()
         )
-        rows = self.neo4j.execute(query, params=params)
+        rows = self._execute(query, params=params)
         if not rows:
             return 0
         deleted = int(rows[0].get("deleted", 0))
@@ -408,7 +413,7 @@ class EpisodeMaintenanceRepository:
                     "n.session_id = $session_id",
                     "n.user_id = $user_id",
                     "n.source = $source",
-                    "n.created_at = datetime()",
+                    f"n.created_at = {self._clock_expression}",
                     "n.freshness = 'ACTIVE'",
                 )
             )
@@ -416,7 +421,7 @@ class EpisodeMaintenanceRepository:
             .build()
         )
         try:
-            rows = self.neo4j.execute(
+            rows = self._execute(
                 query,
                 params={
                     "episode_uuid": episode_uuid,
@@ -433,7 +438,7 @@ class EpisodeMaintenanceRepository:
             if rows:
                 captured_uuid = rows[0].get("entity_uuid")
                 # Link episode to raw-capture entity for provenance
-                self.neo4j.execute(
+                self._execute(
                     """
                     MATCH (ep:Episodic {uuid: $episode_uuid})
                     MATCH (entity:Entity {uuid: $entity_uuid})
@@ -467,7 +472,7 @@ class EpisodeMaintenanceRepository:
             .build()
         )
         try:
-            rows = self.neo4j.execute(query, params={"episode_uuid": episode_uuid})
+            rows = self._execute(query, params={"episode_uuid": episode_uuid})
             return bool(rows and int(rows[0].get("updated", 0)) > 0)
         except (OSError, RuntimeError) as e:
             import logging
@@ -507,7 +512,7 @@ class EpisodeMaintenanceRepository:
             .limit()
             .build()
         )
-        rows = self.neo4j.execute(
+        rows = self._execute(
             query, params={"max_attempts": max(1, max_attempts), "limit": limit}
         )
         return list(rows) if rows else []

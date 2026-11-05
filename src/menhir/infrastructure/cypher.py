@@ -510,6 +510,7 @@ def build_reset_or_fail_query(
     exhausted_error: str,
     reset_error: str,
     return_alias: str = "reset",
+    now_expression: str = "datetime()",
 ) -> str:
     """Build a reset-or-fail query that bifurcates on attempt exhaustion.
 
@@ -532,7 +533,7 @@ def build_reset_or_fail_query(
             "n.processing_stage = CASE WHEN exhausted THEN 'failed' ELSE 'queued' END",
             f"n.processing_substage = CASE WHEN exhausted"
             f" THEN {exhausted_substage} ELSE {reset_substage} END",
-            "n.processing_substage_started_at = datetime()",
+            f"n.processing_substage_started_at = {now_expression}",
             "n.processing_progress = CASE WHEN exhausted"
             " THEN coalesce(n.processing_progress, 100.0) ELSE 0.0 END",
             "n.processing_steps_completed = CASE WHEN exhausted"
@@ -542,9 +543,9 @@ def build_reset_or_fail_query(
             *LLM_RESET_SET,
             "n.processing_owner = null",
             "n.processing_lease_expires_at = null",
-            "n.processing_heartbeat_at = datetime()",
+            f"n.processing_heartbeat_at = {now_expression}",
             "n.processing_started_at = null",
-            "n.processing_completed_at = CASE WHEN exhausted THEN datetime() ELSE null END",
+            f"n.processing_completed_at = CASE WHEN exhausted THEN {now_expression} ELSE null END",
             f"n.processing_error = CASE WHEN exhausted"
             f" THEN {exhausted_error} ELSE {reset_error} END",
         ))

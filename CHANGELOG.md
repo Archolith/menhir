@@ -1,5 +1,10 @@
 ## 2026-11-05 - Falkor runtime integration (#109)
 
+- Added controlled-model queued ingestion, Graphiti enrichment and recall on the shared Lite
+  runtime. Graphiti group clones retain Menhir's physical graph. Episode clocks/claim hydration,
+  source-vector reads, View receipt validation and result provenance have explicit native mappings;
+  live tests reject swallowed backend errors and check tenancy, stale claims and provenance.
+  This bounded profile does not enable the backend or qualify remaining atomic/scalar/merge owners.
 - Added native phase-one schema/readiness: operational property/kind checks, native uniqueness,
   bounded enforcement waits and shared UTC-clock data defaults. Startup retries incomplete
   backfills and refuses duplicate identity data. Fixed Graphiti's startup index-count query and
