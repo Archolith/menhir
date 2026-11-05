@@ -9,7 +9,8 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 AGENT_BASELINE = ROOT / "tests" / "fixtures" / "agent-boundary-baseline.json"
-_WINDOWS_HOME = re.compile(rb"[A-Za-z]:\\Users\\[^\\\s]+", re.I)
+# Backslash, forward-slash, escaped and Git Bash (/c/Users/...) spellings.
+_WINDOWS_HOME = re.compile(rb"(?:[A-Za-z]:[\\/]+|/[A-Za-z]/)Users[\\/]+[^\\/\s]+", re.I)
 _IPV4 = re.compile(rb"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 

@@ -10,6 +10,15 @@
     ".agent/archive/handoffs/HANDOFF-2026-07-07.md": {
       "home_paths": 1
     },
+    ".agent/archive/plans/menhir-155-ground-event-dates-plan.md": {
+      "home_paths": 1
+    },
+    ".agent/archive/plans/menhir-172-context-packing-plan.md": {
+      "home_paths": 1
+    },
+    ".agent/archive/plans/menhir-m1-oracle-lme-ir-benchmark.md": {
+      "home_paths": 1
+    },
     ".agent/archive/plans/menhir-memory-namespace-isolation-plan.md": {
       "home_paths": 1
     },
@@ -21,6 +30,9 @@
     },
     ".agent/archive/plans/menhir-production-release-2026-09-04.md": {
       "home_paths": 4
+    },
+    ".agent/archive/plans/menhir-research-corpus-restructure-plan.md": {
+      "home_paths": 14
     },
     ".agent/archive/plans/session-handoff-2026-06-28-live-verification.md": {
       "home_paths": 1
@@ -56,7 +68,7 @@
       "home_paths": 18
     },
     ".agent/for-review/WRAPUP-2026-07-28-menhir-scalar-candidate-relationless-handoff.md": {
-      "home_paths": 19
+      "home_paths": 20
     },
     ".agent/for-review/WRAPUP-2026-08-06-menhir-deterministic-scalar-routing-checkpoint.md": {
       "home_paths": 17
@@ -79,11 +91,23 @@
     ".agent/plans/menhir-mcp-snapshot-ingest-2026-09-16.md": {
       "home_paths": 1
     },
+    ".agent/plans/menhir-recall-history-plan.md": {
+      "home_paths": 1
+    },
+    ".agent/plans/menhir-recall-timeline-plan.md": {
+      "home_paths": 1
+    },
+    ".agent/plans/menhir-source-memory-lane-plan.md": {
+      "home_paths": 1
+    },
     ".agent/plans/menhir-work-artifact-reconciliation-2026-08-11.md": {
       "home_paths": 2
     },
     ".agent/reports/canonical-self-phase0-baseline.md": {
       "home_paths": 1
+    },
+    ".agent/reviews/menhir-M2-compound-audit-gemini.md": {
+      "home_paths": 20
     },
     ".agent/reviews/menhir-ssot-review-2026-07-11.md": {
       "home_paths": 1
