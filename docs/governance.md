@@ -20,7 +20,7 @@ particular live deployment unless a release and its external receipts bind it.
 | Software bill of materials | [`sbom.json`](../sbom.json) | Reproducible CycloneDX inventory of one clean installed environment |
 | Coverage snapshot | `coverage.xml` (generated, not tracked) | Historical offline test execution, with the limitations below |
 | Model configuration record | [`model-governance.md`](model-governance.md) | Code defaults, environment overrides, and model-selection policy |
-| Runtime activation ledger | [`.agent/default-off-features.md`](../.agent/default-off-features.md) | Which implemented authority and retrieval paths are enabled by default |
+| Runtime activation ledger | [`.agent/default-off-features.md`](../.agent/default-off-features.md) | Activation decisions for authority and retrieval paths; `src/menhir/config/feature_flags.py` holds the current defaults |
 | Production release contract | Private `Archolith/menhir-deploy` repository | Operator release manifests, receipts, backup/restore, promotion, rollback, and live acceptance gates |
 
 ## Knowledge governance
@@ -37,17 +37,18 @@ single-operator trust model and are not a general multi-tenant isolation claim.
 
 ## SBOM
 
-The checked-in SBOM is CycloneDX 1.6 JSON with `reproducible=true` and 101 components,
-including `archolith-menhir` 0.2.0. Representative versions in that generated environment
-are:
+The checked-in SBOM is CycloneDX 1.6 JSON with `reproducible=true` and 97 components,
+plus `archolith-menhir` 0.3.2 as the root component. It was generated on Windows, so the
+Linux-only `jeepney` and `secretstorage` from the lock are not inventoried. Representative
+versions in that generated environment are:
 
 | Component | Version |
 |---|---:|
 | `archolith-mcp-framework` | 0.2.0 |
-| `archolith-oauth` | 0.2.0 |
+| `archolith-oauth` | 0.3.1 |
 | `fastapi` | 0.139.0 |
-| `graphiti-core` | 0.29.2 |
-| `joserfc` | 1.7.3 |
+| `archolith-graphiti-core` | 0.31.2.post2 |
+| `joserfc` | 1.7.7 |
 | `neo4j` | 6.2.0 |
 | `openai` | 2.45.0 |
 | `pydantic` | 2.13.4 |

@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from menhir.core.bootstrap import UnavailableGraphitiClient, UnavailableLLMAdapter
     from menhir.services.correlation_service import CorrelationService
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+from menhir.infrastructure.observability import last_provider_quota_exhaustion
 from menhir.infrastructure.pending_actions import PendingActionStore
 from menhir.infrastructure.telemetry import record_lifecycle_action, record_memory_revision, record_mcp_event
 from menhir.infrastructure.telemetry.store import telemetry_store
@@ -204,6 +205,15 @@ class LifecycleConflictMixin:
                         "node_a": name_a,
                         "node_b": name_b,
                     })
+                # CF-262 F5: under a standing chat quota every remaining group fails the same way;
+                # stop and leave them pending. A later successful chat call clears the record.
+                quota = last_provider_quota_exhaustion()
+                if quota is not None and quota.kind == "chat":
+                    logger.error(
+                        "Conflict review stopped: provider quota exhausted (%s); remaining groups "
+                        "stay pending", quota.summary(),
+                    )
+                    break
                 continue
 
             if is_conflict:

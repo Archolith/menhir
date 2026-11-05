@@ -2,7 +2,11 @@
 
 ## Status
 
-plan — the Day-3 capstone of `weekend-oracle-runtime-roadmap.md`. **Nothing here is built.** It sequences
+plan — the Day-3 capstone of `weekend-oracle-runtime-roadmap.md`. **Partly built:** the retrieval oracle
+pieces R0, R4, R6 and R7 are in `src/menhir` (`domain/retrieval_trace_models.py`, `domain/oracles.py`,
+`services/oracle_executor.py`, `services/retrieval_oracles.py`, `domain/oracle_combiner.py`), and a real
+embedder is now the default. The L4 store, ColdStartOracle, Context Engine and brief benchmark are not
+built and are not part of 0.3.0. The rest of this document is the original plan. It sequences
 the specced pieces (Day 1 interfaces, Day 2 schemas) into a build order, sketches the Context Engine
 integration and the first task-level benchmark, and lists implementable issues — each tagged by its
 gate. GAP items need ctharvey to sequence before building.
@@ -66,12 +70,12 @@ change*, not whether the right chunks were retrieved.
 Ordered, each tagged with its gate. (Not created as GitHub issues — surfaced here for ctharvey to file.)
 
 ```text
-[ ] R0  retrieval trace (per-candidate source/prior/survived-floor) + CI for archolith-bench   buildable-now
+[x] R0  retrieval trace (per-candidate source/prior/survived-floor) + CI for archolith-bench   buildable-now
 [ ] EXT hybrid facet extractor (structural+git+LLM, confidence-tagged) in the bench             buildable-now
 [ ] BENCH dominant-gold validator heuristic (guard false positives)                              buildable-now
-[ ] R4  port RetrievalOracle/OracleResult/executor from bench to menhir src                       gated: R0
-[ ] R6  cheap oracles in menhir (Semantic via embedder seam / Scope / Temporal / Structure)       gated: R0,R4
-[ ] R7  one-pass OracleCombiner (log-space role logits) in menhir                                  gated: R6
+[x] R4  port RetrievalOracle/OracleResult/executor from bench to menhir src                       gated: R0
+[x] R6  cheap oracles in menhir (Semantic via embedder seam / Scope / Temporal / Structure)       gated: R0,R4
+[x] R7  one-pass OracleCombiner (log-space role logits) in menhir                                  gated: R6
 [ ] EMB inject a real SemanticScorer; re-run ladder + R7.5 ablation; calibrate weights            gated: embedder
 [ ] L4  generic KnowledgeArtifact store + MemoryMutator write boundary (R9)                        gated: sequencing
 [ ] CSO ColdStartOracle producing a ColdStartBrief from OraclePacket + L3/L4                       gated: sequencing

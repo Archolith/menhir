@@ -86,6 +86,7 @@ PARENTS: dict[str, list[str]] = {
         "get_memory_stats",
         "get_client_context",
         "rate_recall",
+        "review_inbox",
         "view_entropy",
     ],
     "lifecycle": [
@@ -99,6 +100,7 @@ PARENTS: dict[str, list[str]] = {
         "force_scheduler_takeover",
         "pause_scheduler",
         "resume_scheduler",
+        "acknowledge_warning",
     ],
     "clients": [
         "mint_client",

@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from menhir.domain.recall import (
-    EventAuthorityVerdict,
     QueryPreset,
     RecallResult,
     ScalarAuthorityContributor,
@@ -91,185 +90,6 @@ async def test_context_packs_structured_authority_before_ranked_memories() -> No
 
     assert context.context.index("[Scalar authority: LEADS]") < context.context.index("[Memory 1]")
     assert "CURRENT_ANCHOR: I own 37 rare coins" in context.context
-
-
-def _event_verdict(**overrides) -> EventAuthorityVerdict:
-    base = dict(
-        predicate="acquired", object_key="red notebook", object_display="a red notebook",
-        valid_at="2026-07-22T09:30:00Z", stated_span="I bought a red notebook.",
-        assertion_key="asrt-7", episode_uuid="ep-7", turn_evidence_uuid="te-7",
-        domain="stationery", time_basis="explicit", status="leads", gate="pass",
-        reason="unique grounded lead", subject_uuid="ent-self",
-        has_foundation=True, kind="latest",
-    )
-    base.update(overrides)
-    return EventAuthorityVerdict(**base)
-
-
-def _recall_with_event(*verdicts: EventAuthorityVerdict, memories: list[ScoredMemory] | None = None) -> RecallResult:
-    base = _recall_result(memories if memories is not None else [_mem("old", "I bought", "old obs", 0.9)])
-    return RecallResult(
-        **{**base.__dict__, "event_authority_layer": tuple(verdicts) if verdicts else None}
-    )
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_context_packs_rich_event_authority_lead_before_memories() -> None:
-    result = _recall_with_event(_event_verdict())
-
-    context = await _build_service(result).build_context(
-        "did I acquire a red notebook today?", max_tokens=2000
-    )
-
-    block = context.context.split("[Memory 1]")[0]
-    assert "[Event authority: LEADS (authoritative)]" in block
-    assert "kind latest" in block
-    assert "acquired = a red notebook" in block
-    assert "key: red notebook" in block
-    assert "valid 2026-07-22T09:30:00Z" in block
-    assert "time basis: explicit" in block
-    assert "domain: stationery" in block
-    assert '"I bought a red notebook."' in block
-    assert "episode ep-7" in block
-    assert "turn evidence te-7" in block
-    assert "gate: pass" in block
-    assert "prefer the selected object over any conflicting related memory" in block
-    assert context.context.index(
-        "[Event authority: LEADS (authoritative)]"
-    ) < context.context.index("[Memory 1]")
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_context_unique_lead_authoritative_with_conflict_memory() -> None:
-    # A unique, grounded lead is rendered as explicitly authoritative/preferred while a conflicting
-    # tempting memory is still packed as supporting evidence — a lead does not fail closed.
-    conflict = _mem(
-        "tempt-1", "I bought a different notebook", "tempting stale account", 0.97
-    )
-    result = _recall_with_event(_event_verdict(), memories=[conflict])
-
-    context = await _build_service(result).build_context(
-        "did I acquire a red notebook today?", max_tokens=2000
-    )
-
-    assert "[Event authority: LEADS (authoritative)]" in context.context
-    assert "acquired = a red notebook" in context.context
-    assert "gate: pass" in context.context
-    assert (
-        "prefer the selected object over any conflicting related memory"
-        in context.context
-    )
-    assert context.context.index(
-        "[Event authority: LEADS (authoritative)]"
-    ) < context.context.index("[Memory 1]")
-    assert "[Memory 1]" in context.context
-    assert "tempting stale account" in context.context
-    assert "[Event authority: UNRESOLVED]" not in context.context
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_context_missing_predecessor_anchor_fails_closed_drops_tempting_memories() -> None:
-    # A predecessor query whose anchor is absent/not uniquely resolved fails closed: it renders an
-    # explicit unresolved instruction and packs NEITHER ranked memories NOR the supplementary
-    # timeline as answer evidence (the tempting memories must not surface as a fabricated answer).
-    tempting = _mem(
-        "tempt-1", "I bought the old notebook", "tempting but unverified memory", 0.99
-    )
-    result = _recall_with_event(_event_verdict(
-        status="advisory", kind="predecessor", gate="anchor",
-        reason="anchor not uniquely resolved by assertion_key",
-        object_key=None, object_display=None, valid_at=None, stated_span=None,
-        episode_uuid=None, turn_evidence_uuid=None, domain=None, time_basis=None,
-    ), memories=[tempting])
-
-    context_result = await _build_service(result).build_context(
-        "did I buy the old notebook after I bought the pen?", max_tokens=2000
-    )
-
-    assert "[Event authority: UNRESOLVED]" in context_result.context
-    assert "acquired" in context_result.context
-    assert "gate: anchor" in context_result.context
-    assert "anchor not uniquely resolved" in context_result.context
-    assert (
-        "do not infer an answer from ranked memories or timeline; report unresolved"
-        in context_result.context
-    )
-    assert "[Memory 1]" not in context_result.context
-    assert "tempting but unverified memory" not in context_result.context
-    assert "Timeline" not in context_result.context
-    assert context_result.memory_count == 0
-    assert context_result.memory_ids == []
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_context_fail_closed_suppresses_scalar_authority() -> None:
-    # A temporal-before query whose anchor is unresolved fails closed: current-state scalar
-    # authority answers the present, not the missing historical anchor, and would mislead — so
-    # the scalar block, ranked memories, and timeline are all absent, leaving only the unresolved
-    # instruction.
-    scalar = ScalarAuthorityVerdict(
-        kind="current", status="leads", subject_uuid="ent-self", attribute="owned",
-        scope="", value_kind="count", unit="", value=37,
-        valid_at="2026-07-02T00:00:00+00:00", view_uuid="view-37",
-        has_foundation=True,
-        contributors=(ScalarAuthorityContributor(
-            assertion_id="a37", relation="CURRENT_ANCHOR", operation="absolute",
-            value=37, stated_span="I own 37 rare coins",
-            valid_at="2026-07-02T00:00:00+00:00", evidence_tier="user",
-            episode_uuid="ep37"),), contributors_total=1,
-    )
-    base = _recall_result([_mem("old", "I bought", "old obs", 0.9)])
-    result = RecallResult(
-        **{**base.__dict__,
-           "authority_layer": (scalar,),
-           "event_authority_layer": (_event_verdict(
-               status="advisory", kind="predecessor", gate="anchor",
-               reason="anchor not uniquely resolved by assertion_key",
-               object_key=None, object_display=None, valid_at=None, stated_span=None,
-               episode_uuid=None, turn_evidence_uuid=None, domain=None, time_basis=None,
-           ),)}
-    )
-
-    context = await _build_service(result).build_context(
-        "how many rare coins did I own before I bought the pen?", max_tokens=2000
-    )
-
-    assert "[Event authority: UNRESOLVED]" in context.context
-    assert "gate: anchor" in context.context
-    assert "[Scalar authority:" not in context.context
-    assert "I own 37 rare coins" not in context.context
-    assert "[Memory 1]" not in context.context
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_context_route_advisory_stays_advisory_and_keeps_memories() -> None:
-    # A route/foundation/evidence advisory carries a resolved selection (object_key set), so it
-    # stays ADVISORY, never implies a lead, and does NOT fail closed: ranked memories remain packed.
-    result = _recall_with_event(_event_verdict(
-        status="advisory", kind="generic_advisory", gate="route",
-        reason="generic route stays advisory (no scope token)",
-        object_key="red notebook", object_display="a red notebook",
-        valid_at="2026-07-22T09:30:00Z", stated_span="I bought a red notebook.",
-        episode_uuid="ep-7", turn_evidence_uuid="te-7",
-    ))
-
-    context = await _build_service(result).build_context(
-        "did I acquire a red notebook today?", max_tokens=2000
-    )
-
-    block = context.context.split("[Memory 1]")[0]
-    assert "[Event authority: ADVISORY]" in block
-    assert "acquired" in block
-    assert "kind generic_advisory" in block
-    assert "gate: route" in block
-    assert "reason: generic route stays advisory (no scope token)" in block
-    assert "[Memory 1]" in context.context
-    assert "[Event authority: UNRESOLVED]" not in context.context
 
 
 @pytest.mark.unit
@@ -434,17 +254,13 @@ async def test_context_marks_memory_without_temporal_facts_source_time_unknown()
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-@pytest.mark.parametrize("warden,anchor,sources,expected", [
-    (False, False, ["claude-code"], {"entity-1", "entity-2"}),
-    (False, True, ["claude-code"], {"entity-1", "entity-2"}),
-    (True, True, ["claude-code"], set()),
-    (True, False, ["claude-code"], {"entity-1"}),
-    (True, True, ["user"], {"entity-1"}),
-    (True, True, [], set()),
-    (True, False, [], {"entity-1"}),
+@pytest.mark.parametrize("warden,sources,expected", [
+    (False, ["claude-code"], {"entity-1", "entity-2"}),
+    (True, ["claude-code"], {"entity-1"}),
+    (True, [], {"entity-1"}),
 ])
 async def test_context_applies_configured_warden_profile(
-    stub_graphiti_client, stub_memory_graph_adapter, warden, anchor, sources, expected,
+    stub_graphiti_client, stub_memory_graph_adapter, warden, sources, expected,
 ) -> None:
     from menhir.config import MemorySettings
     from tests.test_recall_service import _build_recall_service, _two_cands
@@ -460,9 +276,12 @@ async def test_context_applies_configured_warden_profile(
         {"uuid": uuid, "evidence_node_kinds": [], "anchor_projects": [], "episode_sources": sources}
         for uuid in ("entity-1", "entity-2")
     ]
-    tuning = MemorySettings(
-        frontier_warden_gate=warden, frontier_evidence_anchor=anchor, frontier_source_memories=False,
-    ).retrieval_tuning()
+    from dataclasses import replace
+
+    tuning = replace(
+        MemorySettings().retrieval_tuning(),
+        enable_warden_gate=warden, enable_source_memories=False,
+    )
     recall = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
     recalled = await recall.recall("Where does Alice live?", namespace="conversation", tuning=tuning)
     context = await ContextBuilderService(recall_service=recall, retrieval_tuning=tuning).build_context(
@@ -834,6 +653,21 @@ class TestTodoBudgetContract:
         assert result_with_todos.memory_count <= result_no_todos.memory_count
         # Total token estimate should not exceed max_tokens (within estimation variance)
         assert result_with_todos.token_estimate <= 300 * 1.1  # 10% tolerance for estimation
+
+    @pytest.mark.asyncio
+    async def test_todo_lookup_receives_caller_namespace(self):
+        """#401: the todo section must be scoped to the caller's namespace."""
+        mock_adapter = MagicMock()
+        mock_adapter.list_todos_matching_query.return_value = []
+        mock_recall = AsyncMock()
+        mock_recall.recall = AsyncMock(return_value=_recall_result([]))
+        svc = ContextBuilderService(recall_service=mock_recall, graph_adapter=mock_adapter)
+
+        await svc.build_context("auth middleware", namespace="ns-a")
+
+        mock_adapter.list_todos_matching_query.assert_called_once_with(
+            "auth middleware", limit=3, namespace="ns-a"
+        )
 
     @pytest.mark.asyncio
     async def test_no_todos_no_section(self):

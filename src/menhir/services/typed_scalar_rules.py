@@ -945,8 +945,9 @@ def _ground_span(content: str, stated_span: str) -> tuple[int, int] | None:
     return (m.start(), m.end())
 
 
-#: #89 semantic grounding applies to kinds whose value is taken from the model as-is. Counts,
-#: durations, frequencies and clock times are derived or canonicalized from the span already.
+#: #89 semantic grounding for money and measurement: the number alone must be in the quote. Counts
+#: and clock times are derived from the span; the kinds in `_SOURCE_CHECKED_KINDS` have their own
+#: checks (#411).
 _VALUE_IN_SPAN_KINDS = frozenset({"money", "measurement"})
 _ONES_WORDS = (
     "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
@@ -1014,6 +1015,295 @@ def _span_states_value(value: Any, stated_span: str) -> bool:
         if number not in stated and -number not in stated:
             return False
     return True
+
+
+# Source grounding for the kinds the model reads directly (#411). A value must be stated in its own
+# quote and not be negated or hedged in the clause leading up to it. Anything these patterns cannot
+# read is dropped: a missed fact is safe, a wrong current View is not.
+_SOURCE_CHECKED_KINDS = frozenset({"duration", "frequency", "weekday", "status", "boolean"})
+_SOURCE_NUMBER_WORDS = "|".join(re.escape(w) for w in sorted(_WORD_NUMBERS, key=len, reverse=True))
+_SOURCE_DIGITS = r"\d[\d,]*(?:\.\d+)?"
+_CLAUSE_BOUNDARY_RE = re.compile(r"[.?!;,:\n]|\b(?:but|though|although|however)\b", re.IGNORECASE)
+_SENTENCE_BOUNDARY_RE = re.compile(r"[.?!\n]")
+_SOURCE_NEGATION_RE = re.compile(r"\b(?:not|never|no|without|cannot|except)\b|n['’]t\b", re.IGNORECASE)
+# "may" is a modal only after its subject, so "in May" is not a hedge.
+_SOURCE_UNCERTAIN_RE = re.compile(
+    r"\b(?:might|could|would|perhaps|maybe|possibly|probably|if|unless)\b"
+    r"|\b(?:i|we|you|he|she|they|it)\s+may\b|\b\w+['’]d\b|\bnot\s+sure\b"
+    r"|\b(?:do\s+not|don['’]t)\s+think\b",
+    re.IGNORECASE,
+)
+_SOURCE_ASPIRATION_RE = re.compile(r"\b(?:wish|wishing|hope|hopes|hoping)\b", re.IGNORECASE)
+# "hoping to beat my best time of 25:50" wants a new result, but 25:50 is a real record (LME 6a1eabeb).
+_STATED_RECORD_RE = re.compile(r"\b(?:my|our)\b[^.,;]*\b(?:of|was|is)\s+$", re.IGNORECASE)
+_PAST_STATE_RE = re.compile(r"\b(?:was|were|had\s+been)\b", re.IGNORECASE)
+_THIRD_PARTY_CLAUSE_RE = re.compile(r"\b(?:who|whose)\b", re.IGNORECASE)
+_FIRST_PERSON_RE = re.compile(r"\b(?:i|we)\b", re.IGNORECASE)
+_DURATION_PHRASE_RE = re.compile(
+    rf"(?<![\w.:])(?:(?P<half>half\s+an?)|(?P<num>{_SOURCE_DIGITS}|{_SOURCE_NUMBER_WORDS}|an?))"
+    r"(?P<and_half>\s+and\s+a\s+half)?[\s-]*"
+    r"(?P<unit>seconds?|secs?|minutes?|mins?|hours?|hrs?)\b"
+    r"(?P<trailing_half>\s+and\s+a\s+half)?",
+    re.IGNORECASE,
+)
+_DURATION_RANGE_RE = re.compile(
+    rf"(?<![\w.:])(?P<low>{_SOURCE_DIGITS}|{_SOURCE_NUMBER_WORDS})\s*(?:-|–|to\b|and\b)\s*"
+    rf"(?P<high>{_SOURCE_DIGITS}|{_SOURCE_NUMBER_WORDS})[\s-]*"
+    r"(?P<unit>seconds?|secs?|minutes?|mins?|hours?|hrs?)\b",
+    re.IGNORECASE,
+)
+_DURATION_COLON_RE = re.compile(r"(?<![\w:.])\d+:\d{2}(?::\d{2})?(?:\.\d+)?(?![\w:])")
+_DURATION_ABBREVIATIONS = {"sec": "second", "secs": "second", "min": "minute", "mins": "minute",
+                           "hr": "hour", "hrs": "hour"}
+_FREQUENCY_COUNT_WORDS = f"{_SOURCE_NUMBER_WORDS}|once|twice|thrice"
+_FREQUENCY_PHRASE_RE = re.compile(
+    rf"(?<![\w.])(?P<count>{_SOURCE_DIGITS}|{_FREQUENCY_COUNT_WORDS})(?:[\s-]+[a-z]+){{0,2}}?[\s-]+"
+    r"(?:(?:a|an|per|each|every)\s+(?P<period>day|week|month|year)s?\b"
+    r"|(?P<adverb>daily|weekly|monthly|yearly|annually)\b)",
+    re.IGNORECASE,
+)
+_FREQUENCY_ADVERB_RE = re.compile(r"\b(?P<adverb>daily|weekly|monthly|yearly|annually)\b", re.IGNORECASE)
+_FREQUENCY_ADVERB_PERIOD = {"daily": "day", "weekly": "week", "monthly": "month", "yearly": "year",
+                            "annually": "year"}
+_FREQUENCY_UNIT_PERIOD_RE = re.compile(r"day|week|month|year|daily|annual", re.IGNORECASE)
+_WORD_TOKEN_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
+#: attribute and status words that carry no claim of their own ("is_vegetarian", "has_cats").
+_SOURCE_NEUTRAL_TOKENS = frozenset({
+    "a", "an", "the", "of", "to", "in", "on", "at", "for", "with", "is", "are", "am", "was", "be",
+    "has", "have", "had", "does", "do", "did", "can", "own", "owns", "like", "likes", "love",
+    "loves", "want", "wants", "use", "uses", "currently", "current", "user", "status",
+})
+
+
+def _source_number(text: str) -> Decimal | None:
+    token = text.strip().lower()
+    if token in ("once", "a", "an"):
+        return Decimal(1)
+    if token == "twice":
+        return Decimal(2)
+    if token == "thrice":
+        return Decimal(3)
+    if token in _WORD_NUMBERS:
+        return _WORD_NUMBERS[token]
+    return _decimal_number(token)
+
+
+def _source_decimals(value: Any) -> list[Decimal] | None:
+    """The magnitudes of a numeric point or [lo, hi] value, or None when it is not numeric."""
+    components = list(value) if isinstance(value, (list, tuple)) else [value]
+    numbers = [_decimal_number(item) for item in components]
+    return None if any(number is None for number in numbers) else [abs(n) for n in numbers]
+
+
+def _duration_unit_seconds(unit: str) -> Decimal:
+    word = unit.strip().lower()
+    return _DURATION_UNIT_SECONDS[_DURATION_ABBREVIATIONS.get(word, word)]
+
+
+def _duration_positions(value: Any, quote: str) -> list[int]:
+    """Where the quote states this duration (a value already normalized to seconds)."""
+    wanted = _source_decimals(value)
+    if wanted is None:
+        return []
+    if len(wanted) == 2:
+        positions = []
+        for match in _DURATION_RANGE_RE.finditer(quote):
+            low, high = _source_number(match.group("low")), _source_number(match.group("high"))
+            if low is not None and high is not None:
+                factor = _duration_unit_seconds(match.group("unit"))
+                if [low * factor, high * factor] == wanted:
+                    positions.append(match.start())
+        colons = [
+            (match.start(), _duration_colon_seconds(match.group()))
+            for match in _DURATION_COLON_RE.finditer(quote)
+        ]
+        for (start, low_seconds), (_, high_seconds) in zip(colons, colons[1:]):
+            if low_seconds is None or high_seconds is None:
+                continue
+            if [Decimal(str(low_seconds)), Decimal(str(high_seconds))] == wanted:
+                positions.append(start)
+        return positions
+    target = wanted[0]
+    positions = []
+    previous: tuple[int, int, Decimal] | None = None  # start, end, seconds of the prior phrase
+    for match in _DURATION_PHRASE_RE.finditer(quote):
+        number = Decimal("0.5") if match.group("half") else _source_number(match.group("num"))
+        if number is None:
+            previous = None
+            continue
+        if match.group("and_half") or match.group("trailing_half"):
+            number += Decimal("0.5")
+        seconds = number * _duration_unit_seconds(match.group("unit"))
+        if seconds == target:
+            positions.append(match.start())
+        # "1 hour and 30 minutes" states the sum of its parts.
+        if previous is not None and re.fullmatch(r"\s*(?:,|and|,\s*and)?\s*", quote[previous[1]:match.start()]):
+            if previous[2] + seconds == target:
+                positions.append(previous[0])
+        previous = (match.start(), match.end(), seconds)
+    for match in _DURATION_COLON_RE.finditer(quote):
+        seconds_value = _duration_colon_seconds(match.group())
+        if seconds_value is not None and Decimal(str(seconds_value)) == target:
+            positions.append(match.start())
+    return positions
+
+
+def _frequency_positions(value: Any, unit: str, quote: str) -> list[int]:
+    """Where the quote states this count per period. A stated period must agree with the unit."""
+    wanted = _source_decimals(value)
+    if wanted is None:
+        return []
+    unit_match = _FREQUENCY_UNIT_PERIOD_RE.search(unit or "")
+    unit_period = None
+    if unit_match:
+        word = unit_match.group().lower()
+        unit_period = {"daily": "day", "annual": "year"}.get(word, word)
+
+    def period_ok(period: str) -> bool:
+        return unit_period is None or period == unit_period
+
+    positions = []
+    for match in _FREQUENCY_PHRASE_RE.finditer(quote):
+        adverb = match.group("adverb")
+        period = _FREQUENCY_ADVERB_PERIOD[adverb.lower()] if adverb else match.group("period").lower()
+        count = _source_number(match.group("count"))
+        if count is None or not period_ok(period):
+            continue
+        if len(wanted) == 1 and count == wanted[0]:
+            positions.append(match.start())
+        elif len(wanted) == 2 and count == wanted[1] and _span_states_value(wanted[0], quote):
+            positions.append(match.start())
+    if len(wanted) == 1 and wanted[0] == 1:
+        for match in _FREQUENCY_ADVERB_RE.finditer(quote):
+            if period_ok(_FREQUENCY_ADVERB_PERIOD[match.group("adverb").lower()]):
+                positions.append(match.start())
+    return positions
+
+
+def _weekday_positions(value: Any, quote: str) -> list[int]:
+    day = str(value).strip().lower()
+    return [m.start() for m in re.finditer(rf"\b{re.escape(day)}s?\b", quote, re.IGNORECASE)]
+
+
+def _token_stem(token: str) -> str:
+    word = token.lower()
+    for suffix in ("ies", "ing", "es", "ed", "er", "ic", "y", "s"):
+        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+            return word[: -len(suffix)]
+    return word
+
+
+def _attribute_positions(attribute: str, quote: str) -> list[int]:
+    """Where the quote names this attribute. Every meaningful word of its name must appear."""
+    tokens = [t for t in attribute.lower().split("_") if t and t not in _SOURCE_NEUTRAL_TOKENS]
+    if not tokens:
+        return []
+    words = [(m.start(), _token_stem(m.group())) for m in _WORD_TOKEN_RE.finditer(quote)]
+    first_matches = []
+    for token in tokens:
+        stem = _token_stem(token)
+        found = [
+            start for start, word in words
+            if word == stem or (len(stem) >= 4 and word.startswith(stem))
+            or (len(word) >= 4 and stem.startswith(word))
+        ]
+        if not found:
+            return []
+        first_matches.append(min(found))
+    return [min(first_matches)]
+
+
+def _status_positions(value: Any, quote: str) -> list[int]:
+    """Where the quote states this status. Exact words only, so 'unemployed' never reads as 'employed'."""
+    tokens = [t for t in _WORD_TOKEN_RE.findall(str(value).lower()) if t not in _SOURCE_NEUTRAL_TOKENS]
+    if not tokens:
+        return []
+    first_matches = []
+    for token in tokens:
+        match = re.search(rf"\b{re.escape(token)}(?:s|es)?\b", quote, re.IGNORECASE)
+        if match is None and token.endswith("s"):
+            match = re.search(rf"\b{re.escape(token[:-1])}\b", quote, re.IGNORECASE)
+        if match is None:
+            return []
+        first_matches.append(match.start())
+    return [min(first_matches)]
+
+
+def _clause_before(text: str) -> str:
+    last = None
+    for last in _CLAUSE_BOUNDARY_RE.finditer(text):
+        pass
+    return text[last.end():] if last else text
+
+
+def _sentence_before(text: str) -> str:
+    last = None
+    for last in _SENTENCE_BOUNDARY_RE.finditer(text):
+        pass
+    return text[last.end():] if last else text
+
+
+def _scalar_source_mismatch(
+    *, value_kind: str, operation: str, value: Any, unit: str, attribute: str, subject_text: str,
+    content: str, span_start: int, span_end: int, value_from_source: bool,
+) -> str | None:
+    """Return the drop reason when the source does not support this current value, else None.
+
+    An `expire` row is exempt: it ends a value the quote need not restate ("I quit my job" ends
+    `employed`), and dropping it would leave the stale value current.
+    """
+    if value_kind not in _SOURCE_CHECKED_KINDS or operation not in ("absolute", "delta"):
+        return None
+    quote = content[span_start:span_end]
+    if value_kind == "duration":
+        positions = _duration_positions(value, quote)
+    elif value_kind == "frequency":
+        if value_from_source:
+            match = _FREQUENCY_INTERVAL_RE.search(quote)
+            positions = [match.start()] if match else []
+        else:
+            positions = _frequency_positions(value, unit, quote)
+    elif value_kind == "weekday":
+        positions = _weekday_positions(value, quote)
+    elif value_kind == "status":
+        positions = _status_positions(value, quote)
+    else:
+        positions = _attribute_positions(attribute, quote)
+    if not positions:
+        return "value_not_in_span"
+    # A question asserts nothing: "Am I married?", "Is 7 hours enough?".
+    sentence_end = _SENTENCE_BOUNDARY_RE.search(content, max(span_end - 1, span_start))
+    if sentence_end is not None and sentence_end.group() == "?":
+        return "hedged_value"
+
+    hedged = negated = False
+    for position in positions:
+        # Read back past the quote's own start: a model can quote "a vegetarian" from
+        # "I'm not a vegetarian".
+        leading = content[: span_start + position]
+        clause = _clause_before(leading)
+        is_hedged = bool(_SOURCE_UNCERTAIN_RE.search(clause)) or bool(
+            _SOURCE_ASPIRATION_RE.search(clause) and not _STATED_RECORD_RE.search(clause)
+        )
+        is_negated = bool(_SOURCE_NEGATION_RE.search(clause))
+        if value_kind in ("boolean", "status") and subject_text.strip().lower() == "user":
+            sentence = _sentence_before(leading)
+            if _THIRD_PARTY_CLAUSE_RE.search(sentence) or (
+                value_kind == "boolean" and not _FIRST_PERSON_RE.search(sentence)
+            ):
+                return "value_not_in_span"
+        # "I was married" is not "I am married". Numeric kinds are exempt: "my best was 25:50" stands.
+        if value_kind in ("boolean", "status") and value is not False and _PAST_STATE_RE.search(clause):
+            is_negated = True
+        if value_kind == "boolean":
+            # False needs a stated negative or ended state; true needs neither.
+            if value is False:
+                is_negated = not (is_negated or _ended_state(quote))
+        if not is_hedged and not is_negated:
+            return None
+        hedged = hedged or is_hedged
+        negated = negated or is_negated
+    return "hedged_value" if hedged else "negated_value"
 
 
 #: drop reasons that judge a well-formed row's quoted span (temporal and shape drops stay unclean).
@@ -1453,6 +1743,14 @@ def parse_scalar_row(
     # measurement value must be stated in its own quote, or the evidence cannot justify it.
     if value_kind in _VALUE_IN_SPAN_KINDS and not _span_states_value(value, stated_span):
         drop("value_not_in_span")
+        return None
+    source_mismatch = _scalar_source_mismatch(
+        value_kind=value_kind, operation=operation, value=value, unit=unit, attribute=attribute,
+        subject_text=subject_text, content=content, span_start=span_start, span_end=span_end,
+        value_from_source=normalized_frequency is not None,
+    )
+    if source_mismatch is not None:
+        drop(source_mismatch)
         return None
 
     return TypedScalarProposal(

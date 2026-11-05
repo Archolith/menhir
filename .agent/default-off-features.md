@@ -2,9 +2,9 @@
 
 **Purpose.** A single place to track features that are **code-complete and shipped but default-off**,
 so activation is a deliberate decision, not a rediscovery. A plan being archived as "code-complete"
-does NOT mean its feature is live — most of the frontier retrieval stack ships off by design (the
-2026-07-04 read-side bench verdict: neutral-to-negative on LongMemEval, so it does not earn being on
-by default). This ledger is the bridge between "built" and "on".
+does NOT mean its feature is live. This ledger is the bridge between "built" and "on". Sections
+below the active table are dated records of each decision; `src/menhir/config/feature_flags.py` is
+the authority for current defaults.
 
 The governing rollout decision is
 [ADR 0007](adr/0007-evidence-gated-default-off-feature-activation.md).
@@ -19,28 +19,33 @@ flag is set (or a bench lift verdict flips the default). Enabling any of these i
 
 ## Active default-off features
 
-Anchor for the flags: `src/menhir/config/settings.py` (Frontier retrieval block, ~L225-245),
-mapped into `RetrievalTuningConfig` at the recall entry via `retrieval_tuning()`.
+Anchor for the flags: `src/menhir/config/feature_flags.py`. Auth, deployment and benchmark switches
+that are off by default (OAuth, client tokens, benchmark mode and similar) are configuration rather
+than experiments and are not listed.
 
-| Feature | Flag / env | Gate location | Bench status | Source plan |
-|---|---|---|---|---|
-| Conflict shared-episode veto | `correlation_shared_episode_veto_enabled` / `MENHIR_CORRELATION_SHARED_EPISODE_VETO_ENABLED` | `CorrelationService._shared_episode_veto` (conflict outcomes only) | not benched: default off until the Phase 1 precision re-run shows no real correction is dropped | `menhir-conflict-detection-signal-2026-08-09.md` |
-| Correlation cosine shadow | `correlation_cosine_shadow_enabled` / `MENHIR_CORRELATION_COSINE_SHADOW_ENABLED` | `CorrelationService._record_cosine_shadow` (observe-only) | observation only: records old vs new route, acts on nothing | `menhir-conflict-detection-signal-2026-08-09.md` |
-| Attributed hybrid (vector+BM25) candidate gen | `frontier_bm25` / `MENHIR_FRONTIER_BM25` | recall tuning | neutral-to-negative on LME | `r1-hybrid-candidate-generation.md` |
-| Diversity gate (Guard 4, set-level anti-spiral) | `frontier_diversity_gate` / `MENHIR_FRONTIER_DIVERSITY_GATE` | recall tuning | opt-in (#344) | `menhir-r8-control-rails-plan.md` |
-| Belief gate (CurrentnessWarden + belief scoring; incl. git/structure staleness feed) | `frontier_belief_gate` / `MENHIR_FRONTIER_BELIEF_GATE` | requires `frontier_warden_gate` | opt-in (#173): marks an Entity superseded when any fact edge expired; with git/test/log evidence that scores CONFLICT_SET and the contradiction guard refuses it under the current lens, and the Warden lens ignores "before/previously/used to" history cues. LME 500 q x 3 with it on: quality delta 0, p50 +1.8%, p95 +12.6%, 40% of candidates flagged. Follow-up: #350 | `menhir-belief-gate-activation.md` + `menhir-belief-gate-git-staleness.md` |
-| Evidence-anchor warden (Guard 5) | `frontier_evidence_anchor` / `MENHIR_FRONTIER_EVIDENCE_ANCHOR` | under `warden_gate` | opt-in: provenance comes from the client label, so 3 of 33,861 LME copy-graph entities pass and the strict profile refused all 205 AMA questions; reimplementation in #349 | R8 rails |
-| Fact-edge injection (RELATES_TO into candidate pool) | `frontier_fact_edges` (+ `frontier_fact_edge_mode`) | recall tuning | standalone net-negative at N=30; "pointer" preferred | retrieval fact-edge work |
-| Similarity lane scale | `frontier_similarity_scale` (`rrf` default / `normalized`) | recall tuning | ranking change; A/B before flip | `retrieval-scale-contract-and-gap-remediation.md` (1a/1b) |
-| Shadow pass (observe-only oracle/warden trace) | `frontier_shadow` / `MENHIR_FRONTIER_SHADOW` | recall tuning | observe-only | oracle stack |
-| Deterministic typed-scalar shadow | `personal_memory_scalar_deterministic_shadow` / `MENHIR_SCALAR_DETERMINISTIC_SHADOW` | `TypedScalarPerceptionService` after the LLM gate; audit rows also require consolidation audit | observe-only; held-out agreement/router gates not yet measured | `menhir-deterministic-first-event-scalar-2026-07-30.md` |
-| Event History Phase 3 Consolidation | `personal_memory_event_history_enabled` / `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED` | backfill :TurnEvidence -> assertions via independent watermark cursor | production-capable but default-off; Phase 1-5 complete | `menhir-event-history-plan.md` + commits 048b8d9..51c11cf |
-| Event History Phase 4 Recall Authority | `personal_memory_event_history_authority_enabled` / `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED` | conditional first-person event route probed only when enabled and namespace present | production-capable but default-off; independent of scalar authority | commits 048b8d9..51c11cf |
-| Brief builder (append temporal Timeline in build_context) | `frontier_brief_builder` | removed 2026-10-01, superseded by `recall_timeline` | — | brief-builder work |
-| Anchored-time resolver (overlay a dated window midpoint onto `valid_at` for user-turn edges with temporal cues; keeps Graphiti's value when inside the window, never touches `invalid_at`) | `anchored_time_resolver_enabled` / `MENHIR_ANCHORED_TIME_RESOLVER` (+ `_MODEL`, `_TIMEOUT_S`) | end of `_run_graphiti_combined_extraction` via `MenhirExtractionHook(anchored_time=...)`, before `resolve_extracted_edges`; resolver built in `graphiti_client.py` only when the LLM is on | offline replay: frozen held-outs written 26/32, 19/23, 19/23, 25/28 dated vs baseline 18/32, 12/23, 12/23, 18/28; live L1 (Flex, 120 s timeout) passed: written 26/32, 19/23, 23/28, 1/89 timeouts; L3 fresh held-out: C1 not met, C2/C3 met; gate run 1 (b11) FAIL on d16485d, year rule added in efdbfd4; accepted on non-blind evidence, no gate pass | workspace `menhir-anchored-time-resolver-p1-plan.md` |
-| Anchored-time render (show the persisted time contract as each fact's event time: the resolved window, a plan's planned window, or "event time unknown (said <speech date>)" instead of a speech-date `valid_at`; timeline facts order by window start) | `anchored_time_render_enabled` / `MENHIR_ANCHORED_TIME_RENDER` | `_build_temporal_facts(event_time=...)` in recall enrichment, `_source_time_lines` in the context builder, MCP recall formatter, `timeline_facts(event_time=...)`; contracts are written by the resolver (`anchored_time_persist.py`) whenever it is on, independent of this flag | offline render and flag-off identity tests (`tests/test_anchored_time_render.py`); no live readback yet | workspace `menhir-anchored-time-resolver-p2-plan.md` |
-| Anchored-time expiry (a fact's own end is world time, not supersession: Graphiti does not set `expired_at` only because an extracted point event or state carries its own `invalid_at` (`MenhirEdgeExpiryHook` answers `WORLD_END`; needs archolith-graphiti-core 0.30.2.post6), the edge is stamped `time_expiry`/`time_world_end`, and recall labels such live ended facts `ended`) | `anchored_time_expiry_enabled` / `MENHIR_ANCHORED_TIME_EXPIRY` | `_apply_anchored_time(expiry=...)` records the world end before resolve; `MenhirEdgeExpiryHook` in `graphiti_extraction_policy.py` decides expiry inside the resolver (owner-checked, fails to `EXPIRE`); `EXPIRY_PERSIST_CYPHER` in `anchored_time_persist.py` stamps live edges under the P2 lock only while `invalid_at` is unchanged and never un-expires; `_build_temporal_facts(ended=...)` and `_source_time_lines`; needs the resolver at ingest, no backfill; a restatement with no usable report keeps a stored ended fact live only from its own stamp (`time_expiry='world_end'` and `time_world_end` equal to `invalid_at`), which the fork keeps through duplicate resolution via `preserved_edge_attributes` (P3c); a concurrent writer's stale save cannot revive an edge another writer expired or move its end later on Neo4j (archolith-graphiti-core 0.31.2.post1, Codex P3c-1); the operator unmerge (`restore_merge_snapshot`) can still recreate a live copy from its merge-time snapshot | offline and live counterexample tests (`tests/test_anchored_time_expiry.py`, `tests/test_anchored_time_expiry_live.py`, `tests/test_anchored_time_restatement.py`, `tests/test_anchored_time_restatement_live.py`); no live LLM readback yet | workspace `menhir-anchored-time-resolver-p3-plan.md`, `menhir-anchored-time-p3c-restatement-evidence-plan.md` |
-| Anchored-time attach check (a blind second model call must quote the same time words with the right relation before a resolver time is written; otherwise the edge keeps Graphiti's value) | `anchored_time_attach_enabled` / `MENHIR_ANCHORED_TIME_ATTACH` (+ `MENHIR_ANCHORED_TIME_ATTACH_MODEL`, empty means the resolver's model) | `_attach_check` after `plan_overlay` in `_apply_anchored_time` (one blind call per episode with candidates; V1-V3 in `anchored_time_attach.decide`; any failure writes nothing); attacher built in `graphiti_client.py` only with the resolver; persisted contract `at2`; ingest-only, no backfill | unit tests (`tests/test_anchored_time_attach.py`, `tests/test_anchored_time_attach_hook.py`); flag-off replay identical to a0a9814 over 2374 facts; no live run yet (P3 gates G1-G4 pending) | workspace `menhir-anchored-time-attachment-plan.md` |
+| Feature | Flag / env | Status | Source plan |
+|---|---|---|---|
+| Conflict shared-episode veto | `correlation_shared_episode_veto_enabled` / `MENHIR_CORRELATION_SHARED_EPISODE_VETO_ENABLED` | not benched: default off until the Phase 1 precision re-run shows no real correction is dropped | `menhir-conflict-detection-signal-2026-08-09.md` |
+| Correlation cosine shadow | `correlation_cosine_shadow_enabled` / `MENHIR_CORRELATION_COSINE_SHADOW_ENABLED` | observation only: records old vs new route, acts on nothing | `menhir-conflict-detection-signal-2026-08-09.md` |
+| Shadow pass (observe-only oracle/warden trace) | `frontier_shadow` / `MENHIR_FRONTIER_SHADOW` | observe-only | oracle stack |
+| Verifier sync | `verifier_sync_enabled` / `MENHIR_VERIFIER_SYNC_ENABLED` | opt-in; see "Warden profiles" below | — |
+| Consolidation audit | `personal_memory_consolidation_audit_enabled` / `MENHIR_PERSONAL_MEMORY_CONSOLIDATION_AUDIT_ENABLED` | opt-in diagnostics | — |
+| Recall audit | `personal_memory_recall_audit_enabled` / `MENHIR_PERSONAL_MEMORY_RECALL_AUDIT_ENABLED` | opt-in diagnostics | — |
+
+## Removed 2026-10-28 and 2026-10-29 (#399)
+
+The event-history lane, the diversity gate, the belief gate, source-memory pools, the evidence anchor
+and others were removed. `RETIRED` in `feature_flags.py` records each one's date and reason. Some
+older sections below still describe them as opt-in; those sections are dated records.
+
+## Removed 2026-10-27
+
+Eleven default-off experiments that were measured and lost, tied, or were deferred were removed
+from `main`: BM25 hybrid, content vector, fact edges, similarity scale, oracle subset, View
+collapse, scalar canonical self, the deterministic scalar shadow and router, and shadow context
+composition. The code is on branch `archive/bucket1-features-2026-10-27`. Per-feature evidence,
+removal commits and restore steps are in
+[`archive/removed-features-2026-10-27.md`](archive/removed-features-2026-10-27.md).
 
 ## Warden profiles and context wiring (2026-10-05)
 
@@ -86,13 +91,30 @@ frontier errors can fall back to baseline results. This is not universal enforce
 
 ## Activated (moved on default-on)
 
-_(none yet — add rows here with the activation date when a flag flips `True` or a gate is removed)_
+### #168 freeze 2026-10-27: tested behavior becomes the default
+
+Owner rule: a feature on in a bench run since 2026-10-13 is on by default, and its flag is removed,
+except the three switches that guard LLM cost. Evidence per flag:
+workspace `.agent/reviews/menhir-168-freeze-feature-flag-review-2026-10-27.md`. Retired keys are
+listed in `RETIRED` (`config/feature_flags.py`); component knobs stay as per-request or test seams.
+
+| Feature | Flag / env | Now | Commit |
+|---|---|---|---|
+| Scalar state lane (scheduler) | `MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED` | default on, switch kept (LLM cost) | `cc931186` |
+| Counting lane (scheduler) | `MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED` | default on, switch kept (LLM cost) | `cc931186` |
+| Anchored time: resolver, blind attach check, world-end expiry | `MENHIR_ANCHORED_TIME_RESOLVER` (one switch); `_ATTACH`, `_EXPIRY` retired | default on, switch kept (LLM cost at ingest); `_MODEL`, `_ATTACH_MODEL`, `_TIMEOUT_S` unchanged | `cc931186` |
+| Source-memory max chars | `MENHIR_FRONTIER_SOURCE_MEMORY_MAX_CHARS` | 2000 (was 600) | `cc931186` |
+| Warden gate, contradiction interrupt, fact said-time, source memories, source-memory spread, count anchor hint, stale-lead demotion | retired | always on | `370fd94e` |
+| Edge-invalidation statement order | retired | always on | `8ec03d26` |
+| Scalar reconcile attribute/scope/subject, scalar View authority (follows the scalar lane), View freshness gate, sum grounding | retired | always on | `d022a7ed` |
+| Counting recall authority-only, wording, extraction v2, related-count matching (stamp `+x2+m`) | retired | always on | `9ec4d08c` |
+| Assistant turns stored only | retired | always on | `bdad118c` |
 
 ### Graduated to default-on 2026-09-30: source-memory recall lane
 
 | Feature | Flag / env | Gate location | Evidence | Source plan |
 |---|---|---|---|---|
-| Source-memory recall lane (additive raw-episode section next to ranked results, never fused; ingest-side episode-content embedding + `scripts/backfill_episode_embeddings.py` backfill; optional anchor pools via `frontier_source_memory_pools`; per-session spread via `frontier_source_memory_spread`, default on since 2026-10-25: o500 changed 18/500 sections, fixed 3 / broke 0, PR #386) | `frontier_source_memories` / `MENHIR_FRONTIER_SOURCE_MEMORIES` (+ `_SOURCE_MEMORY_LIMIT`, `_SOURCE_MEMORY_MAX_CHARS`, `_SOURCE_MEMORY_POOLS`, `_SOURCE_MEMORY_SPREAD`; per-call `source_memory_limit` on REST/MCP/recall) | recall tuning (`enable_source_memories`) + ingest gate (`source_memories_enabled`). Recall Lab exposes it as opt-in arm tunings only — no default arms | AMA-Bench live A/B (505 q x 2: limit 10 fixed 104 / broke 52 vs off; non-state types improved) and LongMemEval oracle 500 q x 2 (0.340 -> 0.711 correct, knowledge-update 0.365 -> 0.782, every type improved, consistent fixed 183 / broke 4) | `menhir-source-memory-lane-plan.md` |
+| Source-memory recall lane (additive raw-episode section next to ranked results, never fused; ingest-side episode-content embedding + `scripts/backfill_episode_embeddings.py` backfill; per-session spread via `frontier_source_memory_spread`, default on since 2026-10-25: o500 changed 18/500 sections, fixed 3 / broke 0, PR #386) | `frontier_source_memories` / `MENHIR_FRONTIER_SOURCE_MEMORIES` (+ `_SOURCE_MEMORY_LIMIT`, `_SOURCE_MEMORY_MAX_CHARS`, `_SOURCE_MEMORY_SPREAD`; per-call `source_memory_limit` on REST/MCP/recall) | recall tuning (`enable_source_memories`) + ingest gate (`source_memories_enabled`). Recall Lab exposes it as opt-in arm tunings only — no default arms | AMA-Bench live A/B (505 q x 2: limit 10 fixed 104 / broke 52 vs off; non-state types improved; harness: archolith-bench PR #11, unmerged; arm settings not recorded in either repo) and LongMemEval oracle 500 q x 2 (0.340 -> 0.711 correct, knowledge-update 0.365 -> 0.782, every type improved, consistent fixed 183 / broke 4) | `menhir-source-memory-lane-plan.md` |
 
 ### Graduated to always-on 2026-10-20: Oracle ranking and intent lens (flags removed)
 
@@ -119,7 +141,7 @@ Not yet measured (non-blocking, #345): AMA stale-before-current and answer-level
 
 | Feature | Flag / env | Gate location | Evidence | Source plan |
 |---|---|---|---|---|
-| Scalar View authority (a current scalar_state View may suppress an older overlapping graph fact, only when all six authority gates pass) | `personal_memory_scalar_view_authority_enabled` / `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED` (default true; pin `false` to opt out) | `scalar_view_authority_effective` in `config/authority_gates.py`: applied only while `personal_memory_scalar_state_enabled` is on (default off), so a default install is unchanged. Collapse, echo-drop and observation-dedup stay off | canonical +0.795 lift on the frozen LME panel (scalar roadmap 2026-08-07); E2E-17 and E2E-18 cover authority on and the opt-out | `menhir-scalar-default-enablement-plan.md` (owner decision 2026-10-23, #168; `menhir-agent-memory-writer-plan-2026-10-23` P1b) |
+| Scalar View authority (a current scalar_state View may suppress an older overlapping graph fact, only when all six authority gates pass) | `personal_memory_scalar_view_authority_enabled` / `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED` (retired 2026-10-27: always on with the #168 freeze; opt out with `MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED=false`) | `scalar_view_authority_effective` in `config/authority_gates.py`: applied only while `personal_memory_scalar_state_enabled` is on (default on). Observation dedup is on by default; collapse and echo-drop were removed (2026-10-27, 2026-10-28) | canonical +0.795 lift on the frozen LME panel (scalar roadmap 2026-08-07); E2E-17 and E2E-18 cover authority on and the opt-out | `menhir-scalar-default-enablement-plan.md` (owner decision 2026-10-23, #168; `menhir-agent-memory-writer-plan-2026-10-23` P1b) |
 
 ### Graduated to default-on 2026-10-20: Warden gate with the contradiction guard
 
@@ -134,5 +156,5 @@ Verifier sync is not a Warden and stays opt-in.
 
 ---
 
-**Last reconciled:** 2026-08-07; event history (Phase 3 consolidation + Phase 4 recall authority)
-added against `src/menhir/config/settings_model.py` and commits 048b8d9..51c11cf.
+**Last reconciled:** 2026-11-01 against `src/menhir/config/feature_flags.py` at `402b54c7` (the active
+table and the removal record; the dated sections were left as written).

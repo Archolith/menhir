@@ -78,8 +78,12 @@ _REDECIDE_COOLED = _redecide(tenant_scope_cypher("t"), cooled=True)
 _REDECIDE_ANY_NAMESPACE = _redecide(
     "coalesce(t.namespace, t.group_id, '') = coalesce(a.namespace, a.group_id, '')", cooled=True)
 
-#: the decision SET shared by plain decisions (d) on node a.
+#: the decision SET shared by plain decisions (d) on node a. `projection_pending` is the durable
+#: "View is stale" obligation, set in the same statement as the decision; the runner clears it
+#: (`mark_projection_complete`) only after a confirmed rebuild, and the scalar repair pass
+#: (`repair_pending_bindings`) rebuilds any row left flagged.
 _SET_DECISION = """
+    a.projection_pending = true,
     a.count_status = d.status, a.count_target_id = d.target_id,
     a.count_family = d.family, a.count_vote = d.vote, a.count_reason = d.reason,
     a.count_truncated = d.truncated, a.count_decided_at = datetime(),
@@ -103,6 +107,7 @@ def _payload(d: dict[str, Any]) -> dict[str, Any]:
         "redecide": bool(d.get("redecide", False)),
         "key_embedding": [float(x) for x in vec] if vec else None,
         "embed_version": str(d.get("embed_version") or "") or None,
+        "subject": str(d.get("subject_uuid") or "") or None,
     }
 
 
@@ -143,6 +148,39 @@ class CountDecisionRepository:
             + " AND " + _counted("a") + " RETURN " + _OCCURRENCE_FIELDS
             + " ORDER BY a.valid_at ASC, a.assertion_id ASC LIMIT $limit",
             params={"subjects": subjects, "limit": int(limit), **tenant_scope_params(namespace)},
+        )
+        return [dict(r) for r in rows]
+
+    def related_counted_occurrences(
+        self, namespace: str, probes: list[dict[str, Any]], *, limit: int,
+    ) -> list[dict[str, Any]]:
+        """For each probe {id, subject_uuid, value_kind, needles}: the newest `limit` current counted
+        occurrences of that subject and value_kind whose family, object or attribute contains any
+        needle (a superset of the token relation). One row per distinct occurrence, oldest first,
+        with `probe_ids` listing the probes whose capped pull contained it."""
+        payload = [
+            {"id": str(p["id"]), "subject": str(p.get("subject_uuid") or ""),
+             "kind": str(p.get("value_kind") or "").strip().lower(),
+             "needles": [str(n).lower() for n in (p.get("needles") or []) if n]}
+            for p in probes
+        ]
+        payload = [p for p in payload if p["subject"] and p["needles"]]
+        if not payload:
+            return []
+        rows = self._neo4j.execute(
+            "UNWIND $probes AS p CALL { WITH p MATCH (a:TypedAssertion) WHERE a.subject_uuid = p.subject AND "
+            + tenant_scope_cypher("a") + " AND " + _LIVE_OCCURRENCE + " AND " + _counted("a")
+            + """ AND toLower(trim(coalesce(a.value_kind, ''))) = p.kind
+              AND any(n IN p.needles WHERE toLower(coalesce(a.count_family, '')) CONTAINS n
+                      OR toLower(coalesce(a.count_object, '')) CONTAINS n
+                      OR toLower(coalesce(a.attribute, '')) CONTAINS n)
+              WITH a ORDER BY a.valid_at DESC, a.assertion_id DESC LIMIT $limit
+              RETURN a AS a
+            }
+            WITH a, collect(p.id) AS probe_ids
+            RETURN probe_ids, """ + _OCCURRENCE_FIELDS
+            + " ORDER BY valid_at ASC, assertion_id ASC",
+            params={"probes": payload, "limit": int(limit), **tenant_scope_params(namespace)},
         )
         return [dict(r) for r in rows]
 
@@ -264,6 +302,7 @@ class CountDecisionRepository:
                 MATCH (a:TypedAssertion {assertion_id: d.assertion_id})
                 WHERE """ + tenant_scope_cypher("a") + " AND " + _CURRENT_OCCURRENCE + """
                       AND (a.count_status IS NULL OR d.redecide)
+                      AND (d.subject IS NULL OR a.subject_uuid = d.subject)
                 SET """ + _SET_DECISION + """
                 RETURN count(a) AS written
             }
@@ -273,6 +312,7 @@ class CountDecisionRepository:
                 MATCH (a:TypedAssertion {assertion_id: d.candidate_id})
                 WHERE """ + tenant_scope_cypher("a") + " AND " + _CURRENT_OCCURRENCE + """
                       AND (a.count_status IS NULL OR d.redecide)
+                      AND (d.subject IS NULL OR a.subject_uuid = d.subject)
                 MATCH (t:TypedAssertion {assertion_id: d.target_id})
                 WHERE """ + tenant_scope_cypher("t") + " AND " + _current("t") + """
                       AND t.count_status = 'counted' AND t.subject_uuid = a.subject_uuid

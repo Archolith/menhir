@@ -39,10 +39,11 @@
       }
     }
   },
-  "canonical_digest": "8922fd131bf3b3ae6607b24305c7caa3840213f1250db3c097000fd96604be3d",
+  "canonical_digest": "a877ea1ed61cde050c9f78e15ca66818d028e0487ac5a1989db2868028c10746",
   "clients": {
     "example-chatgpt-web": {
       "allowed_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory",
         "add_memory_and_track",
@@ -94,6 +95,7 @@
         "resolve_conflict",
         "resolve_todo",
         "resume_scheduler",
+        "review_inbox",
         "run_llm_conflict_review",
         "scan_for_conflicts",
         "supersede_artifact",
@@ -126,6 +128,7 @@
     },
     "example-claude-web": {
       "allowed_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory",
         "add_memory_and_track",
@@ -177,6 +180,7 @@
         "resolve_conflict",
         "resolve_todo",
         "resume_scheduler",
+        "review_inbox",
         "run_llm_conflict_review",
         "scan_for_conflicts",
         "supersede_artifact",
@@ -218,6 +222,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory",
         "add_memory_and_track",
@@ -267,6 +272,7 @@
         "resolve_conflict",
         "resolve_todo",
         "resume_scheduler",
+        "review_inbox",
         "revoke_client",
         "run_llm_conflict_review",
         "scan_for_conflicts",
@@ -286,6 +292,7 @@
     },
     "https://chatgpt.com/oauth/client.json": {
       "allowed_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory",
         "add_memory_and_track",
@@ -337,6 +344,7 @@
         "resolve_conflict",
         "resolve_todo",
         "resume_scheduler",
+        "review_inbox",
         "run_llm_conflict_review",
         "scan_for_conflicts",
         "supersede_artifact",
@@ -379,6 +387,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory_and_track",
         "audit_artifact_corpus",
@@ -417,6 +426,7 @@
         "resolve_conflict",
         "resolve_todo",
         "resume_scheduler",
+        "review_inbox",
         "revoke_client",
         "run_llm_conflict_review",
         "scan_for_conflicts",
@@ -437,6 +447,7 @@
     },
     "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=claude": {
       "allowed_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory",
         "add_memory_and_track",
@@ -488,6 +499,7 @@
         "resolve_conflict",
         "resolve_todo",
         "resume_scheduler",
+        "review_inbox",
         "run_llm_conflict_review",
         "scan_for_conflicts",
         "supersede_artifact",
@@ -530,6 +542,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory_and_track",
         "audit_artifact_corpus",
@@ -568,6 +581,7 @@
         "resolve_conflict",
         "resolve_todo",
         "resume_scheduler",
+        "review_inbox",
         "revoke_client",
         "run_llm_conflict_review",
         "scan_for_conflicts",
@@ -588,6 +602,7 @@
     },
     "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=codex": {
       "allowed_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory",
         "add_memory_and_track",
@@ -639,6 +654,7 @@
         "resolve_conflict",
         "resolve_todo",
         "resume_scheduler",
+        "review_inbox",
         "run_llm_conflict_review",
         "scan_for_conflicts",
         "supersede_artifact",
@@ -681,6 +697,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory_and_track",
         "audit_artifact_corpus",
@@ -719,6 +736,7 @@
         "resolve_conflict",
         "resolve_todo",
         "resume_scheduler",
+        "review_inbox",
         "revoke_client",
         "run_llm_conflict_review",
         "scan_for_conflicts",
@@ -756,6 +774,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory_and_track",
         "audit_artifact_corpus",
@@ -794,6 +813,7 @@
         "resolve_conflict",
         "resolve_todo",
         "resume_scheduler",
+        "review_inbox",
         "revoke_client",
         "run_llm_conflict_review",
         "scan_for_conflicts",
@@ -831,6 +851,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory_and_track",
         "audit_artifact_corpus",
@@ -869,6 +890,7 @@
         "resolve_conflict",
         "resolve_todo",
         "resume_scheduler",
+        "review_inbox",
         "revoke_client",
         "run_llm_conflict_review",
         "scan_for_conflicts",
@@ -906,6 +928,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory_and_track",
         "audit_artifact_corpus",
@@ -944,6 +967,7 @@
         "resolve_conflict",
         "resolve_todo",
         "resume_scheduler",
+        "review_inbox",
         "revoke_client",
         "run_llm_conflict_review",
         "scan_for_conflicts",
@@ -981,6 +1005,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory_and_track",
         "audit_artifact_corpus",
@@ -1019,6 +1044,7 @@
         "resolve_conflict",
         "resolve_todo",
         "resume_scheduler",
+        "review_inbox",
         "revoke_client",
         "run_llm_conflict_review",
         "scan_for_conflicts",
@@ -1039,6 +1065,7 @@
     },
     "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=wsl-claude": {
       "allowed_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory",
         "add_memory_and_track",
@@ -1090,6 +1117,7 @@
         "resolve_conflict",
         "resolve_todo",
         "resume_scheduler",
+        "review_inbox",
         "run_llm_conflict_review",
         "scan_for_conflicts",
         "supersede_artifact",
@@ -1132,6 +1160,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory_and_track",
         "audit_artifact_corpus",
@@ -1170,6 +1199,7 @@
         "resolve_conflict",
         "resolve_todo",
         "resume_scheduler",
+        "review_inbox",
         "revoke_client",
         "run_llm_conflict_review",
         "scan_for_conflicts",
@@ -1207,6 +1237,7 @@
         "recall_timeline"
       ],
       "denied_tools": [
+        "acknowledge_warning",
         "add_candidate",
         "add_memory_and_track",
         "audit_artifact_corpus",
@@ -1245,6 +1276,7 @@
         "resolve_conflict",
         "resolve_todo",
         "resume_scheduler",
+        "review_inbox",
         "revoke_client",
         "run_llm_conflict_review",
         "scan_for_conflicts",

@@ -134,6 +134,9 @@ def main(argv: list[str] | None = None) -> int:
             if args.audit_out is None:
                 raise RepairRefusal("--audit-out is required with --apply")
             backup = verify_backup_proof(args.backup_proof)
+            from menhir.config import MemorySettings
+
+            settings = MemorySettings.from_env()
             audit = apply_repair(
                 repository,
                 plan,
@@ -142,6 +145,11 @@ def main(argv: list[str] | None = None) -> int:
                 source_times=source_times,
                 namespace_prefix=args.prefix,
                 backup=backup,
+                counting_enabled=bool(
+                    settings.personal_memory_counting_enabled
+                    and settings.personal_memory_scalar_state_enabled
+                ),
+                scalar_history_enabled=bool(settings.personal_memory_scalar_history_enabled),
             )
             print(json.dumps(
                 {

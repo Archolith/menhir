@@ -19,6 +19,42 @@ def _resolve_compact(explicit: bool | None) -> bool:
     return os.environ.get("MENHIR_RECALL_COMPACT", "").lower() in ("1", "true", "yes")
 
 
+_COMPACT_SOURCE_MEMORY_LIMIT = 5
+_COMPACT_SOURCE_MEMORY_MAX_CHARS = 1000
+
+
+def _deployment_source_memory_limit() -> int:
+    """The deployment's default source-memory count (frontier_source_memory_limit)."""
+    from menhir.config.settings_model import MemorySettings
+
+    try:
+        from menhir.core.runtime import _state
+
+        settings = getattr(_state.built, "settings", None)
+        value = getattr(settings, "frontier_source_memory_limit", None)
+        if isinstance(value, int):
+            return value
+    except Exception:
+        pass
+    return MemorySettings.from_env().frontier_source_memory_limit
+
+
+def _bound_source_memories(entries: list) -> tuple[list, bool]:
+    """Cut over-long compact-mode source memories; never mutates the backend's entries."""
+    kept = list(entries)
+    cut = False
+    for i, entry in enumerate(kept):
+        content = entry.get("content") if isinstance(entry, dict) else None
+        if isinstance(content, str) and len(content) > _COMPACT_SOURCE_MEMORY_MAX_CHARS:
+            kept[i] = {
+                **entry,
+                "content": content[: _COMPACT_SOURCE_MEMORY_MAX_CHARS - 1] + "…",
+                "truncated": True,
+            }
+            cut = True
+    return kept, cut
+
+
 async def recall_memories(
     query: str,
     preset: str = "knowledge",
@@ -42,9 +78,9 @@ async def recall_memories(
         file_context_project: Optional project name for file_context disambiguation. Auto-detected if omitted.
         namespace: Optional silo to scope this operation to. Empty = default/global behavior.
         include_invalidated: When True, also return superseded/historical beliefs (expired facts). Default False = current beliefs only.
-        compact: True to drop per-item explainability (breakdown sub-scores, type) and candidates_evaluated, keeping only the decision-relevant fields (name, scope, score, relevance, summary, uuid). None defers to the MENHIR_RECALL_COMPACT env default (off).
+        compact: True to drop per-item explainability (breakdown sub-scores, type) and candidates_evaluated, keeping only the decision-relevant fields (name, scope, score, relevance, summary, uuid), and ask for at most 5 source memories (never more than the deployment default) of 1000 chars each; an explicit source_memory_limit keeps its count. None defers to the MENHIR_RECALL_COMPACT env default (off).
         include_warden_status: Include detailed Warden execution diagnostics (default false). Brief incomplete-check notices remain visible.
-        source_memory_limit: Per-call size of the additive source-memory section (raw episode memories with their time, kept NEXT TO the ranked results, never fused into them). None = deployment default (on with MENHIR_FRONTIER_SOURCE_MEMORIES, else off); 0 = off for this call; 1..50 = that many entries for this call, even when the deployment flag is off. The section carries SESSION-scoped raw episodes, so it is off whenever include_session is false (promoted knowledge only); this tool always recalls with include_session=true.
+        source_memory_limit: Per-call size of the additive source-memory section (raw episode memories with their time, kept NEXT TO the ranked results, never fused into them). None = deployment default (on); 0 = off for this call; 1..50 = that many entries for this call. The section carries SESSION-scoped raw episodes, so it is off whenever include_session is false (promoted knowledge only); this tool always recalls with include_session=true.
 
     Returns:
         Ranked memory results with scores and explainability breakdown.
@@ -100,13 +136,17 @@ class RecallMemoriesTool(BaseJsonTool):
         subject to the client's configured pin.
 
         Returns ranked memory summaries, UUIDs, available temporal facts and
-        warnings, not normally source episodes. Use get_provenance(node_uuid=...)
-        on an entity/View result to inspect linked source excerpts.
+        warnings, plus a separate source_memories section of raw source episodes
+        by default. Use get_provenance(node_uuid=...) on an entity/View result
+        to inspect linked source excerpts.
 
         include_invalidated=true retains superseded fact edges attached to
         returned results; it does not search all historical episodes.
-        compact=true omits per-item type/breakdown and candidates_evaluated;
-        omitting it uses the server default. trace=true requests retrieval
+        compact=true omits per-item type/breakdown and candidates_evaluated, and
+        asks for at most 5 source memories (never more than the server default)
+        and cuts each to 1000 chars, ending cut entries with "…" and
+        truncated=true; an explicit source_memory_limit keeps its count.
+        Omitting compact uses the server default. trace=true requests retrieval
         diagnostics when available; it does not retrieve source text.
         include_warden_status=true shows configured versus applied guards and coverage gaps.
 
@@ -115,6 +155,13 @@ class RecallMemoriesTool(BaseJsonTool):
         that no relevant memory exists.
         """
         backend = self.get_backend()
+        compact = _resolve_compact(compact)
+        count_reduced = False
+        backend_limit = source_memory_limit
+        if compact and source_memory_limit is None:
+            deployment_limit = _deployment_source_memory_limit()
+            backend_limit = min(_COMPACT_SOURCE_MEMORY_LIMIT, deployment_limit)
+            count_reduced = backend_limit < deployment_limit
         try:
             result = await backend.recall(
                 query,
@@ -128,7 +175,7 @@ class RecallMemoriesTool(BaseJsonTool):
                 include_invalidated=include_invalidated,
                 **({"include_warden_status": True} if include_warden_status else {}),
                 trace=trace,
-                source_memory_limit=source_memory_limit,
+                source_memory_limit=backend_limit,
             )
         except ValueError:
             return self.render_json(
@@ -164,7 +211,6 @@ class RecallMemoriesTool(BaseJsonTool):
             except Exception:
                 pass
 
-        compact = _resolve_compact(compact)
         payload: dict = {
             "retrieved_at": retrieved_at,
             "query": query,
@@ -179,16 +225,40 @@ class RecallMemoriesTool(BaseJsonTool):
             payload["candidates_evaluated"] = result.get("candidates_evaluated", 0)
         if result.get("note"):
             payload["note"] = result.get("note")
+        if result.get("query_hint"):
+            payload["query_hint"] = result.get("query_hint")
         if result.get("authority_layer"):
             # Decision-relevant and already bounded by recall (7.J), so compact mode retains it.
             payload["authority_layer"] = result.get("authority_layer")
-        if result.get("event_authority_layer"):
-            # Decision-relevant and already bounded by recall (7.J), so compact mode retains it.
-            payload["event_authority_layer"] = result.get("event_authority_layer")
         if result.get("source_memories"):
-            # Decision-relevant (raw source text + its time) and bounded by limit, so compact
-            # mode retains it alongside the ranked results.
-            payload["source_memories"] = result.get("source_memories")
+            # Decision-relevant (raw source text + its time), so compact mode retains it,
+            # but asks the backend for fewer entries (unless the caller set a limit) and cuts
+            # each entry's length.
+            source_memories = result.get("source_memories")
+            if compact:
+                source_memories, cut = _bound_source_memories(source_memories)
+                if count_reduced or cut:
+                    applied = []
+                    if count_reduced:
+                        applied.append(f"at most {backend_limit} source memories")
+                    if cut:
+                        applied.append(
+                            f"entries cut to {_COMPACT_SOURCE_MEMORY_MAX_CHARS} chars"
+                        )
+                    bounds = " and ".join(applied) if not (count_reduced and cut) else (
+                        f"at most {backend_limit} source memories, each cut to "
+                        f"{_COMPACT_SOURCE_MEMORY_MAX_CHARS} chars"
+                    )
+                    more = (
+                        "more entries and longer text"
+                        if count_reduced and cut
+                        else "more entries" if count_reduced else "longer text"
+                    )
+                    payload["source_memories_note"] = (
+                        f"Compact mode returned {bounds}. Call recall_memories with "
+                        f"compact=false for {more} (up to the server's per-entry limit)."
+                    )
+            payload["source_memories"] = source_memories
         if include_warden_status and result.get("warden_status") is not None:
             payload["warden_status"] = result["warden_status"]
         if result.get("warden_notice"):

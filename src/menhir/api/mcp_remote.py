@@ -8,6 +8,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import Tool as MCPTool
 from starlette.types import ASGIApp
 
+from menhir.mcp import instructions as _instructions_module
 from menhir.mcp.contracts import _tier_allows
 from menhir.mcp.instructions import SERVER_INSTRUCTIONS
 from menhir.mcp.resources import register_memory_resources
@@ -15,6 +16,11 @@ from menhir.mcp.service_access import get_client_tool_allowlist, get_request_tie
 from menhir.mcp.tools import register_all_tools
 
 _INSTRUCTIONS = SERVER_INSTRUCTIONS
+
+
+def _served_instructions() -> str:
+    """The instructions text, read when a server is built rather than bound at import."""
+    return _instructions_module.SERVER_INSTRUCTIONS
 
 
 @lru_cache(maxsize=1)
@@ -94,7 +100,7 @@ def create_remote_tool_only_mcp() -> FastMCP:
 
     remote_mcp = TierFilteredFastMCP(
         "menhir",
-        instructions=_INSTRUCTIONS,
+        instructions=_served_instructions(),
     )
     _stamp_server_version(remote_mcp)
     register_all_tools(remote_mcp)
@@ -124,7 +130,7 @@ def create_mcp_streamable_http_app() -> tuple[ASGIApp, "FastMCP"]:
     """
     remote_mcp = TierFilteredFastMCP(
         "menhir",
-        instructions=_INSTRUCTIONS,
+        instructions=_served_instructions(),
         host="0.0.0.0",  # disables DNS rebinding protection — auth via BearerAuthMiddleware
         stateless_http=True,
     )

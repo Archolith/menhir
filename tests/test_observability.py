@@ -59,7 +59,8 @@ def test_build_async_openai_client_uses_plain_openai_without_langfuse(monkeypatc
     )
 
     assert client.auth_headers == {"Authorization": "Bearer test"}
-    assert created == [{"base_url": "https://api.openai.com/v1", "api_key": "remote-key", "has_http_client": False}]
+    # Remote clients now get an httpx client too: it carries the shared DNS cache (#409).
+    assert created == [{"base_url": "https://api.openai.com/v1", "api_key": "remote-key", "has_http_client": True}]
 
 
 @pytest.mark.unit
@@ -161,7 +162,7 @@ def test_build_async_openai_client_uses_langfuse_when_configured(monkeypatch: py
         {
             "base_url": "https://api.openai.com/v1",
             "api_key": "openai-key",
-            "has_http_client": False,
+            "has_http_client": True,  # the shared DNS cache (#409)
         }
     ]
 

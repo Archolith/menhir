@@ -404,7 +404,7 @@ def test_crash_before_commit_replays_as_committed(merger, unmerger, live_repo, p
     merged = merger.merge(survivor_uuid=pair["s"], absorbed_uuid=pair["a"], similarity=0.97)
 
     real_commit = unmerger.journal.mark_committed
-    unmerger.journal.mark_committed = lambda op_id: (_ for _ in ()).throw(RuntimeError("crash"))
+    unmerger.journal.mark_committed = lambda op_id, owner_token=None: (_ for _ in ()).throw(RuntimeError("crash"))
     with pytest.raises(RuntimeError):
         unmerger.unmerge(merged["op_id"])
     unmerger.journal.mark_committed = real_commit  # type: ignore[method-assign]

@@ -19,7 +19,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from menhir.domain.namespace import namespace_to_group_id, stamped_namespace
+from menhir.domain.namespace import (
+    namespace_to_group_id,
+    stamped_namespace,
+    tenant_scope_cypher,
+    tenant_scope_params,
+)
 from typing import Any
 from uuid import uuid4
 
@@ -232,19 +237,30 @@ class CandidateRepository:
     # Read
     # ------------------------------------------------------------------
 
-    def list_candidates(self, *, source: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
-        """Return CANDIDATE nodes for the review surface, newest activity first."""
+    def list_candidates(
+        self, *, source: str | None = None, limit: int = 100, namespace: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return CANDIDATE nodes for the review surface, newest activity first.
+
+        ``namespace`` is opt-in per the namespace contract: ``None``/empty/whitespace does not
+        filter, so every existing caller reads every silo exactly as before. Supplied, it narrows
+        to that silo through the shared ``tenant_scope_cypher`` predicate. Each row reports the
+        silo it belongs to, so an unscoped reviewer can tell them apart.
+        """
         safe_limit = max(1, min(int(limit), 500))
+        ns = str(namespace).strip() if namespace is not None else ""
         return self.neo4j.execute(
-            """
+            f"""
             MATCH (n:Entity)
             WHERE n.scope = 'CANDIDATE'
               AND ($source IS NULL OR n.source = $source)
+              AND {tenant_scope_cypher("n")}
             RETURN
                 n.uuid AS uuid,
                 n.name AS name,
                 n.content AS content,
                 n.source AS source,
+                coalesce(n.namespace, n.group_id) AS namespace,
                 n.candidate_cluster_id AS cluster_id,
                 n.candidate_kind AS kind,
                 n.candidate_type AS type,
@@ -258,7 +274,7 @@ class CandidateRepository:
             ORDER BY coalesce(n.candidate_last_seen, n.created_at) DESC
             LIMIT $limit
             """,
-            {"source": source, "limit": safe_limit},
+            {"source": source, "limit": safe_limit, **tenant_scope_params(ns or None)},
         )
 
     def fetch_candidate(self, uuid: str) -> dict[str, Any] | None:

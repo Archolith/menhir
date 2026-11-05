@@ -252,6 +252,27 @@ def test_service_match_on_writes_audit_keys_on_the_counted_view():
 
 
 @pytest.mark.unit
+def test_service_redraws_edges_for_counted_view_with_zero_counted_rows():
+    class _DrawViews(_Views):
+        def __init__(self):
+            super().__init__()
+            self.draws: list[dict] = []
+
+        def draw_scalar_state_provenance_edges(self, **kw):
+            self.draws.append(kw)
+
+    views = _DrawViews()
+    rows = [_row(1, 1, count_status="uncertain")]
+    ScalarStateService(_Assertions(rows), views, count_match=True).rebuild_scalar_state("ent-self")
+    rec, = views.records
+    assert rec["value"] == 0
+    draw, = views.draws
+    assert draw["view_uuid"] == "view-model_kit_count"
+    assert draw["contributed_delta_ids"] == []
+    assert not draw["anchor_id"]
+
+
+@pytest.mark.unit
 def test_service_match_off_leaves_count_audit_keys_none():
     # Fails if match-off Views carry (or invent) the 4R audit fields.
     views = _Views()

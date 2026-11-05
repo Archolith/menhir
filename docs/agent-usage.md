@@ -19,7 +19,8 @@ Every MCP client receives a short version of this contract as the server instruc
    could change the work, especially when the repository and its Git history do not record the rationale.
    Start with one focused query naming the component and the decision, and rephrase only if evidence is
    missing. Pass `file_context` and `file_context_project` for code-related questions. Recall returns
-   summaries and facts; read the linked source excerpts with `get_provenance(node_uuid=...)` when wording or
+   summaries and facts, plus a separate `source_memories` section of raw source episodes by default; read
+   the linked source excerpts with `get_provenance(node_uuid=...)` when wording or
    rationale matters, and distinguish recorded reasons from inference. When the question needs how
    something changed, the sequence of states, or what it was before, follow with `recall_history`
    (time-ordered matching memories, oldest first).
@@ -30,9 +31,19 @@ Every MCP client receives a short version of this contract as the server instruc
 7. At the end of meaningful work, store durable lessons with `add_memory`. Attach a bounded Git diff when
    code paths matter. Record remaining work as a todo with a repository-relative code reference.
 
+### Compact recall for chat clients
+
+By default a recall response includes up to 10 raw source memories of up to 2000 characters each; these are
+deployment defaults (`MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT`, `MENHIR_FRONTIER_SOURCE_MEMORY_MAX_CHARS`). Chat
+clients with tight context can set `MENHIR_RECALL_COMPACT=1` on the server, or pass `compact=true` per call.
+Compact mode drops per-item breakdowns and asks for at most 5 source memories, never more than the
+deployment default. An explicit `source_memory_limit` keeps its count and only the 1000-character cut
+applies. Cut entries end in "…" and carry `truncated: true`. Pass `compact=false` to get the full form.
+
 ## Write discipline
 
 - Store durable facts, decisions, corrections, verified failures, and reusable operator knowledge.
+  Write a decision together with its reason and the alternative rejected.
 - Do not store secrets, raw credentials, transient progress narration, or facts that have not been checked.
 - For a recall-critical semantic write in the local-stdio MVP, choose `add_memory_and_track` as the
   original write. Plain `add_memory` is fire-and-forget and provides no immediate-recall guarantee.
@@ -103,6 +114,9 @@ separate MVP retention work; this workflow does not certify them.
 
 ## Menhir as a Beacon memory provider
 
+> **Deferred after the MVP (#120).** `get_beacon_evidence` and `menhir beacon generate` ship in
+> 0.3.0 but are not part of the supported MVP surface; their behavior may change.
+
 Beacon builds beacons; Menhir answers what it has indexed. The read-only MCP tool
 `get_beacon_evidence(project_id | repository)` returns a `beacon-memory-evidence-1.1` document for one
 indexed project, bound to the repository and git commit it was indexed from. Beacon calls it:
@@ -122,7 +136,7 @@ index and moves only the recorded commit. The tool reads the graph only -- no fi
 writes -- and is available to readonly, agent and operator clients.
 
 The older `menhir beacon generate` path below is kept until Beacon's end-to-end lane runs
-against this provider (plan Phase 3B removes it).
+against this provider.
 
 ## Beacon generation (issue #120)
 
@@ -165,7 +179,7 @@ after it republishes even though the scan fingerprint is unchanged.
 - Expected refusals (`re-ingest first`, freshness or CAS refusals, an unusable interpreter, a
   Beacon build/validate failure) print one `beacon generate refused: ...` line and exit with
   code 2; a traceback means an unexpected error.
-- **First ingest after upgrading to scanner schema 7 is a full re-scan** of every project: the
+- **First ingest after a scanner schema bump (currently 10) is a full re-scan** of every project: the
   schema version is part of the scan fingerprint, so stored fingerprints are invalidated. That
   re-scan indexes the `.agent` orientation docs as `document` entities (and prunes them again
   when the files are removed), so overview entity counts change once per project. Generation
@@ -180,6 +194,25 @@ after it republishes even though the scan fingerprint is unchanged.
 - If recall marks a file anchor stale, inspect the current file before acting on the memory.
 - If tool discovery is incomplete, use the MCP client's tool discovery mechanism instead of inventing a
   tool name or argument.
+
+## After a server deploy
+
+- A Menhir started with `MENHIR_STARTUP_SCOPE=production` serves `/readyz`; other startup scopes do not.
+  Anyone can read its status. `build.version`, `build.commit` and `build.mcp_metadata_sha256` appear only
+  for a caller sending a bearer access token the MCP endpoint would accept. The built-in authorization
+  server issues those only through the authorization code and refresh token grants, so use a token from a
+  client's OAuth sign-in.
+- After a deploy, set `MENHIR_READYZ_TOKEN` to such a token and run
+  `python scripts/release/check_served_metadata.py <base-url>` (add `--expect-commit <sha>`) to confirm
+  the server serves the instructions and tools this package expects. The script sends the token only over
+  HTTPS or directly to loopback, never through a proxy in plain text.
+  The script is not in the wheel: run it from a checkout with menhir installed at the version the
+  server should run, since it computes the expected digest locally. If the server runs with snapshot
+  receive mode on, pass the same mode with `--snapshot-mode`. Exit codes: 0 match, 1 a compared field
+  differs, 2 the check could not be made.
+- MCP clients read server instructions and the tool list when they connect, so they pick up changes only
+  after reconnecting. `/clear` in Claude Code does not reconnect; restart the session or reconnect the MCP
+  server.
 
 ## Ready-to-copy default
 

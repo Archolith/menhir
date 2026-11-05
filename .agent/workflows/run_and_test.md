@@ -121,6 +121,26 @@ Do not use `-n auto`. A previous 20-worker run exhausted memory and crashed work
 must remain serial. If a long run is warranted, use a background/CI job so an interactive agent is
 not blocked waiting on routine integration evidence.
 
+## Benchmark runs: parallelism and paid-call approval
+
+Standing owner rule (2026-10-29) for benchmark and live-LLM test runs (archolith-bench LongMemEval
+builds, lanes, scoring and A/B arms against Menhir):
+
+- **Run as parallel as possible.** Ingest as many namespaces at once as the system can handle within
+  reason: for a staged fixture that is every namespace at once (`LME_INGEST_CONCURRENCY` = fixture
+  size). Lanes, slices and scoring shards run in parallel too. Lower it only for a measured limit,
+  such as a single-slot local model where parallel calls just queue, capacity 429s that keep recurring,
+  or Neo4j/host memory, and record the reason with the run. The `-n auto` pytest limit above is such
+  a measured limit and still applies.
+- **Paid runs under $0.25 are pre-approved.** A paid LLM run (extraction, chat, answer or judge calls)
+  that costs less than $0.25 needs no owner go-ahead, as long as it runs under a cost monitor
+  with a manual ceiling. That means a guard watching the run's own telemetry that stops it at a USD
+  ceiling set explicitly for that run, e.g. `stage.sh`'s cost-guard ceiling, `rs-score.sh`'s Menhir
+  and harness ceilings, or `run_flex(max_usd=...)`. When a run has several ceilings, they must sum to
+  less than $0.25. A run that needs more, or has no monitor, still needs explicit approval.
+  Embedding calls never need approval. Flex capacity 429s are retried, not a stop; quota/billing/auth
+  errors and guard breaches stop the run.
+
 ## Online and live-service tests
 
 Online tests are opt-in and may run destructive, unscoped graph queries. Use only a disposable test

@@ -8,17 +8,11 @@ from types import SimpleNamespace
 
 import pytest
 
-import menhir.services.recall_service as recall_service_mod
-from menhir.domain.event_history import TypedEventAssertion
-from menhir.domain.namespace import stamped_namespace
-from menhir.domain.recall import RecallResult, ScoredMemory, TemporalFact
+from menhir.domain.recall import ScoredMemory, TemporalFact
 from menhir.domain.retrieval_trace_models import RelevanceBreakdown
-from menhir.domain.self_identity import inferred_self_uuid_for_namespace, self_uuid_for_namespace
 from menhir.mcp.formatters import _compact_scored_item
 from menhir.services.recall_pipeline import _inferred_self_on
 from menhir.services.recall_policies import label_and_collapse_self_tiers
-from menhir.services.recall_service import RecallService
-from menhir.services.scoring_service import ScoringService
 
 pytestmark = pytest.mark.unit
 
@@ -163,39 +157,6 @@ def test_inferred_self_on_truth_table():
     # resolve_inferred_mode strips and lower-cases.
     assert _inferred_self_on(SimpleNamespace(inferred_self_mode=" ENFORCE ")) is True
     assert _inferred_self_on(SimpleNamespace(inferred_self_mode="Observe")) is True
-
-
-# ----------------------------------------------------------------- 4. event authority anchored-only
-
-
-class _Repo:
-    def __init__(self) -> None:
-        self.subjects: list[str] = []
-
-    def event_assertions_for_subject_predicate(self, subject_uuid, predicate, **kwargs):
-        self.subjects.append(subject_uuid)
-        return []
-
-
-@pytest.mark.asyncio
-async def test_event_authority_subject_is_anchored_even_with_inferred_mode_enforce(monkeypatch):
-    async def _run_recall(*args, **kwargs):
-        return RecallResult(query="", preset="KNOWLEDGE", results=[], candidates_evaluated=0,
-                            nodes_touched=0)
-
-    monkeypatch.setattr(recall_service_mod, "run_recall", _run_recall)
-    repo = _Repo()
-    svc = RecallService(
-        graphiti_client=object(), graph_adapter=repo, scoring_service=ScoringService(),
-        event_history_authority_enabled=True, inferred_self_mode="enforce",
-    )
-    await svc.recall("which notebook did I buy most recently?", namespace="alice")
-
-    assert repo.subjects, "event authority lookup did not run"
-    assert set(repo.subjects) == {self_uuid_for_namespace("alice")}
-    assert inferred_self_uuid_for_namespace("alice") not in repo.subjects
-    # keep the imports honest: the stamped form is what the repo is keyed on elsewhere
-    assert stamped_namespace("alice") and TypedEventAssertion
 
 
 # ----------------------------------------------------------------- 5. MCP formatter

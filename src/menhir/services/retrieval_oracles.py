@@ -16,7 +16,6 @@ overlap), Scope (domain/scope), Temporal (domain/temporal), Evidence (provenance
 
 from __future__ import annotations
 
-import os
 from typing import Protocol
 
 from menhir.domain.artifact_role import derive_content_role
@@ -287,13 +286,4 @@ def default_oracles(semantic_scorer: SemanticScorer | None = None) -> list[Retri
         SemanticOracle(semantic_scorer), StructureOracle(), ScopeOracle(),
         TemporalOracle(), IntentOracle(),
     ]
-    # Experiment knob: MENHIR_FRONTIER_ORACLE_SUBSET=semantic,temporal restricts the active set
-    # to isolate a single oracle's marginal effect (the ablation showed the full stack is
-    # net-neutral; this lets us A/B one oracle without the others). Empty = all (default).
-    subset = os.getenv("MENHIR_FRONTIER_ORACLE_SUBSET", "").strip()
-    if subset:
-        want = {s.strip().lower() for s in subset.split(",") if s.strip()}
-        filtered = [o for o in oracles if getattr(o, "name", "") in want]
-        if filtered:  # never return empty (would leave the combiner with no signal)
-            oracles = filtered
     return oracles

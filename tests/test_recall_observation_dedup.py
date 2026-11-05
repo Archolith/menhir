@@ -31,7 +31,8 @@ async def _recall(client, adapter, hits, *, dedup, counting=False):
     _setup_observation_lane(adapter, obs_hit=hits)
     svc = RecallService(
         graphiti_client=client, graph_adapter=adapter, scoring_service=ScoringService(),
-        scalar_view_authority_enabled=True, counting_enabled=counting)
+        scalar_view_authority_enabled=True, counting_enabled=counting,
+        counting_recall_authority_only=False)
     res = await svc.recall(
         QUERY, namespace="proj",
         tuning=RetrievalTuningConfig(enable_observation_dedup=dedup))
@@ -115,24 +116,6 @@ async def test_dedup_keeps_named_subject_for_authority_lookup(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_echo_dropped_slot_does_not_take_other_slots_identical_text(
-    stub_graphiti_client, stub_memory_graph_adapter,
-):
-    from tests.test_scalar_view_collapse_drilldown import (
-        _ids, _other_slot_hit, _state_view, _svc, _wire)
-
-    other = _other_slot_hit()
-    other.update(stated_span="17 postcards since I started", cosine=0.90)
-    _wire(stub_memory_graph_adapter, state_view=_state_view(), extra_hits=[other])
-    _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
-    res = await _svc(stub_graphiti_client, stub_memory_graph_adapter,
-                     scalar_view_echo_drop_enabled=True).recall(
-        QUERY, namespace="proj", tuning=RetrievalTuningConfig(enable_observation_dedup=True))
-    assert "obs-other-1" in _ids(res)
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
 async def test_flag_off_keeps_both(stub_graphiti_client, stub_memory_graph_adapter):
     hits = [_hit("obs-a", "17 postcards since I started", 0.80),
             _hit("obs-b", "17 postcards since I started", 0.90)]
@@ -163,13 +146,18 @@ def test_valid_at_tiebreak_compares_instants_not_strings():
 
 
 @pytest.mark.unit
-def test_dedup_flag_registered_default_off_and_needs_authority(monkeypatch):
+def test_dedup_flag_registered_default_on_and_needs_authority(monkeypatch):
+    # Default on since 2026-10-28 (#399 bucket 3); an explicit false still turns it off.
     feature = FEATURES["personal_memory_observation_dedup_enabled"]
     assert feature.env_var == "MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED"
-    assert feature.default is False
-    assert "personal_memory_scalar_view_authority_enabled" in feature.requires
-    monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED", "1")
+    assert feature.default is True
+    assert "personal_memory_scalar_state_enabled" in feature.requires
+    monkeypatch.delenv("MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED", raising=False)
     settings = MemorySettings.from_env()
     assert settings.personal_memory_observation_dedup_enabled is True
     assert settings.retrieval_tuning().enable_observation_dedup is True
+    monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED", "false")
+    settings = MemorySettings.from_env()
+    assert settings.personal_memory_observation_dedup_enabled is False
+    assert settings.retrieval_tuning().enable_observation_dedup is False
     assert RetrievalTuningConfig().enable_observation_dedup is False

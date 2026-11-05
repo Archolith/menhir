@@ -29,7 +29,7 @@ class _FakeJournal:
     def get(self, op_id):
         return {}
 
-    def mark_needs_review(self, op_id, observed_error):
+    def mark_needs_review(self, op_id, observed_error, owner_token=None):
         self.reviewed = observed_error
 
 

@@ -21,6 +21,7 @@ from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.self_identity import inferred_self_uuid_for_namespace
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.utils import source_confidence_for
+from menhir.domain.verbatim_skip_status import skip_projection_map_cypher
 from menhir.infrastructure.cypher import (
     Cypher,
     EPISODE_PROCESSING_FIELDS,
@@ -204,11 +205,17 @@ class EpisodeLifecycleRepository:
 
     def find_episode_by_ingest_key(self, ingest_key: str) -> dict | None:
         """The anchor `:Episodic` stamped with this ingest key, or None (unique by constraint)."""
+        # The replay REPORTS the anchor's status, so it carries what effective_processing_row
+        # needs to project a verbatim-skipped client onto its evidence projection.
         rows = self.neo4j.execute(
-            """
-            MATCH (n:Episodic {ingest_key: $ingest_key})
+            f"""
+            MATCH (n:Episodic {{ingest_key: $ingest_key}})
+            OPTIONAL MATCH (p:Episodic {{uuid: n.extraction_skipped_for}})
             RETURN n.uuid AS uuid,
                    n.processing_state AS processing_state,
+                   n.processing_substage AS processing_substage,
+                   n.extraction_skipped_for AS extraction_skipped_for,
+                   {skip_projection_map_cypher("p")} AS skip_projection,
                    n.namespace AS namespace,
                    n.ingest_request_sha256 AS ingest_request_sha256
             LIMIT 1
@@ -221,6 +228,9 @@ class EpisodeLifecycleRepository:
         return {
             "uuid": row["uuid"],
             "processing_state": row["processing_state"],
+            "processing_substage": row.get("processing_substage"),
+            "extraction_skipped_for": row.get("extraction_skipped_for"),
+            "skip_projection": row.get("skip_projection"),
             "namespace": row["namespace"],
             "ingest_request_sha256": row["ingest_request_sha256"],
         }
@@ -1136,11 +1146,16 @@ class EpisodeLifecycleRepository:
 
     def mark_episode_store_only(
         self, episode_uuid: str, *, worker_id: str, claim_started_at: object | None,
+        by_turn_role: bool = False,
     ) -> bool:
         """Finish a store-only episode READY without extraction. True when this claim wrote it.
 
         Fenced on this claim's owner and start instant, and on the durable ``extraction_mode``
         itself, so only an attempt holding the current lease on a store-only row can finish it.
+
+        ``by_turn_role``: the worker's assistant-turn policy decided store-only for a row created
+        normal. The mode is then written in the same fenced SET as READY, so the zero-extraction
+        sweep (which exempts store-only by mode) can never see this row READY without it.
         """
         if not worker_id or claim_started_at is None:
             return False
@@ -1151,8 +1166,9 @@ class EpisodeLifecycleRepository:
               AND n.processing_started_at IS NOT NULL
               AND n.processing_started_at.epochSeconds = datetime($claim_started_at).epochSeconds
               AND n.processing_started_at.nanosecond = datetime($claim_started_at).nanosecond
-              AND n.extraction_mode = $store_only
-            SET n.processing_state = 'READY',
+              AND (n.extraction_mode = $store_only OR $by_turn_role)
+            SET n.extraction_mode = $store_only,
+                n.processing_state = 'READY',
                 n.processing_stage = 'ready',
                 n.processing_substage = $store_only,
                 n.processing_substage_started_at = datetime(),
@@ -1177,6 +1193,7 @@ class EpisodeLifecycleRepository:
                 "worker_id": worker_id,
                 "claim_started_at": claim_started_at,
                 "store_only": EXTRACTION_MODE_STORE_ONLY,
+                "by_turn_role": bool(by_turn_role),
             },
         )
         return bool(rows)
@@ -1390,11 +1407,19 @@ class EpisodeLifecycleRepository:
         # 0.29.2 upgrade canary (this path only runs during background enrichment
         # finalize, which the offline test suite doesn't exercise against a real
         # Neo4j server).
+        # The raw row is what work fences read. `extraction_skipped_for` and `skip_projection`
+        # let status readers compute a verbatim-skipped client's effective state
+        # (domain.verbatim_skip_status.effective_processing_row); fences ignore them.
         query = (
             Cypher()
             .match("(n:Episodic)")
             .where("n.uuid = $episode_uuid")
-            .return_fields(MEMORY_RETURN_FIELDS)
+            .optional_match("(p:Episodic {uuid: n.extraction_skipped_for})")
+            .return_fields(
+                MEMORY_RETURN_FIELDS,
+                "n.extraction_skipped_for AS extraction_skipped_for",
+                f"{skip_projection_map_cypher('p')} AS skip_projection",
+            )
             .limit("1")
             .build()
         )

@@ -183,7 +183,9 @@ def _scheduler(**kw: Any) -> MaintenanceScheduler:
 def test_job_registers_only_when_enabled_and_wired() -> None:
     wired = {"source_embedding_embed": _ok, "source_embedding_model_name": lambda: "m-1"}
     assert "repair_source_embeddings" not in _scheduler()._jobs
-    assert "repair_source_embeddings" not in _scheduler(**wired)._jobs
+    assert "repair_source_embeddings" in _scheduler(**wired)._jobs  # on by default (#168 freeze)
+    assert "repair_source_embeddings" not in _scheduler(
+        source_embedding_repair_enabled=False, **wired)._jobs
     assert "repair_source_embeddings" not in _scheduler(
         source_embedding_repair_enabled=True, source_embedding_embed=_ok)._jobs
     sched = _scheduler(source_embedding_repair_enabled=True, **wired)

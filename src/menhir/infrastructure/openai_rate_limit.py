@@ -16,7 +16,7 @@ with ``max_retries=0``, and a throttle there used to return a None verdict), the
 async embeddings endpoint (Graphiti's embedder), the Graphiti reranker
 (``RateLimitedChatClient``), and the sync view embedder. Chat on the
 instrumented client is not wrapped, so the proxy's retry is never nested inside another.
-``LLMAdapter._chat_text`` retries remain for non-429 faults and wrap the inner 429 retry.
+``LLMAdapter._chat_text`` retries only non-429 faults; a 429 that reaches it ends the call (CF-262).
 
 Backoff sleeps are reported to the ``RateLimitBackoffClock`` bound in the current context, if
 any. ``await_with_backoff_aware_timeout`` binds one, so an enclosing deadline (today
@@ -55,7 +55,25 @@ DEFAULT_MAX_WAIT_S = 60.0
 #: How far backoff may push a backoff-aware deadline, as a multiple of its timeout. Bounds an
 #: operation that stays throttled indefinitely.
 DEFAULT_BACKOFF_MAX_EXTENSION = 3.0
-_NOT_RETRYABLE_CODES = frozenset({"insufficient_quota"})
+#: Billing states a wait cannot fix. Compatible providers use other codes for the same state, and
+#: some send only the message (CF-262 F7), so codes, prefixes and the message are all checked.
+_NOT_RETRYABLE_CODES = frozenset({"insufficient_quota", "billing_hard_limit_reached"})
+_NOT_RETRYABLE_CODE_PREFIXES = ("credit_balance_",)
+_NOT_RETRYABLE_MESSAGE_MARKERS = ("exceeded your current quota",)
+
+
+def _is_billing_value(value: object) -> bool:
+    return isinstance(value, str) and (
+        value in _NOT_RETRYABLE_CODES or value.startswith(_NOT_RETRYABLE_CODE_PREFIXES)
+    )
+
+
+def is_billing_state(exc: BaseException) -> bool:
+    """Whether a provider status error says billing/quota, by code, type or message."""
+    if _is_billing_value(getattr(exc, "code", None)) or _is_billing_value(getattr(exc, "type", None)):
+        return True
+    message = str(getattr(exc, "message", "") or "").lower()
+    return any(marker in message for marker in _NOT_RETRYABLE_MESSAGE_MARKERS)
 
 
 class RateLimitBackoffClock:
@@ -130,20 +148,25 @@ def bind_backoff_clock(clock: RateLimitBackoffClock) -> Iterator[RateLimitBackof
 def is_retryable_rate_limit(exc: BaseException) -> bool:
     if not isinstance(exc, openai.RateLimitError):
         return False
-    return exc.code not in _NOT_RETRYABLE_CODES and exc.type not in _NOT_RETRYABLE_CODES
+    return not is_billing_state(exc)
 
 
 QUOTA_REASON_CODE = "provider_quota_exhausted"
 
 
 class ProviderQuotaExhaustedError(Exception):
-    """The provider refused with 429 insufficient_quota: a billing state, not throttling."""
+    """The provider refused for billing (HTTP 402, or a billing-coded 4xx such as a 429
+    insufficient_quota): a billing state that waiting cannot fix, not throttling."""
 
     reason_code = QUOTA_REASON_CODE
 
 
-def find_quota_exhaustion(exc: BaseException | None) -> openai.RateLimitError | None:
-    """The insufficient_quota openai error in ``exc``'s __cause__/__context__ chain, if any.
+def find_quota_exhaustion(exc: BaseException | None) -> openai.APIStatusError | None:
+    """The billing-exhaustion openai error in ``exc``'s __cause__/__context__ chain, if any.
+
+    That is a 429 ``RateLimitError`` whose code/type/message says billing (``insufficient_quota``),
+    or any ``APIStatusError`` that is a 402 Payment Required (whatever its body) or carries a
+    billing marker (for example a 403 ``billing_hard_limit_reached``).
 
     Graphiti rewraps the openai error as its own RateLimitError (``raise ... from e``), which
     loses the quota code, so the chain is walked rather than only ``exc`` itself.
@@ -151,9 +174,9 @@ def find_quota_exhaustion(exc: BaseException | None) -> openai.RateLimitError | 
     seen: set[int] = set()
     while exc is not None and id(exc) not in seen:
         seen.add(id(exc))
-        if isinstance(exc, openai.RateLimitError) and (
-            exc.code in _NOT_RETRYABLE_CODES or exc.type in _NOT_RETRYABLE_CODES
-        ):
+        if isinstance(exc, openai.RateLimitError) and is_billing_state(exc):
+            return exc
+        if isinstance(exc, openai.APIStatusError) and (exc.status_code == 402 or is_billing_state(exc)):
             return exc
         exc = exc.__cause__ or exc.__context__
     return None
@@ -163,11 +186,16 @@ def quota_exhausted_error(exc: BaseException | None) -> ProviderQuotaExhaustedEr
     """``exc`` itself if already a quota error, else a new one chained to it, else None."""
     if isinstance(exc, ProviderQuotaExhaustedError):
         return exc
-    if find_quota_exhaustion(exc) is None:
+    matched = find_quota_exhaustion(exc)
+    if matched is None:
         return None
+    code = getattr(matched, "code", None)
+    detail = f"HTTP {matched.status_code}"
+    if isinstance(code, str) and _SAFE_TOKEN.fullmatch(code):
+        detail += f", {code}"
     error = ProviderQuotaExhaustedError(
-        f"{QUOTA_REASON_CODE}: the provider returned 429 insufficient_quota (credits "
-        "exhausted); waiting will not help - add credits, then re-enrich"
+        f"{QUOTA_REASON_CODE}: the provider refused for billing ({detail}); "
+        "waiting will not help - add credits, then re-enrich"
     )
     error.__cause__ = exc
     return error
@@ -208,7 +236,7 @@ def rate_limit_category(exc: BaseException | None) -> str | None:
         value for value in (getattr(status_error, "code", None), getattr(status_error, "type", None))
         if isinstance(value, str)
     }
-    if codes & _NOT_RETRYABLE_CODES:
+    if is_billing_state(status_error):
         return "quota"
     if codes & _FLEX_CAPACITY_CODES:
         return "flex_capacity"

@@ -324,7 +324,8 @@ def _run(graph, namespaces, *, batch_size=500):
     out = run_counting_consolidation(
         graph, namespaces=namespaces, counting_llm=_Llm(), build_episodes=_build_episodes,
         k=1, threshold=1.0, call_budget=None, embed=None,
-        config=CountingConsolidationConfig(batch_size=batch_size))
+        config=CountingConsolidationConfig(
+            batch_size=batch_size, extract_v2=False, match=False))
     return out
 
 
@@ -571,16 +572,11 @@ def _patch_phases(monkeypatch, order):
         order.append("scalar")
         return {"scalar_namespaces_dirty": 0}
 
-    def _event(graph, **kw):
-        order.append("event")
-        return {"event_namespaces_dirty": 0}
-
     def _counting(graph, **kw):
         order.append("counting")
         return {"counting_namespaces_dirty": 0}
 
     monkeypatch.setattr(scheduler_tasks, "run_scalar_consolidation", _scalar)
-    monkeypatch.setattr(scheduler_tasks, "run_event_consolidation", _event)
     monkeypatch.setattr(scheduler_tasks, "run_counting_consolidation", _counting)
 
 
@@ -613,13 +609,13 @@ def test_counting_off_with_a_sweep_target_reports_sweep_keys(monkeypatch):
 
 
 @pytest.mark.unit
-def test_phase_order_is_scalar_then_event_then_counting(monkeypatch):
-    # Fails if counting runs before the event phase or before scalars (it would then spend the shared
-    # budget first, or read turns the scalar cursor has not passed).
+def test_phase_order_is_scalar_then_counting(monkeypatch):
+    # Fails if counting runs before scalars (it would then spend the shared budget first, or read
+    # turns the scalar cursor has not passed).
     order: list[str] = []
     _patch_phases(monkeypatch, order)
-    _consolidate(_SchedGraph(), enable_counting=True, enable_event_history=True)
-    assert order == ["scalar", "event", "counting"]
+    _consolidate(_SchedGraph(), enable_counting=True)
+    assert order == ["scalar", "counting"]
 
 
 # --------------------------------------------------------------------------- 6. schema

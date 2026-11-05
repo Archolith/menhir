@@ -2,7 +2,7 @@
 
 This runbook is for validating Menhir's OAuth **resource-server** posture before exposing protected remote HTTP endpoints to an OAuth-capable client.
 
-Menhir validates access tokens issued by an external identity provider. Menhir does **not** issue OAuth tokens, does **not** run an authorization server, and does **not** make OAuth the default local development path.
+In this mode Menhir validates access tokens issued by an external identity provider and acts only as a resource server. The optional embedded authorization server (`MENHIR_OAUTH_AS_ENABLED`; see [security posture section 5](../security-posture.md)) is not covered here. OAuth is not the default local development path.
 
 ## Safety boundary
 
@@ -66,11 +66,11 @@ Do not proceed to remote exposure while diagnostics reports OAuth failures.
 
 ## Quick local smoke
 
-Use the OAuth local smoke helper to run checks 2–4 against an already-running Menhir HTTP service.
+Use the OAuth local smoke helper to run checks 1–4 against an already-running Menhir HTTP service.
 
 ```bash
-python scripts/smoke/oauth_local_smoke.py --base-url http://127.0.0.1:8000
-python scripts/smoke/oauth_local_smoke.py --base-url http://127.0.0.1:8000 --json  # machine-readable output
+python scripts/smoke/oauth_local_smoke.py --base-url http://127.0.0.1:8100
+python scripts/smoke/oauth_local_smoke.py --base-url http://127.0.0.1:8100 --json  # machine-readable output
 ```
 
 The helper performs the same checks as the curl commands below:

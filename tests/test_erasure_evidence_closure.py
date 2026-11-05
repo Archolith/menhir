@@ -24,8 +24,7 @@ from menhir.services.erasure_coordinator import ERASED, ErasureCoordinator
 from tests.test_consolidate_personal_memory import (
     _empty_llm,
     _eps,
-    _event_runner_capture,
-    _FakeGraph,
+    _ScalarGraph,
 )
 
 
@@ -202,7 +201,7 @@ def test_repair_claim_can_be_scoped_to_namespaces() -> None:
     assert query.index("IN $namespaces") < lock_at
 
 
-class _RepairGraph(_FakeGraph):
+class _RepairGraph(_ScalarGraph):
     def __init__(self, *args, claimed: int = 1, fail: bool = False, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.repair_calls: list[tuple[list[str], dict]] = []
@@ -217,22 +216,16 @@ class _RepairGraph(_FakeGraph):
                 "terminal_not_rebuildable": 0, "lost_claim": 0, "results": []}
 
 
-def _event_pass(monkeypatch, graph, **kwargs):
-    async def _fake_select(*_a, **kw):
-        return kw.get("namespaces") or ["ev-a"]
-
-    monkeypatch.setattr(scheduler_tasks, "select_event_targets", _fake_select)
-    runner, _captured = _event_runner_capture()
-    monkeypatch.setattr(scheduler_tasks, "run_event_consolidation", runner)
+def _scalar_pass(graph, **kwargs):
     return asyncio.run(scheduler_tasks.consolidate_personal_memory(
-        graph, llm_complete=_empty_llm, k=1, enable_event_history=True, **kwargs))
+        graph, llm_complete=_empty_llm, k=1, enable_scalar_state=True, **kwargs))
 
 
 @pytest.mark.unit
-def test_pass_runs_repairs_for_its_own_namespaces_after_the_lanes(monkeypatch) -> None:
-    graph = _RepairGraph(dirty=[], episodes_by_ns={"tenant-a": _eps("spent money")})
+def test_pass_runs_repairs_for_its_own_namespaces_after_the_lanes() -> None:
+    graph = _RepairGraph(scalar_dirty=[], entities_by_ep={}, episodes_by_ns={"tenant-a": _eps("spent money")})
 
-    out = _event_pass(monkeypatch, graph, namespaces=["tenant-a"])
+    out = _scalar_pass(graph, namespaces=["tenant-a"])
 
     assert [ns for ns, _kw in graph.repair_calls] == [["tenant-a"]]
     assert graph.repair_calls[0][1]["owner_id"].startswith("consolidation:")
@@ -240,16 +233,16 @@ def test_pass_runs_repairs_for_its_own_namespaces_after_the_lanes(monkeypatch) -
 
 
 @pytest.mark.unit
-def test_pass_without_repair_work_keeps_its_result_shape(monkeypatch) -> None:
-    graph = _RepairGraph(dirty=[], episodes_by_ns={}, claimed=0)
-    out = _event_pass(monkeypatch, graph, namespaces=["tenant-a"])
+def test_pass_without_repair_work_keeps_its_result_shape() -> None:
+    graph = _RepairGraph(scalar_dirty=[], entities_by_ep={}, episodes_by_ns={}, claimed=0)
+    out = _scalar_pass(graph, namespaces=["tenant-a"])
     assert "view_repairs" not in out
 
 
 @pytest.mark.unit
-def test_repair_failure_does_not_fail_the_pass(monkeypatch) -> None:
-    graph = _RepairGraph(dirty=[], episodes_by_ns={}, fail=True)
-    out = _event_pass(monkeypatch, graph, namespaces=["tenant-a"])
+def test_repair_failure_does_not_fail_the_pass() -> None:
+    graph = _RepairGraph(scalar_dirty=[], entities_by_ep={}, episodes_by_ns={}, fail=True)
+    out = _scalar_pass(graph, namespaces=["tenant-a"])
     assert "view_repairs" not in out and len(graph.repair_calls) == 1
 
 

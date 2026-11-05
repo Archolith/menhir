@@ -46,8 +46,10 @@ def test_restated_sub_fact_on_another_pair_is_dropped_with_its_orphan() -> None:
 
 
 def test_edge_with_a_number_or_date_the_keeper_lacks_is_kept() -> None:
-    full = _edge("premium", "insurer", "The user's insurance premium went down.")
-    detail = _edge("user", "premium", "The user's insurance premium went down by $20 in March.")
+    full = _edge("premium", "insurer", "The user's insurance premium from the insurer went down.")
+    detail = _edge(
+        "user", "premium", "The user's insurance premium from the insurer went down by $20 in March."
+    )
     nodes, edges, index_map = _graph(full, detail)
 
     # The detailed edge absorbs the bare one, never the other way round.
@@ -89,19 +91,21 @@ def test_role_reversal_on_the_same_pair_is_kept() -> None:
 
 
 def test_equal_token_sets_keep_the_longer_fact_and_merge_episodes() -> None:
-    short = _edge("self", "loom", "User owns a loom.", episodes=["ep-2"])
-    longer = _edge("user", "loom", "The user owns the loom.", episodes=["ep-1"])
+    short = _edge("loom", "attic", "Loom in attic.", episodes=["ep-2"])
+    longer = _edge("user", "loom", "The loom is in the attic.", episodes=["ep-1"])
+    assert fact_tokens(short.fact) == fact_tokens(longer.fact)
     nodes, edges, index_map = _graph(short, longer)
 
-    assert prune_contained_edges(nodes, edges, index_map, {"self"}) == (1, 0)
+    assert prune_contained_edges(nodes, edges, index_map, {"attic"}) == (1, 0)
     assert edges == [longer]
     assert longer.episodes == ["ep-1", "ep-2"]
 
 
 def test_protected_self_node_survives_even_when_orphaned() -> None:
     full = _edge("dolly", "harpsichord", "The furniture dolly moved Odile's harpsichord.")
-    restated = _edge("self", "dolly", "furniture dolly")
+    restated = _edge("dolly", "self", "furniture dolly Odile")
     nodes, edges, index_map = _graph(full, restated)
+    nodes = [SimpleNamespace(uuid=n.uuid, name="Odile" if n.uuid == "self" else n.uuid) for n in nodes]
 
     assert prune_contained_edges(nodes, edges, index_map, {"self"}) == (1, 0)
     assert "self" in {n.uuid for n in nodes}
@@ -145,12 +149,19 @@ def test_fact_tokens_keep_digits_and_negations() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("model", "kept_edges"), [("gpt-6-luna", 1), ("gpt-4o-mini", 2)])
-async def test_extraction_hook_prunes_only_under_the_gpt6_profile(
-    monkeypatch, model: str, kept_edges: int
+@pytest.mark.parametrize(
+    ("model", "force_prune", "kept_edges"),
+    [("gpt-6-luna", False, 2), ("gpt-4o-mini", False, 2), ("gpt-6-luna", True, 1)],
+)
+async def test_extraction_hook_prunes_only_when_the_profile_enables_it(
+    monkeypatch, model: str, force_prune: bool, kept_edges: int
 ) -> None:
     pytest.importorskip("graphiti_core")
     import menhir.infrastructure.graphiti_extraction_policy as policy
+    from menhir.infrastructure.model_profiles import Gpt6Profile
+
+    if force_prune:  # CF-259: off for every shipped profile; the hook path is still exercised
+        monkeypatch.setattr(Gpt6Profile, "prune_contained_edges", True)
 
     full = _edge("user", "jeans", "The user bought new black jeans from Levi's.")
     restated = _edge("jeans", "levis", "The user's black jeans are from Levi's.")
@@ -193,12 +204,12 @@ async def test_extraction_hook_prunes_only_under_the_gpt6_profile(
 @pytest.mark.parametrize(
     ("model", "expected"),
     [
-        ("gpt-6-luna", True),
+        ("gpt-6-luna", False),
         ("gpt-4o-mini", False),
         ("openai/gpt-4o-mini", False),
         ("gpt-5.6", False),
         ("deepseek-v4-flash", False),
     ],
 )
-def test_pruning_is_enabled_only_for_the_gpt6_profile(model: str, expected: bool) -> None:
+def test_pruning_is_off_for_every_shipped_profile(model: str, expected: bool) -> None:
     assert resolve_model_profile(model).prune_contained_edges is expected

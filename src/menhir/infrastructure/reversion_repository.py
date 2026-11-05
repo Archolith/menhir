@@ -1,4 +1,4 @@
-"""Prior-version retirement for the scalar and event lanes (#170 decision 1, counting's rule B).
+"""Prior-version retirement for the scalar lane (#170 decision 1, counting's rule B).
 
 A turn re-read at a higher perceiver version replaces the readings an older version left on it. A
 new reading on the SAME head already supersedes in place (strict rank). These queries cover what that
@@ -27,30 +27,24 @@ from typing import Any
 
 from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
 
-#: Marker key prefixes. One marker per (lane, turn); `_RECORD_CYPHER` and the event record build
-#: the same key from $episode_uuid.
+#: Marker key prefixes. One marker per (lane, turn); `_RECORD_CYPHER` builds
+#: the key from $episode_uuid.
 SCALAR_MARKER_PREFIX = "scalar:"
-EVENT_MARKER_PREFIX = "event:"
 
 #: `retired_reason` stamped on retired rows, per lane.
 SCALAR_RETIRED_REASON = "scalar_reversion"
-EVENT_RETIRED_REASON = "event_reversion"
 
 _SCALAR_ROW = (
     "a.assertion_id AS assertion_id, a.episode_uuid AS episode_uuid, "
     "a.span_start AS span_start, a.span_end AS span_end, a.subject_uuid AS subject_uuid, "
     "coalesce(a.binding_pending, false) AS binding_pending"
 )
-_EVENT_ROW = _SCALAR_ROW + ", a.predicate AS predicate, a.domain AS domain"
 
 # Scalar lane rows: claim ordinal 0 (counting rows are ordinal 1 and have their own rule B).
 _SCALAR_SCOPE = (
     tenant_scope_cypher("a")
     + " AND coalesce(a.claim_ordinal, 0) = 0 AND a.episode_uuid IN $turn_ids"
 )
-# Event rows carry the lowercased namespace (typed_event_repository._norm), so the scope params
-# are built from that spelling (_event_scope_params).
-_EVENT_SCOPE = tenant_scope_cypher("a") + " AND a.episode_uuid IN $turn_ids"
 _RETIRABLE = (
     " AND coalesce(a.evidence_tier, 'agent') = 'agent'"
     " AND coalesce(a.perceiver_rank, 0) < $rank"
@@ -62,8 +56,7 @@ def _ids(values: list[str] | None) -> list[str]:
 
 
 class PerceptionReversionRepository:
-    """Rule-B queries for the scalar (`:TypedAssertion`, ordinal 0) and event
-    (`:TypedEventAssertion`) lanes."""
+    """Rule-B queries for the scalar (`:TypedAssertion`, ordinal 0) lane."""
 
     def __init__(self, neo4j: Any) -> None:
         self._neo4j = neo4j
@@ -144,85 +137,6 @@ class PerceptionReversionRepository:
         )
         return _retired(rows)
 
-    # ---- event -----------------------------------------------------------------------------
-
-    def event_prior_version_rows(
-        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
-    ) -> list[dict[str, Any]]:
-        ids = _ids(turn_ids)
-        if not ids or perceiver_rank <= 0:
-            return []
-        rows = self._neo4j.execute(
-            "MATCH (:TypedEventAssertionHead)-[:CURRENT]->(a:TypedEventAssertion) WHERE "
-            + _EVENT_SCOPE + _RETIRABLE
-            + " RETURN " + _EVENT_ROW
-            + " ORDER BY a.episode_uuid, a.span_start, a.assertion_id",
-            params={"turn_ids": ids, "rank": int(perceiver_rank),
-                    **_event_scope_params(namespace)},
-        )
-        return [dict(r) for r in rows]
-
-    def event_current_version_spans(
-        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
-    ) -> list[dict[str, Any]]:
-        ids = _ids(turn_ids)
-        if not ids:
-            return []
-        rows = self._neo4j.execute(
-            "MATCH (:TypedEventAssertionHead)-[:CURRENT]->(a:TypedEventAssertion) WHERE "
-            + _EVENT_SCOPE
-            + " AND a.perceiver_version = $pv AND NOT coalesce(a.binding_pending, false)"
-            " RETURN " + _EVENT_ROW
-            + " ORDER BY a.episode_uuid, a.span_start, a.assertion_id",
-            params={"turn_ids": ids, "pv": str(perceiver_version), **_event_scope_params(namespace)},
-        )
-        return [dict(r) for r in rows]
-
-    def event_owed_lanes(
-        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
-    ) -> list[dict[str, Any]]:
-        """Lanes of readings an earlier retire at this rank took off these turns."""
-        ids = _ids(turn_ids)
-        if not ids or perceiver_rank <= 0:
-            return []
-        rows = self._neo4j.execute(
-            "MATCH (a:TypedEventAssertion) WHERE " + _EVENT_SCOPE
-            + " AND a.retired_reason = $reason AND a.retired_by_rank = $rank"
-            " AND NOT coalesce(a.binding_pending, false)"
-            " RETURN DISTINCT a.subject_uuid AS subject_uuid, a.predicate AS predicate,"
-            " a.domain AS domain",
-            params={"turn_ids": ids, "rank": int(perceiver_rank), "reason": EVENT_RETIRED_REASON,
-                    **_event_scope_params(namespace)},
-        )
-        return [dict(r) for r in rows]
-
-    def retire_event_prior_version(
-        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
-        perceiver_version: str, keep_ids: list[str] | None = None,
-    ) -> dict[str, Any]:
-        """Event twin of `retire_scalar_prior_version`. Returns {retired, lanes}."""
-        ids = _ids(turn_ids)
-        if not ids or perceiver_rank <= 0:
-            return {"retired": 0, "lanes": []}
-        rows = self._neo4j.execute(
-            _MARK_TURNS.replace("__PREFIX__", EVENT_MARKER_PREFIX)
-            + "MATCH (h:TypedEventAssertionHead)-[cr:CURRENT]->(a:TypedEventAssertion) WHERE "
-            + _EVENT_SCOPE + _RETIRABLE + _RETIRE_TAIL_EVENT,
-            params={"turn_ids": ids, "rank": int(perceiver_rank), "pv": str(perceiver_version),
-                    "keep": _ids(keep_ids), "reason": EVENT_RETIRED_REASON,
-                    **_event_scope_params(namespace)},
-        )
-        if not rows:
-            return {"retired": 0, "lanes": []}
-        lanes = [dict(x) for x in (rows[0].get("lanes") or []) if x and x.get("subject_uuid")]
-        return {"retired": int(rows[0].get("retired") or 0), "lanes": lanes}
-
-
-def _event_scope_params(namespace: str | None) -> dict[str, Any]:
-    # Event rows store typed_event_repository._norm(namespace); scope on that spelling.
-    return tenant_scope_params((namespace or "").strip().lower())
-
-
 def _retired(rows: list[Any]) -> dict[str, Any]:
     if not rows:
         return {"retired": 0, "subjects": []}
@@ -259,17 +173,8 @@ RETURN count(a) AS retired,
                              ELSE a.subject_uuid END) AS subjects
 """
 
-_RETIRE_TAIL_EVENT = _RETIRE_SET + """
-RETURN count(a) AS retired,
-       collect(DISTINCT CASE WHEN a IS NULL OR coalesce(a.binding_pending, false) THEN null
-                             ELSE {subject_uuid: a.subject_uuid, predicate: a.predicate,
-                                   domain: a.domain} END) AS lanes
-"""
-
 
 __all__ = [
-    "EVENT_MARKER_PREFIX",
-    "EVENT_RETIRED_REASON",
     "SCALAR_MARKER_PREFIX",
     "SCALAR_RETIRED_REASON",
     "PerceptionReversionRepository",

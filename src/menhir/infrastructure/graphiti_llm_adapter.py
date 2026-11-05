@@ -30,13 +30,14 @@ except ImportError as exc:
         raise
     raise ImportError(
         "graphiti_core.errors is missing GraphitiRequestTooLargeError. Menhir requires "
-        "archolith-graphiti-core==0.31.2.post1; an older graphiti-core install may have "
+        "archolith-graphiti-core==0.31.2.post2; an older graphiti-core install may have "
         "overwritten the fork's shared graphiti_core files. Use a fresh virtual environment "
         "or uninstall both graphiti-core distributions before reinstalling Menhir "
         "(see docs/post-install.md)."
     ) from exc
 from graphiti_core.llm_client.client import get_extraction_language_instruction
 from graphiti_core.llm_client.config import LLMConfig
+from graphiti_core.llm_client.errors import OutputTruncatedError
 from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
 from graphiti_core.llm_client.request_guard import (
     RequestGuard,
@@ -52,6 +53,7 @@ from menhir.infrastructure.graphiti_helpers import (
     _raw_preview,
 )
 from menhir.infrastructure.openai_calls import ResilientChatClient, acreate_chat_completion
+from menhir.infrastructure.openai_rate_limit import find_quota_exhaustion
 from menhir.infrastructure.model_profiles import resolve_model_profile
 
 logger = logging.getLogger(__name__)
@@ -67,7 +69,9 @@ _TRUNCATION_CHAR_THRESHOLD = 500
 
 
 def _looks_like_truncation(exc: Exception) -> bool:
-    """Return True if *exc* looks like a JSON parse failure caused by output truncation."""
+    """Return True if the provider reported truncation or a JSON offset suggests it."""
+    if isinstance(exc, OutputTruncatedError):
+        return True
     offset = _truncation_offset(exc)
     return offset is not None and offset >= _TRUNCATION_CHAR_THRESHOLD
 
@@ -547,6 +551,9 @@ class MenhirOpenAIGenericClient(OpenAIGenericClient):
             ):
                 raise
             except Exception as exc:
+                if find_quota_exhaustion(exc) is not None:
+                    # Billing state (402 etc.): a retry cannot help and would burn provider calls.
+                    raise
                 last_error = exc
                 if retry_count >= _LOCAL_MODEL_MAX_RETRIES:
                     logger.error(

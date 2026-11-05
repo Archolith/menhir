@@ -1,4 +1,4 @@
-"""Source-memory session spread (MENHIR_FRONTIER_SOURCE_MEMORY_SPREAD): selection and lane wiring."""
+"""Source-memory session spread: selection and lane wiring."""
 
 from __future__ import annotations
 
@@ -88,19 +88,14 @@ async def test_lane_is_unchanged_when_off(stub_graphiti_client, stub_memory_grap
     ]
     result = await _svc(stub_graphiti_client, stub_memory_graph_adapter).recall(
         "query", include_session=True,
-        tuning=RetrievalTuningConfig(enable_source_memories=True, source_memory_limit=3),
+        tuning=RetrievalTuningConfig(enable_source_memories=True, source_memory_limit=3,
+                                     source_memory_spread=False),
     )
     assert stub_memory_graph_adapter.episode_embedding_calls[0]["limit"] == 3
     # Off keeps repeats and same-session rows: today's output.
     assert [sm.uuid for sm in result.source_memories] == ["a2", "a1"]
 
 
-def test_setting_defaults_on_reaches_tuning_and_opts_out(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MENHIR_FRONTIER_SOURCE_MEMORY_SPREAD", raising=False)
-    settings = MemorySettings.from_env()
-    assert settings.frontier_source_memory_spread is True
-    assert settings.retrieval_tuning().source_memory_spread is True
-    monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_SPREAD", "false")
-    settings = MemorySettings.from_env()
-    assert settings.frontier_source_memory_spread is False
-    assert settings.retrieval_tuning().source_memory_spread is False
+def test_spread_defaults_on_in_tuning_and_settings() -> None:
+    assert RetrievalTuningConfig().source_memory_spread is True
+    assert MemorySettings().retrieval_tuning().source_memory_spread is True

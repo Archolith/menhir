@@ -36,6 +36,7 @@ _SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "menhir"
 _KNOWN_RAW_THREADS = {
     "services/saga_reconcile_gate.py": "GateHeartbeat._loop -- gate heartbeat, no model calls",
     "services/saga_writer_heartbeat.py": "saga writer heartbeat -- no model calls",
+    "infrastructure/dns_cache.py": "one getaddrinfo per thread, copied context (#409) -- no model calls",
 }
 
 

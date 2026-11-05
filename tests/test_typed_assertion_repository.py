@@ -822,7 +822,7 @@ def test_purge_scalar_state_nodes_deletes_log_views_and_watermarks():
     out = TypedAssertionRepository(fake).purge_scalar_state_nodes()
     assert out == {"assertions": 4, "heads": 2, "rebinds": 1, "receipts": 3,
                    "projection_repairs": 2,
-                   "views": 6, "watermarks": 5}
+                   "views": 6, "read_markers": 0, "watermarks": 5}
     q, _ = fake.executed[-1]
     assert "MATCH (a:TypedAssertion) DETACH DELETE a" in q
     assert "MATCH (h:TypedAssertionHead) DETACH DELETE h" in q
@@ -835,3 +835,58 @@ def test_purge_scalar_state_nodes_deletes_log_views_and_watermarks():
     # ...and the scheduling cursor, or a purged namespace would look already-consolidated and never
     # backfill against the fresh store.
     assert "MATCH (w:ScalarConsolidationWatermark) DETACH DELETE w" in q
+
+
+@pytest.mark.unit
+def test_purge_scalar_state_nodes_deletes_history_views_and_scalar_read_markers():
+    fake = FakeNeo4j(default=[{"views": 7, "read_markers": 2}])
+    out = TypedAssertionRepository(fake).purge_scalar_state_nodes()
+    assert out["views"] == 7 and out["read_markers"] == 2
+    q, _ = fake.executed[-1]
+    assert "view_kind: 'scalar_history'" in q
+    assert "TypedReadMarker" in q
+    assert "STARTS WITH 'scalar:'" in q
+    assert "'event:'" not in q
+
+
+@pytest.mark.online
+def test_purge_scalar_state_nodes_live_clears_history_views_and_scalar_markers(test_neo4j_repo):
+    repo = test_neo4j_repo
+    repo.execute("CREATE (:Entity {view_kind: 'scalar_state', uuid: 'u6e-v1'})")
+    repo.execute("CREATE (:Entity {view_kind: 'scalar_history', uuid: 'u6e-h1'})")
+    repo.execute("CREATE (:TypedReadMarker {marker_key: 'scalar:u6e-ep'})")
+    repo.execute("CREATE (:TypedReadMarker {marker_key: 'event:u6e-ep'})")
+    try:
+        out = TypedAssertionRepository(repo).purge_scalar_state_nodes()
+        left = repo.execute(
+            "MATCH (n) WHERE n.uuid IN ['u6e-v1','u6e-h1'] OR n.marker_key = 'scalar:u6e-ep' "
+            "RETURN count(n) AS c")
+        event = repo.execute(
+            "MATCH (m:TypedReadMarker {marker_key: 'event:u6e-ep'}) RETURN count(m) AS c")
+        assert left[0]["c"] == 0
+        assert event[0]["c"] == 1
+        assert out["read_markers"] == 1
+        assert out["views"] == 2
+    finally:
+        repo.execute("MATCH (m:TypedReadMarker {marker_key: 'event:u6e-ep'}) DETACH DELETE m")
+
+
+@pytest.mark.unit
+def test_rebind_rearms_counted_occurrences_in_the_same_statement():
+    fake = FakeNeo4j(default=[{"rebound": 1, "source_keys": ["sk"]}])
+    TypedAssertionRepository(fake).rebind_assertions(
+        absorbed_uuid="ent-a", survivor_uuid="ent-b", merge_op_id="op-1")
+    q, _ = fake.executed[-1]
+    assert "a.count_status = 'uncertain'" in q
+    assert "'merged'" in q
+    assert "a.count_attempts = 0" in q
+    assert "a.projection_pending = true" in q
+
+
+@pytest.mark.unit
+def test_restore_rearms_moved_rows_and_cross_subject_repeats():
+    fake = FakeNeo4j(default=[{"restored": 1, "source_keys": ["sk"], "from_uuids": ["ent-a"]}])
+    TypedAssertionRepository(fake).restore_rebound_assertions(merge_op_id="op-1")
+    q, _ = fake.executed[-1]
+    assert "count_target_id: m.assertion_id" in q
+    assert "t.count_attempts = 0" in q

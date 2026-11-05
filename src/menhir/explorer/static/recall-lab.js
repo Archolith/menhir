@@ -7,31 +7,16 @@
   let arms = structuredClone(initialArms);
 
   const primaryFields = [
-    ['enable_bm25', 'Separate BM25 lane', 'bool'],
-    ['enable_content_vector', 'Content vector lane', 'bool'],
-    ['content_vector_replace_name', 'Replace name vector', 'bool'],
     ['enable_facet_candidates', 'Active facet lane', 'bool'],
-    ['hybrid_alpha', 'Name vector weight', 'number', { min: 0, max: 1, step: 0.05 }],
-    ['content_vector_weight', 'Content vector weight', 'number', { min: 0, max: 10, step: 0.05 }],
     ['facet_weight', 'Facet weight', 'number', { min: 0, max: 10, step: 0.05 }],
-    ['fusion_admission_policy', 'Fusion admission', 'select', ['attributed', 'production_fused']],
   ];
   const advancedFields = [
-    ['content_vector_k', 'Content candidates', 'number', { min: 1, max: 200, step: 1 }],
-    ['similarity_scale', 'Similarity scale', 'select', ['rrf', 'normalized']],
-    ['enable_fact_edges', 'Fact-edge retrieval', 'bool'],
-    ['fact_edge_mode', 'Fact-edge mode', 'select', ['pointer', 'standalone']],
-    ['fact_edge_k', 'Fact-edge candidates', 'number', { min: 1, max: 200, step: 1 }],
-    ['enable_verb_facets', 'Verb-facet facts', 'bool'],
     ['scalar_verdict_min_similarity', 'Verdict min similarity', 'number', { min: 0, max: 1, step: 0.005 }],
     ['enable_oracle_ranking', 'Oracle ranking', 'bool'],
     ['oracle_rank_weight', 'Oracle residual weight', 'number', { min: 0, max: 2, step: 0.05 }],
     ['enable_intent_lens', 'Intent lens', 'bool'],
     ['enable_warden_gate', 'Warden gate', 'bool'],
-    ['enable_diversity_gate', 'Diversity gate', 'bool'],
     ['enable_contradiction_interrupt', 'Contradiction interrupt', 'bool'],
-    ['enable_belief_gate', 'Belief gate', 'bool'],
-    ['enable_evidence_anchor', 'Evidence anchor', 'bool'],
     ['enable_assertion_shadow', 'Assertion shadow (trace)', 'bool'],
     ['enable_facet_shadow', 'Facet shadow (trace)', 'bool'],
   ];

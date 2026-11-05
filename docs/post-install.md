@@ -5,7 +5,7 @@ runtime dependencies, an MCP client connection, and whichever optional agent int
 has explicitly chosen.
 
 If upgrading from Menhir v0.2.3, install into a fresh virtual environment. That version may have
-installed upstream `graphiti-core`; current Menhir uses `archolith-graphiti-core==0.31.2.post1`.
+installed upstream `graphiti-core`; current Menhir uses `archolith-graphiti-core==0.31.2.post2`.
 Both distributions write the `graphiti_core` package, so an in-place upgrade or later upstream
 reinstall can leave mixed files even when `pip check` reports no conflict. From the repository
 checkout, a fresh installation is:
@@ -72,26 +72,39 @@ upgrade configuration. No promotion is authorized by this audit.
 
 To opt out, set explicit `false` in the selected configuration and remove any conflicting
 process/service override, then restart the backend and workers that captured the settings.
-For example, the already-shipped source-memory lane uses:
+For example, the scalar lane (counting reads its state, so turn counting off with it) uses:
 
 ```dotenv
-MENHIR_FRONTIER_SOURCE_MEMORIES=false
+MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED=false
 ```
 
-This disables its recall section and new ingest-side episode-content embedding step. It does
-not delete stored embeddings or undo earlier writes. Boolean switches accept `true`, `1`, or
+This stops the lane's model calls and its recall authority. It does not delete stored Views or
+undo earlier writes. Retired settings (`feature_flags.RETIRED`, for example
+`MENHIR_FRONTIER_SOURCE_MEMORIES`) are ignored: the startup log warns when one is set to false,
+and the feature it named stays on or stays removed. Boolean switches accept `true`, `1`, or
 `yes` (case-insensitive); `false`, `0`, `no`, blank and unrecognized strings all load as false.
 Use explicit `false` rather than a blank or misspelled opt-out. Commented template lines do not
 set values; the evidence-anchor example is a code-corpus choice, not its code default.
 
-Scalar state, scalar/history authority, event history, Wardens and verifier sync remain opt-in.
-The canonical event variables are `MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED` and
-`MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED`; the shorter `MENHIR_EVENT_HISTORY_*`
-names are not aliases. Disabling a feature stops its gated paths and leaves persisted data in
-place; this is not a database rollback. Scalar/event processing can revisit historical evidence
+Scalar state, scalar history and counting ship on, and they run model calls over captured user
+turns from the maintenance scheduler; opt out with `MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED`,
+`MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED` and `MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED`
+(see [readiness](personal-memory-readiness.md)). Scalar authority follows the scalar lane, and the
+warden gate is always on. Verifier sync remains opt-in. Before leaving the scalar lane on, read the
+known limitations below.
+The event-history lane was archived (2026-10-28) and its variables are retired.
+The scalar-view echo drop, diversity gate, fact relevance, fusion admission policy and verb facets settings were removed (2026-10-28) and their variables are retired. Disabling a feature stops its gated paths and leaves persisted data in
+place; this is not a database rollback. Scalar processing can revisit historical evidence
 when enabled or when perceiver versions change. Review namespace/version and historical-data
 obligations before activation; do not run a backfill or ingest simply to upgrade the package.
 Keep configuration and verified data backups for a separately approved deployment rollback.
+
+**Known limitations in 0.3.2.** The source checks on five scalar kinds (duration, frequency,
+weekday, status, boolean) are English patterns, and values stored before 0.3.1 are not rechecked
+(#411; see
+[source grounding by scalar kind](personal-memory-readiness.md#known-limitation-source-grounding-by-scalar-kind)).
+Deleting or erasing a memory keeps the entities and fact edges extracted from it (#423; see
+[erasure](personal-memory-readiness.md#known-limitation-erasure-keeps-extracted-knowledge)).
 
 ## 1b. Or do it in one step
 
@@ -102,7 +115,7 @@ report and starts nothing. The steps below are the same path taken manually.
 
 ## 2. Configure and verify the runtime
 
-Edit `.env` for one Neo4j 5 + APOC instance and one supported LLM/embedding configuration. Never put
+Edit `.env` for one Neo4j 5.26+ + APOC instance and one supported LLM/embedding configuration. Never put
 real credentials in `.env.example` or an agent instruction file.
 
 Then run:
@@ -193,13 +206,13 @@ because it changes login-time behavior. Inspect it with:
 
 Remove it with `.\scripts\start-server.ps1 uninstall-task`.
 
-## 5b. Preview a remote structure sync (code the server cannot see)
+## 5b. Remote structure sync (code the server cannot see)
 
 `ingest_project` scans its path in the server process, so it only works when the code and the
 server are on the same machine. If your Menhir runs elsewhere, `menhir sync` is the path being
 built for that -- a sanitized snapshot of your repository, uploaded over MCP.
 
-The local half works today:
+Preview first; this is local only:
 
 ```powershell
 menhir sync . --check
@@ -213,7 +226,27 @@ uncommitted edits show up and ignored files never do.
 Real `.env` files and private keys block the preview rather than being quietly skipped. If one is
 genuinely safe to send, add `--allow-path <path>`; the override applies to that run only.
 
-Uploading is not available yet: plain `menhir sync` refuses and says why.
+Plain `menhir sync` (no `--check`) builds the same plan and **uploads** it to
+`MENHIR_BACKEND_URL` with `MENHIR_OPERATOR_KEY`, unless a refusal stands. The server accepts it only
+when `MENHIR_SNAPSHOT_RECEIVE_MODE` is set (default off, which leaves the receive tools
+unregistered). An accepted upload is only staged on the server: nothing is extracted or written to
+the graph yet.
+
+## 5c. Which tools are actually used (`menhir tool-usage`)
+
+`menhir tool-usage` reports per-tool and per-client MCP call counts from the local telemetry
+sidecar, including registered tools with zero calls, to inform tool-surface pruning. It is read-only
+and needs no running server. Options: `--since-hours N` (default 720, at most 87600 = 10 years),
+`--by tool|client`, `--json`, `--all-operations`. Only `kind = tool` events count towards a
+registered tool; `--all-operations` lists everything else that was recorded, with its kind. For a
+hosted deployment run it inside the app container, e.g. `docker exec <app container> menhir tool-usage`.
+
+"No calls" only means "no calls recorded". The sidecar prunes `mcp_events` after
+`MENHIR_TELEMETRY_OBSERVABILITY_RETENTION_DAYS` (default 30 days), and a new or recently reset
+database has little history. When the requested window starts before the oldest recorded event, the
+text summary says where the history actually begins. Read the report only as far back as that.
+Failures (missing, locked, unreadable or not-yet-migrated database) print one line to stderr and
+exit 1, so `--json` output on stdout is always either the report or empty.
 
 ## 6. Give agents the operating contract
 

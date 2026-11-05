@@ -29,7 +29,8 @@ async def recall_timeline(
 
     Args:
         namespace: Optional silo to scope this operation to. Empty = default/global behavior.
-        query: Semantic seed: the timeline anchors on the best-matching memory.
+        query: Semantic seed: the timeline anchors on the best-matching memory that has a
+            timeline position.
         subject: Entity name or uuid; restricts the timeline to that entity's thread.
         at: ISO instant to split the timeline around.
         window_from: ISO instant starting an ascending time window.
@@ -75,7 +76,7 @@ class RecallTimelineTool(BaseJsonTool):
     description = (
         "Navigate a recorded-time thread of saved memories on demand: page around an "
         "instant, a window, a memory, or a semantic seed, optionally restricted to one "
-        "subject's thread, with typed scalar/event histories. Use when a question needs "
+        "subject's thread, with typed scalar histories. Use when a question needs "
         "what was known at a time or how a thread unfolded."
     )
 

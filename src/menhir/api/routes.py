@@ -216,8 +216,8 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
         warden_notice=result.get("warden_notice"),
         trace=result.get("trace"),
         authority_layer=result.get("authority_layer"),
-        event_authority_layer=result.get("event_authority_layer"),
         source_memories=result.get("source_memories"),
+        query_hint=result.get("query_hint"),
     )
 
 
@@ -233,7 +233,6 @@ async def recall_history(request: Request, body: RecallHistoryRequest) -> Recall
             body.query,
             namespace=_resolve_namespace(request, body.namespace),
             limit=body.limit,
-            pools=body.pools,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -246,8 +245,6 @@ async def recall_history(request: Request, body: RecallHistoryRequest) -> Recall
                 reference_time=m.get("reference_time"),
                 cosine=float(m.get("cosine") or 0.0),
                 source=m.get("source"),
-                pool_id=m.get("pool_id"),
-                pool_anchor=m.get("pool_anchor"),
             )
             for m in result.get("memories", []) or []
         ],
@@ -356,7 +353,7 @@ async def bootstrap_flagged(
     limit: int = Query(default=10, ge=1, le=50),
 ) -> dict[str, object]:
     """Read scoped pins and issue a reader-local bootstrap receipt."""
-    from menhir.mcp.formatters import _normalize_reader_id
+    from menhir.mcp.formatters import _normalize_reader_id, _project_skipped_memory_rows
     from menhir.mcp.lifecycle import _remember_flagged_bootstrap_read
 
     backend = _get_backend(request)
@@ -375,6 +372,7 @@ async def bootstrap_flagged(
         limit=limit, workspace=workspace, namespace=resolved_namespace
     )
     rows = [row for row in rows if not is_structural_memory_row(row)]
+    rows = await _project_skipped_memory_rows(backend, rows)
     version = await backend.fetch_flagged_memory_bootstrap_version(
         workspace=workspace, namespace=resolved_namespace
     )
@@ -399,7 +397,12 @@ async def bootstrap_context(
     request: Request, body: BootstrapContextRequest
 ) -> dict[str, object]:
     """Return scoped recent/relevant context after the matching pin receipt."""
-    from menhir.mcp.formatters import _compact_scored_item, _memory_lifecycle_fields, _normalize_reader_id
+    from menhir.mcp.formatters import (
+        _compact_scored_item,
+        _memory_lifecycle_fields,
+        _normalize_reader_id,
+        _project_skipped_memory_rows,
+    )
     from menhir.mcp.lifecycle import _has_recent_flagged_bootstrap_read
     from types import SimpleNamespace
 
@@ -457,6 +460,7 @@ async def bootstrap_context(
         for row in recent_rows
         if not bool(row.get("user_flagged")) and not is_structural_memory_row(row)
     ][: body.recent_limit]
+    recent = await _project_skipped_memory_rows(backend, recent)
     return {
         "reader_id": normalized_reader,
         "bootstrap_selection": selection_key,

@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in Menhir does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a security issue, do not open an issue. Follow SECURITY.md and email security@archolith.dev.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The smallest steps that show the problem. Remove secrets and private memory content.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Menhir version
+      description: Output of `pip show archolith-menhir`, or the commit if you run from a checkout.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS and Python version
+      placeholder: Windows 11, Python 3.12.10
+    validations:
+      required: true
+  - type: input
+    id: setup
+    attributes:
+      label: Setup
+      description: Neo4j version, the MCP client, and the LLM and embedding provider.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or error output
+      description: Remove API keys and private content first.
+      render: text

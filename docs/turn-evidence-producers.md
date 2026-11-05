@@ -71,6 +71,9 @@ Every producer POSTs the same conceptual payload:
   "source_kind": "<client>_hook",
   "source_client": "claude_code | opencode | codex",
   "source_id": "...",
+  "cwd": "...",
+  "transcript_path": "...",
+  "prompt_id": "...",
   "hook_version": "...",
   "triage_version": "...",
   "triage_reason": ["..."],
@@ -90,6 +93,11 @@ client-side `prompt_hash` in the envelope is provenance/correlation only and mir
 derivation). `source_client` / `hook_version` / `prompt_hash` are queryable node properties; the rest of
 `metadata` is stored verbatim. All provenance is optional and **non-fatal**: missing git or metadata
 never blocks capture, and the old (pre-provenance) payload shape is still accepted.
+
+New top-level fields: `cwd` is the working directory from the hook input; `transcript_path` is the
+host's transcript file path; `prompt_id` is the stable per-prompt id (Claude Code v2.1.196+), unique
+per genuine turn and stable across a double-fired retry, which the server uses for idempotency. It is
+null on producers that omit it, and the server then falls back to text keying.
 
 ## Install
 
@@ -118,7 +126,7 @@ python scripts/hooks/menhir_codex_turn_evidence.py --health
 
 | Var | Meaning |
 |-----|---------|
-| `MENHIR_TURNS_URL` | Endpoint. Default `http://127.0.0.1:8090/api/turn-evidence`. |
+| `MENHIR_TURNS_URL` | Endpoint. Default `http://127.0.0.1:8100/api/turn-evidence`. |
 | `MENHIR_AGENT_KEY` | Bearer token (agent tier). Unset => unauthenticated POST attempt. |
 | `MENHIR_TURN_NAMESPACE` | Namespace override; else inferred from the cwd/project basename. |
 | `MENHIR_TURN_HOOK_LOG` | Failure-log path; else `<home>/.claude/menhir-turn-hook.log`. |

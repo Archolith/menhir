@@ -80,6 +80,8 @@ class Script:
     """The rules a lane installs, plus a log of every chat call the backend made."""
 
     rules: list[Rule] = field(default_factory=list)
+    #: Consulted after ``rules``; :func:`scripted_model` installs the shipped-lane fallbacks.
+    defaults: list[Rule] = field(default_factory=list)
     unmatched: list[dict[str, Any]] = field(default_factory=list)
     log: list[dict[str, Any]] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -96,12 +98,13 @@ class Script:
 
     def calls(self, name: str) -> list[Call]:
         with self._lock:
-            return [call for rule in self.rules if rule.name == name for call in rule.calls]
+            return [call for rule in [*self.rules, *self.defaults] if rule.name == name
+                    for call in rule.calls]
 
     def respond(self, prompt: str, payload: dict[str, Any], *, structured: bool) -> str | None:
         """The scripted reply for this call, or None to fall through to the default."""
         with self._lock:
-            for rule in self.rules:
+            for rule in [*self.rules, *self.defaults]:
                 if rule.match in prompt and (rule.structured or not structured):
                     reply = rule.answer(prompt, payload)
                     self.log.append({"rule": rule.name, "index": len(rule.calls) - 1,
@@ -171,6 +174,10 @@ class ScriptedModel:
 @contextmanager
 def scripted_model(script: Script | None = None) -> Iterator[ScriptedModel]:
     script = script or Script()
+    if not script.defaults:
+        # Imported here: shipped_lanes imports phase3, which imports this module.
+        from tests.e2e._harness.shipped_lanes import shipped_default_rules
+        script.defaults = shipped_default_rules()
     server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(script))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

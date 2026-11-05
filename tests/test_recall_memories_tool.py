@@ -88,51 +88,6 @@ async def test_mcp_recall_retains_bounded_authority_layer_in_all_modes(compact: 
 @pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("compact", [False, True])
-async def test_mcp_recall_retains_event_authority_layer_in_all_modes(compact: bool) -> None:
-    backend = MagicMock()
-    backend.recall = AsyncMock(return_value={
-        "preset": "knowledge", "results": [], "candidates_evaluated": 0,
-        "event_authority_layer": [{
-            "predicate": "acquired", "object_key": "red notebook",
-            "object_display": "a red notebook", "valid_at": "2026-07-22T09:30:00Z",
-            "stated_span": "I bought a red notebook.", "assertion_key": "asrt-7",
-            "episode_uuid": "ep-7", "turn_evidence_uuid": "te-7", "domain": "stationery",
-            "time_basis": "explicit", "status": "leads", "gate": "pass",
-            "reason": "unique grounded lead", "subject_uuid": "ent-self",
-            "has_foundation": True, "kind": "latest",
-        }],
-    })
-    tool = RecallMemoriesTool()
-    tool.get_backend = MagicMock(return_value=backend)
-
-    rendered = await tool.endpoint(query="did I acquire a red notebook today?", compact=compact)
-    payload = json.loads(rendered)
-
-    assert payload["event_authority_layer"][0]["status"] == "leads"
-    assert payload["event_authority_layer"][0]["predicate"] == "acquired"
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-@pytest.mark.parametrize("compact", [False, True])
-async def test_mcp_recall_omits_event_authority_when_absent(compact: bool) -> None:
-    backend = MagicMock()
-    backend.recall = AsyncMock(return_value={
-        "preset": "knowledge", "results": [], "candidates_evaluated": 0,
-        "event_authority_layer": None,
-    })
-    tool = RecallMemoriesTool()
-    tool.get_backend = MagicMock(return_value=backend)
-
-    rendered = await tool.endpoint(query="did I acquire a red notebook today?", compact=compact)
-    payload = json.loads(rendered)
-
-    assert "event_authority_layer" not in payload
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-@pytest.mark.parametrize("compact", [False, True])
 @pytest.mark.parametrize("caller_id,process_id", [("A", "B"), (None, "A"), (None, None)])
 async def test_public_mcp_recall_keeps_effective_session_identity(
     monkeypatch, stub_graphiti_client, stub_memory_graph_adapter, compact, caller_id, process_id,

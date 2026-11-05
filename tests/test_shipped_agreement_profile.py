@@ -27,7 +27,7 @@ from menhir.core import runtime
 from menhir.domain.count_decide import DECIDE_K, DECIDE_THRESHOLD
 from menhir.domain.typed_assertion import perceiver_rank
 from menhir.infrastructure.sync_llm import make_sync_chat
-from menhir.services import perception, scheduler_tasks
+from menhir.services import scheduler_tasks
 from menhir.services.counting_consolidation import effective_counting_perceiver_version
 from menhir.services.maintenance_scheduler import MaintenanceScheduler
 
@@ -39,31 +39,19 @@ SHIPPED_SETTINGS = {
     "personal_memory_consolidation_max_tokens": 8192,
     "personal_memory_consolidation_disable_reasoning": False,
     "personal_memory_consolidation_chat_model": "",
-    "personal_memory_consolidation_verify_retries": 0,
-    "personal_memory_consolidation_sum_grounding": True,
     "personal_memory_scalar_threshold": 2 / 3,
-    "personal_memory_scalar_reconcile_attribute": True,
-    "personal_memory_scalar_reconcile_scope": True,
-    "personal_memory_scalar_reconcile_subject": True,
-    "personal_memory_scalar_canonical_self": False,
     "personal_memory_scalar_verdict_min_similarity": 0.675,
     "personal_memory_scalar_observation_recall": "gated",
-    "personal_memory_scalar_view_freshness_gate": True,
     "personal_memory_scalar_state_perceiver_version": "v2",
-    "personal_memory_event_history_perceiver_version": "v2",
     "personal_memory_counting_perceiver_version": "v1",
-    "personal_memory_counting_extract_v2": False,
-    "personal_memory_counting_match_enabled": False,
     "personal_memory_counting_lease_seconds": 900,
-    # Defaults are not activation: every lane ships off; scalar authority ships on but is gated by its lane.
-    "personal_memory_consolidation_enabled": False,
-    "personal_memory_scalar_state_enabled": False,
-    "personal_memory_scalar_view_authority_enabled": True,
-    "personal_memory_scalar_history_enabled": False,
-    "personal_memory_scalar_deterministic_router": False,
-    "personal_memory_event_history_enabled": False,
-    "personal_memory_event_history_authority_enabled": False,
-    "personal_memory_counting_enabled": False,
+    # The scalar and counting lanes ship on (#168 freeze, cost switches).
+    # Scalar authority is always on but gated by its lane.
+    "personal_memory_scalar_state_enabled": True,
+    "personal_memory_scalar_history_enabled": True,
+    "personal_memory_counting_enabled": True,
+    # Observation dedup ships on since 2026-10-28 (#399 bucket 3).
+    "personal_memory_observation_dedup_enabled": True,
 }
 
 #: What the runtime must hand the scheduler for those settings.
@@ -71,45 +59,46 @@ SCHEDULER_KWARGS = {
     "personal_memory_k": 3,
     "personal_memory_call_budget": 300,
     "personal_memory_interval_s": 300.0,
-    "personal_memory_verify_retries": 0,
-    "personal_memory_sum_grounding": True,
     "scalar_threshold": 2 / 3,
-    "scalar_reconcile_attribute": True,
-    "scalar_reconcile_scope": True,
-    "scalar_reconcile_subject": True,
-    "scalar_canonical_self": False,
     "scalar_state_perceiver_version": "v2",
-    "event_history_perceiver_version": "v2",
     "counting_perceiver_version": "v1",
-    "counting_extract_v2": False,
-    "counting_match": False,
     "counting_lease_seconds": 900,
 }
 
 #: What a consolidation pass must receive, from either entry point.
 CONSOLIDATE_KWARGS = {
     "k": 3,
-    "verify_retries": 0,
-    "sum_grounding": True,
     "scalar_threshold": 2 / 3,
+    "scalar_state_perceiver_version": "v2",
+    "counting_perceiver_version": "v1",
+    "counting_lease_seconds": 900,
+}
+
+#: Always on since the #168 freeze: no setting feeds them, so neither entry point passes a value and
+#: the scheduler and consolidation defaults must be on.
+ALWAYS_ON_SCHEDULER = {
     "scalar_reconcile_attribute": True,
     "scalar_reconcile_scope": True,
     "scalar_reconcile_subject": True,
-    "scalar_canonical_self": False,
-    "scalar_state_perceiver_version": "v2",
-    "counting_perceiver_version": "v1",
-    "counting_extract_v2": False,
-    "counting_match": False,
-    "counting_lease_seconds": 900,
-    "event_history_perceiver_version": "v2",
+    "counting_extract_v2": True,
+    "counting_match": True,
+}
+ALWAYS_ON_CONSOLIDATE = {
+    "scalar_reconcile_attribute": True,
+    "scalar_reconcile_scope": True,
+    "scalar_reconcile_subject": True,
+    "counting_extract_v2": True,
+    "counting_match": True,
 }
 
 
 def _scalar_on() -> MemorySettings:
-    # Scalar on so the runtime builds the consolidation LLM; everything else stays shipped.
+    # Scalar on so the runtime builds the consolidation LLM; counting off (its own test turns it on);
+    # everything else stays shipped.
     return dataclasses.replace(
         MemorySettings(),
         personal_memory_scalar_state_enabled=True,
+        personal_memory_counting_enabled=False,
         artifact_reconcile_mode="off",
         structure_watcher_enabled=False,
     )
@@ -141,29 +130,24 @@ def test_hard_coded_agreement_constants() -> None:
     assert DECIDE_THRESHOLD == 2 / 3
     # Sampling temperature for every consolidation call: not operator-settable.
     assert inspect.signature(make_sync_chat).parameters["temperature"].default == 0.7
-    # Counter lane: unanimous, and no caller passes `threshold`.
+    # Fallback threshold is unanimous, and no caller passes `threshold`.
     params = inspect.signature(scheduler_tasks.consolidate_personal_memory).parameters
     assert params["threshold"].default == 1.0
     assert params["scalar_threshold"].default is None
-    perceive = inspect.signature(perception.perceive_and_fold).parameters
-    assert perceive["coref_k"].default == 3
-    assert perceive["verify_k"].default == 3
 
 
 @pytest.mark.unit
 def test_shipped_perceiver_versions_rank_so_a_bump_can_supersede() -> None:
-    # Scalar and event supersession is strict-rank; a version that ranks 0 can never replace a
+    # Scalar supersession is strict-rank; a version that ranks 0 can never replace a
     # stored CURRENT assertion, so a bump to it would be silently ignored.
     settings = MemorySettings()
-    for version in (
-        settings.personal_memory_scalar_state_perceiver_version,
-        settings.personal_memory_event_history_perceiver_version,
-    ):
+    for version in (settings.personal_memory_scalar_state_perceiver_version,):
         assert perceiver_rank(version) > perceiver_rank("v1.999999") > 0
     assert perceiver_rank("v3") > perceiver_rank("v2.1") > perceiver_rank("v2")
     # Counting compares the version string for equality, so suffixes are fine there.
-    assert effective_counting_perceiver_version("v1", False) == "v1"
-    assert effective_counting_perceiver_version("v1", True) == "v1+x2"
+    assert effective_counting_perceiver_version("v1", False, match=False) == "v1"
+    assert effective_counting_perceiver_version("v1", True, match=False) == "v1+x2"
+    assert effective_counting_perceiver_version("v1") == "v1+x2+m"
 
 
 @pytest.mark.unit
@@ -197,6 +181,8 @@ def test_runtime_scheduler_receives_the_frozen_profile(monkeypatch: pytest.Monke
     asyncio.run(runtime._start_scheduler(built))
 
     assert {name: captured[name] for name in SCHEDULER_KWARGS} == SCHEDULER_KWARGS
+    # A retired switch is never passed as off; omitted means the scheduler default (on).
+    assert {name: captured.get(name, on) for name, on in ALWAYS_ON_SCHEDULER.items()} == ALWAYS_ON_SCHEDULER
     assert chat_kwargs == {"model": None, "max_tokens": 8192, "disable_reasoning": False}
 
 
@@ -220,17 +206,28 @@ def test_scheduler_pass_forwards_the_frozen_profile(monkeypatch: pytest.MonkeyPa
 
     asyncio.run(scheduler._make_consolidate_personal_memory())
 
-    assert "threshold" not in captured  # the counter lane keeps its unanimous default
+    assert "threshold" not in captured  # the unanimous default applies
     assert captured["call_budget"] == 300
-    expected = {k: v for k, v in CONSOLIDATE_KWARGS.items()
-                if k != "event_history_perceiver_version"}
+    expected = dict(CONSOLIDATE_KWARGS)
+    expected.update(ALWAYS_ON_CONSOLIDATE)
     assert {name: captured[name] for name in expected} == expected
+
+
+@pytest.mark.unit
+def test_always_on_switches_default_on_at_every_production_entry_point() -> None:
+    consolidate = inspect.signature(scheduler_tasks.consolidate_personal_memory).parameters
+    scheduler = inspect.signature(MaintenanceScheduler).parameters
+    for name, on in ALWAYS_ON_CONSOLIDATE.items():
+        assert consolidate[name].default is on, name
+    for name, on in ALWAYS_ON_SCHEDULER.items():
+        assert scheduler[name].default is on, name
 
 
 @pytest.mark.unit
 def test_phase3_run_forwards_the_frozen_profile() -> None:
     consolidate = AsyncMock(return_value={})
-    adapter = SimpleNamespace(list_dirty_namespaces=lambda *, limit=500: [])
+    adapter = SimpleNamespace(
+        list_scalar_dirty_namespaces=lambda *, perceiver_version, limit=500: [])
     runtime_ctx = SimpleNamespace(
         built=SimpleNamespace(graph_adapter=adapter, settings=_scalar_on()),
         session=SimpleNamespace(session_id="s", user_id="u"),
@@ -255,3 +252,67 @@ def test_phase3_run_forwards_the_frozen_profile() -> None:
     kwargs = consolidate.await_args.kwargs
     assert "threshold" not in kwargs
     assert {name: kwargs[name] for name in CONSOLIDATE_KWARGS} == CONSOLIDATE_KWARGS
+    # Not passed: the consolidation defaults (on) apply.
+    assert {name: kwargs.get(name, on) for name, on in ALWAYS_ON_CONSOLIDATE.items()} == ALWAYS_ON_CONSOLIDATE
+
+
+@pytest.mark.unit
+def test_counting_version_stamp_agrees_between_api_dirty_check_and_scheduler() -> None:
+    # With nothing set, the writer (scheduler / lane config) and the API dirty check must compute
+    # the same stamp, or a namespace is re-counted or reported dirty wrongly.
+    from menhir.services.counting_consolidation import CountingConsolidationConfig
+
+    settings = dataclasses.replace(
+        _scalar_on(), personal_memory_counting_enabled=True)
+    expected = f"{settings.personal_memory_counting_perceiver_version}+x2+m"
+
+    seen: dict[str, object] = {}
+
+    def _next_batch(namespace: str, **kwargs: object) -> list[object]:
+        seen.update(kwargs)
+        return []
+
+    adapter = SimpleNamespace(
+        list_scalar_dirty_namespaces=lambda *, perceiver_version, limit=500: [],
+        load_next_counting_batch=_next_batch)
+    runtime_ctx = SimpleNamespace(
+        built=SimpleNamespace(graph_adapter=adapter, settings=settings),
+        session=SimpleNamespace(session_id="s", user_id="u"),
+        capabilities=SimpleNamespace(
+            startup_mode="full", neo4j_ready=True, reads_ready=True, queue_writes_ready=True,
+            enrichment_ready=True, scheduler_ready=True, llm_ready=True, embedder_ready=True,
+            graphiti_ready=True, failures=[]),
+    )
+    app = FastAPI()
+    app.include_router(router)
+    app.state.runtime_ctx = runtime_ctx
+    consolidate = AsyncMock(return_value={})
+    with patch.object(api_routes, "_get_backend", return_value=SimpleNamespace()), patch(
+        "menhir.infrastructure.sync_llm.make_sync_chat", return_value=lambda s, u: "[]",
+    ), patch(
+        "menhir.infrastructure.view_embedder.make_view_embedder", return_value=None,
+    ), patch(
+        "menhir.services.scheduler_tasks.consolidate_personal_memory", new=consolidate,
+    ):
+        resp = TestClient(app).post("/api/phase3/run", json={"namespace": "ns-stamp"})
+    assert resp.status_code == 200, resp.text
+    assert seen["perceiver_version"] == expected
+
+    # The API run passes neither knob, so the consolidation defaults decide the writer stamp.
+    assert "counting_extract_v2" not in consolidate.await_args.kwargs
+    assert "counting_match" not in consolidate.await_args.kwargs
+    params = inspect.signature(scheduler_tasks.consolidate_personal_memory).parameters
+    assert effective_counting_perceiver_version(
+        settings.personal_memory_counting_perceiver_version,
+        params["counting_extract_v2"].default, match=params["counting_match"].default) == expected
+
+    scheduler = MaintenanceScheduler(
+        ingest_service=SimpleNamespace(get_queue_depth=lambda: 0), graph_adapter=object())
+    assert effective_counting_perceiver_version(
+        settings.personal_memory_counting_perceiver_version,
+        scheduler.counting_extract_v2, match=scheduler.counting_match) == expected
+
+    config = CountingConsolidationConfig(
+        perceiver_version=settings.personal_memory_counting_perceiver_version)
+    assert effective_counting_perceiver_version(
+        config.perceiver_version, config.extract_v2, config.match) == expected

@@ -11,7 +11,7 @@ the recorded reasons: decisions, rejected alternatives, incidents, preferences, 
    its Git history do not record the rationale. Start with one focused query naming the component and the
    decision; rephrase only if evidence is missing. Pass `file_context` and `file_context_project` when the
    question concerns code.
-3. Recall returns summaries and facts. When wording or rationale matters, read the linked source excerpts
+3. Recall returns summaries and facts, plus a separate section of raw source episodes by default. When wording or rationale matters, read the linked source excerpts
    with `get_provenance(node_uuid=...)`. Cite what you use and distinguish recorded reasons from inference.
 4. For structural questions, call `query_structure(query_type="projects")` first. The structural project key
    for this repository is `<project-key>`. If it is absent, run `ingest_project` before trusting empty results.
@@ -21,7 +21,8 @@ the recorded reasons: decisions, rejected alternatives, incidents, preferences, 
    supersession, and conflicts before applying a memory. Never turn "not indexed" or an empty result into
    "no impact" or "no history."
 7. If your client exposes `rate_recall`, call it after using recall output with an honest usefulness rating.
-8. Store only durable, verified lessons; never secrets. Use `add_memory_and_track` as the original write
+8. Store only durable, verified lessons; never secrets. Write a decision together with its reason and
+   the alternative rejected. Use `add_memory_and_track` as the original write
    when immediate use matters; otherwise use `add_memory`. Attach a bounded Git diff when useful.
    Preserve the returned episode ID. After `PENDING` or timeout, observe that same ID with an available,
    authorized status tool (`get_enrichment_status` uses `episode_uuid`), not another write. `READY` is

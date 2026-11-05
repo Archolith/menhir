@@ -22,11 +22,11 @@ pytestmark = pytest.mark.unit
 SPEECH = datetime(2024, 2, 14, 18, 30, tzinfo=timezone.utc)
 
 
-def test_settings_default_off(monkeypatch) -> None:
+def test_settings_default_on(monkeypatch) -> None:
     for name in ("MENHIR_ANCHORED_TIME_RESOLVER", "MENHIR_ANCHORED_TIME_MODEL", "MENHIR_ANCHORED_TIME_TIMEOUT_S"):
         monkeypatch.delenv(name, raising=False)
     for settings in (MemorySettings(), MemorySettings.from_env()):
-        assert settings.anchored_time_resolver_enabled is False
+        assert settings.anchored_time_resolver_enabled is True
         assert settings.anchored_time_resolver_model == ""
         assert settings.anchored_time_resolver_timeout_s == 120.0
 
@@ -51,8 +51,10 @@ def _captured_hook(monkeypatch, settings: MemorySettings, **kwargs):
     seen: dict = {}
 
     class _CapturingGraphiti:
-        def __init__(self, **graphiti_kwargs) -> None:
-            seen.update(graphiti_kwargs)
+        def __init__(self, *, edge_expiry_hook=None, preserved_edge_attributes=None,
+                     **graphiti_kwargs) -> None:
+            seen.update(graphiti_kwargs, edge_expiry_hook=edge_expiry_hook,
+                        preserved_edge_attributes=preserved_edge_attributes)
 
     monkeypatch.setattr(graphiti_client, "Graphiti", _CapturingGraphiti)
     graphiti_client.GraphitiClient.from_settings_with_capabilities(settings, **kwargs)
@@ -61,10 +63,11 @@ def _captured_hook(monkeypatch, settings: MemorySettings, **kwargs):
     return hook
 
 
-def test_client_builds_the_hook_without_a_resolver_by_default(monkeypatch) -> None:
+def test_client_builds_the_hook_without_a_resolver_when_switched_off(monkeypatch) -> None:
     built: list = []
     monkeypatch.setattr(resolver_module, "AnchoredTimeResolver", lambda *a, **k: built.append(1))
-    assert _captured_hook(monkeypatch, MemorySettings())._anchored_time is None
+    off = MemorySettings(anchored_time_resolver_enabled=False)
+    assert _captured_hook(monkeypatch, off)._anchored_time is None
     assert built == []
 
 

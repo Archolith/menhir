@@ -39,6 +39,10 @@ SCANNER_REPOSITORIES = {
 SEVERITIES = ("Unknown", "Negligible", "Low", "Medium", "High", "Critical")
 MAX_EVIDENCE_BYTES = 256 * 1024 * 1024
 CANONICAL_SOURCE_REPOSITORY = "Archolith/menhir"
+MAX_FAILURE_DETAIL_CHARS = 1000
+CREDENTIAL_RE = re.compile(
+    r"(?i)\b(?:bearer|basic)\s+\S+|\bgh[pousr]_\w+|\bgithub_pat_\w+|\beyJ[\w-]+\.[\w.-]+"
+)
 
 
 class BuildImageError(RuntimeError):
@@ -213,10 +217,14 @@ def inspect_image(image_tag: str, expected: dict[str, str]) -> tuple[str, dict[s
     actual = {name: labels.get(label) for name, label in LABELS.items()}
     if actual != expected:
         raise BuildImageError(f"built image labels do not match derived inputs: {actual!r}")
+    return image_id, actual, canonical_sha256(config)
+
+
+def canonical_sha256(config: dict[str, Any]) -> str:
     encoded = json.dumps(
         config, ensure_ascii=True, separators=(",", ":"), sort_keys=True,
     ).encode("ascii")
-    return image_id, actual, hashlib.sha256(encoded).hexdigest()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _validate_scanner_image(value: Any, scanner: str) -> str:
@@ -580,6 +588,85 @@ def create_validation_bundle(args: argparse.Namespace) -> dict[str, Any]:
     return metadata
 
 
+OCI_MANIFEST_MEDIA_TYPE = "application/vnd.oci.image.manifest.v1+json"
+MAX_MANIFEST_BYTES = 4 * 1024 * 1024
+
+
+def archive_manifest_digests(archive: Path, config_digest: str) -> frozenset[str]:
+    """Digests of the image manifests in ``archive``'s OCI index whose config is
+    ``config_digest``. Each manifest blob must hash to its digest. An archive without an OCI
+    index, or one that cannot be read, yields no digests."""
+    found: set[str] = set()
+    try:
+        with tarfile.open(archive, mode="r:") as tar:
+            index_member = tar.extractfile("index.json")
+            if index_member is None:
+                return frozenset()
+            index = json.loads(index_member.read(MAX_MANIFEST_BYTES))
+            entries = index.get("manifests") if isinstance(index, dict) else None
+            for entry in entries if isinstance(entries, list) else []:
+                if not isinstance(entry, dict) or entry.get("mediaType") != OCI_MANIFEST_MEDIA_TYPE:
+                    continue
+                digest = entry.get("digest")
+                if not isinstance(digest, str) or DIGEST_RE.fullmatch(digest) is None:
+                    continue
+                blob = tar.extractfile(f"blobs/sha256/{digest.removeprefix('sha256:')}")
+                raw = blob.read(MAX_MANIFEST_BYTES + 1) if blob is not None else b""
+                if len(raw) > MAX_MANIFEST_BYTES or "sha256:" + sha256_bytes(raw) != digest:
+                    raise BuildImageError("image archive manifest does not match its digest")
+                manifest = json.loads(raw)
+                config = manifest.get("config") if isinstance(manifest, dict) else None
+                if isinstance(config, dict) and config.get("digest") == config_digest:
+                    found.add(digest)
+    except (KeyError, tarfile.TarError, ValueError):
+        return frozenset()
+    return frozenset(found)
+
+
+def archive_image_config(archive: Path, config_digest: str) -> dict[str, Any]:
+    """The ``config`` section of ``archive``'s config blob ``config_digest``, hash-checked."""
+    try:
+        with tarfile.open(archive, mode="r:") as tar:
+            blob = tar.extractfile(f"blobs/sha256/{config_digest.removeprefix('sha256:')}")
+            raw = blob.read(MAX_MANIFEST_BYTES + 1) if blob is not None else b""
+    except (KeyError, tarfile.TarError) as exc:
+        raise BuildImageError("image archive has no readable config blob") from exc
+    if len(raw) > MAX_MANIFEST_BYTES or "sha256:" + sha256_bytes(raw) != config_digest:
+        raise BuildImageError("image archive config does not match its digest")
+    try:
+        config = json.loads(raw).get("config")
+    except (ValueError, AttributeError) as exc:
+        raise BuildImageError("image archive config is malformed") from exc
+    if not isinstance(config, dict):
+        raise BuildImageError("image archive config is malformed")
+    return config
+
+
+def require_image_matches_sealed_candidate(
+    *, image_id: str, config_sha256: str, expected_image_id: str, expected_config: str,
+    archive: Path | None, id_error: str, config_error: str,
+) -> None:
+    """Accept a loaded or pulled image as the sealed candidate, or raise.
+
+    The classic image store reports the config digest as the image ID and renders the config
+    with its legacy empty fields, which is what validation recorded. The containerd store
+    (Docker 29 default) reports the manifest digest and renders the config as stored. That
+    path is accepted only for a manifest of ``archive`` (whose bytes the identity pinned), and
+    the image's config must then equal the archive's config blob. Without an ``archive`` only
+    the classic form is accepted.
+    """
+    if image_id == expected_image_id:
+        config_matches = config_sha256 == expected_config
+    elif archive is not None and image_id in archive_manifest_digests(archive, expected_image_id):
+        config_matches = config_sha256 == canonical_sha256(
+            archive_image_config(archive, expected_image_id),
+        )
+    else:
+        raise BuildImageError(id_error)
+    if not config_matches:
+        raise BuildImageError(config_error)
+
+
 def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> tuple[dict[str, Any], dict[str, Any]]:
     if not args.metadata or not args.identity or not args.image_archive:
         raise BuildImageError("verification requires metadata, identity, and image archive inputs")
@@ -696,10 +783,22 @@ def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> t
     image_id, actual_labels, config_sha256 = inspect_image(image_tag, expected_labels)
     expected_image_id = _require_sha256(metadata.get("image_id"), "image ID", prefixed=True)
     expected_config = _require_sha256(metadata.get("config_sha256"), "config SHA-256")
-    if image_id != expected_image_id or identity.get("image_id") != image_id:
-        raise BuildImageError("loaded image ID does not match validation identity")
-    if config_sha256 != expected_config or identity.get("config_sha256") != config_sha256:
-        raise BuildImageError("loaded image config does not match validation identity")
+    if identity.get("image_id") != expected_image_id:
+        raise BuildImageError("validation metadata and identity disagree on image ID")
+    if identity.get("config_sha256") != expected_config:
+        raise BuildImageError("validation metadata and identity disagree on image config")
+    # The classic image store reports the config digest as the image ID and renders the
+    # config with its legacy empty fields, which is what validation recorded. The containerd
+    # store (Docker 29 default) reports the manifest digest and renders the config as stored.
+    # That path is accepted only for a manifest of this archive, whose bytes the identity
+    # pinned above, and its loaded config must equal the archive's config blob.
+    require_image_matches_sealed_candidate(
+        image_id=image_id, config_sha256=config_sha256,
+        expected_image_id=expected_image_id, expected_config=expected_config,
+        archive=archive,
+        id_error="loaded image ID does not match validation identity",
+        config_error="loaded image config does not match validation identity",
+    )
     if actual_labels != labels:
         raise BuildImageError("loaded image labels do not match validation metadata")
     return metadata, identity
@@ -733,25 +832,32 @@ def remote_manifest_digest(image_tag: str) -> str | None:
 
 
 def _verify_remote_candidate(
-    *, repository: str, digest: str, metadata: dict[str, Any],
+    *, repository: str, digest: str, metadata: dict[str, Any], archive: Path | None = None,
 ) -> None:
     digest_ref = f"{repository}@{digest}"
     subprocess.run(["docker", "pull", digest_ref], check=True)
     remote_id, remote_labels, remote_config = inspect_image(
         digest_ref, metadata["labels"],
     )
-    if remote_id != metadata["image_id"]:
-        raise BuildImageError("registry candidate image ID differs from the sealed candidate")
-    if remote_config != metadata["config_sha256"]:
-        raise BuildImageError("registry candidate config differs from the sealed candidate")
+    require_image_matches_sealed_candidate(
+        image_id=remote_id, config_sha256=remote_config,
+        expected_image_id=metadata["image_id"], expected_config=metadata["config_sha256"],
+        archive=archive,
+        id_error="registry candidate image ID differs from the sealed candidate",
+        config_error="registry candidate config differs from the sealed candidate",
+    )
     if remote_labels != metadata["labels"]:
         raise BuildImageError("registry candidate labels differ from the sealed candidate")
     if remote_manifest_digest(digest_ref) != digest:
         raise BuildImageError("digest-pinned registry candidate did not verify")
 
 
-def publish_candidate(metadata: dict[str, Any]) -> tuple[str, bool, str]:
+def publish_candidate(
+    metadata: dict[str, Any], *, archive: Path | None = None,
+) -> tuple[str, bool, str]:
     image_tag = metadata["image_tag"]
+    # Passed through only when known, so the verifier is called exactly as before otherwise.
+    archive_kwargs: dict[str, Path] = {} if archive is None else {"archive": archive}
     repository, separator, _version = image_tag.rpartition(":")
     if not separator:
         raise BuildImageError("release image tag is malformed")
@@ -760,28 +866,34 @@ def publish_candidate(metadata: dict[str, Any]) -> tuple[str, bool, str]:
     existing = remote_manifest_digest(candidate_tag)
     if existing is not None:
         _verify_remote_candidate(
-            repository=repository, digest=existing, metadata=metadata,
+            repository=repository, digest=existing, metadata=metadata, **archive_kwargs,
         )
         return existing, True, candidate_tag
 
     existing = remote_manifest_digest(candidate_tag)
     if existing is not None:
         _verify_remote_candidate(
-            repository=repository, digest=existing, metadata=metadata,
+            repository=repository, digest=existing, metadata=metadata, **archive_kwargs,
         )
         return existing, True, candidate_tag
     published_digest = _push_digest(candidate_tag)
     if remote_manifest_digest(candidate_tag) != published_digest:
         raise BuildImageError("candidate tag changed during registry verification")
     _verify_remote_candidate(
-        repository=repository, digest=published_digest, metadata=metadata,
+        repository=repository, digest=published_digest, metadata=metadata, **archive_kwargs,
     )
     return published_digest, False, candidate_tag
 
 
 def publish_bundle(args: argparse.Namespace) -> dict[str, Any]:
     metadata, identity = verify_validation_bundle(args, load_image=True)
-    digest, idempotent, candidate_tag = publish_candidate(metadata)
+    # verify_validation_bundle pinned args.image_archive to the identity-bound archive.
+    image_archive = getattr(args, "image_archive", None)
+    digest, idempotent, candidate_tag = (
+        publish_candidate(metadata)
+        if image_archive is None
+        else publish_candidate(metadata, archive=image_archive.resolve())
+    )
     repository = metadata["image_tag"].rpartition(":")[0]
     publication = {
         "schema": 2,
@@ -853,11 +965,27 @@ def parser() -> argparse.ArgumentParser:
     return value
 
 
+def _failure_message(exc: Exception) -> str:
+    """One line, because the workflow reports the last line matching the failure prefix."""
+    message = str(exc)
+    if isinstance(exc, subprocess.CalledProcessError):
+        for output in (exc.stderr, exc.stdout):
+            if isinstance(output, bytes):
+                output = output.decode("utf-8", errors="replace")
+            detail = " ".join((output or "").split())
+            if detail:
+                # Redact before trimming, so a cut can't leave part of a credential.
+                detail = CREDENTIAL_RE.sub("[redacted]", detail)
+                message = f"{message}: {detail[-MAX_FAILURE_DETAIL_CHARS:]}"
+                break
+    return message
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         metadata = run(parser().parse_args(argv))
     except (BuildImageError, OSError, subprocess.CalledProcessError, ValueError) as exc:
-        print(f"release image operation failed: {exc}")
+        print(f"release image operation failed: {_failure_message(exc)}")
         return 1
     print(json.dumps(metadata, indent=2, sort_keys=True))
     return 0

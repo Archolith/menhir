@@ -475,21 +475,20 @@ async def test_persist_uses_p2_statement_unless_a_world_end_was_recorded() -> No
 
 # --- settings -------------------------------------------------------------------------------------
 
-def test_flag_defaults_off_and_reaches_tuning(monkeypatch) -> None:
+def test_expiry_follows_the_resolver_switch_and_reaches_tuning(monkeypatch) -> None:
     from menhir.config.feature_flags import FEATURES
     from menhir.config.settings_model import MemorySettings
 
-    monkeypatch.delenv("MENHIR_ANCHORED_TIME_EXPIRY", raising=False)
-    off = MemorySettings.from_env()
-    assert off.anchored_time_expiry_enabled is False
-    assert off.retrieval_tuning().enable_anchored_time_expiry is False
-    monkeypatch.setenv("MENHIR_ANCHORED_TIME_EXPIRY", "true")
+    monkeypatch.delenv("MENHIR_ANCHORED_TIME_RESOLVER", raising=False)
     on = MemorySettings.from_env()
-    assert on.anchored_time_expiry_enabled is True
+    assert on.anchored_time_resolver_enabled is True
     assert on.retrieval_tuning().enable_anchored_time_expiry is True
-    flag = FEATURES["anchored_time_expiry_enabled"]
-    assert (flag.env_var, flag.default, flag.recall_affecting) == ("MENHIR_ANCHORED_TIME_EXPIRY", False, True)
-    assert flag.requires == ("anchored_time_resolver_enabled",)
+    monkeypatch.setenv("MENHIR_ANCHORED_TIME_RESOLVER", "false")
+    off = MemorySettings.from_env()
+    assert off.anchored_time_resolver_enabled is False
+    assert off.retrieval_tuning().enable_anchored_time_expiry is False
+    flag = FEATURES["anchored_time_resolver_enabled"]
+    assert (flag.env_var, flag.default, flag.recall_affecting) == ("MENHIR_ANCHORED_TIME_RESOLVER", True, True)
 
 
 # --- recall role ---------------------------------------------------------------------------------

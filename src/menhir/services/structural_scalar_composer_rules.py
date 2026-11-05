@@ -179,7 +179,7 @@ def _money_validator(
 
 def _clock_value_or_none(text: str) -> str | None:
     # Fails silently (returns None) so ``_clock_validator`` can report a reason code instead of
-    # raising; mirrors ``_clock_value_or_raise`` in ``deterministic_scalar_extractor``.
+    # raising.
     match = re.fullmatch(r"(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)\s*(?P<meridiem>am|pm)?", text,
                          re.IGNORECASE)
     if match is None:

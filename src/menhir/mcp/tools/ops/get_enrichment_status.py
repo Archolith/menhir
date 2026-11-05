@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from menhir.domain.verbatim_skip_status import effective_processing_row
 from menhir.mcp.formatters import (
     _coerce_iso,
     _collect_episode_status,
@@ -108,7 +109,7 @@ class GetEnrichmentStatusTool(BaseTextTool):
                 timed_out=timed_out,
             )
 
-        row = await backend.fetch_episode_processing(normalized_uuid)
+        row = effective_processing_row(await backend.fetch_episode_processing(normalized_uuid))
         history = []
         if row is not None:
             history.append(

@@ -166,8 +166,12 @@ def _ready_state() -> SimpleNamespace:
 async def test_readyz_reports_jwks_failures_without_changing_readiness():
     import json
 
+    from starlette.datastructures import Headers
+
     JWKS_REFRESH_STATS.record("ConnectTimeout")
-    response = await readyz(SimpleNamespace(app=SimpleNamespace(state=_ready_state())))
+    response = await readyz(
+        SimpleNamespace(headers=Headers(), app=SimpleNamespace(state=_ready_state()))
+    )
 
     assert response.status_code == 200
     body = json.loads(response.body)

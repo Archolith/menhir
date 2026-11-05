@@ -8,8 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from menhir.services.deterministic_scalar_extractor import DeterministicScalarExtractor
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from freeze_scalar_samples import (  # noqa: E402
     TURN_EVIDENCE_Q,
@@ -116,23 +114,6 @@ def test_static_fixture_is_versioned_non_lme_and_preserves_exact_rows(tmp_path):
         "[2026-01-03] My day off is Wednesday.",
         "[2026-01-04] I paid $250 for my headphones.",
     ]
-
-
-def test_static_fixture_partitions_router_eligibility_without_event_history(tmp_path):
-    namespaces, _metadata = _load_static_namespaces(_write_static_fixture(tmp_path))
-    extractor = DeterministicScalarExtractor()
-
-    fully_covered = extractor.extract(namespaces["heldout-v1-fully-covered"])
-    fallback = extractor.extract(namespaces["heldout-v1-fallback-adversarial"])
-
-    assert len(fully_covered.episode_receipts) == 3
-    assert all(receipt.fully_covered for receipt in fully_covered.episode_receipts)
-    assert len(fallback.episode_receipts) == 4
-    assert all(not receipt.fully_covered for receipt in fallback.episode_receipts)
-    assert all(
-        not (proposal.attribute == "event_history")
-        for proposal in fully_covered.proposals + fallback.proposals
-    )
 
 
 @pytest.mark.parametrize(

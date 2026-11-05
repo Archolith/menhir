@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from menhir.domain.fold_algebra import Event
-from menhir.services.event_fold import fold_events_to_counter, fold_events_to_timeline
+from menhir.services.event_fold import fold_events_to_timeline
 from menhir.services.windowed_fold import (
     count_in_relative_window,
     count_in_window,
@@ -40,10 +40,8 @@ def _acquisitions():
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("kind", ["counter", "timeline"])
 @pytest.mark.parametrize("embedding_mode", ["fails", "succeeds", "disabled"])
 def test_event_fold_embedding_failure_warns_and_preserves_write(
-    kind: str,
     embedding_mode: str,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -60,7 +58,7 @@ def test_event_fold_embedding_failure_warns_and_preserves_write(
             raise RuntimeError("embedding provider unavailable")
         return [0.1, 0.2]
 
-    adapter = SimpleNamespace(record_counter=record, record_timeline=record)
+    adapter = SimpleNamespace(record_timeline=record)
     kwargs = dict(
         graph_adapter=adapter,
         subject="plants_acquired",
@@ -69,35 +67,26 @@ def test_event_fold_embedding_failure_warns_and_preserves_write(
         embed=None if embedding_mode == "disabled" else embed,
     )
     with caplog.at_level(logging.WARNING, logger="menhir.services.event_fold"):
-        if kind == "counter":
-            result = fold_events_to_counter(**kwargs, measure="acquisitions", reducer="count")
-        else:
-            result = fold_events_to_timeline(**kwargs)
+        result = fold_events_to_timeline(**kwargs)
 
     assert result["uuid"] == "fold-result"
     assert len(writes) == 1
     assert writes[0]["subject"] == "plants_acquired"
     assert writes[0]["namespace"] == "test-event-fold"
-    if kind == "counter":
-        assert writes[0]["value"] == result["value"] == 3.0
-        assert writes[0]["episode_uuids"] == ["e0", "e1", "e2"]
-    else:
-        assert result["entries"] == 3
-        assert [entry["what"] for entry in writes[0]["entries"]] == ["peace lily", "succulent", "snake plant"]
-        assert [entry["episode_uuid"] for entry in writes[0]["entries"]] == ["e0", "e1", "e2"]
+    assert result["entries"] == 3
+    assert [entry["what"] for entry in writes[0]["entries"]] == ["peace lily", "succulent", "snake plant"]
+    assert [entry["episode_uuid"] for entry in writes[0]["entries"]] == ["e0", "e1", "e2"]
     assert len(embed_inputs) == (0 if embedding_mode == "disabled" else 1)
     assert writes[0]["name_embedding"] == ([0.1, 0.2] if embedding_mode == "succeeds" else None)
     warnings = [record for record in caplog.records if record.name == "menhir.services.event_fold"]
     if embedding_mode == "fails":
         assert len(warnings) == 1
         assert warnings[0].levelno == logging.WARNING
-        assert f"Event-fold {kind} embedding failed" in warnings[0].message
+        assert "Event-fold timeline embedding failed" in warnings[0].message
         assert "subject=plants_acquired" in warnings[0].message
         assert "namespace=test-event-fold" in warnings[0].message
         assert "keyword-only retrieval" in warnings[0].message
         assert "embedding provider unavailable" in warnings[0].message
-        if kind == "counter":
-            assert "measure=acquisitions" in warnings[0].message
     else:
         assert warnings == []
 

@@ -1,4 +1,4 @@
-"""Session-spread selection for the source-memory lane (``MENHIR_FRONTIER_SOURCE_MEMORY_SPREAD``).
+"""Session-spread selection for the source-memory lane.
 
 Plain cosine top-k fills the section with several turns of the best-matching session and repeats of
 the same text, while another session that holds part of the answer gets no slot. With spread on, the

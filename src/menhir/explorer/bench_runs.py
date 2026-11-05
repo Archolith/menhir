@@ -154,49 +154,6 @@ RETURN v.uuid AS id,
 ORDER BY valid_at, created_at, id
 """
 
-_LIVE_EVENT_ASSERTIONS_QUERY = """
-MATCH (a:TypedEventAssertion {namespace: $namespace})
-RETURN a.assertion_id AS id,
-       a.assertion_key AS assertion_key,
-       a.source_key AS source_key,
-       a.episode_uuid AS evidence_id,
-       a.turn_evidence_uuid AS turn_evidence_id,
-       a.subject_uuid AS subject_uuid,
-       a.subject_display AS subject,
-       a.predicate AS predicate,
-       a.domain AS domain,
-       a.object_key AS object_key,
-       a.object_display AS object_display,
-       a.stated_span AS stated_span,
-       toString(a.valid_at) AS valid_at,
-       toString(a.learned_at) AS learned_at,
-       a.time_basis AS time_basis,
-       a.evidence_tier AS evidence_tier,
-       coalesce(a.binding_pending, false) AS binding_pending,
-       coalesce(a.superseded, false) AS superseded
-ORDER BY valid_at, learned_at, assertion_key
-"""
-
-_LIVE_EVENT_VIEWS_QUERY = """
-MATCH (v:Entity {group_id: $namespace, view_kind: 'timeline'})
-WHERE v.view_predicate IS NOT NULL AND trim(coalesce(v.view_predicate, '')) <> ''
-OPTIONAL MATCH (v)-[:EVENT_HISTORY_ENTRY]->(event_assertion:TypedEventAssertion)
-WITH v, collect(DISTINCT event_assertion.assertion_key) AS contributor_ids
-RETURN v.uuid AS id,
-       v.view_key AS view_key,
-       v.view_subject_uuid AS subject_uuid,
-       v.view_subject AS subject,
-       v.view_predicate AS predicate,
-       v.view_domain AS domain,
-       v.view_value AS entry_count,
-       v.view_payload AS payload,
-       contributor_ids,
-       toString(v.valid_at) AS valid_at,
-       toString(v.created_at) AS created_at,
-       coalesce(v.view_current, true) AS current
-ORDER BY predicate, domain, valid_at, created_at, id
-"""
-
 _LIVE_FACTS_QUERY = """
 MATCH (s:Entity {group_id: $namespace})-[r]->(o:Entity {group_id: $namespace})
 WHERE r.fact IS NOT NULL
@@ -803,7 +760,6 @@ def _build_memory_inventory(
     views: list[dict[str, Any]],
     history_views: list[dict[str, Any]],
     facts: list[dict[str, Any]],
-    event_views: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     operations_by_assertion = {
         str(assertion.get("id") or ""): str(assertion.get("operation") or "")
@@ -846,21 +802,6 @@ def _build_memory_inventory(
                 "content": str(view.get("summary") or ""),
                 "valid_at": view.get("valid_at"),
             })
-    for view in event_views or []:
-        inventory.append({
-            "id": str(view.get("id") or ""),
-            "memory_type": "view",
-            "view_kind": "event_history",
-            "derivation": "event",
-            "operations": ["occurrence"],
-            "current": bool(view.get("current")),
-            "subject": str(view.get("subject") or ""),
-            "attribute": str(view.get("predicate") or ""),
-            "scope": str(view.get("domain") or ""),
-            "value": f"{_safe_int(view.get('entry_count'))} occurrence(s)",
-            "content": "",
-            "valid_at": view.get("valid_at"),
-        })
     for index, fact in enumerate(facts):
         inventory.append({
             "id": f"content:{index}",
@@ -1362,13 +1303,10 @@ class BenchRunTaskReader:
             assertion_count = len(live.get("assertions", []))
             view_count = len(live.get("views", []))
             history_count = len(live.get("history_views", []))
-            event_assertion_count = len(live.get("event_assertions", []))
-            event_view_count = len(live.get("event_views", []))
             fact_count = len(live.get("facts", []))
             has_content = (
                 evidence_count > 0 or assertion_count > 0 or view_count > 0
-                or history_count > 0 or event_assertion_count > 0
-                or event_view_count > 0 or fact_count > 0
+                or history_count > 0 or fact_count > 0
             )
             if has_content:
                 source_warning = "LIVE BENCHMARK GRAPH"
@@ -1408,16 +1346,10 @@ class BenchRunTaskReader:
         assertions = repo.execute(_LIVE_ASSERTIONS_QUERY, params={"namespace": namespace})
         views = repo.execute(_LIVE_STATE_VIEWS_QUERY, params={"namespace": namespace})
         history_views = repo.execute(_LIVE_HISTORY_VIEWS_QUERY, params={"namespace": namespace})
-        event_assertions = repo.execute(
-            _LIVE_EVENT_ASSERTIONS_QUERY, params={"namespace": namespace}
-        )
-        event_views = repo.execute(_LIVE_EVENT_VIEWS_QUERY, params={"namespace": namespace})
         facts = repo.execute(_LIVE_FACTS_QUERY, params={"namespace": namespace})
 
         views_list = [dict(v) for v in views] if views else []
         history_list = [dict(v) for v in history_views] if history_views else []
-        event_assertion_list = [dict(a) for a in event_assertions] if event_assertions else []
-        event_view_list = [dict(v) for v in event_views] if event_views else []
         assertions_list = [dict(a) for a in assertions] if assertions else []
         facts_list = [dict(f) for f in facts] if facts else []
         evidence_list = [dict(e) for e in evidence] if evidence else []
@@ -1439,19 +1371,6 @@ class BenchRunTaskReader:
                 except (json.JSONDecodeError, TypeError):
                     hv["op_counts"] = {}
             hv.pop("payload", None)
-
-        for event_view in event_view_list:
-            raw_payload = event_view.get("payload")
-            if isinstance(raw_payload, str):
-                try:
-                    event_view["entries"] = json.loads(raw_payload)
-                except (json.JSONDecodeError, TypeError):
-                    event_view["entries"] = []
-            elif isinstance(raw_payload, list):
-                event_view["entries"] = raw_payload
-            else:
-                event_view["entries"] = []
-            event_view.pop("payload", None)
 
         # Build evidence-by-id map for source quote resolution
         evidence_by_id = {str(e.get("id", "")): e for e in evidence_list}
@@ -1480,14 +1399,14 @@ class BenchRunTaskReader:
                         break
 
         inventory = _build_memory_inventory(
-            assertions_annotated, views_list, history_list, facts_list, event_view_list
+            assertions_annotated, views_list, history_list, facts_list
         )
         derivation_by_view_id = {
             item["id"]: item["derivation"]
             for item in inventory
             if item.get("memory_type") == "view"
         }
-        for view in views_list + history_list + event_view_list:
+        for view in views_list + history_list:
             view["derivation"] = derivation_by_view_id.get(
                 str(view.get("id") or ""), "unknown"
             )
@@ -1496,8 +1415,6 @@ class BenchRunTaskReader:
             "assertions": assertions_annotated,
             "views": views_list,
             "history_views": history_list,
-            "event_assertions": event_assertion_list,
-            "event_views": event_view_list,
             "memory_inventory": inventory,
         })
 
@@ -1520,16 +1437,6 @@ class BenchRunTaskReader:
                 "count": len(history_list),
                 "status": "available" if history_list else "empty",
             },
-            {
-                "id": "event-history",
-                "name": "Event Scalar",
-                "system_name": "Event History",
-                "role": "Ordered occurrence history",
-                "answers": "What happened latest or immediately before it?",
-                "count": len(event_view_list),
-                "assertion_count": len(event_assertion_list),
-                "status": "available" if event_view_list else "empty",
-            },
         ]
 
         return {
@@ -1537,8 +1444,6 @@ class BenchRunTaskReader:
             "assertions": assertions_annotated,
             "views": views_list,
             "history_views": history_list,
-            "event_assertions": event_assertion_list,
-            "event_views": event_view_list,
             "scalar_roles": scalar_roles,
             "facts": facts_list,
             "memory_inventory": inventory,

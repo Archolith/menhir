@@ -8,6 +8,11 @@ queries centralised for easier reuse and testability.
 from __future__ import annotations
 
 
+# View text limits. These MUST equal the truncation in view_write_repository.py (name[:300],
+# summary[:1000]), which still uses literals; the migration below applies the same limits.
+VIEW_NAME_MAX_CHARS = 300
+VIEW_SUMMARY_MAX_CHARS = 1000
+
 MEMORY_NODE_LABELS = ("Entity", "Episodic")
 EDGE_LABELS = ("RELATES_TO", "NEXT_EPISODE", "HAS_MEMBER", "HAS_EPISODE", "MENTIONS")
 
@@ -43,6 +48,17 @@ def get_artifact_reconciliation_schema_queries() -> list[str]:
         "CREATE CONSTRAINT artifact_reconcile_cursor_repository_unique IF NOT EXISTS "
         "FOR (n:ArtifactReconciliationCursor) REQUIRE n.repository IS UNIQUE",
     ]
+
+#: Indexes Menhir once created and now drops. `episodic_content_idx` was a RANGE index on
+#: :Episodic(content); Neo4j cannot index a value over ~8 KB, so it made every longer episode
+#: unwritable. Nothing seeks it: the content prefix scan it was added for is gone, and text search
+#: uses Graphiti's FULLTEXT `episode_content`.
+RETIRED_INDEXES = ("episodic_content_idx",)
+
+
+def get_retired_index_queries() -> list[str]:
+    return [f"DROP INDEX {name} IF EXISTS" for name in RETIRED_INDEXES]
+
 
 #: The three phase-one indexes GRAPHITI creates, not Menhir. Nothing in
 #: `get_phase1_bootstrap_queries` emits them -- they come from
@@ -174,9 +190,6 @@ def _node_index_queries() -> list[str]:
             "CREATE INDEX episodic_resolved_episode_uuid_idx IF NOT EXISTS FOR (n:Episodic) ON (n.resolved_episode_uuid)",
             # Two-tier self Phase 3: the re-enable sweep runs on every lease-recovery pass.
             "CREATE INDEX episodic_extraction_skipped_for_idx IF NOT EXISTS FOR (n:Episodic) ON (n.extraction_skipped_for)",
-            # Dirty-namespace detection scans :Episodic with a content STARTS WITH predicate on
-            # every consolidation request and scheduler cycle; a plain index backs prefix search.
-            "CREATE INDEX episodic_content_idx IF NOT EXISTS FOR (n:Episodic) ON (n.content)",
             # Raw captures are MERGEd by this property once per exhausted episode during the
             # terminal-failure sweep. Without the index that MERGE is a full :Entity label scan
             # per episode.
@@ -419,8 +432,10 @@ def get_scalar_state_activation_queries() -> list[str]:
         # older writer during a rolling deploy -- into view_name/view_summary. Newer text wins.
         "MATCH (n:Entity) WHERE n.view_kind IN ['scalar_state', 'scalar_history'] "
         "AND (coalesce(n.name, '') <> '' OR coalesce(n.summary, '') <> '') "
-        "SET n.view_name = CASE WHEN coalesce(n.name, '') <> '' THEN n.name ELSE n.view_name END, "
-        "n.view_summary = CASE WHEN coalesce(n.summary, '') <> '' THEN n.summary "
+        "SET n.view_name = CASE WHEN coalesce(n.name, '') <> '' "
+        f"THEN substring(n.name, 0, {VIEW_NAME_MAX_CHARS}) ELSE n.view_name END, "
+        "n.view_summary = CASE WHEN coalesce(n.summary, '') <> '' "
+        f"THEN substring(n.summary, 0, {VIEW_SUMMARY_MAX_CHARS}) "
         "ELSE n.view_summary END, n.name = '', n.summary = ''",
         # Counting-lane fence: one watermark per namespace, or concurrent claims split the fence.
         # Pre-constraint stores may hold duplicates from the old unconstrained MERGE; delete every

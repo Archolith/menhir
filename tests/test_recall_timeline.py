@@ -294,7 +294,7 @@ class _StubAdapter:
         self.search_hits: list[dict[str, Any]] = []
         self.subject_candidates: list[dict[str, Any]] = []
         self.scalar_views: list[dict[str, Any]] = []
-        self.event_views: list[dict[str, Any]] = []
+        self.operator_scalar_views: list[dict[str, Any]] = []
         self.scalar_entries: dict[str, list[dict[str, Any]]] = {}
         self.page_calls: list[dict[str, Any]] = []
         self.facts_calls: list[dict[str, Any]] = []
@@ -340,16 +340,18 @@ class _StubAdapter:
     def resolve_timeline_subject(self, *, subject, namespace):
         return self.subject_candidates
 
-    def search_episode_embeddings(self, query_vector, *, limit=10, namespace=None):
+    def search_episode_embeddings(self, query_vector, *, limit=10, namespace=None,
+                                  resolved_only=False):
         return self.search_hits[:limit]
 
     def list_scalar_history_views(self, *, subject_uuid, namespace=None):
+        # Unfiltered, like the rebuild's reconciliation query.
+        self.view_calls.append({"kind": "scalar", "namespace": namespace})
+        return self.scalar_views + self.operator_scalar_views
+
+    def list_recall_visible_scalar_history_views(self, *, subject_uuid, namespace=None):
         self.view_calls.append({"kind": "scalar", "namespace": namespace})
         return self.scalar_views
-
-    def list_event_timeline_views(self, *, subject_uuid, namespace=None):
-        self.view_calls.append({"kind": "event", "namespace": namespace})
-        return self.event_views
 
     def list_scalar_history_entries(self, *, view_uuid, offset=0, limit=16, namespace=None):
         self.history_calls.append({"view_uuid": view_uuid, "offset": offset, "limit": limit,
@@ -359,11 +361,6 @@ class _StubAdapter:
         end = offset + len(page)
         return {"entries": page, "total": len(entries),
                 "next_offset": end if end < len(entries) else None}
-
-    def list_event_timeline_entries(self, *, view_uuid, offset=0, limit=50, namespace=None):
-        self.history_calls.append({"view_uuid": view_uuid, "offset": offset, "limit": limit,
-                                   "namespace": namespace})
-        return {"entries": [], "total": 0, "next_offset": None}
 
     def touch_retrieved_nodes(self, node_uuids):
         self.touched.extend(node_uuids)
@@ -494,7 +491,7 @@ async def test_query_mode_seed_search_filters_on_current_embedding_model() -> No
 
     class _ModelAdapter(_StubAdapter):
         def search_episode_embeddings(self, query_vector, *, limit=10, namespace=None,
-                                      model=None):
+                                      model=None, resolved_only=False):
             calls.append({"limit": limit, "namespace": namespace, "model": model})
             return self.search_hits[:limit]
 
@@ -506,7 +503,7 @@ async def test_query_mode_seed_search_filters_on_current_embedding_model() -> No
     adapter = _ModelAdapter([_row("ep-1", "2026-01-01")])
     adapter.search_hits = [_row("ep-1", "2026-01-01")]
     await _svc(adapter, graphiti).recall_timeline(namespace="ns", query="auth", limit=1)
-    assert calls == [{"limit": 1, "namespace": "ns", "model": "text-embedding-3-small"}]
+    assert calls == [{"limit": 20, "namespace": "ns", "model": "text-embedding-3-small"}]
 
 
 @pytest.mark.asyncio
@@ -729,6 +726,36 @@ async def test_typed_histories_capped_at_ten_with_note() -> None:
     result = await _svc(adapter).recall_timeline(namespace="ns", subject="Rachel")
     assert len(result.histories) == 10
     assert result.note is not None and "2 more" in result.note
+
+
+@pytest.mark.asyncio
+async def test_typed_histories_skip_operator_audience_scalar_views() -> None:
+    adapter = _StubAdapter([])
+    adapter.subject_candidates = [{"uuid": "entity-1", "name": "Rachel"}]
+    adapter.operator_scalar_views = [{"uuid": "view-op", "attribute": "owned"}]
+    adapter.scalar_entries["view-op"] = [_scalar_entry(1)]
+    result = await _svc(adapter).recall_timeline(namespace="ns", subject="Rachel")
+    assert result.histories == ()
+    assert not [c for c in adapter.history_calls if c["view_uuid"] == "view-op"]
+    paged = await _svc(adapter).recall_timeline(
+        namespace="ns", subject="Rachel", history_view="view-op")
+    assert paged.histories == ()
+
+
+def test_recall_visible_scalar_history_query_applies_visibility() -> None:
+    from menhir.domain.recall_visibility import default_recall_visibility_cypher
+    from menhir.infrastructure.scalar_view_repository import ScalarViewRepositoryMixin
+
+    class _Repo(ScalarViewRepositoryMixin):
+        def __init__(self, neo4j) -> None:
+            self.neo4j = neo4j
+
+    neo4j = _RecordingRepository()
+    _Repo(neo4j).list_recall_visible_scalar_history_views(subject_uuid="entity-1", namespace="ns")
+    query, params = neo4j.calls[0]
+    assert default_recall_visibility_cypher("n") in query
+    assert "view_kind:'scalar_history'" in query and "n.group_id = $ns" in query
+    assert params == {"u": "entity-1", "ns": "ns"}
 
 
 @pytest.mark.asyncio

@@ -151,7 +151,7 @@ def test_crash_after_mutation_replays_as_committed(coord, live_repo, pair):
     real_commit = coord.journal.mark_committed
     calls = {"n": 0}
 
-    def crash_once(op_id):
+    def crash_once(op_id, owner_token=None):
         calls["n"] += 1
         raise RuntimeError("crash before COMMITTED")
 
@@ -275,7 +275,7 @@ def test_replay_after_another_merge_touched_survivor_is_not_false_drift(coord, l
     )
 
     real_commit = coord.journal.mark_committed
-    coord.journal.mark_committed = lambda op_id: (_ for _ in ()).throw(RuntimeError("crash"))
+    coord.journal.mark_committed = lambda op_id, owner_token=None: (_ for _ in ()).throw(RuntimeError("crash"))
     with pytest.raises(RuntimeError):
         coord.merge(survivor_uuid=pair["s"], absorbed_uuid=pair["a"], similarity=0.97)
     coord.journal.mark_committed = real_commit  # type: ignore[method-assign]

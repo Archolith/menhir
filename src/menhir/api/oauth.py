@@ -11,6 +11,7 @@ import asyncio
 import base64
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -71,6 +72,45 @@ def _redacted_uri(uri: str) -> str:
         return f"{parts.scheme}://{parts.hostname or ''}{parts.path}"
     except ValueError:
         return "<unparseable>"
+
+
+def _loggable_uri(uri: str) -> str:
+    """`_redacted_uri`, failing closed when a credential could survive (CF-300: a '/' in the
+    password or a schemeless ``user:pw@host`` moves the secret into the path)."""
+    redacted = _redacted_uri(uri)
+    if "@" in redacted or not redacted.startswith(("http://", "https://")):
+        return "<redacted>"
+    return redacted
+
+
+_URL_IN_TEXT = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*://\S+")
+_URL_TRAILING = ".,;:)]}>\"'"
+
+
+def _redact_urls_in_text(text: str, fallback: str) -> str:
+    """Strip userinfo, query and fragment from every URL in ``text``.
+
+    Fails closed: when a URL cannot be parsed, or anything credential-shaped ('@', '?', '#')
+    survives (quotes inside a URL, relative redirect targets), only ``fallback`` is returned.
+    """
+    def _sub(match: re.Match[str]) -> str:
+        raw = match.group(0)
+        trailing = ""
+        while raw and raw[-1] in _URL_TRAILING:
+            trailing = raw[-1] + trailing
+            raw = raw[:-1]
+        redacted = _redacted_uri(raw)
+        if redacted == "<unparseable>" or "@" in redacted:
+            raise ValueError("unparseable url")
+        return redacted + trailing
+
+    try:
+        result = _URL_IN_TEXT.sub(_sub, text)
+    except ValueError:
+        return fallback
+    if any(ch in result for ch in "@?#"):
+        return fallback
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -306,10 +346,10 @@ class OAuthTokenVerifier:
         self, kind: str, message: str, started: float, force_refresh: bool
     ) -> None:
         JWKS_REFRESH_STATS.record(kind)
-        redacted = _redacted_uri(self.config.jwks_uri)
-        if self.config.jwks_uri:
-            # httpx messages embed the request URL; never log its userinfo/query.
-            message = message.replace(self.config.jwks_uri, redacted)
+        redacted = _loggable_uri(self.config.jwks_uri)
+        # httpx messages embed the request URL, possibly normalised (host case, percent-encoding),
+        # so redact every URL found by parsing rather than by matching the configured string.
+        message = _redact_urls_in_text(message, kind)
         logger.warning(
             "OAuth JWKS fetch failed: kind=%s error=%s uri=%s elapsed_s=%.3f "
             "timeout_s=%s force_refresh=%s cached_keys=%s",

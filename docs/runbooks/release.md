@@ -15,10 +15,15 @@ workflow did not consult CI and shipped both. Both were yanked; v0.2.3 carried t
 ## Steps
 
 1. Land everything on `main` and push. Wait for `tests.yml` to go green on that commit.
-2. Bump `version` in `pyproject.toml` and add a `## <date> - vX.Y.Z ...` heading to
-   `CHANGELOG.md`. Commit and push that too -- the gate requires HEAD == `origin/main`.
-3. Make sure the throwaway test Neo4j is up (`docker compose` service
-   `menhir-neo4j-test`, bolt://localhost:7688). The online lane is mandatory; an
+2. Open the version bump and get it merged. The gate requires HEAD == `origin/main`.
+
+       python scripts/bump.py version X.Y.Z --summary "what this release does" --pr
+
+   This updates `pyproject.toml`, `uv.lock`, `sbom.json`, the docs that state the current
+   version and `CHANGELOG.md`. It writes nothing if any expected line has moved. Check the
+   CHANGELOG entry in the PR before merging. Without `--pr`, the edits stay in the working tree.
+3. Make sure the throwaway test Neo4j is up (`docker compose -f docker-compose.test.yml up -d`:
+   service `neo4j-test`, container `menhir-neo4j-test`, bolt://127.0.0.1:7688). The online lane is mandatory; an
    unreachable instance is a failure, not a skip.
 4. Check:
 
@@ -32,8 +37,41 @@ workflow did not consult CI and shipped both. Both were yanked; v0.2.3 carried t
        python scripts/release.py vX.Y.Z --tag
 
    Re-runs every check, creates an annotated tag whose message is the CHANGELOG heading,
-   pushes it, watches `Publish to PyPI` until its `test-gate`, artifact verification,
-   publish, and GitHub-release jobs all finish, and confirms the version on PyPI.
+   pushes it, watches `Publish to PyPI` until all its jobs finish, and confirms the version
+   on PyPI.
+
+Only repository admins can create `v*` tags (the `release-tags` ruleset), and that one tag
+publishes everything. In order, `publish-pypi.yml` runs the test gate, verifies the artifacts,
+publishes to PyPI, builds and publishes the release image, verifies its attestation, tags it
+`X.Y.Z`, and creates the GitHub release. The image version label (`X.Y.Z-1`) comes from the tag,
+and the Python base comes from `deploy/release-python-base.txt` at the tagged commit. Change
+that file in a normal PR to move the base.
+
+Deploying stays a separate, manual step: `tools/menhirctl.ps1 upgrade X.Y.Z` from menhir-deploy.
+
+## Moving the Graphiti fork pin
+
+Publish the fork release first, then, from a clean `main`:
+
+    python scripts/bump.py fork 0.31.2.postN --commit <full fork commit> --summary "what changed" --pr
+
+The script reads the file URLs, hashes and sizes from PyPI and updates the pin, `uv.lock`, and every
+file that names the fork version. The `--commit` value isn't checked against the fork repository, so
+copy it from the fork's release. If `uv lock --check` fails, every file is restored: the release
+changed dependencies and needs a real re-lock with the pinned uv version, by hand.
+
+## If a release stops partway
+
+Re-run the failed jobs on the run page. If that is no longer possible, start a new run on the
+tag; a run from a branch is refused:
+
+    gh workflow run publish-pypi.yml --repo Archolith/menhir --ref vX.Y.Z -f tag=vX.Y.Z
+
+A new run skips what is already finished. A version already on PyPI is not uploaded again, and
+the GitHub release attaches the files PyPI serves. An image tag that already exists stops the
+image build. An existing GitHub release is left alone. The run stops and asks for a look by hand
+if PyPI holds a different set of files than the build produced, or if the image tag names another
+digest.
 
 ## What the gate checks
 

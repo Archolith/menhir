@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+import json
+import math
+import os
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from .settings_helpers import (
@@ -32,6 +35,38 @@ ARTIFACT_RECONCILE_MODES: frozenset[str] = frozenset({"off", "audit", "safe_appl
 def _normalize_reconcile_mode(raw: str) -> str:
     mode = (raw or "").strip().lower()
     return mode if mode in ARTIFACT_RECONCILE_MODES else "audit"
+
+
+def parse_extra_body(raw: str, *, env_name: str) -> dict[str, Any]:
+    """Parse a raw JSON-object env value into a dict; empty/whitespace means {}."""
+    text = (raw or "").strip()
+    if not text:
+        return {}
+    try:
+        value = json.loads(text)
+    except ValueError as exc:
+        raise ValueError(f"{env_name} must be a JSON object: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{env_name} must be a JSON object, got {type(value).__name__}")
+    return value
+
+
+DEFAULT_FLEX_TIMEOUT_S = 900.0
+
+
+def parse_flex_timeout_s(raw: str | None) -> float:
+    """Parse MENHIR_OPENAI_FLEX_TIMEOUT_S; blank/None means the default."""
+    text = (raw or "").strip()
+    if not text:
+        return DEFAULT_FLEX_TIMEOUT_S
+    message = f"MENHIR_OPENAI_FLEX_TIMEOUT_S must be a positive number of seconds, got {raw!r}"
+    try:
+        value = float(text)
+    except ValueError as exc:
+        raise ValueError(message) from exc
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(message)
+    return value
 
 
 def _parse_scalar_threshold(raw: str) -> float:
@@ -175,18 +210,6 @@ class MemorySettings:
     # providers (e.g. the LongMemEval OpenAI build) to parallelize the drain.
     ingest_concurrency: int = 1
 
-    # Shadow-mode context composition (Stage 1 of the context-composition production-integration
-    # plan, .agent/archive/plans/menhir-context-composition-production-integration.md):
-    # observe-only, never applied. When on, every ingested episode gets a candidate-fact-edge
-    # retrieval + grounded shadow-label classification + eligibility trace logged alongside the real
-    # extraction outcome, with zero effect on what gets extracted or written. Off by default —
-    # this is research instrumentation, not a recall/extraction behavior change. The shadow
-    # LLM work runs OUTSIDE the per-namespace ingest gate as a detached background task (see
-    # shadow_context_composition.py), so shadow_composition_timeout_s bounds only that background
-    # task, never real episode completion latency.
-    shadow_context_composition: bool = False
-    shadow_composition_timeout_s: float = 30.0
-
     # Conflict suppression
     conflict_cooldown_days: int = 0  # 0 = permanent suppression; >0 = re-check after N days
 
@@ -226,31 +249,25 @@ class MemorySettings:
     # anchored speaker marker bind to the inferred self instead of forking "user"; set "off" to opt out.
     inferred_self_mode: str = "enforce"
 
-    # Anchored-time resolver: one extra LLM call per user turn with a temporal cue, overlaying
-    # valid_at on extracted edges. Default off until the live eval gates (L1-L3) pass.
-    anchored_time_resolver_enabled: bool = False
+    # Anchored-time switch: one extra LLM call per user turn with a temporal cue, overlaying
+    # valid_at on extracted edges. It also runs the blind attach check on each resolver time and
+    # records world-end expiry (#168 freeze: folded in, one switch). Default on; set false to opt out.
+    anchored_time_resolver_enabled: bool = True
     #: Model for the resolver call; empty means the ingest chat model.
     anchored_time_resolver_model: str = ""
     anchored_time_resolver_timeout_s: float = 120.0
-    #: Render persisted anchored-time contracts in recall and timeline facts (P2). Default off.
-    anchored_time_render_enabled: bool = False
-    #: P3: a fact's own end (invalid_at) is world time, not supersession: Graphiti does not expire
-    #: edges for that end alone (MenhirEdgeExpiryHook), and recall labels them "ended". Needs the
-    #: resolver and archolith-graphiti-core>=0.30.2.post3. Default off.
-    anchored_time_expiry_enabled: bool = False
-    #: Blind attachment check (plan menhir-anchored-time-attachment-plan.md 3.1): a second model call
-    #: must quote the same words with the right relation before a resolver time is written.
-    #: Needs the resolver. Default off.
-    anchored_time_attach_enabled: bool = False
-    #: 2a (#168): Graphiti never ends a fact on a statement said before it (episode time), so
-    #: an older statement with a later event date leaves both live. Veto only. Default on.
-    edge_invalidation_statement_order: bool = True
-    #: Model for the attach call; empty means the resolver's model.
+    #: Model for the blind attach check (a second model call must quote the same words with the
+    #: right relation before a resolver time is written; runs with the resolver); empty means the resolver's model.
     anchored_time_attach_model: str = ""
+    #: Separate OpenAI-compatible endpoint for the resolver and attach check; empty = the ingest client.
+    #: Requires anchored_time_resolver_model when the resolver is enabled.
+    anchored_time_base_url: str = ""
+    anchored_time_api_key: str = field(default="not-needed", repr=False)
+    #: Raw JSON object merged into resolver/attach request extra_body; empty = nothing added.
+    anchored_time_extra_body: str = ""
 
-    # Personal-memory consolidation job (gated perception -> count/amount Views from user turns).
-    # Short interval + dirty-namespace filter keeps it cheap; all bias guards pinned on. Default off.
-    personal_memory_consolidation_enabled: bool = False
+    # Personal-memory consolidation job (scalar, event-history and counting lanes over dirty
+    # namespaces). The counter lane (personal_memory_consolidation_enabled) was removed 2026-10-28.
     personal_memory_consolidation_interval_s: float = 300.0
     personal_memory_consolidation_k: int = 3
     personal_memory_consolidation_call_budget: int = 300
@@ -304,87 +321,41 @@ class MemorySettings:
     # .agent/plans/phase3-extractor-matrix-results.md); set this rather than the global model so
     # Graphiti enrichment stays on the cheaper model.
     personal_memory_consolidation_chat_model: str = ""
-    # Bounded retry for the consolidation VERIFIER (Lever C4) — re-runs the full k-sample verifier
-    # vote up to 1+N times, committing on the first attempt that clears (same unanimity bar per
-    # attempt, so precision per commit is unchanged; a flaky-but-correct SUM just gets more chances).
-    # Default 0 = exactly one attempt = behaviour identical to before. See the phase3
-    # consumer-quality-pack live characterization.
-    personal_memory_consolidation_verify_retries: int = 0
-    # Deterministic SUM arithmetic grounding (precision-preserving cross-check adjustment): when a
-    # fold-SUM's amounts are each an explicit price literally in their source span, prove the
-    # arithmetic deterministically and skip the noisy holistic cross-check (the sharper verifier still
-    # audits membership). PROMOTED to default True (2026-07-08): live characterization showed the
-    # cross-check-dominated variants jump 40%->90-100% commit with wrong_view_writes=0 across OFF + 2x
-    # ON. Set MENHIR_PERSONAL_MEMORY_SUM_GROUNDING=0 to disable. See the cross-check-quality pack.
-    personal_memory_consolidation_sum_grounding: bool = True
+    #: Raw JSON object merged into the personal-memory chat request's extra_body (e.g. a local
+    #: server's chat_template_kwargs); empty = nothing added.
+    personal_memory_consolidation_chat_extra_body: str = ""
+    #: Per-request timeout (seconds) for the personal-memory chat; 0 = the sync-chat default (30 s).
+    #: Raise it for a slow local server.
+    personal_memory_consolidation_chat_timeout_s: float = 0.0
     # ScalarStateView typed-scalar shadow path (Piece C.4.3), gated inside the same consolidation job.
-    # OFF by default: the counter path is byte-identical when off. When on, the job also extracts typed
+    # When on, the job also extracts typed
     # scalars, binds them to resolved entities, and persists :TypedAssertion + rebuilds ScalarStateViews
     # (behind the fresh-only activation gate). Runs on its OWN :ScalarConsolidationWatermark cursor, so
     # enabling it backfills historical namespaces. The perceiver version stamps the cursor + assertions;
     # bumping it revisits history so a newer perceiver can correct prior claims.
-    personal_memory_scalar_state_enabled: bool = False
+    personal_memory_scalar_state_enabled: bool = True
     # v2: deterministic when-discipline (temporal resolver + hedged-value abstention). assertion_key
     # omits valid_at/time_basis and the idempotent rewrite never rewrites temporal fields, so corrected
     # grounding only lands as a NEW interpreted assertion — a version bump makes it supersede v1 by
     # strict rank rather than silently no-op on the stored row.
     personal_memory_scalar_state_perceiver_version: str = "v2"
-    # Step 7 current-state-only authority canary. ON by default (owner decision 2026-10-23), but
-    # effective only while personal_memory_scalar_state_enabled is on (config/authority_gates).
-    # When off, a current scalar_state View is context only and NEVER suppresses an overlapping
-    # graph fact in recall. When on, a View may suppress an older overlapping fact ONLY if all six
+    # Step 7 current-state-only authority canary. Always on (#168 freeze) while
+    # personal_memory_scalar_state_enabled is on (config/authority_gates). While the scalar lane
+    # is off, a current scalar_state View is context only and NEVER suppresses an overlapping
+    # graph fact in recall. With the lane on, a View may suppress an older overlapping fact ONLY if all six
     # authority gates pass (current-state query + resolved subject + exact slot + grounded evidence +
     # unambiguous current View + complete overlap proof); every other case stays advisory. The
     # decision is computed by menhir.domain.scalar_view_authority.decide_view_authority.
-    personal_memory_scalar_view_authority_enabled: bool = True
-    personal_memory_scalar_view_collapse_enabled: bool = False
-    personal_memory_scalar_view_echo_drop_enabled: bool = False
-    personal_memory_observation_dedup_enabled: bool = False
+    # Default on since 2026-10-28 (#399 bucket 3: no item worse across six o500 shard-1 runs; recall only).
+    personal_memory_observation_dedup_enabled: bool = True
     # 0 = off; else min (1+cos)/2 per verdict slot. 0.675 (raw cosine 0.35): on o500 the gate-off
     # lane emitted verdicts that shared no word with the question for 72% of blocks (#168).
     personal_memory_scalar_verdict_min_similarity: float = 0.675
     # Which raw scalar observations enter the ranked list: all | gated | off (see retrieval_tuning).
     # "gated" (o500, #383): .694 vs .670 for "all"; multi-session +7.5 pts.
     personal_memory_scalar_observation_recall: str = "gated"
-    # A verdict stops leading when newer evidence its fold ignores is in the recall (#168).
-    # On (o500, #384): with fact said time, .746 vs .712 both off.
-    personal_memory_scalar_view_freshness_gate: bool = True
-    # Attribute reconciliation in the k-sample consistency gate. ON by default (lenient-agreement
-    # defaults, 2026-09). When on, the samples
-    # vote WITHOUT the free-text attribute name and the name is chosen modally afterwards (ties to the
-    # longest, then lexicographic -- a pure function of the candidate set, never of sample order).
-    # Measured cause: replaying the frozen LME panel through the real parser and gate, the model emits
-    # the asked value in 100/100 namespace-trials and all k samples emit it in 81/100, but only 23/100
-    # commit -- samples agree the user has 25 postcards and disagree on whether the slot is called
-    # `postcard_count`, `collection_size`, or `count`, and the disagreement vetoes the fact. Turning
-    # this on takes that panel to 34/100 at the unanimity threshold of 1.0, and to 72/100 at a 2/3
-    # threshold -- see gate_typed_scalars for the full grid. It is independently settings-exposed below.
-    # It is RECALL-affecting, not behavior-neutral: more claims
-    # commit, so more assertions and Views are written. The chosen name lands in `slot_key`, so a
-    # namespace consolidated with this on and off can hold the same fact under two different slots --
-    # bump `personal_memory_scalar_state_perceiver_version` when flipping it if that matters.
-    # Defaults changed 2026-09 for new installs; existing namespaces flipping these should bump
-    # `personal_memory_scalar_state_perceiver_version`.
-    personal_memory_scalar_reconcile_attribute: bool = True
-    # Scope/subject/self identity reconciliation -- the same defect as the attribute above, relocated.
-    # The model smears one fact's identity across subject/attribute/scope in arbitrary order, so
-    # exact-matching each field independently turns one agreed fact into several single-vote claims.
-    # These vote on the identity TUPLE (never field-by-field, which could synthesize a slot no sample
-    # proposed) and pick the modal combination. All RECALL-affecting when on,
-    # for the same reason as reconcile_attribute: more claims commit, so more assertions and Views are
-    # written, and the reconciled subject/scope lands in the durable slot -- bump
-    # `personal_memory_scalar_state_perceiver_version` when flipping these on an existing namespace.
-    # Measured on the frozen LME panel at threshold=2/3 with reconcile_attribute on: +scope 65 -> 70,
-    # +scope+subject -> 72 correct current Views out of 100, stale-as-current 0 throughout.
-    # Defaults changed 2026-09 for new installs; existing namespaces flipping these should bump
-    # `personal_memory_scalar_state_perceiver_version`.
-    personal_memory_scalar_reconcile_scope: bool = True
-    personal_memory_scalar_reconcile_subject: bool = True
-    # Fold first-person subjects ('I', 'me', 'my') to the bound self display before the vote, so the
-    # vote key stops contradicting the binder. Measured effect on the LME panel: ZERO cells in every
-    # configuration -- the extraction prompt already emits 'user' almost without exception. Exposed
-    # because the vote key genuinely disagreed with the binder, not because it moved the number.
-    personal_memory_scalar_canonical_self: bool = False
+    # Attribute, scope and subject reconciliation in the k-sample consistency gate are always on
+    # (#168 freeze); the consolidation job and scheduler knobs `scalar_reconcile_*` default on.
     # Agreement required by the typed-scalar gate only. Default 2/3 is the lenient-agreement policy:
     # at k=3 two agreeing samples commit. The env value also accepts ratio syntax (`2/3`) so
     # operators do not accidentally use
@@ -408,38 +379,14 @@ class MemorySettings:
     # can never raise into recall, so toggling it changes only what is recorded, never what recall
     # returns. Read it back with menhir.infrastructure.audit_trail.RECALL or the inspect script.
     personal_memory_recall_audit_enabled: bool = False
-    # ScalarHistory projection: advisory, slot-keyed, ordered assertion history Views. OFF by
-    # default. When on, the projection coordinator also builds scalar_history Views alongside
+    # ScalarHistory projection: advisory, slot-keyed, ordered assertion history Views. When on, the projection coordinator also builds scalar_history Views alongside
     # scalar_state, and the recall path includes a dedicated advisory history lane. When off,
     # stored scalar_history Views are excluded from generic recall (real rollback, not leakage).
     # See `.agent/archive/plans/menhir-scalar-history-projection-plan.md`.
-    personal_memory_scalar_history_enabled: bool = False
-    # Observe-only deterministic typed-scalar shadow. When enabled, consolidation runs the pure
-    # deterministic extractor beside the existing LLM gate and emits bounded comparison audit
-    # telemetry. It never changes LLM decisions, writes, authority, or recall behavior.
-    personal_memory_scalar_deterministic_shadow: bool = False
-    # Opt-in deterministic scalar router; default-off preserves the existing LLM path.
-    personal_memory_scalar_deterministic_router: bool = False
-    personal_memory_scalar_deterministic_classes: tuple[str, ...] = ()
-    # Event-history projection settings. All OFF by default; the perceiver version
-    # stamps the projection cursor so bumping it revisits history.
-    personal_memory_event_history_enabled: bool = False
-    # v2 grounds event dates in source evidence (#155); bumping the default resets the projection
-    # cursor, so existing evidence is re-perceived and v2 assertions supersede v1 by strict rank.
-    personal_memory_event_history_perceiver_version: str = "v2"
-    personal_memory_event_history_authority_enabled: bool = False
-    personal_memory_counting_enabled: bool = False
+    # Default on since 2026-10-28 (#399 bucket 3: o500 A/B neutral to slightly positive, no LLM cost).
+    personal_memory_scalar_history_enabled: bool = True
+    personal_memory_counting_enabled: bool = True
     personal_memory_counting_perceiver_version: str = "v1"
-    # Unit 3a.9: negation/modal guard anchored at the verb, attribute split before overlap grouping,
-    # fenced ALREADY CAPTURED block. Turning it on or off changes the effective counting perceiver
-    # version (configured + "+x2"), so the lane re-reads history.
-    personal_memory_counting_extract_v2: bool = False
-    # Unit 4R related-count matching; needs counting.
-    personal_memory_counting_match_enabled: bool = False
-    # Unit R: counted Views appear only as verdicts; their occurrence observations leave recall.
-    personal_memory_counting_recall_authority_only: bool = False
-    # Unit 6: counted verdicts read "at least N you mentioned" and never lead.
-    personal_memory_counting_wording_enabled: bool = False
     personal_memory_counting_lease_seconds: int = 900
 
     # Benchmark mode — when true, disables the background scheduler,
@@ -449,36 +396,16 @@ class MemorySettings:
 
     # Frontier retrieval portions, mapped into a RetrievalTuningConfig at the recall entry
     # point via retrieval_tuning(). Most portions default OFF; enable any per deployment via
-    # MENHIR_FRONTIER_BM25 / _SHADOW / etc. (code defaults match .env.example, audit DOC-05).
+    # MENHIR_FRONTIER_SHADOW / etc. (code defaults match .env.example, audit DOC-05).
     # Oracle ranking and the intent lens are always on since #172 and have no setting; see
     # RetrievalTuningConfig. The Warden gate and its contradiction guard are on by default since
-    # #173 (set each to false to opt out); the belief gate and evidence anchor (#349) stay opt-in.
-    frontier_bm25: bool = False            # attributed hybrid (vector+BM25) candidate gen
-    frontier_content_vector: bool = False  # add menhir-owned content-embedding cosine lane
-    frontier_content_vector_replace_name: bool = False
-    frontier_content_vector_k: int = 100
-    frontier_content_vector_weight: float = 0.5
-    frontier_fusion_admission_policy: str = "attributed"
-    frontier_warden_gate: bool = True      # drop REFUSED / label FLAGGED (on since #173)
-    frontier_diversity_gate: bool = False  # reorder by evidence family to prevent spiral (opt-in)
-    frontier_contradiction_interrupt: bool = True  # append ContradictionWarden to default chain (on since #173)
-    frontier_belief_gate: bool = False     # add CurrentnessWarden + belief scoring to the chain; REQUIRES frontier_warden_gate to apply its verdicts (opt-in; see #350)
-    frontier_evidence_anchor: bool = False  # Guard 5 EvidenceAnchorWarden (only applies under warden_gate); opt-in: it reads the client label, not the speaker, and refuses ordinary conversation (#349)
-    frontier_fact_edges: bool = False      # inject RELATES_TO fact edges (EntityEdge.fact) into the candidate pool; set TRUE for episodic/"what happened" corpora where the answer is a dated edge fact, not an entity name
-    frontier_fact_relevance: bool = False  # attach the facts most similar to the query (plus the newest) instead of only the 5 newest
-    frontier_fact_said_time: bool = True  # put each fact's statement time (reference_time) on recall facts as said_at (o500 +.026, #384)
-    frontier_verb_facets: bool = False     # append one keyword-matched fact per question verb after ranking (verb-centric questions only)
-    frontier_fact_edge_mode: str = "standalone"  # how fact edges enter the pool: "standalone" (terse fact as its own candidate; net-negative at N=30) or "pointer" (hydrate endpoint nodes' rich context; preferred)
-    frontier_similarity_scale: str = "rrf"  # similarity lane scale (plan 1a/1b): "rrf" (today; RRF ~[0,2]) or "normalized" (divide search scores by the pinned RRF max -> [0,1], restoring PENDING's top-pin; ranking change, A/B before default flip)
+    # #173 (set each to false to opt out).
     frontier_shadow: bool = False          # observe-only oracle/warden pass (trace)
     # Source-memory recall lane: additive section of raw episode memories (cosine over
-    # n.content_embedding), NEXT TO the ranked results, never fused into them. Requires the
-    # ingest-side episode-content embedding step (also gated by frontier_source_memories).
-    frontier_source_memories: bool = True  # additive source-memory section next to ranked recall (default on)
+    # n.content_embedding), NEXT TO the ranked results, never fused into them. Always on since
+    # the #168 freeze, with the ingest-side episode-content embedding step.
     frontier_source_memory_limit: int = 10          # section size (1..50; validated in RetrievalTuningConfig)
-    frontier_source_memory_max_chars: int = 600  # per-memory content cap (100..4000)
-    frontier_source_memory_pools: bool = False  # group section entries by shared anchors
-    frontier_source_memory_spread: bool = True  # pick the section per session from a 3x pool, dropping exact repeats (default on)
+    frontier_source_memory_max_chars: int = 2000  # per-memory content cap (100..4000)
 
     # HTTP server
     api_host: str = "127.0.0.1"
@@ -622,6 +549,26 @@ class MemorySettings:
         if not self.anchored_time_resolver_timeout_s > 0:
             raise ValueError(
                 f"anchored_time_resolver_timeout_s must be > 0, got {self.anchored_time_resolver_timeout_s}"
+            )
+        parse_extra_body(self.anchored_time_extra_body, env_name="MENHIR_ANCHORED_TIME_EXTRA_BODY")
+        parse_extra_body(
+            self.personal_memory_consolidation_chat_extra_body,
+            env_name="MENHIR_PERSONAL_MEMORY_CHAT_EXTRA_BODY",
+        )
+        parse_flex_timeout_s(os.getenv("MENHIR_OPENAI_FLEX_TIMEOUT_S"))
+        if not self.personal_memory_consolidation_chat_timeout_s >= 0:
+            raise ValueError(
+                "personal_memory_consolidation_chat_timeout_s must be >= 0, got "
+                f"{self.personal_memory_consolidation_chat_timeout_s}"
+            )
+        if (
+            self.anchored_time_resolver_enabled
+            and self.anchored_time_base_url
+            and not self.anchored_time_resolver_model
+        ):
+            raise ValueError(
+                "MENHIR_ANCHORED_TIME_BASE_URL requires MENHIR_ANCHORED_TIME_MODEL "
+                "(the ingest model name must not be sent to a different server)"
             )
         if self.api_port < 1 or self.api_port > 65535:
             raise ValueError(f"api_port must be 1-65535, got {self.api_port}")
@@ -777,35 +724,13 @@ class MemorySettings:
         from menhir.domain.retrieval_tuning import RetrievalTuningConfig
 
         return RetrievalTuningConfig(
-            enable_bm25=self.frontier_bm25,
-            enable_content_vector=self.frontier_content_vector,
-            content_vector_replace_name=self.frontier_content_vector_replace_name,
-            content_vector_k=self.frontier_content_vector_k,
-            content_vector_weight=self.frontier_content_vector_weight,
-            fusion_admission_policy=self.frontier_fusion_admission_policy,
-            enable_warden_gate=self.frontier_warden_gate,
-            enable_diversity_gate=self.frontier_diversity_gate,
-            enable_contradiction_interrupt=self.frontier_contradiction_interrupt,
-            enable_belief_gate=self.frontier_belief_gate,
-            enable_evidence_anchor=self.frontier_evidence_anchor,
-            enable_fact_edges=self.frontier_fact_edges,
             scalar_verdict_min_similarity=self.personal_memory_scalar_verdict_min_similarity,
             scalar_observation_recall=self.personal_memory_scalar_observation_recall,
-            scalar_view_freshness_gate=self.personal_memory_scalar_view_freshness_gate,
-            fact_edge_mode=self.frontier_fact_edge_mode,
-            similarity_scale=self.frontier_similarity_scale,
             enable_assertion_shadow=self.frontier_shadow,
-            enable_source_memories=self.frontier_source_memories,
             source_memory_limit=self.frontier_source_memory_limit,
             source_memory_max_chars=self.frontier_source_memory_max_chars,
-            source_memory_pools=self.frontier_source_memory_pools,
-            source_memory_spread=self.frontier_source_memory_spread,
-            enable_anchored_time_render=self.anchored_time_render_enabled,
-            enable_anchored_time_expiry=self.anchored_time_expiry_enabled,
-            enable_fact_relevance=self.frontier_fact_relevance,
-            enable_fact_said_time=self.frontier_fact_said_time,
+            enable_anchored_time_expiry=self.anchored_time_resolver_enabled,
             enable_observation_dedup=self.personal_memory_observation_dedup_enabled,
-            enable_verb_facets=self.frontier_verb_facets,
         )
 
     @classmethod
@@ -885,11 +810,6 @@ class MemorySettings:
                 env_var="MENHIR_INGEST_CONCURRENCY",
                 minimum=1,
             ),
-            shadow_context_composition=parse_bool_env(_getenv("MENHIR_SHADOW_CONTEXT_COMPOSITION", default=str(cls.shadow_context_composition))),
-            shadow_composition_timeout_s=_parse_float(
-                _getenv("MENHIR_SHADOW_COMPOSITION_TIMEOUT_S", default=str(cls.shadow_composition_timeout_s)),
-                env_var="MENHIR_SHADOW_COMPOSITION_TIMEOUT_S",
-            ),
             # Structure watcher
             structure_watcher_interval_s=_parse_float(
                 _getenv("MENHIR_STRUCTURE_WATCHER_INTERVAL_S", default=str(cls.structure_watcher_interval_s)),
@@ -921,12 +841,10 @@ class MemorySettings:
                 _getenv("MENHIR_ANCHORED_TIME_TIMEOUT_S", default=str(cls.anchored_time_resolver_timeout_s)),
                 env_var="MENHIR_ANCHORED_TIME_TIMEOUT_S",
             ),
-            anchored_time_render_enabled=parse_bool_env(_getenv("MENHIR_ANCHORED_TIME_RENDER", default=str(cls.anchored_time_render_enabled))),
-            anchored_time_expiry_enabled=parse_bool_env(_getenv("MENHIR_ANCHORED_TIME_EXPIRY", default=str(cls.anchored_time_expiry_enabled))),
-            anchored_time_attach_enabled=parse_bool_env(_getenv("MENHIR_ANCHORED_TIME_ATTACH", default=str(cls.anchored_time_attach_enabled))),
-            edge_invalidation_statement_order=parse_bool_env(_getenv("MENHIR_EDGE_INVALIDATION_STATEMENT_ORDER", default=str(cls.edge_invalidation_statement_order))),
             anchored_time_attach_model=(_getenv("MENHIR_ANCHORED_TIME_ATTACH_MODEL", default=cls.anchored_time_attach_model) or "").strip(),
-            personal_memory_consolidation_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED", default=str(cls.personal_memory_consolidation_enabled))),
+            anchored_time_base_url=(_getenv("MENHIR_ANCHORED_TIME_BASE_URL", default=cls.anchored_time_base_url) or "").strip(),
+            anchored_time_api_key=_getenv("MENHIR_ANCHORED_TIME_API_KEY", default=cls.anchored_time_api_key),
+            anchored_time_extra_body=(_getenv("MENHIR_ANCHORED_TIME_EXTRA_BODY", default=cls.anchored_time_extra_body) or "").strip(),
             personal_memory_consolidation_interval_s=_parse_float(
                 _getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_INTERVAL_S", default=str(cls.personal_memory_consolidation_interval_s)),
                 env_var="MENHIR_PERSONAL_MEMORY_CONSOLIDATION_INTERVAL_S",
@@ -948,21 +866,16 @@ class MemorySettings:
             ),
             personal_memory_consolidation_disable_reasoning=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_DISABLE_REASONING", default=str(cls.personal_memory_consolidation_disable_reasoning))),
             personal_memory_consolidation_chat_model=_getenv("MENHIR_PERSONAL_MEMORY_CHAT_MODEL", default=cls.personal_memory_consolidation_chat_model),
-            personal_memory_consolidation_verify_retries=int(_getenv("MENHIR_PERSONAL_MEMORY_VERIFY_RETRIES", default=str(cls.personal_memory_consolidation_verify_retries))),
-            personal_memory_consolidation_sum_grounding=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SUM_GROUNDING", default=str(cls.personal_memory_consolidation_sum_grounding))),
+            personal_memory_consolidation_chat_extra_body=(_getenv("MENHIR_PERSONAL_MEMORY_CHAT_EXTRA_BODY", default=cls.personal_memory_consolidation_chat_extra_body) or "").strip(),
+            personal_memory_consolidation_chat_timeout_s=_parse_float(
+                _getenv("MENHIR_PERSONAL_MEMORY_CHAT_TIMEOUT_S", default=str(cls.personal_memory_consolidation_chat_timeout_s)),
+                env_var="MENHIR_PERSONAL_MEMORY_CHAT_TIMEOUT_S",
+            ),
             personal_memory_scalar_state_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED", default=str(cls.personal_memory_scalar_state_enabled))),
             personal_memory_scalar_state_perceiver_version=_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_STATE_PERCEIVER_VERSION", default=cls.personal_memory_scalar_state_perceiver_version),
-            personal_memory_scalar_view_authority_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED", default=str(cls.personal_memory_scalar_view_authority_enabled))),
-            personal_memory_scalar_view_collapse_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_COLLAPSE_ENABLED", default=str(cls.personal_memory_scalar_view_collapse_enabled))),
-            personal_memory_scalar_view_echo_drop_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_ECHO_DROP_ENABLED", default=str(cls.personal_memory_scalar_view_echo_drop_enabled))),
             personal_memory_observation_dedup_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED", default=str(cls.personal_memory_observation_dedup_enabled))),
             personal_memory_scalar_verdict_min_similarity=_parse_float(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY", default=str(cls.personal_memory_scalar_verdict_min_similarity)), env_var="MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY", minimum=0.0),
             personal_memory_scalar_observation_recall=_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_OBSERVATION_RECALL", default=cls.personal_memory_scalar_observation_recall).strip().lower(),
-            personal_memory_scalar_view_freshness_gate=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_FRESHNESS_GATE", default=str(cls.personal_memory_scalar_view_freshness_gate))),
-            personal_memory_scalar_reconcile_attribute=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_ATTRIBUTE", default=str(cls.personal_memory_scalar_reconcile_attribute))),
-            personal_memory_scalar_reconcile_scope=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_SCOPE", default=str(cls.personal_memory_scalar_reconcile_scope))),
-            personal_memory_scalar_reconcile_subject=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_RECONCILE_SUBJECT", default=str(cls.personal_memory_scalar_reconcile_subject))),
-            personal_memory_scalar_canonical_self=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_CANONICAL_SELF", default=str(cls.personal_memory_scalar_canonical_self))),
             personal_memory_scalar_threshold=_parse_scalar_threshold(
                 _getenv(
                     "MENHIR_PERSONAL_MEMORY_SCALAR_THRESHOLD",
@@ -972,34 +885,6 @@ class MemorySettings:
             personal_memory_consolidation_audit_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_AUDIT_ENABLED", default=str(cls.personal_memory_consolidation_audit_enabled))),
             personal_memory_recall_audit_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_RECALL_AUDIT_ENABLED", default=str(cls.personal_memory_recall_audit_enabled))),
             personal_memory_scalar_history_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED", default=str(cls.personal_memory_scalar_history_enabled))),
-            personal_memory_scalar_deterministic_shadow=parse_bool_env(_getenv(
-                "MENHIR_SCALAR_DETERMINISTIC_SHADOW",
-                default=str(cls.personal_memory_scalar_deterministic_shadow),
-            )),
-            personal_memory_scalar_deterministic_router=parse_bool_env(_getenv(
-                "MENHIR_PERSONAL_MEMORY_SCALAR_DETERMINISTIC_ROUTER",
-                default=str(cls.personal_memory_scalar_deterministic_router),
-            )),
-            personal_memory_scalar_deterministic_classes=tuple(dict.fromkeys(
-                item.strip().lower()
-                for item in parse_csv_env(_getenv(
-                    "MENHIR_PERSONAL_MEMORY_SCALAR_DETERMINISTIC_CLASSES",
-                    default="",
-                ))
-                if item.strip()
-            )),
-            personal_memory_event_history_enabled=parse_bool_env(_getenv(
-                "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED",
-                default=str(cls.personal_memory_event_history_enabled),
-            )),
-            personal_memory_event_history_perceiver_version=_getenv(
-                "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_PERCEIVER_VERSION",
-                default=cls.personal_memory_event_history_perceiver_version,
-            ),
-            personal_memory_event_history_authority_enabled=parse_bool_env(_getenv(
-                "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED",
-                default=str(cls.personal_memory_event_history_authority_enabled),
-            )),
             personal_memory_counting_enabled=parse_bool_env(_getenv(
                 "MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED",
                 default=str(cls.personal_memory_counting_enabled),
@@ -1008,22 +893,6 @@ class MemorySettings:
                 "MENHIR_PERSONAL_MEMORY_COUNTING_PERCEIVER_VERSION",
                 default=cls.personal_memory_counting_perceiver_version,
             ),
-            personal_memory_counting_extract_v2=parse_bool_env(_getenv(
-                "MENHIR_PERSONAL_MEMORY_COUNTING_EXTRACT_V2",
-                default=str(cls.personal_memory_counting_extract_v2),
-            )),
-            personal_memory_counting_match_enabled=parse_bool_env(_getenv(
-                "MENHIR_PERSONAL_MEMORY_COUNTING_MATCH_ENABLED",
-                default=str(cls.personal_memory_counting_match_enabled),
-            )),
-            personal_memory_counting_recall_authority_only=parse_bool_env(_getenv(
-                "MENHIR_PERSONAL_MEMORY_COUNTING_RECALL_AUTHORITY_ONLY",
-                default=str(cls.personal_memory_counting_recall_authority_only),
-            )),
-            personal_memory_counting_wording_enabled=parse_bool_env(_getenv(
-                "MENHIR_PERSONAL_MEMORY_COUNTING_WORDING_ENABLED",
-                default=str(cls.personal_memory_counting_wording_enabled),
-            )),
             personal_memory_counting_lease_seconds=max(1, int(_getenv(
                 "MENHIR_PERSONAL_MEMORY_COUNTING_LEASE_SECONDS",
                 default=str(cls.personal_memory_counting_lease_seconds),
@@ -1031,35 +900,7 @@ class MemorySettings:
             # Benchmark mode (LongMemEval Mode B isolation)
             benchmark_mode=parse_bool_env(_getenv("MENHIR_BENCHMARK_MODE", default=str(cls.benchmark_mode))),
             # Frontier portions (default off)
-            frontier_bm25=parse_bool_env(_getenv("MENHIR_FRONTIER_BM25", default=str(cls.frontier_bm25))),
-            frontier_content_vector=parse_bool_env(_getenv("MENHIR_FRONTIER_CONTENT_VECTOR", default=str(cls.frontier_content_vector))),
-            frontier_content_vector_replace_name=parse_bool_env(_getenv("MENHIR_FRONTIER_CONTENT_VECTOR_REPLACE_NAME", default=str(cls.frontier_content_vector_replace_name))),
-            frontier_content_vector_k=_parse_int(
-                _getenv("MENHIR_FRONTIER_CONTENT_VECTOR_K", default=str(cls.frontier_content_vector_k)),
-                env_var="MENHIR_FRONTIER_CONTENT_VECTOR_K",
-                minimum=1,
-            ),
-            frontier_content_vector_weight=_parse_float(
-                _getenv("MENHIR_FRONTIER_CONTENT_VECTOR_WEIGHT", default=str(cls.frontier_content_vector_weight)),
-                env_var="MENHIR_FRONTIER_CONTENT_VECTOR_WEIGHT",
-            ),
-            frontier_fusion_admission_policy=_getenv(
-                "MENHIR_FRONTIER_FUSION_ADMISSION_POLICY",
-                default=cls.frontier_fusion_admission_policy,
-            ).strip().lower(),
-            frontier_warden_gate=parse_bool_env(_getenv("MENHIR_FRONTIER_WARDEN_GATE", default=str(cls.frontier_warden_gate))),
-            frontier_diversity_gate=parse_bool_env(_getenv("MENHIR_FRONTIER_DIVERSITY_GATE", default=str(cls.frontier_diversity_gate))),
-            frontier_contradiction_interrupt=parse_bool_env(_getenv("MENHIR_FRONTIER_CONTRADICTION_INTERRUPT", default=str(cls.frontier_contradiction_interrupt))),
-            frontier_belief_gate=parse_bool_env(_getenv("MENHIR_FRONTIER_BELIEF_GATE", default=str(cls.frontier_belief_gate))),
-            frontier_evidence_anchor=parse_bool_env(_getenv("MENHIR_FRONTIER_EVIDENCE_ANCHOR", default=str(cls.frontier_evidence_anchor))),
-            frontier_fact_edges=parse_bool_env(_getenv("MENHIR_FRONTIER_FACT_EDGES", default=str(cls.frontier_fact_edges))),
-            frontier_fact_relevance=parse_bool_env(_getenv("MENHIR_FRONTIER_FACT_RELEVANCE", default=str(cls.frontier_fact_relevance))),
-            frontier_fact_said_time=parse_bool_env(_getenv("MENHIR_FRONTIER_FACT_SAID_TIME", default=str(cls.frontier_fact_said_time))),
-            frontier_verb_facets=parse_bool_env(_getenv("MENHIR_FRONTIER_VERB_FACETS", default=str(cls.frontier_verb_facets))),
-            frontier_fact_edge_mode=_getenv("MENHIR_FRONTIER_FACT_EDGE_MODE", default=cls.frontier_fact_edge_mode).strip().lower(),
-            frontier_similarity_scale=_getenv("MENHIR_FRONTIER_SIMILARITY_SCALE", default=cls.frontier_similarity_scale).strip().lower(),
             frontier_shadow=parse_bool_env(_getenv("MENHIR_FRONTIER_SHADOW", default=str(cls.frontier_shadow))),
-            frontier_source_memories=parse_bool_env(_getenv("MENHIR_FRONTIER_SOURCE_MEMORIES", default=str(cls.frontier_source_memories))),
             frontier_source_memory_limit=_parse_int(
                 _getenv("MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT", default=str(cls.frontier_source_memory_limit)),
                 env_var="MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT",
@@ -1072,8 +913,6 @@ class MemorySettings:
                 minimum=100,
                 maximum=4000,
             ),
-            frontier_source_memory_pools=parse_bool_env(_getenv("MENHIR_FRONTIER_SOURCE_MEMORY_POOLS", default=str(cls.frontier_source_memory_pools))),
-            frontier_source_memory_spread=parse_bool_env(_getenv("MENHIR_FRONTIER_SOURCE_MEMORY_SPREAD", default=str(cls.frontier_source_memory_spread))),
             # HTTP server
             api_host=_getenv("MENHIR_API_HOST", default=cls.api_host),
             api_port=_parse_int(

@@ -36,6 +36,7 @@ from typing import Any
 
 from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
+from menhir.infrastructure.graph_operations_transitions import StaleTransitionError
 from menhir.services.saga_reconcile_dispatcher_routing import (
     LEGACY_UNMERGE_DISPOSITION,
     NonReplayableKind,
@@ -306,12 +307,20 @@ class SagaReconcileDispatcher:
         # A recorded non-replayable kind quarantines here rather than inside the handler: the
         # disposition is pure data with no journal of its own, and the dispatcher owns the journal.
         # Keeping the write here means exactly one place performs it.
-        if isinstance(handler, NonReplayableKind):
-            self.journal.mark_needs_review(op_id, observed_error=handler.reason)
-            return DRIFTED, {"observed_error": handler.reason, "non_replayable": True}
-
         try:
+            if isinstance(handler, NonReplayableKind):
+                self.journal.mark_needs_review(
+                    op_id,
+                    observed_error=handler.reason,
+                    owner_token=oo.process_owner_token(),
+                )
+                return DRIFTED, {"observed_error": handler.reason, "non_replayable": True}
             return handler.replay_prepared_row(row)
+        except StaleTransitionError as exc:
+            # CF-271: the row moved under us after the claim (a stale writer or another reconciler).
+            # It is no longer ours to touch; report it as stale rather than as an unresolved failure.
+            logger.warning("saga reconcile: op %s moved under the reconciler: %s", op_id, exc)
+            return LIVE_OWNER, {"observed_error": f"stale transition: {exc}", "stale": True}
         except Exception as exc:  # noqa: BLE001 -- one defective handler must not abort the pass
             logger.warning(
                 "saga reconcile: handler for %s raised on op %s: %s", kind, op_id, exc

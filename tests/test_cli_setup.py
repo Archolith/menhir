@@ -255,9 +255,7 @@ def test_provider_defaults_fill_blanks_without_overwriting_choices_or_opt_outs(
 ) -> None:
     state = tmp_path / "state"
     state.mkdir()
-    opt_outs = ("MENHIR_FRONTIER_WARDEN_GATE=false\nMENHIR_FRONTIER_BELIEF_GATE=false\n"
-                "MENHIR_FRONTIER_EVIDENCE_ANCHOR=false\nMENHIR_FRONTIER_CONTRADICTION_INTERRUPT=false\n"
-                "MENHIR_VERIFIER_SYNC_ENABLED=false\n")
+    opt_outs = "MENHIR_VERIFIER_SYNC_ENABLED=false\n"
     existing = opt_outs + "OPENAI_API_KEY=operator-secret\n"
     if initial is not None:
         existing += "".join(f"{key}={initial}\n" for key in defaults)
@@ -350,6 +348,16 @@ def test_setup_ends_with_the_readiness_report_and_one_next_command(tmp_path: Pat
     assert "[ok  ] neo4j: reachable" in result.output
     assert "Next: run 'menhir up' to start the server" in result.output
     assert "menhir check" not in result.output and "menhir serve" not in result.output
+
+
+@pytest.mark.unit
+def test_setup_apply_points_at_the_your_data_guide(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _make_checkout(tmp_path / "menhir")
+    monkeypatch.delenv("ENV_FILE", raising=False)
+    monkeypatch.setattr("menhir.cli.up.report_readiness", lambda checkout: (object(), False))
+    result = CliRunner().invoke(app, ["setup", "--repo", str(repo)])
+    assert result.exit_code == 0, result.output
+    assert "docs/your-data.md" in result.output
 
 
 @pytest.mark.unit

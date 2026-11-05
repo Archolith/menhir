@@ -288,7 +288,7 @@ def _format_text(report: dict[str, Any], skipped: Counter[str]) -> str:
         "",
         "arm          n    relevance  complete  ranking  noise  omissions  composite  avg hits  query-best",
     ]
-    preferred_order = ["production", "a", "b", "c", "d", "e"]
+    preferred_order = ["production", "a", "b", "c", "e"]
     arm_ids = sorted(report["arms"], key=lambda arm_id: (preferred_order.index(arm_id) if arm_id in preferred_order else 99, arm_id))
     for arm_id in arm_ids:
         arm = report["arms"][arm_id]

@@ -181,10 +181,9 @@ def authority_verdicts(recall_text: str) -> list[dict]:
 
 def run_phase3(config: E2EConfig, evidence: LaneEvidence, namespace: str, *, k: int = 3,
                label: str = "phase3") -> dict:
-    """One Phase 3 pass over ``namespace``. The counter path is off: these lanes are about
-    the scalar and counting stages, and the counter path has its own prompts."""
+    """One Phase 3 pass over ``namespace`` (the scalar and counting stages)."""
     result = post_json(config, "/api/phase3/run",
-                       {"namespace": namespace, "k": k, "counter_state": False})
+                       {"namespace": namespace, "k": k})
     evidence.attach(f"{label}.json", json.dumps(result, indent=2, default=str))
     return result
 

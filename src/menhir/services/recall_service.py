@@ -41,7 +41,7 @@ from menhir.domain.retrieval_trace_models import (
     ViewReachability,
 )
 from menhir.infrastructure.graphiti_client import GraphitiClient
-from menhir.services.hybrid_retrieval import FusionLane, hybrid_search, weighted_rrf_multi
+from menhir.services.hybrid_retrieval import FusionLane, weighted_rrf_multi
 
 if TYPE_CHECKING:
     from menhir.core.bootstrap import UnavailableGraphitiClient
@@ -54,9 +54,6 @@ from menhir.services.scoring_service import (
     MIN_SIMILARITY_THRESHOLD,
     ScoringService,
 )
-from menhir.domain.git_staleness import BeliefCommitContext, derive_structural_staleness
-from menhir.services.change_log_provider import CachedGitChangeLog, ChangeLogProvider
-from menhir.infrastructure.paths import repo_root_for_project
 
 logger = logging.getLogger(__name__)
 
@@ -65,20 +62,16 @@ from menhir.services.recall_policies import (
     FILE_LINKED_BASELINE_SIMILARITY,
     PENDING_ENTITY_SIMILARITY,
     _authority_contributors,
-    _belief_markers_from_facts,
     _blend_oracle_order,
     _build_temporal_facts,
     _filter_to_current_beliefs,
     _frontier_trace_enabled,
     _oracle_similarity,
     _query_wants_history,
-    _repo_path_for,
     _select_candidate_content,
-    _staleness_evidence_for,
 )
 
-from menhir.services.recall_pipeline import (
-    apply_event_history_authority_layer, run_recall, run_recall_history)
+from menhir.services.recall_pipeline import run_recall, run_recall_history
 from menhir.services.recall_support import RecallSupportMixin
 from menhir.services.timeline_service import run_recall_timeline
 
@@ -94,21 +87,17 @@ class RecallService(RecallSupportMixin):
     lifecycle_service: LifecycleServiceProtocol | None = None
     #: Step 7 canary: a current View may suppress an older provenance-linked fact (six gates); off.
     scalar_view_authority_enabled: bool = False
-    scalar_view_collapse_enabled: bool = False  # Views hide their items (drill-down tool); off = unchanged
-    scalar_view_echo_drop_enabled: bool = False  # only drop observations echoing a verdict slot
     #: True: scalar_history Views form an advisory recall lane; False: excluded (real rollback).
     scalar_history_enabled: bool = False
     counting_enabled: bool = False  # False hides counted scalar_state Views (read-side kill switch)
-    counting_recall_authority_only: bool = False  # unit R: counted Views only as verdicts
-    counting_wording_enabled: bool = False  # unit 6: "at least N you mentioned", never leads
-    #: When True, a recognized conservative first-person event recall query (non-None namespace) surfaces
-    #: a leading/advisory event-history authority layer. Default OFF: no event authority or assertion read.
-    event_history_authority_enabled: bool = False
+    counting_recall_authority_only: bool = True  # unit R: counted Views only as verdicts (#168: knob)
+    counting_wording_enabled: bool = True  # unit 6: "at least N you mentioned", never leads
+    anchored_count_hint: bool = True  # query_hint on anchored count questions (#168: on, knob)
+    stale_lead_demotion: bool = True  # a count lead with newer related evidence is advisory
     inferred_self_mode: str = "off"  # MENHIR_INFERRED_SELF_MODE; not "off": recall reads both self tiers
     #: Candidate-readonly: never reinforce retrieval via access timestamps, edge weights or lifecycle.
     read_only: bool = False
     _rehydration_tasks: set[asyncio.Task[None]] = field(default_factory=set)
-    _change_log_provider: ChangeLogProvider = field(default_factory=CachedGitChangeLog)
 
     async def recall(
         self,
@@ -133,7 +122,7 @@ class RecallService(RecallSupportMixin):
         update_access: bool = True,
         source_memory_limit: int | None = None, counted_verdict_limit: int | None = None,
     ) -> RecallResult:
-        result = await run_recall(
+        return await run_recall(
             self, query,
             preset=preset,
             limit=limit,
@@ -154,7 +143,6 @@ class RecallService(RecallSupportMixin):
             update_access=update_access and not self.read_only,
             source_memory_limit=source_memory_limit, counted_verdict_limit=counted_verdict_limit,
         )
-        return await apply_event_history_authority_layer(self, result, query, namespace)
 
     recall_history = run_recall_history  # drill-down; run_recall_history takes the service first
     recall_timeline = run_recall_timeline  # on-demand recorded-time navigation (same delegation)

@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from menhir.infrastructure.anchored_time import CUES
-from menhir.services.event_history_perception import resolve_event_valid_time, sentence_context
+from menhir.services.grounded_event_time import resolve_event_valid_time, sentence_context
 from menhir.services.typed_scalar_rules import _ground_span
 
 _SENTENCE_CAP = 240

@@ -1183,7 +1183,7 @@ only after the result survives baselines and skeptic review
 
 ## Current immediate process for BeliefCircuit
 
-1. Keep `docs/research/probabilistic-belief-layer.md` as the living design note.
+1. Keep `docs/research/belief-temporal/belief-layer.md` as the living design note (the older `probabilistic-belief-layer.md` is in `archive/`).
 2. Keep PR #10 as a code spike, not final architecture.
 3. Add archolith-bench fixtures for:
    - CE willow belief drift

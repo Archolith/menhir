@@ -127,6 +127,16 @@ def _isolate_client_restrictions(monkeypatch):
         monkeypatch.setenv(var, "")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_operator_warning_cache():
+    """The FAILED-count snapshot for operator warnings is process-wide; no test may inherit it."""
+    from menhir.core import backend_runtime_admin_ops as admin_ops
+
+    admin_ops._failed_overview_cache = None
+    yield
+    admin_ops._failed_overview_cache = None
+
+
 @pytest.fixture(autouse=True, scope="session")
 def force_all_tests_onto_test_neo4j():
     """SAFETY (2026-07-13): no test may ever connect to the PRODUCTION graph.
@@ -181,6 +191,30 @@ def force_all_tests_onto_test_neo4j():
             if value is None:
                 os.environ.pop(key, None)
             else:
+                os.environ[key] = value
+
+
+@pytest.fixture(scope="module")
+def live_dotenv():
+    """Load the checkout's `.env` for one live-test module, then restore `os.environ` exactly.
+
+    Required because a module-level `load_dotenv()` ran at collection and left `.env` in the
+    environment for the rest of the run, which failed unrelated provider-settings tests.
+    `test_no_import_time_dotenv.py` keeps such calls out of module scope.
+    """
+    from dotenv import load_dotenv
+
+    saved = dict(os.environ)
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if env_path.is_file():
+        load_dotenv(env_path, override=False)
+    try:
+        yield
+    finally:
+        for key in set(os.environ) - set(saved):
+            del os.environ[key]
+        for key, value in saved.items():
+            if os.environ.get(key) != value:
                 os.environ[key] = value
 
 
@@ -320,9 +354,7 @@ class StubMemoryGraphAdapter:
     node_freshness: dict[str, str] = field(default_factory=dict)
     rehydrated_nodes: list[dict[str, object]] = field(default_factory=list)
     raw_capture_calls: list[dict[str, object]] = field(default_factory=list)
-    content_embedding_results: list[dict[str, object]] = field(default_factory=list)
-    content_embedding_calls: list[dict[str, object]] = field(default_factory=list)
-    # Source-memory lane (default-off) stubs, mirroring the content-vector pair above.
+    # Source-memory lane (default-off) stubs.
     episode_embedding_results: list[dict[str, object]] = field(default_factory=list)
     episode_embedding_calls: list[dict[str, object]] = field(default_factory=list)
     episode_embeddings_written: dict[str, tuple[list[float], str]] = field(default_factory=dict)
@@ -383,6 +415,10 @@ class StubMemoryGraphAdapter:
         # G14 slice 3: default = no declarant-user foundation reachable (the governance-safe advisory
         # default). Tests that exercise the leads path override this attribute with a lambda.
         return False
+
+    def newer_subject_assertions(self, **kwargs) -> list[dict]:
+        # Stale-lead demotion is on by default (#168 freeze): no newer related assertion by default.
+        return []
 
     def assertions_have_user_foundation(self, *, assertion_ids, namespace=None) -> bool:
         # G13 expiry-verdict basis: default = no user foundation (advisory). Overridden in tests.
@@ -464,18 +500,6 @@ class StubMemoryGraphAdapter:
     def fetch_candidate_metadata(self, node_uuids: list[str]) -> list[dict[str, object]]:
         return self.candidate_metadata
 
-    def search_content_embeddings(
-        self,
-        query_vector: list[float],
-        *,
-        limit: int = 50,
-        group_ids: list[str] | None = None,
-    ) -> list[dict[str, object]]:
-        self.content_embedding_calls.append(
-            {"query_vector": query_vector, "limit": limit, "group_ids": group_ids}
-        )
-        return self.content_embedding_results
-
     def search_episode_embeddings(
         self,
         query_vector: list[float],
@@ -507,12 +531,9 @@ class StubMemoryGraphAdapter:
         ][:limit]
 
     def fetch_temporal_facts(
-        self, node_uuids: list[str], *, query_vector=None, namespace=None,
+        self, node_uuids: list[str], *, namespace=None,
     ) -> list[dict[str, object]]:
         return self.temporal_fact_rows
-
-    def search_facts_by_keywords(self, phrases, namespace, limit: int = 50) -> list[dict[str, object]]:
-        return []
 
     def fetch_candidate_provenance(self, node_uuids: list[str]) -> list[dict[str, object]]:
         return self.candidate_provenance_rows
@@ -1680,7 +1701,7 @@ class StubGraphitiClient:
     build_indices_forces: list[bool] = field(default_factory=list)
     search_scored_results: list[tuple[str, str, float]] = field(default_factory=list)
     search_scored_calls: list[dict[str, object]] = field(default_factory=list)
-    # Per-method ranked hits for the attributed hybrid path (enable_bm25=True).
+    # Per-method ranked hits for the trace rank shadow (search_ranked_by_method).
     ranked_by_method_results: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
     ranked_by_method_calls: list[dict[str, object]] = field(default_factory=list)
     embed_query_result: list[float] = field(default_factory=lambda: [0.1, 0.2])

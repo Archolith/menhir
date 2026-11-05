@@ -38,23 +38,29 @@ class _Ep:
 # --------------------------------------------------------------------------- 1. settings
 
 @pytest.mark.unit
-def test_extract_v2_setting_defaults_false_and_parses_env(monkeypatch):
-    monkeypatch.delenv("MENHIR_PERSONAL_MEMORY_COUNTING_EXTRACT_V2", raising=False)
-    assert MemorySettings().personal_memory_counting_extract_v2 is False
-    assert MemorySettings.from_env().personal_memory_counting_extract_v2 is False
-    monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_COUNTING_EXTRACT_V2", "true")
-    assert MemorySettings.from_env().personal_memory_counting_extract_v2 is True
+def test_extract_v2_is_always_on_and_has_no_setting(monkeypatch):
+    # Retired in the #168 freeze: no setting, and the entry-point defaults are on.
+    import inspect
+
+    from menhir.services import scheduler_tasks
+    from menhir.services.maintenance_scheduler import MaintenanceScheduler
+
     monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_COUNTING_EXTRACT_V2", "false")
-    assert MemorySettings.from_env().personal_memory_counting_extract_v2 is False
+    assert not hasattr(MemorySettings.from_env(), "personal_memory_counting_extract_v2")
+    assert CountingConsolidationConfig().extract_v2 is True
+    consolidate = inspect.signature(scheduler_tasks.consolidate_personal_memory).parameters
+    assert consolidate["counting_extract_v2"].default is True
+    assert inspect.signature(MaintenanceScheduler).parameters["counting_extract_v2"].default is True
 
 
 # --------------------------------------------------------------------------- 2/3. version + runner
 
 @pytest.mark.unit
 def test_effective_version_helper():
-    assert effective_counting_perceiver_version("v1", False) == "v1"
-    assert effective_counting_perceiver_version("v1", True) == "v1+x2"
-    assert effective_counting_perceiver_version("v7", True) == "v7+x2"
+    assert effective_counting_perceiver_version("v1", False, match=False) == "v1"
+    assert effective_counting_perceiver_version("v1", True, match=False) == "v1+x2"
+    assert effective_counting_perceiver_version("v7", True, match=False) == "v7+x2"
+    assert effective_counting_perceiver_version("v1") == "v1+x2+m"
 
 
 class _Graph:
@@ -144,7 +150,8 @@ def _run(graph, *, v2):
         graph, namespaces=None, counting_llm=_Llm(),
         build_episodes=lambda rows: [_Ep(str(r["uuid"]), str(r["content"])) for r in rows],
         k=1, threshold=1.0, call_budget=None, embed=None,
-        config=CountingConsolidationConfig(perceiver_version="v1", extract_v2=v2))
+        config=CountingConsolidationConfig(
+            perceiver_version="v1", extract_v2=v2, match=False))
 
 
 @pytest.mark.unit

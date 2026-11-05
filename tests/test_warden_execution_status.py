@@ -15,11 +15,7 @@ from menhir.services.context_builder import ContextBuilderService
 from menhir.services.recall_service import RecallService
 from menhir.services.scoring_service import ScoringService
 
-# Pre-#173 meanings, pinned so the default flip does not change what these tests check.
-STRICT = RetrievalTuningConfig(enable_warden_gate=True, enable_evidence_anchor=True,
-                               enable_contradiction_interrupt=False, enable_belief_gate=False)
-OFF = RetrievalTuningConfig(enable_warden_gate=False, enable_contradiction_interrupt=False,
-                            enable_belief_gate=False)
+OFF = RetrievalTuningConfig(enable_warden_gate=False, enable_contradiction_interrupt=False)
 
 
 @pytest.fixture
@@ -41,23 +37,23 @@ def service(stub_graphiti_client, stub_memory_graph_adapter):
 
 @pytest.mark.asyncio
 async def test_details_are_opt_in_and_cannot_change_enforcement(service):
-    tuning = STRICT
+    tuning = RetrievalTuningConfig(enable_warden_gate=True, enable_contradiction_interrupt=False)
     ordinary = await service.recall("config", namespace="tenant", tuning=tuning)
     detailed = await service.recall("config", namespace="tenant", tuning=tuning, include_warden_status=True)
     assert ordinary.results == detailed.results and ordinary.warden_status is None
     assert ordinary.warden_notice is None
     status = detailed.warden_status
     assert status.state == "applied" and status.master_enabled
-    assert status.evaluated == 2 and status.refused == 1
-    assert {m.uuid for m in detailed.results} == {"good"}
-    assert status.applied_guards == ("scope", "evidence_anchor", "oracle_admission")
+    assert status.evaluated == 2 and status.refused == 0
+    assert {m.uuid for m in detailed.results} == {"good", "wrong"}
+    assert status.applied_guards == ("scope", "oracle_admission")
     assert not status.metadata_gaps
     assert "authority_layers" in status.excluded_result_types
     disabled = await service.recall("config", namespace="tenant", tuning=OFF, include_warden_status=True)
     assert disabled.warden_status.state == "disabled" and disabled.warden_notice is None
     default = await service.recall("config", namespace="tenant", include_warden_status=True)
     assert default.warden_status.state == "applied"  # on by default since #173
-    assert "evidence_anchor" not in default.warden_status.applied_guards  # opt-in (#349)
+    assert default.warden_status.applied_guards == ("scope", "oracle_admission", "contradiction")
 
 
 @pytest.mark.asyncio
@@ -82,17 +78,17 @@ async def test_failure_notice_is_independent_of_diagnostic_visibility(service, m
 @pytest.mark.asyncio
 async def test_optional_guard_is_computed_but_not_applied_without_master(service):
     result = await service.recall("config", namespace="tenant",
-        tuning=RetrievalTuningConfig(enable_belief_gate=True, enable_warden_gate=False,
-                                     enable_contradiction_interrupt=False),
+        tuning=RetrievalTuningConfig(enable_warden_gate=False,
+                                     enable_contradiction_interrupt=True),
         include_warden_status=True)
     assert result.warden_status.state == "computed_not_applied"
-    assert "currentness" in result.warden_status.configured_guards
+    assert "contradiction" in result.warden_status.configured_guards
     assert not result.warden_status.applied_guards
     assert "master gate is off" in result.warden_notice
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("gap", ["provenance_error", "provenance_missing", "provenance_malformed", "temporal_error", "staleness_error"])
+@pytest.mark.parametrize("gap", ["provenance_error", "provenance_missing", "provenance_malformed"])
 async def test_metadata_degradation_never_claims_complete_coverage(service, monkeypatch, gap):
     def fail(*args, **kwargs):
         raise RuntimeError("private source details")
@@ -101,15 +97,10 @@ async def test_metadata_degradation_never_claims_complete_coverage(service, monk
         monkeypatch.setattr(adapter, "fetch_candidate_provenance", fail)
     elif gap == "provenance_missing":
         adapter.candidate_provenance_rows = []
-    elif gap == "provenance_malformed":
-        adapter.candidate_provenance_rows = [dict(uuid="good", evidence_node_kinds=1)]
-    elif gap == "temporal_error":
-        monkeypatch.setattr(adapter, "fetch_temporal_facts", fail)
     else:
-        monkeypatch.setattr("menhir.services.recall_pipeline._staleness_evidence_for", fail)
+        adapter.candidate_provenance_rows = [dict(uuid="good", evidence_node_kinds=1)]
     result = await service.recall("config", namespace="tenant",
-        tuning=RetrievalTuningConfig(enable_warden_gate=True, enable_belief_gate=True,
-                                    enable_evidence_anchor=False), include_warden_status=True)
+        tuning=RetrievalTuningConfig(enable_warden_gate=True), include_warden_status=True)
     assert result.warden_status.state == "applied"
     assert result.warden_status.metadata_gaps
     assert "incomplete" in result.warden_notice
@@ -144,12 +135,13 @@ async def test_empty_and_missing_metadata_have_honest_receipts(service):
 @pytest.mark.asyncio
 async def test_context_details_are_opt_in_and_budgeted(service, monkeypatch):
     builder = ContextBuilderService(recall_service=service,
-                                   retrieval_tuning=STRICT)
+                                   retrieval_tuning=RetrievalTuningConfig(
+                                       enable_warden_gate=True, enable_contradiction_interrupt=False))
     ordinary = await builder.build_context("config", namespace="tenant", max_tokens=3000)
     detailed = await builder.build_context("config", namespace="tenant", max_tokens=3000,
                                            include_warden_status=True)
     assert "Warden status:" not in ordinary.context and "Warden status:" in detailed.context
-    assert ordinary.memory_ids == detailed.memory_ids == ["good"]
+    assert ordinary.memory_ids == detailed.memory_ids and ordinary.memory_count == 2
     from menhir.services.assertion_pipeline import AssertionPipeline
     async def fail(*args, **kwargs):
         raise RuntimeError("boom")
@@ -165,7 +157,7 @@ async def test_context_details_are_opt_in_and_budgeted(service, monkeypatch):
 @pytest.mark.parametrize("compact", [False, True])
 async def test_runtime_and_mcp_omit_details_by_default(service, compact):
     runtime = RuntimeProvider(SimpleNamespace(recall_service=service,
-        settings=MemorySettings(frontier_warden_gate=True, frontier_source_memories=False)), process_session=None)
+        settings=MemorySettings()), process_session=None)
     plain = await runtime.recall("config", namespace="tenant")
     assert "warden_status" not in plain and "warden_notice" not in plain
     tool = RecallMemoriesTool()

@@ -4,6 +4,10 @@
 
 active
 
+> **2026-11-01:** the belief gate described in this document was removed before 0.3.0 (#399: quality
+> delta 0, p95 +12.6%). `MENHIR_FRONTIER_BELIEF_GATE` is ignored, `domain/belief_evidence.py` no longer
+> exists, and the warden gate is always on. The sections on the gate are history.
+
 > **2026-07-11 status update.** The R3 belief-bucket + currentness ladder is **built and bench-graduated**
 > on the demo/fixture families (archolith-bench `r3/`: D currentness — stale-current 0.60 -> 0.00 with
 > zero historical loss; C/D/E/F + 7 real fixtures landed). Code: `domain/belief.py`, `domain/warden.py`
@@ -532,9 +536,9 @@ Generalize file-context injection into bounded structural candidate expansion.
 
 Only evaluate ProbLog, PyJuice, or true probabilistic circuits after transparent baselines produce bench artifacts and limitations.
 
-## Belief gate (implemented, default-OFF)
+## Belief gate (removed before 0.3.0; historical)
 
-The belief gate activates `CurrentnessWarden` in the assertion pipeline:
+The belief gate activated `CurrentnessWarden` in the assertion pipeline:
 
 - **Producer**: `domain/belief_evidence.py` assembles `BeliefEvidence` + scores via `BeliefScorer` from candidate metadata temporal markers.
 - **Pipeline**: `AssertionPipeline(belief_gate=True)` appends `CurrentnessWarden` and populates `WardenContext.belief_score`/`.evidence`.

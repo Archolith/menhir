@@ -11,7 +11,6 @@ from menhir.explorer.recall_packet_prototype_build import (
     PACKET_VERSION as PACKET_VERSION,
     _SECTION_DEFINITIONS as _SECTION_DEFINITIONS,
     _USAGE_POLICY as _USAGE_POLICY,
-    _event_assertion_for_entry as _event_assertion_for_entry,
     _grounding_quote as _grounding_quote,
     _latest as _latest,
     _render_entry as _render_entry,

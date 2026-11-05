@@ -2,9 +2,14 @@
 
 Some models restate a sub-fact of a fuller edge on a different endpoint pair ("jeans are from
 Levi's" next to "user bought black jeans from Levi's"); Graphiti's exact-match and same-pair dedup
-cannot catch that. An edge is dropped only when it sits on a different endpoint pair, every content
-token, including numbers and names, appears in a surviving edge with compatible timestamps and
-attributes, and neither fact carries a negation, modality or clause-embedding word.
+cannot catch that. An edge is dropped only when it sits on a different endpoint pair, every
+content token, including numbers and names, appears in a surviving edge with compatible timestamps
+and attributes, and neither fact carries a negation, modality or clause-embedding word. In
+practice the dropped edge's source must be an endpoint of the keeper, and its target must be named
+in the keeper's fact (or be a keeper endpoint, which only matters for a self-loop); "user" and
+possessives are stopwords, so an endpoint can be invisible to token overlap. Token containment
+cannot prove the keeper states the same fact, so this rule narrows the loss but does not eliminate
+it (CF-259).
 """
 
 from __future__ import annotations
@@ -98,7 +103,12 @@ def fact_markers(fact: str) -> frozenset[str]:
     return frozenset(out)
 
 
-def _compatible(kept: Any, dropped: Any) -> bool:
+def _compatible(
+    kept: Any,
+    dropped: Any,
+    kept_tokens: frozenset[str] = frozenset(),
+    name_tokens: dict[str, frozenset[str]] | None = None,
+) -> bool:
     if fact_markers(getattr(kept, "fact", "")) or fact_markers(getattr(dropped, "fact", "")):
         return False
     # Only cross-pair restatements are pruned. Facts on one pair (either direction, which word
@@ -107,6 +117,16 @@ def _compatible(kept: Any, dropped: Any) -> bool:
     dropped_pair = (dropped.source_node_uuid, dropped.target_node_uuid)
     if set(dropped_pair) == set(kept_pair):
         return False
+    # A fact about a subject is contained only by an edge that touches that subject; "user" and
+    # possessives are stopwords, so token overlap alone cannot tell whose fact it is.
+    if dropped.source_node_uuid not in kept_pair:
+        return False
+    # The target must not be invisible to the keeper either: an endpoint of it, or named in it.
+    target = dropped.target_node_uuid
+    if target not in kept_pair:
+        target_name = (name_tokens or {}).get(target)
+        if not target_name or not target_name <= kept_tokens:
+            return False
     for attr in ("valid_at", "invalid_at"):
         value = getattr(dropped, attr, None)
         if value is not None and value != getattr(kept, attr, None):
@@ -135,6 +155,7 @@ def prune_contained_edges(
         return 0, 0
     facts = [getattr(edge, "fact", "") or "" for edge in edges]
     toks = [fact_tokens(fact) for fact in facts]
+    name_tokens = {n.uuid: fact_tokens(getattr(n, "name", "") or "") for n in nodes}
     # Richest first, so every kept edge is at least as rich as anything it absorbs.
     order = sorted(range(len(edges)), key=lambda i: (-len(toks[i]), -len(facts[i]), i))
     kept: list[int] = []
@@ -148,7 +169,7 @@ def prune_contained_edges(
                 for i in kept
                 if toks[j]
                 and toks[j] <= toks[i]
-                and _compatible(edges[i], edges[j])
+                and _compatible(edges[i], edges[j], toks[i], name_tokens)
             ),
             None,
         )

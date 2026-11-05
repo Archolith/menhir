@@ -21,6 +21,73 @@ logger = logging.getLogger(__name__)
 _MAX_REVISION_VALUE_LEN = 100_000
 
 
+def initialize_lifecycle_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS lifecycle_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            recorded_at TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            event TEXT NOT NULL,
+            status TEXT NOT NULL,
+            episode_uuid TEXT,
+            details_json TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_lifecycle_events_phase_recorded
+        ON lifecycle_events (phase, recorded_at)
+        """
+    )
+    lifecycle_columns = {
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(lifecycle_events)"
+        ).fetchall()
+    }
+    if "episode_uuid" not in lifecycle_columns:
+        conn.execute(
+            "ALTER TABLE lifecycle_events ADD COLUMN episode_uuid TEXT"
+        )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_lifecycle_events_episode_recorded
+        ON lifecycle_events (episode_uuid, recorded_at)
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS lifecycle_actions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            recorded_at TEXT NOT NULL,
+            action TEXT NOT NULL,
+            node_uuid TEXT NOT NULL,
+            session_id TEXT,
+            trigger TEXT NOT NULL,
+            before_freshness TEXT,
+            after_freshness TEXT,
+            llm_used INTEGER,
+            duration_ms INTEGER,
+            notes TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_lifecycle_actions_node
+        ON lifecycle_actions(node_uuid, recorded_at DESC)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_lifecycle_actions_action
+        ON lifecycle_actions(action, recorded_at DESC)
+        """
+    )
+
+
 class MergeAuditUnavailable(RuntimeError):
     """The merge-audit read failed, so its result is unknown rather than empty (CF-205).
 

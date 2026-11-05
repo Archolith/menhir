@@ -18,6 +18,7 @@ from menhir.cli.serve_ops import (
 )
 from menhir.cli.setup import setup as setup_command
 from menhir.cli.sync import sync as sync_command
+from menhir.cli.tool_usage import tool_usage as tool_usage_command
 from menhir.cli.up import up as up_command
 from menhir.cli.wiki_ingest import ingest_wiki
 from menhir.infrastructure.logging_config import configure_logging
@@ -49,6 +50,7 @@ app.add_typer(beacon_app)
 app.command("setup")(setup_command)
 app.command("sync")(sync_command)
 app.command("up")(up_command)
+app.command("tool-usage")(tool_usage_command)
 
 
 app.command("ingest-wiki")(ingest_wiki)

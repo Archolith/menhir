@@ -211,7 +211,7 @@ Returns only stale anchored memories. Supports `project` and `limit` query param
 - normalizes absolute paths under `project_root` to repo-relative
 - posts to `POST /api/tool-events`
 - supports `--dry-run` (prints `{would_send, operation, path, content_uploaded: false}`)
-- uses `MENHIR_TOOL_EVENTS_URL` or `MENHIR_EVENTS_URL` or default `http://127.0.0.1:8090/api/tool-events`
+- uses `MENHIR_TOOL_EVENTS_URL` or `MENHIR_EVENTS_URL` or default `http://127.0.0.1:8100/api/tool-events`
 - uses `MENHIR_AGENT_KEY` for bearer auth when present
 - fails open (menhir down / unreadable file / malformed input → exit 0, never blocks the tool)
 
@@ -274,7 +274,7 @@ echo '{"tool_name":"Edit","tool_input":{"file_path":"src/foo.py"}}' \
 
 | Var | Meaning |
 |-----|---------|
-| `MENHIR_TOOL_EVENTS_URL` | Endpoint. Default `http://127.0.0.1:8090/api/tool-events`. |
+| `MENHIR_TOOL_EVENTS_URL` | Endpoint. Default `http://127.0.0.1:8100/api/tool-events`. |
 | `MENHIR_AGENT_KEY` | Bearer token (agent tier). Unset => unauthenticated attempt. |
 | `MENHIR_SOURCE_CLIENT` | Override the detected client name. |
 | `MENHIR_TURN_EVIDENCE_ENABLED` | Set falsey (`0`/`false`/`no`/`off`) to disable the hook (fail-open no-op). |

@@ -17,6 +17,7 @@ SECRET_FIELDS: frozenset[str] = frozenset(
     {
         "neo4j_password",
         "local_llm_api_key",
+        "anchored_time_api_key",
         "openai_api_key",
         "api_key",
         "operator_key",
@@ -33,6 +34,7 @@ SECRET_FIELDS: frozenset[str] = frozenset(
 CANARIES: dict[str, str] = {
     "neo4j_password": "CANARY_NEO4J_PASSWORD",
     "local_llm_api_key": "CANARY_LOCAL_LLM_API_KEY",
+    "anchored_time_api_key": "CANARY_ANCHORED_TIME_API_KEY",
     "openai_api_key": "CANARY_OPENAI_API_KEY",
     "api_key": "CANARY_API_KEY",
     "operator_key": "CANARY_OPERATOR_KEY",

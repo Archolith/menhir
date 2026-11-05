@@ -29,6 +29,21 @@ from .routes_support import (
 )
 
 
+async def _scalar_dirty(adapter: Any, settings: Any, namespace: str) -> bool:
+    """Whether the live scalar cursor still has work for `namespace`.
+
+    Same selector and perceiver version the scheduler uses (`select_scalar_targets`). With the
+    scalar lane off nothing consumes that work, so it is never reported dirty."""
+    if settings is None or not getattr(settings, "personal_memory_scalar_state_enabled", False):
+        return False
+    dirty = await asyncio.to_thread(
+        adapter.list_scalar_dirty_namespaces,
+        perceiver_version=getattr(settings, "personal_memory_scalar_state_perceiver_version", "v1"),
+        limit=500,
+    )
+    return namespace in dirty
+
+
 async def phase3_run_impl(
     request: Request,
     body: Phase3RunRequest,
@@ -41,17 +56,24 @@ async def phase3_run_impl(
     settings = getattr(runtime_ctx.built, "settings", None)
     if settings is None:
         raise HTTPException(status_code=503, detail="phase 3 consolidation unavailable")
+    from menhir.config.settings_model import parse_extra_body
     from menhir.infrastructure.sync_llm import make_sync_chat
     from menhir.infrastructure.view_embedder import make_view_embedder, view_embedder_version
     from menhir.services.lane_outcomes import failed_lanes
     from menhir.services.scheduler_tasks import consolidate_personal_memory
 
     pm_model = getattr(settings, "personal_memory_consolidation_chat_model", "") or None
+    pm_extra_body = parse_extra_body(
+        getattr(settings, "personal_memory_consolidation_chat_extra_body", "") or "",
+        env_name="MENHIR_PERSONAL_MEMORY_CHAT_EXTRA_BODY")
+    pm_timeout_s = float(getattr(settings, "personal_memory_consolidation_chat_timeout_s", 0) or 0)
     chat = make_sync_chat(
         settings, model=pm_model,
         max_tokens=getattr(settings, "personal_memory_consolidation_max_tokens", 8192),
         disable_reasoning=bool(getattr(
-            settings, "personal_memory_consolidation_disable_reasoning", False)))
+            settings, "personal_memory_consolidation_disable_reasoning", False)),
+        **({"extra_body": pm_extra_body} if pm_extra_body else {}),
+        **({"timeout_s": pm_timeout_s} if pm_timeout_s > 0 else {}))
     if chat is None:
         raise HTTPException(
             status_code=503,
@@ -62,7 +84,7 @@ async def phase3_run_impl(
     # of the action, not a filter on it -- forcing the pin here would silently re-aim the run at
     # the caller's own silo and consolidate data it did not ask to touch. Refused instead.
     ns = require_namespace_target(body.namespace, action="run consolidation over")
-    selected = ns in await asyncio.to_thread(adapter.list_dirty_namespaces, limit=500)
+    selected = await _scalar_dirty(adapter, settings, ns)
     result = await consolidate_personal_memory(
         adapter,
         llm_complete=chat,
@@ -71,64 +93,23 @@ async def phase3_run_impl(
         k=body.k,
         source=body.source,
         call_budget=body.call_budget,
-        verify_retries=getattr(settings, "personal_memory_consolidation_verify_retries", 0),
-        sum_grounding=getattr(settings, "personal_memory_consolidation_sum_grounding", False),
-        # CF-129: the deployment flag is the kill switch and the API was bypassing it. The
-        # request body defaulted counter_state=True while the scheduler path
-        # (scheduler_tasks.py) honours personal_memory_consolidation_enabled, which defaults
-        # False -- so a default-body POST reached the correction resolver on a stock
-        # deployment while the scheduler never did. Both must now agree.
-        enable_counter_state=body.counter_state
-        and getattr(settings, "personal_memory_consolidation_enabled", False),
         enable_scalar_state=getattr(settings, "personal_memory_scalar_state_enabled", False),
         scalar_state_perceiver_version=getattr(
             settings,
             "personal_memory_scalar_state_perceiver_version",
             "v1",
         ),
-        scalar_reconcile_attribute=getattr(
-            settings, "personal_memory_scalar_reconcile_attribute", False),
-        scalar_reconcile_scope=getattr(
-            settings, "personal_memory_scalar_reconcile_scope", False),
-        scalar_reconcile_subject=getattr(
-            settings, "personal_memory_scalar_reconcile_subject", False),
-        scalar_canonical_self=getattr(
-            settings, "personal_memory_scalar_canonical_self", False),
         scalar_threshold=getattr(settings, "personal_memory_scalar_threshold", 1.0),
         scalar_embed_version=view_embedder_version(settings),
         scalar_history_enabled=getattr(
             settings, "personal_memory_scalar_history_enabled", False),
-        scalar_deterministic_shadow_enabled=getattr(
-            settings, "personal_memory_scalar_deterministic_shadow", False),
-        scalar_deterministic_router_enabled=getattr(
-            settings, "personal_memory_scalar_deterministic_router", False),
-        scalar_deterministic_router_promoted_classes=getattr(
-            settings, "personal_memory_scalar_deterministic_classes", ()),
-        enable_event_history=getattr(
-            settings, "personal_memory_event_history_enabled", False),
         enable_counting=getattr(settings, "personal_memory_counting_enabled", False),
         counting_perceiver_version=getattr(
             settings, "personal_memory_counting_perceiver_version", "v1"),
-        counting_extract_v2=bool(getattr(
-            settings, "personal_memory_counting_extract_v2", False)),
-        counting_match=bool(getattr(
-            settings, "personal_memory_counting_match_enabled", False)),
         counting_lease_seconds=getattr(
             settings, "personal_memory_counting_lease_seconds", 900),
-        event_history_perceiver_version=getattr(
-            settings, "personal_memory_event_history_perceiver_version", "v1"),
-        event_batch_size=getattr(
-            settings, "personal_memory_event_history_batch_size", 500),
     )
-    dirty_after = ns in await asyncio.to_thread(adapter.list_dirty_namespaces, limit=500)
-    event_dirty_after = None
-    if getattr(settings, "personal_memory_event_history_enabled", False):
-        event_dirty_after = bool(await asyncio.to_thread(
-            adapter.load_next_event_evidence_batch,
-            ns,
-            perceiver_version=getattr(settings, "personal_memory_event_history_perceiver_version", "v1"),
-            limit=1,
-        ))
+    dirty_after = await _scalar_dirty(adapter, settings, ns)
     counting_dirty_after = None
     if (getattr(settings, "personal_memory_counting_enabled", False)
             and getattr(settings, "personal_memory_scalar_state_enabled", False)):
@@ -136,9 +117,7 @@ async def phase3_run_impl(
             adapter.load_next_counting_batch,
             ns,
             perceiver_version=effective_counting_perceiver_version(
-                getattr(settings, "personal_memory_counting_perceiver_version", "v1"),
-                bool(getattr(settings, "personal_memory_counting_extract_v2", False)),
-                match=bool(getattr(settings, "personal_memory_counting_match_enabled", False))),
+                getattr(settings, "personal_memory_counting_perceiver_version", "v1")),
             scalar_perceiver_version=getattr(
                 settings, "personal_memory_scalar_state_perceiver_version", "v1"),
             limit=1,
@@ -156,16 +135,13 @@ async def phase3_run_impl(
         abstained=int(result.get("abstained", 0) or 0),
         corrections_applied=int(result.get("corrections_applied", 0) or 0),
         llm_calls=int(result.get("llm_calls", 0) or 0),
-        counter_enabled=bool(body.counter_state and getattr(settings, "personal_memory_consolidation_enabled", False)),
+        counter_enabled=False,
         scalar_llm_calls=int(result.get("scalar_llm_calls", 0) or 0),
-        event_dirty_after=event_dirty_after,
         scalar_enabled=bool(getattr(settings, "personal_memory_scalar_state_enabled", False)),
         scalar_namespaces_processed=int(result.get("scalar_namespaces_processed", 0) or 0),
         scalar_states_written=int(result.get("scalar_states_written", 0) or 0),
         scalar_advisory=int(result.get("scalar_advisory", 0) or 0),
         scalar_repair_pending=int(result.get("scalar_repair_pending", 0) or 0),
-        event_history_enabled=bool(
-            getattr(settings, "personal_memory_event_history_enabled", False)),
         counting_enabled=bool(getattr(settings, "personal_memory_counting_enabled", False)),
         counting_namespaces_processed=int(
             result.get("counting_namespaces_processed", 0) or 0),
@@ -188,16 +164,6 @@ async def phase3_run_impl(
         counting_decided_swapped=result.get("counting_decided_swapped"),
         counting_decided_deferred=result.get("counting_decided_deferred"),
         counting_gate_dropped=result.get("counting_gate_dropped"),
-        event_namespaces_processed=int(
-            result.get("event_namespaces_processed", 0) or 0),
-        event_namespaces_failed=int(
-            result.get("event_namespaces_failed", 0) or 0),
-        event_assertions_recorded=int(
-            result.get("event_assertions_recorded", 0) or 0),
-        event_assertions_created=int(
-            result.get("event_assertions_created", 0) or 0),
-        event_views_rebuilt=int(result.get("event_views_rebuilt", 0) or 0),
-        event_llm_calls=int(result.get("event_llm_calls", 0) or 0),
         lane_outcomes=result.get("lane_outcomes"),
     )
 
@@ -208,12 +174,13 @@ async def phase3_status_impl(
     *,
     require_phase3_adapter: Callable[[Request], tuple[Any, Any]],
 ) -> Phase3StatusResponse:
-    _, adapter = require_phase3_adapter(request)
+    runtime_ctx, adapter = require_phase3_adapter(request)
+    settings = getattr(getattr(runtime_ctx, "built", None), "settings", None)
     # A read, so the pin forces rather than refuses -- the caller gets a correct answer about
     # its own silo instead of an error. Without this, `?namespace=` was taken verbatim and a
     # pinned client could count another tenant's turn evidence.
     namespace = resolve_namespace_filter(namespace) or namespace
-    dirty = namespace in await asyncio.to_thread(adapter.list_dirty_namespaces, limit=500)
+    dirty = await _scalar_dirty(adapter, settings, namespace)
     turn_evidence = await asyncio.to_thread(adapter.count_turn_evidence, namespace)
     return Phase3StatusResponse(namespace=namespace, dirty=dirty, turn_evidence=int(turn_evidence))
 

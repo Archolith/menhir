@@ -23,8 +23,9 @@ client authority. [Model Context Protocol](https://modelcontextprotocol.io/) is 
 surface alongside REST, a local explorer, and a stdio bridge; it is not the product
 category.
 
-The current package version is `0.2.0`. Menhir is built for a single operator, requires
-Python 3.12 or newer, and is designed for local or operator-controlled deployment.
+The current package version is `0.3.2`. Menhir is built for a single operator, requires
+Python 3.12 or newer, and is designed for local or operator-controlled deployment. Read the
+[known limitations](#known-limitations) before relying on it for personal memory.
 
 [Quick start](#quick-start) | [Agent workflow](#a-coding-loop) |
 [Blast radius](#code-graph-and-blast-radius) |
@@ -35,6 +36,8 @@ Coding agents can read this project's documented knowledge, meaning its purpose,
 decisions and docs, from its public [Beacon](https://github.com/Archolith/beacon) at
 `https://menhir.archolith.dev/mcp` (Streamable HTTP, read-only, no auth). It serves this
 repository's published docs only. It is not a Menhir memory server and holds no one's memory.
+Menhir acting as a memory provider for Beacon (`get_beacon_evidence`, `menhir beacon generate`)
+is deferred until after the MVP (#120) and is not part of the supported MVP surface.
 
 ## Why Menhir is useful for agentic coding
 
@@ -49,7 +52,7 @@ affected by a change, and an advisory warning when a code anchor may be stale.
 | Code-linked evidence | Memories anchored to repository paths found in their narrative or attached Git diff, with source episodes retained for inspection | Shipped |
 | Governed knowledge | Review-only candidates, persistent knowledge, operator-designated authority, conflicts, superseded history, and provenance expansion | Shipped |
 | Engineering artifacts | Plans, reviews, investigations, implementation reports, and handoffs with typed status and relationships | Shipped |
-| Typed temporal state | Immutable assertions with valid and learned time folded into rebuildable current-state and history Views | Shipped, activation and authority opt-in |
+| Typed temporal state | Immutable assertions with valid and learned time folded into rebuildable current-state and history Views | Shipped, on by default (see [known limitations](#known-limitations)) |
 | Agent evidence producers | Prompt and file-event hooks that capture bounded durable evidence without storing full transcripts or file contents | Optional |
 | Release provenance | Strict manifests bind reviewed source commits, build artifacts, installed destinations, policies, and security-review authority | Deployment tooling |
 
@@ -195,22 +198,23 @@ Repository-relative todo locations use the same rule: paths and optional symbols
 ranges are normalized, while unresolved references remain unresolved instead of being
 guessed.
 
-Some read-side authority gates, event-history authority, deterministic scalar routing,
-and retrieval experiments remain opt-in. The
-[activation ledger](.agent/default-off-features.md) records their actual default state
-and the evidence required before activation.
+A few retrieval experiments remain opt-in. The
+[activation ledger](.agent/default-off-features.md) lists them and the evidence required
+before activation; `src/menhir/config/feature_flags.py` is the authority for current defaults.
 
 ## Evaluation posture
 
 Menhir uses benchmark evidence as an activation gate. A retained LongMemEval-derived
-corpus includes temporal-reasoning and knowledge-update questions, but the current run is
-diagnostic: it used the Oracle corpus, a non-fresh graph, and a dirty source revision, and
-it did not run the full-haystack LME-S protocol. There is no current public headline
-score.
+corpus includes temporal-reasoning and knowledge-update questions. The 0.3.0 release gate ran
+on a fresh graph of the 500-question Oracle corpus at the frozen release candidate; retrieval and
+LLM-judged answer-quality results are recorded separately in
+[tracker #123](https://github.com/Archolith/menhir/issues/123) (Gate E). It did not run the
+full-haystack LME-S protocol, so this README quotes no headline score.
 
-That evidence has still been operationally useful. Read-side oracle, warden, belief, and
-related frontier retrieval experiments that were neutral or negative remain disabled by
-default. See the [evaluation posture](docs/evaluation.md) for publication rules, scope
+That evidence has still been operationally useful. Several retrieval experiments were removed
+before release (the belief gate, the diversity gate, source-memory pools and the others listed in
+`feature_flags.RETIRED`), and the Oracle ranking, intent lens and warden gate are now always on.
+See the [evaluation posture](docs/evaluation.md) for publication rules, scope
 limits, and the distinction between shipped behavior and research evidence.
 
 ## How memory moves through the system
@@ -273,12 +277,12 @@ corrections and supersession, and retain the assertions that contributed to the 
 View. `ScalarStateView` represents current state. `ScalarHistoryView` is an advisory
 record of changes rather than a competing source of current truth.
 
-The scalar assertion, persistence, fold, repair, and inspection infrastructure is
-implemented. Scalar-state activation and recall authority remain opt-in while the system
-is checked against held-out extraction, namespace, replay, and repair cases. The
-deterministic extractor and router are also default-off; the extractor can run as an
-observe-only shadow without changing persistence or recall. Event-history authority
-follows the same rollout discipline and remains default-off.
+The scalar lane, scalar history and counting ship on by default, and recall serves their
+Views as authority while the lane is on. They run model calls from the maintenance scheduler,
+so each lane keeps a switch for cost. Some scalar kinds are not checked against the source
+text; see [known limitations](#known-limitations) and the
+[readiness page](docs/personal-memory-readiness.md) for the delay, restart behavior and
+opt-out.
 
 ### Why ingestion comes first
 
@@ -323,6 +327,8 @@ running HTTP backend before launching it.
 
 ## Quick start
 
+Before you store anything, [`docs/your-data.md`](docs/your-data.md) lists what Menhir keeps, for how long, and how to remove it.
+
 ### Prerequisites
 
 - Python 3.12 or newer. On a full OS install check with `python3 --version` (minimal container
@@ -333,7 +339,8 @@ running HTTP backend before launching it.
   the simplest route is [uv](https://docs.astral.sh/uv/): `uv python install 3.12` then
   `uv venv --seed --python 3.12 && source .venv/bin/activate` (`--seed` gives the venv a `pip`;
   uv omits it by default).
-- Neo4j 5 with APOC. `menhir up --compose-neo4j` starts one for you; you need Docker on the
+- Neo4j 5.26 (LTS) or newer with APOC (queries use `CALL () {}` scoped subqueries and dynamic
+  labels, which need 5.26). `menhir up --compose-neo4j` starts one for you; you need Docker on the
   machine running `menhir` for that, and nothing else.
 - a local OpenAI-compatible server (llama.cpp, Ollama, LM Studio, vLLM) or OpenAI
 
@@ -343,6 +350,11 @@ running HTTP backend before launching it.
 python -m pip install archolith-menhir
 menhir up --compose-neo4j --provider openai   # Docker on this machine: bundled Neo4j
 ```
+
+Upgrading from 0.2.3 or earlier? Install into a fresh virtual environment instead of upgrading
+in place: older releases may have installed upstream `graphiti-core`, which shares the
+`graphiti_core` package with the fork Menhir now uses (see
+[post-install](docs/post-install.md)).
 
 No clone, no build tooling, no Git. Configuration lives in `MENHIR_STATE_DIR` (default
 `~/.menhir`): `menhir up` creates `.env` there on first run, and `--compose-neo4j` writes the
@@ -387,7 +399,10 @@ run them by hand.
 
 Keep `menhir up` (or `menhir serve`) running, then configure a local MCP client to launch
 the stdio bridge with the same Python installation as Menhir. The bridge connects to the
-running backend; it does not start one. A fresh loopback install needs no key:
+running backend; it does not start one. A fresh loopback install needs no key, but with no key
+every loopback request gets the operator tier: the agent sees every registered tool, including
+scheduler, lease, client and namespace administration. To give an agent a smaller tool set, set
+up an agent key as described below.
 
 ```json
 {
@@ -409,10 +424,11 @@ has its own `.env` file.
 Once any tier key is configured, unauthenticated MCP requests are refused. Configure a
 distinct `MENHIR_AGENT_KEY` on the backend, restart it, and pass the same value in the stdio
 client's `env` alongside `MENHIR_BACKEND_URL`. The agent key gives an automated client its
-intended tool tier:
+intended tool tier (the shell snippets in this README are bash; on Windows run them in Git Bash):
 
 ```bash
-echo "MENHIR_AGENT_KEY=$(openssl rand -hex 24)" >> "${MENHIR_STATE_DIR:-$HOME/.menhir}/.env"
+ENV_FILE=${MENHIR_STATE_DIR:-~/.menhir}/.env     # or ./.env in a source checkout
+echo "MENHIR_AGENT_KEY=$(openssl rand -hex 24)" >> "$ENV_FILE"
 ```
 
 ```json
@@ -448,8 +464,9 @@ curl -fsS -X POST http://127.0.0.1:8100/mcp-http \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | tail -c 400
 ```
 
-Expect a JSON-RPC result listing tools (40 at agent tier in 0.2.0, including `add_memory`,
-`recall_memories`, `query_structure`, and `build_context`). A `401` means a key is configured
+Expect a JSON-RPC result listing the tools your key's tier can call (with no key configured,
+that is the operator tier and every tool), including `add_memory`,
+`recall_memories`, `query_structure`, and `build_context`. A `401` means a key is configured
 and the request needs `-H "Authorization: Bearer <key>"`; anything else means the server is not
 serving MCP yet -- check `/api/ready` first.
 
@@ -482,9 +499,10 @@ unlinked nodes -- and small models refuse more readily than large ones.
 
 To prove the whole path without leaving test data behind, write into a throwaway namespace,
 recall from it, then delete that namespace. Deleting a single memory removes the episode and
-its projections but deliberately keeps the entities it produced -- they are shared knowledge
-that other memories may also cite -- so the namespace teardown is the clean-up that actually
-leaves nothing.
+its projections but keeps the entities and fact edges extracted from it, and those can restate
+its content (see [known limitations](#known-limitations)). The namespace teardown removes the
+namespace's memories and derived graph data, but it refuses `default` and does not remove TODOs,
+WorkArtifacts or the shared code-structure graph (see [`docs/your-data.md`](docs/your-data.md)).
 
 Namespace deletion requires the operator tier, and `menhir setup` does not write an operator key
 -- `.env` has no `MENHIR_OPERATOR_KEY` line at all, only a comment naming it. Add one, then restart
@@ -510,10 +528,9 @@ Expect `ready entities_linked=2` (or more) on stderr from the write, the sentenc
 results, a node count from the dry run, and the same count deleted.
 
 `ready entities_linked=0` means enrichment succeeded but the model extracted nothing recallable.
-**Use at least a `gpt-4o-mini`-class extraction model.** Measured on OpenRouter: `openai/gpt-4o-mini`
-extracted entities from every test sentence (5/5, including one prefixed "SMOKE TEST:");
-`openai/gpt-4.1-nano` returned zero entities for the same ordinary sentences 6 times out of 9 and
-is not a reliable floor. The same check is available over MCP with `add_memory`,
+**Use at least a `gpt-4o-mini`-class extraction model.** In a small manual check on OpenRouter,
+`openai/gpt-4o-mini` extracted entities from all 5 test sentences, while `openai/gpt-4.1-nano`
+often returned none for the same sentences and is not a reliable floor. The same check is available over MCP with `add_memory`,
 `recall_memories`, and `delete_namespace`.
 
 ### Step by step, and working from a checkout
@@ -543,6 +560,13 @@ python -m pip install -e . --group dev
 ```
 
 The dependency-group command requires pip 25.1 or newer.
+
+Menhir depends on `archolith-graphiti-core`, a fork that installs into the same `graphiti_core`
+import package as upstream `graphiti-core`. Installing upstream into the same environment
+replaces the fork's files, and uninstalling it afterwards breaks the fork; `pip check` reports
+neither. Menhir refuses to build its Graphiti client when the fork's hook parameters are absent
+and names the fix: create a clean virtual environment (or uninstall both `graphiti-core` and
+`archolith-graphiti-core`) and reinstall Menhir.
 
 `menhir setup` is the idempotent post-install step. It creates `.env` only when missing and,
 in a checkout, enables the repository-managed Git hooks without replacing a custom hooks path
@@ -578,7 +602,7 @@ telemetry, and experimental flags.
 
 #### Start Neo4j
 
-The root compose file starts a local Neo4j 5 instance with APOC:
+The root compose file starts a local Neo4j 5 (5.26+) instance with APOC:
 
 ```bash
 docker compose up -d
@@ -648,11 +672,32 @@ See [`deploy/README.md`](deploy/README.md) for client-token bootstrap and image
 verification details. Operator-specific production deployment is maintained in
 the private `Archolith/menhir-deploy` repository.
 
+## Known limitations
+
+These are known gaps in 0.3.2, each with a planned fix:
+
+- **Erasure leaves extracted knowledge behind (#423).** `delete_memory` removes the memory, its
+  episode, captured evidence turns, their projections and its scalar assertions. It does not
+  remove the entities and fact edges enrichment extracted from it, and
+  an entity summary or fact can restate the erased content. Entities are shared across
+  memories, so they are not deleted with one memory. Deleting a non-default namespace removes
+  its memories and derived graph data, but not TODOs, WorkArtifacts or the shared code-structure
+  graph, and `default` cannot be deleted. See [`docs/your-data.md`](docs/your-data.md).
+- **Scalar source checks are pattern-based (#411).** Since 0.3.1, duration, frequency, weekday,
+  status and boolean values must be stated in the source and not negated or hedged. The checks
+  are English patterns: they drop what they cannot read, and they can miss a misattribution such
+  as "my wife is retired" stored as the user's status. Values stored before 0.3.1 are not
+  rechecked. See
+  [source grounding by scalar kind](docs/personal-memory-readiness.md#known-limitation-source-grounding-by-scalar-kind).
+- **Beacon memory provider deferred (#120).** `get_beacon_evidence` and `menhir beacon generate`
+  ship but are not part of the supported MVP surface.
+
 ## Security and privacy
 
 Menhir is a single-operator service, not a multi-tenant boundary. Run a separate instance
 for each operator or trust domain. The full threat model and known limitations are in
-[`docs/security-posture.md`](docs/security-posture.md).
+[`docs/security-posture.md`](docs/security-posture.md). The full inventory of stored data and
+its retention is in [`docs/your-data.md`](docs/your-data.md).
 
 With no key configured, the server refuses non-loopback binds. Bypassing that guard with
 `MENHIR_ALLOW_INSECURE_REMOTE_NO_AUTH=1` is unsafe and is intended only for an isolated
@@ -676,7 +721,7 @@ open a public issue for a security report.
 
 ## Selected MCP tools
 
-Menhir registers 52 tools. These are the main entry points; clients can discover the full
+Menhir registers 62 tools. These are the main entry points; clients can discover the full
 set through the MCP gateway.
 
 ### Store and retain memory
@@ -684,12 +729,12 @@ set through the MCP gateway.
 | Tool | Purpose |
 |------|---------|
 | `add_memory` | Queue a memory for enrichment |
-| `add_memory_and_track` | Queue a memory and stream processing progress |
+| `add_memory_and_track` | Queue a memory and wait for processing, returning the observed state transitions |
 | `ingest_document` | Ingest a document as memory episodes |
 | `add_candidate` | Stage low-trust context for human review without making it recallable |
 | `flag_memory` | Protect a memory from normal lifecycle decay |
-| `promote_memory` | Mark persistent memory as operator-verified ground truth |
-| `delete_memory` | Delete a memory under operator control |
+| `promote_memory` | Mark persistent memory as operator-designated authority |
+| `delete_memory` | Delete a memory under operator control (extracted entities and facts remain; see [known limitations](#known-limitations)) |
 
 ### Recall and context
 
@@ -697,6 +742,8 @@ set through the MCP gateway.
 |------|---------|
 | `recall_memories` | Search and rerank memories, with optional file context |
 | `recall_context_memories` | Retrieve recent and relevant startup context |
+| `recall_history` | List saved memories on a subject in time order, for how something changed |
+| `recall_timeline` | Page through a recorded-time thread of memories, with typed scalar histories |
 | `read_flagged_memories` | Read memories selected for bootstrap |
 | `build_context` | Assemble context within a token budget |
 | `get_provenance` | Expand a result into source episodes, evidence, and code anchors |
@@ -758,7 +805,10 @@ weights for different recall tasks.
 ## Tests
 
 The default pytest run covers the offline suite. Tests marked `online` skip unless
-`--run-online` is present.
+`--run-online` is present. The Beacon tests (`tests/test_beacon_e2e6.py`,
+`tests/test_beacon_generation.py`) fail rather than skip unless `MENHIR_TEST_BEACON_PYTHON`
+names an absolute Python interpreter that has Beacon installed; CI installs one in a separate
+virtualenv. Without it, pass `--deselect` for those two files.
 
 For normal contributor work, do not run the complete suite after every change. Select direct and
 affected tests, broaden according to risk, and let required CI run the full offline plus supported
