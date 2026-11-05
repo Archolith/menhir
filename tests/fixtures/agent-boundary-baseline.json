@@ -1,0 +1,95 @@
+{
+  "description": "Ceilings for .agent/ files that predated test_agent_docs_gain_no_home_paths_or_public_addresses. Lower or remove an entry when a file is cleaned; never raise one.",
+  "files": {
+    ".agent/CHANGELOG.md": {
+      "home_paths": 1
+    },
+    ".agent/archive/handoffs/HANDOFF-2026-07-06.md": {
+      "home_paths": 2
+    },
+    ".agent/archive/handoffs/HANDOFF-2026-07-07.md": {
+      "home_paths": 1
+    },
+    ".agent/archive/plans/menhir-memory-namespace-isolation-plan.md": {
+      "home_paths": 1
+    },
+    ".agent/archive/plans/menhir-oauth-as-phase6-authorize.md": {
+      "global_ipv4": 1
+    },
+    ".agent/archive/plans/menhir-prod-store-corruption-repair.md": {
+      "home_paths": 1
+    },
+    ".agent/archive/plans/menhir-production-release-2026-09-04.md": {
+      "home_paths": 4
+    },
+    ".agent/archive/plans/session-handoff-2026-06-28-live-verification.md": {
+      "home_paths": 1
+    },
+    ".agent/archive/reviews/CROSS-CUTTING-SCRIPTS-DOCS-AUDIT-2026-06-06.md": {
+      "home_paths": 1
+    },
+    ".agent/archive/reviews/menhir-frontier-11-validated-findings.md": {
+      "home_paths": 9
+    },
+    ".agent/archive/reviews/menhir-frontier-dark-code-audit.md": {
+      "home_paths": 8
+    },
+    ".agent/archive/reviews/menhir-frontier-full-audit-results.md": {
+      "home_paths": 14
+    },
+    ".agent/archive/reviews/menhir-frontier-oop-audit.md": {
+      "home_paths": 9
+    },
+    ".agent/archive/reviews/menhir-oauth-as-interop-findings.md": {
+      "global_ipv4": 1
+    },
+    ".agent/archive/reviews/mhir-former-menhir-full-audit-results.md": {
+      "home_paths": 1
+    },
+    ".agent/audit/prompts/M2-FILLED.md": {
+      "home_paths": 1
+    },
+    ".agent/for-review/WRAPUP-2026-07-09-stale-verification-diagnostics.md": {
+      "home_paths": 2
+    },
+    ".agent/for-review/WRAPUP-2026-07-16-menhir-suburbs-extraction-fix.md": {
+      "home_paths": 18
+    },
+    ".agent/for-review/WRAPUP-2026-07-28-menhir-scalar-candidate-relationless-handoff.md": {
+      "home_paths": 19
+    },
+    ".agent/for-review/WRAPUP-2026-08-06-menhir-deterministic-scalar-routing-checkpoint.md": {
+      "home_paths": 17
+    },
+    ".agent/for-review/WRAPUP-2026-08-11-menhir-phase4-5-remediation.md": {
+      "home_paths": 30
+    },
+    ".agent/for-review/WRAPUP-2026-09-06-menhir-release-automation.md": {
+      "home_paths": 35
+    },
+    ".agent/for-review/WRAPUP-2026-09-07-menhir-deployment-reliability.md": {
+      "home_paths": 13
+    },
+    ".agent/for-review/WRAPUP-2026-09-14-menhir-relation-completeness-provenance.md": {
+      "home_paths": 16
+    },
+    ".agent/handoffs/HANDOFF-2026-07-13-recall-hygiene-live-cutover.md": {
+      "home_paths": 6
+    },
+    ".agent/plans/menhir-mcp-snapshot-ingest-2026-09-16.md": {
+      "home_paths": 1
+    },
+    ".agent/plans/menhir-work-artifact-reconciliation-2026-08-11.md": {
+      "home_paths": 2
+    },
+    ".agent/reports/canonical-self-phase0-baseline.md": {
+      "home_paths": 1
+    },
+    ".agent/reviews/menhir-ssot-review-2026-07-11.md": {
+      "home_paths": 1
+    },
+    ".agent/workflows/backend-first-mcp.md": {
+      "home_paths": 1
+    }
+  }
+}
