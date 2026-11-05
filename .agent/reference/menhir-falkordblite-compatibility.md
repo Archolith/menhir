@@ -173,7 +173,8 @@ the entire P0 capability/writer matrix.
 | Same module: `reconcile_all_targets` | Read complete membership, compute additions/removals, apply both atomically | Python set computation needs a deliberate replacement strategy. |
 | `projection_lifecycle_repository_reads.commit` | Fence, callback writes, Python result validation, receipt/certificate in one transaction | Actual callback rejection counterexamples reproduced. |
 | `memory_graph_adapter.write_project_structure` | Identity/generation lock plus multi-query project publication/pruning | Not qualified for FalkorDB. |
-| Same module: `write_document`, `refresh_indexed_binding` | Identity lock and structural writes/metadata together | Not qualified for FalkorDB. |
+| Same module: `write_document` | Identity lock and structural document MERGE together | Production-shaped fused query passes the live checks below; no runtime backend wired. |
+| Same module: `refresh_indexed_binding` | Identity/scan lock and conditional metadata update together | One native MATCH/SET body; fusion not implemented or qualified. |
 | `scripts/backfill_legacy_retention.main` | Revalidate manifest, then apply all reviewed links or none | Operator-only; retains Neo4j requirement. |
 
 Related contract owners include `scalar_projection_materializer.py` (graph reads, Python fold,
@@ -181,6 +182,35 @@ View writes, persisted-state hash verification), `structure_queries.py`, namespa
 schema constraints and graph/SQLite saga recovery. Existing projection tests own the callback
 rollback reference behavior; raw reads/search/schema and Graphiti internal batches still need
 the broader P0 audit. No backend abstraction was wired into runtime construction.
+
+The explicit callback inventory was rechecked across all **543** files under `src/menhir` in
+the current worktree. It still has eight direct runtime `execute_write` calls and the sole
+`begin_transaction` at the repository boundary. Following the callbacks to their query owners
+distinguishes the remaining work:
+
+- `dirty_targets`/`retire_targets` lock/check the definition, then call `_dirty_targets_tx` for
+  one UNWIND/MERGE/SET batch. That helper validates returned row count and decoded target identity
+  **after** mutation; a Falkor variant must validate existing identities and complete target-set
+  coverage before writes or reject inside the atomic operation, not raise after autocommit.
+- `reconcile_all_targets` additionally reads every existing member, validates uniqueness/version,
+  computes desired/current differences in Python, and applies both present and absent batches.
+  Its membership snapshot/difference publication remains unqualified.
+- `write_project_structure` holds the identity/scan lock across `StructureGraphWriter.write_project`:
+  current file-mtime read, incremental changes, conditional role/entity and relationship prunes,
+  entity/edge batches, inferred project targets and symbol/call rewrites. Partial scans deliberately
+  suppress destructive absence-based pruning. The final fingerprint/coverage/Beacon marker is
+  another query whose returned count must be exactly one; failure must undo every earlier write.
+  This is the large structural transaction gate. Do not replace it with independently committed
+  batches or treat the document proof as evidence that it works.
+- `write_document` has a much smaller shape: identity validation plus one `_merge_entity` call.
+  `refresh_indexed_binding` is identity/scan validation plus one conditional MATCH/SET body.
+- Projection `commit` remains the real materializer/history/receipt/certificate gate. Its current
+  prepared proof covers source validation and synthetic outputs, not the complete production path.
+
+This closes the classification of the known explicit runtime callback entry points. It does not
+close P0: indirect/raw query sequences, Graphiti internal operations, schema/readiness and saga
+recovery still need coverage. Graph/SQLite sagas require their existing ownership/recovery protocol;
+a graph transaction must not be presented as an atomic transaction spanning both databases.
 
 The probe now calls `falkordblite_projection_proof.py` against fresh temporary graphs:
 
@@ -213,6 +243,47 @@ contract before an adapter can proceed. Do not move production folds outside tra
 without that proof; no engine rewrite has been demonstrated necessary.
 Large single-query batches must also account for upstream memory/rollback risks #1482/#1062;
 this experiment deliberately uses small fixtures and does not run their crash/OOM reproducers.
+
+### Production-shaped document publication (2026-11-04)
+
+`document_publication_statement` in the existing projection-proof helper obtains the single
+MERGE statement and parameters by invoking the **actual** `StructureGraphWriter.write_document`
+with a capture repository. It does not recreate document defaults, provenance metadata or update
+rules. It adds a backend query variant that validates the current project identity and rejects
+duplicate identities/document keys **before** mutating the identity probe or document. The identity
+probe and unchanged MERGE body execute together in one Falkor graph query.
+
+The existing `admit_structure_writer`/`release_structure_writer` protocol surrounds publication;
+the compiler is not a standalone runtime repository and cannot authorize an unadmitted caller.
+The document's durable project identity must equal the claim. If the production writer ever emits
+more than one statement, compilation refuses instead of silently retaining only one of them.
+This technique is deliberately specific to this writer, not a translator for arbitrary callbacks.
+
+All **13** live checks pass against fresh graphs using real `ProjectIdentity`, `StructureWriteFence`
+and document `Entity` nodes:
+
+- Creation and update match the actual writer's stored fields, including create-only session
+  metadata, UUID and creation-time preservation. The reference path executes the real identity
+  lock plus document writer; the candidate reuses that writer's MERGE and payload construction.
+- Changed/missing host, changed root/generation/state, missing identity, duplicate identity and
+  duplicate document keys refuse without changing any node, relationship or identity probe.
+- A deliberately invalid property write **after** publication rolls back both document creation
+  or update and the identity probe. This is native single-query rollback, not compensation.
+- The real migration fence refuses new admissions while an already-admitted writer can finish;
+  releasing it clears both identity and global registrations. Refusing all admitted writers merely
+  because a migration raised its fence would strand the drain, so that is not the query's rule.
+- Two valid, admitted concurrent writers serialize onto one document with the existing
+  last-writer behavior. The query does not invent a new document revision/order policy.
+
+No datetime replacement is required for this document writer: its existing timestamps are already
+ISO strings. The migration-fence helper still uses the original probe's fixed-string translation
+for `datetime()`; the drain test qualifies admission behavior, not native temporal types.
+
+This passes the document-publication slice only. It does not qualify full project scans/prunes,
+scan-generation publication, native constraint/readiness setup, lease reaping/orphan cleanup,
+cross-process/crash recovery, or real View/history certification. Existing ambiguous-commit handling
+must remain fail-closed; document MERGE is not authority to retry an old write after a peer update.
+No general `execute_write` implementation, backend runtime selection or production service changed.
 
 ### Prepared numeric materialization follow-up (2026-11-04)
 
@@ -393,6 +464,11 @@ Redis pipelining or MULTI/EXEC alone is insufficient evidence. Retain Neo4j mean
   remaining failed compatibility gates. All 24 source-bound cases, all 17 original prepared cases,
   the competing-publisher checks and orderly restart passed. The former admission-link and evidence
   liveness failures now pass in the source-bound variant; the overall decision remains BLOCKED.
+- Document-publication follow-up: 75 local tests passed, 11 online Neo4j checks skipped, one
+  upstream Pydantic warning; default Ruff, F811/F821/ASYNC and formatting checks passed. The
+  focused selection included compatibility/prepared tests, lifecycle/materializer tests and
+  structure-fence/publication reference tests. Live probe: 79 checks, 69 passing, the same 10
+  remaining failed gates; all 13 document checks and orderly restart passed. No full CI claimed.
 
 ## Upstream evidence
 

@@ -81,6 +81,8 @@ Concept id: `runtime.stack`
   basic persistence/search work, but the current Falkor driver does not preserve callback rollback.
   Its `falkordblite_projection_proof.py` helper tests real lifecycle commits and a guarded
   single-query definition-publication candidate; it is isolated experiment code, not runtime wiring.
+  Its document candidate reuses the actual writer's payload/MERGE with atomic identity validation
+  and real admission/release; complete project publication remains unqualified.
   The prepared-materialization and prepared-proof helpers test a bounded numeric payload/certificate
   contract with snapshot and time fences. A source-bound variant now guards real provenance/evidence
   snapshots atomically but still writes synthetic Views. Real View history works only in a

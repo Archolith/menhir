@@ -1,5 +1,8 @@
 ## 2026-11-04 - FalkorDBLite compatibility spike (#109)
 
+- Updated the agreed integration roadmap and callback-writer classification. Added an atomic
+  identity-fenced document candidate reusing the actual writer's MERGE/payload, with live rollback,
+  refusal, migration-drain and concurrent-writer checks. Full project/View publication remains gated.
 - Compared engine-first and Menhir integration routes; documented the recommended internal backend
   with targeted Falkor fixes, ownership boundaries, and the unchanged transaction feasibility gate.
 - Added a bounded source-bound prepared variant: the real assertion/provenance snapshot and evidence

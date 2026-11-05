@@ -110,6 +110,8 @@ database only, pinned fork, failure injection, search and restart checks. See
 `reference/menhir-falkordblite-compatibility.md` for install pins and the measured no-go result.
 Its helper `falkordblite_projection_proof.py` exercises real Menhir materialization callbacks
 and a single-query definition-publication candidate, including refusal/failure and publisher races.
+It also fuses the actual document writer's MERGE with identity validation, exercising real structure
+admission/release, migration draining, rollback and competing document writers.
 Run it through the compatibility probe; it is not a runtime backend adapter.
 `falkordblite_prepared_materialization.py` holds the bounded numeric prepared-write contract;
 `falkordblite_prepared_proof.py` exercises it against disposable storage through the same probe.

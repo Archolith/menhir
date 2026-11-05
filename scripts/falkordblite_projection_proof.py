@@ -1,7 +1,7 @@
 """Bounded #109 transaction experiments, called only by the isolated compatibility probe.
 
 Nothing here is a runtime repository adapter. The autocommit facade deliberately demonstrates
-the unsafe mapping; the guarded publication query is a candidate for one operation only.
+the unsafe mapping; guarded publication candidates cover specific operations only.
 """
 
 from __future__ import annotations
@@ -69,6 +69,62 @@ class AutocommitProbeRepository:
 
     def execute_write(self, work: Callable[..., Any]) -> Any:
         return work(self)
+
+
+def document_publication_statement(claim: Any, document: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Fuse identity validation with the ACTUAL writer's document MERGE, for this proof only.
+
+    The caller must retain the existing admit/release protocol. This is neither an arbitrary
+    callback translator nor a new document model; all payload/default/update rules stay owned
+    by StructureGraphWriter. No temporal substitution is needed for this writer's string stamps.
+    """
+    from menhir.infrastructure.structure_queries import StructureGraphWriter
+
+    if document.get("structure_project_id") != claim.project_id:
+        raise ValueError("document identity disagrees with the publication claim")
+    statements: list[tuple[str, dict[str, Any]]] = []
+
+    class Capture:
+        def execute(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+            statements.append((query, dict(params)))
+            return []
+
+    StructureGraphWriter(Capture()).write_document(**document)
+    if len(statements) != 1:
+        raise ValueError("document proof requires exactly one writer statement")
+    body, parameters = statements[0]
+    query = (
+        """
+OPTIONAL MATCH (p:ProjectIdentity {project_id:$proof_project_id})
+WITH p LIMIT 2
+WITH collect(p) AS identities
+OPTIONAL MATCH (existing:Entity {structure_project:$sp, structure_path:$spath})
+WITH identities, existing LIMIT 2
+WITH identities, collect(existing) AS documents
+WITH identities, CASE
+    WHEN size(identities)>1 OR size(documents)>1 THEN 'corrupt'
+    WHEN size(identities)=0 THEN 'stale_identity'
+    WHEN coalesce(identities[0].state,'bound')<>'bound'
+      OR NOT coalesce(identities[0].bound_host=$proof_host,false)
+      OR NOT coalesce(identities[0].root_key=$proof_root_key,false)
+      OR coalesce(identities[0].claim_generation,0)<>$proof_generation THEN 'stale_identity'
+    ELSE 'apply' END AS action
+FOREACH (identity IN CASE WHEN action='apply' THEN identities ELSE [] END |
+    SET identity.last_publication_probe=timestamp()
+"""
+        + body
+        + """
+)
+RETURN action
+"""
+    )
+    return query, {
+        **parameters,
+        "proof_project_id": claim.project_id,
+        "proof_host": claim.host,
+        "proof_root_key": claim.root_key,
+        "proof_generation": int(claim.generation),
+    }
 
 
 def projection_proofs(db: Any) -> list[tuple[str, Callable[[], object]]]:
@@ -267,3 +323,191 @@ def projection_proofs(db: Any) -> list[tuple[str, Callable[[], object]]]:
         ("guarded_definition_query_failure_rollback", query_failure_rollback),
         ("guarded_definition_concurrent_publishers", concurrent_publication),
     ]
+
+
+def structure_document_proofs(db: Any) -> list[tuple[str, Callable[[], object]]]:
+    """Real identity admission and document-writer payload, with one atomic publication query."""
+    from redis.exceptions import ResponseError
+
+    from menhir.infrastructure.structure_queries import StructureGraphWriter
+    from menhir.infrastructure.structure_write_fence import (
+        IdentityClaim,
+        StructureWritesFrozen,
+        admit_structure_writer,
+        lock_structure_project,
+        raise_fence,
+        release_structure_writer,
+    )
+
+    claim = IdentityClaim(project_id="pid-1", root_key="/workspace/project", generation=3, host="proof-host")
+    document = {
+        "file_path": "/workspace/project/README.md",
+        "content": "original",
+        "project": "project",
+        "structure_path": "README.md",
+        "structure_project_id": claim.project_id,
+        "session_id": "session-one",
+        "user_id": "user-one",
+        "document_type": "reference_article",
+    }
+
+    def require(condition: bool, message: str) -> None:
+        if not condition:
+            raise AssertionError(message)
+
+    def fixture(name: str) -> tuple[Any, Any, Any]:
+        graph = db.select_graph("menhir109_document_" + name)
+        graph.query(
+            "CREATE (:ProjectIdentity {project_id:'pid-1', state:'bound', bound_host:'proof-host', "
+            "root_key:'/workspace/project', claim_generation:3})"
+        )
+        repository = AutocommitProbeRepository(graph)
+        handle = admit_structure_writer(repository, label="document proof", claim=claim)
+        return graph, repository, handle
+
+    def state(graph: Any) -> list[str]:
+        rows = graph.query("MATCH (n) RETURN id(n), labels(n), properties(n)").result_set
+        rows += graph.query("MATCH (a)-[r]->(b) RETURN id(a), id(r), type(r), properties(r), id(b)").result_set
+        return sorted(json.dumps(row, sort_keys=True) for row in rows)
+
+    def entity(graph: Any) -> dict[str, Any]:
+        rows = graph.query("MATCH (n:Entity) RETURN properties(n)").result_set
+        require(len(rows) == 1, f"document identity is not unique: {rows}")
+        return rows[0][0]
+
+    def publish(graph: Any, payload: dict[str, Any]) -> str:
+        query, params = document_publication_statement(claim, payload)
+        rows = graph.query(query, params).result_set
+        require(len(rows) == 1, f"publication returned {rows}")
+        return rows[0][0]
+
+    def roundtrip() -> object:
+        graph, repository, handle = fixture("roundtrip")
+        reference, original, reference_handle = fixture("reference")
+        try:
+            volatile = {"uuid", "created_at", "last_accessed"}
+            for payload in (
+                document,
+                {**document, "content": "updated", "session_id": "session-two", "document_type": "wiki_article"},
+            ):
+                lock_structure_project(original, claim)
+                StructureGraphWriter(original).write_document(**payload)
+                require(publish(graph, payload) == "apply", "valid document refused")
+                actual, expected = entity(graph), entity(reference)
+                require(
+                    {k: v for k, v in actual.items() if k not in volatile}
+                    == {k: v for k, v in expected.items() if k not in volatile},
+                    "document metadata/update rules drifted",
+                )
+                if payload is document:
+                    created = actual["created_at"], actual["uuid"]
+                else:
+                    require(
+                        (actual["created_at"], actual["uuid"]) == created, "update replaced document identity/history"
+                    )
+            require(entity(graph)["session_id"] == "session-one", "update changed create-only metadata")
+            return "create/update match the actual writer's fields and preserve UUID, creation time and create-only metadata"
+        finally:
+            release_structure_writer(repository, handle)
+            release_structure_writer(original, reference_handle)
+
+    mutations = {
+        "host": "MATCH (p:ProjectIdentity) SET p.bound_host='other-host'",
+        "missing_host": "MATCH (p:ProjectIdentity) REMOVE p.bound_host",
+        "root": "MATCH (p:ProjectIdentity) SET p.root_key='/other/project'",
+        "generation": "MATCH (p:ProjectIdentity) SET p.claim_generation=4",
+        "state": "MATCH (p:ProjectIdentity) SET p.state='retired'",
+        "missing_identity": "MATCH (p:ProjectIdentity) DELETE p",
+        "duplicate_identity": "MATCH (p:ProjectIdentity) WITH properties(p) AS props CREATE (q:ProjectIdentity) SET q=props",
+        "duplicate_document": "MATCH (n:Entity) WITH properties(n) AS props CREATE (m:Entity) SET m=props SET m.uuid='duplicate'",
+    }
+
+    def refuse(name: str, mutation: str) -> object:
+        graph, repository, handle = fixture("refuse_" + name)
+        try:
+            StructureGraphWriter(repository).write_document(**document)
+            query, params = document_publication_statement(claim, {**document, "content": "must not publish"})
+            graph.query(mutation)
+            before = state(graph)
+            action = graph.query(query, params).result_set
+            expected = "corrupt" if name.startswith("duplicate") else "stale_identity"
+            require(action == [[expected]], f"{name} accepted or returned wrong refusal: {action}")
+            require(state(graph) == before, f"{name} refusal changed document or identity probe")
+            return expected
+        finally:
+            release_structure_writer(repository, handle)
+
+    def rollback(existing: bool) -> object:
+        graph, repository, handle = fixture("rollback_" + str(existing))
+        try:
+            if existing:
+                StructureGraphWriter(repository).write_document(**document)
+            query, params = document_publication_statement(claim, {**document, "content": "must roll back"})
+            before = state(graph)
+            failing = query.rsplit("RETURN action", 1)[0] + "CREATE (bad:DocumentBad) SET bad.value={nested:1} RETURN 1"
+            try:
+                graph.query(failing, params)
+            except ResponseError as exc:
+                require("Property values" in str(exc), f"unexpected injected failure: {exc}")
+            else:
+                raise AssertionError("document injection did not fail")
+            require(state(graph) == before, "failure retained document or project-probe writes")
+            return "document and project probe restored after post-write failure"
+        finally:
+            release_structure_writer(repository, handle)
+
+    def migration_drain() -> object:
+        graph, repository, handle = fixture("migration")
+        try:
+            raise_fence(repository, reason="proof migration")
+            try:
+                admit_structure_writer(repository, label="late writer", claim=claim)
+            except StructureWritesFrozen:
+                pass
+            else:
+                raise AssertionError("migration admitted a new writer")
+            require(publish(graph, document) == "apply", "migration stranded an already-admitted writer")
+        finally:
+            release_structure_writer(repository, handle)
+        rows = graph.query(
+            "MATCH (p:ProjectIdentity), (f:StructureWriteFence) RETURN p.active_writers, f.writers"
+        ).result_set
+        require(rows == [[[], []]], f"admission/release leaked a writer: {rows}")
+        return "freeze refuses new admissions; admitted writer finishes and releases both registrations"
+
+    def competing_writers() -> object:
+        graph, repository, handle = fixture("race")
+        other = admit_structure_writer(repository, label="second writer", claim=claim)
+        plans = [document_publication_statement(claim, {**document, "content": f"writer-{i}"}) for i in range(2)]
+        barrier = Barrier(2)
+
+        def run(plan: tuple[str, dict[str, Any]]) -> object:
+            barrier.wait(timeout=10)
+            return db.select_graph("menhir109_document_race").query(*plan).result_set
+
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [pool.submit(run, plan) for plan in plans]
+                results = [future.result(timeout=20) for future in futures]
+            require(results == [[["apply"]], [["apply"]]], str(results))
+            current = entity(graph)
+            require(current["content"] in ("writer-0", "writer-1"), "lost document payload")
+            require(current["uuid"] in {params["uuid"] for _, params in plans}, "invented document identity")
+            return "both valid writers serialize onto one document, preserving the existing last-writer behavior"
+        finally:
+            release_structure_writer(repository, handle)
+            release_structure_writer(repository, other)
+            db.client.connection_pool.disconnect()
+
+    checks = [
+        ("document_publication_actual_writer_roundtrip", roundtrip),
+        ("document_publication_create_rollback", lambda: rollback(False)),
+        ("document_publication_update_rollback", lambda: rollback(True)),
+        ("document_publication_migration_drain", migration_drain),
+        ("document_publication_competing_writers", competing_writers),
+    ]
+    checks.extend(
+        (f"document_publication_refuses_{name}", lambda name=name, query=query: refuse(name, query))
+        for name, query in mutations.items()
+    )
+    return checks

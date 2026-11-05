@@ -282,9 +282,14 @@ def main() -> int:
                     checks.extend(asyncio.run(graphiti_probes(db)))
                     # Exercise this checkout's repository code without installing the full service.
                     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-                    from falkordblite_projection_proof import projection_proofs
+                    from falkordblite_projection_proof import (
+                        projection_proofs,
+                        structure_document_proofs,
+                    )
 
                     for name, operation in projection_proofs(db):
+                        checks.append(check(name, operation))
+                    for name, operation in structure_document_proofs(db):
                         checks.append(check(name, operation))
                     from falkordblite_prepared_proof import (
                         prepared_proofs,
