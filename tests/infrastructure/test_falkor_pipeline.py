@@ -883,6 +883,13 @@ def test_native_scalar_assertion_fold_and_rebuild(native_repo):
         "WHERE n.view_current RETURN n.ss_value AS value,n.episode_uuids AS evidence"
     )
     assert rows == [{"value": "20", "evidence": ["turn"]}]
+    assert adapter.delete_memory("turn")
+    assert native_repo.execute(
+        "MATCH (n:Entity {view_kind:'scalar_state'}) RETURN count(n.ss_view_key_current) AS current"
+    ) == [{"current": 0}]
+    assert native_repo.execute(
+        "MATCH (r:ScalarProjectionRepair) RETURN r.status AS status"
+    ) == [{"status": "complete"}]
 
 
 @pytest.mark.online
@@ -951,6 +958,303 @@ def test_native_null_namespace_marker_is_a_closed_compatibility_gate(native_repo
     assert native_repo.execute(
         "MATCH (n:Entity {uuid:'must-not-write'}) RETURN count(n) AS count"
     ) == [{"count": 0}]
+
+
+@pytest.mark.online
+@pytest.mark.parametrize(
+    "namespace", [None, "", "default", "雪", "N", "Vdefault", "\\u0000null"]
+)
+def test_native_repair_identity_roundtrip_and_reconcile_replay(native_repo, namespace):
+    from menhir.infrastructure.falkor import repair_key, repair_key_expression
+    from menhir.infrastructure.typed_assertion_repository import (
+        TypedAssertionRepository,
+    )
+
+    repo = TypedAssertionRepository(native_repo)
+    repo.activate_scalar_state()
+    expression = repair_key_expression("$op", "$kind", "$namespace", "$subject")
+    expected = repair_key("op", "MEMORY_DELETE", namespace, "subject")
+    assert native_repo.execute(
+        f"RETURN {expression} AS key",
+        {
+            "op": "op",
+            "kind": "MEMORY_DELETE",
+            "namespace": namespace,
+            "subject": "subject",
+        },
+    ) == [{"key": expected}]
+    repo.record_reconcile_intent(
+        operation_id="op", operation_kind="ENTITY_UNMERGE", namespace=namespace
+    )
+    assert not repo.reconcile_complete(
+        "op", operation_kind="ENTITY_UNMERGE", namespace=namespace
+    )
+    repo.record_reconcile_receipt(
+        operation_id="op", operation_kind="ENTITY_UNMERGE", namespace=namespace
+    )
+    repo.record_reconcile_intent(
+        operation_id="op", operation_kind="ENTITY_UNMERGE", namespace=namespace
+    )
+    assert repo.reconcile_complete(
+        "op", operation_kind="ENTITY_UNMERGE", namespace=namespace
+    )
+    rows = native_repo.execute(
+        "MATCH (r:ScalarReconcile) RETURN r.receipt_key AS key, r.status AS status"
+    )
+    assert rows == [
+        {"key": repair_key("op", "ENTITY_UNMERGE", namespace), "status": "complete"}
+    ]
+    repo.activate_scalar_state()  # Repeated activation accepts the exact persisted representation.
+
+
+@pytest.mark.online
+@pytest.mark.parametrize(
+    "label,key",
+    [("ScalarProjectionRepair", "repair_key"), ("ScalarReconcile", "receipt_key")],
+)
+@pytest.mark.parametrize("identity", [None, "legacy", "fn1:malformed"])
+def test_native_activation_refuses_incompatible_repair_ids_before_ddl(
+    native_repo, label, key, identity
+):
+    from menhir.infrastructure.typed_assertion_repository import (
+        TypedAssertionRepository,
+    )
+
+    native_repo.execute(
+        f"CREATE (r:{label} {{{key}:$key, operation_id:'op', operation_kind:'MEMORY_DELETE', subject_uuid:'s'}})",
+        {"key": identity},
+    )
+    before = native_repo.execute("CALL db.indexes()")
+    with pytest.raises(RuntimeError, match="incompatible.*identities"):
+        TypedAssertionRepository(native_repo).activate_scalar_state()
+    assert native_repo.execute("CALL db.indexes()") == before
+    assert native_repo.execute(f"MATCH (r:{label}) RETURN r.{key} AS key") == [
+        {"key": identity}
+    ]
+
+
+@pytest.mark.online
+@pytest.mark.parametrize("namespace", [None, "default", "雪", "\\u0000null"])
+def test_native_scalar_erasure_creates_replayable_repair(native_repo, namespace):
+    from menhir.infrastructure.falkor import repair_key
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    adapter = MemoryGraphAdapter(native_repo)
+    adapter.activate_scalar_state()
+    native_repo.execute(
+        """
+        CREATE (:Episodic {uuid:'erase',namespace:$namespace}),
+               (:Entity {uuid:'subject',name:'Atlas'}),
+               (:TypedAssertion {assertion_id:'a',source_key:'source',subject_uuid:'subject',episode_uuid:'erase',
+                                 namespace:$namespace}),
+               (:TypedAssertionHead {source_key:'source'})
+    """,
+        {"namespace": namespace},
+    )
+    result = adapter._memory_queries.delete_memory_with_scalar_cascade(
+        "erase", operation_id="op"
+    )
+    assert result["assertions_deleted"] == 1
+    assert result["heads_deleted"] == 1
+    repairs = adapter._typed_assertions.pending_projection_repairs(operation_id="op")
+    assert len(repairs) == 1
+    assert repairs[0]["repair_key"] == repair_key(
+        "op", "MEMORY_DELETE", namespace, "subject"
+    )
+    repaired = adapter.scalar_state_service().repair_pending_deletions(
+        operation_id="op"
+    )
+    assert repaired["failed"] == []
+    assert repaired["repaired"] == [repairs[0]["repair_key"]]
+    assert not adapter._typed_assertions.pending_projection_repairs(operation_id="op")
+
+
+@pytest.mark.online
+def test_native_namespace_erasure_and_due_activation_use_native_repair_ids(native_repo):
+    from menhir.infrastructure.falkor import repair_key
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    adapter = MemoryGraphAdapter(native_repo)
+    adapter.activate_scalar_state()
+    native_repo.execute("""
+        CREATE (:TypedAssertion {assertion_id:'due',subject_uuid:'subject',namespace:'tenant-a',
+            valid_at:'2026-01-01T00:00:00+00:00',activation_pending:true}),
+            (:TypedAssertion {assertion_id:'other',subject_uuid:'other',namespace:'tenant-b'}),
+            (:TurnEvidence {turn_id:'rawturn',namespace:'tenant-a'}),
+            (:Entity {uuid:'cross-view',group_id:'tenant-b',is_view:true,view_kind:'scalar_state',
+                view_current:true,ss_view_key_current:'cross',episode_uuids:['rawturn','keepturn']}),
+            (h:TypedEventAssertionHead)-[:HAS_VERSION]->(:TypedEventAssertion {episode_uuid:'rawturn',namespace:'tenant-a'}),
+            (h)-[:HAS_VERSION]->(:TypedEventAssertion {episode_uuid:'keepturn',namespace:'tenant-b'})
+    """)
+    native_repo.execute("""
+        MATCH (v:Entity {uuid:'cross-view'}),(a:TypedAssertion {assertion_id:'due'}),
+              (b:TypedAssertion {assertion_id:'other'})
+        CREATE (v)-[:CURRENT_ANCHOR]->(a),(v)-[:CONTRIBUTED_TO]->(b)
+    """)
+    assertions = adapter._typed_assertions
+    due = assertions.claim_due_scalar_activations(
+        as_of="2026-02-01T00:00:00Z", namespaces=["tenant-a"]
+    )
+    assert [r["repair_key"] for r in due] == [
+        repair_key("due", "TIME_ACTIVATION", "tenant-a", "subject")
+    ]
+    assert not assertions.claim_due_scalar_activations(
+        as_of="2026-02-01T00:00:00Z", namespaces=["tenant-a"]
+    )
+    result = adapter._memory_queries.delete_namespace_with_scalar_cascade(
+        "tenant-a", "tenant-a", operation_id="op"
+    )
+    assert result["deleted"] == 3
+    assert result["dependent_views_retired"] == 1
+    assert native_repo.execute(
+        "MATCH (v:Entity {uuid:'cross-view'}) RETURN v.retired AS retired,v.episode_uuids AS evidence"
+    ) == [{"retired": True, "evidence": ["keepturn"]}]
+    assert native_repo.execute(
+        "MATCH (h:TypedEventAssertionHead)-[:HAS_VERSION]->(e:TypedEventAssertion) RETURN e.namespace AS namespace"
+    ) == [{"namespace": "tenant-b"}]
+    assert native_repo.execute(
+        "MATCH (r:ViewProjectionRepair) RETURN r.status AS status,r.reconstructible AS reconstructible"
+    ) == [{"status": "pending", "reconstructible": True}]
+    repairs = assertions.pending_projection_repairs(operation_id="op")
+    assert [r["repair_key"] for r in repairs] == [
+        repair_key("op", "NAMESPACE_DELETE", "tenant-a", "subject")
+    ]
+    assert native_repo.execute(
+        "MATCH (a:TypedAssertion) RETURN a.assertion_id AS id"
+    ) == [{"id": "other"}]
+
+
+@pytest.mark.online
+@pytest.mark.parametrize("namespace_delete", [False, True])
+def test_native_erasure_late_failure_rolls_back_repairs_and_deletion(
+    native_repo, monkeypatch, namespace_delete
+):
+    from redis.exceptions import ResponseError
+
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    adapter = MemoryGraphAdapter(native_repo)
+    adapter.activate_scalar_state()
+    native_repo.execute("""
+        CREATE (:Episodic {uuid:'erase',namespace:'tenant-a'}),
+               (:TypedAssertion {assertion_id:'a',subject_uuid:'s',episode_uuid:'erase',namespace:'tenant-a'})
+    """)
+    original = native_repo.execute
+    snapshot = "MATCH (n) RETURN id(n) AS id,labels(n) AS labels,properties(n) AS props ORDER BY id"
+    before = original(snapshot)
+    dispatched = []
+    return_clause = (
+        "RETURN size(doomed) AS deleted, repairs,"
+        if namespace_delete
+        else "RETURN assertions_deleted, memory_touched, repairs,"
+    )
+    count_expression = "size(doomed)" if namespace_delete else "assertions_deleted"
+
+    def fail_at_return(query, params=None, **kwargs):
+        if return_clause in query:
+            dispatched.append(query)
+            query = query.replace(
+                return_clause,
+                f"RETURN range(0,1,{count_expression}-{count_expression}) AS injected_failure, "
+                + return_clause.removeprefix("RETURN "),
+            )
+        return original(query, params, **kwargs)
+
+    monkeypatch.setattr(native_repo, "execute", fail_at_return)
+    with pytest.raises(ResponseError, match="(?i)step|increment"):
+        if namespace_delete:
+            adapter._memory_queries.delete_namespace_with_scalar_cascade(
+                "tenant-a", "tenant-a", operation_id="op"
+            )
+        else:
+            adapter._memory_queries.delete_memory_with_scalar_cascade(
+                "erase", operation_id="op"
+            )
+    assert len(dispatched) == 1
+    assert original(snapshot) == before
+
+
+@pytest.mark.online
+def test_native_repair_receipts_survive_reopen_and_preserve_namespace_isolation(
+    native_repo,
+):
+    from menhir.infrastructure.falkor import FalkorLiteRepository, repair_key
+    from menhir.infrastructure.typed_assertion_repository import (
+        TypedAssertionRepository,
+    )
+
+    repo = TypedAssertionRepository(native_repo)
+    repo.activate_scalar_state()
+    for ns in (None, "N", "default"):
+        repo.record_reconcile_intent(
+            operation_id="op", operation_kind="ENTITY_UNMERGE", namespace=ns
+        )
+    repo.record_reconcile_receipt(
+        operation_id="op", operation_kind="ENTITY_UNMERGE", namespace=None
+    )
+    native_repo.close()
+    reopened = FalkorLiteRepository(native_repo.path)
+    try:
+        repo = TypedAssertionRepository(reopened)
+        repo.activate_scalar_state()
+        assert repo.reconcile_complete(
+            "op", operation_kind="ENTITY_UNMERGE", namespace=None
+        )
+        assert not repo.reconcile_complete(
+            "op", operation_kind="ENTITY_UNMERGE", namespace="N"
+        )
+        repo.record_reconcile_receipt(
+            operation_id="op", operation_kind="ENTITY_UNMERGE", namespace="N"
+        )
+        rows = reopened.execute(
+            "MATCH (r:ScalarReconcile) RETURN r.receipt_key AS key,r.status AS status ORDER BY key"
+        )
+        assert rows == sorted(
+            [
+                {
+                    "key": repair_key("op", "ENTITY_UNMERGE", ns),
+                    "status": "pending" if ns == "default" else "complete",
+                }
+                for ns in (None, "N", "default")
+            ],
+            key=lambda r: r["key"],
+        )
+    finally:
+        reopened.close()
+
+
+@pytest.mark.online
+def test_native_memory_erasure_preserves_surviving_view_sources_and_event_head(
+    native_repo,
+):
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    adapter = MemoryGraphAdapter(native_repo)
+    adapter.activate_scalar_state()
+    native_repo.execute("""
+        CREATE (ep:Episodic {uuid:'erase',namespace:'tenant-a'})-[:ADMITTED_ON]->
+               (:TurnEvidence {turn_id:'turn',namespace:'tenant-a'}),
+               (a:TypedAssertion {assertion_id:'doomed',subject_uuid:'subject',episode_uuid:'turn',namespace:'tenant-a'}),
+               (b:TypedAssertion {assertion_id:'keeper',subject_uuid:'subject',episode_uuid:'keep',namespace:'tenant-a'}),
+               (v:Entity {uuid:'view',is_view:true,view_kind:'scalar_state',view_current:true}),
+               (ep)-[:MENTIONS]->(v),(v)-[:CURRENT_ANCHOR]->(a),(v)-[:CONTRIBUTED_TO]->(b),
+               (ep)-[:FOUNDS]->(e:TypedEventAssertion {episode_uuid:'turn',namespace:'tenant-a'}),
+               (h:TypedEventAssertionHead)-[:HAS_VERSION]->(e),
+               (h)-[:HAS_VERSION]->(:TypedEventAssertion {episode_uuid:'keep',namespace:'tenant-a'})
+    """)
+    result = adapter._memory_queries.delete_memory_with_scalar_cascade(
+        "erase", operation_id="op"
+    )
+    assert result["assertions_deleted"] == 1
+    assert result["dependent_views_retired"] == 1
+    assert result["event_assertions_deleted"] == 1
+    assert result["event_heads_deleted"] == 0
+    assert native_repo.execute(
+        "MATCH (r:ViewProjectionRepair) RETURN r.status AS status,r.reconstructible AS reconstructible"
+    ) == [{"status": "pending", "reconstructible": True}]
+    assert native_repo.execute(
+        "MATCH (a:TypedAssertion) RETURN a.assertion_id AS id"
+    ) == [{"id": "keeper"}]
 
 
 @pytest.mark.online

@@ -19,7 +19,7 @@ from menhir.infrastructure.typed_assertion_models import (
 )
 
 
-from menhir.infrastructure.falkor import FalkorLiteRepository, encode_instant
+from menhir.infrastructure.falkor import FalkorLiteRepository, encode_instant, repair_key_expression
 
 
 class TypedAssertionWriteMixin:
@@ -257,6 +257,11 @@ class TypedAssertionWriteMixin:
         transaction, so a crash can only leave replayable work, never a lost wake-up.
         """
         ns_pred = " AND a.namespace IN $namespaces" if namespaces is not None else ""
+        activation_key = (
+            repair_key_expression("a.assertion_id", "'TIME_ACTIVATION'", "a.namespace", "a.subject_uuid")
+            if isinstance(self._neo4j, FalkorLiteRepository)
+            else "'TIME_ACTIVATION\u001f' + a.assertion_id"
+        )
         rows = self._execute(
             f"""
             MATCH (a:TypedAssertion)
@@ -267,7 +272,7 @@ class TypedAssertionWriteMixin:
             WITH a ORDER BY a.valid_at ASC, a.assertion_id ASC LIMIT $limit
             SET a.activation_pending = false, a.activation_claimed_at = {self._instant_expression(None)}
             MERGE (rr:ScalarProjectionRepair {{
-                repair_key: 'TIME_ACTIVATION\u001f' + a.assertion_id
+                repair_key: {activation_key}
             }})
             ON CREATE SET rr.operation_id = a.assertion_id,
                           rr.operation_kind = 'TIME_ACTIVATION',

@@ -1,10 +1,13 @@
 ## 2026-11-05 - Falkor runtime integration (#109)
 
+- Added the explicitly authorized native `fn1:` scalar repair/reconciliation IDs, preserving
+  namespace identity and refusing incompatible existing receipts before activation. Mapped native
+  single-memory and namespace erasure while retaining shared retirement/rebuild policy and Neo4j
+  identities. Qualification covers durable receipt replay, native file reopen and late rollback.
 - Added native scalar activation/readiness, View create/refresh/supersede/retire and typed-assertion
   clock/vector mappings, retaining shared folds, provenance gates and Neo4j behavior. Live checks
   cover real uniqueness, refusal, observation vectors and active fold/rebuild. Mapped the shared
-  correlation path veto to the native regex function. Erasure/recovery remains gated on the required
-  repair-ID encoding decision; no new identity format or production enablement was introduced.
+  correlation path veto to the native regex function. Production enablement remains gated.
 - Added native atomic project publication using the actual project writer's policy and payloads.
   Its mtime inputs and identity/scan token are revalidated before ordered writes; actual batch-edge
   counts and exact-one completion are enforced. Full/incremental/partial scan, pruning, input-race

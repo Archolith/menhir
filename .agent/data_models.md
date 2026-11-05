@@ -641,7 +641,7 @@ Concept id: `model.scalar_projection_repair`
 |-------|------|-------|
 | `repair_key` | string | Unique idempotency key for one operation/subject/namespace repair |
 | `operation_id` | string | Correlates all partitions affected by one destructive or activation operation |
-| `subject_key` | string | Scalar subject whose projection must be rebuilt |
+| `subject_uuid` | string | Scalar subject whose projection must be rebuilt |
 | `namespace` | string | Authority partition; repairs never cross namespaces |
 | `operation_kind` | string | `MEMORY_DELETE`, `NAMESPACE_DELETE`, or `TIME_ACTIVATION` |
 | `status` | string | `pending` until rebuild succeeds, then `complete` |
@@ -651,6 +651,13 @@ Memory/episode/namespace deletion creates the receipt in the same Neo4j transact
 removal. The scheduler rebuilds the affected projection at one concrete `as_of` time and only then
 marks the receipt complete. A process crash therefore leaves pending repair work instead of a
 silently stale view.
+
+The internal Falkor backend uses `fn1:` repair identities: operation id, operation kind,
+`N` for null namespace or `V` plus the full non-null namespace, then subject UUID, separated by
+U+001F. `ScalarReconcile.receipt_key` uses the same representation without a subject component.
+Python and native query producers share this contract, including time-activation receipts;
+lookups treat the stored key as opaque. Native scalar activation refuses incompatible existing
+repair/reconcile identities before DDL or backfills. Neo4j's existing identities are unchanged.
 
 ### Recall scalar authority payload
 

@@ -14,6 +14,27 @@ from menhir.infrastructure.falkor import (
 from menhir.infrastructure.neo4j import SagaOwnershipRevoked, revocation_scope
 
 
+def test_native_repair_keys_preserve_namespace_kind_operation_and_subject():
+    from menhir.infrastructure.falkor import repair_key
+
+    namespaces = [None, "", "default", "N", "Vdefault", "雪", "\\u0000null", "a\x1fb"]
+    keys = {repair_key("op", "MEMORY_DELETE", ns, "subject") for ns in namespaces}
+    assert len(keys) == len(namespaces)
+    assert all(key.startswith("fn1:") and "\x00" not in key for key in keys)
+    baseline = repair_key("op", "MEMORY_DELETE", None, "subject")
+    assert baseline != repair_key("other", "MEMORY_DELETE", None, "subject")
+    assert baseline != repair_key("op", "NAMESPACE_DELETE", None, "subject")
+    assert baseline != repair_key("op", "MEMORY_DELETE", None, "other")
+
+
+def test_neo4j_reconcile_identity_remains_unchanged():
+    from menhir.infrastructure.typed_assertion_repository import TypedAssertionRepository
+
+    repo = TypedAssertionRepository(SimpleNamespace())
+    assert repo._receipt_key(" op ", "ENTITY_UNMERGE", None) == "op\x1fENTITY_UNMERGE\x1f\x00null"
+    assert repo._receipt_key("op", "ENTITY_MERGE", "default") == "op\x1fENTITY_MERGE\x1fdefault"
+
+
 @pytest.mark.parametrize(
     "value",
     [

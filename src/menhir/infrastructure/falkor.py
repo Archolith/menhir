@@ -39,6 +39,29 @@ def encode_instant(value: datetime | str) -> str:
     return decode_instant(value).isoformat()
 
 
+def repair_key(
+    operation_id: str, kind: str, namespace: str | None, subject: str | None = None
+) -> str:
+    """Native-only repair identity; null and every non-null namespace stay distinct."""
+    parts = [operation_id, kind, "N" if namespace is None else "V" + namespace]
+    if subject is not None:
+        parts.append(subject)
+    return "fn1:" + "\x1f".join(parts)
+
+
+def repair_key_expression(
+    operation: str, kind: str, namespace: str, subject: str | None = None
+) -> str:
+    """Cypher counterpart of repair_key, using trusted owner expressions, never user text."""
+    expression = (
+        f"'fn1:' + {operation} + '\u001f' + {kind} + '\u001f' + "
+        f"CASE WHEN {namespace} IS NULL THEN 'N' ELSE 'V' + {namespace} END"
+    )
+    if subject is not None:
+        expression += f" + '\u001f' + {subject}"
+    return f"({expression})"
+
+
 @dataclass
 class FalkorLiteRepository:
     """Own one Lite server; direct queries and Graphiti share its socket and graph.

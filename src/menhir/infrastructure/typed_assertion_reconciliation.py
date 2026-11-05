@@ -199,10 +199,13 @@ class TypedAssertionReconciliationMixin:
                     "merge_op": (merge_op_id or "").strip() or None},
         )
 
-    @staticmethod
-    def _receipt_key(operation_id: str, operation_kind: str, namespace: str | None) -> str:
+    def _receipt_key(self, operation_id: str, operation_kind: str, namespace: str | None) -> str:
         """Stable per-(op, kind, namespace) receipt identity. The null namespace gets an explicit
         sentinel so it can never collide with a real silo literally named 'null'."""
+        from menhir.infrastructure.falkor import FalkorLiteRepository, repair_key
+
+        if isinstance(self._neo4j, FalkorLiteRepository):
+            return repair_key(operation_id.strip(), operation_kind, namespace)
         ns = "\x00null" if namespace is None else namespace
         return f"{operation_id.strip()}\x1f{operation_kind}\x1f{ns}"
 

@@ -262,8 +262,28 @@ def scalar_state_schema_ready(repo: FalkorLiteRepository) -> bool:
 
 def activate_scalar_state(repo: FalkorLiteRepository) -> dict[str, int]:
     """Called only after the shared fresh-identity gate; native DDL, shared data policy."""
+    from menhir.infrastructure.falkor import repair_key_expression
     from menhir.infrastructure.schema import get_scalar_state_activation_queries
     from menhir.infrastructure.schema_ddl import schema_rule_name
+
+    # No silent conversion of durable work from an earlier native identity space.
+    # This owner runs before DDL/backfills and accepts only the exact fn1 representation.
+    for label, key, subject in (
+        ("ScalarProjectionRepair", "repair_key", "r.subject_uuid"),
+        ("ScalarReconcile", "receipt_key", None),
+    ):
+        expected = repair_key_expression(
+            "r.operation_id", "r.operation_kind", "r.namespace", subject
+        )
+        rows = repo.execute(
+            f"MATCH (r:{label}) WHERE r.{key} IS NULL OR {expected} IS NULL "
+            f"OR r.{key} <> {expected} RETURN count(r) AS incompatible"
+        )
+        if rows and rows[0]["incompatible"]:
+            raise RuntimeError(
+                f"Native scalar activation refused incompatible {label} identities; "
+                "use an explicit migration or purge_scalar_state_nodes() before activation"
+            )
 
     queries = get_scalar_state_activation_queries()
     names = {schema_rule_name(q) for q in queries if q.startswith("CREATE ")}

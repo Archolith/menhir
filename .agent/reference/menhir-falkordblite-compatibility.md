@@ -954,19 +954,74 @@ docker exec -w /work menhir-109-compat python -m pytest --run-online -q --tb=sho
 # 2 passed, 29 deselected
 ```
 
-Erasure is **not qualified**. Its modern correlated EXISTS query layout needs native variants, and
+At this scalar checkpoint erasure was **not qualified**. Its modern correlated EXISTS layout needed
+native variants, and
 its existing NUL-prefixed null-namespace marker cannot be bound on the pinned native stack:
 `RETURN $marker` with `marker="\u0000null"` raises `Failed to parse query parameter 'marker' value`.
 A negative control proves parameter refusal occurs before a preceding CREATE can mutate the graph.
-The exploratory erasure variant was not committed; the existing path remains fail closed. Simply
+The exploratory erasure variant was not committed at that checkpoint. Simply
 substituting empty namespace or escaped display text would change repair identities and risk merging
-receipts. The concrete native-safe ID proposal is in the roadmap; authorization is pending under the
-workspace rule against unrequested new formats. No encoding change or engine upgrade was made.
+receipts. The roadmap's encoding proposal was awaiting authorization; the follow-up below supersedes
+that decision gate. No engine upgrade was made.
 
-Remaining acceptance includes erasure/recovery after that decision, remaining query/feature owners,
+Remaining acceptance includes broader erasure/saga recovery, remaining query/feature owners,
 full supported-path integration, and scale/crash/CI gates. Internal Linux wiring is not public backend
 support. Static artifact findings remain at the prior baseline, and the previously unavailable
 graph-backed audit endpoint was not retried unchanged.
+
+### Authorized native repair identities and erasure (2026-11-05)
+
+The user explicitly authorized native-safe repair IDs. Native ScalarProjectionRepair keys now use
+`fn1:` plus operation, kind, namespace (`N` for null; `V` plus the complete non-null string), and
+subject, separated by U+001F. ScalarReconcile keys omit the subject. Python receipt producers,
+native deletion/time-activation producers, and exact-key completion agree. Neo4j IDs and tenant
+properties are unchanged. Activation recomputes and rejects incompatible native keys before DDL
+or backfills; it does not silently migrate earlier receipts.
+
+Native erasure keeps the existing policy in one graph command. Falkor cannot resolve graph-pattern
+comprehensions used directly as OPTIONAL MATCH filters, nor the nested View-list variable reliably;
+native conditional aggregation and an explicit per-View UNWIND preserve empty results and evaluate
+surviving sources before deletion. Default queries retain their original semantics. Both commands
+roll back receipts, fences, View changes and deletion on a late execution failure.
+
+Focused validation uses the existing Linux pins and disposable databases, without model calls.
+The final selections and exact commands are recorded in PR #512. These cases cover the real
+assertion/fold/View/deletion path, pending scalar repair completion, namespace deletion and due
+activation, cross-namespace View retirement with surviving evidence, shared event-head preservation,
+late memory/namespace rollback, native encoding round-trips, incompatible receipt refusal, and
+namespace-isolated reconciliation replay after orderly file reopen.
+
+Final results: 125 focused offline passes/4 skips; 23 distinct native passes across the identity/reopen
+selection (14), destructive-write selection (8), and surviving-source case (1); seven matching
+Neo4j deletion/repair regressions passed. Scoped Ruff checks passed. Artifact validation retained
+the existing 19-source/3-workspace finding baseline, with no new owned-document finding.
+
+Invariant scope: internal Menhir native owners on the controlled runtime; not arbitrary graph
+administrators, old external writers, or a production rollout. Source search identified three
+native scalar query producers (memory deletion, namespace deletion, time activation), the shared
+Python reconciliation key owner, opaque pending/completion readers, and activation. Each producer
+and lookup is exercised directly; no string-pattern census test is treated as a Cypher parser.
+Native constraints and each atomic graph command supply the write boundary; startup refuses old
+identity spaces rather than backfilling them. Manual/import bypasses and mixed-version deployment
+remain unqualified and public enablement remains gated. Full merge/saga recovery, remaining feature
+owners, scale/crash qualification, Windows, and exact-SHA full CI remain open.
+
+```text
+Invariant: native scalar activation refuses repair/reconcile identities outside the fn1 contract.
+Authority and refusal outcome: stored receipt fields; RuntimeError before DDL or data backfills.
+System boundary: internal Menhir native runtime; production and arbitrary graph access excluded.
+In-repo paths: source census of producers/readers above; direct tests, no Cypher-parser census claim.
+External paths: manual/import/mixed-version writers; not qualified or enabled for this backend.
+Enforcement point: falkor_schema.activate_scalar_state, before native scalar DDL/backfills.
+Atomicity: each native erasure command; late-failure rollback tested for memory and namespace.
+Accommodations: none for old native IDs; Neo4j keeps its existing representation.
+NULL/absent behavior: tagged null namespace; missing/malformed stored keys refuse activation.
+Staging: fresh-only internal slice; no silent migration, production rollout or backfill.
+Recovery: pending receipt replay and orderly native file reopen tested; crash durability unqualified.
+Deployed versions: pinned disposable Linux runtime; production deployment not performed.
+Live proof: controlled native storage only; production enforcement UNPROVEN and not claimed.
+Remaining assumptions: no older/manual writer bypasses the controlled internal runtime owners.
+```
 
 ## Upstream evidence
 

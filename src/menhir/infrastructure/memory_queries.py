@@ -38,7 +38,7 @@ from menhir.infrastructure.cypher import (
     non_derived_view_cypher,
     SHADOW_CANDIDATE_FACT_EDGE_FIELDS,
 )
-from menhir.infrastructure.falkor import FalkorLiteRepository, encode_instant
+from menhir.infrastructure.falkor import FalkorLiteRepository, encode_instant, repair_key_expression
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.verifier_repository import candidate_verifier_evidence_cypher
 from menhir.services.embedding_identity import LEGACY_EMBEDDING_MODELS
@@ -120,6 +120,25 @@ class MemoryQueryRepository:
 
     def __init__(self, neo4j: Neo4jRepository) -> None:
         self.neo4j = neo4j
+
+    def _scalar_repair_key_expression(self, kind: str) -> str:
+        if isinstance(self.neo4j, FalkorLiteRepository):
+            return repair_key_expression("$operation_id", f"'{kind}'", "repair.namespace", "repair.subject_uuid")
+        return (f"$operation_id + '\u001f{kind}\u001f'"
+                " + coalesce(repair.namespace, '\u0000null') + '\u001f' + repair.subject_uuid")
+
+    @property
+    def _erasure_clock_expression(self) -> str:
+        return "$erasure_now" if isinstance(self.neo4j, FalkorLiteRepository) else "datetime()"
+
+    def _execute_erasure(self, query: str, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        if not isinstance(self.neo4j, FalkorLiteRepository):
+            return self.neo4j.execute(query, *args, **kwargs)
+        params = dict((args[0] if args else kwargs.get("params")) or {})
+        params["erasure_now"] = encode_instant(datetime.now(UTC))
+        if args:
+            return self.neo4j.execute(query, params, *args[1:], **kwargs)
+        return self.neo4j.execute(query, **{**kwargs, "params": params})
 
     @property
     def _fact_text_present(self) -> str:
@@ -1332,12 +1351,91 @@ class MemoryQueryRepository:
         self, node_uuid: str, *, operation_id: str, namespace_key: str
     ) -> dict[str, Any]:
         """Apply one erasure after locking and revalidating its preflight namespace."""
+        native = isinstance(self.neo4j, FalkorLiteRepository)
+        evidence_mentions_view = (
+            'any(evidence IN [(evidence)-[:MENTIONS]->(v) | evidence] WHERE '
+            '(evidence:Episodic AND evidence.uuid=$node_uuid) OR '
+            '(evidence:TurnEvidence AND evidence.turn_id=$node_uuid))'
+            if native else """EXISTS {
+                          MATCH (evidence)-[:MENTIONS]->(v)
+                          WHERE (evidence:Episodic AND evidence.uuid = $node_uuid)
+                             OR (evidence:TurnEvidence AND evidence.turn_id = $node_uuid)
+                      }"""
+        )
+        view_event_from_target = (
+            'any(entry IN [(v)-[:EVENT_HISTORY_ENTRY]->(entry:TypedEventAssertion) | entry] WHERE '
+            'entry.episode_uuid=$node_uuid OR entry.turn_evidence_uuid=$node_uuid)'
+            if native else """EXISTS {
+                          MATCH (v)-[:EVENT_HISTORY_ENTRY]->(entry:TypedEventAssertion)
+                          WHERE entry.episode_uuid = $node_uuid
+                             OR entry.turn_evidence_uuid = $node_uuid
+                      }"""
+        )
+        view_has_events = (
+            'size([(v)-[:EVENT_HISTORY_ENTRY]->(entry:TypedEventAssertion) | entry]) > 0'
+            if native else """EXISTS {
+                                 MATCH (v)-[:EVENT_HISTORY_ENTRY]->(:TypedEventAssertion)
+                             }"""
+        )
+        surviving_scalar_source = (
+            'any(source IN [(v)-[:CURRENT_ANCHOR|CONTRIBUTED_TO|HISTORY_ENTRY]->(source:TypedAssertion) | '
+            'source] WHERE NOT (source.assertion_id=$node_uuid OR source.episode_uuid=$node_uuid OR '
+            'source.subject_uuid=$node_uuid OR any(link IN [(ep:Episodic)-[:ADMITTED_ON]->(t:TurnEvidence) | '
+            '{episode:ep.uuid,turn:t.turn_id}] WHERE link.episode=$node_uuid AND link.turn=source.episode_uuid)))'
+            if native else """EXISTS {
+                                 MATCH (v)-[:CURRENT_ANCHOR|CONTRIBUTED_TO|HISTORY_ENTRY]
+                                       ->(source:TypedAssertion)
+                                 WHERE NOT (
+                                     source.assertion_id = $node_uuid
+                                     OR source.episode_uuid = $node_uuid
+                                     OR source.subject_uuid = $node_uuid
+                                     OR EXISTS {
+                                         MATCH (:Episodic {uuid: $node_uuid})-[:ADMITTED_ON]
+                                               ->(:TurnEvidence {turn_id: source.episode_uuid})
+                                     }
+                                 )
+                             }"""
+        )
+        surviving_event_source = (
+            'any(source IN [(v)-[:EVENT_HISTORY_ENTRY]->(source:TypedEventAssertion) | source] WHERE '
+            "coalesce(source.episode_uuid,'')<>$node_uuid AND coalesce(source.turn_evidence_uuid,'')<>$node_uuid)"
+            if native else """EXISTS {
+                                 MATCH (v)-[:EVENT_HISTORY_ENTRY]->(source:TypedEventAssertion)
+                                 WHERE coalesce(source.episode_uuid, '') <> $node_uuid
+                                   AND coalesce(source.turn_evidence_uuid, '') <> $node_uuid
+                             }"""
+        )
+        admitted_assertion_from_target = (
+            'any(link IN [(ep:Episodic)-[:ADMITTED_ON]->(t:TurnEvidence) | {episode:ep.uuid,turn:t.turn_id}] '
+            'WHERE link.episode=$node_uuid AND link.turn=a.episode_uuid)'
+            if native else """EXISTS {
+                       MATCH (source_ep:Episodic {uuid: $node_uuid})
+                             -[:ADMITTED_ON]->(:TurnEvidence {turn_id: a.episode_uuid})
+                   }"""
+        )
+        event_grounded_on_target = (
+            'any(source IN [(source)-[:FOUNDS|GROUNDS]->(event) | source] WHERE '
+            '(source:TurnEvidence AND source.turn_id=$node_uuid) OR (source:Episodic AND source.uuid=$node_uuid))'
+            if native else """EXISTS {
+                       MATCH (source)-[:FOUNDS|GROUNDS]->(event)
+                       WHERE (source:TurnEvidence AND source.turn_id = $node_uuid)
+                          OR (source:Episodic AND source.uuid = $node_uuid)
+                   }"""
+        )
+        event_head_has_survivors = (
+            'any(outside IN [(event_head)-[:HAS_VERSION]->(outside:TypedEventAssertion) | outside] WHERE NOT '
+            'outside IN doomed_events)'
+            if native else """EXISTS {
+                      MATCH (event_head)-[:HAS_VERSION]->(outside:TypedEventAssertion)
+                      WHERE NOT outside IN doomed_events
+                  }"""
+        )
         # legacy event-history data cleanup, kept after the lane was archived so erasure stays complete
-        rows = self.neo4j.execute(
-            """
-            MERGE (f:EvidenceNamespaceFence {namespace_key: $namespace_key})
-            ON CREATE SET f.generation = 0, f.created_at = datetime()
-            SET f.lock_nonce = $operation_id, f.locked_at = datetime()
+        rows = self._execute_erasure(
+            f"""
+            MERGE (f:EvidenceNamespaceFence {{namespace_key: $namespace_key}})
+            ON CREATE SET f.generation = 0, f.created_at = {self._erasure_clock_expression}
+            SET f.lock_nonce = $operation_id, f.locked_at = {self._erasure_clock_expression}
             WITH f
             OPTIONAL MATCH (target)
             WHERE ((target:Entity OR target:Episodic) AND target.uuid = $node_uuid)
@@ -1357,28 +1455,20 @@ class MemoryQueryRepository:
             WHERE size(actual_namespace_keys) > 0
               AND all(actual_key IN actual_namespace_keys WHERE actual_key = f.namespace_key)
             WITH [f] AS fences
-            CALL {
+            CALL {{
                 WITH fences
                 OPTIONAL MATCH (v:Entity)
-                WHERE (coalesce(v.is_view, false)
+                {'WITH fences, collect(DISTINCT CASE WHEN' if native else 'WHERE'} (coalesce(v.is_view, false)
                        OR coalesce(v.is_quantstate, false)
                        OR v.view_kind IS NOT NULL)
                   AND (
                       $node_uuid IN coalesce(v.episode_uuids, [])
                       OR v.turn_evidence_uuid = $node_uuid
-                      OR EXISTS {
-                          MATCH (evidence)-[:MENTIONS]->(v)
-                          WHERE (evidence:Episodic AND evidence.uuid = $node_uuid)
-                             OR (evidence:TurnEvidence AND evidence.turn_id = $node_uuid)
-                      }
-                      // An event timeline shows its entries' text; the events below are deleted.
-                      OR EXISTS {
-                          MATCH (v)-[:EVENT_HISTORY_ENTRY]->(entry:TypedEventAssertion)
-                          WHERE entry.episode_uuid = $node_uuid
-                             OR entry.turn_evidence_uuid = $node_uuid
-                      }
+                      OR {evidence_mentions_view}
+                      // An event timeline shows its entries' text. the events below are deleted.
+                      OR {view_event_from_target}
                   )
-                WITH fences, collect(DISTINCT v) AS dependent_views
+                {'THEN v ELSE null END) AS dependent_views' if native else 'WITH fences, collect(DISTINCT v) AS dependent_views'}
                 WITH fences, dependent_views,
                      [v IN dependent_views
                       WHERE coalesce(v.view_current, v.qs_current, true)
@@ -1398,50 +1488,34 @@ class MemoryQueryRepository:
                         v.qs_current = false,
                         v.retired = true,
                         v.retired_reason = 'contributing_evidence_erased',
-                        v.expired_at = datetime(),
-                        v.last_accessed = datetime()
+                        v.expired_at = {self._erasure_clock_expression},
+                        v.last_accessed = {self._erasure_clock_expression}
                     REMOVE v.ss_view_key_current
                 )
+                {'WITH fences, dependent_views, current_views' if native else ''}
+                {'UNWIND CASE WHEN size(current_views)=0 THEN [null] ELSE current_views END AS v' if native else ''}
                 WITH fences, dependent_views, current_views,
-                     [v IN current_views | {
+                     {'collect(CASE WHEN v IS NULL THEN null ELSE' if native else '[v IN current_views |'} {{
                          view: v,
                          source_family: CASE
                              WHEN v.view_kind IN ['scalar_state', 'scalar_history']
                              THEN 'typed_scalar_assertions'
-                             WHEN v.view_kind = 'timeline' AND EXISTS {
-                                 MATCH (v)-[:EVENT_HISTORY_ENTRY]->(:TypedEventAssertion)
-                             }
+                             WHEN v.view_kind = 'timeline' AND {view_has_events}
                              THEN 'typed_event_assertions'
                              ELSE 'none'
                          END,
                          reconstructible: CASE
-                             WHEN v.view_kind IN ['scalar_state', 'scalar_history'] AND EXISTS {
-                                 MATCH (v)-[:CURRENT_ANCHOR|CONTRIBUTED_TO|HISTORY_ENTRY]
-                                       ->(source:TypedAssertion)
-                                 WHERE NOT (
-                                     source.assertion_id = $node_uuid
-                                     OR source.episode_uuid = $node_uuid
-                                     OR source.subject_uuid = $node_uuid
-                                     OR EXISTS {
-                                         MATCH (:Episodic {uuid: $node_uuid})-[:ADMITTED_ON]
-                                               ->(:TurnEvidence {turn_id: source.episode_uuid})
-                                     }
-                                 )
-                             }
+                             WHEN v.view_kind IN ['scalar_state', 'scalar_history'] AND {surviving_scalar_source}
                              THEN true
-                             WHEN v.view_kind = 'timeline' AND EXISTS {
-                                 MATCH (v)-[:EVENT_HISTORY_ENTRY]->(source:TypedEventAssertion)
-                                 WHERE coalesce(source.episode_uuid, '') <> $node_uuid
-                                   AND coalesce(source.turn_evidence_uuid, '') <> $node_uuid
-                             }
+                             WHEN v.view_kind = 'timeline' AND {surviving_event_source}
                              THEN true
                              ELSE false
                          END
-                     }] AS view_repairs
+                     }} {'END)' if native else ']'} AS view_repairs
                 FOREACH (repair IN view_repairs |
-                    MERGE (rr:ViewProjectionRepair {
+                    MERGE (rr:ViewProjectionRepair {{
                         repair_key: $operation_id + '\u001f' + repair.view.uuid
-                    })
+                    }})
                     ON CREATE SET rr.operation_id = $operation_id,
                                   rr.operation_kind = 'EVIDENCE_ERASURE',
                                   rr.view_uuid = repair.view.uuid,
@@ -1468,10 +1542,10 @@ class MemoryQueryRepository:
                                       THEN 'not_rebuildable'
                                       ELSE null
                                   END,
-                                  rr.started_at = datetime()
+                                  rr.started_at = {self._erasure_clock_expression}
                 )
                 WITH fences, dependent_views, current_views
-                CALL {
+                CALL {{
                     WITH fences, dependent_views
                     WITH [fence IN fences | fence.namespace_key]
                          + [v IN dependent_views |
@@ -1487,39 +1561,35 @@ class MemoryQueryRepository:
                     WITH collect(DISTINCT w) AS watermarks
                     FOREACH (w IN watermarks | DETACH DELETE w)
                     RETURN size([w IN watermarks WHERE w IS NOT NULL]) AS watermarks_reset
-                }
+                }}
                 RETURN size(current_views) AS dependent_views_retired,
                        size(dependent_views) AS dependent_views_scrubbed,
                        size(current_views) AS view_repairs_created,
                        watermarks_reset
-            }
-            CALL {
+            }}
+            CALL {{
                 MATCH (a:TypedAssertion)
-                WHERE a.assertion_id = $node_uuid
+                {'WITH a,' if native else 'WHERE'} a.assertion_id = $node_uuid
                    OR a.episode_uuid = $node_uuid
                    OR a.subject_uuid = $node_uuid
-                   OR EXISTS {
-                       MATCH (source_ep:Episodic {uuid: $node_uuid})
-                             -[:ADMITTED_ON]->(:TurnEvidence {turn_id: a.episode_uuid})
-                   }
-                WITH collect(a) AS doomed,
-                     collect(DISTINCT {
+                   OR {admitted_assertion_from_target}
+                {'AS erasure_doomed' if native else ''}
+                WITH collect({'CASE WHEN erasure_doomed THEN a ELSE null END' if native else 'a'}) AS doomed,
+                     collect(DISTINCT {'CASE WHEN erasure_doomed THEN' if native else ''} {{
                          subject_uuid: a.subject_uuid,
                          namespace: a.namespace
-                     }) AS repairs,
-                     collect(DISTINCT a.source_key) AS source_keys,
-                     collect(DISTINCT a.assertion_id) AS assertion_ids
+                     }} {'ELSE null END' if native else ''}) AS repairs,
+                     collect(DISTINCT {'CASE WHEN erasure_doomed THEN a.source_key ELSE null END' if native else 'a.source_key'}) AS source_keys,
+                     collect(DISTINCT {'CASE WHEN erasure_doomed THEN a.assertion_id ELSE null END' if native else 'a.assertion_id'}) AS assertion_ids
                 FOREACH (repair IN repairs |
-                    MERGE (rr:ScalarProjectionRepair {
-                        repair_key: $operation_id + '\u001fMEMORY_DELETE\u001f'
-                                    + coalesce(repair.namespace, '\u0000null') + '\u001f'
-                                    + repair.subject_uuid
-                    })
+                    MERGE (rr:ScalarProjectionRepair {{
+                        repair_key: {self._scalar_repair_key_expression('MEMORY_DELETE')}
+                    }})
                     ON CREATE SET rr.operation_id = $operation_id,
                                   rr.operation_kind = 'MEMORY_DELETE',
                                   rr.namespace = repair.namespace,
                                   rr.subject_uuid = repair.subject_uuid,
-                                  rr.status = 'pending', rr.started_at = datetime()
+                                  rr.status = 'pending', rr.started_at = {self._erasure_clock_expression}
                 )
                 FOREACH (a IN doomed | DETACH DELETE a)
                 WITH repairs, source_keys, assertion_ids, size(doomed) AS assertions_deleted
@@ -1528,38 +1598,31 @@ class MemoryQueryRepository:
                 WITH repairs, source_keys, assertions_deleted, collect(rb) AS stale_rebinds
                 FOREACH (rb IN stale_rebinds | DETACH DELETE rb)
                 RETURN repairs, source_keys, assertions_deleted
-            }
+            }}
             // Event assertions grounded on the target itself. Left in place they outlive their
             // evidence and the lane's timeline rebuild fails closed on them (#170 item 5). Not
             // via ADMITTED_ON: an admitted turn is erased by its own call, under its own fence.
-            CALL {
+            CALL {{
                 OPTIONAL MATCH (event:TypedEventAssertion)
-                WHERE event.episode_uuid = $node_uuid
+                {'WITH collect(DISTINCT CASE WHEN' if native else 'WHERE'} event.episode_uuid = $node_uuid
                    OR event.turn_evidence_uuid = $node_uuid
-                   OR EXISTS {
-                       MATCH (source)-[:FOUNDS|GROUNDS]->(event)
-                       WHERE (source:TurnEvidence AND source.turn_id = $node_uuid)
-                          OR (source:Episodic AND source.uuid = $node_uuid)
-                   }
-                WITH collect(DISTINCT event) AS doomed_events
+                   OR {event_grounded_on_target}
+                {'THEN event ELSE null END) AS doomed_events' if native else 'WITH collect(DISTINCT event) AS doomed_events'}
                 OPTIONAL MATCH (event_head:TypedEventAssertionHead)
                       -[:HAS_VERSION]->(head_event:TypedEventAssertion)
-                WHERE head_event IN doomed_events
-                  AND NOT EXISTS {
-                      MATCH (event_head)-[:HAS_VERSION]->(outside:TypedEventAssertion)
-                      WHERE NOT outside IN doomed_events
-                  }
-                WITH doomed_events, collect(DISTINCT event_head) AS event_heads
+                {'WITH doomed_events, collect(DISTINCT CASE WHEN' if native else 'WHERE'} head_event IN doomed_events
+                  AND NOT {event_head_has_survivors}
+                {'THEN event_head ELSE null END) AS event_heads' if native else 'WITH doomed_events, collect(DISTINCT event_head) AS event_heads'}
                 FOREACH (event IN doomed_events | DETACH DELETE event)
                 FOREACH (head IN event_heads | DETACH DELETE head)
                 RETURN size(doomed_events) AS event_assertions_deleted,
                        size(event_heads) AS event_heads_deleted
-            }
-            CALL {
+            }}
+            CALL {{
                 OPTIONAL MATCH (n)
                 WHERE ((n:Entity OR n:Episodic) AND n.uuid = $node_uuid)
                    OR (n:TurnEvidence AND n.turn_id = $node_uuid)
-                CALL {
+                CALL {{
                     WITH n
                     WITH n WHERE n:Entity
                     DETACH DELETE n
@@ -1571,18 +1634,18 @@ class MemoryQueryRepository:
                     SET n.processing_state = 'FAILED',
                         n.processing_stage = 'failed',
                         n.processing_substage = 'deleted_by_user',
-                        n.processing_substage_started_at = datetime(),
+                        n.processing_substage_started_at = {self._erasure_clock_expression},
                         n.processing_progress = coalesce(n.processing_progress, 100.0),
-                        n.processing_completed_at = datetime(),
+                        n.processing_completed_at = {self._erasure_clock_expression},
                         n.processing_owner = null,
                         n.processing_lease_expires_at = null,
-                        n.processing_heartbeat_at = datetime(),
+                        n.processing_heartbeat_at = {self._erasure_clock_expression},
                         n.processing_error = 'deleted_by_user',
                         n.processing_llm_active_task = null,
                         n.processing_llm_active_kind = null,
                         n.processing_llm_active_model = null,
                         n.processing_llm_active_endpoint = null
-                    // The node is kept so the queue stops; the erased text is not.
+                    // The node is kept so the queue stops. the erased text is not.
                     REMOVE n.content, n.content_embedding, n.content_embedding_model,
                            n.ingest_key, n.ingest_request_sha256
                     RETURN 1 AS touched
@@ -1597,15 +1660,15 @@ class MemoryQueryRepository:
                     WITH n WHERE n:TurnEvidence
                     DETACH DELETE n
                     RETURN 1 AS touched
-                }
+                }}
                 RETURN count(touched) AS memory_touched
-            }
+            }}
             WITH repairs, source_keys, assertions_deleted, memory_touched,
                  dependent_views_retired, dependent_views_scrubbed,
                  view_repairs_created, watermarks_reset,
                  event_assertions_deleted, event_heads_deleted
             UNWIND CASE WHEN size(source_keys) = 0 THEN [null] ELSE source_keys END AS source_key
-            OPTIONAL MATCH (h:TypedAssertionHead {source_key: source_key})
+            OPTIONAL MATCH (h:TypedAssertionHead {{source_key: source_key}})
             WHERE source_key IS NOT NULL AND NOT (h)-[:HAS_VERSION]->(:TypedAssertion)
             WITH repairs, assertions_deleted, memory_touched, collect(h) AS orphan_heads,
                  dependent_views_retired, dependent_views_scrubbed,
@@ -1671,37 +1734,76 @@ class MemoryQueryRepository:
         of resuming them. Folding the label into this MATCH makes its removal atomic with the rest
         of the partition, which is the only way that durability argument holds."""
         namespace_key = normalize_namespace(namespace)
+        native = isinstance(self.neo4j, FalkorLiteRepository)
+        event_in_namespace = (
+            "any(ev IN [(n)-[:HAS_VERSION]->(ev:TypedEventAssertion) | ev] WHERE ev.namespace = $namespace)"
+            if native else """EXISTS { MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion)
+                                WHERE ev.namespace = $namespace }"""
+        )
+        event_outside_namespace = (
+            "any(ev IN [(n)-[:HAS_VERSION]->(ev:TypedEventAssertion) | ev] WHERE ev.namespace <> $namespace)"
+            if native else """EXISTS { MATCH (n)-[:HAS_VERSION]->(ev2:TypedEventAssertion)
+                                    WHERE ev2.namespace <> $namespace }"""
+        )
+        doomed_mentions_view = (
+            "any(evidence IN [(evidence)-[:MENTIONS]->(v) | evidence] WHERE evidence IN doomed)"
+            if native else """EXISTS {
+                      MATCH (evidence)-[:MENTIONS]->(v)
+                      WHERE evidence IN doomed
+                  }"""
+        )
+        view_has_events = (
+            "size([(v)-[:EVENT_HISTORY_ENTRY]->(entry:TypedEventAssertion) | entry]) > 0"
+            if native else """EXISTS {
+                             MATCH (v)-[:EVENT_HISTORY_ENTRY]->(:TypedEventAssertion)
+                         }"""
+        )
+        surviving_scalar_source = (
+            "any(source IN [(v)-[:CURRENT_ANCHOR|CONTRIBUTED_TO|HISTORY_ENTRY]->(source:TypedAssertion) | source] "
+            "WHERE NOT source IN doomed)"
+            if native else """EXISTS {
+                             MATCH (v)-[:CURRENT_ANCHOR|CONTRIBUTED_TO|HISTORY_ENTRY]
+                                   ->(source:TypedAssertion)
+                             WHERE NOT source IN doomed
+                         }"""
+        )
+        surviving_event_source = (
+            "any(source IN [(v)-[:EVENT_HISTORY_ENTRY]->(source:TypedEventAssertion) | source] "
+            "WHERE NOT source IN doomed)"
+            if native else """EXISTS {
+                             MATCH (v)-[:EVENT_HISTORY_ENTRY]->(source:TypedEventAssertion)
+                             WHERE NOT source IN doomed
+                         }"""
+        )
         # legacy event-history data cleanup, kept after the lane was archived so erasure stays complete
-        rows = self.neo4j.execute(
-            """
-            MERGE (f:EvidenceNamespaceFence {namespace_key: $namespace_key})
-            ON CREATE SET f.generation = 0, f.created_at = datetime()
+        rows = self._execute_erasure(
+            f"""
+            MERGE (f:EvidenceNamespaceFence {{namespace_key: $namespace_key}})
+            ON CREATE SET f.generation = 0, f.created_at = {self._erasure_clock_expression}
             SET f.lock_nonce = $operation_id,
-                f.locked_at = datetime(),
+                f.locked_at = {self._erasure_clock_expression},
                 f.generation = coalesce(f.generation, 0) + 1,
                 f.last_reset_operation_id = $operation_id,
-                f.last_reset_at = datetime()
+                f.last_reset_at = {self._erasure_clock_expression}
             WITH f
-            OPTIONAL MATCH (a:TypedAssertion {namespace: $namespace})
-            WITH f, collect(DISTINCT CASE WHEN a IS NULL THEN null ELSE {
+            OPTIONAL MATCH (a:TypedAssertion {{namespace: $namespace}})
+            WITH f, collect(DISTINCT CASE WHEN a IS NULL THEN null ELSE {{
                      subject_uuid: a.subject_uuid,
                      namespace: a.namespace
-                 } END) AS repairs
+                 }} END) AS repairs
             FOREACH (repair IN repairs |
-                MERGE (rr:ScalarProjectionRepair {
-                    repair_key: $operation_id + '\u001fNAMESPACE_DELETE\u001f'
-                                + coalesce(repair.namespace, '\u0000null') + '\u001f'
-                                + repair.subject_uuid
-                })
+                MERGE (rr:ScalarProjectionRepair {{
+                    repair_key: {self._scalar_repair_key_expression('NAMESPACE_DELETE')}
+                }})
                 ON CREATE SET rr.operation_id = $operation_id,
                               rr.operation_kind = 'NAMESPACE_DELETE',
                               rr.namespace = repair.namespace,
                               rr.subject_uuid = repair.subject_uuid,
-                              rr.status = 'pending', rr.started_at = datetime()
+                              rr.status = 'pending', rr.started_at = {self._erasure_clock_expression}
             )
             WITH f, repairs
             OPTIONAL MATCH (n)
-            WHERE n.group_id = $group_id
+            {'WITH f, repairs, collect(DISTINCT CASE WHEN' if native else 'WHERE'} n.group_id = $group_id
                OR (n:Episodic AND n.namespace = $namespace)
                OR (n:TypedAssertion AND n.namespace = $namespace)
                OR (n:TypedAssertionHead AND n.namespace = $namespace)
@@ -1710,29 +1812,23 @@ class MemoryQueryRepository:
                OR (n:EventConsolidationWatermark AND n.group_id = $namespace)
                OR (n:TypedEventAssertion AND n.namespace = $namespace)
                OR (n:TypedEventAssertionHead
-                   AND EXISTS { MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion)
-                                WHERE ev.namespace = $namespace }
-                   AND NOT EXISTS { MATCH (n)-[:HAS_VERSION]->(ev2:TypedEventAssertion)
-                                    WHERE ev2.namespace <> $namespace })
-            WITH f, repairs, collect(DISTINCT n) AS doomed
+                   AND {event_in_namespace}
+                   AND NOT {event_outside_namespace})
+            {'THEN n ELSE null END) AS doomed' if native else 'WITH f, repairs, collect(DISTINCT n) AS doomed'}
             WITH f, repairs, doomed,
                  [n IN doomed WHERE coalesce(n.uuid, n.turn_id) IS NOT NULL |
                     coalesce(n.uuid, n.turn_id)] AS doomed_uuids
             OPTIONAL MATCH (v:Entity)
-            WHERE (coalesce(v.is_view, false)
+            {'WITH f, repairs, doomed, doomed_uuids, collect(DISTINCT CASE WHEN' if native else 'WHERE'} (coalesce(v.is_view, false)
                    OR coalesce(v.is_quantstate, false)
                    OR v.view_kind IS NOT NULL)
               AND NOT v IN doomed
               AND (
                   any(eid IN coalesce(v.episode_uuids, []) WHERE eid IN doomed_uuids)
                   OR v.turn_evidence_uuid IN doomed_uuids
-                  OR EXISTS {
-                      MATCH (evidence)-[:MENTIONS]->(v)
-                      WHERE evidence IN doomed
-                  }
+                  OR {doomed_mentions_view}
               )
-            WITH f, repairs, doomed, doomed_uuids,
-                 collect(DISTINCT v) AS dependent_views
+            {'THEN v ELSE null END) AS dependent_views' if native else 'WITH f, repairs, doomed, doomed_uuids, collect(DISTINCT v) AS dependent_views'}
             WITH f, repairs, doomed, doomed_uuids, dependent_views,
                  [v IN dependent_views
                   WHERE coalesce(v.view_current, v.qs_current, true)
@@ -1754,42 +1850,35 @@ class MemoryQueryRepository:
                     v.qs_current = false,
                     v.retired = true,
                     v.retired_reason = 'contributing_namespace_erased',
-                    v.expired_at = datetime(),
-                    v.last_accessed = datetime()
+                    v.expired_at = {self._erasure_clock_expression},
+                    v.last_accessed = {self._erasure_clock_expression}
                 REMOVE v.ss_view_key_current
             )
+            {'WITH f, repairs, doomed, doomed_uuids, dependent_views, current_views, dependent_namespaces' if native else ''}
+            {'UNWIND CASE WHEN size(current_views)=0 THEN [null] ELSE current_views END AS v' if native else ''}
             WITH f, repairs, doomed, doomed_uuids, dependent_views, current_views,
                  dependent_namespaces,
-                 [v IN current_views | {
+                 {'collect(CASE WHEN v IS NULL THEN null ELSE' if native else '[v IN current_views |'} {{
                      view: v,
                      source_family: CASE
                          WHEN v.view_kind IN ['scalar_state', 'scalar_history']
                          THEN 'typed_scalar_assertions'
-                         WHEN v.view_kind = 'timeline' AND EXISTS {
-                             MATCH (v)-[:EVENT_HISTORY_ENTRY]->(:TypedEventAssertion)
-                         }
+                         WHEN v.view_kind = 'timeline' AND {view_has_events}
                          THEN 'typed_event_assertions'
                          ELSE 'none'
                      END,
                      reconstructible: CASE
-                         WHEN v.view_kind IN ['scalar_state', 'scalar_history'] AND EXISTS {
-                             MATCH (v)-[:CURRENT_ANCHOR|CONTRIBUTED_TO|HISTORY_ENTRY]
-                                   ->(source:TypedAssertion)
-                             WHERE NOT source IN doomed
-                         }
+                         WHEN v.view_kind IN ['scalar_state', 'scalar_history'] AND {surviving_scalar_source}
                          THEN true
-                         WHEN v.view_kind = 'timeline' AND EXISTS {
-                             MATCH (v)-[:EVENT_HISTORY_ENTRY]->(source:TypedEventAssertion)
-                             WHERE NOT source IN doomed
-                         }
+                         WHEN v.view_kind = 'timeline' AND {surviving_event_source}
                          THEN true
                          ELSE false
                      END
-                 }] AS view_repairs
+                 }} {'END)' if native else ']'} AS view_repairs
             FOREACH (repair IN view_repairs |
-                MERGE (rr:ViewProjectionRepair {
+                MERGE (rr:ViewProjectionRepair {{
                     repair_key: $operation_id + '\u001f' + repair.view.uuid
-                })
+                }})
                 ON CREATE SET rr.operation_id = $operation_id,
                               rr.operation_kind = 'NAMESPACE_ERASURE',
                               rr.view_uuid = repair.view.uuid,
@@ -1816,11 +1905,11 @@ class MemoryQueryRepository:
                                   THEN 'not_rebuildable'
                                   ELSE null
                               END,
-                              rr.started_at = datetime()
+                              rr.started_at = {self._erasure_clock_expression}
             )
             WITH f, repairs, doomed, dependent_views, current_views,
                  dependent_namespaces
-            CALL {
+            CALL {{
                 WITH f, dependent_namespaces
                 WITH [f.namespace_key] + dependent_namespaces AS namespaces
                 UNWIND namespaces AS ns
@@ -1833,7 +1922,7 @@ class MemoryQueryRepository:
                 WITH collect(DISTINCT w) AS watermarks
                 FOREACH (w IN watermarks | DETACH DELETE w)
                 RETURN size([w IN watermarks WHERE w IS NOT NULL]) AS watermarks_reset
-            }
+            }}
             FOREACH (n IN doomed | DETACH DELETE n)
             RETURN size(doomed) AS deleted, repairs,
                    size(current_views) AS dependent_views_retired,
