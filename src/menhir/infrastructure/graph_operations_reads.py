@@ -130,22 +130,30 @@ class _GraphOperationsReadsMixin:
     ) -> list[dict[str, Any]]:
         self._ensure_ready()
         out: list[dict[str, Any]] = []
-        offset = 0
+        cursor: tuple[str, int] | None = None
         batch = max(1, int(page_size))
         # Page to EXHAUSTION — there is no total cutoff. A ceiling here would permanently hide the
-        # rows beyond it (every call restarts at offset 0), so a beyond-ceiling receiptless op would be
-        # invisible forever and a beyond-ceiling orphan would be marked unresolved on every run.
+        # rows beyond it (every call restarts at the first page), so a beyond-ceiling receiptless op
+        # would be invisible forever and a beyond-ceiling orphan would be marked unresolved on every
+        # run. Keyset on (created_at, rowid): a row moving into COMMITTED mid-scan cannot shift later
+        # rows past a page boundary (OFFSET would skip one).
         while True:
+            sql = (
+                "SELECT rowid AS _rk, created_at, op_id, request_json, reverses_op_id "
+                "FROM graph_operations WHERE state = 'COMMITTED' AND operation_kind = ?"
+            )
+            params: list[Any] = [operation_kind]
+            if cursor is not None:
+                sql += " AND (created_at > ? OR (created_at = ? AND rowid > ?))"
+                params += [cursor[0], cursor[0], cursor[1]]
+            sql += " ORDER BY created_at ASC, rowid ASC LIMIT ?"
+            params.append(batch)
             with connect_telemetry_db(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
-                rows = conn.execute(
-                    "SELECT op_id, request_json, reverses_op_id FROM graph_operations "
-                    "WHERE state = 'COMMITTED' AND operation_kind = ? "
-                    "ORDER BY created_at ASC, rowid ASC LIMIT ? OFFSET ?",
-                    (operation_kind, batch, offset),
-                ).fetchall()
+                rows = conn.execute(sql, params).fetchall()
             if not rows:
                 break
+            cursor = (rows[-1]["created_at"], rows[-1]["_rk"])  # before any malformed-row skip
             for row in rows:
                 try:
                     request = json.loads(row["request_json"] or "{}")
@@ -165,5 +173,4 @@ class _GraphOperationsReadsMixin:
                 out.append(item)
             if len(rows) < batch:
                 break                           # last page
-            offset += batch
         return out

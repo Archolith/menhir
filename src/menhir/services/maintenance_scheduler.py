@@ -37,6 +37,7 @@ from menhir.services.scheduler_tasks import (
     sync_experience_counters,
     sync_verifiers_job,
 )
+from menhir.services.source_embedding_repair import repair_source_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -89,28 +90,30 @@ class MaintenanceScheduler:
     experience_counter_enabled: bool = True
     experience_embed: Callable[[str], "list[float] | None"] | None = None
     experience_embed_version: str | None = None   # 4a.1: model id stamped on write-time observation embeddings
+    # Retry for source-memory embeds the ingest step gave up on (services/source_embedding_repair.py).
+    # Registered only when enabled AND both callables are wired (core/runtime.py). On by default
+    # since #168 freeze; kept as a test seam.
+    source_embedding_repair_enabled: bool = True
+    source_embedding_repair_interval_s: float = 300.0
+    source_embedding_repair_budget: int = 200
+    source_embedding_embed: Callable[[str], Awaitable["list[float] | None"]] | None = None
+    source_embedding_model_name: Callable[[], str] | None = None
     verifier_sync_interval_s: float = 300.0
     verifier_sync_enabled: bool = False
     verifier_repo: object | None = None
     verifier_context: object | None = None
     personal_memory_interval_s: float = 300.0
-    personal_memory_enabled: bool = False
     personal_memory_llm: Callable[[str, str], str] | None = None
     personal_memory_k: int = 3
-    event_history_enabled: bool = False
     counting_enabled: bool = False
     counting_perceiver_version: str = "v1"
-    counting_extract_v2: bool = False
-    counting_match: bool = False
+    counting_extract_v2: bool = True
+    counting_match: bool = True
     counting_lease_seconds: int = 900
-    event_history_perceiver_version: str = "v1"
-    event_history_batch_size: int = 500
     personal_memory_call_budget: int | None = None
-    personal_memory_verify_retries: int = 0
-    personal_memory_sum_grounding: bool = False
     # ScalarStateView typed-scalar shadow path (Piece C.4.3), gated inside the same consolidation job.
-    # OFF by default -> the counter path is byte-identical; when on, the job also runs typed-scalar
-    # extract -> gate -> bind -> persist -> rebuild over its own scalar watermark cursor.
+    # When on, the job runs typed-scalar extract -> gate -> bind -> persist -> rebuild over its own
+    # scalar watermark cursor.
     scalar_state_enabled: bool = False
     scalar_state_perceiver_version: str = "v1"
     # Drop the free-text attribute name from the k-sample vote and reconcile it modally afterwards.
@@ -118,21 +121,14 @@ class MaintenanceScheduler:
     # RECALL-affecting when on (more claims clear the gate), not behavior-neutral.
     scalar_reconcile_attribute: bool = True
     # The same identity-smearing defect relocated into scope/subject, plus first-person folding.
-    # Scope/subject ON by default (matching MemorySettings); canonical_self stays OFF.
+    # Scope/subject ON by default (matching MemorySettings).
     # All RECALL-affecting when on, exactly as the attribute switch above.
     scalar_reconcile_scope: bool = True
     scalar_reconcile_subject: bool = True
-    scalar_canonical_self: bool = False
     # Typed-scalar agreement only. Default 2/3 matches MemorySettings (two of three votes at k=3).
-    # The counter path keeps its existing unanimous threshold.
     scalar_threshold: float = 2 / 3
     # Build advisory scalar_history Views alongside scalar_state at ingest and repair time.
     scalar_history_enabled: bool = False
-    # Observe-only deterministic typed-scalar shadow; default off and behavior-neutral.
-    scalar_deterministic_shadow_enabled: bool = False
-    # Opt-in deterministic scalar router; default off preserves the existing LLM route.
-    scalar_deterministic_router_enabled: bool = False
-    scalar_deterministic_router_promoted_classes: tuple[str, ...] = ()
     lifecycle_consolidation_interval_s: float = 86400.0  # daily
     lifecycle_consolidation_enabled: bool = True
     lifecycle_decay_interval_s: float = 86400.0  # daily
@@ -195,8 +191,15 @@ class MaintenanceScheduler:
         if self.verifier_sync_enabled and self.verifier_repo is not None:
             self._jobs["sync_verifiers"] = _JobState(interval_s=self.verifier_sync_interval_s)
         if (
-            (self.personal_memory_enabled or self.event_history_enabled or self.scalar_state_enabled
-             or self.counting_enabled)
+            self.source_embedding_repair_enabled
+            and self.source_embedding_embed is not None
+            and self.source_embedding_model_name is not None
+        ):
+            self._jobs["repair_source_embeddings"] = _JobState(
+                interval_s=self.source_embedding_repair_interval_s
+            )
+        if (
+            (self.scalar_state_enabled or self.counting_enabled)
             and self.personal_memory_llm is not None
         ):
             self._jobs["consolidate_personal_memory"] = _JobState(interval_s=self.personal_memory_interval_s)
@@ -647,6 +650,10 @@ class MaintenanceScheduler:
                 await self._run_job(job, "scheduler_sync_experience_counters", self._make_sync_experience_counters())
             elif name == "sync_verifiers":
                 await self._run_job(job, "scheduler_sync_verifiers", self._make_sync_verifiers())
+            elif name == "repair_source_embeddings":
+                await self._run_job(
+                    job, "scheduler_repair_source_embeddings", self._make_repair_source_embeddings()
+                )
             elif name == "consolidate_personal_memory":
                 await self._run_job(job, "scheduler_consolidate_personal_memory", self._make_consolidate_personal_memory())
             elif name == "consolidate_lifecycle":
@@ -889,6 +896,15 @@ class MaintenanceScheduler:
             embed=self.experience_embed,
         )
 
+    def _make_repair_source_embeddings(self) -> Awaitable[dict[str, object]]:
+        assert self.source_embedding_embed is not None and self.source_embedding_model_name is not None
+        return repair_source_embeddings(
+            self.graph_adapter,
+            embed=self.source_embedding_embed,
+            model_name=self.source_embedding_model_name,
+            call_budget=self.source_embedding_repair_budget,
+        )
+
     def _make_consolidate_personal_memory(self) -> Awaitable[dict[str, object]]:
         return consolidate_personal_memory(
             self.graph_adapter,
@@ -896,29 +912,19 @@ class MaintenanceScheduler:
             embed=self.experience_embed,
             k=self.personal_memory_k,
             call_budget=self.personal_memory_call_budget,
-            verify_retries=self.personal_memory_verify_retries,
-            sum_grounding=self.personal_memory_sum_grounding,
             enable_scalar_state=self.scalar_state_enabled,
             scalar_state_perceiver_version=self.scalar_state_perceiver_version,
             scalar_reconcile_attribute=self.scalar_reconcile_attribute,
             scalar_reconcile_scope=self.scalar_reconcile_scope,
             scalar_reconcile_subject=self.scalar_reconcile_subject,
-            scalar_canonical_self=self.scalar_canonical_self,
             scalar_threshold=self.scalar_threshold,
             scalar_embed_version=self.experience_embed_version,
             scalar_history_enabled=self.scalar_history_enabled,
-            scalar_deterministic_shadow_enabled=self.scalar_deterministic_shadow_enabled,
-            scalar_deterministic_router_enabled=self.scalar_deterministic_router_enabled,
-            scalar_deterministic_router_promoted_classes=self.scalar_deterministic_router_promoted_classes,
-            enable_counter_state=self.personal_memory_enabled,
-            enable_event_history=self.event_history_enabled,
             enable_counting=self.counting_enabled,
             counting_perceiver_version=self.counting_perceiver_version,
             counting_extract_v2=self.counting_extract_v2,
             counting_match=self.counting_match,
             counting_lease_seconds=self.counting_lease_seconds,
-            event_history_perceiver_version=self.event_history_perceiver_version,
-            event_batch_size=self.event_history_batch_size,
         )
 
     async def _make_consolidate_lifecycle(self) -> dict[str, object]:

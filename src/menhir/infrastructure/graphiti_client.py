@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import inspect
 import logging
+import os
 from dataclasses import dataclass, field
 from functools import partial
 from datetime import datetime
@@ -35,10 +36,19 @@ except ImportError as exc:
     # install may overwrite fork files and fail during graphiti_core.__init__,
     # before our adapter can check the required symbol.
     if "GraphitiRequestTooLargeError" not in str(exc):
-        raise
+        # CF-305: uninstalling upstream after both were installed leaves a broken shared package
+        # ("cannot import name 'Graphiti' from 'graphiti_core'"); name the repair, not just the symbol.
+        if "graphiti_core" not in f"{exc} {getattr(exc, 'name', '') or ''}":
+            raise
+        raise ImportError(
+            f"graphiti_core is broken or incomplete ({exc}). Menhir requires "
+            "archolith-graphiti-core==0.31.2.post2, which shares the graphiti_core package with "
+            "upstream graphiti-core. Use a fresh virtual environment or uninstall both "
+            "graphiti-core distributions before reinstalling Menhir (see docs/post-install.md)."
+        ) from exc
     raise ImportError(
         "graphiti_core is missing GraphitiRequestTooLargeError. Menhir requires "
-        "archolith-graphiti-core==0.31.2.post1; an older graphiti-core install may have "
+        "archolith-graphiti-core==0.31.2.post2; an older graphiti-core install may have "
         "overwritten the fork's shared graphiti_core files. Use a fresh virtual environment "
         "or uninstall both graphiti-core distributions before reinstalling Menhir "
         "(see docs/post-install.md)."
@@ -47,6 +57,7 @@ else:
     _GRAPHITI_IMPORT_ERROR = None
 
 from menhir.config import MemorySettings  # noqa: E402
+from menhir.config.settings_model import parse_extra_body  # noqa: E402
 from menhir.infrastructure.circuit_breaker import CircuitBreaker  # noqa: E402
 from menhir.infrastructure.embedding_cache import get_embedding_cache  # noqa: E402
 from menhir.infrastructure.embedding_dimensions import expected_graphiti_embedding_dimension  # noqa: E402
@@ -129,10 +140,42 @@ def _schedule_client_close(client: Any) -> asyncio.Task | None:
     return loop.create_task(aclose())
 
 
-def edge_expiry_hook_kwargs(enabled: bool, graphiti_cls: Any) -> dict[str, Any]:
-    """``Graphiti(...)`` kwargs for MENHIR_ANCHORED_TIME_EXPIRY: none when off.
+FORK_HOOK_PARAMETERS = (
+    "single_episode_extraction_hook",
+    "identity_gate_hook",
+    "candidate_filter_hook",
+    "node_pre_resolution_hook",
+)
 
-    With the flag on, an installed fork without ``edge_expiry_hook`` would silently keep
+
+def require_graphiti_fork_hooks(graphiti_cls: Any) -> None:
+    """Refuse an installed ``graphiti_core`` whose ``Graphiti`` lacks the fork's hook parameters.
+
+    CF-305: the fork and upstream ``graphiti-core`` share one import package, so an upstream
+    install over the fork leaves no hooks and ``Graphiti(...)`` would raise a bare ``TypeError``.
+    A ``**kwargs`` signature is a test double; an unreadable signature counts as missing.
+    """
+    try:
+        params = inspect.signature(graphiti_cls.__init__).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return
+    missing = [name for name in FORK_HOOK_PARAMETERS if name not in params]
+    if missing:
+        raise RuntimeError(
+            "The installed graphiti_core is not the Archolith fork: Graphiti() has no "
+            f"{', '.join(missing)} parameter. Upstream graphiti-core shares the graphiti_core "
+            "import package and has replaced or shadowed archolith-graphiti-core. Fix: reinstall "
+            "the fork in a clean virtual environment (uninstall graphiti-core and "
+            "archolith-graphiti-core, then install archolith-graphiti-core==0.31.2.post2)."
+        )
+
+
+def edge_expiry_hook_kwargs(enabled: bool, graphiti_cls: Any) -> dict[str, Any]:
+    """``Graphiti(...)`` kwargs for anchored-time expiry (MENHIR_ANCHORED_TIME_RESOLVER): none when off.
+
+    With the switch on, an installed fork without ``edge_expiry_hook`` would silently keep
     expiring ended facts, so startup refuses it instead.
     """
     if not enabled:
@@ -143,7 +186,7 @@ def edge_expiry_hook_kwargs(enabled: bool, graphiti_cls: Any) -> dict[str, Any]:
         params = {}
     if "edge_expiry_hook" not in params:
         raise RuntimeError(
-            "MENHIR_ANCHORED_TIME_EXPIRY=true requires archolith-graphiti-core==0.30.2.post3 "
+            "MENHIR_ANCHORED_TIME_RESOLVER=true requires archolith-graphiti-core==0.30.2.post3 "
             "or later (Graphiti(edge_expiry_hook=...)); the installed graphiti_core has no "
             "edge_expiry_hook. Reinstall Menhir's pinned dependencies or turn the flag off."
         )
@@ -169,7 +212,7 @@ def preserved_edge_attributes_kwargs(
     if "preserved_edge_attributes" not in params:
         if expiry_enabled:
             raise RuntimeError(
-                "MENHIR_ANCHORED_TIME_EXPIRY=true requires archolith-graphiti-core==0.30.2.post6 "
+                "MENHIR_ANCHORED_TIME_RESOLVER=true requires archolith-graphiti-core==0.30.2.post6 "
                 "or later (Graphiti(preserved_edge_attributes=...)); without it a restatement "
                 "can expire a stored ended fact. Reinstall Menhir's pinned dependencies or "
                 "turn the flag off."
@@ -360,27 +403,40 @@ class GraphitiClient:
                 # Unwrapped client: the resolver adds provider extras, shaping and the one 429
                 # backoff layer itself. Not the generic client: its language instruction would
                 # change the frozen prompt.
+                at_client = raw_llm_client
+                at_base_url = llama_base_url
+                if settings.anchored_time_base_url:
+                    at_base_url = settings.anchored_time_base_url
+                    at_client = build_async_openai_client(
+                        base_url=at_base_url,
+                        api_key=settings.anchored_time_api_key,
+                        settings=settings,
+                    )
+                at_extra_body = parse_extra_body(
+                    settings.anchored_time_extra_body, env_name="MENHIR_ANCHORED_TIME_EXTRA_BODY"
+                )
                 anchored_time = AnchoredTimeResolver(
-                    raw_llm_client,
-                    base_url=llama_base_url,
+                    at_client,
+                    base_url=at_base_url,
                     model=settings.anchored_time_resolver_model or llm_provider.chat_model,
                     timeout_s=settings.anchored_time_resolver_timeout_s,
+                    extra_body=at_extra_body,
                 )
                 logger.info(
-                    "Anchored-time resolver enabled (model=%s, timeout_s=%s)",
-                    anchored_time.model, settings.anchored_time_resolver_timeout_s,
+                    "Anchored-time resolver enabled (model=%s, timeout_s=%s, base_url=%s)",
+                    anchored_time.model, settings.anchored_time_resolver_timeout_s, at_base_url,
                 )
-                if settings.anchored_time_attach_enabled:
-                    from menhir.infrastructure.anchored_time_attach_client import AnchoredTimeAttacher
+                from menhir.infrastructure.anchored_time_attach_client import AnchoredTimeAttacher
 
-                    # Blind attach check: same unwrapped client and timeout as the resolver.
-                    anchored_time_attach = AnchoredTimeAttacher(
-                        raw_llm_client,
-                        base_url=llama_base_url,
-                        model=settings.anchored_time_attach_model or anchored_time.model,
-                        timeout_s=settings.anchored_time_resolver_timeout_s,
-                    )
-                    logger.info("Anchored-time attach check enabled (model=%s)", anchored_time_attach.model)
+                # Blind attach check: same unwrapped client and timeout as the resolver.
+                anchored_time_attach = AnchoredTimeAttacher(
+                    at_client,
+                    base_url=at_base_url,
+                    model=settings.anchored_time_attach_model or anchored_time.model,
+                    timeout_s=settings.anchored_time_resolver_timeout_s,
+                    extra_body=at_extra_body,
+                )
+                logger.info("Anchored-time attach check enabled (model=%s)", anchored_time_attach.model)
         embed_base_url = embed_provider.base_url
         embed_dimension = expected_graphiti_embedding_dimension(settings)
         embed_client = (
@@ -428,7 +484,10 @@ class GraphitiClient:
             password=settings.neo4j_password,
             database=settings.neo4j_database,
         )
-        anchored_time_expiry = bool(settings.anchored_time_expiry_enabled)
+        anchored_time_expiry = bool(settings.anchored_time_resolver_enabled)
+        # CF-272: the graphiti fork sends PostHog telemetry per Graphiti() unless this is falsey; set after every .env loader.
+        os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")
+        require_graphiti_fork_hooks(Graphiti)
         return cls(
             client=Graphiti(
                 uri=settings.neo4j_uri,
@@ -855,95 +914,6 @@ class GraphitiClient:
             seen_uuids.add(node.uuid)
 
         return len(seen_uuids)
-
-    async def search_edges_scored(
-        self,
-        query: str,
-        *,
-        num_results: int = 20,
-        group_ids: list[str] | None = None,
-    ) -> list[dict[str, Any]]:
-        """Hybrid search over RELATES_TO fact EDGES, returning dated facts with scores.
-
-        The entity-node search paths (:meth:`search_scored`,
-        :meth:`search_ranked_by_method`) return entity *names*; this returns the
-        *facts* that connect entities — ``EntityEdge.fact`` strings like
-        "the dealership replaced the GPS system on 2023-03-22". For "what
-        happened" queries the answer lives on the edge, not the node, so this is
-        the candidate source node search structurally cannot surface.
-
-        Returns a list of dicts in best-first order, each with keys ``uuid``,
-        ``fact``, ``score`` (edge RRF reranker score) and the edge's bitemporal
-        anchors ``created_at`` / ``valid_at`` / ``invalid_at`` / ``expired_at``
-        (ISO-8601 strings or ``None``). Those anchors are the edge's advantage
-        over entity nodes — the TemporalOracle scores on them — so the recall
-        path threads them into the oracle metadata. Edges with an empty ``fact``
-        are skipped. Mirrors :meth:`search_scored`'s BM25-only fallback on a
-        vector-dimension mismatch.
-        """
-        from graphiti_core.search.search_config import (
-            EdgeSearchConfig,
-            EdgeSearchMethod,
-            EdgeReranker,
-            SearchConfig,
-        )
-
-        config = SearchConfig(
-            edge_config=EdgeSearchConfig(
-                search_methods=[
-                    EdgeSearchMethod.bm25,
-                    EdgeSearchMethod.cosine_similarity,
-                ],
-                reranker=EdgeReranker.rrf,
-            ),
-            limit=num_results,
-        )
-        try:
-            results = await self.client.search_(query, config, group_ids=group_ids)
-        except Exception as exc:
-            if not _is_vector_dimension_mismatch_error(exc):
-                raise
-            logger.warning(
-                "Graphiti search_edges_scored falling back to bm25-only after vector dimension mismatch: %s",
-                exc,
-            )
-            fallback_config = SearchConfig(
-                edge_config=EdgeSearchConfig(
-                    search_methods=[EdgeSearchMethod.bm25],
-                    reranker=EdgeReranker.rrf,
-                ),
-                limit=num_results,
-            )
-            results = await self.client.search_(query, fallback_config, group_ids=group_ids)
-
-        def _iso(dt: Any) -> str | None:
-            return dt.isoformat() if dt is not None else None
-
-        scored: list[dict[str, Any]] = []
-        for edge, score in zip(results.edges, results.edge_reranker_scores):
-            fact = (getattr(edge, "fact", None) or "").strip()
-            if not fact:
-                continue
-            scored.append(
-                {
-                    "uuid": edge.uuid,
-                    "fact": fact,
-                    "score": score,
-                    "created_at": _iso(getattr(edge, "created_at", None)),
-                    "valid_at": _iso(getattr(edge, "valid_at", None)),
-                    "invalid_at": _iso(getattr(edge, "invalid_at", None)),
-                    "expired_at": _iso(getattr(edge, "expired_at", None)),
-                    # Endpoint entity nodes: the RICH candidates the edge points at (a
-                    # dated fact edge connects e.g. "dealership" -> "GPS system", whose
-                    # node summaries carry the answer with surrounding context). Used by
-                    # the "pointer" fact-edge mode to hydrate node context instead of
-                    # injecting the terse fact as a standalone (context-shredding) answer.
-                    "source_node_uuid": getattr(edge, "source_node_uuid", None),
-                    "target_node_uuid": getattr(edge, "target_node_uuid", None),
-                }
-            )
-
-        return scored
 
     async def search_ranked_by_method(
         self,

@@ -1,7 +1,7 @@
 """The callable seam types services share with their injected LLM/embedding collaborators.
 
 CF-77: `LlmComplete` and `Embed` were re-declared in eight modules -- ten declarations for two
-types -- and one had already drifted. `quantstate_consolidator.py:22` read
+types -- and one had already drifted. `quantstate_consolidator.py:22` (since removed) read
 ``Callable[[str], list[float]]`` while every other declaration read
 ``Callable[[str], list[float] | None]``, so the module that consumed it was the one module whose
 type said an embedder may never return ``None``.

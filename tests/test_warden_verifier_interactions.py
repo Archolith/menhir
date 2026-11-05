@@ -38,7 +38,6 @@ async def test_warden_verifier_effects_and_sync_disabled_restart(
 ):
     from menhir.services import verifier_sync
 
-    monkeypatch.delenv("MENHIR_FRONTIER_ORACLE_SUBSET", raising=False)
     clock = [BASE]
     monkeypatch.setattr(verifier_sync, "_utc_now_iso", lambda: clock[0])
     content = "The job is disabled."
@@ -81,15 +80,15 @@ async def test_warden_verifier_effects_and_sync_disabled_restart(
         episode_sources=["claude-code"] if evidence_kind == "agent" else [])]
     stub_graphiti_client.search_scored_results = [("belief", "configuration", .85)]
     tuning = RetrievalTuningConfig(enable_assertion_shadow=False,
-        enable_warden_gate=warden, enable_evidence_anchor=True,
-        enable_contradiction_interrupt=warden, enable_belief_gate=False, enable_intent_lens=True)
+        enable_warden_gate=warden,
+        enable_contradiction_interrupt=warden, enable_intent_lens=True)
     query = "have we already tried this configuration" if historical else "configuration"
     report = dict(schema_version=1, qualified_for_defaults=False, arm=arm, case=case,
         source=source, tuning=asdict(tuning), probes=probes, stored_evidence=deepcopy(stored),
         limits=["Authored single-candidate controls, not answer-quality/cost qualification",
                 "Sync is invoked or skipped directly; scheduler wiring is tested separately",
                 "Restart recreates services over offline persisted-state stubs"], phases=[])
-    expected_returned = not (warden and (evidence_kind == "agent" or (conflict and not historical)))
+    expected_returned = not (warden and (conflict and not historical))
     persisted = deepcopy(rows)
     for phase in ("after_probe", "restart_sync_disabled"):
         if phase == "restart_sync_disabled":
@@ -103,7 +102,7 @@ async def test_warden_verifier_effects_and_sync_disabled_restart(
         common = dict(namespace="conversation", source_memory_limit=0, update_access=False)
         baseline_recall = await service.recall(query, **common, tuning=RetrievalTuningConfig(
             enable_assertion_shadow=False, enable_intent_lens=True, enable_warden_gate=False,
-            enable_contradiction_interrupt=False, enable_belief_gate=False))
+            enable_contradiction_interrupt=False))
         result = await service.recall(query, **common, tuning=tuning, include_warden_status=True)
         assert bool(result.results) is expected_returned
         assert result.warden_status.state == ("applied" if warden else "disabled")

@@ -97,20 +97,16 @@ class SessionReport:
 
 
 @pytest.fixture(scope="module")
-def live_settings(tmp_path_factory: pytest.TempPathFactory):
+def live_settings(tmp_path_factory: pytest.TempPathFactory, live_dotenv):
     """Real settings, with the graph pinned to the disposable instance.
 
     `.env` carries the provider credentials AND a PRODUCTION `NEO4J_URI`. `pytest_configure` has
-    already pinned `NEO4J_URI` to the test instance, and python-dotenv defaults to
-    `override=False`, so loading it here cannot undo that. The assertion below is not decoration:
+    already pinned `NEO4J_URI` to the test instance, and `live_dotenv` loads `.env` with
+    `override=False`, so it cannot undo that. The assertion below is not decoration:
     this module writes, enriches, and deletes, and a misconfiguration would do that to the
     operator's real memories.
     """
-    from dotenv import load_dotenv
-
     from menhir.config import MemorySettings
-
-    load_dotenv(override=False)
 
     # The sidecar must be pinned BEFORE `from_env()`, because the built stack resolves its
     # telemetry/pending-action paths once, at construction. The autouse `isolated_telemetry_db`

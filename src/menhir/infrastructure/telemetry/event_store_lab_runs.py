@@ -19,7 +19,12 @@ class _EventStoreLabRunsMixin:
         request_payload: dict[str, Any],
         result_payload: dict[str, Any],
     ) -> int | None:
-        """Persist one privacy-filtered Recall Lab result and return its run id."""
+        """Persist one Recall Lab result and return its run id.
+
+        The payload is stored exactly as the writer's reveal mode produced it, so a run written
+        with reveal on holds raw memory content and the raw query. Redaction is applied at READ
+        time by the explorer history routes (``redact_recall_lab_history_row``).
+        """
 
         self._ensure_ready()
         judgment = result_payload.get("judgment") or {}

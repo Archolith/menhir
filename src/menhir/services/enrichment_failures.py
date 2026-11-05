@@ -43,7 +43,11 @@ _RETRYABLE_ERROR_MARKERS = (
     "refused",
     "503",
     "429",
+    # CF-307: Graphiti rewraps a provider 429 as its own RateLimitError, whose text has no "429".
+    # Quota is converted to provider_quota_exhausted before this is reached (see the quota check).
+    "rate limit exceeded",
 )
+_RETRYABLE_TYPE_NAMES = {"ratelimiterror"}
 #: A budget refusal is a POLICY decision, not a provider fault. It reaches this classifier only
 #: on a surface where the budget actually binds (graphiti's instrumented client today; every
 #: surface once CF-234's enforcing half lands).
@@ -165,7 +169,7 @@ def classify_enrichment_failure(error: object | None, *, error_type: object | No
     ):
         return "manual_review"
 
-    # Billing state (429 insufficient_quota): never retryable, and must not hit the "429" marker.
+    # Billing state (HTTP 402, or insufficient_quota 429): never retryable, and must not hit the "429" marker.
     # Exceptions are matched through their cause chain; persisted text by reason code/provider code.
     quota_text = _normalize_error_text(error)
     if (
@@ -204,6 +208,9 @@ def classify_enrichment_failure(error: object | None, *, error_type: object | No
         return "terminal"
 
     if any(marker in error_text for marker in _RETRYABLE_ERROR_MARKERS):
+        return "retryable"
+
+    if _normalize_error_type(error, error_type) in _RETRYABLE_TYPE_NAMES:
         return "retryable"
 
     return "manual_review"

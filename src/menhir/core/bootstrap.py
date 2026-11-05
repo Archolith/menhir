@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from menhir.config import MemorySettings
-from menhir.config.authority_gates import event_history_authority_effective, scalar_view_authority_effective
+from menhir.config.authority_gates import scalar_view_authority_effective
+from menhir.config.feature_flags import warn_retired_settings_set_false
 from menhir.core.runtime_preflight import RuntimeCapabilities
 from menhir.infrastructure import GraphitiClient, LLMAdapter, MemoryGraphAdapter, Neo4jRepository
 from menhir.services import CandidateService, ContextBuilderService, IngestService, RecallService, ScoringService, LifecycleService
@@ -121,20 +122,6 @@ class UnavailableLLMAdapter:
     ) -> list[str | None]:
         self._raise()
 
-    async def classify_shadow_context(
-        self,
-        episode_body: str,
-        candidates: list[dict[str, str]],
-    ) -> str | None:
-        self._raise()
-
-    async def break_shadow_tie(
-        self,
-        episode_body: str,
-        tied_candidates: list[dict[str, str]],
-    ) -> str | None:
-        self._raise()
-
 
 @dataclass
 class BuildArtifacts:
@@ -162,6 +149,7 @@ def build_memory_services(
 ) -> BuildArtifacts:
     """Build collaborators for the v1 memory pipeline."""
     settings = settings or MemorySettings.from_env()
+    warn_retired_settings_set_false()
     neo4j = Neo4jRepository(
         uri=settings.neo4j_uri,
         database=settings.neo4j_database,
@@ -200,7 +188,6 @@ def build_memory_services(
             settings.personal_memory_counting_enabled
             and settings.personal_memory_scalar_state_enabled
         ),
-        counting_match_enabled=bool(settings.personal_memory_counting_match_enabled),
     )
     scoring_service = ScoringService()
     lifecycle_service = LifecycleService(
@@ -219,15 +206,12 @@ def build_memory_services(
         graphiti_add_episode_timeout_s=float(settings.graphiti_add_episode_timeout_seconds),
         graphiti_episode_max_estimated_tokens=int(settings.graphiti_episode_max_estimated_tokens),
         canonical_self_binding_mode=str(getattr(settings, "canonical_self_binding_mode", "off")),
-        inferred_self_mode=str(getattr(settings, "inferred_self_mode", "off")),
+        inferred_self_mode=str(getattr(settings, "inferred_self_mode", "enforce")),
         max_llm_calls_per_session_window=settings.max_llm_calls_per_session_window,
         llm_session_window_seconds=settings.llm_session_window_seconds,
         max_llm_calls_per_enrichment_job=settings.max_llm_calls_per_enrichment_job,
         ingest_concurrency=settings.ingest_concurrency,
         record_detailed_revisions=settings.record_detailed_revisions,
-        shadow_context_composition=settings.shadow_context_composition,
-        shadow_composition_timeout_s=settings.shadow_composition_timeout_s,
-        source_memories_enabled=getattr(settings, "frontier_source_memories", False),
         enrichment_enabled=(capabilities.enrichment_ready if capabilities is not None else True),
         enrichment_disabled_reason=(
             "Graphiti/LLM enrichment is unavailable in the current startup mode."
@@ -242,13 +226,8 @@ def build_memory_services(
         ingest_service=ingest_service,
         lifecycle_service=lifecycle_service,
         scalar_view_authority_enabled=scalar_view_authority_effective(settings),
-        scalar_view_collapse_enabled=settings.personal_memory_scalar_view_collapse_enabled,
-        scalar_view_echo_drop_enabled=settings.personal_memory_scalar_view_echo_drop_enabled,
-        counting_recall_authority_only=settings.personal_memory_counting_recall_authority_only,
-        counting_wording_enabled=settings.personal_memory_counting_wording_enabled,
         scalar_history_enabled=settings.personal_memory_scalar_history_enabled,
-        event_history_authority_enabled=event_history_authority_effective(settings),
-        inferred_self_mode=str(getattr(settings, "inferred_self_mode", "off")),
+        inferred_self_mode=str(getattr(settings, "inferred_self_mode", "enforce")),
         counting_enabled=bool(
             settings.personal_memory_counting_enabled
             and settings.personal_memory_scalar_state_enabled
@@ -259,11 +238,7 @@ def build_memory_services(
         recall_service=recall_service,
         graph_adapter=graph_adapter,
         retrieval_tuning=settings.retrieval_tuning(),
-        source_memory_limit=(
-            getattr(settings, "frontier_source_memory_limit", None)
-            if getattr(settings, "frontier_source_memories", False)
-            else None
-        ),
+        source_memory_limit=getattr(settings, "frontier_source_memory_limit", None),
     )
     candidate_service = CandidateService(
         graph_adapter=graph_adapter,
@@ -307,6 +282,14 @@ async def prepare_memory_runtime(
     graphiti_in_play = bool(graphiti_ready and graphiti_client_available)
     if graphiti_in_play:
         await artifacts.graphiti_client.build_indices_and_constraints(force=force_graphiti)
+    # Every start, not inside the bootstrap below: that is skipped on any install whose required
+    # set is online, so a drop placed there never reaches an existing graph.
+    retired_index_failures = await asyncio.to_thread(artifacts.graph_adapter.retire_obsolete_indexes)
+    if retired_index_failures:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Dropping retired indexes failed, continuing: %s", "; ".join(retired_index_failures)
+        )
     schema_ready = await asyncio.to_thread(
         artifacts.graph_adapter.phase_one_schema_ready, require_graphiti=graphiti_in_play
     )
@@ -364,6 +347,7 @@ async def prepare_memory_runtime(
         # disagreement is unrepresentable rather than merely currently-absent.
         "graphiti": "ok" if graphiti_in_play else "skipped",
         "schema": schema,
+        "retired_index_failures": retired_index_failures,
         "edge_count_sync": edge_count_sync,
         "edge_count_sync_error": edge_count_sync_error,
     }

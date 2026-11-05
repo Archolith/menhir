@@ -1,5 +1,6 @@
 # Anthropic Scion source control — Menhir prior-art assessment
 
+**Status:** External comparison note  
 **Reviewed:** 2026-10-13  
 **Classification:** Dated external architecture account; proprietary implementation, not a code audit  
 **Primary source:** [Anthropic, "Redesigning source control at Anthropic" (2026-10-13)](https://www.anthropic.com/engineering/redesigning-source-control)  

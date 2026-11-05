@@ -1,4 +1,4 @@
-"""Blind attach check call (MENHIR_ANCHORED_TIME_ATTACH): one LLM call, its timeout, and a small cache.
+"""Blind attach check call (runs under MENHIR_ANCHORED_TIME_RESOLVER): one LLM call, its timeout, and a small cache.
 
 Mirrors anchored_time_resolver: ``attach`` never raises except on cancellation, and every failure
 becomes a status. Any non-ok status means no write (V3) in the caller. The prompt and the answer
@@ -13,7 +13,7 @@ import hashlib
 import json
 import logging
 import time
-from typing import Any
+from typing import Any, Mapping
 
 from menhir.infrastructure.anchored_time_attach import (
     ATTACH_PROMPT_VERSION,
@@ -65,10 +65,12 @@ class AnchoredTimeAttacher:
         model: str,
         timeout_s: float,
         cache_size: int = 256,
+        extra_body: Mapping[str, Any] | None = None,
     ) -> None:
         # ``client`` must be unwrapped (no retry of its own): acreate_chat_completion adds the
         # one backoff layer, and a wrapped client would nest a second.
         self._client = client
+        self._extra_body: dict[str, Any] = dict(extra_body or {})
         self._base_url = base_url
         self.model = model
         self.prompt_version = ATTACH_PROMPT_VERSION
@@ -90,7 +92,7 @@ class AnchoredTimeAttacher:
             self._cache.move_to_end(key)
             return AttachOutcome("ok", answers=_copy_answers(hit), cached=True)
         request = build_request(self.model, turn, speech_date, facts)
-        extra = _provider_extra_body(self.model, self._base_url)
+        extra = {**_provider_extra_body(self.model, self._base_url), **self._extra_body}
         if extra:
             request["extra_body"] = extra
         started = time.monotonic()
@@ -120,7 +122,7 @@ class AnchoredTimeAttacher:
             return AttachOutcome("empty", latency_s=latency)
         try:
             answers = parse_answers(content)
-        except (ValueError, TypeError, AttributeError):  # json.JSONDecodeError is a ValueError
+        except (ValueError, TypeError, AttributeError, RecursionError):  # JSONDecodeError is a ValueError
             return AttachOutcome("parse_error", latency_s=latency)
         if self._cache_size:
             self._cache[key] = _copy_answers(answers)

@@ -217,18 +217,44 @@ class _UsageTap:
         self.max_usd = max_usd
         self.rates = rates
         self.spent = 0.0
+        self.reserved = 0.0
+        self.refused = False
+        self.max_completion_seen = 0
         self.chat = self
         self.completions = self
 
     async def create(self, **request: Any) -> Any:
-        if self.spent >= self.max_usd:
-            raise RuntimeError(f"budget cap reached (${self.spent:.4f} >= ${self.max_usd:.4f})")
-        response = await self._inner.chat.completions.create(**request)
+        est = (len(json.dumps(request.get("messages", ""), default=str)) / 4 * self.rates[0]
+               + (request.get("max_completion_tokens") or request.get("max_tokens")
+                  or self.max_completion_seen) * self.rates[1]) / 1e6
+        if self.spent + self.reserved + est > self.max_usd:
+            self.refused = True
+            raise RuntimeError(f"budget cap reached (${self.spent:.4f} + ${self.reserved:.4f} reserved "
+                               f"+ ${est:.4f} > ${self.max_usd:.4f})")
+        self.reserved += est
+        try:
+            response = await self._inner.chat.completions.create(**request)
+        finally:
+            self.reserved -= est
         usage = getattr(response, "usage", None)
         if usage is not None:
+            completion = getattr(usage, "completion_tokens", 0) or 0
+            self.max_completion_seen = max(self.max_completion_seen, completion)
             self.spent += ((getattr(usage, "prompt_tokens", 0) or 0) * self.rates[0]
-                           + (getattr(usage, "completion_tokens", 0) or 0) * self.rates[1]) / 1e6
+                           + completion * self.rates[1]) / 1e6
         return response
+
+
+def _resolver_route(settings: Any, provider: Any) -> tuple[str, str, dict]:
+    """Endpoint, key and extra_body the resolver uses in production (graphiti_client.py)."""
+    from menhir.config.settings_model import parse_extra_body
+
+    if settings.anchored_time_base_url:
+        base_url, api_key = settings.anchored_time_base_url, settings.anchored_time_api_key
+    else:
+        base_url, api_key = provider.base_url, provider.api_key
+    extra_body = parse_extra_body(settings.anchored_time_extra_body, env_name="MENHIR_ANCHORED_TIME_EXTRA_BODY")
+    return base_url, api_key, extra_body
 
 
 async def _live(args: argparse.Namespace, eval_dir: Path) -> int:
@@ -240,22 +266,27 @@ async def _live(args: argparse.Namespace, eval_dir: Path) -> int:
     settings = MemorySettings.from_env()
     provider = ProviderConfig.for_graphiti_llm(settings)
     model = args.model or settings.anchored_time_resolver_model or provider.chat_model
-    raw = build_async_openai_client(base_url=provider.base_url, api_key=provider.api_key, settings=settings)
+    base_url, api_key, extra_body = _resolver_route(settings, provider)
+    raw = build_async_openai_client(base_url=base_url, api_key=api_key, settings=settings)
     # Raw client, as in graphiti_client.py: the resolver adds shaping and the one backoff layer.
     tap = _UsageTap(raw, args.max_usd, LUNA_RATES)
-    print(f"LIVE (paid): model={model} base={provider.base_url} cap=${args.max_usd:.2f}")
+    print(f"LIVE (paid): model={model} base={base_url} cap=${args.max_usd:.2f}")
     sem = asyncio.Semaphore(args.workers)
     for run in range(1, args.runs + 1):
         for name in args.sets.split(","):
             turns = load_heldout(eval_dir, name)
             # Fresh resolver per run: its cache must not turn run 2 into a copy of run 1.
-            resolver = AnchoredTimeResolver(tap, base_url=provider.base_url, model=model,
-                                            timeout_s=settings.anchored_time_resolver_timeout_s, cache_size=0)
+            resolver = AnchoredTimeResolver(tap, base_url=base_url, model=model,
+                                            timeout_s=settings.anchored_time_resolver_timeout_s, cache_size=0,
+                                            extra_body=extra_body)
             ckpt = eval_dir / f"ckpt_{name}_{args.tag}_r{run}.jsonl"
             latencies: list[float] = []
 
             async def one(t: dict) -> dict:
                 async with sem:
+                    if tap.refused:
+                        return {"custom_id": t["id"], "content": None, "status": "budget_skipped",
+                                "error": "budget_skipped"}
                     outcome = await resolver.resolve(t["turn"], date.fromisoformat(t["speech_date"][:10]), t["facts"])
                 if outcome.latency_s is not None:
                     latencies.append(outcome.latency_s)
@@ -269,6 +300,9 @@ async def _live(args: argparse.Namespace, eval_dir: Path) -> int:
             started = time.monotonic()
             rows = await asyncio.gather(*(one(t) for t in turns))
             ckpt.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+            if tap.refused:
+                print(f"budget cap reached; set incomplete, stopping (spent ${tap.spent:.4f} -> {ckpt.name})")
+                return 1
             s = score_run(turns, {r["custom_id"]: r["content"] for r in rows})
             lat = sorted(latencies)
             p = (lambda q: f"{lat[min(len(lat) - 1, int(q * len(lat)))]:.1f}s") if lat else (lambda q: "-")

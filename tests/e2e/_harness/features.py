@@ -26,12 +26,12 @@ Three mechanisms, in increasing power. All are evidence-recorded.
 
 2. An explicit override list, applied on top of the preset::
 
-       MENHIR_E2E_FEATURES="frontier_bm25=on,explorer=off,structure_watcher=off"
+       MENHIR_E2E_FEATURES="frontier_shadow=on,explorer=off,structure_watcher=off"
 
 3. A full powerset sweep over named flags, which parametrizes every lane over all
    2**n combinations::
 
-       MENHIR_E2E_FEATURE_POWERSET="frontier_bm25,frontier_fact_edges,scalar_state"
+       MENHIR_E2E_FEATURE_POWERSET="frontier_shadow,scalar_state,scalar_history"
 
    Three flags is 8 runs of every lane. This is deliberately opt-in and deliberately
    not defaulted: the combinatorics are the point, and so is the cost.
@@ -121,22 +121,6 @@ FEATURE_REGISTRY: tuple[FeatureFlag, ...] = (
         summary="QuantState-style agent-memory counters.",
         in_mvp_surface=True,
     ),
-    # --- default-on Warden surfaces promoted by #168 (#173, #171) ---------------
-    _flag(
-        "frontier_warden_gate",
-        "MENHIR_FRONTIER_WARDEN_GATE",
-        summary="Warden recall gate (scope, oracle admission, contradiction guards).",
-    ),
-    _flag(
-        "frontier_contradiction_interrupt",
-        "MENHIR_FRONTIER_CONTRADICTION_INTERRUPT",
-        summary="Warden contradiction interrupt on recall.",
-    ),
-    _flag(
-        "frontier_source_memories",
-        "MENHIR_FRONTIER_SOURCE_MEMORIES",
-        summary="Source-memory section on recall results.",
-    ),
     # --- surfaces outside the local-stdio MVP contract ---------------------------
     _flag(
         "explorer",
@@ -155,21 +139,6 @@ FEATURE_REGISTRY: tuple[FeatureFlag, ...] = (
     ),
     # --- default-off research lanes; the plan requires they stay preserved and off
     _flag(
-        "frontier_bm25",
-        "MENHIR_FRONTIER_BM25",
-        summary="BM25 lexical candidate generation in the frontier retriever.",
-    ),
-    _flag(
-        "frontier_content_vector",
-        "MENHIR_FRONTIER_CONTENT_VECTOR",
-        summary="Content-vector candidate generation.",
-    ),
-    _flag(
-        "frontier_fact_edges",
-        "MENHIR_FRONTIER_FACT_EDGES",
-        summary="FACT-edge expansion during retrieval.",
-    ),
-    _flag(
         "frontier_shadow",
         "MENHIR_FRONTIER_SHADOW",
         summary="Shadow-mode frontier scoring (computes, does not serve).",
@@ -177,22 +146,12 @@ FEATURE_REGISTRY: tuple[FeatureFlag, ...] = (
     _flag(
         "scalar_state",
         "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED",
-        summary="Typed scalar state extraction.",
+        summary="Typed scalar state extraction. Default on since the #168 freeze (cost switch).",
     ),
     _flag(
         "scalar_history",
         "MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED",
-        summary="Scalar history projection.",
-    ),
-    _flag(
-        "event_history",
-        "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED",
-        summary="Event-history extraction.",
-    ),
-    _flag(
-        "consolidation",
-        "MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED",
-        summary="Background personal-memory consolidation.",
+        summary="Scalar history projection. Default on since 2026-10-28 (#399 bucket 3).",
     ),
     _flag(
         "recall_audit",
@@ -203,11 +162,6 @@ FEATURE_REGISTRY: tuple[FeatureFlag, ...] = (
         "verifier_sync",
         "MENHIR_VERIFIER_SYNC_ENABLED",
         summary="Background verifier synchronization.",
-    ),
-    _flag(
-        "shadow_context_composition",
-        "MENHIR_SHADOW_CONTEXT_COMPOSITION",
-        summary="Shadow context composition alongside the served path.",
     ),
 )
 
@@ -304,12 +258,8 @@ PRESETS: dict[str, dict[str, bool]] = {
     "mvp_surface_only": {flag.name: flag.in_mvp_surface for flag in FEATURE_REGISTRY},
     #: Research lanes on, to check they remain non-destructive when an operator opts in.
     "research_on": _baseline(
-        frontier_bm25=True,
-        frontier_content_vector=True,
-        frontier_fact_edges=True,
         scalar_state=True,
         scalar_history=True,
-        event_history=True,
     ),
 }
 

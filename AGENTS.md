@@ -28,6 +28,8 @@ These instructions apply to the entire repository.
 - Use `.agent/workflows/feature_planning.md` before a semi-large or cross-cutting change.
 - Use `.agent/workflows/code_conventions.md` for code style and `.agent/maintenance.md` for changelog and
   closeout requirements.
+- Before changing an MCP tool, agent-facing text, setup or connection flow, a default, or user docs, read
+  the matching guide in `docs/usability/` and follow its Must rules.
 
 ## Verification
 

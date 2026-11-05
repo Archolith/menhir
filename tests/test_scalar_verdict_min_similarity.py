@@ -115,7 +115,8 @@ async def test_history_verdict_kept_when_gate_off_or_passed(
 
 @pytest.mark.unit
 def test_setting_default_off_and_reaches_tuning(monkeypatch):
-    assert MemorySettings().personal_memory_scalar_verdict_min_similarity == 0.0
+    # Shipped default is 0.675 (#168); the bare tuning dataclass stays off like the other flags.
+    assert MemorySettings().personal_memory_scalar_verdict_min_similarity == 0.675
     assert RetrievalTuningConfig().scalar_verdict_min_similarity == 0.0
     monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY", "0.35")
     settings = MemorySettings.from_env()

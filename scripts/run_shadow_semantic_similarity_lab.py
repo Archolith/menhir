@@ -4,7 +4,7 @@ production's own embedder (GraphitiClient.embed_query, text-embedding-3-small).
 Validation experiment for the direct-message<->fact-embedding-similarity proposal in response
 to .agent/reviews/menhir-shadow-context-composition-facet-instability-2026-07-16.md. Must
 demonstrate real discrimination between positive matches and each negative category BEFORE any
-change is made to production shadow_context_composition.py.
+change is made to production (the production shadow-composition module has since been removed).
 
 Usage:
     .venv/Scripts/python.exe scripts/run_shadow_semantic_similarity_lab.py

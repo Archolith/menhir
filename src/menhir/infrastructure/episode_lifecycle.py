@@ -16,10 +16,12 @@ from menhir.domain.namespace import (
 )
 from menhir.domain.recall_visibility import default_recall_visibility_cypher
 from menhir.domain.episode_nodes import menhir_queue_episode_cypher
+from menhir.domain.ingest import EXTRACTION_MODE_STORE_ONLY
 from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.self_identity import inferred_self_uuid_for_namespace
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.utils import source_confidence_for
+from menhir.domain.verbatim_skip_status import skip_projection_map_cypher
 from menhir.infrastructure.cypher import (
     Cypher,
     EPISODE_PROCESSING_FIELDS,
@@ -123,6 +125,7 @@ class EpisodeLifecycleRepository:
         turn_role: str | None = None,
         ingest_key: str | None = None,
         ingest_request_sha256: str | None = None,
+        extraction_mode: str | None = None,
     ) -> str:
         ingest_key_set = (
             "            , n.ingest_key = $ingest_key,\n"
@@ -144,6 +147,7 @@ class EpisodeLifecycleRepository:
             "bootstrap_scope": bootstrap_scope,
             "namespace": namespace,
             "reference_time": reference_time,
+            "extraction_mode": extraction_mode,
         }
         if ingest_key is not None:
             params["ingest_key"] = ingest_key
@@ -191,7 +195,8 @@ class EpisodeLifecycleRepository:
                 n.resolved_episode_uuid = null,
                 n.enrichment_priority = 'P1',
                 n.enriched_nodes_touched = 0,
-                n.enriched_edges_touched = 0
+                n.enriched_edges_touched = 0,
+                n.extraction_mode = $extraction_mode
             """
             + ingest_key_set,
             params=params,
@@ -200,11 +205,17 @@ class EpisodeLifecycleRepository:
 
     def find_episode_by_ingest_key(self, ingest_key: str) -> dict | None:
         """The anchor `:Episodic` stamped with this ingest key, or None (unique by constraint)."""
+        # The replay REPORTS the anchor's status, so it carries what effective_processing_row
+        # needs to project a verbatim-skipped client onto its evidence projection.
         rows = self.neo4j.execute(
-            """
-            MATCH (n:Episodic {ingest_key: $ingest_key})
+            f"""
+            MATCH (n:Episodic {{ingest_key: $ingest_key}})
+            OPTIONAL MATCH (p:Episodic {{uuid: n.extraction_skipped_for}})
             RETURN n.uuid AS uuid,
                    n.processing_state AS processing_state,
+                   n.processing_substage AS processing_substage,
+                   n.extraction_skipped_for AS extraction_skipped_for,
+                   {skip_projection_map_cypher("p")} AS skip_projection,
                    n.namespace AS namespace,
                    n.ingest_request_sha256 AS ingest_request_sha256
             LIMIT 1
@@ -217,6 +228,9 @@ class EpisodeLifecycleRepository:
         return {
             "uuid": row["uuid"],
             "processing_state": row["processing_state"],
+            "processing_substage": row.get("processing_substage"),
+            "extraction_skipped_for": row.get("extraction_skipped_for"),
+            "skip_projection": row.get("skip_projection"),
             "namespace": row["namespace"],
             "ingest_request_sha256": row["ingest_request_sha256"],
         }
@@ -247,18 +261,26 @@ class EpisodeLifecycleRepository:
         return bool(rows and rows[0].get("has_embedding"))
 
     def set_episode_content_embedding(
-        self, episode_uuid: str, embedding: list[float], model: str
+        self,
+        episode_uuid: str,
+        embedding: list[float],
+        model: str,
+        *,
+        expected_content: str | None = None,
     ) -> bool:
         """Stamp a content embedding onto Menhir's own `:Episodic` queue node.
 
         The evidence-projection guard in the WHERE clause is the backstop: evidence
         projections are an entity source, not memory (ADR 0001), and must never be
-        embedded into the source-memory lane. Returns whether a node was written.
+        embedded into the source-memory lane. With ``expected_content``, the write happens only
+        while the node still holds exactly that content, so a vector computed from text read
+        earlier is never stamped onto changed text. Returns whether a node was written.
         """
         rows = self.neo4j.execute(
             """
             MATCH (n:Episodic {uuid: $uuid})
             WHERE NOT coalesce(n.is_evidence_projection, false)
+              AND ($expected_content IS NULL OR n.content = $expected_content)
             SET n.content_embedding = $embedding,
                 n.content_embedding_model = $model,
                 n.content_embedding_at = datetime()
@@ -268,6 +290,7 @@ class EpisodeLifecycleRepository:
                 "uuid": episode_uuid,
                 "embedding": embedding,
                 "model": model,
+                "expected_content": expected_content,
             },
         )
         return bool(rows)
@@ -372,11 +395,13 @@ class EpisodeLifecycleRepository:
         *,
         after_uuid: str | None = None,
         model: str | None = None,
+        ready_only: bool = False,
     ) -> list[dict[str, object]]:
         """Page through Menhir `:Episodic` nodes that need a content embedding.
 
         Needs one = no embedding yet, or (with ``model``) an embedding stamped by a different
-        model. Blank content is excluded IN the query and paging is by an exclusive ``after_uuid``
+        model. ``ready_only`` keeps only finished (READY) episodes: the ingest step is still ahead
+        of PENDING/ENRICHING ones. Blank content is excluded IN the query and paging is by an exclusive ``after_uuid``
         cursor (``ORDER BY n.uuid``), so a page is short only at the true end and rows a caller
         skips are never re-listed ahead of the rest (audit F1).
 
@@ -399,6 +424,7 @@ class EpisodeLifecycleRepository:
             menhir_queue_episode_cypher("n"),
             "n.processing_state IS NOT NULL",
             "n.processing_state <> 'FAILED'",
+            "($ready_only = false OR n.processing_state = 'READY')",
             non_structural_memory_cypher("n"),
             default_recall_visibility_cypher("n"),
         ]
@@ -406,6 +432,7 @@ class EpisodeLifecycleRepository:
             "limit": safe_limit,
             "after_uuid": after_uuid,
             "model": model,
+            "ready_only": bool(ready_only),
             **tenant_scope_params(namespace),
         }
         where.append(tenant_scope_cypher("n"))
@@ -919,6 +946,9 @@ class EpisodeLifecycleRepository:
                 # noted above: stored correctly, projected nowhere.
                 "n.reference_time AS reference_time",
                 "n.queued_at AS queued_at",
+                # Durable per-episode mode: every re-claim (lease recovery, retry, requeue) reads
+                # it here, so a store-only episode is never extracted on a later attempt.
+                "n.extraction_mode AS extraction_mode",
                 # The episode-to-evidence link identifies the current raw transcript turn. A
                 # relationless corrective extraction can use it to retrieve bounded adjacent
                 # dialogue without putting assistant context into the persisted episode body.
@@ -1113,6 +1143,67 @@ class EpisodeLifecycleRepository:
         if not rows or not rows[0].get("projection_uuid"):
             return None
         return str(rows[0]["projection_uuid"])
+
+    def mark_episode_store_only(
+        self, episode_uuid: str, *, worker_id: str, claim_started_at: object | None,
+        by_turn_role: bool = False,
+    ) -> bool:
+        """Finish a store-only episode READY without extraction. True when this claim wrote it.
+
+        Fenced on this claim's owner and start instant, and on the durable ``extraction_mode``
+        itself, so only an attempt holding the current lease on a store-only row can finish it.
+
+        ``by_turn_role``: the worker's assistant-turn policy decided store-only for a row created
+        normal. The mode is then written in the same fenced SET as READY, so the zero-extraction
+        sweep (which exempts store-only by mode) can never see this row READY without it.
+        """
+        if not worker_id or claim_started_at is None:
+            return False
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $episode_uuid})
+            WHERE n.processing_state = 'ENRICHING' AND n.processing_owner = $worker_id
+              AND n.processing_started_at IS NOT NULL
+              AND n.processing_started_at.epochSeconds = datetime($claim_started_at).epochSeconds
+              AND n.processing_started_at.nanosecond = datetime($claim_started_at).nanosecond
+              AND (n.extraction_mode = $store_only OR $by_turn_role)
+            SET n.extraction_mode = $store_only,
+                n.processing_state = 'READY',
+                n.processing_stage = 'ready',
+                n.processing_substage = $store_only,
+                n.processing_substage_started_at = datetime(),
+                n.processing_progress = 100.0,
+                n.processing_steps_completed = coalesce(toInteger(n.processing_steps_total), 5),
+                n.processing_completed_at = datetime(),
+                n.processing_owner = null,
+                n.processing_lease_expires_at = null,
+                n.processing_heartbeat_at = datetime(),
+                n.processing_error = null,
+                n.processing_llm_active_task = null,
+                n.processing_llm_active_kind = null,
+                n.processing_llm_active_model = null,
+                n.processing_llm_active_endpoint = null,
+                n.enriched_nodes_touched = 0,
+                n.enriched_edges_touched = 0,
+                n.policy_empty_reason = null
+            RETURN n.uuid AS uuid
+            """,
+            params={
+                "episode_uuid": episode_uuid,
+                "worker_id": worker_id,
+                "claim_started_at": claim_started_at,
+                "store_only": EXTRACTION_MODE_STORE_ONLY,
+                "by_turn_role": bool(by_turn_role),
+            },
+        )
+        return bool(rows)
+
+    def episode_is_store_only(self, episode_uuid: str) -> bool:
+        rows = self.neo4j.execute(
+            "MATCH (n:Episodic {uuid: $uuid}) RETURN n.extraction_mode = $store_only AS store_only",
+            params={"uuid": episode_uuid, "store_only": EXTRACTION_MODE_STORE_ONLY},
+        )
+        return bool(rows and rows[0].get("store_only"))
 
     def reenable_verbatim_skips(
         self, *, projection_uuid: str | None = None, limit: int = 100,
@@ -1316,11 +1407,19 @@ class EpisodeLifecycleRepository:
         # 0.29.2 upgrade canary (this path only runs during background enrichment
         # finalize, which the offline test suite doesn't exercise against a real
         # Neo4j server).
+        # The raw row is what work fences read. `extraction_skipped_for` and `skip_projection`
+        # let status readers compute a verbatim-skipped client's effective state
+        # (domain.verbatim_skip_status.effective_processing_row); fences ignore them.
         query = (
             Cypher()
             .match("(n:Episodic)")
             .where("n.uuid = $episode_uuid")
-            .return_fields(MEMORY_RETURN_FIELDS)
+            .optional_match("(p:Episodic {uuid: n.extraction_skipped_for})")
+            .return_fields(
+                MEMORY_RETURN_FIELDS,
+                "n.extraction_skipped_for AS extraction_skipped_for",
+                f"{skip_projection_map_cypher('p')} AS skip_projection",
+            )
             .limit("1")
             .build()
         )

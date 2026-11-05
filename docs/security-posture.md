@@ -2,11 +2,12 @@
 
 **Purpose:** a standing reference for Menhir's authentication/authorization architecture,
 the controls in place, the deployment posture, and what is validated vs. still pending.
-Point-in-time finding history lives in the workspace review
-`.agent/reviews/menhir-oauth-security-consolidated.md` (archolith project); this document
-is the durable "how it is built and why" reference.
+Point-in-time finding history lives in a maintainer review outside this repository; this
+document is the durable "how it is built and why" reference.
 
-**Last reviewed:** 2026-07-10, menhir `main` @ `5fd4f8b`.
+**Last full review:** 2026-07-10, menhir `main` @ `5fd4f8b`. Sections not marked otherwise
+describe the code at that review; dependency versions in §11 are from that date (the release
+SBOM is `sbom.json`). Ports and the 0.3.0 limitations below were updated for 0.3.0.
 
 ---
 
@@ -25,6 +26,12 @@ Primary threats considered:
 - Credential-free privilege escalation during bootstrap windows.
 - DoS / resource amplification (JWKS refetch, rate-limit table growth, open DCR).
 - Reverse-proxy trust confusion (peer-address vs. real-client collapse).
+
+**Data removal limit (0.3.0, #423).** Deleting or erasing a memory does not remove the entities
+and fact edges extracted from it, which can restate its content. Namespace deletion removes a
+non-default namespace's memories and derived graph data, but refuses `default` and does not remove
+TODOs, WorkArtifacts or the shared structure graph (see [your data](your-data.md)). See
+[erasure](personal-memory-readiness.md#known-limitation-erasure-keeps-extracted-knowledge).
 
 Not in scope here: OS/network hardening of the VPS, TLS termination (delegated to the
 front proxy), and supply-chain scanning (tracked separately; see §11).
@@ -52,7 +59,7 @@ loopback posture, not by in-app controls** (operator checklist:
   (`bolt+s://` / `neo4j+s://`) or a tunnel — a bare remote `bolt://` would send credentials and
   memory content in the clear. No code change for MVP; local posture is safe.
 - **Graph explorer (Finding B).** The explorer is mounted into the main app at `/explorer` on the
-  API port (default `127.0.0.1:8090`), sharing the runtime Neo4j pool. `BearerAuthMiddleware` now
+  API port (default `127.0.0.1:8100`), sharing the runtime Neo4j pool. `BearerAuthMiddleware` now
   gates `/explorer` and `/explorer/candidates/*` exactly like `/api/*`: on a loopback bind in
   `AuthMode.NONE` it is open (unauthenticated localhost inspection, as before); on a non-loopback
   bind it requires the same bearer/OAuth/client-token credential as the API. Only `/explorer/static/*`
@@ -149,8 +156,11 @@ is a **resource server**, not (for the RS path) an authorization server.
 
 Enabled by `MENHIR_OAUTH_AS_ENABLED`. Public clients only (PKCE, no client secrets).
 
-- **Grant:** `authorization_code` only (advertised and implemented; no unimplemented
-  `refresh_token` advertised).
+- **Grant:** `authorization_code`. Refresh tokens are opt-in
+  (`MENHIR_OAUTH_AS_REFRESH_TOKENS_ENABLED`, default off; lifetime
+  `MENHIR_OAUTH_AS_REFRESH_TTL_S`, default 30 days). Issuance without the `offline_access` scope
+  needs `MENHIR_OAUTH_AS_REFRESH_WITHOUT_OFFLINE_ACCESS_ENABLED` as well. This option postdates the
+  2026-07-10 review.
 - **PKCE** enforced at authorize/token time; authorization codes are single-use (atomic
   redeem).
 - **Dynamic Client Registration (RFC 7591)** is unauthenticated by spec but bounded:
@@ -236,8 +246,8 @@ which would otherwise (a) satisfy the loopback bootstrap check for internet call
 
 ## 10. Data and secret handling
 
-- Tokens (client + OAuth) never stored in plaintext; client tokens sha256-only, OAuth tokens
-  never persisted at all.
+- Client tokens are stored sha256-only. OAuth access tokens are not persisted; refresh tokens
+  are stored in `menhir_oauth_as.db` when refresh is enabled (30-day TTL).
 - Static-key comparison is constant-time (`hmac.compare_digest`).
 - `WWW-Authenticate` challenge components are server-controlled literals/config; caller
   strings never reach the header (quote/backslash escaped).
@@ -306,6 +316,7 @@ after any auth change; it is the fast regression net for the shapes.
 | `MENHIR_OAUTH_AS_REGISTER_RATE` / `_WINDOW_S` | DCR throttle (default 20 / 600s) |
 | `MENHIR_OAUTH_AS_APPROVE_RATE` / `_WINDOW_S` | Consent-approve throttle (default 10 / 300s) |
 | `MENHIR_OAUTH_AS_CONSENT_SECRET` | Explicit consent HMAC secret (required for multi-host) |
+| `MENHIR_OAUTH_AS_REFRESH_TOKENS_ENABLED` / `MENHIR_OAUTH_AS_REFRESH_TTL_S` | Opt-in refresh tokens and their lifetime (default off / 2592000 s) |
 | `MENHIR_CLIENT_TOKENS_ENABLED` | Enable the per-client token tier |
 | `MENHIR_OPERATOR_KEY` / `MENHIR_AGENT_KEY` / `MENHIR_READONLY_KEY` / `MENHIR_API_KEY` | Static bearer keys by tier |
 | `MENHIR_TRUSTED_PROXY` | Trust the last `X-Forwarded-For` hop for AS rate-limit keys |
@@ -336,5 +347,5 @@ after any auth change; it is the fast regression net for the shapes.
   (N-003), CORS preflight exemption (N-002), explicit stdio operator tier (CT-002), atomic
   bootstrap mint (CT-003), DCR stale-client reaper + nearing-cap warn (AS-002 residual).
 - Earlier remediations (resource-server S-001..S-009, embedded-AS AS-001..AS-007,
-  re-audit N-001..N-004) and full finding history: see
-  `.agent/reviews/menhir-oauth-security-consolidated.md` in the archolith workspace.
+  re-audit N-001..N-004) and full finding history are in a maintainer review outside this
+  repository.

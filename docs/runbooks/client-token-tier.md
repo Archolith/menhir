@@ -153,8 +153,8 @@ store:
 ### Option A: Delete the database file
 
 1. Stop the server.
-2. Delete `client_tokens.db` (located in the `.agent` directory by default, or under
-   `MENHIR_OAUTH_AS_DIR` if that variable is set).
+2. Delete `client_tokens.db` (in the state directory, `MENHIR_STATE_DIR`, default `~/.menhir`;
+   or under `MENHIR_OAUTH_AS_DIR` if that variable is set).
 3. Restart the server.
 4. Re-bootstrap the first token via loopback (see section 3).
 

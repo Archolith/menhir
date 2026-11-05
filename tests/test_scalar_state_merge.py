@@ -625,7 +625,7 @@ def test_unmerge_coordinator_fires_scalar_hook_on_commit():
         def get(self, oid):
             return {"expected_after_sha256": expected_after}
 
-        def mark_committed(self, oid):
+        def mark_committed(self, oid, owner_token=None):
             pass
 
         def mark_reversed(self, oid):
@@ -664,7 +664,7 @@ def test_unmerge_coordinator_hook_failure_does_not_break_commit():
     class _Journal:
         def _ensure_ready(self): pass
         def get(self, oid): return {"expected_after_sha256": expected_after}
-        def mark_committed(self, oid): pass
+        def mark_committed(self, oid, owner_token=None): pass
         def mark_reversed(self, oid): pass
 
     def _boom(*, survivor_uuid, absorbed_uuid, merge_op_id, unmerge_op_id):

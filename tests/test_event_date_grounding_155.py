@@ -1,68 +1,54 @@
 """#155 grounded event dates — offline unit tests, no live model/network/db.
 
-Event `valid_at` must be grounded in SOURCE evidence inside the sentence containing the claim span,
+Event valid time must be grounded in SOURCE evidence inside the sentence containing the claim span,
 never in an ungrounded model `when`. Proves: the repro (model 2099 date ignored -> episode reference),
 explicit full source dates (ISO and 'Month D, YYYY'), sentence-locality, future source dates ignored,
 month+day-without-year resolution to the most recent year <= the reference, supported relative phrases,
-malformed `when` no longer dropping the event, unchanged abstention without a usable reference,
-persistence of the resolved valid_at/time_basis into repository write params, and the v2 version bump.
+malformed `when` falling back to the reference, and unchanged abstention without a usable reference.
+These tests exercise the resolver in ``services.grounded_event_time`` (shared with read-time
+occurrence dating).
 """
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 
 import pytest
 
-from menhir.config.settings_model import MemorySettings
-from menhir.domain.typed_assertion import perceiver_rank
-from menhir.infrastructure.typed_event_repository import TypedEventAssertionRepository
-from menhir.services.event_history_perception import (
-    build_event_assertion,
-    extract_events_once,
+from menhir.services.grounded_event_time import (
+    resolve_event_valid_time,
+    sentence_context,
 )
 
 REF = "2026-09-23T12:00:00+00:00"
 
+_SPAN = "bought a notebook"
+
 
 @dataclass(frozen=True)
-class _Ep:
-    uuid: str
-    content: str
+class _Res:
+    valid_at: str | None
+    time_basis: str | None
+    note: str | None
+
+    @property
+    def built(self) -> bool:
+        return self.valid_at is not None
+
+    @property
+    def assertion(self) -> "_Res":
+        return self
+
+    @property
+    def reason(self) -> str | None:
+        return None if self.built else "no_valid_time"
 
 
-def _llm(rows) -> "object":
-    def complete(system: str, user: str) -> str:
-        return json.dumps(rows)
-
-    return complete
-
-
-def _event(**over):
-    base = dict(
-        episode=0, subject="user", predicate="bought", object="notebook",
-        object_display="", domain="", when="", stated_span="bought a notebook",
-    )
-    base.update(over)
-    return base
-
-
-def _extract(content: str, *, when: str = "", on_note=None, on_drop=None):
-    episodes = [_Ep(uuid="ep-0", content=content)]
-    rows = [{"episode": 0, "events": [_event(when=when)]}]
-    out = extract_events_once(
-        episodes, _llm(rows), on_drop=on_drop, on_note=on_note)
-    assert len(out) == 1
-    return out[0]
-
-
-def _build(content: str, *, when: str = "", ref: str | None = REF):
-    p = _extract(content, when=when)
-    return build_event_assertion(
-        p, subject_uuid="u-1", namespace="n", learned_at="2026-09-30T00:00:00+00:00",
-        episode_reference_time=ref, turn_evidence_uuid="te-1", perceiver_version="v2",
-    )
+def _build(content: str, *, when: str = "", ref: str | None = REF) -> _Res:
+    start = content.index(_SPAN)
+    context = sentence_context(content, start, start + len(_SPAN))
+    valid_at, time_basis, note = resolve_event_valid_time(when, context, ref)
+    return _Res(valid_at, time_basis, note)
 
 
 # --------------------------------------------------------------------------- issue repro
@@ -250,17 +236,8 @@ def test_unsupported_relative_phrases_fall_back(phrase):
 
 
 @pytest.mark.unit
-def test_malformed_when_no_longer_drops_the_event():
-    drops: list[str] = []
-    notes: list[str] = []
-    p = _extract("I bought a notebook.", when="notadate", on_drop=drops.append,
-                 on_note=notes.append)
-    assert drops == []
-    assert notes == ["malformed_when_ignored"]
-    res = build_event_assertion(
-        p, subject_uuid="u-1", namespace="n", learned_at="2026-09-30T00:00:00+00:00",
-        episode_reference_time=REF, turn_evidence_uuid="te-1", perceiver_version="v2",
-    )
+def test_malformed_when_falls_back_to_episode_reference():
+    res = _build("I bought a notebook.", when="notadate")
     assert res.built
     assert res.assertion.valid_at == REF
     assert res.assertion.time_basis == "episode_reference"
@@ -274,28 +251,3 @@ def test_no_usable_reference_and_no_source_date_abstains():
     res = _build("I bought a notebook.", ref=None)
     assert not res.built
     assert res.reason == "no_valid_time"
-
-
-# --------------------------------------------------------------------------- persistence
-
-
-@pytest.mark.unit
-def test_resolved_valid_at_and_time_basis_reach_repository_write_params():
-    class FakeNeo4j:
-        def execute(self, query, params=None):
-            return []
-
-    res = _build("On 2026-07-18 I bought a notebook.", when="2026-08-01")
-    assert res.built and res.assertion is not None
-    params = TypedEventAssertionRepository(FakeNeo4j())._to_params(res.assertion)
-    assert params["valid_at_raw"] == "2026-07-18T00:00:00+00:00"
-    assert params["time_basis"] == "explicit"
-
-
-# --------------------------------------------------------------------------- version bump
-
-
-@pytest.mark.unit
-def test_event_perceiver_default_is_v2_and_outranks_v1():
-    assert MemorySettings.personal_memory_event_history_perceiver_version == "v2"
-    assert perceiver_rank("v2") > perceiver_rank("v1")

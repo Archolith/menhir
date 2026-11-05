@@ -11,6 +11,7 @@ import hashlib
 import logging
 import re
 from collections.abc import Sequence
+from datetime import timezone
 from typing import Any
 from uuid import uuid4
 
@@ -26,8 +27,8 @@ from menhir.domain.namespace import (
 from menhir.domain.recall_visibility import default_recall_visibility_cypher
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.episode_nodes import menhir_queue_episode_cypher
-from menhir.domain.event_time import EVENT_TIME_PROPERTIES
 from menhir.domain.recall import adjacency_edge_pattern
+from menhir.domain.verbatim_skip_status import effective_state_cypher, skip_projection_lookup_cypher
 from menhir.infrastructure.cypher import (
     Cypher,
     ENTITY_METADATA_FIELDS,
@@ -40,6 +41,7 @@ from menhir.infrastructure.cypher import (
 )
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.verifier_repository import candidate_verifier_evidence_cypher
+from menhir.services.embedding_identity import LEGACY_EMBEDDING_MODELS
 
 logger = logging.getLogger(__name__)
 
@@ -52,29 +54,6 @@ ADMISSION_NO_TURNS = "no_turns"
 
 _OPAQUE_DIGEST_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,256}$")
 _DIGEST_KEY_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
-
-
-def _lucene_quote(text: str) -> str:
-    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
-
-
-def fact_keyword_lucene_query(
-    phrases: Sequence[str], group_ids: list[str] | None
-) -> str | None:
-    """Lucene string for the edge fulltext index: OR of quoted phrases, optionally scoped by group.
-
-    Returns None when no non-empty phrase remains. The group clause is added only when every
-    group id is a non-empty string (Lucene cannot match an empty value); the caller still
-    filters group_id in Cypher.
-    """
-    quoted = [_lucene_quote(p) for p in phrases if p and p.strip()]
-    if not quoted:
-        return None
-    query = "(" + " OR ".join(quoted) + ")"
-    if group_ids and all(isinstance(g, str) and g for g in group_ids):
-        clause = " OR ".join(f"group_id:{_lucene_quote(g)}" for g in group_ids)
-        query = f"({clause}) AND {query}"
-    return query
 
 
 def _validated_evidence_tombstone_params(
@@ -118,6 +97,24 @@ def admission_provenance_state(*, turn_evidence_count: int, admission_edge_count
     return ADMISSION_LINKED if admission_edge_count > 0 else ADMISSION_NEVER_LINKED
 
 
+def _iso_utc_or_none(value: Any) -> str | None:
+    """Serialise a Neo4j DateTime / datetime / ISO string as an ISO-8601 UTC string."""
+
+    if value is None:
+        return None
+    if hasattr(value, "to_native"):
+        value = value.to_native()
+    if isinstance(value, str):
+        from menhir.infrastructure.telemetry.operator_warnings_store import parse_iso_utc
+
+        value = parse_iso_utc(value)
+        if value is None:
+            return None
+    if getattr(value, "tzinfo", None) is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat(timespec="microseconds")
+
+
 class MemoryQueryRepository:
     """Encapsulates memory read/query operations and simple mutations (flag, delete)."""
 
@@ -147,17 +144,20 @@ class MemoryQueryRepository:
         producer that captures turns and never reports the pairing.
         """
 
-        group_ids = namespace_to_group_ids(namespace)
+        # Menhir's queue anchors carry `namespace` but no `group_id`, so the scope is the shared
+        # tenancy predicate (namespace over group_id), not a bare group_id match.
         params: dict[str, Any] = {}
         node_filter = ""
-        if group_ids is not None:
-            node_filter = " AND n.group_id IN $group_ids"
-            params["group_ids"] = group_ids
+        if namespace_spellings(namespace) is not None:
+            node_filter = f" AND {tenant_scope_cypher('n')}"
+            params.update(tenant_scope_params(namespace))
 
         rows = self.neo4j.execute(
             f"""
             MATCH (n)
             WHERE (n:Entity OR n:Episodic){node_filter}
+            {skip_projection_lookup_cypher("n", "p")}
+            WITH n, {effective_state_cypher("n", "p")} AS effective_state
             RETURN count(n) AS total_memories,
                    count(CASE WHEN n:Entity THEN 1 END) AS entity_count,
                    count(CASE WHEN n:Episodic THEN 1 END) AS episode_count,
@@ -165,10 +165,12 @@ class MemoryQueryRepository:
                    count(CASE WHEN n.scope = 'SESSION' THEN 1 END) AS session_count,
                    count(CASE WHEN n.scope = 'PERSISTENT' THEN 1 END) AS persistent_count,
                    count(CASE WHEN n.scope = 'PROMOTED' THEN 1 END) AS promoted_count,
-                   count(CASE WHEN n:Episodic AND n.processing_state = 'PENDING' THEN 1 END) AS pending_count,
-                   count(CASE WHEN n:Episodic AND n.processing_state = 'ENRICHING' THEN 1 END) AS enriching_count,
-                   count(CASE WHEN n:Episodic AND n.processing_state = 'READY' THEN 1 END) AS ready_count,
-                   count(CASE WHEN n:Episodic AND n.processing_state = 'FAILED' THEN 1 END) AS failed_count
+                   count(CASE WHEN n:Episodic AND effective_state = 'PENDING' THEN 1 END) AS pending_count,
+                   count(CASE WHEN n:Episodic AND effective_state = 'ENRICHING' THEN 1 END) AS enriching_count,
+                   count(CASE WHEN n:Episodic AND effective_state = 'READY' THEN 1 END) AS ready_count,
+                   count(CASE WHEN n:Episodic AND effective_state = 'FAILED' THEN 1 END) AS failed_count,
+                   max(CASE WHEN n:Episodic AND effective_state = 'FAILED'
+                            THEN n.processing_completed_at END) AS latest_failed_at
             """,
             params or None,
         )
@@ -206,7 +208,9 @@ class MemoryQueryRepository:
             "enriching_count": 0,
             "ready_count": 0,
             "failed_count": 0,
+            "latest_failed_at": None,
         }
+        overview["latest_failed_at"] = _iso_utc_or_none(overview.get("latest_failed_at"))
         overview["turn_evidence_count"] = int(admission.get("turn_evidence_count") or 0)
         overview["admission_edge_count"] = int(admission.get("admission_edge_count") or 0)
         overview["admission_provenance"] = admission_provenance_state(
@@ -381,33 +385,6 @@ class MemoryQueryRepository:
 
     # --- Recall scoring helpers ---------------------------------------------
 
-    def search_content_embeddings(
-        self,
-        query_vector: list[float],
-        *,
-        limit: int = 50,
-        group_ids: list[str] | None = None,
-    ) -> list[dict[str, object]]:
-        """Return content-embedding cosine hits without mutating graph state."""
-        safe_limit = max(1, min(limit, 500))
-        return self.neo4j.execute(
-            """
-            MATCH (n:Entity)
-            WHERE n.content_embedding IS NOT NULL
-              AND ($group_ids IS NULL OR n.group_id IN $group_ids)
-            WITH n, vector.similarity.cosine(n.content_embedding, $query_vector) AS cosine
-            WHERE cosine IS NOT NULL
-            RETURN n.uuid AS uuid, n.name AS name, cosine
-            ORDER BY cosine DESC, n.uuid
-            LIMIT $limit
-            """,
-            params={
-                "query_vector": query_vector,
-                "group_ids": group_ids,
-                "limit": safe_limit,
-            },
-        )
-
     def search_episode_embeddings(
         self,
         query_vector: list[float],
@@ -415,12 +392,19 @@ class MemoryQueryRepository:
         limit: int = 10,
         namespace: str | None = None,
         model: str | None = None,
+        subject_uuid: str | None = None,
+        resolved_only: bool = False,
         sources: Sequence[str] | None = None,
     ) -> list[dict[str, object]]:
         """Cosine hits over Menhir `:Episodic` content embeddings (source-memory lane).
 
+        With ``resolved_only``, only receipts whose resolved Graphiti episode can anchor a timeline
+        are searched (store-only receipts and hidden/FAILED/foreign episodes have no position).
+
         With ``model``, only vectors stamped by that embedder are compared: a different model of
-        the same dimension lives in a different space (audit F2).
+        the same dimension lives in a different space (audit F2). With ``subject_uuid``, only
+        receipts whose resolved episode mentions that entity are searched, so the constraint
+        applies before ``LIMIT`` (recall_timeline query + subject).
 
         With ``sources``, only episodes whose ingest ``source`` is one of those exact strings
         match, before the limit is applied. An empty sequence matches nothing; ``None`` is no filter.
@@ -453,11 +437,40 @@ class MemoryQueryRepository:
             **tenant_scope_params(namespace),
         }
         if model is not None:
-            where.append("coalesce(n.content_embedding_model, '') = $embedding_model")
+            where.append(
+                "(coalesce(n.content_embedding_model, '') = $embedding_model"
+                " OR coalesce(n.content_embedding_model, '') IN $legacy_embedding_models)"
+            )
             params["embedding_model"] = model
+            params["legacy_embedding_models"] = list(LEGACY_EMBEDDING_MODELS)
         if sources is not None:
             where.append("n.source IN $sources")
             params["sources"] = list(sources)
+        if resolved_only or subject_uuid is not None:
+            # The resolved episode must itself be one `timeline_anchor` could return (same
+            # shared predicates), so hidden/FAILED/foreign episodes do not use up LIMIT slots.
+            episode_pattern = "(g:Episodic)"
+            if subject_uuid is not None:
+                episode_pattern = "(:Entity {uuid:$subject_uuid})<-[:MENTIONS]-(g:Episodic)"
+                params["subject_uuid"] = subject_uuid
+            # Same prefilter as `_timeline_episode_where`, so a hit here is one it can anchor.
+            prefilter = (
+                [tenant_scope_prefilter_cypher("g")]
+                if namespace_spellings(namespace) is not None else []
+            )
+            where.append(
+                f"EXISTS {{ MATCH {episode_pattern}"
+                " WHERE g.uuid = n.resolved_episode_uuid AND "
+                + " AND ".join([
+                    *prefilter,
+                    "g.valid_at IS NOT NULL",
+                    "coalesce(g.processing_state, '') <> 'FAILED'",
+                    non_structural_memory_cypher("g"),
+                    default_recall_visibility_cypher("g"),
+                    tenant_scope_cypher("g"),
+                ])
+                + " }"
+            )
         # menhir #171: when scoped, lead with the index-friendly prefilter so the planner can
         # seek the :Episodic(namespace)/:Episodic(group_id) RANGE indexes. It is a superset;
         # tenant_scope_cypher below still decides membership. Unscoped (None) is unchanged.
@@ -650,25 +663,17 @@ class MemoryQueryRepository:
         return rows[0] if rows else None
 
     def timeline_facts(
-        self, *, episode_uuids: list[str], namespace: str | None, event_time: bool = False
+        self, *, episode_uuids: list[str], namespace: str | None
     ) -> dict[str, list[dict[str, Any]]]:
         """RELATES_TO facts attached to the page's episodes, grouped per episode (A3).
 
         Tenancy on the fact edge goes through `tenant_scope_cypher("r")` only. Bounded:
         at most 50 episodes (clamped here) and 20 facts per episode, ordered by
-        `r.valid_at`. Read-only. With `event_time` (MENHIR_ANCHORED_TIME_RENDER) the anchored-time
-        contract is projected too and facts order by event-window start, falling back to valid_at.
+        `r.valid_at`. Read-only.
         """
         safe_uuids = [u for u in episode_uuids if u][:50]
         if not safe_uuids:
             return {}
-        order_key = "r.valid_at"
-        contract_keys = ""
-        if event_time:
-            order_key = "coalesce(r.time_window_start, toString(r.valid_at))"
-            contract_keys = "".join(
-                f",\n                {name}: r.{name}" for name in EVENT_TIME_PROPERTIES
-            )
         query = f"""
             UNWIND $episode_uuids AS episode_uuid
             MATCH (ep:Episodic {{uuid: episode_uuid}})-[:MENTIONS]->(:Entity)
@@ -676,12 +681,12 @@ class MemoryQueryRepository:
             WHERE episode_uuid IN coalesce(r.episodes, [])
               AND {tenant_scope_cypher("r")}
             WITH DISTINCT episode_uuid, r
-            ORDER BY {order_key}
+            ORDER BY r.valid_at
             WITH episode_uuid, collect({{
                 fact: r.fact,
                 valid_at: toString(r.valid_at),
                 invalid_at: toString(r.invalid_at),
-                expired_at: toString(r.expired_at){contract_keys}
+                expired_at: toString(r.expired_at)
             }})[0..20] AS facts
             RETURN episode_uuid, facts
         """
@@ -731,7 +736,7 @@ class MemoryQueryRepository:
 
         The recall pipeline is otherwise `:Entity`-only (`fetch_candidate_metadata` matches `(n:Entity)`),
         so a typed-scalar observation is never searched. This is the observation lane's candidate search,
-        mirroring `search_content_embeddings` but over the assertion log. Only MATERIALIZABLE observations
+        mirroring `search_episode_embeddings` but over the assertion log. Only MATERIALIZABLE observations
         are candidates -- current (`NOT superseded`) and bound (`NOT binding_pending`); a superseded or
         unbound row must never surface. Scoped by `namespace` (assertions carry `namespace`, not
         `group_id`). Returns the assertion id + `stated_span` (the recall surface / user's own words) +
@@ -812,88 +817,20 @@ class MemoryQueryRepository:
             params={"uuids": node_uuids, "belief_commit_key": "belief_commit"},
         )
 
-    def fetch_temporal_facts(
-        self,
-        node_uuids: list[str],
-        *,
-        query_vector: list[float] | None = None,
-        namespace: str | None = None,
-    ) -> list[dict[str, object]]:
+    def fetch_temporal_facts(self, node_uuids: list[str]) -> list[dict[str, object]]:
         """Fetch bi-temporal fact-edge state for candidate entity nodes.
 
         Only edges with fact text count: link edges without it would take the per-node slots
         (and mark a node as having temporal facts for the belief gate).
-        With ``query_vector`` each row also carries ``fact_similarity`` (cosine of the
-        fact embedding to the query; null when the embedding is missing or mis-sized), and
-        the edges are tenant-scoped to ``namespace``: ranking by query similarity can pull
-        any edge on a hub node into the top slots, so it must not reach another silo's edge.
         """
         if not node_uuids:
             return []
-        if query_vector is None:
-            query = (Cypher()
-                .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
-                .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT}")
-                .return_fields(FACT_TEMPORAL_FIELDS)
-                .build())
-            return self.neo4j.execute(query, params={"uuids": node_uuids})
-        similarity_field = (
-            "CASE WHEN r.fact_embedding IS NOT NULL "
-            "AND size(r.fact_embedding) = size($query_vector) "
-            "THEN vector.similarity.cosine(r.fact_embedding, $query_vector) "
-            "ELSE null END AS fact_similarity"
-        )
         query = (Cypher()
             .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
-            .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT} AND {tenant_scope_cypher('r')}")
-            .return_fields([*FACT_TEMPORAL_FIELDS, similarity_field])
+            .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT}")
+            .return_fields(FACT_TEMPORAL_FIELDS)
             .build())
-        return self.neo4j.execute(
-            query,
-            params={"uuids": node_uuids, "query_vector": query_vector,
-                    **tenant_scope_params(namespace)},
-        )
-
-    def search_facts_by_keywords(
-        self,
-        phrases: Sequence[str],
-        namespace: str | None,
-        limit: int = 50,
-    ) -> list[dict[str, object]]:
-        """Keyword (Lucene) search over RELATES_TO fact text; rows feed _build_temporal_facts.
-
-        Tenancy is decided by tenant_scope_cypher (both default spellings); the Lucene group
-        clause is only a pre-filter so other tenants cannot crowd the fulltext limit.
-        """
-        lucene = fact_keyword_lucene_query(phrases, namespace_spellings(namespace))
-        if lucene is None:
-            return []
-        safe_limit = max(1, min(limit, 500))
-        return self.neo4j.execute(
-            f"""
-            CALL db.index.fulltext.queryRelationships('edge_name_and_fact', $q, {{limit: $limit}})
-            YIELD relationship AS r, score
-            WHERE {tenant_scope_cypher("r")}
-            RETURN r.uuid AS uuid, r.fact AS fact, score,
-                   startNode(r).uuid AS source_uuid, endNode(r).uuid AS target_uuid,
-                   toString(r.valid_at) AS valid_at,
-                   toString(r.invalid_at) AS invalid_at,
-                   toString(r.created_at) AS created_at,
-                   toString(r.expired_at) AS expired_at,
-                   r.group_id AS group_id,
-                   r.time_basis AS time_basis,
-                   r.time_expression AS time_expression,
-                   r.time_kind AS time_kind,
-                   r.time_granularity AS time_granularity,
-                   r.time_window_start AS time_window_start,
-                   r.time_window_end AS time_window_end,
-                   r.time_outcome AS time_outcome,
-                   r.time_speech_date AS time_speech_date,
-                   r.time_ambiguity AS time_ambiguity
-            ORDER BY score DESC
-            """,
-            params={"q": lucene, "limit": safe_limit, **tenant_scope_params(namespace)},
-        )
+        return self.neo4j.execute(query, params={"uuids": node_uuids})
 
     def fetch_candidate_fact_edges(self, node_uuids: list[str]) -> list[dict[str, object]]:
         """Fetch fact-EDGE identity (not just node state) for candidate entity nodes.
@@ -961,8 +898,8 @@ class MemoryQueryRepository:
         Each id resolves as exactly one of: an Entity (contributing episodes are the
         ``MENTIONS`` episodes), a RELATES_TO fact edge (episodes whose uuid is in
         ``r.episodes``), or a pending anchor (the anchor is itself the episode). Entities and
-        edges are tenant-scoped to ``namespace`` (no filter when None, as in
-        ``fetch_temporal_facts``); anchors are scoped the same way.
+        edges are tenant-scoped to ``namespace`` (no filter when None);
+        anchors are scoped the same way.
 
         Per contributing Graphiti episode the query joins Menhir's receipt anchor
         (``receipt.resolved_episode_uuid = epi.uuid``, indexed; see ``fetch_node_receipts``):
@@ -1055,7 +992,7 @@ class MemoryQueryRepository:
                      END
                    ) WHERE e IS NOT NULL ] AS episodes
             RETURN n.uuid AS uuid,
-                   n.name AS name,
+                   coalesce(n['view_name'], n.name) AS name,
                    n.view_kind AS view_kind,
                    episodes,
                    [ (n)-[supported_by]->(ev:Evidence)
@@ -1319,6 +1256,7 @@ class MemoryQueryRepository:
         self, node_uuid: str, *, operation_id: str, namespace_key: str
     ) -> dict[str, Any]:
         """Apply one erasure after locking and revalidating its preflight namespace."""
+        # legacy event-history data cleanup, kept after the lane was archived so erasure stays complete
         rows = self.neo4j.execute(
             """
             MERGE (f:EvidenceNamespaceFence {namespace_key: $namespace_key})
@@ -1657,6 +1595,7 @@ class MemoryQueryRepository:
         of resuming them. Folding the label into this MATCH makes its removal atomic with the rest
         of the partition, which is the only way that durability argument holds."""
         namespace_key = normalize_namespace(namespace)
+        # legacy event-history data cleanup, kept after the lane was archived so erasure stays complete
         rows = self.neo4j.execute(
             """
             MERGE (f:EvidenceNamespaceFence {namespace_key: $namespace_key})

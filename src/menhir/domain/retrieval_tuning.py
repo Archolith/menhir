@@ -39,24 +39,23 @@ class CandidateSource(str, Enum):
     FACET = "facet"
     STRUCTURE = "structure"
     # Content-vector candidates: a menhir-owned cosine search over n.content_embedding
-    # (the memory's summary/content), as opposed to VECTOR which is graphiti's search over
+    # (the memory's summary/content; lane removed 2026-10-27, member kept for stored traces), as opposed to VECTOR which is graphiti's search over
     # n.name_embedding (the 1-3 word entity name). Rescues PARAPHRASE queries the lexical
     # (BM25) lane cannot reach -- the query's words differ from the memory's, but the
     # meaning matches. Behaves like VECTOR downstream: 0.0 source prior, NOT floor-exempt
     # (it is a semantic-similarity lane, subject to the cosine floor). Experimental,
-    # default-off; gated by RetrievalTuningConfig.enable_content_vector.
     CONTENT_VECTOR = "content_vector"
     # Fact-EDGE candidates: graphiti EDGE_HYBRID search over RELATES_TO edges,
     # whose relevance is the edge's dated fact text (``EntityEdge.fact``), not an
     # entity-node name. This is the candidate the node-only recall path never
     # produced — the answer to a "what happened" query lives on the edge, so the
     # LongMemEval trace found it at edge-rank 2 while node search buried it. Gated
-    # by RetrievalTuningConfig.enable_fact_edges (MENHIR_FRONTIER_FACT_EDGES).
+    # The lane was removed 2026-10-27; the member stays as vocabulary stored traces may contain.
     FACT_EDGE = "fact_edge"
     # Observation candidates: a menhir-owned cosine search over :TypedAssertion.name_embedding (the
     # typed-scalar observation log's stated_span). The recall pipeline is otherwise :Entity-only, so a
     # typed observation ("I own 20 rare coins") is never a candidate. Behaves like CONTENT_VECTOR
-    # downstream: competes on its real cosine (0.0 source prior, NOT floor-exempt). Gated by
+    # (lane removed 2026-10-27) downstream: competes on its real cosine (0.0 source prior, NOT floor-exempt). Gated by
     # RecallService.scalar_view_authority_enabled (the scalar-view-authority feature; default on,
     # effective only while the scalar lane is on).
     OBSERVATION = "observation"
@@ -73,8 +72,7 @@ class RetrievalScoreKind(str, Enum):
     GRAPHITI_RRF = "graphiti_rrf"
     WEIGHTED_RRF_NORMALIZED = "weighted_rrf_normalized"
     SOURCE_PRIOR = "source_prior"
-    FACT_EDGE_RRF = "fact_edge_rrf"
-    VERB_FACET = "verb_facet"
+    FACT_EDGE_RRF = "fact_edge_rrf"  # fact-edge lane removed 2026-10-27; kept for stored traces
 
 
 # Candidates below this score are noise and should be filtered before scoring.
@@ -85,7 +83,7 @@ class RetrievalScoreKind(str, Enum):
 # sum_methods 1/(rank+1) -- a dual-method top hit = 2.0, single-method top = 1.0 --
 # so a 0.15 floor behaves as a RANK CUT (~top 12-13 dual / ~top 6 single), not a
 # cosine cutoff. The value is reasonable only by luck of rank_const=1; revisit the
-# scale (rescale or re-document as a rank cut) before tuning hybrid_alpha.
+# scale (rescale or re-document as a rank cut) before tuning it.
 #
 # The floor is SOURCE-AWARE: it only gates candidates whose relevance is a
 # vector-similarity score (CandidateSource.VECTOR). Candidates that were injected
@@ -101,15 +99,11 @@ class RetrievalScoreKind(str, Enum):
 # 0.15 on that scale admits roughly the top ~12-13 dual / ~6 single hits.
 # test_scoring_service::test_graphiti_rrf_scale_contract pins the rank_const=1
 # assumption against the graphiti package and fails loudly if upstream changes it.
-# Semantic normalization of this lane to [0,1] is a ranking change, staged behind
-# RetrievalTuningConfig.similarity_scale="normalized" (plan 1b); default "rrf" is
-# today's behavior byte-for-byte.
 MIN_SIMILARITY_THRESHOLD = 0.15
 
 # The dual-method (bm25 + cosine) top-hit ceiling of graphiti's RRF reranker score
 # under rank_const=1. This is the scale MIN_SIMILARITY_THRESHOLD and the [0,1]
-# SOURCE_PRIORS are (accidentally) mixed across today; plan 1b's normalized mode
-# divides search scores by this constant to put them on the [0,1] prior scale.
+# SOURCE_PRIORS are (accidentally) mixed across today.
 # Pinned by test_graphiti_rrf_scale_contract so an upstream RRF change is caught.
 GRAPHITI_RRF_DUAL_METHOD_MAX = 2.0
 
@@ -124,18 +118,16 @@ GRAPHITI_RRF_DUAL_METHOD_MAX = 2.0
 # surfaced it); ``FILE_LINKED`` gets a modest baseline so structural neighbors are
 # considered without dominating genuine semantic matches.
 #
-# KNOWN SCALE ACCIDENT (plan 1a, pending 1b): these priors live on [0, 1], but the
+# KNOWN SCALE ACCIDENT (plan 1a): these priors live on [0, 1], but the
 # VECTOR similarity they compete against in the additive formula is graphiti's RRF
 # score on a ~[0, 2] scale (``GRAPHITI_RRF_DUAL_METHOD_MAX``), NOT a cosine. So
 # ``PENDING = 1.0`` does not actually sit at the top today -- it lands mid-rank,
 # around half of a dual-method top VECTOR hit. This is recorded as fact, not fixed
-# here: correcting it rescales one additive lane and therefore changes ranking, so
-# it ships behind ``RetrievalTuningConfig.similarity_scale="normalized"`` (plan 1b,
-# measured on the oracle slice), never by editing these numbers in place.
+# here: correcting it rescales one additive lane and therefore changes ranking.
 SOURCE_PRIORS: dict[CandidateSource, float] = {
     CandidateSource.VECTOR: 0.0,
     CandidateSource.BM25: 0.0,
-    # CONTENT_VECTOR competes on its real cosine like VECTOR: no baseline prior, and
+    # CONTENT_VECTOR (lane removed 2026-10-27) competed on its real cosine like VECTOR: no baseline prior, and
     # NOT floor-exempt (absent from FLOOR_EXEMPT_SOURCES below).
     CandidateSource.CONTENT_VECTOR: 0.0,
     CandidateSource.PENDING: 1.0,
@@ -146,7 +138,7 @@ SOURCE_PRIORS: dict[CandidateSource, float] = {
     # was calibrated against node scores — never silently drops a well-ranked
     # fact edge before it reaches the combiner.
     CandidateSource.FACT_EDGE: 0.0,
-    # OBSERVATION competes on its real cosine like CONTENT_VECTOR: no baseline prior, and NOT
+    # OBSERVATION competes on its real cosine like CONTENT_VECTOR (lane removed 2026-10-27): no baseline prior, and NOT
     # floor-exempt (a low-relevance observation should be dropped by the floor, not forced in).
     CandidateSource.OBSERVATION: 0.0,
     # SCALAR_AUTHORITY is deterministically injected (the current value for a surfaced slot), so it
@@ -176,20 +168,11 @@ FLOOR_EXEMPT_SOURCES: frozenset[CandidateSource] = frozenset(
 class RetrievalTuningConfig:
     """Knobs for candidate generation and semantic tuning.
 
-    Defaults reproduce today's behavior exactly: ``enable_bm25=False`` keeps the
-    single fused ``search_scored`` path (which itself already runs BM25 +
-    cosine via graphiti's RRF reranker). Turning ``enable_bm25`` on switches
-    recall to the *attributed* hybrid path that runs vector and BM25 as separate
-    labeled passes and blends them with :attr:`hybrid_alpha`.
-
-    ``hybrid_alpha`` is a rank-fusion weight, not a raw-score weight:
-    ``1.0`` = vector only, ``0.0`` = BM25 only, ``0.5`` = symmetric (equivalent
-    to plain reciprocal-rank fusion). It is left at a neutral default until
-    archolith-bench can tune it per query class; it is a seam, not a tuned value.
+    Defaults reproduce today's behavior exactly: candidate generation is the single
+    fused ``search_scored`` path (which itself already runs BM25 + cosine via
+    graphiti's RRF reranker).
     """
 
-    hybrid_alpha: float = 0.5
-    enable_bm25: bool = False
     enable_cross_encoder_rerank: bool = False
     rerank_top_n: int = 50
     embedding_dimensions: int | None = None
@@ -224,141 +207,61 @@ class RetrievalTuningConfig:
     # text for the oracle/warden path. No effect unless oracle_ranking or warden_gate is on.
     # On by default since #172, like oracle ranking.
     enable_intent_lens: bool = True
-    # Warden gate: drop REFUSED candidates from results and label FLAGGED ones. On since #173.
+    # Warden gate: drop REFUSED candidates from results and label FLAGGED ones. On by default since #168 freeze; kept as a per-request knob.
     enable_warden_gate: bool = True
-    # Diversity gate: reorder results by evidence family to prevent any single source from dominating.
-    enable_diversity_gate: bool = False
-    # Contradiction interrupt: append ContradictionWarden to the default warden chain. On since #173.
+    # Contradiction interrupt: append ContradictionWarden to the default warden chain. On by default since #168 freeze; kept as a per-request knob.
     enable_contradiction_interrupt: bool = True
-    # Belief gate: append CurrentnessWarden + populate belief_score/evidence from
-    # candidate metadata temporal markers. Default OFF (#173, #350): an Entity is marked superseded
-    # when any of its fact edges expired, and with the contradiction guard an anchored one is
-    # then refused under the current lens. Only belief-bearing candidates are scored.
-    enable_belief_gate: bool = False
-    # Evidence-anchor gate (Guard 5 / EvidenceAnchorWarden): refuse candidates whose support is
-    # synthetic-only / has no external anchor (user/log/test/git/file). OFF by default, matching
-    # MENHIR_FRONTIER_EVIDENCE_ANCHOR: provenance comes from the client label, so ordinary
-    # conversation stored via MCP/REST looks agent-written and is refused (#349).
-    enable_evidence_anchor: bool = False
-    # Fact-edge retrieval: in addition to the entity-node candidate pool, run a
-    # graphiti EDGE_HYBRID search and inject the top RELATES_TO fact edges as
-    # CandidateSource.FACT_EDGE candidates (content == EntityEdge.fact). Default
-    # OFF == today's node-only recall. Turn ON for episodic / "what happened"
-    # corpora (LongMemEval) where the answer is a dated fact on an edge, not an
-    # entity name. See MENHIR_FRONTIER_FACT_EDGES and services/recall_service.py.
-    enable_fact_edges: bool = False
-    # How many fact edges to pull when enable_fact_edges is on (best-first by the
-    # edge RRF reranker). Kept modest so edges augment rather than swamp the node
-    # pool; the combiner/floor still rank the merged set.
-    fact_edge_k: int = 20
     # Minimum query similarity (best per slot) for a scalar verdict to be emitted; 0 = off.
     # Neo4j vector.similarity.cosine scale, (1+cos)/2. MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY.
     scalar_verdict_min_similarity: float = 0.0
-    # How a retrieved fact edge enters the candidate pool:
-    #   "standalone" — inject the terse EntityEdge.fact as its own CandidateData (edge-as-
-    #     answer). Measured net-NEGATIVE at N=30 (rung A′, 0.300->0.033): terse floor-exempt
-    #     facts crowd out richer nodes and collapse context. Kept for A/B comparison.
-    #   "pointer"    — edge-as-POINTER: the edge finds the right memory, then we hydrate its
-    #     endpoint entity NODES (rich summaries + surrounding context) into the pool with an
-    #     edge-derived similarity prior. Preserves node richness AND fixes ranking. This is
-    #     the default (standalone was the footgun default, measured net-NEGATIVE).
-    fact_edge_mode: str = "pointer"
-    # Similarity scale contract (plan 1a/1b). "rrf" == today: graphiti's RRF
-    # reranker score feeds the additive relevance formula on its native ~[0, 2]
-    # scale (see GRAPHITI_RRF_DUAL_METHOD_MAX, owned by this module), and the 0.15 floor
-    # / [0, 1] SOURCE_PRIORS are (by accident) mixed across it. "normalized"
-    # divides the VECTOR/BM25 search scores by that pinned max so `similarity` is
-    # [0, 1] and PENDING=1.0 regains its intended top-pin; the floor scales to
-    # 0.075 in this mode so floor MEMBERSHIP is identical by construction. This
-    # rescales one additive lane and therefore CHANGES ranking, so it ships behind
-    # this flag (default "rrf", byte-for-byte today) and is measured on the bench
-    # oracle slice with a pre-registered parity rule before any default flip --
-    # never by argument (retrieval doc S6).
-    #
-    # MEASURED 2026-07-04 (LongMemEval oracle slice, N=500, llm-judge, recall-only):
-    # rrf 143/500 (0.2860) vs normalized 143/500 (0.2860) -- EXACT parity, with 18
-    # items churned symmetrically (9 win / 9 lose). Meets the >= parity flip rule on
-    # this corpus. Default held at "rrf" pending a multi-corpus check: LongMemEval
-    # under-exercises the PENDING/FILE_LINKED priors this change most affects (pure
-    # recall, no fresh-ingest or file-context at query time), so the global default
-    # flip is not yet claimed on one anecdotal corpus's parity.
-    similarity_scale: str = "rrf"
-    # Content-vector lane (plan menhir-content-embedding-recall, Track A). EXPERIMENTAL,
-    # default OFF == today's behavior byte-for-byte. When on, recall runs a menhir-owned
-    # cosine pass over n.content_embedding (memory summary/content) as a third labeled lane
-    # and fuses it via weighted_rrf_multi. Rescues PARAPHRASE queries the lexical (BM25)
-    # lane cannot reach. Benchmark-gated; must not be flipped on without the fusion parity
-    # test passing. See MENHIR_FRONTIER_CONTENT_VECTOR.
-    enable_content_vector: bool = False
-    # Benchmark Arm C: suppress name-vector while retaining BM25 + content-vector.
-    content_vector_replace_name: bool = False
-    # How many content-vector hits to pull (best-first by content cosine) when the lane is
-    # on. Kept comparable to candidate_k so the lane competes on equal footing.
-    content_vector_k: int = 100
-    # This lane's weight in weighted_rrf_multi relative to the name-vector and BM25 lanes.
-    content_vector_weight: float = 0.5
-    # ``attributed`` preserves the existing experimental BM25 behavior. Benchmark
-    # control/treatment arms use ``production_fused`` so BM25 membership alone never
-    # grants a floor exemption that today's opaque Graphiti fusion does not grant.
-    fusion_admission_policy: str = "attributed"
-    # Source-memory lane (plan menhir-source-memory-lane). EXPERIMENTAL, default OFF ==
-    # today's behavior byte-for-byte. When on, recall builds an ADDITIVE source_memories
-    # section (raw episode contents by cosine over n.content_embedding, oldest first) next
-    # to the ranked results. Never fused: results/candidates_evaluated are identical with
-    # the lane on or off. See MENHIR_FRONTIER_SOURCE_MEMORIES.
-    enable_source_memories: bool = False
+    # Which raw scalar observations enter the ranked list (MENHIR_PERSONAL_MEMORY_SCALAR_OBSERVATION_RECALL):
+    # "all" (every hit), "gated" (hits at or above scalar_verdict_min_similarity) or "off" (none).
+    # Slots are collected for the authority and history lanes in every mode.
+    scalar_observation_recall: str = "all"
+    # A current or expired verdict stops leading when the recall's observation hits hold newer
+    # evidence its fold ignores (see domain/scalar_view_freshness.py). The verdict is still shown,
+    # as advisory. On by default since the #168 freeze; kept as a per-request knob.
+    scalar_view_freshness_gate: bool = True
+    # Source-memory lane (plan menhir-source-memory-lane). When on, recall builds an ADDITIVE
+    # source_memories section (raw episode contents by cosine over n.content_embedding, oldest
+    # first) next to the ranked results. Never fused: results/candidates_evaluated are identical
+    # with the lane on or off. On by default since #168 freeze; kept as a per-request knob.
+    enable_source_memories: bool = True
     # Section size (effective only when enable_source_memories is on, or when a caller
     # passes an explicit per-call source_memory_limit > 0).
     source_memory_limit: int = 10
     # Per-memory content cap in the section; cut content ends with a trailing ellipsis.
-    source_memory_max_chars: int = 600
-    # Group the section's returned memories into anchor-based pools (pure, deterministic).
-    source_memory_pools: bool = False
-    # Render persisted anchored-time contracts as fact event times (MENHIR_ANCHORED_TIME_RENDER).
-    # Presentation only: ranking and admission are identical with it on or off.
-    enable_anchored_time_render: bool = False
+    source_memory_max_chars: int = 2000
+    # Pick the section from a larger pool: drop exact content repeats, then each session's best
+    # memory before more from the same session (domain/source_memory_spread.py). On by default
+    # since #168 freeze; kept as a per-request knob.
+    source_memory_spread: bool = True
+    # Put each fact edge's statement time (its reference_time) on recall temporal facts as
+    # said_at, rendered as "said <time>". Presentation only. On by default since #168 freeze;
+    # kept as a per-request knob.
+    enable_fact_said_time: bool = True
     # Label unexpired facts whose own end (invalid_at) has passed as "ended" instead of
-    # "current_belief" (MENHIR_ANCHORED_TIME_EXPIRY). Presentation only, like the render flag.
-    enable_anchored_time_expiry: bool = False
-    # Attach the facts most similar to the query, not only the newest (MENHIR_FRONTIER_FACT_RELEVANCE).
-    enable_fact_relevance: bool = False
+    # "current_belief" (follows MENHIR_ANCHORED_TIME_RESOLVER; settings pass the switch value).
+    # Presentation only, like the render flag.
+    enable_anchored_time_expiry: bool = True
     # One observation per identical stated text in the observation lane (MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED).
     enable_observation_dedup: bool = False
-    # Append one keyword-matched fact per question verb after ranking (MENHIR_FRONTIER_VERB_FACETS).
-    enable_verb_facets: bool = False
 
     def __post_init__(self) -> None:
-        if not 0.0 <= self.hybrid_alpha <= 1.0:
-            raise ValueError(
-                f"hybrid_alpha must be in [0.0, 1.0], got {self.hybrid_alpha!r}"
-            )
         # NaN fails this too: it would otherwise silently disable the gate.
         if not 0.0 <= self.scalar_verdict_min_similarity <= 1.0:
             raise ValueError(
                 "scalar_verdict_min_similarity must be in [0.0, 1.0], "
                 f"got {self.scalar_verdict_min_similarity!r}"
             )
-        if self.similarity_scale not in ("rrf", "normalized"):
+        if self.scalar_observation_recall not in ("all", "gated", "off"):
             raise ValueError(
-                f'similarity_scale must be "rrf" or "normalized", '
-                f"got {self.similarity_scale!r}"
-            )
-        if self.content_vector_weight < 0.0:
-            raise ValueError(
-                f"content_vector_weight must be >= 0.0, got {self.content_vector_weight!r}"
+                'scalar_observation_recall must be "all", "gated" or "off", '
+                f"got {self.scalar_observation_recall!r}"
             )
         if self.facet_weight < 0.0:
             raise ValueError(
                 f"facet_weight must be >= 0.0, got {self.facet_weight!r}"
-            )
-        if self.content_vector_k < 1:
-            raise ValueError(
-                f"content_vector_k must be >= 1, got {self.content_vector_k!r}"
-            )
-        if self.fusion_admission_policy not in ("attributed", "production_fused"):
-            raise ValueError(
-                "fusion_admission_policy must be attributed or production_fused, "
-                f"got {self.fusion_admission_policy!r}"
             )
         if not 1 <= self.source_memory_limit <= 50:
             raise ValueError(

@@ -84,41 +84,6 @@ def test_packet_separates_authority_history_events_and_untyped_content():
                     ],
                 }
             ],
-            "event_assertions": [
-                {
-                    "id": "event-as-1",
-                    "assertion_key": "event-key-1",
-                    "evidence_id": "episode-1",
-                    "turn_evidence_id": "turn-event-1",
-                    "subject": "user",
-                    "predicate": "purchased",
-                    "domain": "bicycles",
-                    "object_key": "road-bike",
-                    "object_display": "a road bike",
-                    "stated_span": "I bought a road bike",
-                    "valid_at": "2026-01-02T00:00:00Z",
-                    "learned_at": "2026-01-02T01:00:00Z",
-                    "superseded": False,
-                }
-            ],
-            "event_views": [
-                {
-                    "id": "event-view-1",
-                    "current": True,
-                    "subject": "user",
-                    "predicate": "purchased",
-                    "domain": "bicycles",
-                    "contributor_ids": ["event-key-1"],
-                    "entries": [
-                        {
-                            "when": "2026-01-02T00:00:00Z",
-                            "what": "purchased a road bike",
-                            "object_key": "road-bike",
-                            "quote": "I bought a road bike",
-                        }
-                    ],
-                }
-            ],
             "memory_inventory": [
                 {
                     "id": "content:0",
@@ -157,9 +122,7 @@ def test_packet_separates_authority_history_events_and_untyped_content():
         "absolute",
         "delta",
     ]
-    assert len(sections["completed_events"]) == 1
-    assert sections["completed_events"][0]["authority"] == "completed"
-    assert "turn-event-1" in sections["completed_events"][0]["source_ids"]
+    assert not sections.get("completed_events")
     assert "tentative_plans" not in sections
     assert "memory_text: user has been thinking about" in packet["text"]
     assert len(sections["general_content"]) == 2

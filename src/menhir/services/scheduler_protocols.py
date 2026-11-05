@@ -111,6 +111,23 @@ class SchedulerGraphAdapter(Protocol):
     def write_project_structure(self, scan: "ProjectScanResult", session_id: str, user_id: str) -> dict[str, int]:
         ...
 
+    def list_episodes_missing_content_embedding(
+        self,
+        namespace: str | None = None,
+        limit: int = 100,
+        *,
+        after_uuid: str | None = None,
+        model: str | None = None,
+        ready_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        ...
+
+    def set_episode_content_embedding(
+        self, episode_uuid: str, embedding: list[float], model: str, *,
+        expected_content: str | None = None,
+    ) -> bool:
+        ...
+
 
 class SchedulerLifecycleService(Protocol):
     def auto_resolve_stale_conflicts(self, *, max_age_days: int, limit: int) -> int:

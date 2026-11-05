@@ -2,15 +2,20 @@
 
 Build-sequencing and strategic-direction notes. Grouped by altitude so it's clear what authorizes implementation and what is a proposal. None of the proposals or strategic notes is a ladder rung by itself — the dependency-ordered build order lives in [`../../.agent/plans/menhir-research-execution-ladder.md`](../../.agent/plans/menhir-research-execution-ladder.md).
 
-## Active build sequencing
+The 0.3.0 MVP release is governed by [`../../.agent/archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md`](../../.agent/archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md) and [tracker #123](https://github.com/Archolith/menhir/issues/123). Nothing below is part of that scope unless the release plan says so.
 
-Concrete short-horizon plans tied to current work.
+## Superseded and historical
+
+| Doc | What it was |
+|---|---|
+| [`menhir-mvp-roadmap.md`](menhir-mvp-roadmap.md) | The July 2026 M0-M5 board. Superseded; now a pointer to the release plan. |
+| [`weekend-oracle-runtime-roadmap.md`](weekend-oracle-runtime-roadmap.md) | A past three-day plan for the embedder-blocked window: Oracle Runtime interfaces, Layer-4 schema, Cold Start Brief spec. Historical. |
+
+## Partly built
 
 | Doc | What it sequences |
 |---|---|
-| [`menhir-mvp-roadmap.md`](menhir-mvp-roadmap.md) | Current local-MVP path reconciled against `main`, recent plans, and reviews: fresh benchmark, Phase 3 rollout, Hook Center rollout, and local operator hardening. |
-| [`weekend-oracle-runtime-roadmap.md`](weekend-oracle-runtime-roadmap.md) | The embedder-blocked window: Oracle Runtime interfaces, Layer-4 schema, Cold Start Brief spec (Days 1–3). Spec, not built code. |
-| [`oracle-integration-plan.md`](oracle-integration-plan.md) | Day-3 capstone: buildable-now vs gated map + Context Engine sketch + first ColdStartBrief benchmark sketch. Nothing here is built. |
+| [`oracle-integration-plan.md`](oracle-integration-plan.md) | Buildable-now vs gated map + Context Engine sketch + first ColdStartBrief benchmark sketch. The retrieval oracle pieces (R0, R4, R6, R7) are in `src`; the L4 store, ColdStartOracle, Context Engine and brief benchmark are not built. |
 
 ## L3/L4 GAP decision-support (proposals, NOT rungs)
 

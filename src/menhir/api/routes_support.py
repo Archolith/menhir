@@ -206,9 +206,8 @@ class RecallRequest(BaseModel):
     trace: bool = False
     include_warden_status: bool = False
     # Per-call source-memory section size override. None = deployment default
-    # (MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT when MENHIR_FRONTIER_SOURCE_MEMORIES is on,
-    # else off); 0 = off for this call; >0 = that limit, enabling the section for this
-    # call even when the deployment flag is off. The section carries SESSION-scoped
+    # (MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT); 0 = off for this call; >0 = that limit
+    # for this call. The section carries SESSION-scoped
     # raw episodes, so it is off whenever include_session is False (promoted
     # knowledge only).
     source_memory_limit: int | None = Field(default=None, ge=0, le=50)
@@ -232,7 +231,7 @@ class RecallTemporalFact(BaseModel):
     expired_at: str | None = None
     is_current_belief: bool = True
     temporal_role: str = "current_belief"
-    event_time: str | None = None
+    said_at: str | None = None
 
 
 class RecallMemory(BaseModel):
@@ -305,33 +304,6 @@ class ScalarAuthorityVerdictResponse(BaseModel):
     count_items: str | None = None
 
 
-class EventAuthorityVerdictResponse(BaseModel):
-    """Structured first-person event authority, separate from scalar authority.
-
-    Mirrors the domain ``EventAuthorityVerdict``. ``status`` is ``leads`` or ``advisory``.
-    ``gate`` is an explanatory string (``pass`` for a fully grounded non-generic unique
-    lead; selection-failure gates mirror ``EventRecallGate``). Selected grounding fields
-    are None when a gate failed (advisory).
-    """
-
-    predicate: str
-    object_key: str | None = None
-    object_display: str | None = None
-    valid_at: str | None = None
-    stated_span: str | None = None
-    assertion_key: str | None = None
-    episode_uuid: str | None = None
-    turn_evidence_uuid: str | None = None
-    domain: str | None = None
-    time_basis: str | None = None
-    status: str
-    gate: str
-    reason: str
-    subject_uuid: str
-    has_foundation: bool
-    kind: str
-
-
 class SourceMemoryResponse(BaseModel):
     """One entry of the additive source-memory section (raw episode content, oldest first)."""
 
@@ -340,8 +312,6 @@ class SourceMemoryResponse(BaseModel):
     reference_time: str | None = None
     cosine: float
     source: str | None = None
-    pool_id: str | None = None
-    pool_anchor: str | None = None
 
 
 class RecallResponse(BaseModel):
@@ -353,15 +323,14 @@ class RecallResponse(BaseModel):
     warden_notice: str | None = None
     trace: dict[str, object] | None = None
     authority_layer: list[ScalarAuthorityVerdictResponse] | None = None
-    event_authority_layer: list[EventAuthorityVerdictResponse] | None = None
     source_memories: list[SourceMemoryResponse] | None = None
+    query_hint: str | None = None
 
 
 class RecallHistoryRequest(BaseModel):
     query: str
     namespace: str | None = None
     limit: int = Field(default=30, ge=1, le=50)
-    pools: bool = True
 
 
 class RecallHistoryResponse(BaseModel):
@@ -376,7 +345,6 @@ class RecallTimelineFactResponse(BaseModel):
     invalid_at: str | None = None
     expired_at: str | None = None
     time_basis: str = "world"
-    event_time: str | None = None
 
 
 class RecallTimelineEntryResponse(BaseModel):
@@ -490,6 +458,9 @@ class MemoryRequest(BaseModel):
     #: Optional client key making resubmits safe: the same key + content returns the existing
     #: anchor (``idempotent_replay``); the same key with different content is a 409.
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=256)
+    #: Store and embed for the source-memory lane only: no extraction and no evidence projection.
+    #: For turns with nothing to extract, such as a fact-free question.
+    store_only: bool = False
 
 
 class MemoryResponse(BaseModel):
@@ -667,7 +638,8 @@ class HealthResponse(BaseModel):
     # Set when the LLM provider has rejected our credentials since the last successful
     # call: a server can be "ok" and "full" and still unable to enrich anything.
     provider_auth_failure: str | None = None
-    # Set after an insufficient_quota 429 until a call of that kind succeeds: enrichment cannot
+    # Set after a billing refusal (HTTP 402 or insufficient_quota 429) until a call of that kind
+    # succeeds: enrichment cannot
     # progress until credits are added, so a polling driver should stop instead of waiting.
     provider_quota_exhausted: str | None = None
     startup_mode: str | None = None
@@ -711,7 +683,6 @@ class Phase3RunRequest(BaseModel):
     k: int = Field(default=3, ge=1, le=9)
     source: str = "perception"
     call_budget: int | None = None
-    counter_state: bool = True
 
 
 class Phase3RunResponse(BaseModel):
@@ -751,13 +722,15 @@ class Phase3RunResponse(BaseModel):
     counting_decided_swapped: int | None = None
     counting_decided_deferred: int | None = None
     counting_gate_dropped: int | None = None
+    # The event-history lane was archived (#399 bucket 3); these stay as fixed zero/None values so
+    # existing clients keep parsing the response.
     event_namespaces_processed: int = 0
     event_namespaces_failed: int = 0
     event_assertions_recorded: int = 0
     event_assertions_created: int = 0
     event_views_rebuilt: int = 0
     event_llm_calls: int = 0
-    # Per-lane stage counts and no_output/stalled flags (#170 item 4); None on a counter-only pass.
+    # Per-lane stage counts and no_output/stalled flags (#170 item 4); None when the scalar lane did not run.
     lane_outcomes: dict[str, dict[str, Any]] | None = None
     # False when any lane failed closed for the namespace; failed_lanes then names each one.
     ok: bool = True
@@ -847,6 +820,8 @@ _BACKEND_METHODS = {
     "fetch_recent_lifecycle_events",
     "record_conflict_resolution",
     "fetch_memory_overview",
+    "get_operator_warnings",
+    "acknowledge_operator_warning",
     "circuit_breaker_snapshots",
     "embedding_cache_stats",
     "get_provider_config",
@@ -897,6 +872,7 @@ _OP_TIER_OPERATOR = {
     "scheduler_force_takeover", "scheduler_pause", "scheduler_resume",
     "promote_candidate", "reject_candidate", "approve_candidate",
     "promote_memory",
+    "acknowledge_operator_warning",
     # CF-257 phase 0. Raised from agent tier. This op writes a structure payload the CALLER
     # produced, and judges it using a `root_path` the same caller supplied -- so the server
     # classifies a path string, never the directory that actually produced the payload. A remote

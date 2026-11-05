@@ -22,11 +22,11 @@ def _llm(rows):
     return complete
 
 
-def _row(*, value: bool, stated_span: str, unit: str = "") -> dict:
+def _row(*, value: bool, stated_span: str, unit: str = "", attribute: str = "has_passport") -> dict:
     return {
         "episode": 0,
         "subject": "user",
-        "attribute": "has_passport",
+        "attribute": attribute,
         "scope": "",
         "value_kind": "boolean",
         "unit": unit,
@@ -69,17 +69,17 @@ def test_unambiguous_negative_boolean_rejects_true_model_value(span):
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("span", "value"),
+    ("span", "value", "attribute"),
     [
-        ("I have a passport", True),
-        ("I have finished reading Dune", True),
-        ("I don't smoke", False),
-        ("I do not smoke", False),
+        ("I have a passport", True, "has_passport"),
+        ("I have finished reading Dune", True, "finished_reading_dune"),
+        ("I don't smoke", False, "smokes"),
+        ("I do not smoke", False, "smokes"),
     ],
 )
-def test_unambiguous_boolean_matching_source_polarity_is_admitted(span, value):
+def test_unambiguous_boolean_matching_source_polarity_is_admitted(span, value, attribute):
     ep = [_Ep(uuid="bool-match", content=span)]
-    out = extract_typed_scalars_once(ep, _llm([_row(value=value, stated_span=span)]))
+    out = extract_typed_scalars_once(ep, _llm([_row(value=value, stated_span=span, attribute=attribute)]))
     assert len(out) == 1
     assert out[0].value is value
     assert out[0].unit == ""

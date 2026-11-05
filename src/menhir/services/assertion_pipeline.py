@@ -14,8 +14,8 @@ current-truth context. The result is bucketed like the belief recall packet:
     flagged    -> shown but labeled (historical / conflict / uncertain) — FLAG
     refused    -> kept out of current-truth context (superseded / wrong-scope / unsafe) — REFUSE
 
-Wardens read one shared snapshot: ScopeWarden + EvidenceAnchorWarden read the candidate
-metadata (scope, evidence_kinds), OracleAdmissionWarden reads the OraclePacket (currentness/
+Wardens read one shared snapshot: ScopeWarden reads the candidate
+metadata (scope), OracleAdmissionWarden reads the OraclePacket (currentness/
 conflict). No double-application — each warden owns a disjoint axis.
 """
 
@@ -24,17 +24,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 
 from menhir.domain.belief import QueryIntent
-from menhir.domain.belief_evidence import assemble_belief_evidence, score_candidate_belief
 from menhir.domain.intent_affinity import task_intents_to_lens
 from menhir.domain.oracles import CandidateMemory, QueryContext
 from menhir.domain.query_intent import classify_intent
 from menhir.domain.scope import MemoryScope
-from menhir.domain.self_reinforcement import SupportProfile
 from menhir.domain.truth.labels import WardenLabel
 from menhir.domain.warden import (
     ContradictionWarden,
-    CurrentnessWarden,
-    EvidenceAnchorWarden,
     OracleAdmissionWarden,
     ScopeWarden,
     Warden,
@@ -81,37 +77,21 @@ def _candidate_scope(candidate: CandidateMemory) -> MemoryScope:
     return MemoryScope(repo=s("repo"), project=s("project"), branch=s("branch"), namespace=s("namespace"))
 
 
-def _support_profile(candidate: CandidateMemory) -> SupportProfile:
-    kinds = tuple(str(k) for k in candidate.metadata.get("evidence_kinds", ()))
-    meta_depth = int(candidate.metadata.get("meta_depth", 0) or 0)
-    return SupportProfile(support_kinds=kinds, meta_depth=meta_depth)
-
-
 class AssertionPipeline:
     """Run observe (oracles) -> rank (combiner) -> decide (wardens) for a query."""
 
     def __init__(self, combiner, *, executor: OracleExecutor | None = None,
                  wardens: list[Warden] | None = None, auto_intent: bool = True,
-                 contradiction_interrupt: bool = False,
-                 belief_gate: bool = False, evidence_anchor: bool = True) -> None:
+                 contradiction_interrupt: bool = False) -> None:
         self.executor = executor or OracleExecutor(default_oracles())
         self.combiner = combiner
-        # The handoff chain: scope (metadata) + anti-spiral (evidence) + oracle-axis (packet).
-        # evidence_anchor drops the anti-spiral Guard 5 for anecdotal corpora, where every
-        # recalled fact is LLM-extracted from conversation (no external code/test/git anchor)
-        # and Guard 5 would otherwise refuse the entire result set.
-        default = [ScopeWarden()]
-        if evidence_anchor:
-            default.append(EvidenceAnchorWarden())
-        default.append(OracleAdmissionWarden())
-        if belief_gate:
-            default.append(CurrentnessWarden())
+        # The handoff chain: scope (metadata) + oracle-axis (packet).
+        default = [ScopeWarden(), OracleAdmissionWarden()]
         if contradiction_interrupt:
             default.append(ContradictionWarden())
         self.wardens = wardens or default
         self.chain = WardenChain(self.wardens)
         self.auto_intent = auto_intent
-        self.belief_gate = belief_gate
 
     def _resolve_intent(self, query: QueryContext) -> QueryContext:
         """Derive the temporal lens from the query text when the caller did not pin one.
@@ -144,18 +124,10 @@ class AssertionPipeline:
         for rank, cid in enumerate(ranked_ids):
             candidate = by_id[cid]
             packet = packets[cid]
-            belief_score = (
-                score_candidate_belief(cid, candidate.content, candidate.metadata)
-                if self.belief_gate else None
-            )
-            evidence = (
-                assemble_belief_evidence(candidate.metadata) if self.belief_gate else ()
-            )
             ctx = WardenContext(
                 candidate_id=cid, intent=intent,
-                belief_score=belief_score, evidence=evidence,
                 query_scope=q_scope, candidate_scope=_candidate_scope(candidate),
-                support_profile=_support_profile(candidate), oracle_packet=packet,
+                oracle_packet=packet,
                 recorded_conflict=(bool(candidate.metadata.get("conflict_group_id"))
                                    and candidate.metadata.get("conflict_status") == "unresolved"),
             )

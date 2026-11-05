@@ -67,6 +67,8 @@ def apply_repair(
     source_times: SourceTimeIndex,
     namespace_prefix: str,
     backup: dict[str, Any],
+    counting_enabled: bool,
+    scalar_history_enabled: bool,
 ) -> dict[str, Any]:
     started_at = datetime.now(timezone.utc)
     audit: dict[str, Any] = {
@@ -83,6 +85,10 @@ def apply_repair(
         "evidence_updates": list(plan.evidence_updates),
         "assertion_updates": list(plan.assertion_updates),
         "rebuilds": [],
+        "rebuild_flags": {
+            "counting_enabled": counting_enabled,
+            "scalar_history_enabled": scalar_history_enabled,
+        },
     }
     try:
         _write_audit(audit_path, audit, create=True)
@@ -132,8 +138,8 @@ def apply_repair(
     }
     _write_audit(audit_path, audit)
 
-    adapter = MemoryGraphAdapter(repository)
-    scalar_service = adapter.scalar_state_service()
+    adapter = MemoryGraphAdapter(repository, counting_enabled=counting_enabled)
+    scalar_service = adapter.scalar_state_service(scalar_history_enabled=scalar_history_enabled)
     evaluation_time = datetime.now(timezone.utc)
     for subject_uuid, namespace in plan.rebuild_targets:
         result = scalar_service.rebuild_scalar_state(

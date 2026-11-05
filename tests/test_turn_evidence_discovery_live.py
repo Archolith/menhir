@@ -61,7 +61,6 @@ def _drain(load, advance, ns, pv, *, page=50) -> list[str]:
 def _lanes(adapter):
     return {
         "scalar": (adapter.load_next_scalar_batch, adapter.advance_scalar_cursor),
-        "event": (adapter.load_next_event_evidence_batch, adapter.advance_event_cursor),
     }
 
 
@@ -73,8 +72,7 @@ def test_namespace_less_agent_quoted_turn_is_stamped_and_reaches_every_lane(test
         "MATCH (t:TurnEvidence {turn_id: $t}) RETURN t.namespace AS ns", {"t": tid})
     assert stored[0]["ns"] == "default"
 
-    dirty = {"scalar": adapter.list_scalar_dirty_namespaces,
-             "event": adapter.list_event_dirty_evidence_namespaces}
+    dirty = {"scalar": adapter.list_scalar_dirty_namespaces}
     for name, (load, advance) in _lanes(adapter).items():
         pv = _pv()
         assert "default" in dirty[name](perceiver_version=pv, limit=10_000), name
@@ -87,7 +85,7 @@ def test_namespace_less_agent_quoted_turn_is_stamped_and_reaches_every_lane(test
 def test_legacy_spellings_join_default_without_skip_or_replay(test_neo4j_repo):
     """Upgrade: the 'default' cursor is already past legacy null/'' rows no lane ever saw."""
     adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
-    labels = {"scalar": "ScalarConsolidationWatermark", "event": "EventConsolidationWatermark"}
+    labels = {"scalar": "ScalarConsolidationWatermark"}
     for name, (load, advance) in _lanes(adapter).items():
         pv = _pv()
         null_row = _seed_legacy(test_neo4j_repo, namespace=None, text="I own 4 old bikes",

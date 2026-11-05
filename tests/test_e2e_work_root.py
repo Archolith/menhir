@@ -14,7 +14,8 @@ def test_default_e2e_evidence_survives_pytest_scratch_cleanup(
     monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
     with TemporaryDirectory() as checkout:
-        repo_root = Path(checkout)
+        # Resolved: on Windows the temp dir can be an 8.3 short name (RUNNER~1).
+        repo_root = Path(checkout).resolve()
         monkeypatch.setattr(e2e_fixtures, "REPO_ROOT", repo_root)
         monkeypatch.setattr(e2e_fixtures, "validate_registry", lambda _: None)
         monkeypatch.delenv("MENHIR_E2E_WORK_ROOT", raising=False)

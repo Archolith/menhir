@@ -40,15 +40,16 @@ def test_payload_aware_view_lifecycle_stamps() -> None:
 
 
 @pytest.mark.unit
-def test_timeline_audience_distinguishes_legacy_from_event_lane() -> None:
+def test_timeline_audience_is_operator_legacy_only() -> None:
     kind = TimelineKind()
 
     assert kind.view_subtype({"entries": []}) == "legacy_timeline"
     assert kind.view_audience({"entries": []}) is ViewAudience.OPERATOR
 
-    event_payload = {"entries": [], "predicate": "purchased"}
-    assert kind.view_subtype(event_payload) == "event_timeline"
-    assert kind.view_audience(event_payload) is ViewAudience.RECALL
+    # The event-lane mode was archived (2026-10-28): a predicate no longer makes a RECALL View.
+    predicate_payload = {"entries": [], "predicate": "purchased"}
+    assert kind.view_subtype(predicate_payload) == "legacy_timeline"
+    assert kind.view_audience(predicate_payload) is ViewAudience.OPERATOR
 
 
 @pytest.mark.unit

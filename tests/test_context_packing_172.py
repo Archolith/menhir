@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from menhir.domain.recall import EventAuthorityVerdict, RecallResult, ScoredMemory
+from menhir.domain.recall import RecallResult, ScoredMemory
 from menhir.domain.retrieval_trace_models import RelevanceBreakdown
 from menhir.services.context_builder import ContextBuilderService
 import menhir.services.context_builder as cb
@@ -55,19 +55,6 @@ def _build_service(recall_result: RecallResult) -> ContextBuilderService:
     mock_recall = AsyncMock()
     mock_recall.recall = AsyncMock(return_value=recall_result)
     return ContextBuilderService(recall_service=mock_recall)
-
-
-def _event_verdict(**overrides) -> EventAuthorityVerdict:
-    base = dict(
-        predicate="acquired", object_key="red notebook", object_display="a red notebook",
-        valid_at="2026-07-22T09:30:00Z", stated_span="I bought a red notebook.",
-        assertion_key="asrt-7", episode_uuid="ep-7", turn_evidence_uuid="te-7",
-        domain="stationery", time_basis="explicit", status="leads", gate="pass",
-        reason="unique grounded lead", subject_uuid="ent-self",
-        has_foundation=True, kind="latest",
-    )
-    base.update(overrides)
-    return EventAuthorityVerdict(**base)
 
 
 _STALE = {
@@ -178,32 +165,6 @@ async def test_all_memories_fit_truncated_false_all_labels_present() -> None:
     for label in ("[Memory 1]", "[Memory 2]", "[Memory 3]"):
         assert label in context.context
     assert context.memory_count == 3
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_fail_closed_event_verdict_still_packs_no_ranked_memories() -> None:
-    base = _recall_result([_mem("m1", "tempting", "tempting but unverified", 0.99)])
-    result = RecallResult(
-        **{
-            **base.__dict__,
-            "event_authority_layer": (_event_verdict(
-                status="advisory", kind="predecessor", gate="anchor",
-                reason="anchor not uniquely resolved by assertion_key",
-                object_key=None, object_display=None, valid_at=None,
-                stated_span=None, episode_uuid=None, turn_evidence_uuid=None,
-                domain=None, time_basis=None,
-            ),),
-        }
-    )
-
-    context = await _build_service(result).build_context(
-        "test query", max_tokens=200
-    )
-
-    assert "[Event authority: UNRESOLVED]" in context.context
-    assert "[Memory 1]" not in context.context
-    assert context.memory_count == 0
 
 
 @pytest.mark.unit

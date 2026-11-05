@@ -12,7 +12,6 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
-from menhir.domain.event_time import event_time_text
 from menhir.domain.namespace import namespace_to_group_ids
 from menhir.domain.timeline import (
     TimelineEntry,
@@ -39,7 +38,15 @@ _EPOCH = "1970-01-01T00:00:00Z"
 #: At most this many typed histories are paged beside a subject timeline.
 _TYPED_HISTORY_CAP = 10
 
+#: Candidate hits fetched in query mode, tried in rank order until one has a timeline position.
+_QUERY_ANCHOR_CANDIDATES = 20
+
 _QUERY_NO_HIT_NOTE = "No embedded memories matched, so there is no timeline to anchor on."
+
+_QUERY_NO_ANCHOR_NOTE = (
+    "Matching memories were found, but none of the top matches could be placed on the "
+    "timeline."
+)
 
 _HISTORY_TRUNCATION_NOTE = "Only the first {shown} typed histories are shown; {hidden} more exist."
 
@@ -74,7 +81,6 @@ def _entry_from_row(
     detail: str,
     facts_map: dict[str, list[dict[str, Any]]],
     is_anchor: bool = False,
-    event_time: bool = False,
 ) -> TimelineEntry:
     raw = _collapse(row.get("content"))
     headline = raw[:_HEADLINE_MAX_CHARS] + "…" if len(raw) > _HEADLINE_MAX_CHARS else raw
@@ -91,7 +97,6 @@ def _entry_from_row(
             valid_at=f.get("valid_at"),
             invalid_at=f.get("invalid_at"),
             expired_at=f.get("expired_at"),
-            event_time=event_time_text(f) if event_time else None,
         )
         for f in (facts_map.get(str(row["uuid"])) or [])
     )
@@ -152,16 +157,14 @@ async def _typed_histories(
     history_offset: int | None,
     history_limit: int,
 ) -> tuple[tuple[TypedHistory, ...], str | None]:
-    """Page the subject's typed scalar/event histories beside the timeline (plan A5).
+    """Page the subject's typed scalar histories beside the timeline (plan A5).
 
     The default page is the LATEST `history_limit` entries of each View. At most
     `_TYPED_HISTORY_CAP` histories are returned; the caller gets a note when more exist.
     """
+    # Recall-visible only: flag-off delete repair leaves OPERATOR-audience history Views.
     scalar_views = await asyncio.to_thread(
-        adapter.list_scalar_history_views, subject_uuid=subject_uuid, namespace=gid
-    )
-    event_views = await asyncio.to_thread(
-        adapter.list_event_timeline_views, subject_uuid=subject_uuid, namespace=gid
+        adapter.list_recall_visible_scalar_history_views, subject_uuid=subject_uuid, namespace=gid
     )
     descriptors: list[dict[str, Any]] = []
     for view in scalar_views:
@@ -169,14 +172,6 @@ async def _typed_histories(
             "kind": "scalar",
             "view_uuid": str(view["uuid"]),
             "label": str(view.get("attribute") or view.get("view_key") or view["uuid"]),
-        })
-    for view in event_views:
-        predicate = str(view.get("predicate") or "")
-        domain = view.get("domain")
-        descriptors.append({
-            "kind": "event",
-            "view_uuid": str(view["uuid"]),
-            "label": f"{predicate}[{domain}]" if domain else predicate,
         })
     if history_view is not None:
         descriptors = [d for d in descriptors if d["view_uuid"] == history_view]
@@ -187,10 +182,7 @@ async def _typed_histories(
     for descriptor in descriptors:
         kind = descriptor["kind"]
         view_uuid = descriptor["view_uuid"]
-        if kind == "scalar":
-            reader = adapter.list_scalar_history_entries
-        else:
-            reader = adapter.list_event_timeline_entries
+        reader = adapter.list_scalar_history_entries
         first = await asyncio.to_thread(
             reader, view_uuid=view_uuid, offset=0, limit=1, namespace=gid
         )
@@ -203,15 +195,15 @@ async def _typed_histories(
         entries = tuple(
             TypedHistoryEntry(
                 valid_at=str(raw.get("valid_at") or ""),
-                value=raw.get("object_display") if kind == "event" else raw.get("value"),
-                operation=raw.get("operation") if kind == "scalar" else None,
-                time_basis=raw.get("time_basis") if kind == "event" else None,
-                quote=raw.get("quote") if kind == "event" else raw.get("stated_span"),
+                value=raw.get("value"),
+                operation=raw.get("operation"),
+                time_basis=None,
+                quote=raw.get("stated_span"),
                 episode_uuid=raw.get("episode_uuid"),
             )
             for raw in (page.get("entries") or [])
         )
-        prev_offset = offset - history_limit if offset > 0 else None
+        prev_offset = max(0, offset - history_limit) if offset > 0 else None
         histories.append(TypedHistory(
             kind=kind,
             view_uuid=view_uuid,
@@ -244,7 +236,6 @@ async def run_recall_timeline(
     history_view: str | None = None,
     history_offset: int | None = None,
     history_limit: int = 10,
-    event_time: bool = False,
 ) -> TimelineResult:
     """Navigate a recorded-time thread of visible memories on demand.
 
@@ -381,43 +372,43 @@ async def run_recall_timeline(
         stripped = str(query).strip()
         query_vector = await service.graphiti_client.embed_query(stripped)
         # The hit is a receipt (queue-node) uuid; `timeline_anchor` resolves it (T1).
+        # The subject constraint runs inside the search, before its LIMIT.
+        subject_kwargs = {"subject_uuid": subject_uuid} if subject_uuid else {}
         hits = await asyncio.to_thread(
-            adapter.search_episode_embeddings, query_vector, limit=1, namespace=namespace,
-            **_embedding_model_kwargs(service),
+            adapter.search_episode_embeddings, query_vector,
+            limit=_QUERY_ANCHOR_CANDIDATES, namespace=namespace,
+            resolved_only=True, **_embedding_model_kwargs(service), **subject_kwargs,
         )
         if not hits:
-            return TimelineResult(
-                thread="subject" if subject_uuid else "namespace",
-                subject_uuid=subject_uuid,
-                subject_name=subject_name,
-                entries=(),
-                prev_cursor=None,
-                next_cursor=None,
-                histories=(),
-                note=_QUERY_NO_HIT_NOTE,
-            )
-        seed_uuid = str(hits[0]["uuid"])
-        anchor_row = await asyncio.to_thread(
-            adapter.timeline_anchor, uuid=seed_uuid, namespace=namespace,
-            subject_uuid=subject_uuid,
-        )
-        if anchor_row is None:
-            raise ValueError("unknown or hidden memory")
-        anchor_key = _row_key(anchor_row)
-        count_before = safe_limit // 2
-        count_after = safe_limit - count_before - 1
-        if count_before:
-            before_probed = True
-            before_rows, before_more = await _probe_page(
-                adapter, namespace=namespace, subject_uuid=subject_uuid,
-                side="before", key=anchor_key, count=count_before,
-            )
-        if count_after:
-            after_probed = True
-            after_rows, after_more = await _probe_page(
-                adapter, namespace=namespace, subject_uuid=subject_uuid,
-                side="after", key=anchor_key, count=count_after,
-            )
+            note = _QUERY_NO_HIT_NOTE
+        else:
+            # Anchor on the best-ranked hit that can anchor: store-only receipts (assistant
+            # turns, verbatim-skipped clients) have no timeline position.
+            for hit in hits:
+                anchor_row = await asyncio.to_thread(
+                    adapter.timeline_anchor, uuid=str(hit["uuid"]), namespace=namespace,
+                    subject_uuid=subject_uuid,
+                )
+                if anchor_row is not None:
+                    break
+            if anchor_row is None:
+                note = _QUERY_NO_ANCHOR_NOTE
+        if anchor_row is not None:
+            anchor_key = _row_key(anchor_row)
+            count_before = safe_limit // 2
+            count_after = safe_limit - count_before - 1
+            if count_before:
+                before_probed = True
+                before_rows, before_more = await _probe_page(
+                    adapter, namespace=namespace, subject_uuid=subject_uuid,
+                    side="before", key=anchor_key, count=count_before,
+                )
+            if count_after:
+                after_probed = True
+                after_rows, after_more = await _probe_page(
+                    adapter, namespace=namespace, subject_uuid=subject_uuid,
+                    side="after", key=anchor_key, count=count_after,
+                )
     else:  # subject alone: the latest page of the subject thread
         before_probed = True
         before_rows, before_more = await _probe_page(
@@ -430,12 +421,10 @@ async def run_recall_timeline(
 
     facts_map: dict[str, list[dict[str, Any]]] = {}
     if facts and page_rows:
-        # The kwarg is passed only when on, so the flag-off adapter call is unchanged.
         facts_map = await asyncio.to_thread(
             adapter.timeline_facts,
             episode_uuids=[str(r["uuid"]) for r in page_rows],
             namespace=namespace,
-            **({"event_time": True} if event_time else {}),
         )
     entries = tuple(
         _entry_from_row(
@@ -443,7 +432,6 @@ async def run_recall_timeline(
             detail=detail,
             facts_map=facts_map,
             is_anchor=(anchor_uuid is not None and str(row["uuid"]) == anchor_uuid),
-            event_time=event_time,
         )
         for row in page_rows
     )
@@ -475,7 +463,7 @@ async def run_recall_timeline(
             history_limit=safe_history_limit,
         )
         if history_note is not None:
-            note = history_note
+            note = f"{note} {history_note}" if note else history_note
 
     return TimelineResult(
         thread="subject" if subject_uuid else "namespace",

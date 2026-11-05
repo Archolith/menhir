@@ -117,15 +117,59 @@ def test_retired_controls_have_no_live_settings_or_readers(evidence) -> None:
         assert key not in FEATURES
 
 
+@pytest.mark.parametrize("name,env", [
+    ("personal_memory_event_history_enabled", "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED"),
+    ("personal_memory_event_history_authority_enabled",
+     "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_AUTHORITY_ENABLED"),
+    ("personal_memory_event_history_perceiver_version",
+     "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_PERCEIVER_VERSION"),
+])
+def test_event_history_controls_are_retired(monkeypatch, name, env) -> None:
+    # Fails if an archived event-history control returns as a setting/feature, or loses its
+    # retirement reason (field and env names are both recorded).
+    assert name not in FEATURES and env not in FEATURES
+    assert name not in {f.name for f in fields(MemorySettings)}
+    monkeypatch.setenv(env, "true")
+    assert not hasattr(MemorySettings.from_env(), name)
+    assert RETIRED[name].startswith("2026-10-28: event-history lane archived")
+    assert RETIRED[env] == RETIRED[name]
+
+
+@pytest.mark.parametrize("name,env,reason", [
+    ("personal_memory_scalar_view_echo_drop_enabled",
+     "MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_ECHO_DROP_ENABLED",
+     "2026-10-28: removed (#399 bucket 3; redundant with observation dedup in shard-1 repeats)"),
+    ("frontier_diversity_gate", "MENHIR_FRONTIER_DIVERSITY_GATE",
+     "2026-10-28: removed (#399 bucket 3; o500 A/B changed recall without a measurable gain)"),
+    ("frontier_fact_relevance", "MENHIR_FRONTIER_FACT_RELEVANCE",
+     "2026-10-28: removed (#399 bucket 3; o500 A/B changed recall without a measurable gain)"),
+    ("frontier_fusion_admission_policy", "MENHIR_FRONTIER_FUSION_ADMISSION_POLICY",
+     "2026-10-28: removed (#399 bucket 3; dead setting, never read by recall)"),
+    ("frontier_verb_facets", "MENHIR_FRONTIER_VERB_FACETS",
+     "2026-10-28: removed (#399 bucket 3; o500 A/B changed recall on 9 items with no flips)"),
+    ("anchored_time_render_enabled", "MENHIR_ANCHORED_TIME_RENDER",
+     "2026-10-29: removed (#400; at-tr-ku 211 A/B 198 vs 198, flips +4/-4)"),
+    ("frontier_belief_gate", "MENHIR_FRONTIER_BELIEF_GATE",
+     "2026-10-29: removed (#399 bucket 2; quality delta 0, p95 +12.6%)"),
+    ("frontier_evidence_anchor", "MENHIR_FRONTIER_EVIDENCE_ANCHOR",
+     "2026-10-29: removed (#399 bucket 2; 3 of 33,861 entities pass)"),
+    ("frontier_source_memory_pools", "MENHIR_FRONTIER_SOURCE_MEMORY_POOLS",
+     "2026-10-29: removed (#399 bucket 2; indistinguishable from no pools on AMA)"),
+])
+def test_bucket3_recall_flags_are_retired(monkeypatch, name, env, reason) -> None:
+    # Fails if a removed recall flag returns as a setting/feature, or loses its retirement reason.
+    assert name not in FEATURES and env not in FEATURES
+    assert name not in {f.name for f in fields(MemorySettings)}
+    monkeypatch.setenv(env, "true")
+    assert not hasattr(MemorySettings.from_env(), name)
+    assert RETIRED[name] == reason
+    assert RETIRED[env] == reason
+
+
 def test_known_interactions_and_observation_switches_are_recorded() -> None:
-    for key in ("frontier_belief_gate", "frontier_evidence_anchor", "frontier_contradiction_interrupt"):
-        assert FEATURES[key].requires == ("frontier_warden_gate",)
-    assert FEATURES["personal_memory_scalar_view_authority_enabled"].requires == (
+    # Scalar view authority is always on (#168 freeze): its dependents require the scalar lane itself.
+    assert FEATURES["personal_memory_observation_dedup_enabled"].requires == (
         "personal_memory_scalar_state_enabled",)
-    assert FEATURES["personal_memory_scalar_deterministic_shadow"].emission_requires == (
-        "personal_memory_consolidation_audit_enabled",)
-    for suffix in ("attribute", "scope", "subject"):
-        assert FEATURES[f"personal_memory_scalar_reconcile_{suffix}"].version_bump is True
     for key in ("frontier_shadow", "personal_memory_recall_audit_enabled",
                 "personal_memory_consolidation_audit_enabled", "MENHIR_FRONTIER_TRACE"):
         assert FEATURES[key].observation_only is True
@@ -135,7 +179,7 @@ def test_known_interactions_and_observation_switches_are_recorded() -> None:
 @pytest.mark.parametrize("fault", ["missing", "default", "env", "alias", "undocumented"])
 def test_detectors_reject_inventory_and_documentation_regressions(evidence, fault: str) -> None:
     changed = dict(FEATURES)
-    key = "frontier_source_memories"
+    key = "record_detailed_revisions"
     if fault == "missing":
         del changed[key]
     else:
@@ -191,6 +235,6 @@ def test_legacy_wrapper_cannot_silently_read_another_registered_control(evidence
 
 
 def test_documentation_detector_rejects_prose_only_mentions() -> None:
-    entry = FEATURES["frontier_source_memories"]
-    assert documentation_errors({entry.setting: entry}, "Use MENHIR_FRONTIER_SOURCE_MEMORIES to opt out")
-    assert documentation_errors({entry.setting: entry}, "# MENHIR_FRONTIER_SOURCE_MEMORIES=false") == []
+    entry = FEATURES["record_detailed_revisions"]
+    assert documentation_errors({entry.setting: entry}, "Use MENHIR_RECORD_DETAILED_REVISIONS to opt out")
+    assert documentation_errors({entry.setting: entry}, "# MENHIR_RECORD_DETAILED_REVISIONS=false") == []

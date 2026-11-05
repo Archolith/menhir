@@ -65,12 +65,6 @@ from menhir.services.enrichment_failures import (
 )
 from menhir.services.ingest_gate import IngestGate
 from menhir.services.ingest_limits import MAX_DIFF_CHARS
-from menhir.services.shadow_context_composition import (
-    build_shadow_trace,
-    run_shadow_composition_with_timeout,
-    shadow_trace_to_details,
-    snapshot_candidate_facts,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -116,16 +110,6 @@ class EnrichmentContext:
     graphiti_episode_max_estimated_tokens: int
     # Callback
     get_queue_depth: Callable[[], int]
-    # Stage 1 shadow-mode context composition (observe-only; see shadow_context_composition.py
-    # and .agent/archive/plans/menhir-context-composition-production-integration.md).
-    # Off by default — every EnrichmentContext construction site that predates this field gets
-    # the safe default.
-    shadow_context_composition: bool = False
-    shadow_composition_timeout_s: float = 30.0
-    # Registers a fire-and-forget background task so IngestService can track/drain it at
-    # shutdown. None (the default) means "don't track" — used by tests that construct
-    # EnrichmentContext directly without a real IngestService behind it.
-    register_background_task: Callable[[asyncio.Task], None] | None = None
     # Optional, activation-gated publication protocol.  No runtime/bootstrap path constructs this
     # repository yet because the managed tombstone HMAC key ring and created-only Graphiti artifact
     # manifest do not exist.  Tests and a future explicit activation hook can inject it without
@@ -136,9 +120,9 @@ class EnrichmentContext:
     canonical_self_binding_mode: str = "off"
     #: Two-tier self identity rollout (agent-inferred node): "off" (default), "observe" or "enforce".
     inferred_self_mode: str = "off"
-    #: Source-memory lane (MENHIR_FRONTIER_SOURCE_MEMORIES). Defaulted so every construction
-    #: site predating this field keeps pre-change behavior: no episode-content embedding call.
-    source_memories_enabled: bool = False
+    #: Source-memory lane: embed the episode content at ingest. On by default since #168 freeze;
+    #: kept as a per-context knob.
+    source_memories_enabled: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -553,31 +537,6 @@ async def run_graphiti_extraction(
             details={"name": str(ctx.claimed.get("name") or ctx.episode_uuid)},
         )
 
-        # Stage 1 shadow-mode context composition (observe-only): candidate retrieval MUST
-        # happen here, before the real extraction call, so this episode's own about-to-be-
-        # created facts cannot leak into its own candidate pool. It is cheap and read-only,
-        # so it's safe to run inside the gate — the expensive LLM work happens later, after
-        # the gate is released (see the dispatch below). shadow_candidates/shadow_candidate_
-        # error/shadow_retrieval_ms are all None/empty/0 when the flag is off (zero overhead).
-        shadow_candidates: list = []
-        shadow_candidate_error: str | None = None
-        shadow_retrieval_ms = 0
-        if ctx.shadow_context_composition:
-            shadow_retrieval_started = perf_counter()
-            try:
-                shadow_namespace = str(ctx.claimed.get("namespace") or "default")
-                shadow_candidates, shadow_candidate_error = await snapshot_candidate_facts(
-                    ctx.graphiti_client, ctx.graph_adapter,
-                    namespace=shadow_namespace, episode_body=compose_episode_body(ctx.claimed),
-                )
-            except Exception as exc:  # snapshot_candidate_facts is itself fail-safe; this is
-                # a last-resort net (also covers the namespace/body prep above) so a shadow
-                # bug can never block real extraction or leave the surrounding lifecycle
-                # events (started at line ~528) without a matching outcome.
-                logger.debug("Shadow candidate snapshot raised unexpectedly episode_id=%s", ctx.episode_uuid, exc_info=True)
-                shadow_candidates, shadow_candidate_error = [], str(exc)
-            shadow_retrieval_ms = int((perf_counter() - shadow_retrieval_started) * 1000)
-
         try:
             turn_evidence_uuid = str(
                 ctx.claimed.get("turn_evidence_uuid") or ""
@@ -727,81 +686,7 @@ async def run_graphiti_extraction(
         )
         if finalize_under_gate:
             await stamp_and_finalize(ctx, graphiti_result)
-    # Gate released above (the `async with` block ended). Shadow processing dispatches here,
-    # AFTER release, specifically so it never adds to same-namespace queue latency. It's a
-    # detached background task, not awaited — real episode completion has already finished
-    # when ``finalize_under_gate`` is enabled and never waits on shadow latency.
-    if ctx.shadow_context_composition:
-        _dispatch_shadow_composition(
-            ctx,
-            candidates=shadow_candidates,
-            candidate_error=shadow_candidate_error,
-            candidate_retrieval_ms=shadow_retrieval_ms,
-            graphiti_result=graphiti_result,
-        )
     return graphiti_result
-
-
-def _dispatch_shadow_composition(
-    ctx: EnrichmentContext,
-    *,
-    candidates: list,
-    candidate_error: str | None,
-    candidate_retrieval_ms: int,
-    graphiti_result: Any,
-) -> None:
-    """Fire-and-forget: builds and logs the shadow trace without blocking the caller.
-    Registered with IngestService's task-tracking set (via ctx.register_background_task)
-    when a real IngestService is behind this ctx, so shutdown() can drain it cleanly;
-    None (tests constructing EnrichmentContext directly) just means "don't track"."""
-    task = asyncio.create_task(
-        _run_shadow_composition_and_log(
-            ctx, candidates=candidates, candidate_error=candidate_error,
-            candidate_retrieval_ms=candidate_retrieval_ms, graphiti_result=graphiti_result,
-        ),
-        name=f"menhir-shadow-composition-{ctx.episode_uuid}",
-    )
-    if ctx.register_background_task is not None:
-        ctx.register_background_task(task)
-
-
-async def _run_shadow_composition_and_log(
-    ctx: EnrichmentContext,
-    *,
-    candidates: list,
-    candidate_error: str | None,
-    candidate_retrieval_ms: int,
-    graphiti_result: Any,
-) -> None:
-    shadow_started = perf_counter()
-    try:
-        prediction = await run_shadow_composition_with_timeout(
-            ctx.llm,
-            episode_uuid=ctx.episode_uuid,
-            namespace=str(ctx.claimed.get("namespace") or "default"),
-            episode_body=compose_episode_body(ctx.claimed),
-            reference_time=coerce_reference_time(
-                ctx.claimed.get("reference_time") or ctx.claimed.get("queued_at")
-            ).isoformat(),
-            candidates=candidates,
-            candidate_query_error=candidate_error,
-            candidate_retrieval_ms=candidate_retrieval_ms,
-            timeout_s=ctx.shadow_composition_timeout_s,
-        )
-        shadow_total_ms = int((perf_counter() - shadow_started) * 1000)
-        trace = build_shadow_trace(prediction, graphiti_result, shadow_total_ms=shadow_total_ms)
-        record_lifecycle_event(
-            component="ingest_shadow",
-            event="extraction_composition",
-            state="logged",
-            episode_uuid=ctx.episode_uuid,
-            details=shadow_trace_to_details(trace),
-        )
-    except Exception:
-        # This function is never awaited by the real ingest path — a bug here must not
-        # become an unretrieved-task-exception warning at GC time, and must never be
-        # mistaken for a real extraction failure.
-        logger.warning("Shadow composition logging failed episode_id=%s", ctx.episode_uuid, exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -823,16 +708,16 @@ _SOURCE_MEMORY_EMBED_TIMEOUT_S = 10.0
 
 
 async def embed_episode_content(ctx: EnrichmentContext) -> None:
-    """Embed the episode's raw content for the source-memory recall lane (default-off).
+    """Embed the episode's raw content for the source-memory recall lane.
 
-    Runs only when the deployment enabled ``frontier_source_memories``. Skips evidence
+    Runs unless the context turns ``source_memories_enabled`` off. Skips evidence
     projections (the SET-side guard in ``set_episode_content_embedding`` is the backstop)
     and episodes that already carry an embedding, so the step is idempotent across
     retries. The embedder call is bounded (10s) and graph I/O runs in a worker thread.
     ANY exception or timeout is logged at WARNING and swallowed: this lane must never
     fail, delay-retry, or requeue enrichment.
     """
-    if not getattr(ctx, "source_memories_enabled", False):
+    if not getattr(ctx, "source_memories_enabled", True):
         return
     try:
         claimed = ctx.claimed
@@ -1509,7 +1394,7 @@ async def handle_enrichment_failure(
     """
 
     duration_ms = int((perf_counter() - ctx.started) * 1000)
-    # A Graphiti-wrapped insufficient_quota 429 reads "Rate limit exceeded"; record the real cause.
+    # A Graphiti-wrapped billing refusal (402 or insufficient_quota 429) reads as a generic error; record the real cause.
     exc = quota_exhausted_error(exc) or exc
     error_type = type(exc).__name__
     classification = classify_enrichment_failure(exc, error_type=error_type)

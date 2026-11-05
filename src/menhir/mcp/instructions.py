@@ -26,7 +26,8 @@ file_context and file_context_project. Rephrase only if evidence is missing. \
 include_invalidated=true adds superseded facts attached to returned memories; it is not \
 exhaustive history search.
 
-Recall normally returns summaries and facts. When wording or rationale matters, use \
+Recall returns summaries and facts, plus a separate section of raw source \
+episodes by default. When wording or rationale matters, use \
 get_provenance(node_uuid=...) for linked source excerpts; increase content_chars if truncated, up \
 to 5000. Cite the source and distinguish recorded reasons from inference.
 

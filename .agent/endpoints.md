@@ -73,7 +73,7 @@ Public REST:
     structured first-person latest/predecessor verdict; see the Event-history surface section below).
   - `/api/turn-evidence` (agent tier) — selective `:TurnEvidence` capture (ADR 0001); see `data_models.md` and `architecture.md`
   - `POST /api/phase3/run` (agent tier) — run one personal-memory View consolidation pass over an explicit namespace (real LLM, all bias guards on); black-box surface for the `archolith-bench menhir-phase3` benchmark. When event history is enabled (default off), also runs event consolidation over an independent `:EventConsolidationWatermark` cursor and reports bounded Phase-3 event metrics (`event_namespaces_processed`, `event_namespaces_failed`, `event_assertions_recorded`, `event_assertions_created`, `event_views_rebuilt`, `event_llm_calls`). The response also reports effective `counter_enabled`, lane-specific `scalar_llm_calls`, and `event_dirty_after` (null when events are off; otherwise a one-row read beyond the event watermark). A processed namespace count alone does not prove that all event pages completed.
-  - `GET /api/phase3/status` (readonly) — namespace dirty flag + `:TurnEvidence` count
+  - `GET /api/phase3/status` (readonly) — scalar-dirty flag (scalar turns left past the cursor at the configured perceiver version; false when the scalar lane is off) + `:TurnEvidence` count
   - `GET /api/views` (readonly) — current counter Views (each with value `history`/`superseded`) and `subject='perception'` abstention receipts, split
   - `POST /api/phase3/reset` (agent tier) — tear down a throwaway namespace: graphiti partition (Views + watermark) PLUS namespace-keyed `:TurnEvidence`; refuses the default/shared namespace
   - public memory endpoints. `POST /api/memory` takes an optional `role` (`user`, `assistant`, `tool`, `agent`, `system`, matched exactly; anything else is a 422, or a 400 through the internal backend bridge) naming the speaker of `episode`. Menhir never infers the speaker from the text, so a `user:` prefix grants nothing; a grounded episode takes its role from its turn evidence (#271). The MCP `add_memory` and `add_memory_and_track` tools take the same `role` (an invalid value is refused with a `Cannot store memory` message before any write).
@@ -184,8 +184,6 @@ Queue a memory for enrichment. Use this to remember facts, preferences, decision
   every entity extracted from the episode, including pre-existing shared ones. Default `false`.
 - **`role`** (str, optional): Speaker of `text`, exactly one of `user`, `assistant`, `tool`, `agent`, `system`. Same contract as `POST /api/memory` `role`; a matching linked turn evidence overrides it. An invalid value returns `Cannot store memory: invalid role ...` and nothing is written. Checked on every path, but has no effect for `type="TEMPORAL"` with `valid_at` (no extraction).
 - Response now appends a one-line queue snapshot: `queue_depth`, current `active_enriching` count, and scheduler state.
-
-**Gateway alias behavior**: `memory_gateway(action="add_memory", payload_json='{"text":"..."}')` accepts `text` (preferred), `content`, or `summary` for the memory content field.
 
 ### `add_memory_and_track`
 Concept id: `mcp.tool.add_memory_and_track`
@@ -402,6 +400,18 @@ enrichment already leased by a worker continues to completion. Use `resume_sched
 restart the loop.
 - Returns scheduler state after pause (`was_running`, `scheduler_running`, `lease_acquired`).
 
+### `acknowledge_warning`
+Concept id: `mcp.tool.acknowledge_warning`
+Required tier: `operator`
+
+Silence an operator warning (`provider_auth`, `provider_billing` or `failed_episodes`) in
+`add_memory`, `add_memory_and_track`, `recall_context_memories`, `read_flagged_memories` and
+`build_context` output. The ack covers the current incident only: a provider warning comes back
+after the condition clears and recurs, and `failed_episodes` comes back when an episode fails
+after the ack. `get_memory_stats` keeps listing acknowledged warnings while they are active.
+- `subject`: LLM call kind (`chat`, `embedding`, `response`) for provider kinds; empty acks all.
+- Returns what was acknowledged, or that nothing was active.
+
 ### `resume_scheduler`
 Concept id: `mcp.tool.resume_scheduler`
 Required tier: `operator`
@@ -447,24 +457,22 @@ Search memories by semantic similarity. Returns ranked results with relevance sc
 - **`file_context`** (str, optional): File path whose structural neighborhood should inject linked semantic candidates.
 - **`file_context_project`** (str, optional): Optional project disambiguation for `file_context`.
 - **`trace`** (bool, optional): Observe-only diagnostics. On the default fused path, records BM25 and cosine ranks without changing returned ordering; failures are warnings, not recall failures.
-- Gateway alias: `memory_gateway(action="search", payload_json="{...}")` dispatches to the same behavior as `action="recall"`.
 - Returns compact JSON with top results, short summaries, a compact score breakdown (`sim`, `adj`, `rec`, `prom`), and explicit `retrieval_score`, `retrieval_score_kind`, and `relevance_basis`. Legacy `relevance` is retained and explicitly labeled unvalidated.
 
 ### `recall_history`
 Concept id: `mcp.tool.recall_history`
 
-List saved memories matching a subject in time order (oldest first), with optional pools.
+List saved memories matching a subject in time order (oldest first).
 - **`query`** (str): Subject to match. Natural language works best.
 - **`namespace`** (str, optional): Silo to scope the operation to. Empty = default/global behavior.
 - **`limit`** (int, optional): Max memories to return (default: 30, max: 50).
-- **`pools`** (bool, optional): Group related memories into pools (default: true).
 - Read-only drill-down: no access updates, no ranking changes.
-- Returns compact JSON with `query`, `count`, and `memories[]` (`time`, `content`, `uuid`, `source`, plus `pool_id`/`pool_anchor` when pooled). A `note` is set (with empty `memories`) when no embedded memory matched — run `scripts/backfill_episode_embeddings.py` for pre-flag memories.
+- Returns compact JSON with `query`, `count`, and `memories[]` (`time`, `content`, `uuid`, `source`). A `note` is set (with empty `memories`) when no embedded memory matched — run `scripts/backfill_episode_embeddings.py` for pre-flag memories.
 
 ### `recall_timeline`
 Concept id: `mcp.tool.recall_timeline`
 
-Navigate a recorded-time thread of saved memories on demand: page around an instant, a window, a memory, or a semantic seed, optionally restricted to one subject's thread, with typed scalar/event histories. Order is RECORDED time (episode `valid_at`).
+Navigate a recorded-time thread of saved memories on demand: page around an instant, a window, a memory, or a semantic seed, optionally restricted to one subject's thread, with typed scalar histories. Order is RECORDED time (episode `valid_at`).
 - Exactly one of `at` / `window_from`+`window_to` / `around` / `cursor` / `query` is required when any is given; `subject` is a filter that combines with every mode and alone means the latest page of the subject thread.
 - **`at`** (str, optional): ISO instant to split the timeline around.
 - **`window_from`** / **`window_to`** (str, optional): ISO instants bounding an ascending window.
@@ -483,7 +491,8 @@ Navigate a recorded-time thread of saved memories on demand: page around an inst
 ### `get_scalar_view_items`
 Concept id: `mcp.tool.get_scalar_view_items`
 
-Drill into a scalar View from recall's `authority_layer` (a count or a current value) and page the items it was built from. With `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_COLLAPSE_ENABLED` on, counted Views omit their items from recall and render `built from N items; drill down: get_scalar_view_items(view_uuid=...)`.
+Drill into a scalar View from recall's `authority_layer` (a count or a current value) and page the items it was built from.
+
 - **`view_uuid`** (str, required): The verdict's `view_uuid`.
 - **`offset`** (int, optional): Offset into the items (default: 0).
 - **`limit`** (int, optional): Max items per page (default: 20, max: 50).
@@ -646,6 +655,28 @@ List design questions recorded on artifacts, in the order their author wrote the
 - **`limit`** (int, optional): Max rows (default 25, max 200).
 - Answers "what design questions remain?" and "which plans are blocked?" without reading
   markdown. Each question carries an addressable `question_uuid`.
+
+### `review_inbox`
+Concept id: `mcp.tool.review_inbox`
+
+One read-only view of everything waiting on the owner's decision.
+- **`namespace`** (str, optional): Silo. Empty (or whitespace) spans all, and each candidate
+  line then shows its `namespace=`. A pinned client always gets its own silo, in-process and
+  over the stdio bridge, because `list_candidates` now declares `namespace` too. Scoped TODOs
+  and questions include the shared default silo (the header says `<ns>+default`); conflicts,
+  failed enrichments and candidates are that silo only.
+- **`per_category`** (int, optional): Items per section (default 5, clamped to 1..25).
+- Sections: unresolved conflicts, failed enrichments, candidates, stale open TODOs, open
+  artifact questions. Each has a count, items, and an `Act with:` line. Conflicts, failed
+  enrichments, candidates and questions fetch one more row than the cap, so `N+` means more
+  than `N` exist.
+- Stale TODOs differ: they are filtered from one page of the first 200 open TODOs, ordered by
+  priority then age. Below a full page the count is exact (`N+` past the cap, as above). On a
+  full page stale TODOs can sit beyond it, so the count reads `at least N`, and a page with
+  none stale reads `unknown` and points at `list_todos` rather than claiming `none`.
+- Each section's read is bounded at 20s. A failing or hung section renders
+  `unavailable (<ExceptionType>)` (`TimeoutError` for a hang) and the rest still render.
+- The candidates section opens with a line marking its text as unreviewed and untrusted.
 
 ### `get_artifact_relationships`
 Concept id: `mcp.tool.get_artifact_relationships`
@@ -815,7 +846,7 @@ Close stale TODO items that have been open for too long.
 
 `recall_memories` is a standalone semantic search — no bootstrap dependency, returns ranked results with score breakdowns. Use it mid-task when you need targeted retrieval for a specific question.
 
-`recall_history` is a read-only drill-down over raw saved memories strictly in time order (oldest first), with optional pools. Use it after `recall_memories` when a question needs how something changed, the sequence of states, or what it was before.
+`recall_history` is a read-only drill-down over raw saved memories strictly in time order (oldest first). Use it after `recall_memories` when a question needs how something changed, the sequence of states, or what it was before.
 
 ### `build_context`
 Concept id: `mcp.tool.build_context`
@@ -877,6 +908,7 @@ Concept id: `mcp.tool.get_memory_stats`
 Return operational health summary for the memory system.
 - **`since_hours`** (int, optional): Lookback window in hours (default: 24).
 - Returns 6 sections: ingestion rate, recall latency (p50/p95), failure summary, enrichment queue depth, circuit breaker state, and lifecycle summary.
+- The enrichment p95 is graded against `MENHIR_ENRICHMENT_P95_TARGET_SECONDS` (default 120; `0` turns the grade off). 120 s comes from the Phase 2b enrichment SLO (CHANGELOG 2026-03-29: "95% of episodes READY within 120s", a spot-check on the live Neo4j + llama.cpp stack in `post-v1-todo.md`); it isn't derived from a measured baseline and assumes no particular model or provider. Set it to your own measured p95 plus headroom.
 
 ### `view_entropy`
 Concept id: `mcp.tool.view_entropy`

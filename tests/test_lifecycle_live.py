@@ -13,7 +13,6 @@ from urllib.request import Request, urlopen
 from uuid import uuid4
 
 import pytest
-from dotenv import load_dotenv
 
 from menhir.config import MemorySettings
 from menhir.core import build_memory_services, prepare_memory_runtime
@@ -26,7 +25,7 @@ from menhir.services.lifecycle_service import (
     SHARPNESS_PROMOTE_THRESHOLD,
 )
 
-load_dotenv()
+pytestmark = pytest.mark.usefixtures("live_dotenv")
 
 
 def _check_llama_connectivity(

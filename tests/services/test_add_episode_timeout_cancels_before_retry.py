@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from menhir.infrastructure import graphiti_client as graphiti_client_module
 from menhir.infrastructure.graphiti_client import GraphitiClient
 from menhir.services.enrichment_steps import add_episode_with_timeout
 
@@ -16,7 +17,7 @@ pytestmark = pytest.mark.unit
 _WHEN = datetime(2024, 2, 14, tzinfo=timezone.utc)
 
 
-async def _attempt(client: GraphitiClient, attempt: int) -> None:
+async def _attempt(client: GraphitiClient, attempt: int, *, timeout_s: float) -> None:
     await add_episode_with_timeout(
         client,
         name="n",
@@ -25,11 +26,16 @@ async def _attempt(client: GraphitiClient, attempt: int) -> None:
         reference_time=_WHEN,
         episode_uuid="ep-1",
         attempt=attempt,
-        timeout_s=0.1,
+        timeout_s=timeout_s,
     )
 
 
-async def test_timed_out_attempt_is_cancelled_and_finished_before_the_retry_begins() -> None:
+async def test_timed_out_attempt_is_cancelled_and_finished_before_the_retry_begins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Telemetry commits run inside the deadline and can exceed 0.1 s on Windows, so they are
+    # stubbed here. Only attempt 1 needs a short deadline; the retry must not time out.
+    monkeypatch.setattr(graphiti_client_module, "record_lifecycle_event", lambda **_: None)
     events: list[str] = []
 
     async def native_add_episode(**kwargs) -> None:
@@ -49,8 +55,8 @@ async def test_timed_out_attempt_is_cancelled_and_finished_before_the_retry_begi
     client = GraphitiClient(client=SimpleNamespace(add_episode=native_add_episode))
 
     with pytest.raises(TimeoutError, match="timed out"):
-        await _attempt(client, 1)
+        await _attempt(client, 1, timeout_s=0.1)
     assert events == ["start1", "cancelled1", "finished1"], "attempt 1 was still running at timeout"
 
-    await _attempt(client, 2)  # the retry
+    await _attempt(client, 2, timeout_s=30.0)  # the retry
     assert events == ["start1", "cancelled1", "finished1", "start2"]

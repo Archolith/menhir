@@ -43,10 +43,10 @@ pytestmark = [pytest.mark.e2e, pytest.mark.timeout(1500)]
 
 SCALAR_ON = {
     "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED": "true",
-    "MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED": "true",
 }
 COUNTING_ON = {**SCALAR_ON, "MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED": "true"}
-MATCH_ON = {**COUNTING_ON, "MENHIR_PERSONAL_MEMORY_COUNTING_MATCH_ENABLED": "true"}
+# Related-count matching and extraction v2 are always on (#168 freeze): counting alone runs both.
+MATCH_ON = COUNTING_ON
 
 COIN = Obs("I have 37 coins", {"attribute": "owned_coin_count", "value_kind": "count",
                                "operation": "absolute", "value": 37})
@@ -144,10 +144,13 @@ async def test_e2e_10_counting(
                     "counting_stage_runs_after_scalar_with_k_samples",
                     passed=bool(result.get("counting_enabled"))
                     and len(script.calls("scalar")) == 3 and len(script.calls("counting")) == 3
-                    and result.get("counting_llm_calls") == 3,
-                    detail={k: result.get(k) for k in (
+                    # Related-count decide is always on since the #168 freeze; its calls count too.
+                    and result.get("counting_llm_calls")
+                    == 3 + len(script.calls("default:decide")),
+                    detail={**{k: result.get(k) for k in (
                         "counting_enabled", "counting_llm_calls", "counting_occurrences_stored",
                         "counting_namespaces_failed")},
+                        "decide_calls": len(script.calls("default:decide"))},
                 )
                 occ = _occurrences(e2e_config, namespace, lane_evidence)
                 lane_evidence.record(
@@ -195,8 +198,7 @@ async def test_e2e_10_counting_extract_v2(
     namespace = f"e2e10x-{uuid4().hex[:12]}"
     script = _script(GYM, scalar=[COIN])
     with scripted_model(script) as model:
-        env = {**feature_env, **model.env, **COUNTING_ON,
-               "MENHIR_PERSONAL_MEMORY_COUNTING_EXTRACT_V2": "true"}
+        env = {**feature_env, **model.env, **COUNTING_ON}
         with lane_backend(e2e_config, e2e_installed, lane_evidence, env):
             async with stdio_session(e2e_config, e2e_installed.venv_python, lane_evidence,
                                      feature_env=env) as client:
@@ -220,7 +222,7 @@ async def test_e2e_10_counting_extract_v2(
             versions = sorted({str(r["perceiver_version"]) for r in occ})
             lane_evidence.record(
                 "occurrences_carry_the_v2_perceiver_version",
-                passed=len(occ) == 2 and versions == ["v1+x2"],
+                passed=len(occ) == 2 and versions == ["v1+x2+m"],
                 detail={"versions": versions, "stored": result.get("counting_occurrences_stored")},
             )
             views = [v for v in scalar_views(e2e_config, namespace)

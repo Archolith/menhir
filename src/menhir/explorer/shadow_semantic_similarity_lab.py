@@ -1,5 +1,5 @@
-"""Shadow-composition semantic-similarity lab (validation experiment, NOT yet wired into
-production shadow_context_composition.py).
+"""Shadow-composition semantic-similarity lab (validation experiment, NOT wired into
+production; the production shadow-composition module has since been removed).
 
 Follow-up to `.agent/reviews/menhir-shadow-context-composition-facet-instability-2026-07-16.md`,
 which found that Stage 1's exact-string-match join between LLM-generated `shadow_facet` labels

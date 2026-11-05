@@ -4,6 +4,9 @@
 
 supported-by-spike
 
+> **2026-11-01:** Oracle ranking and the intent lens are now always on (#172), so "default-off" below is
+> out of date. The bench verdict is unchanged.
+
 > **2026-07-11 status update.** Promotion condition #1 is **met** — the RetrievalOracle / OracleExecutor
 > / OracleCombiner spike is ported into `src` (`domain/oracles.py`, `services/oracle_executor.py`,
 > `services/retrieval_oracles.py`, `domain/oracle_combiner.py`). But the base R4-R7 oracle pipeline was

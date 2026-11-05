@@ -12,7 +12,7 @@ reviews: dbde430c-9be1-4131-aa85-871a8e99e5ef
 
 **Second-pass baseline:** `14aed115dd0ecb8878aef9b44bfc6a233748cb1a` (merged `main`, 2026-09-28)
 
-**Authority:** [local-stdio MVP release plan](../plans/menhir-local-stdio-mvp-release-2026-09-16.md), Phase B
+**Authority:** [local-stdio MVP release plan](../archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md), Phase B
 
 **Remediation:** [implemented Gate B work package](../archive/plans/menhir-gate-b-remediation-2026-09-28.md)
 

@@ -4,6 +4,9 @@
 
 speculative
 
+> **2026-11-01:** the BM25 switch (`frontier_bm25`) was removed on 2026-10-27; the code is archived on
+> branch `archive/bucket1-features-2026-10-27`.
+
 > **2026-07-11 status update.** Promotion condition #1 is **met** — the configurable hybrid
 > candidate-generation stack (vector + BM25 + source-aware priors) is built
 > (`domain/retrieval_tuning.py`, `services/hybrid_retrieval.py`), default-off. The bench sweep (#2,

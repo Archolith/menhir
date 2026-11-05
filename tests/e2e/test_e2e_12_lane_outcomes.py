@@ -1,21 +1,18 @@
 """E2E-12 - every consolidation lane measured on its own (#170 item 4).
 
-One backend with all four lanes on (counter, scalar, event, counting), four turns captured over
+One backend with both lanes on (scalar, counting), four turns captured over
 REST and admitted through the stdio bridge, one ``POST /api/phase3/run``. The phase3 response's
 ``lane_outcomes`` must report each lane separately: what it read, each stage's count, and whether
 it produced anything. The scalar fold (an absolute then a delta) and the counted View are checked
 against the graph, so "fold correct" is measured, not inferred from a write count.
 
-The scripted model answers the scalar, event and counting prompts with fixed observations, and the
-counter prompt with no events. So the counter lane reads every turn and produces nothing, beside
-three lanes that produce output: its ``no_output`` flag is the inactivity the report must not hide.
+The scripted model answers the scalar and counting prompts with fixed observations. The
+removed counter lane (#168) and the archived event-history lane must not appear in the report.
 """
 
 from __future__ import annotations
 
 import json
-import re
-from collections.abc import Callable
 from uuid import uuid4
 
 import pytest
@@ -36,21 +33,14 @@ from tests.e2e._harness.phase3 import (
     record_turn,
     scalar_views,
 )
-from tests.e2e._harness.scripted_provider import Call, Rule, Script, scripted_model
+from tests.e2e._harness.scripted_provider import Rule, Script, scripted_model
 
 pytestmark = [pytest.mark.e2e, pytest.mark.timeout(1500)]
 
-#: Unique substrings of the counter (perception.py) and event (event_history_perception.py) prompts.
-COUNTER_PROMPT = "COUNTABLE EVENTS for a deterministic aggregator"
-EVENT_PROMPT = "extract COMPLETED ACQUISITION EVENTS only"
-
 ALL_LANES_ON = {
-    "MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED": "true",
     # The pass under test is the explicit phase3 run; keep the background job from racing it.
     "MENHIR_PERSONAL_MEMORY_CONSOLIDATION_INTERVAL_S": "86400",
     "MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED": "true",
-    "MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED": "true",
-    "MENHIR_PERSONAL_MEMORY_EVENT_HISTORY_ENABLED": "true",
     "MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED": "true",
 }
 
@@ -69,33 +59,12 @@ SCALAR = [
 GYM = [Obs("I went to the gym", {"attribute": "gym_visit_count", "value_kind": "count",
                                  "operation": "occurrence", "value": 1, "importance": "tracked"})]
 
-_EVENT_LINE = re.compile(r"^\[(\d+)\] (.*)$", re.MULTILINE)
-
-
-def _event_reply(phrase: str, obj: str) -> Callable[[Call], str]:
-    """One envelope per listed episode; a 'bought' event wherever ``phrase`` occurs."""
-
-    def reply(call: Call) -> str:
-        envelopes = []
-        for index, text in _EVENT_LINE.findall(call.prompt):
-            events = []
-            if phrase.lower() in text.lower():
-                events.append({"subject": "user", "predicate": "bought", "object": obj,
-                               "object_display": "", "domain": "", "when": "",
-                               "stated_span": phrase})
-            envelopes.append({"episode": int(index), "events": events})
-        return json.dumps(envelopes)
-
-    return reply
-
-
 CRITERIA = [
     "every_lane_is_reported_separately",
     "scalar_stages_are_counted_separately",
     "scalar_fold_is_correct",
-    "event_lane_reports_its_own_stages",
     "counting_lane_reports_its_own_output",
-    "idle_counter_is_flagged_beside_busy_lanes",
+    "no_busy_lane_is_flagged_idle",
     "no_unscripted_model_prompt",
 ]
 
@@ -108,8 +77,6 @@ async def test_e2e_12_lane_outcomes(
     script = Script([
         Rule("scalar", SCALAR_PROMPT, envelope_reply(SCALAR)),
         Rule("counting", COUNTING_PROMPT, envelope_reply(GYM)),
-        Rule("event", EVENT_PROMPT, _event_reply("I bought 5 more coins", "coins")),
-        Rule("counter", COUNTER_PROMPT, lambda _call: "[]"),
     ])
     with scripted_model(script) as model:
         env = {**feature_env, **model.env, **ALL_LANES_ON}
@@ -120,18 +87,19 @@ async def test_e2e_12_lane_outcomes(
                     await admit_turn(client, namespace, text,
                                      record_turn(e2e_config, namespace, text, occurred_at=at))
             result = post_json(e2e_config, "/api/phase3/run",
-                               {"namespace": namespace, "k": 3, "counter_state": True})
+                               {"namespace": namespace, "k": 3})
             lane_evidence.attach("phase3.json", json.dumps(result, indent=2, default=str))
             lanes = result.get("lane_outcomes") or {}
-            counter, scalar = lanes.get("counter", {}), lanes.get("scalar", {})
-            event, counting = lanes.get("event", {}), lanes.get("counting", {})
+            scalar = lanes.get("scalar", {})
+            counting = lanes.get("counting", {})
 
             lane_evidence.record(
                 "every_lane_is_reported_separately",
                 passed=all(lanes.get(name, {}).get("enabled") is True
-                           for name in ("counter", "scalar", "event", "counting"))
+                           for name in ("scalar", "counting"))
                 and all(lanes[name].get("input_rows") == len(TURNS)
-                        for name in ("counter", "scalar", "event", "counting"))
+                        for name in ("scalar", "counting"))
+                and "event" not in lanes
                 and not any(lanes[name].get("stalled") for name in lanes),
                 detail=lanes,
             )
@@ -151,15 +119,6 @@ async def test_e2e_12_lane_outcomes(
                 passed=len(coins) == 1 and float(coins[0]["value"]) == 42.0,
                 detail=coins,
             )
-            ev = event.get("stages") or {}
-            lane_evidence.record(
-                "event_lane_reports_its_own_stages",
-                passed=ev.get("proposals") == 1 and ev.get("admitted") == 1
-                and ev.get("recorded") == 1 and (ev.get("views_rebuilt") or 0) >= 1
-                and event.get("no_output") is False and event.get("namespaces_failed") == 0
-                and len(script.calls("event")) >= 1,
-                detail=event,
-            )
             gym = [v for v in scalar_views(e2e_config, namespace)
                    if v["attribute"] == "gym_visit_count"]
             lane_evidence.record(
@@ -169,11 +128,10 @@ async def test_e2e_12_lane_outcomes(
                 detail={"counting": counting, "views": gym},
             )
             lane_evidence.record(
-                "idle_counter_is_flagged_beside_busy_lanes",
-                passed=counter.get("output") == 0 and counter.get("no_output") is True
-                and len(script.calls("counter")) >= 1
-                and not any(lanes[name].get("no_output") for name in ("scalar", "event", "counting")),
-                detail={"counter": counter, "counter_calls": len(script.calls("counter"))},
+                "no_busy_lane_is_flagged_idle",
+                passed="counter" not in lanes
+                and not any(lanes[name].get("no_output") for name in ("scalar", "counting")),
+                detail=lanes,
             )
 
     lane_evidence.attach("model-calls.json", script.evidence())

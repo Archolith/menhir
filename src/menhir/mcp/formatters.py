@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from time import monotonic, perf_counter
+from typing import Any
 from uuid import UUID
 
 from menhir.core.reader_identity import normalize_reader_id as _normalize_reader_id
@@ -15,6 +17,11 @@ from menhir.domain.models import ProcessingState
 from menhir.domain.recall_provenance import provenance_label
 from menhir.domain.recall_visibility import memory_lifecycle_note
 from menhir.domain.utils import excerpt
+from menhir.domain.verbatim_skip_status import (
+    VERBATIM_SKIPPED_SUBSTAGE,
+    effective_processing_row,
+    overlay_effective_status,
+)
 from menhir.services.stale_labeling import (
     STALE_ACTION, STALE_ACTION_OUTDATED,
     STALE_ADVISORY, STALE_ADVISORY_OUTDATED, STALE_ADVISORY_STILL_VALID,
@@ -128,6 +135,29 @@ def _count_unresolved_members(row: dict[str, object] | None) -> int:
         return 0
     members = _coerce_conflict_members(row)
     return sum(1 for member in members if str(member.get("status") or "") == "unresolved")
+
+
+async def _project_skipped_memory_rows(
+    backend: Any, rows: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    """Make a memory row's processing status the one ``effective_processing_row`` reports.
+
+    Memory rows (``MEMORY_RETURN_FIELDS``) carry the client's own READY, which for a
+    verbatim-skipped episode means "never extract this row", not "extracted". Only such rows
+    are looked up again, by the uuid the caller's scoped read already returned.
+    """
+    out: list[dict[str, object]] = []
+    for row in rows:
+        if (
+            row.get("uuid")
+            and row.get("processing_state") == ProcessingState.READY
+            and row.get("processing_substage") == VERBATIM_SKIPPED_SUBSTAGE
+        ):
+            row = overlay_effective_status(
+                row, await backend.fetch_episode_processing(str(row["uuid"]))
+            )
+        out.append(row)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -341,10 +371,10 @@ def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, obj
 
 
 def _with_event_time(item: dict, tf: object) -> dict:
-    """Adds ``event_time`` only when rendered (MENHIR_ANCHORED_TIME_RENDER), else unchanged."""
-    event_time = _tf(tf, "event_time")
-    if event_time:
-        item["event_time"] = event_time
+    """Adds ``said_at`` only when set, else unchanged."""
+    said_at = _tf(tf, "said_at")
+    if said_at:
+        item["said_at"] = said_at
     return item
 
 
@@ -360,15 +390,7 @@ def _format_when(tf: object) -> str:
     created_at = _tf(tf, "created_at")
     expired_at = _tf(tf, "expired_at")
 
-    event_time = _tf(tf, "event_time")
-    if event_time:
-        # A plan has not happened, and an unverified recorded date is not an occurrence date:
-        # their text already says "planned ..." / "recorded ...".
-        happened = (str(event_time) if str(event_time).startswith(("planned", "recorded"))
-                    else f"happened {event_time}")
-        if invalid_at:
-            happened = f"{happened} until {invalid_at}"
-    elif invalid_at:
+    if invalid_at:
         happened = f"happened {valid_at or '?'} until {invalid_at}"
     elif valid_at:
         happened = f"happened from {valid_at}"
@@ -407,6 +429,8 @@ async def _collect_episode_status(
             current = await backend.fetch_episode_processing(episode_uuid)
         else:
             current = backend.graph_adapter.fetch_episode_processing(episode_uuid)
+        # A verbatim-skipped client is READY before the projection that extracts it is.
+        current = effective_processing_row(current)
         if current is None:
             break
 
@@ -625,6 +649,139 @@ async def _standing_unrecallable_count(backend: object) -> int:
     return count
 
 
+async def _legacy_operator_warnings(backend: object) -> list[dict[str, Any]]:
+    """Today's computation: in-process singletons plus the standing FAILED count, all unacked."""
+    from menhir.infrastructure.observability import (
+        last_provider_auth_failure,
+        last_provider_quota_exhaustion,
+    )
+
+    entries: list[dict[str, Any]] = []
+    auth_failure = last_provider_auth_failure()
+    if auth_failure is not None:
+        entries.append(
+            {"kind": "provider_auth", "subject": auth_failure.kind, "acked": False,
+             "summary": auth_failure.summary()}
+        )
+    quota_exhaustion = last_provider_quota_exhaustion()
+    if quota_exhaustion is not None:
+        entries.append(
+            {"kind": "provider_billing", "subject": quota_exhaustion.kind, "acked": False,
+             "summary": quota_exhaustion.summary()}
+        )
+    unrecallable = await _standing_unrecallable_count(backend)
+    if unrecallable > 0:
+        entries.append(
+            {"kind": "failed_episodes", "subject": "global", "acked": False,
+             "count": unrecallable, "summary": ""}
+        )
+    return entries
+
+
+async def _fetch_operator_warnings(backend: object) -> list[dict[str, Any]]:
+    payload = await backend.get_operator_warnings()
+    warnings = payload.get("warnings") if isinstance(payload, dict) else None
+    if not isinstance(warnings, list):
+        raise TypeError("get_operator_warnings returned an unexpected payload")
+    # An older or newer serve may send entries this build cannot read; never index into them.
+    return [w for w in warnings if isinstance(w, dict)]
+
+
+def _caller_visible_warnings(warnings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Tool-side mirror of the backend redaction (#488 F5), for the legacy fallback path."""
+    from menhir.infrastructure.telemetry.operator_warnings_store import (
+        redact_operator_warnings_for_caller,
+    )
+    from menhir.mcp.service_access import get_pinned_namespace, get_request_tier
+
+    return redact_operator_warnings_for_caller(
+        warnings, pinned=bool(get_pinned_namespace()), tier=get_request_tier()
+    )
+
+
+async def _active_operator_warnings(backend: object) -> list[dict[str, Any]]:
+    """All active warnings the caller may see, acknowledged ones included; legacy on failure."""
+    try:
+        warnings = await _fetch_operator_warnings(backend)
+    except Exception:  # noqa: BLE001 - older serve / fake backend / backend error
+        logger.debug("get_operator_warnings unavailable; using legacy warnings", exc_info=True)
+        warnings = await _legacy_operator_warnings(backend)
+    return _caller_visible_warnings(warnings)
+
+
+async def _unacked_operator_warnings(backend: object) -> list[dict[str, Any]]:
+    """Unacknowledged operator warnings from the backend; any failure falls back to the legacy path."""
+    try:
+        warnings = await _fetch_operator_warnings(backend)
+    except Exception:  # noqa: BLE001 - older serve / fake backend / backend error
+        logger.debug("get_operator_warnings unavailable; using legacy warnings", exc_info=True)
+        return await _legacy_operator_warnings(backend)
+    return [w for w in warnings if not w.get("acked")]
+
+
+def _operator_warning_line(entry: Any) -> str | None:
+    """One rendered warning, or None for an entry this build cannot render (never raises)."""
+    if not isinstance(entry, dict):
+        return None
+    kind = entry.get("kind")
+    summary = str(entry.get("summary") or "").strip()
+    if kind in ("provider_auth", "provider_billing") and not summary:
+        return None
+    if kind == "provider_auth":
+        text = (
+            f"WARNING: {summary}. New memories are stored but cannot be "
+            "enriched or recalled until the provider credential (e.g. OPENAI_API_KEY) is fixed; "
+            "failed episodes are retried automatically once a call succeeds."
+        )
+    elif kind == "provider_billing":
+        text = (
+            f"WARNING: {summary}. Enrichment cannot progress until provider "
+            "credits are added; stop waiting on queued episodes."
+        )
+    elif kind != "failed_episodes":
+        # A kind from a newer serve: its own summary.
+        return f"WARNING: {summary}." if summary else None
+    else:
+        try:
+            unrecallable = int(entry.get("count") or 0)
+        except (TypeError, ValueError):
+            return None
+        if unrecallable <= 0:
+            return None
+        text = (
+            f"WARNING: {unrecallable} earlier "
+            f"{'memory is' if unrecallable == 1 else 'memories are'} FAILED and NOT recallable "
+            f"-- the text is stored but has no entities, so recall cannot return it. "
+            f"This write may end the same way; check get_enrichment_status(episode_id) if it matters."
+        )
+    # No "how to silence this" text: these lines reach models at every tier, and silencing a
+    # warning is the owner's decision, not a next step to suggest to whoever reads it.
+    return text
+
+
+def _benchmark_mode() -> bool:
+    from menhir.config.settings_helpers import parse_bool_env
+
+    return parse_bool_env(os.getenv("MENHIR_BENCHMARK_MODE", ""))
+
+
+async def session_start_operator_warnings(backend: object) -> list[dict[str, Any]]:
+    """Unacked warnings for session-start surfaces; empty in benchmark mode so bench output is unchanged."""
+    if _benchmark_mode():
+        return []
+    return _caller_visible_warnings(await _unacked_operator_warnings(backend))
+
+
+async def session_start_warning_lines(backend: object) -> list[str]:
+    """Rendered unacked warning lines for session-start surfaces (empty when none, never raises)."""
+    try:
+        entries = await session_start_operator_warnings(backend)
+        return [line for line in map(_operator_warning_line, entries) if line]
+    except Exception:  # noqa: BLE001 - a warning must never fail a bootstrap read
+        logger.debug("could not render session-start operator warnings", exc_info=True)
+        return []
+
+
 async def _queue_summary(backend: object) -> str:
     # NOTE: this helper runs AFTER a durable mutation, so it must never raise --
     # its failure is cosmetic and the write is already committed. A suppressed
@@ -661,31 +818,20 @@ async def _queue_summary(backend: object) -> str:
         f"scheduler={scheduler_state}"
     )
 
-    from menhir.infrastructure.observability import last_provider_auth_failure
-
-    auth_failure = last_provider_auth_failure()
-    if auth_failure is not None:
-        summary += (
-            f"\nWARNING: {auth_failure.summary()}. New memories are stored but cannot be "
-            "enriched or recalled until the provider credential (e.g. OPENAI_API_KEY) is fixed; "
-            "failed episodes are retried automatically once a call succeeds."
+    try:
+        # Benchmark mode keeps the pre-ack text byte for byte: no backend warnings call, so an
+        # ack can never move a bench transcript (#488 F13).
+        entries = (
+            await _legacy_operator_warnings(backend)
+            if _benchmark_mode()
+            else await _unacked_operator_warnings(backend)
         )
-    from menhir.infrastructure.observability import last_provider_quota_exhaustion
-
-    quota_exhaustion = last_provider_quota_exhaustion()
-    if quota_exhaustion is not None:
-        summary += (
-            f"\nWARNING: {quota_exhaustion.summary()}. Enrichment cannot progress until provider "
-            "credits are added; stop waiting on queued episodes."
-        )
-    unrecallable = await _standing_unrecallable_count(backend)
-    if unrecallable > 0:
-        summary += (
-            f"\nWARNING: {unrecallable} earlier "
-            f"{'memory is' if unrecallable == 1 else 'memories are'} FAILED and NOT recallable "
-            f"-- the text is stored but has no entities, so recall cannot return it. "
-            f"This write may end the same way; check get_enrichment_status(episode_id) if it matters."
-        )
+        lines = [line for line in map(_operator_warning_line, entries) if line]
+    except Exception:  # noqa: BLE001 - post-write cosmetic read; the write is committed
+        logger.debug("could not render operator warnings after durable mutation", exc_info=True)
+        lines = []
+    for line in lines:
+        summary += "\n" + line
     return summary
 
 

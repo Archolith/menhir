@@ -21,7 +21,8 @@ difference is easy to miss:
 
 - :func:`redact_mapping` / :func:`redact_rows` are **field-exact**. They mask by KEY against
   :data:`REDACTED_FIELDS`, so every value under a memory-bearing field is masked regardless of
-  its shape. This is what the explorer UI uses.
+  its shape. This is what most of the explorer UI uses; Recall Lab does NOT -- it has its own
+  allowlist redactor (``explorer/recall_lab.py``) applied to live responses and at history read time.
 - :func:`redact_log_line` is **heuristic, and bounded by what it can see**. It masks only QUOTED
   spans in an already-rendered string, so memory content interpolated through an unquoted
   ``%s`` passes through untouched. Short quoted values pass too, by design -- the free-text

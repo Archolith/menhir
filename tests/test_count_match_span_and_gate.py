@@ -127,6 +127,9 @@ class _Graph:
     def counted_occurrences_for_subjects(self, namespace, subjects, **kw):
         return []
 
+    def related_counted_occurrences(self, namespace, probes, **kw):
+        return []
+
     def undecided_count_occurrences(self, namespace, **kw):
         return []
 
@@ -222,7 +225,7 @@ def test_match_off_result_has_no_gate_dropped_key(perception):
 @pytest.fixture
 def client():
     graph_adapter = SimpleNamespace(
-        list_dirty_namespaces=lambda *, limit=500: ["ns-bench"],
+        list_scalar_dirty_namespaces=lambda *, perceiver_version, limit=500: ["ns-bench"],
         count_turn_evidence=lambda ns: 2,
     )
     built = SimpleNamespace(

@@ -35,6 +35,7 @@ from menhir.infrastructure.schema import (
     PHASE_ONE_REQUIRED_INDEXES,
     SCALAR_STATE_REQUIRED_INDEXES,
     get_phase1_bootstrap_queries,
+    get_retired_index_queries,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,7 +72,7 @@ class MemoryGraphAdapter:
     # keyword-only dataclass field (a same-named property would clobber the init default)
     counting_enabled: bool = field(default=False, kw_only=True)
     # unit 4R: counted Views fold by count decision; only effective with counting on.
-    counting_match_enabled: bool = field(default=False, kw_only=True)
+    counting_match_enabled: bool = field(default=True, kw_only=True)
 
     def __post_init__(self) -> None:
         from menhir.infrastructure.memory_queries import MemoryQueryRepository
@@ -105,8 +106,6 @@ class MemoryGraphAdapter:
         self._tool_events = ToolEventRepository(self.neo4j)
         from menhir.infrastructure.typed_assertion_repository import TypedAssertionRepository
         self._typed_assertions = TypedAssertionRepository(self.neo4j)
-        from menhir.infrastructure.typed_event_repository import TypedEventAssertionRepository
-        self._typed_event_assertions = TypedEventAssertionRepository(self.neo4j)
         from menhir.infrastructure.reversion_repository import PerceptionReversionRepository
         self._reversion = PerceptionReversionRepository(self.neo4j)
 
@@ -278,66 +277,6 @@ class MemoryGraphAdapter:
             counting_enabled=self.counting_enabled if counting_enabled is None else counting_enabled,
             count_match=self.counting_match_enabled if count_match is None else count_match)
 
-    # -------------------------------------------------------------------------
-    # Typed-event assertion delegates → TypedEventAssertionRepository
-    # -------------------------------------------------------------------------
-
-    def activate_event_history(self) -> dict[str, Any]:
-        """Bring the event-assertion DDL online (idempotent, IF NOT EXISTS)."""
-        return self._typed_event_assertions.activate()
-
-    def record_typed_event_assertion(self, assertion: Any) -> dict[str, Any]:
-        """Persist one :TypedEventAssertion to the durable event log."""
-        return self._typed_event_assertions.record_event_assertion(assertion)
-
-    def event_assertions_for_lane(
-        self,
-        lane: Any,
-        *,
-        include_superseded: bool = False,
-        materializable_only: bool = False,
-    ) -> list[Any]:
-        """Reconstructed assertions in one event lane (exact namespace/subject/predicate/domain)."""
-        return self._typed_event_assertions.assertions_for_lane(
-            lane,
-            include_superseded=include_superseded,
-            materializable_only=materializable_only,
-        )
-
-    def event_assertions_for_subject_predicate(
-        self,
-        subject_uuid: str,
-        predicate: str,
-        *,
-        namespace: str | None = None,
-        include_superseded: bool = False,
-        materializable_only: bool = True,
-    ) -> list[Any]:
-        """Reconstructed assertions for an exact normalized subject_uuid + predicate across ALL actual
-        domain lanes (optionally namespace-scoped); no domain filter/override. Default excludes
-        superseded and binding-pending (safe for recall)."""
-        return self._typed_event_assertions.assertions_for_subject_predicate(
-            subject_uuid,
-            predicate,
-            namespace=namespace,
-            include_superseded=include_superseded,
-            materializable_only=materializable_only,
-        )
-
-    def typed_event_assertion_by_key(self, assertion_key: str) -> Any:
-        """Reconstruct the event assertion with `assertion_key`, or None."""
-        return self._typed_event_assertions.assertion_by_key(assertion_key)
-
-    def current_typed_event_assertion_for_source(self, source_key: str) -> Any:
-        """Reconstruct the CURRENT event assertion for a binding-stable source_key, or None."""
-        return self._typed_event_assertions.current_for_source(source_key)
-
-    def event_history_service(self) -> Any:
-        """Build an `EventHistoryService` bound to this adapter's event-assertion log (source) and
-        to the adapter itself as the event-lane timeline View sink."""
-        from menhir.services.event_history_service import EventHistoryService
-        return EventHistoryService(self._typed_event_assertions, self)
-
     def run_view_projection_repairs(
         self, namespaces: list[str], *, owner_id: str, scalar_history_enabled: bool = False,
         limit: int = 25,
@@ -349,7 +288,6 @@ class MemoryGraphAdapter:
             ViewProjectionRepairRepository(self.neo4j),
             scalar_rebuilder=self.scalar_state_service(
                 scalar_history_enabled=scalar_history_enabled),
-            event_rebuilder=self.event_history_service(),
         )
         return service.run_pending(owner_id=owner_id, limit=limit, namespaces=namespaces)
 
@@ -367,6 +305,17 @@ class MemoryGraphAdapter:
             queries_executed=len(queries),
             failures=failures,
         )
+
+    def retire_obsolete_indexes(self) -> list[str]:
+        """Drop RETIRED_INDEXES; return failure messages. Separate from bootstrap_phase_one
+        because that is skipped once the required set is online, i.e. on every existing install."""
+        failures: list[str] = []
+        for query in get_retired_index_queries():
+            try:
+                self.neo4j.execute(query)
+            except Exception as exc:  # pragma: no cover - external dependency behavior
+                failures.append(str(exc))
+        return failures
 
     # -------------------------------------------------------------------------
     # Episode lifecycle delegates → EpisodeRepository
@@ -393,11 +342,14 @@ class MemoryGraphAdapter:
         turn_role: str | None = None,
         ingest_key: str | None = None,
         ingest_request_sha256: str | None = None,
+        extraction_mode: str | None = None,
     ) -> str:
         ingest_kwargs: dict[str, Any] = {}
         if ingest_key is not None:
             ingest_kwargs["ingest_key"] = ingest_key
             ingest_kwargs["ingest_request_sha256"] = ingest_request_sha256
+        if extraction_mode is not None:
+            ingest_kwargs["extraction_mode"] = extraction_mode
         return self._episodes.create_pending_episode(
             episode_uuid=episode_uuid,
             name=name,
@@ -432,11 +384,12 @@ class MemoryGraphAdapter:
         return self._episodes.episode_has_content_embedding(episode_uuid, model)
 
     def set_episode_content_embedding(
-        self, episode_uuid: str, embedding: list[float], model: str
+        self, episode_uuid: str, embedding: list[float], model: str, *,
+        expected_content: str | None = None,
     ) -> bool:
         """See EpisodeLifecycleRepository.set_episode_content_embedding."""
         return self._episodes.set_episode_content_embedding(
-            episode_uuid, embedding, model
+            episode_uuid, embedding, model, expected_content=expected_content
         )
 
     def episodic_twin_uuids(self, node_uuid: str) -> list[str]:
@@ -454,10 +407,11 @@ class MemoryGraphAdapter:
         *,
         after_uuid: str | None = None,
         model: str | None = None,
+        ready_only: bool = False,
     ) -> list[dict[str, Any]]:
         """See EpisodeLifecycleRepository.list_episodes_missing_content_embedding."""
         return self._episodes.list_episodes_missing_content_embedding(
-            namespace, limit, after_uuid=after_uuid, model=model
+            namespace, limit, after_uuid=after_uuid, model=model, ready_only=ready_only
         )
 
     def create_evidence_projection(
@@ -743,6 +697,19 @@ class MemoryGraphAdapter:
         exist; see `EpisodeLifecycleRepository.link_self_tiers`."""
         return self._episodes.link_self_tiers(namespace)
 
+    def mark_episode_store_only(
+        self, episode_uuid: str, *, worker_id: str, claim_started_at: object | None,
+        by_turn_role: bool = False,
+    ) -> bool:
+        """See `EpisodeLifecycleRepository.mark_episode_store_only`."""
+        return self._episodes.mark_episode_store_only(
+            episode_uuid, worker_id=worker_id, claim_started_at=claim_started_at,
+            by_turn_role=by_turn_role,
+        )
+
+    def episode_is_store_only(self, episode_uuid: str) -> bool:
+        return self._episodes.episode_is_store_only(episode_uuid)
+
     def mark_episode_verbatim_skipped(
         self, episode_uuid: str, *, worker_id: str, claim_started_at: object | None,
     ) -> str | None:
@@ -822,13 +789,14 @@ class MemoryGraphAdapter:
 
         In addition to the ``group_id`` partition (which already covers the namespace-keyed
         :EventConsolidationWatermark cursor) and the scalar/episode namespace rows, counts the
-        durable event log: every :TypedEventAssertion in the namespace and every
+        legacy event log (event-history lane archived): every :TypedEventAssertion in the namespace and every
         :TypedEventAssertionHead that HAS_VERSION to an event assertion in the namespace.
         """
         namespace_clause = (
             " OR (n:Episodic AND n.namespace = $namespace)"
             " OR ((n:TypedAssertion OR n:TypedAssertionHead OR "
             "n:ScalarConsolidationWatermark OR n:TurnEvidence) AND n.namespace = $namespace)"
+            # legacy event-history data cleanup, kept after the lane was archived so erasure stays complete
             " OR (n:TypedEventAssertion AND n.namespace = $namespace)"
             " OR (n:TypedEventAssertionHead AND EXISTS {"
             " MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion) WHERE ev.namespace = $namespace})"
@@ -877,6 +845,7 @@ class MemoryGraphAdapter:
             " OR (n:Episodic AND n.namespace = $namespace)"
             " OR ((n:TypedAssertion OR n:TypedAssertionHead OR "
             "n:ScalarConsolidationWatermark OR n:TurnEvidence) AND n.namespace = $namespace)"
+            # legacy event-history data cleanup, kept after the lane was archived so erasure stays complete
             " OR (n:TypedEventAssertion AND n.namespace = $namespace)"
             " OR (n:TypedEventAssertionHead AND EXISTS {"
             " MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion) WHERE ev.namespace = $namespace})"
@@ -944,17 +913,6 @@ class MemoryGraphAdapter:
         """Fetch scoring-relevant fields for candidate nodes."""
         return self._memory_queries.fetch_candidate_metadata(node_uuids)
 
-    def search_content_embeddings(
-        self,
-        query_vector: list[float],
-        *,
-        limit: int = 50,
-        group_ids: list[str] | None = None,
-    ) -> list[dict[str, object]]:
-        return self._memory_queries.search_content_embeddings(
-            query_vector, limit=limit, group_ids=group_ids
-        )
-
     def search_episode_embeddings(
         self,
         query_vector: list[float],
@@ -962,11 +920,14 @@ class MemoryGraphAdapter:
         limit: int = 10,
         namespace: str | None = None,
         model: str | None = None,
+        subject_uuid: str | None = None,
+        resolved_only: bool = False,
         sources: Sequence[str] | None = None,
     ) -> list[dict[str, object]]:
         """Source-memory lane search over :Episodic content embeddings (read-only)."""
         return self._memory_queries.search_episode_embeddings(
-            query_vector, limit=limit, namespace=namespace, model=model, sources=sources
+            query_vector, limit=limit, namespace=namespace, model=model,
+            subject_uuid=subject_uuid, resolved_only=resolved_only, sources=sources,
         )
 
     def timeline_page(
@@ -999,11 +960,11 @@ class MemoryGraphAdapter:
         )
 
     def timeline_facts(
-        self, *, episode_uuids: list[str], namespace: str | None, event_time: bool = False
+        self, *, episode_uuids: list[str], namespace: str | None
     ) -> dict[str, list[dict[str, object]]]:
         """RELATES_TO facts grouped per episode (recall_timeline, read-only)."""
         return self._memory_queries.timeline_facts(
-            episode_uuids=episode_uuids, namespace=namespace, event_time=event_time
+            episode_uuids=episode_uuids, namespace=namespace
         )
 
     def resolve_timeline_subject(
@@ -1032,26 +993,9 @@ class MemoryGraphAdapter:
         """Hydrate surfaced :TypedAssertion observations by id (Phase 4a.2 observation lane)."""
         return self._memory_queries.fetch_assertion_candidate_metadata(assertion_ids)
 
-    def fetch_temporal_facts(
-        self,
-        node_uuids: list[str],
-        *,
-        query_vector: list[float] | None = None,
-        namespace: str | None = None,
-    ) -> list[dict[str, object]]:
+    def fetch_temporal_facts(self, node_uuids: list[str]) -> list[dict[str, object]]:
         """Fetch bi-temporal fact-edge state for candidate nodes."""
-        return self._memory_queries.fetch_temporal_facts(
-            node_uuids, query_vector=query_vector, namespace=namespace
-        )
-
-    def search_facts_by_keywords(
-        self,
-        phrases: Sequence[str],
-        namespace: str | None,
-        limit: int = 50,
-    ) -> list[dict[str, object]]:
-        """Keyword search over fact-edge text, scoped to the namespace's silo."""
-        return self._memory_queries.search_facts_by_keywords(phrases, namespace, limit)
+        return self._memory_queries.fetch_temporal_facts(node_uuids)
 
     def fetch_candidate_fact_edges(
         self, node_uuids: list[str]
@@ -1746,30 +1690,6 @@ class MemoryGraphAdapter:
         reads :TurnEvidence unconditionally since #271)."""
         return self._turn_evidence.evidence_exists()
 
-    # --- event-consolidation cursor (Event History consolidation source) ---
-    # These delegates read canonical :TurnEvidence ONLY — no Episodic fallback and no global
-    # `evidence_exists` switch. They advance an independent :EventConsolidationWatermark keyed by the
-    # namespace string in `group_id`, so event consolidation never disturbs the scalar/counter cursors.
-    def list_event_dirty_evidence_namespaces(
-        self, *, perceiver_version: str, limit: int = 200,
-    ) -> list[str]:
-        return self._turn_evidence.list_event_dirty_evidence_namespaces(
-            perceiver_version=perceiver_version, limit=limit)
-
-    def load_next_event_evidence_batch(
-        self, namespace: str, *, perceiver_version: str, limit: int = 500,
-    ) -> list[dict[str, Any]]:
-        return self._turn_evidence.load_next_event_evidence_batch(
-            namespace, perceiver_version=perceiver_version, limit=limit)
-
-    def advance_event_cursor(
-        self, namespace: str, *, cursor_at: str, cursor_uuid: str,
-        perceiver_version: str, at: str,
-    ) -> None:
-        self._turn_evidence.advance_event_cursor(
-            namespace, cursor_at=cursor_at, cursor_uuid=cursor_uuid,
-            perceiver_version=perceiver_version, at=at)
-
     # --- counting-consolidation cursor (counting lane; never reads past the scalar cursor) ---
     def list_counting_dirty_namespaces(
         self, *, perceiver_version: str, scalar_perceiver_version: str, limit: int = 200,
@@ -1867,32 +1787,6 @@ class MemoryGraphAdapter:
             namespace, turn_ids, perceiver_rank=perceiver_rank,
             perceiver_version=perceiver_version, keep_ids=keep_ids)
 
-    def event_prior_version_rows(
-        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
-    ) -> list[dict[str, Any]]:
-        return self._reversion.event_prior_version_rows(
-            namespace, turn_ids, perceiver_rank=perceiver_rank)
-
-    def event_current_version_spans(
-        self, namespace: str, turn_ids: list[str], *, perceiver_version: str,
-    ) -> list[dict[str, Any]]:
-        return self._reversion.event_current_version_spans(
-            namespace, turn_ids, perceiver_version=perceiver_version)
-
-    def event_owed_lanes(
-        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
-    ) -> list[dict[str, Any]]:
-        return self._reversion.event_owed_lanes(
-            namespace, turn_ids, perceiver_rank=perceiver_rank)
-
-    def retire_event_prior_version(
-        self, namespace: str, turn_ids: list[str], *, perceiver_rank: int,
-        perceiver_version: str, keep_ids: list[str] | None = None,
-    ) -> dict[str, Any]:
-        return self._reversion.retire_event_prior_version(
-            namespace, turn_ids, perceiver_rank=perceiver_rank,
-            perceiver_version=perceiver_version, keep_ids=keep_ids)
-
     def mark_counting_flag_state(
         self, namespace: str, *, enabled: bool, at: str, create_only: bool = False,
         match: bool = False,
@@ -1921,6 +1815,13 @@ class MemoryGraphAdapter:
         from menhir.infrastructure.count_decision_repository import CountDecisionRepository
         return CountDecisionRepository(self.neo4j).counted_occurrences_for_subjects(
             namespace, subject_uuids, limit=limit)
+
+    def related_counted_occurrences(
+        self, namespace: str, probes: list[dict[str, Any]], *, limit: int,
+    ) -> list[dict[str, Any]]:
+        from menhir.infrastructure.count_decision_repository import CountDecisionRepository
+        return CountDecisionRepository(self.neo4j).related_counted_occurrences(
+            namespace, probes, limit=limit)
 
     def undecided_count_occurrences(
         self, namespace: str, *, perceiver_version: str, limit: int,
@@ -2359,9 +2260,9 @@ class MemoryGraphAdapter:
         )
 
     def list_todos_matching_query(
-        self, query: str, *, limit: int = 3
+        self, query: str, *, limit: int = 3, namespace: str | None = None
     ) -> list[dict[str, Any]]:
-        return self._todos.search_by_query(query, limit=limit)
+        return self._todos.search_by_query(query, limit=limit, namespace=namespace)
 
     # -------------------------------------------------------------------------
     # TEMPORAL delegates → TemporalRepository
@@ -2442,8 +2343,10 @@ class MemoryGraphAdapter:
             namespace=namespace,
         )
 
-    def list_candidates(self, *, source: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
-        return self._candidates.list_candidates(source=source, limit=limit)
+    def list_candidates(
+        self, *, source: str | None = None, limit: int = 100, namespace: str | None = None
+    ) -> list[dict[str, Any]]:
+        return self._candidates.list_candidates(source=source, limit=limit, namespace=namespace)
 
     def fetch_candidate(self, uuid: str) -> dict[str, Any] | None:
         return self._candidates.fetch_candidate(uuid)
@@ -2553,6 +2456,10 @@ class MemoryGraphAdapter:
         """True if the View's head traces to a declarant='user' :TurnEvidence foundation (G14/10.G)."""
         return self._views.scalar_view_has_user_foundation(**kwargs)
 
+    def newer_subject_assertions(self, **kwargs: Any) -> list[dict[str, Any]]:
+        """Newer materializable assertions for one subject and value kind (stale-lead check)."""
+        return self._views.newer_subject_assertions(**kwargs)
+
     def draw_scalar_state_provenance_edges(self, **kwargs: Any) -> dict[str, int]:
         """Draw a scalar_state View's CURRENT_ANCHOR/CONTRIBUTED_TO/SUPERSEDED_ANCHOR edges (Phase 3).
 
@@ -2588,6 +2495,9 @@ class MemoryGraphAdapter:
     def list_scalar_history_views(self, **kwargs: Any) -> list[dict[str, Any]]:
         return self._views.list_scalar_history_views(**kwargs)
 
+    def list_recall_visible_scalar_history_views(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return self._views.list_recall_visible_scalar_history_views(**kwargs)
+
     def list_scalar_history_views_for_namespace(
         self, **kwargs: Any
     ) -> list[dict[str, Any]]:
@@ -2613,32 +2523,6 @@ class MemoryGraphAdapter:
     def list_views(self, *, kind: str | None = None, namespace: str | None = None,
                    limit: int = 100) -> list[dict[str, Any]]:
         return self._views.list_views(kind=kind, namespace=namespace, limit=limit)
-
-    # --- event-lane timeline (Event History Phase 2B.2) ---
-
-    def record_event_timeline(self, **kwargs: Any) -> dict[str, Any]:
-        """Upsert the entity-anchored, predicate/domain event-lane timeline View."""
-        return self._views.record_event_timeline(**kwargs)
-
-    def fetch_event_timeline(self, **kwargs: Any) -> dict[str, Any] | None:
-        """Current event-lane timeline View for (subject_uuid, predicate[, domain])."""
-        return self._views.fetch_event_timeline(**kwargs)
-
-    def list_event_timeline_views(self, **kwargs: Any) -> list[dict[str, Any]]:
-        """Current event-lane timeline Views for one resolved entity."""
-        return self._views.list_event_timeline_views(**kwargs)
-
-    def retire_event_timeline(self, **kwargs: Any) -> bool:
-        """Expire a current event-lane timeline View with no replacement."""
-        return self._views.retire_event_timeline(**kwargs)
-
-    def draw_event_timeline_entries(self, **kwargs: Any) -> dict[str, int]:
-        """Atomically rewrite a View's EVENT_HISTORY_ENTRY edges to an exact ordered assertion set."""
-        return self._views.draw_event_timeline_entries(**kwargs)
-
-    def list_event_timeline_entries(self, **kwargs: Any) -> dict[str, Any]:
-        """Paginated EVENT_HISTORY_ENTRY contributors for one event-lane timeline View."""
-        return self._views.list_event_timeline_entries(**kwargs)
 
     # --- Metric class (operator-only instrumentation; :Metric label, Metric plan A3) ---
 

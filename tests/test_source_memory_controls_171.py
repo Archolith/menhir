@@ -214,10 +214,9 @@ async def _lane(graph: Any, namespace: str | None, model: str | None = None):
         service,
         "where is the db",
         namespace,
-        RetrievalTuningConfig(source_memory_pools=False),
+        RetrievalTuningConfig(),
         10,
         include_session=True,
-        content_query_vector=Q,
     )
 
 

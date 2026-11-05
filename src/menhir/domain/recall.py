@@ -114,11 +114,11 @@ class TemporalFact:
     expired_at: str | None
     is_current_belief: bool
     # "current_belief" | "superseded_belief" | "ended" (believed, but its own end has passed;
-    # only with MENHIR_ANCHORED_TIME_EXPIRY on).
+    # only with the anchored-time switch, MENHIR_ANCHORED_TIME_RESOLVER, on).
     temporal_role: str
-    # Rendered anchored-time event time; set only when MENHIR_ANCHORED_TIME_RENDER is on and the
-    # edge carries a persisted contract.
-    event_time: str | None = None
+    # When the fact was said: the edge's reference_time (statement time, not world time). Set only
+    # when the fact-said-time knob is on (default).
+    said_at: str | None = None
     # Two-tier self: True when the inferred self tier holds a near-duplicate of this anchored fact
     # (the inferred copy is dropped from the same result). Set only with MENHIR_INFERRED_SELF_MODE on.
     corroborated: bool = False
@@ -270,37 +270,6 @@ class ScalarAuthorityVerdict:
 
 
 @dataclass(frozen=True)
-class EventAuthorityVerdict:
-    """Structured first-person event authority, separate from scalar authority.
-
-    Immutable advisory/lead verdict for a conservative ``did I`` event recall query, layered onto
-    ``RecallResult.event_authority_layer`` and distinct from ``ScalarAuthorityVerdict``. ``status``
-    is ``leads`` or ``advisory``. ``gate`` is an explanatory string (``pass`` for a fully grounded
-    non-generic unique lead; selection-failure gates mirror ``EventRecallGate``; ``route`` marks a
-    unique generic selection; ``foundation`` marks an unverified foundation). Selected grounding
-    fields are None when a gate failed (advisory). Never derived from ``learned_at``: authority rests
-    on ``valid_at`` plus exact quote/evidence identity.
-    """
-
-    predicate: str
-    object_key: str | None
-    object_display: str | None
-    valid_at: str | None
-    stated_span: str | None
-    assertion_key: str | None
-    episode_uuid: str | None
-    turn_evidence_uuid: str | None
-    domain: str | None
-    time_basis: str | None
-    status: str  # leads | advisory
-    gate: str  # pass | route | foundation | scope | anchor | ambiguity | time | no_candidate | ...
-    reason: str
-    subject_uuid: str
-    has_foundation: bool
-    kind: str  # latest | predecessor | generic_advisory | anchor_guard
-
-
-@dataclass(frozen=True)
 class SourceMemory:
     """One entry of the additive source-memory section (raw episode content, not fused).
 
@@ -313,8 +282,6 @@ class SourceMemory:
     reference_time: str | None
     cosine: float
     source: str | None
-    pool_id: str | None = None
-    pool_anchor: str | None = None
 
 
 MAX_SOURCE_MEMORY_SOURCES = 20
@@ -411,13 +378,13 @@ class RecallResult:
     # Phase 4c/7.J: an explicit authority layer, separate from flat ranked candidates. None when the
     # authority feature is disabled or no verdict was produced, preserving flag-off wire output.
     authority_layer: tuple[ScalarAuthorityVerdict, ...] | None = None
-    # First-person event authority, separate from scalar authority. None when the authority feature
-    # is disabled, no verdict was produced, or the query abstained; preserves flag-off wire output.
-    event_authority_layer: tuple[EventAuthorityVerdict, ...] | None = None
-    # Source-memory lane (MENHIR_FRONTIER_SOURCE_MEMORIES): additive section of raw episode
+    # Source-memory lane: additive section of raw episode
     # memories next to `results`, oldest first. None when the lane is off or failed;
     # `results`/`candidates_evaluated` are identical either way.
     source_memories: tuple[SourceMemory, ...] | None = None
+    # MENHIR_COUNT_ANCHOR_HINT: deterministic query-text hint for anchored count questions.
+    # None when the flag is off or the query does not match; preserves flag-off wire output.
+    query_hint: str | None = None
 
 
 @dataclass(frozen=True)

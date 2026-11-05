@@ -1,4 +1,4 @@
-"""Blind attachment check for anchored time (MENHIR_ANCHORED_TIME_ATTACH, plan section 3.1).
+"""Blind attachment check for anchored time (runs under MENHIR_ANCHORED_TIME_RESOLVER, plan section 3.1).
 
 A second model call says, per fact, which verbatim phrase of the turn dates that fact's start (a
 state) or occurrence (a point event). It is blind: ``build_messages`` takes only the turn, the

@@ -2,67 +2,18 @@
 
 from __future__ import annotations
 
-from menhir.domain.belief import (
-    BeliefCandidate,
-    BeliefCandidateType,
-    BeliefEvidence,
-    BeliefHead,
-    BeliefScore,
-    EvidenceSignal,
-    QueryIntent,
-    RecallBucket,
-)
+from menhir.domain.belief import QueryIntent
 from menhir.domain.exhaustion import RetrievalStats
 from menhir.domain.scope import MemoryScope
-from menhir.domain.self_reinforcement import SupportProfile
 from menhir.domain.oracles import OraclePacket, OraclePolarity, OracleResult, OracleTarget
 from menhir.domain.warden import (
     ContradictionWarden,
-    CurrentnessWarden,
-    EvidenceAnchorWarden,
     ExhaustionWarden,
     ScopeWarden,
     WardenChain,
     WardenContext,
     WardenDecision,
 )
-
-
-def _score(bucket: RecallBucket) -> BeliefScore:
-    return BeliefScore(
-        candidate=BeliefCandidate(id="c", statement="s", candidate_type=BeliefCandidateType.FIX),
-        head=BeliefHead.CURRENT, probability=0.9, support=1.0, contradiction=0.0,
-        evidence_count=1, bucket=bucket,
-    )
-
-
-# --- CurrentnessWarden ------------------------------------------------------
-
-def test_currentness_admits_current_belief() -> None:
-    ctx = WardenContext("c", belief_score=_score(RecallBucket.SAFE_TO_ASSERT), evidence=())
-    assert CurrentnessWarden().evaluate(ctx).decision is WardenDecision.ADMIT
-
-
-def test_currentness_refuses_superseded_under_current_intent() -> None:
-    # would-be-asserted belief + supersession signal -> ANERGIC -> REFUSE
-    ctx = WardenContext(
-        "c", belief_score=_score(RecallBucket.SAFE_TO_ASSERT),
-        evidence=(BeliefEvidence(EvidenceSignal.IS_EXPIRED),), intent=QueryIntent.CURRENT,
-    )
-    assert CurrentnessWarden().evaluate(ctx).decision is WardenDecision.REFUSE
-
-
-def test_currentness_flags_superseded_as_historical_under_historical_intent() -> None:
-    ctx = WardenContext(
-        "c", belief_score=_score(RecallBucket.SAFE_TO_ASSERT),
-        evidence=(BeliefEvidence(EvidenceSignal.IS_EXPIRED),), intent=QueryIntent.HISTORICAL,
-    )
-    v = CurrentnessWarden().evaluate(ctx)
-    assert v.decision is WardenDecision.FLAG and v.label == "historical"
-
-
-def test_currentness_admits_without_score() -> None:
-    assert CurrentnessWarden().evaluate(WardenContext("c")).decision is WardenDecision.ADMIT
 
 
 # --- ExhaustionWarden -------------------------------------------------------
@@ -80,22 +31,19 @@ def test_exhaustion_admit_attenuate_refuse() -> None:
 def test_chain_takes_most_restrictive() -> None:
     ctx = WardenContext(
         "c",
-        belief_score=_score(RecallBucket.SAFE_TO_ASSERT),       # currentness -> ADMIT
-        evidence=(),
         retrieval_stats=RetrievalStats(retrievals_since_progress=4),  # exhaustion -> REFUSE
     )
-    v = WardenChain([CurrentnessWarden(), ExhaustionWarden()]).evaluate(ctx)
+    v = WardenChain([ScopeWarden(), ExhaustionWarden()]).evaluate(ctx)
     assert v.decision is WardenDecision.REFUSE
-    assert "currentness:admit" in v.reason and "exhaustion:refuse" in v.reason
+    assert "scope:admit" in v.reason and "exhaustion:refuse" in v.reason
 
 
 def test_chain_multiplies_attenuation() -> None:
     ctx = WardenContext(
         "c",
-        belief_score=_score(RecallBucket.SAFE_TO_ASSERT),
         retrieval_stats=RetrievalStats(retrievals_since_progress=2),  # ATTENUATE 0.4
     )
-    v = WardenChain([CurrentnessWarden(), ExhaustionWarden(attenuation=0.5)]).evaluate(ctx)
+    v = WardenChain([ScopeWarden(), ExhaustionWarden(attenuation=0.5)]).evaluate(ctx)
     assert v.decision is WardenDecision.ATTENUATE
     assert v.factor == 0.5
 
@@ -121,39 +69,15 @@ def test_scope_admits_same_and_unknown() -> None:
     assert ScopeWarden().evaluate(unknown).decision is WardenDecision.ADMIT
 
 
-def test_evidence_anchor_warden_refuses_synthetic_only() -> None:
-    """Rule zero: a claim backed only by LLM/retrieval self-support is refused as current truth."""
-    ctx = WardenContext("c", support_profile=SupportProfile(support_kinds=("agent_inference", "llm_summary")))
-    assert EvidenceAnchorWarden().evaluate(ctx).decision is WardenDecision.REFUSE
-
-
-def test_evidence_anchor_warden_admits_externally_anchored() -> None:
-    ctx = WardenContext("c", support_profile=SupportProfile(support_kinds=("git", "agent_inference"), meta_depth=1))
-    assert EvidenceAnchorWarden().evaluate(ctx).decision is WardenDecision.ADMIT
-
-
-def test_evidence_anchor_warden_flags_deep_meta_chain() -> None:
-    ctx = WardenContext("c", support_profile=SupportProfile(support_kinds=("git",), meta_depth=5))
-    v = EvidenceAnchorWarden().evaluate(ctx)
-    assert v.decision is WardenDecision.FLAG and v.label == "suspicious_chain"
-
-
-def test_evidence_anchor_warden_admits_without_profile() -> None:
-    assert EvidenceAnchorWarden().evaluate(WardenContext("c")).decision is WardenDecision.ADMIT
-
-
-def test_scope_warden_closes_the_gap_currentness_misses() -> None:
-    """The r3_rename_wrong_scope finding: a current (non-superseded) belief in the WRONG repo
-    is ADMITted by currentness but REFUSEd by scope. The chain catches it."""
+def test_scope_warden_refuses_wrong_repo_inside_a_chain() -> None:
+    """A candidate in the WRONG repo is REFUSEd by scope even when another warden admits it."""
     ctx = WardenContext(
         "c",
-        belief_score=_score(RecallBucket.SAFE_TO_ASSERT),   # currentness -> ADMIT (not superseded)
-        evidence=(),
         query_scope=MemoryScope(repo="menhir"),
         candidate_scope=MemoryScope(repo="yawn.dashboard"),  # scope -> REFUSE
     )
-    assert CurrentnessWarden().evaluate(ctx).decision is WardenDecision.ADMIT
-    chain = WardenChain([CurrentnessWarden(), ScopeWarden()]).evaluate(ctx)
+    assert ExhaustionWarden().evaluate(ctx).decision is WardenDecision.ADMIT
+    chain = WardenChain([ExhaustionWarden(), ScopeWarden()]).evaluate(ctx)
     assert chain.decision is WardenDecision.REFUSE
 
 

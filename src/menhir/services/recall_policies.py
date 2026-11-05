@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 import os
 import re
 from dataclasses import dataclass, field, replace
@@ -16,7 +15,6 @@ if TYPE_CHECKING:
 
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
 from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FAMILY
-from menhir.domain.event_time import event_time_text
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
 from menhir.domain.recall import (
     CandidateData,
@@ -44,7 +42,7 @@ from menhir.domain.retrieval_trace_models import (
     ViewReachability,
 )
 from menhir.infrastructure.graphiti_client import GraphitiClient
-from menhir.services.hybrid_retrieval import FusionLane, hybrid_search, weighted_rrf_multi
+from menhir.services.hybrid_retrieval import FusionLane, weighted_rrf_multi
 
 if TYPE_CHECKING:
     from menhir.core.bootstrap import UnavailableGraphitiClient
@@ -59,9 +57,6 @@ from menhir.services.scoring_service import (
     MIN_SIMILARITY_THRESHOLD,
     ScoringService,
 )
-from menhir.domain.git_staleness import BeliefCommitContext, derive_structural_staleness
-from menhir.services.change_log_provider import CachedGitChangeLog, ChangeLogProvider
-from menhir.infrastructure.paths import repo_root_for_project
 
 logger = logging.getLogger(__name__)
 
@@ -191,51 +186,6 @@ def _select_candidate_content(meta: dict[str, object], *, preset: QueryPreset) -
     return str(chosen) if chosen else None
 
 
-def _belief_markers_from_facts(
-    rows: list[dict[str, object]],
-) -> dict[str, dict[str, bool]]:
-    """Per-uuid belief markers from temporal fact-rows: has-any-temporal, and superseded
-    when any fact for that uuid has expired_at set (belief invalidation)."""
-    markers: dict[str, dict[str, bool]] = {}
-    for row in rows:
-        uuid = str(row.get("node_uuid") or "")
-        if not uuid:
-            continue
-        m = markers.setdefault(uuid, {"belief_superseded": False, "belief_has_temporal": True})
-        if row.get("expired_at") is not None:
-            m["belief_superseded"] = True
-    return markers
-
-
-def _repo_path_for(project: str) -> str | None:
-    """Best-effort on-disk repo path for a project, or None."""
-    try:
-        root = repo_root_for_project(project)
-        return str(root) if root is not None else None
-    except Exception:
-        return None
-
-
-def _staleness_evidence_for(meta, *, provider, repo_resolver):
-    """Best-effort git staleness evidence for one candidate's metadata. () on any miss."""
-    anchors = [str(p) for p in (meta.get("anchor_paths") or ())]
-    project = meta.get("anchor_project")
-    if not anchors or not project:
-        return ()
-    repo = repo_resolver(str(project))
-    if not repo:
-        return ()
-    commit = meta.get("belief_commit")
-    ctx = BeliefCommitContext(commit=str(commit)) if commit else None
-    changes = provider.changes(repo, since_commit=(str(commit) if commit else None), paths=anchors)
-    verdict = derive_structural_staleness(
-        anchors=anchors,
-        believed_at=(str(meta.get("created_at")) if meta.get("created_at") else None),
-        changes=changes, belief_context=ctx,
-    )
-    return verdict.evidence
-
-
 def _filter_to_current_beliefs(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     """Drop fact-edge rows that are no longer current belief (expired_at set).
 
@@ -248,19 +198,15 @@ def _filter_to_current_beliefs(rows: list[dict[str, object]]) -> list[dict[str, 
 def _build_temporal_facts(
     rows: list[dict[str, object]],
     *,
-    event_time: bool = False,
     ended: bool = False,
     now: datetime | None = None,
-    relevance_k: int = 0,
+    said_time: bool = True,
 ) -> dict[str, tuple[TemporalFact, ...]]:
     """Group fact-edge rows by node_uuid, cap to 5 most recent, and build TemporalFact tuples.
 
     Sorts by created_at DESC (None last), caps to 5 most recent per node,
     and assigns temporal_role based on whether expired_at is None.
-    With ``relevance_k`` > 0, up to that many rows with the highest finite
-    ``fact_similarity`` take slots first (ties by newest-first order), the remaining slots
-    fill from the newest rows, and output stays newest first.
-    With ``ended`` (MENHIR_ANCHORED_TIME_EXPIRY) an unexpired fact whose own end (invalid_at)
+    With ``ended`` (MENHIR_ANCHORED_TIME_RESOLVER) an unexpired fact whose own end (invalid_at)
     is at or before ``now`` is "ended": still believed, no longer true in the world.
     Returns a dict mapping node_uuid -> tuple of TemporalFact.
     """
@@ -285,24 +231,7 @@ def _build_temporal_facts(
             reverse=True,
         )
         # Cap to 5 most recent
-        if relevance_k > 0:
-            scored = [
-                (i, float(r["fact_similarity"]))
-                for i, r in enumerate(sorted_rows)
-                if isinstance(r.get("fact_similarity"), (int, float))
-                and not isinstance(r.get("fact_similarity"), bool)
-                and math.isfinite(r["fact_similarity"])
-            ]
-            # Stable sort: equal similarity keeps the newest-first index order.
-            scored.sort(key=lambda item: -item[1])
-            picked = {i for i, _ in scored[:relevance_k]}
-            for i in range(len(sorted_rows)):
-                if len(picked) >= 5:
-                    break
-                picked.add(i)
-            capped = [sorted_rows[i] for i in sorted(picked)][:5]
-        else:
-            capped = sorted_rows[:5]
+        capped = sorted_rows[:5]
         facts = []
         for row in capped:
             expired_at = row.get("expired_at")
@@ -320,7 +249,9 @@ def _build_temporal_facts(
                 expired_at=expired_at,
                 is_current_belief=is_current,
                 temporal_role=temporal_role,
-                event_time=event_time_text(row) if event_time else None,
+                # Drop a trailing zone id like [UTC] (Neo4j toString).
+                said_at=(str(row.get("said_at")).split("[", 1)[0].strip()
+                         if said_time and row.get("said_at") else None),
             )
             facts.append(fact)
         result[node_uuid] = tuple(facts)

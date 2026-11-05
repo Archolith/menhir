@@ -81,7 +81,7 @@ def test_client_tokens_enabled_from_env(monkeypatch: pytest.MonkeyPatch, raw: st
 @pytest.mark.unit
 def test_frontier_portion_defaults() -> None:
     """Oracle ranking and the intent lens are always on (#172); the Warden gate and its
-    contradiction guard are on by default (#173); the belief gate, the evidence anchor and the
+    contradiction guard are on by default (#173); the
     other frontier portions default OFF and are opt-in via MENHIR_FRONTIER_* (audit DOC-05)."""
     t = MemorySettings().retrieval_tuning()
     assert t.enable_oracle_ranking is True
@@ -89,89 +89,42 @@ def test_frontier_portion_defaults() -> None:
     assert t.enable_assertion_shadow is False
     assert t.enable_warden_gate is True
     assert t.enable_contradiction_interrupt is True
-    assert t.enable_belief_gate is False
-    assert t.enable_evidence_anchor is False
-    assert t.enable_bm25 is False
-    assert t.enable_content_vector is False
 
 
 @pytest.mark.unit
 def test_frontier_portions_env_can_enable_default_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """A default-OFF portion can be turned ON via env (the opt-in toggle works)."""
-    monkeypatch.setenv("MENHIR_FRONTIER_EVIDENCE_ANCHOR", "1")
     monkeypatch.setenv("MENHIR_FRONTIER_SHADOW", "true")
     t = MemorySettings.from_env().retrieval_tuning()
-    assert t.enable_evidence_anchor is True
     assert t.enable_assertion_shadow is True
-    assert t.enable_bm25 is False   # untouched default stays off
 
 
 @pytest.mark.unit
-def test_warden_defaults_can_be_turned_off_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The #173 default-on Warden settings each opt out independently."""
-    monkeypatch.setenv("MENHIR_FRONTIER_WARDEN_GATE", "false")
-    monkeypatch.setenv("MENHIR_FRONTIER_CONTRADICTION_INTERRUPT", "0")
+def test_always_on_portions_are_on_without_settings() -> None:
+    """Warden gate, contradiction interrupt, source memories, spread, said-time are always on (#168 freeze)."""
     t = MemorySettings.from_env().retrieval_tuning()
-    assert t.enable_warden_gate is False
-    assert t.enable_contradiction_interrupt is False
-
-
-@pytest.mark.unit
-def test_content_vector_env_maps_all_tuning_knobs(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MENHIR_FRONTIER_CONTENT_VECTOR", "true")
-    monkeypatch.setenv("MENHIR_FRONTIER_CONTENT_VECTOR_K", "17")
-    monkeypatch.setenv("MENHIR_FRONTIER_CONTENT_VECTOR_WEIGHT", "0.75")
-    monkeypatch.setenv("MENHIR_FRONTIER_CONTENT_VECTOR_REPLACE_NAME", "true")
-    monkeypatch.setenv("MENHIR_FRONTIER_FUSION_ADMISSION_POLICY", "production_fused")
-    tuning = MemorySettings.from_env().retrieval_tuning()
-    assert tuning.enable_content_vector is True
-    assert tuning.content_vector_k == 17
-    assert tuning.content_vector_weight == 0.75
-    assert tuning.content_vector_replace_name is True
-    assert tuning.fusion_admission_policy == "production_fused"
+    assert t.enable_warden_gate is True
+    assert t.enable_contradiction_interrupt is True
+    assert t.enable_source_memories is True
+    assert t.source_memory_spread is True
+    assert t.enable_fact_said_time is True
 
 
 @pytest.mark.unit
 def test_frontier_portions_from_env_map_to_tuning(monkeypatch: pytest.MonkeyPatch) -> None:
     """MENHIR_FRONTIER_* env flags map onto RetrievalTuningConfig; shadow drives assertion_shadow."""
     # Set each explicitly so the mapping is asserted independent of field defaults.
-    monkeypatch.setenv("MENHIR_FRONTIER_WARDEN_GATE", "true")
-    monkeypatch.setenv("MENHIR_FRONTIER_BELIEF_GATE", "1")
     monkeypatch.setenv("MENHIR_FRONTIER_SHADOW", "yes")
-    monkeypatch.setenv("MENHIR_FRONTIER_BM25", "false")
     # Retired flags (#172) are ignored: Oracle ranking and the intent lens stay on.
     monkeypatch.setenv("MENHIR_FRONTIER_ORACLE_RANKING", "0")
     monkeypatch.setenv("MENHIR_FRONTIER_INTENT_LENS", "0")
     s = MemorySettings.from_env()
-    assert (s.frontier_warden_gate, s.frontier_belief_gate, s.frontier_shadow) == (True, True, True)
-    assert s.frontier_bm25 is False
+    assert s.frontier_shadow is True
     t = s.retrieval_tuning()
     assert t.enable_oracle_ranking is True
     assert t.enable_warden_gate is True
-    assert t.enable_belief_gate is True
     assert t.enable_assertion_shadow is True   # frontier_shadow -> tuning.enable_assertion_shadow
     assert t.enable_intent_lens is True
-    assert t.enable_bm25 is False
-
-
-@pytest.mark.unit
-def test_shadow_context_composition_defaults_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stage 1 shadow-mode context composition is off by default (research
-    instrumentation, not a recall/extraction behavior change)."""
-    monkeypatch.delenv("MENHIR_SHADOW_CONTEXT_COMPOSITION", raising=False)
-    monkeypatch.delenv("MENHIR_SHADOW_COMPOSITION_TIMEOUT_S", raising=False)
-    s = MemorySettings.from_env()
-    assert s.shadow_context_composition is False
-    assert s.shadow_composition_timeout_s == 30.0
-
-
-@pytest.mark.unit
-def test_shadow_context_composition_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MENHIR_SHADOW_CONTEXT_COMPOSITION", "true")
-    monkeypatch.setenv("MENHIR_SHADOW_COMPOSITION_TIMEOUT_S", "12.5")
-    s = MemorySettings.from_env()
-    assert s.shadow_context_composition is True
-    assert s.shadow_composition_timeout_s == 12.5
 
 
 @pytest.mark.unit
@@ -204,3 +157,23 @@ def test_graphiti_provider_canonical_beats_alias(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("GRAPHITI_LLM_PROVIDER", "openai")
     monkeypatch.setenv("GRAPHITI_PROVIDER", "local")
     assert MemorySettings.from_env().graphiti_provider == "openai"
+
+
+@pytest.mark.unit
+def test_parse_flex_timeout_s() -> None:
+    from menhir.config.settings_model import parse_flex_timeout_s
+
+    assert parse_flex_timeout_s(None) == 900.0
+    assert parse_flex_timeout_s("") == 900.0
+    assert parse_flex_timeout_s("  ") == 900.0
+    assert parse_flex_timeout_s("120") == 120.0
+    for bad in ("15m", "0", "-1", "nan", "inf"):
+        with pytest.raises(ValueError, match="MENHIR_OPENAI_FLEX_TIMEOUT_S"):
+            parse_flex_timeout_s(bad)
+
+
+@pytest.mark.unit
+def test_settings_reject_invalid_flex_timeout_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MENHIR_OPENAI_FLEX_TIMEOUT_S", "15m")
+    with pytest.raises(ValueError, match="MENHIR_OPENAI_FLEX_TIMEOUT_S"):
+        MemorySettings.from_env()

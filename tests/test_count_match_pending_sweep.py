@@ -48,7 +48,7 @@ def _run(graph, *, match=True, namespaces=None, max_namespaces=50, call_budget=N
         k=1, threshold=1.0, call_budget=call_budget, embed=None,
         config=CountingConsolidationConfig(
             perceiver_version="cv1", scalar_perceiver_version="sv1", batch_size=500,
-            match=match, max_namespaces=max_namespaces))
+            match=match, extract_v2=False, max_namespaces=max_namespaces))
 
 
 def _claimed(graph):

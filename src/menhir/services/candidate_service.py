@@ -39,10 +39,11 @@ class CandidateService:
     lifecycle_service: LifecycleService
 
     async def list_candidates(
-        self, *, source: str | None = None, limit: int = 100
+        self, *, source: str | None = None, limit: int = 100, namespace: str | None = None
     ) -> list[dict[str, Any]]:
+        scope = {"namespace": namespace} if namespace else {}
         return await asyncio.to_thread(
-            self.graph_adapter.list_candidates, source=source, limit=limit
+            self.graph_adapter.list_candidates, source=source, limit=limit, **scope
         )
 
     async def approve(self, uuid: str) -> dict[str, Any]:

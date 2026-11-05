@@ -181,8 +181,8 @@ async def _lane(adapter, *, limit, sources, enable=False):
     service = SimpleNamespace(graphiti_client=_Graphiti(), graph_adapter=adapter)
     return await _build_source_memories(
         service, "q", "ns",
-        RetrievalTuningConfig(enable_source_memories=enable, source_memory_pools=False),
-        limit, include_session=True, content_query_vector=[1.0, 0.0], sources=sources,
+        RetrievalTuningConfig(enable_source_memories=enable, source_memory_spread=False),
+        limit, include_session=True, sources=sources,
     )
 
 

@@ -21,7 +21,7 @@ from menhir.domain.recall import QueryPreset
 from menhir.domain.recall_provenance import provenance_label
 from menhir.domain.utils import decode_json_value, excerpt
 from menhir.mcp.contracts import BaseJsonResource
-from menhir.mcp.formatters import _memory_lifecycle_fields
+from menhir.mcp.formatters import _memory_lifecycle_fields, _project_skipped_memory_rows
 from menhir.mcp.service_access import get_mcp_session
 
 _TYPE_PATTERN = re.compile(r"^[A-Za-z0-9_\- ]{1,64}$")
@@ -438,6 +438,8 @@ class MemoryByUuidResource(BaseJsonResource):
         row = await backend.fetch_memory_by_uuid(
             normalized_uuid, namespace=self.pinned_namespace()
         )
+        if row is not None:
+            [row] = await _project_skipped_memory_rows(backend, [row])
         return {
             "found": row is not None,
             "memory": _normalize_memory_row(row, detail=True),

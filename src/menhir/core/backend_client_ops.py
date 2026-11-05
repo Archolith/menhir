@@ -24,6 +24,7 @@ class BackendClientOpsMixin:
         user_statement: str | None = None,
         role: str | None = None,
         idempotency_key: str | None = None,
+        store_only: bool = False,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {
             "text": text,
@@ -44,6 +45,8 @@ class BackendClientOpsMixin:
             params["role"] = role
         if idempotency_key is not None:
             params["idempotency_key"] = idempotency_key
+        if store_only:
+            params["store_only"] = True
         return await self._request("queue_episode", params)
 
     async def flag_memory(
@@ -141,7 +144,6 @@ class BackendClientOpsMixin:
         *,
         namespace: str | None = None,
         limit: int = 30,
-        pools: bool = True,
     ) -> dict[str, Any]:
         return await self._request(
             "recall_history",
@@ -149,7 +151,6 @@ class BackendClientOpsMixin:
                 "query": query,
                 "namespace": namespace,
                 "limit": int(limit),
-                "pools": bool(pools),
             },
         )
 
@@ -578,6 +579,17 @@ class BackendClientOpsMixin:
     async def fetch_memory_overview(self, namespace: str | None = None) -> dict[str, Any]:
         return await self._request("fetch_memory_overview", {"namespace": namespace})
 
+    async def get_operator_warnings(self) -> dict[str, Any]:
+        return await self._request("get_operator_warnings")
+
+    async def acknowledge_operator_warning(
+        self, kind: str, subject: str = "", actor: str = ""
+    ) -> dict[str, Any]:
+        return await self._request(
+            "acknowledge_operator_warning",
+            {"kind": kind, "subject": subject, "actor": actor},
+        )
+
     async def circuit_breaker_snapshots(self) -> dict[str, dict[str, Any]]:
         return await self._request("circuit_breaker_snapshots")
 
@@ -851,11 +863,14 @@ class BackendClientOpsMixin:
         )
 
     async def list_candidates(
-        self, *, source: str | None = None, limit: int = 100
+        self, *, source: str | None = None, limit: int = 100, namespace: str | None = None
     ) -> list[dict[str, Any]]:
-        return await self._request(
-            "list_candidates", {"source": source, "limit": limit}
-        )
+        # `namespace` is sent only when set: a server that predates the parameter still answers
+        # an unscoped call, and a pinned caller gets its silo forced server-side either way.
+        payload: dict[str, Any] = {"source": source, "limit": limit}
+        if namespace:
+            payload["namespace"] = namespace
+        return await self._request("list_candidates", payload)
 
     async def fetch_candidate(self, uuid: str) -> dict[str, Any] | None:
         return await self._request("fetch_candidate", {"uuid": uuid})

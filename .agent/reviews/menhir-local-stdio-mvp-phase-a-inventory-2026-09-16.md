@@ -8,7 +8,7 @@ artifact_status: COMPLETE
 # Menhir local-stdio MVP — Phase A issue and plan inventory
 
 **Date:** 2026-09-16  
-**Reviewed execution authority:** `.agent/plans/menhir-local-stdio-mvp-release-2026-09-16.md` (`dbde430c-9be1-4131-aa85-871a8e99e5ef`)  
+**Reviewed execution authority:** `.agent/archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md` (`dbde430c-9be1-4131-aa85-871a8e99e5ef`)  
 **Purpose:** classify every open GitHub issue and every plan currently routed as active/partial/owner-decision against the approved local-stdio MVP contract.
 
 ## Result

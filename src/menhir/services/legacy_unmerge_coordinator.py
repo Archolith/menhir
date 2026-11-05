@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from menhir.domain import legacy_snapshot as ls
+from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.services.saga_writer_heartbeat import owned_mutation
 from menhir.services.merge_coordinator import (
@@ -231,7 +232,11 @@ class LegacyUnmergeCoordinator:
                     **plan,
                 )
             except Exception as exc:  # noqa: BLE001
-                self.journal.record_attempt(op_id, error=f"{type(exc).__name__}: {exc}")
+                self.journal.record_attempt(
+                    op_id,
+                    error=f"{type(exc).__name__}: {exc}",
+                    owner_token=oo.process_owner_token(),
+                )
                 raise
 
             after_fp = merge_state_fingerprint(
@@ -239,11 +244,13 @@ class LegacyUnmergeCoordinator:
             )
             if after_fp != restored_fp:
                 self.journal.mark_needs_review(
-                    op_id, observed_error=f"legacy unmerge after-state mismatch: {after_fp}"
+                    op_id,
+                    observed_error=f"legacy unmerge after-state mismatch: {after_fp}",
+                    owner_token=oo.process_owner_token(),
                 )
                 raise MergeDrift(f"legacy unmerge after-state drift (op {op_id})")
 
-            self.journal.mark_committed(op_id)
+            self.journal.mark_committed(op_id, owner_token=oo.process_owner_token())
         out = dict(result)
         out.update({
             "op_id": op_id,

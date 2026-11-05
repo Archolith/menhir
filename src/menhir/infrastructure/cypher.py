@@ -412,21 +412,14 @@ FACT_TEMPORAL_FIELDS = (
     "toString(r.invalid_at) AS invalid_at",
     "toString(r.created_at) AS created_at",
     "toString(r.expired_at) AS expired_at",
-    # Anchored-time contract (P2); read only when MENHIR_ANCHORED_TIME_RENDER is on.
-    "r.time_basis AS time_basis",
-    "r.time_expression AS time_expression",
-    "r.time_kind AS time_kind",
-    "r.time_granularity AS time_granularity",
-    "r.time_window_start AS time_window_start",
-    "r.time_window_end AS time_window_end",
-    "r.time_outcome AS time_outcome",
-    "r.time_speech_date AS time_speech_date",
-    "r.time_ambiguity AS time_ambiguity",
+    # Statement time (the episode's reference time); read by the fact-said-time knob.
+    "toString(r.reference_time) AS said_at",
 )
 
 # Menhir's own similarity/bridge links are RELATES_TO edges with no fact text. Queries that read
 # edges as facts need this, or those links take fact slots meant for real facts.
 # CASE so a non-string fact is skipped instead of trim() failing the whole query.
+# `IS :: STRING NOT NULL` requires Neo4j >= 5.10; Menhir as a whole needs 5.26 (README prerequisites).
 FACT_TEXT_PRESENT = (
     "CASE WHEN r.fact IS :: STRING NOT NULL THEN trim(r.fact) <> '' ELSE false END"
 )

@@ -48,6 +48,7 @@ from menhir.domain.count_match import (
     RELATED_POOL_LIMIT,
     UNDECIDED_SWEEP_LIMIT,
     related_sets,
+    relation_needles,
     relation_tokens,
 )
 from menhir.domain.typed_assertion import COUNTING_OPERATIONS
@@ -130,7 +131,7 @@ COUNTING_MATCH_PROMPT_ADDENDUM = (
 
 
 def effective_counting_perceiver_version(
-    configured: str, extract_v2: bool, match: bool = False,
+    configured: str, extract_v2: bool = True, match: bool = True,
 ) -> str:
     """The counting perceiver version used for writes, the re-version check and the watermark:
     the configured value, plus `+x2` under extraction v2 and `+m` under the 4R match flag. The one
@@ -225,8 +226,8 @@ class CountMatchGraph(Protocol):
         self, namespace: str, assertion_ids: list[str], *, perceiver_version: str,
     ) -> list[dict[str, Any]]: ...
 
-    def counted_occurrences_for_subjects(
-        self, namespace: str, subject_uuids: list[str], *, limit: int,
+    def related_counted_occurrences(
+        self, namespace: str, probes: list[dict[str, Any]], *, limit: int,
     ) -> list[dict[str, Any]]: ...
 
     def undecided_count_occurrences(
@@ -272,10 +273,10 @@ class CountingConsolidationConfig:
     scalar_history_enabled: bool = False
     #: per-namespace claim lease; renewed after every page.
     lease_seconds: int = 900
-    #: unit 3a.9 extraction v2 (own flag); the effective version becomes `<perceiver_version>+x2`.
-    extract_v2: bool = False
-    #: unit 4R related-count matching (own flag); the effective version gains `+m`.
-    match: bool = False
+    #: unit 3a.9 extraction v2 (always on by default); the effective version becomes `<perceiver_version>+x2`.
+    extract_v2: bool = True
+    #: unit 4R related-count matching (always on by default); the effective version gains `+m`.
+    match: bool = True
 
 
 def build_counting_context(
@@ -536,8 +537,10 @@ def run_counting_consolidation(
                                           retired_subjects, page_rows,
                                           history=config.scalar_history_enabled)
                     if match and episodes:
-                        # Rows were stored undecided (they fold as uncertain); decide them now,
-                        # before the cursor moves, so a crash here leaves the page to re-read.
+                        # Rows were stored undecided (they fold as uncertain); decide them now.
+                        # A crash before the decision leaves them undecided for the undecided
+                        # sweep; a decision carries projection_pending until its rebuild is
+                        # confirmed, so the cursor may move past a failed rebuild.
                         _decide_and_rebuild(
                             decide_ctx,
                             graph_adapter.count_occurrences_by_ids(
@@ -694,8 +697,29 @@ def _decide_and_rebuild(
         return
     ns = ctx.namespace
     subjects = sorted({str(r.get("subject_uuid") or "") for r in candidates} - {""})
-    pool = list(ctx.graph.counted_occurrences_for_subjects(ns, subjects, limit=RELATED_POOL_LIMIT))
-    pool_truncated = len(pool) >= RELATED_POOL_LIMIT
+    probe_of: dict[str, str] = {}
+    probes_by_key: dict[tuple[str, str, tuple[str, ...]], dict[str, Any]] = {}
+    for c in candidates:
+        cid = str(c.get("assertion_id") or "")
+        subject = str(c.get("subject_uuid") or "")
+        needles = relation_needles(c)
+        if not subject or not needles:
+            continue
+        kind = str(c.get("value_kind") or "").strip().lower()
+        probe = probes_by_key.setdefault((subject, kind, needles), {
+            "id": cid, "subject_uuid": subject, "value_kind": kind, "needles": list(needles)})
+        probe_of[cid] = probe["id"]
+    pool: list[dict[str, Any]] = []
+    truncated_ids: set[str] = set()
+    if probes_by_key:
+        per_probe: dict[str, int] = {}
+        for row in ctx.graph.related_counted_occurrences(
+                ns, list(probes_by_key.values()), limit=RELATED_POOL_LIMIT):
+            for pid in row.get("probe_ids") or ():
+                per_probe[str(pid)] = per_probe.get(str(pid), 0) + 1
+            pool.append({k: v for k, v in row.items() if k != "probe_ids"})
+        truncated_ids = {cid for cid, pid in probe_of.items()
+                         if per_probe.get(pid, 0) >= RELATED_POOL_LIMIT}
     vectors = _key_vectors(ctx, candidates)
     cosine: dict[tuple[str, str], float] = {}
     if vectors:
@@ -717,7 +741,7 @@ def _decide_and_rebuild(
         for i, a in enumerate(ids):
             for b in ids[i + 1:]:
                 cosine[(a, b)] = cosine[(b, a)] = _cosine(vectors[a], vectors[b])
-    sets = related_sets(candidates, pool, pool_truncated=pool_truncated, cosine=cosine,
+    sets = related_sets(candidates, pool, truncated_ids=truncated_ids, cosine=cosine,
                         min_cosine=COSINE_MIN)
     need = [rs for rs in sets if rs.related and relation_tokens(rs.candidate)]
     voted: dict[str, tuple[str, str, str, str]] = {}
@@ -732,11 +756,14 @@ def _decide_and_rebuild(
             voted = vote(samples, [str(rs.candidate["assertion_id"]) for rs in need], k=DECIDE_K)
     outcome = apply_decide_rules(sets, voted, decided=decided,
                                  current_version=ctx.perceiver_version)
+    subject_of = {str(c["assertion_id"]): c.get("subject_uuid") for c in candidates}
     for d in outcome.decisions:
         d["key_embedding"] = vectors.get(d["assertion_id"])
         d["embed_version"] = ctx.embed_version
         d["redecide"] = redecide
+        d["subject_uuid"] = subject_of.get(str(d["assertion_id"]))
     for s in outcome.swaps:
+        s["subject_uuid"] = subject_of.get(str(s["candidate_id"]))
         s["key_embedding"] = vectors.get(s["candidate_id"])
         s["embed_version"] = ctx.embed_version
         s["redecide"] = redecide
@@ -753,8 +780,37 @@ def _decide_and_rebuild(
     for d in outcome.decisions:
         ctx.tally[str(d["status"])] = ctx.tally.get(str(d["status"]), 0) + 1
     ctx.tally["swapped"] = ctx.tally.get("swapped", 0) + int(written.get("swapped") or 0)
+    # record_count_decisions set projection_pending on every decided row in the decision statement.
+    # Clear it per subject only after a confirmed rebuild; on a failure the flag stays and the
+    # scalar repair pass rebuilds the subject (isolated per subject, so one failure stops no other).
+    decided_ids = {str(d["assertion_id"]) for d in outcome.decisions} | {
+        str(s["candidate_id"]) for s in outcome.swaps}
+    by_subject: dict[str, list[str]] = {}
+    for r in candidates:
+        rid = str(r.get("assertion_id") or "")
+        if rid in decided_ids:
+            by_subject.setdefault(str(r.get("subject_uuid") or ""), []).append(rid)
     for subject in subjects:
-        _rebuild_subject(ctx.state_service, subject, ns, history=ctx.history)
+        try:
+            if _rebuild_incomplete(
+                    _rebuild_subject(ctx.state_service, subject, ns, history=ctx.history)):
+                logger.warning("counting: rebuild after decisions incomplete for %s in %s; "
+                               "projection_pending left for the repair pass", subject, ns)
+                continue
+            if by_subject.get(subject):
+                ctx.graph.mark_projection_complete(by_subject[subject])
+        except Exception:
+            logger.exception("counting: rebuild after decisions failed for %s in %s; "
+                             "projection_pending left for the repair pass", subject, ns)
+
+
+def _rebuild_incomplete(result: Any) -> bool:
+    """True when a rebuild result explicitly reports an incomplete projection (a dict failing
+    `_rebuild_succeeded`). Unlike `_rebuild_succeeded` (a missing dict counts as failed), a result
+    that is not a dict is not treated as failed: result-less test sinks; the real service returns one."""
+    from menhir.services.typed_scalar_persistence import _rebuild_succeeded
+
+    return isinstance(result, dict) and not _rebuild_succeeded(result)
 
 
 def _rebuild_subject(state_service: Any, subject: str, namespace: str, *, history: bool) -> Any:
@@ -808,8 +864,14 @@ def _rebuild_subjects(
     """Rebuild each subject once; returns those whose rebuild completed."""
     from menhir.services.typed_scalar_persistence import _rebuild_succeeded
 
-    return {s for s in sorted(set(subjects) - {""})
-            if _rebuild_succeeded(_rebuild_subject(state_service, s, namespace, history=history))}
+    done: set[str] = set()
+    for s in sorted(set(subjects) - {""}):
+        try:
+            if _rebuild_succeeded(_rebuild_subject(state_service, s, namespace, history=history)):
+                done.add(s)
+        except Exception:
+            logger.exception("counting: owed rebuild failed for %s in %s", s, namespace)
+    return done
 
 
 def _rebuild_page(
@@ -861,15 +923,33 @@ def sweep_counting_flag_state(
                 scalar_history_enabled=scalar_history_enabled, counting_enabled=enabled,
                 **({"count_match": True} if match else {}))
             after = ""
+            ns_failed = 0
             while True:
                 subjects = graph_adapter.counting_sweep_subjects(
                     namespace, limit=subject_limit, after=after)
                 for subject in subjects:
-                    _rebuild_subject(svc, subject, namespace, history=scalar_history_enabled)
-                    rebuilt += 1
+                    try:
+                        result = _rebuild_subject(
+                            svc, subject, namespace, history=scalar_history_enabled)
+                    except Exception:
+                        logger.exception("counting: flag sweep rebuild failed for %s in %s",
+                                         subject, namespace)
+                        ns_failed += 1
+                        continue
+                    if _rebuild_incomplete(result):
+                        ns_failed += 1
+                    else:
+                        rebuilt += 1
                 if len(subjects) < subject_limit:
                     break
                 after = subjects[-1]
+            if ns_failed:
+                # A View built under the old flag may remain: leave the marker so the next pass retries.
+                failed += 1
+                logger.warning(
+                    "counting: flag sweep for %s left unmarked; %d subject rebuild(s) incomplete",
+                    namespace, ns_failed)
+                continue
             graph_adapter.mark_counting_flag_state(
                 namespace, enabled=enabled, at=datetime.now(timezone.utc).isoformat(),
                 **match_kwargs)

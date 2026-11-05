@@ -32,7 +32,7 @@ from typing import Any
 
 import pytest
 
-from menhir.domain.namespace import namespace_spellings
+from menhir.domain.namespace import namespace_spellings, tenant_scope_cypher, tenant_scope_params
 from menhir.infrastructure.memory_queries import MemoryQueryRepository
 from menhir.mcp.contracts import ToolScope, assert_tool_scopes_declared
 from menhir.mcp.tools import ALL_TOOLS
@@ -68,8 +68,9 @@ def test_a_namespace_scopes_the_entity_counts() -> None:
     MemoryQueryRepository(neo4j).fetch_memory_overview("archolith")
 
     node_query, node_params = next(c for c in neo4j.calls if "ADMITTED_ON" not in c[0])
-    assert "n.group_id IN $group_ids" in node_query
-    assert node_params == {"group_ids": ["archolith"]}
+    assert tenant_scope_cypher("n") in node_query
+    assert node_params == tenant_scope_params("archolith")
+    assert node_params == {"tenant_namespaces": ["archolith"]}
 
 
 def test_turn_evidence_is_scoped_on_namespace_not_group_id() -> None:

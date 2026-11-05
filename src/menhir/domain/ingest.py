@@ -33,6 +33,11 @@ class IdempotencyKeyConflict(ValueError):
     """An idempotency key was reused with different episode content."""
 
 
+#: `:Episodic.extraction_mode` for an episode stored and embedded but never extracted (no
+#: Graphiti extraction, no evidence projection). Set at creation; absent means normal extraction.
+EXTRACTION_MODE_STORE_ONLY = "store_only"
+
+
 _INGEST_KEY_PREFIX = b"menhir-episode-ingest-key-v1\x00"
 
 
@@ -59,6 +64,7 @@ def episode_request_digest(
     role: str | None,
     turn_evidence_uuid: str | None,
     user_statement: str | None,
+    store_only: bool = False,
 ) -> str:
     """sha256 hex of the caller-supplied submit fields (canonical JSON).
 
@@ -77,6 +83,9 @@ def episode_request_digest(
         "turn_evidence_uuid": turn_evidence_uuid,
         "user_statement": user_statement,
     }
+    if store_only:
+        # Only when set, so digests already stored for normal submits keep matching their replays.
+        payload["store_only"] = True
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 

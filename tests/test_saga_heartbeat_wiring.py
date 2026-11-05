@@ -58,19 +58,19 @@ class _Journal:
         self.renewals.append(op_id)
         return True
 
-    def mark_committed(self, op_id):
+    def mark_committed(self, op_id, owner_token=None):
         self.committed.append(op_id)
 
-    def mark_needs_review(self, op_id, *, observed_error=None):
+    def mark_needs_review(self, op_id, *, observed_error=None, owner_token=None):
         self.reviews.append(op_id)
 
-    def mark_failed(self, op_id, *, reason=None):
+    def mark_failed(self, op_id, *, reason=None, owner_token=None):
         pass
 
     def mark_reversed(self, op_id):
         pass
 
-    def record_attempt(self, op_id, *, error=None):
+    def record_attempt(self, op_id, *, error=None, owner_token=None):
         pass
 
     def prepare(self, **kw):

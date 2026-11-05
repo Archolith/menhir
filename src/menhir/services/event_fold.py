@@ -1,12 +1,7 @@
-"""Event-log fold -> counter View (move 2). Deterministic SUM / COUNT / DISTINCT-COUNT over dated
-`Event`s, materialized as a supersedable counter — the exact answer to "how many / how much" where
-the user never *stated* a total (total spent on a hobby, items owned, times an activity happened).
-These are the cases that need the deterministic fold, not a better model; this is the fold.
+"""Event-log fold -> timeline View. Deterministic lossless timeline over dated `Event`s.
 
-Perception (episodes -> typed `Event`s) is the LLM's only role and lives upstream; this service is
-pure arithmetic + one `record_counter`. Batch re-fold semantics: it stores the ABSOLUTE reduced
-value with `valid_at` = the latest event's world time, so re-running is idempotent at the value
-level (Law 2) and the counter's `valid_at` feeds the View's LWW ordering guard (Law 1) correctly.
+The counter fold (`fold_events_to_counter`) was removed 2026-10-28 with the consolidation counter
+lane (#168); see branch `archive/consolidation-counter-2026-10-28`.
 """
 
 from __future__ import annotations
@@ -14,75 +9,15 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Protocol
 
-from menhir.domain.fold_algebra import REDUCERS, Event, latest, timeline
+from menhir.domain.fold_algebra import Event, timeline
 from menhir.infrastructure.view_repository import ViewRepository
 from menhir.services.seam_types import Embed
 
 logger = logging.getLogger(__name__)
 
 
-#: reducers whose accumulator is the scalar a counter stores.
-_SCALAR_REDUCERS = ("sum", "count", "distinct_count")
-
-
-class _GraphAdapter(Protocol):
-    def record_counter(self, **kwargs: Any) -> dict[str, Any]: ...
-
-
 class _TimelineAdapter(Protocol):
     def record_timeline(self, **kwargs: Any) -> dict[str, Any]: ...
-
-
-def fold_events_to_counter(
-    *,
-    graph_adapter: _GraphAdapter,
-    subject: str,
-    measure: str,
-    events: list[Event],
-    reducer: str = "sum",
-    namespace: str = "agent-experience",
-    source: str = "event-fold",
-    embed: Embed | None = None,
-    audit: dict[str, Any] | None = None,
-    value: float | None = None,
-) -> dict[str, Any]:
-    """Fold `events` with a scalar reducer and upsert the result as a counter View for
-    (subject, measure). `reducer` in {sum, count, distinct_count}. Idempotent + supersedable:
-    re-folding the same events no-ops; adding a later-dated event supersedes (its `valid_at` > current,
-    so the LWW guard admits it). Returns the counter row + {reducer, value, events}.
-
-    `value`, when given, is stored as-is and `events` are provenance only. Perception passes the
-    value its gate vetted: a Law-3 anchor + delta (`[anchor, *post]`) does not re-reduce to it under
-    count/distinct_count."""
-    if reducer not in _SCALAR_REDUCERS:
-        raise ValueError(f"reducer {reducer!r} must be one of {_SCALAR_REDUCERS}")
-    if value is None:
-        fn, _idempotent = REDUCERS[reducer]
-        value = float(fn(events))  # batch re-fold: absolute value over the full set (Law-2 safe)
-    value = float(value)
-    lat = latest(events)
-    valid_at = lat.when if lat is not None else None
-    episode_uuids = [e.episode_uuid for e in events if e.episode_uuid]
-
-    name_embedding = None
-    if embed is not None:
-        try:
-            name_embedding = embed(ViewRepository.retrieval_text(subject, measure, value))
-        except Exception as exc:
-            logger.warning(
-                "Event-fold counter embedding failed subject=%s measure=%s namespace=%s; "
-                "writing without embedding (keyword-only retrieval): %s",
-                subject, measure, namespace, exc,
-            )
-            name_embedding = None  # surfacing degrades to BM25-only; never block the write
-
-    res = graph_adapter.record_counter(
-        subject=subject, counter=measure, value=value, namespace=namespace,
-        valid_at=valid_at, episode_uuids=episode_uuids, source=source,
-        name_embedding=name_embedding, audit=audit,
-    )
-    res.update({"reducer": reducer, "value": value, "events": len(events)})
-    return res
 
 
 def fold_events_to_timeline(

@@ -4,6 +4,9 @@
 
 speculative
 
+> **2026-11-01:** Guard 4 (`domain/diversity.py`) and the evidence-anchor guard were removed (#399), and
+> the oracle stack and warden gate are now always on. "Default-off" below is out of date.
+
 > **2026-07-11 status update.** Promotion condition #2 is **met** — `SelfReinforcementGuard` and the
 > guard set are built (`domain/self_reinforcement.py`, `domain/exhaustion.py`, `domain/diversity.py`),
 > default-off / bench-gated; effective status is **supported-by-spike** for the self-reinforcement rail.

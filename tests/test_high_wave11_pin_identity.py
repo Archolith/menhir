@@ -88,6 +88,7 @@ def test_cf33_the_global_list_is_small_and_reviewable() -> None:
     rather than to describe the tool -- which is the one way this mechanism fails."""
     global_tools = sorted(t.name for t in ALL_TOOLS if getattr(t, "scope", None) == ToolScope.GLOBAL)
     assert global_tools == [
+        "acknowledge_warning",
         "force_scheduler_takeover",
         # Added 2026-09-22 (Beacon memory provider, plan Phase 3A). It reads the structure
         # graph, which is keyed by project, not by memory namespace: the same facts

@@ -377,7 +377,7 @@ class TestLiveQuery:
 
     def _build_repo(
         self, evidence=True, assertions=True, views=True, history=True,
-        event_assertions=True, event_views=True, facts=True,
+        facts=True,
     ):
         repo = MagicMock()
         def _exec(q, params=None):
@@ -385,31 +385,6 @@ class TestLiveQuery:
             if "TurnEvidence" in q:
                 if evidence:
                     return [{"id": "ev-1", "role": "user", "text": "my name is alice", "occurred_at": None, "recorded_at": "now", "founds": ["as-1"]}]
-                return []
-            if "MATCH (a:TypedEventAssertion" in q:
-                if event_assertions:
-                    return [{
-                        "id": "event-as-1", "assertion_key": "event-key-1",
-                        "subject": "Alice", "predicate": "purchased",
-                        "domain": "bicycles", "object_key": "road-bike",
-                        "object_display": "a road bike", "stated_span": "I bought a road bike",
-                        "valid_at": "2026-01-02T00:00:00Z", "learned_at": "now",
-                        "time_basis": "source", "evidence_tier": "explicit_user",
-                        "binding_pending": False, "superseded": False,
-                    }]
-                return []
-            if "EVENT_HISTORY_ENTRY" in q:
-                if event_views:
-                    return [{
-                        "id": "event-vw-1", "current": True,
-                        "subject": "Alice", "predicate": "purchased", "domain": "bicycles",
-                        "entry_count": 1, "contributor_ids": ["event-key-1"],
-                        "valid_at": "2026-01-02T00:00:00Z",
-                        "payload": json.dumps([{
-                            "when": "2026-01-02T00:00:00Z", "what": "purchased a road bike",
-                            "object_key": "road-bike", "quote": "I bought a road bike",
-                        }]),
-                    }]
                 return []
             if "TypedAssertion" in q and "history_assertion" not in q:
                 if assertions:
@@ -464,7 +439,7 @@ class TestLiveQuery:
     def test_empty(self, catalog):
         repo = self._build_repo(
             evidence=False, assertions=False, views=False, history=False,
-            event_assertions=False, event_views=False, facts=False,
+            facts=False,
         )
         reader = BenchRunTaskReader(catalog=catalog, repo_provider=lambda: repo)
         d = reader.get_task_detail("lme-ingest", "lme-item-001", reveal=True)
@@ -497,28 +472,12 @@ class TestLiveQuery:
         views = [i for i in d["live_graph"]["memory_inventory"] if i["memory_type"] == "view"]
         assert len(views) >= 1
 
-    def test_scalar_roles_surface_all_three_view_types(self, catalog):
+    def test_scalar_roles_surface_both_view_types(self, catalog):
         reader = BenchRunTaskReader(catalog=catalog, repo_provider=self._build_repo)
         d = reader.get_task_detail("lme-ingest", "lme-item-001", reveal=True)
         roles = d["live_graph"]["scalar_roles"]
-        assert [role["id"] for role in roles] == [
-            "scalar-state", "scalar-history", "event-history",
-        ]
+        assert [role["id"] for role in roles] == ["scalar-state", "scalar-history"]
         assert all(role["status"] == "available" for role in roles)
-        assert roles[2]["assertion_count"] == 1
-
-    def test_event_history_projection_keeps_grounding_and_drops_raw_payload(self, catalog):
-        reader = BenchRunTaskReader(catalog=catalog, repo_provider=self._build_repo)
-        d = reader.get_task_detail("lme-ingest", "lme-item-001", reveal=True)
-        live = d["live_graph"]
-        assert live["event_assertions"][0]["stated_span"] == "I bought a road bike"
-        assert live["event_views"][0]["entries"][0]["object_key"] == "road-bike"
-        assert "payload" not in live["event_views"][0]
-        event_inventory = [
-            item for item in live["memory_inventory"]
-            if item.get("view_kind") == "event_history"
-        ]
-        assert event_inventory[0]["derivation"] == "event"
 
     def test_privacy(self, catalog):
         reader = BenchRunTaskReader(catalog=catalog, repo_provider=self._build_repo)
@@ -529,12 +488,7 @@ class TestLiveQuery:
             assert a.get("source_quote", "") == "[hidden]" or a.get("source_quote", "") == ""
         for hv in lg.get("history_views", []):
             assert "payload" not in hv
-        event_assertion = lg.get("event_assertions", [])[0]
-        assert event_assertion["object_display"] == "[hidden]"
-        assert event_assertion["stated_span"] == "[hidden]"
-        event_entry = lg.get("event_views", [])[0]["entries"][0]
-        assert event_entry["what"] == "[hidden]"
-        assert event_entry["quote"] == "[hidden]"
+        assert "event_assertions" not in lg and "event_views" not in lg
         assert lg["recall_packet"]["text"] == "[hidden]"
         for section in lg["recall_packet"]["sections"]:
             for entry in section["entries"]:
@@ -1005,7 +959,6 @@ class TestRoutes:
             ("#scalar-roles", "Scalar Roles"),
             ("#scalar-state", "Scalar State"),
             ("#scalar-history", "Scalar History"),
-            ("#event-history", "Event History"),
             ("#memory", "Memory"),
             ("#recall-packet", "Recall Packet"),
             ("#answer-path", "Answer Path"),
@@ -1065,7 +1018,6 @@ class TestRoutes:
                     "elapsed_ms": 12.5,
                     "candidates_evaluated": 7,
                     "authority_layer": None,
-                    "event_authority_layer": None,
                     "results": [
                         {
                             "rank": 1,

@@ -49,10 +49,10 @@ class _Journal:
     def get(self, op_id):
         return {"expected_after_sha256": self.expected_after}
 
-    def mark_needs_review(self, op_id, observed_error):
+    def mark_needs_review(self, op_id, observed_error, owner_token=None):
         self.review_calls.append((op_id, observed_error))
 
-    def mark_committed(self, op_id):
+    def mark_committed(self, op_id, owner_token=None):
         self.commits += 1
 
     def mark_reversed(self, op_id):

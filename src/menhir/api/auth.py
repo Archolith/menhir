@@ -8,6 +8,7 @@ import hmac
 import json
 import logging
 from collections.abc import Callable, Sequence
+from typing import Any
 from urllib.parse import parse_qs, urlencode
 
 from menhir.api.client_policy import ClientPolicyAuthority
@@ -91,6 +92,42 @@ def _duplicate_sensitive_headers(headers: Sequence[tuple[bytes, bytes]]) -> list
         if name in _SENSITIVE_SINGLETON_HEADERS:
             counts[name] = counts.get(name, 0) + 1
     return sorted(name.decode("ascii", errors="replace") for name, count in counts.items() if count > 1)
+
+
+class ClientPolicyDenied(PermissionError):
+    """The client policy refused a token that otherwise verified."""
+
+
+async def authenticate_oauth_bearer(
+    auth_value: str,
+    *,
+    verifier: OAuthTokenVerifier | None,
+    client_policy: ClientPolicyAuthority | None,
+) -> tuple[Any, Any]:
+    """Run the OAuth checks for one Authorization value; return (principal, policy entry).
+
+    BearerAuthMiddleware and /readyz both use this, so the public route cannot drift from the
+    protected one. Raises OAuthAuthenticationError for the verifier, scheme and token checks, and
+    ClientPolicyDenied when the policy refuses. With no policy it accepts, as the middleware
+    always has; a caller that needs a policy must check for one first.
+    """
+
+    if verifier is None:
+        raise OAuthAuthenticationError("server_error", "OAuth verifier is not configured")
+    if not auth_value.startswith("Bearer "):
+        raise OAuthAuthenticationError("invalid_token", "Missing bearer token")
+    principal = await verifier.verify_access_token(auth_value[7:])
+    if client_policy is None:
+        return principal, None
+    try:
+        policy = client_policy.require_client(
+            client_id=principal.client_id,
+            scopes=principal.scopes,
+            tier=principal.tier,
+        )
+    except PermissionError as exc:
+        raise ClientPolicyDenied(str(exc)) from exc
+    return principal, policy
 
 
 def _identity_header(headers: dict[bytes, bytes], suffix: bytes) -> str:
@@ -701,46 +738,24 @@ class BearerAuthMiddleware:
         auth_value: str,
         qs: dict[str, list[str]],
     ) -> None:
-        if self._oauth_verifier is None:
-            await self._send_oauth_error(
-                scope,
-                send,
-                OAuthAuthenticationError("server_error", "OAuth verifier is not configured"),
-            )
-            return
-
-        if not auth_value.startswith("Bearer "):
-            await self._send_oauth_error(
-                scope,
-                send,
-                OAuthAuthenticationError("invalid_token", "Missing bearer token"),
-            )
-            return
-
-        token_str = auth_value[7:]
         try:
-            principal = await self._oauth_verifier.verify_access_token(token_str)
+            principal, policy = await authenticate_oauth_bearer(
+                auth_value,
+                verifier=self._oauth_verifier,
+                client_policy=self._client_policy,
+            )
         except OAuthAuthenticationError as exc:
             await self._send_oauth_error(scope, send, exc)
             return
-
-        policy = None
-        if self._client_policy is not None:
-            try:
-                policy = self._client_policy.require_client(
-                    client_id=principal.client_id,
-                    scopes=principal.scopes,
-                    tier=principal.tier,
-                )
-            except PermissionError as exc:
-                await self._send_auth_error(
-                    scope,
-                    send,
-                    status_code=403,
-                    detail=str(exc),
-                    code="client_policy_denied",
-                )
-                return
+        except ClientPolicyDenied as exc:
+            await self._send_auth_error(
+                scope,
+                send,
+                status_code=403,
+                detail=str(exc),
+                code="client_policy_denied",
+            )
+            return
 
         user_id, session_id, client_id, client_name = self._request_session_headers(
             headers,

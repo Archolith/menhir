@@ -164,8 +164,6 @@ def build_runtime_lifespan(
                 getattr(settings, "personal_memory_counting_enabled", False)
                 and getattr(settings, "personal_memory_scalar_state_enabled", False)
             ),
-            counting_match_enabled=bool(
-                getattr(settings, "personal_memory_counting_match_enabled", False)),
         )
         lifecycle_service = LifecycleService(
             graph_adapter=graph_adapter,
@@ -398,6 +396,7 @@ def wrap_server_middlewares(
     oauth_config: Any,
     client_token_store: Any,
     client_policy: Any = None,
+    oauth_verifier: Any = None,
 ) -> Any:
     """Wrap the FastAPI app with auth + request-context middleware."""
     app = BearerAuthMiddleware(  # type: ignore[assignment]
@@ -407,6 +406,7 @@ def wrap_server_middlewares(
         agent_key=settings.agent_key,
         readonly_key=settings.readonly_key,
         oauth_config=oauth_config,
+        oauth_verifier=oauth_verifier,
         client_token_store=client_token_store,
         loopback_bound=is_loopback_host(settings.api_host),
         auth_mode=resolve_auth_mode(settings),

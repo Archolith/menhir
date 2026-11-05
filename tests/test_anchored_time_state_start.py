@@ -14,7 +14,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from menhir.domain.event_time import rendered_event_time
 from menhir.infrastructure.anchored_time import EdgeTimeInput, clause_guard, plan_overlay, state_start_guard
 
 pytestmark = pytest.mark.unit
@@ -621,19 +620,6 @@ def test_many_repeated_occurrences_stay_cheap() -> None:
     started = time.perf_counter()
     state_start_guard(turn, [f"Fact {k}." for k in range(40)], items)
     assert time.perf_counter() - started < 2.0  # quadratic sentence rescans took ~9 s
-
-
-@pytest.mark.parametrize(("valid_at", "shown"), [
-    ("2023-05-25T00:00:00Z", "event time unknown (said 2023-06-15)"),  # Graphiti made the same copy
-    ("2023-05-28T21:00:00-06:00", "event time unknown (said 2023-06-15)"),  # the copy in local time
-    ("2023-06-15T00:00:00Z", "event time unknown (said 2023-06-15)"),  # speech-date default
-    ("2022-01-10T00:00:00Z", "2022-01-10"),  # Graphiti's own date, without the borrowed expression
-])
-def test_render_never_shows_the_borrowed_time(valid_at, shown) -> None:
-    row = {"time_basis": "speech_relative", "time_expression": "three weeks ago", "time_kind": "state",
-           "time_granularity": "day", "time_window_start": "2023-05-22", "time_window_end": "2023-05-28",
-           "time_outcome": "state_start", "time_speech_date": "2023-06-15", "valid_at": valid_at}
-    assert rendered_event_time(row) == shown
 
 
 def test_overlay_never_shows_a_state_start_window_even_when_graphiti_agrees() -> None:

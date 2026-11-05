@@ -40,6 +40,7 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from menhir.domain.namespace import normalize_namespace
+from menhir.domain.turn_role import is_agent_quoted
 
 __all__ = [
     "FIRST_PERSON_SELF_ALIASES",
@@ -161,14 +162,12 @@ GATE_APPROVED_HUMAN_SOURCES = frozenset({"user", "manual"})
 #: DOMAIN: extracted entity NAMES, mirroring ``graphiti_extraction_policy``, which governs the
 #: same seam this contract binds at.
 #:
-#: Two other self-token sets exist and are **deliberately different, not drift**. They answer
-#: different questions over different inputs, so unifying them would widen admission in three
-#: subsystems -- each widening a chance to bind something that is not the human:
+#: Another self-token set exists and is **deliberately different, not drift**. It answers a
+#: different question over different inputs, so unifying them would widen admission -- a chance to
+#: bind something that is not the human:
 #:
 #: - ``typed_scalar_rules.SELF_TOKENS`` -- scalar-proposal ``subject_text``. Omits ``my``/``mine``
 #:   because those are plausible entity names but malformed subjects.
-#: - ``event_consolidation._SELF_TOKENS`` -- event-proposal subject. Adds ``speaker``, which only
-#:   that producer emits; admitting it here would bind an entity named "speaker" to the human.
 #:
 #: Do not merge them.
 #: First-person references. These are self-LIKE and, like every other name shape, NOT authority.
@@ -357,8 +356,7 @@ def self_subject_endpoint_for_claim(
 
 
 def _is_agent_quoted(claimed: Mapping[str, Any]) -> bool:
-    kind = str(claimed.get("turn_evidence_source_kind") or "").strip().lower()
-    return kind.replace("-", "_") == "agent_quoted"
+    return is_agent_quoted(claimed.get("turn_evidence_source_kind"))
 
 
 # ---------------------------------------------------------------------------

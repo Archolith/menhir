@@ -121,7 +121,7 @@ def test_recall_history_and_section_pass_the_current_model(model: str | None, ex
     spy.kwargs = {}
     tuning = RetrievalTuningConfig(enable_source_memories=True)
     asyncio.run(_build_source_memories(
-        service, "q", "ns", tuning, None, include_session=True, content_query_vector=[0.1, 0.2],
+        service, "q", "ns", tuning, None, include_session=True,
     ))
     assert spy.kwargs.get("model") == expected
     if expected is None:

@@ -450,9 +450,10 @@ The goal is not to imitate the organization. The goal is to remember, explain, a
 
 ## Near-term implication for Menhir
 
-The immediate codebase should not try to build all of this.
+None of this is part of 0.3.0, which is a local, single-operator release. The immediate codebase
+should not try to build all of this.
 
-Near-term priority remains:
+After 0.3.0, the candidate work this note points to is:
 
 ```text
 L4 artifacts: Decision / Failure / Incident
@@ -462,7 +463,7 @@ read-only MemoryOracle
 ColdStartBrief v0
 ```
 
-But the org-scale direction changes the design pressure:
+The org-scale direction changes the design pressure:
 
 ```text
 build evidence and audit in now

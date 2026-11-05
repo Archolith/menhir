@@ -49,7 +49,7 @@ gate for any future non-local deployment.
 ## 3. Explorer — unauthenticated localhost tooling only (Finding B)
 
 The graph explorer is mounted into the main app at `/explorer` on the API port (default
-`127.0.0.1:8090`) and shares the runtime Neo4j pool. `BearerAuthMiddleware` gates `/explorer` and
+`127.0.0.1:8100`) and shares the runtime Neo4j pool. `BearerAuthMiddleware` gates `/explorer` and
 `/explorer/candidates/*` exactly like `/api/*` (only `/explorer/static/*` is exempt). Set
 `MENHIR_EXPLORER_ENABLED=false` to omit the surface entirely. The standalone `menhir-explorer`
 process and port `8787` were removed.
@@ -64,7 +64,7 @@ credential-gated. No separate explorer port or process to secure.
 
 ## 4. Telemetry retention / inspection
 
-The MCP telemetry sidecar (SQLite) lives at `workspace_root()/.agent/mcp_telemetry.db` (override:
+The MCP telemetry sidecar (SQLite) lives at `<state dir>/mcp_telemetry.db` (`MENHIR_STATE_DIR`, default `~/.menhir`; override:
 `MENHIR_MCP_TELEMETRY_DB`). Growth is bounded:
 
 - **Revision pruning:** `prune_old_revisions(retention_days=14)` deletes `memory_revisions` older
@@ -73,10 +73,12 @@ The MCP telemetry sidecar (SQLite) lives at `workspace_root()/.agent/mcp_telemet
   `min(20)` / `min(limit, 200)` in `infrastructure/telemetry/store.py`) so a large `limit` cannot
   amplify a read.
 
-Operator practice: the DB is disposable local state. If a launch benchmark or a Hook Center smoke
-run inflates it, delete the file (or point `MENHIR_MCP_TELEMETRY_DB` at a throwaway path for the
-run) — no migration needed; it is recreated on next start. Non-revision tables are append-only
-(low operational debt; a full retention sweep across all telemetry tables is post-MVP).
+Operator practice: the DB is not disposable. It holds the only unmerge copy, the erasure journal
+and suppression record, and the rehydration archive. Deleting the file is not a supported way to
+erase data. To keep a launch benchmark or a Hook Center smoke run out of it, point
+`MENHIR_MCP_TELEMETRY_DB` at a throwaway path for the run. Tiered pruning has shipped
+(observability tables 30 days, diagnostic tables 90 days, revisions 14 days); some tables are never
+pruned. See [your data](../your-data.md).
 
 ---
 

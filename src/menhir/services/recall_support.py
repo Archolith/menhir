@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from menhir.services.ingest_service import IngestService
 
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
-from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FAMILY
+from menhir.domain.verbatim_skip_status import effective_processing_row
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
 from menhir.domain.recall import (
     CandidateData,
@@ -43,7 +43,7 @@ from menhir.domain.retrieval_trace_models import (
     ViewReachability,
 )
 from menhir.infrastructure.graphiti_client import GraphitiClient
-from menhir.services.hybrid_retrieval import FusionLane, hybrid_search, weighted_rrf_multi
+from menhir.services.hybrid_retrieval import FusionLane, weighted_rrf_multi
 
 if TYPE_CHECKING:
     from menhir.core.bootstrap import UnavailableGraphitiClient
@@ -56,9 +56,6 @@ from menhir.services.scoring_service import (
     MIN_SIMILARITY_THRESHOLD,
     ScoringService,
 )
-from menhir.domain.git_staleness import BeliefCommitContext, derive_structural_staleness
-from menhir.services.change_log_provider import CachedGitChangeLog, ChangeLogProvider
-from menhir.infrastructure.paths import repo_root_for_project
 
 logger = logging.getLogger(__name__)
 
@@ -68,16 +65,13 @@ from menhir.services.recall_policies import (
     FILE_LINKED_BASELINE_SIMILARITY,
     PENDING_ENTITY_SIMILARITY,
     _authority_contributors,
-    _belief_markers_from_facts,
     _blend_oracle_order,
     _build_temporal_facts,
     _filter_to_current_beliefs,
     _frontier_trace_enabled,
     _oracle_similarity,
     _query_wants_history,
-    _repo_path_for,
     _select_candidate_content,
-    _staleness_evidence_for,
 )
 
 
@@ -320,7 +314,8 @@ class RecallSupportMixin:
             row_uuid = str(row.get("uuid") or "")
             refreshed = updated_rows_by_uuid.get(row_uuid)
             if refreshed is None:
-                refreshed = await asyncio.to_thread(self.graph_adapter.fetch_episode_processing, row_uuid)
+                refreshed = effective_processing_row(
+                    await asyncio.to_thread(self.graph_adapter.fetch_episode_processing, row_uuid))
             if refreshed is not None and self._session_scope_admitted(
                 str(refreshed.get("scope") or NodeScope.SESSION), refreshed.get("session_id"),
                 include_session=include_session, session_id=session_id,
@@ -516,8 +511,6 @@ class RecallSupportMixin:
             LogSpaceOracleCombiner(),
             auto_intent=tuning.enable_intent_lens if tuning else False,
             contradiction_interrupt=tuning.enable_contradiction_interrupt if tuning else False,
-            belief_gate=tuning.enable_belief_gate if tuning else False,
-            evidence_anchor=tuning.enable_evidence_anchor if tuning else True,
         )
         resolved_lens = pipeline._resolve_intent(qctx).intent
         outcome = await pipeline.run(qctx, cmems)
@@ -634,16 +627,7 @@ class RecallSupportMixin:
         """
         from menhir.domain.oracle_combiner import LogSpaceOracleCombiner
         from menhir.domain.oracles import CandidateMemory, QueryContext
-        from menhir.domain.diversity import diversify
         from menhir.services.assertion_pipeline import AssertionPipeline
-
-        def _family_for(uuid: str) -> str:
-            kinds = metadata_by_uuid.get(uuid, {}).get("evidence_kinds") or ()
-            for k in kinds:
-                fam = _FRONTIER_DIVERSITY_FAMILY.get(str(k))
-                if fam:
-                    return fam
-            return "semantic"
 
         try:
             cmems = []
@@ -660,8 +644,6 @@ class RecallSupportMixin:
             pipeline = AssertionPipeline(
                 LogSpaceOracleCombiner(), auto_intent=tuning.enable_intent_lens,
                 contradiction_interrupt=tuning.enable_contradiction_interrupt,
-                belief_gate=tuning.enable_belief_gate,
-                evidence_anchor=tuning.enable_evidence_anchor,
             )
             outcome = await pipeline.run(qctx, cmems)
 
@@ -684,8 +666,6 @@ class RecallSupportMixin:
                     rank_of,
                     oracle_weight=tuning.oracle_rank_weight,
                 )
-            if tuning.enable_diversity_gate:
-                result = diversify(result, family_of=lambda s: _family_for(s.uuid))
             if tuning.enable_warden_gate:
                 refused = {r.candidate_id for r in outcome.refused}
                 label_of = {r.candidate_id: r.label for r in outcome.flagged}
@@ -698,23 +678,10 @@ class RecallSupportMixin:
                 p for p, on in (
                     ("oracle_ranking", tuning.enable_oracle_ranking),
                     ("warden_gate", tuning.enable_warden_gate),
-                    ("diversity_gate", tuning.enable_diversity_gate),
                     ("intent_lens", tuning.enable_intent_lens),
-                    ("belief_gate", tuning.enable_belief_gate),
                 ) if on
             ]
             note = ("frontier: " + ",".join(portions)) if portions else None
-            # belief_gate only ADDS CurrentnessWarden to the chain; warden_gate is the master
-            # switch that APPLIES the chain's verdicts (drop REFUSED / label FLAGGED). With
-            # belief_gate on but warden_gate off, those verdicts are computed and discarded —
-            # warn so the gate is not silently inert.
-            if tuning.enable_belief_gate and not tuning.enable_warden_gate:
-                warn = (
-                    "belief_gate has no effect without warden_gate "
-                    "(belief verdicts computed but not applied)"
-                )
-                logger.warning("recall frontier: %s query=%r", warn, query[:60])
-                note = f"{note} | {warn}" if note else warn
             if warden_status is not None:
                 warden_status.state = (
                     ("applied" if len(outcome.ranked) == len(scored) else "partial")
@@ -794,13 +761,6 @@ class RecallSupportMixin:
                     meta["evidence_kinds"] = tuple(sorted(kinds))
                     if len(anchor_projects) == 1:
                         meta["project"] = next(iter(anchor_projects))
-                    anchor_paths = [
-                        str(p) for p in (row.get("anchor_paths") or []) if p
-                    ]
-                    if anchor_paths:
-                        meta["anchor_paths"] = tuple(anchor_paths)
-                    if len(anchor_projects) == 1:
-                        meta["anchor_project"] = next(iter(anchor_projects))
             except Exception as exc:
                 if warden_status is not None:
                     warden_status.add_gap("provenance_malformed_row")

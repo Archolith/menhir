@@ -1,8 +1,9 @@
 """Which embedding model produced the source-memory vectors (`content_embedding_model`).
 
 Ingest stamps every content embedding with the embedder's model name; recall, the ingest
-idempotency check and the backfill compare against the CURRENT embedder so vectors from a
-different model (same dimension, different space) are never ranked together and are re-embedded.
+idempotency check and the backfill compare against the CURRENT embedder so vectors stamped by a
+different model (same dimension, different space) are not ranked together and are re-embedded.
+Pre-fix ``'unknown'`` stamps can't be told apart and stay ranked until the backfill re-embeds them.
 When the model cannot be resolved the check is skipped (``None``) rather than excluding every
 stored vector.
 """
@@ -13,6 +14,11 @@ from typing import Any
 
 UNKNOWN_EMBEDDING_MODEL = "unknown"
 
+#: Stamps Menhir's own ingest wrote with the configured embedder before its name resolved
+#: (CF-260). Recall still admits these vectors; the backfill re-embeds them under the real name.
+#: Unstamped vectors (blank/NULL) stay excluded under a known model (#171 A5).
+LEGACY_EMBEDDING_MODELS = [UNKNOWN_EMBEDDING_MODEL]
+
 
 def embedder_model_name(graphiti_client: Any) -> str:
     """Best-effort embedder model name; ``'unknown'`` when it cannot be resolved."""
@@ -22,6 +28,10 @@ def embedder_model_name(graphiti_client: Any) -> str:
             value = getattr(embedder, attr, None)
             if isinstance(value, str) and value.strip():
                 return value.strip()
+        # Graphiti's OpenAIEmbedder keeps the name at ``config.embedding_model``.
+        value = getattr(getattr(embedder, "config", None), "embedding_model", None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     return UNKNOWN_EMBEDDING_MODEL
 
 

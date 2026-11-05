@@ -272,7 +272,8 @@ def _run(graph, *, llm=None, namespaces=None, budget=None, batch_size=500, scala
         graph, namespaces=namespaces, counting_llm=llm, build_episodes=_build_episodes,
         k=1, threshold=1.0, call_budget=budget, embed=None,
         config=CountingConsolidationConfig(
-            perceiver_version=pv, scalar_perceiver_version=scalar_pv, batch_size=batch_size))
+            perceiver_version=pv, scalar_perceiver_version=scalar_pv, batch_size=batch_size,
+            extract_v2=False, match=False))
     return out, llm
 
 

@@ -13,9 +13,14 @@ from menhir.config import MemorySettings
 from menhir.core import build_memory_services, prepare_memory_runtime
 from menhir.core.runtime_preflight import collect_runtime_capabilities
 from menhir.domain import new_session
-from menhir.infrastructure.telemetry import enable_llm_usage_telemetry, record_lifecycle_event
+from menhir.infrastructure.telemetry import (
+    enable_llm_usage_telemetry,
+    enable_operator_warning_persistence,
+    record_lifecycle_event,
+)
 from menhir.infrastructure.view_embedder import make_view_embedder, view_embedder_version
 from menhir.services import MaintenanceScheduler
+from menhir.services.embedding_identity import embedder_model_name
 
 from .runtime_support import (
     RuntimeContext,
@@ -393,8 +398,6 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         getattr(settings, "personal_memory_recall_audit_enabled", False)
     )
 
-    personal_memory_enabled = getattr(settings, "personal_memory_consolidation_enabled", False)
-    event_history_enabled = getattr(settings, "personal_memory_event_history_enabled", False)
     scalar_state_enabled = getattr(settings, "personal_memory_scalar_state_enabled", False)
     counting_enabled = getattr(settings, "personal_memory_counting_enabled", False)
     if counting_enabled and not scalar_state_enabled:
@@ -402,19 +405,25 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
             "personal-memory counting enabled but scalar state is disabled; "
             "counting needs scalar state and will do nothing")
     personal_memory_llm = None
-    if (personal_memory_enabled or event_history_enabled or scalar_state_enabled
-            or counting_enabled) and settings is not None:
+    if (scalar_state_enabled or counting_enabled) and settings is not None:
+        from menhir.config.settings_model import parse_extra_body
         from menhir.infrastructure.sync_llm import make_sync_chat
 
         pm_model = getattr(settings, "personal_memory_consolidation_chat_model", "") or None
+        pm_extra_body = parse_extra_body(
+            getattr(settings, "personal_memory_consolidation_chat_extra_body", "") or "",
+            env_name="MENHIR_PERSONAL_MEMORY_CHAT_EXTRA_BODY")
+        pm_timeout_s = float(getattr(settings, "personal_memory_consolidation_chat_timeout_s", 0) or 0)
         personal_memory_llm = make_sync_chat(
             settings, model=pm_model,
             max_tokens=getattr(settings, "personal_memory_consolidation_max_tokens", 8192),
             disable_reasoning=bool(getattr(
-                settings, "personal_memory_consolidation_disable_reasoning", False)))
+                settings, "personal_memory_consolidation_disable_reasoning", False)),
+            **({"extra_body": pm_extra_body} if pm_extra_body else {}),
+            **({"timeout_s": pm_timeout_s} if pm_timeout_s > 0 else {}))
         if personal_memory_llm is None:
             logger.warning(
-                "personal-memory consolidation, event history, or scalar state enabled but no sync chat provider; job disabled")
+                "personal-memory consolidation or scalar state enabled but no sync chat provider; job disabled")
 
     scheduler = MaintenanceScheduler(
         ingest_service=built.ingest_service,
@@ -435,48 +444,30 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         experience_counter_enabled=getattr(settings, "experience_counter_enabled", True),
         experience_embed=make_view_embedder(settings) if settings is not None else None,
         experience_embed_version=view_embedder_version(settings) if settings is not None else None,
+        # Same embedder and model stamp as the ingest-time step (enrichment_steps.embed_episode_content).
+        source_embedding_embed=getattr(getattr(built, "graphiti_client", None), "embed_query", None),
+        source_embedding_model_name=(
+            (lambda: embedder_model_name(built.graphiti_client))
+            if getattr(built, "graphiti_client", None) is not None else None
+        ),
         verifier_sync_enabled=verifier_sync_enabled,
         verifier_sync_interval_s=getattr(settings, "verifier_sync_interval_s", 300.0),
         verifier_repo=verifier_repo,
         verifier_context=verifier_context,
-        personal_memory_enabled=personal_memory_enabled,
-        event_history_enabled=event_history_enabled,
         counting_enabled=counting_enabled,
         counting_perceiver_version=getattr(
             settings, "personal_memory_counting_perceiver_version", "v1"),
-        counting_extract_v2=bool(getattr(
-            settings, "personal_memory_counting_extract_v2", False)),
-        counting_match=bool(getattr(
-            settings, "personal_memory_counting_match_enabled", False)),
         counting_lease_seconds=getattr(
             settings, "personal_memory_counting_lease_seconds", 900),
-        event_history_perceiver_version=getattr(
-            settings, "personal_memory_event_history_perceiver_version", "v1"),
         personal_memory_interval_s=getattr(settings, "personal_memory_consolidation_interval_s", 300.0),
         personal_memory_llm=personal_memory_llm,
         personal_memory_k=getattr(settings, "personal_memory_consolidation_k", 3),
         personal_memory_call_budget=getattr(settings, "personal_memory_consolidation_call_budget", 300),
-        personal_memory_verify_retries=getattr(settings, "personal_memory_consolidation_verify_retries", 0),
-        personal_memory_sum_grounding=getattr(settings, "personal_memory_consolidation_sum_grounding", False),
         scalar_state_enabled=scalar_state_enabled,
         scalar_state_perceiver_version=getattr(
             settings, "personal_memory_scalar_state_perceiver_version", "v2"),
-        scalar_reconcile_attribute=getattr(
-            settings, "personal_memory_scalar_reconcile_attribute", False),
-        scalar_reconcile_scope=getattr(
-            settings, "personal_memory_scalar_reconcile_scope", False),
-        scalar_reconcile_subject=getattr(
-            settings, "personal_memory_scalar_reconcile_subject", False),
-        scalar_canonical_self=getattr(
-            settings, "personal_memory_scalar_canonical_self", False),
         scalar_threshold=getattr(settings, "personal_memory_scalar_threshold", 1.0),
         scalar_history_enabled=getattr(settings, "personal_memory_scalar_history_enabled", False),
-        scalar_deterministic_shadow_enabled=getattr(
-            settings, "personal_memory_scalar_deterministic_shadow", False),
-        scalar_deterministic_router_enabled=getattr(
-            settings, "personal_memory_scalar_deterministic_router", False),
-        scalar_deterministic_router_promoted_classes=getattr(
-            settings, "personal_memory_scalar_deterministic_classes", ()),
     )
     await scheduler.start()
     snapshot = scheduler.status_snapshot()
@@ -689,6 +680,7 @@ async def _initialize_services(
     settings = settings or MemorySettings.from_env()
     if not candidate_readonly:
         enable_llm_usage_telemetry()
+        enable_operator_warning_persistence()
 
     # The venv-path guard is auto-scoped by preflight (venv_guard_applies): enforced
     # only for a source checkout that carries its own .venv, skipped for pip/pipx/
@@ -739,8 +731,6 @@ async def _initialize_services(
                 getattr(settings, "personal_memory_counting_enabled", False)
                 and getattr(settings, "personal_memory_scalar_state_enabled", False)
             ),
-            counting_match_enabled=bool(
-                getattr(settings, "personal_memory_counting_match_enabled", False)),
         )
         schema_ready = await asyncio.to_thread(graph_adapter.phase_one_schema_ready)
         if not schema_ready:

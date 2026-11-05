@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 
 import pytest
-from dotenv import load_dotenv
 
 from menhir.infrastructure import MemoryGraphAdapter, Neo4jRepository
 from menhir.infrastructure.schema import (
@@ -18,8 +17,7 @@ from menhir.infrastructure.schema import (
     get_phase1_bootstrap_queries,
 )
 
-load_dotenv()
-
+# pytest_configure pins NEO4J_* before collection; this module needs nothing else from `.env`.
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")

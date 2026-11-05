@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import threading
 from typing import Any
 
 from menhir.config import redact_uri_credentials
@@ -9,6 +11,16 @@ from menhir.core.tenancy import require_own_object
 from menhir.infrastructure.providers import ProviderConfig
 
 from .backend_shared import _to_jsonable
+
+logger = logging.getLogger(__name__)
+
+#: FAILED-count snapshot for ``get_operator_warnings``: (monotonic deadline, count,
+#: latest_failed_at). Module-level, because ``RuntimeProvider`` is built per request and an
+#: instance attribute never reached a second call, so every write re-ran the full-graph
+#: aggregate (#488 F1). Same 60s TTL as ``formatters._stuck_count_cache``.
+_FAILED_OVERVIEW_TTL_S = 60.0
+_failed_overview_cache: tuple[float, int, str | None] | None = None
+_failed_overview_lock = threading.Lock()
 
 
 class SchedulerStartBlockedInBenchmarkMode(RuntimeError):
@@ -315,6 +327,112 @@ class RuntimeProviderAdminOpsMixin:
             )
         )
 
+    async def _failed_overview_snapshot(self, fresh: bool) -> tuple[int, str | None]:
+        """(FAILED count, newest FAILED time), shared across instances for the TTL."""
+        global _failed_overview_cache
+        from time import monotonic
+
+        with _failed_overview_lock:
+            cached = _failed_overview_cache
+        if cached is not None and not fresh and monotonic() < cached[0]:
+            return cached[1], cached[2]
+        try:
+            overview = await self.fetch_memory_overview()
+            snapshot = (
+                int((overview or {}).get("failed_count") or 0),
+                (overview or {}).get("latest_failed_at"),
+            )
+        except Exception:  # noqa: BLE001 - provider warnings must still be reported
+            logger.debug("could not read FAILED count for operator warnings", exc_info=True)
+            # Keep the last known count rather than reporting none while the graph is failing,
+            # and hold it for the TTL so a slow graph is not re-aggregated on every write (F7).
+            snapshot = (cached[1], cached[2]) if cached is not None else (0, None)
+        with _failed_overview_lock:
+            _failed_overview_cache = (monotonic() + _FAILED_OVERVIEW_TTL_S, *snapshot)
+        return snapshot
+
+    async def get_operator_warnings(self, _fresh: bool = False) -> dict[str, Any]:
+        from menhir.core.request_context import get_request_tier
+        from menhir.core.tenancy import pinned_namespace
+        from menhir.infrastructure.telemetry.operator_warnings_store import (
+            redact_operator_warnings_for_caller,
+        )
+
+        warnings = await self._operator_warnings_unredacted(_fresh)
+        return {
+            "warnings": redact_operator_warnings_for_caller(
+                warnings, pinned=bool(pinned_namespace()), tier=get_request_tier()
+            )
+        }
+
+    async def _operator_warnings_unredacted(self, fresh: bool) -> list[dict[str, Any]]:
+        from menhir.infrastructure.observability import (
+            last_provider_auth_failure,
+            last_provider_quota_exhaustion,
+        )
+        from menhir.infrastructure.telemetry.operator_warnings_store import (
+            build_operator_warnings,
+        )
+
+        rows = await self._off_loop(self.telemetry.list_operator_warnings)
+        # The overview is a full-graph aggregate and add_memory polls this on every write, so
+        # it is shared for 60s (the same TTL the legacy count used). Acks read it fresh.
+        failed_count, latest_failed_at = await self._failed_overview_snapshot(fresh)
+        return build_operator_warnings(
+            rows,
+            auth_failure=last_provider_auth_failure(),
+            quota_exhaustion=last_provider_quota_exhaustion(),
+            failed_count=failed_count,
+            latest_failed_at=latest_failed_at,
+        )
+
+    async def acknowledge_operator_warning(
+        self, kind: str, subject: str = "", actor: str = ""
+    ) -> dict[str, Any]:
+        from menhir.clock import utc_now_iso
+        from menhir.infrastructure.telemetry.operator_warnings_store import (
+            KIND_FAILED_EPISODES,
+            WARNING_KINDS,
+        )
+
+        if kind not in WARNING_KINDS:
+            raise ValueError(f"unknown warning kind {kind!r}; expected one of {list(WARNING_KINDS)}")
+        actor = actor.strip() or "unknown"
+        # Unredacted: the ack needs the incident pin, and the tool gate already required operator.
+        current = await self._operator_warnings_unredacted(True)
+        candidates = [
+            w for w in current if w["kind"] == kind and (not subject or w["subject"] == subject)
+        ]
+        acknowledged: list[str] = []
+        already: list[str] = []
+        for w in candidates:
+            if w["acked"]:
+                already.append(w["subject"])
+                continue
+            if not w["durable"]:
+                await self._off_loop(
+                    self.telemetry.record_operator_warning_occurrence, kind, w["subject"]
+                )
+            watermark = None
+            if kind == KIND_FAILED_EPISODES:
+                watermark = w.get("latest_failed_at") or utc_now_iso()
+            ok = await self._off_loop(
+                self.telemetry.ack_operator_warning,
+                kind,
+                w["subject"],
+                actor,
+                watermark,
+                w["first_seen_at"] if w["durable"] else None,
+            )
+            if ok:
+                acknowledged.append(w["subject"])
+        return {
+            "kind": kind,
+            "active": len(candidates),
+            "acknowledged": acknowledged,
+            "already_acknowledged": already,
+        }
+
     async def circuit_breaker_snapshots(self) -> dict[str, dict[str, Any]]:
         return _to_jsonable(
             await self._off_loop(self.built.graphiti_client.circuit_breaker_snapshots)
@@ -527,6 +645,7 @@ class RuntimeProviderAdminOpsMixin:
         )
 
     async def close_todo(self, uuid: str) -> bool:
+        await self._require_own_todo(uuid)
         return bool(await self._off_loop(self.built.graph_adapter.close_todo, uuid))
 
     async def _require_own_todo(self, todo_uuid: str) -> None:
@@ -591,6 +710,7 @@ class RuntimeProviderAdminOpsMixin:
         )
 
     async def delete_todo(self, uuid: str) -> bool:
+        await self._require_own_todo(uuid)
         return bool(await self._off_loop(self.built.graph_adapter.delete_todo, uuid))
 
     async def close_stale_todos(
@@ -690,13 +810,16 @@ class RuntimeProviderAdminOpsMixin:
         )
 
     async def list_candidates(
-        self, *, source: str | None = None, limit: int = 100
+        self, *, source: str | None = None, limit: int = 100, namespace: str | None = None
     ) -> list[dict[str, Any]]:
+        # Forwarded only when set, so an unscoped call is the same adapter call it always was.
+        scope = {"namespace": namespace} if namespace else {}
         return _to_jsonable(
             await self._off_loop(
                 self.built.graph_adapter.list_candidates,
                 source=source,
                 limit=limit,
+                **scope,
             )
         )
 

@@ -15,6 +15,55 @@ from scripts.repair_lme_scalar_source_times import (
 )
 
 
+def test_apply_repair_rebuilds_with_runtime_counting_and_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    from scripts.repair_lme_scalar_source_times import RepairPlan, SourceTimeIndex
+
+    import scripts.repair_lme_scalar_source_times  # noqa: F401  (puts siblings on sys.path)
+
+    apply_mod = sys.modules["repair_lme_scalar_source_times_apply"]
+    seen: dict = {}
+
+    class _Service:
+        def rebuild_scalar_state(self, subject_uuid, **kw):
+            return {"written": 1}
+
+    class _Adapter:
+        def __init__(self, repository, **kw):
+            seen["adapter"] = kw
+
+        def scalar_state_service(self, **kw):
+            seen["service"] = kw
+            return _Service()
+
+    class _Repo:
+        def execute(self, query, params=None):
+            return [{"evidence_updated": 0, "assertions_updated": 0}]
+
+    monkeypatch.setattr(apply_mod, "MemoryGraphAdapter", _Adapter)
+    def _plan(targets):
+        return RepairPlan(
+            evidence_updates=(), assertion_updates=(), rebuild_targets=targets,
+            evidence_total=0, assertion_total=0, evidence_already_correct=0,
+            assertions_already_correct=0,
+        )
+
+    monkeypatch.setattr(apply_mod, "build_repair_plan", lambda *a, **k: _plan(()))
+    index = SourceTimeIndex(fixture_sha256="x" * 64, session_times={}, namespaces=frozenset())
+    audit = apply_mod.apply_repair(
+        _Repo(), _plan((("subj", "lme-ns"),)),
+        audit_path=tmp_path / "audit.json", fixture_path=tmp_path / "f.json",
+        source_times=index, namespace_prefix="lme-", backup={},
+        counting_enabled=True, scalar_history_enabled=True,
+    )
+    assert seen["adapter"] == {"counting_enabled": True}
+    assert seen["service"] == {"scalar_history_enabled": True}
+    assert audit["rebuild_flags"] == {"counting_enabled": True, "scalar_history_enabled": True}
+
+
 def _write_fixture(path: Path) -> Path:
     path.write_text(
         json.dumps(

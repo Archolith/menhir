@@ -157,6 +157,88 @@ def test_review_requires_explicit_proof_and_detects_graph_drift(tmp_path: Path) 
         MODULE._approved(repo, "bolt://test", "neo4j", path, 10)
 
 
+@pytest.mark.online
+def test_parallel_mentions_are_one_candidate_and_one_link(
+    test_neo4j_repo: Any, tmp_path: Path
+) -> None:
+    repo = test_neo4j_repo
+    tag = f"legacy-parallel-{uuid.uuid4()}"
+    ids = {name: f"{tag}-{name}" for name in ("source", "graphiti", "entity")}
+    ids["tag"] = tag
+    repo.execute(
+        """
+        CREATE (s:Episodic {uuid:$source, name:'same', content:'same text',
+                            created_at:datetime('2026-01-01T00:00:00Z'), processing_state:'READY',
+                            resolved_episode_uuid:$graphiti, namespace:'default',
+                            user_flagged:true, test_tag:$tag})
+        CREATE (g:Episodic {uuid:$graphiti, name:'same', content:'same text',
+                            created_at:datetime('2026-01-01T00:00:01Z'),
+                            namespace:'default', test_tag:$tag})
+        CREATE (e:Entity {uuid:$entity, namespace:'default', user_flagged:true,
+                          content:'semantic memory', test_tag:$tag})
+        CREATE (g)-[:MENTIONS]->(e)
+        CREATE (g)-[:MENTIONS]->(e)
+        """,
+        ids,
+    )
+    path = tmp_path / "parallel.jsonl"
+    try:
+        MODULE.plan(repo, repo.uri, path, 100)
+        rows = _read(path)
+        targets = [row for row in rows if row.get("source_uuid") == ids["source"]]
+        assert len(targets) == 1
+        assert targets[0]["reason"] == "REVIEW_REQUIRED"
+        targets[0]["decision"] = "APPROVE"
+        targets[0]["proof"] = "synthetic test: exact source and Graphiti pair"
+        _write(path, rows)
+
+        def work(tx: Any) -> int:
+            reviewed = MODULE._approved(tx, repo.uri, repo.database, path, 100)
+            return MODULE.apply(tx, reviewed)
+
+        assert repo.execute_write(work) == 1
+        assert MODULE.verify(repo, repo.uri, repo.database, path, 100) == 1
+        result = repo.execute(
+            """
+            MATCH (g:Episodic {uuid:$graphiti})-[m:MENTIONS]->(e:Entity {uuid:$entity})
+            WITH e, count(m) AS mentions
+            RETURN mentions, e.user_flagged AS direct,
+                   [(s:Episodic {uuid:$source})-[r:RETENTION_SOURCE]->(e) | r.direct] AS links
+            """,
+            ids,
+        )[0]
+        assert result == {"mentions": 2, "direct": True, "links": [True]}
+    finally:
+        repo.execute("MATCH (n {test_tag:$tag}) DETACH DELETE n", {"tag": tag})
+
+
+@pytest.mark.online
+def test_parallel_retention_links_still_refuse_the_inventory(
+    test_neo4j_repo: Any,
+) -> None:
+    repo = test_neo4j_repo
+    tag = f"legacy-parallel-link-{uuid.uuid4()}"
+    ids = {name: f"{tag}-{name}" for name in ("source", "graphiti", "entity")}
+    ids["tag"] = tag
+    repo.execute(
+        """
+        CREATE (s:Episodic {uuid:$source, processing_state:'READY',
+                            resolved_episode_uuid:$graphiti, test_tag:$tag})
+        CREATE (g:Episodic {uuid:$graphiti, test_tag:$tag})
+        CREATE (e:Entity {uuid:$entity, test_tag:$tag})
+        CREATE (g)-[:MENTIONS]->(e)
+        CREATE (s)-[:RETENTION_SOURCE]->(e)
+        CREATE (s)-[:RETENTION_SOURCE]->(e)
+        """,
+        ids,
+    )
+    try:
+        with pytest.raises(ValueError, match="duplicate source/Graphiti/entity"):
+            MODULE._inventory(repo, limit=100)
+    finally:
+        repo.execute("MATCH (n {test_tag:$tag}) DETACH DELETE n", {"tag": tag})
+
+
 def test_legacy_merge_backfill_unmerge_reflag_stays_quarantined(tmp_path: Path) -> None:
     """An old merge lacks retention snapshot fields, so its survivor cannot gain a guessed link."""
     repo = FakeRepo([], [_candidate(merge_audit_count=1)])

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from graphiti_core.errors import GraphitiRequestTooLargeError
+from graphiti_core.llm_client.errors import OutputTruncatedError
 from menhir.infrastructure.graphiti_llm_adapter import (
+    _TRUNCATION_CHAR_THRESHOLD,
     _looks_like_truncation,
     _truncation_offset,
 )
@@ -208,3 +211,85 @@ class TestRetryEscalation:
         # The third retry prompt should mention reducing extraction
         retry_msg = messages[-1].content
         assert "Reduce" in retry_msg or "reduce" in retry_msg.lower()
+
+
+# ---------------------------------------------------------------------------
+# Real fork request path: a reply cut off at the output limit
+# ---------------------------------------------------------------------------
+
+_COMPLETE = '{"extracted_entities": [], "edges": []}'
+# Shorter than _TRUNCATION_CHAR_THRESHOLD, so only finish_reason identifies it.
+_SHORT_CUT = '{"extracted_entities": [{"name": "a"}], "edges": [{"fact": "x"}, {"fa'
+
+
+class _Completions:
+    def __init__(self, replies: list[tuple[str, str]]) -> None:
+        self.replies = replies
+        self.limits: list[int] = []
+
+    async def create(self, **kwargs):
+        self.limits.append(kwargs["max_tokens"])
+        content, finish_reason = self.replies[min(len(self.limits) - 1, len(self.replies) - 1)]
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=content),
+                    finish_reason=finish_reason,
+                )
+            ]
+        )
+
+
+def _real_client(replies: list[tuple[str, str]]):
+    from graphiti_core.llm_client.config import LLMConfig
+
+    from menhir.infrastructure.graphiti_llm_adapter import MenhirOpenAIGenericClient
+
+    completions = _Completions(replies)
+    client = MenhirOpenAIGenericClient(
+        config=LLMConfig(api_key="test", model="test-model"),
+        client=SimpleNamespace(chat=SimpleNamespace(completions=completions), base_url=None),
+        max_tokens=4096,
+    )
+    return client, completions
+
+
+def _messages():
+    from graphiti_core.prompts.models import Message
+
+    return [Message(role="system", content="s"), Message(role="user", content="u")]
+
+
+class TestOutputLimitEscalation:
+    def test_reported_truncation_is_truncation_at_any_length(self) -> None:
+        assert _looks_like_truncation(OutputTruncatedError("cut off")) is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("cut_body", [_SHORT_CUT, ""])
+    async def test_length_finish_retries_with_a_higher_limit(self, cut_body: str) -> None:
+        client, completions = _real_client([(cut_body, "length"), (_COMPLETE, "stop")])
+
+        result = await client.generate_response(_messages())
+
+        assert result == json.loads(_COMPLETE)
+        assert completions.limits == [4096, 8192]
+
+    @pytest.mark.asyncio
+    async def test_persistent_truncation_stops_at_the_cap_and_raises(self) -> None:
+        client, completions = _real_client([(_SHORT_CUT, "length")])
+
+        with pytest.raises(OutputTruncatedError):
+            await client.generate_response(_messages())
+
+        assert completions.limits == [4096, 8192, 16384, 16384]
+
+    @pytest.mark.asyncio
+    async def test_cut_off_reply_without_length_is_not_returned_as_a_fragment(self) -> None:
+        padding = "x" * _TRUNCATION_CHAR_THRESHOLD
+        long_cut = f'{{"note": "{padding}", "edges": [{{"fact": "x"}}, {{"fa'
+        client, completions = _real_client([(long_cut, "stop"), (_COMPLETE, "stop")])
+
+        result = await client.generate_response(_messages())
+
+        assert result == json.loads(_COMPLETE)
+        assert completions.limits == [4096, 8192]

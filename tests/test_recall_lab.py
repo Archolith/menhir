@@ -162,10 +162,10 @@ class _StubRecallService:
         try:
             await asyncio.sleep(0.02)
             tuning = kwargs["tuning"]
-            if self.fail_content_lane and tuning.enable_content_vector:
+            if self.fail_content_lane and tuning.enable_facet_candidates:
                 raise RuntimeError("content index unavailable")
-            result = _result(query, content_lane=tuning.enable_content_vector)
-            if self.degrade_content_lane and tuning.enable_content_vector:
+            result = _result(query, content_lane=tuning.enable_facet_candidates)
+            if self.degrade_content_lane and tuning.enable_facet_candidates:
                 return RecallResult(
                     query=result.query,
                     preset=result.preset,
@@ -216,15 +216,14 @@ def _body() -> dict[str, Any]:
             {
                 "id": "a",
                 "label": "A",
-                "tuning": {"enable_bm25": True},
+                "tuning": {},
             },
             {
                 "id": "b",
                 "label": "B",
                 "tuning": {
-                    "enable_bm25": True,
-                    "enable_content_vector": True,
-                    "content_vector_weight": 0.7,
+                    "enable_facet_candidates": True,
+                    "facet_weight": 0.7,
                 },
             },
         ],
@@ -233,29 +232,15 @@ def _body() -> dict[str, Any]:
 
 @pytest.mark.unit
 def test_recall_lab_frontier_preset_uses_active_facet() -> None:
-    arm = next(item for item in DEFAULT_ARMS if item["id"] == "d")
+    arm = next(item for item in DEFAULT_ARMS if item["id"] == "e")
     tuning = arm["tuning"]
 
-    assert "active facet" in arm["label"]
+    assert "production base + frontier" in arm["label"]
     assert tuning["enable_facet_candidates"] is True
     assert tuning["enable_facet_shadow"] is False
     assert tuning["enable_oracle_ranking"] is True
     assert tuning["enable_intent_lens"] is True
     assert tuning["enable_warden_gate"] is True
-    assert tuning["enable_evidence_anchor"] is True
-
-
-@pytest.mark.unit
-def test_recall_lab_working_frontier_preserves_d_and_softens_evidence_gate() -> None:
-    d_arm = next(item for item in DEFAULT_ARMS if item["id"] == "d")
-    e_arm = next(item for item in DEFAULT_ARMS if item["id"] == "e")
-
-    expected = dict(d_arm["tuning"])
-    expected["enable_evidence_anchor"] = False
-
-    assert "production base + frontier" in e_arm["label"]
-    assert e_arm["tuning"] == expected
-    assert d_arm["tuning"]["enable_evidence_anchor"] is True
 
 
 @pytest.mark.unit
@@ -301,11 +286,9 @@ def test_recall_lab_page_renders_default_arms() -> None:
     assert response.status_code == 200
     assert "Recall Lab" in response.text
     assert "Production" in response.text
-    assert "add content vector" in response.text
     assert "Pure read" in response.text
     assert "Blinded LLM judge" in response.text
     assert "one per line" in response.text
-    assert "active facet + warden + oracle" in response.text
     assert "production base + frontier" in response.text
     assert "production base + facet ranking only" in response.text
     assert "production base + oracle ranking only" in response.text
@@ -313,7 +296,7 @@ def test_recall_lab_page_renders_default_arms() -> None:
 
 
 @pytest.mark.unit
-def test_recall_lab_accepts_all_nine_default_arms() -> None:
+def test_recall_lab_accepts_all_seven_default_arms() -> None:
     recall = _StubRecallService()
     app = _create_test_app(
         settings=MemorySettings(),
@@ -328,9 +311,9 @@ def test_recall_lab_accepts_all_nine_default_arms() -> None:
 
     assert response.status_code == 200
     assert [arm["id"] for arm in response.json()["arms"]] == [
-        "production", "a", "b", "c", "d", "e", "f", "g", "h",
+        "production", "e", "f", "g", "h",
     ]
-    assert recall.max_active == 9
+    assert recall.max_active == 5
 
 
 @pytest.mark.unit
@@ -359,9 +342,9 @@ def test_recall_lab_runs_arms_concurrently_and_read_only() -> None:
     assert all(call["trace"] is True for call in recall.calls)
     assert all(call["include_warden_status"] is True for call in recall.calls)
     assert all(call["update_access"] is False for call in recall.calls)
-    assert recall.calls[0]["tuning"].enable_bm25 is True
-    assert recall.calls[1]["tuning"].enable_content_vector is True
-    assert recall.calls[1]["tuning"].content_vector_weight == 0.7
+    assert recall.calls[0]["tuning"].enable_facet_candidates is False
+    assert recall.calls[1]["tuning"].enable_facet_candidates is True
+    assert recall.calls[1]["tuning"].facet_weight == 0.7
     assert payload["arms"][1]["results"][0]["source"] == "content_vector"
     assert payload["arms"][1]["results"][0]["content_rank"] == 1
 
@@ -460,7 +443,7 @@ def test_recall_lab_blinds_and_aggregates_llm_judging_passes(monkeypatch) -> Non
     assert all(call["temperature"] == 0.0 for call in backend.calls)
     assert all("PRIVATE PRODUCTION LABEL" not in call["user_prompt"] for call in backend.calls)
     assert all("PRIVATE CONTENT LABEL" not in call["user_prompt"] for call in backend.calls)
-    assert all("enable_content_vector" not in call["user_prompt"] for call in backend.calls)
+    assert all("enable_facet_candidates" not in call["user_prompt"] for call in backend.calls)
     assert all("R1:" in call["user_prompt"] and "R2:" in call["user_prompt"] for call in backend.calls)
     assert all("_judge_results" not in arm for arm in payload["arms"])
 
@@ -633,7 +616,6 @@ def test_recall_lab_surfaces_authority_layer() -> None:
     assert verdict["subject_uuid"] == "memory-baseline"
     assert verdict["value"] == 185
     assert verdict["contributors"][0]["stated_span"] == "I spent another $40 on bike lights"
-    assert arm["event_authority_layer"] is None
 
 
 @pytest.mark.unit
@@ -751,15 +733,15 @@ def test_recall_lab_validates_bounds_and_requires_runtime() -> None:
 
 
 @pytest.mark.unit
-def test_recall_lab_tunes_verb_facets_and_verdict_gate() -> None:
+def test_recall_lab_tunes_verdict_gate() -> None:
     from pydantic import ValidationError
 
     from menhir.explorer.recall_lab import RecallLabTuning
 
     default = RecallLabTuning().to_domain()
-    assert default.enable_verb_facets is False and default.scalar_verdict_min_similarity == 0.0
-    tuned = RecallLabTuning(enable_verb_facets=True, scalar_verdict_min_similarity=0.675).to_domain()
-    assert tuned.enable_verb_facets is True and tuned.scalar_verdict_min_similarity == 0.675
+    assert default.scalar_verdict_min_similarity == 0.0
+    tuned = RecallLabTuning(scalar_verdict_min_similarity=0.675).to_domain()
+    assert tuned.scalar_verdict_min_similarity == 0.675
     with pytest.raises(ValidationError):
         RecallLabTuning(scalar_verdict_min_similarity=1.5)
 
