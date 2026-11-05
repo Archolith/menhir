@@ -21,8 +21,11 @@ from falkordblite_prepared_materialization import (
     _require,
     commit,
     commit_production,
+    commit_real_view,
     prepare,
     prepare_production,
+    prepare_real_view,
+    real_view_statement,
 )
 
 from menhir.infrastructure.projection_lifecycle_repository_encoding import (
@@ -571,11 +574,184 @@ def production_schema_proofs(db: Any) -> list[tuple[str, Callable[[], object]]]:
         finally:
             db.client.connection_pool.disconnect()
 
+    def real_view_fixture(name: str):
+        graph, _, token = work_fixture("atomic_view_" + name)
+        graph.query(
+            "MATCH (d:PreparedDefinition), (w:PreparedWork) "
+            "SET d:ProjectionDefinitionState, w:ProjectionWorkState "
+            "REMOVE d:PreparedDefinition, w:PreparedWork"
+        )
+        return graph, token
+
+    def atomic_real_view_roundtrip() -> object:
+        from dataclasses import replace
+
+        from menhir.infrastructure.realization_coverage_repository import (
+            ScalarStateProjectionHashSource,
+        )
+
+        graph, token = real_view_fixture("roundtrip")
+        graph.query("MATCH (a:TypedAssertion) SET a.value=10.0,a.value_json='10.0'")
+        plan = prepare_real_view(graph, token, "first")
+        _require(commit_real_view(graph, plan) == "apply", "real View initial commit refused")
+        reader = ScalarStateProjectionHashSource(StringTemporalRepository(graph))
+        expected = reader.current_projection_hash(
+            definition=SCALAR_STATE_PROJECTION, target=token.target, target_present=True
+        )
+        _require(plan.parameters()["after_receipt"]["projection_hash"] == expected, "real View hash differs")
+        before = graph_state(graph)
+        _require(commit_real_view(graph, plan) == "replay", "real View replay refused")
+        _require(graph_state(graph) == before, "real View replay mutated graph")
+        graph.query(
+            "MATCH (a:TypedAssertion) CREATE (b:TypedAssertion) SET b=properties(a) "
+            "SET b.assertion_id='a2', b.value=11, b.value_json='11', b.valid_at='2026-02-01T00:00:00Z' "
+            "WITH b MATCH (w:ProjectionWorkState) SET w.generation=2"
+        )
+        second = prepare_real_view(graph, replace(token, generation=2), "second")
+        _require(commit_real_view(graph, second) == "apply", "real View supersession refused")
+        rows = graph.query(
+            "MATCH (n:Entity)-[:SUPERSEDES]->(o:Entity) RETURN n.ss_value,n.view_current,o.ss_value,o.view_current"
+        ).result_set
+        _require(rows == [["11", True, "10", False]], f"real View history drift: {rows}")
+        expected = reader.current_projection_hash(
+            definition=SCALAR_STATE_PROJECTION, target=token.target, target_present=True
+        )
+        _require(second.parameters()["after_receipt"]["projection_hash"] == expected, "superseded hash differs")
+        _require(
+            graph.query("MATCH (:ProjectionDerivationReceipt) RETURN count(*)").result_set == [[2]], "receipt drift"
+        )
+        return "actual View create/supersede and provenance writes share one query with real work/receipt; hash reader agrees"
+
+    def atomic_real_view_refuse(name: str, mutation: str) -> object:
+        graph, token = real_view_fixture(name)
+        plan = prepare_real_view(graph, token, "derive")
+        graph.query(mutation, {"key": plan.view_key, "receipt": plan.parameters()["receipt_key"]})
+        before = graph_state(graph)
+        action = commit_real_view(graph, plan)
+        _require(action != "apply", f"real View accepted {name}")
+        _require(graph_state(graph) == before, f"real View refusal wrote after {name}")
+        return action
+
+    def atomic_real_view_rollback(*, supersede: bool = False) -> object:
+        from dataclasses import replace
+
+        graph, token = real_view_fixture("rollback_" + str(supersede))
+        if supersede:
+            _require(commit_real_view(graph, prepare_real_view(graph, token, "initial")) == "apply", "seed refused")
+            graph.query(
+                "MATCH (a:TypedAssertion) SET a.value=11,a.value_json='11' "
+                "WITH a MATCH (w:ProjectionWorkState) SET w.generation=2"
+            )
+            token = replace(token, generation=2)
+        plan = prepare_real_view(graph, token, "derive")
+        query, params = real_view_statement(plan)
+        # Fail AFTER the real View, provenance, work and receipt mutations have executed.
+        query = query.removesuffix("RETURN action\n") + (
+            "RETURN Menhir109Guard.requireOk(false,'injected late certification failure') AS action"
+        )
+        before = graph_state(graph)
+        try:
+            graph.query(query, params)
+        except Exception as exc:  # noqa: BLE001 - injected native failure is the acceptance condition
+            _require("injected late certification failure" in str(exc), f"unexpected query failure: {exc}")
+        else:
+            raise AssertionError("late certification failure did not raise")
+        _require(graph_state(graph) == before, "late failure leaked View/history/provenance/work/receipt writes")
+        _require(commit_real_view(graph, plan) == "apply", "rollback made work unrecoverable")
+        return "late native failure restores complete graph; same prepared work succeeds afterward"
+
+    def atomic_real_view_tampered_write(part: str) -> object:
+        graph, token = real_view_fixture("tamper_" + part)
+        plan = prepare_real_view(graph, token, "derive")
+        query, params = real_view_statement(plan)
+        if part == "writer":
+            params["view_step0"] = {**params["view_step0"], "eps": ["missing"]}
+        elif part == "provenance":
+            params["view_step1"] = {**params["view_step1"], "anchor_ids": ["missing"]}
+        else:
+            params["expected_value"] = "invalid"
+        before = graph_state(graph)
+        try:
+            graph.query(query, params)
+        except Exception as exc:  # noqa: BLE001 - require the specific native postcondition failure
+            _require("real View" in str(exc), f"unexpected query failure: {exc}")
+        else:
+            raise AssertionError("invalid View write/postcondition was certified")
+        _require(graph_state(graph) == before, "refused View/provenance/postcondition leaked writes")
+        return "native postcondition throws; complete graph unchanged"
+
+    def atomic_real_view_race() -> object:
+        graph, token = real_view_fixture("race")
+        plans = [prepare_real_view(graph, token, "worker-a"), prepare_real_view(graph, token, "worker-b")]
+        barrier = Barrier(2)
+
+        def run(plan):
+            barrier.wait(timeout=10)
+            return commit_real_view(graph, plan)
+
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results = list(pool.map(run, plans))
+            _require(sorted(results) == ["apply", "stale_work"], f"competing publications: {results}")
+            _require(graph.query("MATCH (:Entity) RETURN count(*)").result_set == [[1]], "race forked history")
+            _require(
+                graph.query("MATCH (:ProjectionDerivationReceipt) RETURN count(*)").result_set == [[1]],
+                "race forked receipt",
+            )
+            return results
+        finally:
+            db.client.connection_pool.disconnect()
+
+    def atomic_real_view_replay_source_change() -> object:
+        graph, token = real_view_fixture("replay_source")
+        plan = prepare_real_view(graph, token, "derive")
+        _require(commit_real_view(graph, plan) == "apply", "seed refused")
+        graph.query("MATCH (t:TurnEvidence) SET t.evidence_quarantined=true")
+        before = graph_state(graph)
+        _require(commit_real_view(graph, plan) == "stale_inputs", "replay acknowledged quarantined evidence")
+        _require(graph_state(graph) == before, "source-invalid replay mutated graph")
+        return "replay revalidates source evidence without writes"
+
+    def atomic_real_view_profile_refusal() -> object:
+        from dataclasses import replace
+
+        graph, token = real_view_fixture("profile")
+        _require(commit_real_view(graph, prepare_real_view(graph, token, "initial")) == "apply", "seed refused")
+        graph.query("MATCH (w:ProjectionWorkState) SET w.generation=2")
+        before = graph_state(graph)
+        for next_token in (replace(token, generation=2), replace(token, generation=2, target_present=False)):
+            try:
+                prepare_real_view(graph, next_token, "unsupported")
+            except ValueError:
+                _require(graph_state(graph) == before, "unsupported preparation mutated graph")
+            else:
+                raise AssertionError("unqualified refresh/retirement accepted")
+        return "same-value refresh and retirement explicitly refused without writes"
+
+    def atomic_real_view_replay_provenance_damage(role: str) -> object:
+        graph, token = real_view_fixture("replay_damage_" + role)
+        plan = prepare_real_view(graph, token, "derive")
+        _require(commit_real_view(graph, plan) == "apply", "seed refused")
+        graph.query("MATCH ()-[r:" + role + "]->() DELETE r")
+        before = graph_state(graph)
+        try:
+            commit_real_view(graph, plan)
+        except Exception as exc:  # noqa: BLE001 - corrupted replay must fail the native postcondition
+            _require("real View postcondition failed" in str(exc), f"unexpected replay failure: {exc}")
+        else:
+            raise AssertionError("replay acknowledged broken live provenance")
+        _require(graph_state(graph) == before, "corrupt replay mutated graph")
+        return "replay refuses damaged live provenance without writes"
+
     def real_materializer_string_temporals() -> object:
         from dataclasses import replace
 
-        from menhir.infrastructure.realization_coverage_repository import ScalarStateProjectionHashSource
-        from menhir.infrastructure.scalar_projection_materializer import ScalarStateProjectionMaterializer
+        from menhir.infrastructure.realization_coverage_repository import (
+            ScalarStateProjectionHashSource,
+        )
+        from menhir.infrastructure.scalar_projection_materializer import (
+            ScalarStateProjectionMaterializer,
+        )
 
         graph, _, token = work_fixture("real_materializer_string_temporals")
         repository = StringTemporalRepository(graph)
@@ -652,6 +828,41 @@ def production_schema_proofs(db: Any) -> list[tuple[str, Callable[[], object]]]:
         ("production_scalar_view_history", lambda: view_history(Repository)),
         ("production_scalar_view_history_string_temporals", lambda: view_history(StringTemporalRepository)),
         ("production_scalar_materializer_string_temporals", real_materializer_string_temporals),
+        ("atomic_real_view_roundtrip", atomic_real_view_roundtrip),
+        ("atomic_real_view_late_failure_rollback", atomic_real_view_rollback),
+        ("atomic_real_view_supersession_rollback", lambda: atomic_real_view_rollback(supersede=True)),
+        (
+            "atomic_real_view_quarantine_refusal",
+            lambda: atomic_real_view_refuse("quarantine", "MATCH (t:TurnEvidence) SET t.evidence_quarantined=true"),
+        ),
+        (
+            "atomic_real_view_work_refusal",
+            lambda: atomic_real_view_refuse("work", "MATCH (w:ProjectionWorkState) SET w.generation=2"),
+        ),
+        (
+            "atomic_real_view_definition_refusal",
+            lambda: atomic_real_view_refuse(
+                "definition", "MATCH (d:ProjectionDefinitionState) SET d.semantic_hash='changed'"
+            ),
+        ),
+        (
+            "atomic_real_view_prior_history_refusal",
+            lambda: atomic_real_view_refuse("history", "CREATE (:Entity {view_key:$key})"),
+        ),
+        (
+            "atomic_real_view_receipt_conflict",
+            lambda: atomic_real_view_refuse(
+                "receipt", "CREATE (:ProjectionDerivationReceipt {receipt_key:$receipt,derivation_id:'conflicting'})"
+            ),
+        ),
+        ("atomic_real_view_writer_refusal_rollback", lambda: atomic_real_view_tampered_write("writer")),
+        ("atomic_real_view_provenance_refusal_rollback", lambda: atomic_real_view_tampered_write("provenance")),
+        ("atomic_real_view_postcondition_rollback", lambda: atomic_real_view_tampered_write("postcondition")),
+        ("atomic_real_view_competing_publishers", atomic_real_view_race),
+        ("atomic_real_view_replay_source_fence", atomic_real_view_replay_source_change),
+        ("atomic_real_view_profile_refusal", atomic_real_view_profile_refusal),
+        ("atomic_real_view_replay_mentions_damage", lambda: atomic_real_view_replay_provenance_damage("MENTIONS")),
+        ("atomic_real_view_replay_anchor_damage", lambda: atomic_real_view_replay_provenance_damage("CURRENT_ANCHOR")),
     ]
     proofs.extend(
         (f"prepared_production_refuses_{name}", lambda name=name, query=query: refuse_source(name, query))

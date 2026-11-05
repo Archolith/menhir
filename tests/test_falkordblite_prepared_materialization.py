@@ -275,6 +275,67 @@ def test_source_snapshot_derives_hash_from_admitted_episode() -> None:
     assert replace(plan, snapshot_json=json.dumps(data)).parameters()["after_view"] == params["after_view"]
 
 
+def _real_view_plan():
+    source = _source_plan()
+    data = json.loads(source.snapshot_json)
+    data[3] = []
+    steps = [("CREATE (n:Entity) RETURN n.uuid AS uuid", {"uuid": "new-view"}), ("RETURN ca, cd, cs", {})]
+    return prepared.PreparedRealViewScalar(
+        source.token, source.derivation_id, json.dumps(data), "view-key", json.dumps(steps), ("turn-a",)
+    )
+
+
+@pytest.mark.parametrize("value", [10, 10.0])
+def test_real_view_certificate_matches_grounding_turn_hash(value: float) -> None:
+    plan = _real_view_plan()
+    data = json.loads(plan.snapshot_json)
+    data[2]["sources"][0]["assertion"]["value"] = value
+    plan = replace(plan, snapshot_json=json.dumps(data))
+    params = plan.parameters()
+    expected = prepared.scalar_projection_present_hash(
+        prepared.SCALAR_STATE_PROJECTION,
+        plan.token.target,
+        value=10,
+        valid_at="2026-01-01T00:00:00+00:00",
+        contributor_ids=["a1"],
+        effective_tier="user",
+        episode_uuids=["turn-a"],
+    )
+    assert params["after_receipt"]["projection_hash"] == expected
+    assert params["after_work"]["certified_projection_hash"] == expected
+    assert params["after_work"]["applied_projection_hash"] == expected
+    assert params["expected_value"] == "10"
+    assert params["expected_anchors"] == ["turn-a"]
+
+
+@pytest.mark.parametrize(
+    "mutation,message",
+    [
+        ("retirement", "does not support retirement"),
+        ("wrong_anchor", "resolved anchors disagree"),
+        ("history_overflow", "history bound"),
+        ("foreign_history", "foreign View history"),
+        ("missing_provenance", "unsupported real View write trace"),
+    ],
+)
+def test_real_view_profile_refuses_unqualified_inputs(mutation: str, message: str) -> None:
+    plan = _real_view_plan()
+    if mutation == "retirement":
+        plan = replace(plan, token=replace(plan.token, target_present=False))
+    elif mutation == "wrong_anchor":
+        plan = replace(plan, anchors=("episode-a1",))
+    elif mutation == "missing_provenance":
+        plan = replace(plan, steps_json=json.dumps(json.loads(plan.steps_json)[:1]))
+    else:
+        data = json.loads(plan.snapshot_json)
+        data[3] = [{"props": {"view_subject_uuid": "foreign", "namespace": "tenant-b"}}]
+        if mutation == "history_overflow":
+            data[3] *= prepared.MAX_INPUTS + 1
+        plan = replace(plan, snapshot_json=json.dumps(data))
+    with pytest.raises(ValueError, match=message):
+        plan.parameters()
+
+
 @pytest.mark.parametrize(
     "mutation,message",
     [

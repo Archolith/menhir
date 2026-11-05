@@ -1,3 +1,11 @@
+## 2026-11-05 - Atomic real-View Falkor experiment (#109)
+
+- Added a bounded create/supersede candidate that captures the actual View and scalar provenance
+  write bodies and commits them with real projection work/receipt labels in one guarded query.
+  Source/history/time fences, native postconditions, late-failure rollback, replay and competing
+  publisher cases pass in the string-temporal profile. Refresh, retirement, native View temporals,
+  crash recovery and the full P1 transaction gate remain open; no runtime wiring changed.
+
 ## 2026-11-04 - FalkorDBLite compatibility spike (#109)
 
 - Fixed two shared scalar certification blockers found while qualifying the real View path:

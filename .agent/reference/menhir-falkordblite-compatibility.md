@@ -460,6 +460,57 @@ publication in one guarded native query, plus refusal, replay and competing-writ
 The complete disposable Falkor probe reports **93 checks: 83 PASS, 10 FAIL** (`BLOCKED`);
 the new real-materializer diagnostic passes and the ten existing failed capability gates remain.
 
+### Atomic real-View create/supersede candidate (2026-11-05)
+
+`PreparedRealViewScalar`, `prepare_real_view` and `commit_real_view` now qualify a restricted next
+step beyond the synthetic View payload. Preparation uses the same production assertion/evidence
+snapshot and real fold, then captures the actual materializer's two known write bodies: the View
+create/supersede statement and the scalar provenance rewrite. No mutation occurs during preparation;
+unknown mutation shapes fail closed. Both bodies execute as ordered correlated subqueries inside
+one native graph command with `ProjectionDefinitionState`, `ProjectionWorkState` and
+`ProjectionDerivationReceipt`. The candidate writes real `Entity` Views, `SUPERSEDES`, `MENTIONS`,
+`CURRENT_ANCHOR`, `CONTRIBUTED_TO` and `SUPERSEDED_ANCHOR` relationships, rather than `PreparedView`.
+
+The command revalidates definition, work generation, source/evidence identities, namespace fence,
+preparation deadline, receipt absence and prior history node properties/edge identities before
+writing. The history snapshot includes current and prior versions for the exact View key and
+refuses foreign subjects/namespaces. The evidence snapshot excludes the writer's advisory lock
+nonce/time fields from comparison; generation and fence identity remain authoritative. Otherwise
+the writer's own lock stamp would invalidate every replay.
+
+Each write's returned result is a required dependency of the next stage. Pure native UDF
+postconditions check the resulting current View, canonical value/time, contributors/authority,
+normalized grounding anchors, current-key marker, retained history count, supersession edge and
+live provenance edges before installing the work certificate and receipt. Replay rechecks source
+eligibility and these current-output/provenance postconditions without writing. The real installed
+hash reader agrees with the prepared certificate for both initial publication and supersession,
+including a numeric `10.0` input normalized to the persisted scalar string.
+
+All **16 focused native cases pass**: initial/superseding publication, exact no-write replay,
+late failure after work/receipt mutations for both creation and supersession, changed evidence,
+work, definition and prior history refusal, conflicting receipt, writer/provenance/postcondition
+rejection, competing publishers, replay source change, missing replay provenance, and explicit
+profile refusal. Failure checks compare the complete graph before/after; a failed certification
+restores the old current marker, history/provenance edges, work state and receipts. The same plan
+can then succeed. Competing workers produce one `apply` and one `stale_work` with one receipt.
+
+This remains an isolated experiment: **nondefault namespaces, count targets, diagnostic string
+temporals, present folds, creation/supersession only**, with the existing 32-source-record and
+30-second preparation bounds plus a 32-prior-View bound. Those are proof limits, not product limits
+or engine scan/memory bounds. Same-value refresh and retirement are explicitly refused before
+mutation. Native temporal ordering/types, complete historical-metadata drift detection on replay,
+process/crash/ambiguous-response recovery, scale, native constraint/bootstrap ownership and the
+remaining callback writers are still unqualified. Captured statement bodies are trusted experiment
+code, not a serialized job API. The remaining ten compatibility failures are unchanged; **P1 is
+not passed and P2 runtime wiring has not started**.
+
+Final verification: **65 focused local tests passed, 1 online test skipped**; default Ruff and
+format checks passed for all three changed Python files. The complete disposable Linux probe
+reports **109 checks: 99 PASS, 10 FAIL**, including all 16 new atomic real-View cases and orderly
+restart. The failed capability names are unchanged from the previous milestone. No full CI or
+native Windows qualification is claimed. Artifact graph audit remains unavailable because the
+local Menhir graph service is not reachable; document validation is performed separately.
+
 ### Atomic production-source snapshot follow-up (2026-11-04)
 
 `PreparedProductionScalar`, `prepare_production` and `commit_production` now implement that source

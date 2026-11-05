@@ -120,7 +120,10 @@ Run it through the compatibility probe; it is not a runtime backend adapter.
 `falkordblite_prepared_proof.py` exercises it against disposable storage through the same probe.
 It also runs the real assertion read and View-history writer. The source-bound candidate guards
 real provenance/evidence snapshots atomically but still writes synthetic Views; its separate
-string-temporal history diagnostic is not runtime qualification.
+string-temporal history diagnostic is not runtime qualification. Its separate `prepare_real_view` /
+`commit_real_view` candidate reuses the actual create/supersede and scalar provenance write bodies
+with real work/receipt labels in one guarded query. It tests late rollback, refusal, replay and
+competing publishers; refresh/retirement and native View temporals remain unqualified.
 
 `smoke/run_all.py` runs every self-serving smoke. Auth/OAuth: `auth_shapes_smoke.py`,
 `oauth_local_smoke.py`, `auth0_live_smoke.py`. Hook Center: `hook_center_live_smoke.py`,

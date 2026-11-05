@@ -88,7 +88,10 @@ Concept id: `runtime.stack`
   The prepared-materialization and prepared-proof helpers test a bounded numeric payload/certificate
   contract with snapshot and time fences. A source-bound variant now guards real provenance/evidence
   snapshots atomically but still writes synthetic Views. Real View history works only in a
-  string-temporal diagnostic; atomic history/certification integration remains unqualified on Falkor.
+  string-temporal diagnostic. A separate bounded candidate now combines the actual create/supersede
+  and scalar provenance writes with real work/receipt labels in one guarded Falkor query, including
+  late rollback and replay/race checks. It still requires string temporals and refuses same-value
+  refresh/retirement; complete history/certification integration remains unqualified on Falkor.
   The real scalar materializer now hashes the resolved evidence anchors used by the View writer.
   Its Neo4j lifecycle commit must supply a whole-transaction timeout no greater than the View's
   statement budget; explicit transactions cannot install per-statement deadlines after BEGIN.

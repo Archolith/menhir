@@ -2,6 +2,8 @@
 
 Uses Menhir's actual numeric fold/hash functions. The original experiment uses synthetic labels;
 the source-bound variant reads production assertion/evidence labels but still writes synthetic Views.
+The separate real-View candidate captures actual create/supersede and provenance query bodies and
+publishes them with real work/receipt labels in one guarded command, with diagnostic string temporals.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from menhir.domain.projection import (
 )
 from menhir.domain.projection_lifecycle import ProjectionWorkToken
 from menhir.domain.temporal import parse_iso8601
+from menhir.domain.typed_assertion import normalize_scalar
 from menhir.infrastructure.projection_lifecycle_repository_encoding import (
     _receipt_key,
     _target_json,
@@ -419,4 +422,279 @@ def prepare_production(graph: Any, token: ProjectionWorkToken, derivation_id: st
 def commit_production(graph: Any, plan: PreparedProductionScalar) -> str:
     result = graph.query(PRODUCTION_COMMIT, plan.parameters()).result_set
     _require(len(result) == 1 and len(result[0]) == 1, "invalid source commit result")
+    return str(result[0][0])
+
+
+# A separate, deliberately restricted real-View candidate. No runtime adapter uses it.
+REAL_VIEW_SNAPSHOT = (
+    PRODUCTION_SNAPSHOT[: PRODUCTION_SNAPSHOT.index("OPTIONAL MATCH (v:PreparedView")]
+    .replace("PreparedDefinition", "ProjectionDefinitionState")
+    .replace("PreparedWork", "ProjectionWorkState")
+    .replace(
+        "collect(properties(f)) AS fences",
+        "collect(CASE WHEN f IS NULL THEN null ELSE "
+        "{namespace_key:f.namespace_key,generation:f.generation,node:id(f)} END) AS fences",
+    )
+    + """
+OPTIONAL MATCH (v:Entity {view_key:$real_view_key})
+WITH definitions, work_nodes, works, inputs, v ORDER BY id(v) LIMIT $snapshot_input_limit
+OPTIONAL MATCH (v)-[link]-(other)
+WITH definitions, work_nodes, works, inputs, v, link, other ORDER BY id(v), id(link)
+WITH definitions, work_nodes, works, inputs, v,
+     collect(CASE WHEN link IS NULL THEN null ELSE
+       {node:id(link),kind:type(link),source:id(startNode(link)),target:id(endNode(link)),
+        props:properties(link)} END) AS links
+WITH definitions, work_nodes, works, inputs,
+     collect(CASE WHEN v IS NULL THEN null ELSE {node:id(v),props:properties(v),links:links} END) AS views
+OPTIONAL MATCH (r:ProjectionDerivationReceipt {receipt_key:$receipt_key})
+WITH definitions, work_nodes, works, inputs, views, r LIMIT 2
+WITH definitions, work_nodes, works, inputs, views, collect(properties(r)) AS receipts,
+     timestamp() AS clock
+"""
+)
+REAL_VIEW_READ = REAL_VIEW_SNAPSHOT + "RETURN definitions, works, inputs, views, receipts, clock"
+
+
+@dataclass(frozen=True)
+class PreparedRealViewScalar(PreparedScalar):
+    """Count create/supersede proof using the actual writer; string temporals only.
+
+    Refresh, retirement and general callback translation are intentionally refused. Captured write
+    bodies are trusted experiment code, not an input format exposed to callers or persisted jobs.
+    """
+
+    view_key: str
+    steps_json: str
+    anchors: tuple[str, ...]
+
+    def parameters(self) -> dict[str, object]:
+        data = json.loads(self.snapshot_json)
+        history = data[3]
+        _require(len(history) <= MAX_INPUTS, "View history bound exceeded")
+        _require(self.token.target_present, "real View proof does not support retirement")
+        _require(
+            all(
+                v["props"].get("view_subject_uuid") == self.token.target.subject_id
+                and v["props"].get("namespace") == self.token.target.namespace
+                and v["props"].get("view_kind") == "scalar_state"
+                for v in history
+            ),
+            "foreign View history",
+        )
+        data[3] = []  # The base candidate's synthetic View checks do not describe real history.
+        base = PreparedProductionScalar(self.token, self.derivation_id, json.dumps(data)).parameters()
+        rows = _production_inputs(data[2], self.token)
+        outcome = SCALAR_STATE_PROJECTION.fold(
+            self.token.target,
+            tuple(r for r in rows if scalar_projection_target(r) == self.token.target),
+            datetime.fromtimestamp(base["as_of_ms"] / 1000, tz=UTC),
+        )
+        _require(isinstance(outcome, ProjectionMaterialization), "real View proof requires a present fold")
+        state = outcome.payload
+        bridge = {
+            s["episode"]["uuid"]: s["turn"]["turn_id"]
+            for s in data[2]["sources"]
+            if s["episode"] is not None and s["turn"] is not None
+        }
+        anchors = tuple(sorted({bridge[e] for e in state.episode_uuids}))
+        _require(anchors == self.anchors, "resolved anchors disagree with source snapshot")
+        digest = scalar_projection_present_hash(
+            SCALAR_STATE_PROJECTION,
+            self.token.target,
+            value=state.value,
+            valid_at=state.valid_at,
+            contributor_ids=state.contributor_ids,
+            effective_tier=state.effective_tier,
+            episode_uuids=anchors,
+        )
+        after_work = dict(base["after_work"])
+        after_work.update(applied_projection_hash=digest, certified_projection_hash=digest)
+        after_receipt = {**base["after_receipt"], "projection_hash": digest}
+        steps = json.loads(self.steps_json)
+        _require(len(steps) == 2, "unsupported real View write trace")
+        _require("CREATE (n:Entity" in steps[0][0], "real View proof supports create/supersede only")
+        _require("RETURN ca, cd, cs" in steps[1][0], "missing real scalar provenance rewrite")
+        return {
+            **base,
+            "real_view_key": self.view_key,
+            "views": history,
+            "after_work": after_work,
+            "after_receipt": after_receipt,
+            "expected_value": normalize_scalar(state.value),
+            "expected_valid_at": state.valid_at,
+            "expected_contributors": sorted(state.contributor_ids),
+            "expected_tier": state.effective_tier,
+            "expected_anchors": list(anchors),
+            "expected_history": len(history) + 1,
+            "expected_uuid": steps[0][1]["uuid"],
+            "expected_ca": 1 if state.anchor_id else 0,
+            "expected_cd": len(state.contributed_delta_ids),
+            "expected_cs": len(state.superseded_anchor_ids),
+            "expected_anchor_ids": [state.anchor_id] if state.anchor_id else [],
+            "expected_delta_ids": list(state.contributed_delta_ids),
+            "expected_superseded_ids": list(state.superseded_anchor_ids),
+            "expected_old": steps[0][1].get("old"),
+            **{f"view_step{i}": step[1] for i, step in enumerate(steps)},
+        }
+
+
+def prepare_real_view(graph: Any, token: ProjectionWorkToken, derivation_id: str) -> PreparedRealViewScalar:
+    import re
+
+    from falkordblite_projection_proof import AutocommitProbeRepository
+
+    from menhir.infrastructure.scalar_projection_materializer import (
+        ScalarStateProjectionMaterializer,
+    )
+    from menhir.infrastructure.view_repository import ViewRepository
+
+    kind = ViewRepository.KINDS["scalar_state"]
+    attribute, scope, value_kind, unit = token.target.key
+    key = ViewRepository._key(
+        token.target.namespace,
+        "",
+        kind.key_discriminator({"attribute": attribute, "scope": scope, "value_kind": value_kind, "unit": unit}),
+        subject_uuid=token.target.subject_id,
+    )
+    keys = {**_keys(token), "real_view_key": key}
+    snapshot = graph.query(REAL_VIEW_READ, keys).result_set
+    _require(len(snapshot) == 1, "invalid real View snapshot")
+    data = snapshot[0]
+    rows = _production_inputs(data[2], token)
+    outcome = SCALAR_STATE_PROJECTION.fold(
+        token.target,
+        tuple(r for r in rows if scalar_projection_target(r) == token.target),
+        datetime.fromtimestamp(data[5] / 1000, tz=UTC),
+    )
+    _require(token.target_present and isinstance(outcome, ProjectionMaterialization), "present fold required")
+    steps: list[tuple[str, dict[str, Any]]] = []
+
+    class Capture(AutocommitProbeRepository):
+        def execute(self, query: str, params: dict[str, Any] | None = None, **_kwargs: Any):
+            parameters = dict(params or {})
+            # Only the exact two known mutation shapes are captured. Other mutations fail closed.
+            if "CREATE (n:Entity" in query:
+                steps.append((query, parameters))
+                return [{"uuid": parameters["uuid"]}]
+            if "RETURN ca, cd, cs" in query:
+                steps.append((query, parameters))
+                return [{"ca": 0, "cd": 0, "cs": 0}]
+            if re.search(r"\b(?:CREATE|MERGE|SET|DELETE|REMOVE)\b", query):
+                raise ValueError("unsupported real View mutation (refresh/retirement not qualified)")
+            return super().execute(re.sub(r"datetime\((\$\w+)\)", r"\1", query), parameters)
+
+    anchors = ScalarStateProjectionMaterializer()._materialize_state(
+        ViewRepository(Capture(graph)), outcome.payload, token
+    )
+    # A changed preflight read cannot authorize writes from a mixed source/View snapshot.
+    after = graph.query(REAL_VIEW_READ, keys).result_set
+    _require(len(after) == 1 and after[0][:5] == data[:5], "source/View changed during preparation")
+    plan = PreparedRealViewScalar(
+        token,
+        derivation_id,
+        json.dumps(data, sort_keys=True),
+        key,
+        json.dumps(steps, sort_keys=True),
+        tuple(sorted(anchors)),
+    )
+    plan.parameters()
+    return plan
+
+
+def real_view_statement(plan: PreparedRealViewScalar) -> tuple[str, dict[str, object]]:
+    import re
+
+    from falkordblite_projection_proof import _bind_structure_query
+
+    parameters = plan.parameters()
+    parts = [
+        REAL_VIEW_SNAPSHOT
+        + f"""
+WITH work_nodes, CASE
+ WHEN size(definitions)<>1 OR size(works)<>1 OR size(receipts)>1 THEN 'corrupt'
+ WHEN clock<$as_of_ms OR clock>=$valid_until_ms THEN 'expired'
+ WHEN definitions<>$definitions OR NOT ({_SOURCE_EQUAL}) THEN 'stale_inputs'
+ WHEN works=[$after_work] AND receipts=[$after_receipt] THEN 'replay'
+ WHEN works<>$works THEN 'stale_work'
+ WHEN NOT coalesce(views=$views,false) THEN 'stale_view'
+ WHEN receipts<>$receipts THEN 'receipt_conflict'
+ ELSE 'apply' END AS action
+WITH work_nodes, action, true AS stage_initial
+"""
+    ]
+    previous = "stage_initial"
+    for i, (query, params) in enumerate(json.loads(plan.steps_json)):
+        # Diagnostic strings only; the existing binder preserves literals/comments/parameter names.
+        query = re.sub(r"datetime\((\$\w+)\)", r"\1", query)
+        body = _bind_structure_query(query, params, f"view_step{i}")
+        returned = "uuid" if i == 0 else "{ca:ca,cd:cd,cs:cs}"
+        expected = "rows=[$expected_uuid]" if i == 0 else ("rows=[{ca:$expected_ca,cd:$expected_cd,cs:$expected_cs}]")
+        parts.append(f"""
+CALL {{ WITH action, {previous}
+ CALL {{ WITH action, {previous} WITH action, {previous} WHERE action='apply' AND {previous} {body} }}
+ RETURN collect({returned}) AS rows
+}}
+WITH work_nodes, action, Menhir109Guard.requireOk(
+ {previous} AND (action<>'apply' OR coalesce({expected},false)), 'real View writer refused') AS stage{i}
+""")
+        previous = f"stage{i}"
+    parts.append("""
+OPTIONAL MATCH (v:Entity {view_key:$real_view_key})
+WITH work_nodes, action, stage1, collect(v) AS history
+WITH work_nodes, action, stage1, history, [v IN history WHERE coalesce(v.view_current,true)] AS current
+CALL {
+ WITH current WITH head(current) AS head
+ OPTIONAL MATCH (e)-[:MENTIONS]->(head)
+ RETURN collect(coalesce(e.uuid,e.turn_id)) AS mentions
+}
+CALL {
+ WITH current WITH head(current) AS head
+ OPTIONAL MATCH (head)-[:CURRENT_ANCHOR]->(a)
+ RETURN collect(a.assertion_id) AS anchors
+}
+CALL {
+ WITH current WITH head(current) AS head
+ OPTIONAL MATCH (head)-[:CONTRIBUTED_TO]->(a)
+ RETURN collect(a.assertion_id) AS deltas
+}
+CALL {
+ WITH current WITH head(current) AS head
+ OPTIONAL MATCH (head)-[:SUPERSEDED_ANCHOR]->(a)
+ RETURN collect(a.assertion_id) AS excluded
+}
+CALL {
+ WITH current WITH head(current) AS head
+ OPTIONAL MATCH (head)-[:SUPERSEDES]->(old)
+ RETURN collect(CASE WHEN old IS NULL THEN null ELSE
+  {uuid:old.uuid,current:old.view_current,marker:coalesce(old.ss_view_key_current,'')} END) AS prior
+}
+WITH work_nodes, action, Menhir109Guard.requireOk(
+ stage1 AND (NOT action IN ['apply','replay'] OR
+ (size(history)=$expected_history AND size(current)=1 AND
+  current[0].uuid=$expected_uuid AND current[0].ss_value=$expected_value AND
+  current[0].namespace=$namespace AND current[0].view_subject_uuid=$subject AND
+  current[0].view_kind='scalar_state' AND current[0].ss_view_key_current=$real_view_key AND
+  NOT coalesce(current[0].retired,false) AND
+  current[0].valid_at=$expected_valid_at AND current[0].scalar_contributors=$expected_contributors AND
+  current[0].scalar_effective_tier=$expected_tier AND current[0].episode_uuids=$expected_anchors AND
+  size(mentions)=size($expected_anchors) AND all(e IN $expected_anchors WHERE e IN mentions) AND
+  size(anchors)=size($expected_anchor_ids) AND all(a IN $expected_anchor_ids WHERE a IN anchors) AND
+  size(deltas)=size($expected_delta_ids) AND all(a IN $expected_delta_ids WHERE a IN deltas) AND
+  size(excluded)=size($expected_superseded_ids) AND all(a IN $expected_superseded_ids WHERE a IN excluded) AND
+  (($expected_old IS NULL AND size(prior)=0) OR
+   prior=[{uuid:$expected_old,current:false,marker:''}]))),
+ 'real View postcondition failed') AS certified
+FOREACH (w IN CASE WHEN action='apply' AND certified THEN work_nodes ELSE [] END |
+ SET w=$after_work
+ CREATE (r:ProjectionDerivationReceipt) SET r=$after_receipt
+)
+RETURN action
+""")
+    return "\n".join(parts), parameters
+
+
+def commit_real_view(graph: Any, plan: PreparedRealViewScalar) -> str:
+    query, parameters = real_view_statement(plan)
+    result = graph.query(query, parameters).result_set
+    _require(len(result) == 1 and len(result[0]) == 1, "invalid real View commit result")
     return str(result[0][0])
