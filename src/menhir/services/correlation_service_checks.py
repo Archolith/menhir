@@ -161,6 +161,8 @@ class CorrelationChecksMixin:
 
                 final_action, details = await self.classify_pair(uuid, other_uuid, score)
                 if final_action == "none":
+                    if details is not None:
+                        break  # a dropped pair ends the node's scan, as a match would
                     continue
 
                 if final_action == "related":
