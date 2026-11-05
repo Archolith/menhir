@@ -554,8 +554,14 @@ class GraphitiClient:
 
 
     async def _count_existing_indices(self) -> int:
-        """Query Neo4j for current index count."""
+        """Count native index records for startup diagnostics, not readiness evidence."""
+        from graphiti_core.driver.driver import GraphProvider
+
         try:
+            if getattr(self.client.driver, "provider", None) == GraphProvider.FALKORDB:
+                result = await self.client.driver.execute_query("CALL db.indexes() YIELD label RETURN count(label) AS cnt")
+                records = result[0] if result else []
+                return int(records[0]["cnt"]) if records else 0
             result = await self.client.driver.execute_query("SHOW INDEXES YIELD name RETURN count(*) AS cnt")
             return result.records[0]["cnt"] if result.records else 0
         except (OSError, RuntimeError, AttributeError) as exc:

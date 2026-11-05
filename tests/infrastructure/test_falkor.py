@@ -132,22 +132,46 @@ def test_injected_backend_assembly_failure_does_not_silently_degrade(tmp_path, m
 
 @pytest.mark.online
 @pytest.mark.asyncio
-async def test_shared_bootstrap_temporal_graphiti_and_restart(tmp_path: Path):
+async def test_shared_bootstrap_temporal_graphiti_and_restart(tmp_path: Path, monkeypatch):
     pytest.importorskip("redislite.falkordb_client")
     from graphiti_core.nodes import EntityNode
 
     from menhir.config import MemorySettings
-    from menhir.core.bootstrap import build_memory_services
+    from menhir.core.bootstrap import build_memory_services, prepare_memory_runtime
 
     repo = FalkorLiteRepository(tmp_path / "memory.rdb", database="menhir_test")
     built = None
     try:
         built = build_memory_services(MemorySettings(local_llm_embed_model="test-embedding"), graph_repository=repo)
         driver = repo.graphiti_driver()
+        original_pid = repo._get_db().client.pid
+        assert repo._get_db().client.connection_pool.connection_kwargs["retry"].get_retries() == 0
+        assert driver.client.connection.connection_pool.connection_kwargs["retry"].get_retries() == 0
         assert built.neo4j is repo and built.graph_adapter.neo4j is repo
         assert built.graphiti_client.client.driver is driver
         if driver._init_task is not None:
             await driver._init_task
+        repo.execute("CREATE (:Entity {uuid:'legacy-schema',source:'user',user_flagged:true})")
+        assert not built.graph_adapter.phase_one_schema_ready()
+        execute = repo.execute
+
+        def interrupted_backfill(query, *args, **kwargs):
+            if "SET n.type" in query:
+                raise RuntimeError("injected data-backfill interruption")
+            return execute(query, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(repo, "execute", interrupted_backfill)
+            with pytest.raises(RuntimeError, match="schema remains absent"):
+                await prepare_memory_runtime(built)
+        assert not built.graph_adapter.phase_one_schema_ready(), "operational DDL hid failed data defaults"
+        ready = await prepare_memory_runtime(built)
+        assert ready["schema"]["status"] == "ok" and not ready["schema"]["skipped"]
+        assert built.graph_adapter.phase_one_schema_ready()
+        assert repo.execute(
+            "MATCH (n:Entity {uuid:'legacy-schema'}) RETURN n.source AS source,n.user_flagged AS flagged"
+        ) == [{"source": "user", "flagged": True}]
+        assert (await prepare_memory_runtime(built))["schema"]["skipped"]
         today = datetime.now(UTC).date().isoformat()
         reminder = built.graph_adapter.create_temporal(
             content="native runtime reminder", target_date=today, namespace="tenant-a"
@@ -180,6 +204,7 @@ async def test_shared_bootstrap_temporal_graphiti_and_restart(tmp_path: Path):
         repo.close()
     reopened = FalkorLiteRepository(repo.path, database=repo.database)
     try:
+        assert reopened._get_db().client.pid != original_pid, "restart reattached to the old server"
         assert reopened.execute("MATCH (n:Entity {uuid:'shared-node'}) RETURN n.name AS name") == [{"name": "shared"}]
     finally:
         reopened.close()

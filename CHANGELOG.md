@@ -1,5 +1,9 @@
 ## 2026-11-05 - Falkor runtime integration (#109)
 
+- Added native phase-one schema/readiness: operational property/kind checks, native uniqueness,
+  bounded enforcement waits and shared UTC-clock data defaults. Startup retries incomplete
+  backfills and refuses duplicate identity data. Fixed Graphiti's startup index-count query and
+  disabled underlying Redis transport retries on both shared clients to preserve ambiguous failures.
 - Added the internal shared Lite repository/bootstrap seam and injectable Graphiti driver.
   Canonical UTC instant encoding matches Graphiti; the active TEMPORAL path now uses native
   create/list/complete queries and UTC calendar bounds. A live shared-graph test verifies

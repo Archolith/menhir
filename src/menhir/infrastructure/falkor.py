@@ -65,10 +65,12 @@ class FalkorLiteRepository:
             if self._closed:
                 raise RuntimeError("Falkor repository is closed")
             if self._db is None:
+                from redis.backoff import NoBackoff
+                from redis.retry import Retry
                 from redislite.falkordb_client import FalkorDB
 
                 self.path.parent.mkdir(parents=True, exist_ok=True)
-                self._db = FalkorDB(str(self.path))
+                self._db = FalkorDB(str(self.path), retry=Retry(NoBackoff(), 0))
             return self._db
 
     def graphiti_driver(self) -> Any:
@@ -78,8 +80,14 @@ class FalkorLiteRepository:
             if self._driver is None:
                 from falkordb.asyncio import FalkorDB
                 from graphiti_core.driver.falkordb_driver import FalkorDriver
+                from redis.asyncio.retry import Retry
+                from redis.backoff import NoBackoff
+                from redis.retry import Retry as SyncRetry
 
-                client = FalkorDB(unix_socket_path=db.client.socket_file)
+                # The SDK first runs a synchronous INFO probe with the supplied connection
+                # options. Install its async retry policy only after that constructor returns.
+                client = FalkorDB(unix_socket_path=db.client.socket_file, retry=SyncRetry(NoBackoff(), 0))
+                client.connection.set_retry(Retry(NoBackoff(), 0))
                 self._driver = FalkorDriver(falkor_db=client, database=self.database)
             return self._driver
 

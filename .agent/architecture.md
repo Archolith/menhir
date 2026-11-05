@@ -104,7 +104,11 @@ Concept id: `runtime.stack`
   The internal `FalkorLiteRepository` now owns one file/server and supplies Graphiti's client on
   the same socket/graph through `build_memory_services(graph_repository=...)`. This is not exposed
   by CLI/environment configuration. The TEMPORAL owner has native create/read/complete variants;
-  normal enrichment/recall, Menhir schema readiness and the remaining query owners are still open.
+  core phase-one schema/readiness now uses native operational index/constraint metadata and shared
+  data-default backfills. Failed validation or incomplete backfills refuse writer startup; redundant
+  bootstrap is skipped when those requirements remain complete. Normal enrichment/recall, feature
+  activation DDL and remaining query owners are still open. Both Redis clients have explicit zero
+  transport retries.
   Unsupported callback transactions fail before invocation; no query translator is installed.
 - `archolith-graphiti-core==0.31.2.post2` (Archolith soft fork of `getzep/graphiti`,
   baseline `v0.31.2`; it still imports as `graphiti_core`). Menhir policy uses its explicit

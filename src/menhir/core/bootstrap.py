@@ -319,7 +319,12 @@ async def prepare_memory_runtime(
         }
     else:
         # These adapter calls are synchronous and can block the event loop on startup.
-        bootstrap_result = await asyncio.to_thread(artifacts.graph_adapter.bootstrap_phase_one)
+        bootstrap_kwargs = (
+            {"require_graphiti": graphiti_in_play}
+            if isinstance(getattr(artifacts, "neo4j", None), FalkorLiteRepository)
+            else {}
+        )
+        bootstrap_result = await asyncio.to_thread(artifacts.graph_adapter.bootstrap_phase_one, **bootstrap_kwargs)
         # Bootstrap success means only that every DDL statement returned without raising. It is
         # not proof that the required schema exists: Neo4j's IF NOT EXISTS can no-op when a
         # same-named ordinary index or wrong-shaped constraint occupies the name. Re-read the

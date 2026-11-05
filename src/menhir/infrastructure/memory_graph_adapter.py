@@ -30,6 +30,7 @@ from menhir.infrastructure.correlation_queries import CorrelationRepository
 from menhir.infrastructure.falkor import FalkorLiteRepository
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.schema import (
+    PhaseOneSchemaResult,
     PHASE_ONE_REQUIRED_CONSTRAINTS,
     GRAPHITI_OWNED_INDEXES,
     PHASE_ONE_REQUIRED_INDEXES,
@@ -48,20 +49,6 @@ __all__ = [
     "is_context_window_error_text",
     "is_recoverable_context_window_error",
 ]
-
-
-@dataclass
-class PhaseOneSchemaResult:
-    """Result shape for phase-1 schema bootstrap."""
-
-    success: bool
-    queries_executed: int
-    failures: list[str]
-
-    @property
-    def query_failures(self) -> list[str]:
-        """Compatibility alias for callers that expect a descriptive failure list."""
-        return self.failures
 
 
 @dataclass
@@ -131,6 +118,10 @@ class MemoryGraphAdapter:
         Graphiti index there still refuses the writer, because there it means the build failed
         rather than never ran.
         """
+        if isinstance(self.neo4j, FalkorLiteRepository):
+            from menhir.infrastructure.falkor_schema import phase_one_schema_ready
+
+            return phase_one_schema_ready(self.neo4j, require_graphiti=require_graphiti)
         required = [
             name
             for name in PHASE_ONE_REQUIRED_INDEXES
@@ -291,8 +282,12 @@ class MemoryGraphAdapter:
         )
         return service.run_pending(owner_id=owner_id, limit=limit, namespaces=namespaces)
 
-    def bootstrap_phase_one(self) -> PhaseOneSchemaResult:
+    def bootstrap_phase_one(self, *, require_graphiti: bool = False) -> PhaseOneSchemaResult:
         """Apply phase-1 schema fields and indexes in an idempotent manner."""
+        if isinstance(self.neo4j, FalkorLiteRepository):
+            from menhir.infrastructure.falkor_schema import bootstrap_phase_one
+
+            return bootstrap_phase_one(self.neo4j, require_graphiti=require_graphiti)
         queries = get_phase1_bootstrap_queries()
         failures: list[str] = []
         for query in queries:
@@ -309,6 +304,10 @@ class MemoryGraphAdapter:
     def retire_obsolete_indexes(self) -> list[str]:
         """Drop RETIRED_INDEXES; return failure messages. Separate from bootstrap_phase_one
         because that is skipped once the required set is online, i.e. on every existing install."""
+        if isinstance(self.neo4j, FalkorLiteRepository):
+            # Retired Neo4j index names have no native counterpart; never drop Graphiti's
+            # label-shared Falkor index to emulate a Neo4j DROP INDEX by name.
+            return []
         failures: list[str] = []
         for query in get_retired_index_queries():
             try:

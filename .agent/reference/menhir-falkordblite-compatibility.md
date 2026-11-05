@@ -184,6 +184,37 @@ environment passed **19 repository tests**, including the live shared-runtime/re
 Default Ruff passes for the new owner/tests; scoped correctness checks pass for existing owners.
 No full CI, public backend readiness or complete enrichment/recall qualification is claimed.
 
+### Native phase-one startup/readiness (2026-11-05)
+
+`infrastructure/falkor_schema.py` now implements the existing core startup contract through
+`MemoryGraphAdapter`, so the shared runtime can call `prepare_memory_runtime`. Required indexes
+map to native label/property/kind metadata; uniqueness uses `GRAPH.CONSTRAINT` and operational
+`db.constraints` records. An ordinary index cannot satisfy uniqueness. Composite property order
+is ignored because native uniqueness is defined over the property set. Bootstrap covers the
+phase-one required indexes and all ten unconditional uniqueness rules; optional performance indexes
+and feature-activation DDL remain unmapped. Graphiti-owned fulltext/range requirements are conditional
+on the existing availability decision. No Neo4j-named DROP is applied to shared native indexes.
+
+Enforcement must become operational within a bounded wait before data defaults run. Existing
+node/edge backfill policy is shared with an explicit UTC string clock; Neo4j retains `datetime()`.
+Readiness also checks the existing version stamps and unresolved conflict defaults. Thus a failed
+backfill is retried even when DDL is already complete, without introducing another persistent marker.
+Completed startup skips bootstrap. Existing trust/flag fields are retained; duplicate ingest keys
+refuse bootstrap before data defaults change. No duplicate rows are deleted or repaired automatically.
+
+The actual startup path exposed a Neo4j-only index-count query in `GraphitiClient`; its native
+variant now handles Falkor's tuple result. It also exposed transport replay below the repository:
+the pinned Redis constructor defaults allow ten retries. Both client pools now explicitly use zero
+retries. The Falkor async SDK first makes a sync INFO probe, so construction uses the sync retry
+object, then installs the async zero-retry policy before Graphiti can dispatch mutations.
+
+Verification: **183 local tests passed, 6 skipped**; **32 tests passed** in the disposable Falkor
+environment, and **5 existing Neo4j bootstrap integration tests passed**. The final shared-runtime
+case also passed a targeted rerun asserting a different server PID after close/reopen. Live checks
+cover startup interruption/recovery, idempotent readiness, retained user metadata, duplicate-data
+refusal and both zero-retry pools. Static checks pass on the changed owners. No full CI claimed.
+Normal `add_memory` enrichment/recall remains the next runtime slice; backend selection stays internal.
+
 ## Reproduce
 
 Use a disposable **Linux** Python 3.12 environment. The instrument accepts no existing database
