@@ -80,7 +80,11 @@ def _current_view_keys(tx: Any, token: ProjectionWorkToken) -> tuple[str, ...]:
 
 
 class ScalarStateProjectionMaterializer:
-    """Materialize exactly one scalar projection target inside a T5 fenced transaction."""
+    """Materialize one scalar target inside a T5 fenced transaction bounded by the View write budget.
+
+    Use ``commit(..., timeout_s=SAGA_MUTATION_TIMEOUT_S)`` (or a narrower bound) on Neo4j;
+    its explicit transactions cannot apply the View writer's statement deadline after BEGIN.
+    """
 
     def __init__(self, *, as_of: datetime | None = None, source: str = "scalar-state-lifecycle") -> None:
         self._as_of = as_of
@@ -118,7 +122,7 @@ class ScalarStateProjectionMaterializer:
             outcome = SCALAR_STATE_PROJECTION.fold(token.target, slot_rows, evaluation_time)
             if isinstance(outcome, ProjectionMaterialization):
                 state = outcome.payload
-                self._materialize_state(views, state, token)
+                episode_uuids = self._materialize_state(views, state, token)
                 if len(_current_view_keys(tx, token)) != 1:
                     raise ProjectionLifecycleCorruptionError(
                         "scalar materialization did not leave exactly one current View"
@@ -130,7 +134,7 @@ class ScalarStateProjectionMaterializer:
                     valid_at=state.valid_at,
                     contributor_ids=state.contributor_ids,
                     effective_tier=state.effective_tier,
-                    episode_uuids=state.episode_uuids,
+                    episode_uuids=episode_uuids,
                 )
             elif isinstance(outcome, (ProjectionAbstention, ProjectionRetirement)):
                 self._retire_slot(tx, views, token)
@@ -161,7 +165,14 @@ class ScalarStateProjectionMaterializer:
         if _current_view_keys(tx, token):
             raise ProjectionLifecycleCorruptionError("scalar retirement left a current View installed")
 
-    def _materialize_state(self, views: ViewRepository, state: Any, token: ProjectionWorkToken) -> None:
+    def _materialize_state(self, views: ViewRepository, state: Any, token: ProjectionWorkToken) -> tuple[str, ...]:
+        # The fold names source episodes; the View writer may resolve those to grounding turns.
+        # Certify the independently resolved anchors supplied to the writer, rather than comparing
+        # the installed View against a hash of the pre-normalization aliases.
+        episode_uuids = views._resolve_evidence_anchors(
+            list(state.episode_uuids),
+            namespace=token.target.namespace,
+        )
         audit = {
             "scalar_contributors": list(state.contributor_ids),
             "scalar_effective_tier": state.effective_tier,
@@ -181,7 +192,7 @@ class ScalarStateProjectionMaterializer:
             valid_at=state.valid_at,
             source=self._source,
             audit=audit,
-            episode_uuids=list(state.episode_uuids),
+            episode_uuids=episode_uuids,
         )
         if result.get("stale_skipped"):
             raise ProjectionLifecycleCorruptionError(
@@ -201,3 +212,4 @@ class ScalarStateProjectionMaterializer:
                 logger.exception(
                     "scalar_state provenance-edge draw failed for view %s (non-fatal)", view_uuid
                 )
+        return tuple(episode_uuids)

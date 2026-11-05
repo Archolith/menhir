@@ -571,6 +571,38 @@ def production_schema_proofs(db: Any) -> list[tuple[str, Callable[[], object]]]:
         finally:
             db.client.connection_pool.disconnect()
 
+    def real_materializer_string_temporals() -> object:
+        from dataclasses import replace
+
+        from menhir.infrastructure.realization_coverage_repository import ScalarStateProjectionHashSource
+        from menhir.infrastructure.scalar_projection_materializer import ScalarStateProjectionMaterializer
+
+        graph, _, token = work_fixture("real_materializer_string_temporals")
+        repository = StringTemporalRepository(graph)
+        materialize = ScalarStateProjectionMaterializer()
+        first_hash = materialize(repository, token)
+        expected = ScalarStateProjectionHashSource(repository).current_projection_hash(
+            definition=SCALAR_STATE_PROJECTION, target=token.target, target_present=True
+        )
+        _require(first_hash == expected, "real materializer disagrees with installed hash")
+        rows = graph.query("MATCH (n:Entity {view_current:true}) RETURN n.episode_uuids").result_set
+        _require(rows == [[["turn-a"]]], f"episode bridge was not normalized: {rows}")
+        graph.query(
+            "MATCH (a:TypedAssertion) CREATE (b:TypedAssertion) SET b=properties(a) "
+            "SET b.assertion_id='next', b.value=11, b.value_json='11', b.valid_at='2026-02-01T00:00:00Z'"
+        )
+        second_hash = materialize(repository, replace(token, generation=2))
+        _require(second_hash != first_hash, "new value retained old certification hash")
+        history = graph.query(
+            "MATCH (n:Entity)-[:SUPERSEDES]->(o:Entity) RETURN n.view_current, o.view_current"
+        ).result_set
+        _require(history == [[True, False]], f"materializer history drift: {history}")
+        absent_hash = materialize(repository, replace(token, generation=3, target_present=False))
+        _require(absent_hash != second_hash, "retirement retained present hash")
+        rows = graph.query("MATCH (n:Entity) RETURN n.view_current ORDER BY n.uuid").result_set
+        _require(rows == [[False], [False]], f"retirement lost history or retained current: {rows}")
+        return "real materializer/hash reader agree after episode normalization; history/retirement pass with string temporals only; no atomic certification claim"
+
     def view_history(repository_type: type[Repository]) -> object:
         graph, _ = fixture("view_history_" + repository_type.__name__)
         views = ViewRepository(repository_type(graph))
@@ -619,6 +651,7 @@ def production_schema_proofs(db: Any) -> list[tuple[str, Callable[[], object]]]:
         ("prepared_production_competing_publishers", source_race),
         ("production_scalar_view_history", lambda: view_history(Repository)),
         ("production_scalar_view_history_string_temporals", lambda: view_history(StringTemporalRepository)),
+        ("production_scalar_materializer_string_temporals", real_materializer_string_temporals),
     ]
     proofs.extend(
         (f"prepared_production_refuses_{name}", lambda name=name, query=query: refuse_source(name, query))

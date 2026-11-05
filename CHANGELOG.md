@@ -1,5 +1,10 @@
 ## 2026-11-04 - FalkorDBLite compatibility spike (#109)
 
+- Fixed two shared scalar certification blockers found while qualifying the real View path:
+  hash the writer's resolved evidence anchors, and allow explicit transaction budgets to honor
+  View statement deadlines. Added live Neo4j history/refresh/retirement and certification-rollback
+  regressions plus a Falkor string-temporal materializer diagnostic. Falkor atomic certification
+  and native View temporals remain gated.
 - Added a full-project compound candidate reusing the actual structural writer, with mtime/scan
   freshness, native UDF postcondition rollback, operational uniqueness constraints, full/partial
   scan parity and failure/race checks. Restart now verifies project data, temporal values and UDF

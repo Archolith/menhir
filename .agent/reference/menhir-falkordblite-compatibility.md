@@ -430,6 +430,36 @@ P1 remains unpassed. The synthetic View overwrite must still be replaced with gu
 history/provenance writes in the same commit as the work certificate and receipt, including
 unchanged-value refresh, retirement, rejection/rollback, concurrent publication and replay.
 
+### Real materializer and Neo4j certification oracle (2026-11-04)
+
+Crossing the actual materializer/View/hash-reader boundary exposed two shared Menhir bugs:
+
+- The assertion read returns a source episode UUID, while the View writer resolves it to its
+  grounding turn. The expected certificate hashed the episode alias and therefore rejected the
+  correctly installed View. The materializer now independently resolves the evidence anchors
+  before writing and uses those same IDs for the expected hash; the installed hash is still checked.
+- The View writer passes `timeout_s` to repository writes, but the explicit transaction adapter
+  did not accept it. The adapter now requires an equal or narrower whole-transaction budget,
+  forwarded through `ProjectionLifecycleRepository.commit` to Neo4j `begin_transaction(timeout=...)`.
+  Unbounded generic callbacks retain their existing default. Invalid or unenforceable statement
+  budgets fail before RUN rather than being ignored. This adds no Falkor transaction emulation.
+
+A disposable Neo4j 5.26.30 Community instance passes the real episode-to-turn bridge, initial
+certificate, history/supersession, same-value authority refresh, retirement, and conflicting-receipt
+rollback. A rejected certificate leaves the prior current View and history unchanged. The selected
+online materializer/lifecycle/atomicity files pass **37 tests**; the focused local transaction,
+View, hash-reader and neighboring Falkor contract regression set passes **122 tests**, with
+**8 online tests skipped**.
+These are focused results, not full-suite CI or Falkor atomicity evidence.
+
+The existing Falkor instrument also exercises the actual materializer and installed hash reader
+through its explicitly diagnostic string-temporal facade. This checks normalized provenance and
+real history/retirement on the pinned engine; it does not combine those autocommit writes with a
+work receipt or qualify temporal types. P1 still requires real View/history, receipt and certificate
+publication in one guarded native query, plus refusal, replay and competing-writer coverage.
+The complete disposable Falkor probe reports **93 checks: 83 PASS, 10 FAIL** (`BLOCKED`);
+the new real-materializer diagnostic passes and the ten existing failed capability gates remain.
+
 ### Atomic production-source snapshot follow-up (2026-11-04)
 
 `PreparedProductionScalar`, `prepare_production` and `commit_production` now implement that source
