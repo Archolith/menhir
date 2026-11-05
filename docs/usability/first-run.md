@@ -85,9 +85,9 @@ call in their first sessions.
 [#431]: https://github.com/Archolith/menhir/issues/431
 [#432]: https://github.com/Archolith/menhir/issues/432
 [#433]: https://github.com/Archolith/menhir/issues/433
-[#498]: https://github.com/Archolith/menhir/issues/498
 [#434]: https://github.com/Archolith/menhir/issues/434
 [#435]: https://github.com/Archolith/menhir/issues/435
 [#439]: https://github.com/Archolith/menhir/issues/439
 [#440]: https://github.com/Archolith/menhir/issues/440
 [#441]: https://github.com/Archolith/menhir/issues/441
+[#498]: https://github.com/Archolith/menhir/issues/498
