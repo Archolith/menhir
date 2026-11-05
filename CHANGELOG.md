@@ -1,5 +1,8 @@
 ## 2026-11-04 - FalkorDBLite compatibility spike (#109)
 
+- `scripts/falkordblite_prepared_materialization.py`, `scripts/falkordblite_prepared_proof.py`:
+  bounded numeric prepared-write candidate with atomic payload/certificate, snapshot/time fences,
+  refusal, replay and worker-exit checks; offline contracts in `tests/test_falkordblite_prepared_materialization.py`.
 - `scripts/falkordblite_projection_proof.py`: real Menhir materialization rejection counterexamples
   and a guarded single-query publication candidate with injected-failure and competing-writer checks;
   integrated into the isolated probe. The callback transaction gate remains unpassed.

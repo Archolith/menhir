@@ -111,6 +111,8 @@ database only, pinned fork, failure injection, search and restart checks. See
 Its helper `falkordblite_projection_proof.py` exercises real Menhir materialization callbacks
 and a single-query definition-publication candidate, including refusal/failure and publisher races.
 Run it through the compatibility probe; it is not a runtime backend adapter.
+`falkordblite_prepared_materialization.py` holds the bounded numeric prepared-write contract;
+`falkordblite_prepared_proof.py` exercises it against disposable storage through the same probe.
 
 `smoke/run_all.py` runs every self-serving smoke. Auth/OAuth: `auth_shapes_smoke.py`,
 `oauth_local_smoke.py`, `auth0_live_smoke.py`. Hook Center: `hook_center_live_smoke.py`,

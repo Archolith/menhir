@@ -25,7 +25,7 @@ Linux wheels, with no Windows wheel. The Linux run below does not qualify the Wi
 
 Use a disposable **Linux** Python 3.12 environment. The instrument accepts no existing database
 path or service address: every run creates a new temporary embedded database and removes it.
-Run from this checkout, retaining `pyproject.toml`, `src/menhir` and both probe scripts;
+Run from this checkout, retaining `pyproject.toml`, `src/menhir` and the `scripts/falkordblite_*.py` helpers;
 the script reads the fork pin there and loads this checkout's repository code.
 
 ```sh
@@ -134,13 +134,52 @@ support arbitrary client callbacks, structure batches, post-write Python hash ch
 existing/invalid data shapes. Process death, transport-level ambiguous commits and complete
 native uniqueness/readiness qualification are not claimed.
 
-The next design should prepare a bounded materialization payload before mutation, then validate
-every relevant input/generation and persist payload plus receipt atomically. Its rejection,
-hash/provenance and concurrent-input behavior must match the existing callback contract before
-an adapter can proceed. This is a proposed contract change, not a proven solution or evidence
-that an engine rewrite is necessary. Do not move folds outside transactions without that proof.
+The prepared-materialization experiment below explores a bounded payload and atomic receipt.
+Its production hash/provenance and concurrent-input behavior must match the existing callback
+contract before an adapter can proceed. Do not move production folds outside transactions
+without that proof; no engine rewrite has been demonstrated necessary.
 Large single-query batches must also account for upstream memory/rollback risks #1482/#1062;
 this experiment deliberately uses small fixtures and does not run their crash/OOM reproducers.
+
+### Prepared numeric materialization follow-up (2026-11-04)
+
+`falkordblite_prepared_materialization.py` implements an isolated candidate contract;
+`falkordblite_prepared_proof.py` owns its live cases. Neither is imported by production runtime.
+Preparation uses Menhir's actual `SCALAR_STATE_PROJECTION.fold` and canonical scalar hashes.
+An immutable JSON snapshot is retained; payload, hash and certificate fields are derived again
+at dispatch, rather than accepting a caller-supplied result hash or arbitrary write callback.
+
+The snapshot includes definition properties, work state, all synthetic input properties for the
+subject/namespace, the old synthetic View and the generation's receipt. The commit query checks
+all of these before replacing the payload and recording the receipt/certificate together.
+Exact committed post-state permits a no-write replay; changed input, work, View or receipt
+state is never blindly acknowledged as a replay.
+
+The database clock bounds preparation to 30 seconds or the earliest future assertion activation,
+whichever comes first. The query refuses an expired plan. A fresh fold after activation includes
+the newly eligible assertion. This is validity at the atomic-query decision point, not a promise
+that a View remains current indefinitely. Recovery after expiration needs a separate read-only
+receipt/freshness check; that production recovery path has not been implemented.
+
+The candidate deliberately accepts only numeric scalar targets with explicit namespaces and at
+most 32 input rows. A bounded read fetches one extra row to detect overflow instead of certifying
+a truncated set. This bounds result/write payload sizes, not the engine's total scan/sort memory.
+Other scalar kinds fail closed. Stored payload identity, contributors, episodes and hash are
+covered by offline contract checks; no assertion/provenance relationship closure is represented.
+
+Live cases cover present/retired payloads and exact replay, source modification/insertion/deletion,
+changed definition/generation/View, conflicting receipt, duplicate View identity, injected failure
+after payload/certificate writes, competing publishers, activation-time expiry, namespace isolation,
+input overflow, and replay after committed state changes. A child writer exits after the database
+reply but before acknowledging to its parent; the parent-retained plan recognizes the persisted
+result without mutating it again. This is a worker-process-loss experiment, not a database crash,
+a real transport-fault injection or recovery after loss of the parent and its retained plan.
+
+**This establishes a viable bounded prepared-write mechanism, not full P1 acceptance.** It uses
+synthetic `Prepared*` labels, JSON View payloads and flat input properties. Binding the snapshot
+to real materializable-assertion joins, authority/provenance changes, real View retirement/history,
+all supported value types and every remaining transaction writer is still required. Production
+code and the old callback path are unchanged; their earlier negative gates remain failures.
 
 Future implementation gates are indexed in [the memory backlog](../memory-backlog.md#memorybacklogembedded_graph).
 The [Archolith FalkorDBLite fork](https://github.com/Archolith/falkordblite) owns the separate
@@ -177,9 +216,15 @@ Redis pipelining or MULTI/EXEC alone is insufficient evidence. Retain Neo4j mean
   projection checks run as executable assertions in the disposable Falkor probe.
 - Final local selection also included `tests/infrastructure/test_scalar_projection_materializer.py`:
   25 passed, 4 online checks skipped; default Ruff and the scoped correctness/async gates passed.
-- Final expanded native probe: 22 checks, 13 passing and 9 failed compatibility gates. The nine
+- Transaction follow-up probe, before the prepared extension: 22 checks, 13 passing and 9 failed gates. The nine
   failures are the prior seven incompatibilities plus the two Menhir materialization refusal
   counterexamples; the publication candidate and orderly-restart checks passed. Exit code remains 1.
+- Prepared follow-up offline selection: the prepared-materialization tests, compatibility tests,
+  projection lifecycle repository tests and scalar materializer tests: 43 passed, 4 online checks
+  skipped, one upstream Pydantic warning. Default Ruff and F811/F821/ASYNC checks passed.
+- Final prepared live run: 39 total checks, 30 passing and the same nine failed compatibility
+  gates; all 17 prepared-materialization cases passed, including orderly restart afterward.
+  The aggregate decision remains BLOCKED because the existing callback/runtime paths are unchanged.
 
 ## Upstream evidence
 
