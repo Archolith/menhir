@@ -27,6 +27,7 @@ from menhir.infrastructure.episode_lifecycle import TRANSIENT_RETRY_CAP
 from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.infrastructure.consolidation_queries import ConsolidationRepository
 from menhir.infrastructure.correlation_queries import CorrelationRepository
+from menhir.infrastructure.falkor import FalkorLiteRepository
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.schema import (
     PHASE_ONE_REQUIRED_CONSTRAINTS,
@@ -67,7 +68,7 @@ class PhaseOneSchemaResult:
 class MemoryGraphAdapter:
     """Thin façade over graph storage; delegates to focused sub-repositories."""
 
-    neo4j: Neo4jRepository
+    neo4j: Neo4jRepository | FalkorLiteRepository
     # keyword-only dataclass field (a same-named property would clobber the init default)
     counting_enabled: bool = field(default=False, kw_only=True)
     # unit 4R: counted Views fold by count decision; only effective with counting on.

@@ -11,6 +11,7 @@ from menhir.config.authority_gates import scalar_view_authority_effective
 from menhir.config.feature_flags import warn_retired_settings_set_false
 from menhir.core.runtime_preflight import RuntimeCapabilities
 from menhir.infrastructure import GraphitiClient, LLMAdapter, MemoryGraphAdapter, Neo4jRepository
+from menhir.infrastructure.falkor import FalkorLiteRepository
 from menhir.services import CandidateService, ContextBuilderService, IngestService, RecallService, ScoringService, LifecycleService
 
 
@@ -129,7 +130,7 @@ class BuildArtifacts:
 
     settings: MemorySettings
     capabilities: RuntimeCapabilities | None
-    neo4j: Neo4jRepository
+    neo4j: Neo4jRepository | FalkorLiteRepository
     graphiti_client: GraphitiClient | UnavailableGraphitiClient
     llm: LLMAdapter | UnavailableLLMAdapter
     graph_adapter: MemoryGraphAdapter
@@ -146,15 +147,22 @@ def build_memory_services(
     *,
     capabilities: RuntimeCapabilities | None = None,
     read_only: bool = False,
+    graph_repository: FalkorLiteRepository | None = None,
 ) -> BuildArtifacts:
-    """Build collaborators for the v1 memory pipeline."""
+    """Build collaborators; optional repository injection is an unreleased integration seam.
+
+    The caller owns an injected Lite repository and must close its Graphiti client first. If
+    construction raises, the caller must close any driver already created on that repository.
+    """
     settings = settings or MemorySettings.from_env()
     warn_retired_settings_set_false()
-    neo4j = Neo4jRepository(
-        uri=settings.neo4j_uri,
-        database=settings.neo4j_database,
-        user=settings.neo4j_user,
-        password=settings.neo4j_password,
+    neo4j = (
+        graph_repository if graph_repository is not None else Neo4jRepository(
+            uri=settings.neo4j_uri,
+            database=settings.neo4j_database,
+            user=settings.neo4j_user,
+            password=settings.neo4j_password,
+        )
     )
     graphiti_reason = "Graphiti-backed features are unavailable in the current startup mode."
     llm_reason = "LLM-backed features are unavailable in the current startup mode."
@@ -162,12 +170,20 @@ def build_memory_services(
     llm: LLMAdapter | UnavailableLLMAdapter
     if capabilities is None or capabilities.reads_ready:
         try:
+            driver_kwargs = (
+                {"graph_driver": graph_repository.graphiti_driver()} if graph_repository is not None else {}
+            )
             graphiti_client = GraphitiClient.from_settings_with_capabilities(
                 settings,
                 llm_enabled=(capabilities.llm_ready if capabilities is not None else True),
                 reranker_enabled=(capabilities.reranker_ready if capabilities is not None else True),
+                **driver_kwargs,
             )
         except Exception as exc:
+            if graph_repository is not None:
+                # An injected backend must not silently lose its matching policy/Graphiti client.
+                # Its caller owns cleanup if assembly fails before BuildArtifacts is returned.
+                raise
             import logging
             logging.getLogger(__name__).warning("Graphiti client creation failed, degrading: %s", exc)
             graphiti_client = UnavailableGraphitiClient(f"{graphiti_reason} ({exc})")

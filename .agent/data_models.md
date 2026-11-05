@@ -5,6 +5,12 @@ model section you need.
 
 ## Quick Index
 
+The unreleased Falkor path stores instants as UTC-normalized ISO strings, matching the pinned
+Graphiti provider's `datetime.isoformat()` output; naive inputs follow the existing UTC convention.
+`infrastructure/falkor.py` owns explicit encode/decode with microsecond precision and rejects
+invalid or finer-precision input. Date-only TEMPORAL targets use canonical `YYYY-MM-DD`, with UTC
+window bounds. Neo4j retains typed timestamps. No mixed-format import/migration is implemented.
+
 `RecallResult.warden_status` is an optional request-local `WardenExecutionStatus` execution receipt;
 it is populated only with `include_warden_status=true`. It carries configured/applied guard names,
 master-gate state, evaluated/refused/flagged counts, unassessed and pending counts, dropped missing

@@ -1,5 +1,10 @@
-## 2026-11-05 - Atomic real-View Falkor experiment (#109)
+## 2026-11-05 - Falkor runtime integration (#109)
 
+- Added the internal shared Lite repository/bootstrap seam and injectable Graphiti driver.
+  Canonical UTC instant encoding matches Graphiti; the active TEMPORAL path now uses native
+  create/list/complete queries and UTC calendar bounds. A live shared-graph test verifies
+  cross-client visibility and restart persistence. Public backend selection and normal
+  enrichment/recall remain unqualified; callback transactions fail before invocation.
 - Reassessed the completion architecture: stop expanding isolated proof families, resolve shared
   temporal semantics, and integrate one unreleased Linux slice through existing repository/Graphiti
   seams. Retain all correctness release gates; dormant T5 cutover and native Windows work do not

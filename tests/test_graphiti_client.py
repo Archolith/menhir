@@ -235,7 +235,10 @@ def _stub_search_config(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.unit
-def test_graphiti_client_from_settings_builds_expected_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("injected", [False, True])
+def test_graphiti_client_from_settings_builds_expected_dependencies(
+    monkeypatch: pytest.MonkeyPatch, injected: bool,
+) -> None:
     monkeypatch.setattr(graphiti_client_module, "_GRAPHITI_IMPORT_ERROR", None)
     monkeypatch.setattr(graphiti_client_module, "LLMConfig", _DummyLLMConfig)
     monkeypatch.setattr(graphiti_client_module, "MenhirOpenAIGenericClient", _DummyOpenAIGenericClient)
@@ -262,7 +265,14 @@ def test_graphiti_client_from_settings_builds_expected_dependencies(monkeypatch:
         local_llm_embed_model="embed-model",
     )
 
-    wrapper = GraphitiClient.from_settings(settings)
+    driver = _DummyNeo4jDriver(uri="injected", user="injected", password="", database="gemini-test")
+    wrapper = (
+        GraphitiClient.from_settings_with_capabilities(settings, graph_driver=driver)
+        if injected
+        else GraphitiClient.from_settings(settings)
+    )
+    if injected:
+        assert wrapper.client.graph_driver is driver
 
     assert isinstance(wrapper.client, _DummyGraphiti)
     assert wrapper.client.uri == "bolt://db:7687"

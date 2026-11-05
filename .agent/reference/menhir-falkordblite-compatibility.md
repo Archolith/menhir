@@ -151,6 +151,39 @@ pass backend-native contract tests instead; native constraint/vector APIs need n
 The earlier token bands remain conditional estimates, not justification to spend the full budget;
 re-estimate after the temporal decision and real vertical slice rather than extrapolating proof count.
 
+### Internal shared-runtime slice (2026-11-05)
+
+`infrastructure/falkor.py` now owns a Lite file/server and exposes native query rows plus the
+existing Graphiti async driver on the same Unix socket and graph name. Injection through
+`build_memory_services(graph_repository=...)` and `GraphitiClient.from_settings_with_capabilities`
+preserves the default Neo4j path. It is an internal seam, with no CLI/environment backend selector.
+Matching Graphiti construction failure propagates rather than silently degrading the injected pair.
+Callers close the Graphiti client before the repository; failed persistence leaves the owner open
+for recovery. The repository never replays ambiguous transport failures and refuses arbitrary
+callback transactions before invocation, retaining the existing saga revocation checks.
+
+The time representation uses the pinned Graphiti provider's canonical UTC ISO strings and Python
+microsecond precision. Explicit instant encode/decode preserves offsets, normalizes naive inputs
+as UTC, and rejects invalid/finer-precision input instead of silently truncating it. Arbitrary
+strings and query text are not rewritten. Calendar-date targets remain `YYYY-MM-DD`. The active
+TEMPORAL repository uses native parameter expressions and Python-computed UTC window bounds;
+Neo4j retains typed temporal expressions. Other time-query owners and mixed-format imports remain
+unmapped; this does not qualify every temporal operation or activate the previous diagnostic facade.
+
+A disposable Linux test builds the real Menhir services with the shared repository, awaits native
+Graphiti index initialization, creates/lists/completes a namespaced TEMPORAL memory through the
+actual graph adapter, saves/reads an entity through Graphiti, checks the same entity/time from
+Menhir, compares canonical instants in the store, then closes/reopens the file and reads it again.
+No LLM/embedder service calls are made: full `add_memory` enrichment/recall is still next, alongside
+Menhir-native schema/readiness and required query variants. No standalone proof helper was added.
+
+Verification: **168 local tests passed, 6 skipped**, covering the changed owners plus neighboring
+Graphiti, degraded-startup, service-pipeline and authority contracts. One skip is the Windows host's
+missing IANA timezone data; DST-fold preservation passes in the native Linux environment. That
+environment passed **19 repository tests**, including the live shared-runtime/restart case.
+Default Ruff passes for the new owner/tests; scoped correctness checks pass for existing owners.
+No full CI, public backend readiness or complete enrichment/recall qualification is claimed.
+
 ## Reproduce
 
 Use a disposable **Linux** Python 3.12 environment. The instrument accepts no existing database

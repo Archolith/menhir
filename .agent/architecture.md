@@ -101,6 +101,11 @@ Concept id: `runtime.stack`
   repository and Graphiti construction seams with one managed Lite runtime. Correctness gates
   block supported/default enablement, not internal integration. The T5 materializer has no runtime
   constructor in this checkout; qualify the active legacy scalar path before expanding that cutover.
+  The internal `FalkorLiteRepository` now owns one file/server and supplies Graphiti's client on
+  the same socket/graph through `build_memory_services(graph_repository=...)`. This is not exposed
+  by CLI/environment configuration. The TEMPORAL owner has native create/read/complete variants;
+  normal enrichment/recall, Menhir schema readiness and the remaining query owners are still open.
+  Unsupported callback transactions fail before invocation; no query translator is installed.
 - `archolith-graphiti-core==0.31.2.post2` (Archolith soft fork of `getzep/graphiti`,
   baseline `v0.31.2`; it still imports as `graphiti_core`). Menhir policy uses its explicit
   hooks without runtime monkeypatching. Published from fork tag `v0.31.2.post2` at
