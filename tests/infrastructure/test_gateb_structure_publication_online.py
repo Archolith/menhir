@@ -22,13 +22,19 @@ pytestmark = [pytest.mark.online]
 
 
 @pytest.fixture
-def graph():
+def graph(request, tmp_path):
     uri = os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://127.0.0.1:7688")
     assert "127.0.0.1" in uri or "localhost" in uri
-    repo = Neo4jRepository(
-        uri=uri, database="neo4j", user="neo4j",
-        password=os.getenv("MENHIR_TEST_NEO4J_PASSWORD", "testpassword"),
-    )
+    if getattr(request, "param", "neo4j") == "falkor":
+        pytest.importorskip("redislite.falkordb_client")
+        from menhir.infrastructure.falkor import FalkorLiteRepository
+
+        repo = FalkorLiteRepository(tmp_path / "project.rdb")
+    else:
+        repo = Neo4jRepository(
+            uri=uri, database="neo4j", user="neo4j",
+            password=os.getenv("MENHIR_TEST_NEO4J_PASSWORD", "testpassword"),
+        )
     name = f"gateb-structure-{uuid.uuid4().hex[:12]}"
     project_id = str(uuid.uuid4())
     root = f"C:/disposable/{name}"
@@ -79,6 +85,7 @@ def _state(repo: Neo4jRepository, name: str) -> list[dict]:
     )
 
 
+@pytest.mark.parametrize("graph", ["neo4j", "falkor"], indirect=True)
 def test_late_scan_and_missing_token_cannot_replace_newer_publication(graph):
     repo, adapter, name, root, claim = graph
     old_token = adapter.begin_structure_scan(claim)
@@ -102,6 +109,7 @@ def test_late_scan_and_missing_token_cannot_replace_newer_publication(graph):
     assert _state(repo, name) == before
 
 
+@pytest.mark.parametrize("graph", ["neo4j", "falkor"], indirect=True)
 def test_mid_publication_exception_rolls_back_entities_and_fingerprint(graph, monkeypatch):
     repo, adapter, name, root, claim = graph
     initial = adapter.begin_structure_scan(claim)
@@ -122,6 +130,7 @@ def test_mid_publication_exception_rolls_back_entities_and_fingerprint(graph, mo
     assert _state(repo, name) == before
 
 
+@pytest.mark.parametrize("graph", ["neo4j", "falkor"], indirect=True)
 def test_unchanged_fingerprint_refresh_rejects_stale_scan(graph):
     repo, adapter, name, root, claim = graph
     initial = adapter.begin_structure_scan(claim)
@@ -146,6 +155,7 @@ def test_unchanged_fingerprint_refresh_rejects_stale_scan(graph):
     assert rows == [{"commit": "new-commit"}]
 
 
+@pytest.mark.parametrize("graph", ["neo4j", "falkor"], indirect=True)
 def test_partial_scan_keeps_unseen_legacy_symbols_without_file_mtimes(graph):
     repo, adapter, name, root, claim = graph
     initial = adapter.begin_structure_scan(claim)
@@ -400,3 +410,204 @@ def test_document_publication_exception_rolls_back_merge(graph, monkeypatch, exi
         )
         == before
     )
+
+
+@pytest.mark.parametrize("graph", ["neo4j", "falkor"], indirect=True)
+def test_full_project_publication_and_incremental_pruning(graph):
+    from dataclasses import replace
+
+    from menhir.infrastructure.project_scanner import (
+        CallEdge,
+        CrossProjectRef,
+        DirEntry,
+        EndpointEntry,
+        ImportEdge,
+        NestedRepo,
+        SymbolEntry,
+        TestEdge,
+    )
+    from menhir.infrastructure.structure_queries import _symbol_path
+
+    repo, adapter, name, root, claim = graph
+    alpha = SymbolEntry("src/a.py", "alpha", "function", 1, "alpha()", "alpha", "")
+    beta = SymbolEntry("src/b.py", "beta", "function", 1, "beta()", "beta", "")
+    external, child = name + "-external", name + "-child"
+    scan = ProjectScanResult(
+        name=name,
+        root_path=root,
+        stack="python",
+        description="full fixture",
+        project_id=claim.project_id,
+        identity_generation=claim.generation,
+        scan_generation=adapter.begin_structure_scan(claim),
+        scan_fingerprint="base",
+        directories=[DirEntry("src"), DirEntry("tests")],
+        files=[
+            FileEntry("src/a.py", file_mtime=1),
+            FileEntry("src/b.py", file_mtime=1),
+            FileEntry("tests/test_a.py", role="test", file_mtime=1),
+            FileEntry("README.md", role="document", file_mtime=1),
+            FileEntry("pyproject.toml", role="config", file_mtime=1),
+            FileEntry("main.py", role="entrypoint", file_mtime=1),
+        ],
+        dependencies=["pytest"],
+        imports=[ImportEdge("src/a.py", "src/b.py")],
+        test_edges=[TestEdge("tests/test_a.py", "src/a.py")],
+        endpoints=[EndpointEntry("GET /fixture", "src/a.py", "http")],
+        cross_project_refs=[CrossProjectRef(external, "import", "fixture")],
+        nested_repos=[NestedRepo("vendor/child", child)],
+        symbols=[alpha, beta],
+        call_edges=[CallEdge(_symbol_path(alpha), _symbol_path(beta))],
+        files_discovered=6,
+        files_eligible=6,
+        files_indexed=6,
+        indexed_commit="base-commit",
+        indexed_repository="fixture/repository",
+    )
+    adapter.write_document(
+        root + "/keep.md",
+        "retained",
+        project=name,
+        structure_path="doc:keep",
+        project_id=claim.project_id,
+        identity_generation=claim.generation,
+        identity_root=root,
+        session_id="s",
+        user_id="u",
+    )
+    try:
+        assert adapter.write_project_structure(scan, "s", "u") == {
+            "entities": 13,
+            "edges": 17,
+        }
+        assert repo.execute(
+            "MATCH (n:Entity {structure_project:$name, structure_path:'.'}) "
+            "RETURN n.indexed_commit AS commit, n.scan_fingerprint AS fingerprint",
+            {"name": name},
+        ) == [{"commit": "base-commit", "fingerprint": "base"}]
+        update = replace(
+            scan,
+            scan_generation=adapter.begin_structure_scan(claim),
+            scan_fingerprint="updated",
+            indexed_commit="new-commit",
+            indexed_dirty=True,
+            directories=[DirEntry("src")],
+            files=[FileEntry("src/a.py", file_mtime=2)],
+            symbols=[replace(alpha, name="new_alpha")],
+            dependencies=[],
+            imports=[],
+            test_edges=[],
+            endpoints=[],
+            cross_project_refs=[],
+            nested_repos=[],
+            call_edges=[],
+            files_discovered=1,
+            files_eligible=1,
+            files_indexed=1,
+        )
+        assert adapter.write_project_structure(update, "s", "u") == {
+            "entities": 4,
+            "edges": 3,
+        }
+        paths = repo.execute(
+            "MATCH (n:Entity {structure_project:$name}) RETURN n.structure_path AS path ORDER BY path",
+            {"name": name},
+        )
+        assert {r["path"] for r in paths} == {
+            ".",
+            "src",
+            "src/a.py",
+            "src/a.py::new_alpha",
+            "doc:keep",
+        }
+    finally:
+        repo.execute(
+            "MATCH (n:Entity) WHERE n.structure_project IN $names DETACH DELETE n",
+            {"names": [external, child]},
+        )
+
+
+@pytest.mark.parametrize("graph", ["falkor"], indirect=True)
+@pytest.mark.parametrize("change", ["mtime", "identity"])
+def test_native_project_revalidates_planning_inputs(graph, monkeypatch, change):
+    from menhir.infrastructure.structure_write_fence import StaleStructureScan
+
+    repo, adapter, name, root, claim = graph
+    adapter.write_project_structure(
+        _scan(
+            name, root, claim, "initial", "a.py", adapter.begin_structure_scan(claim)
+        ),
+        "s",
+        "u",
+    )
+    token = adapter.begin_structure_scan(claim)
+    original = repo.execute
+
+    def changed(query, params=None, **kwargs):
+        if "WITH 0 AS stage_initial" in query:
+            if change == "mtime":
+                original(
+                    "MATCH (n:Entity {structure_project:$name, structure_path:'a.py'}) SET n.file_mtime=99",
+                    {"name": name},
+                )
+            else:
+                original(
+                    "MATCH (p:ProjectIdentity {project_id:$id}) SET p.claim_generation=2",
+                    {"id": claim.project_id},
+                )
+        return original(query, params, **kwargs)
+
+    monkeypatch.setattr(repo, "execute", changed)
+    with pytest.raises(StaleStructureScan):
+        adapter.write_project_structure(
+            _scan(name, root, claim, "unauthorized", "b.py", token), "s", "u"
+        )
+    assert {r["path"] for r in _state(repo, name)} == {".", "a.py"}
+    assert {r["fingerprint"] for r in _state(repo, name) if r["fingerprint"]} == {
+        "initial"
+    }
+
+
+@pytest.mark.parametrize("graph", ["neo4j", "falkor"], indirect=True)
+@pytest.mark.parametrize("count", [0, 2])
+def test_project_completion_cardinality_failure_rolls_back(graph, monkeypatch, count):
+    repo, adapter, name, root, claim = graph
+    adapter.write_project_structure(
+        _scan(
+            name, root, claim, "initial", "a.py", adapter.begin_structure_scan(claim)
+        ),
+        "s",
+        "u",
+    )
+    before = _state(repo, name)
+    token = adapter.begin_structure_scan(claim)
+    original = StructureGraphWriter._merge_entity
+
+    def wrong_completion(self, **kwargs):
+        original(self, **kwargs)
+        if kwargs["structure_role"] == "project":
+            if count == 0:
+                self.neo4j.execute(
+                    "MATCH (n:Entity {structure_project:$name, structure_role:'project'}) SET n.structure_project_id='wrong'",
+                    {"name": name},
+                )
+            else:
+                self.neo4j.execute(
+                    "CREATE (:Entity {structure_project:$name, structure_role:'project', structure_project_id:$id, structure_path:'duplicate'})",
+                    {"name": name, "id": claim.project_id},
+                )
+
+    monkeypatch.setattr(StructureGraphWriter, "_merge_entity", wrong_completion)
+    from menhir.infrastructure.falkor import FalkorLiteRepository
+
+    if isinstance(repo, FalkorLiteRepository):
+        from redis.exceptions import ResponseError
+
+        error, message = ResponseError, "(?i)step|increment"
+    else:
+        error, message = RuntimeError, "exactly one project node"
+    with pytest.raises(error, match=message):
+        adapter.write_project_structure(
+            _scan(name, root, claim, "must-rollback", "b.py", token), "s", "u"
+        )
+    assert _state(repo, name) == before

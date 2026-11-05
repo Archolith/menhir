@@ -208,3 +208,47 @@ async def test_shared_bootstrap_temporal_graphiti_and_restart(tmp_path: Path, mo
         assert reopened.execute("MATCH (n:Entity {uuid:'shared-node'}) RETURN n.name AS name") == [{"name": "shared"}]
     finally:
         reopened.close()
+
+
+def test_project_parameter_binding_preserves_literals_and_comments():
+    from menhir.infrastructure.falkor import _bind_project_parameters
+
+    query = "RETURN $value, '$value datetime()', `$value` // $missing\n/* $missing */"
+    assert _bind_project_parameters(
+        query, {"value": "untrusted '$value'"}, "step0"
+    ) == (
+        "RETURN $step0.value, '$value datetime()', `$value` // $missing\n/* $missing */"
+    )
+    with pytest.raises(ValueError, match="missing structure parameter"):
+        _bind_project_parameters("RETURN $missing", {}, "step0")
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("project_id", "other"),
+        ("identity_generation", 99),
+        ("root_path", "elsewhere"),
+        ("scan_generation", 0),
+    ],
+)
+def test_project_preparation_refuses_invalid_claim_before_queries(
+    tmp_path, monkeypatch, field, value
+):
+    from menhir.infrastructure.project_identity_binding import root_key_for
+    from menhir.infrastructure.structure_write_fence import IdentityClaim
+
+    scan = SimpleNamespace(
+        project_id="project", identity_generation=1, root_path="root", scan_generation=1
+    )
+    claim = IdentityClaim("project", root_key_for("root"), 1, "host")
+    setattr(scan, field, value)
+    repo = FalkorLiteRepository(tmp_path / "never-opened.rdb")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("invalid project claim reached the graph")
+
+    monkeypatch.setattr(repo, "execute", forbidden)
+    with pytest.raises(ValueError):
+        repo.publish_project(claim, scan, "session", "user")
+    repo.close()

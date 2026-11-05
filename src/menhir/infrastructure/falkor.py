@@ -1,7 +1,7 @@
 """Internal FalkorDBLite repository. Native queries only; not a Neo4j compatibility layer.
 
 Instants use Graphiti's UTC ISO string representation, with Python microsecond precision.
-Callers bind canonical instants explicitly; arbitrary strings and query text are never rewritten.
+Callers bind canonical instants explicitly; execute never translates queries or stored values.
 This backend is not yet selectable by production configuration.
 """
 
@@ -130,6 +130,16 @@ class FalkorLiteRepository:
     def execute_write(self, work: Any, *, timeout_s: float | None = None) -> Any:
         raise NotImplementedError("Falkor callbacks require an operation-specific atomic native command")
 
+    def publish_project(self, claim: Any, scan: Any, session_id: str, user_id: str) -> dict[str, int]:
+        """Publish this specific structure operation in one guarded native command."""
+        from menhir.infrastructure.structure_write_fence import StaleStructureScan
+
+        query, params = _project_publication_statement(self, claim, scan, session_id, user_id)
+        rows = self.execute(query, params)
+        if not rows:
+            raise StaleStructureScan("Project identity, scan generation or mtime inputs changed before publication")
+        return {"entities": int(rows[0]["entities"]), "edges": int(rows[0]["edges"])}
+
     def close(self) -> None:
         with self._lock:
             if self._closed:
@@ -138,3 +148,156 @@ class FalkorLiteRepository:
                 self._db.client.save()
                 self._db.close()
             self._closed = True
+
+
+_PROJECT_PARAMETER_TOKENS = re.compile(
+    r"'(?:''|\\.|[^'\\])*'|\"(?:\"\"|\\.|[^\"\\])*\"|`(?:``|[^`])*`|//[^\n]*|/\*.*?\*/"
+    r"|\$(?P<parameter>[A-Za-z_][A-Za-z0-9_]*)",
+    re.DOTALL,
+)
+_PROJECT_TERMINAL_COUNT = re.compile(r"\bRETURN\s+count\([^)]*\)\s+AS\s+(cnt|deleted|updated)\s*$", re.IGNORECASE)
+
+
+def _bind_project_parameters(query: str, parameters: dict[str, Any], name: str) -> str:
+    """Namespace parameters for the fixed project operation, preserving literals/comments."""
+
+    def replace(match: re.Match[str]) -> str:
+        parameter = match.group("parameter")
+        if parameter is not None:
+            if parameter == "project_now":
+                return match.group(0)
+            if parameter not in parameters:
+                raise ValueError(f"missing structure parameter {parameter}")
+            return f"${name}.{parameter}"
+        return match.group(0)
+
+    return _PROJECT_PARAMETER_TOKENS.sub(replace, query)
+
+
+def _project_publication_statement(
+    repository: Any,
+    claim: Any,
+    scan: Any,
+    session_id: str,
+    user_id: str,
+) -> tuple[str, dict[str, Any]]:
+    """Prepare only StructureGraphWriter's project operation, never arbitrary callbacks.
+
+    Mtime reads determine the shared Python incremental/partial policy. Recheck the exact
+    inputs in the atomic command. Write results used only for diagnostic counters are
+    deferred; batch-edge counts and the exact-one completion assertion execute server-side.
+    """
+    from menhir.infrastructure.project_identity_binding import root_key_for
+    from menhir.infrastructure.structure_queries import StructureGraphWriter
+    from menhir.infrastructure.structure_write_fence import (
+        _STRUCTURE_PUBLICATION_GUARD_CYPHER,
+    )
+
+    if (
+        scan.project_id != claim.project_id
+        or scan.identity_generation != claim.generation
+        or root_key_for(scan.root_path) != claim.root_key
+    ):
+        raise ValueError("scan identity disagrees with publication claim")
+    if type(scan.scan_generation) is not int or scan.scan_generation < 1:
+        raise ValueError("project publication requires a positive scan generation")
+    reads: list[tuple[str, dict[str, Any], list[dict[str, Any]]]] = []
+    paths: set[str] = set()
+
+    class ReadCapture:
+        def execute(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+            rows = repository.execute(query, params)
+            for row in rows:
+                if not row.get("path") or row["path"] in paths:
+                    raise ValueError("ambiguous structural mtime identity")
+                paths.add(row["path"])
+            reads.append((query, dict(params), sorted(rows, key=lambda row: (row["path"], row["mtime"]))))
+            return rows
+
+    mtimes = StructureGraphWriter(ReadCapture()).get_file_mtimes(scan.name, scan.project_id)
+    steps: list[tuple[str, dict[str, Any], str, bool]] = []
+
+    class WriteCapture:
+        edge_batch = False
+
+        def execute(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+            # Unexpected reads must not be answered with fabricated application state.
+            plain = _PROJECT_PARAMETER_TOKENS.sub("", query)
+            if not re.search(r"\b(MERGE|CREATE|SET|DELETE|REMOVE)\b", plain):
+                raise ValueError("unrecognized project read during write planning")
+            match = _PROJECT_TERMINAL_COUNT.search(query.strip())
+            alias = match.group(1).lower() if match else "project_rows"
+            steps.append((query, dict(params), alias, self.edge_batch))
+            return [{"cnt": 0, "deleted": 0, "updated": 1}]
+
+    capture = WriteCapture()
+
+    class Planner(StructureGraphWriter):
+        @property
+        def _edge_clock_expression(self) -> str:
+            return "$project_now"
+
+        def get_file_mtimes(self, project_name: str, project_id: str | None = None) -> dict[str, float]:
+            if project_name != scan.name or project_id != scan.project_id:
+                raise ValueError("unrecognized project mtime read")
+            return dict(mtimes)
+
+        def _write_edges_batch(self, *args: Any, **kwargs: Any) -> int:
+            capture.edge_batch = True
+            try:
+                return super()._write_edges_batch(*args, **kwargs)
+            finally:
+                capture.edge_batch = False
+
+    counts = Planner(capture).write_project(scan, session_id, user_id)
+    if not steps or steps[-1][2] != "updated" or any(step[2] == "updated" for step in steps[:-1]):
+        raise ValueError("unrecognized project completion contract")
+    parameters: dict[str, Any] = {
+        "project_id": claim.project_id,
+        "project_entities": counts["entities"],
+        "project_fixed_edges": counts["edges"],
+    }
+    parameters["project_now"] = encode_instant(datetime.now(UTC))
+    parameters.update({
+        "project_id": claim.project_id, "host": claim.host, "root_key": claim.root_key,
+        "identity_generation": claim.generation, "scan_generation": scan.scan_generation,
+    })
+    parts = [_STRUCTURE_PUBLICATION_GUARD_CYPHER, "WITH p AS identity, true AS gate"]
+    for i, (query, params, rows) in enumerate(reads):
+        name = f"read{i}"
+        parameters[name], parameters[f"snapshot{i}"] = params, rows
+        body = _bind_project_parameters(query, params, name)
+        parts.append(f"""
+CALL {{ WITH gate
+    CALL {{ WITH gate WITH gate WHERE gate {body} }}
+    WITH path, mtime ORDER BY path, mtime
+    RETURN collect({{path:path,mtime:mtime}}) AS actual{i}
+}}
+WITH identity, gate, actual{i}
+WHERE coalesce(actual{i}=$snapshot{i},false)
+""")
+    parts.append("WITH 0 AS stage_initial")
+    previous = "stage_initial"
+    edge_counts = ["$project_fixed_edges"]
+    for i, (query, params, alias, edge_batch) in enumerate(steps):
+        name, result = f"step{i}", f"stage{i}"
+        parameters[name] = params
+        body = _bind_project_parameters(query, params, name)
+        if alias == "project_rows":
+            body += " RETURN count(*) AS project_rows"
+        parts.append(f"""
+CALL {{ WITH {previous}
+    CALL {{ WITH {previous} WITH {previous} WHERE {previous}>=0 {body} }}
+    RETURN sum({alias}) AS {result}
+}}
+""")
+        if edge_batch:
+            edge_counts.append(result)
+        previous = result
+    parts.append(
+        # A zero range step is a native execution error: failed postconditions roll back
+        # all preceding writes. The step depends on the actual completion count.
+        f"RETURN size(range(0,0,CASE WHEN {previous}=1 THEN 1 ELSE 0 END)) AS committed, "
+        f"$project_entities AS entities, toInteger({'+'.join(edge_counts)}) AS edges"
+    )
+    return "\n".join(parts), parameters

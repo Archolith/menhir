@@ -2329,6 +2329,10 @@ class StructureGraphWriter:
 
         return edges
 
+    @property
+    def _edge_clock_expression(self) -> str:
+        return "datetime()"
+
     def _write_edges_batch(
         self,
         rel_type: str,
@@ -2344,7 +2348,7 @@ class StructureGraphWriter:
             MATCH (a:Entity {{structure_project: $project, structure_path: edge.source_path}})
             MATCH (b:Entity {{structure_project: $project, structure_path: edge.target_path}})
             MERGE (a)-[r:{rel_type}]->(b)
-            ON CREATE SET r.source = 'project-scan', r.created_at = datetime()
+            ON CREATE SET r.source = 'project-scan', r.created_at = {self._edge_clock_expression}
             RETURN count(r) AS cnt
         """
         rows = self.neo4j.execute(query, {"edges": edges, "project": project_name})
@@ -2364,10 +2368,10 @@ class StructureGraphWriter:
         """
         self.neo4j.execute(
             _INFERRED_PROJECT_TARGET_CYPHER
-            + """
-            MATCH (source:Entity {structure_project: $source_name, structure_path: '.', structure_role: 'project'})
+            + f"""
+            MATCH (source:Entity {{structure_project: $source_name, structure_path: '.', structure_role: 'project'}})
             MERGE (source)-[r:CALLS]->(target)
-            ON CREATE SET r.source = 'project-scan', r.mechanism = $mechanism, r.evidence = $evidence, r.created_at = datetime()
+            ON CREATE SET r.source = 'project-scan', r.mechanism = $mechanism, r.evidence = $evidence, r.created_at = {self._edge_clock_expression}
             ON MATCH SET r.mechanism = $mechanism, r.evidence = $evidence
             """,
             {
@@ -2406,10 +2410,10 @@ class StructureGraphWriter:
         """
         self.neo4j.execute(
             _INFERRED_PROJECT_TARGET_CYPHER
-            + """
-            MATCH (source:Entity {structure_project: $source_name, structure_path: '.', structure_role: 'project'})
+            + f"""
+            MATCH (source:Entity {{structure_project: $source_name, structure_path: '.', structure_role: 'project'}})
             MERGE (source)-[r:CONTAINS_REPO]->(target)
-            ON CREATE SET r.source = 'project-scan', r.rel_path = $rel_path, r.created_at = datetime()
+            ON CREATE SET r.source = 'project-scan', r.rel_path = $rel_path, r.created_at = {self._edge_clock_expression}
             ON MATCH SET r.rel_path = $rel_path
             """,
             {

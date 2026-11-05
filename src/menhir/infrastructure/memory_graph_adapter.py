@@ -1413,6 +1413,7 @@ class MemoryGraphAdapter:
         unattended watcher all arrive through this one method. Guarding the callers instead would
         mean four places to keep in step, and the next writer added would silently miss it.
         """
+        from menhir.infrastructure.falkor import FalkorLiteRepository
         from menhir.infrastructure.project_identity_binding import binding_host, root_key_for
         from menhir.infrastructure.structure_write_fence import (
             IdentityClaim, StaleStructureScan, admit_structure_writer,
@@ -1463,6 +1464,9 @@ class MemoryGraphAdapter:
             self.neo4j, label=str(getattr(scan, "name", "") or ""), claim=claim
         )
         try:
+            if isinstance(self.neo4j, FalkorLiteRepository):
+                return self.neo4j.publish_project(claim, scan, session_id, user_id)
+
             def _publish(tx: Any) -> dict[str, int]:
                 lock_structure_project(tx, claim, scan_generation=int(generation))
                 return StructureGraphWriter(tx).write_project(scan, session_id, user_id)

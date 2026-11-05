@@ -293,7 +293,7 @@ the entire P0 capability/writer matrix.
 | Same module: `dirty_targets`, `retire_targets` | Validate definition and advance exact target generations together | Candidate not implemented. |
 | Same module: `reconcile_all_targets` | Read complete membership, compute additions/removals, apply both atomically | Python set computation needs a deliberate replacement strategy. |
 | `projection_lifecycle_repository_reads.commit` | Fence, callback writes, Python result validation, receipt/certificate in one transaction | Actual callback rejection counterexamples reproduced. |
-| `memory_graph_adapter.write_project_structure` | Identity/generation lock plus multi-query project publication/pruning | Compound-query candidate passes the full-writer fixtures below; production wiring, scale and broader qualification remain open. |
+| `memory_graph_adapter.write_project_structure` | Identity/generation lock plus multi-query project publication/pruning | Runtime operation-specific compound command passes native/Neo4j full-scan, incremental, partial, refusal and rollback checks (milestone below); scale and complete backend acceptance remain open. |
 | Same module: `write_document` | Identity lock and structural document MERGE together | Runtime native command now fuses the shared guard with the actual entity writer; live create/update, refusal and rollback checks pass (milestone below). |
 | Same module: `refresh_indexed_binding` | Identity/scan lock and conditional metadata update together | Runtime native guarded command implemented; live CAS, refusal, slot cleanup and late-error rollback checks pass (milestone below). |
 | `scripts/backfill_legacy_retention.main` | Revalidate manifest, then apply all reviewed links or none | Operator-only; retains Neo4j requirement. |
@@ -869,6 +869,48 @@ Next: native atomic project publication, then the recorded active scalar View tr
 erasure/saga recovery, remaining native query/feature mappings and release acceptance. Completing
 two of the three active explicit callback paths does not qualify the full backend. Public enablement,
 Windows and dormant T5 remain gated separately.
+
+### Native atomic project publication milestone (2026-11-05)
+
+The third active explicit callback path now dispatches a native operation through
+`FalkorLiteRepository.publish_project`, under the existing adapter admission/finally-release.
+Preparation invokes only the actual StructureGraphWriter project operation. Its Python full,
+incremental and partial-scan decisions, payloads, pruning and final completion write remain shared.
+There is no arbitrary callback entry point and no runtime dependency on experiment scripts.
+
+The operation reads the actual mtime inputs, rejects ambiguous duplicate paths and revalidates
+those exact inputs inside the guarded command before business writes. The shared identity/scan
+publication guard prevents stale claims and old scans. Existing write statements are composed as
+ordered native subqueries with namespaced parameter tokens; literals, identifiers and comments are
+preserved. Unexpected reads fail preparation. Only diagnostic write counters are deferred: actual
+batch-edge counts are returned, and the actual completion count must be exactly one. A native range
+step dependent on that count raises an execution error when it is not one, rolling back all earlier
+writes. No UDF registration, engine feature or general transaction compiler is required.
+
+Edge-clock variants are explicit at their three owners. Neo4j retains datetime(); the native planner
+binds one canonical UTC instant. Time constructors and arbitrary query values are not translated.
+The former compound experiment is retained as historical evidence, not imported by runtime code.
+
+Verification: **111 focused local passes, 2 skips**, **9 native project cases passed**, and **7 matching
+Neo4j project cases passed**. The full fixture covers all structural roles, dependencies, endpoints,
+imports, tests, symbols/calls, inferred external projects and nested repositories. Initial and
+incremental complete writes agree on counts and prune paths while retaining separately ingested
+documents. Partial scans retain unseen symbols. Tests cover changed mtime/identity after preparation,
+stale/missing scan tokens, planning exceptions, and execution-time rollback of zero/multiple
+completion markers. No full CI, large-scan/crash qualification or complete #109 acceptance is claimed.
+
+Commands: local pytest selected `tests/test_structure_queries.py`,
+`tests/infrastructure/test_cf257_detached_write_identity.py`, `test_cf257_stale_claim.py` and
+`test_falkor.py` (106 passes/2 skips), followed by the five new repository guards (23 repository
+passes/2 skips including the prior 18). Native tests selected the `falkor` parametrizations in
+`tests/infrastructure/test_gateb_structure_publication_online.py` (4 initial cases plus 5 extended
+cases), with isolated `--basetemp` directories. The same module's `-k neo4j` selection passed 7 cases
+through the disposable loopback relay. Source correctness/async gates pass; static artifact findings
+remain at the recorded baseline. Public backend enablement stays gated.
+
+Next: active scalar View refresh/retirement, erasure/saga recovery, other required native queries
+and feature mappings, then release acceptance. Completing the three structural callback paths does
+not establish full Neo4j feature parity.
 
 ## Upstream evidence
 

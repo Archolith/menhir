@@ -1,5 +1,9 @@
 ## 2026-11-05 - Falkor runtime integration (#109)
 
+- Added native atomic project publication using the actual project writer's policy and payloads.
+  Its mtime inputs and identity/scan token are revalidated before ordered writes; actual batch-edge
+  counts and exact-one completion are enforced. Full/incremental/partial scan, pruning, input-race
+  and late rollback cases pass on disposable storage; Neo4j retains its transaction path.
 - Added native atomic document publication through the existing adapter and entity writer. The
   shared identity guard and actual MERGE execute together; create defaults and update policy remain
   shared with Neo4j. Live cases cover retained metadata, post-admission claim changes, migration
