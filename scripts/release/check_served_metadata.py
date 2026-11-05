@@ -39,6 +39,12 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _COMMIT_RE = re.compile(r"[0-9a-fA-F]{7,40}")
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}")
 _BUILD_FIELDS = ("version", "commit", "mcp_metadata_sha256")
+_PLAIN_TEXT_RE = re.compile(r"[A-Za-z0-9_.:+-]{1,64}")
+_REDIRECT_HINT = ": a redirect the script did not follow; use the final URL"
+_STATUS_HINTS = {
+    **dict.fromkeys((301, 302, 303, 307, 308), _REDIRECT_HINT),
+    404: ": not the production surface, or the wrong URL",
+}
 
 
 class CheckError(Exception):
@@ -88,15 +94,12 @@ def fetch_readyz(base_url: str, timeout: float, token: str | None = None) -> dic
     opener = _token_opener(base_url) if token else urllib.request.build_opener()
     try:
         with opener.open(request, timeout=timeout) as response:
+            if response.status != 200:
+                raise CheckError(f"readyz answered HTTP {response.status}")
             raw = response.read()
     except urllib.error.HTTPError as exc:
         if exc.code != 503:
-            hint = (
-                ": a redirect the script did not follow; use the final URL"
-                if 300 <= exc.code < 400
-                else ""
-            )
-            raise CheckError(f"readyz answered HTTP {exc.code}{hint}") from None
+            raise CheckError(f"readyz answered HTTP {exc.code}{_STATUS_HINTS.get(exc.code, '')}") from None
         raw = exc.read()
     body = json.loads(raw.decode("utf-8"))
     if not isinstance(body, dict):
@@ -111,10 +114,11 @@ def _jwks_note(body: dict[str, Any]) -> str:
     kind = jwks.get("last_failure_kind") if isinstance(jwks, dict) else None
     if not kind:
         return ""
-    return (
-        f". The server's last JWKS refresh failure was {kind} at {jwks.get('last_failure_at')}; "
-        "if that is recent, the token may be fine"
-    )
+    at = jwks.get("last_failure_at")
+    # Server text: printed only in a shape that cannot forge output or break the encoding.
+    if not all(isinstance(v, str) and _PLAIN_TEXT_RE.fullmatch(v) for v in (kind, at)):
+        return ". The server reports a JWKS refresh failure; if that is recent, the token may be fine"
+    return f". The server's last JWKS refresh failure was {kind} at {at}; if that is recent, the token may be fine"
 
 
 def read_build(body: dict[str, Any], *, token_sent: bool = False) -> dict[str, str]:
@@ -125,7 +129,7 @@ def read_build(body: dict[str, Any], *, token_sent: bool = False) -> dict[str, s
         if token_sent:
             raise CheckError(
                 "readyz returned no build block: the server did not accept the token, or it is "
-                f"an older server, or not the production surface{_jwks_note(body)}"
+                f"an older server{_jwks_note(body)}"
             )
         raise CheckError(f"readyz returned no build block: set {TOKEN_ENV} to a valid access token")
     fields: dict[str, str] = {}

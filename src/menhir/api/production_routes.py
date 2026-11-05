@@ -58,6 +58,7 @@ async def _caller_may_see_build(request: Request) -> bool:
     """
 
     if _duplicate_sensitive_headers(request.headers.raw):
+        _LOG.info("readyz build block refused: duplicate_header")
         return False
     value = request.headers.get("authorization", "")
     if not value.startswith("Bearer "):
@@ -65,6 +66,7 @@ async def _caller_may_see_build(request: Request) -> bool:
     verifier = getattr(request.app.state, "oauth_verifier", None)
     policy = getattr(request.app.state, "client_policy", None)
     if verifier is None or policy is None:
+        _LOG.info("readyz build block refused: not_configured")
         return False
     try:
         principal = await verifier.verify_access_token(value[len("Bearer "):])
@@ -75,7 +77,9 @@ async def _caller_may_see_build(request: Request) -> bool:
         )
     except OAuthAuthenticationError as exc:
         # Required because this route answers 200/503 either way, so the log is the only signal.
-        _LOG.info("readyz build block refused: %s", exc.error)
+        # server_error is our outage or misconfiguration, so it warns as the middleware does.
+        level = logging.WARNING if exc.error == "server_error" else logging.INFO
+        _LOG.log(level, "readyz build block refused: %s", exc.error)
         return False
     except PermissionError:
         _LOG.info("readyz build block refused: client_policy")

@@ -26,7 +26,7 @@ from joserfc.jwk import KeySet, RSAKey
 from starlette.datastructures import Headers
 
 from menhir.api import production_routes
-from menhir.api.oauth import OAuthAuthenticationError
+from menhir.api.oauth import JwksRefreshStats, OAuthAuthenticationError
 from menhir.api.production_routes import _caller_may_see_build, readyz
 from menhir.api.server import create_app
 from menhir.mcp import served_metadata
@@ -153,7 +153,7 @@ def test_the_mcp_endpoint_lets_the_valid_token_past_auth(
     response = stack.client.post(
         "/mcp-http", headers={"Authorization": f"Bearer {_token(signing_key)}"}, json={}
     )
-    assert response.status_code not in {400, 401, 403}
+    assert response.status_code == 500
 
 
 def test_a_valid_token_sees_the_build_and_the_response_is_not_cached(
@@ -333,6 +333,39 @@ async def test_a_refusal_logs_a_bounded_reason_below_warning(
     assert "tok-text" not in caplog.text
 
 
+async def test_a_server_side_failure_logs_a_warning(caplog) -> None:
+    request = _request(
+        _BEARER,
+        verifier=_verifier(raises=OAuthAuthenticationError("server_error", "tok-text")),
+        policy=SimpleNamespace(require_client=print),
+    )
+    with caplog.at_level(logging.INFO, logger=production_routes.__name__):
+        assert await _caller_may_see_build(request) is False
+    records = [r for r in caplog.records if r.name == production_routes.__name__]
+    assert [r.levelno for r in records] == [logging.WARNING]
+    assert "tok-text" not in caplog.text
+
+
+async def test_a_duplicate_header_refusal_is_logged(caplog) -> None:
+    request = _request(
+        _BEARER,
+        (b"x-menhir-namespace", b"a"),
+        (b"x-menhir-namespace", b"b"),
+        verifier=_verifier(_principal()),
+        policy=SimpleNamespace(require_client=print),
+    )
+    with caplog.at_level(logging.INFO, logger=production_routes.__name__):
+        assert await _caller_may_see_build(request) is False
+    assert "duplicate_header" in caplog.text
+
+
+async def test_missing_wiring_is_logged(caplog) -> None:
+    request = _request(_BEARER, verifier=None, policy=None)
+    with caplog.at_level(logging.INFO, logger=production_routes.__name__):
+        assert await _caller_may_see_build(request) is False
+    assert "not_configured" in caplog.text
+
+
 @pytest.mark.parametrize(
     ("has_verifier", "has_policy"),
     [(False, True), (True, False), (False, False)],
@@ -396,6 +429,47 @@ async def test_the_readiness_answer_is_read_after_the_token_check(monkeypatch) -
     response = await readyz(SimpleNamespace(headers=Headers(), app=SimpleNamespace(state=state)))
     assert response.status_code == 503
     assert json.loads(response.body)["failures"] == ["neo4j_unavailable"]
+
+
+async def test_the_readiness_answer_is_read_after_the_digest_wait(monkeypatch) -> None:
+    capabilities = SimpleNamespace(neo4j_ready=True, enrichment_ready=True)
+
+    async def gate(_request: object) -> bool:
+        return True
+
+    async def digest(_instance: object) -> str:
+        capabilities.neo4j_ready = False
+        return "0" * 64
+
+    monkeypatch.setattr(production_routes, "_caller_may_see_build", gate)
+    monkeypatch.setattr(production_routes, "served_mcp_metadata_digest", digest)
+    state = SimpleNamespace(
+        settings=SimpleNamespace(runtime_mode="production", instance_id="x"),
+        runtime_ctx=SimpleNamespace(capabilities=capabilities, scheduler=object()),
+        oauth_signing_key=object(),
+    )
+    response = await readyz(SimpleNamespace(headers=Headers(), app=SimpleNamespace(state=state)))
+    assert response.status_code == 503
+    assert "build" in json.loads(response.body)
+
+
+async def test_a_jwks_failure_during_the_token_check_is_in_the_same_response(monkeypatch) -> None:
+    """The check script names this failure, so it must not wait for the next request."""
+    stats = JwksRefreshStats()
+
+    async def gate(_request: object) -> bool:
+        stats.record("ConnectTimeout")
+        return False
+
+    monkeypatch.setattr(production_routes, "JWKS_REFRESH_STATS", stats)
+    monkeypatch.setattr(production_routes, "_caller_may_see_build", gate)
+    state = SimpleNamespace(
+        settings=SimpleNamespace(runtime_mode="production", instance_id="x"),
+        runtime_ctx=None,
+        oauth_signing_key=object(),
+    )
+    response = await readyz(SimpleNamespace(headers=Headers(), app=SimpleNamespace(state=state)))
+    assert json.loads(response.body)["oauth_jwks"]["last_failure_kind"] == "ConnectTimeout"
 
 
 # --- the check script ------------------------------------------------------------------------
@@ -535,23 +609,61 @@ def test_a_loopback_token_never_goes_to_a_proxy(serve, monkeypatch) -> None:
     assert target_seen == ["Bearer secret-token"]
 
 
-@pytest.mark.parametrize("status", [300, 301, 302, 303, 305, 307, 308])
+def test_the_https_token_opener_keeps_the_proxy_but_never_follows_redirects(monkeypatch) -> None:
+    monkeypatch.delenv("NO_PROXY")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+    handlers = check_script._token_opener("https://menhir.example.com").handlers
+    assert any(isinstance(h, check_script._NoRedirect) for h in handlers)
+    assert not any(type(h) is check_script.urllib.request.HTTPRedirectHandler for h in handlers)
+    # Only a CONNECT reaches the proxy over HTTPS, so the token stays inside TLS.
+    assert any(
+        isinstance(h, check_script.urllib.request.ProxyHandler) and "https" in h.proxies
+        for h in handlers
+    )
+
+
+_MATCHING_BUILD = json.dumps(
+    {"build": {"version": "1", "commit": "unknown", "mcp_metadata_sha256": "0" * 64}}
+).encode()
+
+
+def _set_token(monkeypatch, with_token: bool) -> None:
+    if with_token:
+        monkeypatch.setenv(check_script.TOKEN_ENV, "secret-token")
+    else:
+        monkeypatch.delenv(check_script.TOKEN_ENV, raising=False)
+
+
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
 def test_a_redirect_answer_is_an_error_even_with_a_matching_body(
     serve, monkeypatch, capsys, status: int
 ) -> None:
     monkeypatch.setenv(check_script.TOKEN_ENV, "secret-token")
-    body = {"build": {"version": "1", "commit": "unknown", "mcp_metadata_sha256": "0" * 64}}
-    url, _ = serve(status=status, body=json.dumps(body).encode())
+    url, _ = serve(status=status, body=_MATCHING_BUILD)
     assert check_script.main([url, "--expect-version", "1"]) == check_script.EXIT_ERROR
     out = capsys.readouterr().out
     assert f"HTTP {status}" in out and "redirect" in out
 
 
-def test_an_error_status_is_named_and_its_body_ignored(serve, monkeypatch, capsys) -> None:
-    monkeypatch.setenv(check_script.TOKEN_ENV, "secret-token")
-    url, _ = serve(status=500, body=b"{}")
+@pytest.mark.parametrize("with_token", [True, False], ids=["token", "no-token"])
+@pytest.mark.parametrize("status", [201, 202, 204, 206, 300, 304, 305, 500])
+def test_any_other_status_is_named_and_its_body_ignored(
+    serve, monkeypatch, capsys, status: int, with_token: bool
+) -> None:
+    _set_token(monkeypatch, with_token)
+    url, _ = serve(status=status, body=_MATCHING_BUILD)
+    assert check_script.main([url, "--expect-version", "1"]) == check_script.EXIT_ERROR
+    out = capsys.readouterr().out
+    assert f"HTTP {status}" in out and "redirect" not in out
+
+
+@pytest.mark.parametrize("with_token", [True, False], ids=["token", "no-token"])
+def test_a_404_points_at_the_surface_or_the_url(serve, monkeypatch, capsys, with_token) -> None:
+    _set_token(monkeypatch, with_token)
+    url, _ = serve(status=404, body=b'{"detail":"Not Found"}')
     assert check_script.main([url]) == check_script.EXIT_ERROR
-    assert "HTTP 500" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "HTTP 404" in out and "production surface" in out
 
 
 def test_a_503_body_is_still_read(serve, monkeypatch, capsys) -> None:
@@ -570,6 +682,41 @@ def test_a_jwks_failure_is_named_when_the_token_was_not_accepted(
     assert check_script.main([url]) == check_script.EXIT_ERROR
     out = capsys.readouterr().out
     assert "ConnectTimeout" in out and "2026-11-04" in out
+
+
+@pytest.mark.parametrize(
+    ("kind", "at"),
+    [
+        ("X\nversion: ok\n::error::forged", "2026-11-04"),
+        ("☃", "2026-11-04"),
+        ("\ud800", "2026-11-04"),
+        ("a" * 200, "2026-11-04"),
+        (5, "2026-11-04"),
+        (["a"], "2026-11-04"),
+        ("ConnectTimeout", "2026\nforged"),
+        ("ConnectTimeout", None),
+    ],
+    ids=["newlines", "non-ascii", "surrogate", "long", "number", "list", "bad-time", "no-time"],
+)
+def test_server_text_that_is_not_plain_is_not_printed(
+    serve, monkeypatch, capsys, kind: Any, at: Any
+) -> None:
+    monkeypatch.setenv(check_script.TOKEN_ENV, "secret-token")
+    body = {"oauth_jwks": {"last_failure_kind": kind, "last_failure_at": at}}
+    url, _ = serve(body=json.dumps(body).encode())
+    assert check_script.main([url]) == check_script.EXIT_ERROR
+    out = capsys.readouterr().out
+    assert "reports a JWKS refresh failure" in out
+    assert "forged" not in out and "last JWKS refresh failure was" not in out
+
+
+@pytest.mark.parametrize("jwks", [None, [], "x", 5, {}], ids=["none", "list", "text", "number", "empty"])
+def test_an_unusable_jwks_field_adds_no_note(serve, monkeypatch, capsys, jwks: Any) -> None:
+    monkeypatch.setenv(check_script.TOKEN_ENV, "secret-token")
+    url, _ = serve(body=json.dumps({"oauth_jwks": jwks}).encode())
+    assert check_script.main([url]) == check_script.EXIT_ERROR
+    out = capsys.readouterr().out
+    assert "did not accept the token" in out and "JWKS" not in out
 
 
 @pytest.mark.parametrize(
