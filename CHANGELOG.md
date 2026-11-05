@@ -1,5 +1,9 @@
 ## 2026-11-04 - FalkorDBLite compatibility spike (#109)
 
+- Added a full-project compound candidate reusing the actual structural writer, with mtime/scan
+  freshness, native UDF postcondition rollback, operational uniqueness constraints, full/partial
+  scan parity and failure/race checks. Restart now verifies project data, temporal values and UDF
+  restoration. Parameterized temporals and real View/history certification remain gated.
 - Updated the agreed integration roadmap and callback-writer classification. Added an atomic
   identity-fenced document candidate reusing the actual writer's MERGE/payload, with live rollback,
   refusal, migration-drain and concurrent-writer checks. Full project/View publication remains gated.

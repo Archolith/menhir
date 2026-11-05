@@ -116,3 +116,90 @@ def test_document_compiler_refuses_a_multi_statement_writer(monkeypatch) -> None
     claim = IdentityClaim(project_id="pid", root_key="/workspace/project", generation=3, host="host")
     with pytest.raises(ValueError, match="exactly one writer statement"):
         document_proof.document_publication_statement(claim, {"structure_project_id": "pid"})
+
+
+def test_project_parameter_binding_preserves_literals_comments_and_parameter_temporals() -> None:
+    query = """SET n.value=$value, n.text='$value datetime()', n.`$field`=1
+    // $comment datetime()
+    RETURN datetime(), localdatetime(), datetime($when)"""
+    bound = document_proof._bind_structure_query(query, {"value": 10, "when": "2026-01-01T00:00:00Z"}, "step")
+    assert "n.value=$step.value" in bound
+    assert "n.text='$value datetime()'" in bound
+    assert "n.`$field`=1" in bound
+    assert "// $comment datetime()" in bound
+    assert "RETURN localdatetime(), localdatetime(), datetime($step.when)" in bound
+    with pytest.raises(ValueError, match="missing structure parameter"):
+        document_proof._bind_structure_query("RETURN $missing", {}, "step")
+
+
+def _project_inputs():
+    from menhir.infrastructure.project_identity_binding import root_key_for
+    from menhir.infrastructure.project_scanner import FileEntry, ProjectScanResult
+    from menhir.infrastructure.structure_write_fence import IdentityClaim
+
+    root = "/workspace/project"
+    claim = IdentityClaim(project_id="pid", root_key=root_key_for(root), generation=3, host="host")
+    scan = ProjectScanResult(
+        name="project",
+        root_path=root,
+        stack="python",
+        description="fixture",
+        project_id="pid",
+        identity_generation=3,
+        scan_generation=1,
+        files=[FileEntry("a.py", file_mtime=2)],
+        scan_fingerprint="new",
+    )
+    return claim, scan
+
+
+def test_project_planner_captures_actual_mtime_inputs_without_writing() -> None:
+    class Reads:
+        calls = 0
+
+        def execute(self, query, params):
+            self.calls += 1
+            assert "RETURN n.structure_path AS path" in query
+            return [{"path": "a.py", "mtime": 1.0}] if self.calls == 1 else []
+
+    repository = Reads()
+    claim, scan = _project_inputs()
+    query, params = document_proof.project_publication_statement(repository, claim, scan, "session", "user")
+    assert repository.calls == 2
+    assert params["snapshot0"] == [{"path": "a.py", "mtime": 1.0}]
+    assert params["snapshot1"] == []
+    assert params["proof_scan"] == 1
+    assert params["proof_entities"] == 2
+    assert "project completion marker mismatch" in query
+
+
+@pytest.mark.parametrize("kind", ["identity", "generation", "duplicate", "unexpected_read", "completion"])
+def test_project_planner_refuses_unsupported_or_ambiguous_plans(monkeypatch, kind: str) -> None:
+    from dataclasses import replace
+
+    from menhir.infrastructure.structure_queries import StructureGraphWriter
+
+    class Reads:
+        def execute(self, query, params):
+            return [{"path": "a.py", "mtime": 1.0}] if kind == "duplicate" else []
+
+    claim, scan = _project_inputs()
+    if kind == "identity":
+        scan = replace(scan, project_id="foreign")
+    elif kind == "generation":
+        scan = replace(scan, scan_generation=None)
+    elif kind == "unexpected_read":
+
+        def read_during_writes(writer, *args):
+            writer.neo4j.execute("MATCH (n) RETURN n.uuid", {})
+
+        monkeypatch.setattr(StructureGraphWriter, "write_project", read_during_writes)
+    elif kind == "completion":
+
+        def missing_completion(writer, *args):
+            writer.neo4j.execute("CREATE (:Entity)", {})
+            return {"entities": 1, "edges": 0}
+
+        monkeypatch.setattr(StructureGraphWriter, "write_project", missing_completion)
+    with pytest.raises(ValueError):
+        document_proof.project_publication_statement(Reads(), claim, scan, "session", "user")

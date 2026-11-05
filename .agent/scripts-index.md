@@ -112,6 +112,9 @@ Its helper `falkordblite_projection_proof.py` exercises real Menhir materializat
 and a single-query definition-publication candidate, including refusal/failure and publisher races.
 It also fuses the actual document writer's MERGE with identity validation, exercising real structure
 admission/release, migration draining, rollback and competing document writers.
+Its full-project compound candidate reuses the actual writer, guards initial mtime inputs and
+asserts completion inside one query using a pure native UDF. It tests full/partial scan parity,
+pruning, rollback and scan generations under a UTC native-clock profile; it is not runtime wiring.
 Run it through the compatibility probe; it is not a runtime backend adapter.
 `falkordblite_prepared_materialization.py` holds the bounded numeric prepared-write contract;
 `falkordblite_prepared_proof.py` exercises it against disposable storage through the same probe.

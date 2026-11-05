@@ -7,10 +7,181 @@ the unsafe mapping; guarded publication candidates cover specific operations onl
 from __future__ import annotations
 
 import json
+import re
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from typing import Any
+
+PROJECT_GUARD_JS = """
+function requireOk(ok, message) {
+    if (ok !== true) { throw new Error(message); }
+    return true;
+}
+falkor.register('requireOk', requireOk);
+"""
+_STRUCTURE_TOKENS = re.compile(
+    r"'(?:''|\\.|[^'\\])*'|\"(?:\"\"|\\.|[^\"\\])*\"|`(?:``|[^`])*`|//[^\n]*|/\*.*?\*/"
+    r"|\$(?P<parameter>[A-Za-z_][A-Za-z0-9_]*)|(?P<clock>\bdatetime\s*\(\s*\))",
+    re.DOTALL,
+)
+_TERMINAL_COUNT = re.compile(r"\bRETURN\s+count\([^)]*\)\s+AS\s+(cnt|deleted|updated)\s*$", re.IGNORECASE)
+
+
+def _bind_structure_query(query: str, parameters: dict[str, Any], name: str) -> str:
+    """Bind this writer's parameter names without rewriting strings, identifiers or comments.
+
+    Only its zero-argument edge clock is mapped to native localdatetime(). Qualification below
+    assumes a UTC runtime; this is NOT an alias for timezone-bearing datetime(parameters).
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        parameter = match.group("parameter")
+        if parameter is not None:
+            if parameter not in parameters:
+                raise ValueError(f"missing structure parameter {parameter}")
+            return f"${name}.{parameter}"
+        return "localdatetime()" if match.group("clock") else match.group(0)
+
+    return _STRUCTURE_TOKENS.sub(replace, query)
+
+
+def project_publication_statement(
+    repository: Any,
+    claim: Any,
+    scan: Any,
+    session_id: str,
+    user_id: str,
+) -> tuple[str, dict[str, Any]]:
+    """Operation-specific compound proof using the actual full project writer.
+
+    Capture its read-only mtime inputs, retain its Python scan policy, and compose its existing
+    write statements. Only diagnostic counters are placeholders during planning; the actual
+    completion count is asserted server-side and actual batch-edge counts are returned.
+    Caller must hold the existing structure admission through preparation and publication.
+    """
+    from menhir.infrastructure.project_identity_binding import root_key_for
+    from menhir.infrastructure.structure_queries import StructureGraphWriter
+
+    if (
+        scan.project_id != claim.project_id
+        or scan.identity_generation != claim.generation
+        or root_key_for(scan.root_path) != claim.root_key
+    ):
+        raise ValueError("scan identity disagrees with publication claim")
+    if type(scan.scan_generation) is not int or scan.scan_generation < 1:
+        raise ValueError("project proof requires a positive scan generation")
+    reads: list[tuple[str, dict[str, Any], list[dict[str, Any]]]] = []
+    paths: set[str] = set()
+
+    class ReadCapture:
+        def execute(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+            rows = repository.execute(query, params)
+            for row in rows:
+                if not row.get("path") or row["path"] in paths:
+                    raise ValueError("ambiguous structural mtime identity")
+                paths.add(row["path"])
+            reads.append((query, dict(params), sorted(rows, key=lambda row: (row["path"], row["mtime"]))))
+            return rows
+
+    mtimes = StructureGraphWriter(ReadCapture()).get_file_mtimes(scan.name, scan.project_id)
+    steps: list[tuple[str, dict[str, Any], str, bool]] = []
+
+    class WriteCapture:
+        edge_batch = False
+
+        def execute(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+            # Unexpected reads must not be answered with fabricated application state.
+            plain = _STRUCTURE_TOKENS.sub("", query)
+            if not re.search(r"\b(MERGE|CREATE|SET|DELETE|REMOVE)\b", plain):
+                raise ValueError("unrecognized project read during write planning")
+            match = _TERMINAL_COUNT.search(query.strip())
+            alias = match.group(1).lower() if match else "proof_rows"
+            steps.append((query, dict(params), alias, self.edge_batch))
+            return [{"cnt": 0, "deleted": 0, "updated": 1}]
+
+    capture = WriteCapture()
+
+    class Planner(StructureGraphWriter):
+        def get_file_mtimes(self, project_name: str, project_id: str | None = None) -> dict[str, float]:
+            if project_name != scan.name or project_id != scan.project_id:
+                raise ValueError("unrecognized project mtime read")
+            return dict(mtimes)
+
+        def _write_edges_batch(self, *args: Any, **kwargs: Any) -> int:
+            capture.edge_batch = True
+            try:
+                return super()._write_edges_batch(*args, **kwargs)
+            finally:
+                capture.edge_batch = False
+
+    counts = Planner(capture).write_project(scan, session_id, user_id)
+    if not steps or steps[-1][2] != "updated" or any(step[2] == "updated" for step in steps[:-1]):
+        raise ValueError("unrecognized project completion contract")
+    parameters: dict[str, Any] = {
+        "proof_id": claim.project_id,
+        "proof_host": claim.host,
+        "proof_root": claim.root_key,
+        "proof_generation": claim.generation,
+        "proof_scan": scan.scan_generation,
+        "proof_entities": counts["entities"],
+        "proof_fixed_edges": counts["edges"],
+    }
+    parts = [
+        """
+OPTIONAL MATCH (p:ProjectIdentity {project_id:$proof_id})
+WITH collect(p) AS identities
+WITH identities, Menhir109Guard.requireOk(
+    size(identities)=1 AND coalesce(identities[0].state,'bound')='bound'
+    AND coalesce(identities[0].bound_host=$proof_host,false)
+    AND coalesce(identities[0].root_key=$proof_root,false)
+    AND coalesce(identities[0].claim_generation,0)=$proof_generation
+    AND coalesce(identities[0].structure_scan_generation=$proof_scan,false),
+    'stale project publication') AS gate
+"""
+    ]
+    for i, (query, params, rows) in enumerate(reads):
+        name = f"read{i}"
+        parameters[name], parameters[f"snapshot{i}"] = params, rows
+        body = _bind_structure_query(query, params, name)
+        parts.append(f"""
+CALL {{ WITH gate
+    CALL {{ WITH gate WITH gate WHERE gate {body} }}
+    WITH path, mtime ORDER BY path, mtime
+    RETURN collect({{path:path,mtime:mtime}}) AS actual{i}
+}}
+WITH identities, Menhir109Guard.requireOk(
+    coalesce(actual{i}=$snapshot{i},false), 'changed project mtime input') AS gate
+""")
+    parts.append("""
+WITH identities[0] AS identity, gate
+SET identity.last_publication_probe=timestamp()
+WITH CASE WHEN gate THEN 1 ELSE 0 END AS stage_initial
+""")
+    previous = "stage_initial"
+    edge_counts = ["$proof_fixed_edges"]
+    for i, (query, params, alias, edge_batch) in enumerate(steps):
+        name, result = f"step{i}", f"stage{i}"
+        parameters[name] = params
+        body = _bind_structure_query(query, params, name)
+        if alias == "proof_rows":
+            body += " RETURN count(*) AS proof_rows"
+        parts.append(f"""
+CALL {{ WITH {previous}
+    CALL {{ WITH {previous} WITH {previous} WHERE {previous}>=0 {body} }}
+    RETURN sum({alias}) AS {result}
+}}
+""")
+        if edge_batch:
+            edge_counts.append(result)
+        previous = result
+    parts.append(
+        f"RETURN Menhir109Guard.requireOk({previous}=1,'project completion marker mismatch') AS committed, "
+        f"$proof_entities AS entities, toInteger({'+'.join(edge_counts)}) AS edges"
+    )
+    return "\n".join(parts), parameters
+
 
 # Validate BEFORE any mutation; one graph query owns the whole publication decision and write.
 # Timestamp values are supplied explicitly because this runtime has no Neo4j datetime() value.
@@ -511,3 +682,343 @@ def structure_document_proofs(db: Any) -> list[tuple[str, Callable[[], object]]]
         for name, query in mutations.items()
     )
     return checks
+
+
+def project_publication_proofs(db: Any) -> list[tuple[str, Callable[[], object]]]:
+    """Full-writer compound experiments, native constraints and explicit late rollback guards."""
+    from dataclasses import replace
+    from datetime import datetime
+
+    from redis.exceptions import ResponseError
+
+    from menhir.infrastructure.project_identity_binding import root_key_for
+    from menhir.infrastructure.project_scanner import (
+        CallEdge,
+        CrossProjectRef,
+        DirEntry,
+        EndpointEntry,
+        FileEntry,
+        ImportEdge,
+        NestedRepo,
+        ProjectScanResult,
+        SymbolEntry,
+        TestEdge,
+    )
+    from menhir.infrastructure.structure_queries import (
+        StructureGraphWriter,
+        _symbol_path,
+    )
+    from menhir.infrastructure.structure_write_fence import (
+        IdentityClaim,
+        admit_structure_writer,
+        lock_structure_project,
+        release_structure_writer,
+    )
+
+    db.client.execute_command("GRAPH.UDF", "LOAD", "Menhir109Guard", PROJECT_GUARD_JS)
+    claim = IdentityClaim(
+        project_id="project-pid", root_key=root_key_for("/workspace/project"), generation=3, host="host"
+    )
+    alpha = SymbolEntry("src/a.py", "alpha", "function", 1, "alpha()", "alpha", "")
+    beta = SymbolEntry("src/b.py", "beta", "function", 1, "beta()", "beta", "")
+    base = ProjectScanResult(
+        name="project",
+        root_path="/workspace/project",
+        stack="python",
+        description="full fixture",
+        project_id=claim.project_id,
+        identity_generation=3,
+        scan_generation=1,
+        scan_fingerprint="base",
+        directories=[DirEntry("src"), DirEntry("tests")],
+        files=[
+            FileEntry("src/a.py", file_mtime=1),
+            FileEntry("src/b.py", file_mtime=1),
+            FileEntry("tests/test_a.py", role="test", file_mtime=1),
+            FileEntry("README.md", role="document", file_mtime=1),
+            FileEntry("pyproject.toml", role="config", file_mtime=1),
+            FileEntry("main.py", role="entrypoint", file_mtime=1),
+        ],
+        dependencies=["pytest"],
+        imports=[ImportEdge("src/a.py", "src/b.py")],
+        test_edges=[TestEdge("tests/test_a.py", "src/a.py")],
+        endpoints=[EndpointEntry("GET /fixture", "src/a.py", "http")],
+        cross_project_refs=[CrossProjectRef("external", "import", "fixture")],
+        nested_repos=[NestedRepo("vendor/child", "child")],
+        symbols=[alpha, beta],
+        call_edges=[CallEdge(_symbol_path(alpha), _symbol_path(beta))],
+        files_discovered=6,
+        files_eligible=6,
+        files_indexed=6,
+        indexed_commit="base-commit",
+        indexed_repository="fixture/repository",
+        indexed_dirty=False,
+    )
+    update = replace(
+        base,
+        scan_fingerprint="updated",
+        indexed_commit="new-commit",
+        indexed_dirty=True,
+        directories=[DirEntry("src")],
+        files=[FileEntry("src/a.py", file_mtime=2)],
+        symbols=[replace(alpha, name="replacement")],
+        dependencies=[],
+        imports=[],
+        test_edges=[],
+        endpoints=[],
+        cross_project_refs=[],
+        nested_repos=[],
+        call_edges=[],
+        files_discovered=1,
+        files_eligible=1,
+        files_indexed=1,
+    )
+
+    def require(ok: bool, message: str) -> None:
+        if not ok:
+            raise AssertionError(message)
+
+    class NativeRepository:
+        def __init__(self, graph: Any):
+            self.graph = graph
+
+        def execute(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+            params = params or {}
+            result = self.graph.query(_bind_structure_query(query, params, "native"), {"native": params})
+            return [dict(zip([column[1] for column in result.header], row, strict=True)) for row in result.result_set]
+
+    def fixture(name: str) -> tuple[Any, Any, Any]:
+        graph = db.select_graph("menhir109_project_" + name)
+        for label, properties in (
+            ("Entity", ("structure_project_id", "structure_path")),
+            ("ProjectIdentity", ("project_id",)),
+        ):
+            graph.query(f"CREATE INDEX FOR (n:{label}) ON ({','.join('n.' + p for p in properties)})")
+            db.client.execute_command(
+                "GRAPH.CONSTRAINT",
+                "CREATE",
+                graph.name,
+                "UNIQUE",
+                "NODE",
+                label,
+                "PROPERTIES",
+                len(properties),
+                *properties,
+            )
+        repository = NativeRepository(graph)
+        deadline = time.monotonic() + 3
+        while True:
+            constraints = repository.execute("CALL db.constraints()")
+            if len(constraints) == 2 and all(row["status"] == "OPERATIONAL" for row in constraints):
+                break
+            require(time.monotonic() < deadline, f"constraints did not become operational: {constraints}")
+            time.sleep(0.02)
+        graph.query(
+            "CREATE (:ProjectIdentity {project_id:$pid,state:'bound',root_key:$root,bound_host:'host', "
+            "claim_generation:3,structure_scan_generation:1}) "
+            "CREATE (:Entity {uuid:'foreign',structure_project:'foreign',structure_project_id:'foreign-pid', "
+            "structure_path:'src/a.py',structure_role:'file',file_mtime:1}) "
+            "CREATE (:Entity {uuid:'manual',structure_project:'project',structure_project_id:$pid, "
+            "structure_path:'doc:manual',structure_role:'document',source:'document-ingest'})",
+            {"pid": claim.project_id, "root": claim.root_key},
+        )
+        handle = admit_structure_writer(repository, label="project proof", claim=claim)
+        return graph, repository, handle
+
+    def state(graph: Any) -> list[str]:
+        rows = graph.query("MATCH (n) RETURN id(n),labels(n),properties(n)").result_set
+        rows += graph.query("MATCH (a)-[r]->(b) RETURN id(a),id(r),type(r),properties(r),id(b)").result_set
+        return sorted(json.dumps(row, sort_keys=True, default=str) for row in rows)
+
+    def semantic_state(graph: Any) -> list[str]:
+        rows = graph.query("MATCH (n:Entity) RETURN properties(n)").result_set
+        edges = graph.query(
+            "MATCH (a)-[r]->(b) RETURN a.structure_project,a.structure_path,type(r),"
+            "b.structure_project,b.structure_path,properties(r)"
+        ).result_set
+        volatile = {"uuid", "created_at", "last_accessed"}
+        values = [[{k: v for k, v in row[0].items() if k not in volatile}] for row in rows]
+        values += [row[:-1] + [{k: v for k, v in row[-1].items() if k not in volatile}] for row in edges]
+        return sorted(json.dumps(row, sort_keys=True, default=str) for row in values)
+
+    def publish(repository: Any, scan: Any) -> list[Any]:
+        query, params = project_publication_statement(repository, claim, scan, "session", "user")
+        return repository.graph.query(query, params).result_set[0]
+
+    def expect_rollback(graph: Any, query: str, params: dict[str, Any], message: str | tuple[str, ...]) -> str:
+        before = state(graph)
+        try:
+            graph.query(query, params)
+        except ResponseError as exc:
+            expected = (message,) if isinstance(message, str) else message
+            require(any(value in str(exc) for value in expected), f"wrong publication error: {exc}")
+        else:
+            raise AssertionError("project publication did not reject")
+        require(state(graph) == before, "project rejection retained writes or changed the identity probe")
+        return message if isinstance(message, str) else " / ".join(message)
+
+    def roundtrip(partial: bool) -> object:
+        graph, repo, handle = fixture("partial" if partial else "complete")
+        reference, original, reference_handle = fixture("partial_reference" if partial else "complete_reference")
+        try:
+            second = replace(update, files_discovered=6, files_eligible=6) if partial else update
+            for scan in (base, second):
+                lock_structure_project(original, claim, scan_generation=1)
+                expected = StructureGraphWriter(original).write_project(scan, "session", "user")
+                actual = publish(repo, scan)
+                require(
+                    actual == [True, expected["entities"], expected["edges"]],
+                    f"result count mismatch: {actual}, {expected}",
+                )
+                require(
+                    semantic_state(graph) == semantic_state(reference),
+                    "compound publication drifted from actual writer",
+                )
+            paths = graph.query(
+                "MATCH (n:Entity {structure_project_id:$pid}) RETURN n.structure_path", {"pid": claim.project_id}
+            ).result_set
+            require((["src/b.py"] in paths) == partial, "partial/full scan prune policy changed")
+            require(["doc:manual"] in paths, "scan pruned a separately ingested document")
+            return "actual writer parity for initial/incremental publication, entities/edges, counts, pruning and completion metadata"
+        finally:
+            release_structure_writer(repo, handle)
+            release_structure_writer(original, reference_handle)
+
+    def refusal(kind: str) -> object:
+        graph, repo, handle = fixture(kind)
+        try:
+            publish(repo, base)
+            query, params = project_publication_statement(repo, claim, update, "session", "user")
+            if kind == "mtime":
+                graph.query(
+                    "MATCH (n:Entity {structure_project_id:$pid,structure_path:'src/a.py'}) SET n.file_mtime=99",
+                    {"pid": claim.project_id},
+                )
+                message = "changed project mtime input"
+            elif kind == "generation":
+                graph.query("MATCH (p:ProjectIdentity) SET p.structure_scan_generation=2")
+                message = "stale project publication"
+            elif kind == "completion":
+                steps = [key for key in params if key.startswith("step")]
+                params[max(steps, key=lambda key: int(key[4:]))]["project_id"] = "wrong-project"
+                message = "project completion marker mismatch"
+            elif kind == "completion_multiple":
+                graph.query(
+                    "CREATE (:Entity {uuid:'extra-project',structure_project:'project',structure_project_id:$pid,"
+                    "structure_path:'invalid-project-marker',structure_role:'project'})",
+                    {"pid": claim.project_id},
+                )
+                message = "project completion marker mismatch"
+            else:
+                step = next(value for key, value in params.items() if key.startswith("step") and value.get("rows"))
+                step["rows"][0]["name"] = {"invalid": "property"}
+                # This engine can replace a nested execution error with the later UDF rejection.
+                # Either error must reject and roll back the entire graph, never report success.
+                message = ("Property values", "project completion marker mismatch")
+            return expect_rollback(graph, query, params, message)
+        finally:
+            release_structure_writer(repo, handle)
+
+    def udf_rollback() -> object:
+        graph = db.select_graph("menhir109_project_udf")
+        return expect_rollback(
+            graph,
+            "CREATE (:RollbackSentinel) WITH count(*) AS changed "
+            "RETURN Menhir109Guard.requireOk(changed=0,'postcondition rollback')",
+            {},
+            "postcondition rollback",
+        )
+
+    def clock_profile() -> object:
+        graph = db.select_graph("menhir109_project_clock")
+        now, epoch = graph.query("RETURN localdatetime(),timestamp()").result_set[0]
+        require(
+            isinstance(now, datetime) and abs(now.timestamp() * 1000 - epoch) < 2000,
+            "native structural clock is not compatible with the UTC fixture runtime",
+        )
+        return "native localdatetime edge clock in UTC runtime only; timezone-bearing datetime(parameters) remains unqualified"
+
+    def late_failure() -> object:
+        graph, repo, handle = fixture("late_failure")
+        try:
+            publish(repo, base)
+            query, params = project_publication_statement(repo, claim, update, "session", "user")
+            prefix, result = query.rsplit("RETURN Menhir109Guard", 1)
+            failing = prefix + "CREATE (bad:ProjectFailure) SET bad.value={nested:1}\nRETURN Menhir109Guard" + result
+            return expect_rollback(graph, failing, params, ("Property values", "project completion marker mismatch"))
+        finally:
+            release_structure_writer(repo, handle)
+
+    def ambiguous_input() -> object:
+        graph, repo, handle = fixture("ambiguous")
+        try:
+            publish(repo, base)
+            graph.query(
+                "CREATE (:Entity {structure_project:'project',structure_path:'src/a.py',structure_role:'file',file_mtime:1})"
+            )
+            before = state(graph)
+            try:
+                project_publication_statement(repo, claim, update, "session", "user")
+            except ValueError as exc:
+                require("ambiguous structural mtime" in str(exc), str(exc))
+            else:
+                raise AssertionError("ambiguous legacy/current mtime identity was accepted")
+            require(state(graph) == before, "ambiguous preparation mutated graph")
+            return "ambiguous legacy/current input refused before planning writes"
+        finally:
+            release_structure_writer(repo, handle)
+
+    def competing_generations() -> object:
+        graph, repo, handle = fixture("race")
+        other = admit_structure_writer(repo, label="second scan", claim=claim)
+        graph.query("MATCH (p:ProjectIdentity) SET p.structure_scan_generation=2")
+        scans = (base, replace(update, scan_generation=2))
+        plans = [project_publication_statement(repo, claim, scan, "session", "user") for scan in scans]
+        barrier = Barrier(2)
+
+        def run(plan: tuple[str, dict[str, Any]]) -> object:
+            barrier.wait(timeout=10)
+            try:
+                return db.select_graph("menhir109_project_race").query(*plan).result_set
+            except ResponseError as exc:
+                require("stale project publication" in str(exc), f"unexpected race failure: {exc}")
+                return "stale"
+
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [pool.submit(run, plan) for plan in plans]
+                results = [future.result(timeout=20) for future in futures]
+            require(results[0] == "stale" and results[1][0][0] is True, str(results))
+            marker = graph.query(
+                "MATCH (n:Entity {structure_project_id:$pid,structure_role:'project'}) RETURN n.scan_fingerprint",
+                {"pid": claim.project_id},
+            ).result_set
+            require(marker == [["updated"]], f"old scan replaced new completion marker: {marker}")
+            return "stale and current scans race; only the current generation publishes"
+        finally:
+            release_structure_writer(repo, handle)
+            release_structure_writer(repo, other)
+            db.client.connection_pool.disconnect()
+
+    def missing_guard() -> object:
+        graph, repo, handle = fixture("missing_guard")
+        try:
+            query, params = project_publication_statement(repo, claim, base, "session", "user")
+            return expect_rollback(graph, query.replace("Menhir109Guard.", "MissingGuard."), params, "Unknown function")
+        finally:
+            release_structure_writer(repo, handle)
+
+    return [
+        ("project_publication_udf_postcondition_rollback", udf_rollback),
+        ("project_publication_native_clock_profile", clock_profile),
+        ("project_publication_full_writer_roundtrip", lambda: roundtrip(False)),
+        ("project_publication_partial_scan_policy", lambda: roundtrip(True)),
+        ("project_publication_late_failure_rollback", late_failure),
+        ("project_publication_ambiguous_input", ambiguous_input),
+        ("project_publication_competing_generations", competing_generations),
+        ("project_publication_missing_guard", missing_guard),
+        *[
+            (f"project_publication_refuses_{kind}", lambda kind=kind: refusal(kind))
+            for kind in ("mtime", "generation", "completion", "completion_multiple", "property")
+        ],
+    ]

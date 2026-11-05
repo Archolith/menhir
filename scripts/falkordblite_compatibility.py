@@ -228,10 +228,21 @@ async def graphiti_probes(db: Any) -> list[dict[str, object]]:
 
 
 def persistence_probe(db: Any, path: Path) -> dict[str, object]:
-    """Close the embedded server, confirm it exited, then reopen the same database file."""
+    """Restart the full probe's server and verify sentinel, project data and its guard UDF."""
     import psutil
     from redislite.falkordb_client import FalkorDB
 
+    def project_checkpoint(client: Any) -> list[str]:
+        graph = client.select_graph("menhir109_project_complete")
+        nodes = graph.query("MATCH (n:Entity) RETURN properties(n)").result_set
+        edges = graph.query(
+            "MATCH (a)-[r]->(b) RETURN a.structure_project_id,a.structure_path,type(r),"
+            "b.structure_project_id,b.structure_path,properties(r)"
+        ).result_set
+        require(bool(nodes), "completed project fixture is missing at restart")
+        return sorted(json.dumps(row, sort_keys=True, default=str) for row in nodes + edges)
+
+    project_before = project_checkpoint(db)
     db.select_graph("menhir_restart").query("CREATE (:Sentinel {uuid:'durable'})")
     pid = db.client.pid
     db.client.save()
@@ -245,7 +256,24 @@ def persistence_probe(db: Any, path: Path) -> dict[str, object]:
         rows = reopened.select_graph("menhir_restart").query("MATCH (n:Sentinel) RETURN n.uuid").result_set
         require(rows == [["durable"]], f"restart lost sentinel: {rows}")
         require(reopened.client.pid != pid, "reopen reused the original server")
-        return {"old_pid": pid, "old_status": old_status, "new_pid": reopened.client.pid, "rows": rows}
+        require(
+            project_checkpoint(reopened) == project_before,
+            "restart changed project nodes, edges or native temporal values",
+        )
+        guard = (
+            reopened.select_graph("menhir_restart")
+            .query("RETURN Menhir109Guard.requireOk(true,'restart guard qualification')")
+            .result_set
+        )
+        require(guard == [[True]], f"restart did not restore the publication guard: {guard}")
+        return {
+            "old_pid": pid,
+            "old_status": old_status,
+            "new_pid": reopened.client.pid,
+            "rows": rows,
+            "project_restored": True,
+            "guard_restored": True,
+        }
     finally:
         reopened.close()
 
@@ -283,6 +311,7 @@ def main() -> int:
                     # Exercise this checkout's repository code without installing the full service.
                     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
                     from falkordblite_projection_proof import (
+                        project_publication_proofs,
                         projection_proofs,
                         structure_document_proofs,
                     )
@@ -290,6 +319,8 @@ def main() -> int:
                     for name, operation in projection_proofs(db):
                         checks.append(check(name, operation))
                     for name, operation in structure_document_proofs(db):
+                        checks.append(check(name, operation))
+                    for name, operation in project_publication_proofs(db):
                         checks.append(check(name, operation))
                     from falkordblite_prepared_proof import (
                         prepared_proofs,

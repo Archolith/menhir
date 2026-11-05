@@ -172,7 +172,7 @@ the entire P0 capability/writer matrix.
 | Same module: `dirty_targets`, `retire_targets` | Validate definition and advance exact target generations together | Candidate not implemented. |
 | Same module: `reconcile_all_targets` | Read complete membership, compute additions/removals, apply both atomically | Python set computation needs a deliberate replacement strategy. |
 | `projection_lifecycle_repository_reads.commit` | Fence, callback writes, Python result validation, receipt/certificate in one transaction | Actual callback rejection counterexamples reproduced. |
-| `memory_graph_adapter.write_project_structure` | Identity/generation lock plus multi-query project publication/pruning | Not qualified for FalkorDB. |
+| `memory_graph_adapter.write_project_structure` | Identity/generation lock plus multi-query project publication/pruning | Compound-query candidate passes the full-writer fixtures below; production wiring, scale and broader qualification remain open. |
 | Same module: `write_document` | Identity lock and structural document MERGE together | Production-shaped fused query passes the live checks below; no runtime backend wired. |
 | Same module: `refresh_indexed_binding` | Identity/scan lock and conditional metadata update together | One native MATCH/SET body; fusion not implemented or qualified. |
 | `scripts/backfill_legacy_retention.main` | Revalidate manifest, then apply all reviewed links or none | Operator-only; retains Neo4j requirement. |
@@ -200,8 +200,9 @@ distinguishes the remaining work:
   entity/edge batches, inferred project targets and symbol/call rewrites. Partial scans deliberately
   suppress destructive absence-based pruning. The final fingerprint/coverage/Beacon marker is
   another query whose returned count must be exactly one; failure must undo every earlier write.
-  This is the large structural transaction gate. Do not replace it with independently committed
-  batches or treat the document proof as evidence that it works.
+  This is the large structural transaction gate. The compound-query follow-up below now exercises
+  it against real writer fixtures. Do not replace it with independently committed batches or treat
+  the simpler document proof as equivalent evidence.
 - `write_document` has a much smaller shape: identity validation plus one `_merge_entity` call.
   `refresh_indexed_binding` is identity/scan validation plus one conditional MATCH/SET body.
 - Projection `commit` remains the real materializer/history/receipt/certificate gate. Its current
@@ -284,6 +285,66 @@ scan-generation publication, native constraint/readiness setup, lease reaping/or
 cross-process/crash recovery, or real View/history certification. Existing ambiguous-commit handling
 must remain fail-closed; document MERGE is not authority to retry an old write after a peer update.
 No general `execute_write` implementation, backend runtime selection or production service changed.
+
+### Full project writer compound-query follow-up (2026-11-04)
+
+The pinned engine already supports pure JavaScript UDFs. A small probe-owned `requireOk` function
+throws when a predicate is not exactly true; native execution then rolls back the entire graph
+query. The live check verified this after a preceding CREATE. This supplies an explicit postcondition
+mechanism without a deliberate invalid-property hack, compensating writes or a new engine feature.
+It does **not** introduce interactive transactions or change the current Graphiti callback behavior.
+
+`project_publication_statement` now invokes the real `StructureGraphWriter.write_project` to
+produce a compound-query candidate:
+
+1. Capture the actual read-only mtime queries/results, then let the writer retain its existing
+   Python incremental/full/partial-scan policy. Revalidate those exact mtime inputs in the commit.
+2. Capture the existing write statements and payloads; compose them as ordered, correlated CALL
+   subqueries in one graph command. Parameters are rebound without changing strings/comments.
+   Unexpected additional reads are refused rather than answered with fabricated state.
+3. Validate identity and scan generation inside that command, then mutate the publication probe
+   and execute the writes. Actual batch-edge counts are returned. Planning uses placeholders only
+   for diagnostic write counters; it does not emulate arbitrary callback results.
+4. Assert the actual final completion count is **exactly one** inside the query. Zero/multiple
+   markers and later failures must undo every earlier entity, edge, prune and metadata write.
+
+The native fixture installs Entity `(structure_project_id, structure_path)` and ProjectIdentity
+`project_id` indexes/unique constraints and waits for `OPERATIONAL` before publication. This is
+evidence for those native schema APIs, not the complete Menhir/Graphiti schema-readiness gate.
+The normal structure admission/release protocol still surrounds the operation.
+
+The full-writer fixture covers directories, file/config/test/entrypoint/scanner-document roles,
+dependencies, endpoints, imports, test links, symbols and intra-project calls, inferred external
+projects and nested repositories. Initial and incremental complete/partial publications match
+the real writer's semantic graph and entity/edge counts. Partial scans preserve absent files;
+complete scans prune them. A foreign project and a separately ingested document remain intact.
+Failure cases cover changed mtime inputs, stale scan generation, ambiguous legacy/current mtimes,
+zero/multiple completion markers, invalid properties after earlier writes, late failure after the
+completion query, missing UDF readiness and competing old/new scan generations.
+
+**Temporal scope matters:** only this writer's zero-argument edge clock `datetime()` is mapped
+to native `localdatetime()` in the tested UTC runtime. It stores native temporal values rather
+than the earlier diagnostic strings. Parameterized `datetime(value)` is not rewritten. A separate
+probe observed `localdatetime('2026-01-01T00:00:00+02:00')` returning wall time 00:00 with the
+Python driver attaching UTC, rather than normalizing the instant to 22:00 UTC. Do not alias
+timezone-bearing datetime constructors to it. Timezone/precision semantics and runtime UTC
+configuration still need a complete backend contract.
+
+The orderly-restart check now compares the completed project's nodes/edges/temporal values and
+confirms the UDF is restored, in addition to the sentinel. UDF startup/version/ownership checks,
+query size/scale, OOM/timeout behavior, crash/ambiguous-response recovery and the broader P0/P1
+writer contract remain unqualified. Some nested failures surface as a later postcondition error;
+the tests require rejection plus complete rollback, not preservation of one incidental error text.
+Provider exception mapping must be qualified before runtime wiring.
+
+This is a **production-shaped compound candidate**, not a general callback translator or a
+shipping adapter. It reuses current writer policy instead of duplicating it and introduces no new
+project-size limit. The source-bound scalar proof still writes synthetic Views; real View/history
+certification and parameterized temporals remain outstanding. No engine/runtime production change.
+
+Sources: [pinned UDF invocation](https://github.com/FalkorDB/FalkorDB/blob/v4.22.1/src/arithmetic/udf_funcs/udf_funcs.c),
+[native UDF load command](https://github.com/FalkorDB/FalkorDB/blob/v4.22.1/src/commands/udf/cmd_udf_load.c),
+and [temporal constructors](https://github.com/FalkorDB/FalkorDB/blob/v4.22.1/src/arithmetic/time_funcs/time_funcs.c).
 
 ### Prepared numeric materialization follow-up (2026-11-04)
 
@@ -469,6 +530,11 @@ Redis pipelining or MULTI/EXEC alone is insufficient evidence. Retain Neo4j mean
   focused selection included compatibility/prepared tests, lifecycle/materializer tests and
   structure-fence/publication reference tests. Live probe: 79 checks, 69 passing, the same 10
   remaining failed gates; all 13 document checks and orderly restart passed. No full CI claimed.
+- Full-project follow-up: 82 local tests passed, 11 online checks skipped, one upstream warning;
+  default/scoped Ruff and formatting passed. Final live probe: 92 checks, 82 passing and the same
+  10 remaining failed compatibility gates. All 13 compound-project cases passed, including zero
+  and multiple completion-marker rejection. Orderly restart preserved the complete project graph,
+  native temporal values and guard library. The aggregate decision remains BLOCKED; no full CI claimed.
 
 ## Upstream evidence
 
