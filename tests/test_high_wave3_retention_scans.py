@@ -129,7 +129,7 @@ def test_cf167_size_still_measures_the_unredacted_payload() -> None:
 def test_cf167_filesystem_paths_are_masked() -> None:
     from menhir.infrastructure.telemetry.helpers import _preview_of
 
-    rendered = _preview_of({"repo_path": "C:/Users/thron/secret-project"})
+    rendered = _preview_of({"repo_path": "C:/Users/example/secret-project"})
     assert "secret-project" not in rendered
 
 
