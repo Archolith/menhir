@@ -581,3 +581,192 @@ def test_native_binding_refresh_requires_guard_before_dispatch(
             scan_generation=generation,
         )
     repo.close()
+
+
+@pytest.fixture
+def document_publication(native_repo):
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+    from menhir.infrastructure.project_identity_binding import (
+        binding_host,
+        root_key_for,
+    )
+
+    root = "/disposable/documents"
+    native_repo.execute(
+        "CREATE (:ProjectIdentity {project_id:'project', state:'bound', bound_host:$host, "
+        "root_key:$root, claim_generation:1})",
+        {"host": binding_host(), "root": root_key_for(root)},
+    )
+    adapter = MemoryGraphAdapter(native_repo)
+
+    def publish(content):
+        adapter.write_document(
+            root + "/guide.md",
+            content,
+            project="example",
+            structure_path="docs/guide.md",
+            project_id="project",
+            identity_generation=1,
+            identity_root=root,
+            session_id="session",
+            user_id="user",
+            document_type="reference_article",
+        )
+
+    return publish
+
+
+def _document_rows(repo):
+    return repo.execute(
+        "MATCH (n:Entity {structure_role:'document'}) RETURN properties(n) AS props ORDER BY n.uuid"
+    )
+
+
+@pytest.mark.online
+def test_native_document_publication_create_update_and_scan_independence(
+    native_repo, document_publication
+):
+    document_publication("first")
+    before = _document_rows(native_repo)[0]["props"]
+    assert before["structure_project_id"] == "project"
+    assert before["structure_path"] == "docs/guide.md"
+    assert before["source"] == "document-ingest"
+    assert before["document_type"] == "reference_article"
+    assert before["content"] == "first"
+    native_repo.execute(
+        "MATCH (n:Entity {uuid:$uuid}) SET n.user_flagged=true, n.summary='retained', n.group_id='tenant'",
+        {"uuid": before["uuid"]},
+    )
+    # Documents hold the same identity lock but do not require a filesystem-scan token.
+    native_repo.execute("MATCH (p:ProjectIdentity) SET p.structure_scan_generation=99")
+    document_publication("updated")
+    rows = _document_rows(native_repo)
+    assert len(rows) == 1
+    after = rows[0]["props"]
+    assert after["content"] == "updated" and after["uuid"] == before["uuid"]
+    assert after["created_at"] == before["created_at"]
+    assert (
+        after["user_flagged"]
+        and after["summary"] == "retained"
+        and after["group_id"] == "tenant"
+    )
+    assert after["root_path"] == "/disposable/documents/guide.md"
+    _assert_binding_slots_released(native_repo)
+
+
+@pytest.mark.online
+@pytest.mark.parametrize(
+    "change",
+    [
+        "p.claim_generation=2",
+        "p.root_key='elsewhere'",
+        "p.bound_host='elsewhere'",
+        "p.state='superseded'",
+    ],
+)
+def test_native_document_publication_revalidates_claim(
+    native_repo, document_publication, monkeypatch, change
+):
+    from menhir.infrastructure.structure_write_fence import StaleStructureScan
+
+    document_publication("original")
+    before = _document_rows(native_repo)
+    original = native_repo.execute
+
+    def transferred(query, params=None, **kwargs):
+        if "last_publication_probe" in query:
+            original("MATCH (p:ProjectIdentity) SET " + change)
+        return original(query, params, **kwargs)
+
+    monkeypatch.setattr(native_repo, "execute", transferred)
+    with pytest.raises(StaleStructureScan):
+        document_publication("unauthorized")
+    assert _document_rows(native_repo) == before
+    _assert_binding_slots_released(native_repo)
+
+
+@pytest.mark.online
+@pytest.mark.parametrize("existing", [False, True])
+def test_native_document_publication_late_failure_rolls_back(
+    native_repo, document_publication, monkeypatch, existing
+):
+    from redis.exceptions import ResponseError
+
+    if existing:
+        document_publication("original")
+    before = _document_rows(native_repo)
+    original = native_repo.execute
+    dispatched = []
+
+    def fail_after_merge(query, params=None, **kwargs):
+        if "last_publication_probe" in query:
+            dispatched.append(query)
+            assert query.endswith("RETURN n.uuid AS uuid")
+            query = query.removesuffix("RETURN n.uuid AS uuid") + (
+                "WITH n RETURN range(0,1,size(n.content)-size($content)) AS injected_failure"
+            )
+        return original(query, params, **kwargs)
+
+    monkeypatch.setattr(native_repo, "execute", fail_after_merge)
+    with pytest.raises(ResponseError, match="(?i)step|increment"):
+        document_publication("must-rollback")
+    assert len(dispatched) == 1
+    assert _document_rows(native_repo) == before
+    _assert_binding_slots_released(native_repo)
+
+
+@pytest.mark.online
+def test_native_document_publication_respects_migration_freeze(
+    native_repo, document_publication
+):
+    from menhir.infrastructure.structure_write_fence import (
+        StructureWritesFrozen,
+        lower_fence,
+        raise_fence,
+    )
+
+    raise_fence(native_repo, reason="document test")
+    with pytest.raises(StructureWritesFrozen):
+        document_publication("frozen")
+    assert not _document_rows(native_repo)
+    _assert_binding_slots_released(native_repo)
+    lower_fence(native_repo)
+    document_publication("allowed")
+    assert len(_document_rows(native_repo)) == 1
+    _assert_binding_slots_released(native_repo)
+
+
+@pytest.mark.parametrize("target,has_claim", [("project", False), ("other", True)])
+def test_native_document_publication_requires_claim_before_dispatch(
+    tmp_path, monkeypatch, target, has_claim
+):
+    from menhir.infrastructure.falkor import FalkorLiteRepository
+    from menhir.infrastructure.structure_queries import StructureGraphWriter
+    from menhir.infrastructure.structure_write_fence import (
+        IdentityClaim,
+        StaleStructureScan,
+    )
+
+    repo = FalkorLiteRepository(tmp_path / "never-opened.rdb")
+    claim = (
+        IdentityClaim(project_id="project", root_key="root", generation=1, host="host")
+        if has_claim
+        else None
+    )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("unguarded native document write dispatched")
+
+    monkeypatch.setattr(repo, "execute", forbidden)
+    with pytest.raises(StaleStructureScan):
+        StructureGraphWriter(repo).write_document(
+            "/doc.md",
+            "content",
+            project="example",
+            structure_path="doc.md",
+            structure_project_id=target,
+            session_id="s",
+            user_id="u",
+            claim=claim,
+        )
+    repo.close()

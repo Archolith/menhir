@@ -553,6 +553,7 @@ class StructureGraphWriter:
         session_id: str,
         user_id: str,
         document_type: str = "generic",
+        claim: IdentityClaim | None = None,
     ) -> None:
         """MERGE a single document Entity node (structure_role='document').
 
@@ -589,6 +590,7 @@ class StructureGraphWriter:
                 "source": "document-ingest",
                 "document_type": document_type,
             },
+            **({"claim": claim} if isinstance(self.neo4j, FalkorLiteRepository) else {}),
         )
 
     def get_project_coverage(self, project_name: str) -> dict[str, Any]:
@@ -2159,7 +2161,11 @@ class StructureGraphWriter:
         now: str,
         extra: dict[str, Any] | None = None,
         structure_project_id: str | None = None,
+        claim: IdentityClaim | None = None,
     ) -> None:
+        native = isinstance(self.neo4j, FalkorLiteRepository)
+        if native and (claim is None or claim.project_id != structure_project_id):
+            raise StaleStructureScan("Native document publication requires the target project's identity claim")
         props = {
             **_ENTITY_DEFAULTS,
             "structure_project": structure_project,
@@ -2176,8 +2182,7 @@ class StructureGraphWriter:
         if extra:
             props.update(extra)
 
-        self.neo4j.execute(
-            """
+        query = """
             MERGE (n:Entity {structure_project: $sp, structure_path: $spath})
             ON CREATE SET n += $props, n.uuid = $uuid
             ON MATCH SET n += $extra, n.content = $content, n.last_accessed = $now,
@@ -2185,20 +2190,31 @@ class StructureGraphWriter:
                          n.structure_project_id = coalesce($spid, n.structure_project_id),
                          n.group_id = coalesce(n.group_id, ''),
                          n.summary = coalesce(n.summary, '')
-            """,
-            {
-                "sp": structure_project,
-                "spath": structure_path,
-                "spid": structure_project_id,
-                "uuid": str(uuid4()),
-                "props": props,
-                "extra": extra or {},
-                "content": content,
-                "now": now,
-                "role": structure_role,
-                "name": name,
-            },
-        )
+            """
+        params = {
+            "sp": structure_project,
+            "spath": structure_path,
+            "spid": structure_project_id,
+            "uuid": str(uuid4()),
+            "props": props,
+            "extra": extra or {},
+            "content": content,
+            "now": now,
+            "role": structure_role,
+            "name": name,
+        }
+        if native:
+            params.update({
+                "project_id": claim.project_id, "host": claim.host, "root_key": claim.root_key,
+                "identity_generation": claim.generation, "scan_generation": None,
+            })
+            query = _STRUCTURE_PUBLICATION_GUARD_CYPHER + " WITH p " + query + " RETURN n.uuid AS uuid"
+        rows = self.neo4j.execute(query, params)
+        if native and not rows:
+            raise StaleStructureScan(
+                f"Refusing stale document publication for {structure_project_id}: identity changed. "
+                "Settle identity before writing."
+            )
 
     def _merge_entities_batch(self, rows: list[dict[str, Any]]) -> int:
         if not rows:

@@ -294,7 +294,7 @@ the entire P0 capability/writer matrix.
 | Same module: `reconcile_all_targets` | Read complete membership, compute additions/removals, apply both atomically | Python set computation needs a deliberate replacement strategy. |
 | `projection_lifecycle_repository_reads.commit` | Fence, callback writes, Python result validation, receipt/certificate in one transaction | Actual callback rejection counterexamples reproduced. |
 | `memory_graph_adapter.write_project_structure` | Identity/generation lock plus multi-query project publication/pruning | Compound-query candidate passes the full-writer fixtures below; production wiring, scale and broader qualification remain open. |
-| Same module: `write_document` | Identity lock and structural document MERGE together | Production-shaped fused query passes the live checks below; no runtime backend wired. |
+| Same module: `write_document` | Identity lock and structural document MERGE together | Runtime native command now fuses the shared guard with the actual entity writer; live create/update, refusal and rollback checks pass (milestone below). |
 | Same module: `refresh_indexed_binding` | Identity/scan lock and conditional metadata update together | Runtime native guarded command implemented; live CAS, refusal, slot cleanup and late-error rollback checks pass (milestone below). |
 | `scripts/backfill_legacy_retention.main` | Revalidate manifest, then apply all reviewed links or none | Operator-only; retains Neo4j requirement. |
 
@@ -823,6 +823,52 @@ dedicated disposable Neo4j container. Default Ruff/format checks on the changed 
 F811/F821/ASYNC checks on all changed Python owners pass. Artifact validation retains the prior
 baseline findings; the edited reference and roadmap add none. Graph-backed artifact audit remains
 unavailable at its previously failing local endpoint; it was not retried unchanged.
+
+### Native atomic document publication milestone (2026-11-05)
+
+`MemoryGraphAdapter.write_document` now uses a native command under the existing writer admission
+and finally/release. The actual `_merge_entity` payload, MERGE, create defaults and match updates
+remain shared with Neo4j. Its native path requires the matching target claim, combines the existing
+identity publication guard with that write, and raises `StaleStructureScan` when the guard refuses.
+No callback compiler, copied document policy or standalone publication mechanism was introduced.
+Neo4j retains its transaction callback and the same write body.
+
+Live checks exercise creation and update, preserving UUID, creation time, retained user flag,
+summary and group_id while updating content and document metadata. Documents intentionally do not
+require a filesystem-scan token: changing scan generation does not reject a valid identity claim.
+Changes to claim generation, root, host or bound state after admission reject publication. The
+actual migration raise/lower API blocks/resumes publication, and both writer registrations are
+released on every tested outcome. Runtime zero-step range errors read the just-written content,
+proving rollback for both creation and update. Ordinary callbacks remain refused before invocation.
+
+Verification selection covers the changed writer/adapter and immediate document tool, structural
+writer and identity/fence contracts. No full CI or complete backend acceptance was run.
+
+```powershell
+.venv/Scripts/python.exe -m pytest -q --tb=short tests/test_structure_queries.py tests/test_ingest_document_tool.py tests/infrastructure/test_cf257_detached_write_identity.py tests/infrastructure/test_cf257_stale_claim.py tests/infrastructure/test_cf257_structure_write_fence.py
+# 107 passed
+.venv/Scripts/python.exe -m pytest -q --tb=short tests/infrastructure/test_falkor_pipeline.py -k document_publication_requires_claim
+# 2 passed, 24 deselected
+docker exec -w /work menhir-109-compat python -m pytest --run-online -q --tb=short --basetemp=/tmp/menhir109-document-final tests/infrastructure/test_falkor_pipeline.py -k 'document_publication or normal_ingest'
+# 11 passed, 15 deselected
+```
+
+The first native run passed all eight live document cases, then lost shared pytest temporary storage
+when the concurrent Neo4j run cleaned it. The final selection uses an isolated `--basetemp` and runs
+the document cases, two pre-dispatch refusals and the existing controlled-model queued pipeline.
+The three new Neo4j document cases passed in
+`tests/infrastructure/test_gateb_structure_publication_online.py -k document_publication` (3 passed,
+7 deselected) via the existing loopback relay into the dedicated disposable Neo4j container.
+They verify create/update, stale identity admission and transaction rollback for create and update.
+Scoped F811/F821/ASYNC checks cover changed Python owners/tests; default Ruff and formatting cover
+the native test file. Existing unrelated default-lint findings in the Neo4j test module remain.
+Artifact validation retains the prior 19 Menhir/3 workspace findings. The previously unavailable
+graph-backed artifact audit endpoint was not retried unchanged.
+
+Next: native atomic project publication, then the recorded active scalar View transitions,
+erasure/saga recovery, remaining native query/feature mappings and release acceptance. Completing
+two of the three active explicit callback paths does not qualify the full backend. Public enablement,
+Windows and dormant T5 remain gated separately.
 
 ## Upstream evidence
 

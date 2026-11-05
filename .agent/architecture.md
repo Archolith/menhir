@@ -113,7 +113,8 @@ Concept id: `runtime.stack`
   correlation merge/veto queries, scalar transitions and remaining query owners are still open.
   Both Redis clients have explicit zero transport retries.
   Indexed-binding refresh now fuses the shared identity/scan guard and existing conditional update
-  in one native command, retaining admission/release and Neo4j callback behavior. Project/document
+  in one native command, retaining admission/release and Neo4j callback behavior. Document publication
+  likewise combines that guard with the shared entity MERGE/payload in one native command. Project
   atomic publication and the remaining parity work are still open. Arbitrary callback transactions
   fail before invocation; no query translator is installed.
 - `archolith-graphiti-core==0.31.2.post2` (Archolith soft fork of `getzep/graphiti`,

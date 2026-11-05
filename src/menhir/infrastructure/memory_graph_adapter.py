@@ -1486,6 +1486,7 @@ class MemoryGraphAdapter:
         document_type: str = "generic",
     ) -> None:
         """Write one document under the same durable identity fence as a project scan."""
+        from menhir.infrastructure.falkor import FalkorLiteRepository
         from menhir.infrastructure.project_identity_binding import binding_host, root_key_for
         from menhir.infrastructure.structure_write_fence import (
             IdentityClaim, admit_structure_writer, lock_structure_project,
@@ -1516,6 +1517,14 @@ class MemoryGraphAdapter:
         )
         handle = admit_structure_writer(self.neo4j, label=project, claim=claim)
         try:
+            if isinstance(self.neo4j, FalkorLiteRepository):
+                StructureGraphWriter(self.neo4j).write_document(
+                    file_path, content, project=project, structure_path=structure_path,
+                    structure_project_id=str(project_id), session_id=session_id,
+                    user_id=user_id, document_type=document_type, claim=claim,
+                )
+                return
+
             def _publish_document(tx: Any) -> None:
                 lock_structure_project(tx, claim)
                 StructureGraphWriter(tx).write_document(

@@ -1,5 +1,9 @@
 ## 2026-11-05 - Falkor runtime integration (#109)
 
+- Added native atomic document publication through the existing adapter and entity writer. The
+  shared identity guard and actual MERGE execute together; create defaults and update policy remain
+  shared with Neo4j. Live cases cover retained metadata, post-admission claim changes, migration
+  freeze and rollback of creation/update. Atomic project publication remains open.
 - Added a native atomic indexed-binding refresh through the existing adapter/writer. The shared
   identity/scan publication guard and unchanged compare-and-set execute in one command; admission
   and cleanup remain shared. Live tests cover post-admission claim changes, freeze, stale scans,

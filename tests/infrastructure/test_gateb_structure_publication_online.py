@@ -314,3 +314,89 @@ def test_same_project_token_issuance_waits_for_publication_transaction(graph, mo
     assert not errors
     assert tokens == [token + 1]
     assert _state(repo, name)[0]["fingerprint"] == "first"
+
+
+def test_document_publication_create_update_and_identity_fence(graph):
+    from menhir.infrastructure.structure_write_fence import StaleIdentityClaim
+
+    repo, adapter, name, root, claim = graph
+
+    def publish(content, generation=claim.generation):
+        adapter.write_document(
+            root + "/guide.md",
+            content,
+            project=name,
+            structure_path="docs/guide.md",
+            project_id=claim.project_id,
+            identity_generation=generation,
+            identity_root=root,
+            session_id="session",
+            user_id="user",
+            document_type="reference_article",
+        )
+
+    publish("first")
+    before = repo.execute(
+        "MATCH (n:Entity {structure_project:$name}) RETURN n.uuid AS uuid, n.created_at AS created_at",
+        {"name": name},
+    )[0]
+    publish("updated")
+    assert repo.execute(
+        "MATCH (n:Entity {structure_project:$name}) RETURN n.uuid AS uuid, n.created_at AS created_at, "
+        "n.content AS content, n.document_type AS document_type, n.structure_project_id AS project_id",
+        {"name": name},
+    ) == [
+        {
+            **before,
+            "content": "updated",
+            "document_type": "reference_article",
+            "project_id": claim.project_id,
+        }
+    ]
+    with pytest.raises(StaleIdentityClaim):
+        publish("unauthorized", generation=claim.generation + 1)
+    assert repo.execute(
+        "MATCH (n:Entity {structure_project:$name}) RETURN n.content AS content",
+        {"name": name},
+    ) == [{"content": "updated"}]
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_document_publication_exception_rolls_back_merge(graph, monkeypatch, existing):
+    repo, adapter, name, root, claim = graph
+
+    def publish(content):
+        adapter.write_document(
+            root + "/guide.md",
+            content,
+            project=name,
+            structure_path="docs/guide.md",
+            project_id=claim.project_id,
+            identity_generation=claim.generation,
+            identity_root=root,
+            session_id="session",
+            user_id="user",
+        )
+
+    if existing:
+        publish("original")
+    before = repo.execute(
+        "MATCH (n:Entity {structure_project:$name}) RETURN properties(n) AS props",
+        {"name": name},
+    )
+    original = StructureGraphWriter._merge_entity
+
+    def fail_after_merge(self, **kwargs):
+        original(self, **kwargs)
+        raise RuntimeError("injected after document merge")
+
+    monkeypatch.setattr(StructureGraphWriter, "_merge_entity", fail_after_merge)
+    with pytest.raises(RuntimeError, match="injected after document merge"):
+        publish("must-rollback")
+    assert (
+        repo.execute(
+            "MATCH (n:Entity {structure_project:$name}) RETURN properties(n) AS props",
+            {"name": name},
+        )
+        == before
+    )
