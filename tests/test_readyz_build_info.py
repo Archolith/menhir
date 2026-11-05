@@ -39,6 +39,14 @@ def _caller_has_a_token(monkeypatch):
     monkeypatch.setattr(production_routes, "_caller_may_see_build", _yes)
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_proxy(monkeypatch):
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
+    monkeypatch.setenv("NO_PROXY", "*")
+
+
 def _request(*, ready: bool = True):
     state = SimpleNamespace(
         settings=SimpleNamespace(runtime_mode="production", instance_id="source-prod-a"),

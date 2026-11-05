@@ -156,7 +156,7 @@ _ENV_ONLY = (
     ('MENHIR_OPENAI_RATE_LIMIT_MAX_WAIT_S', None, 'runtime',
         'Longest single 429 backoff sleep in seconds; absent or invalid uses 60.'),
     ('MENHIR_RELEASE_COMMIT', '', 'runtime',
-        'Build metadata (not a feature flag): release git SHA reported by /readyz; empty or invalid reports unknown.'),
+        'Build metadata (not a feature flag): release git SHA reported by /readyz to a caller with a valid token; empty or invalid reports unknown.'),
     ('MENHIR_ENRICHMENT_P95_TARGET_SECONDS', None, 'telemetry',
         'Enrichment p95 target graded by get_memory_stats; absent or invalid uses 120, 0 turns the grade off.'),
 )

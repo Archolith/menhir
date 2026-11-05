@@ -6,7 +6,8 @@ locally installed package. Run it from a checkout with menhir installed at the v
 should run: the expected digest is computed locally.
 
 The server returns the build block only to a caller with a valid access token, read here from
-``MENHIR_READYZ_TOKEN``. It is sent only over HTTPS or to loopback, and redirects are not followed.
+``MENHIR_READYZ_TOKEN``. It is sent only over HTTPS or directly to loopback, never through a proxy
+in plain text, and redirects are not followed while holding it.
 
 Usage:
     python scripts/release/check_served_metadata.py https://menhir.example.com
@@ -56,9 +57,24 @@ def _read_token() -> str | None:
 
 
 def _require_safe_token_url(base_url: str) -> None:
-    parts = urllib.parse.urlsplit(base_url)
-    if parts.scheme != "https" and parts.hostname not in _LOOPBACK_HOSTS:
-        raise CheckError(f"{TOKEN_ENV} is sent only over HTTPS or to loopback")
+    refused = CheckError(f"{TOKEN_ENV} is sent only over HTTPS or to loopback, with no user info")
+    try:
+        parts = urllib.parse.urlsplit(base_url)
+        _ = parts.port  # raises on a malformed port
+    except ValueError:
+        raise refused from None
+    # Required because urllib connects to the whole netloc, not the host urlsplit reads from it.
+    if "@" in parts.netloc:
+        raise refused
+    if parts.scheme != "https" and not (parts.scheme == "http" and parts.hostname in _LOOPBACK_HOSTS):
+        raise refused
+
+
+def _token_opener(base_url: str) -> urllib.request.OpenerDirector:
+    if urllib.parse.urlsplit(base_url).scheme == "https":
+        return urllib.request.build_opener(_NoRedirect)
+    # A proxy would read a plain-HTTP token, even one meant for loopback.
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
 
 
 def fetch_readyz(base_url: str, timeout: float, token: str | None = None) -> dict[str, Any]:
@@ -69,16 +85,36 @@ def fetch_readyz(base_url: str, timeout: float, token: str | None = None) -> dic
         _require_safe_token_url(base_url)
         headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(base_url.rstrip("/") + "/readyz", headers=headers)
-    opener = urllib.request.build_opener(_NoRedirect) if token else urllib.request.build_opener()
+    opener = _token_opener(base_url) if token else urllib.request.build_opener()
     try:
         with opener.open(request, timeout=timeout) as response:
             raw = response.read()
     except urllib.error.HTTPError as exc:
+        if exc.code != 503:
+            hint = (
+                ": a redirect the script did not follow; use the final URL"
+                if 300 <= exc.code < 400
+                else ""
+            )
+            raise CheckError(f"readyz answered HTTP {exc.code}{hint}") from None
         raw = exc.read()
     body = json.loads(raw.decode("utf-8"))
     if not isinstance(body, dict):
         raise ValueError("readyz body is not a JSON object")
     return body
+
+
+def _jwks_note(body: dict[str, Any]) -> str:
+    """Name a key refresh failure, because an outage refuses good tokens too."""
+
+    jwks = body.get("oauth_jwks")
+    kind = jwks.get("last_failure_kind") if isinstance(jwks, dict) else None
+    if not kind:
+        return ""
+    return (
+        f". The server's last JWKS refresh failure was {kind} at {jwks.get('last_failure_at')}; "
+        "if that is recent, the token may be fine"
+    )
 
 
 def read_build(body: dict[str, Any], *, token_sent: bool = False) -> dict[str, str]:
@@ -89,7 +125,7 @@ def read_build(body: dict[str, Any], *, token_sent: bool = False) -> dict[str, s
         if token_sent:
             raise CheckError(
                 "readyz returned no build block: the server did not accept the token, or it is "
-                "an older server, or not the production surface"
+                f"an older server, or not the production surface{_jwks_note(body)}"
             )
         raise CheckError(f"readyz returned no build block: set {TOKEN_ENV} to a valid access token")
     fields: dict[str, str] = {}
@@ -136,7 +172,10 @@ def _local_metadata(snapshot_mode: str | None) -> tuple[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=DESCRIPTION)
+    parser = argparse.ArgumentParser(
+        description=DESCRIPTION,
+        epilog=f"The server shows the build block only with a valid access token: set {TOKEN_ENV}.",
+    )
     parser.add_argument("base_url")
     parser.add_argument("--expect-version")
     parser.add_argument("--expect-commit", help="7-40 hex characters; matched as a prefix")
