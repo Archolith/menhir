@@ -1,9 +1,12 @@
 """Verify that a deployed Menhir serves the build this checkout/package expects.
 
-Fetches ``<base-url>/readyz`` (public, unauthenticated, served by the production surface only)
-and compares ``build.version``, ``build.mcp_metadata_sha256`` and, when requested,
-``build.commit`` with the locally installed package. Run it from a checkout with menhir
-installed at the version the server should run: the expected digest is computed locally.
+Fetches ``<base-url>/readyz`` (served by the production surface only) and compares
+``build.version``, ``build.mcp_metadata_sha256`` and, when requested, ``build.commit`` with the
+locally installed package. Run it from a checkout with menhir installed at the version the server
+should run: the expected digest is computed locally.
+
+The server returns the build block only to a caller with a valid access token, read here from
+``MENHIR_READYZ_TOKEN``. It is sent only over HTTPS or to loopback, and redirects are not followed.
 
 Usage:
     python scripts/release/check_served_metadata.py https://menhir.example.com
@@ -24,11 +27,14 @@ import os
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
 DESCRIPTION = "Check a deployed Menhir's /readyz build block against the local package."
 EXIT_MATCH, EXIT_MISMATCH, EXIT_ERROR = 0, 1, 2
+TOKEN_ENV = "MENHIR_READYZ_TOKEN"
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _COMMIT_RE = re.compile(r"[0-9a-fA-F]{7,40}")
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}")
 _BUILD_FIELDS = ("version", "commit", "mcp_metadata_sha256")
@@ -38,14 +44,34 @@ class CheckError(Exception):
     """A check could not be made; reported with exit code 2."""
 
 
-def fetch_readyz(base_url: str, timeout: float) -> dict[str, Any]:
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """urllib re-sends Authorization on a redirect, even to another host; never follow one."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+def _read_token() -> str | None:
+    return os.environ.get(TOKEN_ENV, "").strip() or None
+
+
+def _require_safe_token_url(base_url: str) -> None:
+    parts = urllib.parse.urlsplit(base_url)
+    if parts.scheme != "https" and parts.hostname not in _LOOPBACK_HOSTS:
+        raise CheckError(f"{TOKEN_ENV} is sent only over HTTPS or to loopback")
+
+
+def fetch_readyz(base_url: str, timeout: float, token: str | None = None) -> dict[str, Any]:
     """GET ``/readyz`` and return the parsed JSON body (503 bodies are still parsed)."""
 
-    request = urllib.request.Request(
-        base_url.rstrip("/") + "/readyz", headers={"Accept": "application/json"}
-    )
+    headers = {"Accept": "application/json"}
+    if token:
+        _require_safe_token_url(base_url)
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(base_url.rstrip("/") + "/readyz", headers=headers)
+    opener = urllib.request.build_opener(_NoRedirect) if token else urllib.request.build_opener()
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with opener.open(request, timeout=timeout) as response:
             raw = response.read()
     except urllib.error.HTTPError as exc:
         raw = exc.read()
@@ -55,14 +81,17 @@ def fetch_readyz(base_url: str, timeout: float) -> dict[str, Any]:
     return body
 
 
-def read_build(body: dict[str, Any]) -> dict[str, str]:
+def read_build(body: dict[str, Any], *, token_sent: bool = False) -> dict[str, str]:
     """Return the served build fields, refusing a missing block or a non-string field."""
 
     build = body.get("build")
     if not isinstance(build, dict):
-        raise CheckError(
-            "readyz has no build block (an older server, or not the production surface)"
-        )
+        if token_sent:
+            raise CheckError(
+                "readyz returned no build block: the server did not accept the token, or it is "
+                "an older server, or not the production surface"
+            )
+        raise CheckError(f"readyz returned no build block: set {TOKEN_ENV} to a valid access token")
     fields: dict[str, str] = {}
     for name in _BUILD_FIELDS:
         value = build.get(name)
@@ -131,8 +160,11 @@ def _check(args: argparse.Namespace) -> int:
     if args.expect_version is not None and not args.expect_version.strip():
         raise CheckError("--expect-version must not be empty")
 
+    token = _read_token()
     try:
-        served = read_build(fetch_readyz(args.base_url, args.timeout))
+        served = read_build(
+            fetch_readyz(args.base_url, args.timeout, token), token_sent=token is not None
+        )
     except CheckError:
         raise
     except Exception as exc:  # any fetch or parse failure: nothing was compared

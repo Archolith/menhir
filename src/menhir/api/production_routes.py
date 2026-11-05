@@ -17,7 +17,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from menhir import __version__
-from menhir.api.oauth import JWKS_REFRESH_STATS
+from menhir.api.oauth import JWKS_REFRESH_STATS, OAuthAuthenticationError
 from menhir.mcp.served_metadata import release_commit, served_mcp_metadata_digest
 
 
@@ -47,9 +47,43 @@ async def livez(request: Request) -> dict[str, str]:
     return {"status": "alive", "mode": _runtime_mode(request)}
 
 
+async def _caller_may_see_build(request: Request) -> bool:
+    """True only for a single bearer token the MCP endpoint would also accept.
+
+    /readyz sits outside BearerAuthMiddleware because health checks carry no credential, so this
+    repeats that middleware's OAuth checks: the token, then the client policy. Any doubt means no
+    build block rather than an error, because a bad token must not change the readiness answer.
+    """
+
+    headers = getattr(request, "headers", None)
+    if headers is None:
+        return False
+    values = headers.getlist("authorization")
+    if len(values) != 1 or not values[0].startswith("Bearer "):
+        return False
+    verifier = getattr(request.app.state, "oauth_verifier", None)
+    policy = getattr(request.app.state, "client_policy", None)
+    if verifier is None or policy is None:
+        return False
+    try:
+        principal = await verifier.verify_access_token(values[0][len("Bearer "):])
+        policy.require_client(
+            client_id=principal.client_id,
+            scopes=principal.scopes,
+            tier=principal.tier,
+        )
+    except (OAuthAuthenticationError, PermissionError) as exc:
+        _LOG.debug("readyz build block refused: %s", type(exc).__name__)
+        return False
+    except Exception as exc:  # a broken check must not break readiness
+        _LOG.warning("readyz build check failed: %s", type(exc).__name__)
+        return False
+    return True
+
+
 @router.get("/readyz", include_in_schema=False)
 async def readyz(request: Request) -> JSONResponse:
-    """Report mode-aware readiness using only redacted capability state."""
+    """Report mode-aware readiness; the build block goes only to a caller with a valid token."""
 
     mode = _runtime_mode(request)
     runtime_ctx = getattr(request.app.state, "runtime_ctx", None)
@@ -76,33 +110,35 @@ async def readyz(request: Request) -> JSONResponse:
             failures.append("sole_writer_scheduler_unavailable")
 
     ready = not failures
-    try:
-        mcp_digest = await served_mcp_metadata_digest(
-            getattr(request.app.state, "mcp_http_instance", None)
-        )
-    except Exception as exc:  # diagnostic only; never affects readiness
-        _LOG.warning("readyz mcp metadata digest unavailable: %s", type(exc).__name__)
-        mcp_digest = "unavailable"
-    return JSONResponse(
-        status_code=200 if ready else 503,
-        content={
-            "status": "ready" if ready else "not_ready",
-            "mode": mode,
-            "mutation_fence": mode == "candidate-readonly" and ready,
-            "scheduler": "disabled_by_mode"
-            if mode == "candidate-readonly"
-            else ("ready" if ready else "unavailable"),
-            "failures": failures,
-            # Diagnostic only; never affects readiness. Counts are per process.
-            "oauth_jwks": JWKS_REFRESH_STATS.snapshot(),
-            # Diagnostic only; never affects readiness or the status code.
-            "build": {
-                "version": __version__,
-                "commit": release_commit(),
-                "mcp_metadata_sha256": mcp_digest,
-            },
-        },
-    )
+    content: dict[str, Any] = {
+        "status": "ready" if ready else "not_ready",
+        "mode": mode,
+        "mutation_fence": mode == "candidate-readonly" and ready,
+        "scheduler": "disabled_by_mode"
+        if mode == "candidate-readonly"
+        else ("ready" if ready else "unavailable"),
+        "failures": failures,
+        # Diagnostic only; never affects readiness. Counts are per process.
+        "oauth_jwks": JWKS_REFRESH_STATS.snapshot(),
+    }
+    headers: dict[str, str] | None = None
+    if await _caller_may_see_build(request):
+        try:
+            mcp_digest = await served_mcp_metadata_digest(
+                getattr(request.app.state, "mcp_http_instance", None)
+            )
+        except Exception as exc:  # diagnostic only; never affects readiness
+            _LOG.warning("readyz mcp metadata digest unavailable: %s", type(exc).__name__)
+            mcp_digest = "unavailable"
+        # Diagnostic only; never affects readiness or the status code.
+        content["build"] = {
+            "version": __version__,
+            "commit": release_commit(),
+            "mcp_metadata_sha256": mcp_digest,
+        }
+        # Required because this body differs by caller; a shared cache must not replay it.
+        headers = {"Cache-Control": "no-store"}
+    return JSONResponse(status_code=200 if ready else 503, content=content, headers=headers)
 
 
 @router.post("/internal/source-fence", include_in_schema=False)

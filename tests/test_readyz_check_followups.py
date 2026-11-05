@@ -18,6 +18,7 @@ from types import SimpleNamespace
 import pytest
 
 import menhir
+from menhir.api import production_routes
 from menhir.api.production_routes import readyz
 from menhir.config.snapshot_mode import SNAPSHOT_RECEIVE_MODE_ENV
 from menhir.mcp import served_metadata
@@ -39,6 +40,16 @@ def _fresh_cache_and_mode(monkeypatch):
     served_metadata._reset_digest_cache()
     yield
     served_metadata._reset_digest_cache()
+
+
+@pytest.fixture(autouse=True)
+def _caller_has_a_token(monkeypatch):
+    """These tests cover the build block's content; test_readyz_build_access covers who sees it."""
+
+    async def _yes(_request) -> bool:
+        return True
+
+    monkeypatch.setattr(production_routes, "_caller_may_see_build", _yes)
 
 
 def _state(**extra):

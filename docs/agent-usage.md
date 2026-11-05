@@ -197,10 +197,13 @@ after it republishes even though the scan fingerprint is unchanged.
 
 ## After a server deploy
 
-- A Menhir started with `MENHIR_STARTUP_SCOPE=production` reports `build.version`, `build.commit`, and
-  `build.mcp_metadata_sha256` on `/readyz`. Other startup scopes do not serve `/readyz`.
-- After a deploy, run `python scripts/release/check_served_metadata.py <base-url>` (add
-  `--expect-commit <sha>`) to confirm the server serves the instructions and tools this package expects.
+- A Menhir started with `MENHIR_STARTUP_SCOPE=production` serves `/readyz`; other startup scopes do not.
+  Anyone can read its status. `build.version`, `build.commit` and `build.mcp_metadata_sha256` appear only
+  for a caller sending a bearer access token the MCP endpoint would accept.
+- After a deploy, set `MENHIR_READYZ_TOKEN` to such a token and run
+  `python scripts/release/check_served_metadata.py <base-url>` (add `--expect-commit <sha>`) to confirm
+  the server serves the instructions and tools this package expects. The script sends the token only over
+  HTTPS or to loopback.
   The script is not in the wheel: run it from a checkout with menhir installed at the version the
   server should run, since it computes the expected digest locally. If the server runs with snapshot
   receive mode on, pass the same mode with `--snapshot-mode`. Exit codes: 0 match, 1 a compared field
