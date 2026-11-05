@@ -954,6 +954,25 @@ class MemoryQueryRepository:
             row["turn_evidence_ids"] = seen[:5]
         return rows
 
+    def fetch_name_embeddings(
+        self, uuids: list[str], namespace: str | None
+    ) -> dict[str, list[float]]:
+        """Stored ``name_embedding`` per entity uuid, in ONE batched query, tenant-scoped like
+        ``fetch_result_provenance``. Nodes with no vector (Views) are absent from the result."""
+        if not uuids:
+            return {}
+        rows = self.neo4j.execute(
+            f"""
+            MATCH (n:Entity)
+            WHERE n.uuid IN $uuids AND n.name_embedding IS NOT NULL
+              AND {tenant_scope_cypher('n')}
+            RETURN n.uuid AS uuid, n.name_embedding AS embedding
+            """,
+            params={"uuids": uuids, **tenant_scope_params(namespace)},
+            timeout_s=10.0,
+        )
+        return {str(row["uuid"]): [float(x) for x in row["embedding"]] for row in rows}
+
     def fetch_node_receipts(self, node_uuid: str) -> dict[str, object] | None:
         """Receipts for one node (the "show me the sources" read): the source episodes that
         ``MENTIONS`` it, its first-class ``SUPPORTED_BY`` :Evidence, and its ``ANCHORED_TO``

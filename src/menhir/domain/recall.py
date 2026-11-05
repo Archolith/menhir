@@ -356,6 +356,9 @@ class RecallResult:
     # MENHIR_COUNT_ANCHOR_HINT: deterministic query-text hint for anchored count questions.
     # None when the flag is off or the query does not match; preserves flag-off wire output.
     query_hint: str | None = None
+    # Experiment diagnostic: set only by an explicit tuning, so normal recall and its wire output
+    # never carry it.
+    name_cosine: retrieval_trace_models.NameCosineRecord | None = None
 
 
 @dataclass(frozen=True)
@@ -386,6 +389,8 @@ class CandidateData:
     contributing_sources: frozenset[CandidateSource] = frozenset()
     content_rank: int | None = None
     content_cosine: float | None = None
+    # Raw [-1, 1] query-to-name cosine; set only by record_name_cosine and name_cosine_floor arms.
+    name_cosine: float | None = None
     # True when a deterministically-injected current scalar_state View has a SOURCE FOUNDATION and may
     # LEAD as the authoritative current value (Phase 4b/G10). Decoupled from `source`: an injected View
     # is always CandidateSource.SCALAR_AUTHORITY (floor-exempt), but it is marked authoritative ONLY

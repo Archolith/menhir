@@ -64,6 +64,20 @@ class CandidateTrace:
 
 
 @dataclass(frozen=True)
+class NameCosineRecord:
+    """Query-to-name cosines from a ``record_name_cosine`` recall (plan
+    menhir-recall-real-similarity-test). Kept out of ``RetrievalTrace``, which is public wire.
+
+    ``cosines`` is uuid to raw [-1, 1] cosine for every candidate reaching scoring; ``None`` means
+    no signal (Views have no name vector). ``warning`` means no cosine could be read at all, so a
+    floor arm ran as its baseline and must not be counted as a result.
+    """
+
+    cosines: dict[str, float | None]
+    warning: str | None = None
+
+
+@dataclass(frozen=True)
 class AssertionShadowRow:
     """One candidate's would-be oracle/warden verdict (observe-only)."""
 
@@ -178,6 +192,7 @@ __all__ = [
     "CandidateTrace",
     "FacetShadowRow",
     "FacetShadowTrace",
+    "NameCosineRecord",
     "RelevanceBreakdown",
     "RetrievalTrace",
     "ScoringTrace",

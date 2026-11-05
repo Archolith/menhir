@@ -1,3 +1,13 @@
+## 2026-11-05 - Recall Lab can record real cosines and test a cosine floor
+
+Diagnostic only. Recall output and defaults do not change, and no setting reaches these knobs.
+
+- New tuning fields, on `RetrievalTuningConfig` and Recall Lab arms: `record_name_cosine`,
+  `name_cosine_floor` and `name_cosine_floor_all_sources`. A candidate with no name vector is
+  never dropped.
+- `scripts/recall_lab_batch.py` runs recall over a query file with no answer model or judge and
+  writes every candidate as JSONL. It refuses any graph but a loopback throwaway copy.
+
 ## 2026-11-04 - `/readyz` shows build details only to callers with a valid token
 
 - The public `/readyz` body keeps its status fields but no longer reports the version, commit or

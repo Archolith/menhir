@@ -118,6 +118,7 @@ Read the handoff doc before running any of them; they are phases of one experime
 
 ### Recall and audit analysis
 `profile_recall.py` (latency phases), `analyze_recall_lab_scores.py`,
+`recall_lab_batch.py` (recall-only batch to JSONL, no LLM, throwaway graph copies only),
 `inspect_audit_trail.py` / `inspect_consolidation_audit.py` (replay a run's telemetry DB),
 `validate_phase3_realdata.py` (hook triage -> TurnEvidence -> Views -> recall),
 `probe/probe_sharpness_cosine_floor.py`, `run_suburbs_extraction_gate.py`.

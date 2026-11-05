@@ -67,16 +67,26 @@ class ScoringService:
         *,
         min_similarity: float = MIN_SIMILARITY_THRESHOLD,
         trace: ScoringTrace | None = None,
+        name_cosine_floor: float | None = None,
+        name_cosine_floor_all_sources: bool = False,
     ) -> list[ScoredMemory]:
         if not candidates:
             return []
+
+        # Experiment arm, off by default. A candidate with no vector has no signal and stays.
+        def _passes_name_cosine(candidate: CandidateData) -> bool:
+            if name_cosine_floor is None or candidate.name_cosine is None:
+                return True
+            if not name_cosine_floor_all_sources and candidate.source in FLOOR_EXEMPT_SOURCES:
+                return True
+            return candidate.name_cosine >= name_cosine_floor
 
         # Filter out vector candidates with negligible similarity before scoring.
         # This prevents "best of bad options" results for off-topic queries.
         # Floor-exempt sources (BM25/pending/file-linked/...) survive regardless:
         # their relevance is provenance, not cosine similarity.
         def _passes_floor(candidate: CandidateData) -> bool:
-            return (
+            return _passes_name_cosine(candidate) and (
                 candidate.source in FLOOR_EXEMPT_SOURCES
                 or not math.isfinite(candidate.similarity)  # NaN/Inf: let _safe_float coerce in scoring
                 or candidate.similarity >= min_similarity

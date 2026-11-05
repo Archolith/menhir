@@ -1013,6 +1013,12 @@ class MemoryGraphAdapter:
         """Raw who-said-it signals (episode sources, first seen, turn ids) per result id."""
         return self._memory_queries.fetch_result_provenance(uuids, namespace)
 
+    def fetch_name_embeddings(
+        self, uuids: list[str], namespace: str | None = None
+    ) -> dict[str, list[float]]:
+        """Stored ``name_embedding`` per entity uuid; nodes without one are absent."""
+        return self._memory_queries.fetch_name_embeddings(uuids, namespace)
+
     def fetch_node_receipts(self, node_uuid: str) -> dict[str, object] | None:
         """Receipts for one node: its MENTIONS source episodes + SUPPORTED_BY evidence + ANCHORED_TO paths."""
         return self._memory_queries.fetch_node_receipts(node_uuid)

@@ -372,6 +372,8 @@ class RuntimeProviderDataOpsMixin:
             payload.pop("source_memories", None)
         if payload.get("query_hint") is None:
             payload.pop("query_hint", None)
+        if payload.get("name_cosine") is None:
+            payload.pop("name_cosine", None)
         return payload
 
     async def recall_history(

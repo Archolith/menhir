@@ -49,12 +49,14 @@ from menhir.domain.retrieval_trace_models import (
     AssertionShadowTrace,
     FacetShadowRow,
     FacetShadowTrace,
+    NameCosineRecord,
     RetrievalTrace,
     ScoringTrace,
     ViewReachability,
 )
 from menhir.infrastructure.graphiti_client import GraphitiClient
 from menhir.services.hybrid_retrieval import FusionLane, weighted_rrf_multi
+from menhir.services.recall_name_cosine import attach_name_cosines
 
 if TYPE_CHECKING:
     from menhir.core.bootstrap import UnavailableGraphitiClient
@@ -1730,11 +1732,27 @@ async def _run_recall(
         await service._attach_frontier_metadata(eligible_uuids, metadata_by_uuid, warden_status=guard_status)
         _t_phases["frontier_metadata"] = int((perf_counter() - _t) * 1000)
 
+    # --- Real name cosine: explicit experiment arms only ---
+    name_cosine_record: NameCosineRecord | None = None
+    floor_kwargs: dict[str, object] = {}
+    if tuning.record_name_cosine or tuning.name_cosine_floor is not None:
+        _t = perf_counter()
+        candidates, name_cosine_record = await attach_name_cosines(
+            service, query, candidates, namespace
+        )
+        _t_phases["name_cosine"] = int((perf_counter() - _t) * 1000)
+    if tuning.name_cosine_floor is not None:
+        floor_kwargs = {
+            "name_cosine_floor": tuning.name_cosine_floor,
+            "name_cosine_floor_all_sources": tuning.name_cosine_floor_all_sources,
+        }
+
     # --- Phase 2: score + rank ---
     _t = perf_counter()
     scoring_trace = ScoringTrace() if trace else None
     scored = service.scoring_service.score_candidates(
-        candidates, preset, min_similarity=MIN_SIMILARITY_THRESHOLD, trace=scoring_trace
+        candidates, preset, min_similarity=MIN_SIMILARITY_THRESHOLD, trace=scoring_trace,
+        **floor_kwargs,
     )
     _t_phases["scoring"] = int((perf_counter() - _t) * 1000)
 
@@ -2093,6 +2111,7 @@ async def _run_recall(
         note=note,
         search_error=search_error,
         trace=retrieval_trace,
+        name_cosine=name_cosine_record,
         authority_layer=tuple(authority_layer) or None,
         source_memories=source_memories,
         query_hint=(

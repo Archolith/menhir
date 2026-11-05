@@ -46,6 +46,9 @@ class RecallLabTuning(BaseModel):
     source_memory_max_chars: int = Field(default=2000, ge=100, le=4000)
     source_memory_spread: bool = True
     scalar_verdict_min_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
+    record_name_cosine: bool = False
+    name_cosine_floor: float | None = Field(default=None, ge=-1.0, le=1.0)
+    name_cosine_floor_all_sources: bool = False
 
     def to_domain(self) -> RetrievalTuningConfig:
         return RetrievalTuningConfig(**self.model_dump())
@@ -419,7 +422,8 @@ _NUMBER_KEYS: frozenset[str] = frozenset({
     "lower_bound", "is_current_belief", "corroborated", "is_superseded_view",
     "is_scalar_authority",
     "final_score", "retrieval_score", "similarity", "bm25_rank", "cosine_rank", "content_rank",
-    "content_cosine", "cosine", "semantic_similarity", "adjacency_bonus", "recency_bonus",
+    "content_cosine", "name_cosine", "cosine", "semantic_similarity", "adjacency_bonus",
+    "recency_bonus",
     "prominence_bonus", "conflict_bonus", "type_boost", "alpha", "beta", "gamma", "delta",
 })
 # Children of these are walked by the same allowlist; a bare string under one is masked.
@@ -558,7 +562,7 @@ _WALKED_ARM_KEYS: frozenset[str] = frozenset({"results", "authority_layer", "sou
 _SAFE_ARM_KEYS: frozenset[str] = frozenset({
     "id", "label", "enabled", "ok", "degraded", "elapsed_ms", "tuning", "candidates_evaluated",
     "nodes_touched", "service_ms", "preset", "phases", "warden_status", "warden_notice", "note",
-    "search_error", "rank_shadow_warning",
+    "search_error", "rank_shadow_warning", "name_cosine_warning",
 })
 _SAFE_PAYLOAD_KEYS: frozenset[str] = frozenset({
     "preset", "namespace", "limit", "candidate_k", "include_session", "include_superseded",
@@ -669,6 +673,8 @@ def _redact_authority_verdicts(verdicts: list[dict[str, Any]], *, reveal: bool) 
 
 def _serialize_result(result: object, *, reveal: bool) -> dict[str, Any]:
     trace = _value(result, "trace")
+    name_cosine_record = _value(result, "name_cosine")
+    name_cosines = _value(name_cosine_record, "cosines", {}) or {}
     memories: list[dict[str, Any]] = []
     for rank, memory in enumerate(_value(result, "results", []) or [], start=1):
         uuid = str(_value(memory, "uuid", ""))
@@ -700,6 +706,7 @@ def _serialize_result(result: object, *, reveal: bool) -> dict[str, Any]:
             "cosine_rank": _value(candidate, "cosine_rank"),
             "content_rank": _value(candidate, "content_rank"),
             "content_cosine": _value(candidate, "content_cosine"),
+            "name_cosine": name_cosines.get(uuid),
             "warden_label": _enum_value(_value(memory, "warden_label")),
             "score_parts": _mapping(_value(candidate, "score_parts")),
             # Recall Lab arms bypass the /api/recall route's authority formatting; surface these
@@ -740,6 +747,7 @@ def _serialize_result(result: object, *, reveal: bool) -> dict[str, Any]:
         "service_ms": _value(trace, "total_ms"),
         "phases": dict(_value(trace, "phases", {}) or {}),
         "rank_shadow_warning": _value(trace, "rank_shadow_warning"),
+        "name_cosine_warning": _value(name_cosine_record, "warning"),
         "authority_layer": (
             _redact_authority_verdicts([asdict(v) for v in authority_layer], reveal=reveal)
             if authority_layer else None

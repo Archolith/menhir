@@ -246,8 +246,20 @@ class RetrievalTuningConfig:
     enable_anchored_time_expiry: bool = True
     # One observation per identical stated text in the observation lane (MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED).
     enable_observation_dedup: bool = False
+    # Experiment arm (plan menhir-recall-real-similarity-test). No setting or env var reaches these
+    # three, only an explicit tuning. Not gated on trace: frontier_shadow traces production recalls.
+    # record_name_cosine reports each candidate's raw [-1, 1] query-to-name cosine (one embedding
+    # call and one graph read per recall). name_cosine_floor also drops candidates below it, and
+    # skips FLOOR_EXEMPT_SOURCES unless name_cosine_floor_all_sources is set.
+    record_name_cosine: bool = False
+    name_cosine_floor: float | None = None
+    name_cosine_floor_all_sources: bool = False
 
     def __post_init__(self) -> None:
+        if self.name_cosine_floor is not None and not -1.0 <= self.name_cosine_floor <= 1.0:
+            raise ValueError(
+                f"name_cosine_floor must be in [-1.0, 1.0], got {self.name_cosine_floor!r}"
+            )
         # NaN fails this too: it would otherwise silently disable the gate.
         if not 0.0 <= self.scalar_verdict_min_similarity <= 1.0:
             raise ValueError(
