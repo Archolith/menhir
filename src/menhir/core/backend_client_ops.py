@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from menhir.domain.recall import normalize_source_memory_sources
+
 
 class BackendClientOpsMixin:
     """Behavior mixin holding the large HTTP operation surface."""
@@ -135,7 +137,7 @@ class BackendClientOpsMixin:
         if counted_verdict_limit is not None:
             params["counted_verdict_limit"] = int(counted_verdict_limit)
         if source_memory_sources is not None:
-            params["source_memory_sources"] = list(source_memory_sources)
+            params["source_memory_sources"] = list(normalize_source_memory_sources(source_memory_sources))
         return await self._request("recall", params)
 
     async def recall_history(

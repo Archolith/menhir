@@ -306,6 +306,9 @@ def normalize_source_memory_sources(value: Any) -> tuple[str, ...]:
             )
         if text not in cleaned:
             cleaned.append(text)
+        # Fail inside the loop so `cleaned` stays <= 21 items and the check stays linear.
+        if len(cleaned) > MAX_SOURCE_MEMORY_SOURCES:
+            break
     if not 1 <= len(cleaned) <= MAX_SOURCE_MEMORY_SOURCES:
         raise ValueError(
             f"source_memory_sources must hold 1-{MAX_SOURCE_MEMORY_SOURCES} distinct sources"
