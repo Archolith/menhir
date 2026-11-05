@@ -12,11 +12,12 @@ Issue: https://github.com/Archolith/menhir/issues/109. Broader first-run experie
 
 ## Decision
 
-**Stop before implementing a general backend adapter.** The current Graphiti Falkor session
+**Production enablement remains blocked.** The current Graphiti Falkor session
 does not provide the callback rollback Menhir requires. Both a failed callback and a failed
 Redis MULTI/EXEC batch left the first graph mutation committed. A driver swap or a thin
 transaction wrapper therefore fails the compatibility gate. This does not prove that a
-carefully designed single-query rewrite is impossible; that route remains unqualified.
+carefully designed single-query rewrite is impossible; bounded candidates now pass, while the
+complete backend remains unqualified. Internal integration may proceed under the review below.
 
 Native Windows is also unqualified: the published FalkorDBLite 0.11.0 release has macOS and
 Linux wheels, with no Windows wheel. The Linux run below does not qualify the Windows host.
@@ -25,8 +26,9 @@ Linux wheels, with no Windows wheel. The Linux run below does not qualify the Wi
 
 **Use an internal Menhir Falkor backend plus targeted, reusable Falkor fixes.** Do not build a
 separate adapter service/package or attempt to make Falkor a drop-in Neo4j implementation. This
-is an architecture recommendation, not a declaration that the backend is ready. P1 still gates
-runtime integration.
+is an architecture recommendation, not a declaration that the backend is ready. P1 gates
+production enablement; the 2026-11-05 minimal-work review below permits an internal vertical slice
+before every transaction family is implemented.
 
 | Route | What it requires | Assessment |
 |---|---|---|
@@ -76,8 +78,8 @@ that is a reason to assess native temporal support before choosing an encoding, 
 that the bundled module implements Menhir's timezone-aware `datetime` contract. String substitution
 remains diagnostic only. Do not upgrade to the separate Rust 6.x engine without fresh qualification.
 
-**Next gate:** close the remaining writer/capability inventory and prove production-shaped atomic
-View/history certification and structure/document publication strategies. Keep single-query
+**Original next gate (superseded by the minimal-work review below):** close the writer/capability
+inventory and prove production-shaped atomic View/history and structure/document strategies. Keep single-query
 variants only where they preserve the complete contract without duplicating domain rules. The
 prototype's `count`/32-row limits are experimental bounds, not acceptable new product limits.
 If that requires broad application rewrites, retain Neo4j and explicitly scope native transaction
@@ -93,6 +95,61 @@ Evidence: [Lite wrapper](https://github.com/FalkorDB/falkordblite/blob/ed2164762
 [temporal primitives](https://github.com/FalkorDB/FalkorDB/blob/v4.22.1/src/arithmetic/time_funcs/time_funcs.c),
 and [the inspected Graphiti fork](https://github.com/Archolith/graphiti/blob/v0.31.2.post2/graphiti_core/driver/falkordb_driver.py).
 This comparison inspected source and existing results; it added no runtime changes or new live tests.
+
+### Minimal-work architecture review (2026-11-05)
+
+The ownership decision still fits #109: one internal Menhir Falkor implementation, the existing
+Graphiti Falkor provider, and one managed Lite runtime. The execution order had drifted toward
+an expanding standalone proof suite instead of a usable backend. Stop adding synthetic or
+captured-query proof families by default. Existing proofs are evidence and test fixtures, not a
+second persistence architecture to port wholesale into production.
+
+Code-backed reasons to change the order:
+
+- `core/bootstrap.py:153` still constructs `Neo4jRepository`, while
+  `infrastructure/graphiti_client.py:481` independently constructs `Neo4jDriver`. No selectable
+  Falkor runtime path exists. These are the two seams to connect, sharing one embedded server,
+  socket/data location and graph name. The pinned driver already accepts `falkor_db=...`; the
+  successful spike creates its async client on the Lite server's existing Unix socket.
+- The active scalar rebuild is constructed in `MemoryGraphAdapter.scalar_state_service`
+  (`memory_graph_adapter.py:273`), and scalar state is enabled in `config/feature_flags.py:53`.
+  No runtime construction of `ScalarStateProjectionMaterializer` or `ScalarProjectionReconciler`
+  was found under `src/menhir`. Finishing every T5 prototype transition before integrating the
+  active path is the wrong dependency order. This is dormant cutover infrastructure, not evidence
+  that active scalar View behavior can be omitted.
+- Temporal compatibility remains unresolved across actual Menhir and Graphiti operations. The
+  passing string-temporal proofs cannot define the production representation. Resolve shared
+  time storage, comparison, hydration and timezone behavior before expanding those proofs.
+
+Shortest implementation order:
+
+1. Resolve the time/result mapping on the pinned engine using actual active queries and the
+   Graphiti provider. Reuse the existing instrument for a focused blocker test only if needed.
+   If preserving the contract requires broad engine work, stop this route immediately.
+2. Wire one internal, unreleased Linux slice through existing bootstrap and Graphiti construction:
+   start/open a file, native schema readiness, direct repository write/read, real Graphiti-backed
+   `add_memory`/enrichment/recall, and restart. Keep Neo4j as the working default. This is integration
+   work, not permission to expose a partially correct backend as supported.
+3. Implement native query/schema variants at existing owners. Reuse shared folds, payload builders
+   and policy hooks. Adapt the three active explicit callback entry points (project, document,
+   binding refresh) as operation-specific atomic commands; do not build a general callback compiler
+   or a runtime dependency on `scripts/`. Cover active scalar refresh/retirement and saga recovery.
+4. Close all #109 acceptance requirements, including projection-lifecycle atomicity, hook safety,
+   namespace/uniqueness, failures/retries and export/restart, on the actual backend. Retain dormant
+   T5 contract tests as release gates without activating the T5 cutover as a side project. Package
+   supported Linux using the existing Lite distribution first; qualify Windows separately.
+
+Do not add a new adapter service, parallel storage protocol hierarchy, custom runtime wheel,
+engine transaction API, native Windows port, new engine version or default-backend migration to
+the next implementation slice. No broad rename of existing `neo4j` variables/types is required
+to prove that slice. Reuse the existing repository surface and add only capabilities exercised
+by real callers. The P1 correctness gate moves to production enablement; it no longer prevents
+internal integration from discovering incompatibilities sooner. All acceptance requirements remain.
+Do not chase a zero-failure result in the original compatibility spike: its unchanged Neo4j-syntax
+probes and unsafe-autocommit counterexamples can remain negative controls. Supported behavior must
+pass backend-native contract tests instead; native constraint/vector APIs need no Neo4j aliases.
+The earlier token bands remain conditional estimates, not justification to spend the full budget;
+re-estimate after the temporal decision and real vertical slice rather than extrapolating proof count.
 
 ## Reproduce
 

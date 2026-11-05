@@ -1,5 +1,9 @@
 ## 2026-11-05 - Atomic real-View Falkor experiment (#109)
 
+- Reassessed the completion architecture: stop expanding isolated proof families, resolve shared
+  temporal semantics, and integrate one unreleased Linux slice through existing repository/Graphiti
+  seams. Retain all correctness release gates; dormant T5 cutover and native Windows work do not
+  precede the active runtime path.
 - Added a bounded create/supersede candidate that captures the actual View and scalar provenance
   write bodies and commits them with real projection work/receipt labels in one guarded query.
   Source/history/time fences, native postconditions, late-failure rollback, replay and competing

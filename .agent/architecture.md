@@ -96,6 +96,11 @@ Concept id: `runtime.stack`
   Its Neo4j lifecycle commit must supply a whole-transaction timeout no greater than the View's
   statement budget; explicit transactions cannot install per-statement deadlines after BEGIN.
   Live Neo4j tests cover history/refresh/retirement and rollback after certification rejection.
+  The 2026-11-05 architecture review stops further standalone proof expansion by default: resolve
+  production time/result semantics, then wire one unreleased Linux path through the existing
+  repository and Graphiti construction seams with one managed Lite runtime. Correctness gates
+  block supported/default enablement, not internal integration. The T5 materializer has no runtime
+  constructor in this checkout; qualify the active legacy scalar path before expanding that cutover.
 - `archolith-graphiti-core==0.31.2.post2` (Archolith soft fork of `getzep/graphiti`,
   baseline `v0.31.2`; it still imports as `graphiti_core`). Menhir policy uses its explicit
   hooks without runtime monkeypatching. Published from fork tag `v0.31.2.post2` at
