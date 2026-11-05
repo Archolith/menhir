@@ -82,8 +82,9 @@ Concept id: `runtime.stack`
   Its `falkordblite_projection_proof.py` helper tests real lifecycle commits and a guarded
   single-query definition-publication candidate; it is isolated experiment code, not runtime wiring.
   The prepared-materialization and prepared-proof helpers test a bounded numeric payload/certificate
-  contract with snapshot and time fences. Real-schema checks expose absent provenance/liveness guards;
-  View history works only in a string-temporal diagnostic. Production integration remains unqualified.
+  contract with snapshot and time fences. A source-bound variant now guards real provenance/evidence
+  snapshots atomically but still writes synthetic Views. Real View history works only in a
+  string-temporal diagnostic; atomic history/certification integration remains unqualified.
 - `archolith-graphiti-core==0.31.2.post2` (Archolith soft fork of `getzep/graphiti`,
   baseline `v0.31.2`; it still imports as `graphiti_core`). Menhir policy uses its explicit
   hooks without runtime monkeypatching. Published from fork tag `v0.31.2.post2` at

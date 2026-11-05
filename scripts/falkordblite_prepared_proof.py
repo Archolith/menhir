@@ -20,7 +20,9 @@ from falkordblite_prepared_materialization import (
     _keys,
     _require,
     commit,
+    commit_production,
     prepare,
+    prepare_production,
 )
 
 from menhir.infrastructure.projection_lifecycle_repository_encoding import (
@@ -343,6 +345,11 @@ def production_schema_proofs(db: Any) -> list[tuple[str, Callable[[], object]]]:
     def read(repository: TypedAssertionRepository) -> list[dict[str, Any]]:
         return repository.materializable_assertions_for_entity("subject", namespace="tenant-a")
 
+    def graph_state(graph: Any) -> list[str]:
+        rows = graph.query("MATCH (n) RETURN id(n), labels(n), properties(n)").result_set
+        rows += graph.query("MATCH (a)-[r]->(b) RETURN id(a), id(r), type(r), properties(r), id(b)").result_set
+        return sorted(json.dumps(row, sort_keys=True) for row in rows)
+
     def digest(rows: list[dict[str, Any]]) -> str:
         target = scalar_projection_target(rows[0])
         outcome = SCALAR_STATE_PROJECTION.fold(target, tuple(rows), datetime.now(UTC))
@@ -374,13 +381,9 @@ def production_schema_proofs(db: Any) -> list[tuple[str, Callable[[], object]]]:
         _require(before != after, "authority change did not change canonical hash")
         return "actual repository excludes pending/superseded/foreign rows, joins source episode and hashes authority"
 
-    def source_drift(mutation: str) -> object:
-        graph, repository = fixture(mutation)
+    def work_fixture(name: str) -> tuple[Any, TypedAssertionRepository, Any]:
+        graph, repository = fixture(name)
         rows = read(repository)
-        original_hash = digest(rows)
-        raw = graph.query("MATCH (a:TypedAssertion) RETURN properties(a)").result_set
-        # Recreate exactly the original synthetic experiment's source and lifecycle state.
-        graph.query("MATCH (a:TypedAssertion) CREATE (p:PreparedAssertion) SET p=$row", {"row": rows[0]})
         target = scalar_projection_target(rows[0])
         from menhir.domain.projection_lifecycle import ProjectionWorkToken
 
@@ -400,7 +403,13 @@ def production_schema_proofs(db: Any) -> list[tuple[str, Callable[[], object]]]:
             "target_json:$target, generation:1, applied_generation:0, target_present:true})",
             {"id": token.definition_id, "key": token.work_key, "target": _target_json(target)},
         )
-        plan = prepare(graph, token, "derive")
+        return graph, repository, token
+
+    def source_drift(mutation: str) -> object:
+        graph, repository, token = work_fixture(mutation)
+        original_hash = digest(read(repository))
+        raw = graph.query("MATCH (a:TypedAssertion) RETURN properties(a)").result_set
+        plan = prepare_production(graph, token, "derive")
         _require(plan.parameters()["after_view"]["projection_hash"] == original_hash, "fixture hash mismatch")
         if mutation == "admission_link":
             graph.query(
@@ -413,12 +422,154 @@ def production_schema_proofs(db: Any) -> list[tuple[str, Callable[[], object]]]:
             # Read/fold alone retains this row. The production View gate must reject its evidence.
             _require(digest(read(repository)) == original_hash, "quarantine unexpectedly changed fold inputs")
         _require(graph.query("MATCH (a:TypedAssertion) RETURN properties(a)").result_set == raw, "assertion mutated")
-        action = commit(graph, plan)
+        before = graph_state(graph)
+        action = commit_production(graph, plan)
         _require(
-            action not in ("apply", "replay"),
-            f"synthetic commit returned {action} after real {mutation} changed; assertion properties unchanged",
+            action == "stale_inputs",
+            f"source-bound commit returned {action} after real {mutation} changed; assertion properties unchanged",
         )
+        _require(graph_state(graph) == before, "source refusal mutated graph")
         return action
+
+    def source_roundtrip() -> object:
+        graph, repository, token = work_fixture("source_roundtrip")
+        plan = prepare_production(graph, token, "derive")
+        expected = digest(read(repository))
+        _require(plan.parameters()["after_view"]["projection_hash"] == expected, "source snapshot/read fold mismatch")
+        _require(commit_production(graph, plan) == "apply", "source publication refused")
+        state = graph_state(graph)
+        _require(commit_production(graph, plan) == "replay", "source replay was not recognized")
+        _require(graph_state(graph) == state, "source replay mutated graph")
+        graph.query("MATCH (t:TurnEvidence) SET t.evidence_quarantined=true")
+        state = graph_state(graph)
+        _require(commit_production(graph, plan) == "stale_inputs", "replay acknowledged quarantined evidence")
+        _require(graph_state(graph) == state, "source replay refusal mutated graph")
+        return "real source fold hash matches repository; atomic apply/replay and no-write refusal after quarantine"
+
+    def source_multi_input() -> object:
+        graph, repository, token = work_fixture("source_multi_input")
+        graph.query(
+            "MATCH (a:TypedAssertion) WITH properties(a) AS p "
+            "CREATE (b:TypedAssertion) SET b=p SET b.assertion_id='delta', b.operation='delta', "
+            "b.value=2, b.value_json='2', b.valid_at='2026-02-01T00:00:00Z' "
+            "CREATE (c:TypedAssertion) SET c=p SET c.assertion_id='pending', c.binding_pending=true, c.episode_uuid='missing' "
+            "CREATE (d:TypedAssertion) SET d=p SET d.assertion_id='superseded', d.superseded=true, d.episode_uuid='missing'"
+        )
+        plan = prepare_production(graph, token, "derive")
+        _require(
+            plan.parameters()["after_view"]["projection_hash"] == digest(read(repository)), "multi-input read mismatch"
+        )
+        payload = json.loads(plan.parameters()["after_view"]["payload_json"])
+        _require(payload["value"] == "12" and payload["contributor_ids"] == ["a1", "delta"], str(payload))
+        _require(commit_production(graph, plan) == "apply", "multi-input source apply refused")
+        _require(commit_production(graph, plan) == "replay", "multi-input source replay refused")
+        return "anchor/delta fold matches real read; pending/superseded rows remain guarded but do not contribute"
+
+    def source_empty() -> object:
+        graph, _, token = work_fixture("source_empty")
+        graph.query("MATCH (a:TypedAssertion) DELETE a")
+        plan = prepare_production(graph, token, "derive")
+        _require(plan.parameters()["after_view"]["present"] is False, "empty source was not absent")
+        _require(commit_production(graph, plan) == "apply", "empty source publication refused")
+        state = graph_state(graph)
+        _require(commit_production(graph, plan) == "replay", "empty source replay refused")
+        _require(graph_state(graph) == state, "empty source replay mutated graph")
+        return "empty closure produces absent hash and exact no-write replay"
+
+    source_mutations = {
+        "fence_generation": "MATCH (f:EvidenceNamespaceFence) SET f.generation=1",
+        "evidence_generation": "MATCH (t:TurnEvidence) SET t.evidence_generation=1",
+        "unfinalized": "MATCH (t:TurnEvidence) SET t.evidence_finalized=false",
+        "foreign_turn": "MATCH (t:TurnEvidence) SET t.namespace='tenant-b'",
+        "authority": "MATCH (a:TypedAssertion) SET a.evidence_tier='agent'",
+        "pending": "MATCH (a:TypedAssertion) SET a.binding_pending=true",
+        "superseded": "MATCH (a:TypedAssertion) SET a.superseded=true",
+        "input_delete": "MATCH (a:TypedAssertion) DELETE a",
+        "input_insert": "MATCH (a:TypedAssertion) WITH properties(a) AS p CREATE (b:TypedAssertion) "
+        "SET b=p SET b.assertion_id='a2', b.value=11, b.value_json='11'",
+        "parallel_admission": "MATCH (e:Episodic), (t:TurnEvidence) CREATE (e)-[:ADMITTED_ON]->(t)",
+        "second_grounding": "MATCH (e:Episodic) CREATE (e)-[:ADMITTED_ON]->(:TurnEvidence {turn_id:'turn-b', namespace:'tenant-a'})",
+        "episode_alias": "CREATE (:Episodic {uuid:'episode-a', group_id:'tenant-a'})",
+        "turn_alias": "CREATE (:TurnEvidence {turn_id:'turn-a', namespace:'tenant-a'})",
+        "direct_alias": "CREATE (:TurnEvidence {turn_id:'episode-a', namespace:'tenant-a'})",
+        "evidence_collision": "CREATE (:Episodic {uuid:'turn-a', group_id:'tenant-a'})",
+        "duplicate_fence": "CREATE (:EvidenceNamespaceFence {namespace_key:'tenant-a', generation:0})",
+    }
+
+    def refuse_source(name: str, query: str) -> object:
+        graph, _, token = work_fixture("refuse_" + name)
+        plan = prepare_production(graph, token, "derive")
+        graph.query(query)
+        state = graph_state(graph)
+        action = commit_production(graph, plan)
+        _require(action == "stale_inputs", f"{name} accepted: {action}")
+        _require(graph_state(graph) == state, f"{name} refusal mutated graph")
+        if name not in ("authority", "pending", "superseded", "input_delete", "input_insert"):
+            try:
+                prepare_production(graph, token, "fresh")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"fresh preparation accepted invalid {name} evidence")
+            _require(graph_state(graph) == state, "invalid fresh preparation mutated graph")
+        return action
+
+    def source_bound() -> object:
+        graph, _, token = work_fixture("source_bound")
+        graph.query(
+            "MATCH (a:TypedAssertion) WITH properties(a) AS p UNWIND range(1,$count) AS i "
+            "CREATE (b:TypedAssertion) SET b=p SET b.assertion_id='extra-'+toString(i)",
+            {"count": MAX_INPUTS},
+        )
+        state = graph_state(graph)
+        try:
+            prepare_production(graph, token, "derive")
+        except ValueError as exc:
+            _require("source closure bound" in str(exc), str(exc))
+        else:
+            raise AssertionError("source closure silently truncated")
+        _require(graph_state(graph) == state, "source overflow refusal mutated graph")
+        return "fetch-one-extra rejects source-closure overflow before any write"
+
+    def source_rollback() -> object:
+        from falkordblite_prepared_materialization import PRODUCTION_COMMIT
+        from redis.exceptions import ResponseError
+
+        graph, _, token = work_fixture("source_rollback")
+        plan = prepare_production(graph, token, "derive")
+        state = graph_state(graph)
+        failing = (
+            PRODUCTION_COMMIT.rsplit("RETURN action", 1)[0] + "CREATE (n:PreparedBad) SET n.bad={nested:1} RETURN 1"
+        )
+        try:
+            graph.query(failing, plan.parameters())
+        except ResponseError as exc:
+            _require("Property values" in str(exc), f"unexpected failure: {exc}")
+        else:
+            raise AssertionError("source publication injection did not fail")
+        _require(graph_state(graph) == state, "source query failure retained writes")
+        return "failure after payload/certificate writes restores nodes and relationships"
+
+    def source_race() -> object:
+        graph, _, token = work_fixture("source_race")
+        plans = [prepare_production(graph, token, f"derive-{i}") for i in range(2)]
+        barrier = Barrier(2)
+
+        def publish(plan: Any) -> str:
+            barrier.wait(timeout=10)
+            return commit_production(db.select_graph("menhir109_schema_source_race"), plan)
+
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [pool.submit(publish, plan) for plan in plans]
+                actions = [future.result(timeout=20) for future in futures]
+            _require(actions.count("apply") == 1 and actions.count("stale_work") == 1, str(actions))
+            _require(
+                graph.query("MATCH (r:PreparedReceipt) RETURN count(r)").result_set == [[1]], "duplicate source receipt"
+            )
+            return actions
+        finally:
+            db.client.connection_pool.disconnect()
 
     def view_history(repository_type: type[Repository]) -> object:
         graph, _ = fixture("view_history_" + repository_type.__name__)
@@ -456,10 +607,21 @@ def production_schema_proofs(db: Any) -> list[tuple[str, Callable[[], object]]]:
         _require(remaining == [[False], [False]], f"retirement lost history or retained current: {remaining}")
         return "real writer created, superseded, refreshed authority/provenance and retired, preserving both versions"
 
-    return [
+    proofs = [
         ("production_scalar_assertion_read", real_read),
+        ("prepared_production_source_roundtrip_replay", source_roundtrip),
+        ("prepared_production_multi_input", source_multi_input),
+        ("prepared_production_empty_source", source_empty),
+        ("prepared_production_source_bound", source_bound),
         ("prepared_production_admission_link_fence", lambda: source_drift("admission_link")),
         ("prepared_production_evidence_liveness_fence", lambda: source_drift("quarantine")),
+        ("prepared_production_query_failure_rollback", source_rollback),
+        ("prepared_production_competing_publishers", source_race),
         ("production_scalar_view_history", lambda: view_history(Repository)),
         ("production_scalar_view_history_string_temporals", lambda: view_history(StringTemporalRepository)),
     ]
+    proofs.extend(
+        (f"prepared_production_refuses_{name}", lambda name=name, query=query: refuse_source(name, query))
+        for name, query in source_mutations.items()
+    )
+    return proofs

@@ -226,3 +226,112 @@ def test_unsupported_scalar_kind_is_not_silently_certified(value_kind: str) -> N
     target = replace(plan.token.target, key=("owned", "", value_kind, "count"))
     with pytest.raises(ValueError, match="numeric scalar targets only"):
         replace(plan, token=replace(plan.token, target=target)).parameters()
+
+
+def _source_plan():
+    plan = _plan()
+    data = json.loads(plan.snapshot_json)
+    data[2] = {
+        "sources": [
+            {
+                "assertion": {**_row(), "episode_uuid": "turn-a"},
+                "assertion_node": 1,
+                "turn": {
+                    "turn_id": "turn-a",
+                    "namespace": "tenant-a",
+                    "evidence_finalized": True,
+                    "evidence_generation": 0,
+                },
+                "turn_node": 2,
+                "episode": {"uuid": "episode-a1", "group_id": "tenant-a"},
+                "episode_node": 3,
+                "admission_node": 4,
+                "grounding": {
+                    "turn_id": "turn-a",
+                    "namespace": "tenant-a",
+                    "evidence_finalized": True,
+                    "evidence_generation": 0,
+                },
+                "grounding_node": 2,
+                "grounding_edge": 4,
+                "direct_node": None,
+                "alias_node": 3,
+                "collision_node": None,
+            }
+        ],
+        "fences": [{"namespace_key": "tenant-a", "generation": 0}],
+    }
+    return prepared.PreparedProductionScalar(plan.token, plan.derivation_id, json.dumps(data))
+
+
+def test_source_snapshot_derives_hash_from_admitted_episode() -> None:
+    plan = _source_plan()
+    params = plan.parameters()
+    assert params["after_view"] == _plan().parameters()["after_view"]
+    assert params["inputs"] == json.loads(plan.snapshot_json)[2]
+    # A stored hydrated value wins over the compatibility numeric mirror, as in the real read.
+    data = json.loads(plan.snapshot_json)
+    data[2]["sources"][0]["assertion"].update(value=99, value_json="10")
+    assert replace(plan, snapshot_json=json.dumps(data)).parameters()["after_view"] == params["after_view"]
+
+
+@pytest.mark.parametrize(
+    "mutation,message",
+    [
+        ("quarantine", "not live"),
+        ("unfinalized", "not live"),
+        ("fence", "stale source evidence fence"),
+        ("foreign", "foreign source evidence"),
+        ("direct", "ambiguous source evidence identity"),
+        ("collision", "ambiguous source evidence identity"),
+        ("grounding", "ambiguous source evidence identity"),
+        ("missing_turn", "turn-backed admission"),
+        ("duplicate", "ambiguous source provenance"),
+        ("duplicate_fence", "missing/duplicate evidence fence"),
+        ("overflow", "source closure bound"),
+        ("finalized_episode", "unfinalized episode bridge"),
+        ("invalid_flag", "invalid source eligibility flag"),
+        ("invalid_evidence_flag", "invalid source evidence flag"),
+    ],
+)
+def test_source_preparation_refuses_ineligible_or_ambiguous_evidence(mutation: str, message: str) -> None:
+    plan = _source_plan()
+    data = json.loads(plan.snapshot_json)
+    bundle = data[2]
+    source = bundle["sources"][0]
+    if mutation == "quarantine":
+        source["turn"]["evidence_quarantined"] = True
+    elif mutation == "unfinalized":
+        source["turn"]["evidence_finalized"] = False
+    elif mutation == "fence":
+        bundle["fences"][0]["generation"] = 1
+    elif mutation == "foreign":
+        source["episode"]["group_id"] = "tenant-b"
+    elif mutation in ("direct", "collision", "grounding"):
+        source[mutation + "_node"] = 999
+    elif mutation == "missing_turn":
+        source["turn"] = None
+    elif mutation == "duplicate":
+        bundle["sources"].append(source)
+    elif mutation == "duplicate_fence":
+        bundle["fences"].append(bundle["fences"][0])
+    elif mutation == "overflow":
+        bundle["sources"] *= prepared.MAX_INPUTS + 1
+    elif mutation == "finalized_episode":
+        source["episode"]["evidence_finalized"] = True
+    elif mutation == "invalid_flag":
+        source["assertion"]["binding_pending"] = "false"
+    elif mutation == "invalid_evidence_flag":
+        source["turn"]["evidence_quarantined"] = 0
+    with pytest.raises(ValueError, match=message):
+        replace(plan, snapshot_json=json.dumps(data)).parameters()
+
+
+@pytest.mark.parametrize("flag", ["superseded", "binding_pending"])
+def test_source_snapshot_excludes_ineligible_assertions_but_guards_their_properties(flag: str) -> None:
+    plan = _source_plan()
+    data = json.loads(plan.snapshot_json)
+    data[2]["sources"][0]["assertion"][flag] = True
+    params = replace(plan, snapshot_json=json.dumps(data)).parameters()
+    assert params["after_view"]["present"] is False
+    assert params["inputs"]["sources"][0]["assertion"][flag] is True

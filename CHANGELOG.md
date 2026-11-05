@@ -1,5 +1,8 @@
 ## 2026-11-04 - FalkorDBLite compatibility spike (#109)
 
+- Added a bounded source-bound prepared variant: the real assertion/provenance snapshot and evidence
+  fence are revalidated inside the atomic publication/replay query. Added no-write refusal, null-safe
+  comparison, overflow, rollback and competing-publisher checks; real View history integration remains gated.
 - Extended the probe to real assertion/provenance reads and View history; exposed stale-admission
   and quarantined-evidence acceptance in the synthetic candidate. Corrected its slot kind to `count`
   and added a production View-kind regression. Native View temporals and full P1 remain blocked.

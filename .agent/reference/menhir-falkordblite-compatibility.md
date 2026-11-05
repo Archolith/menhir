@@ -165,7 +165,8 @@ The candidate deliberately accepts only `count` scalar targets with explicit nam
 most 32 input rows. A bounded read fetches one extra row to detect overflow instead of certifying
 a truncated set. This bounds result/write payload sizes, not the engine's total scan/sort memory.
 Other scalar kinds fail closed. Stored payload identity, contributors, episodes and hash are
-covered by offline contract checks; no assertion/provenance relationship closure is represented.
+covered by offline contract checks; the original variant represents no assertion/provenance
+relationship closure. The source-bound extension below adds that closure for a restricted profile.
 
 Live cases cover present/retired payloads and exact replay, source modification/insertion/deletion,
 changed definition/generation/View, conflicting receipt, duplicate View identity, injected failure
@@ -195,7 +196,8 @@ the fold accepts but the real `ScalarStateKind` rejects. The candidate now accep
 production `count` kind. An offline test crosses the actual View-kind boundary, and the canonical
 present/absent hash fixtures changed with that target identity. Other kinds remain unsupported.
 
-Two executable acceptance checks deliberately **FAIL**, exposing missing production guards:
+The initial production-schema run had two executable acceptance checks deliberately **FAIL**,
+exposing missing production guards in the original synthetic candidate:
 
 - Prepare from the real read, change only `ADMITTED_ON` to another source episode, then commit.
   The actual read/fold hash changes, assertion properties stay identical, and the synthetic
@@ -204,8 +206,8 @@ Two executable acceptance checks deliberately **FAIL**, exposing missing product
   stays identical, but the evidence is no longer eligible for a current FACT View. The synthetic
   commit still returns `apply`; it has no evidence-liveness gate.
 
-These are failures of extending the isolated candidate to production, not new defects in the
-unchanged Neo4j runtime. The required next step is to read the production assertion/provenance
+These are failures of extending the original isolated candidate to production, not new defects in
+the unchanged Neo4j runtime. They established the requirement to read the production assertion/provenance
 closure and derive the fold from that same snapshot, then revalidate it **inside** the atomic
 commit. Include source identity/link changes, evidence finalization/quarantine, tenant scope,
 namespace-fence generation and duplicate/ambiguous evidence. Merely comparing copied assertion
@@ -222,6 +224,47 @@ multi-query operations atomically with the prepared certificate. No runtime tran
 P1 remains unpassed. The synthetic View overwrite must still be replaced with guarded real View
 history/provenance writes in the same commit as the work certificate and receipt, including
 unchanged-value refresh, retirement, rejection/rollback, concurrent publication and replay.
+
+### Atomic production-source snapshot follow-up (2026-11-04)
+
+`PreparedProductionScalar`, `prepare_production` and `commit_production` now implement that source
+requirement in the existing prepared-materialization helper. Preparation reads real assertion,
+turn, episode, admission-link and namespace-fence state in **one** query. Hydration and the real
+fold/hash run from that returned snapshot; there is no separate provenance preflight or copied
+`PreparedAssertion` source. The commit re-reads and compares the source components **inside**
+the same query that installs the synthetic payload, work certificate and receipt. Replay performs
+the same source check before acknowledging the existing result.
+
+The profile remains deliberately narrow: nondefault explicit namespaces, `count` targets, ISO
+string timestamps, one finalized/unquarantined grounding turn and one unfinalized episode bridge
+with an unambiguous admission link. Its evidence/publication generation must match the sole
+namespace fence. Missing, foreign or ambiguous evidence is refused before dispatch. Legacy direct
+episode anchors, finalized-episode bridges and other scalar kinds remain unsupported. Pending and
+superseded assertions are captured for invalidation but excluded from the fold. The query fetches
+one extra row and refuses more than 32 joined source records; it never certifies a truncated set.
+This bounds returned records, not the engine's join/scan memory or execution cost.
+
+The snapshot includes raw source-node properties and node/link identities, including evidence
+aliases and other grounding links that could change contributor resolution. The first native run
+exposed a guard error: comparing a nested map containing null identity fields can return `null`
+even when another component differs. A `WHEN inputs<>$inputs` guard therefore missed changes.
+The final query explicitly compares each property map and identity, normalizes absent identities,
+and treats uncertain property-map comparisons as unequal. Do not replace this with whole-bundle
+equality. Live regressions cover the evidence-property and null-to-identity transitions it missed.
+
+The admission-link and quarantine acceptance checks now **PASS** against this source-bound
+variant: both return `stale_inputs` without changing any nodes or relationships. Additional checks
+cover fence/evidence generations, finalization, authority, pending/superseded eligibility, tenant
+changes, input insertion/deletion, parallel admission links, secondary grounding, identity aliases,
+duplicate fences, fresh preparation of invalid evidence, overflow, empty/multiple fold inputs,
+replay after quarantine, injected failure after writes, and competing publishers with one receipt.
+The original property-only candidate is still isolated and is not a production-safe alternative.
+
+**This passes the bounded source-guard sub-gate, not P1.** Outputs still use synthetic `Prepared*`
+work/receipt/View storage and a JSON View overwrite. Real View history, provenance edges and
+evidence-fence coordination must be published atomically with certification next. The separate
+string-temporal history diagnostic remains the only passing real View writer experiment; native
+temporals, general value types, all transaction writers and crash/recovery qualification remain open.
 
 Future implementation gates are indexed in [the memory backlog](../memory-backlog.md#memorybacklogembedded_graph).
 The [Archolith FalkorDBLite fork](https://github.com/Archolith/falkordblite) owns the separate
@@ -272,6 +315,11 @@ Redis pipelining or MULTI/EXEC alone is insufficient evidence. Retain Neo4j mean
   12 failed gates (the prior nine plus admission-link fencing, evidence liveness, and native View
   datetime support). All 17 isolated prepared cases and orderly restart passed. The diagnostic
   string-temporal View-history case passed; it does not qualify temporal semantics or P1.
+- Atomic source follow-up: 62 local tests passed, 4 online Neo4j checks skipped; default Ruff,
+  F811/F821/ASYNC and formatting checks passed. Final live probe: 66 checks, 56 passing and 10
+  remaining failed compatibility gates. All 24 source-bound cases, all 17 original prepared cases,
+  the competing-publisher checks and orderly restart passed. The former admission-link and evidence
+  liveness failures now pass in the source-bound variant; the overall decision remains BLOCKED.
 
 ## Upstream evidence
 
