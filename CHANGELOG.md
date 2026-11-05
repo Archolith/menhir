@@ -1,5 +1,8 @@
 ## 2026-11-04 - FalkorDBLite compatibility spike (#109)
 
+- Extended the probe to real assertion/provenance reads and View history; exposed stale-admission
+  and quarantined-evidence acceptance in the synthetic candidate. Corrected its slot kind to `count`
+  and added a production View-kind regression. Native View temporals and full P1 remain blocked.
 - `scripts/falkordblite_prepared_materialization.py`, `scripts/falkordblite_prepared_proof.py`:
   bounded numeric prepared-write candidate with atomic payload/certificate, snapshot/time fences,
   refusal, replay and worker-exit checks; offline contracts in `tests/test_falkordblite_prepared_materialization.py`.

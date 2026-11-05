@@ -29,7 +29,7 @@ def _row() -> dict[str, object]:
         "namespace": "tenant-a",
         "attribute": "owned",
         "scope": "",
-        "value_kind": "number",
+        "value_kind": "count",
         "unit": "count",
         "operation": "absolute",
         "value": 10,
@@ -82,7 +82,7 @@ def test_preparation_uses_real_fold_and_certifies_canonical_payload() -> None:
     assert payload["value"] == "10"
     assert payload["contributor_ids"] == ["a1"]
     assert payload["episode_uuids"] == ["episode-a1"]
-    assert params["after_view"]["projection_hash"] == "7d61a16ad48549daec6e87f5e1ba39f2821f009ce21b22947dcc7a39bef5b982"
+    assert params["after_view"]["projection_hash"] == "e05c6e3a187e3ed040031d69ece34e302f386d61d1b4891b02c1a710afb49f48"
     assert params["after_work"]["certified_projection_hash"] == params["after_receipt"]["projection_hash"]
     assert params["after_work"]["certified_definition_version"] == 1
     assert params["after_work"]["applied_projection_hash"] == params["after_view"]["projection_hash"]
@@ -92,7 +92,7 @@ def test_retirement_certifies_absence_instead_of_old_value() -> None:
     params = _plan(present=False).parameters()
     assert params["after_view"]["present"] is False
     assert json.loads(params["after_view"]["payload_json"]) == {"present": False}
-    assert params["after_view"]["projection_hash"] == "3b9ea7377dbdcdf9817959737eb6e8d9c9a5277f8217081b7d7540c688b4f2b9"
+    assert params["after_view"]["projection_hash"] == "0f1e96d4f4f9a0dda2609a28d3531661535629abfd80e0ae1d9488b8fecc3379"
 
 
 def test_future_assertion_sets_deadline_and_is_not_folded_early() -> None:
@@ -208,8 +208,21 @@ def test_preparation_folds_anchor_and_later_delta() -> None:
     assert payload["contributor_ids"] == ["a1", "d1"]
 
 
-def test_unsupported_scalar_kind_is_not_silently_certified() -> None:
+def test_candidate_slot_is_accepted_by_production_view_kind() -> None:
+    from menhir.infrastructure.view_models import ScalarStateKind
+
+    # The fold accepts broader inputs than the persisted View schema. Check that boundary too.
+    row = _row()
+    kind = ScalarStateKind()
+    discriminator = kind.key_discriminator(row)
+    props = kind.write_props("Alice", discriminator, row)
+    assert props["ss_kind"] == "count"
+    assert props["ss_value"] == "10"
+
+
+@pytest.mark.parametrize("value_kind", ["boolean", "number"])
+def test_unsupported_scalar_kind_is_not_silently_certified(value_kind: str) -> None:
     plan = _plan()
-    target = replace(plan.token.target, key=("owned", "", "boolean", "count"))
+    target = replace(plan.token.target, key=("owned", "", value_kind, "count"))
     with pytest.raises(ValueError, match="numeric scalar targets only"):
         replace(plan, token=replace(plan.token, target=target)).parameters()

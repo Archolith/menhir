@@ -86,7 +86,7 @@ def _keys(token: ProjectionWorkToken) -> dict[str, object]:
     _require(token.definition_version == SCALAR_STATE_PROJECTION.version, "unsupported definition version")
     _require(bool(token.target.namespace), "proof requires an explicit namespace")
     _require(
-        len(token.target.key) == 4 and token.target.key[2] == "number", "proof supports numeric scalar targets only"
+        len(token.target.key) == 4 and token.target.key[2] == "count", "proof supports numeric scalar targets only"
     )
     _require(token.work_key == _work_key(token.definition_id, token.target), "work key/target mismatch")
     return {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import time
@@ -47,7 +48,7 @@ def prepared_proofs(db: Any) -> list[tuple[str, Callable[[], object]]]:
             "namespace": "tenant-a",
             "attribute": "owned",
             "scope": "",
-            "value_kind": "number",
+            "value_kind": "count",
             "unit": "count",
             "operation": "absolute",
             "value": 10,
@@ -298,3 +299,167 @@ def prepared_proofs(db: Any) -> list[tuple[str, Callable[[], object]]]:
         ]
     )
     return proofs
+
+
+def production_schema_proofs(db: Any) -> list[tuple[str, Callable[[], object]]]:
+    """Qualify the real read/write contracts separately from the synthetic commit candidate.
+
+    A FAIL is a backend acceptance gate, including a successful synthetic commit whose result
+    disagrees with the real source read. No production services or data are used.
+    """
+    from falkordblite_projection_proof import AutocommitProbeRepository
+
+    from menhir.infrastructure.typed_assertion_repository import (
+        TypedAssertionRepository,
+    )
+    from menhir.infrastructure.view_repository import ViewRepository
+    from menhir.services.scalar_projection_hash import scalar_projection_present_hash
+
+    class Repository(AutocommitProbeRepository):
+        def execute(self, query: str, params: dict[str, Any] | None = None, **kwargs: Any) -> list[dict[str, Any]]:
+            # The native probe has no transaction timeout API. Do not translate query semantics.
+            return super().execute(query, params)
+
+    class StringTemporalRepository(Repository):
+        def execute(self, query: str, params: dict[str, Any] | None = None, **kwargs: Any) -> list[dict[str, Any]]:
+            # Diagnostic only: string fixtures let us inspect the next incompatibility. This is
+            # deliberately NOT evidence for Neo4j temporal semantics or a runtime query translator.
+            return super().execute(re.sub(r"datetime\((\$\w+)\)", r"\1", query), params, **kwargs)
+
+    def fixture(name: str) -> tuple[Any, TypedAssertionRepository]:
+        graph = db.select_graph("menhir109_schema_" + name)
+        graph.query(
+            "CREATE (a:TypedAssertion {assertion_id:'a1', subject_uuid:'subject', subject_display:'Alice', "
+            "namespace:'tenant-a', attribute:'owned', scope:'', value_kind:'count', unit:'count', "
+            "operation:'absolute', value:10, value_json:'10', evidence_tier:'user', "
+            "valid_at:'2026-01-01T00:00:00Z', learned_at:'2026-01-01T00:00:00Z', episode_uuid:'turn-a'}) "
+            "CREATE (t:TurnEvidence {turn_id:'turn-a', namespace:'tenant-a', evidence_finalized:true, "
+            "evidence_generation:0}) "
+            "CREATE (e:Episodic {uuid:'episode-a', group_id:'tenant-a'})-[:ADMITTED_ON]->(t) "
+            "CREATE (:EvidenceNamespaceFence {namespace_key:'tenant-a', generation:0})"
+        )
+        return graph, TypedAssertionRepository(Repository(graph))
+
+    def read(repository: TypedAssertionRepository) -> list[dict[str, Any]]:
+        return repository.materializable_assertions_for_entity("subject", namespace="tenant-a")
+
+    def digest(rows: list[dict[str, Any]]) -> str:
+        target = scalar_projection_target(rows[0])
+        outcome = SCALAR_STATE_PROJECTION.fold(target, tuple(rows), datetime.now(UTC))
+        state = outcome.payload
+        return scalar_projection_present_hash(
+            SCALAR_STATE_PROJECTION,
+            target,
+            value=state.value,
+            valid_at=state.valid_at,
+            contributor_ids=state.contributor_ids,
+            effective_tier=state.effective_tier,
+            episode_uuids=state.episode_uuids,
+        )
+
+    def real_read() -> object:
+        graph, repository = fixture("read")
+        graph.query(
+            "MATCH (a:TypedAssertion) WITH properties(a) AS p "
+            "CREATE (b:TypedAssertion) SET b=p SET b.assertion_id='pending', b.binding_pending=true "
+            "CREATE (c:TypedAssertion) SET c=p SET c.assertion_id='old', c.superseded=true "
+            "CREATE (d:TypedAssertion) SET d=p SET d.assertion_id='foreign', d.namespace='tenant-b'"
+        )
+        rows = read(repository)
+        _require(len(rows) == 1 and rows[0]["assertion_id"] == "a1", f"eligibility drift: {rows}")
+        _require(rows[0]["grounding_id"] == "turn-a" and rows[0]["episode_uuid"] == "episode-a", str(rows))
+        before = digest(rows)
+        graph.query("MATCH (a:TypedAssertion {assertion_id:'a1'}) SET a.evidence_tier='agent'")
+        after = digest(read(repository))
+        _require(before != after, "authority change did not change canonical hash")
+        return "actual repository excludes pending/superseded/foreign rows, joins source episode and hashes authority"
+
+    def source_drift(mutation: str) -> object:
+        graph, repository = fixture(mutation)
+        rows = read(repository)
+        original_hash = digest(rows)
+        raw = graph.query("MATCH (a:TypedAssertion) RETURN properties(a)").result_set
+        # Recreate exactly the original synthetic experiment's source and lifecycle state.
+        graph.query("MATCH (a:TypedAssertion) CREATE (p:PreparedAssertion) SET p=$row", {"row": rows[0]})
+        target = scalar_projection_target(rows[0])
+        from menhir.domain.projection_lifecycle import ProjectionWorkToken
+
+        token = ProjectionWorkToken(
+            work_key=_work_key(SCALAR_STATE_PROJECTION.definition_id, target),
+            definition_id=SCALAR_STATE_PROJECTION.definition_id,
+            definition_version=1,
+            target=target,
+            generation=1,
+            target_present=True,
+            reason="schema-proof",
+        )
+        # Prepare before changing relationship/liveness state; assertion properties stay identical.
+        graph.query(
+            "CREATE (:PreparedDefinition {definition_id:$id, current_version:1, semantic_hash:'proof-v1'}) "
+            "CREATE (:PreparedWork {work_key:$key, definition_id:$id, definition_version:1, "
+            "target_json:$target, generation:1, applied_generation:0, target_present:true})",
+            {"id": token.definition_id, "key": token.work_key, "target": _target_json(target)},
+        )
+        plan = prepare(graph, token, "derive")
+        _require(plan.parameters()["after_view"]["projection_hash"] == original_hash, "fixture hash mismatch")
+        if mutation == "admission_link":
+            graph.query(
+                "MATCH (e:Episodic)-[r:ADMITTED_ON]->(t:TurnEvidence) DELETE r "
+                "CREATE (:Episodic {uuid:'episode-b', group_id:'tenant-a'})-[:ADMITTED_ON]->(t)"
+            )
+            _require(digest(read(repository)) != original_hash, "source relink did not alter actual fold hash")
+        else:
+            graph.query("MATCH (t:TurnEvidence) SET t.evidence_quarantined=true")
+            # Read/fold alone retains this row. The production View gate must reject its evidence.
+            _require(digest(read(repository)) == original_hash, "quarantine unexpectedly changed fold inputs")
+        _require(graph.query("MATCH (a:TypedAssertion) RETURN properties(a)").result_set == raw, "assertion mutated")
+        action = commit(graph, plan)
+        _require(
+            action not in ("apply", "replay"),
+            f"synthetic commit returned {action} after real {mutation} changed; assertion properties unchanged",
+        )
+        return action
+
+    def view_history(repository_type: type[Repository]) -> object:
+        graph, _ = fixture("view_history_" + repository_type.__name__)
+        views = ViewRepository(repository_type(graph))
+        arguments = {
+            "subject": "Alice",
+            "subject_uuid": "subject",
+            "attribute": "owned",
+            "scope": "",
+            "value_kind": "count",
+            "unit": "count",
+            "namespace": "tenant-a",
+            "valid_at": "2026-01-01T00:00:00Z",
+            "episode_uuids": ["episode-a"],
+        }
+        first = views.record_scalar_state(value=10, **arguments)
+        second = views.record_scalar_state(value=11, **arguments)
+        _require(first["uuid"] != second["uuid"] and second["superseded"], "history was overwritten")
+        rows = graph.query(
+            "MATCH (n:Entity)-[:SUPERSEDES]->(o:Entity) RETURN n.uuid, o.uuid, n.view_current, o.view_current"
+        ).result_set
+        _require(rows == [[second["uuid"], first["uuid"], True, False]], f"invalid history: {rows}")
+        refreshed = views.record_scalar_state(value=11, audit={"effective_tier": "agent"}, **arguments)
+        _require(refreshed["uuid"] == second["uuid"] and not refreshed["created"], "same-value refresh forked history")
+        current = graph.query(
+            "MATCH (t:TurnEvidence)-[:MENTIONS]->(n:Entity {uuid:$uuid}) RETURN t.turn_id, n.effective_tier",
+            {"uuid": second["uuid"]},
+        ).result_set
+        _require(current == [["turn-a", "agent"]], f"same-value authority/provenance refresh drift: {current}")
+        _require(views.retire_scalar_state(view_key=second["view_key"]), "retirement refused")
+        remaining = graph.query(
+            "MATCH (n:Entity {view_key:$key}) RETURN n.view_current ORDER BY n.uuid",
+            {"key": second["view_key"]},
+        ).result_set
+        _require(remaining == [[False], [False]], f"retirement lost history or retained current: {remaining}")
+        return "real writer created, superseded, refreshed authority/provenance and retired, preserving both versions"
+
+    return [
+        ("production_scalar_assertion_read", real_read),
+        ("prepared_production_admission_link_fence", lambda: source_drift("admission_link")),
+        ("prepared_production_evidence_liveness_fence", lambda: source_drift("quarantine")),
+        ("production_scalar_view_history", lambda: view_history(Repository)),
+        ("production_scalar_view_history_string_temporals", lambda: view_history(StringTemporalRepository)),
+    ]

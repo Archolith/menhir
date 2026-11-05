@@ -113,6 +113,8 @@ and a single-query definition-publication candidate, including refusal/failure a
 Run it through the compatibility probe; it is not a runtime backend adapter.
 `falkordblite_prepared_materialization.py` holds the bounded numeric prepared-write contract;
 `falkordblite_prepared_proof.py` exercises it against disposable storage through the same probe.
+It also runs the real assertion read and View-history writer, exposing missing production
+provenance/liveness guards; its separate string-temporal diagnostic is not runtime qualification.
 
 `smoke/run_all.py` runs every self-serving smoke. Auth/OAuth: `auth_shapes_smoke.py`,
 `oauth_local_smoke.py`, `auth0_live_smoke.py`. Hook Center: `hook_center_live_smoke.py`,

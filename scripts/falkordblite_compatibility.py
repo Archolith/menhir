@@ -286,9 +286,14 @@ def main() -> int:
 
                     for name, operation in projection_proofs(db):
                         checks.append(check(name, operation))
-                    from falkordblite_prepared_proof import prepared_proofs
+                    from falkordblite_prepared_proof import (
+                        prepared_proofs,
+                        production_schema_proofs,
+                    )
 
                     for name, operation in prepared_proofs(db):
+                        checks.append(check(name, operation))
+                    for name, operation in production_schema_proofs(db):
                         checks.append(check(name, operation))
                     checks.append(check("restart_persistence", lambda: persistence_probe(db, path)))
                 finally:
