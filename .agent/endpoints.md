@@ -676,6 +676,7 @@ One read-only view of everything waiting on the owner's decision.
   none stale reads `unknown` and points at `list_todos` rather than claiming `none`.
 - Each section's read is bounded at 20s. A failing or hung section renders
   `unavailable (<ExceptionType>)` (`TimeoutError` for a hang) and the rest still render.
+- The candidates section opens with a line marking its text as unreviewed and untrusted.
 
 ### `get_artifact_relationships`
 Concept id: `mcp.tool.get_artifact_relationships`

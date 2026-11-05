@@ -1,3 +1,9 @@
+## 2026-11-04 - Warning lines stop suggesting a silence; candidate text is marked untrusted
+
+- Operator warning lines no longer tell the reader how to silence them. `acknowledge_warning` is
+  unchanged and still listed for operator clients.
+- `review_inbox` marks the candidates section as unreviewed, untrusted text.
+
 ## 2026-11-04 - One read-only inbox of what is waiting on a decision
 
 New MCP tool `review_inbox` (readonly tier, #437). It lists unresolved conflicts, failed

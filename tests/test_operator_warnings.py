@@ -115,7 +115,7 @@ def test_ack_success_then_new_failure_is_unacked(store) -> None:
     (w,) = _warnings(backend)
     assert w["acked"] is False and w["occurrences"] == 1
     summary = asyncio.run(_queue_summary(backend))
-    assert "WARNING" in summary and 'acknowledge_warning(kind="provider_auth")' in summary
+    assert "WARNING" in summary and "acknowledge_warning" not in summary  # no silence hint
 
 
 def test_ack_on_resolved_or_absent_row_is_noop(store) -> None:
