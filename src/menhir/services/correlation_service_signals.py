@@ -1,17 +1,18 @@
-"""Pure signal helpers for conflict detection (plan: menhir-conflict-detection-signal-2026-08-09).
+"""Pure signal helpers for conflict detection (plan: menhir-conflict-similarity-floor-plan-2026-11-05).
 
 Two things live here, both free of I/O so they are cheap to test:
 
 * ``pair_cosine`` -- a real cosine similarity on the documented [-1, 1] scale (in practice [0, 1]
   for the embedders Menhir uses). ``CorrelationService`` thresholds are written as cosine values
-  but the score ``search_scored`` hands it is a graphiti RRF rank-fusion score on ~[0, 2]; this is
-  the separate accessor the plan asks for, so ``search_scored`` itself is left untouched.
+  but the score ``search_scored`` hands it is a graphiti RRF rank-fusion score on ~[0, 2]. The
+  similarity floor reads this instead, so ``search_scored`` itself is left untouched.
 * ``attributes_overlap`` -- the scoping rule for the shared-episode veto. Two entities extracted
   from one episode cannot contradict each other *unless* they speak about the same attribute (a
   turn can say "retry limit was 5, actually 7"). Overlap is decided from the entity names only:
-  they overlap when they share a non-numeric word. Disjoint names (two different fonts) do not.
-  The rule errs toward "overlap" (no veto), so a doubtful pair still reaches the queue exactly as
-  it does today.
+  they overlap when they share a word with no digit in it. Disjoint names (two different fonts) do
+  not. An empty name counts as overlap (no veto). Known limit: a correction with no such shared
+  word, such as "Lisbon residence" / "Porto home" or "Neo4j version 5" / "Neo4j release 4", is
+  treated as disjoint.
 """
 
 from __future__ import annotations

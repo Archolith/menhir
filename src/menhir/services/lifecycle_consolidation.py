@@ -389,9 +389,14 @@ class LifecycleConsolidationMixin:
                 if other_uuid == uuid:
                     continue
 
-                final_action, _details = await correlation_service.classify_pair(
+                final_action, details = await correlation_service.classify_pair(
                     uuid, other_uuid, score,
                 )
+
+                if final_action == "none" and details is not None:
+                    # Dropped where this loop used to queue or merge and stop. Going on would reach
+                    # hits it never classified; test_drop_ends_the_node_scan exercises that.
+                    break
 
                 if final_action in ("none", "related"):
                     # "related" already created its RELATES_TO edge inside

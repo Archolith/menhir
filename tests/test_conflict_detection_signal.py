@@ -17,6 +17,7 @@ import pytest
 
 from menhir.infrastructure.correlation_queries import CorrelationRepository
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+from menhir.infrastructure.telemetry.recorders import telemetry_store
 from menhir.services.correlation_service import (
     CORRELATION_SIMILARITY_FLOOR,
     CorrelationService,
@@ -36,9 +37,12 @@ FIXTURE = json.loads(
 )
 PAIRS = FIXTURE["pairs"]
 
+# Real two-lane RRF scores are 1/a or 1/a + 1/b, so none lands in [0.85, 0.95): production reaches
+# review through MERGE_ROUTE. CONFLICT_ROUTE covers the branch for a future scale change.
 CONFLICT_ROUTE = 0.90
 MERGE_ROUTE = 1.0
 RELATED_ROUTE = 0.75
+BOTH_ROUTES = pytest.mark.parametrize("score", [CONFLICT_ROUTE, MERGE_ROUTE], ids=["conflict", "merge"])
 
 
 def _vectors(cosine: float) -> tuple[tuple[float, float], tuple[float, float]]:
@@ -93,14 +97,19 @@ def test_attribute_overlap_rules() -> None:
 # --- fixture: what each hand-written pair does today -------------------------
 
 
+@BOTH_ROUTES
 @pytest.mark.parametrize("pair", PAIRS, ids=[p["id"] for p in PAIRS])
-def test_fixture_pair_routes_as_recorded(pair: dict) -> None:
+def test_fixture_pair_routes_as_recorded(pair: dict, score: float) -> None:
+    # expected_action "conflict" means the pair reaches review. On the merge route the judge is
+    # stubbed to decline, so a pair the judge would confirm merges instead of queueing.
     repo = _repo(
         co_mention=pair["same_episode"],
         names=(pair["a"]["name"], pair["b"]["name"]),
         vectors=_vectors(pair["name_cosine"]),
     )
-    action, _ = _run(_svc(repo).classify_pair("src", "tgt", CONFLICT_ROUTE))
+    svc = _svc(repo)
+    with patch.object(svc, "_handle_merge_proposal", new=AsyncMock(return_value="conflict")):
+        action, _ = _run(svc.classify_pair("src", "tgt", score))
     assert action == pair["expected_action"]
 
 
@@ -131,9 +140,37 @@ def test_below_floor_conflict_is_dropped_and_recorded() -> None:
     assert result == ("none", {"reason": "below_similarity_floor"})
     calls = [c for c in event.call_args_list if c.kwargs["operation"] == "correlation_similarity_floor"]
     assert len(calls) == 1
-    assert calls[0].kwargs["result"] == {"dropped": True, "route_avoided": "conflict"}
+    assert calls[0].kwargs["payload"]["action"] == "conflict"
     assert calls[0].kwargs["payload"]["rrf_score"] == CONFLICT_ROUTE
     assert calls[0].kwargs["payload"]["cosine"] == pytest.approx(0.10)
+
+
+def _stored_preview(repo, operation: str) -> dict:
+    """Run a pair through the real recorder and return what it would persist."""
+    with patch.object(telemetry_store, "record") as record:
+        _run(_svc(repo).classify_pair("src", "tgt", CONFLICT_ROUTE))
+    rows = [c.kwargs for c in record.call_args_list if c.kwargs["operation"] == operation]
+    assert len(rows) == 1
+    assert rows[0]["node_uuid"] == "src"
+    return json.loads(rows[0]["payload_preview"])
+
+
+def test_stored_floor_event_keeps_the_decision() -> None:
+    preview = _stored_preview(_repo(vectors=BELOW_FLOOR), "correlation_similarity_floor")
+    assert preview["action"] == "conflict"
+    assert preview["cosine"] == pytest.approx(0.10)
+
+
+@pytest.mark.parametrize(
+    ("names", "vetoed"),
+    [(("Roboto", "Inter"), True), (("retry limit 5", "retry limit 7"), False)],
+    ids=["vetoed", "kept"],
+)
+def test_stored_veto_event_keeps_the_decision(names, vetoed: bool) -> None:
+    preview = _stored_preview(_repo(co_mention=True, names=names), "conflict_shared_episode_veto")
+    assert preview["vetoed"] is vetoed
+    assert preview["attribute_overlap"] is not vetoed
+    assert preview["phase"] == "conflict"
 
 
 def test_below_floor_merge_candidate_never_reaches_vetoes_or_judge() -> None:
@@ -164,35 +201,46 @@ def test_cosine_equal_to_floor_is_kept() -> None:
     [(None, None), (None, (1.0, 0.0)), ((1.0,), (1.0, 0.0)), ((0.0, 0.0), (1.0, 0.0))],
     ids=["both-missing", "one-missing", "dimension-mismatch", "zero-vector"],
 )
-@pytest.mark.parametrize("score", [CONFLICT_ROUTE, MERGE_ROUTE], ids=["conflict", "merge"])
+@BOTH_ROUTES
 def test_no_signal_keeps_todays_route(vectors, score: float) -> None:
     result = _run(_svc(_repo(vectors=vectors)).classify_pair("src", "tgt", score))
     assert result[0] == "conflict"
     assert result[1]["reason"] != "below_similarity_floor"
 
 
-def test_embedding_read_error_keeps_todays_route() -> None:
+def _kept(repo, score: float) -> bool:
+    """The floor kept the pair: the merge handler still ran, or the conflict was queued."""
+    svc = _svc(repo)
+    with patch.object(svc, "_handle_merge_proposal", new=AsyncMock(return_value="conflict")) as proposal:
+        action, _ = _run(svc.classify_pair("src", "tgt", score))
+    return action == "conflict" and proposal.await_count == (1 if score == MERGE_ROUTE else 0)
+
+
+@BOTH_ROUTES
+def test_embedding_read_error_keeps_todays_route(score: float) -> None:
     repo = _repo()
     repo.fetch_pair_name_embeddings.side_effect = RuntimeError("db down")
-    assert _run(_svc(repo).classify_pair("src", "tgt", CONFLICT_ROUTE))[0] == "conflict"
+    assert _kept(repo, score)
 
 
 def test_metadata_read_error_keeps_todays_route() -> None:
+    # On the merge route the same read failing later in the handler is today's behaviour.
     repo = _repo(vectors=BELOW_FLOOR)
     repo.fetch_entity_merge_metadata.side_effect = RuntimeError("db down")
-    assert _run(_svc(repo).classify_pair("src", "tgt", CONFLICT_ROUTE))[0] == "conflict"
+    assert _kept(repo, CONFLICT_ROUTE)
 
 
-def test_member_missing_from_metadata_is_not_dropped() -> None:
+@BOTH_ROUTES
+def test_member_missing_from_metadata_is_not_dropped(score: float) -> None:
     repo = _repo(vectors=BELOW_FLOOR)
     repo.fetch_entity_merge_metadata.return_value = [{"uuid": "src", "name": "x", "scope": "PERSISTENT"}]
-    assert _run(_svc(repo).classify_pair("src", "tgt", CONFLICT_ROUTE))[0] == "conflict"
+    assert _kept(repo, score)
 
 
+@BOTH_ROUTES
 @pytest.mark.parametrize("scopes", [("PROMOTED", "PERSISTENT"), ("PERSISTENT", "PROMOTED")])
-def test_promoted_member_is_never_dropped_by_the_floor(scopes) -> None:
-    repo = _repo(vectors=BELOW_FLOOR, scopes=scopes)
-    assert _run(_svc(repo).classify_pair("src", "tgt", CONFLICT_ROUTE))[0] == "conflict"
+def test_promoted_member_is_never_dropped_by_the_floor(scopes, score: float) -> None:
+    assert _kept(_repo(vectors=BELOW_FLOOR, scopes=scopes), score)
 
 
 def test_related_and_none_routes_never_read_vectors() -> None:
@@ -225,6 +273,91 @@ def test_lifecycle_builder_applies_floor_and_veto_on_the_graph_adapter(kwargs, r
     host = SimpleNamespace(graph_adapter=adapter, graphiti_client=AsyncMock(), llm=None)
     svc = LifecycleConsolidationMixin._build_correlation_service(host)
     assert _run(svc.classify_pair("src", "tgt", CONFLICT_ROUTE)) == ("none", {"reason": reason})
+
+
+def test_adapter_delegate_forwards_the_vector_read() -> None:
+    adapter = MemoryGraphAdapter.__new__(MemoryGraphAdapter)
+    adapter._correlation = MagicMock(spec=CorrelationRepository)
+    adapter._correlation.fetch_pair_name_embeddings.return_value = ([1.0], [2.0])
+    assert adapter.fetch_pair_name_embeddings("a", "b") == ([1.0], [2.0])
+    adapter._correlation.fetch_pair_name_embeddings.assert_called_once_with("a", "b")
+
+
+# --- a drop must not un-gate later hits ---------------------------------------
+
+
+class _Host(LifecycleConsolidationMixin):
+    """The real consolidation loop over a spec'd adapter; the judge always declines."""
+
+    def __init__(self, adapter, hits) -> None:
+        self.graph_adapter = adapter
+        self.graphiti_client = AsyncMock()
+        self.graphiti_client.search_scored.return_value = hits
+        self.llm = None
+        self.settings = SimpleNamespace(conflict_cooldown_days=30)
+
+
+def _scan_adapter(*, low_cosine=(), co_mention=False) -> MagicMock:
+    adapter = _repo(spec=MemoryGraphAdapter, co_mention=co_mention)
+    adapter.fetch_pair_name_embeddings.side_effect = (
+        lambda _a, b: BELOW_FLOOR if b in low_cosine else ((1.0, 0.0), (1.0, 0.0))
+    )
+    adapter.fetch_entity_merge_metadata.side_effect = (
+        lambda uuids: [{"uuid": u, "name": u, "scope": "PERSISTENT"} for u in uuids]
+    )
+    adapter.set_conflict.return_value = ("group", 2)
+    return adapter
+
+
+def _scan(adapter, hits) -> int:
+    host = _Host(adapter, hits)
+    with patch("menhir.services.lifecycle_consolidation.telemetry_store") as store:
+        store.is_pair_resolved.return_value = False
+        return _run(host._check_contradictions_batch([{"uuid": "src", "name": "source"}]))
+
+
+HITS = [("x", "X", MERGE_ROUTE), ("y", "Y", MERGE_ROUTE), ("z", "Z", RELATED_ROUTE)]
+
+
+def test_scan_without_a_drop_queues_the_first_hit_and_stops() -> None:
+    adapter = _scan_adapter()
+    assert _scan(adapter, HITS) == 1
+    assert adapter.set_conflict.call_args.args[:2] == ("src", "x")
+    adapter.create_related_to_edge.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "kwargs", [{"low_cosine": {"x"}}, {"co_mention": True}], ids=["floor", "veto"],
+)
+def test_drop_ends_the_node_scan(kwargs) -> None:
+    # Reaching y or z here would be a queue write or edge the scan never made before the drop.
+    adapter = _scan_adapter(**kwargs)
+    assert _scan(adapter, HITS) == 0
+    adapter.set_conflict.assert_not_called()
+    adapter.create_related_to_edge.assert_not_called()
+    assert {c.args[1] for c in adapter.fetch_pair_name_embeddings.call_args_list} == {"x"}
+
+
+def test_plain_none_still_moves_on_to_the_next_hit() -> None:
+    adapter = _scan_adapter()
+    assert _scan(adapter, [("low", "L", 0.10), ("x", "X", MERGE_ROUTE)]) == 1
+    assert adapter.set_conflict.call_args.args[:2] == ("src", "x")
+
+
+def test_related_edge_before_the_drop_is_kept() -> None:
+    adapter = _scan_adapter(low_cosine={"x"})
+    assert _scan(adapter, [("z", "Z", RELATED_ROUTE), ("x", "X", MERGE_ROUTE), ("y", "Y", MERGE_ROUTE)]) == 0
+    adapter.create_related_to_edge.assert_called_once()
+    adapter.set_conflict.assert_not_called()
+
+
+def test_batch_check_stops_at_a_drop_too() -> None:
+    adapter = _scan_adapter(low_cosine={"x"})
+    svc = _svc(adapter)
+    svc._graphiti.search_scored.return_value = HITS
+    result = _run(svc.check_correlation_batch([{"uuid": "src", "name": "source"}]))
+    assert (result.conflicts, result.related, result.merged) == (0, 0, 0)
+    adapter.create_related_to_edge.assert_not_called()
 
 
 # --- shared-episode veto ------------------------------------------------------

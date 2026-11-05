@@ -1034,7 +1034,7 @@ class CorrelationRepository:
     ) -> tuple[list[float] | None, list[float] | None]:
         """Read-only: the stored ``name_embedding`` of each entity (``None`` when absent).
 
-        Used by the cosine shadow in ``CorrelationService``: the pair cosine is computed from
+        Used by the similarity floor in ``CorrelationService``: the pair cosine is computed from
         vectors already on the nodes, so it makes no embedding call.
         """
         rows = self._neo4j.execute(

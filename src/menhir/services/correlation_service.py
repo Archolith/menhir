@@ -141,7 +141,7 @@ class CorrelationService(CorrelationChecksMixin):
         cosine values (RCA ``rca-conflict-detection-rrf-scale-mismatch-2026-08-09``). The name says
         so on purpose. Routing stays on this score because cosine cannot tell a contradiction from
         a duplicate; a real name cosine only drops conflict and merge candidates below
-        ``similarity_floor``, so the judge and review still decide everything above it.
+        ``similarity_floor``, so the vetoes, judge and review still decide everything above it.
 
         This is the sole owner of pair classification, deterministic vetoes, and
         judge-gated merge decisions (SSOT-03: previously duplicated -- with a
@@ -156,7 +156,9 @@ class CorrelationService(CorrelationChecksMixin):
         existing candidate it was matched against (the merge survivor).
 
         Returns ``(final_action, details)`` where ``final_action`` is one of
-        "none" | "related" | "conflict" | "merged".
+        "none" | "related" | "conflict" | "merged". ``none`` with details means the pair was
+        dropped by the floor or the veto; a caller that stops at a match must stop there too, or a
+        drop reaches hits it would not have classified.
         """
         similarity = rrf_score  # downstream names/telemetry keys stay `similarity` (unchanged)
         action = self._route(similarity)
@@ -252,6 +254,7 @@ class CorrelationService(CorrelationChecksMixin):
         A drop needs a defined name cosine below the floor and both members read as not PROMOTED
         (SSOT-08). A missing vector, an unreadable member and any error return False, which keeps
         today's route: no signal is not low similarity. This can only turn a route into ``none``.
+        A drop writes nothing to the graph, so a rescan of the node records it again.
         """
         try:
             vec_a, vec_b = await asyncio.to_thread(
@@ -274,8 +277,9 @@ class CorrelationService(CorrelationChecksMixin):
                     "target_uuid": target_uuid,
                     "rrf_score": rrf_score,
                     "cosine": cosine,
+                    "action": route,
                 },
-                result={"dropped": True, "route_avoided": route},
+                node_uuid=source_uuid,
                 success=True,
             )
         except Exception:  # noqa: BLE001 -- fail open: an unreadable pair routes as before
@@ -325,8 +329,14 @@ class CorrelationService(CorrelationChecksMixin):
         record_mcp_event(
             kind="background",
             operation="conflict_shared_episode_veto",
-            payload={"source_uuid": source_uuid, "target_uuid": target_uuid, "stage": stage},
-            result={"vetoed": not overlap, "attribute_overlap": overlap},
+            payload={
+                "source_uuid": source_uuid,
+                "target_uuid": target_uuid,
+                "phase": stage,
+                "vetoed": not overlap,
+                "attribute_overlap": overlap,
+            },
+            node_uuid=source_uuid,
             success=True,
         )
         if overlap:

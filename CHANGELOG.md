@@ -5,10 +5,12 @@
   missing vector, a read error or a PROMOTED member keeps today's route. Each drop is recorded as
   `correlation_similarity_floor`. Routing above the floor still uses the RRF rank score, because
   cosine cannot tell a contradiction from a duplicate.
-- The shared-episode veto is always on, in enrichment as well as consolidation. A pair that one
-  episode asserted together, with no shared attribute word, is dropped instead of queued. Known
-  limit: a same-episode correction with no shared word ("Lisbon residence" / "Porto home") is
-  dropped too.
+- The shared-episode veto is always on. A pair that one episode asserted together, with no shared
+  attribute word, is dropped instead of queued. Known limit: a same-episode correction with no
+  shared word ("Lisbon residence" / "Porto home") is dropped too.
+- A floor or veto drop ends that node's contradiction scan, as a queued conflict does, so a drop
+  never reaches hits the scan would not have classified. A dropped pair writes nothing to the
+  graph: the node stays scannable and merge-eligible, and a rescan records the drop again.
 - `list_conflicts` shows each member's scope and a note on how the group may have been created.
 - `tests/fixtures/conflict_pairs.json` pins what 42 hand-written pairs do. The floor is fitted to
   those pairs, so the fixture records behaviour and does not measure accuracy.

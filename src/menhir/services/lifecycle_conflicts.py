@@ -62,8 +62,10 @@ class LifecycleConflictMixin:
         are routed by RRF rank score (not a cosine; see
         CorrelationService.classify_pair):
         - 0.70–0.85: RELATES_TO edge (correlation, not conflict)
-        - 0.85–0.95: pending_llm_review (genuine conflict candidate)
-        - >0.95: merged (near-duplicate absorption)
+        - 0.85–0.95: pending_llm_review (a band real two-lane RRF scores never land in)
+        - >=0.95: judge-gated merge, else pending_llm_review
+        Conflict and merge candidates can first be dropped by the similarity
+        floor or the shared-episode veto.
 
         Only the conflict-range pairs increment the returned count.
 
