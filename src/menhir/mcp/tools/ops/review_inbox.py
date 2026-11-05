@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any, Awaitable, Callable
 
 from menhir.domain.utils import excerpt
+from menhir.infrastructure.openai_rate_limit import await_with_backoff_aware_timeout
 from menhir.infrastructure.todo_repository import TODO_STALE_AFTER_DAYS
 from menhir.mcp.contracts import ToolScope
 from menhir.mcp.formatters import _coerce_conflict_members, _resolve_queue_state_filter
@@ -101,7 +101,11 @@ class ReviewInboxTool(BaseTextTool):
         body: list[str] = []
         for name, build in sections:
             try:
-                result = await asyncio.wait_for(build(), timeout=_SECTION_TIMEOUT_S)
+                # These reads make no OpenAI calls, so no backoff extends this: it is a plain
+                # deadline. The helper is the one the call-discipline guard requires.
+                result = await await_with_backoff_aware_timeout(
+                    build(), timeout_s=_SECTION_TIMEOUT_S
+                )
             except Exception as exc:  # noqa: BLE001 - one failed read must not hide the rest
                 # The caller sees only the type: a backend message can carry memory content.
                 # The server log keeps the detail at debug level for whoever has to fix it.
