@@ -1,5 +1,7 @@
 ## 2026-11-04 - FalkorDBLite compatibility spike (#109)
 
+- Compared engine-first and Menhir integration routes; documented the recommended internal backend
+  with targeted Falkor fixes, ownership boundaries, and the unchanged transaction feasibility gate.
 - Added a bounded source-bound prepared variant: the real assertion/provenance snapshot and evidence
   fence are revalidated inside the atomic publication/replay query. Added no-write refusal, null-safe
   comparison, overflow, rollback and competing-publisher checks; real View history integration remains gated.

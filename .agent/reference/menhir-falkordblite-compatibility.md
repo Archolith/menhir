@@ -21,6 +21,79 @@ carefully designed single-query rewrite is impossible; that route remains unqual
 Native Windows is also unqualified: the published FalkorDBLite 0.11.0 release has macOS and
 Linux wheels, with no Windows wheel. The Linux run below does not qualify the Windows host.
 
+### Architecture recommendation after comparing both routes (2026-11-04)
+
+**Use an internal Menhir Falkor backend plus targeted, reusable Falkor fixes.** Do not build a
+separate adapter service/package or attempt to make Falkor a drop-in Neo4j implementation. This
+is an architecture recommendation, not a declaration that the backend is ready. P1 still gates
+runtime integration.
+
+| Route | What it requires | Assessment |
+|---|---|---|
+| Make Falkor emulate Menhir's existing Neo4j interface | Neo4j-facing transport/driver behavior, Cypher/procedure/DDL compatibility, temporal/result semantics, and genuine interactive transaction rollback | Largest engine/compatibility maintenance burden; integration wiring is still needed. Not the default route for one application's backend. |
+| Do everything in a Menhir adapter against unchanged Falkor | Native query/schema mappings plus replacements for multi-query callbacks and application-side validation | Appropriate for API differences; unsafe if it pretends autocommit is transactional. Can become expensive if it duplicates business logic for every writer. |
+| Internal backend plus focused Falkor improvements | Reuse existing clients/Graphiti provider; map genuine backend differences in Menhir; fix general engine/runtime deficiencies in their owners | Recommended, subject to proving the transaction contract before expanding runtime integration. |
+
+The inspected FalkorDBLite fork imports as `redislite`: it launches Redis, loads the bundled
+graph module, and delegates graph operations to `falkordb-py`. It contains neither the native
+query executor nor its undo log. A Python transaction context manager added there cannot roll
+back graph commands that already committed. Engine changes would belong in **FalkorDB/FalkorDB**
+(or a separate core-engine fork), not just the existing **Archolith/falkordblite** wrapper fork.
+
+Menhir's `Neo4jRepository.execute_write` genuinely begins a transaction, runs Python code that
+can inspect intermediate results, and commits or rolls back afterward. The projection lifecycle
+and structure/document publication use that contract. The installed Graphiti Falkor session's
+`execute_write` merely invokes the callback; its `run` sends graph queries individually. This
+matches the live partial-write failures. Reusing that provider is useful but does not qualify its
+transaction semantics. A generic adapter cannot infer or safely rewrite arbitrary Python callbacks.
+
+The pinned v4.22.1 engine has a query-context undo log; `cmd_query.c` rolls back errors for the
+current command. Its registered graph commands have no BEGIN/COMMIT/ROLLBACK transaction API.
+Extending this into interactive transactions would require connection/transaction ownership,
+isolation and lock lifetime, cancellation/disconnect cleanup, rollback across commands, and
+persistence/replication/crash behavior. It is a database-engine project, not a bounded wrapper fix.
+Redis MULTI/EXEC does not supply the missing rollback, as both its documentation and our probe show.
+
+Assign changes by ownership:
+
+- **Menhir infrastructure:** backend selection, lifecycle wiring, native query/result/identity and
+  schema mappings, readiness, export/restore and backend contract tests. Keep fold, authority,
+  provenance policy and other business rules shared. Reuse the existing Graphiti Falkor provider
+  and fix its integration where necessary; do not introduce another general graph abstraction.
+- **FalkorDB core:** demonstrated general engine defects or missing reusable capabilities whose
+  scope is justified independently of Menhir. Do not add Menhir-specific projection operations or
+  reproduce Neo4j's whole API in the engine. Proper interactive transactions, if required, need a
+  separate design/feasibility decision rather than silent scope expansion.
+- **FalkorDBLite:** embedded process ownership, transport, packaging, artifact pins and Windows
+  lifecycle. Native Windows additionally needs a working host/module/dependency build; a wrapper
+  patch alone does not establish that support.
+
+Native constraints already exist through `GRAPH.CONSTRAINT`; Neo4j DDL failing in the probe
+does not mean Falkor lacks uniqueness. The adapter should use its native index/constraint APIs
+and wait for enforcement readiness. Likewise, prefer native vector/fulltext APIs to engine-side
+Neo4j procedure aliases. The pinned core source also contains DateTime/localdatetime primitives;
+that is a reason to assess native temporal support before choosing an encoding, **not** evidence
+that the bundled module implements Menhir's timezone-aware `datetime` contract. String substitution
+remains diagnostic only. Do not upgrade to the separate Rust 6.x engine without fresh qualification.
+
+**Next gate:** close the remaining writer/capability inventory and prove production-shaped atomic
+View/history certification and structure/document publication strategies. Keep single-query
+variants only where they preserve the complete contract without duplicating domain rules. The
+prototype's `count`/32-row limits are experimental bounds, not acceptable new product limits.
+If that requires broad application rewrites, retain Neo4j and explicitly scope native transaction
+engineering before proceeding. Do not keep expanding isolated prototypes as if they were a
+working backend, and do not disguise missing guarantees in an `execute_write` facade.
+
+Evidence: [Lite wrapper](https://github.com/FalkorDB/falkordblite/blob/ed2164762af1f433871fceb9b8ebbfd078ec2405/redislite/falkordb_client.py),
+[pinned query rollback](https://github.com/FalkorDB/FalkorDB/blob/v4.22.1/src/commands/cmd_query.c),
+[query-context undo log](https://github.com/FalkorDB/FalkorDB/blob/v4.22.1/src/query_ctx.c),
+[registered commands](https://github.com/FalkorDB/FalkorDB/blob/v4.22.1/src/module.c),
+[Redis transaction errors](https://redis.io/docs/latest/develop/using-commands/transactions/),
+[native constraint API](https://docs.falkordb.com/commands/graph.constraint-create),
+[temporal primitives](https://github.com/FalkorDB/FalkorDB/blob/v4.22.1/src/arithmetic/time_funcs/time_funcs.c),
+and [the inspected Graphiti fork](https://github.com/Archolith/graphiti/blob/v0.31.2.post2/graphiti_core/driver/falkordb_driver.py).
+This comparison inspected source and existing results; it added no runtime changes or new live tests.
+
 ## Reproduce
 
 Use a disposable **Linux** Python 3.12 environment. The instrument accepts no existing database
