@@ -81,12 +81,7 @@ def stack(tmp_path: Path, signing_key: Any) -> SimpleNamespace:
     verifier._jwks = KeySet.import_key_set({"keys": [signing_key.as_dict(private=False)]})
     verifier._jwks_expires_at = time.monotonic() + 3600.0
     verifier._load_jwks = AsyncMock(return_value=verifier._jwks)
-    return SimpleNamespace(
-        wrapped=wrapped,
-        inner=inner,
-        # No lifespan here, so a request that gets past auth on /mcp-http answers 500.
-        client=TestClient(wrapped, raise_server_exceptions=False),
-    )
+    return SimpleNamespace(wrapped=wrapped, inner=inner, client=TestClient(wrapped))
 
 
 def _policy_client() -> tuple[str, list[str]]:
@@ -150,10 +145,19 @@ def test_the_mcp_endpoint_lets_the_valid_token_past_auth(
     stack: SimpleNamespace, signing_key: Any
 ) -> None:
     """The control for the refusal test below: there, 401/403 means the token was the problem."""
+    reached: list[str] = []
+
+    async def behind_auth(scope: Any, _receive: Any, send: Any) -> None:
+        reached.append(scope["path"])
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    stack.wrapped.app.app = behind_auth
     response = stack.client.post(
         "/mcp-http", headers={"Authorization": f"Bearer {_token(signing_key)}"}, json={}
     )
-    assert response.status_code == 500
+    assert response.status_code == 204
+    assert reached == ["/mcp-http"]
 
 
 def test_a_valid_token_sees_the_build_and_the_response_is_not_cached(
@@ -359,6 +363,18 @@ async def test_a_duplicate_header_refusal_is_logged(caplog) -> None:
     assert "duplicate_header" in caplog.text
 
 
+async def test_a_caller_with_no_token_is_not_logged_as_refused(caplog) -> None:
+    request = _request(
+        (b"x-menhir-namespace", b"a"),
+        (b"x-menhir-namespace", b"b"),
+        verifier=_verifier(_principal()),
+        policy=SimpleNamespace(require_client=print),
+    )
+    with caplog.at_level(logging.INFO, logger=production_routes.__name__):
+        assert await _caller_may_see_build(request) is False
+    assert "refused" not in caplog.text
+
+
 async def test_missing_wiring_is_logged(caplog) -> None:
     request = _request(_BEARER, verifier=None, policy=None)
     with caplog.at_level(logging.INFO, logger=production_routes.__name__):
@@ -543,6 +559,7 @@ def test_no_build_block_with_a_token_says_it_was_not_accepted(serve, monkeypatch
     assert check_script.main([url]) == check_script.EXIT_ERROR
     out = capsys.readouterr().out
     assert "did not accept the token" in out and "secret-token" not in out
+    assert "production surface" not in out  # a non-production Menhir answers 404 instead
 
 
 def test_the_script_refuses_to_send_a_token_over_plain_http(monkeypatch, capsys) -> None:
@@ -677,11 +694,12 @@ def test_a_jwks_failure_is_named_when_the_token_was_not_accepted(
     serve, monkeypatch, capsys
 ) -> None:
     monkeypatch.setenv(check_script.TOKEN_ENV, "secret-token")
-    body = {"oauth_jwks": {"last_failure_kind": "ConnectTimeout", "last_failure_at": "2026-11-04"}}
-    url, _ = serve(body=json.dumps(body).encode())
+    stats = JwksRefreshStats()
+    stats.record("ConnectTimeout")  # the exact shape the server emits, timestamp included
+    url, _ = serve(body=json.dumps({"oauth_jwks": stats.snapshot()}).encode())
     assert check_script.main([url]) == check_script.EXIT_ERROR
     out = capsys.readouterr().out
-    assert "ConnectTimeout" in out and "2026-11-04" in out
+    assert "ConnectTimeout" in out and stats.last_failure_at in out
 
 
 @pytest.mark.parametrize(
@@ -747,9 +765,23 @@ def test_a_redirect_never_carries_the_token_elsewhere(serve, monkeypatch, capsys
     assert "secret-token" not in capsys.readouterr().out
 
 
-def test_without_a_token_a_redirect_is_still_followed(serve, monkeypatch) -> None:
+def test_without_a_token_a_redirect_is_still_followed(serve, monkeypatch, capsys) -> None:
     monkeypatch.delenv(check_script.TOKEN_ENV, raising=False)
-    other, other_seen = serve()
+    other, other_seen = serve(body=_MATCHING_BUILD)
     url, _ = serve(status=302, location=f"{other}/readyz")
-    check_script.main([url])
+    check_script.main([url, "--expect-version", "1"])
     assert other_seen == [None]
+    assert "version: ok" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("with_token", [True, False], ids=["token", "no-token"])
+@pytest.mark.parametrize("url", ["file:///x", "ftp://localhost:2121", "localhost:8000", "localhost"])
+def test_a_url_that_is_not_http_is_refused_before_any_request(
+    monkeypatch, capsys, url: str, with_token: bool
+) -> None:
+    opened: list[object] = []
+    monkeypatch.setattr(check_script.urllib.request, "build_opener", lambda *a: opened.append(a))
+    _set_token(monkeypatch, with_token)
+    assert check_script.main([url]) == check_script.EXIT_ERROR
+    assert "http://" in capsys.readouterr().out
+    assert opened == []

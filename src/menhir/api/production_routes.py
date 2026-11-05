@@ -57,11 +57,11 @@ async def _caller_may_see_build(request: Request) -> bool:
     readiness answer.
     """
 
-    if _duplicate_sensitive_headers(request.headers.raw):
-        _LOG.info("readyz build block refused: duplicate_header")
-        return False
     value = request.headers.get("authorization", "")
     if not value.startswith("Bearer "):
+        return False
+    if _duplicate_sensitive_headers(request.headers.raw):
+        _LOG.info("readyz build block refused: duplicate_header")
         return False
     verifier = getattr(request.app.state, "oauth_verifier", None)
     policy = getattr(request.app.state, "client_policy", None)

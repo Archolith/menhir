@@ -86,6 +86,8 @@ def _token_opener(base_url: str) -> urllib.request.OpenerDirector:
 def fetch_readyz(base_url: str, timeout: float, token: str | None = None) -> dict[str, Any]:
     """GET ``/readyz`` and return the parsed JSON body (503 bodies are still parsed)."""
 
+    if urllib.parse.urlsplit(base_url).scheme not in ("http", "https"):
+        raise CheckError("the base URL must start with http:// or https://")
     headers = {"Accept": "application/json"}
     if token:
         _require_safe_token_url(base_url)
