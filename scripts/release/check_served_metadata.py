@@ -58,6 +58,15 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def _scheme(url: str) -> str:
+    """The URL's scheme in lower case, or "" if the URL cannot be parsed."""
+
+    try:
+        return urllib.parse.urlsplit(url).scheme
+    except ValueError:
+        return ""
+
+
 def _read_token() -> str | None:
     return os.environ.get(TOKEN_ENV, "").strip() or None
 
@@ -86,7 +95,7 @@ def _token_opener(base_url: str) -> urllib.request.OpenerDirector:
 def fetch_readyz(base_url: str, timeout: float, token: str | None = None) -> dict[str, Any]:
     """GET ``/readyz`` and return the parsed JSON body (503 bodies are still parsed)."""
 
-    if urllib.parse.urlsplit(base_url).scheme not in ("http", "https"):
+    if _scheme(base_url) not in ("http", "https"):
         raise CheckError("the base URL must start with http:// or https://")
     headers = {"Accept": "application/json"}
     if token:
@@ -96,6 +105,9 @@ def fetch_readyz(base_url: str, timeout: float, token: str | None = None) -> dic
     opener = _token_opener(base_url) if token else urllib.request.build_opener()
     try:
         with opener.open(request, timeout=timeout) as response:
+            # A followed redirect (no token) can end on ftp, whose response has no status.
+            if _scheme(response.geturl()) not in ("http", "https"):
+                raise CheckError("readyz redirected to a URL that is not http or https")
             if response.status != 200:
                 raise CheckError(f"readyz answered HTTP {response.status}")
             raw = response.read()

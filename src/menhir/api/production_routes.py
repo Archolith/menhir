@@ -52,16 +52,18 @@ async def _caller_may_see_build(request: Request) -> bool:
     """True only for a request the MCP endpoint would also let past authentication.
 
     /readyz sits outside BearerAuthMiddleware because health checks carry no credential, so this
-    repeats that middleware's checks: duplicate headers, the token, then the client policy. Any
-    doubt means no build block rather than an error, because a bad token must not change the
-    readiness answer.
+    repeats that middleware's checks for a request that sends Authorization: duplicate headers,
+    the Bearer scheme, the token, then the client policy. Any doubt means no build block rather
+    than an error, because a bad token must not change the readiness answer.
     """
 
-    value = request.headers.get("authorization", "")
-    if not value.startswith("Bearer "):
+    value = request.headers.get("authorization")
+    if value is None:
         return False
     if _duplicate_sensitive_headers(request.headers.raw):
         _LOG.info("readyz build block refused: duplicate_header")
+        return False
+    if not value.startswith("Bearer "):
         return False
     verifier = getattr(request.app.state, "oauth_verifier", None)
     policy = getattr(request.app.state, "client_policy", None)

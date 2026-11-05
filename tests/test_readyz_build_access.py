@@ -363,6 +363,21 @@ async def test_a_duplicate_header_refusal_is_logged(caplog) -> None:
     assert "duplicate_header" in caplog.text
 
 
+@pytest.mark.parametrize(
+    "first", [b"Basic dGVzdA==", b"", b"bearer t"], ids=["basic", "empty", "lowercase"]
+)
+async def test_a_duplicate_authorization_is_logged_whatever_comes_first(caplog, first) -> None:
+    request = _request(
+        (b"authorization", first),
+        _BEARER,
+        verifier=_verifier(_principal()),
+        policy=SimpleNamespace(require_client=print),
+    )
+    with caplog.at_level(logging.INFO, logger=production_routes.__name__):
+        assert await _caller_may_see_build(request) is False
+    assert "duplicate_header" in caplog.text
+
+
 async def test_a_caller_with_no_token_is_not_logged_as_refused(caplog) -> None:
     request = _request(
         (b"x-menhir-namespace", b"a"),
@@ -785,3 +800,43 @@ def test_a_url_that_is_not_http_is_refused_before_any_request(
     assert check_script.main([url]) == check_script.EXIT_ERROR
     assert "http://" in capsys.readouterr().out
     assert opened == []
+
+
+@pytest.mark.parametrize("url", ["http://[::1", "https://[bad", "http://exa℀mple.test"])
+def test_an_unparseable_url_is_a_check_error(monkeypatch, url: str) -> None:
+    monkeypatch.setenv(check_script.TOKEN_ENV, "secret-token")
+    with pytest.raises(check_script.CheckError):
+        check_script.fetch_readyz(url, 1, "secret-token")
+
+
+def test_an_uppercase_scheme_still_reaches_the_server(serve, monkeypatch) -> None:
+    monkeypatch.setenv(check_script.TOKEN_ENV, "secret-token")
+    url, seen = serve()
+    check_script.main([url.replace("http://", "HTTP://")])
+    assert seen == ["Bearer secret-token"]
+
+
+def test_a_redirect_that_ends_off_http_is_named(monkeypatch, capsys) -> None:
+    """urllib follows a no-token redirect to ftp, and that response has no HTTP status."""
+
+    class _FtpResponse:
+        status = None
+
+        def geturl(self) -> str:
+            return "ftp://127.0.0.1/readyz"
+
+        def read(self) -> bytes:
+            return _MATCHING_BUILD
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+    opener = SimpleNamespace(open=lambda *_a, **_k: _FtpResponse())
+    monkeypatch.setattr(check_script.urllib.request, "build_opener", lambda *_a: opener)
+    monkeypatch.delenv(check_script.TOKEN_ENV, raising=False)
+    assert check_script.main(["http://127.0.0.1:1", "--expect-version", "1"]) == check_script.EXIT_ERROR
+    out = capsys.readouterr().out
+    assert "not http or https" in out and "None" not in out
