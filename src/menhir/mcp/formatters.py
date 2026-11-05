@@ -661,19 +661,19 @@ async def _legacy_operator_warnings(backend: object) -> list[dict[str, Any]]:
     if auth_failure is not None:
         entries.append(
             {"kind": "provider_auth", "subject": auth_failure.kind, "acked": False,
-             "summary": auth_failure.summary(), "legacy": True}
+             "summary": auth_failure.summary()}
         )
     quota_exhaustion = last_provider_quota_exhaustion()
     if quota_exhaustion is not None:
         entries.append(
             {"kind": "provider_billing", "subject": quota_exhaustion.kind, "acked": False,
-             "summary": quota_exhaustion.summary(), "legacy": True}
+             "summary": quota_exhaustion.summary()}
         )
     unrecallable = await _standing_unrecallable_count(backend)
     if unrecallable > 0:
         entries.append(
             {"kind": "failed_episodes", "subject": "global", "acked": False,
-             "count": unrecallable, "summary": "", "legacy": True}
+             "count": unrecallable, "summary": ""}
         )
     return entries
 
@@ -739,8 +739,7 @@ def _operator_warning_line(entry: Any) -> str | None:
             "credits are added; stop waiting on queued episodes."
         )
     elif kind != "failed_episodes":
-        # A kind from a newer serve: its own summary, and no ack hint -- this build's
-        # acknowledge_warning would refuse the kind.
+        # A kind from a newer serve: its own summary.
         return f"WARNING: {summary}." if summary else None
     else:
         try:
@@ -755,8 +754,8 @@ def _operator_warning_line(entry: Any) -> str | None:
             f"-- the text is stored but has no entities, so recall cannot return it. "
             f"This write may end the same way; check get_enrichment_status(episode_id) if it matters."
         )
-    if not entry.get("legacy"):
-        text += f' An operator can silence it with acknowledge_warning(kind="{kind}").'
+    # No "how to silence this" text: these lines reach models at every tier, and silencing a
+    # warning is the owner's decision, not a next step to suggest to whoever reads it.
     return text
 
 
@@ -820,8 +819,8 @@ async def _queue_summary(backend: object) -> str:
     )
 
     try:
-        # Benchmark mode keeps the pre-ack text byte for byte: no backend warnings call and no
-        # ack hint, so an ack or a hint can never move a bench transcript (#488 F13).
+        # Benchmark mode keeps the pre-ack text byte for byte: no backend warnings call, so an
+        # ack can never move a bench transcript (#488 F13).
         entries = (
             await _legacy_operator_warnings(backend)
             if _benchmark_mode()

@@ -372,6 +372,21 @@ def test_unknown_kind_renders_its_summary_without_an_ack_hint_or_is_skipped() ->
     assert summary == BASE + "\nWARNING: a new problem."
 
 
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"kind": "provider_auth", "subject": "chat", "summary": "auth failed"},
+        {"kind": "provider_billing", "subject": "chat", "summary": "no credits"},
+        {"kind": "failed_episodes", "subject": "global", "count": 3},
+    ],
+    ids=lambda entry: entry["kind"],
+)
+def test_no_warning_line_tells_the_reader_how_to_silence_it(entry: dict[str, Any]) -> None:
+    line = formatters._operator_warning_line(entry)
+    assert line is not None and line.startswith("WARNING:")
+    assert "acknowledge_warning" not in line and "silence" not in line.lower()
+
+
 def test_a_raising_renderer_is_contained(monkeypatch) -> None:
     def _boom(entry: Any) -> str:
         raise RuntimeError("render bug")
