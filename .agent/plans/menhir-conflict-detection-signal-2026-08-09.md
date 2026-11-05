@@ -1,6 +1,6 @@
 # Conflict Detection Signal Correction
 
-Status: **Phases 1-3 implemented behind default-off flags on branch `fix/conflict-detection-signal` (2026-10-26); Phase 0 live RRF distribution NOT obtained (graph unreachable); precision re-run and online tests NOT RUN**
+Status: **Superseded 2026-11-05 by `menhir-conflict-similarity-floor-plan-2026-11-05` (workspace plans): the shadow flag and the cosine switch were dropped, the veto is always on, and Phase 3 (`list_conflicts`) stands. Phase 0 live RRF distribution was never obtained.**
 **Last verified:** 2026-08-18 — ACCURATE, not started. `classify_pair` (`services/correlation_service.py:146`) is the PRE-EXISTING method the RCA indicts, not this plan's output; it still takes a bare `similarity: float` and routes on it, and no Phase 0 precision measurement is recorded.
 
 

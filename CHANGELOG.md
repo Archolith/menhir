@@ -1,3 +1,19 @@
+## 2026-11-05 - Conflict detection drops dissimilar pairs before review
+
+- `classify_pair` now reads the pair's real name cosine and drops conflict and merge candidates
+  below `CORRELATION_SIMILARITY_FLOOR` (0.40). The floor can only turn a route into `none`; a
+  missing vector, a read error or a PROMOTED member keeps today's route. Each drop is recorded as
+  `correlation_similarity_floor`. Routing above the floor still uses the RRF rank score, because
+  cosine cannot tell a contradiction from a duplicate.
+- The shared-episode veto is always on, in enrichment as well as consolidation. A pair that one
+  episode asserted together, with no shared attribute word, is dropped instead of queued. Known
+  limit: a same-episode correction with no shared word ("Lisbon residence" / "Porto home") is
+  dropped too.
+- `list_conflicts` shows each member's scope and a note on how the group may have been created.
+- `tests/fixtures/conflict_pairs.json` pins what 42 hand-written pairs do. The floor is fitted to
+  those pairs, so the fixture records behaviour and does not measure accuracy.
+  `scripts/build_conflict_fixture.py` refreshes its cosines.
+
 ## 2026-11-04 - `/readyz` shows build details only to callers with a valid token
 
 - The public `/readyz` body keeps its status fields but no longer reports the version, commit or

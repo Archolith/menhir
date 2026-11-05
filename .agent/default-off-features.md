@@ -25,8 +25,6 @@ than experiments and are not listed.
 
 | Feature | Flag / env | Status | Source plan |
 |---|---|---|---|
-| Conflict shared-episode veto | `correlation_shared_episode_veto_enabled` / `MENHIR_CORRELATION_SHARED_EPISODE_VETO_ENABLED` | not benched: default off until the Phase 1 precision re-run shows no real correction is dropped | `menhir-conflict-detection-signal-2026-08-09.md` |
-| Correlation cosine shadow | `correlation_cosine_shadow_enabled` / `MENHIR_CORRELATION_COSINE_SHADOW_ENABLED` | observation only: records old vs new route, acts on nothing | `menhir-conflict-detection-signal-2026-08-09.md` |
 | Shadow pass (observe-only oracle/warden trace) | `frontier_shadow` / `MENHIR_FRONTIER_SHADOW` | observe-only | oracle stack |
 | Verifier sync | `verifier_sync_enabled` / `MENHIR_VERIFIER_SYNC_ENABLED` | opt-in; see "Warden profiles" below | — |
 | Consolidation audit | `personal_memory_consolidation_audit_enabled` / `MENHIR_PERSONAL_MEMORY_CONSOLIDATION_AUDIT_ENABLED` | opt-in diagnostics | — |

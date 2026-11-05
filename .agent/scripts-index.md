@@ -64,6 +64,7 @@ scripts are indexed in the private `Archolith/menhir-deploy` repository.
 | `bump.py` | Prepares a release PR: `version` or `fork` updates every file that states the version or pin, all or nothing, then checks `uv.lock` |
 | `run_mcp_gateway.py` | stdio launcher for the MCP server |
 | `conflict_group_signal_survey.py` | read-only survey of existing conflict groups: member scope, shared episodes/anchors, stored-vector cosine, optional RRF (`--rrf`); plan `menhir-conflict-detection-signal-2026-08-09` |
+| `build_conflict_fixture.py` | re-embeds the names in `tests/fixtures/conflict_pairs.json` and rewrites their cosines and embedder stamp; review the diff, a moved cosine can move the floor; plan `menhir-conflict-similarity-floor-plan-2026-11-05` |
 | `export_graph_backup.py` / `_tolerant.py` | logical graph backup; the tolerant variant survives corruption |
 | `migrate_schema_v_property.py` | dry-run-first `_yawn_schema_v` removal and replacement-index migration. Remote writes require `--allow-remote`; configured production targets require `--allow-production` after a verified backup |
 | `unmerge.py` | operator CLI to reverse a merge |

@@ -16,6 +16,10 @@ correlated-but-not-contradictory memories.
 Thresholds are based on the audit of 11,412 entities and the
 existing SIMILARITY_CONFLICT_THRESHOLD (0.85) and sharpness
 threshold (0.7) in lifecycle_service.py.
+
+The score routed on is an ordinal RRF rank score, not the cosine these bands
+describe (see ``classify_pair``). A real name cosine below
+CORRELATION_SIMILARITY_FLOOR drops conflict and merge candidates before review.
 """
 
 from __future__ import annotations
@@ -35,6 +39,7 @@ from menhir.services.correlation_service_types import (
     CORRELATION_CONFLICT_THRESHOLD,
     CORRELATION_MERGE_THRESHOLD,
     CORRELATION_RELATED_THRESHOLD,
+    CORRELATION_SIMILARITY_FLOOR,
     CorrelationBatchResult,
     CorrelationResult,
 )
@@ -43,6 +48,7 @@ __all__ = [
     "CORRELATION_CONFLICT_THRESHOLD",
     "CORRELATION_MERGE_THRESHOLD",
     "CORRELATION_RELATED_THRESHOLD",
+    "CORRELATION_SIMILARITY_FLOOR",
     "CorrelationBatchResult",
     "CorrelationResult",
     "CorrelationService",
@@ -82,8 +88,7 @@ class CorrelationService(CorrelationChecksMixin):
         llm: "LLMAdapter | None" = None,
         merge_coordinator: Any = None,
         on_merge_committed: Any = None,
-        cosine_shadow: bool = False,
-        shared_episode_veto: bool = False,
+        similarity_floor: float = CORRELATION_SIMILARITY_FLOOR,
     ) -> None:
         self._repo = correlation_repo
         self._graphiti = graphiti_client
@@ -97,14 +102,7 @@ class CorrelationService(CorrelationChecksMixin):
         # no scalar-state coupling, byte-identical to before. Best-effort: it must never fail the
         # merge (the merge already committed; scalar reconciliation is repairable out of band).
         self._on_merge_committed = on_merge_committed
-        # Conflict-detection signal plan (2026-08-09). Both default OFF so a service built without
-        # them routes byte-identically to before.
-        #   cosine_shadow: Phase 1. Observe-only -- also route on a real pair cosine and RECORD the
-        #     old vs new decision. The new decision is never acted on.
-        #   shared_episode_veto: Phase 2. A conflict-bound pair whose members were extracted from
-        #     one episode, about non-overlapping attributes, is dropped before it can be queued.
-        self._cosine_shadow = cosine_shadow
-        self._shared_episode_veto_enabled = shared_episode_veto
+        self._similarity_floor = similarity_floor
 
     @property
     def merge_coordinator(self) -> Any:
@@ -141,8 +139,9 @@ class CorrelationService(CorrelationChecksMixin):
         rank_const=1: 1.0 for a lane's top hit, 0.5 for its second). It is ORDINAL, NOT a cosine
         similarity, although the 0.70 / 0.85 / 0.95 thresholds it is compared with are written as
         cosine values (RCA ``rca-conflict-detection-rrf-scale-mismatch-2026-08-09``). The name says
-        so on purpose; production routing is unchanged. A real cosine is available as a shadow
-        signal (``cosine_shadow``) and is never used to act.
+        so on purpose. Routing stays on this score because cosine cannot tell a contradiction from
+        a duplicate; a real name cosine only drops conflict and merge candidates below
+        ``similarity_floor``, so the judge and review still decide everything above it.
 
         This is the sole owner of pair classification, deterministic vetoes, and
         judge-gated merge decisions (SSOT-03: previously duplicated -- with a
@@ -161,10 +160,13 @@ class CorrelationService(CorrelationChecksMixin):
         """
         similarity = rrf_score  # downstream names/telemetry keys stay `similarity` (unchanged)
         action = self._route(similarity)
-        if self._cosine_shadow:
-            await self._record_cosine_shadow(source_uuid, target_uuid, rrf_score, action)
         if action == "none":
             return "none", None
+
+        if action in ("conflict", "merge_proposed") and await self._below_similarity_floor(
+            source_uuid, target_uuid, rrf_score, action,
+        ):
+            return "none", {"reason": "below_similarity_floor"}
 
         if action == "related":
             created = await asyncio.to_thread(
@@ -239,54 +241,57 @@ class CorrelationService(CorrelationChecksMixin):
         return "conflict", {"reason": "strong_overlap_pending_review"}
 
     # ------------------------------------------------------------------
-    # Conflict-detection signal plan: Phase 1 shadow + Phase 2 veto
+    # Cheap checks in front of review: similarity floor, shared-episode veto
     # ------------------------------------------------------------------
 
-    async def _record_cosine_shadow(
-        self, source_uuid: str, target_uuid: str, rrf_score: float, legacy_action: str,
-    ) -> None:
-        """Phase 1 shadow: route the same pair on a real cosine and record both decisions.
+    async def _below_similarity_floor(
+        self, source_uuid: str, target_uuid: str, rrf_score: float, route: str,
+    ) -> bool:
+        """True when a pair bound for review or merge is too dissimilar to be worth reviewing.
 
-        Observe-only. Reads two stored vectors (no embedding call), applies the SAME threshold
-        cascade to the cosine, and records ``legacy_action`` vs ``cosine_action``. It never
-        changes what ``classify_pair`` does and never raises: any failure is logged at debug.
-        ``cosine_action`` may be ``merge_proposed`` -- that is a would-be decision only; no
-        judge, veto or merge runs for it.
+        A drop needs a defined name cosine below the floor and both members read as not PROMOTED
+        (SSOT-08). A missing vector, an unreadable member and any error return False, which keeps
+        today's route: no signal is not low similarity. This can only turn a route into ``none``.
         """
         try:
             vec_a, vec_b = await asyncio.to_thread(
                 self._repo.fetch_pair_name_embeddings, source_uuid, target_uuid,
             )
             cosine = pair_cosine(vec_a, vec_b)
-            cosine_action = self._route(cosine) if cosine is not None else "no_signal"
+            if cosine is None or not cosine < self._similarity_floor:
+                return False
+            metadata = await asyncio.to_thread(
+                self._repo.fetch_entity_merge_metadata, [source_uuid, target_uuid],
+            )
+            scopes = {str(m.get("uuid")): str(m.get("scope") or "") for m in metadata or []}
+            if {source_uuid, target_uuid} - scopes.keys() or "PROMOTED" in scopes.values():
+                return False
             record_mcp_event(
                 kind="background",
-                operation="correlation_cosine_shadow",
+                operation="correlation_similarity_floor",
                 payload={
                     "source_uuid": source_uuid,
                     "target_uuid": target_uuid,
                     "rrf_score": rrf_score,
                     "cosine": cosine,
                 },
-                result={
-                    "legacy_action": legacy_action,
-                    "cosine_action": cosine_action,
-                    "differs": cosine_action != legacy_action,
-                },
+                result={"dropped": True, "route_avoided": route},
                 success=True,
             )
-            logger.info(
-                "Correlation cosine shadow %s <-> %s rrf=%.3f cosine=%s legacy=%s cosine_route=%s",
-                source_uuid, target_uuid, rrf_score,
-                "n/a" if cosine is None else f"{cosine:.3f}", legacy_action, cosine_action,
-            )
-        except Exception:  # noqa: BLE001 -- the shadow must never affect routing
+        except Exception:  # noqa: BLE001 -- fail open: an unreadable pair routes as before
             logger.debug(
-                "Cosine shadow failed for %s <-> %s", source_uuid, target_uuid, exc_info=True,
+                "Similarity floor check failed for %s <-> %s; keeping route",
+                source_uuid, target_uuid, exc_info=True,
             )
+            return False
+        logger.info(
+            "Correlation %s <-> %s dropped below similarity floor (cosine=%.3f rrf=%.3f route=%s)",
+            source_uuid, target_uuid, cosine, rrf_score, route,
+        )
+        return True
 
     async def _shared_episode_veto(self, source_uuid: str, target_uuid: str, *, stage: str) -> bool:
-        """Phase 2: True when a conflict-bound pair must be dropped before it is queued.
+        """True when a conflict-bound pair must be dropped before it is queued.
 
         Safety property: a pair is dropped only if BOTH members are MENTIONed by one episode (a
         single source asserted both, which is affirmative evidence of compatibility) AND neither is PROMOTED AND their
@@ -294,9 +299,10 @@ class CorrelationService(CorrelationChecksMixin):
         was 5, actually 7"). Every other case, and every error, returns False -- i.e. today's
         behaviour. Reached only from the two ``conflict`` outcomes of ``classify_pair``; the merge
         path (vetoes, judge, saga) is not touched.
+
+        Known limit: the overlap check is word-based, so a same-episode correction whose names
+        share no word ("Lisbon residence" / "Porto home") is dropped. Each decision is recorded.
         """
-        if not self._shared_episode_veto_enabled:
-            return False
         try:
             shared = await asyncio.to_thread(
                 self._repo.check_co_mention_veto, source_uuid, target_uuid,
@@ -338,9 +344,8 @@ class CorrelationService(CorrelationChecksMixin):
     def _route(self, similarity: float) -> str:
         """Determine the action for a given score on the SAME scale as the thresholds.
 
-        Production passes an RRF rank-fusion score (see ``classify_pair``); the cosine shadow
-        passes a real cosine. The thresholds are cosine-calibrated, so only the latter is on the
-        scale they name.
+        Production passes an RRF rank-fusion score (see ``classify_pair``), which is NOT on the
+        cosine scale these thresholds are written in.
 
         Part 2: Judge-gated merge — scores >= merge_threshold route to "merge_proposed",
         which is then handled by vetoes + LLM judge. The judge returns "conflict" on

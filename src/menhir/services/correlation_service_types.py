@@ -23,6 +23,11 @@ CORRELATION_CONFLICT_THRESHOLD = 0.85
 #: Above this threshold, pairs are considered near-duplicates and merged.
 CORRELATION_MERGE_THRESHOLD = 0.95
 
+#: Real name cosine below which a conflict or merge candidate is dropped before review. Unlike the
+#: thresholds above, this one is compared with a cosine. Set just under the lowest contradiction in
+#: tests/fixtures/conflict_pairs.json: a miss is silent, an extra look costs one review.
+CORRELATION_SIMILARITY_FLOOR = 0.40
+
 
 # ---------------------------------------------------------------------------
 # Result types

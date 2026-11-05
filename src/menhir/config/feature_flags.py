@@ -34,10 +34,6 @@ class FeatureFlag:
 _SETTINGS = (
     ('record_detailed_revisions', 'MENHIR_RECORD_DETAILED_REVISIONS', True, 'runtime',
         'Retain detailed revision provenance.', False, ()),
-    ('correlation_cosine_shadow_enabled', 'MENHIR_CORRELATION_COSINE_SHADOW_ENABLED', False, 'runtime',
-        'Record a real-cosine routing decision beside the RRF one for each correlated pair; never acts.', False, ()),
-    ('correlation_shared_episode_veto_enabled', 'MENHIR_CORRELATION_SHARED_EPISODE_VETO_ENABLED', False, 'runtime',
-        'Drop conflict candidates whose members share an episode and name unrelated attributes.', False, ()),
     ('structure_watcher_enabled', 'MENHIR_STRUCTURE_WATCHER_ENABLED', True, 'runtime',
         'Enable background structural watching.', False, ()),
     ('artifact_reconcile_mode', 'MENHIR_ARTIFACT_RECONCILE_MODE', 'audit', 'runtime',
@@ -175,7 +171,7 @@ _REQUIREMENT_SCOPE = {
     "personal_memory_counting_enabled": "The counting lane runs after the scalar phase and reads scalar state.",
 }
 _VERSIONED: frozenset[str] = frozenset()
-_OBSERVATION = frozenset({"correlation_cosine_shadow_enabled", "frontier_shadow",
+_OBSERVATION = frozenset({"frontier_shadow",
     "personal_memory_consolidation_audit_enabled", "personal_memory_recall_audit_enabled",
     "MENHIR_FRONTIER_TRACE",
     "MENHIR_BENCH_ACTIVE_RUN_ID", "MENHIR_BENCH_RESULTS_ROOT"})

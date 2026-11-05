@@ -341,16 +341,7 @@ class LifecycleConsolidationMixin:
         """
         from menhir.services.correlation_service import CorrelationService
 
-        settings = getattr(self, "settings", None)
-        return CorrelationService(
-            self.graph_adapter,
-            self.graphiti_client,
-            llm=self.llm,
-            cosine_shadow=bool(getattr(settings, "correlation_cosine_shadow_enabled", False)),
-            shared_episode_veto=bool(
-                getattr(settings, "correlation_shared_episode_veto_enabled", False)
-            ),
-        )
+        return CorrelationService(self.graph_adapter, self.graphiti_client, llm=self.llm)
 
     async def _check_contradictions_batch(
         self,
@@ -366,9 +357,10 @@ class LifecycleConsolidationMixin:
         pending_llm_review conflict-queue write, telemetry suppression
         (cooldown) checks, and one-conflict-per-node capping.
 
-        Correlation routing (Step 8): pairs with similarity 0.70–0.85 receive
-        a RELATES_TO edge instead of entering the conflict queue.  Only pairs
-        >= SIMILARITY_CONFLICT_THRESHOLD (0.85) are flagged as conflicts.
+        Correlation routing (Step 8): scores of 0.70–0.85 receive a RELATES_TO
+        edge instead of entering the conflict queue.  Only scores
+        >= SIMILARITY_CONFLICT_THRESHOLD (0.85) are flagged as conflicts.  These
+        are RRF rank scores, not cosines; see CorrelationService.classify_pair.
 
         Part 2: Judge-gated merge — near-duplicates (>= merge_threshold) route to the
         judge after deterministic vetoes. Merge only on unanimous yes; non-unanimous or
