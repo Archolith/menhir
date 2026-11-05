@@ -107,3 +107,15 @@ def test_duplicate_existing_data_refuses_native_bootstrap(tmp_path):
         ]
     finally:
         repo.close()
+
+
+def test_scalar_mapping_covers_the_separately_gated_activation_owner():
+    from menhir.infrastructure.schema import (
+        SCALAR_STATE_REQUIRED_INDEXES,
+        get_scalar_state_activation_queries,
+    )
+    from menhir.infrastructure.schema_ddl import schema_rule_name
+
+    names = {schema_rule_name(q) for q in get_scalar_state_activation_queries() if q.startswith("CREATE ")}
+    assert set(schema.SCALAR_RULES) == names
+    assert set(SCALAR_STATE_REQUIRED_INDEXES) <= names

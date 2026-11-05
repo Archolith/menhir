@@ -28,7 +28,7 @@ class TypedAssertionRepairMixin:
         """Heads for a binding-stable source_key (episode+span+ordinal), regardless of current
         subject_uuid. source_key is DB-unique on the head, so at most one is returned; a lookup that
         finds >1 is a schema/migration violation the caller must fail closed on, never silently pick."""
-        rows = self._neo4j.execute(
+        rows = self._execute(
             "MATCH (h:TypedAssertionHead {source_key: $sk}) RETURN h.claim_key AS claim_key, "
             "h.subject_uuid AS subject_uuid",
             params={"sk": source_key},
@@ -45,7 +45,7 @@ class TypedAssertionRepairMixin:
         longer exists — assertions orphaned by a merge whose post-commit rebind did not run.
         Excludes binding_pending (C.4's deliberately-unresolved advisory assertions are NOT
         merge-crash orphans). A repair pass resolves each to its survivor via merge lineage."""
-        rows = self._neo4j.execute(
+        rows = self._execute(
             """
             MATCH (a:TypedAssertion)
             WHERE NOT coalesce(a.superseded, false) AND NOT coalesce(a.binding_pending, false)
@@ -90,7 +90,7 @@ class TypedAssertionRepairMixin:
         if namespaces is not None:
             where.append("a.namespace IN $namespaces")
             params["namespaces"] = list(namespaces)
-        rows = self._neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (a:TypedAssertion)
             WHERE {' AND '.join(where)}
@@ -130,11 +130,11 @@ class TypedAssertionRepairMixin:
         ids = [i for i in (assertion_ids or []) if i]
         if not ids:
             return 0
-        rows = self._neo4j.execute(
-            """
+        rows = self._execute(
+            f"""
             MATCH (a:TypedAssertion)
             WHERE a.assertion_id IN $ids
-            SET a.binding_repair_attempted_at = datetime($at)
+            SET a.binding_repair_attempted_at = {self._instant_expression('at')}
             RETURN count(a) AS stamped
             """,
             params={"ids": ids, "at": at},
@@ -149,7 +149,7 @@ class TypedAssertionRepairMixin:
         ids = [i for i in (assertion_ids or []) if i]
         if not ids:
             return 0
-        rows = self._neo4j.execute(
+        rows = self._execute(
             """
             MATCH (a:TypedAssertion)
             WHERE a.assertion_id IN $ids
@@ -172,7 +172,7 @@ class TypedAssertionRepairMixin:
         contract and would reject valid survivors."""
         if not (uuid or "").strip():
             return False
-        rows = self._neo4j.execute(
+        rows = self._execute(
             "MATCH (e:Entity {uuid: $u}) RETURN 1 AS ok LIMIT 1", params={"u": uuid.strip()})
         return bool(rows)
 
@@ -186,13 +186,13 @@ class TypedAssertionRepairMixin:
           * current assertions still sitting on the ABSORBED uuid (the not-yet-rebound case).
         Deliberately EXCLUDES survivor-native assertions: a tenant-A merge whose survivor happens to
         hold unrelated tenant-B assertions is a tenant-A operation, not a multi-namespace violation."""
-        rows = self._neo4j.execute(
+        rows = self._execute(
             "MATCH (r:AssertionRebind {merge_op_id: $op}) RETURN DISTINCT r.namespace AS namespace",
             params={"op": (merge_op_id or "").strip()},
         )
         out: list[Any] = [r.get("namespace") for r in rows]
         if absorbed_uuid:
-            rows2 = self._neo4j.execute(
+            rows2 = self._execute(
                 """
                 MATCH (a:TypedAssertion {subject_uuid: $absorbed})
                 WHERE NOT coalesce(a.superseded, false)
@@ -220,12 +220,12 @@ class TypedAssertionRepairMixin:
         receiptless. The pending marker written before restore keeps the namespace discoverable, so the
         retry finds the silo instead of skipping it forever. Union (not fallback) because a partially
         restored op may legitimately have evidence in both places."""
-        rows = self._neo4j.execute(
+        rows = self._execute(
             "MATCH (r:AssertionRebind {merge_op_id: $op}) RETURN DISTINCT r.namespace AS namespace",
             params={"op": (merge_op_id or "").strip()},
         )
         out: list[Any] = [r.get("namespace") for r in rows]
-        rows2 = self._neo4j.execute(
+        rows2 = self._execute(
             """
             MATCH (rc:ScalarReconcile {operation_id: $op, operation_kind: 'ENTITY_UNMERGE'})
             RETURN DISTINCT rc.namespace AS namespace
@@ -255,7 +255,7 @@ class TypedAssertionRepairMixin:
         if namespaces is not None:
             where.append("a.namespace IN $namespaces")
             params["namespaces"] = list(namespaces)
-        rows = self._neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (a:TypedAssertion)
             WHERE {' AND '.join(where)}
@@ -287,12 +287,12 @@ class TypedAssertionRepairMixin:
         ]
         if not items:
             return 0
-        rows = self._neo4j.execute(
-            """
+        rows = self._execute(
+            f"""
             UNWIND $items AS item
-            MATCH (a:TypedAssertion {subject_uuid: item.uuid})
+            MATCH (a:TypedAssertion {{subject_uuid: item.uuid}})
             WHERE a.namespace = item.namespace OR (a.namespace IS NULL AND item.namespace IS NULL)
-            SET a.orphan_repair_attempted_at = datetime($at)
+            SET a.orphan_repair_attempted_at = {self._instant_expression('at')}
             RETURN count(a) AS stamped
             """,
             params={"items": items, "at": at},
@@ -301,7 +301,7 @@ class TypedAssertionRepairMixin:
 
     def current_for_claim(self, claim_key: str) -> dict[str, Any] | None:
         """The single current assertion for a claim (head -> CURRENT), or None."""
-        rows = self._neo4j.execute(
+        rows = self._execute(
             """
             MATCH (h:TypedAssertionHead {claim_key: $ck})-[:CURRENT]->(a:TypedAssertion)
             RETURN a.assertion_id AS assertion_id, a.assertion_key AS assertion_key,

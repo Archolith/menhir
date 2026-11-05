@@ -118,7 +118,10 @@ Concept id: `runtime.stack`
   publication prepares only the existing project writer, revalidates its mtime inputs and composes
   its writes into one guarded command with exact-one completion and actual edge counts. Literal
   parameters are namespaced; edge clocks have explicit native variants. Remaining scalar, erasure,
-  recovery and query parity are open. Arbitrary callback transactions
+  recovery and query parity are open. Active scalar activation/readiness, View lifecycle and
+  typed-assertion/fold paths have native clock/vector variants, with shared policy retained.
+  Erasure/recovery remains gated on native-safe repair-ID encoding: the engine rejects the current
+  NUL marker, and that persistent format change awaits explicit scope authorization. Arbitrary callback transactions
   fail before invocation; no query translator is installed.
 - `archolith-graphiti-core==0.31.2.post2` (Archolith soft fork of `getzep/graphiti`,
   baseline `v0.31.2`; it still imports as `graphiti_core`). Menhir policy uses its explicit

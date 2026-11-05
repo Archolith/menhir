@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from menhir.infrastructure.falkor import FalkorLiteRepository, encode_instant
 from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S
 from menhir.infrastructure.view_kind_registry import resolve_view_kinds
 from menhir.infrastructure.view_models import (
@@ -63,6 +64,27 @@ class ViewWriteRepositoryMixin:
     ) -> None:
         self.neo4j = neo4j
         self.KINDS = resolve_view_kinds(self.KINDS, kinds)
+
+    @property
+    def _embedding_expression(self) -> str:
+        return "vecf32($emb)" if isinstance(self.neo4j, FalkorLiteRepository) else "$emb"
+
+    def _instant_expression(self, parameter: str | None = None) -> str:
+        if isinstance(self.neo4j, FalkorLiteRepository):
+            return "$" + (parameter or "view_now")
+        return "datetime($" + parameter + ")" if parameter else "datetime()"
+
+    def _execute(self, query: str, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        if not isinstance(self.neo4j, FalkorLiteRepository):
+            return self.neo4j.execute(query, *args, **kwargs)
+        params = dict((args[0] if args else kwargs.get("params")) or {})
+        params["view_now"] = encode_instant(datetime.now(timezone.utc))
+        for name in ("now", "valid_at", "after", "before"):
+            if params.get(name) is not None:
+                params[name] = encode_instant(params[name])
+        if args:
+            return self.neo4j.execute(query, params, *args[1:], **kwargs)
+        return self.neo4j.execute(query, **{**kwargs, "params": params})
 
     # ------------------------------------------------------------------ keys / surfaces (compat)
 
@@ -133,7 +155,7 @@ class ViewWriteRepositoryMixin:
         if not eps:
             return []
         namespace_key = normalize_namespace(namespace)
-        rows = self.neo4j.execute(
+        rows = self._execute(
             f"""
             UNWIND $eps AS eid
             OPTIONAL MATCH (te:TurnEvidence {{turn_id: eid}})
@@ -269,7 +291,7 @@ class ViewWriteRepositoryMixin:
         and a METRIC sharing a key are independent (never supersede each other). Falls back to
         qs_key/qs_current so pre-View counter nodes still supersede (no migration needed)."""
         label = _label_for(view_class)
-        rows = self.neo4j.execute(
+        rows = self._execute(
             f"MATCH (n:{label}) WHERE (n.view_key = $k OR n.qs_key = $k) "
             "AND coalesce(n.view_current, n.qs_current, true) "
             "RETURN n.uuid AS uuid, coalesce(n.view_sig, toString(n.qs_value)) AS sig, "
@@ -355,16 +377,16 @@ class ViewWriteRepositoryMixin:
                 )
             elif view_class is ViewClass.FACT:
                 namespace_key = normalize_namespace(namespace)
-                touched = self.neo4j.execute(
-                    """
-                    MERGE (f:EvidenceNamespaceFence {namespace_key: $namespace_key})
-                    ON CREATE SET f.generation = 0, f.created_at = datetime($now)
-                    SET f.lock_nonce = $operation_id, f.locked_at = datetime($now)
+                touched = self._execute(
+                    f"""
+                    MERGE (f:EvidenceNamespaceFence {{namespace_key: $namespace_key}})
+                    ON CREATE SET f.generation = 0, f.created_at = {self._instant_expression('now')}
+                    SET f.lock_nonce = $operation_id, f.locked_at = {self._instant_expression('now')}
                     WITH f
-                    MATCH (n:Entity {uuid: $u})
+                    MATCH (n:Entity {{uuid: $u}})
                     WHERE coalesce(n.view_current, n.qs_current, true)
                       AND NOT coalesce(n.retired, false)
-                    SET n.last_accessed = datetime($now),
+                    SET n.last_accessed = {self._instant_expression('now')},
                         n.view_fence_generation = f.generation
                     SET n += $refresh
                     RETURN n.uuid AS uuid
@@ -382,9 +404,8 @@ class ViewWriteRepositoryMixin:
                     raise ValueError("FACT View refresh refused after concurrent lifecycle change")
                 prov = {}
             else:
-                self.neo4j.execute(
-                    f"MATCH (n:{label} {{uuid:$u}}) SET n.last_accessed=datetime($now), n += $refresh "
-                    "RETURN n.uuid",
+                self._execute(
+                    f"""MATCH (n:{label} {{uuid:$u}}) SET n.last_accessed={self._instant_expression('now')}, n += $refresh RETURN n.uuid""",
                     {"u": current["uuid"], "now": now, "refresh": dict(refresh_props or {})},
                     timeout_s=SAGA_MUTATION_TIMEOUT_S,  # CF-211
                 )
@@ -451,8 +472,8 @@ class ViewWriteRepositoryMixin:
         clear_current_key = "REMOVE o.ss_view_key_current" if kind == "scalar_state" else ""
         create_and_supersede = f"""
             MERGE (f:EvidenceNamespaceFence {{namespace_key: $namespace_key}})
-            ON CREATE SET f.generation = 0, f.created_at = datetime($now)
-            SET f.lock_nonce = $operation_id, f.locked_at = datetime($now)
+            ON CREATE SET f.generation = 0, f.created_at = {self._instant_expression('now')}
+            SET f.lock_nonce = $operation_id, f.locked_at = {self._instant_expression('now')}
             WITH f
             OPTIONAL MATCH (actual:{label})
             WHERE (actual.view_key = $key OR actual.qs_key = $key)
@@ -481,19 +502,19 @@ class ViewWriteRepositoryMixin:
             OPTIONAL MATCH (old:{label} {{uuid: $old}})
             FOREACH (o IN CASE WHEN old IS NULL THEN [] ELSE [old] END |
                 SET o.view_current = false, o.qs_current = false, o.superseded_by = $uuid,
-                    o.expired_at = datetime($now), o.last_accessed = datetime($now)
+                    o.expired_at = {self._instant_expression('now')}, o.last_accessed = {self._instant_expression('now')}
                 {clear_current_key})
             WITH f, old, evidence
             CREATE (n:{label} {{
                 uuid: $uuid, name: $name, summary: $summary, content: $content,
                 group_id: $ns, namespace: $ns_stamped, {_SHARED_STAMPS},
                 source: $source, source_confidence: $sc,
-                valid_at: datetime($valid_at), created_at: datetime($now), last_accessed: datetime($now)
+                valid_at: {self._instant_expression('valid_at')}, created_at: {self._instant_expression('now')}, last_accessed: {self._instant_expression('now')}
             }})
             SET n += $extra
             SET n.view_fence_generation = f.generation
             FOREACH (_ IN CASE WHEN $emb IS NULL THEN [] ELSE [1] END |
-                SET n.name_embedding = $emb)
+                SET n.name_embedding = {self._embedding_expression})
             FOREACH (o IN CASE WHEN old IS NULL THEN [] ELSE [old] END |
                 SET n.supersedes = $old
                 MERGE (n)-[:SUPERSEDES]->(o))
@@ -510,7 +531,7 @@ class ViewWriteRepositoryMixin:
                   "old": old_uuid}
         if kind == "scalar_state":
             try:
-                write_rows = self.neo4j.execute(
+                write_rows = self._execute(
                     create_and_supersede, params, timeout_s=SAGA_MUTATION_TIMEOUT_S
                 )
             except _Neo4jConstraintError:
@@ -539,7 +560,7 @@ class ViewWriteRepositoryMixin:
                             "winner_sig": winner_sig}
                 raise
         else:
-            write_rows = self.neo4j.execute(
+            write_rows = self._execute(
                 create_and_supersede, params, timeout_s=SAGA_MUTATION_TIMEOUT_S
             )
         if not write_rows:
@@ -577,7 +598,7 @@ class ViewWriteRepositoryMixin:
         generic = ("FACT View write refused: every declared contributor UUID must resolve to live "
                    ":Episodic or :TurnEvidence evidence")
         try:
-            rows = self.neo4j.execute(
+            rows = self._execute(
                 f"""
                 OPTIONAL MATCH (actual:{label})
                 WHERE (actual.view_key = $key OR actual.qs_key = $key)
@@ -686,7 +707,7 @@ class ViewWriteRepositoryMixin:
         if not episode_uuids:
             return {"episodes_present": 0, "episodes_missing": 0}
         label = _label_for(view_class)
-        rows = self.neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (n:{label} {{uuid:$u}})
             UNWIND $eps AS eid
@@ -738,13 +759,13 @@ class ViewWriteRepositoryMixin:
         )
 
         namespace_key = normalize_namespace(namespace)
-        rows = self.neo4j.execute(
-            """
-            MERGE (f:EvidenceNamespaceFence {namespace_key: $namespace_key})
-            ON CREATE SET f.generation = 0, f.created_at = datetime($now)
-            SET f.lock_nonce = $operation_id, f.locked_at = datetime($now)
+        rows = self._execute(
+            f"""
+            MERGE (f:EvidenceNamespaceFence {{namespace_key: $namespace_key}})
+            ON CREATE SET f.generation = 0, f.created_at = {self._instant_expression('now')}
+            SET f.lock_nonce = $operation_id, f.locked_at = {self._instant_expression('now')}
             WITH f
-            MATCH (n:Entity {uuid:$u})
+            MATCH (n:Entity {{uuid:$u}})
             WHERE coalesce(n.view_current, n.qs_current, true)
               AND NOT coalesce(n.retired, false)
             OPTIONAL MATCH (old_evidence)-[:MENTIONS]->(n)
@@ -753,7 +774,7 @@ class ViewWriteRepositoryMixin:
                                                  old_evidence.turn_id)) AS old_mentions
             WHERE size(old_mentions) = size(coalesce(n.episode_uuids, []))
               AND all(eid IN old_mentions WHERE eid IN coalesce(n.episode_uuids, []))
-            CALL {
+            CALL {{
                 WITH n
                 WITH n, (coalesce(n.episode_uuids, []) + $eps) AS all_eids
                 UNWIND CASE WHEN size(all_eids) = 0 THEN [null] ELSE all_eids END AS eid
@@ -761,22 +782,22 @@ class ViewWriteRepositoryMixin:
                 OPTIONAL MATCH (e)
                 WHERE ((e:Episodic AND e.uuid = eid) OR
                        (e:TurnEvidence AND e.turn_id = eid))
-                  AND """ + tenant_scope_cypher("e") + """
+                  AND """ + tenant_scope_cypher("e") + f"""
                   AND e.evidence_finalized = true
                   AND NOT coalesce(e.evidence_quarantined, false)
                 WITH eid, [candidate IN collect(DISTINCT e)
                            WHERE candidate IS NOT NULL] AS candidates
-                WITH collect({eid: eid, candidates: candidates}) AS resolved
+                WITH collect({{eid: eid, candidates: candidates}}) AS resolved
                 RETURN [row IN resolved WHERE size(row.candidates) = 1 |
                         head(row.candidates)] AS evidence,
                        [row IN resolved | row.eid] AS requested,
                        size([row IN resolved WHERE size(row.candidates) = 1]) AS resolved_count
-            }
+            }}
             WITH f, n, evidence, requested, resolved_count
             WHERE resolved_count = size(requested)
               AND all(e IN evidence WHERE
                   coalesce(e.evidence_generation, e.publication_generation) = f.generation)
-            SET n.last_accessed = datetime($now), n.view_fence_generation = f.generation
+            SET n.last_accessed = {self._instant_expression('now')}, n.view_fence_generation = f.generation
             WITH n, (coalesce(n.episode_uuids, []) + $eps) AS all_eids
             UNWIND CASE WHEN size(all_eids) = 0 THEN [null] ELSE all_eids END AS eid
             WITH n, eid ORDER BY eid
@@ -789,17 +810,17 @@ class ViewWriteRepositoryMixin:
                                  ELSE replace($tpl, $token, toString(size(uuids))) END
             SET n += $refresh
             WITH n, uuids
-            CALL {
+            CALL {{
                 WITH n, uuids
                 UNWIND CASE WHEN size(uuids) = 0 THEN [null] ELSE uuids END AS eid
-                OPTIONAL MATCH (ep:Episodic {uuid: eid})
-                OPTIONAL MATCH (te:TurnEvidence {turn_id: eid})
+                OPTIONAL MATCH (ep:Episodic {{uuid: eid}})
+                OPTIONAL MATCH (te:TurnEvidence {{turn_id: eid}})
                 WITH n, coalesce(ep, te) AS e
                 FOREACH (_ IN CASE WHEN e IS NULL THEN [] ELSE [1] END |
                     MERGE (e)-[:MENTIONS]->(n))
                 RETURN [uuid IN collect(coalesce(e.uuid, e.turn_id))
                         WHERE uuid IS NOT NULL] AS present
-            }
+            }}
             RETURN uuids AS stored, present
             """,
             {"u": node_uuid, "eps": episode_uuids, "now": now, "token": _COUNT_TOKEN,
@@ -839,7 +860,7 @@ class ViewWriteRepositoryMixin:
         from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
 
         try:
-            rows = self.neo4j.execute(
+            rows = self._execute(
                 """
                 OPTIONAL MATCH (f:EvidenceNamespaceFence {namespace_key: $namespace_key})
                 OPTIONAL MATCH (n:Entity {uuid: $u})
@@ -920,13 +941,13 @@ class ViewWriteRepositoryMixin:
         )
 
         namespace_key = normalize_namespace(namespace)
-        rows = self.neo4j.execute(
-            """
-            MERGE (f:EvidenceNamespaceFence {namespace_key: $namespace_key})
-            ON CREATE SET f.generation = 0, f.created_at = datetime($now)
-            SET f.lock_nonce = $operation_id, f.locked_at = datetime($now)
+        rows = self._execute(
+            f"""
+            MERGE (f:EvidenceNamespaceFence {{namespace_key: $namespace_key}})
+            ON CREATE SET f.generation = 0, f.created_at = {self._instant_expression('now')}
+            SET f.lock_nonce = $operation_id, f.locked_at = {self._instant_expression('now')}
             WITH f
-            MATCH (n:Entity {uuid:$u})
+            MATCH (n:Entity {{uuid:$u}})
             WHERE coalesce(n.view_current, n.qs_current, true)
               AND NOT coalesce(n.retired, false)
             OPTIONAL MATCH (old_evidence)-[:MENTIONS]->(n)
@@ -935,27 +956,27 @@ class ViewWriteRepositoryMixin:
                                                  old_evidence.turn_id)) AS old_mentions
             WHERE size(old_mentions) = size(coalesce(n.episode_uuids, []))
               AND all(eid IN old_mentions WHERE eid IN coalesce(n.episode_uuids, []))
-            CALL {
+            CALL {{
                 WITH n
                 UNWIND CASE WHEN size($eps) = 0 THEN [null] ELSE $eps END AS eid
                 OPTIONAL MATCH (e)
                 WHERE ((e:Episodic AND e.uuid = eid) OR
                        (e:TurnEvidence AND e.turn_id = eid))
-                  AND """ + tenant_scope_cypher("e") + """
+                  AND """ + tenant_scope_cypher("e") + f"""
                   AND e.evidence_finalized = true
                   AND NOT coalesce(e.evidence_quarantined, false)
                 WITH eid, [candidate IN collect(DISTINCT e)
                            WHERE candidate IS NOT NULL] AS candidates
-                WITH collect({eid: eid, candidates: candidates}) AS resolved
+                WITH collect({{eid: eid, candidates: candidates}}) AS resolved
                 RETURN [row IN resolved WHERE size(row.candidates) = 1 |
                         head(row.candidates)] AS evidence,
                        size([row IN resolved WHERE size(row.candidates) = 1]) AS resolved_count
-            }
+            }}
             WITH f, n, evidence, resolved_count
             WHERE resolved_count = size($eps)
               AND all(e IN evidence WHERE
                   coalesce(e.evidence_generation, e.publication_generation) = f.generation)
-            SET n.last_accessed = datetime($now),
+            SET n.last_accessed = {self._instant_expression('now')},
                 n.view_fence_generation = f.generation,
                 n.episode_uuids = $eps,
                 n.supporting_event_count = size($eps),
@@ -965,26 +986,26 @@ class ViewWriteRepositoryMixin:
                                  ELSE replace($tpl, $token, toString(size($eps))) END
             SET n += $refresh
             WITH n
-            CALL {
+            CALL {{
                 WITH n
                 OPTIONAL MATCH (old)-[m:MENTIONS]->(n)
                 WHERE NOT coalesce(old.uuid, old.turn_id) IN $eps
                   AND (old:Episodic OR old:TurnEvidence)
                 DELETE m
                 RETURN count(*) AS pruned
-            }
+            }}
             WITH n
-            CALL {
+            CALL {{
                 WITH n
                 UNWIND CASE WHEN size($eps) = 0 THEN [null] ELSE $eps END AS eid
-                OPTIONAL MATCH (ep:Episodic {uuid: eid})
-                OPTIONAL MATCH (te:TurnEvidence {turn_id: eid})
+                OPTIONAL MATCH (ep:Episodic {{uuid: eid}})
+                OPTIONAL MATCH (te:TurnEvidence {{turn_id: eid}})
                 WITH n, coalesce(ep, te) AS e
                 FOREACH (_ IN CASE WHEN e IS NULL THEN [] ELSE [1] END |
                     MERGE (e)-[:MENTIONS]->(n))
                 RETURN [uuid IN collect(coalesce(e.uuid, e.turn_id))
                         WHERE uuid IS NOT NULL] AS present
-            }
+            }}
             RETURN present
             """,
             {"u": node_uuid, "eps": episode_uuids, "now": now, "token": _COUNT_TOKEN,

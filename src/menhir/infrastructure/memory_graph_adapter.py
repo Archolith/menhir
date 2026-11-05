@@ -173,6 +173,10 @@ class MemoryGraphAdapter:
         constraints/indexes are ACTIVATION-created (via `activate_scalar_state`, behind the
         identity-version gate) — NOT created by `bootstrap_phase_one` — and are excluded from
         PHASE_ONE_REQUIRED_INDEXES. So this returns False until activation has run successfully."""
+        from menhir.infrastructure.falkor import FalkorLiteRepository
+        if isinstance(self.neo4j, FalkorLiteRepository):
+            from menhir.infrastructure.falkor_schema import scalar_state_schema_ready
+            return scalar_state_schema_ready(self.neo4j)
         rows = self.neo4j.execute(
             """
             SHOW INDEXES YIELD name, state

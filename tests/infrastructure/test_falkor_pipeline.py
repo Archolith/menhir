@@ -770,3 +770,209 @@ def test_native_document_publication_requires_claim_before_dispatch(
             claim=claim,
         )
     repo.close()
+
+
+@pytest.mark.online
+def test_native_scalar_view_create_refresh_supersede_and_retire(native_repo):
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+    from menhir.infrastructure.view_repository import ViewRepository
+
+    adapter = MemoryGraphAdapter(native_repo)
+    assert not adapter.scalar_state_schema_ready()
+    adapter.activate_scalar_state()
+    assert adapter.scalar_state_schema_ready()
+
+    native_repo.execute("""
+        CREATE (:TurnEvidence {turn_id:'turn1',namespace:'tenant-a',evidence_finalized:true,evidence_generation:0}),
+               (:TurnEvidence {turn_id:'turn2',namespace:'tenant-a',evidence_finalized:true,evidence_generation:0})
+    """)
+    views = ViewRepository(native_repo)
+    slot = {
+        "subject": "Atlas",
+        "subject_uuid": "subject",
+        "attribute": "owned",
+        "scope": "",
+        "value_kind": "count",
+        "unit": "",
+        "namespace": "tenant-a",
+    }
+    first = views.record_scalar_state(
+        **slot,
+        value=20,
+        valid_at="2026-01-01T00:00:00Z",
+        episode_uuids=["turn1"],
+        name_embedding=[1.0, 0.0],
+    )
+    assert first["created"]
+    assert native_repo.execute(
+        "MATCH (n:Entity {uuid:$uuid}) RETURN vec.cosineDistance(n.name_embedding,vecf32([1.0,0.0])) AS distance",
+        {"uuid": first["uuid"]},
+    ) == [{"distance": 0.0}]
+    refreshed = views.record_scalar_state(
+        **slot,
+        value=20,
+        valid_at="2026-01-01T00:00:00Z",
+        episode_uuids=["turn1", "turn2"],
+    )
+    assert refreshed["uuid"] == first["uuid"]
+    current = views.fetch_scalar_state(
+        **{k: v for k, v in slot.items() if k != "subject"}
+    )
+    assert current["recall_eligible"]
+    assert native_repo.execute(
+        "MATCH (n:Entity {uuid:$uuid}) RETURN n.episode_uuids AS episodes",
+        {"uuid": first["uuid"]},
+    ) == [{"episodes": ["turn1", "turn2"]}]
+    replacement = views.record_scalar_state(
+        **slot, value=37, valid_at="2026-01-02T00:00:00Z", episode_uuids=["turn2"]
+    )
+    assert replacement["superseded"] and replacement["uuid"] != first["uuid"]
+    assert views.retire_scalar_state(view_key=replacement["view_key"])
+    assert (
+        views.fetch_scalar_state(**{k: v for k, v in slot.items() if k != "subject"})
+        is None
+    )
+    assert native_repo.execute(
+        "MATCH (n:Entity {view_kind:'scalar_state'}) RETURN count(n) AS versions, "
+        "sum(CASE WHEN n.ss_view_key_current IS NOT NULL THEN 1 ELSE 0 END) AS current_keys"
+    ) == [{"versions": 2, "current_keys": 0}]
+
+
+@pytest.mark.online
+def test_native_scalar_assertion_fold_and_rebuild(native_repo):
+    from menhir.domain.typed_assertion import TypedAssertion
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    adapter = MemoryGraphAdapter(native_repo)
+    adapter.activate_scalar_state()
+    native_repo.execute("""
+        CREATE (:Entity {uuid:'subject',name:'Atlas',group_id:'tenant-a'}),
+               (:Episodic {uuid:'episode',namespace:'tenant-a'})-[:ADMITTED_ON]->(:TurnEvidence {turn_id:'turn',uuid:'turn',namespace:'tenant-a',role:'user',declarant:'user',
+                               evidence_finalized:true,evidence_generation:0})
+    """)
+    assertion = TypedAssertion(
+        subject_uuid="subject",
+        subject_display="Atlas",
+        attribute="owned",
+        scope="",
+        value_kind="count",
+        unit="",
+        operation="absolute",
+        value=20,
+        stated_span="Atlas owns 20.",
+        episode_uuid="turn",
+        valid_at="2026-01-01T00:00:00Z",
+        learned_at="2026-01-01T00:00:00Z",
+        namespace="tenant-a",
+        evidence_tier="user",
+        name_embedding=[1.0, 0.0],
+        embed_version="controlled",
+    )
+    result = adapter.record_typed_assertion(assertion)
+    assert result["created"] and not result["binding_pending"]
+    observations = adapter._memory_queries.search_assertion_embeddings(
+        [1.0, 0.0], namespaces=["tenant-a"]
+    )
+    assert [r["assertion_id"] for r in observations] == [result["assertion_id"]]
+    rebuilt = adapter.scalar_state_service().rebuild_scalar_state(
+        "subject", namespace="tenant-a"
+    )
+    assert rebuilt is not None
+    rows = native_repo.execute(
+        "MATCH (n:Entity {view_kind:'scalar_state',view_subject_uuid:'subject'}) "
+        "WHERE n.view_current RETURN n.ss_value AS value,n.episode_uuids AS evidence"
+    )
+    assert rows == [{"value": "20", "evidence": ["turn"]}]
+
+
+@pytest.mark.online
+def test_native_scalar_activation_refuses_legacy_and_write_refuses_stale_evidence(
+    native_repo,
+):
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+    from menhir.infrastructure.typed_assertion_repository import (
+        ScalarStateActivationError,
+    )
+    from menhir.infrastructure.view_repository import ViewRepository
+
+    adapter = MemoryGraphAdapter(native_repo)
+    native_repo.execute("CREATE (:TypedAssertion {assertion_id:'legacy'})")
+    with pytest.raises(ScalarStateActivationError):
+        adapter.activate_scalar_state()
+    assert not native_repo.execute("CALL db.constraints()")
+    native_repo.execute("MATCH (a:TypedAssertion) DELETE a")
+    adapter.activate_scalar_state()
+    adapter.activate_scalar_state()
+    native_repo.execute(
+        "CREATE (:TurnEvidence {turn_id:'e',namespace:'tenant-a',evidence_finalized:true,evidence_generation:0})"
+    )
+    views = ViewRepository(native_repo)
+    slot = {
+        "subject": "Atlas",
+        "subject_uuid": "subject",
+        "attribute": "owned",
+        "scope": "",
+        "value_kind": "count",
+        "unit": "",
+        "namespace": "tenant-a",
+    }
+    first = views.record_scalar_state(**slot, value=20, episode_uuids=["e"])
+    for change in (
+        "e.evidence_quarantined=true",
+        "e.namespace='tenant-b'",
+        "e.evidence_generation=1",
+    ):
+        native_repo.execute("MATCH (e:TurnEvidence) SET " + change)
+        with pytest.raises(ValueError):
+            views.record_scalar_state(**slot, value=37, episode_uuids=["e"])
+        assert native_repo.execute(
+            "MATCH (n:Entity {view_kind:'scalar_state'}) RETURN count(n) AS versions"
+        ) == [{"versions": 1}]
+        native_repo.execute(
+            "MATCH (e:TurnEvidence) SET e.namespace='tenant-a',e.evidence_quarantined=false,e.evidence_generation=0"
+        )
+    assert (
+        views.fetch_scalar_state(**{k: v for k, v in slot.items() if k != "subject"})[
+            "uuid"
+        ]
+        == first["uuid"]
+    )
+
+
+@pytest.mark.online
+def test_native_null_namespace_marker_is_a_closed_compatibility_gate(native_repo):
+    from redis.exceptions import ResponseError
+
+    with pytest.raises(ResponseError, match="Failed to parse query parameter"):
+        native_repo.execute(
+            "CREATE (:Entity {uuid:'must-not-write'}) RETURN $marker AS marker",
+            {"marker": "\u0000null"},
+        )
+    assert native_repo.execute(
+        "MATCH (n:Entity {uuid:'must-not-write'}) RETURN count(n) AS count"
+    ) == [{"count": 0}]
+
+
+@pytest.mark.online
+def test_native_correlation_path_veto_uses_shared_role_policy(native_repo):
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    adapter = MemoryGraphAdapter(native_repo)
+    native_repo.execute(
+        "CREATE (:Entity {uuid:'a',name:'ordinary'}),(:Entity {uuid:'b',name:'ordinary'})"
+    )
+    for name, expected in (
+        ("ordinary", False),
+        ("thing.py", True),
+        ("thing.PY", True),
+        ("docs/readme", False),
+        ("thing.pyx", False),
+    ):
+        native_repo.execute(
+            "MATCH (n:Entity {uuid:'b'}) SET n.name=$name", {"name": name}
+        )
+        assert adapter.check_ineligible_node_veto("a", "b") is expected, name
+    native_repo.execute(
+        "MATCH (n:Entity {uuid:'b'}) SET n.name='ordinary',n.is_view=true"
+    )
+    assert adapter.check_ineligible_node_veto("a", "b")

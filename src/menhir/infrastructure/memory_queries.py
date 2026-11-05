@@ -759,7 +759,7 @@ class MemoryQueryRepository:
         cosine + the slot/subject identity a downstream deterministic View-authority lookup needs."""
         safe_limit = max(1, min(limit, 500))
         cosine = (
-            "1 - vec.cosineDistance(vecf32(a.name_embedding), vecf32($query_vector))"
+            "1 - vec.cosineDistance(a.name_embedding, vecf32($query_vector))"
             if isinstance(self.neo4j, FalkorLiteRepository)
             else "vector.similarity.cosine(a.name_embedding, $query_vector)"
         )

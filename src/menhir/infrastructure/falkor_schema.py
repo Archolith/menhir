@@ -183,3 +183,175 @@ def bootstrap_phase_one(repo: FalkorLiteRepository, *, require_graphiti: bool = 
     except Exception as exc:  # noqa: BLE001 - bootstrap reports failure to the existing startup gate
         return PhaseOneSchemaResult(False, executed, [str(exc)])
     return PhaseOneSchemaResult(True, executed, [])
+
+
+SCALAR_RULES = {
+    "typed_assertion_key_unique": ("TypedAssertion", ("assertion_key",), "UNIQUE"),
+    "typed_assertion_id_unique": ("TypedAssertion", ("assertion_id",), "UNIQUE"),
+    "typed_assertion_subject_uuid_idx": ("TypedAssertion", ("subject_uuid",), "RANGE"),
+    "typed_assertion_claim_key_idx": ("TypedAssertion", ("claim_key",), "RANGE"),
+    "typed_assertion_source_key_idx": ("TypedAssertion", ("source_key",), "RANGE"),
+    "typed_assertion_episode_idx": ("TypedAssertion", ("episode_uuid",), "RANGE"),
+    "typed_assertion_head_source_key_unique": (
+        "TypedAssertionHead",
+        ("source_key",),
+        "UNIQUE",
+    ),
+    "typed_assertion_head_claim_key_idx": (
+        "TypedAssertionHead",
+        ("claim_key",),
+        "RANGE",
+    ),
+    "typed_read_marker_key_unique": ("TypedReadMarker", ("marker_key",), "UNIQUE"),
+    "assertion_rebind_key_unique": ("AssertionRebind", ("rebind_key",), "UNIQUE"),
+    "assertion_rebind_op_idx": ("AssertionRebind", ("merge_op_id",), "RANGE"),
+    "scalar_reconcile_receipt_key_unique": (
+        "ScalarReconcile",
+        ("receipt_key",),
+        "UNIQUE",
+    ),
+    "scalar_reconcile_op_idx": ("ScalarReconcile", ("operation_id",), "RANGE"),
+    "scalar_projection_repair_key_unique": (
+        "ScalarProjectionRepair",
+        ("repair_key",),
+        "UNIQUE",
+    ),
+    "scalar_projection_repair_pending_idx": (
+        "ScalarProjectionRepair",
+        ("status", "started_at"),
+        "RANGE",
+    ),
+    "scalar_state_view_current_key_unique": (
+        "Entity",
+        ("ss_view_key_current",),
+        "UNIQUE",
+    ),
+    "counting_watermark_group_unique": (
+        "CountingConsolidationWatermark",
+        ("group_id",),
+        "UNIQUE",
+    ),
+    "counting_flag_state_namespace_unique": (
+        "CountingFlagState",
+        ("namespace_key",),
+        "UNIQUE",
+    ),
+    "typed_assertion_operation_idx": ("TypedAssertion", ("operation",), "RANGE"),
+}
+
+
+def scalar_state_schema_ready(repo: FalkorLiteRepository) -> bool:
+    """Require native enforcement of every activation-owned schema rule."""
+    indexes = repo.execute("CALL db.indexes()", timeout_s=3)
+    constraints = repo.execute("CALL db.constraints()", timeout_s=3)
+    return _indexes_ready(
+        indexes, [(label, props, "RANGE") for label, props, _ in SCALAR_RULES.values()]
+    ) and all(
+        any(
+            row.get("type") == "UNIQUE"
+            and row.get("entitytype") == "NODE"
+            and row.get("label") == label
+            and set(row.get("properties", [])) == set(props)
+            and row.get("status") == "OPERATIONAL"
+            for row in constraints
+        )
+        for label, props, kind in SCALAR_RULES.values()
+        if kind == "UNIQUE"
+    )
+
+
+def activate_scalar_state(repo: FalkorLiteRepository) -> dict[str, int]:
+    """Called only after the shared fresh-identity gate; native DDL, shared data policy."""
+    from menhir.infrastructure.schema import get_scalar_state_activation_queries
+    from menhir.infrastructure.schema_ddl import schema_rule_name
+
+    queries = get_scalar_state_activation_queries()
+    names = {schema_rule_name(q) for q in queries if q.startswith("CREATE ")}
+    if names != set(SCALAR_RULES) or any(
+        not q.startswith(("CREATE ", "DROP ", "MATCH ")) for q in queries
+    ):
+        raise RuntimeError(
+            "Native scalar schema mapping does not cover the activation contract"
+        )
+    executed = 0
+    graph = repo._get_db().select_graph(repo.database)
+    indexes = repo.execute("CALL db.indexes()")
+    by_label: dict[str, set[str]] = {}
+    for label, props, _ in SCALAR_RULES.values():
+        by_label.setdefault(label, set()).update(props)
+    for label, props in by_label.items():
+        existing = {
+            p
+            for row in indexes
+            if row.get("label") == label and row.get("entitytype") == "NODE"
+            for p, kinds in row.get("types", {}).items()
+            if "RANGE" in kinds
+        }
+        if props - existing:
+            graph.create_node_range_index(label, *sorted(props - existing))
+            executed += 1
+    constraints = repo.execute("CALL db.constraints()")
+    # These exact legacy identities are explicitly retired by the original activation owner.
+    for label, props in (
+        ("TypedAssertionHead", ("claim_key",)),
+        ("ScalarReconcile", ("operation_id",)),
+    ):
+        if any(
+            row.get("type") == "UNIQUE"
+            and row.get("entitytype") == "NODE"
+            and row.get("label") == label
+            and set(row.get("properties", [])) == set(props)
+            for row in constraints
+        ):
+            repo._get_db().client.execute_command(
+                "GRAPH.CONSTRAINT",
+                "DROP",
+                repo.database,
+                "UNIQUE",
+                "NODE",
+                label,
+                "PROPERTIES",
+                len(props),
+                *props,
+            )
+            executed += 1
+    # Includes current-key/text backfills and the existing counting-duplicate cleanup policy.
+    for query in queries:
+        if query.startswith("MATCH "):
+            repo.execute(query)
+            executed += 1
+    constraints = repo.execute("CALL db.constraints()")
+    for label, props, kind in SCALAR_RULES.values():
+        if kind != "UNIQUE" or any(
+            row.get("type") == "UNIQUE"
+            and row.get("entitytype") == "NODE"
+            and row.get("label") == label
+            and set(row.get("properties", [])) == set(props)
+            for row in constraints
+        ):
+            continue
+        repo._get_db().client.execute_command(
+            "GRAPH.CONSTRAINT",
+            "CREATE",
+            repo.database,
+            "UNIQUE",
+            "NODE",
+            label,
+            "PROPERTIES",
+            len(props),
+            *props,
+        )
+        executed += 1
+    deadline = time.monotonic() + 10
+    while not scalar_state_schema_ready(repo):
+        if any(
+            row.get("status") == "FAILED"
+            for row in repo.execute("CALL db.constraints()")
+        ):
+            raise RuntimeError("Native scalar constraints refused existing data")
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                "Native scalar schema did not become operational before the deadline"
+            )
+        time.sleep(0.02)
+    return {"queries_executed": executed}

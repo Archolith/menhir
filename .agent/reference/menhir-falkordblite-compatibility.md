@@ -912,6 +912,62 @@ Next: active scalar View refresh/retirement, erasure/saga recovery, other requir
 and feature mappings, then release acceptance. Completing the three structural callback paths does
 not establish full Neo4j feature parity.
 
+### Active scalar runtime and remaining erasure gate (2026-11-05)
+
+The active legacy scalar path now has explicit native View and typed-assertion time expressions,
+canonical UTC parameter bindings, and native feature-schema activation/readiness. Activation still
+runs the shared identity-version refusal first. All 19 declared activation rules map to native
+range/uniqueness metadata and bounded operational enforcement, including the source-key head,
+repair records and single-current View key. The existing data backfills/duplicate cleanup remain
+owned by the shared activation declaration. Only the two explicitly retired legacy uniqueness
+identities are dropped, by exact native label/property/type, rather than guessed Neo4j names.
+
+Native View reads bind complete incoming evidence collections before evaluating the shared
+visibility predicate. Direct checks cover create, same-value provenance refresh, value supersession,
+retirement and current-key release under real uniqueness enforcement. Quarantined/foreign evidence
+and stale generations refuse without creating another version; incompatible typed identities refuse
+before schema installation. The actual typed-assertion store and active
+`MemoryGraphAdapter.scalar_state_service()` fold/rebuild run together with admitted TurnEvidence
+provenance. Dormant T5 remains inactive.
+
+View/observation embedding writes and typed-assertion backfill now store native float32 vectors.
+Observation reads consume those vectors directly; re-wrapping an existing Vectorf32 with vecf32()
+is invalid on this engine. Tests exercise native cosine distance and the real observation query.
+Neo4j retains its list storage and typed temporal expressions. The correlation path veto uses
+native string.matchRegEx while both eligibility owners retain the same role policy and regex;
+the original Neo4j predicate is unchanged. Full merge mutation/saga qualification remains open.
+
+Verification: **252 focused local passes, 2 skips**; the native scalar/guard selection passed **5
+cases**, including the explicitly closed NUL-marker compatibility gate; the vector-enhanced lifecycle
+and actual assertion/fold cases passed a further targeted **2-case** run. Existing Neo4j scalar
+supersession tests passed **3 cases**, and the unchanged Neo4j scalar deletion/repair module passed
+**7 cases**. No full CI or complete backend acceptance. Commands selected:
+
+```powershell
+.venv/Scripts/python.exe -m pytest -q --tb=short tests/test_typed_assertion_repository.py tests/test_scalar_state_view.py tests/test_view_repository_lww.py tests/test_scalar_view_freshness.py tests/infrastructure/test_falkor_schema.py
+# 142 passed, 2 skipped
+.venv/Scripts/python.exe -m pytest -q --tb=short tests/test_merge_eligibility.py tests/test_correlation_service.py tests/test_cf63_batch_correlation_namespace.py
+# 110 passed
+docker exec -w /work menhir-109-compat python -m pytest --run-online -q --tb=short --basetemp=/tmp/menhir109-active-scalar-final tests/infrastructure/test_falkor_pipeline.py -k 'native_scalar or native_correlation or native_null_namespace'
+# 5 passed, 26 deselected
+docker exec -w /work menhir-109-compat python -m pytest --run-online -q --tb=short --basetemp=/tmp/menhir109-scalar-vectors-fixed tests/infrastructure/test_falkor_pipeline.py -k 'native_scalar_view_create or native_scalar_assertion_fold'
+# 2 passed, 29 deselected
+```
+
+Erasure is **not qualified**. Its modern correlated EXISTS query layout needs native variants, and
+its existing NUL-prefixed null-namespace marker cannot be bound on the pinned native stack:
+`RETURN $marker` with `marker="\u0000null"` raises `Failed to parse query parameter 'marker' value`.
+A negative control proves parameter refusal occurs before a preceding CREATE can mutate the graph.
+The exploratory erasure variant was not committed; the existing path remains fail closed. Simply
+substituting empty namespace or escaped display text would change repair identities and risk merging
+receipts. The concrete native-safe ID proposal is in the roadmap; authorization is pending under the
+workspace rule against unrequested new formats. No encoding change or engine upgrade was made.
+
+Remaining acceptance includes erasure/recovery after that decision, remaining query/feature owners,
+full supported-path integration, and scale/crash/CI gates. Internal Linux wiring is not public backend
+support. Static artifact findings remain at the prior baseline, and the previously unavailable
+graph-backed audit endpoint was not retried unchanged.
+
 ## Upstream evidence
 
 - [FalkorDBLite usage and persistence](https://github.com/FalkorDB/falkordblite): runtime ownership and file API.

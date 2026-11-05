@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, Callable
 
 from menhir.domain.namespace import (
@@ -14,7 +15,11 @@ from menhir.domain.typed_assertion import (
 )
 from menhir.infrastructure.typed_assertion_models import (
     _RECORD_CYPHER,
+    _record_cypher,
 )
+
+
+from menhir.infrastructure.falkor import FalkorLiteRepository, encode_instant
 
 
 class TypedAssertionWriteMixin:
@@ -22,6 +27,23 @@ class TypedAssertionWriteMixin:
 
     def __init__(self, neo4j: Any) -> None:
         self._neo4j = neo4j
+
+    def _instant_expression(self, parameter: str | None = None) -> str:
+        if isinstance(self._neo4j, FalkorLiteRepository):
+            return "$" + (parameter or "assertion_now")
+        return "datetime($" + parameter + ")" if parameter else "datetime()"
+
+    def _execute(self, query: str, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        if not isinstance(self._neo4j, FalkorLiteRepository):
+            return self._neo4j.execute(query, *args, **kwargs)
+        params = dict((args[0] if args else kwargs.get("params")) or {})
+        params["assertion_now"] = encode_instant(datetime.now(UTC))
+        for name in ("as_of", "at"):
+            if params.get(name) is not None:
+                params[name] = encode_instant(params[name])
+        if args:
+            return self._neo4j.execute(query, params, *args[1:], **kwargs)
+        return self._neo4j.execute(query, **{**kwargs, "params": params})
 
     # ---- write -------------------------------------------------------------------------------
 
@@ -35,7 +57,15 @@ class TypedAssertionWriteMixin:
         head and ONE current assertion; there is no read-before-write preflight to race. Both
         ``source_key`` (head identity) and ``assertion_key`` (exact interpreted identity) omit
         subject_uuid, so re-perception after a rebind is idempotent and lands on the same head."""
-        rows = self._neo4j.execute(_RECORD_CYPHER, params=self._to_params(assertion))
+        params = self._to_params(assertion)
+        query = _RECORD_CYPHER
+        if isinstance(self._neo4j, FalkorLiteRepository):
+            query = _record_cypher(native=True)
+            params["assertion_now"] = encode_instant(datetime.now(UTC))
+            for name in ("valid_at", "learned_at"):
+                if params.get(name) is not None:
+                    params[name] = encode_instant(params[name])
+        rows = self._execute(query, params=params)
         row = rows[0] if rows else {}
         return {
             "assertion_id": str(row.get("assertion_id") or ""),
@@ -70,7 +100,7 @@ class TypedAssertionWriteMixin:
         select_params: dict[str, Any] = {"version": str(embed_version)}
         if namespace is not None:
             select_params["ns"] = namespace
-        candidates = self._neo4j.execute(
+        candidates = self._execute(
             f"""
             MATCH (a:TypedAssertion)
             WHERE a.stated_span IS NOT NULL
@@ -87,15 +117,16 @@ class TypedAssertionWriteMixin:
             if vec:
                 embedded.append({"id": str(c.get("id")), "emb": list(vec)})
         if embedded:
-            self._neo4j.execute(
-                """
+            vector = "vecf32(row.emb)" if isinstance(self._neo4j, FalkorLiteRepository) else "row.emb"
+            self._execute(
+                f"""
                 UNWIND $rows AS row
-                MATCH (a:TypedAssertion {assertion_id: row.id})
-                SET a.name_embedding = row.emb, a.embed_version = $version
+                MATCH (a:TypedAssertion {{assertion_id: row.id}})
+                SET a.name_embedding = {vector}, a.embed_version = $version
                 """,
                 params={"rows": embedded, "version": str(embed_version)},
             )
-        remaining_rows = self._neo4j.execute(
+        remaining_rows = self._execute(
             f"""
             MATCH (a:TypedAssertion)
             WHERE a.stated_span IS NOT NULL
@@ -129,7 +160,7 @@ class TypedAssertionWriteMixin:
             preds.append(tenant_scope_cypher("a"))
             params.update(tenant_scope_params(namespace))
         where = ("WHERE " + " AND ".join(preds)) if preds else ""
-        rows = self._neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (a:TypedAssertion {{subject_uuid: $u}})
             {where}
@@ -198,7 +229,7 @@ class TypedAssertionWriteMixin:
         if namespaces is not None:
             preds.append("rr.namespace IN $namespaces")
             params["namespaces"] = list(dict.fromkeys(namespaces))
-        rows = self._neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (rr:ScalarProjectionRepair)
             WHERE {' AND '.join(preds)}
@@ -226,22 +257,22 @@ class TypedAssertionWriteMixin:
         transaction, so a crash can only leave replayable work, never a lost wake-up.
         """
         ns_pred = " AND a.namespace IN $namespaces" if namespaces is not None else ""
-        rows = self._neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (a:TypedAssertion)
             WHERE NOT coalesce(a.superseded, false)
               AND NOT coalesce(a.binding_pending, false)
-              AND a.valid_at <= datetime($as_of)
+              AND a.valid_at <= {self._instant_expression('as_of')}
               AND coalesce(a.activation_pending, a.valid_at > a.recorded_at){ns_pred}
             WITH a ORDER BY a.valid_at ASC, a.assertion_id ASC LIMIT $limit
-            SET a.activation_pending = false, a.activation_claimed_at = datetime()
+            SET a.activation_pending = false, a.activation_claimed_at = {self._instant_expression(None)}
             MERGE (rr:ScalarProjectionRepair {{
                 repair_key: 'TIME_ACTIVATION\u001f' + a.assertion_id
             }})
             ON CREATE SET rr.operation_id = a.assertion_id,
                           rr.operation_kind = 'TIME_ACTIVATION',
                           rr.namespace = a.namespace, rr.subject_uuid = a.subject_uuid,
-                          rr.status = 'pending', rr.started_at = datetime(),
+                          rr.status = 'pending', rr.started_at = {self._instant_expression(None)},
                           rr.due_at = a.valid_at
             RETURN rr.repair_key AS repair_key, rr.operation_id AS operation_id,
                    rr.operation_kind AS operation_kind, rr.subject_uuid AS subject_uuid,
@@ -261,7 +292,7 @@ class TypedAssertionWriteMixin:
         bounded = ordered_ids[:max(1, min(int(limit), 50))]
         if not bounded:
             return {"contributors": [], "total": 0, "next_offset": None}
-        rows = self._neo4j.execute(
+        rows = self._execute(
             """
             UNWIND range(0, size($ids) - 1) AS ordinal
             MATCH (a:TypedAssertion {assertion_id: $ids[ordinal]})
@@ -298,11 +329,11 @@ class TypedAssertionWriteMixin:
 
     def mark_projection_repair_complete(self, repair_key: str) -> bool:
         """Complete one deletion repair only after its subject was successfully rebuilt."""
-        rows = self._neo4j.execute(
-            """
-            MATCH (rr:ScalarProjectionRepair {repair_key: $repair_key})
+        rows = self._execute(
+            f"""
+            MATCH (rr:ScalarProjectionRepair {{repair_key: $repair_key}})
             WHERE rr.status = 'pending'
-            SET rr.status = 'complete', rr.completed_at = datetime()
+            SET rr.status = 'complete', rr.completed_at = {self._instant_expression(None)}
             RETURN count(rr) AS completed
             """,
             params={"repair_key": repair_key},
@@ -337,7 +368,7 @@ class TypedAssertionWriteMixin:
         set -> no query."""
         if not candidate_uuids:
             return []
-        rows = self._neo4j.execute(
+        rows = self._execute(
             """
             MATCH (epi:Episodic)-[:MENTIONS]->(n:Entity)
             WHERE n.uuid IN $uuids
