@@ -2341,8 +2341,10 @@ class MemoryGraphAdapter:
             namespace=namespace,
         )
 
-    def list_candidates(self, *, source: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
-        return self._candidates.list_candidates(source=source, limit=limit)
+    def list_candidates(
+        self, *, source: str | None = None, limit: int = 100, namespace: str | None = None
+    ) -> list[dict[str, Any]]:
+        return self._candidates.list_candidates(source=source, limit=limit, namespace=namespace)
 
     def fetch_candidate(self, uuid: str) -> dict[str, Any] | None:
         return self._candidates.fetch_candidate(uuid)
