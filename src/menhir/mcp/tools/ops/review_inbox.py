@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Awaitable, Callable
 
@@ -17,6 +18,12 @@ _MIN_PER_CATEGORY = 1
 _MAX_PER_CATEGORY = 25
 _TODO_PAGE = 200
 _LABEL_LIMIT = 100
+#: Budget for ONE section's read, in seconds. The whole call is bounded at 120s by
+#: `BaseTool.timeout_for`; five sequential reads at the bridge's 30s HTTP timeout would exceed
+#: that, so a single hung read would lose every section. 5 x 20s stays inside the call budget.
+_SECTION_TIMEOUT_S = 20.0
+
+_SectionResult = tuple[str, list[str]] | None
 
 
 async def review_inbox(namespace: str = "", per_category: int = 5) -> str:
@@ -26,8 +33,9 @@ async def review_inbox(namespace: str = "", per_category: int = 5) -> str:
     open TODOs and open artifact questions. Read-only: it changes nothing.
 
     Args:
-        namespace: Optional silo to scope to. Empty spans every silo. Candidates are not
-            namespace-scoped, so they are listed only when this is empty.
+        namespace: Optional silo to scope to. Empty spans every silo, and each candidate
+            then shows its silo. Scoped TODOs and questions also include the shared
+            default silo, as list_todos and list_artifact_questions do.
         per_category: Max items shown per section (default 5, clamped to 1..25).
 
     Returns:
@@ -40,8 +48,17 @@ def _label(value: object) -> str:
     return excerpt(value, limit=_LABEL_LIMIT) or "(empty)"
 
 
-def _count(shown_rows: int, cap: int, more: bool) -> str:
-    return f"{cap}+" if more else str(shown_rows)
+def _count(fetched: int, cap: int, more: bool) -> str:
+    """`cap+` when the read returned more rows than the cap, else the exact row count."""
+    return f"{cap}+" if more else str(fetched)
+
+
+def _candidate_silo(row: dict[str, Any]) -> str:
+    # A server that predates the `namespace` column returns no such key; say so rather than
+    # implying the default silo.
+    if "namespace" not in row:
+        return "?"
+    return str(row.get("namespace") or "default")
 
 
 class ReviewInboxTool(BaseTextTool):
@@ -59,26 +76,37 @@ class ReviewInboxTool(BaseTextTool):
     )
 
     async def endpoint(self, namespace: str = "", per_category: int = 5) -> str:
+        # Whitespace-only is unscoped everywhere. Without this the repositories disagreed:
+        # some stripped it to "every silo", others normalized it to the default silo.
+        namespace = (namespace or "").strip()
         cap = max(_MIN_PER_CATEGORY, min(int(per_category), _MAX_PER_CATEGORY))
         backend = self.get_backend()
         ns = namespace or None
-        sections: list[Callable[[], Awaitable[tuple[str, list[str]] | None]]] = [
-            lambda: self._conflicts(backend, ns, cap),
-            lambda: self._failed_enrichments(backend, ns, cap),
-            lambda: self._candidates(backend, namespace, cap),
-            lambda: self._stale_todos(backend, ns, cap),
-            lambda: self._artifact_questions(backend, ns, cap),
+        sections: list[tuple[str, Callable[[], Awaitable[_SectionResult]]]] = [
+            ("Conflicts", lambda: self._conflicts(backend, ns, cap)),
+            ("Failed enrichments", lambda: self._failed_enrichments(backend, ns, cap)),
+            ("Candidates", lambda: self._candidates(backend, ns, cap)),
+            ("Stale TODOs", lambda: self._stale_todos(backend, ns, cap)),
+            ("Open artifact questions", lambda: self._artifact_questions(backend, ns, cap)),
         ]
-        names = ["Conflicts", "Failed enrichments", "Candidates", "Stale TODOs", "Open artifact questions"]
 
-        lines = [f"Review inbox ({namespace or 'all namespaces'})"]
+        if namespace:
+            title = (
+                f"Review inbox ({namespace}; TODOs and questions in {namespace}+default)"
+            )
+        else:
+            title = "Review inbox (all namespaces)"
+        lines = [title]
         any_waiting = False
         body: list[str] = []
-        for name, build in zip(names, sections):
+        for name, build in sections:
             try:
-                result = await build()
+                result = await asyncio.wait_for(build(), timeout=_SECTION_TIMEOUT_S)
             except Exception as exc:  # noqa: BLE001 - one failed read must not hide the rest
+                # The caller sees only the type: a backend message can carry memory content.
+                # The server log keeps the detail at debug level for whoever has to fix it.
                 logger.warning("review_inbox section %r unavailable: %s", name, type(exc).__name__)
+                logger.debug("review_inbox section %r failure detail", name, exc_info=True)
                 body.append(f"{name}: unavailable ({type(exc).__name__})")
                 any_waiting = True
                 continue
@@ -86,18 +114,16 @@ class ReviewInboxTool(BaseTextTool):
                 body.append(f"{name}: none")
                 continue
             header, items = result
-            any_waiting = any_waiting or bool(items)
+            any_waiting = True
             body.append(header)
             body.extend(items)
         if not any_waiting:
             lines.append("Nothing is waiting on a decision.")
-            if namespace:
-                lines.append("(Candidates are not checked on a namespace-scoped call.)")
             return "\n".join(lines)
         lines.extend(body)
         return "\n".join(lines)
 
-    async def _conflicts(self, backend: Any, ns: str | None, cap: int):
+    async def _conflicts(self, backend: Any, ns: str | None, cap: int) -> _SectionResult:
         scope = {"namespace": ns} if ns else {}
         rows = await backend.list_conflict_groups(status="unresolved", limit=cap + 1, **scope)
         if not rows:
@@ -114,7 +140,7 @@ class ReviewInboxTool(BaseTextTool):
         items.append("  Act with: list_conflicts, resolve_conflict")
         return f"Conflicts ({_count(len(rows), cap, more)}):", items
 
-    async def _failed_enrichments(self, backend: Any, ns: str | None, cap: int):
+    async def _failed_enrichments(self, backend: Any, ns: str | None, cap: int) -> _SectionResult:
         _, states = _resolve_queue_state_filter("failed")
         scope = {"namespace": ns} if ns else {}
         rows = await backend.list_episode_processing(states=states, limit=cap + 1, **scope)
@@ -128,50 +154,68 @@ class ReviewInboxTool(BaseTextTool):
         items.append("  Act with: get_enrichment_status (detail), force_reenrich (retry)")
         return f"Failed enrichments ({_count(len(rows), cap, more)}):", items
 
-    async def _candidates(self, backend: Any, namespace: str, cap: int):
-        if namespace:
-            # list_candidates takes no namespace, so a scoped caller must not see other silos'.
-            return "Candidates: not listed for a namespace-scoped call (they are not namespace-scoped)", []
-        rows = await backend.list_candidates(limit=cap + 1)
+    async def _candidates(self, backend: Any, ns: str | None, cap: int) -> _SectionResult:
+        # The namespace is passed only when scoped, so a server that predates the parameter
+        # still answers an unscoped call. A pinned caller does not depend on this argument: the
+        # pin is forced onto it in-process (`_apply_pinned_namespace`) or server-side
+        # (`_pin_backend_invoke_namespace`), because `list_candidates` declares `namespace`.
+        scope = {"namespace": ns} if ns else {}
+        rows = await backend.list_candidates(limit=cap + 1, **scope)
         if not rows:
             return None
         more = len(rows) > cap
-        items = [
-            f"  uuid={row.get('uuid') or '?'} - "
-            f"{_label(row.get('label') or row.get('name') or row.get('content'))}"
-            for row in rows[:cap]
-        ]
+        items = []
+        for row in rows[:cap]:
+            silo = "" if ns else f" namespace={_candidate_silo(row)}"
+            label = _label(row.get("label") or row.get("name") or row.get("content"))
+            items.append(f"  uuid={row.get('uuid') or '?'}{silo} - {label}")
         items.append(
             "  Act with: approval is not available over MCP yet (#431); "
             "review and approve in the explorer"
         )
         return f"Candidates awaiting review ({_count(len(rows), cap, more)}):", items
 
-    async def _stale_todos(self, backend: Any, ns: str | None, cap: int):
+    async def _stale_todos(self, backend: Any, ns: str | None, cap: int) -> _SectionResult:
+        # `list_todos` orders by priority and then age, and returns at most one page. When the
+        # page is full, stale TODOs can sit beyond it, so neither "none" nor an exact count is
+        # true -- the section says so instead.
         rows = await backend.list_todos(status="open", limit=_TODO_PAGE, namespace=ns)
         stale = [row for row in rows if row.get("stale")]
+        page_full = len(rows) >= _TODO_PAGE
         if not stale:
+            if page_full:
+                return (
+                    f"Stale TODOs: unknown (the first {_TODO_PAGE} open TODOs are not stale; "
+                    "use list_todos)",
+                    [],
+                )
             return None
-        more = len(rows) >= _TODO_PAGE
         items = []
         for row in stale[:cap]:
             age = row.get("age_days")
             age_str = f" (age {age}d)" if age is not None else ""
             items.append(f"  uuid={row.get('uuid') or '?'}{age_str} - {_label(row.get('content'))}")
         items.append("  Act with: resolve_todo, close_todo, supersede_todo")
-        count = f"{len(stale)}+" if more else str(len(stale))
+        if page_full:
+            count = f"at least {len(stale)}"
+        else:
+            count = _count(len(stale), cap, len(stale) > cap)
         return f"Stale TODOs ({count}, open longer than {TODO_STALE_AFTER_DAYS} days):", items
 
-    async def _artifact_questions(self, backend: Any, ns: str | None, cap: int):
+    async def _artifact_questions(self, backend: Any, ns: str | None, cap: int) -> _SectionResult:
         rows = await backend.list_artifact_questions(status="open", namespace=ns, limit=cap + 1)
         if not rows:
             return None
         more = len(rows) > cap
         items = []
         for row in rows[:cap]:
-            owner = row.get("artifact_title") or row.get("artifact_uuid") or "?"
+            title = row.get("artifact_title")
+            artifact_uuid = row.get("artifact_uuid") or "?"
+            owner = f"{_label(title)} (artifact_uuid={artifact_uuid})" if title else (
+                f"artifact_uuid={artifact_uuid}"
+            )
             items.append(
-                f"  question_uuid={row.get('question_uuid') or '?'} on {_label(owner)} - "
+                f"  question_uuid={row.get('question_uuid') or '?'} on {owner} - "
                 f"{_label(row.get('text'))}"
             )
         items.append("  Act with: get_artifact (read the artifact), list_artifact_questions")

@@ -1,3 +1,17 @@
+## 2026-11-04 - One read-only inbox of what is waiting on a decision
+
+New MCP tool `review_inbox` (readonly tier, #437). It lists unresolved conflicts, failed
+enrichments, candidates, stale TODOs and open artifact questions in one call, with the tool that
+acts on each. Plans stuck in a lifecycle state and a start-session inbox line are not included yet.
+
+- `src/menhir/mcp/tools/ops/review_inbox.py`: the tool. One failed or hung read shows as
+  `unavailable (<ExceptionType>)` and the other sections still render.
+- `list_candidates` gains an optional `namespace` at every backend layer. The internal backend
+  dispatch now forces a pinned client's silo onto it, as it already did for the other four reads.
+  Each candidate row now also reports its `namespace`. An unscoped call is unchanged.
+- Agent-tier clients do not get the tool. A production client policy must decide `review_inbox`
+  for every client, or startup refuses the policy.
+
 ## 2026-11-02 - Usability charter and guardrails
 
 Documentation only. Sets who Menhir must work for and the rules that keep new work usable.

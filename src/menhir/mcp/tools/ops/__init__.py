@@ -37,8 +37,8 @@ from .list_enrichment_queue import ListEnrichmentQueueTool
 from .list_todos import ListTodosTool
 from .rate_recall import RateRecallTool
 from .recover_orphans import RecoverOrphansTool
-from .review_inbox import ReviewInboxTool
 from .repair_stale_enrichment import RepairStaleEnrichmentTool
+from .review_inbox import ReviewInboxTool
 from .view_entropy import ViewEntropyTool
 from .watch_enrichment import WatchEnrichmentTool
 

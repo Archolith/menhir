@@ -810,13 +810,16 @@ class RuntimeProviderAdminOpsMixin:
         )
 
     async def list_candidates(
-        self, *, source: str | None = None, limit: int = 100
+        self, *, source: str | None = None, limit: int = 100, namespace: str | None = None
     ) -> list[dict[str, Any]]:
+        # Forwarded only when set, so an unscoped call is the same adapter call it always was.
+        scope = {"namespace": namespace} if namespace else {}
         return _to_jsonable(
             await self._off_loop(
                 self.built.graph_adapter.list_candidates,
                 source=source,
                 limit=limit,
+                **scope,
             )
         )
 

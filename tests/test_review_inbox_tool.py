@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from menhir.core.request_context import bind_request_tier, reset_request_tier
+from menhir.mcp import contracts
 from menhir.mcp.contracts import assert_tool_scopes_declared, validate_tool_metadata
 from menhir.mcp.tools import registered_tools
+from menhir.mcp.tools.ops import review_inbox as review_inbox_module
 from menhir.mcp.tools.ops.review_inbox import ReviewInboxTool, review_inbox
 
 
@@ -41,7 +46,7 @@ def _full_backend() -> MagicMock:
             "members": [{"uuid": "m1", "name": "Uses Postgres"}, {"uuid": "m2", "name": "Uses MySQL"}],
         }],
         failed=[{"uuid": "ep-1", "processing_error": "llm timeout"}],
-        candidates=[{"uuid": "c-1", "label": "Prefers tabs"}],
+        candidates=[{"uuid": "c-1", "label": "Prefers tabs", "namespace": "tenant-a"}],
         todos=[
             {"uuid": "t-1", "content": "old thing", "stale": True, "age_days": 40},
             {"uuid": "t-2", "content": "fresh thing", "stale": False},
@@ -68,13 +73,19 @@ async def test_all_sections_render_with_items_and_acting_tools() -> None:
     assert "Open artifact questions (1):" in out and "question_uuid=q-1" in out and "Plan A" in out
     assert "get_artifact" in out
     assert out.count("Act with:") == 5
-    print(out)
 
 
 @pytest.mark.asyncio
 async def test_empty_inbox() -> None:
     out = await _tool(_backend()).endpoint()
     assert out == "Review inbox (all namespaces)\nNothing is waiting on a decision."
+
+
+@pytest.mark.asyncio
+async def test_empty_scoped_inbox_has_no_candidates_caveat() -> None:
+    out = await _tool(_backend()).endpoint(namespace="tenant-a")
+    assert out.splitlines()[1:] == ["Nothing is waiting on a decision."]
+    assert "not checked" not in out and "not listed" not in out
 
 
 @pytest.mark.asyncio
@@ -92,7 +103,6 @@ async def test_cap_shows_plus_and_truncates() -> None:
     out = await _tool(_backend(candidates=rows)).endpoint(per_category=2)
     assert "Candidates awaiting review (2+):" in out
     assert out.count("uuid=c-") == 2
-    # the fetch asked for one more than the cap
     assert "uuid=c-2" not in out
 
 
@@ -100,10 +110,31 @@ async def test_cap_shows_plus_and_truncates() -> None:
 async def test_fetches_cap_plus_one() -> None:
     backend = _backend()
     await _tool(backend).endpoint(per_category=3)
+    # Each read asks for one more row than the cap, so `N+` can be told from exactly N.
     assert backend.list_conflict_groups.await_args.kwargs["limit"] == 4
     assert backend.list_episode_processing.await_args.kwargs["limit"] == 4
     assert backend.list_candidates.await_args.kwargs["limit"] == 4
     assert backend.list_artifact_questions.await_args.kwargs["limit"] == 4
+
+
+@pytest.mark.asyncio
+async def test_unscoped_candidates_show_their_silo() -> None:
+    rows = [
+        {"uuid": "c-a", "label": "A", "namespace": "tenant-a"},
+        {"uuid": "c-d", "label": "D", "namespace": ""},
+        {"uuid": "c-old", "label": "Old server"},
+    ]
+    out = await _tool(_backend(candidates=rows)).endpoint()
+    assert "uuid=c-a namespace=tenant-a - A" in out
+    assert "uuid=c-d namespace=default - D" in out
+    # A server that predates the column returns no key; do not imply the default silo.
+    assert "uuid=c-old namespace=? - Old server" in out
+
+
+@pytest.mark.asyncio
+async def test_scoped_candidates_omit_the_silo_column() -> None:
+    out = await _tool(_full_backend()).endpoint(namespace="tenant-a")
+    assert "uuid=c-1 - Prefers tabs" in out
 
 
 @pytest.mark.asyncio
@@ -126,47 +157,127 @@ async def test_all_non_stale_todos_means_none() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stale_plus_only_when_page_full() -> None:
-    todos = [{"uuid": f"t-{i}", "content": "x", "stale": True} for i in range(200)]
+async def test_stale_below_a_full_page_uses_the_cap_convention() -> None:
+    todos = [{"uuid": f"t-{i}", "content": "x", "stale": True} for i in range(7)]
+    out = await _tool(_backend(todos=todos)).endpoint(per_category=5)
+    assert "Stale TODOs (5+," in out
+    assert out.count("uuid=t-") == 5
+
+
+@pytest.mark.asyncio
+async def test_stale_on_a_full_page_is_a_lower_bound() -> None:
+    todos = [{"uuid": f"t-{i}", "content": "x", "stale": i < 3} for i in range(200)]
     out = await _tool(_backend(todos=todos)).endpoint(per_category=2)
-    assert "Stale TODOs (200+," in out
+    assert "Stale TODOs (at least 3," in out
     assert out.count("uuid=t-") == 2
 
 
 @pytest.mark.asyncio
-async def test_failing_read_is_isolated_and_leaks_no_message() -> None:
+async def test_full_page_with_nothing_stale_is_unknown_not_none() -> None:
+    """THE FINDING. `list_todos` orders by priority then age and returns one page, so 200 fresh
+    high-priority TODOs can hide every stale low-priority one. That is not "none"."""
+    todos = [{"uuid": f"t-{i}", "content": "x", "stale": False} for i in range(200)]
+    out = await _tool(_backend(todos=todos)).endpoint()
+    assert (
+        "Stale TODOs: unknown (the first 200 open TODOs are not stale; use list_todos)" in out
+    )
+    assert "Stale TODOs: none" not in out
+    assert "Nothing is waiting on a decision." not in out
+
+
+@pytest.mark.asyncio
+async def test_failing_read_is_isolated_and_leaks_no_message(caplog) -> None:
     backend = _full_backend()
     backend.list_conflict_groups = AsyncMock(side_effect=ValueError("secret content here"))
+    caplog.set_level(logging.DEBUG, logger=review_inbox_module.logger.name)
     out = await _tool(backend).endpoint()
     assert "Conflicts: unavailable (ValueError)" in out
     assert "secret content here" not in out
     assert "Failed enrichments (1):" in out
     assert "Open artifact questions (1):" in out
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings and "secret content here" not in warnings[0].getMessage()
+    # The detail is kept for the operator, at debug level only.
+    debug = [r for r in caplog.records if r.levelno == logging.DEBUG and r.exc_info]
+    assert debug
 
 
 @pytest.mark.asyncio
-async def test_namespace_reaches_scoped_reads_and_candidates_are_skipped() -> None:
+async def test_a_hung_read_times_out_alone(monkeypatch) -> None:
+    async def _hang(**_kwargs):
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(review_inbox_module, "_SECTION_TIMEOUT_S", 0.05)
+    backend = _full_backend()
+    backend.list_episode_processing = AsyncMock(side_effect=_hang)
+    out = await _tool(backend).endpoint()
+    assert "Failed enrichments: unavailable (TimeoutError)" in out
+    assert "Conflicts (1):" in out
+    assert "Candidates awaiting review (1):" in out
+    assert "Open artifact questions (1):" in out
+
+
+@pytest.mark.asyncio
+async def test_namespace_reaches_every_read_including_candidates() -> None:
     backend = _full_backend()
     out = await _tool(backend).endpoint(namespace="tenant-a")
-    assert out.splitlines()[0] == "Review inbox (tenant-a)"
+    assert out.splitlines()[0] == (
+        "Review inbox (tenant-a; TODOs and questions in tenant-a+default)"
+    )
     assert backend.list_conflict_groups.await_args.kwargs["namespace"] == "tenant-a"
     assert backend.list_episode_processing.await_args.kwargs["namespace"] == "tenant-a"
+    assert backend.list_candidates.await_args.kwargs["namespace"] == "tenant-a"
     assert backend.list_todos.await_args.kwargs["namespace"] == "tenant-a"
     assert backend.list_artifact_questions.await_args.kwargs["namespace"] == "tenant-a"
-    # list_candidates takes no namespace; a scoped call must not read other silos' candidates.
-    backend.list_candidates.assert_not_awaited()
-    assert "uuid=c-1" not in out
-    assert "not namespace-scoped" in out
+    assert "Candidates awaiting review (1):" in out
 
 
 @pytest.mark.asyncio
-async def test_no_namespace_passes_none_and_reads_candidates() -> None:
+async def test_no_namespace_passes_none_and_omits_it_from_candidates() -> None:
     backend = _backend()
     await _tool(backend).endpoint()
     assert backend.list_todos.await_args.kwargs["namespace"] is None
     assert backend.list_artifact_questions.await_args.kwargs["namespace"] is None
     assert "namespace" not in backend.list_conflict_groups.await_args.kwargs
-    backend.list_candidates.assert_awaited_once()
+    # Omitted, not None: a server that predates the parameter still answers an unscoped call.
+    assert "namespace" not in backend.list_candidates.await_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_whitespace_namespace_is_unscoped_everywhere() -> None:
+    backend = _backend()
+    out = await _tool(backend).endpoint(namespace="   ")
+    assert out.splitlines()[0] == "Review inbox (all namespaces)"
+    assert "namespace" not in backend.list_conflict_groups.await_args.kwargs
+    assert "namespace" not in backend.list_episode_processing.await_args.kwargs
+    assert "namespace" not in backend.list_candidates.await_args.kwargs
+    assert backend.list_todos.await_args.kwargs["namespace"] is None
+    assert backend.list_artifact_questions.await_args.kwargs["namespace"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("passed", [{}, {"namespace": ""}, {"namespace": "tenant-b"}])
+async def test_pinned_caller_through_execute_pins_every_read(monkeypatch, passed) -> None:
+    """The real gate: tier check, then `_apply_pinned_namespace`, then the endpoint. A pinned
+    caller who omits the namespace, blanks it, or names another silo reads only its own."""
+    monkeypatch.setattr(contracts, "get_pinned_namespace", lambda: "tenant-a")
+    backend = _full_backend()
+    monkeypatch.setattr(ReviewInboxTool, "get_backend", lambda self: backend)
+    token = bind_request_tier("readonly")
+    try:
+        out = await ReviewInboxTool().execute(**passed)
+    finally:
+        reset_request_tier(token)
+
+    assert out.splitlines()[0].startswith("Review inbox (tenant-a;")
+    for read in (
+        backend.list_conflict_groups,
+        backend.list_episode_processing,
+        backend.list_candidates,
+        backend.list_todos,
+        backend.list_artifact_questions,
+    ):
+        assert read.await_args.kwargs["namespace"] == "tenant-a", read
 
 
 @pytest.mark.asyncio
@@ -175,6 +286,17 @@ async def test_per_category_is_clamped(requested: int, expected_limit: int) -> N
     backend = _backend()
     await _tool(backend).endpoint(per_category=requested)
     assert backend.list_artifact_questions.await_args.kwargs["limit"] == expected_limit
+
+
+@pytest.mark.asyncio
+async def test_artifact_question_lines_carry_the_artifact_uuid() -> None:
+    questions = [
+        {"question_uuid": "q-1", "text": "Which store?", "artifact_title": "Plan A", "artifact_uuid": "a-1"},
+        {"question_uuid": "q-2", "text": "Untitled?", "artifact_uuid": "a-2"},
+    ]
+    out = await _tool(_backend(questions=questions)).endpoint()
+    assert "question_uuid=q-1 on Plan A (artifact_uuid=a-1) - Which store?" in out
+    assert "question_uuid=q-2 on artifact_uuid=a-2 - Untitled?" in out
 
 
 @pytest.mark.asyncio
