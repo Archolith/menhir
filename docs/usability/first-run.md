@@ -50,7 +50,7 @@ indexed project and, where the client supports them, hooks.
 | Step | Today | Gap |
 |---|---|---|
 | Authenticate | Each client uses its own OAuth identity and the tier its policy grants | |
-| Know what is running | `/readyz` reports the version, commit and a digest of the served instructions and tools; `scripts/release/check_served_metadata.py` compares them with a local checkout | Commit in the MCP `initialize` server info; a release step that runs the check ([#429]) |
+| Know what is running | `/readyz` reports the version, commit and a digest of the served instructions and tools; `scripts/release/check_served_metadata.py` compares them with a local checkout | Commit in the MCP `initialize` server info; a release step that runs the check ([#498]) |
 | Pick up a new release | Clients see new instructions and tools only after reconnecting | Say so in release notes and client docs ([#429]) |
 | Index code the server cannot see | `menhir sync` uploads a sanitized snapshot only when the server has receive mode on, and an accepted upload is staged, not yet written to the graph | Finish remote sync; stop reporting reachable projects as stale ([#104]) |
 
@@ -90,3 +90,4 @@ call in their first sessions.
 [#439]: https://github.com/Archolith/menhir/issues/439
 [#440]: https://github.com/Archolith/menhir/issues/440
 [#441]: https://github.com/Archolith/menhir/issues/441
+[#498]: https://github.com/Archolith/menhir/issues/498
