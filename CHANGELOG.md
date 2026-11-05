@@ -1,3 +1,12 @@
+## 2026-11-05 - Filter recall's source memories by ingest source
+
+For agent-written memories (#168): a caller can ask for just the agent-writer items, ranked among themselves, instead of fetching 50 and filtering client-side.
+
+- `POST /api/recall` takes `source_memory_sources` (1-20 exact `source` strings, stripped and de-duplicated; anything else is 422). The source-memory search keeps only episodes with one of those sources, before `source_memory_limit` is applied. It does not turn the section on: that is still `source_memory_limit` or the deployment default. Without the field, recall is unchanged and the kwarg is not passed down.
+- `domain/recall.py`: `normalize_source_memory_sources`, shared by the request model and the backend runtime, since the internal backend route skips `RecallRequest`. Threaded through `backend_client_ops`, `backend_protocol`, `backend_runtime_data_ops`, `RecallService`, `run_recall`, `_build_source_memories`, `MemoryGraphAdapter` and `MemoryQueryRepository.search_episode_embeddings` (`n.source IN $sources`; an empty sequence matches nothing).
+- Not on the `recall_memories` MCP tool.
+- Tests (new): `tests/test_source_memory_source_filter.py`, including an online test showing the filter applies before LIMIT.
+
 ## 2026-11-04 - `/readyz` shows build details only to callers with a valid token
 
 - The public `/readyz` body keeps its status fields but no longer reports the version, commit or
