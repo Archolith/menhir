@@ -1543,6 +1543,7 @@ class MemoryGraphAdapter:
         self, project_name: str, fingerprint: str, commit: str, repository: str, dirty: bool,
         *, claim: Any, scan_generation: int,
     ) -> bool:
+        from menhir.infrastructure.falkor import FalkorLiteRepository
         from menhir.infrastructure.structure_queries import StructureGraphWriter
         from menhir.infrastructure.structure_write_fence import (
             admit_structure_writer, lock_structure_project, release_structure_writer,
@@ -1550,6 +1551,12 @@ class MemoryGraphAdapter:
 
         handle = admit_structure_writer(self.neo4j, label=project_name, claim=claim)
         try:
+            if isinstance(self.neo4j, FalkorLiteRepository):
+                return StructureGraphWriter(self.neo4j).refresh_indexed_binding(
+                    project_name, fingerprint, commit, repository, dirty,
+                    project_id=claim.project_id, claim=claim, scan_generation=scan_generation,
+                )
+
             def _refresh(tx: Any) -> bool:
                 lock_structure_project(tx, claim, scan_generation=scan_generation)
                 return StructureGraphWriter(tx).refresh_indexed_binding(

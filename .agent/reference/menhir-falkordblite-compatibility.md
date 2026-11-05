@@ -295,7 +295,7 @@ the entire P0 capability/writer matrix.
 | `projection_lifecycle_repository_reads.commit` | Fence, callback writes, Python result validation, receipt/certificate in one transaction | Actual callback rejection counterexamples reproduced. |
 | `memory_graph_adapter.write_project_structure` | Identity/generation lock plus multi-query project publication/pruning | Compound-query candidate passes the full-writer fixtures below; production wiring, scale and broader qualification remain open. |
 | Same module: `write_document` | Identity lock and structural document MERGE together | Production-shaped fused query passes the live checks below; no runtime backend wired. |
-| Same module: `refresh_indexed_binding` | Identity/scan lock and conditional metadata update together | One native MATCH/SET body; fusion not implemented or qualified. |
+| Same module: `refresh_indexed_binding` | Identity/scan lock and conditional metadata update together | Runtime native guarded command implemented; live CAS, refusal, slot cleanup and late-error rollback checks pass (milestone below). |
 | `scripts/backfill_legacy_retention.main` | Revalidate manifest, then apply all reviewed links or none | Operator-only; retains Neo4j requirement. |
 
 Related contract owners include `scalar_projection_materializer.py` (graph reads, Python fold,
@@ -777,6 +777,52 @@ The final native selection passed **36 tests**: that file plus `test_falkor.py` 
 `test_falkor_schema.py`, including shared runtime/readiness and file restart. Scoped
 F811/F821/ASYNC checks and default Ruff on the runtime, shared policy and new tests pass.
 Artifact validation retains the same 19 baseline findings, none on the edited reference.
+
+### Native atomic binding refresh milestone (2026-11-05)
+
+`MemoryGraphAdapter.refresh_indexed_binding` now dispatches one native command after the existing
+writer admission and before its existing finally/release. The command combines the unchanged
+conditional binding update with the shared project-publication guard: bound identity, host, root,
+claim generation and graph-issued scan generation. The Neo4j callback retains the same guard and
+update. This is an explicit operation mapping, with no callback replay or general query compiler.
+
+Native refresh requires a matching target claim and a positive scan token before dispatch. A
+stale guard raises `StaleStructureScan`; a valid guard with an unchanged binding or replaced
+fingerprint returns False. Another identity with the same display name is untouched. Admission
+still enforces the migration freeze. The real raise/lower fence API is exercised; raising a native
+fence binds its UTC instant instead of using Neo4j datetime(). Both registrations are released on success, no-op,
+refusal and failure. Inert admission/publication probes are not business publication state.
+
+Live tests change the claim generation, root, host, identity state or scan generation between
+admission and publication. All are refused without changing bindings. A valid update followed by
+a query-time zero-step range error (dependent on the updated row count) rolls back the binding;
+this exercises execution-time rollback rather than parser rejection. Arbitrary `execute_write`
+callbacks remain refused. Project and document atomic publication, scalar transitions, erasure
+and the other recorded native query gaps remain unqualified. Public enablement stays gated.
+
+Verification covers the changed adapter/writer/guard and neighboring beacon, watcher, identity and
+migration contracts. No full CI or complete backend acceptance was run. Commands from the feature
+worktree (PowerShell; native runs use the disposable Linux container):
+
+```powershell
+.venv/Scripts/python.exe -m pytest -q --tb=short tests/test_beacon_provider.py tests/infrastructure/test_cf257_structure_write_fence.py tests/infrastructure/test_cf257_stale_claim.py tests/infrastructure/test_cf257_detached_write_identity.py tests/test_structure_watcher.py
+# 91 passed
+.venv/Scripts/python.exe -m pytest -q --tb=short tests/infrastructure/test_falkor_pipeline.py -k requires_guard
+# 4 passed, 12 deselected
+docker exec -w /work menhir-109-compat python -m pytest --run-online -q --tb=short tests/infrastructure/test_falkor_pipeline.py -k 'binding_refresh or normal_ingest'
+# 13 passed, 3 deselected
+```
+
+The native selection includes eight live binding cases, the existing queued pipeline and four
+pre-dispatch refusal cases. The actual raise/lower-fence case also passed a targeted rerun after
+adding its native clock (1 passed), and the 11 existing offline fence tests passed again. Existing Neo4j tests `test_unchanged_fingerprint_refresh_rejects_stale_scan`,
+`test_binding_refresh_cannot_update_a_same_name_other_identity` and
+`test_late_scan_and_missing_token_cannot_replace_newer_publication` passed (**3 tests**) in
+`tests/infrastructure/test_gateb_structure_publication_online.py`, through a loopback relay to the
+dedicated disposable Neo4j container. Default Ruff/format checks on the changed tests and scoped
+F811/F821/ASYNC checks on all changed Python owners pass. Artifact validation retains the prior
+baseline findings; the edited reference and roadmap add none. Graph-backed artifact audit remains
+unavailable at its previously failing local endpoint; it was not retried unchanged.
 
 ## Upstream evidence
 

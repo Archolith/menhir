@@ -112,7 +112,10 @@ Concept id: `runtime.stack`
   Episode lease/retry clocks and claim hydration have explicit native mappings. Feature activation,
   correlation merge/veto queries, scalar transitions and remaining query owners are still open.
   Both Redis clients have explicit zero transport retries.
-  Unsupported callback transactions fail before invocation; no query translator is installed.
+  Indexed-binding refresh now fuses the shared identity/scan guard and existing conditional update
+  in one native command, retaining admission/release and Neo4j callback behavior. Project/document
+  atomic publication and the remaining parity work are still open. Arbitrary callback transactions
+  fail before invocation; no query translator is installed.
 - `archolith-graphiti-core==0.31.2.post2` (Archolith soft fork of `getzep/graphiti`,
   baseline `v0.31.2`; it still imports as `graphiti_core`). Menhir policy uses its explicit
   hooks without runtime monkeypatching. Published from fork tag `v0.31.2.post2` at

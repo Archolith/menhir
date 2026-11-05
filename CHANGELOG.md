@@ -1,5 +1,10 @@
 ## 2026-11-05 - Falkor runtime integration (#109)
 
+- Added a native atomic indexed-binding refresh through the existing adapter/writer. The shared
+  identity/scan publication guard and unchanged compare-and-set execute in one command; admission
+  and cleanup remain shared. Live tests cover post-admission claim changes, freeze, stale scans,
+  same-name identity isolation and execution-time rollback. The actual raise/lower migration fence
+  API is covered, with a native UTC freeze instant. Project/document publication remains open.
 - Added controlled-model queued ingestion, Graphiti enrichment and recall on the shared Lite
   runtime. Graphiti group clones retain Menhir's physical graph. Episode clocks/claim hydration,
   source-vector reads, View receipt validation and result provenance have explicit native mappings;

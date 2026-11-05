@@ -316,3 +316,268 @@ def test_native_provenance_entities_facts_and_receipts(native_repo):
     for row in rows.values():
         assert row["turn_evidence_ids"] == ["turn"], rows
     assert queries.fetch_result_provenance(["n", "fact", "receipt"], "tenant-b") == []
+
+
+@pytest.fixture
+def binding_refresh(native_repo):
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+    from menhir.infrastructure.structure_write_fence import IdentityClaim
+
+    claim = IdentityClaim(
+        project_id="project", root_key="root", generation=1, host="host"
+    )
+    native_repo.execute("""
+        CREATE (:ProjectIdentity {project_id:'project', state:'bound', bound_host:'host',
+                                 root_key:'root', claim_generation:1}),
+               (:Entity {uuid:'project-node', structure_project:'example', structure_role:'project',
+                         structure_project_id:'project', scan_fingerprint:'same', indexed_commit:'old'}),
+               (:Entity {uuid:'other-node', structure_project:'example', structure_role:'project',
+                         structure_project_id:'other', scan_fingerprint:'same', indexed_commit:'other'})
+    """)
+    adapter = MemoryGraphAdapter(native_repo)
+    token = adapter.begin_structure_scan(claim)
+    return adapter, claim, token
+
+
+def _binding_rows(repo):
+    return repo.execute(
+        "MATCH (n:Entity) RETURN n.uuid AS uuid, n.indexed_commit AS commit, "
+        "n.indexed_repository AS repository, n.indexed_dirty AS dirty ORDER BY uuid"
+    )
+
+
+def _assert_binding_slots_released(repo):
+    assert repo.execute(
+        "MATCH (p:ProjectIdentity {project_id:'project'}), (f:StructureWriteFence {id:'singleton'}) "
+        "RETURN coalesce(p.active_writers,[]) AS identity_slots, f.writers AS fence_slots"
+    ) == [{"identity_slots": [], "fence_slots": []}]
+
+
+@pytest.mark.online
+def test_native_binding_refresh_cas_and_identity_isolation(
+    native_repo, binding_refresh
+):
+    adapter, claim, token = binding_refresh
+    assert adapter.refresh_indexed_binding(
+        "example",
+        "same",
+        "new",
+        "origin",
+        False,
+        claim=claim,
+        scan_generation=token,
+    )
+    assert not adapter.refresh_indexed_binding(
+        "example",
+        "same",
+        "new",
+        "origin",
+        False,
+        claim=claim,
+        scan_generation=token,
+    )
+    before = _binding_rows(native_repo)
+    assert before == [
+        {"uuid": "other-node", "commit": "other", "repository": None, "dirty": None},
+        {
+            "uuid": "project-node",
+            "commit": "new",
+            "repository": "origin",
+            "dirty": False,
+        },
+    ]
+    assert not adapter.refresh_indexed_binding(
+        "example",
+        "replaced",
+        "stale",
+        "origin",
+        True,
+        claim=claim,
+        scan_generation=token,
+    )
+    assert _binding_rows(native_repo) == before
+    _assert_binding_slots_released(native_repo)
+
+
+@pytest.mark.online
+@pytest.mark.parametrize(
+    "change",
+    [
+        "p.claim_generation=2",
+        "p.root_key='elsewhere'",
+        "p.bound_host='elsewhere'",
+        "p.state='superseded'",
+        "p.structure_scan_generation=2",
+    ],
+)
+def test_native_binding_refresh_revalidates_after_admission(
+    native_repo, binding_refresh, monkeypatch, change
+):
+    from menhir.infrastructure.structure_write_fence import StaleStructureScan
+
+    adapter, claim, token = binding_refresh
+    original = native_repo.execute
+    before = _binding_rows(native_repo)
+
+    def transferred(query, params=None, **kwargs):
+        if "CALL { WITH p" in query:
+            original("MATCH (p:ProjectIdentity {project_id:'project'}) SET " + change)
+        return original(query, params, **kwargs)
+
+    monkeypatch.setattr(native_repo, "execute", transferred)
+    with pytest.raises(StaleStructureScan):
+        adapter.refresh_indexed_binding(
+            "example",
+            "same",
+            "unauthorized",
+            "origin",
+            False,
+            claim=claim,
+            scan_generation=token,
+        )
+    assert _binding_rows(native_repo) == before
+    _assert_binding_slots_released(native_repo)
+
+
+@pytest.mark.online
+def test_native_binding_refresh_freeze_and_scan_order(native_repo, binding_refresh):
+    from menhir.infrastructure.structure_write_fence import (
+        StaleStructureScan,
+        StructureWritesFrozen,
+        fence_status,
+        lower_fence,
+        raise_fence,
+    )
+
+    adapter, claim, old = binding_refresh
+    token = adapter.begin_structure_scan(claim)
+    before = _binding_rows(native_repo)
+    with pytest.raises(StaleStructureScan):
+        adapter.refresh_indexed_binding(
+            "example",
+            "same",
+            "old",
+            "origin",
+            False,
+            claim=claim,
+            scan_generation=old,
+        )
+    with pytest.raises(StaleStructureScan):
+        adapter.refresh_indexed_binding(
+            "example",
+            "same",
+            "invalid",
+            "origin",
+            False,
+            claim=claim,
+            scan_generation=0,
+        )
+    raise_fence(native_repo, reason="binding refresh test")
+    assert fence_status(native_repo)["frozen"]
+    with pytest.raises(StructureWritesFrozen):
+        adapter.refresh_indexed_binding(
+            "example",
+            "same",
+            "frozen",
+            "origin",
+            False,
+            claim=claim,
+            scan_generation=token,
+        )
+    assert _binding_rows(native_repo) == before
+    _assert_binding_slots_released(native_repo)
+
+    lower_fence(native_repo)
+    assert not fence_status(native_repo)["frozen"]
+    assert adapter.refresh_indexed_binding(
+        "example",
+        "same",
+        "unfrozen",
+        "origin",
+        False,
+        claim=claim,
+        scan_generation=token,
+    )
+    _assert_binding_slots_released(native_repo)
+
+
+@pytest.mark.online
+def test_native_binding_refresh_late_failure_rolls_back(
+    native_repo, binding_refresh, monkeypatch
+):
+    from redis.exceptions import ResponseError
+
+    adapter, claim, token = binding_refresh
+    before = _binding_rows(native_repo)
+    original = native_repo.execute
+    dispatched = []
+
+    def fail_after_refresh(query, params=None, **kwargs):
+        if "CALL { WITH p" in query:
+            dispatched.append(query)
+            # The zero step depends on the count returned AFTER SET, rather than a
+            # parse-time or constant-folded error that could precede the mutation.
+            query = (
+                query.removesuffix("RETURN updated")
+                + "WITH updated RETURN range(0,1,updated - 1) AS injected_failure"
+            )
+        return original(query, params, **kwargs)
+
+    monkeypatch.setattr(native_repo, "execute", fail_after_refresh)
+    with pytest.raises(ResponseError, match="(?i)step|increment"):
+        adapter.refresh_indexed_binding(
+            "example",
+            "same",
+            "must-rollback",
+            "origin",
+            True,
+            claim=claim,
+            scan_generation=token,
+        )
+    assert len(dispatched) == 1
+    assert _binding_rows(native_repo) == before
+    _assert_binding_slots_released(native_repo)
+
+
+@pytest.mark.parametrize(
+    "target,has_claim,generation",
+    [
+        ("project", False, 1),
+        ("other", True, 1),
+        ("project", True, None),
+        ("project", True, 0),
+    ],
+)
+def test_native_binding_refresh_requires_guard_before_dispatch(
+    tmp_path, monkeypatch, target, has_claim, generation
+):
+    from menhir.infrastructure.falkor import FalkorLiteRepository
+    from menhir.infrastructure.structure_queries import StructureGraphWriter
+    from menhir.infrastructure.structure_write_fence import (
+        IdentityClaim,
+        StaleStructureScan,
+    )
+
+    repo = FalkorLiteRepository(tmp_path / "never-opened.rdb")
+    claim = (
+        IdentityClaim(project_id="project", root_key="root", generation=1, host="host")
+        if has_claim
+        else None
+    )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("an unguarded native mutation was dispatched")
+
+    monkeypatch.setattr(repo, "execute", forbidden)
+    with pytest.raises(StaleStructureScan):
+        StructureGraphWriter(repo).refresh_indexed_binding(
+            "example",
+            "same",
+            "new",
+            "origin",
+            False,
+            project_id=target,
+            claim=claim,
+            scan_generation=generation,
+        )
+    repo.close()
