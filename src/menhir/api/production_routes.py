@@ -17,7 +17,11 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from menhir import __version__
-from menhir.api.auth import _duplicate_sensitive_headers, authenticate_oauth_bearer
+from menhir.api.auth import (
+    ClientPolicyDenied,
+    _duplicate_sensitive_headers,
+    authenticate_oauth_bearer,
+)
 from menhir.api.oauth import JWKS_REFRESH_STATS, OAuthAuthenticationError
 from menhir.mcp.served_metadata import release_commit, served_mcp_metadata_digest
 
@@ -80,7 +84,7 @@ async def _caller_may_see_build(request: Request) -> bool:
         level = logging.WARNING if exc.error == "server_error" else logging.INFO
         _LOG.log(level, "readyz build block refused: %s", exc.error)
         return False
-    except PermissionError:
+    except ClientPolicyDenied:
         _LOG.info("readyz build block refused: client_policy")
         return False
     except Exception as exc:  # a broken check must not break readiness
