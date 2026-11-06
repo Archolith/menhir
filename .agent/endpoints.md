@@ -457,7 +457,7 @@ Search memories by semantic similarity. Returns ranked results with relevance sc
 - **`file_context`** (str, optional): File path whose structural neighborhood should inject linked semantic candidates.
 - **`file_context_project`** (str, optional): Optional project disambiguation for `file_context`.
 - **`trace`** (bool, optional): Observe-only diagnostics. On the default fused path, records BM25 and cosine ranks without changing returned ordering; failures are warnings, not recall failures.
-- Returns compact JSON with top results, short summaries, a compact score breakdown (`sim`, `adj`, `rec`, `prom`), and explicit `retrieval_score`, `retrieval_score_kind`, and `relevance_basis`. Legacy `relevance` is retained and explicitly labeled unvalidated.
+- Returns compact JSON with top results, short summaries, a compact score breakdown (`sim`, `adj`, `rec`, `prom`), and explicit `retrieval_score`, `retrieval_score_kind`, and `relevance_basis`. Legacy `relevance` is retained for compatibility. It reports rank position, not how well a memory matches the query, and `relevance_basis=rank_score_threshold_not_similarity` says so.
 
 ### `recall_history`
 Concept id: `mcp.tool.recall_history`

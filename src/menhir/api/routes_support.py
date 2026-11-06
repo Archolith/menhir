@@ -243,7 +243,7 @@ class RecallMemory(BaseModel):
     final_score: float
     retrieval_score: float | None = None
     retrieval_score_kind: str = "graphiti_rrf"
-    relevance_basis: str = "legacy_rrf_threshold_unvalidated"
+    relevance_basis: str = "rank_score_threshold_not_similarity"
     # True only for a superseded View surfaced via include_superseded (the "clearly labeled" flag).
     is_superseded_view: bool = False
     # True for the deterministically-injected current scalar_state View: the authoritative CURRENT

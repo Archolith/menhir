@@ -1,3 +1,11 @@
+## 2026-11-06 - Recall's `relevance_basis` says the tier is a rank score
+
+`relevance_basis` changes from `legacy_rrf_threshold_unvalidated` to
+`rank_score_threshold_not_similarity` on MCP and REST recall results. The tier has now been tested:
+at least one `high` result came back for 98.5% of real LongMemEval questions and for 92.5% of null
+questions (unanswerable, or swapped onto an unrelated namespace). The `relevance` key, its values, scores, ranking and the 0.15 floor are
+unchanged. A client matching the old string must update it.
+
 ## 2026-11-04 - `/readyz` shows build details only to callers with a valid token
 
 - The public `/readyz` body keeps its status fields but no longer reports the version, commit or
