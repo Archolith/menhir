@@ -19,8 +19,14 @@ from menhir.domain.todo_location import (
 )
 from menhir.domain.truth.kinds import SOURCE_CONFIDENCE_AGENT
 from menhir.domain.utils import source_confidence_for, symbol_structure_path
+from menhir.infrastructure.falkor import FalkorLiteRepository
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.project_scanner import ProjectScanResult, SymbolEntry
+from menhir.infrastructure.structure_write_fence import (
+    IdentityClaim,
+    StaleStructureScan,
+    _STRUCTURE_PUBLICATION_GUARD_CYPHER,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -547,6 +553,7 @@ class StructureGraphWriter:
         session_id: str,
         user_id: str,
         document_type: str = "generic",
+        claim: IdentityClaim | None = None,
     ) -> None:
         """MERGE a single document Entity node (structure_role='document').
 
@@ -583,6 +590,7 @@ class StructureGraphWriter:
                 "source": "document-ingest",
                 "document_type": document_type,
             },
+            **({"claim": claim} if isinstance(self.neo4j, FalkorLiteRepository) else {}),
         )
 
     def get_project_coverage(self, project_name: str) -> dict[str, Any]:
@@ -798,7 +806,7 @@ class StructureGraphWriter:
 
     def refresh_indexed_binding(
         self, project_name: str, fingerprint: str, commit: str, repository: str, dirty: bool,
-        *, project_id: str,
+        *, project_id: str, claim: IdentityClaim | None = None, scan_generation: int | None = None,
     ) -> bool:
         """Update only the evidence binding when an unchanged scan was skipped.
 
@@ -807,10 +815,10 @@ class StructureGraphWriter:
         Writes nothing when the stored binding already matches, or when a full re-scan replaced
         the fingerprint since the skip decision read it (compare-and-set on the fingerprint, so
         a stale skip can never pair its binding with another scan's content). Returns True when
-        it wrote.
+        it wrote. Native refresh requires the claim and scan token here, so its guard and
+        compare-and-set run as one atomic command instead of an autocommit callback.
         """
-        rows = self.neo4j.execute(
-            """
+        query = """
             MATCH (n:Entity {structure_project: $name, structure_role: 'project'})
             WHERE n.structure_project_id = $project_id
               AND n.scan_fingerprint = $fingerprint
@@ -821,16 +829,35 @@ class StructureGraphWriter:
                 n.indexed_repository = $repository,
                 n.indexed_dirty = $dirty
             RETURN count(n) AS updated
-            """,
-            {
-                "name": project_name,
-                "project_id": project_id,
-                "fingerprint": fingerprint,
-                "commit": commit,
-                "repository": repository,
-                "dirty": dirty,
-            },
-        )
+            """
+        params: dict[str, Any] = {
+            "name": project_name,
+            "project_id": project_id,
+            "fingerprint": fingerprint,
+            "commit": commit,
+            "repository": repository,
+            "dirty": dirty,
+        }
+        native = isinstance(self.neo4j, FalkorLiteRepository)
+        if native:
+            if claim is None or claim.project_id != project_id:
+                raise StaleStructureScan("Native binding refresh requires the target project's identity claim")
+            if scan_generation is None or scan_generation < 1:
+                raise StaleStructureScan("Structure scan generation must be positive")
+            params.update({
+                "host": claim.host, "root_key": claim.root_key,
+                "identity_generation": claim.generation, "scan_generation": scan_generation,
+            })
+            query = (
+                _STRUCTURE_PUBLICATION_GUARD_CYPHER
+                + " CALL { WITH p " + query + " } RETURN updated"
+            )
+        rows = self.neo4j.execute(query, params)
+        if native and not rows:
+            raise StaleStructureScan(
+                f"Refusing stale structure publication for {project_id}: identity or scan "
+                "generation changed. Re-scan before writing."
+            )
         return bool(rows and rows[0].get("updated"))
 
     def _owner_arms(
@@ -2134,7 +2161,11 @@ class StructureGraphWriter:
         now: str,
         extra: dict[str, Any] | None = None,
         structure_project_id: str | None = None,
+        claim: IdentityClaim | None = None,
     ) -> None:
+        native = isinstance(self.neo4j, FalkorLiteRepository)
+        if native and (claim is None or claim.project_id != structure_project_id):
+            raise StaleStructureScan("Native document publication requires the target project's identity claim")
         props = {
             **_ENTITY_DEFAULTS,
             "structure_project": structure_project,
@@ -2151,8 +2182,7 @@ class StructureGraphWriter:
         if extra:
             props.update(extra)
 
-        self.neo4j.execute(
-            """
+        query = """
             MERGE (n:Entity {structure_project: $sp, structure_path: $spath})
             ON CREATE SET n += $props, n.uuid = $uuid
             ON MATCH SET n += $extra, n.content = $content, n.last_accessed = $now,
@@ -2160,20 +2190,31 @@ class StructureGraphWriter:
                          n.structure_project_id = coalesce($spid, n.structure_project_id),
                          n.group_id = coalesce(n.group_id, ''),
                          n.summary = coalesce(n.summary, '')
-            """,
-            {
-                "sp": structure_project,
-                "spath": structure_path,
-                "spid": structure_project_id,
-                "uuid": str(uuid4()),
-                "props": props,
-                "extra": extra or {},
-                "content": content,
-                "now": now,
-                "role": structure_role,
-                "name": name,
-            },
-        )
+            """
+        params = {
+            "sp": structure_project,
+            "spath": structure_path,
+            "spid": structure_project_id,
+            "uuid": str(uuid4()),
+            "props": props,
+            "extra": extra or {},
+            "content": content,
+            "now": now,
+            "role": structure_role,
+            "name": name,
+        }
+        if native:
+            params.update({
+                "project_id": claim.project_id, "host": claim.host, "root_key": claim.root_key,
+                "identity_generation": claim.generation, "scan_generation": None,
+            })
+            query = _STRUCTURE_PUBLICATION_GUARD_CYPHER + " WITH p " + query + " RETURN n.uuid AS uuid"
+        rows = self.neo4j.execute(query, params)
+        if native and not rows:
+            raise StaleStructureScan(
+                f"Refusing stale document publication for {structure_project_id}: identity changed. "
+                "Settle identity before writing."
+            )
 
     def _merge_entities_batch(self, rows: list[dict[str, Any]]) -> int:
         if not rows:
@@ -2288,6 +2329,10 @@ class StructureGraphWriter:
 
         return edges
 
+    @property
+    def _edge_clock_expression(self) -> str:
+        return "datetime()"
+
     def _write_edges_batch(
         self,
         rel_type: str,
@@ -2303,7 +2348,7 @@ class StructureGraphWriter:
             MATCH (a:Entity {{structure_project: $project, structure_path: edge.source_path}})
             MATCH (b:Entity {{structure_project: $project, structure_path: edge.target_path}})
             MERGE (a)-[r:{rel_type}]->(b)
-            ON CREATE SET r.source = 'project-scan', r.created_at = datetime()
+            ON CREATE SET r.source = 'project-scan', r.created_at = {self._edge_clock_expression}
             RETURN count(r) AS cnt
         """
         rows = self.neo4j.execute(query, {"edges": edges, "project": project_name})
@@ -2323,10 +2368,10 @@ class StructureGraphWriter:
         """
         self.neo4j.execute(
             _INFERRED_PROJECT_TARGET_CYPHER
-            + """
-            MATCH (source:Entity {structure_project: $source_name, structure_path: '.', structure_role: 'project'})
+            + f"""
+            MATCH (source:Entity {{structure_project: $source_name, structure_path: '.', structure_role: 'project'}})
             MERGE (source)-[r:CALLS]->(target)
-            ON CREATE SET r.source = 'project-scan', r.mechanism = $mechanism, r.evidence = $evidence, r.created_at = datetime()
+            ON CREATE SET r.source = 'project-scan', r.mechanism = $mechanism, r.evidence = $evidence, r.created_at = {self._edge_clock_expression}
             ON MATCH SET r.mechanism = $mechanism, r.evidence = $evidence
             """,
             {
@@ -2365,10 +2410,10 @@ class StructureGraphWriter:
         """
         self.neo4j.execute(
             _INFERRED_PROJECT_TARGET_CYPHER
-            + """
-            MATCH (source:Entity {structure_project: $source_name, structure_path: '.', structure_role: 'project'})
+            + f"""
+            MATCH (source:Entity {{structure_project: $source_name, structure_path: '.', structure_role: 'project'}})
             MERGE (source)-[r:CONTAINS_REPO]->(target)
-            ON CREATE SET r.source = 'project-scan', r.rel_path = $rel_path, r.created_at = datetime()
+            ON CREATE SET r.source = 'project-scan', r.rel_path = $rel_path, r.created_at = {self._edge_clock_expression}
             ON MATCH SET r.rel_path = $rel_path
             """,
             {

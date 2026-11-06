@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from contextlib import contextmanager
@@ -171,12 +172,22 @@ class Neo4jTransaction:
     """Transaction-scoped execute adapter for atomic multi-repository work."""
 
     _tx: Any = field(repr=False)
+    _timeout_s: float | None = field(default=None, repr=False)
 
     def execute(
         self,
         query: str,
         params: dict[str, Any] | None = None,
+        *,
+        timeout_s: float | None = None,
     ) -> list[dict[str, Any]]:
+        # Explicit transactions accept timeout only at BEGIN, not on individual RUN messages.
+        # A narrower enclosing deadline honors a statement budget; silently ignoring it would not.
+        if timeout_s is not None:
+            if isinstance(timeout_s, bool) or not math.isfinite(timeout_s) or timeout_s <= 0:
+                raise ValueError("statement timeout must be positive and finite")
+            if self._timeout_s is None or self._timeout_s > timeout_s:
+                raise ValueError("statement timeout requires an enclosing transaction with an equal or narrower budget")
         result = self._tx.run(query, **(params or {}))
         return [record.data() for record in result]
 
@@ -400,7 +411,7 @@ class Neo4jRepository:
                 _record_and_backoff(exc, attempt, label="transient error")
         raise last_exc  # type: ignore[misc]
 
-    def execute_write(self, work: Callable[[Neo4jTransaction], _T]) -> _T:
+    def execute_write(self, work: Callable[[Neo4jTransaction], _T], *, timeout_s: float | None = None) -> _T:
         """Run replay-safe graph work in one explicit write transaction.
 
         This deliberately does not use ``session.execute_write``. Managed transaction functions may
@@ -412,9 +423,13 @@ class Neo4jRepository:
         back. ``ServiceUnavailable`` and ``SessionExpired`` are never retried here. The callback must
         contain graph-local work only; all mutations performed through the supplied adapter commit or
         roll back with the lifecycle fence.
+        ``timeout_s`` bounds the whole explicit transaction. Omitting it preserves the existing
+        server-default behavior; callbacks requesting statement budgets must supply a suitable bound.
         """
         if not callable(work):
             raise TypeError("execute_write requires a callable transaction body")
+        if timeout_s is not None and (isinstance(timeout_s, bool) or not math.isfinite(timeout_s) or timeout_s <= 0):
+            raise ValueError("transaction timeout must be positive and finite")
 
         last_exc: Exception | None = None
         for attempt in range(_TRANSIENT_RETRIES):
@@ -426,9 +441,13 @@ class Neo4jRepository:
                 )
             try:
                 with self._get_driver().session(database=self.database) as session:
-                    tx = session.begin_transaction()
+                    tx = (
+                        session.begin_transaction(timeout=timeout_s)
+                        if timeout_s is not None
+                        else session.begin_transaction()
+                    )
                     try:
-                        result = work(Neo4jTransaction(tx))
+                        result = work(Neo4jTransaction(tx, timeout_s))
                         tx.commit()
                         return result
                     except Exception:

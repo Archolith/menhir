@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from menhir.domain.recall import RecallResult, ScalarAuthorityContributor, ScalarAuthorityVerdict
-from menhir.infrastructure.scalar_view_repository import ScalarViewRepositoryMixin
+from menhir.infrastructure.view_repository import ViewRepository
 from menhir.infrastructure.typed_assertion_write_repository import TypedAssertionWriteMixin
 from menhir.services.context_builder import ContextBuilderService
 from menhir.services.occurrence_event_time import occurrence_event_time
@@ -151,7 +151,7 @@ class _Recorder:
 
 
 def test_view_contributor_query_joins_turn_text_without_multiplying_rows():
-    class _Repo(ScalarViewRepositoryMixin):
+    class _Repo(ViewRepository):
         def __init__(self, n):
             self.neo4j = n
 

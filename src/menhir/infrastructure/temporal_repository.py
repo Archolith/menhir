@@ -1,4 +1,4 @@
-"""TemporalRepository — direct Neo4j reads/writes for TEMPORAL :Entity nodes.
+"""TemporalRepository — direct graph reads/writes for TEMPORAL :Entity nodes.
 
 TEMPORAL nodes are :Entity nodes with type='TEMPORAL' and a target_date property.
 They bypass the Graphiti enrichment pipeline and are written directly via Cypher.
@@ -11,16 +11,21 @@ suppressing it from hook output and triggering fast compress.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
+from menhir.infrastructure.falkor import FalkorLiteRepository, encode_instant
+
 
 class TemporalRepository:
-    """Direct Neo4j CRUD for TEMPORAL :Entity nodes."""
+    """TEMPORAL CRUD with typed Neo4j instants or canonical UTC strings on Falkor."""
 
     def __init__(self, neo4j: Any) -> None:
         self.neo4j = neo4j
+
+    def _instant_parameter(self, name: str) -> str:
+        return f"${name}" if isinstance(self.neo4j, FalkorLiteRepository) else f"datetime(${name})"
 
     # ------------------------------------------------------------------
     # Write
@@ -100,12 +105,15 @@ class TemporalRepository:
 
         node_uuid = str(uuid4())
         now = datetime.now(timezone.utc).isoformat()
+        if isinstance(self.neo4j, FalkorLiteRepository):
+            target_date = date.fromisoformat(target_date).isoformat()
+            now = encode_instant(now)
         node_name = (name or content)[:60]
         group_id = namespace_to_group_id(namespace)
         node_namespace = stamped_namespace(namespace)
 
         self.neo4j.execute(
-            """
+            f"""
             // CF-158 criterion 1: MERGE on the uuid, not CREATE. `:Entity.uuid` carries no
             // uniqueness constraint and cannot be given one (graphiti owns a plain index on that
             // property and recreates it every startup), so a re-executed CREATE leaves TWO nodes
@@ -113,7 +121,7 @@ class TemporalRepository:
             // ON CREATE SET, never a bare SET: a match means the node already exists, and
             // overwriting it would reset `status`, `last_accessed` and any later edit back to the
             // values this call was born with.
-            MERGE (n:Entity {uuid: $uuid})
+            MERGE (n:Entity {{uuid: $uuid}})
             ON CREATE SET
                 n.name         = $name,
                 n.summary      = '',
@@ -127,8 +135,8 @@ class TemporalRepository:
                 n.scope        = 'PERSISTENT',
                 n.user_flagged = $user_flagged,
                 n.bootstrap_scope = $bootstrap_scope,
-                n.created_at   = datetime($now),
-                n.last_accessed = datetime($now),
+                n.created_at   = {self._instant_parameter('now')},
+                n.last_accessed = {self._instant_parameter('now')},
                 n.freshness    = 'ACTIVE',
                 n.edge_count   = 0,
                 n.sharpness    = 1.0
@@ -178,10 +186,10 @@ class TemporalRepository:
         """Mark a TEMPORAL node as completed. Returns True if it was open."""
         now = datetime.now(timezone.utc).isoformat()
         rows = self.neo4j.execute(
-            """
-            MATCH (n:Entity {uuid: $uuid, type: 'TEMPORAL'})
+            f"""
+            MATCH (n:Entity {{uuid: $uuid, type: 'TEMPORAL'}})
             WHERE n.status = 'open'
-            SET n.status = 'completed', n.last_accessed = datetime($now)
+            SET n.status = 'completed', n.last_accessed = {self._instant_parameter('now')}
             RETURN count(n) AS updated
             """,
             {"uuid": uuid, "now": now},
@@ -216,14 +224,25 @@ class TemporalRepository:
             if namespace is None
             else "              AND coalesce(n.namespace, 'default') = $namespace\n"
         )
+        date_predicate = (
+            "date(n.target_date) >= date() - duration({days: $window}) "
+            "AND date(n.target_date) <= date() + duration({days: $window})"
+        )
+        params = {"window": safe_window, "namespace": namespace, "limit": safe_limit}
+        if isinstance(self.neo4j, FalkorLiteRepository):
+            today = datetime.now(timezone.utc).date()
+            params.update(
+                window_start=(today - timedelta(days=safe_window)).isoformat(),
+                window_end=(today + timedelta(days=safe_window)).isoformat(),
+            )
+            date_predicate = "n.target_date >= $window_start AND n.target_date <= $window_end"
         return self.neo4j.execute(
             f"""
             MATCH (n:Entity)
             WHERE n.type = 'TEMPORAL'
               AND n.status = 'open'
               AND n.target_date IS NOT NULL
-              AND date(n.target_date) >= date() - duration({{days: $window}})
-              AND date(n.target_date) <= date() + duration({{days: $window}})
+              AND {date_predicate}
 {scope}            RETURN
                 n.uuid        AS uuid,
                 n.name        AS name,
@@ -232,5 +251,5 @@ class TemporalRepository:
                 n.status      AS status
             ORDER BY n.target_date ASC{bound}
             """,
-            {"window": safe_window, "namespace": namespace, "limit": safe_limit},
+            params,
         )

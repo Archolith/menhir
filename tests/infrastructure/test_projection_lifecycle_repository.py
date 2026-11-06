@@ -734,6 +734,56 @@ def test_execute_write_exposes_repository_compatible_transaction_adapter() -> No
     assert driver.session_obj.raw_tx.rolled_back is False
 
 
+class _BoundedSession(_Session):
+    timeout: float | None = None
+
+    def begin_transaction(self, *, timeout: float | None = None) -> _RawTx:
+        self.timeout = timeout
+        return self.raw_tx
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("transaction_timeout", [None, 30.0, 5.0])
+def test_explicit_transaction_honors_statement_budget(transaction_timeout: float | None) -> None:
+    repository = Neo4jRepository(uri="bolt://unused", database="neo4j", user="neo4j", password="unused")
+    driver = _Driver()
+    session = _BoundedSession()
+    driver.session_obj = session
+    repository._driver = driver  # type: ignore[assignment]
+
+    def work(tx: Neo4jTransaction) -> list[dict[str, Any]]:
+        return tx.execute("RETURN $value AS ok", {"value": 1}, timeout_s=20)
+
+    if transaction_timeout == 5:
+        assert repository.execute_write(work, timeout_s=transaction_timeout) == [{"ok": 1}]
+        assert session.raw_tx.calls == [("RETURN $value AS ok", {"value": 1})]
+        assert session.raw_tx.committed
+    else:
+        with pytest.raises(ValueError, match="equal or narrower budget"):
+            repository.execute_write(work, timeout_s=transaction_timeout)
+        assert not session.raw_tx.calls
+        assert session.raw_tx.rolled_back
+        assert not session.raw_tx.committed
+    assert session.timeout == transaction_timeout
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("timeout", [0, -1, True, float("inf"), float("nan")])
+def test_explicit_transaction_rejects_invalid_timeouts(timeout: float) -> None:
+    repository = Neo4jRepository(uri="bolt://unused", database="neo4j", user="neo4j", password="unused")
+    driver = _Driver()
+    repository._driver = driver  # type: ignore[assignment]
+    with pytest.raises(ValueError, match="positive and finite"):
+        repository.execute_write(lambda _tx: pytest.fail("must not start"), timeout_s=timeout)
+    assert not driver.session_obj.raw_tx.calls
+    assert not driver.session_obj.raw_tx.committed
+
+    with pytest.raises(ValueError, match="positive and finite"):
+        repository.execute_write(lambda tx: tx.execute("RETURN 1", timeout_s=timeout))
+    assert not driver.session_obj.raw_tx.calls
+    assert driver.session_obj.raw_tx.rolled_back
+
+
 @pytest.mark.online
 def test_projection_lifecycle_live_publish_dirty_commit_and_freshness(test_neo4j_repo) -> None:
     lifecycle = ProjectionLifecycleRepository(test_neo4j_repo)

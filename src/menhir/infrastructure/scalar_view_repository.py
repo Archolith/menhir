@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
 from menhir.domain.recall_visibility import default_recall_visibility_cypher
+from menhir.infrastructure.falkor import FalkorLiteRepository
 
 try:  # neo4j is a hard runtime dep; guard the import so unit imports without the driver still load.
     from neo4j.exceptions import ConstraintError as _Neo4jConstraintError
@@ -69,11 +70,18 @@ class ScalarViewRepositoryMixin:
         """
         kind = self.KINDS[kind_name]
         label = _label_for(view_class)
-        rows = self.neo4j.execute(
+        native = isinstance(self.neo4j, FalkorLiteRepository)
+        lookup = (
+            "CALL { WITH n OPTIONAL MATCH (e)-[:MENTIONS]->(n) RETURN collect(e) AS view_evidence }"
+            if native else ""
+        )
+        visibility = default_recall_visibility_cypher(
+            "n", incoming_evidence="view_evidence" if native else None
+        )
+        rows = self._execute(
             f"MATCH (n:{label} {{view_kind:$kind}}) WHERE n.view_key=$k AND coalesce(n.view_current, true) "
-            f"RETURN {kind.read_fields}, "
-            f"CASE WHEN {default_recall_visibility_cypher('n')} "
-            "THEN true ELSE false END AS recall_eligible LIMIT 1",
+            f"{lookup} RETURN {kind.read_fields}, "
+            f"CASE WHEN {visibility} THEN true ELSE false END AS recall_eligible LIMIT 1",
             {"k": key, "kind": kind_name},
         )
         if not rows:
@@ -82,6 +90,24 @@ class ScalarViewRepositoryMixin:
         parsed = kind.parse(row)
         parsed["recall_eligible"] = bool(row.get("recall_eligible"))
         return parsed
+
+    @property
+    def _view_evidence_lookup(self) -> str:
+        return (
+            "CALL { WITH n OPTIONAL MATCH (e)-[:MENTIONS]->(n) RETURN collect(e) AS view_evidence }"
+            if isinstance(self.neo4j, FalkorLiteRepository) else ""
+        )
+
+    @property
+    def _view_visibility(self) -> str:
+        return default_recall_visibility_cypher(
+            "n", incoming_evidence="view_evidence" if isinstance(self.neo4j, FalkorLiteRepository) else None
+        )
+
+    @property
+    def _view_visibility_filter(self) -> str:
+        fields = "n, view_evidence" if isinstance(self.neo4j, FalkorLiteRepository) else "n"
+        return self._view_evidence_lookup + " WITH " + fields + " WHERE " + self._view_visibility
 
     # ------------------------------------------------------------------ counter (QuantState) API
 
@@ -145,7 +171,7 @@ class ScalarViewRepositoryMixin:
         """Current kind='scalar_state' Views for one resolved entity (by view_subject_uuid) — the
         rebuild's reconciliation input: it retires any slot not in the freshly-folded desired set."""
         ns_filter = "AND n.group_id = $ns" if namespace is not None else ""
-        rows = self.neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (n:Entity {{view_kind:'scalar_state', view_subject_uuid:$u}})
             WHERE coalesce(n.view_current, true) {ns_filter}
@@ -174,7 +200,7 @@ class ScalarViewRepositoryMixin:
         onto EXISTING :TypedAssertion nodes only (MATCH, never MERGE a node -- never creates a stub).
         Returns the drawn counts per label."""
         anchor_ids = [anchor_id] if anchor_id else []
-        rows = self.neo4j.execute(
+        rows = self._execute(
             """
             MATCH (v:Entity {uuid: $view_uuid})
             OPTIONAL MATCH (v)-[r:CURRENT_ANCHOR|CONTRIBUTED_TO|SUPERSEDED_ANCHOR]->()
@@ -228,19 +254,20 @@ class ScalarViewRepositoryMixin:
         recall pipeline can reject an ineligible projection without hiding it from inspection.
         """
         ns_filter = "AND n.group_id = $ns" if namespace is not None else ""
-        rows = self.neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (n:Entity {{view_kind:'scalar_state', view_subject_uuid:$u,
                               ss_attribute:$attr, ss_kind:$vk}})
             WHERE coalesce(n.view_current, true) {ns_filter}
               AND coalesce(n.ss_scope, '') = $scope AND coalesce(n.ss_unit, '') = $unit
+            {self._view_evidence_lookup}
             RETURN n.uuid AS uuid, n.ss_value AS value,
                    coalesce(n['view_name'], n.name) AS name, n.view_key AS view_key,
                    n.ss_attribute AS attribute, n.view_subject_uuid AS subject_uuid,
                    toString(n.valid_at) AS valid_at, n.scalar_basis AS scalar_basis,
                    n.count_uncertain AS count_uncertain, n.count_actions AS count_actions,
                    n.count_items AS count_items,
-                   CASE WHEN {default_recall_visibility_cypher("n")}
+                   CASE WHEN {self._view_visibility}
                         THEN true ELSE false END AS recall_eligible
             LIMIT 1
             """,
@@ -268,7 +295,7 @@ class ScalarViewRepositoryMixin:
         # below is TOTAL: relation_rank, then valid_at (directional), then `a.assertion_id` as a
         # unique tiebreaker, so a page boundary can never duplicate or skip a row. `total` comes
         # from a separate count() aggregation, not size(all_rows).
-        total_rows = self.neo4j.execute(
+        total_rows = self._execute(
             """
             MATCH (v:Entity {uuid: $view_uuid})
                   -[r:CURRENT_ANCHOR|CONTRIBUTED_TO|SUPERSEDED_ANCHOR]->(a:TypedAssertion)
@@ -280,7 +307,7 @@ class ScalarViewRepositoryMixin:
                     "include_occurrences": bool(include_occurrences)},
         )
         total = int(total_rows[0].get("total") or 0) if total_rows else 0
-        rows = self.neo4j.execute(
+        rows = self._execute(
             """
             MATCH (v:Entity {uuid: $view_uuid})
                   -[r:CURRENT_ANCHOR|CONTRIBUTED_TO|SUPERSEDED_ANCHOR]->(a:TypedAssertion)
@@ -336,7 +363,7 @@ class ScalarViewRepositoryMixin:
         an `agent` extraction with no user admission (e.g. an Episodic fixture, no FOUNDS edge) does NOT.
         Namespace-scoped so a foundation never leaks across tenants. Returns False when the View has no
         CURRENT_ANCHOR (edges undrawn) or no user FOUNDS -- the safe advisory default."""
-        rows = self.neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (v:Entity {{uuid: $view_uuid}})-[:CURRENT_ANCHOR]->(a:TypedAssertion)
             MATCH (te:TurnEvidence {{declarant: 'user'}})-[:FOUNDS]->(a)
@@ -357,7 +384,7 @@ class ScalarViewRepositoryMixin:
         directly off the expiry's contributor assertions. Namespace-scoped; False on empty input."""
         if not assertion_ids:
             return False
-        rows = self.neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (te:TurnEvidence {{declarant: 'user'}})-[:FOUNDS]->(a:TypedAssertion)
             WHERE a.assertion_id IN $ids
@@ -377,13 +404,13 @@ class ScalarViewRepositoryMixin:
         (one human's self tiers, or a single subject) and value kind with valid_at after ``after`` (and at or before ``before`` when given), carrying its
         newest valid_at. The stale-lead check filters these to related slots; superseded and
         unbound rows never count as newer evidence. A full page (len == limit) may be truncated."""
-        rows = self.neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (a:TypedAssertion {{value_kind: $vk}})
             WHERE a.subject_uuid IN $us
               AND NOT coalesce(a.superseded, false) AND NOT coalesce(a.binding_pending, false)
-              AND a.valid_at > datetime($after)
-              AND ($before IS NULL OR a.valid_at <= datetime($before))
+              AND a.valid_at > {self._instant_expression('after')}
+              AND ($before IS NULL OR a.valid_at <= {self._instant_expression('before')})
               AND {tenant_scope_cypher('a')}
             WITH a.attribute AS attribute, max(a.valid_at) AS newest
             RETURN attribute, toString(newest) AS valid_at
@@ -399,12 +426,12 @@ class ScalarViewRepositoryMixin:
         """Expire a current scalar_state View with NO replacement (a slot that vanished or now
         abstains). Retires-in-place (view_current=false, expired_at) — the version is kept for
         audit, not deleted. Returns True if a current version was retired."""
-        rows = self.neo4j.execute(
-            """
-            MATCH (n:Entity {view_kind:'scalar_state', view_key:$k})
+        rows = self._execute(
+            f"""
+            MATCH (n:Entity {{view_kind:'scalar_state', view_key:$k}})
             WHERE coalesce(n.view_current, true)
-            SET n.view_current = false, n.qs_current = false, n.expired_at = datetime(),
-                n.retired = true, n.last_accessed = datetime()
+            SET n.view_current = false, n.qs_current = false, n.expired_at = {self._instant_expression(None)},
+                n.retired = true, n.last_accessed = {self._instant_expression(None)}
             REMOVE n.ss_view_key_current
             RETURN count(n) AS retired
             """,
@@ -430,17 +457,17 @@ class ScalarViewRepositoryMixin:
         "I have 20 coins and 20 cards" -- ambiguous which quantity the counter is). Retires in-place
         (view_current=false, expired_at, retired) keeping the version for audit. Namespace-scoped and
         idempotent (a re-run finds no current counter to retire). Returns the count retired."""
-        rows = self.neo4j.execute(
-            """
-            MATCH (c:Entity {view_kind:'counter', group_id:$ns})
+        rows = self._execute(
+            f"""
+            MATCH (c:Entity {{view_kind:'counter', group_id:$ns}})
             WHERE coalesce(c.view_current, true) AND c.view_value IS NOT NULL
-            MATCH (a:TypedAssertion {namespace:$ns, operation:'absolute'})
+            MATCH (a:TypedAssertion {{namespace:$ns, operation:'absolute'}})
             WHERE NOT coalesce(a.binding_pending, false)
               AND a.value_kind IN ['count', 'money', 'measurement']
               AND a.episode_uuid IN coalesce(c.episode_uuids, [])
               AND a.subject_display = c.view_subject
               AND toFloat(a.value) = toFloat(c.view_value)
-            MATCH (v:Entity {view_kind:'scalar_state', view_subject_uuid: a.subject_uuid, group_id:$ns})
+            MATCH (v:Entity {{view_kind:'scalar_state', view_subject_uuid: a.subject_uuid, group_id:$ns}})
             WHERE coalesce(v.view_current, true)
               AND v.ss_attribute = a.attribute
               AND coalesce(v.ss_scope, '') = coalesce(a.scope, '')
@@ -448,9 +475,9 @@ class ScalarViewRepositoryMixin:
               AND coalesce(v.ss_unit, '') = coalesce(a.unit, '')
             WITH c, collect(DISTINCT v.view_key) AS slots
             WHERE size(slots) = 1
-            SET c.view_current = false, c.qs_current = false, c.expired_at = datetime(),
+            SET c.view_current = false, c.qs_current = false, c.expired_at = {self._instant_expression(None)},
                 c.retired = true, c.retired_reason = 'superseded_by_typed_scalar_slot',
-                c.last_accessed = datetime()
+                c.last_accessed = {self._instant_expression(None)}
             RETURN count(c) AS retired
             """,
             {"ns": namespace},
@@ -521,7 +548,7 @@ class ScalarViewRepositoryMixin:
         Used by the rebuild's reconciliation: retire any history View whose slot is absent
         from the freshly-projected desired set."""
         ns_filter = "AND n.group_id = $ns" if namespace is not None else ""
-        rows = self.neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (n:Entity {{view_kind:'scalar_history', view_subject_uuid:$u}})
             WHERE coalesce(n.view_current, true) {ns_filter}
@@ -541,11 +568,11 @@ class ScalarViewRepositoryMixin:
         Required because delete repair rebuilds history with the flag off as OPERATOR-audience
         Views; test_recall_timeline_history_visibility_live covers that path."""
         ns_filter = "AND n.group_id = $ns" if namespace is not None else ""
-        rows = self.neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (n:Entity {{view_kind:'scalar_history', view_subject_uuid:$u}})
             WHERE coalesce(n.view_current, true) {ns_filter}
-              AND {default_recall_visibility_cypher("n")}
+            {self._view_visibility_filter}
             RETURN n.uuid AS uuid, n.view_key AS view_key, n.ss_attribute AS attribute,
                    n.ss_scope AS scope, n.ss_kind AS value_kind, n.ss_unit AS unit,
                    n.group_id AS namespace
@@ -562,7 +589,7 @@ class ScalarViewRepositoryMixin:
         The advisory history lane may run while scalar-state authority is disabled, so it cannot
         depend on an observation hit or an already-ranked entity to discover eligible slots.
         """
-        rows = self.neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (n:Entity {{view_kind:'scalar_history'}})
             WHERE coalesce(n.view_current, true)
@@ -570,7 +597,7 @@ class ScalarViewRepositoryMixin:
               // silo's group id -- so it must not be coalesced to the NAME 'default'.
               // Matches the convention of the sibling list_scalar_history_views above.
               AND n.group_id = $namespace
-              AND {default_recall_visibility_cypher("n")}
+            {self._view_visibility_filter}
             RETURN n.uuid AS uuid, n.view_subject AS subject,
                    n.view_subject_uuid AS subject_uuid,
                    n.ss_attribute AS attribute, n.ss_scope AS scope,
@@ -586,12 +613,12 @@ class ScalarViewRepositoryMixin:
 
     def retire_scalar_history(self, *, view_key: str) -> bool:
         """Expire a current scalar_history View with NO replacement. Returns True if retired."""
-        rows = self.neo4j.execute(
-            """
-            MATCH (n:Entity {view_kind:'scalar_history', view_key:$k})
+        rows = self._execute(
+            f"""
+            MATCH (n:Entity {{view_kind:'scalar_history', view_key:$k}})
             WHERE coalesce(n.view_current, true)
-            SET n.view_current = false, n.qs_current = false, n.expired_at = datetime(),
-                n.retired = true, n.last_accessed = datetime()
+            SET n.view_current = false, n.qs_current = false, n.expired_at = {self._instant_expression(None)},
+                n.retired = true, n.last_accessed = {self._instant_expression(None)}
             RETURN count(n) AS retired
             """,
             {"k": view_key},
@@ -610,7 +637,7 @@ class ScalarViewRepositoryMixin:
         Returns drawn edge count."""
         if not entries:
             # Clear any existing HISTORY_ENTRY edges.
-            self.neo4j.execute(
+            self._execute(
                 """
                 MATCH (v:Entity {uuid: $view_uuid})-[r:HISTORY_ENTRY]->()
                 DELETE r
@@ -632,7 +659,7 @@ class ScalarViewRepositoryMixin:
             for i, e in enumerate(normalized)
         ]
 
-        rows = self.neo4j.execute(
+        rows = self._execute(
             """
             MATCH (v:Entity {uuid: $view_uuid})
             OPTIONAL MATCH (v)-[r:HISTORY_ENTRY]->()
@@ -662,7 +689,7 @@ class ScalarViewRepositoryMixin:
         # CF-113: push SKIP/LIMIT before collect() so only the page is materialised. `he.ordinal` is
         # unique per View (one HISTORY_ENTRY edge per ordinal), so `ORDER BY he.ordinal ASC` is a
         # TOTAL order within the fixed view_uuid -- a page boundary can never duplicate or skip a row.
-        total_rows = self.neo4j.execute(
+        total_rows = self._execute(
             """
             MATCH (v:Entity {uuid: $view_uuid})
                   -[he:HISTORY_ENTRY]->(a:TypedAssertion)
@@ -674,7 +701,7 @@ class ScalarViewRepositoryMixin:
              "include_occurrences": bool(include_occurrences)},
         )
         total = int(total_rows[0].get("total") or 0) if total_rows else 0
-        rows = self.neo4j.execute(
+        rows = self._execute(
             """
             MATCH (v:Entity {uuid: $view_uuid})
                   -[he:HISTORY_ENTRY]->(a:TypedAssertion)

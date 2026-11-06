@@ -105,6 +105,26 @@ Read the handoff doc before running any of them; they are phases of one experime
 `run_shadow_contrastive_judge_lab.py`. These make real API calls -- check cost before running.
 
 ### Smoke tests
+`falkordblite_compatibility.py` is the opt-in issue #109 storage spike: temporary embedded
+database only, pinned fork, failure injection, search and restart checks. See
+`reference/menhir-falkordblite-compatibility.md` for install pins and the measured no-go result.
+Its helper `falkordblite_projection_proof.py` exercises real Menhir materialization callbacks
+and a single-query definition-publication candidate, including refusal/failure and publisher races.
+It also fuses the actual document writer's MERGE with identity validation, exercising real structure
+admission/release, migration draining, rollback and competing document writers.
+Its full-project compound candidate reuses the actual writer, guards initial mtime inputs and
+asserts completion inside one query using a pure native UDF. It tests full/partial scan parity,
+pruning, rollback and scan generations under a UTC native-clock profile; it is not runtime wiring.
+Run it through the compatibility probe; it is not a runtime backend adapter.
+`falkordblite_prepared_materialization.py` holds the bounded numeric prepared-write contract;
+`falkordblite_prepared_proof.py` exercises it against disposable storage through the same probe.
+It also runs the real assertion read and View-history writer. The source-bound candidate guards
+real provenance/evidence snapshots atomically but still writes synthetic Views; its separate
+string-temporal history diagnostic is not runtime qualification. Its separate `prepare_real_view` /
+`commit_real_view` candidate reuses the actual create/supersede and scalar provenance write bodies
+with real work/receipt labels in one guarded query. It tests late rollback, refusal, replay and
+competing publishers; refresh/retirement and native View temporals remain unqualified.
+
 `smoke/run_all.py` runs every self-serving smoke. Auth/OAuth: `auth_shapes_smoke.py`,
 `oauth_local_smoke.py`, `auth0_live_smoke.py`. Hook Center: `hook_center_live_smoke.py`,
 `hook_center_stale_lane_smoke.py`. Extraction regressions: `suburbs_extraction_live_smoke.py`,

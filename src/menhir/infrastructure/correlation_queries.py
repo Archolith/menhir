@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 from menhir.domain import merge_delta as md
 from menhir.domain.retention import same_tenant_cypher, source_retention_protected_cypher
 from menhir.infrastructure.cypher import non_derived_view_cypher
+from menhir.infrastructure.falkor import FalkorLiteRepository
 from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S
 
 logger = logging.getLogger(__name__)
@@ -152,15 +153,23 @@ class CorrelationRepository:
     #: and absorbing it into an ordinary ``user`` node destroys the deterministic identity after
     #: an otherwise correct extraction. The lower-trust inferred-self node (entity_role
     #: 'inferred_self' / any self_tier) gets the same protection as the anchored self.
-    _INELIGIBLE_ROLE_PREDICATE = (
+    _INELIGIBLE_ROLE_BASE = (
         f"(n.structure_role IS NOT NULL) OR NOT ({non_derived_view_cypher('n')}) OR "
         "coalesce(n.is_self, false) OR "
         "toLower(trim(coalesce(n.entity_role, ''))) = 'self' OR "
         "toLower(trim(coalesce(n.entity_role, ''))) = 'inferred_self' OR "
         "n.self_tier IS NOT NULL OR "
-        r"(n.name =~ '(?i).*([\\/]|\\.(py|md|txt|json|ya?ml|ps1|sh|java|ts|tsx|js|sql|env|toml|"
-        r"cfg|ini|gradle|html|css|png|jpg|svg))(\b|$).*')"
     )
+    _PATH_SHAPED_NAME_PATTERN = '(?i).*([\\\\/]|\\\\.(py|md|txt|json|ya?ml|ps1|sh|java|ts|tsx|js|sql|env|toml|cfg|ini|gradle|html|css|png|jpg|svg))(\\b|$).*'
+    _INELIGIBLE_ROLE_PREDICATE = _INELIGIBLE_ROLE_BASE + f"(n.name =~ '{_PATH_SHAPED_NAME_PATTERN}')"
+
+    @property
+    def _ineligible_role_predicate(self) -> str:
+        if isinstance(self._neo4j, FalkorLiteRepository):
+            return self._INELIGIBLE_ROLE_BASE + (
+                f"(size(string.matchRegEx(n.name, '{self._PATH_SHAPED_NAME_PATTERN}')) > 0)"
+            )
+        return self._INELIGIBLE_ROLE_PREDICATE
 
     def evaluate_merge_eligibility(self, survivor_uuid: str, absorbed_uuid: str) -> "MergeEligibility":
         """Gather both nodes' material state in ONE read and decide eligibility (plan Phase 3).
@@ -175,7 +184,7 @@ class CorrelationRepository:
             f"""
             MATCH (n:Entity) WHERE n.uuid IN [$s, $a]
             RETURN n.uuid AS uuid,
-                   ({self._INELIGIBLE_ROLE_PREDICATE}) AS ineligible_role,
+                   ({self._ineligible_role_predicate}) AS ineligible_role,
                    coalesce(n.namespace, n.group_id, 'default') AS namespace,
                    n.freshness AS freshness,
                    n.scope AS scope,
@@ -1065,7 +1074,7 @@ class CorrelationRepository:
         rows = self._neo4j.execute(
             f"""
             MATCH (n:Entity) WHERE n.uuid IN [$a, $b]
-            WITH n, ({self._INELIGIBLE_ROLE_PREDICATE}) AS ineligible_node
+            WITH n, ({self._ineligible_role_predicate}) AS ineligible_node
             RETURN count(CASE WHEN ineligible_node THEN 1 END) > 0 AS ineligible
             """,
             params={"a": survivor_uuid, "b": absorbed_uuid},

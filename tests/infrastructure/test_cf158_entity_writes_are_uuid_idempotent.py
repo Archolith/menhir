@@ -73,6 +73,8 @@ def test_the_converted_sites_use_on_create_set_not_a_bare_set(relpath: str) -> N
     matches the existing node and then overwrites it, resetting state a later call had changed.
     """
     text = (_SRC / relpath).read_text(encoding="utf-8")
+    # f-string query maps escape braces in source; inspect their emitted spelling too.
+    text = text.replace("{{", "{").replace("}}", "}")
     merges = sum(
         text.count(f"MERGE ({var}:{label} " + "{uuid:")
         for var in ("n", "r")

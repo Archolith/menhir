@@ -53,9 +53,17 @@ class ScalarStateActivationError(RuntimeError):
             f"exact contract match; run an explicit migration or purge_scalar_state_nodes() first."
         )
 
-_RECORD_CYPHER = """
-MERGE (h:TypedAssertionHead {source_key: $source_key})
-  ON CREATE SET h.created_at = datetime(), h.namespace = $namespace,
+def _record_cypher(*, native: bool = False) -> str:
+    now = "$assertion_now" if native else "datetime()"
+    valid_at = "$valid_at" if native else "datetime($valid_at)"
+    learned_at = "$learned_at" if native else "datetime($learned_at)"
+    embedding = (
+        "CASE WHEN $name_embedding IS NULL THEN null ELSE vecf32($name_embedding) END"
+        if native else "$name_embedding"
+    )
+    return f"""
+MERGE (h:TypedAssertionHead {{source_key: $source_key}})
+  ON CREATE SET h.created_at = {now}, h.namespace = $namespace,
                 h.subject_uuid = $subject_uuid, h.claim_key = $claim_key,
                 h.identity_version = $identity_version
 // #170 D1 read marker (scalar lane, ordinal 0): the highest perceiver rank that re-read this turn.
@@ -64,11 +72,11 @@ MERGE (h:TypedAssertionHead {source_key: $source_key})
 WITH h
 FOREACH (_ IN CASE WHEN coalesce($claim_ordinal, 0) = 0 AND coalesce($episode_uuid, '') <> ''
                    THEN [1] ELSE [] END |
-    MERGE (rm:TypedReadMarker {marker_key: 'scalar:' + $episode_uuid})
+    MERGE (rm:TypedReadMarker {{marker_key: 'scalar:' + $episode_uuid}})
       ON CREATE SET rm.rank = -1, rm.turn_id = $episode_uuid
-    SET rm.write_at = datetime())
+    SET rm.write_at = {now})
 WITH h
-OPTIONAL MATCH (rm:TypedReadMarker {marker_key: 'scalar:' + coalesce($episode_uuid, '')})
+OPTIONAL MATCH (rm:TypedReadMarker {{marker_key: 'scalar:' + coalesce($episode_uuid, '')}})
 WITH h, ($evidence_tier <> 'agent' OR coalesce($claim_ordinal, 0) <> 0
          OR $perceiver_rank >= coalesce(rm.rank, -1)) AS read_current
 // already-bound identity-mismatch (ScalarStateView C.4.4) — decided from the head's EXISTING current
@@ -84,9 +92,9 @@ OPTIONAL MATCH (h)-[cr:CURRENT]->(cur:TypedAssertion)
 WITH h, cr, cur, read_current,
      (cur IS NOT NULL AND NOT coalesce(cur.binding_pending, true)
       AND cur.subject_uuid <> $subject_uuid) AS binding_mismatch
-MERGE (a:TypedAssertion {assertion_key: $assertion_key})
+MERGE (a:TypedAssertion {{assertion_key: $assertion_key}})
   ON CREATE SET
-    a.assertion_id = randomUuid(), a.recorded_at = datetime(),
+    a.assertion_id = randomUuid(), a.recorded_at = {now},
     a.identity_version = $identity_version,
     a.claim_key = $claim_key, a.source_key = $source_key,
     a.subject_uuid = $subject_uuid, a.subject_display = $subject_display,
@@ -97,7 +105,7 @@ MERGE (a:TypedAssertion {assertion_key: $assertion_key})
     a.stated_span = $stated_span, a.span_start = $span_start, a.span_end = $span_end,
     a.claim_ordinal = $claim_ordinal,
     a.episode_uuid = $episode_uuid,
-    a.valid_at = datetime($valid_at), a.learned_at = datetime($learned_at),
+    a.valid_at = {valid_at}, a.learned_at = {learned_at},
     a.time_basis = $time_basis,
     a.evidence_tier = $evidence_tier, a.evidence_rank = $evidence_rank,
     a.perceiver_version = $perceiver_version, a.perceiver_rank = $perceiver_rank,
@@ -112,10 +120,10 @@ MERGE (a:TypedAssertion {assertion_key: $assertion_key})
     // G19: a future-dated assertion needs a durable wake-up bit because the ingestion cursor will
     // advance before valid_at arrives. The scheduler atomically converts this into a projection
     // repair receipt when due. Historical/current writes stay false and add no work.
-    a.activation_pending = datetime($valid_at) > datetime(),
+    a.activation_pending = {valid_at} > {now},
     // 4a.1 write-time observation embedding (null when no embedder / embed failed -> backfill fills it).
     // ON CREATE only: a re-perception (ON MATCH) never overwrites an existing/backfilled embedding.
-    a.name_embedding = $name_embedding, a.embed_version = $embed_version,
+    a.name_embedding = {embedding}, a.embed_version = $embed_version,
     a.superseded = true, a._created = true
   ON MATCH SET a._created = false
 MERGE (h)-[:HAS_VERSION]->(a)
@@ -146,7 +154,7 @@ FOREACH (_ IN CASE WHEN (NOT binding_mismatch)
     MERGE (h)-[:CURRENT]->(a))
 // replace + supersede the prior current when out-ranked (will_supersede is already mismatch-gated)
 FOREACH (c IN CASE WHEN will_supersede THEN [cur] ELSE [] END |
-    SET c.superseded = true, c.superseded_by = a.assertion_id, c.expired_at = datetime()
+    SET c.superseded = true, c.superseded_by = a.assertion_id, c.expired_at = {now}
     MERGE (a)-[:SUPERSEDES]->(c)
     DELETE cr)
 WITH h, a, will_supersede, binding_mismatch
@@ -157,9 +165,9 @@ WITH h, a, will_supersede, binding_mismatch
 // randomUuids), so this is INERT for every current Episodic-sourced write (te IS NULL -> identical
 // binding, no FOUNDS edge). A TurnEvidence anchor grounds the assertion AND draws (te)-[:FOUNDS]->(a)
 // so the 10.G basis gate can trace the head to an admitted user statement.
-OPTIONAL MATCH (e:Episodic {uuid: $episode_uuid})
-OPTIONAL MATCH (te:TurnEvidence {turn_id: $episode_uuid})
-OPTIONAL MATCH (n:Entity {uuid: $subject_uuid})
+OPTIONAL MATCH (e:Episodic {{uuid: $episode_uuid}})
+OPTIONAL MATCH (te:TurnEvidence {{turn_id: $episode_uuid}})
+OPTIONAL MATCH (n:Entity {{uuid: $subject_uuid}})
 WITH h, a, will_supersede, binding_mismatch, e, te, n,
      ((e IS NOT NULL OR te IS NOT NULL) AND n IS NOT NULL) AS fully_bound,
      coalesce(a.binding_pending, true) AS was_pending
@@ -201,3 +209,6 @@ RETURN a.assertion_id AS assertion_id, coalesce(a._created, false) AS created,
        will_supersede AS superseded_prior, coalesce(a.binding_pending, false) AS binding_pending,
        binding_mismatch AS binding_mismatch
 """
+
+
+_RECORD_CYPHER = _record_cypher()

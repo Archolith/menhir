@@ -7,6 +7,22 @@ queries centralised for easier reuse and testability.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+
+@dataclass
+class PhaseOneSchemaResult:
+    """Result shape for phase-1 schema bootstrap."""
+
+    success: bool
+    queries_executed: int
+    failures: list[str]
+
+    @property
+    def query_failures(self) -> list[str]:
+        """Compatibility alias for callers that expect a descriptive failure list."""
+        return self.failures
+
 
 # View text limits. These MUST equal the truncation in view_write_repository.py (name[:300],
 # summary[:1000]), which still uses literals; the migration below applies the same limits.
@@ -501,7 +517,7 @@ def _edge_index_queries() -> list[str]:
     return queries
 
 
-def _node_defaults_queries() -> list[str]:
+def _node_defaults_queries(*, now_expression: str = "datetime()") -> list[str]:
     return [
         f"""
         MATCH (n:Entity)
@@ -517,7 +533,7 @@ def _node_defaults_queries() -> list[str]:
             n.user_flagged = coalesce(n.user_flagged, false),
             n.session_id = coalesce(n.session_id, randomUuid()),
             n.user_id = coalesce(n.user_id, 'default'),
-            n.created_at = coalesce(n.created_at, datetime()),
+            n.created_at = coalesce(n.created_at, {now_expression}),
             n.last_accessed = coalesce(n.last_accessed, n.created_at),
             n.sharpness = coalesce(toFloat(n.sharpness), 0.0),
             n.edge_count = coalesce(toInteger(n.edge_count), 0),
@@ -525,7 +541,7 @@ def _node_defaults_queries() -> list[str]:
             n.emotions = coalesce(n.emotions, []),
             n.conflict_created_at = CASE
                 WHEN n.conflict_created_at IS NULL AND n.conflict_group_id IS NOT NULL
-                THEN datetime()
+                THEN {now_expression}
                 ELSE n.conflict_created_at
             END,
             n._menhir_schema_v = {_SCHEMA_V}
@@ -544,7 +560,7 @@ def _node_defaults_queries() -> list[str]:
             n.user_flagged = coalesce(n.user_flagged, false),
             n.session_id = coalesce(n.session_id, randomUuid()),
             n.user_id = coalesce(n.user_id, 'default'),
-            n.created_at = coalesce(n.created_at, datetime()),
+            n.created_at = coalesce(n.created_at, {now_expression}),
             n.last_accessed = coalesce(n.last_accessed, n.created_at),
             n.sharpness = coalesce(toFloat(n.sharpness), 0.0),
             n.edge_count = coalesce(toInteger(n.edge_count), 0),
@@ -579,7 +595,7 @@ def _node_defaults_queries() -> list[str]:
             n.emotions = coalesce(n.emotions, []),
             n.conflict_created_at = CASE
                 WHEN n.conflict_created_at IS NULL AND n.conflict_group_id IS NOT NULL
-                THEN datetime()
+                THEN {now_expression}
                 ELSE n.conflict_created_at
             END,
             n._menhir_schema_v = {_SCHEMA_V}
@@ -592,7 +608,7 @@ def _node_defaults_queries() -> list[str]:
     ]
 
 
-def _edge_defaults_queries() -> list[str]:
+def _edge_defaults_queries(*, now_expression: str = "datetime()") -> list[str]:
     #: DIRECTED, like `increment_edge_weight` and `update_edge_facts` (CF-75, CF-250). A match
     #: whose endpoints are both anonymous yields every relationship twice -- once per assignment
     #: of the two free endpoints -- so this backfill visited each edge twice on every startup.
@@ -607,7 +623,7 @@ def _edge_defaults_queries() -> list[str]:
             MATCH ()-[r:{edge_label}]->()
             WHERE r._menhir_schema_v IS NULL OR r._menhir_schema_v < {_SCHEMA_V}
             SET r.weight = coalesce(toFloat(r.weight), 1.0),
-                r.created_at = coalesce(r.created_at, datetime()),
+                r.created_at = coalesce(r.created_at, {now_expression}),
                 r.last_traversed = coalesce(r.last_traversed, r.created_at),
                 r.source = coalesce(r.source, 'system-derived'),
                 r.scope = coalesce(r.scope, 'PERSISTENT'),

@@ -307,6 +307,7 @@ class GraphitiClient:
         *,
         llm_enabled: bool = True,
         reranker_enabled: bool = True,
+        graph_driver: Any | None = None,
     ) -> "GraphitiClient":
         """Build a Graphiti client from runtime settings with optional degraded collaborators."""
 
@@ -478,12 +479,13 @@ class GraphitiClient:
                 ),
                 client=ResilientChatClient(reranker_client, label="reranker"),
             )
-        graph_driver = Neo4jDriver(
-            uri=settings.neo4j_uri,
-            user=settings.neo4j_user,
-            password=settings.neo4j_password,
-            database=settings.neo4j_database,
-        )
+        if graph_driver is None:
+            graph_driver = Neo4jDriver(
+                uri=settings.neo4j_uri,
+                user=settings.neo4j_user,
+                password=settings.neo4j_password,
+                database=settings.neo4j_database,
+            )
         anchored_time_expiry = bool(settings.anchored_time_resolver_enabled)
         # CF-272: the graphiti fork sends PostHog telemetry per Graphiti() unless this is falsey; set after every .env loader.
         os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")
@@ -552,8 +554,14 @@ class GraphitiClient:
 
 
     async def _count_existing_indices(self) -> int:
-        """Query Neo4j for current index count."""
+        """Count native index records for startup diagnostics, not readiness evidence."""
+        from graphiti_core.driver.driver import GraphProvider
+
         try:
+            if getattr(self.client.driver, "provider", None) == GraphProvider.FALKORDB:
+                result = await self.client.driver.execute_query("CALL db.indexes() YIELD label RETURN count(label) AS cnt")
+                records = result[0] if result else []
+                return int(records[0]["cnt"]) if records else 0
             result = await self.client.driver.execute_query("SHOW INDEXES YIELD name RETURN count(*) AS cnt")
             return result.records[0]["cnt"] if result.records else 0
         except (OSError, RuntimeError, AttributeError) as exc:
