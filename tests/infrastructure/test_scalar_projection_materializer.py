@@ -235,6 +235,11 @@ def test_real_view_episode_bridge_certification_history_and_rollback(test_neo4j_
 
     repo = test_neo4j_repo
     suffix = uuid4().hex
+    # Exercise the same uniqueness contract whether this test runs alone or after activation tests.
+    repo.execute(
+        "CREATE CONSTRAINT typed_assertion_id_unique IF NOT EXISTS "
+        "FOR (a:TypedAssertion) REQUIRE a.assertion_id IS UNIQUE"
+    )
     subject, namespace = "subject-" + suffix, "materializer-" + suffix
     assertion, turn, episode = "assertion-" + suffix, "turn-" + suffix, "episode-" + suffix
     target = scalar_projection_target(
@@ -295,8 +300,11 @@ def test_real_view_episode_bridge_certification_history_and_rollback(test_neo4j_
         repo.execute(
             """
             MATCH (a:TypedAssertion {assertion_id:$id})
-            CREATE (b:TypedAssertion) SET b=properties(a)
-            SET b.assertion_id=$next,b.value=11,b.value_json='11',b.valid_at=datetime('2026-01-02T00:00:00Z')
+            CREATE (b:TypedAssertion {assertion_id:$next,subject_uuid:a.subject_uuid,
+              subject_display:a.subject_display,namespace:a.namespace,attribute:a.attribute,
+              scope:a.scope,value_kind:a.value_kind,unit:a.unit,operation:a.operation,
+              evidence_tier:a.evidence_tier,episode_uuid:a.episode_uuid,learned_at:a.learned_at,
+              value:11,value_json:'11',valid_at:datetime('2026-01-02T00:00:00Z')})
             """,
             {"id": assertion, "next": assertion + "-next"},
         )

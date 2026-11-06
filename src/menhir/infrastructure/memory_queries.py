@@ -37,6 +37,7 @@ from menhir.infrastructure.cypher import (
     memory_recency_cypher,
     non_derived_view_cypher,
     SHADOW_CANDIDATE_FACT_EDGE_FIELDS,
+    view_provenance_live_field,
 )
 from menhir.infrastructure.falkor import FalkorLiteRepository, encode_instant, repair_key_expression
 from menhir.infrastructure.neo4j import Neo4jRepository
@@ -850,8 +851,7 @@ class MemoryQueryRepository:
         params: dict[str, Any] = {"uuids": node_uuids, "belief_commit_key": "belief_commit"}
         if isinstance(self.neo4j, FalkorLiteRepository):
             metadata_fields = tuple(
-                ("CASE WHEN NOT coalesce(n.is_view,false) THEN true ELSE "
-                 + view_live_provenance_cypher("n", incoming_evidence="view_evidence") + " END AS view_provenance_live")
+                view_provenance_live_field(incoming_evidence="view_evidence")
                 if field.endswith(" AS view_provenance_live") else
                 "CASE WHEN n.target_date IS NOT NULL AND n.target_date < $today THEN true ELSE false END AS target_date_passed"
                 if field.endswith(" AS target_date_passed") else field

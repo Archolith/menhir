@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from menhir.infrastructure.scalar_view_repository import ScalarViewRepositoryMixin
+from menhir.infrastructure.view_repository import ViewRepository
 
 
 class _RecordingNeo4j:
@@ -31,7 +31,7 @@ class _RecordingNeo4j:
         return self.default
 
 
-class _Repo(ScalarViewRepositoryMixin):
+class _Repo(ViewRepository):
     def __init__(self, neo4j) -> None:
         self.neo4j = neo4j
 

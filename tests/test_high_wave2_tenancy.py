@@ -98,9 +98,9 @@ def test_cf147_history_view_read_does_not_coalesce_group_id_to_the_name_default(
     """`coalesce(n.group_id, 'default') = $namespace` compares the two value spaces.
     coalesce replaces NULL, not '', so a view written with no namespace (group_id "")
     could never match any namespace name a caller can pass."""
-    from menhir.infrastructure.scalar_view_repository import ScalarViewRepositoryMixin
+    from menhir.infrastructure.view_repository import ViewRepository
 
-    class _Repo(ScalarViewRepositoryMixin):
+    class _Repo(ViewRepository):
         def __init__(self, neo4j: Any) -> None:
             self.neo4j = neo4j
 

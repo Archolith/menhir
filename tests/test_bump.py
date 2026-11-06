@@ -132,6 +132,8 @@ def test_fork_file_table_is_complete() -> None:
     actual = {
         relative: data.count(version) for relative, data in _tracked_text().items()
         if version in data and relative != "uv.lock" and not relative.startswith("CHANGELOG")
+        # This investigation records measured historical pins, not the currently deployed pin.
+        and relative != ".agent/reference/menhir-falkordblite-compatibility.md"
     }
     assert actual == bump.FORK_VERSION_FILES
 

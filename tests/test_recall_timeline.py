@@ -744,9 +744,9 @@ async def test_typed_histories_skip_operator_audience_scalar_views() -> None:
 
 def test_recall_visible_scalar_history_query_applies_visibility() -> None:
     from menhir.domain.recall_visibility import default_recall_visibility_cypher
-    from menhir.infrastructure.scalar_view_repository import ScalarViewRepositoryMixin
+    from menhir.infrastructure.view_repository import ViewRepository
 
-    class _Repo(ScalarViewRepositoryMixin):
+    class _Repo(ViewRepository):
         def __init__(self, neo4j) -> None:
             self.neo4j = neo4j
 

@@ -353,6 +353,15 @@ MEMORY_RETURN_FIELDS = (
 )
 
 # Entity metadata for scoring/recall.
+def view_provenance_live_field(variable: str = "n", *, incoming_evidence: str | None = None) -> str:
+    """One metadata field for both native and Neo4j provenance queries."""
+    return (
+        f"CASE WHEN NOT coalesce({variable}.is_view, false) THEN true "
+        f"ELSE {view_live_provenance_cypher(variable, incoming_evidence=incoming_evidence)} "
+        "END AS view_provenance_live"
+    )
+
+
 ENTITY_METADATA_FIELDS = (
     "n.uuid AS uuid",
     "coalesce(n['view_name'], n.name) AS name",
@@ -395,9 +404,7 @@ ENTITY_METADATA_FIELDS = (
     "coalesce(n.retired, false) AS retired",
     "coalesce(n.is_view, false) AS is_view",
     "n.episode_uuids AS episode_uuids",
-    "CASE WHEN NOT coalesce(n.is_view, false) THEN true "
-    f"ELSE {view_live_provenance_cypher('n')} "
-    "END AS view_provenance_live",
+    view_provenance_live_field(),
     # Structural graph role (directory/file/project) on project-scan nodes; unset (null) on
     # every semantic memory. Recall uses it to drop structural nodes that leak in via BM25 token
     # collisions, mirroring fetch_recent_memories' structural exclusion.

@@ -1,5 +1,8 @@
 ## 2026-11-05 - Falkor runtime integration (#109)
 
+- Reconciled the branch with current main and repaired full-CI query capture/source guards.
+  Centralized the native/Neo4j metadata provenance field, made the certification fixture safe
+  under assertion-ID uniqueness, and retained historical qualification pins in the bump checks.
 - Added the explicitly authorized native `fn1:` scalar repair/reconciliation IDs, preserving
   namespace identity and refusing incompatible existing receipts before activation. Mapped native
   single-memory and namespace erasure while retaining shared retirement/rebuild policy and Neo4j
