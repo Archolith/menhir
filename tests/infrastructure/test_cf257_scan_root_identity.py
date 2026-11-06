@@ -310,8 +310,8 @@ def test_posix_paths_differing_only_in_case_are_different_directories(tmp_path):
 def test_windows_paths_still_compare_case_and_separator_insensitively():
     """The leniency that must survive the fix: one directory spelled two ways in the graph."""
     from menhir.domain.project_identity import _same_path
-    assert _same_path(r"C:\Users\thron\proj", "c:/users/thron/proj")
-    assert _same_path(r"C:\Users\thron\proj\\", "C:/Users/thron/proj")
+    assert _same_path(r"C:\Users\Example\proj", "c:/users/example/proj")
+    assert _same_path(r"C:\Users\Example\proj\\", "C:/Users/Example/proj")
 
 
 @pytest.mark.unit

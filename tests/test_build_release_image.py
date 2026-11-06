@@ -243,6 +243,16 @@ def test_git_commit_rejects_untracked_live_tree_input(tmp_path: Path) -> None:
         MODULE.git_commit(tmp_path)
 
 
+def test_runtime_image_reports_the_release_commit_to_readyz() -> None:
+    """/readyz reads MENHIR_RELEASE_COMMIT; it must come from the RELEASE_COMMIT build arg."""
+    dockerfile = (ROOT / "deploy" / "Dockerfile").read_text(encoding="utf-8")
+    runtime = dockerfile[dockerfile.index(" AS runtime"):]
+    arg_at = runtime.index("ARG RELEASE_COMMIT")
+    env_at = runtime.index("MENHIR_RELEASE_COMMIT=${RELEASE_COMMIT}")
+    assert arg_at < env_at
+    assert "FROM " not in runtime[:env_at]
+
+
 def test_build_command_contains_all_derived_labels(tmp_path: Path) -> None:
     command = MODULE.build_command(
         repo=tmp_path,

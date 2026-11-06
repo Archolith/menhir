@@ -76,6 +76,7 @@ EXPECTED_TOOL_NAMES = frozenset({
     "requeue_conflicts_for_llm_review",
     "resolve_conflict",
     "resume_scheduler",
+    "review_inbox",
     "revoke_client",
     "run_llm_conflict_review",
     "scan_for_conflicts",

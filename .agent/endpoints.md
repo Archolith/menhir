@@ -656,6 +656,28 @@ List design questions recorded on artifacts, in the order their author wrote the
 - Answers "what design questions remain?" and "which plans are blocked?" without reading
   markdown. Each question carries an addressable `question_uuid`.
 
+### `review_inbox`
+Concept id: `mcp.tool.review_inbox`
+
+One read-only view of everything waiting on the owner's decision.
+- **`namespace`** (str, optional): Silo. Empty (or whitespace) spans all, and each candidate
+  line then shows its `namespace=`. A pinned client always gets its own silo, in-process and
+  over the stdio bridge, because `list_candidates` now declares `namespace` too. Scoped TODOs
+  and questions include the shared default silo (the header says `<ns>+default`); conflicts,
+  failed enrichments and candidates are that silo only.
+- **`per_category`** (int, optional): Items per section (default 5, clamped to 1..25).
+- Sections: unresolved conflicts, failed enrichments, candidates, stale open TODOs, open
+  artifact questions. Each has a count, items, and an `Act with:` line. Conflicts, failed
+  enrichments, candidates and questions fetch one more row than the cap, so `N+` means more
+  than `N` exist.
+- Stale TODOs differ: they are filtered from one page of the first 200 open TODOs, ordered by
+  priority then age. Below a full page the count is exact (`N+` past the cap, as above). On a
+  full page stale TODOs can sit beyond it, so the count reads `at least N`, and a page with
+  none stale reads `unknown` and points at `list_todos` rather than claiming `none`.
+- Each section's read is bounded at 20s. A failing or hung section renders
+  `unavailable (<ExceptionType>)` (`TimeoutError` for a hang) and the rest still render.
+- The candidates section opens with a line marking its text as unreviewed and untrusted.
+
 ### `get_artifact_relationships`
 Concept id: `mcp.tool.get_artifact_relationships`
 

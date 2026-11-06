@@ -661,19 +661,19 @@ async def _legacy_operator_warnings(backend: object) -> list[dict[str, Any]]:
     if auth_failure is not None:
         entries.append(
             {"kind": "provider_auth", "subject": auth_failure.kind, "acked": False,
-             "summary": auth_failure.summary(), "legacy": True}
+             "summary": auth_failure.summary()}
         )
     quota_exhaustion = last_provider_quota_exhaustion()
     if quota_exhaustion is not None:
         entries.append(
             {"kind": "provider_billing", "subject": quota_exhaustion.kind, "acked": False,
-             "summary": quota_exhaustion.summary(), "legacy": True}
+             "summary": quota_exhaustion.summary()}
         )
     unrecallable = await _standing_unrecallable_count(backend)
     if unrecallable > 0:
         entries.append(
             {"kind": "failed_episodes", "subject": "global", "acked": False,
-             "count": unrecallable, "summary": "", "legacy": True}
+             "count": unrecallable, "summary": ""}
         )
     return entries
 
@@ -683,16 +683,30 @@ async def _fetch_operator_warnings(backend: object) -> list[dict[str, Any]]:
     warnings = payload.get("warnings") if isinstance(payload, dict) else None
     if not isinstance(warnings, list):
         raise TypeError("get_operator_warnings returned an unexpected payload")
-    return warnings
+    # An older or newer serve may send entries this build cannot read; never index into them.
+    return [w for w in warnings if isinstance(w, dict)]
+
+
+def _caller_visible_warnings(warnings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Tool-side mirror of the backend redaction (#488 F5), for the legacy fallback path."""
+    from menhir.infrastructure.telemetry.operator_warnings_store import (
+        redact_operator_warnings_for_caller,
+    )
+    from menhir.mcp.service_access import get_pinned_namespace, get_request_tier
+
+    return redact_operator_warnings_for_caller(
+        warnings, pinned=bool(get_pinned_namespace()), tier=get_request_tier()
+    )
 
 
 async def _active_operator_warnings(backend: object) -> list[dict[str, Any]]:
-    """All active warnings, acknowledged ones included; legacy fallback on any failure."""
+    """All active warnings the caller may see, acknowledged ones included; legacy on failure."""
     try:
-        return await _fetch_operator_warnings(backend)
+        warnings = await _fetch_operator_warnings(backend)
     except Exception:  # noqa: BLE001 - older serve / fake backend / backend error
         logger.debug("get_operator_warnings unavailable; using legacy warnings", exc_info=True)
-        return await _legacy_operator_warnings(backend)
+        warnings = await _legacy_operator_warnings(backend)
+    return _caller_visible_warnings(warnings)
 
 
 async def _unacked_operator_warnings(backend: object) -> list[dict[str, Any]]:
@@ -705,29 +719,43 @@ async def _unacked_operator_warnings(backend: object) -> list[dict[str, Any]]:
     return [w for w in warnings if not w.get("acked")]
 
 
-def _operator_warning_line(entry: dict[str, Any]) -> str:
-    kind = entry["kind"]
+def _operator_warning_line(entry: Any) -> str | None:
+    """One rendered warning, or None for an entry this build cannot render (never raises)."""
+    if not isinstance(entry, dict):
+        return None
+    kind = entry.get("kind")
+    summary = str(entry.get("summary") or "").strip()
+    if kind in ("provider_auth", "provider_billing") and not summary:
+        return None
     if kind == "provider_auth":
         text = (
-            f"WARNING: {entry['summary']}. New memories are stored but cannot be "
+            f"WARNING: {summary}. New memories are stored but cannot be "
             "enriched or recalled until the provider credential (e.g. OPENAI_API_KEY) is fixed; "
             "failed episodes are retried automatically once a call succeeds."
         )
     elif kind == "provider_billing":
         text = (
-            f"WARNING: {entry['summary']}. Enrichment cannot progress until provider "
+            f"WARNING: {summary}. Enrichment cannot progress until provider "
             "credits are added; stop waiting on queued episodes."
         )
+    elif kind != "failed_episodes":
+        # A kind from a newer serve: its own summary.
+        return f"WARNING: {summary}." if summary else None
     else:
-        unrecallable = int(entry.get("count") or 0)
+        try:
+            unrecallable = int(entry.get("count") or 0)
+        except (TypeError, ValueError):
+            return None
+        if unrecallable <= 0:
+            return None
         text = (
             f"WARNING: {unrecallable} earlier "
             f"{'memory is' if unrecallable == 1 else 'memories are'} FAILED and NOT recallable "
             f"-- the text is stored but has no entities, so recall cannot return it. "
             f"This write may end the same way; check get_enrichment_status(episode_id) if it matters."
         )
-    if not entry.get("legacy"):
-        text += f' An operator can silence it with acknowledge_warning(kind="{kind}").'
+    # No "how to silence this" text: these lines reach models at every tier, and silencing a
+    # warning is the owner's decision, not a next step to suggest to whoever reads it.
     return text
 
 
@@ -741,12 +769,17 @@ async def session_start_operator_warnings(backend: object) -> list[dict[str, Any
     """Unacked warnings for session-start surfaces; empty in benchmark mode so bench output is unchanged."""
     if _benchmark_mode():
         return []
-    return await _unacked_operator_warnings(backend)
+    return _caller_visible_warnings(await _unacked_operator_warnings(backend))
 
 
 async def session_start_warning_lines(backend: object) -> list[str]:
-    """Rendered unacked warning lines for session-start surfaces (empty when none)."""
-    return [_operator_warning_line(w) for w in await session_start_operator_warnings(backend)]
+    """Rendered unacked warning lines for session-start surfaces (empty when none, never raises)."""
+    try:
+        entries = await session_start_operator_warnings(backend)
+        return [line for line in map(_operator_warning_line, entries) if line]
+    except Exception:  # noqa: BLE001 - a warning must never fail a bootstrap read
+        logger.debug("could not render session-start operator warnings", exc_info=True)
+        return []
 
 
 async def _queue_summary(backend: object) -> str:
@@ -785,8 +818,20 @@ async def _queue_summary(backend: object) -> str:
         f"scheduler={scheduler_state}"
     )
 
-    for entry in await _unacked_operator_warnings(backend):
-        summary += "\n" + _operator_warning_line(entry)
+    try:
+        # Benchmark mode keeps the pre-ack text byte for byte: no backend warnings call, so an
+        # ack can never move a bench transcript (#488 F13).
+        entries = (
+            await _legacy_operator_warnings(backend)
+            if _benchmark_mode()
+            else await _unacked_operator_warnings(backend)
+        )
+        lines = [line for line in map(_operator_warning_line, entries) if line]
+    except Exception:  # noqa: BLE001 - post-write cosmetic read; the write is committed
+        logger.debug("could not render operator warnings after durable mutation", exc_info=True)
+        lines = []
+    for line in lines:
+        summary += "\n" + line
     return summary
 
 

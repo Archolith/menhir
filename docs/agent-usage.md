@@ -197,9 +197,19 @@ after it republishes even though the scan fingerprint is unchanged.
 
 ## After a server deploy
 
-- A remote Menhir reports `build.version`, `build.commit`, and `build.mcp_metadata_sha256` on `/readyz`.
-  After a deploy, run `python scripts/release/check_served_metadata.py <base-url>` (add
-  `--expect-commit <sha>`) to confirm the server serves the instructions and tools this package expects.
+- A Menhir started with `MENHIR_STARTUP_SCOPE=production` serves `/readyz`; other startup scopes do not.
+  Anyone can read its status. `build.version`, `build.commit` and `build.mcp_metadata_sha256` appear only
+  for a caller sending a bearer access token the MCP endpoint would accept. The built-in authorization
+  server issues those only through the authorization code and refresh token grants, so use a token from a
+  client's OAuth sign-in.
+- After a deploy, set `MENHIR_READYZ_TOKEN` to such a token and run
+  `python scripts/release/check_served_metadata.py <base-url>` (add `--expect-commit <sha>`) to confirm
+  the server serves the instructions and tools this package expects. The script sends the token only over
+  HTTPS or directly to loopback, never through a proxy in plain text.
+  The script is not in the wheel: run it from a checkout with menhir installed at the version the
+  server should run, since it computes the expected digest locally. If the server runs with snapshot
+  receive mode on, pass the same mode with `--snapshot-mode`. Exit codes: 0 match, 1 a compared field
+  differs, 2 the check could not be made.
 - MCP clients read server instructions and the tool list when they connect, so they pick up changes only
   after reconnecting. `/clear` in Claude Code does not reconnect; restart the session or reconnect the MCP
   server.

@@ -860,11 +860,14 @@ class BackendClientOpsMixin:
         )
 
     async def list_candidates(
-        self, *, source: str | None = None, limit: int = 100
+        self, *, source: str | None = None, limit: int = 100, namespace: str | None = None
     ) -> list[dict[str, Any]]:
-        return await self._request(
-            "list_candidates", {"source": source, "limit": limit}
-        )
+        # `namespace` is sent only when set: a server that predates the parameter still answers
+        # an unscoped call, and a pinned caller gets its silo forced server-side either way.
+        payload: dict[str, Any] = {"source": source, "limit": limit}
+        if namespace:
+            payload["namespace"] = namespace
+        return await self._request("list_candidates", payload)
 
     async def fetch_candidate(self, uuid: str) -> dict[str, Any] | None:
         return await self._request("fetch_candidate", {"uuid": uuid})

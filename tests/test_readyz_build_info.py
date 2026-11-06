@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 import menhir
+from menhir.api import production_routes
 from menhir.api.production_routes import readyz
 from menhir.mcp import served_metadata
 from menhir.mcp.served_metadata import release_commit, served_mcp_metadata_digest
@@ -26,6 +27,24 @@ def _fresh_cache():
     served_metadata._reset_digest_cache()
     yield
     served_metadata._reset_digest_cache()
+
+
+@pytest.fixture(autouse=True)
+def _caller_has_a_token(monkeypatch):
+    """These tests cover the build block's content; test_readyz_build_access covers who sees it."""
+
+    async def _yes(_request) -> bool:
+        return True
+
+    monkeypatch.setattr(production_routes, "_caller_may_see_build", _yes)
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_proxy(monkeypatch):
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
+    monkeypatch.setenv("NO_PROXY", "*")
 
 
 def _request(*, ready: bool = True):

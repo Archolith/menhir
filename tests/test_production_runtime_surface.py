@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from starlette.datastructures import Headers
 
 from menhir.api.client_policy import load_client_policy
 from menhir.access_contract import (
@@ -78,7 +79,7 @@ async def test_readyz_does_not_expose_source_identity_publicly() -> None:
         ),
         oauth_signing_key=object(),
     )
-    response = await readyz(SimpleNamespace(app=SimpleNamespace(state=state)))
+    response = await readyz(SimpleNamespace(headers=Headers(), app=SimpleNamespace(state=state)))
     assert response.status_code == 200
     assert b"instance_id" not in response.body
 

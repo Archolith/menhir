@@ -795,9 +795,13 @@ class MemoryBackend(Protocol):
         ...
 
     async def list_candidates(
-        self, *, source: str | None = None, limit: int = 100
+        self, *, source: str | None = None, limit: int = 100, namespace: str | None = None
     ) -> list[dict[str, Any]]:
-        """Return CANDIDATE nodes for review, newest activity first."""
+        """Return CANDIDATE nodes for review, newest activity first.
+
+        ``namespace`` is opt-in: omitted lists every silo, supplied narrows to that silo. It is
+        declared so the internal backend dispatch can force a pinned client's silo onto it.
+        """
         ...
 
     async def fetch_candidate(self, uuid: str) -> dict[str, Any] | None:

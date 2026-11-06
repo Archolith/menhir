@@ -12,6 +12,7 @@ from menhir.api.mcp_remote import (
     create_mcp_streamable_http_app,
     production_tool_catalog,
 )
+from menhir.api.oauth import OAuthTokenVerifier
 from menhir.config import MemorySettings
 from menhir.infrastructure.logging_config import build_logging_config, configure_logging
 
@@ -61,6 +62,13 @@ def create_app(*, settings: MemorySettings | None = None) -> FastAPI:
     app.state.oauth_refresh_store = prereqs["oauth_refresh_store"]
     app.state.client_policy = prereqs["client_policy"]
     app.state.mutation_fence_active = False
+    # The served MCP instance, so /readyz digests what clients actually get.
+    app.state.mcp_http_instance = mcp_http_instance
+    # One verifier: /readyz and the auth middleware share the JWKS cache and its forced-refresh
+    # limit, so a public route cannot double the refreshes an invalid token can trigger.
+    oauth_config = prereqs["oauth_config"]
+    oauth_verifier = OAuthTokenVerifier(oauth_config) if oauth_config.enabled else None
+    app.state.oauth_verifier = oauth_verifier
 
     register_exception_handlers(app)
     configure_cors(app, settings)
@@ -74,7 +82,8 @@ def create_app(*, settings: MemorySettings | None = None) -> FastAPI:
     wrapped = wrap_server_middlewares(
         app,
         settings=settings,
-        oauth_config=prereqs["oauth_config"],
+        oauth_config=oauth_config,
+        oauth_verifier=oauth_verifier,
         client_token_store=prereqs["client_token_store"],
         client_policy=prereqs["client_policy"],
     )

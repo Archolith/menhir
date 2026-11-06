@@ -311,7 +311,10 @@ def complete_llm_usage_call(
 ) -> None:
     clear_provider_auth_failure()
     clear_provider_quota_exhaustion(handle.kind)
-    _notify_provider_warning("resolve", "provider_auth", None)
+    # Per kind, not every subject: with separate chat and embedding providers, a chat success
+    # says nothing about the embedding credential, and resolving it re-opened the row as a
+    # new incident on the next embedding failure, so an ack could never hold (#488 F3).
+    _notify_provider_warning("resolve", "provider_auth", handle.kind)
     _notify_provider_warning("resolve", "provider_billing", handle.kind)
     try:
         normalized = _normalized_usage(usage if usage is not None else _value(result, "usage"))
