@@ -151,6 +151,8 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
         recall_kwargs["source_memory_limit"] = body.source_memory_limit
     if body.counted_verdict_limit is not None:
         recall_kwargs["counted_verdict_limit"] = body.counted_verdict_limit
+    if body.source_memory_sources is not None:
+        recall_kwargs["source_memory_sources"] = list(body.source_memory_sources)
     try:
         result = await backend.recall(
             body.query,

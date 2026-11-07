@@ -1,3 +1,40 @@
+## 2026-11-02 - One tag publishes the whole release
+
+A `v*` tag now publishes PyPI, the release image, the image's version tag and the GitHub release
+in one run. Nothing is typed in by hand, and a stopped release can be finished by a re-run.
+
+- `.github/workflows/publish-pypi.yml`: calls `release-image.yml`, verifies the attestation with
+  the identity `menhirctl.ps1 upgrade` uses, tags the image `X.Y.Z`, then creates the GitHub
+  release. The test gate is unchanged.
+- `deploy/release_pipeline.py`, `deploy/release-python-base.txt`: derive the release inputs, skip
+  finished stages, and refuse to move an image tag or upload over a different PyPI file set.
+- `scripts/release.py`: wait up to three hours for the longer run.
+- `docs/runbooks/release.md`: the new flow and how to finish a stopped release.
+
+## 2026-11-02 - v0.3.2: retry replies cut off at the output limit
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`,
+  `docs/model-governance.md`, `docs/post-install.md`: version 0.3.2. No dependency changes in this
+  commit.
+- Includes the truncation retry and fork 0.31.2.post2 (#424), the parallel `MENTIONS` retention fix
+  (#422) and the release command error report (#420).
+
+## 2026-11-02 - Retry LLM replies cut off at the output limit; Graphiti fork 0.31.2.post2
+
+A reply cut off at the output token limit could be parsed into a nested fragment, so the retry with
+a higher limit never ran, or the fragment was accepted. The fork now raises `OutputTruncatedError`
+when the provider reports `finish_reason=length`, and Menhir treats that as truncation.
+
+- `infrastructure/graphiti_llm_adapter.py`: `_looks_like_truncation` returns true for
+  `OutputTruncatedError` at any reply length. The retry limits are unchanged: 4096, 8192, 16384,
+  then 16384 with a request for a smaller extraction.
+- `tests/test_graphiti_truncation_retry.py`: real-client tests for the escalation.
+- `pyproject.toml`, `uv.lock`: `archolith-graphiti-core==0.31.2.post2`; pins, docs and release
+  checks updated.
+
+A prose-wrapped reply that is cut off, when the provider does not report `length`, can still parse
+to a fragment.
+
 ## 2026-11-01 - v0.3.1: scalar values checked against their source (#411)
 
 Hotfix on 0.3.0. A wrong value in five scalar kinds could become a current View if 2 of 3 model
