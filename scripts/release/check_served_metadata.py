@@ -15,8 +15,8 @@ Usage:
     python scripts/release/check_served_metadata.py URL --snapshot-mode receive
 
 Exit codes: 0 every compared field matches, 1 a compared field differs, 2 nothing differed but
-a check could not be made (fetch, parse, argument, or local package error, or a server digest
-that is unavailable).
+a check could not be made (fetch, parse, argument, or local package error, a served build field
+that is not plain text, or a server digest that is unavailable).
 """
 
 from __future__ import annotations
@@ -151,6 +151,10 @@ def read_build(body: dict[str, Any], *, token_sent: bool = False) -> dict[str, s
         value = build.get(name)
         if not isinstance(value, str) or not value:
             raise CheckError(f"readyz build.{name} is missing or not a string")
+        # Server text is printed below; refuse anything that could forge a line or break the
+        # encoding, without echoing it (#501).
+        if not _PLAIN_TEXT_RE.fullmatch(value):
+            raise CheckError(f"readyz build.{name} is not plain text; not shown")
         fields[name] = value
     return fields
 
@@ -208,6 +212,9 @@ def main(argv: list[str] | None = None) -> int:
         return _check(args)
     except CheckError as exc:
         print(f"error: {exc}")
+        return EXIT_ERROR
+    except UnicodeError:
+        print("error: output could not be encoded")
         return EXIT_ERROR
 
 

@@ -1,3 +1,19 @@
+## 2026-11-07 - Release gaps: refusals name their control, review_inbox labels, readyz check output
+
+- A refused tool call names the control that refused it: the server's client policy, or
+  `MENHIR_CLIENT_TOOLS`. A bound client policy now decides alone, and an empty one denies every
+  tool in both the invocation gate and `tools/list` (the policy loader already rejects an empty
+  one) (#503).
+- `review_inbox` over the stdio bridge no longer heads an unscoped read "all namespaces": a pin
+  there exists only server-side (#507). Its candidates line says the explorer is not served by
+  production (#504).
+- `scripts/release/check_served_metadata.py` refuses a served build field that is not plain text,
+  with exit 2 and without printing it, and reports an output encoding error as exit 2 (#501).
+- New test pins the auth middleware's 403 `client_policy_denied` response (#508).
+- `docs/usability/README.md`: the usage row is done (#480); the served-metadata row points at #498 (#505).
+- Still open: a denied call returns a text result with `isError=False` (#503). Changing that
+  changes an existing test's assertion, so it waits for a decision.
+
 ## 2026-11-07 - Lock refresh for Python 3.15 wheels
 
 - `uv.lock`: jiter 0.19.0, markupsafe 3.0.4, numpy 2.5.4, pydantic 2.14.3, pydantic-core 2.50.4
@@ -97,23 +113,3 @@ when the provider reports `finish_reason=length`, and Menhir treats that as trun
 
 A prose-wrapped reply that is cut off, when the provider does not report `length`, can still parse
 to a fragment.
-
-## 2026-11-01 - v0.3.1: scalar values checked against their source (#411)
-
-Hotfix on 0.3.0. A wrong value in five scalar kinds could become a current View if 2 of 3 model
-samples agreed on it, because nothing compared it with what the user said.
-
-- `services/typed_scalar_rules.py`: `parse_scalar_row` now drops a duration, frequency, weekday,
-  status or boolean value the source does not state, or that the source negates, hedges or asks
-  about. The clause is read from the source, so a short quote cannot leave a negation out. Status
-  and true booleans are also dropped in the past tense or in a "who" clause. `expire` rows are
-  exempt.
-- `uv.lock`: `joserfc` 1.7.3 -> 1.7.7 (GHSA-jpxq-7h8p-2q76, GHSA-9pg5-8c7x-5hfx).
-- `tests/test_scalar_source_grounding_411.py` (new). `tests/test_boolean_polarity_consistency.py`:
-  three cases asserted `has_passport` from unrelated sentences and now name their own attribute.
-- `docs/personal-memory-readiness.md`, `docs/post-install.md`, `README.md`: what the checks do and
-  do not cover.
-- `pyproject.toml`, `uv.lock`, `sbom.json`, `docs/governance.md`: version 0.3.1.
-
-Values stored before 0.3.1 are not rechecked. The benchmark was not rerun for this hotfix, so the
-Gate E results in #123 describe 0.3.0.

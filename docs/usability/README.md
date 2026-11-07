@@ -90,8 +90,8 @@ A rule that is only written down drifts. Prefer a check in code; fall back to th
 | User-facing changes are checked against this folder | PR template checklist | Enforced by review |
 | Every registered tool belongs to a profile, or is marked internal | Profiles ([#435]) | Not yet |
 | Tool and command names in docs resolve | Docs name check ([#442]) | Not yet |
-| Per-tool, per-client usage is visible | Usage report ([#432]) | Not yet |
-| The served instructions and tool metadata match the release | Release acceptance check ([#429]) | Not yet |
+| Per-tool, per-client usage is visible | `menhir tool-usage` ([#432], [#480]) | Done |
+| The served instructions and tool metadata match the release | `scripts/release/check_served_metadata.py` ([#429]); the remaining gaps are [#498] | Partly |
 
 When a "Not yet" row lands, update this table in the same pull request.
 
@@ -105,3 +105,5 @@ When a "Not yet" row lands, update this table in the same pull request.
 [#436]: https://github.com/Archolith/menhir/issues/436
 [#439]: https://github.com/Archolith/menhir/issues/439
 [#442]: https://github.com/Archolith/menhir/issues/442
+[#480]: https://github.com/Archolith/menhir/pull/480
+[#498]: https://github.com/Archolith/menhir/issues/498

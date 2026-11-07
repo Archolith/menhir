@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable
 
+from menhir.core.backend_client import BackendClient
 from menhir.domain.utils import excerpt
 from menhir.infrastructure.openai_rate_limit import await_with_backoff_aware_timeout
 from menhir.infrastructure.todo_repository import TODO_STALE_AFTER_DAYS
@@ -94,6 +95,10 @@ class ReviewInboxTool(BaseTextTool):
             title = (
                 f"Review inbox ({namespace}; TODOs and questions in {namespace}+default)"
             )
+        elif isinstance(backend, BackendClient):
+            # Over the stdio bridge a namespace pin exists only server-side, where it narrows
+            # every read below; this process cannot see it, so it does not claim "all" (#507).
+            title = "Review inbox (every namespace this client can read)"
         else:
             title = "Review inbox (all namespaces)"
         lines = [title]
@@ -176,8 +181,8 @@ class ReviewInboxTool(BaseTextTool):
             label = _label(row.get("label") or row.get("name") or row.get("content"))
             items.append(f"  uuid={row.get('uuid') or '?'}{silo} - {label}")
         items.append(
-            "  Act with: approval is not available over MCP yet (#431); "
-            "review and approve in the explorer"
+            "  Act with: approval is not available over MCP yet (#431); the explorer can "
+            "approve them, but only on a server that serves it (production does not)"
         )
         return f"Candidates awaiting review ({_count(len(rows), cap, more)}):", items
 

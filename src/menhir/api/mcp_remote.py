@@ -12,6 +12,7 @@ from menhir.mcp import instructions as _instructions_module
 from menhir.mcp.contracts import _tier_allows
 from menhir.mcp.instructions import SERVER_INSTRUCTIONS
 from menhir.mcp.resources import register_memory_resources
+from menhir.core.request_context import get_request_tool_allowlist
 from menhir.mcp.service_access import get_client_tool_allowlist, get_request_tier
 from menhir.mcp.tools import register_all_tools
 
@@ -75,8 +76,10 @@ class TierFilteredFastMCP(FastMCP):
         # fixed set for named clients, independent of tier. Applied first so it
         # composes with the tier filter below: a tool must survive BOTH gates.
         # Empty = unrestricted, so unnamed/unconfigured callers are untouched.
-        allowlist = get_client_tool_allowlist()
-        if allowlist:
+        # A bound client policy filters even when empty (deny-all), matching the invocation gate.
+        policy_allowlist = get_request_tool_allowlist()
+        allowlist = policy_allowlist if policy_allowlist is not None else get_client_tool_allowlist()
+        if allowlist or policy_allowlist is not None:
             tools = [t for t in tools if t.name in allowlist]
         tier = get_request_tier()
         # Empty tier = local stdio trust or no-auth loopback (CT-002): the
