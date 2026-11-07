@@ -189,6 +189,7 @@ These are open, not ruled out. Earlier negative results don't cover them.
   [`../archive/plans/menhir-content-embedding-recall.md`](../archive/plans/menhir-content-embedding-recall.md).
 - Issues and PRs: #168, #171 (ablation and qualification comments), #348, #386, #396, #399, #433,
   #470, #515, #516.
-- Workspace plans, not in this repo: `menhir-recall-real-similarity-test-plan-2026-11-05.md`,
-  `menhir-recall-no-match-signal-plan-2026-11-06.md`, `menhir-graph-value-ablation-plan-2026-11-06.md`.
+- Full test records with their registered rules: [`menhir-recall-real-similarity-test-plan-2026-11-05.md`](menhir-recall-real-similarity-test-plan-2026-11-05.md),
+  [`menhir-recall-no-match-signal-plan-2026-11-06.md`](menhir-recall-no-match-signal-plan-2026-11-06.md),
+  [`menhir-graph-value-ablation-plan-2026-11-06.md`](menhir-graph-value-ablation-plan-2026-11-06.md).
   Each holds the registered rules, and run data sits under `~/.lme-bench/runs/`.
