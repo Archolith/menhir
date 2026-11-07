@@ -186,14 +186,35 @@ def _worker(adapter: Any) -> IngestWorkerMixin:
     return worker
 
 
-async def _wait_for(predicate, timeout_s: float = 3.0) -> bool:
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_s
-    while loop.time() < deadline:
+async def _wait_for(predicate, polls: int = 300) -> bool:
+    """Poll `predicate` for up to `polls` event-loop turns of at least 10 ms each.
+
+    The budget is counted in turns, not wall-clock time, on purpose. The heartbeat loop and the
+    worker write telemetry synchronously on the event loop, and the first write in each test also
+    builds the telemetry schema in a fresh database. A slow disk can hold the loop for seconds
+    there (issue #522). A wall-clock deadline expires during that block, while nothing can run, so
+    the wait fails although the loop was about to touch again. A blocked loop spends no turns here,
+    and a heartbeat that really stops still exhausts the budget.
+    """
+    for _ in range(polls):
         if predicate():
             return True
         await asyncio.sleep(0.01)
     return predicate()
+
+
+async def _finish(awaitable: Any, polls: int = 200) -> Any:
+    """Await `awaitable` under the same turn budget; a hang fails with TimeoutError.
+
+    Replaces asyncio.wait_for here because its timeout is wall-clock (see _wait_for). Re-raises
+    whatever the awaitable raised.
+    """
+    task = asyncio.ensure_future(awaitable)
+    if not await _wait_for(task.done, polls=polls):
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        raise TimeoutError(f"not finished after {polls} event-loop turns")
+    return task.result()
 
 
 @pytest.mark.unit
@@ -209,7 +230,7 @@ async def test_loop_with_claim_instant_passes_lease_and_ceiling(isolated_telemet
 
     assert await _wait_for(lambda: len(adapter.calls) >= 2), "loop never touched twice"
     stop.set()
-    await asyncio.wait_for(task, timeout=2.0)
+    await _finish(task)
 
     args, kwargs = adapter.calls[0]
     assert args == ("ep-6",)
@@ -230,10 +251,7 @@ async def test_loop_stops_by_itself_when_the_fence_is_lost(isolated_telemetry_db
     worker = _worker(adapter)
     stop = asyncio.Event()  # never set: the loop must end on its own
 
-    await asyncio.wait_for(
-        worker._processing_heartbeat_loop("ep-7", stop, claim_started_at=object()),
-        timeout=2.0,
-    )
+    await _finish(worker._processing_heartbeat_loop("ep-7", stop, claim_started_at=object()))
     await asyncio.sleep(0.1)  # a loop that kept going would add calls here
 
     assert len(adapter.calls) == 2
@@ -253,7 +271,7 @@ async def test_legacy_loop_call_uses_the_two_argument_touch_only(isolated_teleme
     assert await _wait_for(lambda: len(adapter.calls) >= 2)
     assert not task.done(), "legacy loop died (renewal kwargs were probably passed)"
     stop.set()
-    await asyncio.wait_for(task, timeout=2.0)
+    await _finish(task)
 
     assert all(call == ("ep-8", "loop-worker") for call in adapter.calls)
 
@@ -315,7 +333,7 @@ async def test_enrichment_past_the_ceiling_fails_with_deadline_exceeded(
     service = _service(adapter, stub_graphiti_client, stub_llm_adapter, max_enrichment_seconds=0.05)
     episode_uuid = _create(adapter, "deadline-1")
 
-    await asyncio.wait_for(service._process_pending_episode(episode_uuid), timeout=3.0)
+    await _finish(service._process_pending_episode(episode_uuid), polls=300)
 
     assert len(seen) == 1
     assert isinstance(seen[0], EnrichmentDeadlineExceeded)
@@ -464,7 +482,7 @@ async def test_loop_survives_a_neo4j_driver_error(renewing: bool, isolated_telem
     assert await _wait_for(lambda: adapter.calls >= 3), "loop did not keep touching after the error"
     assert not task.done(), "loop ended after a single driver error"
     stop.set()
-    await asyncio.wait_for(task, timeout=2.0)  # re-raises if an exception escaped
+    await _finish(task)  # re-raises if an exception escaped
     assert task.exception() is None
 
 
@@ -500,7 +518,7 @@ async def test_worker_passes_the_claimed_start_instant_into_the_heartbeat_loop(
     monkeypatch.setattr(service, "_processing_heartbeat_loop", spy_loop)
     episode_uuid = _create(adapter, "wiring-1")
 
-    await asyncio.wait_for(service._process_pending_episode(episode_uuid), timeout=3.0)
+    await _finish(service._process_pending_episode(episode_uuid), polls=300)
 
     assert len(seen) == 1
     instant = adapter.pending_episode_rows[episode_uuid]["processing_started_at"]

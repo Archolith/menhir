@@ -5,13 +5,13 @@
 **Model:** gpt-5.6-sol
 **Session:** unavailable
 **Status:** PARTIAL
-**Plan / Ticket:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\archive\plans\menhir-deployment-reliability-2026-09-07.md (superseded historical plan)
-**Worktree:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion
+**Plan / Ticket:** <home>\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\archive\plans\menhir-deployment-reliability-2026-09-07.md (superseded historical plan)
+**Worktree:** <home>\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion
 **Branch:** fix/deployment-reliability-20260907
 **Commits:** Menhir 62a536854b69b25611ab70faea8ea080869ee824 through b94cc33, including modular remediation commits 5d212d1, 3f3f619, 3797047, 402745e, and b94cc33; shared operator scripts through cadeb28e; Yawn VPS compatibility fix 585f0ff
 **Verification Scope:** Focused local verification of every changed deployment module and its direct contracts; the complete suite is assigned to required CI on the exact pushed SHA under the revised local-testing policy. Live checks are read-only evidence for the unchanged 0.2.0-13 infrastructure and do not claim the remediated runners are installed.
-**Docs Updated:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\RELEASE_AUTOMATION.md; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\LIVE_VPS_PLAYBOOK.md; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\PRODUCTION.md; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\release.json.example; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\scripts-index.md; C:\Users\thron\IdeaProjects\scripts\README.md
-**Changelog Updated:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\CHANGELOG.md; C:\Users\thron\IdeaProjects\.agent\CHANGELOG.md
+**Docs Updated:** <home>\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\RELEASE_AUTOMATION.md; <home>\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\LIVE_VPS_PLAYBOOK.md; <home>\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\PRODUCTION.md; <home>\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\release.json.example; <home>\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\scripts-index.md; <workspace>\scripts\README.md
+**Changelog Updated:** <home>\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\CHANGELOG.md; <workspace>\.agent\CHANGELOG.md
 
 ---
 
@@ -111,9 +111,9 @@ unrelated history. No new product release was invented merely to exercise a muta
 | `deploy/lib/validate_durable_inventory.py` | Keep the existing inventory validator lint-clean while the release checks exercise it. |
 | `deploy/personal_stage.ps1`, `deploy/personal_stage_vps.py` | Invoke a fixed root-owned staging runner, copy hostile inputs through no-follow descriptors, and prove exact Cloudflared non-interference. |
 | `deploy/ansible/group_vars/all.yml`, `deploy/ansible/roles/menhir_host/**`, `deploy/ansible/tests/test_host_state.py` | Converge trusted transaction directories, retired Caddy writers, and the exact audit service executable. |
-| `C:\Users\thron\IdeaProjects\scripts\deploy-menhir-app-only.ps1` | Fail closed on source classification and pass the approved runner digest into the privileged app transaction. |
-| `C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1` | Execute maintenance only from a revalidated root-owned copy and gate the trusted/installed release runner before cutover. |
-| `C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1` | Install the complete scaffold, including the fixed staging runner, from a trusted root-owned copy. |
+| `<workspace>\scripts\deploy-menhir-app-only.ps1` | Fail closed on source classification and pass the approved runner digest into the privileged app transaction. |
+| `<workspace>\scripts\deploy-menhir.ps1` | Execute maintenance only from a revalidated root-owned copy and gate the trusted/installed release runner before cutover. |
+| `<workspace>\scripts\menhir-scaffold.ps1` | Install the complete scaffold, including the fixed staging runner, from a trusted root-owned copy. |
 | `tests/test_install_bundle_builder.py` | Cover authority/spec binding refusal. |
 | `tests/test_personal_deploy.py` | Cover rehearsal, preflight, legacy refusal, and derived confirmation behavior. |
 | `tests/test_personal_promote.py` | Cover PowerShell preflight promotion gates. |

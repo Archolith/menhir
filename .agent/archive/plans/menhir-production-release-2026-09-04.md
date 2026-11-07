@@ -354,12 +354,12 @@ Exit evidence:
 
 ## Phase 5 — Read-only production preflight and owner gate
 
-Run the fixed read-only preflight through `C:\Users\thron\IdeaProjects\scripts\vps-ssh.ps1`:
+Run the fixed read-only preflight through `<workspace>\scripts\vps-ssh.ps1`:
 
 ```text
-sudo -n /srv/menhir/production/bin/verify-artifacts
-sudo -n /srv/menhir/production/bin/backup-status
-curl -fsS https://memory.ctharvey.me/readyz
+sudo -n <prod-root>/bin/verify-artifacts
+sudo -n <prod-root>/bin/backup-status
+curl -fsS https://<production-host>/readyz
 ```
 
 Also verify:
@@ -406,7 +406,7 @@ After approval:
 4. Use the existing desktop wrapper with the reviewed primary bundle:
 
 ```powershell
-PowerShell -File C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1 `
+PowerShell -File <workspace>\scripts\deploy-menhir.ps1 `
   -BundlePath <reviewed-enforce-install-bundle>
 ```
 
@@ -433,7 +433,7 @@ release ID. This is the only feature-specific production write required by the p
 
 Require:
 
-- normal OAuth identity and allowed-tool behavior through `https://memory.ctharvey.me/mcp-http`;
+- normal OAuth identity and allowed-tool behavior through `https://<production-host>/mcp-http`;
 - successful internal turn-evidence staging, public MCP memory write, internal episode admission,
   and asynchronous projection to `READY`;
 - exactly one deterministic canonical-self node for the namespace;
@@ -550,9 +550,9 @@ separate work item. Its authorities are:
 - [Canonical-self operations runbook](../workflows/canonical-self-migration-runbook.md), especially
   **Remediating existing data**;
 - workspace plan
-  `C:\Users\thron\IdeaProjects\.agent\plans\menhir-canonical-self-remediation-plan.md`;
+  `<workspace>\.agent\plans\menhir-canonical-self-remediation-plan.md`;
 - workspace corrections
-  `C:\Users\thron\IdeaProjects\.agent\plans\menhir-canonical-self-observation-correction-2026-09-04.md`,
+  `<workspace>\.agent\plans\menhir-canonical-self-observation-correction-2026-09-04.md`,
   which supersede the earlier name-, arity-, and grammar-based authority assumptions.
 
 The 2026-09-04 read-only observation found 73 exact-name `user` nodes in the default physical group.

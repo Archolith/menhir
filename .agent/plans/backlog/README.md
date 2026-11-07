@@ -8,7 +8,7 @@ the source document's gate before acting and consult the
 dependency-ordered rung. Reference-only records no longer live here; use the
 [reference library](../../reference/README.md).
 
-This index routes all 16 backlog records exactly once.
+This index routes all 20 backlog records exactly once.
 
 ## Active or proposed
 
@@ -17,6 +17,7 @@ This index routes all 16 backlog records exactly once.
 | [`deferred-verification.md`](deferred-verification.md) | Living checklist of tests and benches owed when the required environment is available. |
 | [`menhir-scion-exploration-2026-10-13.md`](menhir-scion-exploration-2026-10-13.md) | Gated, evidence-first exploration of revision-indexed Git metadata and content-addressed snapshot sync; no VCS replacement or production change authorized. |
 | [`menhir-hyperedge-ready-storage.md`](menhir-hyperedge-ready-storage.md) | Unscheduled hyperedge-ready logical/storage seam. |
+| [`menhir-assistant-writer-server-side-plan-2026-10-26.md`](menhir-assistant-writer-server-side-plan-2026-10-26.md) | Server-side assistant-memory writer (#168 decision 1b). Not started. |
 | [`menhir-rung1-temporal-intent-reconciliation.md`](menhir-rung1-temporal-intent-reconciliation.md) | Wire the temporal-intent classifier and canonical fact filter into recall. |
 | [`menhir-temporal-bulk-ingest.md`](menhir-temporal-bulk-ingest.md) | Temporally correct bulk-ingest optimization. |
 | [`retrieval-recency-split-and-view-injection.md`](retrieval-recency-split-and-view-injection.md) | Recency split, View injection, and lens routing after the receipt gate. |
@@ -31,6 +32,7 @@ This index routes all 16 backlog records exactly once.
 | [`graph-verifiers.md`](graph-verifiers.md) | Core executor, scheduler wiring, seeding, recall/context advisories, register freshness, Warden receipts, offline safety/interaction controls and recorded-conflict guard handoff. | Measured usefulness, combined-profile qualification and optional additional executor kinds. |
 | [`identity-keying-layer-plan.md`](identity-keying-layer-plan.md) | Scalar identity composition and conservative binding. | Generic identity view/union-find and twin-probe merge guard. |
 | [`l3l4-semantic-overlay-sequencing-plan.md`](l3l4-semantic-overlay-sequencing-plan.md) | L4 artifact storage, governance, and read path. | L3 semantic types and proposer/runtime work. |
+| [`menhir-ingest-decision-cost-plan-2026-09-29.md`](menhir-ingest-decision-cost-plan-2026-09-29.md) | Part of Phase 0 through #205. | The rest of Phase 0, then Phases 1-3. Jev stays optional. |
 | [`menhir-temporal-chronostratum-plan.md`](menhir-temporal-chronostratum-plan.md) | Pure-domain temporal rungs and bench evidence. | Gated production graph/recall wiring. |
 | [`perception-law3-bias-coverage-and-crosscheck-independence.md`](perception-law3-bias-coverage-and-crosscheck-independence.md) | Law-3 bias coverage code. | Track W6 live corroboration-independence experiment. |
 | [`retrieval-reachability-receipts-and-bundle-honesty.md`](retrieval-reachability-receipts-and-bundle-honesty.md) | Reachability telemetry, verdict markers, notes, and explicit empty results. | Bench aggregation helper and traced decision run. |
@@ -39,6 +41,8 @@ This index routes all 16 backlog records exactly once.
 
 | Document | Decision |
 |---|---|
+| [`menhir-counted-view-selection-and-extract-rules-plan-2026-10-19.md`](menhir-counted-view-selection-and-extract-rules-plan-2026-10-19.md) | Shelved 2026-10-19; draft PRs #320 and #321 stay unmerged. Restart only if repeated runs or a larger slice show a real effect. |
+| [`menhir-counting-category-rollup-plan-2026-10-19.md`](menhir-counting-category-rollup-plan-2026-10-19.md) | Shelved 2026-10-19 after both prototypes failed their gate. Blocked on the counted-View plan above. |
 | [`menhir-memory-supersession-and-dedup-plan.md`](menhir-memory-supersession-and-dedup-plan.md) | Decide whether generic `SUPERSEDED_BY` memory lineage is still wanted after temporal expiry and judge-gated merge shipped. |
 
 ## Maintenance rule

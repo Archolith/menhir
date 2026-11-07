@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Phase 1 of the proposer/reviewer vocabulary experiment -- live panel across arms A-D.
 
-Plan: `.agent/plans/menhir-proposer-reviewer-vocabulary-experiment-plan.md` (+ Addendum A2/A3).
+Plan: `.agent/archive/plans/menhir-proposer-reviewer-vocabulary-experiment-plan.md` (+ Addendum A2/A3).
 MEASURE ONLY: nothing is persisted to the graph.
 
 ARMS (all at production settings, all on a THREE-call budget so cost is comparable):

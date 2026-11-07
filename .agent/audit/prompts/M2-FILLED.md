@@ -57,7 +57,7 @@ The probe has already been run for you at this commit. Its **verbatim** output:
 AUDITPROBE -- mechanical structural checks
 ==============================================================================
   module    : src/menhir/api
-  repo root : C:\Users\thron\IdeaProjects\projects\archolith\menhir
+  repo root : <menhir>
   package   : menhir  (10 subpackages)
   files     : 24
   plugin    : a2

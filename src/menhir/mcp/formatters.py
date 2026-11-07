@@ -292,7 +292,7 @@ def _compact_scored_item(scored: object, compact: bool = False) -> dict[str, obj
             "value",
             getattr(scored, "retrieval_score_kind", "graphiti_rrf"),
         ),
-        "relevance_basis": "legacy_rrf_threshold_unvalidated",
+        "relevance_basis": "rank_score_threshold_not_similarity",
     }
     # Frontier warden gate: a FLAG label (historical/conflict/uncertain) is decision-relevant,
     # so it is kept even in compact mode. Absent on the old path (None) -> omitted.

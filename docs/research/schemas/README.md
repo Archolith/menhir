@@ -2,6 +2,10 @@
 
 Cluster 3 (structural). Passive data-structure specs for the Layer-3/Layer-4 semantic overlay — the unsequenced GAP. Kept separate from the active `../retrieval/` pipeline because these define shapes, not mechanisms.
 
+## Start here
+
+Both docs are specs with no build sequence yet. Use `layer4-knowledge-artifacts.md` for the generic artifact schema and `cold-start-brief.md` for the task brief.
+
 | Doc | Status | Owns |
 |---|---|---|
 | `layer4-knowledge-artifacts.md` | speculative | The generic L3/L4 knowledge-artifact schema: artifact types, knowledge-promotion lifecycle, review state, evidence-as-first-class, temporal validity, supersession. Program B/D. |

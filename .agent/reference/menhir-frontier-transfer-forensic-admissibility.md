@@ -1,3 +1,8 @@
+---
+artifact_schema: 1
+artifact_type: investigation
+---
+
 # Frontier Transfer Review — Evidence Law & Admissibility -> Menhir
 
 - Date: 2026-07-03

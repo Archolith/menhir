@@ -90,7 +90,7 @@ The CLI hook (`menhir hook run`) bypasses the HTTP backend entirely and talks di
 
 ### Legacy RRF floor (MIN_SIMILARITY_THRESHOLD = 0.15)
 
-Recall filters the default vector lane at raw Graphiti RRF < 0.15 **before scoring**. This is not cosine similarity. Results now expose `retrieval_score_kind` and `relevance_basis=legacy_rrf_threshold_unvalidated` so consumers do not misread the legacy tier as calibrated confidence.
+Recall filters the default vector lane at raw Graphiti RRF < 0.15 **before scoring**. This is not cosine similarity. Results now expose `retrieval_score_kind` and `relevance_basis=rank_score_threshold_not_similarity` so consumers do not misread the legacy tier as calibrated confidence.
 
 - Junk/gibberish queries return zero results instead of "best of bad options"
 - No amount of adjacency, recency, or prominence can override a sub-threshold similarity

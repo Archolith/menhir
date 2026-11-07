@@ -1,3 +1,8 @@
+---
+artifact_schema: 1
+artifact_type: investigation
+---
+
 # Write-time primitive family already hiding in ingest
 
 > **Read this through the Event→Fold→View lens** ([`.agent/architecture.md`](../architecture.md)):

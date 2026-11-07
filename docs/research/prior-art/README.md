@@ -4,6 +4,10 @@ Cluster: external systems, papers, and products compared against Menhir. Purpose
 already exists, what genuinely overlaps, which claims Menhir can no longer make safely, and
 what implementation ideas are worth borrowing — not just summarization.
 
+## Start here
+
+Use the table to find the system closest to your question. Check each comparison's date and pinned revision before citing it, and re-verify unpinned or closed-system claims.
+
 | Doc | Compared against | Status | Owns |
 |---|---|---|---|
 | `memtrace-comparison.md` | [`syncable-dev/memtrace-public`](https://github.com/syncable-dev/memtrace-public) | External comparison note | Strongest direct prior art for structural code memory for AI coding agents. |

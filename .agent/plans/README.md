@@ -26,6 +26,7 @@ This index routes the current execution owners listed below exactly once.
 | [`menhir-namespace-contract-2026-08-09.md`](menhir-namespace-contract-2026-08-09.md) | Namespace enumeration, centralized validation, naming decision, and selective cleanup. |
 | [`menhir-projection-realization-coverage-implementation.md`](menhir-projection-realization-coverage-implementation.md) | Projection parity and realization-observation coverage implementation. |
 | [`menhir-unbounded-graph-writes-2026-08-09.md`](menhir-unbounded-graph-writes-2026-08-09.md) | Bound raw graph-write payload retention rather than only enrichment input. |
+| [`menhir-conflict-similarity-floor-plan-2026-11-05.md`](menhir-conflict-similarity-floor-plan-2026-11-05.md) | Owner-approved similarity floor and belief-shaped fixture for conflict detection; implementation is open PR #392. Replaces Phases 1-2 of the conflict detection signal plan. |
 | [`menhir-view-evidence-lifecycle-2026-08-28.md`](menhir-view-evidence-lifecycle-2026-08-28.md) | Keep current View contributors alive under automatic lifecycle work, invalidate dependent Views on explicit erasure, and exclude stale/internal/orphaned Views from recall. |
 
 ## Partially implemented
@@ -41,6 +42,8 @@ This index routes the current execution owners listed below exactly once.
 | [`menhir-recall-history-plan.md`](menhir-recall-history-plan.md) | `recall_history` drill-down tool, merged (#207); pools later defaulted off (#396) and removed (#399). | None identified; archive candidate (not confirmed here). |
 | [`menhir-recall-timeline-plan.md`](menhir-recall-timeline-plan.md) | `recall_timeline` on-demand time navigation, merged (#213) with follow-ups (e.g. CF-268). | None identified; archive candidate (not confirmed here). |
 | [`menhir-recall-timeline-phaseA-fixes.md`](menhir-recall-timeline-phaseA-fixes.md) | Binding review fixes F1+ for `recall_timeline` phase A (timeline Cypher ordering, `subject` as a thread filter). | Companion to the timeline plan; no separate residual confirmed. Archive with it. |
+| [`menhir-scalar-counting-plan-2026-10-15.md`](menhir-scalar-counting-plan-2026-10-15.md) | Counting units 1, 3, 3a, R, 6 and 4R, all default off. | Unit 5, distinct items and unit 7 (#370); paid A/B per flag (#361, #362). |
+| [`menhir-two-tier-self-identity-plan-2026-10-21.md`](menhir-two-tier-self-identity-plan-2026-10-21.md) | Phases 1-3 and 5 (#355), default off; phase 4 report only. | The journaled fold of approved user forks (#371). |
 | [`typed-recall-packet-prototype.md`](typed-recall-packet-prototype.md) | Scalar/event inspection packet. | Admitted intent-state integration after the Intent State View exists. |
 
 ## Owner decision required

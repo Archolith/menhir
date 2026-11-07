@@ -164,7 +164,7 @@ def test_a_non_loopback_plaintext_backend_is_refused(monkeypatch) -> None:
 
     monkeypatch.delenv("MENHIR_ALLOW_INSECURE_BACKEND_URL", raising=False)
     with pytest.raises(ValueError, match="Refusing a plaintext backend URL"):
-        _require_secure_backend_url("http://192.168.86.56:8090")
+        _require_secure_backend_url("http://192.168.1.50:8090")
 
 
 def test_diagnostics_reports_a_bad_backend_url_instead_of_crashing(monkeypatch) -> None:
@@ -218,9 +218,9 @@ def test_the_override_is_honoured_and_warns(monkeypatch, caplog) -> None:
 
     monkeypatch.setenv("MENHIR_ALLOW_INSECURE_BACKEND_URL", "1")
     with caplog.at_level(logging.WARNING, logger="menhir.mcp.service_access"):
-        url = _require_secure_backend_url("http://192.168.86.56:8090")
+        url = _require_secure_backend_url("http://192.168.1.50:8090")
 
-    assert url == "http://192.168.86.56:8090"
+    assert url == "http://192.168.1.50:8090"
     assert any("plaintext" in r.message for r in caplog.records)
 
 

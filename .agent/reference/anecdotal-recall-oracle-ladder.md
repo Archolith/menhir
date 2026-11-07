@@ -1,3 +1,8 @@
+---
+artifact_schema: 1
+artifact_type: investigation
+---
+
 # Anecdotal-Recall Oracle Ladder
 
 Branch: `claude/menhir-chain-handoff-doc-7iuat2`
