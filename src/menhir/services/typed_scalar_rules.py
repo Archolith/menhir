@@ -1513,7 +1513,7 @@ def parse_scalar_row(
     """Validate ONE raw model row into a grounded proposal, or None with a `drop` reason.
 
     Lifted verbatim out of `extract_typed_scalars_once` so experimental extraction protocols (see
-    .agent/plans/menhir-proposer-reviewer-vocabulary-experiment-plan.md) admit rows through the
+    .agent/archive/plans/menhir-proposer-reviewer-vocabulary-experiment-plan.md) admit rows through the
     IDENTICAL rules -- required fields, canonical attribute, kind-typed value, unique span grounding,
     hedged-value abstention, temporal disposition. A second implementation of these rules would drift
     from this one and silently make experiment arms incomparable to the baseline they are scored

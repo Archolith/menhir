@@ -15,7 +15,7 @@ yawn.* is a Pokemon card market tracking workspace. Related projects include:
 | menhir | Python MCP memory server |
 | yawn.delegate | Python MCP delegate server |
 | yawn.bot | Python Discord bot |
-| yawn.vps | Python MCP VPS management server |
+| the operations repository | Python MCP VPS management server |
 | yawn.scheduler | Python task scheduler |
 
 ## Python Conventions

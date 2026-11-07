@@ -717,15 +717,15 @@ Repair acceptance:
 Phase 5 completion record (2026-08-11):
 
 - Workspace-level operator evidence is recorded in
-  `C:\Users\thron\IdeaProjects\.agent\handoffs\HANDOFF-2026-08-11-menhir-artifact-reconciliation-phase5.md`
+  `<workspace>\.agent\handoffs\HANDOFF-2026-08-11-menhir-artifact-reconciliation-phase5.md`
   and
-  `C:\Users\thron\IdeaProjects\.agent\handoffs\MENHIR-PHASE5-LIFECYCLE-CONTRADICTIONS-2026-08-11.md`.
+  `<workspace>\.agent\handoffs\MENHIR-PHASE5-LIFECYCLE-CONTRADICTIONS-2026-08-11.md`.
 - Canonical `main` was fast-forwarded to `338b1cb8dc25f9134ccd015edbe6aa0d4563a1cd`
   without a branch switch. The unrelated untracked
   `.agent/plans/menhir-post-install-and-agent-defaults-plan.md` was preserved, and repository-local
   Git config was set to `menhir.artifactRepository=menhir`.
 - Menhir and its watchdog were paused for Neo4j dumps. The pre-repair dump is
-  `/home/ctharvey/menhir-neo4j/backups/phase5-20260811T211356Z`; SHA-256 values are
+  `<server-home>/menhir-neo4j/backups/phase5-20260811T211356Z`; SHA-256 values are
   `44f135b570aa27ca70a9617387bc1af022a0995e651e52822ccb7fb33d339df8` for `neo4j.dump`
   and `a7edf7885688b785d85ab5dfdc9d9110ff39ef851c4e453ca07c138ecbcb756a` for
   `system.dump`.
@@ -734,7 +734,7 @@ Phase 5 completion record (2026-08-11):
   `entity_freshness_idx`. With owner approval, those unconstrained indexes were recreated from
   their `SHOW INDEXES` `createStatement` values and all reached `ONLINE` at 100 percent.
 - The post-repair dump is
-  `/home/ctharvey/menhir-neo4j/backups/phase5-post-index-repair-20260811T212419Z`; SHA-256 values are
+  `<server-home>/menhir-neo4j/backups/phase5-post-index-repair-20260811T212419Z`; SHA-256 values are
   `f93e6b1c6afa626d8b7eb7ebcbaa2b71c01ecb0c80b7bebb1db1e582abefd2c7` for `neo4j.dump`
   and `49ceacafc2d6debab2e629e4bb061f39081670610989fa9f14de1984fc2017d4` for
   `system.dump`. Both `neo4j` and `system` consistency checks passed. Menhir and the watchdog were

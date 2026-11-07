@@ -1,7 +1,7 @@
 # Anchored-time resolver fixtures
 
 Frozen inputs and expected outputs for the anchored-time resolver port (P1 plan:
-`.agent/plans/menhir-anchored-time-resolver-p1-plan.md` in the workspace). All files come from
+`.agent/archive/plans/menhir-anchored-time-resolver-p1-plan.md`). All files come from
 the P0 prototype, never from the Menhir port, so the tests check the port against it.
 
 Hashes are of the prototype-side files (CRLF line endings); git stores them with LF, so a

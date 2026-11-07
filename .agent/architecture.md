@@ -387,7 +387,7 @@ The system has a working ingestion pipeline:
      slot/value/foundation plus bounded, relation-labelled contributors; it is never interleaved
      with or reranked as ordinary observations
    - When event-history authority is enabled (default off), recall also attaches a separate
-     `event_authority_layer` — a structured first-person latest/predecessor verdict, independent of
+     `event_authority_layer` (removed 2026-10-28) — a structured first-person latest/predecessor verdict, independent of
      scalar authority and likewise never reranked as an observation (see 4b below)
    - Contributor expansion is available at `GET /api/scalar-authority/{view_uuid}/contributors` with
      explicit pagination, while the inline recall payload remains bounded
@@ -406,7 +406,7 @@ The system has a working ingestion pipeline:
      key, episode/offsets, slot semantics, normalized value, and world time), allowing omissions,
      parser drops, vote fragmentation, and fold outcomes to be distinguished without copying
      transcript text into telemetry
-   - `MENHIR_SCALAR_DETERMINISTIC_SHADOW` optionally runs the pure deterministic scalar extractor
+   - **Removed 2026-10-27** (code on `archive/bucket1-features-2026-10-27`): `MENHIR_SCALAR_DETERMINISTIC_SHADOW` optionally ran the pure deterministic scalar extractor
      once after the existing LLM gate and emits bounded, quote-free exact/aligned agreement and
      router-completeness receipts through consolidation audit. It is default-off, fail-open, and
      observe-only: deterministic output never reaches binding, persistence, projections, authority,
@@ -432,7 +432,11 @@ The system has a working ingestion pipeline:
      same graph transaction. A receipt is completed only after the affected subject/namespace view
      has been rebuilt at one concrete evaluation time, so a crash leaves discoverable repair work
 
-4b. **Event history (default-off production-capable)** — Event History Phases 1–5 are landed at
+4b. **Event history (removed 2026-10-28)**
+
+    > The event-history lane and its recall authority were removed (#399 bucket 3: neutral A/B, and fail-closed authority regressed). The code is on `archive/event-history-2026-10-28`. This section is kept as history and doesn't describe current behavior.
+
+    Event History Phases 1–5 are landed at
     `370eff1` as a **default-off** path. Every event settings/flag defaults off; flag-off behavior is
     byte-compatible and scalar assertion/state/history/authority and wire contracts are unchanged.
     There is no dedicated event endpoint, no default enablement, and no canonical-run gain claim.

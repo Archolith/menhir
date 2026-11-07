@@ -1,7 +1,7 @@
 """Anchored-time resolver: deterministic parts (detector, prompt, calendar, clause guard, overlay).
 
 Ported from the P0 prototype (reich_lib.py sha256 a7797891, clause_guard.py sha256 ec4472e9);
-see .agent/plans/menhir-anchored-time-resolver-p1-plan.md in the workspace. The prompt text is
+see .agent/archive/plans/menhir-anchored-time-resolver-p1-plan.md. The prompt text is
 frozen: any wording change needs a new dev/held-out round. Everything here is pure and
 synchronous; the LLM call lives in ``anchored_time_resolver``.
 """

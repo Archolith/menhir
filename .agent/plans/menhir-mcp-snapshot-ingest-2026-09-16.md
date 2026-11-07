@@ -92,8 +92,8 @@ hash-bound approval is the eventual answer, path-wide permission is not.
 **The corpus ingest was attempted and is blocked -- by this plan's own premise.** Ingesting this
 document so its `IMPLEMENTING` lifecycle is auditable requires `ingest_document`, which stats and
 reads its path **in the server process**, exactly like `ingest_project`. The configured client is
-`https://memory.ctharvey.me/mcp-http`, so a workstation path returns `not a file:
-C:\Users\thron\...` and `transition_artifact` reports the UUID as not found because nothing was
+`https://<production-host>/mcp-http`, so a workstation path returns `not a file:
+<home>\...` and `transition_artifact` reports the UUID as not found because nothing was
 ever registered. `artifact_status: IMPLEMENTING` therefore lives in this file's frontmatter and
 nowhere else.
 

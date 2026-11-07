@@ -69,7 +69,7 @@ Public REST:
     `created_at`/`expired_at` are Menhir belief time. Set `include_invalidated=true` when a consumer
     needs superseded source-time evidence for previous/later/changed comparisons; this enriches
     already-selected memories and does not add invalidated candidates. When event-history authority
-    is enabled (default off) and a namespace is present, may also attach `event_authority_layer` (a
+    is enabled (default off) and a namespace is present, may also attach `event_authority_layer` (removed 2026-10-28) (a
     structured first-person latest/predecessor verdict; see the Event-history surface section below).
   - `/api/turn-evidence` (agent tier) — selective `:TurnEvidence` capture (ADR 0001); see `data_models.md` and `architecture.md`
   - `POST /api/phase3/run` (agent tier) — run one personal-memory View consolidation pass over an explicit namespace (real LLM, all bias guards on); black-box surface for the `archolith-bench menhir-phase3` benchmark. When event history is enabled (default off), also runs event consolidation over an independent `:EventConsolidationWatermark` cursor and reports bounded Phase-3 event metrics (`event_namespaces_processed`, `event_namespaces_failed`, `event_assertions_recorded`, `event_assertions_created`, `event_views_rebuilt`, `event_llm_calls`). The response also reports effective `counter_enabled`, lane-specific `scalar_llm_calls`, and `event_dirty_after` (null when events are off; otherwise a one-row read beyond the event watermark). A processed namespace count alone does not prove that all event pages completed.
@@ -95,6 +95,8 @@ Practical rule:
 - use `architecture.md` plus `workflows/backend-first-mcp.md` for public REST, internal backend transport, and remote-vs-stdio boundary decisions
 
 ## Event-history surface: no dedicated endpoint
+
+> **2026-10-28: removed.** The event-history lane and its recall authority were removed (#399 bucket 3: neutral A/B, and fail-closed authority regressed). The code is on `archive/event-history-2026-10-28`. This section is kept as history and doesn't describe current behavior.
 
 There is **NO dedicated event-history endpoint, tool, resource, or response contract** for Event
 History Phases 1–5 at `370eff1`. The landed code (`domain/event_history.py`,

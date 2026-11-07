@@ -6,6 +6,11 @@
 code anchors and live measurements. When the two disagree, the constitution is the target and this doc
 is the reality; reconcile before trusting either.
 
+> **2026-11-06 correction.** This snapshot predates the #168 freeze and #399. The Warden gate is now
+> always on. The belief gate and evidence-anchor warden were removed on 2026-10-29, and the
+> consolidation counter lane on 2026-10-28, so the settings rows below for those are history. The
+> rest of this ledger hasn't been re-verified.
+
 > **One-line summary.** The governance *substrate* is largely built and much of it is live (candidate
 > tier, source-confidence tiering, view supersession, deterministic merge veto, perception
 > span-grounding). The **institutional artifact + first-class Evidence layer is tested-but-unwired**

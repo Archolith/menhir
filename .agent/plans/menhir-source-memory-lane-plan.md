@@ -1,12 +1,12 @@
 ---
 artifact_schema: 1
 artifact_type: plan
-artifact_status: ACTIVE
+artifact_status: IMPLEMENTED
 ---
 
 # menhir -- source-memory recall lane (step 1)
 
-Project Scope: `Archolith/menhir`, worktree `C:/Users/thron/IdeaProjects/.agent/worktrees/menhir-source-memory-lane`,
+Project Scope: `Archolith/menhir`, worktree `<workspace>/.agent/worktrees/menhir-source-memory-lane`,
 branch `feat/source-memory-lane`, base `origin/main` `f034bfc5`. Nothing outside this worktree.
 
 ## Why

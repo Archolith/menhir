@@ -12,13 +12,13 @@ implements: 35d57efd-8fd5-4b9a-9fd5-582ebfb134f7
 **Agent:** Codex
 **Model:** gpt-5.6-sol
 **Status:** PARTIAL
-**Plan / Ticket:** `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.agent\archive\plans\menhir-release-automation-2026-09-06.md`
-**Worktree:** `C:\Users\thron\IdeaProjects\projects\archolith\menhir`
+**Plan / Ticket:** `<menhir>\.agent\archive\plans\menhir-release-automation-2026-09-06.md`
+**Worktree:** `<menhir>`
 **Branch:** `feat/release-automation`
 **Commits:** `e9dde81d6b181e7abd9d2960e96cb262d2832b43`, `0e6628be5203401ef7895a1a3cf28bd5776a33e4`, `6e913691efe91706da4d7fe6db075198ec9e8614`, `3f5eebe99689e0c1cae066d01edce6a057372672`, `5c1d12bb36c514eed4889eaf6a6a9a8a16ffb4ca`, `963f1abe2a9761cae620295301fd60b3ebdabdc7`, `8eaa706548a5cfde4ac0764d4418b07dd88ce959`, `8e427f107268aaf76064a9563593972a88f7b8a8`, `bf646676abdeb5d3c4b28e3af2f888fe5c5f3e90`, `362eb37742768adf649a30799d874827a7e06535`; companion workspace-meta commit `2d9c028003b1e23aab922962315b176f1e5aa5d4`
 **Verification Scope:** Menhir `abb1f10ada2eabc0ed63f8c085b7357b37019342..362eb37742768adf649a30799d874827a7e06535`; workspace-meta `fed867d5..2d9c028003b1e23aab922962315b176f1e5aa5d4`; plus this closeout artifact
-**Docs Updated:** `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\RELEASE_AUTOMATION.md`, `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\LIVE_VPS_PLAYBOOK.md`, `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\README.md`, `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\changes\README.md`, `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.agent\scripts-index.md`, `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.agent\archive\plans\menhir-release-automation-2026-09-06.md`, `C:\Users\thron\IdeaProjects\scripts\README.md`
-**Changelog Updated:** `C:\Users\thron\IdeaProjects\projects\archolith\menhir\CHANGELOG.md`
+**Docs Updated:** `<menhir>\deploy\RELEASE_AUTOMATION.md`, `<menhir>\deploy\LIVE_VPS_PLAYBOOK.md`, `<menhir>\deploy\README.md`, `<menhir>\deploy\changes\README.md`, `<menhir>\.agent\scripts-index.md`, `<menhir>\.agent\archive\plans\menhir-release-automation-2026-09-06.md`, `<workspace>\scripts\README.md`
+**Changelog Updated:** `<menhir>\CHANGELOG.md`
 
 ---
 
@@ -63,33 +63,33 @@ deployment, image push, or VPS mutation was performed.
 
 | File | Why |
 |------|-----|
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.agent\archive\plans\menhir-release-automation-2026-09-06.md` | Record the implemented design, invariants, validation scope, and completed disposition. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.agent\scripts-index.md` | Index the maintained release instruments. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.agent\for-review\WRAPUP-2026-09-06-menhir-release-automation.md` | Record implementation evidence and unresolved release-readiness gaps. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\CHANGELOG.md` | Add the release-automation entry and retain only the ten most recent entries. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\LIVE_VPS_PLAYBOOK.md` | Route routine release preparation through the maintained coordinator while retaining low-level recovery commands. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\README.md` | Link the release automation runbook from the deployment entry point. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\RELEASE_AUTOMATION.md` | Document inputs, prepare, review, finalize, preview, execution, retries, classification, and systemd behavior. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\build_install_bundle.py` | Build and revalidate the deterministic exact-census install bundle from reviewed authority and committed blobs. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\changes\README.md` | Define the strict staged release-note fragment contract. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\changes\unreleased\chatgpt-stable-cimd.json` | Stage the already-committed ChatGPT stable-CIMD production change for the next release. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\changes\unreleased\release-automation.json` | Stage this release automation and its exact implementation commits. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\release-inputs.example.json` | Provide the strict no-secret release-input template. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\release-install.sh` | Validate and transactionally install the reviewed bundle, with file and active-service rollback. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\release_flow.py` | Coordinate digest-bound prepare, finalize, status, preview, and explicit deployment phases. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\release_notes.py` | Strictly validate and deterministically render release-note fragments. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\release_spec.py` | Generate the maintained release-author specification from validated four-repository inputs. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\tests\test_install_bundle_builder.py` | Cover bundle census, modes, tampering, installer policy, deterministic output, and cleanup. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\tests\test_release_flow.py` | Cover commit coverage, classification, phase gates, exact confirmation, bundle drift, and retry behavior. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\tests\test_release_notes.py` | Cover fragment schema, bounds, deterministic rendering, paths, and atomic writes. |
-| `C:\Users\thron\IdeaProjects\projects\archolith\menhir\tests\test_release_spec.py` | Cover repository authority, operations policy shape, installed mappings, evidence, secrets, and cleanup. |
-| `C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1` | Require the staged complete-tree digest for maintenance, verify it before upload, and repeat verification remotely before bundle-backed mutation. |
-| `C:\Users\thron\IdeaProjects\scripts\README.md` | Document the app-only/maintenance dispatcher and digest-bound coordinator path. |
+| `<menhir>\.agent\archive\plans\menhir-release-automation-2026-09-06.md` | Record the implemented design, invariants, validation scope, and completed disposition. |
+| `<menhir>\.agent\scripts-index.md` | Index the maintained release instruments. |
+| `<menhir>\.agent\for-review\WRAPUP-2026-09-06-menhir-release-automation.md` | Record implementation evidence and unresolved release-readiness gaps. |
+| `<menhir>\CHANGELOG.md` | Add the release-automation entry and retain only the ten most recent entries. |
+| `<menhir>\deploy\LIVE_VPS_PLAYBOOK.md` | Route routine release preparation through the maintained coordinator while retaining low-level recovery commands. |
+| `<menhir>\deploy\README.md` | Link the release automation runbook from the deployment entry point. |
+| `<menhir>\deploy\RELEASE_AUTOMATION.md` | Document inputs, prepare, review, finalize, preview, execution, retries, classification, and systemd behavior. |
+| `<menhir>\deploy\build_install_bundle.py` | Build and revalidate the deterministic exact-census install bundle from reviewed authority and committed blobs. |
+| `<menhir>\deploy\changes\README.md` | Define the strict staged release-note fragment contract. |
+| `<menhir>\deploy\changes\unreleased\chatgpt-stable-cimd.json` | Stage the already-committed ChatGPT stable-CIMD production change for the next release. |
+| `<menhir>\deploy\changes\unreleased\release-automation.json` | Stage this release automation and its exact implementation commits. |
+| `<menhir>\deploy\release-inputs.example.json` | Provide the strict no-secret release-input template. |
+| `<menhir>\deploy\release-install.sh` | Validate and transactionally install the reviewed bundle, with file and active-service rollback. |
+| `<menhir>\deploy\release_flow.py` | Coordinate digest-bound prepare, finalize, status, preview, and explicit deployment phases. |
+| `<menhir>\deploy\release_notes.py` | Strictly validate and deterministically render release-note fragments. |
+| `<menhir>\deploy\release_spec.py` | Generate the maintained release-author specification from validated four-repository inputs. |
+| `<menhir>\tests\test_install_bundle_builder.py` | Cover bundle census, modes, tampering, installer policy, deterministic output, and cleanup. |
+| `<menhir>\tests\test_release_flow.py` | Cover commit coverage, classification, phase gates, exact confirmation, bundle drift, and retry behavior. |
+| `<menhir>\tests\test_release_notes.py` | Cover fragment schema, bounds, deterministic rendering, paths, and atomic writes. |
+| `<menhir>\tests\test_release_spec.py` | Cover repository authority, operations policy shape, installed mappings, evidence, secrets, and cleanup. |
+| `<workspace>\scripts\deploy-menhir.ps1` | Require the staged complete-tree digest for maintenance, verify it before upload, and repeat verification remotely before bundle-backed mutation. |
+| `<workspace>\scripts\README.md` | Document the app-only/maintenance dispatcher and digest-bound coordinator path. |
 
 ## Verification
 
-- `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp C:\Users\thron\Documents\Codex\2026-09-06\inve\work\pytest-full-rebased-12` — `PASS` — 9,020 passed, 361 skipped, 9 warnings in 883.97 seconds against refreshed `origin/main` through commit `5c1d12bb`.
-- `.\.venv\Scripts\python.exe -m pytest tests\test_release_notes.py tests\test_release_spec.py tests\test_install_bundle_builder.py tests\test_release_flow.py tests\test_release_author.py tests\test_live_vps_playbook.py tests\test_deployment_contracts.py tests\test_production_runtime_surface.py -q -p no:cacheprovider --basetemp C:\Users\thron\Documents\Codex\2026-09-06\inve\work\pytest-release-rebased-11` — `PASS` — 240 passed, 7 skipped, 2 warnings in 448.20 seconds.
+- `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp <home>\Documents\Codex\2026-09-06\inve\work\pytest-full-rebased-12` — `PASS` — 9,020 passed, 361 skipped, 9 warnings in 883.97 seconds against refreshed `origin/main` through commit `5c1d12bb`.
+- `.\.venv\Scripts\python.exe -m pytest tests\test_release_notes.py tests\test_release_spec.py tests\test_install_bundle_builder.py tests\test_release_flow.py tests\test_release_author.py tests\test_live_vps_playbook.py tests\test_deployment_contracts.py tests\test_production_runtime_surface.py -q -p no:cacheprovider --basetemp <home>\Documents\Codex\2026-09-06\inve\work\pytest-release-rebased-11` — `PASS` — 240 passed, 7 skipped, 2 warnings in 448.20 seconds.
 - Focused final `tests/test_release_flow.py` run with an isolated temporary root — `PASS` — 18 passed, 2 warnings in 21.04 seconds after making cross-repository Git fixtures unique at Menhir `8e427f10`.
 - Final broad release/deployment selection — `PASS WITH ENVIRONMENT RERUN` — 240 passed and 7 skipped; its only initial failure was WSL `CreateInstance/E_ACCESSDENIED` under the sandbox, and the exact failed shell-contract test passed when rerun with local WSL permission.
 - Windows PowerShell 5.1 parser plus local PowerShell/embedded remote-Python portable bundle-digest parity — `PASS` — both implementations returned the same SHA-256 for the same tree.
@@ -121,7 +121,7 @@ deployment, image push, or VPS mutation was performed.
 
 ## Assumptions
 
-1. The canonical desktop wrapper is `C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1`; its companion change is isolated in workspace-meta PR #1 rather than mixed with unrelated local workspace commits.
+1. The canonical desktop wrapper is `<workspace>\scripts\deploy-menhir.ps1`; its companion change is isolated in workspace-meta PR #1 rather than mixed with unrelated local workspace commits.
 2. The existing procedural control around independent reviewer identity remains the release authority until a separately designed cryptographic attestation mechanism replaces it.
 3. Immutable image creation and evidence generation continue to happen before `release_flow.py prepare`.
 

@@ -121,7 +121,7 @@ script. Mutating a graph and then re-measuring the same stack does not produce a
 | `scripts/scalar_state_coverage.py` | the four-stage coverage matrix above. Read-only over bolt; refuses a prod-looking URI |
 | `scripts/run_scalar_state_e2e.sh` | end-to-end run against a THROWAWAY menhir with the typed-scalar scheduler ON; fresh ephemeral Neo4j, serve, harness, teardown. Reuses LongMemEval `config.sh` conventions |
 | `scripts/inspect_scalar_state_graph.py` | read-only autopsy of one namespace: user `:Episodic` bodies (is the producer shape right?), resolved `:Entity` nodes (was there anything to bind to?), full `:TypedAssertion` rows with `binding_pending` and subject |
-| `scripts/scalar_view_authority_live.py` | Step 7c live production-recall A/B for current-state View authority SUPPRESSION; drives the real recall endpoint behind `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED` |
+| `scripts/scalar_view_authority_live.py` | Step 7c live production-recall A/B for current-state View authority SUPPRESSION; drives the real recall endpoint (its `MENHIR_PERSONAL_MEMORY_SCALAR_VIEW_AUTHORITY_ENABLED` flag was retired 2026-10-27; authority now follows the scalar lane) |
 | `scripts/scalar_leads_authority_live.py` | live measurement of the ADDITIVE authority LEADS path (G14 + Phase 4b) |
 | `scripts/scalar_phase_d.py` | Phase D counterfactual: seeds stale-predecessor + current-value episodes, scores baseline recall vs a View-aware answer composed OFFLINE in the harness |
 

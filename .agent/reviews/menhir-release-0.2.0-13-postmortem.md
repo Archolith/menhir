@@ -46,7 +46,7 @@ integration discovery in the release path instead of a disposable rehearsal and 
 
 ## Process failures
 
-1. **Release scope was not isolated.** Application changes, release automation, and a sibling `yawn.vps`
+1. **Release scope was not isolated.** Application changes, release automation, and a sibling the operations repository
    tip refresh shipped together. The mechanical classifier correctly selected `maintenance`; this was
    not a routine application deployment.
 2. **Publication is incomplete.** The coordinator describes `prepare -> review -> finalize -> publish`,
