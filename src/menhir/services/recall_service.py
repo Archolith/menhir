@@ -121,6 +121,7 @@ class RecallService(RecallSupportMixin):
         trace: bool = False,
         update_access: bool = True,
         source_memory_limit: int | None = None, counted_verdict_limit: int | None = None,
+        source_memory_sources: tuple[str, ...] | None = None,
     ) -> RecallResult:
         return await run_recall(
             self, query,
@@ -142,6 +143,7 @@ class RecallService(RecallSupportMixin):
             trace=trace,
             update_access=update_access and not self.read_only,
             source_memory_limit=source_memory_limit, counted_verdict_limit=counted_verdict_limit,
+            source_memory_sources=source_memory_sources,
         )
 
     recall_history = run_recall_history  # drill-down; run_recall_history takes the service first

@@ -188,6 +188,7 @@ async def _build_source_memories(
     source_memory_limit: int | None,
     *,
     include_session: bool,
+    sources: tuple[str, ...] | None = None,
 ) -> tuple[tuple[SourceMemory, ...] | None, str | None, int]:
     """Run the additive source-memory lane; never raises.
 
@@ -199,6 +200,8 @@ async def _build_source_memories(
     Scoped by namespace only: ``session_id`` is deliberately not applied, because the lane (and
     its session spread, #386) exists to surface other sessions' episodes in the same namespace;
     the #148 own-session rule governs ranked SESSION-scope candidates, not this section.
+    ``sources`` keeps only episodes with one of those ingest sources; it does not turn the
+    lane on by itself.
     """
     if source_memory_limit is None:
         effective_limit = tuning.source_memory_limit if tuning.enable_source_memories else 0
@@ -218,6 +221,7 @@ async def _build_source_memories(
             limit=pool_size(effective_limit) if spread else effective_limit,
             namespace=namespace,
             **_embedding_model_kwargs(service),
+            **({"sources": sources} if sources is not None else {}),
         )
         if spread:
             rows = spread_by_session(
@@ -450,6 +454,7 @@ async def _run_recall(
     update_access: bool = True,
     source_memory_limit: int | None = None,
     counted_verdict_limit: int | None = None,
+    source_memory_sources: tuple[str, ...] | None = None,
     owned_tasks: list[asyncio.Task[Any]],
 ) -> RecallResult:
     # update_access=False makes recall a pure read: no last_accessed touches, no
@@ -632,7 +637,7 @@ async def _run_recall(
     # and is read-only. If recall raises before awaiting it, ``run_recall`` cancels it.
     source_memory_task = asyncio.create_task(_build_source_memories(
         service, query, namespace, tuning, source_memory_limit,
-        include_session=include_session,
+        include_session=include_session, sources=source_memory_sources,
     ))
     owned_tasks.append(source_memory_task)
 

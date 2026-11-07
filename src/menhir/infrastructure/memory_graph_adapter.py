@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import uuid as uuidlib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -921,11 +922,12 @@ class MemoryGraphAdapter:
         model: str | None = None,
         subject_uuid: str | None = None,
         resolved_only: bool = False,
+        sources: Sequence[str] | None = None,
     ) -> list[dict[str, object]]:
         """Source-memory lane search over :Episodic content embeddings (read-only)."""
         return self._memory_queries.search_episode_embeddings(
             query_vector, limit=limit, namespace=namespace, model=model,
-            subject_uuid=subject_uuid, resolved_only=resolved_only,
+            subject_uuid=subject_uuid, resolved_only=resolved_only, sources=sources,
         )
 
     def timeline_page(
@@ -2630,6 +2632,11 @@ class MemoryGraphAdapter:
 
     def check_co_mention_veto(self, uuid_a: str, uuid_b: str) -> bool:
         return self._correlation.check_co_mention_veto(uuid_a, uuid_b)
+
+    def fetch_pair_name_embeddings(
+        self, uuid_a: str, uuid_b: str,
+    ) -> tuple[list[float] | None, list[float] | None]:
+        return self._correlation.fetch_pair_name_embeddings(uuid_a, uuid_b)
 
     def check_anchor_project_veto(self, uuid_a: str, uuid_b: str) -> bool:
         return self._correlation.check_anchor_project_veto(uuid_a, uuid_b)
