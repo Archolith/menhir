@@ -77,6 +77,7 @@ Consumers import from `menhir.domain.truth` (or via `menhir.domain` which re-exp
 - `../docs/roadmap/README.md` -> build-sequencing and strategic notes, grouped by altitude
 - `plans/backlog/deferred-verification.md` -> LIVING checklist of tests/benches owed once a real env is available (remote sessions can't run them)
 - `reference/r1-hybrid-candidate-generation.md` -> R1 design and measured non-graduation evidence
+- `reference/menhir-recall-experiment-record.md` -> everything tried on recall ranking and no-answer detection, and what is still open
 - `archive/plans/r2-facet-{candidate-generation,production-integration}.md` -> completed R2 design, integration, and PARK verdict
 - `../docs/research/README.md` -> forward research index (positioning, retrieval pipeline, belief, vision)
 - `../docs/research/positioning/positioning.md` -> canonical product/category positioning (CIP)
