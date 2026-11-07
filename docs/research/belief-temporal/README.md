@@ -2,6 +2,10 @@
 
 Cluster 4 of the research corpus. The probabilistic-belief / temporal / structure-aware substrates beneath retrieval.
 
+## Start here
+
+Start with `belief-layer.md`. The belief gate was removed in #399, and #350 tracks what replaces it, so check the code before relying on any gate described here.
+
 | Doc | Status | Owns |
 |---|---|---|
 | `belief-layer.md` | active | BeliefCircuit, breaker decisions, anergy/apoptosis split. Single owner for probabilistic belief/breaker concepts (`src/menhir/domain/belief.py`). |

@@ -10,6 +10,10 @@ work. The two compose into one pipeline if ever revived: admission decides integ
 Sealed Recall provides confidentiality. The single piece worth reviving first is provenance
 tiers feeding belief-layer assertion confidence (see `trusted-memory-admission.md`).
 
+## Start here
+
+Nothing here is active. If this work is revived, start with `trusted-memory-admission.md`.
+
 | Doc | Status | Owns |
 |---|---|---|
 | `sealed-recall.md` | parked | Confidentiality: MemoryIndex/MemoryBlob/KeyMap/AuditLog layering, envelope encryption, privacy levels L0-L4, local-embedding + top-k selective decrypt, the SemanticShadowLeak threat-model caveat, Git/temporal decrypt-set narrowing. |

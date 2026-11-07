@@ -4,6 +4,9 @@ Exhaustive, disjoint partition of `src/menhir/` for audit scoping. Every file
 belongs to exactly one module. Counts verified by
 `menhir_audit_probe.py` at commit `eebf6d6dd83f15083167bf847b639d24b953fdc9`.
 
+This is a snapshot. Modules have been removed since, including the event-history and
+deterministic-scalar modules, so rerun the probe before scoping an audit from it.
+
 | # | Module | Path scope | Files | Lines |
 |---|--------|-----------|------:|------:|
 | M1 | Domain algebra and types | `domain/` | 58 | 12,107 |

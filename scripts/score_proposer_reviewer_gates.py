@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Score a Phase 1 capture against the experiment's PRE-REGISTERED go/no-go gates.
 
-Plan: `.agent/plans/menhir-proposer-reviewer-vocabulary-experiment-plan.md`, "Metrics and
+Plan: `.agent/archive/plans/menhir-proposer-reviewer-vocabulary-experiment-plan.md`, "Metrics and
 Acceptance Gates", as revised by Addendum A2 (gate 6 is scored against Arm D, not Arm A).
 
 Reads the probe's JSONL only -- no LLM calls, no database. The point of pre-registering gates is

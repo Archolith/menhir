@@ -5,8 +5,8 @@ been measured and lost, tied, or been deferred. The code is kept on branch
 `archive/bucket1-features-2026-10-27` (Menhir and archolith-bench, both pushed), cut at Menhir
 `d1105b25` and bench `7b1d798`, before the first removal.
 
-Evidence: workspace `.agent/reviews/menhir-168-off-flag-triage-2026-10-27.md` (section 1).
-Plan: workspace `.agent/plans/menhir-remove-bucket1-features-plan-2026-10-27.md`.
+Evidence: [`../reviews/menhir-168-off-flag-triage-2026-10-27.md`](../reviews/menhir-168-off-flag-triage-2026-10-27.md) (section 1).
+Plan: [`plans/menhir-remove-bucket1-features-plan-2026-10-27.md`](plans/menhir-remove-bucket1-features-plan-2026-10-27.md).
 
 Default behavior did not change. Each removed flag was off by default, and each commit was
 checked against the pre-removal tree: the resolved settings, `retrieval_tuning()`, the component

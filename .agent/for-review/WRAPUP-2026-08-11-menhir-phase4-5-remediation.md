@@ -4,15 +4,15 @@
 **Agent:** Codex
 **Model:** GPT-5
 **Status:** REVIEWED WITH FINDINGS
-**Plan / Ticket:** `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\plans\menhir-work-artifact-reconciliation-2026-08-11.md`
-**Worktree:** `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation`
+**Plan / Ticket:** `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\plans\menhir-work-artifact-reconciliation-2026-08-11.md`
+**Worktree:** `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation`
 **Branch:** `agent/menhir-phase5-closeout`
 **Commits:** `7a19426297f022ed887d22a255a7d01c31e7b9d2`, `59a45c727244d2de2f44699fc939ac2f1489d831`, `0779c15fb120a0338b40c64af3bf326e9b805a51`, `fe8bfdc78474a89c0e17f753c63c8652097e45a6`, `2e18832811c4fd19f494ddafe858181a908df15b`, `1fcd050848da1e78ef9768993b080ce6ff199786`, `338b1cb8dc25f9134ccd015edbe6aa0d4563a1cd`
 **PR:** [#8](https://github.com/Archolith/menhir/pull/8)
 **Merge Commit / Closeout Base:** `338b1cb8dc25f9134ccd015edbe6aa0d4563a1cd`
 **Verification Scope:** verifier-supplied hosted CI, production backup and index repair, source-v2 preparation, reconciliation apply, repeat audit, and direct acceptance evidence
-**Docs Updated:** `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\plans\menhir-work-artifact-reconciliation-2026-08-11.md`, `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\for-review\WRAPUP-2026-08-11-menhir-phase4-5-remediation.md`, `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\CHANGELOG.md`, `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\docs\hook-center-tool-events.md`, `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\scripts\hooks\README.md`, `C:\Users\thron\IdeaProjects\.agent\handoffs\HANDOFF-2026-08-11-menhir-artifact-reconciliation-phase5.md`, `C:\Users\thron\IdeaProjects\.agent\handoffs\MENHIR-PHASE5-LIFECYCLE-CONTRADICTIONS-2026-08-11.md`
-**Changelog Updated:** `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\CHANGELOG.md`
+**Docs Updated:** `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\plans\menhir-work-artifact-reconciliation-2026-08-11.md`, `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\for-review\WRAPUP-2026-08-11-menhir-phase4-5-remediation.md`, `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\CHANGELOG.md`, `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\docs\hook-center-tool-events.md`, `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\scripts\hooks\README.md`, `<workspace>\.agent\handoffs\HANDOFF-2026-08-11-menhir-artifact-reconciliation-phase5.md`, `<workspace>\.agent\handoffs\MENHIR-PHASE5-LIFECYCLE-CONTRADICTIONS-2026-08-11.md`
+**Changelog Updated:** `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\CHANGELOG.md`
 
 ---
 
@@ -55,26 +55,26 @@ complete; the post-doc cursor must not be described as current until that sequen
 
 | File | Why |
 |------|-----|
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\plans\menhir-work-artifact-reconciliation-2026-08-11.md` | Correct Phase 4/5 cursor, worktree identity, preparation, backup, and 29/25 acceptance gates. |
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\CHANGELOG.md` | Record the remediation and verification evidence. |
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\for-review\WRAPUP-2026-08-11-menhir-phase4-5-remediation.md` | Record completed Phase 5 evidence and the remaining Phase 6 gate. |
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\docs\hook-center-tool-events.md` | Document stable artifact repository identity. |
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\scripts\hooks\README.md` | Document hook environment/Git configuration. |
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\scripts\hooks\menhir_file_event.py` | Emit explicit repository identity from environment or repository-local Git config. |
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\src\menhir\api\routes.py` | Keep structural project and artifact repository routing independent. |
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\src\menhir\api\routes_support.py` | Add and normalize the optional tool-event repository field. |
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\src\menhir\cli\artifacts.py` | Add separately gated graph preparation and retire reconcile's unsafe inline preparation. |
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\src\menhir\infrastructure\schema.py` | Centralize the four reconciliation constraints. |
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\src\menhir\infrastructure\work_artifact_repository.py` | Add global preflight, idempotent v2 backfill, constraint activation, and ONLINE verification. |
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\src\menhir\services\artifact_reconciliation_service.py` | Add narrow cursor-conflict policy and count-gated preparation ordering. |
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\tests\test_artifact_reconciliation_entrypoints.py` | Cover preparation CLI write gates. |
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\tests\test_artifact_reconciliation_live.py` | Verify source-v2 preparation against Neo4j. |
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\tests\test_artifact_source_reconciliation_io.py` | Cover conflict classification, preparation ordering, duplicates, constraints, and unresolved-source idempotence. |
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\tests\test_hook_center_artifact_reconciliation.py` | Cover worktree identity separation and visible missing identity. |
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\tests\test_hook_center_tool_events.py` | Cover environment/Git-config identity resolution and precedence. |
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\tests\test_main_checks.py` | Replace a checkout-name allowlist with the actual repository-root invariant. |
-| `C:\Users\thron\IdeaProjects\.agent\handoffs\HANDOFF-2026-08-11-menhir-artifact-reconciliation-phase5.md` | Record the workspace-level Phase 5 operator procedure and evidence. |
-| `C:\Users\thron\IdeaProjects\.agent\handoffs\MENHIR-PHASE5-LIFECYCLE-CONTRADICTIONS-2026-08-11.md` | Record the 106-item lifecycle contradiction queue for owner disposition. |
+| `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\plans\menhir-work-artifact-reconciliation-2026-08-11.md` | Correct Phase 4/5 cursor, worktree identity, preparation, backup, and 29/25 acceptance gates. |
+| `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\CHANGELOG.md` | Record the remediation and verification evidence. |
+| `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\for-review\WRAPUP-2026-08-11-menhir-phase4-5-remediation.md` | Record completed Phase 5 evidence and the remaining Phase 6 gate. |
+| `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\docs\hook-center-tool-events.md` | Document stable artifact repository identity. |
+| `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\scripts\hooks\README.md` | Document hook environment/Git configuration. |
+| `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\scripts\hooks\menhir_file_event.py` | Emit explicit repository identity from environment or repository-local Git config. |
+| `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\src\menhir\api\routes.py` | Keep structural project and artifact repository routing independent. |
+| `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\src\menhir\api\routes_support.py` | Add and normalize the optional tool-event repository field. |
+| `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\src\menhir\cli\artifacts.py` | Add separately gated graph preparation and retire reconcile's unsafe inline preparation. |
+| `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\src\menhir\infrastructure\schema.py` | Centralize the four reconciliation constraints. |
+| `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\src\menhir\infrastructure\work_artifact_repository.py` | Add global preflight, idempotent v2 backfill, constraint activation, and ONLINE verification. |
+| `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\src\menhir\services\artifact_reconciliation_service.py` | Add narrow cursor-conflict policy and count-gated preparation ordering. |
+| `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\tests\test_artifact_reconciliation_entrypoints.py` | Cover preparation CLI write gates. |
+| `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\tests\test_artifact_reconciliation_live.py` | Verify source-v2 preparation against Neo4j. |
+| `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\tests\test_artifact_source_reconciliation_io.py` | Cover conflict classification, preparation ordering, duplicates, constraints, and unresolved-source idempotence. |
+| `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\tests\test_hook_center_artifact_reconciliation.py` | Cover worktree identity separation and visible missing identity. |
+| `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\tests\test_hook_center_tool_events.py` | Cover environment/Git-config identity resolution and precedence. |
+| `<home>\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\tests\test_main_checks.py` | Replace a checkout-name allowlist with the actual repository-root invariant. |
+| `<workspace>\.agent\handoffs\HANDOFF-2026-08-11-menhir-artifact-reconciliation-phase5.md` | Record the workspace-level Phase 5 operator procedure and evidence. |
+| `<workspace>\.agent\handoffs\MENHIR-PHASE5-LIFECYCLE-CONTRADICTIONS-2026-08-11.md` | Record the 106-item lifecycle contradiction queue for owner disposition. |
 
 ## Verification
 
@@ -89,7 +89,7 @@ the closeout author during this documentation edit.
   `338b1cb8dc25f9134ccd015edbe6aa0d4563a1cd`, the unrelated untracked
   `.agent/plans/menhir-post-install-and-agent-defaults-plan.md` was preserved, and repository-local
   Git config is `menhir.artifactRepository=menhir`.
-- Pre-repair dump: `/home/ctharvey/menhir-neo4j/backups/phase5-20260811T211356Z`.
+- Pre-repair dump: `<server-home>/menhir-neo4j/backups/phase5-20260811T211356Z`.
   `neo4j.dump` SHA-256 is
   `44f135b570aa27ca70a9617387bc1af022a0995e651e52822ccb7fb33d339df8`; `system.dump`
   SHA-256 is `a7edf7885688b785d85ab5dfdc9d9110ff39ef851c4e453ca07c138ecbcb756a`.
@@ -99,13 +99,13 @@ the closeout author during this documentation edit.
   paused, all five were recreated from `SHOW INDEXES` `createStatement` and reached `ONLINE` at
   100 percent.
 - Post-repair dump:
-  `/home/ctharvey/menhir-neo4j/backups/phase5-post-index-repair-20260811T212419Z`.
+  `<server-home>/menhir-neo4j/backups/phase5-post-index-repair-20260811T212419Z`.
   `neo4j.dump` SHA-256 is
   `f93e6b1c6afa626d8b7eb7ebcbaa2b71c01ecb0c80b7bebb1db1e582abefd2c7`; `system.dump`
   SHA-256 is `49ceacafc2d6debab2e629e4bb061f39081670610989fa9f14de1984fc2017d4`.
   Both post-repair consistency checks passed.
 - Service restoration: `PASS`; server HTTP ready, Neo4j up, and watchdog task enabled/Ready on
-  Neo4j Community 5.26.26 at `ubuntu-server`.
+  Neo4j Community 5.26.26 at `test-host`.
 - Preparation preflight: 112 sources, 112 missing source UUIDs, 112 missing locator keys, and zero
   duplicates in all five categories. Owner-approved apply stamped all 112 UUIDs and keys. Postflight
   missing and duplicate counts were all zero.

@@ -1,3 +1,8 @@
+---
+artifact_schema: 1
+artifact_type: plan
+---
+
 # Menhir Research Task: Belief Supersession & Temporal Belief Chains
 
 **Status: Research / Prototype — SAVED, NOT ACTIVE.** Not implemented, not scheduled. Do not begin

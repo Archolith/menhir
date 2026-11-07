@@ -1,3 +1,8 @@
+---
+artifact_schema: 1
+artifact_type: plan
+---
+
 # R1 — Hybrid candidate generation + source-aware priors
 
 **Date:** 2026-06-27

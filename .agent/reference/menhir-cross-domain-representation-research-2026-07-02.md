@@ -1,3 +1,8 @@
+---
+artifact_schema: 1
+artifact_type: investigation
+---
+
 # Cross-domain representation research — ingestion, consolidation, and View techniques for Menhir
 
 **Date:** 2026-07-02 · **Type:** frontier architecture review (mechanisms, not metaphors)

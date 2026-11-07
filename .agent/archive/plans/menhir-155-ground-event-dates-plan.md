@@ -8,7 +8,7 @@ artifact_status: IMPLEMENTED
 
 **Disposition:** IMPLEMENTED by merged PR #209 (`637d604c`); issue #155 closed as completed 2026-10-01. Retained as the historical work package.
 
-Project Scope: `Archolith/menhir`, worktree `C:/Users/thron/IdeaProjects/.agent/worktrees/menhir-155-event-dates`,
+Project Scope: `Archolith/menhir`, worktree `<workspace>/.agent/worktrees/menhir-155-event-dates`,
 branch `fix/155-ground-event-dates`, base `origin/main` `1f6eb392`. Nothing outside this worktree.
 
 ## Problem (verified on current main)

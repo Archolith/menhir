@@ -1,6 +1,6 @@
 """EXPERIMENT ONLY -- asymmetric proposer/reviewer typed-scalar protocol.
 
-Plan: `.agent/plans/menhir-proposer-reviewer-vocabulary-experiment-plan.md`.
+Plan: `.agent/archive/plans/menhir-proposer-reviewer-vocabulary-experiment-plan.md`.
 
 NOT WIRED INTO PRODUCTION. Nothing in `menhir` imports this module; the scheduler, the API, and
 `gate_typed_scalars` are untouched, so production behaviour is byte-identical while this exists.

@@ -5,13 +5,13 @@
 **Model:** GPT-5
 **Session:** Not exposed by this harness
 **Status:** COMPLETE — merged through PR #108; pull-request and post-merge `main` CI passed
-**Plan / Ticket:** `C:\Users\thron\Documents\Codex\2026-09-13\it-i\outputs\menhir-relation-completeness-integration-plan.md`; Archolith/menhir#90; Archolith/menhir#94; Archolith/menhir#96
-**Worktree:** `C:\Users\thron\IdeaProjects\.agent\worktrees\menhir-relation-completeness-integration`
+**Plan / Ticket:** `<home>\Documents\Codex\2026-09-13\it-i\outputs\menhir-relation-completeness-integration-plan.md`; Archolith/menhir#90; Archolith/menhir#94; Archolith/menhir#96
+**Worktree:** `<workspace>\.agent\worktrees\menhir-relation-completeness-integration`
 **Branch:** `integrate/relation-completeness-provenance-20260914`
 **Commits:** `9dcdce33fe1e88cdb3b8e12d705ecc4949ace881`, `244e0123489ffab6cc264dc31b6eebdb18ad8672`, `8974ae15eedfc9221c548c40e72eaf195342c48a`, `6366817a11da457de9c825db3ac4a21b4b90d104`, `3e47ed1b1137a2c847e21dfe508c5e20894abcc5`, `f74b937c91fb755d7014073971e9aa1b80535453`
 **Verification Scope:** six commits above, merged through PR #108 as `d7d79e35b20afb1488ec10b553e407c713f17b60`; pull-request and post-merge `main` CI passed
-**Docs Updated:** `C:\Users\thron\Documents\Codex\2026-09-13\it-i\outputs\menhir-relation-completeness-integration-plan.md`; `C:\Users\thron\IdeaProjects\.agent\worktrees\menhir-relation-completeness-integration\.agent\for-review\WRAPUP-2026-09-14-menhir-relation-completeness-provenance.md`
-**Changelog Updated:** `C:\Users\thron\IdeaProjects\.agent\worktrees\menhir-relation-completeness-integration\CHANGELOG.md`
+**Docs Updated:** `<home>\Documents\Codex\2026-09-13\it-i\outputs\menhir-relation-completeness-integration-plan.md`; `<workspace>\.agent\worktrees\menhir-relation-completeness-integration\.agent\for-review\WRAPUP-2026-09-14-menhir-relation-completeness-provenance.md`
+**Changelog Updated:** `<workspace>\.agent\worktrees\menhir-relation-completeness-integration\CHANGELOG.md`
 
 ---
 
@@ -42,17 +42,17 @@ verified and merged to `origin/main` through PR #108.
 
 | File | Why |
 |------|-----|
-| `C:\Users\thron\IdeaProjects\.agent\worktrees\menhir-relation-completeness-integration\src\menhir\infrastructure\graphiti_extraction_patches.py` | Gates first-person instructions and removes custom third-person relation prompting. |
-| `C:\Users\thron\IdeaProjects\.agent\worktrees\menhir-relation-completeness-integration\src\menhir\infrastructure\graphiti_model_patches.py` | Excludes structural/View candidates from Graphiti dedupe. |
-| `C:\Users\thron\IdeaProjects\.agent\worktrees\menhir-relation-completeness-integration\src\menhir\infrastructure\view_write_repository.py` | Diagnoses the exact unchanged-FACT provenance refusal gate. |
-| `C:\Users\thron\IdeaProjects\.agent\worktrees\menhir-relation-completeness-integration\src\menhir\services\typed_scalar_rules.py` | Keeps named third parties as scalar subjects. |
-| `C:\Users\thron\IdeaProjects\.agent\worktrees\menhir-relation-completeness-integration\tests\test_relation_completeness_first_person_gate.py` | Covers first-, mixed-, and third-person prompt/repair behavior. |
-| `C:\Users\thron\IdeaProjects\.agent\worktrees\menhir-relation-completeness-integration\tests\test_graphiti_view_candidate_isolation.py` | Covers View markers and candidate filtering. |
-| `C:\Users\thron\IdeaProjects\.agent\worktrees\menhir-relation-completeness-integration\tests\test_typed_scalar_prompt_third_party_subject.py` | Covers named-third-party scalar extraction guidance. |
-| `C:\Users\thron\IdeaProjects\.agent\worktrees\menhir-relation-completeness-integration\tests\infrastructure\test_view_refusal_diagnosis.py` | Directly probes refresh diagnostic fields and fallback behavior. |
-| `C:\Users\thron\IdeaProjects\.agent\worktrees\menhir-relation-completeness-integration\tests\test_fact_provenance.py` | Proves broken MENTIONS parity is named and causes no further mutation on real Neo4j. |
-| `C:\Users\thron\IdeaProjects\.agent\worktrees\menhir-relation-completeness-integration\CHANGELOG.md` | Records the integrated behavior while preserving the ten-entry cap. |
-| `C:\Users\thron\IdeaProjects\.agent\worktrees\menhir-relation-completeness-integration\.agent\for-review\WRAPUP-2026-09-14-menhir-relation-completeness-provenance.md` | Records review anchors, evidence, and residual gaps. |
+| `<workspace>\.agent\worktrees\menhir-relation-completeness-integration\src\menhir\infrastructure\graphiti_extraction_patches.py` | Gates first-person instructions and removes custom third-person relation prompting. |
+| `<workspace>\.agent\worktrees\menhir-relation-completeness-integration\src\menhir\infrastructure\graphiti_model_patches.py` | Excludes structural/View candidates from Graphiti dedupe. |
+| `<workspace>\.agent\worktrees\menhir-relation-completeness-integration\src\menhir\infrastructure\view_write_repository.py` | Diagnoses the exact unchanged-FACT provenance refusal gate. |
+| `<workspace>\.agent\worktrees\menhir-relation-completeness-integration\src\menhir\services\typed_scalar_rules.py` | Keeps named third parties as scalar subjects. |
+| `<workspace>\.agent\worktrees\menhir-relation-completeness-integration\tests\test_relation_completeness_first_person_gate.py` | Covers first-, mixed-, and third-person prompt/repair behavior. |
+| `<workspace>\.agent\worktrees\menhir-relation-completeness-integration\tests\test_graphiti_view_candidate_isolation.py` | Covers View markers and candidate filtering. |
+| `<workspace>\.agent\worktrees\menhir-relation-completeness-integration\tests\test_typed_scalar_prompt_third_party_subject.py` | Covers named-third-party scalar extraction guidance. |
+| `<workspace>\.agent\worktrees\menhir-relation-completeness-integration\tests\infrastructure\test_view_refusal_diagnosis.py` | Directly probes refresh diagnostic fields and fallback behavior. |
+| `<workspace>\.agent\worktrees\menhir-relation-completeness-integration\tests\test_fact_provenance.py` | Proves broken MENTIONS parity is named and causes no further mutation on real Neo4j. |
+| `<workspace>\.agent\worktrees\menhir-relation-completeness-integration\CHANGELOG.md` | Records the integrated behavior while preserving the ten-entry cap. |
+| `<workspace>\.agent\worktrees\menhir-relation-completeness-integration\.agent\for-review\WRAPUP-2026-09-14-menhir-relation-completeness-provenance.md` | Records review anchors, evidence, and residual gaps. |
 
 ## Verification
 

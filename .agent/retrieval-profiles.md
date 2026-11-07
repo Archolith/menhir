@@ -54,7 +54,7 @@ See `memory-retrieval-under-uncertainty.md` §3 (scale-coupling law) and `.agent
 
 ## Score metadata contract
 
-Recall outputs identify the raw retrieval lane without changing ranking: `graphiti_rrf`, `weighted_rrf_normalized`, `source_prior`, or `fact_edge_rrf`. `retrieval_score` is that raw lane; the old `breakdown.semantic_similarity`, `relevance`, and the 0.15 floor remain for compatibility and carry `relevance_basis=legacy_rrf_threshold_unvalidated`. With `trace=true`, default fused retrieval also shadows per-method BM25/cosine ranks observe-only.
+Recall outputs identify the raw retrieval lane without changing ranking: `graphiti_rrf`, `weighted_rrf_normalized`, `source_prior`, or `fact_edge_rrf`. `retrieval_score` is that raw lane; the old `breakdown.semantic_similarity`, `relevance`, and the 0.15 floor remain for compatibility and carry `relevance_basis=rank_score_threshold_not_similarity`. On the 500-question LongMemEval oracle graph, at least one `high` result came back for 98.5% of real questions and 92.5% of null questions (unanswerable, or swapped onto an unrelated namespace), so the tier does not separate a match from no match. With `trace=true`, default fused retrieval also shadows per-method BM25/cosine ranks observe-only.
 
 ---
 

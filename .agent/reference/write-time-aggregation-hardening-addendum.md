@@ -1,3 +1,8 @@
+---
+artifact_schema: 1
+artifact_type: investigation
+---
+
 # Write-time aggregation hardening addendum
 
 **Follow-up to:** `../memory-aggregation-under-uncertainty.md`

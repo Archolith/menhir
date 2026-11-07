@@ -67,7 +67,7 @@ returns success to the caller, and is **permanently invisible to recall**. Nobod
 ## 2. Verify it yourself (do this first, ~2 minutes)
 
 Connection is in `projects/archolith/menhir/.env` (`NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`).
-At time of writing `NEO4J_URI=bolt://192.168.86.56:7687`. **All queries below are READ ONLY.**
+At time of writing `NEO4J_URI=bolt://<test-host>`. **All queries below are READ ONLY.**
 
 ```python
 from dotenv import dotenv_values

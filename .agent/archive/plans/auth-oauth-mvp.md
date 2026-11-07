@@ -38,9 +38,9 @@ compatibility layer beside shared keys.
   `WWW-Authenticate` on 401. Claude.ai custom connectors additionally expect the AS to support
   dynamic client registration (RFC 7591).
 
-## D-A — the one decision that needs Charles (does not block Phase 0)
+## D-A — the one decision that needs the owner (does not block Phase 0)
 
-**D-A constraint set 2026-07-09 (Charles):** the architecture must support ALL issuer options
+**D-A constraint set 2026-07-09 (the owner):** the architecture must support ALL issuer options
 (pluggable `MENHIR_OAUTH_ISSUER`/`JWKS_URI` stays the spine — BYO SaaS IdP always possible),
 but there MUST be a **simple self-hosting option** that needs no external account. Phase 0's
 job is now to pick which self-host rung is the simple one (Rung 1 self-issue mint / 2a
