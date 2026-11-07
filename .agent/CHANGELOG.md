@@ -4,6 +4,12 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
+## 2026-11-07 - Design records moved in from the maintainer workspace
+
+- Added 16 plans and reviews, trimmed of local paths, host details and live configuration: three current plans, four backlog plans, five archived plans plus the bucket-1 removal plan, the #168 off-flag triage, the agent prompt review and the combined PR #274 reviews.
+- `plans/README.md`, `plans/backlog/README.md`: routed the new plans.
+- `archive/removed-features-2026-10-27.md`: its evidence and plan links now resolve here.
+
 ## 2026-11-07 - Recall test records added to reference
 
 - `reference/`: added the real-similarity, no-match and graph-value test records, trimmed of local paths and host names.
@@ -123,18 +129,3 @@ The legacy `user` extraction prompt work in the archive is marked "Superseded by
 - `reset_zero_extraction_episodes` exempts store-only rows (it would otherwise loop them).
   `/api/episode-admission` still links a store-only episode but does not mint its projection.
 - `store_only` is in the idempotency digest only when set, so existing stored digests still match.
-
-## 2026-10-25 - Source-memory embedding repair job
-
-- The ingest step's episode embed (10 s timeout) logs and swallows failures, so an episode could
-  stay READY with no `content_embedding` and never reach the source-memory lane. In the o500
-  build, 91 such timeouts left 91 READY episodes unembedded, 34 of them evidence turns.
-- New scheduler job `repair_source_embeddings` (`services/source_embedding_repair.py`), on when
-  `MENHIR_FRONTIER_SOURCE_MEMORIES` is on (the default) and the embedder is wired: every 300 s it embeds up to
-  200 READY episodes missing an embedding (30 s timeout each), skips past failures, and stops a
-  run after 5 consecutive failures. It fills missing embeddings only; re-embedding for a model
-  change stays with `scripts/backfill_episode_embeddings.py`.
-- `set_episode_content_embedding(..., expected_content=)` writes only if the content still matches
-  the text that was embedded; `list_episodes_missing_content_embedding(..., ready_only=)` limits
-  the listing to READY episodes so the job never races the ingest step.
-- Benchmark mode disables the scheduler, so LME builds still need the backfill script after drain.
