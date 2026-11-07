@@ -77,6 +77,20 @@ moved to `archive/` has not thereby been implemented. Only the directories in th
 the corpus — a document in an undeclared subdirectory is invisible to reconciliation, and `README.md`
 is a routing index rather than an artifact.
 
+## Where research results go
+
+Use one home per kind of content, so a result has an obvious place.
+
+| Content | Home |
+|---|---|
+| Measured results, negative results, and what was tried | One evidence record per topic in `.agent/reference/`, declared as `investigation`. Update the topic's record instead of adding a new note. |
+| Mechanism design, direction, and prior art | `docs/research/`, with a status and promotion condition. |
+| Work to be done, and its registered test rules | `.agent/plans/` |
+| Raw run data | `archolith-bench` or the run's data directory. The record summarizes it and names where it is. |
+
+When work planned outside this repo produces a result, add that result to the topic's record before
+closing the work. A result that lives only in a workspace plan or an issue thread gets lost.
+
 ## The metadata block
 
 New artifacts created from now on carry this block as the first lines of the file:

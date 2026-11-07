@@ -51,6 +51,7 @@ Start with one file:
 - exploring new View shapes (design exploration, not settled) -> `memory-view-kinds-frontier-transfer.md`
 - current local-MVP release plan -> `archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md` (gates: tracker #123)
 - current executable plans and dependency order -> `plans/README.md`
+- what has been tried on recall, and what's still open -> `reference/menhir-recall-experiment-record.md`
 - useful non-executable design, research, and negative evidence -> `reference/README.md`
 
 Use `concept-ids.md` only when you need an exact concept id or owner doc.

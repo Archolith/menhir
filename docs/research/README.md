@@ -51,6 +51,17 @@ Otherwise it remains a parked research note or issue comment.
 > `.agent/archive/plans/menhir-cumulative-activity-scalars-2026-08-08.md`. This is benchmark evidence on
 > one subset, not a launch headline.
 
+## Start here
+
+| Question | Start with |
+|---|---|
+| What has been tried on recall? | [`menhir-recall-experiment-record.md`](../../.agent/reference/menhir-recall-experiment-record.md) |
+| What is the current write-time direction? | [`memory-aggregation-under-uncertainty.md`](../../.agent/memory-aggregation-under-uncertainty.md) and Track W of the [execution ladder](../../.agent/plans/menhir-research-execution-ladder.md) |
+| What is actually built? | [`process/research-vs-shipped-inventory.md`](process/research-vs-shipped-inventory.md), then the code |
+| What's the big picture? | [`direction/README.md`](direction/README.md) |
+| What already exists elsewhere? | [`prior-art/README.md`](prior-art/README.md) |
+| Where does a new result go? | [Where research results go](../../.agent/workflows/artifact_authoring.md#where-research-results-go) |
+
 ## Cluster layout
 
 The corpus is organized into themed subdirectories; each has its own `README.md`:

@@ -2,6 +2,12 @@
 
 Cluster 1 of the research corpus. The workflow that governs every other doc and the menhir↔archolith-bench division of labor.
 
+## Start here
+
+- **How research works here:** `research-process.md`.
+- **Before planning a build:** `research-vs-shipped-inventory.md`. It's a snapshot, so check the code too.
+- **Where a new result goes:** [Where research results go](../../../.agent/workflows/artifact_authoring.md#where-research-results-go).
+
 | Doc | Status | Owns |
 |---|---|---|
 | `research-process.md` | canonical | Research workflow: sources, claims, baselines, evals, and the publication ladder. |
