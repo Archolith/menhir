@@ -1,3 +1,7 @@
+## 2026-11-07 - v0.3.3: Transient 402s back off instead of hard-opening the breaker; recall gains relevance basis, conflict-signal and source-memory filter fixes; release gaps in tool refusals, review_inbox and the readyz check are closed.
+
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.3. No dependency changes in this commit.
+
 ## 2026-11-07 - Release gaps: refusals name their control, review_inbox labels, readyz check output
 
 - A refused tool call names the control that refused it: the server's client policy, or
