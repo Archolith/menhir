@@ -1,3 +1,16 @@
+## 2026-11-02 - One tag publishes the whole release
+
+A `v*` tag now publishes PyPI, the release image, the image's version tag and the GitHub release
+in one run. Nothing is typed in by hand, and a stopped release can be finished by a re-run.
+
+- `.github/workflows/publish-pypi.yml`: calls `release-image.yml`, verifies the attestation with
+  the identity `menhirctl.ps1 upgrade` uses, tags the image `X.Y.Z`, then creates the GitHub
+  release. The test gate is unchanged.
+- `deploy/release_pipeline.py`, `deploy/release-python-base.txt`: derive the release inputs, skip
+  finished stages, and refuse to move an image tag or upload over a different PyPI file set.
+- `scripts/release.py`: wait up to three hours for the longer run.
+- `docs/runbooks/release.md`: the new flow and how to finish a stopped release.
+
 ## 2026-11-02 - v0.3.2: retry replies cut off at the output limit
 
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`,

@@ -1,3 +1,13 @@
+## 2026-11-07 - A 402 with a retry hint backs off instead of opening the breaker for an hour
+
+- Every HTTP 402 counted as billing (#482), so OpenRouter's `in_flight_budget_exhausted` 402, which
+  carries a Retry-After and clears in seconds, hard-opened the LLM breaker for an hour and parked
+  the enrichment. A 402 with a Retry-After (HTTP header, or OpenRouter's `metadata.headers`) or
+  that reason is now throttling: backed off like a 429, counted toward the normal breaker
+  threshold, and requeued. A bare 402, or one with a billing code, is still billing.
+- `retry_after_seconds` also reads the hint from the error body, so the backoff waits as asked.
+- No operator reset for a hard-opened breaker yet (#492): it needs a new operator tool.
+
 ## 2026-11-05 - Filter recall's source memories by ingest source
 
 For agent-written memories (#168): a caller can ask for just the agent-writer items, ranked among themselves, instead of fetching 50 and filtering client-side.
@@ -95,16 +105,3 @@ Documentation only. Sets who Menhir must work for and the rules that keep new wo
 - `tests/test_bump.py`: covers partial writes, restores, and CRLF files. It also fails if a new file
   names the current version or fork pin and the bump would miss it.
 - `docs/runbooks/release.md`: step 2 and the fork pin procedure.
-
-## 2026-11-02 - One tag publishes the whole release
-
-A `v*` tag now publishes PyPI, the release image, the image's version tag and the GitHub release
-in one run. Nothing is typed in by hand, and a stopped release can be finished by a re-run.
-
-- `.github/workflows/publish-pypi.yml`: calls `release-image.yml`, verifies the attestation with
-  the identity `menhirctl.ps1 upgrade` uses, tags the image `X.Y.Z`, then creates the GitHub
-  release. The test gate is unchanged.
-- `deploy/release_pipeline.py`, `deploy/release-python-base.txt`: derive the release inputs, skip
-  finished stages, and refuse to move an image tag or upload over a different PyPI file set.
-- `scripts/release.py`: wait up to three hours for the longer run.
-- `docs/runbooks/release.md`: the new flow and how to finish a stopped release.
