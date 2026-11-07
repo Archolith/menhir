@@ -1,3 +1,21 @@
+## 2026-11-05 - Conflict detection drops dissimilar pairs before review
+
+- `classify_pair` now reads the pair's real name cosine and drops conflict and merge candidates
+  below `CORRELATION_SIMILARITY_FLOOR` (0.40). The floor can only turn a route into `none`; a
+  missing vector, a read error or a PROMOTED member keeps today's route. Each drop is recorded as
+  `correlation_similarity_floor`. Routing above the floor still uses the RRF rank score, because
+  cosine cannot tell a contradiction from a duplicate.
+- The shared-episode veto is always on. A pair that one episode asserted together, with no shared
+  attribute word, is dropped instead of queued. Known limit: a same-episode correction with no
+  shared word ("Lisbon residence" / "Porto home") is dropped too.
+- A floor or veto drop ends that node's contradiction scan, as a queued conflict does, so a drop
+  never reaches hits the scan would not have classified. A dropped pair writes nothing to the
+  graph: the node stays scannable and merge-eligible, and a rescan records the drop again.
+- `list_conflicts` shows each member's scope and a note on how the group may have been created.
+- `tests/fixtures/conflict_pairs.json` pins what 42 hand-written pairs do. The floor is fitted to
+  those pairs, so the fixture records behaviour and does not measure accuracy.
+  `scripts/build_conflict_fixture.py` refreshes its cosines.
+
 ## 2026-11-06 - Recall's `relevance_basis` says the tier is a rank score
 
 `relevance_basis` changes from `legacy_rrf_threshold_unvalidated` to
@@ -89,19 +107,3 @@ in one run. Nothing is typed in by hand, and a stopped release can be finished b
   commit.
 - Includes the truncation retry and fork 0.31.2.post2 (#424), the parallel `MENTIONS` retention fix
   (#422) and the release command error report (#420).
-
-## 2026-11-02 - Retry LLM replies cut off at the output limit; Graphiti fork 0.31.2.post2
-
-A reply cut off at the output token limit could be parsed into a nested fragment, so the retry with
-a higher limit never ran, or the fragment was accepted. The fork now raises `OutputTruncatedError`
-when the provider reports `finish_reason=length`, and Menhir treats that as truncation.
-
-- `infrastructure/graphiti_llm_adapter.py`: `_looks_like_truncation` returns true for
-  `OutputTruncatedError` at any reply length. The retry limits are unchanged: 4096, 8192, 16384,
-  then 16384 with a request for a smaller extraction.
-- `tests/test_graphiti_truncation_retry.py`: real-client tests for the escalation.
-- `pyproject.toml`, `uv.lock`: `archolith-graphiti-core==0.31.2.post2`; pins, docs and release
-  checks updated.
-
-A prose-wrapped reply that is cut off, when the provider does not report `length`, can still parse
-to a fragment.

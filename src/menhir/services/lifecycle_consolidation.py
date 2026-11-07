@@ -341,11 +341,7 @@ class LifecycleConsolidationMixin:
         """
         from menhir.services.correlation_service import CorrelationService
 
-        return CorrelationService(
-            self.graph_adapter,
-            self.graphiti_client,
-            llm=self.llm,
-        )
+        return CorrelationService(self.graph_adapter, self.graphiti_client, llm=self.llm)
 
     async def _check_contradictions_batch(
         self,
@@ -361,9 +357,10 @@ class LifecycleConsolidationMixin:
         pending_llm_review conflict-queue write, telemetry suppression
         (cooldown) checks, and one-conflict-per-node capping.
 
-        Correlation routing (Step 8): pairs with similarity 0.70–0.85 receive
-        a RELATES_TO edge instead of entering the conflict queue.  Only pairs
-        >= SIMILARITY_CONFLICT_THRESHOLD (0.85) are flagged as conflicts.
+        Correlation routing (Step 8): scores of 0.70–0.85 receive a RELATES_TO
+        edge instead of entering the conflict queue.  Only scores
+        >= SIMILARITY_CONFLICT_THRESHOLD (0.85) are flagged as conflicts.  These
+        are RRF rank scores, not cosines; see CorrelationService.classify_pair.
 
         Part 2: Judge-gated merge — near-duplicates (>= merge_threshold) route to the
         judge after deterministic vetoes. Merge only on unanimous yes; non-unanimous or
@@ -392,9 +389,14 @@ class LifecycleConsolidationMixin:
                 if other_uuid == uuid:
                     continue
 
-                final_action, _details = await correlation_service.classify_pair(
+                final_action, details = await correlation_service.classify_pair(
                     uuid, other_uuid, score,
                 )
+
+                if final_action == "none" and details is not None:
+                    # Dropped where this loop used to queue or merge and stop. Going on would reach
+                    # hits it never classified; test_drop_ends_the_node_scan exercises that.
+                    break
 
                 if final_action in ("none", "related"):
                     # "related" already created its RELATES_TO edge inside
