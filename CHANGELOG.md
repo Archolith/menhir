@@ -1,3 +1,10 @@
+## 2026-11-07 - Lock refresh for Python 3.15 wheels
+
+- `uv.lock`: jiter 0.19.0, markupsafe 3.0.4, numpy 2.5.4, pydantic 2.14.3, pydantic-core 2.50.4
+  and typing-inspection 0.4.5. These releases have Python 3.15 wheels; the locked ones did not.
+- PyYAML 6.0.3 still has no 3.15 wheel. The README says how to install on 3.15 anyway, and
+  `requires-python` stays `>=3.12`.
+
 ## 2026-11-04 - `/readyz` shows build details only to callers with a valid token
 
 - The public `/readyz` body keeps its status fields but no longer reports the version, commit or
@@ -110,12 +117,3 @@ samples agreed on it, because nothing compared it with what the user said.
 
 Values stored before 0.3.1 are not rechecked. The benchmark was not rerun for this hotfix, so the
 Gate E results in #123 describe 0.3.0.
-
-## 2026-11-01 - v0.3.0: release version for candidate 44933985 (#123)
-
-The frozen MVP release candidate `44933985` (#123) gets its own version: 0.2.3 is already on PyPI.
-
-- `pyproject.toml`, `uv.lock`: version 0.2.3 -> 0.3.0. No dependency changes.
-- No source changes since `44933985`. Outside `src/`: offline tests also run on Windows/py3.12 and Ubuntu/py3.13, test fixes for those platforms, and community files (CONTRIBUTING, Code of Conduct, issue and PR templates). `docs/personal-memory-readiness.md` gained the scalar grounding known limitation (#412; post-MVP follow-up #411).
-- `CHANGELOG-archive.md`: the oldest former current entry moved there (10-entry limit).
-- Docs accuracy pass for the release: known limitations (#169, #417) and the Beacon deferral (#120) are stated; defaults, ports, retired settings, `menhir sync` upload behavior and runbook commands are corrected; `docs/roadmap/menhir-mvp-roadmap.md` is now a pointer to the release plan.
