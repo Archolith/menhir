@@ -1,3 +1,16 @@
+## 2026-11-07 - v0.3.3: review inbox, token-gated /readyz build details, transient-402 backoff
+
+- New read-only MCP tool `review_inbox`: what is waiting on a decision, in one call.
+- `/readyz` shows the build block only to callers with a valid token; the release check script
+  reads it with `MENHIR_READYZ_TOKEN` and refuses served text that is not plain.
+- A 402 with a retry hint (OpenRouter's in-flight budget) backs off like a 429 instead of
+  hard-opening the LLM breaker for an hour.
+- Recall: `relevance_basis` names the tier as a rank score; source memories can be filtered by
+  ingest source. Conflict detection drops dissimilar pairs before review.
+- Tool refusals name the control that refused; `uv.lock` refreshed for Python 3.15 wheels.
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`,
+  `docs/model-governance.md`: version 0.3.3. No dependency changes in this commit.
+
 ## 2026-11-07 - Release gaps: refusals name their control, review_inbox labels, readyz check output
 
 - A refused tool call names the control that refused it: the server's client policy, or
@@ -95,18 +108,3 @@ acts on each. Plans stuck in a lifecycle state and a start-session inbox line ar
   Each candidate row now also reports its `namespace`. An unscoped call is unchanged.
 - Agent-tier clients do not get the tool. A production client policy must decide `review_inbox`
   for every client, or startup refuses the policy.
-
-## 2026-11-02 - Usability charter and guardrails
-
-Documentation only. Sets who Menhir must work for and the rules that keep new work usable.
-
-- `docs/usability/README.md`: audiences, nine principles, and which guardrails are enforced in code.
-- `docs/usability/tool-design.md`: rules for MCP tool names, descriptions, arguments, output, errors,
-  safety and lifecycle.
-- `docs/usability/agent-facing-text.md`: rules for server instructions, tool descriptions, the AGENTS
-  template and hook output, including when a change needs an agent evaluation.
-- `docs/usability/first-run.md`: standards for the first-run journeys and the gaps against them
-  (#429-#441).
-- `docs/usability/documentation.md`: rules for docs, and which document owns each fact.
-- `AGENTS.md`, `CONTRIBUTING.md`, `.github/pull_request_template.md`: point contributors and agents at
-  the guides; the PR template gains a usability checklist.
