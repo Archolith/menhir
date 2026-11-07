@@ -58,7 +58,7 @@ half (JWT validation, scope->tier, `client:<id>` identity, JWKS caching — see
 
 ## Implementation ladder (decide the rung in Phase 0 — do not assume Rung 2)
 
-> **D-A constraint (Charles, 2026-07-09):** all issuer options must remain supported
+> **D-A constraint (the owner, 2026-07-09):** all issuer options must remain supported
 > (pluggable issuer = the spine), but the ladder MUST include a **simple self-hosting
 > option** with no external account. This removes "2b-only" from the outcome space: Phase 0
 > must recommend which self-host rung (1 / 2a / 2c) is the simple one, with 2b remaining a

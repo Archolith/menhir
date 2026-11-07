@@ -112,7 +112,7 @@ four-way check against a proxied hostname on a Browser-Integrity-Check zone:
 
 So the real exposure is narrower and worth stating exactly:
 
-- **Production is not affected.** `memory.ctharvey.me` is on `ctharvey.me`, which has Browser
+- **Production is not affected.** `<production-host>` is on `<production-domain>`, which has Browser
   Integrity Check ON and no custom firewall rule exempting it — but its clients send httpx's
   agent, which passes.
 - **What is affected** is anything speaking to a Cloudflare-fronted Menhir with urllib, or with no

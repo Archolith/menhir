@@ -996,7 +996,7 @@ Kept so these are not re-raised as findings in a later pass.
 2. ~~M9 infrastructure scan-only gap~~ **CLOSED.** All 10 files (5,205 lines, verified sum) were
    read deep in the completion pass; 0 NOT READ. The 58/100 confidence cap on M9 v2 is lifted.
    Remaining M9 caveat: no `PROFILE` runs against Neo4j (configured host is remote at
-   192.168.86.56:7687), so query-plan claims are unverified.
+   <test-host>:7687), so query-plan claims are unverified.
 3. Is the surrogate-encoding crash (M9-telemetry B9) reachable in practice?
 4. Which findings are already regression-covered? The 17 telemetry test files and the M6 test
    set were not read by either lane.

@@ -1,6 +1,6 @@
 """Phase 0 of the proposer/reviewer vocabulary experiment -- deterministic offline fixtures.
 
-Plan: `.agent/plans/menhir-proposer-reviewer-vocabulary-experiment-plan.md`, "Test Matrix / Phase 0".
+Plan: `.agent/archive/plans/menhir-proposer-reviewer-vocabulary-experiment-plan.md`, "Test Matrix / Phase 0".
 
 Gate for proceeding to live trials: ZERO false commits and ZERO distinct-claim collisions. Every
 test here is fake-LLM driven, so a failure is a design defect and never a sampling artifact.

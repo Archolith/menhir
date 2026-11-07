@@ -69,7 +69,7 @@ H2 is the hinge. If it is killed, H3 and H4 are reported as exploratory only, an
 
 ## Data
 
-### Primary: LongMemEval o500 oracle, graph `lme-snap-o500-ship-dcf17cb-counted`
+### Primary: LongMemEval o500 oracle, graph `o500-counted`
 
 This is the canonical 0.3.0 graph that Gate E's IR numbers were served on.
 - Ingest was adaptive segmentation, store-only user context, and assistant turns evidence-only.
@@ -209,7 +209,7 @@ Every paid step runs with a cost monitor, a hard ceiling and a progress-feed ent
 
 ## Owner decisions
 
-- **D1 Graph.** May Phase 0 restore a copy of `lme-snap-o500-ship-dcf17cb-counted` into my own throwaway container? The snapshot stays untouched; no shared bench container is used. Recommended: yes.
+- **D1 Graph.** May Phase 0 restore a copy of `o500-counted` into my own throwaway container? The snapshot stays untouched; no shared bench container is used. Recommended: yes.
 - **D2 Real queries.** Use none from your Menhir memory. The plan does not need them. A later fixture with gold answers (your stated next step) can add them with your sign-off.
 - **D3 Budget.** Allow about $1 total ceiling for Phase 4 end-to-end, the judge sample and the R1 build.
 - **D4 Noisy haystack.** If the multi-namespace distractor setting is not possible, choose between a small recall-pipeline change to allow it (preferred, still diagnostic-only) and an LME_S subset rebuild ($5-9, which first needs a fix for the s12 failure: "Property value is too large to index" on `episodic_content_idx`).
@@ -233,7 +233,7 @@ Every paid step runs with a cost monitor, a hard ceiling and a progress-feed ent
 
 ## Owner decisions recorded (2026-11-05)
 
-- **D1 yes.** Restore a copy of `lme-snap-o500-ship-dcf17cb-counted` into a throwaway container.
+- **D1 yes.** Restore a copy of `o500-counted` into a throwaway container.
 - **D2 agreed.** No real queries from the owner's memory for now.
 - **D3 yes.** About $1 total ceiling.
 - **D4 approved.** Read as the preferred option: a small diagnostic recall-pipeline change if multi-namespace search needs one. No LME_S rebuild.
@@ -241,7 +241,7 @@ Every paid step runs with a cost monitor, a hard ceiling and a progress-feed ent
 
 ## Phase 0 note (2026-11-05)
 
-Measured on a throwaway copy of `lme-snap-o500-ship-dcf17cb-counted`, whole graph, no sampling. No label was compared with any cosine, so the pre-registration still holds. Phase 2 rebuilds this logic in `candidate_labels.py`.
+Measured on a throwaway copy of `o500-counted`, whole graph, no sampling. No label was compared with any cosine, so the pre-registration still holds. Phase 2 rebuilds this logic in `candidate_labels.py`.
 
 1. **Embeddings.** All 11,177 plain entities have a 1536-dim `name_embedding`. The 5,334 `scalar_state` and `scalar_history` Views and 291 `admission_audit` nodes have none, so a cosine floor has no signal for them and never drops them.
 2. **Label gate: passed.**

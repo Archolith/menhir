@@ -6,7 +6,7 @@ artifact_status: IMPLEMENTED
 
 # menhir -- recall_history drill-down tool
 
-Project Scope: `Archolith/menhir`, worktree `C:/Users/thron/IdeaProjects/.agent/worktrees/menhir-recall-history`,
+Project Scope: `Archolith/menhir`, worktree `<workspace>/.agent/worktrees/menhir-recall-history`,
 branch `feat/recall-history`, base `origin/main` `5b73a1a5` (source-memory lane, PR #206). Nothing
 outside this worktree.
 
