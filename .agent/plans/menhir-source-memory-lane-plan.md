@@ -1,7 +1,7 @@
 ---
 artifact_schema: 1
 artifact_type: plan
-artifact_status: ACTIVE
+artifact_status: IMPLEMENTED
 ---
 
 # menhir -- source-memory recall lane (step 1)

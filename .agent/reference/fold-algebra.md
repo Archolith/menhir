@@ -1,3 +1,8 @@
+---
+artifact_schema: 1
+artifact_type: plan
+---
+
 # Fold Algebra — the minimal deterministic operation set
 
 > **Status note 2026-08-08 (curator audit).** The line below is stale — implementation IS done;

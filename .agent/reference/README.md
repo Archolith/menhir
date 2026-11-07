@@ -7,7 +7,7 @@ reference may constrain a current design, preserve negative benchmark evidence, 
 option, or supply research consumed by an active plan. Executable ownership belongs in
 [`../plans/`](../plans/); completed and superseded work belongs in [`../archive/`](../archive/).
 
-This index routes all 15 Markdown references and the one intentionally unverified PDF exactly once.
+This index routes all 14 Markdown references and the one PDF exactly once.
 
 ## Current design laws and inventories
 
@@ -44,11 +44,11 @@ This index routes all 15 Markdown references and the one intentionally unverifie
 | [`menhir-projection-coverage-audit.md`](menhir-projection-coverage-audit.md) | [`../plans/menhir-projection-realization-coverage-implementation.md`](../plans/menhir-projection-realization-coverage-implementation.md) |
 | [`menhir-realization-coverage.md`](menhir-realization-coverage.md) | [`../plans/menhir-projection-realization-coverage-implementation.md`](../plans/menhir-projection-realization-coverage-implementation.md) |
 
-## Unverified binary artifact
+## Binary artifact
 
 | Document | Rule |
 |---|---|
-| [`Research Note- Evidence Admission for Agent Memory.pdf`](<Research Note- Evidence Admission for Agent Memory.pdf>) | Content classification remains unverified. Do not infer it from the filename; read and classify only with explicit approval. |
+| [`Research Note- Evidence Admission for Agent Memory.pdf`](<Research Note- Evidence Admission for Agent Memory.pdf>) | Saved research note dated 2026-07-03 on an evidence-admission layer for memory: foundation-typed admission, execution-date supersession and summary substitution. Read in full 2026-11-06. Its PDF metadata names ChatGPT Canvas as author, so treat it as a source of ideas, not evidence. Covers the same ground as [`menhir-frontier-transfer-forensic-admissibility.md`](menhir-frontier-transfer-forensic-admissibility.md). A PDF can't declare an artifact type, so the validator still reports it. |
 
 ## Maintenance rule
 
@@ -56,7 +56,7 @@ Every reference must state why it is still useful and, when applicable, name its
 Promote it to `../plans/` only when it becomes executable ownership. Archive it when its constraints
 are fully absorbed or it is superseded and no current consumer remains.
 
-## Maintenance rule
+## Moving a document here
 
 Moving a document here follows
 [`../workflows/artifact_authoring.md`](../workflows/artifact_authoring.md). Three things are

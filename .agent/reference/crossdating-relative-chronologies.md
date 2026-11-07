@@ -1,3 +1,8 @@
+---
+artifact_schema: 1
+artifact_type: investigation
+---
+
 # Research Note: Crossdating and Relative Chronologies for Event-Sourced Memory
 
 **Status:** Frontier research
