@@ -1,6 +1,6 @@
 # Changelog archive
 
-Entries moved from `CHANGELOG.md`, newest first. One Windows home path became a workspace-relative path; the rest is unchanged.
+Entries moved from `CHANGELOG.md`, newest first. One Windows home path became a workspace-relative path, and private host, provider and repository names were generalized on 2026-11-07; the rest is unchanged.
 
 ## 2026-10-25 - Source-memory embedding repair job
 
@@ -362,7 +362,7 @@ Entries moved from `CHANGELOG.md`, newest first. One Windows home path became a 
   re-authorize changed content later; hash-bound approval is the eventual answer.
 - Corpus ingest of the plan attempted and **blocked**: `ingest_document` stats its path
   server-side (`ingest_document.py:82`) like `ingest_project`, and the client points at
-  `memory.ctharvey.me`. The plan's `IMPLEMENTING` status exists only in its frontmatter, and
+  the production host. The plan's `IMPLEMENTING` status exists only in its frontmatter, and
   `transition_artifact` reports its UUID as unknown because registration never happened.
 - Investigating that turned up something sharper, recorded in the plan: `audit_artifact_corpus`
   against an unreachable repository does not fail. It returns `entries 0 / sources 202` and
@@ -426,12 +426,12 @@ Entries moved from `CHANGELOG.md`, newest first. One Windows home path became a 
   found three P1 and three P2 design gaps, invalidating the prior `PLAN SOUND` conclusion.
 - Add a separate non-executable architecture specification that closes final ownership, the complete
   protocol-record inventory, descriptor-safe intake, one-mutator/five-reader privilege boundaries,
-  replay/adoption, bootstrap handoff, Cloudflared-only ingress, `yawn.deploy` contraction, retention,
+  replay/adoption, bootstrap handoff, tunnel-only ingress, deployment-repository contraction, retention,
   wrapper interfaces, and serial phase invalidation before implementation planning can resume.
 - Keep every implementation phase blocked until the architecture receives a fresh no-context review,
   moves to `COMPLETE`, and the execution plan is re-derived and independently reviewed.
 - Replace the incremental deployment-reliability plan with one serial, phase-gated architecture
-  plan covering Menhir, shared operator wrappers, and Yawn's read-only integration.
+  plan covering Menhir, shared operator wrappers, and a read-only operations integration.
 - Preserve proven release, staging, backup, restore, and lane mutation primitives while assigning
   authority parsing, admission, journaling, rollback, receipt adoption, and live-state equality to
   one root transaction kernel.
@@ -440,7 +440,7 @@ Entries moved from `CHANGELOG.md`, newest first. One Windows home path became a 
 - Require a complete writer/bypass census, crash and concurrency matrices, clean-host rehearsal,
   obsolete-path contraction, exact-sha CI, and independent full-phase/final reviews before any
   production gate is considered.
-- Freeze the v1 operator documents, defer the incompatible production-release and Contabo plans,
+- Freeze the v1 operator documents, defer the incompatible production-release and production-migration plans,
   and incorporate the fresh no-context plan review's sequencing, pre-state, signing/bootstrap,
   release-input, transport-provenance, access-contract, and retention corrections.
 - Record the earlier review's repository-census and owner-key-custody closure as superseded review
@@ -467,7 +467,7 @@ Entries moved from `CHANGELOG.md`, newest first. One Windows home path became a 
   hashes; make each privileged runner verify its approved digest before mutation; recover promotions
   from completed transaction receipts instead of repeating mutation.
 - Make deployment classification fail closed, require published release authority, enforce
-  cross-lane transaction admission, compare the exact Cloudflared identity, and converge retired
+  cross-lane transaction admission, compare the exact tunnel identity, and converge retired
   Caddy writers plus the exact scaffold-audit executable before enabling its timer.
 - Publish the exact CI-built image by immutable digest, make SBOM and vulnerability evidence
   mandatory, and reject mutable release tags or any rebuild between validation and publication.
@@ -522,7 +522,7 @@ Entries moved from `CHANGELOG.md`, newest first. One Windows home path became a 
   evidence into release authority, exercise changed client policy, use the fixed release
   transaction, run one bounded synthetic canary, and prepare an immutable `off` bundle for fast
   feature rollback.
-- Scale the canonical-self and live-VPS rollout playbooks to the actual single-owner, self-hosted,
+- Scale the canonical-self and live-host rollout playbooks to the actual single-owner, self-hosted,
   no-external-user deployment: test the complete candidate with the live provider/model, deploy once
   through the mechanically selected class, run one synthetic canary, and roll back on concrete
   failure instead of requiring representative-user cohorts or shadow-rollout infrastructure.
@@ -564,7 +564,7 @@ Entries moved from `CHANGELOG.md`, newest first. One Windows home path became a 
   Compose service, preserves Neo4j, accepts the candidate, and automatically rolls back.
 - Add the workspace PowerShell operator path with immutable bundle hashing, source-diff
   classification, private upload staging, and exact sudoers commands.
-- Add a policy-bound `menhir-deploy-probe` identity that can only read via
+- Add a policy-bound deployment probe identity that can only read via
   `recall_memories`; mint its signed JWT in memory for 60 seconds instead of persisting
   an acceptance credential.
 - Update the scaffold, production playbook, access contract, architecture, operations
@@ -574,15 +574,15 @@ Entries moved from `CHANGELOG.md`, newest first. One Windows home path became a 
 
 - Remove the unapproved external object-store/provider requirement from the production plan,
   playbook, release scripts, receipts, and verification contracts.
-- Require a unique encrypted archive retained locally on the VPS, age decryption round-trip and
+- Require a unique encrypted archive retained locally on the production host, age decryption round-trip and
   plaintext hash verification, a release-bound receipt, and plaintext-generation cleanup.
-- Allow a receipt-hash-verified copy of the encrypted archive on the operator desktop after the
-  authoritative VPS backup completes; desktop availability does not block a release.
+- Allow a receipt-hash-verified copy of the encrypted archive on a second operator machine after the
+  authoritative host backup completes; that copy's availability does not block a release.
 
 ## 2026-08-31 - Make the production client access contract executable
 
 - Fix one canonical client data-plane endpoint at
-  `https://memory.ctharvey.me/mcp-http` and document the distinction from the
+  the production host's `/mcp-http` path and document the distinction from the
   release-only `/ops/mcp` surface.
 - Promote Codex and all Claude client variants to operator while retaining
   OpenCode variants as bounded agents; operator clients now include
@@ -611,7 +611,7 @@ Entries moved from `CHANGELOG.md`, newest first. One Windows home path became a 
 - Replace the impossible separate-source writer proof with a release- and
   host-bound Docker census that captures, restart-disables, and retires the
   exact legacy Menhir app and Neo4j containers only after a verified encrypted
-  VPS-local
+  host-local
   backup.
 - Add root-only backup decryption/staging and `release-run.sh`, which rebuilds
   progress from receipts and live runtime evidence, reconciles interrupted
@@ -622,7 +622,7 @@ Entries moved from `CHANGELOG.md`, newest first. One Windows home path became a 
   remain repeatable without discarding forensic evidence.
 - Stop requiring the retired remote source-fence bearer token in the runtime
   image entrypoint; the Docker census receipt is now the only writer fence.
-- Rewrite the live VPS and production playbooks around the single operator
+- Rewrite the live host and production playbooks around the single operator
   action and retain mandatory release-bound security review evidence.
 
 ## 2026-08-28 - Bind hosted web clients to production OAuth policy
@@ -648,7 +648,7 @@ Entries moved from `CHANGELOG.md`, newest first. One Windows home path became a 
   the operator secret is entered once per short authorization session while
   every application still receives its own token and audit identity.
 - Resolve the server-owned Agent Smith CIMD roster locally instead of
-  hairpinning through Cloudflare, so VPS egress filtering or an IP block cannot
+  hairpinning through the public edge, so host egress filtering or an IP block cannot
   break authorization for metadata published by the same Menhir process.
 - Keep each identity on the same least-privilege read/write tool partition and
   bind the complete roster to a new production policy digest.
@@ -670,7 +670,7 @@ Entries moved from `CHANGELOG.md`, newest first. One Windows home path became a 
 - Preserve the existing ChatGPT client unchanged and cover the metadata and
   complete policy census with focused production tests.
 
-## 2026-08-27 - Add full Contabo production release path
+## 2026-08-27 - Add full production release path
 
 - Added the immutable four-repository release authority, offline wheelhouse and
   reviewed OAuth source binding, full production Compose/runtime surface, and
@@ -679,7 +679,7 @@ Entries moved from `CHANGELOG.md`, newest first. One Windows home path became a 
   replay-safe restore authority, candidate acceptance, promotion, rollback,
   external evidence aggregation, and a scoped source-fence producer.
 - Added canonical collision-safe Neo4j authority hashing and release-bound
-  integration with the transactional shared-Caddy and VPS operations layers.
+  integration with the transactional shared-Caddy and host operations layers.
 - Verified the complete local suite and resolved every blocker from the frozen
   11-finding Sol xhigh review; live deployment and secret operations remain
   separate operator-controlled gates.
@@ -749,26 +749,26 @@ Entries moved from `CHANGELOG.md`, newest first. One Windows home path became a 
   constraints, so a rebuilt or upgraded graph cannot report ready without every Phase 3
   prerequisite.
 
-## 2026-08-25 - Plan the full Contabo production migration
+## 2026-08-25 - Plan the full production migration
 
-- Replace the split edge/private-worker design after Pokémon image cleanup freed Contabo capacity.
-  The target now runs OAuth, MCP, full Menhir runtime/enrichment, and Neo4j on Contabo while exposing
+- Replace the split edge/private-worker design after capacity was freed on the production host.
+  The target now runs OAuth, MCP, full Menhir runtime/enrichment, and Neo4j on that host while exposing
   only Caddy and isolating Neo4j on a Docker-internal network.
 - Define immutable-client `chatgpt-chat` policy, durable refresh retries, exact-version offline Neo4j
-  dump/check/load rehearsal, OAuth/graph single-writer fencing, encrypted VPS-local backups,
+  dump/check/load rehearsal, OAuth/graph single-writer fencing, encrypted host-local backups,
   route/network minimization, cutover, reverse-state rollback, observability, and real ChatGPT E2E
   acceptance gates.
 - Add a production host-security gate: recoverable key-only SSH, Docker-aware IPv4/IPv6 firewalling,
-  Cloudflare-only mTLS origin ingress, non-root least-privilege containers, immutable image evidence,
-  receipt-bound backup authority, optional desktop archival, and clean-host compromise recovery.
+  edge-only mTLS origin ingress, non-root least-privilege containers, immutable image evidence,
+  receipt-bound backup authority, optional off-host archival, and clean-host compromise recovery.
 - Close the initial eight plan-level Sol blockers, then ground continued fresh Sol reviews in the
-  actual Menhir, `yawn.deploy`, and `yawn.vps` repositories. Add the resulting external-network and
+  actual Menhir, deployment and operations repositories. Add the resulting external-network and
   Caddy-only transaction contract, whole-host capacity gate, immutable dependency/release authority,
-  exact state/writer manifest, atomic OAuth package boundary, capability-scoped VPS operations,
+  exact state/writer manifest, atomic OAuth package boundary, capability-scoped host operations,
   host-wide lock, prune containment, backup/restore job semantics, and four-repository file/test map.
 - After the final remediation, two consecutive fresh Sol reviewers independently audited the fixed
-  plan against current Menhir, `yawn.deploy`, and `yawn.vps` code and returned `VERDICT: NO BLOCKERS`.
-- Index the plan as active execution authority. No runtime, VPS, DNS, tunnel, or OAuth state was
+  plan against current Menhir, deployment and operations code and returned `VERDICT: NO BLOCKERS`.
+- Index the plan as active execution authority. No runtime, host, DNS, tunnel, or OAuth state was
   changed while authoring the plan.
 
 ## 2026-08-25 - Prove live ChatGPT OAuth compatibility
@@ -822,7 +822,7 @@ Entries moved from `CHANGELOG.md`, newest first. One Windows home path became a 
   scan from the wrong copy overwrites the canonical rows *and* runs the per-project stale prune,
   deleting the files that copy lacks. Measured on this workspace: 167 git repos, **7 basenames
   claimed by more than one**, including three worktrees keeping the repo's own basename and one
-  fork (`projects/forked/yawn.frontend` against `projects/yawn/yawn.frontend`). The hazard had not
+  fork sharing its upstream's basename. The hazard had not
   fired -- all 61 project entities recorded a canonical `root_path` -- but its only witness is one
   last-writer-wins field, so the check proving it had not fired is the check that stops working
   the moment it does.
@@ -1932,7 +1932,7 @@ The operator gate is a migration bridge, not the permanent design.
 - **Stale-server fix:** the live `:8090` server was a manually-started `menhir.cli serve` that predated the Phase 3 REST surface *and* Hook Center (`/api/phase3/*`, `/api/views`, `/api/tool-events/*` all 404) with its **scheduler not running** despite `CONSOLIDATION_ENABLED=true` - so no consolidation was actually happening in production. Restarted via `scripts/start-server.ps1 -Action restart` (PID 62908); post-restart `scheduler.running=true`, `consolidate_personal_memory` job registered, phase3 + Hook Center endpoints live.
 - **Live run:** `POST /api/phase3/run {namespace: trip-report}` (11 turn-evidence, production graph, real `gpt-4o-mini`) -> `namespaces_processed=1`, `llm_calls=3`, **`views_written=0`, `abstained=0`, 0 wrong writes**. Honest null yield: the k=3 extraction ran on the real turns but they carried no committable count/amount measure (a safe miss, not a regression). Positive materialization remains proven by `menhir-phase3-realdata-validation-2026-07-07.md` + archolith-bench `menhir-phase3`.
 - **`.agent/reviews/menhir-phase3-live-operator-run-2026-07-10.md`** (new): full M2 rollout-evidence note with the receipt, gate mapping, and the 6a interaction (the now-live scheduler writes Views into the still-degraded graph; precision-first but 6a repair-or-accept still governs trust).
-- **`.agent/reviews/menhir-phase3-persona-fit-2026-07-10.md`** (new): persona-fit analysis. A Views inventory found **zero genuine personal Views** in real use - all 5 `user::` Views are artifacts (3 from Phase 3 folding *quoted example sentences* out of a real 2026-07-07 planning prompt in `IdeaProjects`; 2 bench-scenario residue). Phase 3 personal-measure consolidation is a personal-assistant/chatbot feature; on coding-workspace content the precision-first consumer correctly commits nothing, so M2's value for the coding MVP is the mechanism + safety proof, not materialized yield. Two follow-ups filed as todos: (1) consumer guard against quoted/hypothetical measures, (2) persona decision - keep personal-measure vs add a project-measure taxonomy.
+- **`.agent/reviews/menhir-phase3-persona-fit-2026-07-10.md`** (new): persona-fit analysis. A Views inventory found **zero genuine personal Views** in real use - all 5 `user::` Views are artifacts (3 from Phase 3 folding *quoted example sentences* out of a real 2026-07-07 planning prompt in the maintainer workspace; 2 bench-scenario residue). Phase 3 personal-measure consolidation is a personal-assistant/chatbot feature; on coding-workspace content the precision-first consumer correctly commits nothing, so M2's value for the coding MVP is the mechanism + safety proof, not materialized yield. Two follow-ups filed as todos: (1) consumer guard against quoted/hypothetical measures, (2) persona decision - keep personal-measure vs add a project-measure taxonomy.
 
 ## 2026-07-10 - M4 Local operator hardening: doc blockers closed + surfaces verified
 - **MVP M4 closed (docs + verification).** No production code changed. Captured the local-MVP operator posture and folded in the two standing findings that gate any non-local move.

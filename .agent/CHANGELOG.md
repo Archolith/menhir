@@ -9,6 +9,9 @@ The legacy `user` extraction prompt work in the archive is marked "Superseded by
 - Added 16 plans and reviews, trimmed of local paths, host details and live configuration: three current plans, four backlog plans, five archived plans plus the bucket-1 removal plan, the #168 off-flag triage, the agent prompt review and the combined PR #274 reviews.
 - `plans/README.md`, `plans/backlog/README.md`: routed the new plans.
 - `archive/removed-features-2026-10-27.md`: its evidence and plan links now resolve here.
+- `reviews/`: added the anchored-time attach gate review and the #168 freeze flag review, trimmed the same way.
+- `CHANGELOG-archive.md`: generalized private host, provider and repository names.
+- `anchored_time.py`, `tests/fixtures/anchored_time/README.md`: the P1 plan citation now points at the archive.
 
 ## 2026-11-07 - Recall test records added to reference
 
