@@ -1,6 +1,6 @@
 ---
 artifact_schema: 1
-artifact_type: plan
+artifact_type: investigation
 ---
 
 # Realization Coverage for Menhir

@@ -4,6 +4,12 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
+## 2026-11-07 - Recall test records added to reference
+
+- `reference/`: added the real-similarity, no-match and graph-value test records, trimmed of local paths and host names.
+- `reference/menhir-projection-coverage-audit.md`, `reference/menhir-realization-coverage.md`: retyped as `investigation`.
+- `reference/README.md`: the evidence-admission PDF is suggestions only, and its two validator findings are accepted.
+
 ## 2026-11-06 - Doc review: removed features marked, reference docs typed
 
 - `architecture.md`, `data_models.md`, `endpoints.md`, `memory-backlog.md`: marked the event-history lane and deterministic shadow as removed.
@@ -132,19 +138,3 @@ The legacy `user` extraction prompt work in the archive is marked "Superseded by
   the text that was embedded; `list_episodes_missing_content_embedding(..., ready_only=)` limits
   the listing to READY episodes so the job never races the ingest step.
 - Benchmark mode disables the scheduler, so LME builds still need the backfill script after drain.
-
-## 2026-10-25 - Source-memory session spread (default on)
-
-- `MENHIR_FRONTIER_SOURCE_MEMORY_SPREAD` (default on; `=false` opts out): the source-memory lane fetches a pool
-  of 3x the limit (capped at 50), drops exact content repeats (whitespace and case folded), then
-  takes each session's best match in cosine order before a second turn from any session. Rows
-  without a session count as their own session; rows without a uuid never take a slot. The
-  section is still sorted oldest first. Off: the lane fetches and returns exactly as before.
-  `recall_history` is unchanged.
-- Why: in the o500 src-sm10 run, the slots often crowded into one session (e.g. 6 of 10 from a
-  single session, with an evidence session absent) and exact repeats took slots.
-- o500 recall-only A/B vs src-sm10: 0.810 vs 0.804 (noise). The spread changed 18/500 sections;
-  those flipped fixed 3 / broke 0. o500 has a median of 2 sessions per item, so it rarely fires.
-- New `domain/source_memory_spread.py` and `tests/test_source_memory_spread.py`; the flag is
-  added to the release-config campaign list and its default-on set. `RetrievalTuningConfig` and
-  Recall Lab keep `source_memory_spread=False`, as they do for `enable_source_memories`.
