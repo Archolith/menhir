@@ -93,7 +93,7 @@ frontier errors can fall back to baseline results. This is not universal enforce
 
 Owner rule: a feature on in a bench run since 2026-10-13 is on by default, and its flag is removed,
 except the three switches that guard LLM cost. Evidence per flag:
-workspace `.agent/reviews/menhir-168-freeze-feature-flag-review-2026-10-27.md`. Retired keys are
+`.agent/reviews/menhir-168-freeze-feature-flag-review-2026-10-27.md`. Retired keys are
 listed in `RETIRED` (`config/feature_flags.py`); component knobs stay as per-request or test seams.
 
 | Feature | Flag / env | Now | Commit |
