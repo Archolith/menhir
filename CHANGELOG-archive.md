@@ -1,3 +1,23 @@
+## 2026-11-01 - v0.3.1: scalar values checked against their source (#411)
+
+Hotfix on 0.3.0. A wrong value in five scalar kinds could become a current View if 2 of 3 model
+samples agreed on it, because nothing compared it with what the user said.
+
+- `services/typed_scalar_rules.py`: `parse_scalar_row` now drops a duration, frequency, weekday,
+  status or boolean value the source does not state, or that the source negates, hedges or asks
+  about. The clause is read from the source, so a short quote cannot leave a negation out. Status
+  and true booleans are also dropped in the past tense or in a "who" clause. `expire` rows are
+  exempt.
+- `uv.lock`: `joserfc` 1.7.3 -> 1.7.7 (GHSA-jpxq-7h8p-2q76, GHSA-9pg5-8c7x-5hfx).
+- `tests/test_scalar_source_grounding_411.py` (new). `tests/test_boolean_polarity_consistency.py`:
+  three cases asserted `has_passport` from unrelated sentences and now name their own attribute.
+- `docs/personal-memory-readiness.md`, `docs/post-install.md`, `README.md`: what the checks do and
+  do not cover.
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `docs/governance.md`: version 0.3.1.
+
+Values stored before 0.3.1 are not rechecked. The benchmark was not rerun for this hotfix, so the
+Gate E results in #123 describe 0.3.0.
+
 ## 2026-11-01 - v0.3.0: release version for candidate 44933985 (#123)
 
 The frozen MVP release candidate `44933985` (#123) gets its own version: 0.2.3 is already on PyPI.

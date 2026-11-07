@@ -18,6 +18,7 @@ import httpx
 from menhir.infrastructure.openai_rate_limit import (
     QUOTA_REASON_CODE,
     ProviderQuotaExhaustedError,
+    find_transient_payment_refusal,
     quota_exhausted_error,
 )
 
@@ -54,6 +55,10 @@ def should_trip_circuit(exc: Exception) -> bool:
     """
 
     if isinstance(exc, ProviderQuotaExhaustedError):
+        return True
+
+    # A 402 with a retry hint is throttling: counts toward the threshold like a 429.
+    if find_transient_payment_refusal(exc) is not None:
         return True
 
     # Timeouts

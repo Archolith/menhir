@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from menhir.domain.self_identity import SelfSubjectEndpointCollisionError
 from menhir.infrastructure.episode_repository import is_context_window_error_text
-from menhir.infrastructure.openai_rate_limit import QUOTA_REASON_CODE, find_quota_exhaustion
+from menhir.infrastructure.openai_rate_limit import (
+    QUOTA_REASON_CODE,
+    find_quota_exhaustion,
+    find_transient_payment_refusal,
+)
 
 _MANUAL_REVIEW_TYPE_NAMES = {
     "jsondecodeerror",
@@ -46,6 +50,8 @@ _RETRYABLE_ERROR_MARKERS = (
     # CF-307: Graphiti rewraps a provider 429 as its own RateLimitError, whose text has no "429".
     # Quota is converted to provider_quota_exhausted before this is reached (see the quota check).
     "rate limit exceeded",
+    # OpenRouter's transient 402 (concurrent-request budget), as persisted text.
+    "in_flight_budget_exhausted",
 )
 _RETRYABLE_TYPE_NAMES = {"ratelimiterror"}
 #: A budget refusal is a POLICY decision, not a provider fault. It reaches this classifier only
@@ -178,6 +184,10 @@ def classify_enrichment_failure(error: object | None, *, error_type: object | No
         or "insufficient_quota" in quota_text
     ):
         return "manual_review"
+
+    # A 402 with a retry hint is throttling, like a 429 (the quota check above skips it).
+    if find_transient_payment_refusal(error if isinstance(error, BaseException) else None) is not None:
+        return "retryable"
 
     # Checked BEFORE every marker list. A budget message that happened to contain a retryable
     # marker would otherwise be requeued, and requeueing a deterministic overrun spends the
