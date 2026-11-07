@@ -7,7 +7,7 @@ reference may constrain a current design, preserve negative benchmark evidence, 
 option, or supply research consumed by an active plan. Executable ownership belongs in
 [`../plans/`](../plans/); completed and superseded work belongs in [`../archive/`](../archive/).
 
-This index routes all 14 Markdown references and the one intentionally unverified PDF exactly once.
+This index routes all 15 Markdown references and the one intentionally unverified PDF exactly once.
 
 ## Current design laws and inventories
 
@@ -24,6 +24,7 @@ This index routes all 14 Markdown references and the one intentionally unverifie
 |---|---|
 | [`anecdotal-recall-oracle-ladder.md`](anecdotal-recall-oracle-ladder.md) | Read-side experiment history and the evidence behind default-off oracle levers. |
 | [`r1-hybrid-candidate-generation.md`](r1-hybrid-candidate-generation.md) | The attributed hybrid mechanism and its measured non-graduation verdict. |
+| [`menhir-recall-experiment-record.md`](menhir-recall-experiment-record.md) | Everything tried on recall ranking and no-answer detection, what it showed, and what is still open. Read before proposing a recall change. |
 
 ## Saved research and future options
 
