@@ -268,7 +268,7 @@ ctharvey (2026-07-14): not a concern. **And not a new exposure:** menhir **alrea
 
 **#6 (this session, ctharvey)** — why a curated gold set rather than spot-checking against the full clone? The real requirement is a reproducible *number*, not curation, and a spot-check yields only vibes. **Auto-generate known-item queries from the clone**: bigger N, no UUID rot, samples the true distribution, removes curator bias, naturally produces paraphrase queries. Keep a small held-out negative set (can't be generated) and a tiny human-verified anchor set (regression tripwire). Clone confirmed to be a duplicate *of* prod, so prod's near-duplicate memories are inherited — credit any duplicate-cluster member as a hit.
 
-**Infrastructure.** prod = `neo4j-memory` @ `bolt://192.168.86.33:7687` (OVM box). test = `menhir-neo4j-test` @ `bolt://192.168.86.33:7688` — ephemeral tmpfs, `neo4j/testpassword`, **no APOC** (clone with plain Cypher). Graphiti fulltext: `node_name_and_summary` → `['name','summary','group_id']`.
+**Infrastructure.** prod = `neo4j-memory` @ `bolt://<old-prod-host>` (home server). test = `menhir-neo4j-test` @ `bolt://<old-prod-host>` — ephemeral tmpfs, `neo4j/testpassword`, **no APOC** (clone with plain Cypher). Graphiti fulltext: `node_name_and_summary` → `['name','summary','group_id']`.
 
 **Throwaway probes** in `menhir/scripts/` (`_switch_diff.py`, `_gate_threshold_test.py`, `_content_vs_name_search.py`, `_cosine_gate_probe.py`, `_ce_rerank_probe.py`, `_bm25_baseline_probe.py`, `_clone_and_embed_content.py`) — fold into R1 and delete.
 

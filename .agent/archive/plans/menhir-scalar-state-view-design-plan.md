@@ -2,7 +2,7 @@
 
 **Project:** menhir (production memory system; design only - NO prod code in this plan)
 **Date:** 2026-07-18
-**Author:** Claude Code (design brief by Charles Harvey)
+**Author:** Claude Code (design brief by the owner)
 **Status:** APPROVED AND IMPLEMENTED (noted 2026-08-18). The gate below was passed: the design
 was approved and built under the sibling plan `menhir-scalar-state-view-implementation-plan.md`
 (Rev 3, Pieces A + B + C COMPLETE). Verified in source 2026-08-18 -- `domain/scalar_state_fold.py`,

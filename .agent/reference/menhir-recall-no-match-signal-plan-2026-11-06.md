@@ -21,7 +21,7 @@ This is a measurement only. No recall output, score, ranking, threshold or defau
 
 ## Data
 
-- Graph: read-only throwaway copy of `lme-snap-o500-ship-dcf17cb-counted`. Public LongMemEval data only (D2).
+- Graph: read-only throwaway copy of `o500-counted`. Public LongMemEval data only (D2).
 - Sample: 150 questions, `random.Random(20261106)`, drawn from the 414 that are neither `single-session-assistant` nor `_abs`.
 - Per question, one gpt-6-luna Flex call sees the user turns of that namespace and writes three queries in the same style:
   - `control`: answerable, the answer is stated in the history.
@@ -266,7 +266,7 @@ Scripts and run data are not in this repo.
 
 ## Follow-up: reader test with distractors (registered before any call, 2026-11-06)
 
-Tests the open risk: does "not in the top 10" become a false "memory lacks this"? No ingest. No LME_S graph exists on the test server by size and name (`s12` failed and took no snapshot), and an earlier note here that this needs a new build was wrong. This reuses the Phase 3b method: restore `lme-snap-o500-ship-dcf17cb-counted` to a throwaway copy and merge namespaces into groups of 10 with `p3_merge.py` and `distractor-groups.json`.
+Tests the open risk: does "not in the top 10" become a false "memory lacks this"? No ingest. No LME_S graph exists on the test server by size and name (`s12` failed and took no snapshot), and an earlier note here that this needs a new build was wrong. This reuses the Phase 3b method: restore `o500-counted` to a throwaway copy and merge namespaces into groups of 10 with `p3_merge.py` and `distractor-groups.json`.
 
 Recalls: the stored `mix.jsonl` for real and `_abs` questions; a fresh recall on the merged copy for the 432 generated queries, using the same script and arm. Embeddings only.
 

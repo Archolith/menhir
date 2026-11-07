@@ -9,7 +9,7 @@ from menhir.domain.todo_location import (
     parse_code_ref,
 )
 
-KNOWN = frozenset({"menhir", "yawn.market", "yawn.vps", "archolith-context", "yawn.frontend"})
+KNOWN = frozenset({"menhir", "yawn.market", "example.ops", "archolith-context", "yawn.frontend"})
 
 
 # ---------------------------------------------------------------------------

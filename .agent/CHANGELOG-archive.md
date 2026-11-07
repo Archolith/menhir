@@ -1871,7 +1871,7 @@ The operator gate is a migration bridge, not the permanent design.
   N-lane RRF fusion with separate admission and provenance attribution. With the flag off,
   the production `search_scored` path is unchanged.
 - Added query embedding reuse, namespace-aware content-cosine lookup, trace fields, settings,
-  and focused tests. The live benchmark used a persistent offline-dump clone on the home-media
+  and focused tests. The live benchmark used a persistent offline-dump clone on a home
   server and passed exact production/control parity plus the no-write fingerprint.
 - Decision: **NO-GRADUATE**. The lane improved generated paraphrases but did not improve the
   fixed human anchors, so production hardening and rollout were not performed.

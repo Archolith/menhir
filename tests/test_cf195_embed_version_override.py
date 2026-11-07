@@ -8,7 +8,7 @@ new vectors coexist in one cosine surface.
 
 The entry's preferred close is a server-side model digest. That stayed unimplemented here and the
 reason is recorded rather than assumed: no llama-server was reachable to test whether one is
-exposed (nothing on :8083, nothing on the ubuntu-server port either), so the claim that it does not
+exposed (nothing on :8083, nothing on the test host port either), so the claim that it does not
 expose one is INHERITED, not verified. This implements the entry's own listed alternative.
 
 **Why appended and not substituted.** A replacement stamp would let an operator set a constant and

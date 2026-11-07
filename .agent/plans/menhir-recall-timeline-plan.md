@@ -6,7 +6,7 @@ artifact_status: IMPLEMENTED
 
 # menhir -- `recall_timeline`: on-demand time navigation over memories (#172 follow-up)
 
-**Base.** Project scope: `Archolith/menhir`, worktree `C:/Users/thron/IdeaProjects/.agent/worktrees/menhir-timeline`,
+**Base.** Project scope: `Archolith/menhir`, worktree `<workspace>/.agent/worktrees/menhir-timeline`,
 branch `feat/timeline-tool`, stacked on `perf/171-source-memory-latency` (`1064612d`, PR #210, which provides
 `tenant_scope_prefilter_cypher`).
 

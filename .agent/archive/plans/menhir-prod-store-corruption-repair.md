@@ -2,12 +2,12 @@
 
 Status: RESOLVED (2026-07-25, section 9): the repaired snapshot was migrated off the faulty host instead of repairing in place.
 **Disposition (2026-11-02):** resolved. Section 9 records the migration of the repaired store to healthy hardware, and on 2026-11-03 full `:Entity` scans ran without error on the current production store (`menhir-prod-neo4j`, Neo4j 5.26.30 on the VPS) during the embedding health check. Workspace TODO 8bac8d81 closed. The 2026-08-18 stamp below predates noticing section 9.
-**Previously verified:** 2026-08-18 — NOT VERIFIABLE OFFLINE — treat as LIVE. Status says the repair is validated on a copy but NOT YET APPLIED TO PROD, and nothing in this workspace can confirm prod Neo4j state (bolt://192.168.86.33:7687). The only mentions of `property record id:964518 / owner NODE:-1` are inside this plan. Someone must check prod directly before this is closed.
+**Previously verified:** 2026-08-18 — NOT VERIFIABLE OFFLINE — treat as LIVE. Status says the repair is validated on a copy but NOT YET APPLIED TO PROD, and nothing in this workspace can confirm prod Neo4j state (bolt://<old-prod-host>). The only mentions of `property record id:964518 / owner NODE:-1` are inside this plan. Someone must check prod directly before this is closed.
 
 Date: 2026-07-25
-Prod: bolt://192.168.86.33:7687 - Neo4j 5.26.26 Community
-Evidence source: `C:\Users\thron\IdeaProjects\backups\prod-neo4j-data-20260725-CORRUPT.tar.gz` (raw data dir, 15:08 2026-07-25)
-Forensic host: ubuntu-server (192.168.86.56), `~/neo4j-check`, fully userspace, localhost-only, auth disabled
+Prod: bolt://<old-prod-host> - Neo4j 5.26.26 Community
+Evidence source: `<workspace>\backups\prod-neo4j-data-20260725-CORRUPT.tar.gz` (raw data dir, 15:08 2026-07-25)
+Forensic host: test-host (<test-host>), `~/neo4j-check`, fully userspace, localhost-only, auth disabled
 
 ## 1. Why this exists
 
@@ -252,9 +252,8 @@ Re-run the range probe; it must complete with zero failing ranges. A full offlin
 
 ## 8. ROOT CAUSE CONFIRMED - failing non-ECC RAM (2026-07-25)
 
-Prod ran on **192.168.86.33, the OpenMediaVault home media server**, which has a **known-bad
-8 GB DDR4 non-ECC DIMM** already diagnosed on 2026-07-12 (`projects/ctharvey/home-media/.agent/
-workflows/troubleshooting.md` -> "ROOT CAUSE - Failing System RAM"). It corrupts writes in flight;
+Prod ran on **<old-prod-host>, a home server**, which has a **known-bad
+8 GB DDR4 non-ECC DIMM** already diagnosed on 2026-07-12. It corrupts writes in flight;
 it had been destroying the JFS journal and segfaulting unrelated binaries at single-high-bit
 addresses (`0x800000000`, `0x2000000000`).
 
@@ -281,15 +280,15 @@ Rather than repair in place, the graph was moved:
 
 | | before | after |
 |---|---|---|
-| host | 192.168.86.33 (media server, bad DIMM) | 192.168.86.56 (ubuntu-server) |
+| host | <old-prod-host> (home server, bad DIMM) | <test-host> (test-host) |
 | process | `neo4j-memory` Docker container | `menhir-neo4j.service` (systemd, enabled+active) |
 | store | checker crashes, full scans fail | full scans pass, 142 indexes ONLINE |
-| access | - | ufw limited to 192.168.86.0/24, auth enforced |
+| access | - | ufw limited to <lan>, auth enforced |
 | counts | 58,921 nodes | 58,913 nodes / 107,680 rels |
 
 - Source: the **repaired** forensic snapshot (all 8 corrupt nodes removed, indexes rebuilt),
   i.e. the validated section 4 procedure applied on healthy hardware.
-- menhir `.env` `NEO4J_URI` -> `bolt://192.168.86.56:7687` (backup `.env.bak-premigrate`).
+- menhir `.env` `NEO4J_URI` -> `bolt://<test-host>` (backup `.env.bak-premigrate`).
 - `neo4j-memory` on .33 **stopped with `--restart=no`**; `/srv/neo4j/data` preserved, not deleted.
 - Verified end-to-end over the LAN: reads, writes, probe cleanup, and menhir's own
   `MemorySettings` path all resolve to the new instance.
@@ -312,5 +311,5 @@ Rather than repair in place, the graph was moved:
 
 ## 7. Teardown
 
-Forensic environment is disposable: `rm -rf ~/neo4j-check` on ubuntu-server. No sudo was used,
+Forensic environment is disposable: `rm -rf ~/neo4j-check` on test-host. No sudo was used,
 no system packages installed, no services registered, nothing bound beyond 127.0.0.1.

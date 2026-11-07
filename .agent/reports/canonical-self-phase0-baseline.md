@@ -5,7 +5,7 @@ Evidence record for Phase 0 of
 
 - **Date:** 2026-09-03
 - **Branch:** `fix/canonical-self-remediation`
-- **Worktree:** `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.agent\worktrees\canonical-self-remediation`
+- **Worktree:** `<menhir>\.agent\worktrees\canonical-self-remediation`
 - **Base commit:** `50b177357` (`main`, "chore: pin the interpreter at 3.12 so fresh worktrees match production"), which builds on `6ff184e9` (graphiti pin)
 - **Plan revision implemented against:** workspace-meta `80753036`
 

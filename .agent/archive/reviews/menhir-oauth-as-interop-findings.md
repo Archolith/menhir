@@ -4,7 +4,7 @@
   `menhir-embedded-oauth-as-plan.md`)
 - **Date:** 2026-07-09
 - **Author:** Claude Code (Fable), research-only pass — no product source changed
-- **D-A constraint (Charles, 2026-07-09):** all issuer options must remain supported
+- **D-A constraint (the owner, 2026-07-09):** all issuer options must remain supported
   (pluggable issuer = the spine), but there MUST be a **simple self-hosting option** with
   no external account.
 
@@ -139,7 +139,7 @@ Evidence:
 
 ### 4a. JOSE library trust hedge — provider seam (added 2026-07-09, post-migration)
 
-**Concern (Charles):** `joserfc`, though maintained by Authlib's author (`lepture`) and its
+**Concern (the owner):** `joserfc`, though maintained by Authlib's author (`lepture`) and its
 official JOSE successor, is newer and less battle-tested than the most ubiquitous option —
 uncomfortable for a library sitting directly in the token-verification path.
 

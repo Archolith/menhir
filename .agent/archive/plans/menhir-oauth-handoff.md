@@ -83,8 +83,8 @@ RS256 alg allowlist; closed wildcard CORS default; issuer/exp/audience validatio
 ### 3a-bis. JOSE library: S-009 migration + provider seam (2026-07-09)
 Commits `9ee2b30` (migrate `authlib.jose` -> `joserfc`; S-009 closed; authlib removed from
 `pyproject.toml`) and `d1a7f8c` (isolate the library behind `api/jose_provider.py`).
-**Decision context (Charles, 2026-07-09):** Phase 0 chose `joserfc` (Authlib's own successor,
-by the same author `lepture`); Charles raised a supply-chain trust concern about it being
+**Decision context (the owner, 2026-07-09):** Phase 0 chose `joserfc` (Authlib's own successor,
+by the same author `lepture`); the owner raised a supply-chain trust concern about it being
 newer/less battle-tested than the most ubiquitous option. Resolution: **stay on joserfc but
 put it behind a one-file seam** so the choice is reversible cheaply — not a code-wide bet.
 - `jose_provider.py` is the only module importing a JOSE library. Verifier + signing-key

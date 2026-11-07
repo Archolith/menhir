@@ -5,11 +5,11 @@ artifact_type: plan
 artifact_status: SUPERSEDED
 ---
 
-# Menhir full production migration to Contabo
+# Menhir full production migration to the VPS
 
 > **Disposition (2026-09-08, archived 2026-09-13):** Superseded — retained as the
 > historical migration/topology rationale. The migration itself was delivered to
-> production (Menhir runs on Contabo; releases through `menhir-prod-0.2.0-14`), but the
+> production (Menhir runs on the VPS; releases through `menhir-prod-0.2.0-14`), but the
 > execution authority moved to the deployment control-plane architecture reset
 > (`menhir-deployment-control-plane-architecture-reset-2026-09-08.md`, branch
 > `fix/deployment-reliability-20260907`); its Caddy-ownership and Yawn-mutation language
@@ -17,7 +17,7 @@ artifact_status: SUPERSEDED
 > Divergences between this plan and production: ingress is a digest-pinned cloudflared
 > tunnel (not Caddy + AOP, which the plan forbade), and operations run through
 > root-owned fixed wrappers plus the desktop release coordinator rather than the
-> `yawn.vps` `menhir_*` tool surface this plan specified. Re-plan any genuine residual
+> the operations repository `menhir_*` tool surface this plan specified. Re-plan any genuine residual
 > from the control-plane reset rather than resuming these procedures.
 
 > **Backup contract correction (2026-08-31):** this plan never had owner authority to
@@ -27,10 +27,10 @@ artifact_status: SUPERSEDED
 
 ## Decision
 
-Move the complete Menhir production stack to the existing Contabo VPS:
+Move the complete Menhir production stack to the existing VPS:
 
 - public OAuth authorization server and resource-server metadata;
-- Streamable HTTP MCP at `https://memory.ctharvey.me/mcp-http`;
+- Streamable HTTP MCP at `https://<production-host>/mcp-http`;
 - Menhir runtime, scheduler, recall, writes, enrichment, and model clients;
 - the production Neo4j graph and indexes.
 
@@ -50,7 +50,7 @@ The migration removes the failure mode that motivated this work: public memory a
 longer depends on a Windows process, an interactive PowerShell window, a home/LAN Neo4j host, or a
 private tunnel connector.
 
-The Contabo host was observed with 11 GiB RAM, about 8.5 GiB available, low load, and 48 GB free
+The VPS host was observed with 11 GiB RAM, about 8.5 GiB available, low load, and 48 GB free
 before the large Pokémon image cleanup. The owner has confirmed that cleanup completed; phase 0
 must capture the new figures rather than assume how much space was reclaimed. The current graph is
 modest (57,080 entities and 2,610 episodes in the latest operational snapshot). A prior logical
@@ -72,11 +72,11 @@ window and verified offline dumps. See Neo4j's official
 ChatGPT / Codex
        |
        v
-Cloudflare proxied DNS/WAF: memory.ctharvey.me
+Cloudflare proxied DNS/WAF: <production-host>
        |
        | TLS Full (strict) + authenticated origin
        v
-Contabo host firewall + existing Caddy (Menhir application ingress: 443)
+VPS host firewall + existing Caddy (Menhir application ingress: 443)
        |
        | shared proxy network
        v
@@ -103,8 +103,8 @@ network as `external: true`; the existing Caddy service keeps its current defaul
 `down`, rollback, cleanup, nor prune path may remove the external network. Keep Neo4j solely on a
 Compose-owned `internal: true` network. Deployment validation proves the exact project name,
 network labels, attachments, alias, and absence of unintended peers before and after every change.
-`yawn.deploy` owns the Caddy route and Caddy-side network declaration; Menhir owns its image,
-runtime profile, Compose contract, and application-side declaration; `yawn.vps` owns bounded
+the deployment repository owns the Caddy route and Caddy-side network declaration; Menhir owns its image,
+runtime profile, Compose contract, and application-side declaration; the operations repository owns bounded
 deployment, status, logs, backup, and restore operations.
 
 ## Scope
@@ -115,7 +115,7 @@ In scope:
   public OAuth/MCP/health surfaces;
 - immutable-client OAuth/tool policy and durable refresh-retry idempotency;
 - hardened Menhir and Neo4j containers, networks, volumes, secrets, limits, health, and monitoring;
-- a rehearsed Neo4j + OAuth state migration from the private host to Contabo;
+- a rehearsed Neo4j + OAuth state migration from the private host to the VPS;
 - encrypted VPS-local backups, optional desktop archives, restore drills, cutover, rollback, and
   real ChatGPT E2E proof;
 - retiring the old public gateway, private worker/runtime, public tunnel route, and source writer
@@ -133,9 +133,9 @@ Out of scope:
 
 | Invariant | Authoritative enforcement | Defense in depth | Refusal/outcome |
 |---|---|---|---|
-| Public ingress | Contabo/provider firewall + Docker-aware host rules | Cloudflare proxy + authenticated origin | direct-origin and non-Caddy application ports unreachable |
+| Public ingress | provider firewall + Docker-aware host rules | Cloudflare proxy + authenticated origin | direct-origin and non-Caddy application ports unreachable |
 | Host administration | OpenSSH policy + provider console | source-IP restriction and login alerting | password/root login refused; recovery remains possible |
-| Cloud control plane | Contabo/Cloudflare/registrar account policy | scoped API tokens and change alerts | MFA required; unauthorized DNS/host changes detected |
+| Cloud control plane | provider/edge/registrar account policy | scoped API tokens and change alerts | MFA required; unauthorized DNS/host changes detected |
 | Container privilege | Compose security contract + Docker daemon policy | image scan and runtime drift audit | privileged/host-namespace/socket-mounted workload rejected |
 | OAuth validity | Menhir `BearerAuthMiddleware` | exact issuer/resource/JWKS configuration | `401` with correct Bearer challenge |
 | `chatgpt-chat` identity | immutable DCR `client_id` -> local policy | token display name is informational | unknown/missing client refused |
@@ -148,14 +148,14 @@ Out of scope:
 The VPS holds the OAuth signing key, graph, and model credentials, so compromise of its root account
 is a full Menhir compromise. Container/network isolation limits accidental exposure and
 cross-service blast radius but is not a defense against hostile VPS root or provider control. On
-2026-08-25 the owner explicitly accepted Contabo's provider-at-rest trust boundary for this migration;
+2026-08-25 the owner explicitly accepted the provider's provider-at-rest trust boundary for this migration;
 that acceptance does not weaken host hardening, secret isolation, or recovery requirements.
 Encrypted, round-trip-verified VPS-local backups remain mandatory. An encrypted copy may also be
 archived on the operator desktop, but no cloud backup provider is required or implied.
 
 ## Production invariants
 
-1. `memory.ctharvey.me`, the exact MCP resource, issuer, DCR client record, signing key, refresh
+1. `<production-host>`, the exact MCP resource, issuer, DCR client record, signing key, refresh
    families, scopes, and callback remain unchanged across cutover. Mismatch blocks cutover; partial
    OAuth recovery is forbidden.
 2. The production DCR `client_id`—not token `client_name`—selects the worker-local policy record for
@@ -184,7 +184,7 @@ archived on the operator desktop, but no cloud backup provider is required or im
    challenge. Invalid credentials remain `401`; insufficient scope remains `403`; an admitted MCP
    tool failure returns protocol-native `CallToolResult(isError=true)` rather than triggering
    reauthorization.
-10. Once Contabo performs any OAuth or graph mutation, rollback requires quiescing the target and
+10. Once the VPS performs any OAuth or graph mutation, rollback requires quiescing the target and
     reverse-transferring the newest OAuth and Neo4j authority state, or explicitly accepting loss of
     post-cutover writes plus connector reauthorization. DNS-only rollback is forbidden.
 11. No Menhir, Neo4j, Caddy, backup, monitoring, or deployment container is privileged, uses host
@@ -260,15 +260,15 @@ may add entries but may not replace them with categories:
 
 | State/path | Writer/authority and required decision |
 |---|---|
-| host `/srv/menhir/production/state/oauth/menhir_oauth_as.db` mounted as `/var/lib/menhir/oauth/menhir_oauth_as.db`, plus `-wal` and `-shm` when present | `AuthCodeStore`, `OAuthClientStore`, `OAuthRefreshStore`, durable spent-consent JTI state, encrypted exact-retry receipts, and the pinned `archolith_oauth` transaction; one SQLite consistency boundary, checkpointed/integrity-checked and included in every authority generation |
-| host `/srv/menhir/production/secrets/oauth/oauth_signing_key.json` plus explicitly retained verification-key files | `oauth_keys.py`; authoritative key lifecycle, separately encrypted and restored before token validation |
-| host `/srv/menhir/production/secrets/oauth/retry_response.key` | encryption key for retry responses whose receipt rows live inside `menhir_oauth_as.db`; restored before refresh handling and rotated under a versioned dual-read/re-encryption runbook. A separate retry SQLite database is forbidden because it cannot share the refresh transaction |
+| host `<prod-root>/state/oauth/menhir_oauth_as.db` mounted as `/var/lib/menhir/oauth/menhir_oauth_as.db`, plus `-wal` and `-shm` when present | `AuthCodeStore`, `OAuthClientStore`, `OAuthRefreshStore`, durable spent-consent JTI state, encrypted exact-retry receipts, and the pinned `archolith_oauth` transaction; one SQLite consistency boundary, checkpointed/integrity-checked and included in every authority generation |
+| host `<prod-root>/secrets/oauth/oauth_signing_key.json` plus explicitly retained verification-key files | `oauth_keys.py`; authoritative key lifecycle, separately encrypted and restored before token validation |
+| host `<prod-root>/secrets/oauth/retry_response.key` | encryption key for retry responses whose receipt rows live inside `menhir_oauth_as.db`; restored before refresh handling and rotated under a versioned dual-read/re-encryption runbook. A separate retry SQLite database is forbidden because it cannot share the refresh transaction |
 | `client_tokens.db` and journals | disabled and absent in the DCR-policy production profile; startup/census fails if created. If implementation proves it is required, pin its exact host/container path, table writers, migration/backup/restore order, and candidate fence before proceeding |
-| host `/srv/menhir/production/state/telemetry/mcp_telemetry.db` mounted as `/var/lib/menhir/telemetry/mcp_telemetry.db`, plus `-wal` and `-shm` | one SQLite boundary covering `GraphOperationsJournal`, `PendingActionStore`, `MigrationBatchStore`, `MetricReceiptStore`, `SchedulerLeaseStore`, erasure state, telemetry events, lifecycle audit, recall/session registries, and LLM usage; table-level writer/authority/retention decisions are mandatory |
-| host `/srv/menhir/production/config/client-policy.json` and the rendered Menhir/Compose configuration digests | reviewed read-only release authority; no runtime writer; restored from the immutable release record before startup |
+| host `<prod-root>/state/telemetry/mcp_telemetry.db` mounted as `/var/lib/menhir/telemetry/mcp_telemetry.db`, plus `-wal` and `-shm` | one SQLite boundary covering `GraphOperationsJournal`, `PendingActionStore`, `MigrationBatchStore`, `MetricReceiptStore`, `SchedulerLeaseStore`, erasure state, telemetry events, lifecycle audit, recall/session registries, and LLM usage; table-level writer/authority/retention decisions are mandatory |
+| host `<prod-root>/config/client-policy.json` and the rendered Menhir/Compose configuration digests | reviewed read-only release authority; no runtime writer; restored from the immutable release record before startup |
 | Compose volume `menhir-prod_neo4j-data` (`/data`) containing Neo4j `system` and `neo4j` plus indexes/constraints; separately classified logs/import/plugins volumes | Neo4j is sole store writer; Menhir is the only Bolt mutation caller. Both databases share the quiesced generation; plugin files are digest-pinned release inputs, not learned state |
-| `/srv/menhir/production/secrets/caddy/memory-origin.crt`, `memory-origin.key`, and `cloudflare-aop-ca.pem` | root/Caddy-read-only TLS/AOP authority with serial/expiry/version inventory and separate clean-host recovery; never exposed to Menhir/Neo4j or logs |
-| every remaining `/srv/menhir/production` bind/volume, provider/model/Neo4j/backup secret, release/operation-state record, backup credential, audit/alert state, and Caddy-side mount | exact writer, source of truth, backup or external recovery source, restore order, retention, and disposability decision; unclassified discovery blocks the phase |
+| `<prod-root>/secrets/caddy/memory-origin.crt`, `memory-origin.key`, and `cloudflare-aop-ca.pem` | root/Caddy-read-only TLS/AOP authority with serial/expiry/version inventory and separate clean-host recovery; never exposed to Menhir/Neo4j or logs |
+| every remaining `<prod-root>` bind/volume, provider/model/Neo4j/backup secret, release/operation-state record, backup credential, audit/alert state, and Caddy-side mount | exact writer, source of truth, backup or external recovery source, restore order, retention, and disposability decision; unclassified discovery blocks the phase |
 
 Audit the exact installed `archolith_oauth` source commit, schema, transaction boundaries, lock behavior,
 and packaging artifact before designing retry durability. Pin it in the release record. Structural tests
@@ -287,10 +287,10 @@ writer lacks both a manifest row and candidate-fence classification.
   functional probe, and exact firewall/network rollback. The owner approves every change. No host
   firewall, Caddy-network, Docker-daemon, or shared-proxy promotion occurs until every co-resident
   service passes its probe; a failure rolls back the host-level change before Menhir cutover.
-- Confirm the Contabo out-of-band console and recovery credentials work before touching SSH or
+- Confirm the provider out-of-band console and recovery credentials work before touching SSH or
   firewall policy. Keep two tested administrative sessions during firewall changes and define the
   timed rollback command first, so hardening cannot strand the operator.
-- Require phishing-resistant MFA/passkeys where supported for Contabo, Cloudflare, the registrar,
+- Require phishing-resistant MFA/passkeys where supported for the provider, the edge, the registrar,
   image registry, and alerting account. Store tested recovery codes offline; remove
   stale users/sessions/tokens; use scoped service tokens instead of global account keys; and enable
   account, DNS, firewall, certificate, and VPS lifecycle change notifications to an off-host channel.
@@ -368,7 +368,7 @@ If entrypoint args/env/cwd change, regenerate and validate the central MCP regis
   purge, backup/restore, and candidate refusal. Keep one application replica. PostgreSQL/external
   IdP is a separate prerequisite for OAuth HA.
 
-### 4. Build the isolated Contabo deployment
+### 4. Build the isolated VPS deployment
 
 - Create a dedicated `menhir-prod` Compose definition with pinned Menhir and exact source-version
   Neo4j image digests, fixed non-root UID/GID, read-only root filesystem where compatible, `tmpfs` for required
@@ -388,7 +388,7 @@ If entrypoint args/env/cwd change, regenerate and validate the central MCP regis
   group and access to `/var/run/docker.sock` as root-equivalent: application users receive neither;
   bounded root-owned systemd/sudo operations provide deploy/status/backup access.
 - Pin the application Compose project name to `menhir-prod`. Declare `menhir-proxy` as an external
-  network with that exact name in both Menhir and `yawn.deploy`; pre-create it idempotently through a
+  network with that exact name in both Menhir and the deployment repository; pre-create it idempotently through a
   bounded root-owned operation. Attach Menhir with only alias `menhir-prod-app`; attach Caddy while
   retaining its existing default network and every matrix-approved attachment. Attach Neo4j only to
   the Menhir-owned `menhir-internal` network (`internal: true`). Publish no Menhir or Neo4j host
@@ -398,7 +398,7 @@ If entrypoint args/env/cwd change, regenerate and validate the central MCP regis
   project/network/alias/port/namespace/mount/capability census to deployment validation.
 - Set host and provider firewalls to default-deny inbound on IPv4 and IPv6 plus only the approved
   shared-service matrix. Restrict key-only SSH to an approved source/VPN when feasible, with a
-  documented break-glass path through the tested Contabo console. If the entire host can accept it,
+  documented break-glass path through the tested provider console. If the entire host can accept it,
   permit 443 only from current official Cloudflare ranges; otherwise dedicate an IP to Menhir for
   that L3 rule or keep matrix-required 443 sources while enforcing AOP on the Menhir vhost. Do not
   expose Docker's remote API. Run before/after probes for every shared service and restore the exact
@@ -439,7 +439,7 @@ If entrypoint args/env/cwd change, regenerate and validate the central MCP regis
   OS-package manifests, base digests, SBOM, scan/provenance/signature evidence, and final digest.
   Set remediation deadlines by severity and rebuild from patched bases; never patch a running
   container manually. Registry credentials are pull-only on the VPS and are not mounted into apps.
-- Add a release-managed `caddy-menhir-route` target in `yawn.deploy` that owns only the central
+- Add a release-managed `caddy-menhir-route` target in the deployment repository that owns only the central
   repository revision/config record and the single `caddy` service. It must use the existing
   single-service `--no-deps` path and must not run the broad `all`/multi-service deploy path, rebuild,
   recreate, or wait on unrelated Yawn services. Before replacement run `caddy validate` against the
@@ -458,9 +458,9 @@ If entrypoint args/env/cwd change, regenerate and validate the central MCP regis
   is stronger than its shared certificate; see [origin IP restrictions](https://developers.cloudflare.com/fundamentals/concepts/cloudflare-ip-addresses/),
   [Authenticated Origin Pulls](https://developers.cloudflare.com/ssl/origin-configuration/authenticated-origin-pull/explanation/),
   and [Full (strict)](https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/full-strict/).
-- Scope manual Origin CA TLS and hostname AOP only to `memory.ctharvey.me`; preserve Caddy's existing
+- Scope manual Origin CA TLS and hostname AOP only to `<production-host>`; preserve Caddy's existing
   automatic TLS/renewal behavior and public ports 80/443 for all approved co-resident vhosts.
-  `http://memory.ctharvey.me` must be explicitly rejected rather than becoming an unreviewed ACME or
+  `https://<production-host>` must be explicitly rejected rather than becoming an unreviewed ACME or
   redirect path. Validate and rehearse issuance/renewal/reload for every existing hostname after the
   change, not only Menhir, and restore the prior vhost configuration on any regression.
 - Assign certificate ownership and inventory serials, SANs, issuers, locations, and expiry without
@@ -480,8 +480,8 @@ If entrypoint args/env/cwd change, regenerate and validate the central MCP regis
   application containers, and alert on new destinations rather than silently permitting them.
 - Add `vps/menhir_tools.py` with dedicated Menhir operations rather than routing Menhir through the
   current fixed Yawn deploy directory or caller-supplied `vps_compose(args)`. Pin the only allowed
-  repository root to `/srv/menhir/production`, Compose file to
-  `/srv/menhir/production/deploy/docker-compose.production.yml`, project to `menhir-prod`, services
+  repository root to `<prod-root>`, Compose file to
+  `<prod-root>/deploy/docker-compose.production.yml`, project to `menhir-prod`, services
   to `menhir` and `neo4j`, and execution identity to the root-owned wrappers/systemd units created by
   the deployment. `vps/core.py` owns separate Menhir constants/validators; never add a free-form path,
   project, service, profile, Compose-file, environment, or command argument.
@@ -498,8 +498,8 @@ If entrypoint args/env/cwd change, regenerate and validate the central MCP regis
 - Give the Menhir production operator principal only those dedicated tools. It must not inherit
   `vps_shell`, generic `vps_ssh`, `vps_exec`, `vps_compose`, arbitrary file/environment mutation,
   unrestricted Caddy reload, or generic Docker prune merely because those tools already exist in
-  `yawn.vps`. Add `vps/tool_policy.py` with a fail-closed capability allowlist keyed by immutable
-  operational OAuth client ID plus exact audience `urn:yawn-vps:menhir-production`; validate audience,
+  the operations repository. Add `vps/tool_policy.py` with a fail-closed capability allowlist keyed by immutable
+  operational OAuth client ID plus exact audience `urn:<operations>:menhir-production`; validate audience,
   client ID, tool name, and tier on every invocation after token verification. `OPERATOR` is necessary
   but never sufficient. The Menhir operations credential is distinct from public `chatgpt-chat` and
   from broad Yawn administration. Missing/duplicate/empty/unknown policy, audience drift, client-name
@@ -551,16 +551,16 @@ If entrypoint args/env/cwd change, regenerate and validate the central MCP regis
   read-only audit compares live state to it. Unexpected root user/key, socket listener, privileged
   workload, Docker socket mount, or public port is a high-severity incident—not self-healed deletion.
 - Make the release record the deployment authority rather than mutable branch heads. It records
-  immutable Menhir, Neo4j, and Caddy image digests; Menhir, `archolith_oauth`, `yawn.deploy`, and
-  `yawn.vps` source commits plus the installed OAuth wheel hash; rendered Compose/Caddy/config
+  immutable Menhir, Neo4j, and Caddy image digests; Menhir, `archolith_oauth`, the deployment repository, and
+  the operations repository source commits plus the installed OAuth wheel hash; rendered Compose/Caddy/config
   digests; Compose project name; external-network identity,
   labels, peers, and alias; secret version identifiers without values; schema/store compatibility;
   and the exact prior release/route/recovery anchors. Extend drift detection beyond Git status to
   compare this record with live Docker images, containers, mounts, networks, published ports,
   rendered config, Caddy adaptation, and host firewall state. Empty/floating image pins, unrecorded
   live state, or a mismatch blocks deploy/cutover and alerts; no tool may silently normalize it.
-  `yawn.deploy/releases.json`, `lib/registry.sh`, and `check-drift.sh` own expected-record validation;
-  `yawn.vps` `menhir_release_inspect`/`menhir_status` collect the bounded read-only live comparison.
+  the deployment repository's `releases.json`, `lib/registry.sh`, and `check-drift.sh` own expected-record validation;
+  the operations repository `menhir_release_inspect`/`menhir_status` collect the bounded read-only live comparison.
   Missing/uninspectable fields are drift, not "unknown but healthy," and each field has a negative test.
 - Put Menhir deploy/lifecycle, Caddy-route changes, backup, restore, promotion, rollback, and Docker
   cleanup behind one root-owned host lock plus persisted operation-state record. Record operation ID,
@@ -613,8 +613,8 @@ If entrypoint args/env/cwd change, regenerate and validate the central MCP regis
   owner acceptance before cutover; do not describe source rollback as available after mutation.
 - Rehearse the exact Cloudflare route change and rollback against synthetic staging, then use a
   scheduled production maintenance window for the positive candidate proof. The production
-  hostname is switched from the old tunnel origin to Contabo while the target is authoritatively
-  `candidate-readonly`; this preserves canonical `memory.ctharvey.me` Host/SNI and traverses the real
+  hostname is switched from the old tunnel origin to the VPS while the target is authoritatively
+  `candidate-readonly`; this preserves canonical `<production-host>` Host/SNI and traverses the real
   proxy/WAF/Full-strict/AOP path. Save the exact prior route object and TTL/state, use a narrowly
   scoped API token, verify the observed Cloudflare configuration/version after each change, and
   provide a one-command idempotent rollback. Do not depend on Enterprise-only Origin Rule
@@ -638,7 +638,7 @@ If entrypoint args/env/cwd change, regenerate and validate the central MCP regis
    service/task, scheduler/watchdog, tunnel route, CLI writer, and maintenance job. Wait for no
    `PENDING`/`ENRICHING` work or explicitly record/reconcile each residual.
 3. Stop source Neo4j cleanly. Prove no Bolt listener or graph/OAuth writer remains and make source
-   state read-only. Record that a Contabo-local lock cannot fence the old host.
+   state read-only. Record that a VPS-local lock cannot fence the old host.
 4. With the source offline, dump both `neo4j` and `system` using the recorded exact source image
    digest and plugin checksums. Run consistency checks with that digest and record sizes/checksums.
 5. Resolve every path from the durable-state manifest. With all writers stopped, checkpoint/truncate
@@ -658,7 +658,7 @@ If entrypoint args/env/cwd change, regenerate and validate the central MCP regis
    readiness, route minimization, existing-token read/recall, client identity/tier, mutation refusal,
    and unchanged graph plus every authoritative-file digest. Internal probes validate application
    state only; a direct host-file/SNI override is forbidden ingress evidence.
-8. Change the canonical Cloudflare route to Contabo while the target remains read-only. From two
+8. Change the canonical Cloudflare route to the VPS while the target remains read-only. From two
    independent public networks prove canonical Host/SNI, WAF, Full-strict TLS, AOP, discovery,
    challenge, existing-token read/recall, direct-origin/alternate-SNI denial, and bounded mutation
    `503`. Compare the observed route version to the intended change. On failure run the idempotent
@@ -690,10 +690,10 @@ If entrypoint args/env/cwd change, regenerate and validate the central MCP regis
   encrypted generations and binds the current archive hash to the release and state manifest.
   After the VPS-local receipt is complete, `scripts/menhir-backup-archive.ps1` may copy the named
   encrypted archive to the operator desktop and must verify the receipt SHA-256 before finalizing it.
-- Before the first Contabo OAuth or graph mutation, rollback may restore the old route and immutable
+- Before the first VPS OAuth or graph mutation, rollback may restore the old route and immutable
   source state after deliberately re-enabling source services and rechecking the original digests.
-- After any Contabo OAuth or graph mutation, prefer roll-forward remediation. If rollback is
-  unavoidable and the synthetic reverse rehearsal passed, quiesce Contabo and produce/transfer the
+- After any VPS OAuth or graph mutation, prefer roll-forward remediation. If rollback is
+  unavoidable and the synthetic reverse rehearsal passed, quiesce the VPS and produce/transfer the
   newest complete authority generation from the durable-state manifest, restore it with the exact
   source-compatible binaries/configuration, prove OAuth/graph parity, then switch ingress. If that
   rehearsal did not pass, the post-mutation plan is explicitly roll-forward-only. If state integrity
@@ -713,13 +713,13 @@ filenames may change during implementation, but ownership and proof boundaries m
 |---|---|---|
 | Menhir | `deploy/Dockerfile`; a new production Compose file under `deploy/`; dependency lock/wheel and OS-package manifests; `src/menhir/config/settings_model.py`; `src/menhir/api/server.py`; `src/menhir/api/server_support.py`; route assembly; `oauth_authorize.py`; OAuth client/refresh/key adapters; diagnostics; `.env.example`; deployment/backup/restore runbooks | production config render; image dependency-closure/SBOM/scan verification; public-route absence; candidate graph/OAuth/telemetry writer census; `/livez` and both `/readyz` modes; consent-JTI and refresh retry restart/replay/concurrency tests; container/network/secret/limit tests; complete-generation restore and real MCP/ChatGPT lifecycle |
 | `archolith_oauth` (`https://github.com/Archolith/archolith_oauth`, currently pinned at `586d715a9f87db17c9b2feaa652715e01afe5214`) | clone/review as its own repository; extend its SQLite schema and refresh transaction API so family rotation and encrypted retry-receipt insertion occur in one `menhir_oauth_as.db` transaction; expose the atomic consent-JTI consume plus authorization-code issue boundary if Menhir cannot own that same-connection transaction; update package metadata/changelog | package unit/integration tests for commit/rollback/crash interleavings, concurrent exact/variant retries, revocation/purge, consent replay, schema upgrade and downgrade refusal; build wheel in isolation, verify hashes/contents, install into a clean Menhir environment, pin the reviewed new commit and wheel hash in `pyproject.toml`/`uv.lock`, and retain the old commit/wheel as rollback anchor |
-| `yawn.deploy` | `docker-compose.yml`; `Caddyfile`; `releases.json`; `lib/registry.sh`; `remote-deploy.sh`; `wait-for-readiness.sh`; `check-drift.sh`; new Caddy transaction/probe helpers as needed | extend `tests/registry.test.sh` and add Caddy transaction tests proving target isolation, `--no-deps`, config validation, all-vhost probes, failure recording, exact rollback, external-network survival, immutable release fields, and live-Docker/config/network drift detection |
-| `yawn.vps` | `vps/core.py`; new `vps/menhir_tools.py` and `vps/tool_policy.py`; `vps/jobs.py`; `vps/compose_tools.py`; `vps/maintenance_tools.py`; `vps/logs_tools.py`; `vps/tier_auth.py`; `vps_server.py`; root-owned fixed-argument wrapper/systemd-unit definitions and operator runbook; README/CHANGELOG | extend `tests/test_vps_server.py`, `tests/test_tools_integration.py`, `tests/test_deploy_repo_target.py`, `tests/test_logs_tools.py`, and `tests/test_remediation_containment.py`; add focused Menhir operations tests for exact roots/project/files/services/actions and generation IDs, client-ID/audience/tool allowlist plus tier denial, generic-tool non-inheritance, traversal/symlink/metacharacter rejection, 90-second job submission, phase timeout/cancel/process-tree cleanup, 8 KiB output/redaction, lock concurrency/restart/stale recovery, protected-resource prune denial, immutable deploy anchors, quiesced backup, corruption/mixed-generation/local-archive failures, clean-volume rehearsal, production-restore safeguards, and rollback refusal |
+| the deployment repository | `docker-compose.yml`; `Caddyfile`; `releases.json`; `lib/registry.sh`; `remote-deploy.sh`; `wait-for-readiness.sh`; `check-drift.sh`; new Caddy transaction/probe helpers as needed | extend `tests/registry.test.sh` and add Caddy transaction tests proving target isolation, `--no-deps`, config validation, all-vhost probes, failure recording, exact rollback, external-network survival, immutable release fields, and live-Docker/config/network drift detection |
+| the operations repository | `vps/core.py`; new `vps/menhir_tools.py` and `vps/tool_policy.py`; `vps/jobs.py`; `vps/compose_tools.py`; `vps/maintenance_tools.py`; `vps/logs_tools.py`; `vps/tier_auth.py`; `vps_server.py`; root-owned fixed-argument wrapper/systemd-unit definitions and operator runbook; README/CHANGELOG | extend `tests/test_vps_server.py`, `tests/test_tools_integration.py`, `tests/test_deploy_repo_target.py`, `tests/test_logs_tools.py`, and `tests/test_remediation_containment.py`; add focused Menhir operations tests for exact roots/project/files/services/actions and generation IDs, client-ID/audience/tool allowlist plus tier denial, generic-tool non-inheritance, traversal/symlink/metacharacter rejection, 90-second job submission, phase timeout/cancel/process-tree cleanup, 8 KiB output/redaction, lock concurrency/restart/stale recovery, protected-resource prune denial, immutable deploy anchors, quiesced backup, corruption/mixed-generation/local-archive failures, clean-volume rehearsal, production-restore safeguards, and rollback refusal |
 
 The final implementation report records the four source commits, package/wheel hashes, all deployed image/config digests,
 the release-authority record, exact commands/results, rollback anchors, live-host evidence, and every
 skipped hosted/external check. Menhir tests cannot substitute for Yawn deploy/operations tests, and
-local tests cannot certify Contabo, Cloudflare, VPS filesystem durability, or real ChatGPT behavior.
+local tests cannot certify the provider, the edge, VPS filesystem durability, or real ChatGPT behavior.
 
 ## Acceptance gates
 
@@ -730,8 +730,8 @@ local tests cannot certify Contabo, Cloudflare, VPS filesystem durability, or re
 | Shared VPS | every existing listener/vhost/network/probe/certificate flow has an approved matrix decision, passing before/after probe, and tested host-change rollback |
 | Proxy network | the explicitly named external network is pre-created, declared external by both projects, survives repeated deploy/down/rollback/prune denial, retains Caddy's prior attachments, and contains only Caddy plus alias `menhir-prod-app` |
 | Caddy transaction | Caddy-only release target validates complete config, changes no unrelated service, probes every vhost and Menhir denial path, records failures, and restores prior config/image/network state on injected failure |
-| Host access | named non-root key-only SSH works; root/password login fails; sudo is bounded; Contabo console recovery is tested |
-| Control plane | Contabo, Cloudflare, registrar, registry, and alerting accounts have MFA, scoped tokens, offline recovery, and change alerts |
+| Host access | named non-root key-only SSH works; root/password login fails; sudo is bounded; the VPS console recovery is tested |
+| Control plane | the provider, the edge, registrar, registry, and alerting accounts have MFA, scoped tokens, offline recovery, and change alerts |
 | Origin protection | Full (strict), hostname AOP, selected Origin CA lifecycle, Host/SNI checks, rotation rehearsal, and direct-origin probes pass; Cloudflare-only L3 ingress or its shared-host exception is recorded |
 | Docker boundary | no privileged/host-namespace/device/socket workloads; fixed UIDs, dropped capabilities, seccomp/AppArmor, limits, and read-only mounts are proven |
 | Firewall | provider + host + Docker-aware rules survive reboot; external scan matches the shared-service matrix; range updates prove add-before-remove, invalid-set refusal, last-known-good retention, staleness alert, and rollback |
@@ -787,12 +787,12 @@ python scripts/smoke/auth_shapes_smoke.py
 python -m menhir.cli diagnostics --json
 menhir artifacts validate . --repository menhir
 
-# In yawn.deploy
+# In the deployment repository
 bash tests/registry.test.sh
 # Run the added Caddy target/transaction/drift/network tests, then render the complete Compose and
 # Caddy candidates and validate them with the pinned production binaries.
 
-# In yawn.vps
+# In the operations repository
 python -m pytest \
   tests/test_vps_server.py \
   tests/test_tools_integration.py \
@@ -809,9 +809,9 @@ fence evidence. Unit tests alone do not authorize migration.
 
 - **Split VPS edge and private worker:** minimized initial data movement but retained home/LAN power,
   tunnel, and worker availability dependencies and added bearer forwarding plus cross-host policy.
-  Rejected after capacity was freed on Contabo.
+  Rejected after capacity was freed on the VPS.
 - **New dedicated VPS:** improves failure-domain isolation but adds cost and another host to operate.
-  The existing Contabo has sufficient measured headroom after cleanup; reconsider if shared-service
+  The existing VPS has sufficient measured headroom after cleanup; reconsider if shared-service
   load or security posture changes.
 - **Move only Neo4j:** still leaves OAuth/MCP/runtime lifecycle split across hosts and does not remove
   the original Windows-process failure.
@@ -850,7 +850,7 @@ clean-host rebuild, and incident runbooks, and changelog.
 
 Menhir owns application/runtime/auth semantics and the canonical plan. `archolith_oauth` owns the
 single-database refresh-family/retry-receipt transaction and any shared consent-code transaction it
-must expose. A dedicated Contabo deploy definition owns Menhir/Neo4j containers and volumes.
-`yawn.deploy` owns Caddy/shared proxy-network configuration; `yawn.vps` owns capability-scoped bounded
+must expose. A dedicated VPS deploy definition owns Menhir/Neo4j containers and volumes.
+the deployment repository owns Caddy/shared proxy-network configuration; the operations repository owns capability-scoped bounded
 operational tools. Each cross-repo change requires a reviewed commit and rollback anchor linked from
 the final implementation report.
