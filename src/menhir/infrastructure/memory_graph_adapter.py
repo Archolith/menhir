@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import uuid as uuidlib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -921,11 +922,12 @@ class MemoryGraphAdapter:
         model: str | None = None,
         subject_uuid: str | None = None,
         resolved_only: bool = False,
+        sources: Sequence[str] | None = None,
     ) -> list[dict[str, object]]:
         """Source-memory lane search over :Episodic content embeddings (read-only)."""
         return self._memory_queries.search_episode_embeddings(
             query_vector, limit=limit, namespace=namespace, model=model,
-            subject_uuid=subject_uuid, resolved_only=resolved_only,
+            subject_uuid=subject_uuid, resolved_only=resolved_only, sources=sources,
         )
 
     def timeline_page(
