@@ -12,7 +12,7 @@ The legacy `user` extraction prompt work in the archive is marked "Superseded by
 - `reviews/`: added the anchored-time attach gate review and the #168 freeze flag review, trimmed the same way.
 - `CHANGELOG-archive.md`: generalized private host, provider and repository names.
 - `anchored_time.py`, `tests/fixtures/anchored_time/README.md`: the P1 plan citation now points at the archive.
-- Tracked docs: generalized home paths, LAN addresses, the production hostname, the owner's name, snapshot volume names, and the provider and operations repository names. The production migration plan lost `contabo` from its filename.
+- Tracked docs: generalized home paths, LAN addresses, the production hostname, the owner's name, snapshot volume names, and the provider and operations repository names. The archived production migration plan moved to the private deployment repository.
 - `archive/plans/`: added the proposer-reviewer vocabulary experiment plan; its five code and test citations now resolve.
 
 ## 2026-11-07 - Recall test records added to reference
