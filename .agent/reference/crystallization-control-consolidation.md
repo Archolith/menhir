@@ -1,3 +1,8 @@
+---
+artifact_schema: 1
+artifact_type: investigation
+---
+
 # Research Note: Crystallization Control for Memory Consolidation
 
 **Project:** Menhir / Archolith

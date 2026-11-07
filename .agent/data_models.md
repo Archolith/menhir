@@ -531,6 +531,8 @@ summary remains intact for backward comparison.
 
 ### TypedEventAssertion node, EventLane value object, and event timeline projection
 
+> **2026-10-28: removed.** The event-history lane and its recall authority were removed (#399 bucket 3: neutral A/B, and fail-closed authority regressed). The code is on `archive/event-history-2026-10-28`. This section is kept as history and doesn't describe current behavior. Erasure paths still cover legacy event nodes.
+
 The Event History Phase 1–5 substrate: an immutable, evidence-grounded record of categorical
 occurrences (`TypedEventAssertion`), a fold/selection scope (`EventLane`), and a disposable timeline
 projection, wired as a **default-off production-capable** path at `370eff1`. Every event settings/flag
@@ -703,6 +705,8 @@ Additional edge families now in active use:
 | `EVENT_HISTORY_ENTRY` | Event-lane timeline View → contributing `:TypedEventAssertion` nodes, carrying `ordinal` (see the event-history section above) |
 
 ### Event history namespace watermark
+
+> **2026-10-28: removed** with the event-history lane. Kept as history.
 
 The event-history backfill runs on an **independent** cursor node `:EventConsolidationWatermark`
 (unique on `group_id`, keyed by the namespace string), deliberately distinct from

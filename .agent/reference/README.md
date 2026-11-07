@@ -7,7 +7,7 @@ reference may constrain a current design, preserve negative benchmark evidence, 
 option, or supply research consumed by an active plan. Executable ownership belongs in
 [`../plans/`](../plans/); completed and superseded work belongs in [`../archive/`](../archive/).
 
-This index routes all 15 Markdown references and the one intentionally unverified PDF exactly once.
+This index routes all 14 Markdown references and the one intentionally unverified PDF exactly once.
 
 ## Current design laws and inventories
 
@@ -56,7 +56,7 @@ Every reference must state why it is still useful and, when applicable, name its
 Promote it to `../plans/` only when it becomes executable ownership. Archive it when its constraints
 are fully absorbed or it is superseded and no current consumer remains.
 
-## Maintenance rule
+## Moving a document here
 
 Moving a document here follows
 [`../workflows/artifact_authoring.md`](../workflows/artifact_authoring.md). Three things are

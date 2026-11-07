@@ -37,7 +37,7 @@ Project maintenance rules for `menhir`.
 - Only log changes made to this project (`menhir`).
 - Never include changes from sibling projects.
 - Use the format: `## YYYY-MM-DD - <short description>` with bullet points per file changed.
-- Keep only the 10 most recent dated entries in `.agent/CHANGELOG.md`; move older entries to `.agent/CHANGELOG-archive.md`.
+- Keep only the 10 most recent dated entries in each changelog; move older entries to the `CHANGELOG-archive.md` beside it.
 
 ## Git Hygiene
 

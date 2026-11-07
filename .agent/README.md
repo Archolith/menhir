@@ -2,9 +2,9 @@
 
 Core bot-facing docs for `menhir`.
 
-> **New chain / swapping in a fresh LLM?** For current local-MVP sequencing, start with
-> [`archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md`](archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md)
-> and tracker #123, which holds the live release gates. The code-verified finding
+> **New chain / swapping in a fresh LLM?** Current work is in [`plans/README.md`](plans/README.md). The local MVP
+> shipped as 0.3.0, so [`archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md`](archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md)
+> and closed tracker #123 are history. The code-verified finding
 > ledger is [`verified-current-findings-main-2026-07-10.md`](verified-current-findings-main-2026-07-10.md).
 > Historical frontier/oracle context is archived at
 > [`archive/plans/chain-handoff.md`](archive/plans/chain-handoff.md); it is not the current MVP roadmap.
@@ -49,7 +49,7 @@ Start with one file:
 - shipped-but-default-off features (what's built but not live) -> `default-off-features.md`
 - conflict-resolution history and suppression-recording semantics -> `conflict-resolution-history-proposal.md`
 - exploring new View shapes (design exploration, not settled) -> `memory-view-kinds-frontier-transfer.md`
-- current local-MVP release plan -> `archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md` (gates: tracker #123)
+- local-MVP release history -> `archive/plans/menhir-local-stdio-mvp-release-2026-09-16.md` (closed tracker #123)
 - current executable plans and dependency order -> `plans/README.md`
 - what has been tried on recall, and what's still open -> `reference/menhir-recall-experiment-record.md`
 - useful non-executable design, research, and negative evidence -> `reference/README.md`
