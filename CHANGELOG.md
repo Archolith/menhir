@@ -1,3 +1,19 @@
+## 2026-11-07 - Release gaps: refusals name their control, review_inbox labels, readyz check output
+
+- A refused tool call names the control that refused it: the server's client policy, or
+  `MENHIR_CLIENT_TOOLS`. A bound client policy now decides alone, and an empty one denies every
+  tool in both the invocation gate and `tools/list` (the policy loader already rejects an empty
+  one) (#503).
+- `review_inbox` over the stdio bridge no longer heads an unscoped read "all namespaces": a pin
+  there exists only server-side (#507). Its candidates line says the explorer is not served by
+  production (#504).
+- `scripts/release/check_served_metadata.py` refuses a served build field that is not plain text,
+  with exit 2 and without printing it, and reports an output encoding error as exit 2 (#501).
+- New test pins the auth middleware's 403 `client_policy_denied` response (#508).
+- `docs/usability/README.md`: the usage row is done (#480); the served-metadata row points at #498 (#505).
+- Still open: a denied call returns a text result with `isError=False` (#503). Changing that
+  changes an existing test's assertion, so it waits for a decision.
+
 ## 2026-11-07 - A 402 with a retry hint backs off instead of opening the breaker for an hour
 
 - Every HTTP 402 counted as billing (#482), so OpenRouter's `in_flight_budget_exhausted` 402, which
@@ -94,14 +110,3 @@ Documentation only. Sets who Menhir must work for and the rules that keep new wo
 - `docs/usability/documentation.md`: rules for docs, and which document owns each fact.
 - `AGENTS.md`, `CONTRIBUTING.md`, `.github/pull_request_template.md`: point contributors and agents at
   the guides; the PR template gains a usability checklist.
-
-## 2026-11-02 - One command prepares a version or fork bump
-
-`scripts/bump.py` replaces the by-hand edits before a release. No runtime code changes.
-
-- `scripts/bump.py`: `version` and `fork` subcommands update every file that states the version or
-  pin, or write nothing if an expected line has moved. `uv lock --check` must pass, and `--pr` opens
-  the pull request. Tagging stays in `scripts/release.py`.
-- `tests/test_bump.py`: covers partial writes, restores, and CRLF files. It also fails if a new file
-  names the current version or fork pin and the bump would miss it.
-- `docs/runbooks/release.md`: step 2 and the fork pin procedure.

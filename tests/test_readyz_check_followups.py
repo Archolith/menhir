@@ -368,3 +368,19 @@ def test_script_runs_without_docstrings() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "--snapshot-mode" in result.stdout
+
+
+@pytest.mark.parametrize("field", ["version", "commit", "mcp_metadata_sha256"])
+@pytest.mark.parametrize(
+    "value",
+    ["1\nversion: ok forged", "\ud800", "x" * 65, "1 2"],
+    ids=["newline", "lone-surrogate", "too-long", "space"],
+)
+def test_served_build_text_that_is_not_plain_is_refused_unshown(serve, capsys, field, value) -> None:
+    """#501: served text is printed only in a plain shape; otherwise exit 2 with a fixed phrase."""
+    build = _build("0" * 64)
+    build["build"][field] = value
+    assert run(serve(build)) == 2
+    out = capsys.readouterr().out
+    assert f"build.{field} is not plain text" in out
+    assert "forged" not in out and "version: ok" not in out
