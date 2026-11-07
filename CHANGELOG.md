@@ -1,3 +1,11 @@
+## 2026-11-06 - Recall's `relevance_basis` says the tier is a rank score
+
+`relevance_basis` changes from `legacy_rrf_threshold_unvalidated` to
+`rank_score_threshold_not_similarity` on MCP and REST recall results. The tier has now been tested:
+at least one `high` result came back for 98.5% of real LongMemEval questions and for 92.5% of null
+questions (unanswerable, or swapped onto an unrelated namespace). The `relevance` key, its values, scores, ranking and the 0.15 floor are
+unchanged. A client matching the old string must update it.
+
 ## 2026-11-07 - Lock refresh for Python 3.15 wheels
 
 - `uv.lock`: jiter 0.19.0, markupsafe 3.0.4, numpy 2.5.4, pydantic 2.14.3, pydantic-core 2.50.4
@@ -97,23 +105,3 @@ when the provider reports `finish_reason=length`, and Menhir treats that as trun
 
 A prose-wrapped reply that is cut off, when the provider does not report `length`, can still parse
 to a fragment.
-
-## 2026-11-01 - v0.3.1: scalar values checked against their source (#411)
-
-Hotfix on 0.3.0. A wrong value in five scalar kinds could become a current View if 2 of 3 model
-samples agreed on it, because nothing compared it with what the user said.
-
-- `services/typed_scalar_rules.py`: `parse_scalar_row` now drops a duration, frequency, weekday,
-  status or boolean value the source does not state, or that the source negates, hedges or asks
-  about. The clause is read from the source, so a short quote cannot leave a negation out. Status
-  and true booleans are also dropped in the past tense or in a "who" clause. `expire` rows are
-  exempt.
-- `uv.lock`: `joserfc` 1.7.3 -> 1.7.7 (GHSA-jpxq-7h8p-2q76, GHSA-9pg5-8c7x-5hfx).
-- `tests/test_scalar_source_grounding_411.py` (new). `tests/test_boolean_polarity_consistency.py`:
-  three cases asserted `has_passport` from unrelated sentences and now name their own attribute.
-- `docs/personal-memory-readiness.md`, `docs/post-install.md`, `README.md`: what the checks do and
-  do not cover.
-- `pyproject.toml`, `uv.lock`, `sbom.json`, `docs/governance.md`: version 0.3.1.
-
-Values stored before 0.3.1 are not rechecked. The benchmark was not rerun for this hotfix, so the
-Gate E results in #123 describe 0.3.0.
