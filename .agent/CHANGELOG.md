@@ -2,12 +2,14 @@
 
 Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
+The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
+
 ## 2026-11-06 - Research routing and changelog trim
 
 - `workflows/artifact_authoring.md`: added where research results go.
 - `README.md`: routes recall questions to the experiment record.
 - `maintenance.md`: older changelog entries now move to `CHANGELOG-archive.md`.
-- `CHANGELOG.md`, `CHANGELOG-archive.md`: moved 114 older entries to the archive, unchanged.
+- `CHANGELOG.md`, `CHANGELOG-archive.md`: moved 114 older entries to the archive. One Windows home path became a repo-style path; the rest is unchanged.
 - `../docs/research/README.md` and the cluster READMEs: added "Start here" routing.
 
 ## 2026-10-27 - Bucket 1 default-off features removed; kept on an archive branch

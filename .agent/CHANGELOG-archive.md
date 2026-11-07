@@ -1,6 +1,6 @@
 # Changelog archive
 
-Entries moved from `CHANGELOG.md`, newest first, unchanged.
+Entries moved from `CHANGELOG.md`, newest first. One Windows home path became a workspace-relative path; the rest is unchanged.
 
 ## 2026-10-11 - Anchored-time P3c follow-ups: stale saves and the preserved-attributes guard
 
@@ -1958,7 +1958,7 @@ The operator gate is a migration bridge, not the permanent design.
 ## 2026-05-21 - structural query missing-project guidance
 - **`src/cth_mcp_memory/mcp/tools/recall/query_structure.py`**: Detect unknown projects up front by checking the ingested project list before project-scoped structure queries. Return explicit ingest guidance instead of ambiguous empty `overview` / `files` / `tests` results when the repo has not been structurally ingested yet.
 - **`tests/test_query_structure_tool.py`**: Added regression coverage for the unknown-project guidance path and preserved `projects` listing behavior.
-- **`C:\Users\you\IdeaProjects\.agent\README.md`**: Updated workspace structural-graph workflow docs to require checking `projects` first and ingesting missing repos before trusting empty structure output.
+- **Workspace `.agent/README.md`**: Updated workspace structural-graph workflow docs to require checking `projects` first and ingesting missing repos before trusting empty structure output.
 - **`.agent/README.md`, `.agent/tasks-mcp.md`**: Documented that the structure watcher refreshes only already-ingested repos and that empty structure results can mean "not ingested yet."
 - **Verification**: `python -m pytest tests/test_query_structure_tool.py -q` -> `2 passed`.
 
