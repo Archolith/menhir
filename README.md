@@ -339,6 +339,9 @@ Before you store anything, [`docs/your-data.md`](docs/your-data.md) lists what M
   the simplest route is [uv](https://docs.astral.sh/uv/): `uv python install 3.12` then
   `uv venv --seed --python 3.12 && source .venv/bin/activate` (`--seed` gives the venv a `pip`;
   uv omits it by default).
+- Python 3.15: PyYAML 6.0.3 has no 3.15 wheel yet, so pip builds it from source. That build is
+  pure Python and needs no compiler, but it fails under `--only-binary=:all:`. Allow it with
+  `--no-binary=pyyaml`, or use 3.12-3.14, where every dependency has a wheel.
 - Neo4j 5.26 (LTS) or newer with APOC (queries use `CALL () {}` scoped subqueries and dynamic
   labels, which need 5.26). `menhir up --compose-neo4j` starts one for you; you need Docker on the
   machine running `menhir` for that, and nothing else.

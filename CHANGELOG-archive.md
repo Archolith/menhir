@@ -1,3 +1,12 @@
+## 2026-11-01 - v0.3.0: release version for candidate 44933985 (#123)
+
+The frozen MVP release candidate `44933985` (#123) gets its own version: 0.2.3 is already on PyPI.
+
+- `pyproject.toml`, `uv.lock`: version 0.2.3 -> 0.3.0. No dependency changes.
+- No source changes since `44933985`. Outside `src/`: offline tests also run on Windows/py3.12 and Ubuntu/py3.13, test fixes for those platforms, and community files (CONTRIBUTING, Code of Conduct, issue and PR templates). `docs/personal-memory-readiness.md` gained the scalar grounding known limitation (#412; post-MVP follow-up #411).
+- `CHANGELOG-archive.md`: the oldest former current entry moved there (10-entry limit).
+- Docs accuracy pass for the release: known limitations (#169, #417) and the Beacon deferral (#120) are stated; defaults, ports, retired settings, `menhir sync` upload behavior and runbook commands are corrected; `docs/roadmap/menhir-mvp-roadmap.md` is now a pointer to the release plan.
+
 ## 2026-10-31 - LLM clients resolve each host once (#409)
 
 Under 500-way ingest every default-executor thread can be busy with sync Neo4j calls. asyncio resolves hostnames on that same pool, so each new OpenAI connection waited behind graph I/O and hit the SDK's 5 s connect timeout. Graphiti embeds failed with `APITimeoutError`, and source-memory embeds were skipped.
