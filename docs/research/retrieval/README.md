@@ -2,6 +2,11 @@
 
 Cluster 3 of the research corpus. The read-side retrieval pipeline: candidate generation, the oracle/combiner reasoning layer, the write boundary, and the control rails. (Passive L3/L4 data structures live in `../schemas/`.)
 
+## Start here
+
+- **What has been tried on recall, and what's still open:** [`menhir-recall-experiment-record.md`](../../../.agent/reference/menhir-recall-experiment-record.md). Read it before proposing a recall change. For measured results, trust the record over the docs below.
+- **Open work:** #515 (telling whether recall holds an answer), #516 (entity recall options), #433 (what scores mean).
+
 > **2026-11-01:** "default-off" below is out of date. Oracle ranking, the intent lens and the warden gate are always on; see the correction in [`../README.md`](../README.md).
 >
 > **2026-07-11:** this pipeline is **built but no longer the active build direction** — the oracle/warden stack benched neutral-to-negative on LongMemEval and ships default-off (`config/settings.py` frontier_* all False); the active direction moved to write-time consolidation. See the master index's dated correction: [`../README.md`](../README.md). The statuses below track each mechanism's implementation/bench state, not current build priority.
