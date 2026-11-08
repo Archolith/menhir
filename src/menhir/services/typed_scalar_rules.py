@@ -2192,6 +2192,10 @@ def gate_typed_scalars(
             )
         if align_spans:
             proposal = _canonical_aligned_proposal(proposal, candidates)
+            # Each sample kept a source-time prefix because ITS quote had the cue; the aligned quote
+            # may not, so re-ground the name against the quote committed (#519: current_x vs x).
+            proposal = replace(
+                proposal, attribute=_canon_attribute(proposal.attribute, proposal.stated_span))
         if is_counting_occurrence(proposal.operation):
             levels = Counter(c.importance for c in candidates)
             rank = {"tracked": 2, "notable": 1, "routine": 0}
