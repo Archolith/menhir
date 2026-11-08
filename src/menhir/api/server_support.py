@@ -96,7 +96,9 @@ def build_server_prereqs(
             tool_catalog=tool_catalog,
         )
         if client_policy.access_contract is None:
-            raise ValueError("production startup requires a version 2 access contract")
+            raise ValueError(
+                "production startup requires a version 2 or 3 access contract"
+            )
         client_policy.access_contract.require_primary_endpoint(oauth_config.resource)
         client_policy.access_contract.require_oauth_scope_mapping(
             scopes_supported=oauth_config.scopes_supported,

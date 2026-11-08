@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from archolith_oauth import resolve_client_metadata_document as _shared_cimd_resolver
@@ -27,6 +27,9 @@ from menhir.api.oauth_client_store import (
     upsert_cimd_client,
 )
 from menhir.config.oauth import _get_setting
+
+if TYPE_CHECKING:
+    from menhir.api.client_policy import ClientPolicyAuthority
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +127,11 @@ def _client_from_cimd_document(
     )
 
 
-async def resolve_cimd_client(client_id: str, settings: object) -> OAuthClient:
+async def resolve_cimd_client(
+    client_id: str,
+    settings: object,
+    client_policy: ClientPolicyAuthority | None = None,
+) -> OAuthClient:
     """Resolve an HTTPS URL client_id via CIMD with durable bounded-freshness caching.
 
     A fresh cached snapshot is used without network; stale or missing snapshots
@@ -135,7 +142,9 @@ async def resolve_cimd_client(client_id: str, settings: object) -> OAuthClient:
     from menhir.api import oauth_authorize as _facade  # CIMD resolver seam (see docstring)
     from menhir.api.oauth_as_metadata import agent_smith_client_document_for_id
 
-    local_document = agent_smith_client_document_for_id(client_id, settings)
+    local_document = agent_smith_client_document_for_id(
+        client_id, settings, client_policy
+    )
     if local_document is not None:
         client = _client_from_cimd_document(client_id, local_document, settings)
         upsert_cimd_client(client, fetched_at=time.time())
@@ -171,7 +180,10 @@ async def resolve_cimd_client(client_id: str, settings: object) -> OAuthClient:
 
 
 async def _resolve_client_and_redirect(
-    client_id: str, redirect_uri: str, settings: object
+    client_id: str,
+    redirect_uri: str,
+    settings: object,
+    client_policy: ClientPolicyAuthority | None = None,
 ) -> OAuthClient:
     """Return the client iff it exists and *redirect_uri* exactly matches a registered
     URI. Ordinary persisted (DCR) client IDs resolve from the store; HTTPS URL
@@ -180,7 +192,7 @@ async def _resolve_client_and_redirect(
     if not client_id:
         raise ValueError("Missing client_id")
     if _is_https_url(client_id):
-        client = await resolve_cimd_client(client_id, settings)
+        client = await resolve_cimd_client(client_id, settings, client_policy)
     else:
         client = get_client_store().get(client_id)
     if client is None:

@@ -1,3 +1,23 @@
+## 2026-11-08 - Client policy v3: tool profiles and deployment-owned product roles (#435)
+
+- A version 3 client policy grants tools by profile: `core`, `curate`, `operate` and `admin`
+  (`src/menhir/mcp/tool_profiles.py`), plus optional `allow` and `deny` lists. It resolves at load
+  time to the same allowlist versions 1 and 2 spell out, so runtime enforcement is unchanged.
+- Profile tools above a client's `maximum_tier` are left out and logged. An explicit `allow`
+  above the tier fails the load. A v3 client's scopes must equal its tier's scopes.
+- `profile_catalog` pins the catalog a policy was written for. Tools a later catalog adds are
+  withheld and logged as a warning; a policy newer than the build fails the load. Catalog 1 is
+  this release.
+- `access_contract.products` is now the deployment's: any product names, roles `readonly`, `agent`
+  or `operator` (v2: `agent` or `operator`). The fixed ChatGPT/Codex/Claude/OpenCode role table is
+  gone. In v3 a product client never resolves an `admin` tool.
+- Agent Smith client-metadata documents advertise the scopes the policy gives that client.
+- Tier ranking lives in one place, `src/menhir/tiers.py`.
+- `.agent/mcp-tools.yaml` lists the profiles, checked against the code by a test.
+- Versions 1 and 2 still load. The next release drops them.
+- New fixture `tests/fixtures/client-policy.v3.synthetic.json`; `.agent/endpoints.md` documents
+  the policy.
+
 ## 2026-11-08 - v0.3.4: MCP initialize names the build; releases publish what they serve; policy refusals are MCP errors
 
 - `serverInfo.version` carries the build commit as SemVer build metadata, and each GitHub release
@@ -99,20 +119,3 @@ For agent-written memories (#168): a caller can ask for just the agent-writer it
 - Not on the `recall_memories` MCP tool.
 - Tests (new): `tests/test_source_memory_source_filter.py`, including an online test showing the filter applies before LIMIT.
 
-## 2026-11-05 - Conflict detection drops dissimilar pairs before review
-
-- `classify_pair` now reads the pair's real name cosine and drops conflict and merge candidates
-  below `CORRELATION_SIMILARITY_FLOOR` (0.40). The floor can only turn a route into `none`; a
-  missing vector, a read error or a PROMOTED member keeps today's route. Each drop is recorded as
-  `correlation_similarity_floor`. Routing above the floor still uses the RRF rank score, because
-  cosine cannot tell a contradiction from a duplicate.
-- The shared-episode veto is always on. A pair that one episode asserted together, with no shared
-  attribute word, is dropped instead of queued. Known limit: a same-episode correction with no
-  shared word ("Lisbon residence" / "Porto home") is dropped too.
-- A floor or veto drop ends that node's contradiction scan, as a queued conflict does, so a drop
-  never reaches hits the scan would not have classified. A dropped pair writes nothing to the
-  graph: the node stays scannable and merge-eligible, and a rescan records the drop again.
-- `list_conflicts` shows each member's scope and a note on how the group may have been created.
-- `tests/fixtures/conflict_pairs.json` pins what 42 hand-written pairs do. The floor is fitted to
-  those pairs, so the fixture records behaviour and does not measure accuracy.
-  `scripts/build_conflict_fixture.py` refreshes its cosines.

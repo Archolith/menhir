@@ -11,7 +11,6 @@ from starlette.datastructures import Headers
 from menhir.api.client_policy import load_client_policy
 from menhir.access_contract import (
     is_canonical_primary_endpoint,
-    EXPECTED_PRODUCT_ROLES,
 )
 from menhir.api.production_routes import readyz, source_fence_probe
 from menhir.api.server import create_app

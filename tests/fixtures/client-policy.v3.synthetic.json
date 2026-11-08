@@ -1,0 +1,273 @@
+{
+  "access_contract": {
+    "authentication": {
+      "access_token": "signed_jwt",
+      "client_identity": "policy_bound_client_id",
+      "grant_type": "authorization_code",
+      "pkce_method": "S256",
+      "protocol": "oauth-2.1"
+    },
+    "primary_endpoint": "https://menhir.example.com/mcp-http",
+    "products": {
+      "chatgpt": {
+        "client_ids": [
+          "example-chatgpt-web",
+          "https://chatgpt.com/oauth/client.json"
+        ],
+        "role": "agent"
+      },
+      "claude": {
+        "client_ids": [
+          "example-claude-web",
+          "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=claude",
+          "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=wsl-claude"
+        ],
+        "role": "operator"
+      },
+      "codex": {
+        "client_ids": [
+          "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=codex"
+        ],
+        "role": "operator"
+      },
+      "opencode": {
+        "client_ids": [
+          "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=opencode",
+          "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=wsl-opencode"
+        ],
+        "role": "agent"
+      }
+    }
+  },
+  "canonical_digest": "bda551cf2cb43969b2f3b177865f4a425defaa953abb8350aeb6e88717fdffb4",
+  "clients": {
+    "example-chatgpt-web": {
+      "label": "chatgpt-chat",
+      "maximum_tier": "agent",
+      "namespace": "",
+      "profiles": [
+        "core",
+        "curate"
+      ],
+      "registration": {
+        "client_name": "chatgpt-chat",
+        "redirect_uris": [
+          "https://chatgpt.com/connector_platform_oauth_redirect"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
+      "scopes": [
+        "menhir:read",
+        "menhir:write"
+      ]
+    },
+    "example-claude-web": {
+      "label": "claude-web",
+      "maximum_tier": "operator",
+      "namespace": "",
+      "profiles": [
+        "core",
+        "curate",
+        "operate"
+      ],
+      "registration": {
+        "client_name": "Claude web",
+        "protocol_scopes": [
+          "offline_access"
+        ],
+        "redirect_uris": [
+          "https://claude.ai/api/mcp/auth_callback"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
+      "scopes": [
+        "menhir:read",
+        "menhir:write",
+        "menhir:admin"
+      ]
+    },
+    "example-web-client-1": {
+      "allow": [
+        "get_scalar_view_items",
+        "recall_history",
+        "recall_memories",
+        "recall_timeline"
+      ],
+      "label": "example-web-client-1",
+      "maximum_tier": "readonly",
+      "namespace": "",
+      "profiles": [],
+      "scopes": [
+        "menhir:read"
+      ]
+    },
+    "https://chatgpt.com/oauth/client.json": {
+      "label": "chatgpt-web-cimd",
+      "maximum_tier": "agent",
+      "namespace": "",
+      "profiles": [
+        "core",
+        "curate"
+      ],
+      "scopes": [
+        "menhir:read",
+        "menhir:write"
+      ]
+    },
+    "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=antigravity-ide": {
+      "label": "agent-smith-antigravity-ide",
+      "maximum_tier": "agent",
+      "namespace": "",
+      "profiles": [
+        "core"
+      ],
+      "scopes": [
+        "menhir:read",
+        "menhir:write"
+      ]
+    },
+    "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=claude": {
+      "label": "agent-smith-claude",
+      "maximum_tier": "operator",
+      "namespace": "",
+      "profiles": [
+        "core",
+        "curate",
+        "operate"
+      ],
+      "scopes": [
+        "menhir:read",
+        "menhir:write",
+        "menhir:admin"
+      ]
+    },
+    "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=cline": {
+      "label": "agent-smith-cline",
+      "maximum_tier": "agent",
+      "namespace": "",
+      "profiles": [
+        "core"
+      ],
+      "scopes": [
+        "menhir:read",
+        "menhir:write"
+      ]
+    },
+    "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=codex": {
+      "label": "agent-smith-codex",
+      "maximum_tier": "operator",
+      "namespace": "",
+      "profiles": [
+        "core",
+        "curate",
+        "operate"
+      ],
+      "scopes": [
+        "menhir:read",
+        "menhir:write",
+        "menhir:admin"
+      ]
+    },
+    "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=gemini": {
+      "label": "agent-smith-gemini",
+      "maximum_tier": "agent",
+      "namespace": "",
+      "profiles": [
+        "core"
+      ],
+      "scopes": [
+        "menhir:read",
+        "menhir:write"
+      ]
+    },
+    "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=gemini-config": {
+      "label": "agent-smith-gemini-config",
+      "maximum_tier": "agent",
+      "namespace": "",
+      "profiles": [
+        "core"
+      ],
+      "scopes": [
+        "menhir:read",
+        "menhir:write"
+      ]
+    },
+    "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=goose": {
+      "label": "agent-smith-goose",
+      "maximum_tier": "agent",
+      "namespace": "",
+      "profiles": [
+        "core"
+      ],
+      "scopes": [
+        "menhir:read",
+        "menhir:write"
+      ]
+    },
+    "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=opencode": {
+      "label": "agent-smith-opencode",
+      "maximum_tier": "agent",
+      "namespace": "",
+      "profiles": [
+        "core"
+      ],
+      "scopes": [
+        "menhir:read",
+        "menhir:write"
+      ]
+    },
+    "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=qwen": {
+      "label": "agent-smith-qwen",
+      "maximum_tier": "agent",
+      "namespace": "",
+      "profiles": [
+        "core"
+      ],
+      "scopes": [
+        "menhir:read",
+        "menhir:write"
+      ]
+    },
+    "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=wsl-claude": {
+      "label": "agent-smith-wsl-claude",
+      "maximum_tier": "operator",
+      "namespace": "",
+      "profiles": [
+        "core",
+        "curate",
+        "operate"
+      ],
+      "scopes": [
+        "menhir:read",
+        "menhir:write",
+        "menhir:admin"
+      ]
+    },
+    "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=wsl-opencode": {
+      "label": "agent-smith-wsl-opencode",
+      "maximum_tier": "agent",
+      "namespace": "",
+      "profiles": [
+        "core"
+      ],
+      "scopes": [
+        "menhir:read",
+        "menhir:write"
+      ]
+    },
+    "https://menhir.example.com/oauth/client-metadata/agent-smith.json?client=zcode": {
+      "label": "agent-smith-zcode",
+      "maximum_tier": "agent",
+      "namespace": "",
+      "profiles": [
+        "core"
+      ],
+      "scopes": [
+        "menhir:read",
+        "menhir:write"
+      ]
+    }
+  },
+  "profile_catalog": 1,
+  "version": 3
+}

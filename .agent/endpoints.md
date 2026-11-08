@@ -160,6 +160,44 @@ Behaviors that surprise callers:
   remote surface uses the MCP SDK's `FastMCP` (`mcp.server.fastmcp`), which has no
   tool-transform hook, whereas the gateway uses the separate `fastmcp` v2 package.
 
+### Production client policy (OAuth)
+
+In production, each OAuth `client_id` must appear in the digest-bound client policy
+(`MENHIR_CLIENT_POLICY_PATH` + `MENHIR_CLIENT_POLICY_DIGEST`, loaded by
+`src/menhir/api/client_policy.py`). The policy fixes the client's exact scopes, its
+`maximum_tier`, and its tool allowlist. Versions 1 and 2 spell the allowlist out as
+`allowed_tools`/`denied_tools`. Version 3 builds it from named tool profiles
+(`src/menhir/mcp/tool_profiles.py`, mirrored in `mcp-tools.yaml`):
+
+| Profile | What it covers |
+|---------|----------------|
+| `core` | recall, context, structure, provenance, `add_memory`, everyday todos |
+| `curate` | flagging, promotion, deletion, candidates, conflicts, artifacts, todo lifecycle, ingest |
+| `operate` | stats, entropy, enrichment and scheduler control |
+| `admin` | `list_clients`, `mint_client`, `revoke_client`, `delete_namespace` |
+
+A v3 client lists `profiles`, plus optional `allow` and `deny` tool names. Resolution:
+
+- Profile tools above the client's `maximum_tier` are left out and logged at INFO. An
+  explicit `allow` above the tier fails the load.
+- The policy's top-level `profile_catalog` pins the catalog version it was written for.
+  Tools added to a profile in a later catalog are withheld from it and logged as a WARNING;
+  startup continues. A policy pinned to a catalog newer than the build fails the load.
+- A v3 client's `scopes` must equal its tier's: readonly `menhir:read`, agent adds
+  `menhir:write`, operator adds `menhir:admin`.
+
+The `access_contract.products` map is the deployment's own: any product names, each with
+a role of `readonly`, `agent` or `operator` (v2 allows only `agent` and `operator`). Every
+client of a product must sit at that tier, and in v3 a product client never resolves an
+`admin` tool. Clients outside any product, such as an operator CLI, may hold `admin`.
+
+Changing a client's tier changes its scopes, so the client must reauthorize: refresh
+tokens carry the old scopes and are refused. Changing only its tools takes effect once the
+server restarts with the new policy, and existing tokens keep working.
+
+Agent Smith client-metadata documents advertise the scopes the policy gives that client,
+falling back to the built-in table when the client is not in the policy.
+
 Throwaway/benchmark recipe (unauthenticated, local only):
 
 ```bash

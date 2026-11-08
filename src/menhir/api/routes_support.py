@@ -13,6 +13,7 @@ from menhir.core.backend_protocol import MemoryBackend
 from menhir.core.runtime import RuntimeContext
 from menhir.domain.session import MemorySession, new_session
 from menhir.domain.recall import VerifierEvidence, normalize_source_memory_sources
+from menhir.tiers import TIER_RANK
 from menhir.infrastructure.telemetry import record_destructive_op
 from menhir.mcp.service_access import (
     get_pinned_namespace,
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 # skipped, matching the MCP semantics exactly.
 # ---------------------------------------------------------------------------
 
-_TIER_RANK = {"readonly": 0, "agent": 1, "operator": 2}
+_TIER_RANK = TIER_RANK
 
 
 def _require_tier(required: str) -> None:
