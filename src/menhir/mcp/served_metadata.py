@@ -37,6 +37,18 @@ def release_commit() -> str:
     return value if _COMMIT_RE.fullmatch(value) else "unknown"
 
 
+def served_server_version(version: str) -> str:
+    """MCP ``serverInfo.version``: ``version``, plus the build commit as SemVer build metadata.
+
+    ``1.2.3+43e693f6b821`` still parses as version 1.2.3 (SemVer and PEP 440 both ignore the
+    ``+`` part when comparing), and it names the build a long-lived connection was opened
+    against (#498). Without a known commit the version is unchanged.
+    """
+
+    commit = release_commit()
+    return version if commit == "unknown" else f"{version}+{commit[:12]}"
+
+
 def _get_lock() -> asyncio.Lock:
     global _digest_lock, _digest_lock_loop
     loop = asyncio.get_running_loop()
@@ -111,6 +123,50 @@ async def _compute_digest(server: Any = None) -> str:
     return (await compute_metadata(server)).sha256
 
 
+RELEASE_RECORD_SCHEMA = 1
+
+
+def release_record() -> dict[str, Any]:
+    """What a release publishes for a deploy to compare with ``/readyz`` (#498).
+
+    Run inside the release image, so the commit and catalog are the ones it serves. The catalog
+    depends on the snapshot receive mode, which the release cannot know, so every mode's digest
+    is listed; a deploy accepts the served digest when it equals one of them.
+    """
+
+    from menhir import __version__
+    from menhir.config.snapshot_mode import SNAPSHOT_RECEIVE_MODE_ENV, SnapshotReceiveMode
+
+    # Saved for the restore below, not read as configuration: each pass sets the mode itself.
+    previous = os.environ.pop(SNAPSHOT_RECEIVE_MODE_ENV, None)
+    digests: dict[str, str] = {}
+    try:
+        for mode in SnapshotReceiveMode:
+            os.environ[SNAPSHOT_RECEIVE_MODE_ENV] = mode.value
+            digests[mode.value] = asyncio.run(compute_metadata()).sha256
+    finally:
+        if previous is None:
+            os.environ.pop(SNAPSHOT_RECEIVE_MODE_ENV, None)
+        else:
+            os.environ[SNAPSHOT_RECEIVE_MODE_ENV] = previous
+    return {
+        "schema": RELEASE_RECORD_SCHEMA,
+        "version": __version__,
+        "commit": release_commit(),
+        "mcp_metadata_sha256": digests,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    """``python -m menhir.mcp.served_metadata``: print the release record as one JSON line."""
+
+    import argparse
+
+    argparse.ArgumentParser(description=release_record.__doc__.splitlines()[0]).parse_args(argv)
+    print(json.dumps(release_record(), sort_keys=True))
+    return 0
+
+
 async def served_mcp_metadata_digest(server: Any = None) -> str:
     """Return the sha256 hex digest of served MCP instructions and tool catalog.
 
@@ -127,3 +183,7 @@ async def served_mcp_metadata_digest(server: Any = None) -> str:
                 _compute_digest() if server is None else _compute_digest(server)
             )
         return _digest_cache
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
