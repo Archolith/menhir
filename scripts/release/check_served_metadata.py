@@ -35,6 +35,7 @@ from typing import Any
 DESCRIPTION = "Check a deployed Menhir's /readyz build block against the local package."
 EXIT_MATCH, EXIT_MISMATCH, EXIT_ERROR = 0, 1, 2
 TOKEN_ENV = "MENHIR_READYZ_TOKEN"
+USER_AGENT = "menhir-release-check"
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _COMMIT_RE = re.compile(r"[0-9a-fA-F]{7,40}")
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}")
@@ -97,7 +98,8 @@ def fetch_readyz(base_url: str, timeout: float, token: str | None = None) -> dic
 
     if _scheme(base_url) not in ("http", "https"):
         raise CheckError("the base URL must be a valid http:// or https:// URL")
-    headers = {"Accept": "application/json"}
+    # Cloudflare answers 403 to urllib's default "Python-urllib/x.y" User-Agent.
+    headers = {"Accept": "application/json", "User-Agent": USER_AGENT}
     if token:
         _require_safe_token_url(base_url)
         headers["Authorization"] = f"Bearer {token}"

@@ -1,3 +1,9 @@
+## 2026-11-08 - The served-metadata check reaches a Cloudflare-fronted server
+
+- `scripts/release/check_served_metadata.py` sends `User-Agent: menhir-release-check`. Cloudflare
+  answered 403 to urllib's default `Python-urllib/x.y`, so the check could not read production's
+  `/readyz`.
+
 ## 2026-11-08 - Policy refusals are MCP errors; v0.3.3 audit follow-ups
 
 - A tool refused by the client policy or `MENHIR_CLIENT_TOOLS` now returns an MCP error result
@@ -104,9 +110,3 @@ unchanged. A client matching the old string must update it.
 - `scripts/release/check_served_metadata.py` reads the token from `MENHIR_READYZ_TOKEN`, sends it
   only over HTTPS or directly to loopback, and does not follow redirects while holding it. It now
   treats any status other than 200 or 503 as an error instead of reading the body.
-
-## 2026-11-04 - Warning lines stop suggesting a silence; candidate text is marked untrusted
-
-- Operator warning lines no longer tell the reader how to silence them. `acknowledge_warning` is
-  unchanged and still listed for operator clients.
-- `review_inbox` marks the candidates section as unreviewed, untrusted text.
