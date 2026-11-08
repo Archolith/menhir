@@ -1,3 +1,12 @@
+## 2026-11-08 - v0.3.5: Client policy v3: tool profiles, a tier ceiling and deployment-owned product roles
+
+- Client policy v3 grants tools by profile (`core`, `curate`, `operate`, `admin`) with a tier
+  ceiling, and product roles belong to the deployment (#435). v1 and v2 policies still load;
+  the next release drops them.
+- Profile catalog 1: the first catalog. A v3 policy sets `"profile_catalog": 1`. Under v3,
+  `list_clients` is an `admin` tool, so product clients no longer receive it.
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.5. No dependency changes in this commit.
+
 ## 2026-11-08 - Client policy v3: tool profiles and deployment-owned product roles (#435)
 
 - A version 3 client policy grants tools by profile: `core`, `curate`, `operate` and `admin`
@@ -109,13 +118,4 @@
   threshold, and requeued. A bare 402, or one with a billing code, is still billing.
 - `retry_after_seconds` also reads the hint from the error body, so the backoff waits as asked.
 - No operator reset for a hard-opened breaker yet (#492): it needs a new operator tool.
-
-## 2026-11-05 - Filter recall's source memories by ingest source
-
-For agent-written memories (#168): a caller can ask for just the agent-writer items, ranked among themselves, instead of fetching 50 and filtering client-side.
-
-- `POST /api/recall` takes `source_memory_sources` (1-20 exact `source` strings, stripped and de-duplicated; anything else is 422). The source-memory search keeps only episodes with one of those sources, before `source_memory_limit` is applied. It does not turn the section on: that is still `source_memory_limit` or the deployment default. Without the field, recall is unchanged and the kwarg is not passed down.
-- `domain/recall.py`: `normalize_source_memory_sources`, shared by the request model and the backend runtime, since the internal backend route skips `RecallRequest`. Threaded through `backend_client_ops`, `backend_protocol`, `backend_runtime_data_ops`, `RecallService`, `run_recall`, `_build_source_memories`, `MemoryGraphAdapter` and `MemoryQueryRepository.search_episode_embeddings` (`n.source IN $sources`; an empty sequence matches nothing).
-- Not on the `recall_memories` MCP tool.
-- Tests (new): `tests/test_source_memory_source_filter.py`, including an online test showing the filter applies before LIMIT.
 
