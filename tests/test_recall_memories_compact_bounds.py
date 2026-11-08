@@ -118,6 +118,19 @@ async def test_no_runtime_trims_to_five_after_the_server_default(monkeypatch) ->
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+async def test_no_runtime_trim_keeps_the_closest_five_in_server_order(monkeypatch) -> None:
+    # The server sends source memories oldest-first, not by match; the oldest here match worst.
+    monkeypatch.setattr(rm, "_deployment_source_memory_limit", lambda: None)
+    sources = _sources(10, 100)
+    for i, entry in enumerate(sources):
+        entry["reference_time"] = f"2026-07-{10 + i:02d}T00:00:00Z"
+        entry["cosine"] = 0.5 + i * 0.01
+    payload, _ = await _recall(copy.deepcopy(sources), compact=True)
+    assert [m["uuid"] for m in payload["source_memories"]] == [f"src-{i}" for i in range(5, 10)]
+
+
+@pytest.mark.unit
 def test_unbuilt_runtime_reports_no_deployment_limit(monkeypatch) -> None:
     monkeypatch.undo()
     from menhir.core.runtime import _state

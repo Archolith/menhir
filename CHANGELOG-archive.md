@@ -1,3 +1,10 @@
+## 2026-11-07 - Lock refresh for Python 3.15 wheels
+
+- `uv.lock`: jiter 0.19.0, markupsafe 3.0.4, numpy 2.5.4, pydantic 2.14.3, pydantic-core 2.50.4
+  and typing-inspection 0.4.5. These releases have Python 3.15 wheels; the locked ones did not.
+- PyYAML 6.0.3 still has no 3.15 wheel. The README says how to install on 3.15 anyway, and
+  `requires-python` stays `>=3.12`.
+
 ## 2026-11-04 - `/readyz` shows build details only to callers with a valid token
 
 - The public `/readyz` body keeps its status fields but no longer reports the version, commit or

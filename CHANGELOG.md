@@ -1,3 +1,11 @@
+## 2026-11-08 - v0.3.4 audit fixes: bridge recall keeps the closest sources; release record on re-runs
+
+- Compact `recall_memories` over the stdio bridge trimmed the server's source memories to the first
+  five, which are the oldest, since the server sends them oldest-first. It now keeps the five with
+  the highest cosine, still in the server's order. (Regression from the bridge-limit change.)
+- A release run that finds the GitHub release already there attaches `served-metadata.json` when it
+  is missing, and fails if it cannot, instead of finishing green without the record a deploy checks.
+
 ## 2026-11-08 - MCP `initialize` names the build; releases publish what they serve
 
 - A release image reports `serverInfo.version` as the version plus the first 12 characters of
@@ -105,10 +113,3 @@ For agent-written memories (#168): a caller can ask for just the agent-writer it
 at least one `high` result came back for 98.5% of real LongMemEval questions and for 92.5% of null
 questions (unanswerable, or swapped onto an unrelated namespace). The `relevance` key, its values, scores, ranking and the 0.15 floor are
 unchanged. A client matching the old string must update it.
-
-## 2026-11-07 - Lock refresh for Python 3.15 wheels
-
-- `uv.lock`: jiter 0.19.0, markupsafe 3.0.4, numpy 2.5.4, pydantic 2.14.3, pydantic-core 2.50.4
-  and typing-inspection 0.4.5. These releases have Python 3.15 wheels; the locked ones did not.
-- PyYAML 6.0.3 still has no 3.15 wheel. The README says how to install on 3.15 anyway, and
-  `requires-python` stays `>=3.12`.

@@ -315,6 +315,15 @@ def test_served_metadata_is_computed_from_the_tagged_image_before_the_release() 
     assert "served/served-metadata.json" in create
 
 
+def test_an_existing_release_without_the_record_gets_it_attached() -> None:
+    # A re-run that finds the release already there must not finish green without the record.
+    release = _workflow("publish-pypi.yml")["jobs"]["github-release"]
+    run = next(s["run"] for s in release["steps"] if "gh release create" in s.get("run", ""))
+    existing = run.split("gh release create")[0]
+    assert "--json assets" in existing and "grep -qx 'served-metadata.json'" in existing
+    assert 'gh release upload "$RELEASE_TAG" served/served-metadata.json' in existing
+
+
 def test_image_call_grants_every_permission_the_called_job_requests() -> None:
     # A called job asking for more than the caller grants fails the whole run at startup.
     caller = _workflow("publish-pypi.yml")["jobs"]["image"]
