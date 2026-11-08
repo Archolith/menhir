@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from menhir.domain.assertion_operations import is_counting_occurrence, is_value_claim
 from menhir.domain.count_match import COUNTED, TARGETED_STATUSES, match_slot_row, status_of
 from menhir.domain.scalar_state_fold import _dedup_occurrences_per_turn
 from menhir.domain.temporal import parse_iso8601
@@ -159,7 +160,7 @@ def _make_entry(row: dict[str, Any]) -> HistoryEntry | None:
 def _match_history_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Occurrences as the match fold sees them: family-keyed, minus repeats of a counted row."""
     def _occ(r: dict[str, Any]) -> bool:
-        return str(r.get("operation")) == "occurrence"
+        return is_counting_occurrence(r.get("operation"))
 
     counted_ids = {str(r.get("assertion_id") or "") for r in rows
                    if _occ(r) and status_of(r) == COUNTED} - {""}
@@ -171,7 +172,8 @@ def _match_history_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for r in keyed:
         if not _occ(r):
-            out.append(r)
+            if is_value_claim(r.get("operation")):
+                out.append(r)
             continue
         target = str(r.get("count_target_id") or "")
         if (status_of(r) in TARGETED_STATUSES and target
@@ -216,6 +218,12 @@ def build_history(
             if _parse_dt(r.get("valid_at")) is None
             or (_parse_dt(r.get("valid_at")) <= as_of)
         ]
+
+    # An operation the table does not know is neither a value nor a counted happening: no history.
+    rows = [
+        r for r in rows
+        if is_value_claim(r.get("operation")) or is_counting_occurrence(r.get("operation"))
+    ]
 
     if count_match:
         rows = _match_history_rows(rows)

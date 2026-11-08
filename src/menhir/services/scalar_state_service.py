@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Protocol
 
+from menhir.domain.assertion_operations import is_value_claim
 from menhir.domain.exact_json import dumps_exact
 from menhir.domain.scalar_history import MALFORMED_VALID_AT, build_history
 from menhir.domain.scalar_state_fold import Expiry, FoldResult, fold_assertions
@@ -432,7 +433,7 @@ class ScalarStateService:
                 subject_uuid, namespace=namespace)
             if not self._counting_enabled:
                 # Counting off: history must not list occurrences either (same rule as fold_entity).
-                rows = [r for r in rows if str(r.get("operation")) != "occurrence"]
+                rows = [r for r in rows if is_value_claim(r.get("operation"))]
             result = build_history(rows, as_of=_evaluation_time(as_of), max_entries=max_entries,
                                    **({"count_match": True} if self._count_match else {}))
         except Exception as exc:  # noqa: BLE001 - durable marker must remain retryable

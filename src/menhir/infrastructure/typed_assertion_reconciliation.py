@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable
 
+from menhir.domain.assertion_operations import COUNTING_OCCURRENCE_OPS_CYPHER
 from menhir.domain.typed_assertion import IDENTITY_VERSION, TypedAssertion, normalize_scalar
 from menhir.infrastructure.schema import get_scalar_state_activation_queries
 from menhir.infrastructure.schema_ddl import (
@@ -50,10 +51,10 @@ class TypedAssertionReconciliationMixin:
                             r.rebound_at = datetime()
             SET a.subject_uuid = $survivor, a.rebound_at = datetime()
             // CF-265: a moved decided occurrence is re-armed; a counted one is re-decided against the survivor's pool
-            FOREACH (_ IN CASE WHEN a.operation = 'occurrence' AND a.count_status IS NOT NULL THEN [1] ELSE [] END |
+            FOREACH (_ IN CASE WHEN a.operation IN {COUNTING_OCCURRENCE_OPS_CYPHER} AND a.count_status IS NOT NULL THEN [1] ELSE [] END |
                 SET a.count_attempts = 0, a.count_decided_at = null, a.projection_pending = true,
                     a.count_merge_op_id = $op)
-            FOREACH (_ IN CASE WHEN a.operation = 'occurrence' AND a.count_status = 'counted' THEN [1] ELSE [] END |
+            FOREACH (_ IN CASE WHEN a.operation IN {COUNTING_OCCURRENCE_OPS_CYPHER} AND a.count_status = 'counted' THEN [1] ELSE [] END |
                 SET a.count_status = 'uncertain', a.count_reason = 'merged', a.count_target_id = null)
             WITH collect(a) AS moved, collect(DISTINCT a.source_key) AS source_keys
             OPTIONAL MATCH (s:Entity {{uuid: $survivor}})
@@ -98,7 +99,7 @@ class TypedAssertionReconciliationMixin:
             DELETE rel
             SET a.subject_uuid = from_uuid
             // CF-265: re-arm the moved-back occurrence so it is decided again under its original subject
-            FOREACH (_ IN CASE WHEN a.operation = 'occurrence' AND a.count_status IS NOT NULL THEN [1] ELSE [] END |
+            FOREACH (_ IN CASE WHEN a.operation IN {COUNTING_OCCURRENCE_OPS_CYPHER} AND a.count_status IS NOT NULL THEN [1] ELSE [] END |
                 SET a.count_attempts = 0, a.count_decided_at = null, a.projection_pending = true)
             WITH a, r, from_uuid, sk
             OPTIONAL MATCH (b:Entity {{uuid: from_uuid}})

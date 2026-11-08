@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from menhir.domain.assertion_operations import sets_value
 from menhir.domain.scalar_identity import CompositionalScalarIdentity
 from menhir.domain.typed_assertion import normalize_scalar
 from menhir.services.compositional_scalar_identity import compose_scalar_identity
@@ -198,7 +199,7 @@ def _topology(
         return "proposal_quote_mismatch"
     if proposal.subject_text != "I":
         return "subject_not_canonical_self"
-    if proposal.scope.strip() or proposal.unit.strip() or proposal.operation != "absolute":
+    if proposal.scope.strip() or proposal.unit.strip() or not sets_value(proposal.operation):
         return "proposal_constraints_invalid"
     if proposal.value_kind != "count" or type(proposal.value) is not int or proposal.value < 0:
         return "proposal_value_invalid"

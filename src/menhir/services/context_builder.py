@@ -11,6 +11,7 @@ import re
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
+from menhir.domain.assertion_operations import is_counting_occurrence, is_value_claim
 from menhir.domain.recall_provenance import provenance_label
 from menhir.domain.recall_visibility import memory_lifecycle_note
 
@@ -415,9 +416,11 @@ class ContextBuilderService:
             if verdict.lower_bound:
                 authority_lines.extend(_count_match_lines(verdict))
             for contributor in verdict.contributors:
-                if contributor.operation == "occurrence":
+                if is_counting_occurrence(contributor.operation):
                     authority_lines.append(_occurrence_contributor_line(contributor))
                     continue
+                if not is_value_claim(contributor.operation):
+                    continue  # an operation the table does not know is not rendered as evidence
                 authority_lines.append(
                     f"  - {contributor.relation}: {contributor.stated_span} "
                     f"(valid {contributor.valid_at or 'unknown'})"

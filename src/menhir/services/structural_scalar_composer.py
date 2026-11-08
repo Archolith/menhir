@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from menhir.domain.assertion_operations import sets_value
 from menhir.domain.scalar_identity import CompositionalScalarIdentity
 from menhir.domain.typed_assertion import validate_value
 from menhir.services.compositional_scalar_identity import compose_scalar_identity
@@ -158,7 +159,7 @@ def compose_structural_scalar_identity(
         validate_value(proposal.value_kind, proposal.operation, proposal.value)
     except ValueError:
         return _abstain(REASON_CONSTRAINT_MISMATCH)
-    if proposal.operation != "absolute":
+    if not sets_value(proposal.operation):
         return _abstain(REASON_OPERATION_UNSUPPORTED)
     if proposal.subject_text.strip().lower() not in SELF_TOKENS:
         return _abstain(REASON_SUBJECT_MISMATCH)

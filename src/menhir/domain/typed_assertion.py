@@ -35,6 +35,14 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
+from menhir.domain.assertion_operations import (
+    ASSERTION_OPERATIONS,
+    COUNTING_OPERATIONS,
+    OPERATIONS,
+    adjusts_value,
+    is_counting_occurrence,
+)
+
 #: identity-contract version stamped on every head + assertion. v2 is the source_key-anchored
 #: contract (head keyed by source_key; assertion_key built from source_key). v1 (unstamped) is the
 #: original claim_key-anchored contract. Activation refuses to run over any v1 node (fresh-only), so
@@ -52,19 +60,12 @@ VALUE_KINDS: frozenset[str] = frozenset({
 #: value_kinds whose value is a number (or a [lo, hi] numeric range). Only these may take a delta.
 NUMERIC_KINDS: frozenset[str] = frozenset({"count", "money", "measurement", "duration", "frequency"})
 
-#: how the value relates to the running state: a stated absolute, a signed increment, or an EXPIRE
-#: (the value ENDED with no current replacement -- "I used to X"). An expire carries the OLD value as
-#: provenance (validated like an absolute of its kind) but the fold treats a latest-expire as
-#: "current unknown, no View" rather than a standing value.
-OPERATIONS: frozenset[str] = frozenset({"absolute", "delta", "expire"})
-
-#: operations only the COUNTING lane may write: one happening on a count/money slot (value 1 or a
-#: positive amount). Kept OUT of `OPERATIONS`, which stays the set the scalar lane may emit, so no
-#: scalar parse path can produce an occurrence.
-COUNTING_OPERATIONS: frozenset[str] = frozenset({"occurrence"})
-
-#: every operation a stored TypedAssertion may carry.
-ASSERTION_OPERATIONS: frozenset[str] = OPERATIONS | COUNTING_OPERATIONS
+#: Operation names and meanings live in `menhir.domain.assertion_operations`; these sets derive from
+#: that table. `OPERATIONS`: what the scalar lane may emit -- a stated absolute, a signed delta, or an
+#: EXPIRE (the value ENDED with no replacement, "I used to X"; it carries the OLD value as provenance
+#: and the fold treats a latest-expire as "current unknown, no View"). `COUNTING_OPERATIONS`: what
+#: only the counting lane may write (one happening on a count/money slot), kept out of `OPERATIONS`
+#: so no scalar parse path can produce one. `ASSERTION_OPERATIONS`: every stored operation.
 
 #: value_kinds an occurrence may count.
 COUNTABLE_KINDS: frozenset[str] = frozenset({"count", "money"})
@@ -225,7 +226,7 @@ def normalize_scalar(value: Any) -> str:
 
 def validate_value(value_kind: str, operation: str, value: Any) -> None:
     """Kind-specific value validation + delta compatibility. Raises ValueError on a mismatch."""
-    if operation == "occurrence":
+    if is_counting_occurrence(operation):
         if value_kind not in COUNTABLE_KINDS:
             raise ValueError(f"occurrence requires value_kind in {sorted(COUNTABLE_KINDS)}, got {value_kind!r}")
         if not _is_finite_number(value) or value <= 0:
@@ -233,7 +234,7 @@ def validate_value(value_kind: str, operation: str, value: Any) -> None:
         if value_kind == "count" and not _is_integral_number(value):
             raise ValueError("a count occurrence must be a positive integer")
         return
-    if operation == "delta":
+    if adjusts_value(operation):
         if value_kind not in NUMERIC_KINDS:
             raise ValueError(f"delta operation requires a numeric value_kind, got {value_kind!r}")
         if not _is_finite_number(value):

@@ -14,6 +14,11 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from menhir.services.ingest_service import IngestService
 
+from menhir.domain.assertion_operations import (
+    adjusts_value,
+    is_counting_occurrence,
+    is_value_claim,
+)
 from menhir.domain.count_anchor_hint import count_anchor_hint
 from menhir.domain.count_match import match_slot_row
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
@@ -146,7 +151,8 @@ def _observation_dedup_skip_ids(obs_hits: list[dict[str, Any]]) -> set[str]:
     """
     groups: dict[tuple[str, ...], list[tuple[float, float, str]]] = {}
     for hit in obs_hits:
-        if str(hit.get("operation")) in ("occurrence", "delta"):
+        _op = hit.get("operation")
+        if is_counting_occurrence(_op) or adjusts_value(_op) or not is_value_claim(_op):
             continue
         aid = str(hit.get("assertion_id") or "").strip()
         span = " ".join(str(hit.get("stated_span") or "").split()).casefold()
@@ -804,8 +810,13 @@ async def _run_recall(
                 service.graph_adapter.search_assertion_embeddings,
                 obs_vec, limit=10, namespaces=[stamped_namespace(namespace)],
             )
-            if not service.counting_enabled:  # counting off: occurrence rows never enter recall
-                obs_hits = [h for h in obs_hits if str(h.get("operation")) != "occurrence"]
+            # Counting off: occurrence rows never enter recall. An operation the table does not know
+            # is neither a value nor a counted happening, so it never enters recall either.
+            obs_hits = [
+                h for h in obs_hits
+                if is_value_claim(h.get("operation"))
+                or (service.counting_enabled and is_counting_occurrence(h.get("operation")))
+            ]
             existing_uuids = (
                 {str(c["uuid"]) for c in candidate_inputs}
                 if service.scalar_view_authority_enabled else set()
@@ -835,7 +846,7 @@ async def _run_recall(
                     _subj = str(hit.get("subject_uuid") or "")
                     _attr = str(hit.get("attribute") or "")
                     _scope = str(hit.get("scope") or "")
-                    _shaped = _count_match and str(hit.get("operation")) == "occurrence"
+                    _shaped = _count_match and is_counting_occurrence(hit.get("operation"))
                     if _shaped:
                         _m = match_slot_row(hit)
                         _attr = str(_m.get("attribute") or "")
@@ -867,7 +878,7 @@ async def _run_recall(
                         if _subj:
                             obs_subject_displays[_subj] = str(hit.get("subject_display") or "")
                         continue
-                    if (_counted_authority_only and str(hit.get("operation")) == "occurrence"
+                    if (_counted_authority_only and is_counting_occurrence(hit.get("operation"))
                             and _subj and _attr and _value_kind):
                         # At most one occurrence per slot; hits arrive best cosine first.
                         _occ_slot = (_subj, _attr, _scope, _value_kind, _unit)

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
+from menhir.domain.assertion_operations import is_counting_occurrence
 from menhir.domain.projection_coverage import (
     AssertionEligibilitySource,
     AssertionLifecycle,
@@ -59,7 +60,7 @@ class _CountingOffEligibility:
         self._source = source
 
     def eligibility_for(self, assertion: dict[str, Any]) -> EligibilityDecision:
-        if str(assertion.get("operation")) == "occurrence":
+        if is_counting_occurrence(assertion.get("operation")):
             return EligibilityDecision(EligibilityRole.OPERATOR_VETOED, "counting_disabled")
         return self._source.eligibility_for(assertion)
 
