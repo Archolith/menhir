@@ -406,7 +406,14 @@ jobs:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo "GitHub release $RELEASE_TAG already exists; leaving it unchanged."
+            # A deploy compares /readyz with this record (#498); an existing release must carry it.
+            assets=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+            if printf '%s\n' "$assets" | grep -qx 'served-metadata.json'; then
+              echo "GitHub release $RELEASE_TAG already exists with served-metadata.json; leaving it unchanged."
+              exit 0
+            fi
+            echo "GitHub release $RELEASE_TAG exists without served-metadata.json; attaching it."
+            gh release upload "$RELEASE_TAG" served/served-metadata.json --repo "$GITHUB_REPOSITORY"
             exit 0
           fi
           gh release create "$RELEASE_TAG" dist/* checksums/SHA256SUMS served/served-metadata.json \

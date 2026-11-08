@@ -242,7 +242,14 @@ class RecallMemoriesTool(BaseJsonTool):
             source_memories = result.get("source_memories")
             if compact:
                 if trim_locally and len(source_memories) > _COMPACT_SOURCE_MEMORY_LIMIT:
-                    source_memories = list(source_memories)[:_COMPACT_SOURCE_MEMORY_LIMIT]
+                    # The server sends them oldest-first, not by match: keep the closest five,
+                    # in the server's order.
+                    entries = list(source_memories)
+                    closest = sorted(
+                        range(len(entries)),
+                        key=lambda i: -float((entries[i] or {}).get("cosine") or 0.0),
+                    )[:_COMPACT_SOURCE_MEMORY_LIMIT]
+                    source_memories = [entries[i] for i in sorted(closest)]
                     backend_limit = _COMPACT_SOURCE_MEMORY_LIMIT
                     count_reduced = True
                 source_memories, cut = _bound_source_memories(source_memories)

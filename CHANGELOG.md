@@ -4,8 +4,18 @@
   attaches `served-metadata.json` for a deploy to compare with `/readyz` (#498).
 - A tool refused by the client policy or `MENHIR_CLIENT_TOOLS` returns an MCP error result (#503).
 - A transient 402 stays transient after it is stored, so the retry poller requeues it.
-- Compact recall over the stdio bridge leaves the source-memory limit to the server.
+- Compact recall over the stdio bridge leaves the source-memory limit to the server, and keeps
+  the closest five source memories.
+- A release re-run attaches `served-metadata.json` to an existing release that lacks it.
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.4. No dependency changes in this commit.
+
+## 2026-11-08 - v0.3.4 audit fixes: bridge recall keeps the closest sources; release record on re-runs
+
+- Compact `recall_memories` over the stdio bridge trimmed the server's source memories to the first
+  five, which are the oldest, since the server sends them oldest-first. It now keeps the five with
+  the highest cosine, still in the server's order. (Regression from the bridge-limit change.)
+- A release run that finds the GitHub release already there attaches `served-metadata.json` when it
+  is missing, and fails if it cannot, instead of finishing green without the record a deploy checks.
 
 ## 2026-11-08 - MCP `initialize` names the build; releases publish what they serve
 
@@ -106,11 +116,3 @@ For agent-written memories (#168): a caller can ask for just the agent-writer it
 - `tests/fixtures/conflict_pairs.json` pins what 42 hand-written pairs do. The floor is fitted to
   those pairs, so the fixture records behaviour and does not measure accuracy.
   `scripts/build_conflict_fixture.py` refreshes its cosines.
-
-## 2026-11-06 - Recall's `relevance_basis` says the tier is a rank score
-
-`relevance_basis` changes from `legacy_rrf_threshold_unvalidated` to
-`rank_score_threshold_not_similarity` on MCP and REST recall results. The tier has now been tested:
-at least one `high` result came back for 98.5% of real LongMemEval questions and for 92.5% of null
-questions (unanswerable, or swapped onto an unrelated namespace). The `relevance` key, its values, scores, ranking and the 0.15 floor are
-unchanged. A client matching the old string must update it.
