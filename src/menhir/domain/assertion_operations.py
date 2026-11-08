@@ -37,6 +37,10 @@ class OperationSemantics:
     ends_value: bool
     #: one happening counted by the counting lane; never part of the scalar fold.
     counting_occurrence: bool
+    #: a hedged value ("close to 1300"): shown beside a View, never sets or changes its value.
+    approximates_value: bool
+    #: listed as an entry of the slot's scalar history.
+    listed_in_history: bool
     #: a newer one in a View's own slot keeps that View advisory (the freshness gate).
     demotes_newer_view: bool
 
@@ -44,19 +48,31 @@ class OperationSemantics:
 _ENTRIES: tuple[OperationSemantics, ...] = (
     OperationSemantics(
         name="absolute", writer_lane=SCALAR_LANE, sets_value=True, adjusts_value=False,
-        ends_value=False, counting_occurrence=False, demotes_newer_view=False,
+        ends_value=False, counting_occurrence=False, approximates_value=False,
+        listed_in_history=True, demotes_newer_view=False,
     ),
     OperationSemantics(
         name="delta", writer_lane=SCALAR_LANE, sets_value=False, adjusts_value=True,
-        ends_value=False, counting_occurrence=False, demotes_newer_view=False,
+        ends_value=False, counting_occurrence=False, approximates_value=False,
+        listed_in_history=True, demotes_newer_view=False,
     ),
     OperationSemantics(
         name="expire", writer_lane=SCALAR_LANE, sets_value=False, adjusts_value=False,
-        ends_value=True, counting_occurrence=False, demotes_newer_view=False,
+        ends_value=True, counting_occurrence=False, approximates_value=False,
+        listed_in_history=True, demotes_newer_view=False,
     ),
     OperationSemantics(
         name="occurrence", writer_lane=COUNTING_LANE, sets_value=False, adjusts_value=False,
-        ends_value=False, counting_occurrence=True, demotes_newer_view=True,
+        ends_value=False, counting_occurrence=True, approximates_value=False,
+        listed_in_history=True, demotes_newer_view=True,
+    ),
+    # #519. No lane writes it yet (writer_lane=None keeps it out of OPERATIONS, so no parse path
+    # can emit one): readers ship first, so a build that stores one never meets a build that
+    # cannot read it.
+    OperationSemantics(
+        name="approximate", writer_lane=None, sets_value=False, adjusts_value=False,
+        ends_value=False, counting_occurrence=False, approximates_value=True,
+        listed_in_history=True, demotes_newer_view=True,
     ),
 )
 
@@ -68,7 +84,8 @@ OPERATION_SEMANTICS: Mapping[str, OperationSemantics] = MappingProxyType(
 #: what an unrecognised or missing operation means everywhere: nothing.
 UNKNOWN = OperationSemantics(
     name="", writer_lane=None, sets_value=False, adjusts_value=False, ends_value=False,
-    counting_occurrence=False, demotes_newer_view=False,
+    counting_occurrence=False, approximates_value=False, listed_in_history=False,
+    demotes_newer_view=False,
 )
 
 _UNKNOWN_SEEN: set[str] = set()
@@ -121,6 +138,20 @@ def is_value_claim(operation: object) -> bool:
     return s.sets_value or s.adjusts_value or s.ends_value
 
 
+def folds_into_view(operation: object) -> bool:
+    """A fold input: a value claim, or a counting occurrence (folded only with counting on)."""
+    s = semantics_of(operation)
+    return s.sets_value or s.adjusts_value or s.ends_value or s.counting_occurrence
+
+
+def approximates_value(operation: object) -> bool:
+    return semantics_of(operation).approximates_value
+
+
+def is_listed_in_history(operation: object) -> bool:
+    return semantics_of(operation).listed_in_history
+
+
 def demotes_newer_view(operation: object) -> bool:
     return semantics_of(operation).demotes_newer_view
 
@@ -142,6 +173,10 @@ VALUE_CLAIM_OPERATIONS: frozenset[str] = operations_where(
 )
 SETS_VALUE_OPERATIONS: frozenset[str] = operations_where(lambda s: s.sets_value)
 COUNTING_OCCURRENCE_OPERATIONS: frozenset[str] = operations_where(lambda s: s.counting_occurrence)
+#: history entries other than counting occurrences (those are listed only with counting on).
+HISTORY_VALUE_OPERATIONS: frozenset[str] = operations_where(
+    lambda s: s.listed_in_history and not s.counting_occurrence
+)
 
 _CYPHER_NAME_RE = re.compile(r"[a-z_]+")
 
@@ -159,6 +194,7 @@ def cypher_list(operations: Iterable[str]) -> str:
 VALUE_CLAIM_OPS_CYPHER: str = cypher_list(VALUE_CLAIM_OPERATIONS)
 SETS_VALUE_OPS_CYPHER: str = cypher_list(SETS_VALUE_OPERATIONS)
 COUNTING_OCCURRENCE_OPS_CYPHER: str = cypher_list(COUNTING_OCCURRENCE_OPERATIONS)
+HISTORY_VALUE_OPS_CYPHER: str = cypher_list(HISTORY_VALUE_OPERATIONS)
 
 __all__ = [
     "ASSERTION_OPERATIONS",
@@ -166,6 +202,8 @@ __all__ = [
     "COUNTING_OCCURRENCE_OPERATIONS",
     "COUNTING_OCCURRENCE_OPS_CYPHER",
     "COUNTING_OPERATIONS",
+    "HISTORY_VALUE_OPERATIONS",
+    "HISTORY_VALUE_OPS_CYPHER",
     "OPERATIONS",
     "OPERATION_SEMANTICS",
     "OperationSemantics",
@@ -176,11 +214,14 @@ __all__ = [
     "VALUE_CLAIM_OPERATIONS",
     "VALUE_CLAIM_OPS_CYPHER",
     "adjusts_value",
+    "approximates_value",
     "cypher_list",
     "demotes_newer_view",
     "ends_value",
+    "folds_into_view",
     "is_counting_occurrence",
     "is_known",
+    "is_listed_in_history",
     "is_value_claim",
     "operations_where",
     "semantics_of",

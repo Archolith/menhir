@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
-from menhir.domain.assertion_operations import is_counting_occurrence
+from menhir.domain.assertion_operations import folds_into_view, is_counting_occurrence, is_known
 from menhir.domain.projection_coverage import (
     AssertionEligibilitySource,
     AssertionLifecycle,
@@ -51,6 +51,20 @@ class _CachedEligibilitySource:
         if key not in self._decisions:
             self._decisions[key] = self._source.eligibility_for(assertion)
         return self._decisions[key]
+
+
+class _HistoryOnlyEligibility:
+    """A known operation the fold never reads cannot be expected to materialize in a View. An
+    unknown one stays materializable so the audit still reports it as unaccounted."""
+
+    def __init__(self, source: AssertionEligibilitySource) -> None:
+        self._source = source
+
+    def eligibility_for(self, assertion: dict[str, Any]) -> EligibilityDecision:
+        operation = assertion.get("operation")
+        if is_known(operation) and not folds_into_view(operation):
+            return EligibilityDecision(EligibilityRole.HISTORY_ONLY, "not_a_fold_input")
+        return self._source.eligibility_for(assertion)
 
 
 class _CountingOffEligibility:
@@ -141,7 +155,8 @@ class ProjectionCoverageService:
                     f"spans multiple namespaces: {rendered}"
                 )
 
-        base_eligibility = eligibility_source or DefaultAssertionEligibilitySource()
+        base_eligibility = _HistoryOnlyEligibility(
+            eligibility_source or DefaultAssertionEligibilitySource())
         if not self._counting_enabled:
             base_eligibility = _CountingOffEligibility(base_eligibility)
         cached_eligibility = _CachedEligibilitySource(base_eligibility)

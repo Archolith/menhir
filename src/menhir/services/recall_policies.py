@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 from menhir.domain.assertion_operations import (
     adjusts_value,
+    approximates_value,
     is_counting_occurrence,
     is_known,
     sets_value,
@@ -329,8 +330,9 @@ def _scalar_history_records_change(history_view: dict[str, object]) -> bool:
         operation = str(entry.get("operation") or "").strip().lower()
         if not is_known(operation):
             continue  # an unrecognised entry is neither a change nor a value
-        if not sets_value(operation):
+        if not (sets_value(operation) or approximates_value(operation)):
             return True
+        # A hedge is a value statement: restating "about 1300" alone is not a change.
         values.add(str(entry.get("value")).strip().casefold())
     return len(values) > 1
 
@@ -392,7 +394,7 @@ def _render_scalar_history_content(history_view: dict[str, object]) -> str:
         value = entry.get("value")
         stated_span = str(entry.get("stated_span") or "").strip()
 
-        prefix = "+" if adjusts_value(operation) else ""
+        prefix = "+" if adjusts_value(operation) else "about " if approximates_value(operation) else ""
         val_str = f"{prefix}{value}" if value is not None else "?"
         entry_line = f"  {valid_at}: {val_str} ({operation})"
         if stated_span:
@@ -405,6 +407,8 @@ def _render_scalar_history_content(history_view: dict[str, object]) -> str:
         lval = latest.get("value")
         ldate = str(latest.get("valid_at") or "")[:10]
         lop = str(latest.get("operation") or "")
+        if approximates_value(lop) and lval is not None:
+            lval = f"about {lval}"
         qualifier = ", not absolute" if delta_only else ""
         lines.append(f"Latest: {lval} at {ldate} ({lop}{qualifier})")
 
