@@ -2,16 +2,17 @@
 
 The digest-bound client policy carries the concrete client identities.  This
 module states the part that must not drift between those entries: one public
-MCP data-plane endpoint, one cryptographic authorization protocol, and the
-product-to-role mapping approved for this deployment.
+MCP data-plane endpoint, one cryptographic authorization protocol, and a
+product-to-role mapping. Product names and roles belong to the deployment's
+policy; this module only enforces that each product's clients match its role.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
-
 
 #: The one public MCP data-plane path. The origin is deployment configuration
 #: (``MENHIR_PUBLIC_BASE_URL``); the policy's ``primary_endpoint`` must be that origin
@@ -24,15 +25,19 @@ EXPECTED_AUTHENTICATION = {
     "access_token": "signed_jwt",
     "client_identity": "policy_bound_client_id",
 }
-EXPECTED_PRODUCT_ROLES = {
-    "chatgpt": "operator",
-    "codex": "operator",
-    "claude": "operator",
-    "opencode": "agent",
-}
-
+READONLY_SCOPES = frozenset({"menhir:read"})
 OPERATOR_SCOPES = frozenset({"menhir:read", "menhir:write", "menhir:admin"})
 AGENT_SCOPES = frozenset({"menhir:read", "menhir:write"})
+#: Exact OAuth permission scopes for each tier.
+TIER_SCOPES: dict[str, frozenset[str]] = {
+    "readonly": READONLY_SCOPES,
+    "agent": AGENT_SCOPES,
+    "operator": OPERATOR_SCOPES,
+}
+#: Roles a version 2 contract may name; version 2 fixes their tool sets below.
+V2_PRODUCT_ROLES = frozenset({"operator", "agent"})
+
+# The tool sets below bind version 2 policies only; version 3 uses tool profiles.
 OPERATOR_DENIED_TOOLS = frozenset(
     {"delete_namespace", "mint_client", "revoke_client"}
 )
@@ -139,14 +144,18 @@ def _exact_keys(value: object, expected: set[str], label: str) -> dict[str, Any]
     return value
 
 
-def validate_access_contract(
-    value: object,
-    clients: object,
-    *,
-    tool_catalog: frozenset[str] | None = None,
-) -> ProductionAccessContract:
-    """Validate the production product/identity/role invariant or fail closed."""
+@dataclass(frozen=True)
+class ResolvedClientAccess:
+    """What a version 3 contract checks about one client after profile resolution."""
 
+    maximum_tier: str
+    scopes: frozenset[str]
+    allowed_tools: frozenset[str]
+
+
+def _parse_contract_header(
+    value: object,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     contract = _exact_keys(
         value,
         {"primary_endpoint", "authentication", "products"},
@@ -167,27 +176,38 @@ def validate_access_contract(
             "production access contract authentication must be OAuth 2.1 "
             "authorization code + PKCE S256 with signed JWT access tokens"
         )
-    products = _exact_keys(
-        contract["products"],
-        set(EXPECTED_PRODUCT_ROLES),
-        "production access contract products",
-    )
-    if not isinstance(clients, dict):
-        raise ValueError("production client policy clients must be an object")
+    products = contract["products"]
+    if (
+        not isinstance(products, dict)
+        or not products
+        or any(not isinstance(name, str) or not name.strip() for name in products)
+    ):
+        raise ValueError(
+            "production access contract products must be a non-empty object "
+            "keyed by product name"
+        )
+    return contract, authentication, products
 
-    parsed: dict[str, ProductAccess] = {}
+
+def _parse_products(
+    products: dict[str, Any],
+    *,
+    allowed_roles: frozenset[str],
+) -> dict[str, tuple[str, tuple[str, ...]]]:
+    parsed: dict[str, tuple[str, tuple[str, ...]]] = {}
     seen_client_ids: set[str] = set()
-    for product, expected_role in EXPECTED_PRODUCT_ROLES.items():
+    for product, raw_entry in products.items():
         entry = _exact_keys(
-            products[product],
+            raw_entry,
             {"role", "client_ids"},
             f"production access contract product {product}",
         )
         role = entry["role"]
         client_ids = entry["client_ids"]
-        if role != expected_role:
+        if role not in allowed_roles:
             raise ValueError(
-                f"production access contract requires {product} role {expected_role}"
+                f"production access contract {product} role must be one of "
+                f"{sorted(allowed_roles)}"
             )
         if (
             not isinstance(client_ids, list)
@@ -198,13 +218,31 @@ def validate_access_contract(
             raise ValueError(
                 f"production access contract {product} client_ids must be unique strings"
             )
-        overlap = seen_client_ids & set(client_ids)
-        if overlap:
+        if seen_client_ids & set(client_ids):
             raise ValueError(
                 "production access contract client identity belongs to multiple products"
             )
         seen_client_ids.update(client_ids)
+        parsed[product] = (role, tuple(client_ids))
+    return parsed
 
+
+def validate_access_contract(
+    value: object,
+    clients: object,
+    *,
+    tool_catalog: frozenset[str] | None = None,
+) -> ProductionAccessContract:
+    """Validate a version 2 product/identity/role invariant or fail closed."""
+
+    contract, authentication, products = _parse_contract_header(value)
+    if not isinstance(clients, dict):
+        raise ValueError("production client policy clients must be an object")
+
+    parsed: dict[str, ProductAccess] = {}
+    for product, (role, client_ids) in _parse_products(
+        products, allowed_roles=V2_PRODUCT_ROLES
+    ).items():
         for client_id in client_ids:
             raw = clients.get(client_id)
             if not isinstance(raw, dict):
@@ -249,7 +287,52 @@ def validate_access_contract(
                         f"production access contract {product} agent tool census drifted"
                     )
 
-        parsed[product] = ProductAccess(role=role, client_ids=tuple(client_ids))
+        parsed[product] = ProductAccess(role=role, client_ids=client_ids)
+
+    return ProductionAccessContract(
+        primary_endpoint=contract["primary_endpoint"],
+        authentication=dict(authentication),
+        products=parsed,
+    )
+
+
+def validate_access_contract_v3(
+    value: object,
+    clients: Mapping[str, ResolvedClientAccess],
+    *,
+    forbidden_product_tools: frozenset[str],
+) -> ProductionAccessContract:
+    """Validate a version 3 contract against clients whose profiles are resolved.
+
+    Each product's clients must sit exactly at the product's tier, hold exactly
+    that tier's scopes, and resolve none of ``forbidden_product_tools``.
+    """
+
+    contract, authentication, products = _parse_contract_header(value)
+    parsed: dict[str, ProductAccess] = {}
+    for product, (role, client_ids) in _parse_products(
+        products, allowed_roles=frozenset(TIER_SCOPES)
+    ).items():
+        for client_id in client_ids:
+            client = clients.get(client_id)
+            if client is None:
+                raise ValueError(
+                    f"production access contract references unknown {product} client_id"
+                )
+            if client.maximum_tier != role:
+                raise ValueError(
+                    f"production access contract {product} client tier does not match {role}"
+                )
+            if client.scopes != TIER_SCOPES[role]:
+                raise ValueError(
+                    f"production access contract {product} {role} scopes drifted"
+                )
+            leaked = sorted(client.allowed_tools & forbidden_product_tools)
+            if leaked:
+                raise ValueError(
+                    f"production access contract {product} client resolves admin tools {leaked}"
+                )
+        parsed[product] = ProductAccess(role=role, client_ids=client_ids)
 
     return ProductionAccessContract(
         primary_endpoint=contract["primary_endpoint"],
@@ -261,14 +344,18 @@ def validate_access_contract(
 __all__ = [
     "AGENT_ALLOWED_TOOLS",
     "AGENT_SCOPES",
-    "PRIMARY_ENDPOINT_PATH",
-    "is_canonical_primary_endpoint",
     "EXPECTED_AUTHENTICATION",
-    "EXPECTED_PRODUCT_ROLES",
     "OPERATOR_DENIED_TOOLS",
     "OPERATOR_REQUIRED_TOOLS",
     "OPERATOR_SCOPES",
+    "PRIMARY_ENDPOINT_PATH",
+    "READONLY_SCOPES",
+    "TIER_SCOPES",
+    "V2_PRODUCT_ROLES",
     "ProductAccess",
     "ProductionAccessContract",
+    "ResolvedClientAccess",
+    "is_canonical_primary_endpoint",
     "validate_access_contract",
+    "validate_access_contract_v3",
 ]

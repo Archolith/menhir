@@ -28,6 +28,7 @@ from menhir.mcp.service_access import (
 )
 from menhir.mcp.telemetry import track_mcp_call
 from menhir.mcp.telemetry.tracker import McpToolAccessDenied
+from menhir.tiers import TIER_RANK, tier_allows
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -227,14 +228,12 @@ class ToolScope:
     ALL = frozenset({NAMESPACED, OBJECT, GLOBAL})
 
 
-_TIER_RANK: dict[str, int] = {"readonly": 0, "agent": 1, "operator": 2}
+_TIER_RANK = TIER_RANK
 
 
 def _tier_allows(current: str, required: str) -> bool:
     """Return True when *current* tier satisfies the *required* tier."""
-    if current not in _TIER_RANK or required not in _TIER_RANK:
-        return False
-    return _TIER_RANK[current] >= _TIER_RANK[required]
+    return tier_allows(current, required)
 
 
 def _try_log_query_auth_usage(tool_name: str) -> None:

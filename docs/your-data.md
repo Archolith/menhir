@@ -129,6 +129,7 @@ Paths are under `src/menhir/` unless they start with `scripts/` or `deploy/`, or
   `infrastructure/telemetry/lifecycle_store_stats.py`, `services/scheduler_tasks.py`,
   `services/maintenance_scheduler.py`, `infrastructure/graph_operations_prepare.py`
 - OAuth: `api/client_token_store.py`, `api/oauth_refresh_store.py`, `api/auth_code_store.py`
-- Access tiers: `access_contract.py`
+- Access tiers and tool profiles: `tiers.py`, `access_contract.py`, `mcp/tool_profiles.py`,
+  `api/client_policy.py`
 - Backups: `deploy/menhir-backup-local.sh`, `scripts/export_graph_backup.py`, `deploy/README.md`
 - Privacy: `config/feature_flags.py`, `explorer/recall_lab.py`

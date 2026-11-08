@@ -234,7 +234,12 @@ async def authorize_get(request: Request):
 
     # Untrusted-target validation FIRST — never redirect on these.
     try:
-        client = await _resolve_client_and_redirect(client_id, redirect_uri, settings)
+        client = await _resolve_client_and_redirect(
+            client_id,
+            redirect_uri,
+            settings,
+            getattr(request.app.state, "client_policy", None),
+        )
     except ValueError as exc:
         return _bad_request(str(exc))
 
@@ -346,7 +351,10 @@ async def authorize_post(request: Request):
     # network (CIMD revalidation) happens for unauthenticated garbage.
     try:
         client = await _resolve_client_and_redirect(
-            submitted["client_id"], redirect_uri, settings
+            submitted["client_id"],
+            redirect_uri,
+            settings,
+            getattr(request.app.state, "client_policy", None),
         )
     except ValueError as exc:
         if not _consume_registered_consent_jti(jti, submitted):
