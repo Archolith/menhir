@@ -23,20 +23,20 @@ _COMPACT_SOURCE_MEMORY_LIMIT = 5
 _COMPACT_SOURCE_MEMORY_MAX_CHARS = 1000
 
 
-def _deployment_source_memory_limit() -> int:
-    """The deployment's default source-memory count (frontier_source_memory_limit)."""
-    from menhir.config.settings_model import MemorySettings
+def _deployment_source_memory_limit() -> int | None:
+    """The serving runtime's default source-memory count, or None when this process has none.
 
+    The stdio bridge builds no runtime, and its own environment says nothing about the server's
+    setting, so it must not turn a guess into an explicit limit the server would obey.
+    """
     try:
         from menhir.core.runtime import _state
 
         settings = getattr(_state.built, "settings", None)
         value = getattr(settings, "frontier_source_memory_limit", None)
-        if isinstance(value, int):
-            return value
     except Exception:
-        pass
-    return MemorySettings.from_env().frontier_source_memory_limit
+        return None
+    return value if isinstance(value, int) else None
 
 
 def _bound_source_memories(entries: list) -> tuple[list, bool]:
@@ -158,10 +158,15 @@ class RecallMemoriesTool(BaseJsonTool):
         compact = _resolve_compact(compact)
         count_reduced = False
         backend_limit = source_memory_limit
+        trim_locally = False
         if compact and source_memory_limit is None:
             deployment_limit = _deployment_source_memory_limit()
-            backend_limit = min(_COMPACT_SOURCE_MEMORY_LIMIT, deployment_limit)
-            count_reduced = backend_limit < deployment_limit
+            if deployment_limit is None:
+                # Server default unknown here: let the server apply its own, then trim to 5.
+                trim_locally = True
+            else:
+                backend_limit = min(_COMPACT_SOURCE_MEMORY_LIMIT, deployment_limit)
+                count_reduced = backend_limit < deployment_limit
         try:
             result = await backend.recall(
                 query,
@@ -236,6 +241,10 @@ class RecallMemoriesTool(BaseJsonTool):
             # each entry's length.
             source_memories = result.get("source_memories")
             if compact:
+                if trim_locally and len(source_memories) > _COMPACT_SOURCE_MEMORY_LIMIT:
+                    source_memories = list(source_memories)[:_COMPACT_SOURCE_MEMORY_LIMIT]
+                    backend_limit = _COMPACT_SOURCE_MEMORY_LIMIT
+                    count_reduced = True
                 source_memories, cut = _bound_source_memories(source_memories)
                 if count_reduced or cut:
                     applied = []

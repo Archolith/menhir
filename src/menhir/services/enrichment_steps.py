@@ -62,6 +62,7 @@ from menhir.services.embedding_identity import comparable_model, embedder_model_
 from menhir.services.enrichment_failures import (
     classify_enrichment_failure,
     is_graphiti_output_parse_error,
+    persisted_failure_text,
 )
 from menhir.services.ingest_gate import IngestGate
 from menhir.services.ingest_limits import MAX_DIFF_CHARS
@@ -1400,7 +1401,7 @@ async def handle_enrichment_failure(
     classification = classify_enrichment_failure(exc, error_type=error_type)
     failed = ctx.graph_adapter.mark_episode_failed(
         ctx.episode_uuid,
-        str(exc),
+        persisted_failure_text(exc),
         worker_id=ctx.worker_id,
         transient_requeue=classification == "retryable",
         claim_started_at=ctx.claimed.get("processing_started_at"),

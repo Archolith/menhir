@@ -38,7 +38,11 @@ from menhir.infrastructure.openai_rate_limit import (
     rate_limit_category,
     retry_after_seconds,
 )
-from menhir.services.enrichment_failures import classify_enrichment_failure
+from menhir.infrastructure.openai_rate_limit import TRANSIENT_PAYMENT_REASON_CODE
+from menhir.services.enrichment_failures import (
+    classify_enrichment_failure,
+    persisted_failure_text,
+)
 from menhir.services.enrichment_steps import add_episode_with_timeout
 
 pytestmark = pytest.mark.unit
@@ -133,6 +137,48 @@ def test_classifier_requeues_a_transient_402() -> None:
 def test_classifier_still_parks_a_bare_402() -> None:
     err = _status(None)
     assert classify_enrichment_failure(err, error_type=type(err).__name__) == "manual_review"
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: _status(None, headers={"Retry-After": "7"}),
+        lambda: _status({"code": 402, "metadata": {"headers": {"retry-after": "5"}}}),
+        lambda: _wrapped(_status(None, headers={"Retry-After": "7"})),
+        lambda: _wrapped(_in_flight()),
+    ],
+)
+def test_poller_regrades_the_persisted_text_of_a_transient_402_as_retryable(make) -> None:
+    # Audit F1: the retry poller sees only processing_error, with no exception or type.
+    err = make()
+    text = persisted_failure_text(err)
+    assert text.startswith(f"{TRANSIENT_PAYMENT_REASON_CODE}: ")
+    assert classify_enrichment_failure(text) == "retryable"
+    # Without the code, the header-only form had nothing to match.
+    if "in_flight_budget_exhausted" not in str(err):
+        assert classify_enrichment_failure(str(err)) == "manual_review"
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: _status(None),
+        lambda: _status({"code": "insufficient_quota", "message": "x"}, headers={"Retry-After": "7"}),
+        lambda: RuntimeError("boom"),
+    ],
+)
+def test_persisted_text_is_unchanged_for_other_failures(make) -> None:
+    err = make()
+    assert persisted_failure_text(err) == str(err)
+
+
+def test_persisted_text_does_not_repeat_the_code() -> None:
+    err = _status(None, headers={"Retry-After": "7"})
+    once = persisted_failure_text(err)
+    try:
+        raise RuntimeError(once) from err
+    except RuntimeError as wrapped:
+        assert persisted_failure_text(wrapped) == once
 
 
 def test_transient_402_does_not_set_the_quota_signal() -> None:

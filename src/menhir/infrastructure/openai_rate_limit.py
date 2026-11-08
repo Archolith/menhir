@@ -147,6 +147,9 @@ def bind_backoff_clock(clock: RateLimitBackoffClock) -> Iterator[RateLimitBackof
 
 #: 402 reasons that clear on their own (OpenRouter's concurrent-request budget), not balance exhaustion.
 _TRANSIENT_402_REASONS = frozenset({"in_flight_budget_exhausted"})
+#: Written into a persisted failure when the exception was a transient 402, so the retry poller,
+#: which sees only the stored text, grades it retryable as the exception path did.
+TRANSIENT_PAYMENT_REASON_CODE = "provider_payment_throttled"
 
 
 def _body_metadata(exc: BaseException) -> dict[str, Any]:

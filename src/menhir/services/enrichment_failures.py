@@ -6,6 +6,7 @@ from menhir.domain.self_identity import SelfSubjectEndpointCollisionError
 from menhir.infrastructure.episode_repository import is_context_window_error_text
 from menhir.infrastructure.openai_rate_limit import (
     QUOTA_REASON_CODE,
+    TRANSIENT_PAYMENT_REASON_CODE,
     find_quota_exhaustion,
     find_transient_payment_refusal,
 )
@@ -152,6 +153,21 @@ def is_session_window_refusal(error: object | None, *, error_type: object | None
     return any(marker in text for marker in _SESSION_WINDOW_REFUSAL_MARKERS)
 
 
+def persisted_failure_text(error: BaseException) -> str:
+    """The processing_error text for ``error``, classified the same way the exception is.
+
+    The retry poller re-grades only this text. A transient 402 whose only sign is a Retry-After
+    hint leaves nothing in ``str(error)`` to match, so it gets the reason code as a prefix.
+    """
+    text = str(error)
+    if (
+        find_transient_payment_refusal(error) is not None
+        and TRANSIENT_PAYMENT_REASON_CODE not in text.lower()
+    ):
+        return f"{TRANSIENT_PAYMENT_REASON_CODE}: {text}"
+    return text
+
+
 def classify_enrichment_failure(error: object | None, *, error_type: object | None = None) -> str:
     """Classify an enrichment failure as retryable, terminal, or manual review."""
 
@@ -186,7 +202,11 @@ def classify_enrichment_failure(error: object | None, *, error_type: object | No
         return "manual_review"
 
     # A 402 with a retry hint is throttling, like a 429 (the quota check above skips it).
-    if find_transient_payment_refusal(error if isinstance(error, BaseException) else None) is not None:
+    # The persisted form carries TRANSIENT_PAYMENT_REASON_CODE (see persisted_failure_text).
+    if (
+        find_transient_payment_refusal(error if isinstance(error, BaseException) else None) is not None
+        or TRANSIENT_PAYMENT_REASON_CODE in quota_text
+    ):
         return "retryable"
 
     # Checked BEFORE every marker list. A budget message that happened to contain a retryable
