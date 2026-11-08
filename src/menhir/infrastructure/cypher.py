@@ -353,6 +353,15 @@ MEMORY_RETURN_FIELDS = (
 )
 
 # Entity metadata for scoring/recall.
+def view_provenance_live_field(variable: str = "n", *, incoming_evidence: str | None = None) -> str:
+    """One metadata field for both native and Neo4j provenance queries."""
+    return (
+        f"CASE WHEN NOT coalesce({variable}.is_view, false) THEN true "
+        f"ELSE {view_live_provenance_cypher(variable, incoming_evidence=incoming_evidence)} "
+        "END AS view_provenance_live"
+    )
+
+
 ENTITY_METADATA_FIELDS = (
     "n.uuid AS uuid",
     "coalesce(n['view_name'], n.name) AS name",
@@ -395,9 +404,7 @@ ENTITY_METADATA_FIELDS = (
     "coalesce(n.retired, false) AS retired",
     "coalesce(n.is_view, false) AS is_view",
     "n.episode_uuids AS episode_uuids",
-    "CASE WHEN NOT coalesce(n.is_view, false) THEN true "
-    f"ELSE {view_live_provenance_cypher('n')} "
-    "END AS view_provenance_live",
+    view_provenance_live_field(),
     # Structural graph role (directory/file/project) on project-scan nodes; unset (null) on
     # every semantic memory. Recall uses it to drop structural nodes that leak in via BM25 token
     # collisions, mirroring fetch_recent_memories' structural exclusion.
@@ -510,6 +517,7 @@ def build_reset_or_fail_query(
     exhausted_error: str,
     reset_error: str,
     return_alias: str = "reset",
+    now_expression: str = "datetime()",
 ) -> str:
     """Build a reset-or-fail query that bifurcates on attempt exhaustion.
 
@@ -532,7 +540,7 @@ def build_reset_or_fail_query(
             "n.processing_stage = CASE WHEN exhausted THEN 'failed' ELSE 'queued' END",
             f"n.processing_substage = CASE WHEN exhausted"
             f" THEN {exhausted_substage} ELSE {reset_substage} END",
-            "n.processing_substage_started_at = datetime()",
+            f"n.processing_substage_started_at = {now_expression}",
             "n.processing_progress = CASE WHEN exhausted"
             " THEN coalesce(n.processing_progress, 100.0) ELSE 0.0 END",
             "n.processing_steps_completed = CASE WHEN exhausted"
@@ -542,9 +550,9 @@ def build_reset_or_fail_query(
             *LLM_RESET_SET,
             "n.processing_owner = null",
             "n.processing_lease_expires_at = null",
-            "n.processing_heartbeat_at = datetime()",
+            f"n.processing_heartbeat_at = {now_expression}",
             "n.processing_started_at = null",
-            "n.processing_completed_at = CASE WHEN exhausted THEN datetime() ELSE null END",
+            f"n.processing_completed_at = CASE WHEN exhausted THEN {now_expression} ELSE null END",
             f"n.processing_error = CASE WHEN exhausted"
             f" THEN {exhausted_error} ELSE {reset_error} END",
         ))

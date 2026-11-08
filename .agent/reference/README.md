@@ -7,7 +7,7 @@ reference may constrain a current design, preserve negative benchmark evidence, 
 option, or supply research consumed by an active plan. Executable ownership belongs in
 [`../plans/`](../plans/); completed and superseded work belongs in [`../archive/`](../archive/).
 
-This index routes all 17 Markdown references and the one PDF exactly once.
+This index routes all 18 Markdown references and the one PDF exactly once.
 
 ## Current design laws and inventories
 
@@ -24,6 +24,7 @@ This index routes all 17 Markdown references and the one PDF exactly once.
 |---|---|
 | [`anecdotal-recall-oracle-ladder.md`](anecdotal-recall-oracle-ladder.md) | Read-side experiment history and the evidence behind default-off oracle levers. |
 | [`r1-hybrid-candidate-generation.md`](r1-hybrid-candidate-generation.md) | The attributed hybrid mechanism and its measured non-graduation verdict. |
+| [`menhir-falkordblite-compatibility.md`](menhir-falkordblite-compatibility.md) | Issue #109 embedded-backend measurements, transaction blockers and unqualified acceptance gates. |
 | [`menhir-recall-experiment-record.md`](menhir-recall-experiment-record.md) | Everything tried on recall ranking and no-answer detection, what it showed, and what is still open. Read before proposing a recall change. |
 | [`menhir-recall-real-similarity-test-plan-2026-11-05.md`](menhir-recall-real-similarity-test-plan-2026-11-05.md) | Full test of name and summary cosine against rank scores, with its registered rules. |
 | [`menhir-recall-no-match-signal-plan-2026-11-06.md`](menhir-recall-no-match-signal-plan-2026-11-06.md) | Full tests of whether a signal or a reader can tell that memory holds no answer. |

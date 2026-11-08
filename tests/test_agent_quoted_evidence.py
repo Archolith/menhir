@@ -16,7 +16,7 @@ import pytest
 from menhir.domain import MemorySession
 from menhir.domain.truth.admission_gate import evaluate_user_tier_claim
 from menhir.infrastructure.episode_lifecycle import EpisodeLifecycleRepository
-from menhir.infrastructure.scalar_view_repository import ScalarViewRepositoryMixin
+from menhir.infrastructure.view_repository import ViewRepository
 from menhir.infrastructure.turn_evidence_repository import TurnEvidenceRepository
 from menhir.services.ingest_intake import IngestIntakeMixin
 
@@ -227,16 +227,14 @@ class TestLaneExclusions:
 class TestFoundationExclusions:
     def test_scalar_view_foundation_excludes_agent_quoted(self):
         fake = FakeNeo4j([{"founded": True}])
-        repo = ScalarViewRepositoryMixin.__new__(ScalarViewRepositoryMixin)
-        repo.neo4j = fake
+        repo = ViewRepository(fake)
         assert repo.scalar_view_has_user_foundation(view_uuid="v1") is True
         query = fake.executed[-1][0]
         assert "replace(toLower(trim(coalesce(te.source_kind, ''))), '-', '_') <> 'agent_quoted'" in query
 
     def test_assertions_foundation_excludes_agent_quoted(self):
         fake = FakeNeo4j([{"founded": True}])
-        repo = ScalarViewRepositoryMixin.__new__(ScalarViewRepositoryMixin)
-        repo.neo4j = fake
+        repo = ViewRepository(fake)
         assert repo.assertions_have_user_foundation(assertion_ids=["a1"]) is True
         query = fake.executed[-1][0]
         assert "replace(toLower(trim(coalesce(te.source_kind, ''))), '-', '_') <> 'agent_quoted'" in query

@@ -30,7 +30,10 @@ import os
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
+
+from menhir.infrastructure.falkor import FalkorLiteRepository, encode_instant
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +231,18 @@ def issue_structure_scan_generation(neo4j: Any, claim: IdentityClaim) -> int:
         release_structure_writer(neo4j, handle)
 
 
+_STRUCTURE_PUBLICATION_GUARD_CYPHER = """
+        MATCH (p:ProjectIdentity {project_id: $project_id})
+        SET p.last_publication_probe = timestamp()
+        WITH p
+        WHERE coalesce(p.state, 'bound') = 'bound'
+          AND p.bound_host = $host AND p.root_key = $root_key
+          AND coalesce(p.claim_generation, 0) = $identity_generation
+          AND ($scan_generation IS NULL OR
+               p.structure_scan_generation = $scan_generation)
+"""
+
+
 def lock_structure_project(
     tx: Any, claim: IdentityClaim, *, scan_generation: int | None = None,
 ) -> None:
@@ -239,17 +254,7 @@ def lock_structure_project(
     if scan_generation is not None and scan_generation < 1:
         raise StaleStructureScan("Structure scan generation must be positive")
     rows = tx.execute(
-        """
-        MATCH (p:ProjectIdentity {project_id: $project_id})
-        SET p.last_publication_probe = timestamp()
-        WITH p
-        WHERE coalesce(p.state, 'bound') = 'bound'
-          AND p.bound_host = $host AND p.root_key = $root_key
-          AND coalesce(p.claim_generation, 0) = $identity_generation
-          AND ($scan_generation IS NULL OR
-               p.structure_scan_generation = $scan_generation)
-        RETURN p.project_id AS project_id
-        """,
+        _STRUCTURE_PUBLICATION_GUARD_CYPHER + " RETURN p.project_id AS project_id",
         {"project_id": claim.project_id, "host": claim.host,
          "root_key": claim.root_key, "identity_generation": claim.generation,
          "scan_generation": scan_generation},
@@ -324,13 +329,18 @@ def release_structure_writer(neo4j: Any, handle: FenceHandle | None) -> None:
 
 def raise_fence(neo4j: Any, *, reason: str) -> None:
     """Refuse new structure writers. Does NOT wait -- call :func:`drain` after."""
+    native = isinstance(neo4j, FalkorLiteRepository)
+    clock = "$frozen_at" if native else "datetime()"
+    params: dict[str, Any] = {"fence_id": _FENCE_ID, "reason": reason}
+    if native:
+        params["frozen_at"] = encode_instant(datetime.now(UTC))
     neo4j.execute(
-        """
-        MERGE (f:StructureWriteFence {id: $fence_id})
+        f"""
+        MERGE (f:StructureWriteFence {{id: $fence_id}})
           ON CREATE SET f.writers = []
-        SET f.frozen = true, f.reason = $reason, f.frozen_at = datetime()
+        SET f.frozen = true, f.reason = $reason, f.frozen_at = {clock}
         """,
-        {"fence_id": _FENCE_ID, "reason": reason},
+        params,
     )
 
 

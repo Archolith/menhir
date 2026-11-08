@@ -37,7 +37,7 @@ class TypedAssertionReconciliationMixin:
         if absorbed_uuid.strip() == survivor_uuid.strip():
             return {"rebound": 0, "source_keys": []}
         ns_pred = " AND a.namespace = $namespace" if namespace is not None else ""
-        rows = self._neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (a:TypedAssertion {{subject_uuid: $absorbed}})
             WHERE true{ns_pred}
@@ -47,8 +47,8 @@ class TypedAssertionReconciliationMixin:
               ON CREATE SET r.merge_op_id = $op, r.assertion_id = a.assertion_id,
                             r.from_uuid = $absorbed, r.to_uuid = $survivor,
                             r.source_key = a.source_key, r.namespace = a.namespace,
-                            r.rebound_at = datetime()
-            SET a.subject_uuid = $survivor, a.rebound_at = datetime()
+                            r.rebound_at = {self._instant_expression(None)}
+            SET a.subject_uuid = $survivor, a.rebound_at = {self._instant_expression(None)}
             // CF-265: a moved decided occurrence is re-armed; a counted one is re-decided against the survivor's pool
             FOREACH (_ IN CASE WHEN a.operation = 'occurrence' AND a.count_status IS NOT NULL THEN [1] ELSE [] END |
                 SET a.count_attempts = 0, a.count_decided_at = null, a.projection_pending = true,
@@ -87,7 +87,7 @@ class TypedAssertionReconciliationMixin:
         if not merge_op_id.strip():
             raise ValueError("restore_rebound_assertions requires a merge_op_id")
         ns_pred = " AND r.namespace = $namespace" if namespace is not None else ""
-        rows = self._neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (r:AssertionRebind {{merge_op_id: $op}})
             WHERE true{ns_pred}
@@ -153,15 +153,15 @@ class TypedAssertionReconciliationMixin:
         null silo, which is exactly the scope such a repair covered. Idempotent."""
         if not operation_id.strip() or operation_kind not in self.RECONCILE_KINDS:
             raise ValueError(f"record_reconcile_receipt needs operation_id + kind in {self.RECONCILE_KINDS}")
-        self._neo4j.execute(
-            """
-            MERGE (rc:ScalarReconcile {receipt_key: $receipt_key})
+        self._execute(
+            f"""
+            MERGE (rc:ScalarReconcile {{receipt_key: $receipt_key}})
             ON CREATE SET rc.operation_id = $op, rc.operation_kind = $kind,
                           rc.namespace = $namespace, rc.merge_op_id = $merge_op,
-                          rc.completed_at = datetime(), rc.status = 'complete'
+                          rc.completed_at = {self._instant_expression(None)}, rc.status = 'complete'
             ON MATCH SET rc.operation_id = $op, rc.operation_kind = $kind,
                          rc.namespace = $namespace, rc.merge_op_id = $merge_op,
-                         rc.status = 'complete', rc.completed_at = datetime()
+                         rc.status = 'complete', rc.completed_at = {self._instant_expression(None)}
             """,
             params={"receipt_key": self._receipt_key(operation_id, operation_kind, namespace),
                     "op": operation_id.strip(), "kind": operation_kind, "namespace": namespace,
@@ -187,22 +187,25 @@ class TypedAssertionReconciliationMixin:
         replay must never downgrade a complete receipt back to pending. Idempotent."""
         if not operation_id.strip() or operation_kind not in self.RECONCILE_KINDS:
             raise ValueError(f"record_reconcile_intent needs operation_id + kind in {self.RECONCILE_KINDS}")
-        self._neo4j.execute(
-            """
-            MERGE (rc:ScalarReconcile {receipt_key: $receipt_key})
+        self._execute(
+            f"""
+            MERGE (rc:ScalarReconcile {{receipt_key: $receipt_key}})
             ON CREATE SET rc.operation_id = $op, rc.operation_kind = $kind,
                           rc.namespace = $namespace, rc.merge_op_id = $merge_op,
-                          rc.started_at = datetime(), rc.status = 'pending'
+                          rc.started_at = {self._instant_expression(None)}, rc.status = 'pending'
             """,
             params={"receipt_key": self._receipt_key(operation_id, operation_kind, namespace),
                     "op": operation_id.strip(), "kind": operation_kind, "namespace": namespace,
                     "merge_op": (merge_op_id or "").strip() or None},
         )
 
-    @staticmethod
-    def _receipt_key(operation_id: str, operation_kind: str, namespace: str | None) -> str:
+    def _receipt_key(self, operation_id: str, operation_kind: str, namespace: str | None) -> str:
         """Stable per-(op, kind, namespace) receipt identity. The null namespace gets an explicit
         sentinel so it can never collide with a real silo literally named 'null'."""
+        from menhir.infrastructure.falkor import FalkorLiteRepository, repair_key
+
+        if isinstance(self._neo4j, FalkorLiteRepository):
+            return repair_key(operation_id.strip(), operation_kind, namespace)
         ns = "\x00null" if namespace is None else namespace
         return f"{operation_id.strip()}\x1f{operation_kind}\x1f{ns}"
 
@@ -223,7 +226,7 @@ class TypedAssertionReconciliationMixin:
             where += (" AND (rc.namespace = $namespace OR "
                       "(rc.namespace IS NULL AND $namespace IS NULL))")
             params["namespace"] = namespace
-        rows = self._neo4j.execute(
+        rows = self._execute(
             f"MATCH (rc:ScalarReconcile {{operation_id: $op}}) {where} RETURN 1 AS ok LIMIT 1", params)
         return bool(rows)
 
@@ -243,7 +246,7 @@ class TypedAssertionReconciliationMixin:
         with this binary (IS NULL or <> IDENTITY_VERSION — i.e. unstamped, older, OR newer). Returns
         {incompatible_heads, incompatible_assertions}. Zero of both means every node matches this
         binary's contract exactly and the store is safe to activate."""
-        rows = self._neo4j.execute(
+        rows = self._execute(
             """
             CALL {
                 MATCH (h:TypedAssertionHead)
@@ -284,6 +287,10 @@ class TypedAssertionReconciliationMixin:
         drop the superseded v1 head-claim_key constraint. Idempotent on an exact-match store (every
         DDL is IF (NOT) EXISTS). Returns {queries_executed}."""
         self.assert_scalar_state_activatable()
+        from menhir.infrastructure.falkor import FalkorLiteRepository
+        if isinstance(self._neo4j, FalkorLiteRepository):
+            from menhir.infrastructure.falkor_schema import activate_scalar_state
+            return activate_scalar_state(self._neo4j)
         queries = get_scalar_state_activation_queries()
         created: list[str] = []
         for query in queries:
@@ -308,7 +315,7 @@ class TypedAssertionReconciliationMixin:
         store never backfills. Destructive and irreversible — the caller (an operator action, never an
         automatic startup path) is responsible for confirming it is safe to discard the durable
         assertion log, its projections, and its scheduling cursors. Returns per-label deleted counts."""
-        rows = self._neo4j.execute(
+        rows = self._execute(
             """
             CALL { MATCH (a:TypedAssertion) DETACH DELETE a RETURN count(a) AS assertions }
             CALL { MATCH (h:TypedAssertionHead) DETACH DELETE h RETURN count(h) AS heads }

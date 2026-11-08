@@ -76,6 +76,53 @@ Concept id: `runtime.stack`
 
 - Python 3.12+
 - Neo4j 5 (remote systemd service via bolt)
+- Issue #109's standalone `scripts/falkordblite_compatibility.py` probes temporary local storage
+  without changing runtime wiring. See [compatibility results](reference/menhir-falkordblite-compatibility.md):
+  basic persistence/search work, but the current Falkor driver does not preserve callback rollback.
+  Its `falkordblite_projection_proof.py` helper tests real lifecycle commits and a guarded
+  single-query definition-publication candidate; it is isolated experiment code, not runtime wiring.
+  Its document candidate reuses the actual writer's payload/MERGE with atomic identity validation
+  and real admission/release. A full-project compound candidate also reuses the actual writer,
+  validates mtime inputs and asserts completion via a native UDF under a UTC structural-clock
+  profile. Production project integration/scale and complete transaction qualification remain open.
+  The prepared-materialization and prepared-proof helpers test a bounded numeric payload/certificate
+  contract with snapshot and time fences. A source-bound variant now guards real provenance/evidence
+  snapshots atomically but still writes synthetic Views. Real View history works only in a
+  string-temporal diagnostic. A separate bounded candidate now combines the actual create/supersede
+  and scalar provenance writes with real work/receipt labels in one guarded Falkor query, including
+  late rollback and replay/race checks. It still requires string temporals and refuses same-value
+  refresh/retirement; complete history/certification integration remains unqualified on Falkor.
+  The real scalar materializer now hashes the resolved evidence anchors used by the View writer.
+  Its Neo4j lifecycle commit must supply a whole-transaction timeout no greater than the View's
+  statement budget; explicit transactions cannot install per-statement deadlines after BEGIN.
+  Live Neo4j tests cover history/refresh/retirement and rollback after certification rejection.
+  The 2026-11-05 architecture review stops further standalone proof expansion by default: resolve
+  production time/result semantics, then wire one unreleased Linux path through the existing
+  repository and Graphiti construction seams with one managed Lite runtime. Correctness gates
+  block supported/default enablement, not internal integration. The T5 materializer has no runtime
+  constructor in this checkout; qualify the active legacy scalar path before expanding that cutover.
+  The internal `FalkorLiteRepository` now owns one file/server and supplies Graphiti's client on
+  the same socket/graph through `build_memory_services(graph_repository=...)`. This is not exposed
+  by CLI/environment configuration. The TEMPORAL owner has native create/read/complete variants;
+  core phase-one schema/readiness now uses native operational index/constraint metadata and shared
+  data-default backfills. Failed validation or incomplete backfills refuse writer startup; redundant
+  bootstrap is skipped when those requirements remain complete. A controlled-model queued ingestion,
+  enrichment and recall slice now runs on that shared graph, including source/provenance reads.
+  Graphiti group clones retain the owned physical graph; logical tenancy remains property-scoped.
+  Episode lease/retry clocks and claim hydration have explicit native mappings. Feature activation,
+  correlation merge/veto queries, scalar transitions and remaining query owners are still open.
+  Both Redis clients have explicit zero transport retries.
+  Indexed-binding refresh now fuses the shared identity/scan guard and existing conditional update
+  in one native command, retaining admission/release and Neo4j callback behavior. Document publication
+  likewise combines that guard with the shared entity MERGE/payload in one native command. Project
+  publication prepares only the existing project writer, revalidates its mtime inputs and composes
+  its writes into one guarded command with exact-one completion and actual edge counts. Literal
+  parameters are namespaced; edge clocks have explicit native variants. Remaining scalar, erasure,
+  recovery and query parity are open. Active scalar activation/readiness, View lifecycle and
+  typed-assertion/fold paths have native clock/vector variants, with shared policy retained.
+  Erasure/recovery remains gated on native-safe repair-ID encoding: the engine rejects the current
+  NUL marker, and that persistent format change awaits explicit scope authorization. Arbitrary callback transactions
+  fail before invocation; no query translator is installed.
 - `archolith-graphiti-core==0.31.2.post2` (Archolith soft fork of `getzep/graphiti`,
   baseline `v0.31.2`; it still imports as `graphiti_core`). Menhir policy uses its explicit
   hooks without runtime monkeypatching. Published from fork tag `v0.31.2.post2` at

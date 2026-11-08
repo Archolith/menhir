@@ -74,6 +74,7 @@ class _ProjectionLifecycleReadsMixin:
         *,
         derivation_id: str,
         materialize: MaterializationCallback,
+        timeout_s: float | None = None,
     ) -> ProjectionFreshnessCertificate:
         """Fence, materialize, receipt, and certify one work generation atomically.
 
@@ -82,6 +83,8 @@ class _ProjectionLifecycleReadsMixin:
         canonical retired/absent state rather than returning ``None``. If any fence check fails, the
         callback is not invoked; if certification fails after the callback, the whole transaction
         rolls back, including the materialization.
+        ``timeout_s`` optionally bounds the whole transaction; materializers with statement budgets
+        require an equal or narrower transaction bound. Generic callbacks retain the existing default.
         """
 
         if not isinstance(token, ProjectionWorkToken):
@@ -211,6 +214,8 @@ class _ProjectionLifecycleReadsMixin:
                 derivation_id=str(certified[0]["derivation_id"]),
             )
 
+        if timeout_s is not None:
+            return self._neo4j.execute_write(work, timeout_s=timeout_s)
         return self._neo4j.execute_write(work)
 
     def assess_freshness(

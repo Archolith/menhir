@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from menhir.domain.namespace import (
@@ -22,6 +22,7 @@ from menhir.domain.self_identity import inferred_self_uuid_for_namespace
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.utils import source_confidence_for
 from menhir.domain.verbatim_skip_status import skip_projection_map_cypher
+from menhir.infrastructure.falkor import FalkorLiteRepository, decode_instant, encode_instant
 from menhir.infrastructure.cypher import (
     Cypher,
     EPISODE_PROCESSING_FIELDS,
@@ -102,10 +103,57 @@ def is_context_window_error_text(error: object | None) -> bool:
     )
 
 
-class EpisodeLifecycleRepository:
-    """Episode creation, claiming, and state transitions."""
+class _EpisodeGraphTime:
+    """Shared clocks for the episode owners' explicit native query templates."""
 
     neo4j: Any
+
+    @property
+    def _clock_expression(self) -> str:
+        return "$episode_now" if isinstance(self.neo4j, FalkorLiteRepository) else "datetime()"
+
+    @property
+    def _lease_deadline_expression(self) -> str:
+        return (
+            "$episode_deadline" if isinstance(self.neo4j, FalkorLiteRepository)
+            else "datetime() + duration({seconds: $lease_seconds})"
+        )
+
+    @property
+    def _claim_instant_expression(self) -> str:
+        if isinstance(self.neo4j, FalkorLiteRepository):
+            return "n.processing_started_at = $claim_started_at"
+        return (
+            "n.processing_started_at.epochSeconds = datetime($claim_started_at).epochSeconds"
+            " AND n.processing_started_at.nanosecond = datetime($claim_started_at).nanosecond"
+        )
+
+    @property
+    def _within_enrichment_window_expression(self) -> str:
+        return (
+            "n.processing_started_at > $episode_oldest_start" if isinstance(self.neo4j, FalkorLiteRepository)
+            else "datetime() < n.processing_started_at + duration({seconds: $max_enrichment_seconds})"
+        )
+
+    def _execute(self, query: str, params: dict[str, Any] | None = None, **kwargs: Any) -> list[dict[str, Any]]:
+        if isinstance(self.neo4j, FalkorLiteRepository):
+            now = datetime.now(UTC)
+            params = dict(params or {})
+            params["episode_now"] = encode_instant(now)
+            if "lease_seconds" in params:
+                params["episode_deadline"] = encode_instant(now + timedelta(seconds=params["lease_seconds"]))
+            if "max_enrichment_seconds" in params:
+                params["episode_oldest_start"] = encode_instant(now - timedelta(seconds=params["max_enrichment_seconds"]))
+            if "native_retry_seconds" in params:
+                params["episode_retry_at"] = encode_instant(now + timedelta(seconds=params.pop("native_retry_seconds")))
+            for name in ("reference_time", "claim_started_at"):
+                if params.get(name) is not None:
+                    params[name] = encode_instant(params[name])
+        return self.neo4j.execute(query, params=params, **kwargs)
+
+
+class EpisodeLifecycleRepository(_EpisodeGraphTime):
+    """Episode creation, claiming, and state transitions."""
 
     def create_pending_episode(
         self,
@@ -152,13 +200,13 @@ class EpisodeLifecycleRepository:
         if ingest_key is not None:
             params["ingest_key"] = ingest_key
             params["ingest_request_sha256"] = ingest_request_sha256
-        self.neo4j.execute(
-            """
+        self._execute(
+            f"""
             // CF-158 criterion 1, sibling label. `:Episodic.uuid` has no uniqueness constraint
             // either -- the duplicate census in that finding counted BOTH labels -- so this
             // carries the identical hazard as the TEMPORAL `:Entity` writes. Fixing one and
             // leaving this one is trap T26 exactly: the instance gets fixed, the class does not.
-            MERGE (n:Episodic {uuid: $episode_uuid})
+            MERGE (n:Episodic {{uuid: $episode_uuid}})
             ON CREATE SET
                 n.name = $name,
                 n.type = 'EPISODIC',
@@ -173,8 +221,8 @@ class EpisodeLifecycleRepository:
                 n.session_id = $session_id,
                 n.user_id = $user_id,
                 n.namespace = $namespace,
-                n.created_at = datetime(),
-                n.last_accessed = datetime(),
+                n.created_at = {self._clock_expression},
+                n.last_accessed = {self._clock_expression},
                 n.sharpness = 0.0,
                 n.edge_count = 0,
                 n.processing_state = 'PENDING',
@@ -186,11 +234,11 @@ class EpisodeLifecycleRepository:
                 n.processing_llm_tasks_total = 0,
                 n.processing_llm_last_task_at = null,
                 n.processing_attempts = 0,
-                n.queued_at = datetime(),
+                n.queued_at = {self._clock_expression},
                 n.reference_time = $reference_time,
                 n.processing_owner = null,
                 n.processing_lease_expires_at = null,
-                n.processing_heartbeat_at = datetime(),
+                n.processing_heartbeat_at = {self._clock_expression},
                 n.processing_error = null,
                 n.resolved_episode_uuid = null,
                 n.enrichment_priority = 'P1',
@@ -207,7 +255,7 @@ class EpisodeLifecycleRepository:
         """The anchor `:Episodic` stamped with this ingest key, or None (unique by constraint)."""
         # The replay REPORTS the anchor's status, so it carries what effective_processing_row
         # needs to project a verbatim-skipped client onto its evidence projection.
-        rows = self.neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (n:Episodic {{ingest_key: $ingest_key}})
             OPTIONAL MATCH (p:Episodic {{uuid: n.extraction_skipped_for}})
@@ -242,7 +290,7 @@ class EpisodeLifecycleRepository:
         step re-embeds it instead of keeping a vector from another space (audit F2).
         """
         if model is None:
-            rows = self.neo4j.execute(
+            rows = self._execute(
                 """
                 MATCH (n:Episodic {uuid: $uuid})
                 RETURN n.content_embedding IS NOT NULL AS has_embedding
@@ -250,7 +298,7 @@ class EpisodeLifecycleRepository:
                 params={"uuid": episode_uuid},
             )
         else:
-            rows = self.neo4j.execute(
+            rows = self._execute(
                 """
                 MATCH (n:Episodic {uuid: $uuid})
                 RETURN n.content_embedding IS NOT NULL
@@ -276,14 +324,14 @@ class EpisodeLifecycleRepository:
         while the node still holds exactly that content, so a vector computed from text read
         earlier is never stamped onto changed text. Returns whether a node was written.
         """
-        rows = self.neo4j.execute(
-            """
-            MATCH (n:Episodic {uuid: $uuid})
+        rows = self._execute(
+            f"""
+            MATCH (n:Episodic {{uuid: $uuid}})
             WHERE NOT coalesce(n.is_evidence_projection, false)
               AND ($expected_content IS NULL OR n.content = $expected_content)
             SET n.content_embedding = $embedding,
                 n.content_embedding_model = $model,
-                n.content_embedding_at = datetime()
+                n.content_embedding_at = {self._clock_expression}
             RETURN n.uuid AS uuid
             """,
             params={
@@ -304,7 +352,7 @@ class EpisodeLifecycleRepository:
         queue node(s) for a Graphiti episode; nothing for any other uuid. A twin in a different
         canonical namespace is never returned -- the erasure was authorized for the target's silo.
         """
-        rows = self.neo4j.execute(
+        rows = self._execute(
             """
             MATCH (n:Episodic {uuid: $uuid})
             OPTIONAL MATCH (g:Episodic)
@@ -347,7 +395,7 @@ class EpisodeLifecycleRepository:
         it, so the deleted claim came back (#170 item 5). A turn admitted by several memories is
         erased with any of them: the cascade already retracts that turn's assertions in that case.
         """
-        rows = self.neo4j.execute(
+        rows = self._execute(
             """
             MATCH (n)
             WHERE (n:Episodic AND n.uuid = $uuid) OR (n:TurnEvidence AND n.turn_id = $uuid)
@@ -436,7 +484,7 @@ class EpisodeLifecycleRepository:
             **tenant_scope_params(namespace),
         }
         where.append(tenant_scope_cypher("n"))
-        rows = self.neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (n)
             WHERE {" AND ".join(where)}
@@ -503,13 +551,13 @@ class EpisodeLifecycleRepository:
         `namespace=None` does not filter, so an unpinned deployment reaches every turn exactly as
         before and each projection now lands in the right silo.
         """
-        rows = self.neo4j.execute(
-            """
-            MATCH (t:TurnEvidence {turn_id: $turn_evidence_uuid})
+        rows = self._execute(
+            f"""
+            MATCH (t:TurnEvidence {{turn_id: $turn_evidence_uuid}})
             WHERE t.role = 'user' AND t.declarant = 'user'
               AND t.text IS NOT NULL AND trim(t.text) <> ''
               AND ($namespace IS NULL OR coalesce(t.namespace, 'default') = $namespace)
-            MERGE (p:Episodic {evidence_projection_of: t.turn_id})
+            MERGE (p:Episodic {{evidence_projection_of: t.turn_id}})
             ON CREATE SET
                 p.uuid = $projection_uuid,
                 p.name = $name,
@@ -525,8 +573,8 @@ class EpisodeLifecycleRepository:
                 p.session_id = $session_id,
                 p.user_id = $user_id,
                 p.namespace = coalesce(t.namespace, 'default'),
-                p.created_at = datetime(),
-                p.last_accessed = datetime(),
+                p.created_at = {self._clock_expression},
+                p.last_accessed = {self._clock_expression},
                 p.sharpness = 0.0,
                 p.edge_count = 0,
                 p.processing_state = 'PENDING',
@@ -538,11 +586,11 @@ class EpisodeLifecycleRepository:
                 p.processing_llm_tasks_total = 0,
                 p.processing_llm_last_task_at = null,
                 p.processing_attempts = 0,
-                p.queued_at = datetime(),
+                p.queued_at = {self._clock_expression},
                 p.reference_time = coalesce(t.occurred_at, t.recorded_at),
                 p.processing_owner = null,
                 p.processing_lease_expires_at = null,
-                p.processing_heartbeat_at = datetime(),
+                p.processing_heartbeat_at = {self._clock_expression},
                 p.processing_error = null,
                 p.resolved_episode_uuid = null,
                 p.enrichment_priority = 'P1',
@@ -606,7 +654,7 @@ class EpisodeLifecycleRepository:
         someone else's captured turn, which is the direction that leaks.
         """
         ns = str(namespace).strip() if namespace is not None else ""
-        rows = self.neo4j.execute(
+        rows = self._execute(
             """
             MATCH (e:Episodic {uuid: $episode_uuid})
             WHERE $namespace IS NULL OR coalesce(e.namespace, 'default') = $namespace
@@ -628,7 +676,7 @@ class EpisodeLifecycleRepository:
     ) -> str | None:
         """Return the existing pending projection for an idempotent admission retry."""
 
-        rows = self.neo4j.execute(
+        rows = self._execute(
             """
             MATCH (p:Episodic {evidence_projection_of: $turn_evidence_uuid})
             WHERE coalesce(p.is_evidence_projection, false)
@@ -656,14 +704,14 @@ class EpisodeLifecycleRepository:
                 "n.processing_state = 'PENDING'",
                 "coalesce(toInteger(n.processing_attempts), 0) < $max_attempts",
                 "coalesce(toInteger(n.transient_retries), 0) < $transient_max",
-                "coalesce(properties(n)['retry_after'], datetime()) <= datetime()",
+                f"coalesce(properties(n)['retry_after'], {self._clock_expression}) <= {self._clock_expression}",
             )
             .return_raw("n.uuid AS uuid")
             .order_by("coalesce(n.queued_at, n.created_at) ASC, n.uuid")
             .limit()
             .build()
         )
-        rows = self.neo4j.execute(
+        rows = self._execute(
             query,
             params={
                 "limit": safe_limit,
@@ -694,7 +742,7 @@ class EpisodeLifecycleRepository:
                     "n.processing_state = 'FAILED'",
                     "n.processing_stage = 'failed'",
                     "n.processing_substage = 'pending_transient_exhausted'",
-                    "n.processing_substage_started_at = datetime()",
+                    f"n.processing_substage_started_at = {self._clock_expression}",
                     "n.processing_progress = 100.0",
                     "n.processing_steps_completed = coalesce("
                     " toInteger(n.processing_steps_total),"
@@ -702,9 +750,9 @@ class EpisodeLifecycleRepository:
                     *LLM_RESET_SET,
                     "n.processing_owner = null",
                     "n.processing_lease_expires_at = null",
-                    "n.processing_heartbeat_at = datetime()",
+                    f"n.processing_heartbeat_at = {self._clock_expression}",
                     "n.processing_started_at = null",
-                    "n.processing_completed_at = datetime()",
+                    f"n.processing_completed_at = {self._clock_expression}",
                     "n.processing_error = CASE"
                     " WHEN n.processing_error IS NULL OR trim(toString(n.processing_error)) = ''"
                     " THEN 'pending_transient_exhausted'"
@@ -714,7 +762,7 @@ class EpisodeLifecycleRepository:
             .return_raw("count(n) AS failed")
             .build()
         )
-        rows = self.neo4j.execute(query, params={"transient_max": max(1, transient_max)})
+        rows = self._execute(query, params={"transient_max": max(1, transient_max)})
         return int(rows[0].get("failed", 0)) if rows else 0
 
     def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list[dict[str, Any]]:
@@ -728,7 +776,7 @@ class EpisodeLifecycleRepository:
             .limit()
             .build()
         )
-        return self.neo4j.execute(query, params={"limit": safe_limit})
+        return self._execute(query, params={"limit": safe_limit})
 
     def fetch_failed_error_signatures(self, limit: int = 25) -> list[dict[str, Any]]:
         """Group FAILED episodes by their error text, most common first.
@@ -741,7 +789,7 @@ class EpisodeLifecycleRepository:
         rather than being reimplemented in Cypher, so the marker lists cannot drift apart.
         """
         safe_limit = max(1, min(limit, 200))
-        return self.neo4j.execute(
+        return self._execute(
             """
             MATCH (e:Episodic) WHERE e.processing_state = 'FAILED'
             WITH coalesce(e.processing_error, '(no error recorded)') AS error,
@@ -760,7 +808,7 @@ class EpisodeLifecycleRepository:
         anchor_uuid: str,
         anchor_name: str,
     ) -> dict[str, Any] | None:
-        rows = self.neo4j.execute(
+        rows = self._execute(
             (
                 Cypher()
                 .match("(e:Episodic)-[]-(n:Entity)")
@@ -790,7 +838,7 @@ class EpisodeLifecycleRepository:
             return None
 
         edge_uuids: list[str] = []
-        episode_edge_rows = self.neo4j.execute(
+        episode_edge_rows = self._execute(
             (
                 Cypher()
                 .match("(:Episodic {uuid: $episode_uuid})-[r]-()")
@@ -803,7 +851,7 @@ class EpisodeLifecycleRepository:
         if episode_edge_rows:
             edge_uuids.extend(str(uuid) for uuid in (episode_edge_rows[0].get("edge_uuids") or []) if str(uuid))
 
-        entity_edge_rows = self.neo4j.execute(
+        entity_edge_rows = self._execute(
             (
                 Cypher()
                 .match("(a:Entity)-[r]-(b:Entity)")
@@ -844,7 +892,7 @@ class EpisodeLifecycleRepository:
             )
             .build()
         )
-        precheck_rows = self.neo4j.execute(precheck_query, params={"episode_uuid": episode_uuid})
+        precheck_rows = self._execute(precheck_query, params={"episode_uuid": episode_uuid})
         context_cap = max(max_attempts, int(context_retry_attempts if context_retry_attempts is not None else max_attempts))
         claim_query = (
             Cypher()
@@ -852,7 +900,7 @@ class EpisodeLifecycleRepository:
             .where(
                 "n.uuid = $episode_uuid",
                 "n.processing_state IN ['PENDING', 'FAILED']",
-                "coalesce(properties(n)['retry_after'], datetime()) <= datetime()",
+                f"coalesce(properties(n)['retry_after'], {self._clock_expression}) <= {self._clock_expression}",
                 "(coalesce(toInteger(n.processing_attempts), 0) < $max_attempts"
                 " OR (n.processing_state = 'FAILED'"
                 " AND coalesce(toInteger(n.processing_attempts), 0) < $context_retry_attempts"
@@ -865,7 +913,7 @@ class EpisodeLifecycleRepository:
                     "n.processing_state = 'ENRICHING'",
                     "n.processing_stage = 'claiming'",
                     "n.processing_substage = 'lease_acquired'",
-                    "n.processing_substage_started_at = datetime()",
+                    f"n.processing_substage_started_at = {self._clock_expression}",
                     "n.processing_progress = 5.0",
                     "n.processing_steps_total = coalesce(toInteger(n.processing_steps_total), 5)",
                     "n.processing_steps_completed = 0",
@@ -875,12 +923,12 @@ class EpisodeLifecycleRepository:
                     "n.processing_llm_active_kind = null",
                     "n.processing_llm_active_model = null",
                     "n.processing_llm_active_endpoint = null",
-                    "n.processing_started_at = datetime()",
+                    f"n.processing_started_at = {self._clock_expression}",
                     "n.processing_completed_at = null",
                     "n.processing_attempts = coalesce(toInteger(n.processing_attempts), 0) + 1",
                     "n.processing_owner = $worker_id",
-                    "n.processing_lease_expires_at = datetime() + duration({seconds: $lease_seconds})",
-                    "n.processing_heartbeat_at = datetime()",
+                    f"n.processing_lease_expires_at = {self._lease_deadline_expression}",
+                    f"n.processing_heartbeat_at = {self._clock_expression}",
                     "n.processing_error = null",
                     "n.retry_after = null",
                 )
@@ -960,7 +1008,7 @@ class EpisodeLifecycleRepository:
             )
             .build()
         )
-        rows = self.neo4j.execute(
+        rows = self._execute(
             claim_query,
             params={
                 "episode_uuid": episode_uuid,
@@ -973,7 +1021,12 @@ class EpisodeLifecycleRepository:
             },
         )
         if rows:
-            return rows[0]
+            claimed = dict(rows[0])
+            if isinstance(self.neo4j, FalkorLiteRepository):
+                for field in ("reference_time", "queued_at", "processing_started_at", "processing_lease_expires_at"):
+                    if claimed.get(field) is not None:
+                        claimed[field] = decode_instant(claimed[field])
+            return claimed
 
         if not precheck_rows:
             logger.debug("claim_pending_episode skipped uuid=%s reason=missing", episode_uuid)
@@ -1014,9 +1067,7 @@ class EpisodeLifecycleRepository:
         # from the attempt that made it READY, never from an earlier one.
         fence_instant = claim_started_at is not None and worker_id is not None
         instant_clause = (
-            " AND n.processing_started_at IS NOT NULL"
-            " AND n.processing_started_at.epochSeconds = datetime($claim_started_at).epochSeconds"
-            " AND n.processing_started_at.nanosecond = datetime($claim_started_at).nanosecond"
+            f' AND n.processing_started_at IS NOT NULL AND {self._claim_instant_expression}'
             if fence_instant
             else ""
         )
@@ -1036,13 +1087,13 @@ class EpisodeLifecycleRepository:
                     "n.processing_state = 'READY'",
                     "n.processing_stage = 'ready'",
                     "n.processing_substage = 'complete'",
-                    "n.processing_substage_started_at = datetime()",
+                    f"n.processing_substage_started_at = {self._clock_expression}",
                     "n.processing_progress = 100.0",
                     "n.processing_steps_completed = coalesce(toInteger(n.processing_steps_total), 5)",
-                    "n.processing_completed_at = datetime()",
+                    f"n.processing_completed_at = {self._clock_expression}",
                     "n.processing_owner = null",
                     "n.processing_lease_expires_at = null",
-                    "n.processing_heartbeat_at = datetime()",
+                    f"n.processing_heartbeat_at = {self._clock_expression}",
                     "n.processing_error = null",
                     "n.processing_llm_active_task = null",
                     "n.processing_llm_active_kind = null",
@@ -1068,7 +1119,7 @@ class EpisodeLifecycleRepository:
         }
         if fence_instant:
             params["claim_started_at"] = claim_started_at
-        rows = self.neo4j.execute(query, params=params)
+        rows = self._execute(query, params=params)
         return bool(rows and int(rows[0].get("updated", 0)) > 0)
 
     def mark_episode_verbatim_skipped(
@@ -1084,13 +1135,12 @@ class EpisodeLifecycleRepository:
         """
         if not worker_id or claim_started_at is None:
             return None
-        rows = self.neo4j.execute(
-            """
-            MATCH (n:Episodic {uuid: $episode_uuid})
+        rows = self._execute(
+            f"""
+            MATCH (n:Episodic {{uuid: $episode_uuid}})
             WHERE n.processing_state = 'ENRICHING' AND n.processing_owner = $worker_id
               AND n.processing_started_at IS NOT NULL
-              AND n.processing_started_at.epochSeconds = datetime($claim_started_at).epochSeconds
-              AND n.processing_started_at.nanosecond = datetime($claim_started_at).nanosecond
+              AND {self._claim_instant_expression}
               AND NOT coalesce(n.is_evidence_projection, false)
               AND n.evidence_projection_of IS NULL
               AND n.diff IS NULL
@@ -1100,7 +1150,7 @@ class EpisodeLifecycleRepository:
             WITH n, [(n)-[:ADMITTED_ON]->(t:TurnEvidence) | t] AS turns
             WHERE size(turns) = 1 AND n.content = turns[0].text
             WITH n, turns[0] AS t
-            MATCH (p:Episodic {evidence_projection_of: t.turn_id})-[:ADMITTED_ON]->(t)
+            MATCH (p:Episodic {{evidence_projection_of: t.turn_id}})-[:ADMITTED_ON]->(t)
             WHERE p.uuid <> n.uuid
               AND coalesce(p.is_evidence_projection, false)
               AND p.content = n.content
@@ -1116,13 +1166,13 @@ class EpisodeLifecycleRepository:
             SET n.processing_state = 'READY',
                 n.processing_stage = 'ready',
                 n.processing_substage = 'verbatim_skipped',
-                n.processing_substage_started_at = datetime(),
+                n.processing_substage_started_at = {self._clock_expression},
                 n.processing_progress = 100.0,
                 n.processing_steps_completed = coalesce(toInteger(n.processing_steps_total), 5),
-                n.processing_completed_at = datetime(),
+                n.processing_completed_at = {self._clock_expression},
                 n.processing_owner = null,
                 n.processing_lease_expires_at = null,
-                n.processing_heartbeat_at = datetime(),
+                n.processing_heartbeat_at = {self._clock_expression},
                 n.processing_error = null,
                 n.processing_llm_active_task = null,
                 n.processing_llm_active_kind = null,
@@ -1159,25 +1209,24 @@ class EpisodeLifecycleRepository:
         """
         if not worker_id or claim_started_at is None:
             return False
-        rows = self.neo4j.execute(
-            """
-            MATCH (n:Episodic {uuid: $episode_uuid})
+        rows = self._execute(
+            f"""
+            MATCH (n:Episodic {{uuid: $episode_uuid}})
             WHERE n.processing_state = 'ENRICHING' AND n.processing_owner = $worker_id
               AND n.processing_started_at IS NOT NULL
-              AND n.processing_started_at.epochSeconds = datetime($claim_started_at).epochSeconds
-              AND n.processing_started_at.nanosecond = datetime($claim_started_at).nanosecond
+              AND {self._claim_instant_expression}
               AND (n.extraction_mode = $store_only OR $by_turn_role)
             SET n.extraction_mode = $store_only,
                 n.processing_state = 'READY',
                 n.processing_stage = 'ready',
                 n.processing_substage = $store_only,
-                n.processing_substage_started_at = datetime(),
+                n.processing_substage_started_at = {self._clock_expression},
                 n.processing_progress = 100.0,
                 n.processing_steps_completed = coalesce(toInteger(n.processing_steps_total), 5),
-                n.processing_completed_at = datetime(),
+                n.processing_completed_at = {self._clock_expression},
                 n.processing_owner = null,
                 n.processing_lease_expires_at = null,
-                n.processing_heartbeat_at = datetime(),
+                n.processing_heartbeat_at = {self._clock_expression},
                 n.processing_error = null,
                 n.processing_llm_active_task = null,
                 n.processing_llm_active_kind = null,
@@ -1199,7 +1248,7 @@ class EpisodeLifecycleRepository:
         return bool(rows)
 
     def episode_is_store_only(self, episode_uuid: str) -> bool:
-        rows = self.neo4j.execute(
+        rows = self._execute(
             "MATCH (n:Episodic {uuid: $uuid}) RETURN n.extraction_mode = $store_only AS store_only",
             params={"uuid": episode_uuid, "store_only": EXTRACTION_MODE_STORE_ONLY},
         )
@@ -1214,13 +1263,13 @@ class EpisodeLifecycleRepository:
         (the pre-feature behavior, collapsed at recall) but never leaves it unextracted.
         Returns the re-enabled client uuids for enqueueing.
         """
-        rows = self.neo4j.execute(
-            """
+        rows = self._execute(
+            f"""
             MATCH (n:Episodic)
             WHERE n.extraction_skipped_for IS NOT NULL
               AND ($projection_uuid IS NULL OR n.extraction_skipped_for = $projection_uuid)
               AND n.processing_state = 'READY'
-            OPTIONAL MATCH (p:Episodic {uuid: n.extraction_skipped_for})
+            OPTIONAL MATCH (p:Episodic {{uuid: n.extraction_skipped_for}})
             WITH n, p
             WHERE p IS NULL OR p.processing_state = 'FAILED'
             WITH n LIMIT $limit
@@ -1230,13 +1279,13 @@ class EpisodeLifecycleRepository:
                 n.processing_state = 'PENDING',
                 n.processing_stage = 'queued',
                 n.processing_substage = 'verbatim_skip_revoked',
-                n.processing_substage_started_at = datetime(),
+                n.processing_substage_started_at = {self._clock_expression},
                 n.processing_progress = 0.0,
                 n.processing_steps_completed = 0,
                 n.processing_attempts = 0,
                 n.processing_owner = null,
                 n.processing_lease_expires_at = null,
-                n.processing_heartbeat_at = datetime(),
+                n.processing_heartbeat_at = {self._clock_expression},
                 n.processing_started_at = null,
                 n.processing_completed_at = null,
                 n.processing_error = null,
@@ -1263,20 +1312,11 @@ class EpisodeLifecycleRepository:
         # path already does); without one the legacy text is unchanged.
         if claim_started_at is not None and not transient_requeue:
             owner_instant = (
-                " AND n.processing_started_at IS NOT NULL"
-                " AND n.processing_started_at.epochSeconds"
-                " = datetime($claim_started_at).epochSeconds"
-                " AND n.processing_started_at.nanosecond"
-                " = datetime($claim_started_at).nanosecond))"
+                f' AND n.processing_started_at IS NOT NULL AND {self._claim_instant_expression}))'
             )
         else:
             owner_instant = (
-                " AND (NOT $transient_requeue OR ($claim_started_at IS NOT NULL"
-                " AND n.processing_started_at IS NOT NULL"
-                " AND n.processing_started_at.epochSeconds"
-                " = datetime($claim_started_at).epochSeconds"
-                " AND n.processing_started_at.nanosecond"
-                " = datetime($claim_started_at).nanosecond))))"
+                f' AND (NOT $transient_requeue OR ($claim_started_at IS NOT NULL AND n.processing_started_at IS NOT NULL AND {self._claim_instant_expression}))))'
             )
         query = (
             Cypher()
@@ -1299,14 +1339,14 @@ class EpisodeLifecycleRepository:
                     "n.processing_state = 'FAILED'",
                     "n.processing_stage = 'failed'",
                     "n.processing_substage = 'failed'",
-                    "n.processing_substage_started_at = datetime()",
+                    f"n.processing_substage_started_at = {self._clock_expression}",
                     "n.processing_progress = CASE"
                     " WHEN n.processing_progress IS NULL THEN 100.0"
                     " ELSE n.processing_progress END",
-                    "n.processing_completed_at = datetime()",
+                    f"n.processing_completed_at = {self._clock_expression}",
                     "n.processing_owner = null",
                     "n.processing_lease_expires_at = null",
-                    "n.processing_heartbeat_at = datetime()",
+                    f"n.processing_heartbeat_at = {self._clock_expression}",
                     "n.processing_error = $error",
                     "n.processing_llm_active_task = null",
                     "n.processing_llm_active_kind = null",
@@ -1317,7 +1357,7 @@ class EpisodeLifecycleRepository:
             .return_raw("count(n) AS updated")
             .build()
         )
-        rows = self.neo4j.execute(
+        rows = self._execute(
             query,
             params={
                 "episode_uuid": episode_uuid,
@@ -1343,19 +1383,17 @@ class EpisodeLifecycleRepository:
             if retry_after_s > 0
             else "n.retry_after = null"
         )
+        native_retry = isinstance(self.neo4j, FalkorLiteRepository) and retry_after_s > 0
+        if native_retry:
+            retry_clause = "n.retry_after = $episode_retry_at"
         query = (
             Cypher()
             .match("(n:Episodic)")
             .where(
                 "n.uuid = $episode_uuid",
-                "(($worker_id IS NULL AND NOT $transient_requeue)"
-                " OR (n.processing_state = 'ENRICHING' AND n.processing_owner = $worker_id"
-                " AND (NOT $transient_requeue OR ($claim_started_at IS NOT NULL"
-                " AND n.processing_started_at IS NOT NULL"
-                " AND n.processing_started_at.epochSeconds"
-                " = datetime($claim_started_at).epochSeconds"
-                " AND n.processing_started_at.nanosecond"
-                " = datetime($claim_started_at).nanosecond))))",
+                f"(($worker_id IS NULL AND NOT $transient_requeue) OR (n.processing_state = 'ENRICHING' AND "
+                f"n.processing_owner = $worker_id AND (NOT $transient_requeue OR ($claim_started_at IS NOT NULL "
+                f"AND n.processing_started_at IS NOT NULL AND {self._claim_instant_expression}))))",
             )
             .set(
                 (
@@ -1369,10 +1407,10 @@ class EpisodeLifecycleRepository:
                     "n.processing_state = 'PENDING'",
                     "n.processing_stage = 'queued'",
                     "n.processing_substage = 'circuit_breaker_requeue'",
-                    "n.processing_substage_started_at = datetime()",
+                    f"n.processing_substage_started_at = {self._clock_expression}",
                     "n.processing_owner = null",
                     "n.processing_lease_expires_at = null",
-                    "n.processing_heartbeat_at = datetime()",
+                    f"n.processing_heartbeat_at = {self._clock_expression}",
                     "n.processing_error = null",
                     "n.processing_llm_active_task = null",
                     "n.processing_llm_active_kind = null",
@@ -1384,13 +1422,14 @@ class EpisodeLifecycleRepository:
             .return_raw("count(n) AS updated")
             .build()
         )
-        rows = self.neo4j.execute(
+        rows = self._execute(
             query,
             params={
                 "episode_uuid": episode_uuid,
                 "worker_id": worker_id,
                 "transient_requeue": transient_requeue,
                 "claim_started_at": claim_started_at,
+                **({"native_retry_seconds": int(max(0, retry_after_s))} if native_retry else {}),
             },
         )
         return bool(rows and int(rows[0].get("updated", 0)) > 0)
@@ -1423,7 +1462,7 @@ class EpisodeLifecycleRepository:
             .limit("1")
             .build()
         )
-        rows = self.neo4j.execute(query, params={"episode_uuid": episode_uuid})
+        rows = self._execute(query, params={"episode_uuid": episode_uuid})
         return rows[0] if rows else None
 
     def fetch_relevant_pending_episodes(
@@ -1465,7 +1504,7 @@ class EpisodeLifecycleRepository:
             .limit()
             .build()
         )
-        return self.neo4j.execute(
+        return self._execute(
             cypher,
             params={
                 "tokens": tokens, "limit": safe_limit, "namespace": namespace,
@@ -1481,7 +1520,7 @@ class EpisodeLifecycleRepository:
             .return_raw("DISTINCT n.uuid AS uuid")
             .build()
         )
-        rows = self.neo4j.execute(query, params={"episode_uuid": episode_uuid})
+        rows = self._execute(query, params={"episode_uuid": episode_uuid})
         return [str(row["uuid"]) for row in rows if row.get("uuid")]
 
     def fetch_linked_entity_uuids_for_episodes(
@@ -1501,7 +1540,7 @@ class EpisodeLifecycleRepository:
         """
         if not episode_uuids:
             return {}
-        rows = self.neo4j.execute(
+        rows = self._execute(
             """
             UNWIND $episode_uuids AS episode_uuid
             MATCH (e:Episodic)-[]-(n:Entity)
@@ -1533,10 +1572,10 @@ NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If
         if not namespace:
             raise ValueError("ensure_self_entity requires a non-empty namespace")
         self_uuid = self_uuid_for_namespace(namespace)
-        self.neo4j.execute(
-            """
-            MERGE (n:Entity {uuid: $self_uuid})
-            ON CREATE SET n.created_at = datetime(), n.summary = $summary
+        self._execute(
+            f"""
+            MERGE (n:Entity {{uuid: $self_uuid}})
+            ON CREATE SET n.created_at = {self._clock_expression}, n.summary = $summary
             SET n.name = $name,
                 n.namespace = $namespace,
                 n.group_id = $group_id,
@@ -1574,14 +1613,14 @@ NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If
         link exists after the call."""
         if not namespace:
             raise ValueError("link_self_tiers requires a non-empty namespace")
-        rows = self.neo4j.execute(
-            """
-            MATCH (a:Entity {uuid: $anchored})
+        rows = self._execute(
+            f"""
+            MATCH (a:Entity {{uuid: $anchored}})
             WHERE a.group_id = $group_id AND coalesce(a.is_self, false)
-            MATCH (i:Entity {uuid: $inferred})
+            MATCH (i:Entity {{uuid: $inferred}})
             WHERE i.group_id = $group_id AND toLower(coalesce(i.entity_role, '')) = 'inferred_self'
             MERGE (a)-[r:INFERRED_VIEW_OF]->(i)
-            ON CREATE SET r.created_at = datetime()
+            ON CREATE SET r.created_at = {self._clock_expression}
             RETURN count(r) AS linked
             """,
             params={
@@ -1614,7 +1653,7 @@ NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If
             group_ids.append(namespace)
         return [
             str(row["uuid"])
-            for row in self.neo4j.execute(
+            for row in self._execute(
                 f"""
                 MATCH (f:Entity)
                 WHERE f.group_id IN $group_ids AND f.uuid <> $self_uuid
@@ -1656,7 +1695,7 @@ NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If
         safe_spellings = [s for s in (spellings or []) if isinstance(s, str) and s.strip()]
         if not (namespace and namespace.strip()) or not safe_spellings:
             return []
-        rows = self.neo4j.execute(
+        rows = self._execute(
             f"""
             MATCH (n:Entity)
             WHERE {tenant_scope_cypher("n")}
@@ -1724,7 +1763,7 @@ NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If
                    coalesce(n.is_quantstate, false) AS is_quantstate,
                    n.view_kind AS view_kind
         """
-        rows = self.neo4j.execute(query, params={"episode_uuid": episode_uuid})
+        rows = self._execute(query, params={"episode_uuid": episode_uuid})
         out: list[dict[str, str]] = []
         for row in rows:
             if not row.get("uuid"):

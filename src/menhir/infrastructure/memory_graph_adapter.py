@@ -28,8 +28,10 @@ from menhir.infrastructure.episode_lifecycle import TRANSIENT_RETRY_CAP
 from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.infrastructure.consolidation_queries import ConsolidationRepository
 from menhir.infrastructure.correlation_queries import CorrelationRepository
+from menhir.infrastructure.falkor import FalkorLiteRepository
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.schema import (
+    PhaseOneSchemaResult,
     PHASE_ONE_REQUIRED_CONSTRAINTS,
     GRAPHITI_OWNED_INDEXES,
     PHASE_ONE_REQUIRED_INDEXES,
@@ -51,24 +53,10 @@ __all__ = [
 
 
 @dataclass
-class PhaseOneSchemaResult:
-    """Result shape for phase-1 schema bootstrap."""
-
-    success: bool
-    queries_executed: int
-    failures: list[str]
-
-    @property
-    def query_failures(self) -> list[str]:
-        """Compatibility alias for callers that expect a descriptive failure list."""
-        return self.failures
-
-
-@dataclass
 class MemoryGraphAdapter:
     """Thin façade over graph storage; delegates to focused sub-repositories."""
 
-    neo4j: Neo4jRepository
+    neo4j: Neo4jRepository | FalkorLiteRepository
     # keyword-only dataclass field (a same-named property would clobber the init default)
     counting_enabled: bool = field(default=False, kw_only=True)
     # unit 4R: counted Views fold by count decision; only effective with counting on.
@@ -131,6 +119,10 @@ class MemoryGraphAdapter:
         Graphiti index there still refuses the writer, because there it means the build failed
         rather than never ran.
         """
+        if isinstance(self.neo4j, FalkorLiteRepository):
+            from menhir.infrastructure.falkor_schema import phase_one_schema_ready
+
+            return phase_one_schema_ready(self.neo4j, require_graphiti=require_graphiti)
         required = [
             name
             for name in PHASE_ONE_REQUIRED_INDEXES
@@ -182,6 +174,10 @@ class MemoryGraphAdapter:
         constraints/indexes are ACTIVATION-created (via `activate_scalar_state`, behind the
         identity-version gate) — NOT created by `bootstrap_phase_one` — and are excluded from
         PHASE_ONE_REQUIRED_INDEXES. So this returns False until activation has run successfully."""
+        from menhir.infrastructure.falkor import FalkorLiteRepository
+        if isinstance(self.neo4j, FalkorLiteRepository):
+            from menhir.infrastructure.falkor_schema import scalar_state_schema_ready
+            return scalar_state_schema_ready(self.neo4j)
         rows = self.neo4j.execute(
             """
             SHOW INDEXES YIELD name, state
@@ -291,8 +287,12 @@ class MemoryGraphAdapter:
         )
         return service.run_pending(owner_id=owner_id, limit=limit, namespaces=namespaces)
 
-    def bootstrap_phase_one(self) -> PhaseOneSchemaResult:
+    def bootstrap_phase_one(self, *, require_graphiti: bool = False) -> PhaseOneSchemaResult:
         """Apply phase-1 schema fields and indexes in an idempotent manner."""
+        if isinstance(self.neo4j, FalkorLiteRepository):
+            from menhir.infrastructure.falkor_schema import bootstrap_phase_one
+
+            return bootstrap_phase_one(self.neo4j, require_graphiti=require_graphiti)
         queries = get_phase1_bootstrap_queries()
         failures: list[str] = []
         for query in queries:
@@ -309,6 +309,10 @@ class MemoryGraphAdapter:
     def retire_obsolete_indexes(self) -> list[str]:
         """Drop RETIRED_INDEXES; return failure messages. Separate from bootstrap_phase_one
         because that is skipped once the required set is online, i.e. on every existing install."""
+        if isinstance(self.neo4j, FalkorLiteRepository):
+            # Retired Neo4j index names have no native counterpart; never drop Graphiti's
+            # label-shared Falkor index to emulate a Neo4j DROP INDEX by name.
+            return []
         failures: list[str] = []
         for query in get_retired_index_queries():
             try:
@@ -1415,6 +1419,7 @@ class MemoryGraphAdapter:
         unattended watcher all arrive through this one method. Guarding the callers instead would
         mean four places to keep in step, and the next writer added would silently miss it.
         """
+        from menhir.infrastructure.falkor import FalkorLiteRepository
         from menhir.infrastructure.project_identity_binding import binding_host, root_key_for
         from menhir.infrastructure.structure_write_fence import (
             IdentityClaim, StaleStructureScan, admit_structure_writer,
@@ -1465,6 +1470,9 @@ class MemoryGraphAdapter:
             self.neo4j, label=str(getattr(scan, "name", "") or ""), claim=claim
         )
         try:
+            if isinstance(self.neo4j, FalkorLiteRepository):
+                return self.neo4j.publish_project(claim, scan, session_id, user_id)
+
             def _publish(tx: Any) -> dict[str, int]:
                 lock_structure_project(tx, claim, scan_generation=int(generation))
                 return StructureGraphWriter(tx).write_project(scan, session_id, user_id)
@@ -1488,6 +1496,7 @@ class MemoryGraphAdapter:
         document_type: str = "generic",
     ) -> None:
         """Write one document under the same durable identity fence as a project scan."""
+        from menhir.infrastructure.falkor import FalkorLiteRepository
         from menhir.infrastructure.project_identity_binding import binding_host, root_key_for
         from menhir.infrastructure.structure_write_fence import (
             IdentityClaim, admit_structure_writer, lock_structure_project,
@@ -1518,6 +1527,14 @@ class MemoryGraphAdapter:
         )
         handle = admit_structure_writer(self.neo4j, label=project, claim=claim)
         try:
+            if isinstance(self.neo4j, FalkorLiteRepository):
+                StructureGraphWriter(self.neo4j).write_document(
+                    file_path, content, project=project, structure_path=structure_path,
+                    structure_project_id=str(project_id), session_id=session_id,
+                    user_id=user_id, document_type=document_type, claim=claim,
+                )
+                return
+
             def _publish_document(tx: Any) -> None:
                 lock_structure_project(tx, claim)
                 StructureGraphWriter(tx).write_document(
@@ -1545,6 +1562,7 @@ class MemoryGraphAdapter:
         self, project_name: str, fingerprint: str, commit: str, repository: str, dirty: bool,
         *, claim: Any, scan_generation: int,
     ) -> bool:
+        from menhir.infrastructure.falkor import FalkorLiteRepository
         from menhir.infrastructure.structure_queries import StructureGraphWriter
         from menhir.infrastructure.structure_write_fence import (
             admit_structure_writer, lock_structure_project, release_structure_writer,
@@ -1552,6 +1570,12 @@ class MemoryGraphAdapter:
 
         handle = admit_structure_writer(self.neo4j, label=project_name, claim=claim)
         try:
+            if isinstance(self.neo4j, FalkorLiteRepository):
+                return StructureGraphWriter(self.neo4j).refresh_indexed_binding(
+                    project_name, fingerprint, commit, repository, dirty,
+                    project_id=claim.project_id, claim=claim, scan_generation=scan_generation,
+                )
+
             def _refresh(tx: Any) -> bool:
                 lock_structure_project(tx, claim, scan_generation=scan_generation)
                 return StructureGraphWriter(tx).refresh_indexed_binding(

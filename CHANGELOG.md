@@ -1,3 +1,92 @@
+## 2026-11-05 - Falkor runtime integration (#109)
+
+- Reconciled the branch with current main and repaired full-CI query capture/source guards.
+  Centralized the native/Neo4j metadata provenance field, made the certification fixture safe
+  under assertion-ID uniqueness, and retained historical qualification pins in the bump checks.
+- Added the explicitly authorized native `fn1:` scalar repair/reconciliation IDs, preserving
+  namespace identity and refusing incompatible existing receipts before activation. Mapped native
+  single-memory and namespace erasure while retaining shared retirement/rebuild policy and Neo4j
+  identities. Qualification covers durable receipt replay, native file reopen and late rollback.
+- Added native scalar activation/readiness, View create/refresh/supersede/retire and typed-assertion
+  clock/vector mappings, retaining shared folds, provenance gates and Neo4j behavior. Live checks
+  cover real uniqueness, refusal, observation vectors and active fold/rebuild. Mapped the shared
+  correlation path veto to the native regex function. Production enablement remains gated.
+- Added native atomic project publication using the actual project writer's policy and payloads.
+  Its mtime inputs and identity/scan token are revalidated before ordered writes; actual batch-edge
+  counts and exact-one completion are enforced. Full/incremental/partial scan, pruning, input-race
+  and late rollback cases pass on disposable storage; Neo4j retains its transaction path.
+- Added native atomic document publication through the existing adapter and entity writer. The
+  shared identity guard and actual MERGE execute together; create defaults and update policy remain
+  shared with Neo4j. Live cases cover retained metadata, post-admission claim changes, migration
+  freeze and rollback of creation/update. Atomic project publication remains open.
+- Added a native atomic indexed-binding refresh through the existing adapter/writer. The shared
+  identity/scan publication guard and unchanged compare-and-set execute in one command; admission
+  and cleanup remain shared. Live tests cover post-admission claim changes, freeze, stale scans,
+  same-name identity isolation and execution-time rollback. The actual raise/lower migration fence
+  API is covered, with a native UTC freeze instant. Project/document publication remains open.
+- Added controlled-model queued ingestion, Graphiti enrichment and recall on the shared Lite
+  runtime. Graphiti group clones retain Menhir's physical graph. Episode clocks/claim hydration,
+  source-vector reads, View receipt validation and result provenance have explicit native mappings;
+  live tests reject swallowed backend errors and check tenancy, stale claims and provenance.
+  This bounded profile does not enable the backend or qualify remaining atomic/scalar/merge owners.
+- Added native phase-one schema/readiness: operational property/kind checks, native uniqueness,
+  bounded enforcement waits and shared UTC-clock data defaults. Startup retries incomplete
+  backfills and refuses duplicate identity data. Fixed Graphiti's startup index-count query and
+  disabled underlying Redis transport retries on both shared clients to preserve ambiguous failures.
+- Added the internal shared Lite repository/bootstrap seam and injectable Graphiti driver.
+  Canonical UTC instant encoding matches Graphiti; the active TEMPORAL path now uses native
+  create/list/complete queries and UTC calendar bounds. A live shared-graph test verifies
+  cross-client visibility and restart persistence. Public backend selection and normal
+  enrichment/recall remain unqualified; callback transactions fail before invocation.
+- Reassessed the completion architecture: stop expanding isolated proof families, resolve shared
+  temporal semantics, and integrate one unreleased Linux slice through existing repository/Graphiti
+  seams. Retain all correctness release gates; dormant T5 cutover and native Windows work do not
+  precede the active runtime path.
+- Added a bounded create/supersede candidate that captures the actual View and scalar provenance
+  write bodies and commits them with real projection work/receipt labels in one guarded query.
+  Source/history/time fences, native postconditions, late-failure rollback, replay and competing
+  publisher cases pass in the string-temporal profile. Refresh, retirement, native View temporals,
+  crash recovery and the full P1 transaction gate remain open; no runtime wiring changed.
+
+## 2026-11-04 - FalkorDBLite compatibility spike (#109)
+
+- Fixed two shared scalar certification blockers found while qualifying the real View path:
+  hash the writer's resolved evidence anchors, and allow explicit transaction budgets to honor
+  View statement deadlines. Added live Neo4j history/refresh/retirement and certification-rollback
+  regressions plus a Falkor string-temporal materializer diagnostic. Falkor atomic certification
+  and native View temporals remain gated.
+- Added a full-project compound candidate reusing the actual structural writer, with mtime/scan
+  freshness, native UDF postcondition rollback, operational uniqueness constraints, full/partial
+  scan parity and failure/race checks. Restart now verifies project data, temporal values and UDF
+  restoration. Parameterized temporals and real View/history certification remain gated.
+- Updated the agreed integration roadmap and callback-writer classification. Added an atomic
+  identity-fenced document candidate reusing the actual writer's MERGE/payload, with live rollback,
+  refusal, migration-drain and concurrent-writer checks. Full project/View publication remains gated.
+- Compared engine-first and Menhir integration routes; documented the recommended internal backend
+  with targeted Falkor fixes, ownership boundaries, and the unchanged transaction feasibility gate.
+- Added a bounded source-bound prepared variant: the real assertion/provenance snapshot and evidence
+  fence are revalidated inside the atomic publication/replay query. Added no-write refusal, null-safe
+  comparison, overflow, rollback and competing-publisher checks; real View history integration remains gated.
+- Extended the probe to real assertion/provenance reads and View history; exposed stale-admission
+  and quarantined-evidence acceptance in the synthetic candidate. Corrected its slot kind to `count`
+  and added a production View-kind regression. Native View temporals and full P1 remain blocked.
+- `scripts/falkordblite_prepared_materialization.py`, `scripts/falkordblite_prepared_proof.py`:
+  bounded numeric prepared-write candidate with atomic payload/certificate, snapshot/time fences,
+  refusal, replay and worker-exit checks; offline contracts in `tests/test_falkordblite_prepared_materialization.py`.
+- `scripts/falkordblite_projection_proof.py`: real Menhir materialization rejection counterexamples
+  and a guarded single-query publication candidate with injected-failure and competing-writer checks;
+  integrated into the isolated probe. The callback transaction gate remains unpassed.
+- `.agent/reference/menhir-falkordblite-compatibility.md`: bounded transaction inventory and P1 results.
+- `.agent/memory-backlog.md`: links the phased workspace roadmap and conditional LLM token budget.
+- `.agent/memory-backlog.md`: future adapter gates, rollback evidence and the separate Windows fork investigation.
+- `scripts/falkordblite_compatibility.py`: opt-in isolated storage probe for the checkout's Graphiti
+  fork, entity/edge replay, vector/fulltext search, rollback failures and orderly restart persistence.
+- `tests/test_falkordblite_compatibility.py`: offline refusal and result-reporting checks.
+- `.agent/reference/menhir-falkordblite-compatibility.md`: measured transaction blockers, Windows
+  limitation and remaining acceptance gates; indexed in `.agent/reference/README.md` and
+  `.agent/scripts-index.md`, with the investigation boundary recorded in `.agent/architecture.md`.
+  Runtime storage and dependencies remain unchanged. Older changelog entries remain in Git history.
+
 ## 2026-11-08 - v0.3.4: MCP initialize names the build; releases publish what they serve; policy refusals are MCP errors
 
 - `serverInfo.version` carries the build commit as SemVer build metadata, and each GitHub release
@@ -89,30 +178,3 @@
   threshold, and requeued. A bare 402, or one with a billing code, is still billing.
 - `retry_after_seconds` also reads the hint from the error body, so the backoff waits as asked.
 - No operator reset for a hard-opened breaker yet (#492): it needs a new operator tool.
-
-## 2026-11-05 - Filter recall's source memories by ingest source
-
-For agent-written memories (#168): a caller can ask for just the agent-writer items, ranked among themselves, instead of fetching 50 and filtering client-side.
-
-- `POST /api/recall` takes `source_memory_sources` (1-20 exact `source` strings, stripped and de-duplicated; anything else is 422). The source-memory search keeps only episodes with one of those sources, before `source_memory_limit` is applied. It does not turn the section on: that is still `source_memory_limit` or the deployment default. Without the field, recall is unchanged and the kwarg is not passed down.
-- `domain/recall.py`: `normalize_source_memory_sources`, shared by the request model and the backend runtime, since the internal backend route skips `RecallRequest`. Threaded through `backend_client_ops`, `backend_protocol`, `backend_runtime_data_ops`, `RecallService`, `run_recall`, `_build_source_memories`, `MemoryGraphAdapter` and `MemoryQueryRepository.search_episode_embeddings` (`n.source IN $sources`; an empty sequence matches nothing).
-- Not on the `recall_memories` MCP tool.
-- Tests (new): `tests/test_source_memory_source_filter.py`, including an online test showing the filter applies before LIMIT.
-
-## 2026-11-05 - Conflict detection drops dissimilar pairs before review
-
-- `classify_pair` now reads the pair's real name cosine and drops conflict and merge candidates
-  below `CORRELATION_SIMILARITY_FLOOR` (0.40). The floor can only turn a route into `none`; a
-  missing vector, a read error or a PROMOTED member keeps today's route. Each drop is recorded as
-  `correlation_similarity_floor`. Routing above the floor still uses the RRF rank score, because
-  cosine cannot tell a contradiction from a duplicate.
-- The shared-episode veto is always on. A pair that one episode asserted together, with no shared
-  attribute word, is dropped instead of queued. Known limit: a same-episode correction with no
-  shared word ("Lisbon residence" / "Porto home") is dropped too.
-- A floor or veto drop ends that node's contradiction scan, as a queued conflict does, so a drop
-  never reaches hits the scan would not have classified. A dropped pair writes nothing to the
-  graph: the node stays scannable and merge-eligible, and a rescan records the drop again.
-- `list_conflicts` shows each member's scope and a note on how the group may have been created.
-- `tests/fixtures/conflict_pairs.json` pins what 42 hand-written pairs do. The floor is fitted to
-  those pairs, so the fixture records behaviour and does not measure accuracy.
-  `scripts/build_conflict_fixture.py` refreshes its cosines.

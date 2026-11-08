@@ -52,8 +52,8 @@ VERSION_LINES: tuple[tuple[str, str], ...] = (
     ("docs/post-install.md", "**Known limitations in {v}.**"),
 )
 
-#: Every file naming the fork version, and how many times. Excludes CHANGELOG.md, which is history,
-#: and uv.lock, whose lines are rewritten individually.
+#: Files naming the live fork pin, and how many times. Changelogs and measured qualification
+#: reports are historical; uv.lock is rewritten individually.
 FORK_VERSION_FILES: dict[str, int] = {
     ".agent/architecture.md": 2,
     ".github/workflows/release-image.yml": 1,
