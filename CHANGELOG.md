@@ -1,3 +1,47 @@
+## 2026-11-08 - v0.3.6: profile catalog 2, telemetry off the event loop, one operation table
+
+- Profile catalog 2 puts `get_client_context` in `core`, so agent-tier clients receive it. A
+  deployment opts in with `"profile_catalog": 2`; catalog 1 policies resolve as before.
+- Telemetry writes no longer block the event loop (#527), and the token endpoint logs why it
+  refused a request (#541).
+- What each TypedAssertion operation means now lives in one table; an operation it does not know
+  carries no value anywhere.
+- #519: a span-aligned scalar no longer keeps a `current_`/`latest_` prefix its quote dropped.
+  Readers understand an `approximate` operation; nothing writes one yet.
+- v1 and v2 client policies still load. The v0.3.5 notes said this release would drop them; that
+  moves to a later release.
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.6. No dependency changes in this commit.
+
+## 2026-11-08 - Readers for an approximate scalar operation (#519 phase 1)
+
+- A hedged value ("I think I'm close to 1300") will be stored as `approximate`: it never sets or
+  changes a View's value, is listed in scalar history as "about 1300", and keeps a View advisory
+  when newer. Only readers ship here. The table entry has no writer lane, so a stored row loads
+  but no parse path or scalar identity can produce one.
+- `validate_value`: one finite number on a numeric kind (an integer for counts); ranges are
+  refused.
+- History lists it, also with counting off; the change check treats it as a value statement, so a
+  lone hedge is not a change. The HISTORY_ENTRY listing includes it; provenance never does.
+- Projection coverage: a known operation the fold never reads is `HISTORY_ONLY`, not an
+  unaccounted write. An unknown operation is still reported.
+
+## 2026-11-08 - Span alignment re-grounds a source-time attribute prefix (#519)
+
+- Each k-sample proposal canonicalises its attribute against its own quote, so one quoting
+  "current balance is 1300" kept `current_balance`. Span alignment then commits the common span
+  "balance is 1300", and the kept prefix forked a `current_balance` slot beside `balance`. The
+  gate now re-checks the name against the committed quote. Stored rows keep their names.
+
+## 2026-11-08 - One table decides what each TypedAssertion operation means
+
+- `menhir.domain.assertion_operations` holds every operation's meaning. The 61 places that
+  compared operation names in Python and Cypher ask it instead. An operation it does not know
+  sets, changes, ends and counts nothing, opens no fold slot or history entry, and is logged once.
+- Known operations behave as before. The provenance and history listings now list the known
+  operations instead of "everything except occurrences".
+- `tests/test_assertion_operations.py` fails on any new literal operation comparison outside the
+  table.
+
 ## 2026-11-08 - Profile catalog 2: `get_client_context` moves to core
 
 - `get_client_context` is a readonly-tier, read-only tool that agents use at session start. Catalog
@@ -96,59 +140,3 @@
 - `scripts/release/check_served_metadata.py` sends `User-Agent: menhir-release-check`. Cloudflare
   answered 403 to urllib's default `Python-urllib/x.y`, so the check could not read production's
   `/readyz`.
-
-## 2026-11-08 - Policy refusals are MCP errors; v0.3.3 audit follow-ups
-
-- A tool refused by the client policy or `MENHIR_CLIENT_TOOLS` now returns an MCP error result
-  (`isError=true`) with the same text as before, so a client reading only `isError` no longer
-  takes it for a result (#503). Other gate refusals (tier, identity, query-string auth) are unchanged.
-- A transient 402 is stored with a `provider_payment_throttled:` prefix, so the retry poller,
-  which sees only the stored text, requeues it as the worker did. Before, a 402 whose only sign
-  was a Retry-After hint was parked for manual review.
-- Compact `recall_memories` over the stdio bridge no longer sends a source-memory limit read from
-  the bridge's own environment. The server applies its own default, and the bridge trims to 5.
-- Upgrade note for v0.3.3: startup requires the production client policy to decide
-  `review_inbox` and `acknowledge_warning` for every client, and refuses a policy that does not,
-  so update the policy first. A deploy check that matched the old refusal text ("restricted by
-  MENHIR_CLIENT_TOOLS allowlist") must also accept "restricted by the server's client policy",
-  or, from this change, `isError=true`.
-
-## 2026-11-07 - v0.3.3: review inbox, token-gated /readyz build details, transient-402 backoff
-
-- New read-only MCP tool `review_inbox`: what is waiting on a decision, in one call.
-- `/readyz` shows the build block only to callers with a valid token; the release check script
-  reads it with `MENHIR_READYZ_TOKEN` and refuses served text that is not plain.
-- A 402 with a retry hint (OpenRouter's in-flight budget) backs off like a 429 instead of
-  hard-opening the LLM breaker for an hour.
-- Recall: `relevance_basis` names the tier as a rank score; source memories can be filtered by
-  ingest source. Conflict detection drops dissimilar pairs before review.
-- Tool refusals name the control that refused; `uv.lock` refreshed for Python 3.15 wheels.
-- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`,
-  `docs/model-governance.md`: version 0.3.3. No dependency changes in this commit.
-
-## 2026-11-07 - Release gaps: refusals name their control, review_inbox labels, readyz check output
-
-- A refused tool call names the control that refused it: the server's client policy, or
-  `MENHIR_CLIENT_TOOLS`. A bound client policy now decides alone, and an empty one denies every
-  tool in both the invocation gate and `tools/list` (the policy loader already rejects an empty
-  one) (#503).
-- `review_inbox` over the stdio bridge no longer heads an unscoped read "all namespaces": a pin
-  there exists only server-side (#507). Its candidates line says the explorer is not served by
-  production (#504).
-- `scripts/release/check_served_metadata.py` refuses a served build field that is not plain text,
-  with exit 2 and without printing it, and reports an output encoding error as exit 2 (#501).
-- New test pins the auth middleware's 403 `client_policy_denied` response (#508).
-- `docs/usability/README.md`: the usage row is done (#480); the served-metadata row points at #498 (#505).
-- Still open: a denied call returns a text result with `isError=False` (#503). Changing that
-  changes an existing test's assertion, so it waits for a decision.
-
-## 2026-11-07 - A 402 with a retry hint backs off instead of opening the breaker for an hour
-
-- Every HTTP 402 counted as billing (#482), so OpenRouter's `in_flight_budget_exhausted` 402, which
-  carries a Retry-After and clears in seconds, hard-opened the LLM breaker for an hour and parked
-  the enrichment. A 402 with a Retry-After (HTTP header, or OpenRouter's `metadata.headers`) or
-  that reason is now throttling: backed off like a 429, counted toward the normal breaker
-  threshold, and requeued. A bare 402, or one with a billing code, is still billing.
-- `retry_after_seconds` also reads the hint from the error body, so the backoff waits as asked.
-- No operator reset for a hard-opened breaker yet (#492): it needs a new operator tool.
-
