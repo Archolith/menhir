@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from menhir.domain.assertion_operations import demotes_newer_view
 from menhir.domain.temporal import parse_iso8601
 
 Slot = tuple[str, str, str, str, str]  # subject_uuid, attribute, scope, value_kind, unit
@@ -43,7 +44,7 @@ def newer_unfolded_evidence(
         return ()
     stale_by: list[str] = []
     for obs in observations:
-        if obs.slot != slot or obs.operation != "occurrence":
+        if obs.slot != slot or not demotes_newer_view(obs.operation):
             continue
         obs_time = parse_iso8601(obs.valid_at)
         if obs_time is None or obs_time <= verdict_time:

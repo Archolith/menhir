@@ -12,6 +12,11 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from menhir.domain.assertion_operations import (
+    COUNTING_OCCURRENCE_OPS_CYPHER,
+    SETS_VALUE_OPS_CYPHER,
+    VALUE_CLAIM_OPS_CYPHER,
+)
 from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
 from menhir.domain.recall_visibility import default_recall_visibility_cypher
 
@@ -21,6 +26,17 @@ except Exception:  # pragma: no cover - driver always present in the running ser
     _Neo4jConstraintError = ()  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
+
+
+def _operation_filter(operation: str) -> str:
+    """Value claims always; counting occurrences only when $include_occurrences. An operation the
+    table does not know matches neither, so it is never listed."""
+    return (f"({operation} IN {VALUE_CLAIM_OPS_CYPHER}"
+            f" OR ($include_occurrences AND {operation} IN {COUNTING_OCCURRENCE_OPS_CYPHER}))")
+
+
+_PROVENANCE_OPERATION_FILTER = _operation_filter("a.operation")
+_HISTORY_OPERATION_FILTER = _operation_filter("he.operation")
 
 #: Placeholder for the supporting-event count inside a kind's `summary_template`. The unchanged-value
 #: provenance refresh (plan D2) computes the count INSIDE Cypher (the union must be atomic), so the
@@ -273,7 +289,7 @@ class ScalarViewRepositoryMixin:
             MATCH (v:Entity {uuid: $view_uuid})
                   -[r:CURRENT_ANCHOR|CONTRIBUTED_TO|SUPERSEDED_ANCHOR]->(a:TypedAssertion)
             WHERE ($namespace IS NULL OR v.group_id = $namespace)
-              AND ($include_occurrences OR coalesce(a.operation, '') <> 'occurrence')
+              AND """ + _PROVENANCE_OPERATION_FILTER + """
             RETURN count(*) AS total
             """,
             params={"view_uuid": view_uuid, "namespace": namespace,
@@ -285,7 +301,7 @@ class ScalarViewRepositoryMixin:
             MATCH (v:Entity {uuid: $view_uuid})
                   -[r:CURRENT_ANCHOR|CONTRIBUTED_TO|SUPERSEDED_ANCHOR]->(a:TypedAssertion)
             WHERE ($namespace IS NULL OR v.group_id = $namespace)
-              AND ($include_occurrences OR coalesce(a.operation, '') <> 'occurrence')
+              AND """ + _PROVENANCE_OPERATION_FILTER + """
             WITH r, a,
                  CASE type(r) WHEN 'CURRENT_ANCHOR' THEN 0
                               WHEN 'CONTRIBUTED_TO' THEN 1 ELSE 2 END AS relation_rank
@@ -434,8 +450,9 @@ class ScalarViewRepositoryMixin:
             """
             MATCH (c:Entity {view_kind:'counter', group_id:$ns})
             WHERE coalesce(c.view_current, true) AND c.view_value IS NOT NULL
-            MATCH (a:TypedAssertion {namespace:$ns, operation:'absolute'})
-            WHERE NOT coalesce(a.binding_pending, false)
+            MATCH (a:TypedAssertion {namespace:$ns})
+            WHERE a.operation IN """ + SETS_VALUE_OPS_CYPHER + """
+              AND NOT coalesce(a.binding_pending, false)
               AND a.value_kind IN ['count', 'money', 'measurement']
               AND a.episode_uuid IN coalesce(c.episode_uuids, [])
               AND a.subject_display = c.view_subject
@@ -667,7 +684,7 @@ class ScalarViewRepositoryMixin:
             MATCH (v:Entity {uuid: $view_uuid})
                   -[he:HISTORY_ENTRY]->(a:TypedAssertion)
             WHERE ($namespace IS NULL OR v.group_id = $namespace)
-              AND ($include_occurrences OR coalesce(he.operation, '') <> 'occurrence')
+              AND """ + _HISTORY_OPERATION_FILTER + """
             RETURN count(*) AS total
             """,
             {"view_uuid": view_uuid, "namespace": namespace,
@@ -679,7 +696,7 @@ class ScalarViewRepositoryMixin:
             MATCH (v:Entity {uuid: $view_uuid})
                   -[he:HISTORY_ENTRY]->(a:TypedAssertion)
             WHERE ($namespace IS NULL OR v.group_id = $namespace)
-              AND ($include_occurrences OR coalesce(he.operation, '') <> 'occurrence')
+              AND """ + _HISTORY_OPERATION_FILTER + """
             OPTIONAL MATCH (te:TurnEvidence {turn_id: a.episode_uuid})
             OPTIONAL MATCH (source_ep:Episodic)-[:ADMITTED_ON]->(te)
             WITH he, a, te, collect(DISTINCT source_ep.uuid) AS admitted_episode_uuids

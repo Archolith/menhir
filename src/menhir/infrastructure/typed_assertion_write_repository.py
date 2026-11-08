@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from menhir.domain.assertion_operations import SETS_VALUE_OPS_CYPHER
 from menhir.domain.namespace import (
     normalize_namespace,
     tenant_scope_cypher,
@@ -343,7 +344,7 @@ class TypedAssertionWriteMixin:
             WHERE n.uuid IN $uuids
             MATCH (c:TypedAssertion)
             WHERE c.namespace = $ns AND NOT coalesce(c.binding_pending, false)
-              AND c.operation = 'absolute' AND c.episode_uuid = epi.uuid
+              AND c.operation IN """ + SETS_VALUE_OPS_CYPHER + """ AND c.episode_uuid = epi.uuid
             CALL {
                 WITH c
                 MATCH (v:Entity {view_kind: 'scalar_state',
@@ -361,7 +362,7 @@ class TypedAssertionWriteMixin:
                 WITH c
                 MATCH (a:TypedAssertion)
                 WHERE a.namespace = $ns AND NOT coalesce(a.binding_pending, false)
-                  AND a.operation = 'absolute'
+                  AND a.operation IN """ + SETS_VALUE_OPS_CYPHER + """
                   AND a.subject_uuid = c.subject_uuid AND a.attribute = c.attribute
                   AND coalesce(a.scope, '') = coalesce(c.scope, '')
                   AND a.value_kind = c.value_kind AND coalesce(a.unit, '') = coalesce(c.unit, '')

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
+from menhir.domain.assertion_operations import is_counting_occurrence
 from menhir.domain.typed_assertion import TypedAssertion
 from menhir.infrastructure import consolidation_audit as _audit
 from menhir.services.typed_scalar_rules import (
@@ -33,7 +34,7 @@ def _counting_self_echo(
 ) -> bool:
     """True for a counting-lane occurrence row whose subject only restates the counted thing.
     Scalar rows (any other ordinal) are never affected."""
-    if str(operation or "").strip().lower() != "occurrence":
+    if not is_counting_occurrence(str(operation or "").strip().lower()):
         return False
     try:
         if int(claim_ordinal) != COUNTING_CLAIM_ORDINAL:

@@ -13,6 +13,13 @@ from decimal import Decimal, InvalidOperation
 from enum import Enum
 from typing import Any, Callable
 
+from menhir.domain.assertion_operations import (
+    adjusts_value,
+    ends_value,
+    is_counting_occurrence,
+    is_value_claim,
+    sets_value,
+)
 from menhir.domain.typed_assertion import (
     COUNTABLE_KINDS,
     IMPORTANCE_LEVELS,
@@ -573,7 +580,7 @@ def _coerce_value(value_kind: str, operation: str, raw: Any) -> Any:
             return raw.strip().lower() == "true"
         return raw  # let validate_value reject anything else
     if value_kind in NUMERIC_KINDS:
-        if operation == "delta":
+        if adjusts_value(operation):
             return _as_number(raw)
         if isinstance(raw, (list, tuple)) and len(raw) == 2:
             return [_as_number(raw[0]), _as_number(raw[1])]
@@ -644,14 +651,14 @@ def _normalize_colon_duration_value(raw: Any, operation: str) -> tuple[Any, bool
     point. A mixed range (one colon endpoint and one ordinary number) is deliberately not converted:
     changing its unit to seconds would silently reinterpret the numeric endpoint.
     """
-    if operation != "delta" and isinstance(raw, (list, tuple)) and len(raw) == 2:
+    if not adjusts_value(operation) and isinstance(raw, (list, tuple)) and len(raw) == 2:
         normalized_range = [
             _duration_colon_seconds(endpoint, allow_signed=False) for endpoint in raw
         ]
         if all(endpoint is not None for endpoint in normalized_range):
             return normalized_range, True
         return raw, False
-    normalized = _duration_colon_seconds(raw, allow_signed=operation == "delta")
+    normalized = _duration_colon_seconds(raw, allow_signed=adjusts_value(operation))
     return (normalized, True) if normalized is not None else (raw, False)
 
 
@@ -679,7 +686,7 @@ def _decimal_number(raw: Any) -> Decimal | None:
 
 def _money_value(raw: Any, operation: str) -> Any:
     """Return a Decimal money point/range, or the original shape for fail-closed validation."""
-    if operation != "delta" and isinstance(raw, (list, tuple)) and len(raw) == 2:
+    if not adjusts_value(operation) and isinstance(raw, (list, tuple)) and len(raw) == 2:
         values = [_decimal_number(item) for item in raw]
         return values if all(item is not None for item in values) else raw
     parsed = _decimal_number(raw)
@@ -804,7 +811,7 @@ def _count_value_from_source(stated_span: str, operation: str, model_value: Any)
     # Calendar numbers describe validity, not quantity. Temporal resolution owns them.
     span = _SRC_ISO_RE.sub(" ", _SRC_MONTH_DAY_YEAR_RE.sub(" ", stated_span or ""))
     range_match = _COUNT_RANGE_RE.search(span)
-    if operation != "delta" and range_match is not None:
+    if not adjusts_value(operation) and range_match is not None:
         if any(
             _joined_to_number(span, range_match.start(g), range_match.end(g)) for g in ("low", "high")
         ):
@@ -819,7 +826,7 @@ def _count_value_from_source(stated_span: str, operation: str, model_value: Any)
         return None
     tokens = [matches[0].group("token")]
     value = _count_token_value(tokens[0])
-    if operation != "delta":
+    if not adjusts_value(operation):
         return value
     magnitude = abs(value)
     if _COUNT_NEGATIVE_DELTA_RE.search(span):
@@ -1252,7 +1259,9 @@ def _scalar_source_mismatch(
     An `expire` row is exempt: it ends a value the quote need not restate ("I quit my job" ends
     `employed`), and dropping it would leave the stale value current.
     """
-    if value_kind not in _SOURCE_CHECKED_KINDS or operation not in ("absolute", "delta"):
+    if value_kind not in _SOURCE_CHECKED_KINDS or not (
+        sets_value(operation) or adjusts_value(operation)
+    ):
         return None
     quote = content[span_start:span_end]
     if value_kind == "duration":
@@ -1567,10 +1576,10 @@ def parse_scalar_row(
     count_object = count_item = count_action = ""
     normalized_frequency = (
         _normalize_interval_frequency(stated_span)
-        if value_kind == "frequency" and operation != "delta"
+        if value_kind == "frequency" and not adjusts_value(operation)
         else None
     )
-    if operation == "occurrence":
+    if is_counting_occurrence(operation):
         if value_kind not in COUNTABLE_KINDS:
             drop("occurrence_kind_not_countable")
             return None
@@ -1626,8 +1635,9 @@ def parse_scalar_row(
         if value is None:
             drop("clock_time_unresolved")
             return None
-    elif (value_kind == "count" and operation in ("absolute", "expire")
-          and "absolute" in allowed_operations and _numberless_count_stop(stated_span)):
+    elif (value_kind == "count" and (sets_value(operation) or ends_value(operation))
+          and any(sets_value(o) for o in allowed_operations)
+          and _numberless_count_stop(stated_span)):
         # "I don't have cats anymore" states no number, so the count is now 0. Whatever number the
         # model supplied is ignored: it is not in the source (#170 item 5).
         operation, value, unit, numberless_stop = "absolute", 0, "", True
@@ -1686,7 +1696,7 @@ def parse_scalar_row(
     # typed schema for a hypothetical total or a single event, but those are not durable cumulative
     # scalars.  Use only the punctuation-delimited clause prefix ending at the grounded span so a
     # modal in trailing text cannot veto an otherwise valid observation.
-    activity_rejection = None if operation == "occurrence" else _activity_scalar_admission_reason(
+    activity_rejection = None if is_counting_occurrence(operation) else _activity_scalar_admission_reason(
         attribute=attribute,
         value_kind=value_kind,
         operation=operation,
@@ -1699,7 +1709,7 @@ def parse_scalar_row(
     # An occurrence must be a happening that took place. Planned, hypothetical or negated wording in
     # the grounded clause ("I'm going to visit", "if I visit", "I didn't visit") is not one, whatever
     # the model emitted. Fails closed: a dropped row can only undercount.
-    if operation == "occurrence":
+    if is_counting_occurrence(operation):
         occurrence_context = _activity_source_context(content, span_start, span_end)
         if counting_v2:
             not_happened = _occurrence_vetoed_v2(content, span_start, span_end)
@@ -1723,7 +1733,8 @@ def parse_scalar_row(
     # Ended-state framing ("I no longer have 3 cars", "I used to weigh 90 kg") states a value that is
     # NOT current. The contract for that is operation=expire (kept), never an absolute/delta current
     # value; booleans are handled by source polarity above (ended -> false).
-    if (value_kind != "boolean" and operation in ("absolute", "delta") and not numberless_stop
+    if (value_kind != "boolean" and (sets_value(operation) or adjusts_value(operation))
+            and not numberless_stop
             and _ended_state(stated_span)):
         drop("ended_state")
         return None
@@ -2181,7 +2192,7 @@ def gate_typed_scalars(
             )
         if align_spans:
             proposal = _canonical_aligned_proposal(proposal, candidates)
-        if proposal.operation == "occurrence":
+        if is_counting_occurrence(proposal.operation):
             levels = Counter(c.importance for c in candidates)
             rank = {"tracked": 2, "notable": 1, "routine": 0}
             best = max(levels, key=lambda lv: (levels[lv], rank.get(lv, -1)))
@@ -2259,7 +2270,7 @@ def classify_absolute_semantics(stated_span: str, operation: str = "absolute") -
     modifier can stay OUT of assertion identity. Only `absolute` operations can be corrections; deltas
     and expires are always 'ordinary'. Conservative on purpose: a missed correction merely leaves the
     tie AMBIGUOUS_ANCHOR (safe), whereas a false correction would grant unearned authority."""
-    if operation != "absolute":
+    if not sets_value(operation):
         return "ordinary"
     span = (stated_span or "").strip().lower()
     if not span:
@@ -2446,7 +2457,7 @@ def _activity_scalar_admission_reason(
     modal/conditional totals fail closed.
     """
     if (
-        operation not in {"absolute", "delta"}
+        not (sets_value(operation) or adjusts_value(operation))
         or value_kind != "count"
         or not _ACTIVITY_COUNT_ATTRIBUTE_RE.search(attribute or "")
     ):
@@ -2456,7 +2467,7 @@ def _activity_scalar_admission_reason(
     count_cue = _ACTIVITY_EXACT_COUNT_CUE_RE.search(context)
     if modal is not None and count_cue is not None and modal.start() < count_cue.start():
         return "activity_modal_or_hypothetical"
-    if operation != "absolute":
+    if not sets_value(operation):
         return None
     activity_context = (event_context or context).strip()
     if not _ACTIVITY_TOTAL_TOKEN_RE.search(activity_context):
@@ -2488,7 +2499,7 @@ def is_ambiguous_exact(stated_span: str, value: Any, operation: str) -> bool:
     an expire carries the OLD value as provenance only. Conservative: a missed hedge merely admits a
     value the unanimous gate already vetted; a false reject would silently drop a good value, so the
     signals are word-boundary and span-local to avoid firing on ordinary prose."""
-    if operation not in ("absolute", "delta"):
+    if not (sets_value(operation) or adjusts_value(operation)):
         return False
     span = (stated_span or "").strip()
     if not span:
@@ -2643,7 +2654,7 @@ def resolve_temporal_disposition(
       * ``unsupported_date``     no resolvable source date but the model supplied one -> IGNORE it
                                  (-> episode reference), so a hallucinated date never reaches valid_at;
       * ``current_observation``  dateless present-state -> episode reference (trusted_when=None)."""
-    if operation not in ("absolute", "delta", "expire"):
+    if not is_value_claim(operation):
         return ("current_observation", True, None)   # unknown op: never trust a model date
     span = (stated_span or "").strip()
     if not span:

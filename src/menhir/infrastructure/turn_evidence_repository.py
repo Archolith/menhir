@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from menhir.domain.assertion_operations import COUNTING_OCCURRENCE_OPS_CYPHER, VALUE_CLAIM_OPS_CYPHER
 from menhir.domain.namespace import (
     TURN_EVIDENCE_NULL_NAMESPACE_KEY,
     normalize_namespace,
@@ -650,7 +651,8 @@ class TurnEvidenceRepository:
             """
             MATCH (h:TypedAssertionHead)-[:CURRENT]->(a:TypedAssertion)
             WHERE """ + tenant_scope_cypher("a") + """
-                  AND a.operation = 'occurrence' AND coalesce(a.claim_ordinal, 0) = 1
+                  AND a.operation IN """ + COUNTING_OCCURRENCE_OPS_CYPHER + """
+                  AND coalesce(a.claim_ordinal, 0) = 1
                   AND a.episode_uuid IN $turn_ids
                   AND coalesce(a.perceiver_version, '') <> $pv
             RETURN a.assertion_id AS assertion_id, h.source_key AS source_key,
@@ -677,7 +679,8 @@ class TurnEvidenceRepository:
             """
             MATCH (a:TypedAssertion)
             WHERE """ + tenant_scope_cypher("a") + """
-                  AND a.operation = 'occurrence' AND coalesce(a.claim_ordinal, 0) = 1
+                  AND a.operation IN """ + COUNTING_OCCURRENCE_OPS_CYPHER + """
+                  AND coalesce(a.claim_ordinal, 0) = 1
                   AND a.episode_uuid IN $turn_ids AND a.perceiver_version = $pv
                   AND NOT coalesce(a.binding_pending, false)
                   AND (EXISTS { MATCH (:TypedAssertionHead)-[:CURRENT]->(a) }
@@ -712,7 +715,8 @@ class TurnEvidenceRepository:
             WITH w, w IS NOT NULL AS fence_ok
             OPTIONAL MATCH (h:TypedAssertionHead)-[cr:CURRENT]->(a:TypedAssertion)
             WHERE fence_ok AND """ + tenant_scope_cypher("a") + """
-                  AND a.operation = 'occurrence' AND coalesce(a.claim_ordinal, 0) = 1
+                  AND a.operation IN """ + COUNTING_OCCURRENCE_OPS_CYPHER + """
+                  AND coalesce(a.claim_ordinal, 0) = 1
                   AND a.episode_uuid IN $turn_ids
                   AND coalesce(a.perceiver_version, '') <> $pv
                   AND NOT a.assertion_id IN $keep
@@ -783,8 +787,9 @@ class TurnEvidenceRepository:
         params = {"namespaces": None if namespaces is None else [str(n) for n in namespaces]}
         self._neo4j.execute(
             """
-            MATCH (h:TypedAssertionHead)-[:CURRENT]->(a:TypedAssertion {operation: 'occurrence'})
-            WHERE coalesce(a.claim_ordinal, 0) = 1
+            MATCH (h:TypedAssertionHead)-[:CURRENT]->(a:TypedAssertion)
+            WHERE a.operation IN """ + COUNTING_OCCURRENCE_OPS_CYPHER + """
+              AND coalesce(a.claim_ordinal, 0) = 1
             WITH DISTINCT a.namespace AS ns
             WHERE ns IS NOT NULL AND ns <> ''
               AND ($namespaces IS NULL OR ns IN $namespaces)
@@ -819,7 +824,8 @@ class TurnEvidenceRepository:
             CALL {
                 MATCH (h:TypedAssertionHead)-[:CURRENT]->(a:TypedAssertion)
                 WHERE """ + tenant_scope_cypher("a") + """
-                      AND a.operation = 'occurrence' AND coalesce(a.claim_ordinal, 0) = 1
+                      AND a.operation IN """ + COUNTING_OCCURRENCE_OPS_CYPHER + """
+                      AND coalesce(a.claim_ordinal, 0) = 1
                       AND a.subject_uuid IS NOT NULL
                 RETURN DISTINCT a.subject_uuid AS subject_uuid
                 UNION
@@ -852,7 +858,7 @@ class TurnEvidenceRepository:
             MATCH (h:TypedAssertionHead)-[:CURRENT]->(a:TypedAssertion)
             WHERE a.episode_uuid IN $ids AND """ + tenant_scope_cypher("a") + """
                   AND coalesce(a.claim_ordinal, 0) = 0
-                  AND a.operation IN ['absolute', 'delta', 'expire']
+                  AND a.operation IN """ + VALUE_CLAIM_OPS_CYPHER + """
             RETURN a.episode_uuid AS episode_uuid, a.subject_display AS subject,
                    a.attribute AS attribute, a.scope AS scope, a.unit AS unit,
                    a.operation AS operation, a.value_json AS value_json,

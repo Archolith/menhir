@@ -13,6 +13,12 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from menhir.services.ingest_service import IngestService
 
+from menhir.domain.assertion_operations import (
+    adjusts_value,
+    is_counting_occurrence,
+    is_known,
+    sets_value,
+)
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
 from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FAMILY
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
@@ -142,7 +148,7 @@ def _hydrate_contributor(row: dict[str, Any]) -> ScalarAuthorityContributor:
     valid_at = str(row["valid_at"]) if row.get("valid_at") is not None else None
     stated_span = str(row.get("stated_span") or "")
     extra: dict[str, Any] = {}
-    if operation == "occurrence":
+    if is_counting_occurrence(operation):
         from menhir.services.occurrence_event_time import occurrence_event_time
 
         # mentioned_at is the row's own session time; never recorded/ingest time.
@@ -320,7 +326,10 @@ def _scalar_history_records_change(history_view: dict[str, object]) -> bool:
         return True
     values: set[str] = set()
     for entry in history_view.get("entries") or []:
-        if str(entry.get("operation") or "").strip().lower() != "absolute":
+        operation = str(entry.get("operation") or "").strip().lower()
+        if not is_known(operation):
+            continue  # an unrecognised entry is neither a change nor a value
+        if not sets_value(operation):
             return True
         values.add(str(entry.get("value")).strip().casefold())
     return len(values) > 1
@@ -366,7 +375,7 @@ def _render_scalar_history_content(history_view: dict[str, object]) -> str:
     entries = history_view.get("entries") or []
     subject = str(history_view.get("subject") or "user")
 
-    delta_only = set(op_counts.keys()) <= {"delta"}
+    delta_only = all(adjusts_value(o) for o in op_counts)
     scope_txt = f" ({scope})" if scope else ""
 
     lines: list[str] = []
@@ -383,7 +392,7 @@ def _render_scalar_history_content(history_view: dict[str, object]) -> str:
         value = entry.get("value")
         stated_span = str(entry.get("stated_span") or "").strip()
 
-        prefix = "+" if operation == "delta" else ""
+        prefix = "+" if adjusts_value(operation) else ""
         val_str = f"{prefix}{value}" if value is not None else "?"
         entry_line = f"  {valid_at}: {val_str} ({operation})"
         if stated_span:

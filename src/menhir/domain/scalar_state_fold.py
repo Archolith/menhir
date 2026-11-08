@@ -28,6 +28,13 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from menhir.domain.assertion_operations import (
+    adjusts_value,
+    ends_value,
+    is_counting_occurrence,
+    is_value_claim,
+    sets_value,
+)
 from menhir.domain.count_match import (
     COUNTED,
     TARGETED_STATUSES,
@@ -182,7 +189,7 @@ def _dedup_occurrences_per_turn(
     groups: dict[tuple, list[dict[str, Any]]] = {}
     for row in rows:
         turn = _turn_key(row)
-        if str(row.get("operation")) != "occurrence" or not turn:
+        if not is_counting_occurrence(row.get("operation")) or not turn:
             continue
         s = _slot_of(row)
         key: tuple = (s[0], s[1], s[3], s[4], turn)
@@ -226,8 +233,13 @@ def fold_assertions(
     rows + same `as_of` always fold identically (live == rebuild); a later real-time evaluation MAY differ
     because future assertions have since activated -- temporal evolution, not a parity break. A row with
     an unparseable/absent `valid_at` sorts as epoch (always <= as_of), i.e. included."""
-    if not include_occurrences:
-        rows = [r for r in rows if str(r.get("operation")) != "occurrence"]
+    # A row whose operation the table does not know is neither a value nor a counted happening: it
+    # forms no slot and no abstention.
+    rows = [
+        r for r in rows
+        if is_value_claim(r.get("operation"))
+        or (include_occurrences and is_counting_occurrence(r.get("operation")))
+    ]
     if as_of is not None:
         rows = [r for r in rows if (_parse_dt(r.get("valid_at")) or _EPOCH) <= as_of]
     # Match mode (unit 4R): occurrences fold by object family and by their stored decision; only
@@ -236,9 +248,9 @@ def fold_assertions(
     if count_match:
         counted_ids = {
             str(r.get("assertion_id") or "") for r in rows
-            if str(r.get("operation")) == "occurrence" and status_of(r) == COUNTED
+            if is_counting_occurrence(r.get("operation")) and status_of(r) == COUNTED
         } - {""}
-        rows = [match_slot_row(r) if str(r.get("operation")) == "occurrence" else r for r in rows]
+        rows = [match_slot_row(r) if is_counting_occurrence(r.get("operation")) else r for r in rows]
     rows = _dedup_occurrences_per_turn(rows, count_match=count_match)
     slots: dict[tuple, list[dict[str, Any]]] = {}
     for row in rows:
@@ -250,10 +262,10 @@ def fold_assertions(
         members = slots[slot_key]
         subject_uuid = str(members[0].get("subject_uuid", subject_uuid))
 
-        absolutes = [m for m in members if str(m.get("operation")) == "absolute"]
-        deltas = [m for m in members if str(m.get("operation")) == "delta"]
-        expires = [m for m in members if str(m.get("operation")) == "expire"]
-        occurrences = [m for m in members if str(m.get("operation")) == "occurrence"]
+        absolutes = [m for m in members if sets_value(m.get("operation"))]
+        deltas = [m for m in members if adjusts_value(m.get("operation"))]
+        expires = [m for m in members if ends_value(m.get("operation"))]
+        occurrences = [m for m in members if is_counting_occurrence(m.get("operation"))]
 
         # Expiry reconciliation (owner spec: "used to X" ends X as a current fact but need not supply a
         # replacement). If the latest expire is STRICTLY after every absolute (or there is no absolute),

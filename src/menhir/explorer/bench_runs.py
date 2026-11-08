@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from menhir.domain.assertion_operations import adjusts_value, sets_value
 from menhir.explorer.recall_packet_prototype import build_typed_recall_packet
 
 logger = logging.getLogger(__name__)
@@ -780,9 +781,9 @@ def _build_memory_inventory(
                     for assertion_id in view.get("contributor_ids") or []
                 }
             operations.discard("")
-            if operations == {"absolute"}:
+            if operations and all(sets_value(o) for o in operations):
                 derivation = "absolute"
-            elif operations == {"delta"}:
+            elif operations and all(adjusts_value(o) for o in operations):
                 derivation = "delta"
             elif operations:
                 derivation = "mixed"

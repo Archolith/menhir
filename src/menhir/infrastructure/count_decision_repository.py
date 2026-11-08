@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from menhir.domain.assertion_operations import COUNTING_OCCURRENCE_OPS_CYPHER
 from menhir.domain.namespace import normalize_namespace, tenant_scope_cypher, tenant_scope_params
 
 _OCCURRENCE_FIELDS = """
@@ -28,7 +29,7 @@ _OCCURRENCE_FIELDS = """
 
 def _live(v: str) -> str:
     """A current (any version), bound, counting-lane occurrence."""
-    return (f" {v}.operation = 'occurrence' AND coalesce({v}.claim_ordinal, 0) = 1"
+    return (f" {v}.operation IN {COUNTING_OCCURRENCE_OPS_CYPHER} AND coalesce({v}.claim_ordinal, 0) = 1"
             f" AND NOT coalesce({v}.superseded, false)"
             f" AND NOT coalesce({v}.binding_pending, false) ")
 
