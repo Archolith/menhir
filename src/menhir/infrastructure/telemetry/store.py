@@ -16,8 +16,13 @@ from menhir.infrastructure.telemetry.schema_migrations import ensure_lineage_col
 logger = logging.getLogger(__name__)
 
 
+from menhir.infrastructure.telemetry.async_writer import (
+    TELEMETRY_WRITER,
+    OffLoopObservabilityWritesMixin,
+)
 from menhir.infrastructure.telemetry.event_store import TelemetryEventStoreMixin
 from menhir.infrastructure.telemetry.helpers import (
+    _SQLITE_BUSY_TIMEOUT_S,
     _json_default,
     _preview_of,
     _size_of,
@@ -43,6 +48,7 @@ from menhir.infrastructure.telemetry.recall_store import TelemetryRecallStoreMix
 
 @dataclass
 class McpTelemetryStore(
+    OffLoopObservabilityWritesMixin,
     TelemetryEventStoreMixin,
     TelemetryLifecycleStoreMixin,
     TelemetryRecallStoreMixin,
@@ -73,6 +79,10 @@ class McpTelemetryStore(
         sharing this database file calls it — an operator raising the timeout previously moved the
         ceiling for this store alone while six siblings kept failing at 5 s against the same
         file."""
+        # #527: see every write queued off-loop before this one. Skipped during schema init,
+        # where the writer may be waiting on this store's init lock.
+        if self._initialized:
+            TELEMETRY_WRITER.drain(_SQLITE_BUSY_TIMEOUT_S)
         return connect_telemetry_db(self.db_path)
 
     def _ensure_ready(self) -> None:

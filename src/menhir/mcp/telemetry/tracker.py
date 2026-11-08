@@ -235,7 +235,7 @@ async def track_mcp_call(
         logger.error("%s (duration=%dms)", error_msg, duration_ms)
         namespace, node_uuid = _resolved_lineage()
         try:
-            store.record(
+            await asyncio.to_thread(store.record,
                 kind=kind,
                 operation=operation,
                 started_at=started_at,
@@ -266,7 +266,7 @@ async def track_mcp_call(
         logger.error("MCP %s/%s failed after %dms: %s", kind, operation, duration_ms, error_msg)
         namespace, node_uuid = _resolved_lineage()
         try:
-            store.record(
+            await asyncio.to_thread(store.record,
                 kind=kind,
                 operation=operation,
                 started_at=started_at,
@@ -328,7 +328,7 @@ async def track_mcp_call(
     logger.info("MCP %s/%s completed in %dms", kind, operation, duration_ms)
     namespace, node_uuid = _resolved_lineage()
     try:
-        store.record(
+        await asyncio.to_thread(store.record,
             kind=kind,
             operation=operation,
             started_at=started_at,

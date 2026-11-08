@@ -260,6 +260,12 @@ class ErasureCoordinator:
             raise
 
         try:
+            # #527: a queued observability row for this subject must land before the purge,
+            # not after it. Timing out raises, so the erasure stays PREPARED and retryable.
+            from menhir.infrastructure.telemetry.async_writer import TELEMETRY_WRITER
+            from menhir.infrastructure.telemetry.helpers import _SQLITE_BUSY_TIMEOUT_S
+
+            TELEMETRY_WRITER.drain_strict(_SQLITE_BUSY_TIMEOUT_S * 2)
             with self._connect() as conn:
                 result = purge_content(conn, purge, dry_run=False)
                 leftover = count_residual_content(conn, purge)
