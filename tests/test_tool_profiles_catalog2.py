@@ -65,7 +65,7 @@ def test_catalog_1_resolution_is_unchanged_for_every_other_tool(tier) -> None:
 
 
 def test_catalog_1_membership_matches_the_released_catalog() -> None:
-    """Catalog 1 as shipped in v0.3.5: get_client_context was operate."""
+    """Catalog 1 as first released: get_client_context was operate."""
     assert placement(MOVED, 1) == "operate"
     assert placement(MOVED, 2) == "core"
 
