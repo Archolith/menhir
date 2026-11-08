@@ -1,10 +1,14 @@
-## 2026-11-08 - MCP `initialize` names the build
+## 2026-11-08 - MCP `initialize` names the build; releases publish what they serve
 
 - A release image reports `serverInfo.version` as the version plus the first 12 characters of
   `MENHIR_RELEASE_COMMIT`, as SemVer build metadata (`0.3.3+43e693f6b821`), so a long-lived
   connection shows which build it was opened against (#498). It still parses as the plain version.
   Without a valid commit the version is unchanged.
 - `docs/agent-usage.md`: compare it with `/readyz`'s `build.commit` to spot a pre-deploy connection.
+- The release workflow runs the sealed image with no network to compute `served-metadata.json`
+  (version, commit, and the MCP metadata digest for every snapshot mode), checks it against the tag,
+  and attaches it to the GitHub release. `python -m menhir.mcp.served_metadata` prints the record.
+  A deploy compares `/readyz` with it; the GitHub release is not created without it.
 
 ## 2026-11-08 - The served-metadata check reaches a Cloudflare-fronted server
 

@@ -123,6 +123,49 @@ async def _compute_digest(server: Any = None) -> str:
     return (await compute_metadata(server)).sha256
 
 
+RELEASE_RECORD_SCHEMA = 1
+
+
+def release_record() -> dict[str, Any]:
+    """What a release publishes for a deploy to compare with ``/readyz`` (#498).
+
+    Run inside the release image, so the commit and catalog are the ones it serves. The catalog
+    depends on the snapshot receive mode, which the release cannot know, so every mode's digest
+    is listed; a deploy accepts the served digest when it equals one of them.
+    """
+
+    from menhir import __version__
+    from menhir.config.snapshot_mode import SNAPSHOT_RECEIVE_MODE_ENV, SnapshotReceiveMode
+
+    previous = os.environ.get(SNAPSHOT_RECEIVE_MODE_ENV)
+    digests: dict[str, str] = {}
+    try:
+        for mode in SnapshotReceiveMode:
+            os.environ[SNAPSHOT_RECEIVE_MODE_ENV] = mode.value
+            digests[mode.value] = asyncio.run(compute_metadata()).sha256
+    finally:
+        if previous is None:
+            os.environ.pop(SNAPSHOT_RECEIVE_MODE_ENV, None)
+        else:
+            os.environ[SNAPSHOT_RECEIVE_MODE_ENV] = previous
+    return {
+        "schema": RELEASE_RECORD_SCHEMA,
+        "version": __version__,
+        "commit": release_commit(),
+        "mcp_metadata_sha256": digests,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    """``python -m menhir.mcp.served_metadata``: print the release record as one JSON line."""
+
+    import argparse
+
+    argparse.ArgumentParser(description=release_record.__doc__.splitlines()[0]).parse_args(argv)
+    print(json.dumps(release_record(), sort_keys=True))
+    return 0
+
+
 async def served_mcp_metadata_digest(server: Any = None) -> str:
     """Return the sha256 hex digest of served MCP instructions and tool catalog.
 
@@ -139,3 +182,7 @@ async def served_mcp_metadata_digest(server: Any = None) -> str:
                 _compute_digest() if server is None else _compute_digest(server)
             )
         return _digest_cache
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

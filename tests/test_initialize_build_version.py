@@ -46,6 +46,28 @@ def test_stamped_version_still_parses_as_the_release_version(monkeypatch) -> Non
     assert base == "0.3.3" and build.isalnum()
 
 
+def test_release_record_lists_every_snapshot_mode(monkeypatch, capsys) -> None:
+    import asyncio
+    import json
+
+    from menhir.config.snapshot_mode import SNAPSHOT_RECEIVE_MODE_ENV, SnapshotReceiveMode
+    from menhir.mcp import served_metadata
+
+    monkeypatch.setenv("MENHIR_RELEASE_COMMIT", SHA)
+    monkeypatch.setenv(SNAPSHOT_RECEIVE_MODE_ENV, "receive")
+    assert served_metadata.main([]) == 0
+    record = json.loads(capsys.readouterr().out)
+    assert record["schema"] == 1
+    assert record["version"] == menhir.__version__
+    assert record["commit"] == SHA
+    assert set(record["mcp_metadata_sha256"]) == {mode.value for mode in SnapshotReceiveMode}
+    # The caller's mode is restored, and each entry is what a server in that mode serves.
+    assert served_metadata.os.environ[SNAPSHOT_RECEIVE_MODE_ENV] == "receive"
+    for mode, digest in record["mcp_metadata_sha256"].items():
+        monkeypatch.setenv(SNAPSHOT_RECEIVE_MODE_ENV, mode)
+        assert asyncio.run(served_metadata.compute_metadata()).sha256 == digest
+
+
 @pytest.mark.asyncio
 async def test_initialize_handshake_carries_the_build(monkeypatch) -> None:
     monkeypatch.setenv("MENHIR_RELEASE_COMMIT", SHA)
