@@ -7,7 +7,11 @@ dropped and reported, never granted.
 ``CATALOG_VERSION`` grows when a tool is added to a profile or moved between
 profiles. Each entry records the catalog version that put it there (``since``).
 A policy pinned to an older catalog does not receive newer entries; they are
-returned as withheld so startup can log them. Release notes list every bump.
+returned as withheld so startup can log them. A moved tool keeps its earlier
+placements in ``EARLIER_PLACEMENTS``, so an older policy still resolves it
+where its catalog put it. Release notes list every bump.
+
+Catalog 2: ``get_client_context`` moved from operate to core.
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ from dataclasses import dataclass
 
 from menhir.tiers import TIER_RANK, tier_allows
 
-CATALOG_VERSION = 1
+CATALOG_VERSION = 2
 
 CORE = "core"
 CURATE = "curate"
@@ -34,6 +38,7 @@ TOOL_PROFILE: dict[str, tuple[str, int]] = {
     "recall_timeline": (CORE, 1),
     "read_flagged_memories": (CORE, 1),
     "build_context": (CORE, 1),
+    "get_client_context": (CORE, 2),
     "query_structure": (CORE, 1),
     "get_provenance": (CORE, 1),
     "get_beacon_evidence": (CORE, 1),
@@ -76,7 +81,6 @@ TOOL_PROFILE: dict[str, tuple[str, int]] = {
     "ingest_document": (CURATE, 1),
     "ingest_project": (CURATE, 1),
     # operate: runtime health, enrichment and scheduler control
-    "get_client_context": (OPERATE, 1),
     "get_memory_stats": (OPERATE, 1),
     "view_entropy": (OPERATE, 1),
     "get_enrichment_status": (OPERATE, 1),
@@ -97,10 +101,27 @@ TOOL_PROFILE: dict[str, tuple[str, int]] = {
     "delete_namespace": (ADMIN, 1),
 }
 
+#: tool name -> earlier (profile, since) placements, oldest first, for moved tools.
+EARLIER_PLACEMENTS: dict[str, tuple[tuple[str, int], ...]] = {
+    "get_client_context": ((OPERATE, 1),),
+}
+
+#: Profile membership in the current catalog.
 PROFILES: dict[str, frozenset[str]] = {
     name: frozenset(tool for tool, (profile, _) in TOOL_PROFILE.items() if profile == name)
     for name in PROFILE_NAMES
 }
+
+
+def placement(tool: str, policy_catalog: int) -> str | None:
+    """The profile ``tool`` belongs to under ``policy_catalog``; None if not yet placed."""
+    profile, since = TOOL_PROFILE[tool]
+    if since <= policy_catalog:
+        return profile
+    for earlier_profile, earlier_since in reversed(EARLIER_PLACEMENTS.get(tool, ())):
+        if earlier_since <= policy_catalog:
+            return earlier_profile
+    return None
 
 
 @dataclass(frozen=True)
@@ -171,12 +192,13 @@ def resolve(
 
     selected: set[str] = set()
     withheld: set[str] = set()
-    for name in profile_names:
-        for tool in PROFILES[name]:
-            if TOOL_PROFILE[tool][1] > policy_catalog:
-                withheld.add(tool)
-            else:
-                selected.add(tool)
+    for tool, (current_profile, _) in TOOL_PROFILE.items():
+        pinned_profile = placement(tool, policy_catalog)
+        if pinned_profile in profile_names:
+            selected.add(tool)
+        elif current_profile in profile_names:
+            # A newer catalog adds this tool to a selected profile; the pin keeps it out.
+            withheld.add(tool)
     # A profile entry the runtime does not register cannot be granted.
     selected &= set(tool_tiers)
     above_tier = {
@@ -209,11 +231,13 @@ __all__ = [
     "CATALOG_VERSION",
     "CORE",
     "CURATE",
+    "EARLIER_PLACEMENTS",
     "OPERATE",
     "PROFILES",
     "PROFILE_NAMES",
     "TOOL_PROFILE",
     "ResolvedTools",
+    "placement",
     "production_tool_tiers",
     "resolve",
 ]
