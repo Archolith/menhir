@@ -7,6 +7,7 @@ import logging
 from menhir.infrastructure.telemetry.recall_store_archive import TelemetryRecallArchiveMixin
 from menhir.infrastructure.telemetry.recall_store_diagnostics import TelemetryDiagnosticsMixin
 from menhir.infrastructure.telemetry.recall_store_folds import TelemetryRecallFoldsMixin
+from menhir.infrastructure.telemetry.recall_store_query_log import TelemetryRecallQueryLogMixin
 from menhir.infrastructure.telemetry.recall_store_receipts import TelemetryRecallReceiptsMixin
 from menhir.infrastructure.telemetry.recall_store_sessions import TelemetryClientSessionsMixin
 
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)  # module-logger contract (tests/test_telem
 
 class TelemetryRecallStoreMixin(
     TelemetryRecallReceiptsMixin,
+    TelemetryRecallQueryLogMixin,
     TelemetryRecallFoldsMixin,
     TelemetryDiagnosticsMixin,
     TelemetryClientSessionsMixin,

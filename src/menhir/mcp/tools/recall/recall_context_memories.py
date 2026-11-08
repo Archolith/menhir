@@ -206,5 +206,6 @@ class RecallContextMemoriesTool(BaseJsonTool):
                 "recent": [_compact_memory_item(row, tag="recent") for row in non_flagged_recent],
                 "stale_todo_warning": stale_warning or None,
                 **({"operator_warnings": operator_warnings} if operator_warnings else {}),
-            }
+            },
+            log_context={"namespace": namespace or None, "limit": limit},
         )
