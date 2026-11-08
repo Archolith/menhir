@@ -37,6 +37,7 @@ _KNOWN_RAW_THREADS = {
     "services/saga_reconcile_gate.py": "GateHeartbeat._loop -- gate heartbeat, no model calls",
     "services/saga_writer_heartbeat.py": "saga writer heartbeat -- no model calls",
     "infrastructure/dns_cache.py": "one getaddrinfo per thread, copied context (#409) -- no model calls",
+    "infrastructure/telemetry/async_writer.py": "telemetry SQLite writer (#527) -- no model calls",
 }
 
 

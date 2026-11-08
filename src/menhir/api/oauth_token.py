@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from typing import Any
 
 from archolith_oauth import (
@@ -26,6 +28,7 @@ from menhir.api.oauth_refresh_store import get_refresh_keyring, get_refresh_stor
 from menhir.config import MemorySettings
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 _ACCESS_TTL_DEFAULT_S = 3600
 _NO_STORE_HEADERS = {"Cache-Control": "no-store", "Pragma": "no-cache"}
@@ -127,6 +130,56 @@ def _token_error(
     )
 
 
+_LOG_FIELD_MAX = 200
+
+
+def _log_field(value: object, secrets: tuple[str, ...]) -> str:
+    """One-line, bounded, secret-free rendering of a client-supplied value."""
+    text = str(value)
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret, "[redacted]")
+    text = "".join(ch if ch.isprintable() else "?" for ch in text)
+    return text[:_LOG_FIELD_MAX] or "-"
+
+
+def _client_label(request: Request, client_id: str) -> str | None:
+    authority = getattr(request.app.state, "client_policy", None)
+    if not client_id or not isinstance(authority, ClientPolicyAuthority):
+        return None
+    try:
+        return authority.policy_for_client_id(client_id).label
+    except PermissionError:
+        return None
+
+
+def _log_token_refusal(
+    request: Request,
+    form: Any,
+    *,
+    error: str,
+    description: str,
+    status_code: int,
+) -> None:
+    """#541: say why a token request was refused, and for which client. Never the secrets."""
+    secrets = tuple(
+        str(form.get(name) or "") for name in ("code", "refresh_token", "code_verifier")
+    )
+    client_id = str(form.get("client_id") or "")
+    label = _client_label(request, client_id)
+    logger.log(
+        logging.ERROR if status_code >= 500 else logging.WARNING,
+        "OAuth token request refused: error=%s status=%d grant_type=%s client=%s scopes=%s "
+        "description=%s",
+        error,
+        status_code,
+        _log_field(form.get("grant_type") or "", secrets),
+        label if label is not None else _log_field(client_id, secrets),
+        _log_field(form.get("scope") or "", secrets),
+        _log_field(description, secrets),
+    )
+
+
 def _signing_kid() -> str:
     return str(public_jwks(get_signing_key())["keys"][0]["kid"])
 
@@ -148,6 +201,20 @@ async def token(request: Request) -> JSONResponse:
         )
 
     form = await request.form()
+    response = await _token_response(request, settings, form)
+    if response.status_code != 200:
+        body = json.loads(bytes(response.body))
+        _log_token_refusal(
+            request,
+            form,
+            error=str(body.get("error", "")),
+            description=str(body.get("error_description", "")),
+            status_code=response.status_code,
+        )
+    return response
+
+
+async def _token_response(request: Request, settings: object, form: Any) -> JSONResponse:
     try:
         authorization_config = build_authorization_server_config(settings)
         issuer = TokenIssuer(authorization_config, get_signing_key())
@@ -254,6 +321,9 @@ async def token(request: Request) -> JSONResponse:
     except PermissionError as exc:
         return _token_error("unauthorized_client", str(exc))
     except ValueError as exc:
+        _log_token_refusal(
+            request, form, error="server_error", description=str(exc), status_code=500
+        )
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return JSONResponse(
