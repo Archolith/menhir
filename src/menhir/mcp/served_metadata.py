@@ -37,6 +37,18 @@ def release_commit() -> str:
     return value if _COMMIT_RE.fullmatch(value) else "unknown"
 
 
+def served_server_version(version: str) -> str:
+    """MCP ``serverInfo.version``: ``version``, plus the build commit as SemVer build metadata.
+
+    ``0.3.3+43e693f6b821`` still parses as version 0.3.3 (SemVer and PEP 440 both ignore the
+    ``+`` part when comparing), and it names the build a long-lived connection was opened
+    against (#498). Without a known commit the version is unchanged.
+    """
+
+    commit = release_commit()
+    return version if commit == "unknown" else f"{version}+{commit[:12]}"
+
+
 def _get_lock() -> asyncio.Lock:
     global _digest_lock, _digest_lock_loop
     loop = asyncio.get_running_loop()

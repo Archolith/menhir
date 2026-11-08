@@ -1,3 +1,13 @@
+## 2026-11-04 - `/readyz` shows build details only to callers with a valid token
+
+- The public `/readyz` body keeps its status fields but no longer reports the version, commit or
+  metadata digest. A caller sending a bearer token the MCP endpoint would accept gets the `build`
+  block. Both bodies are `Cache-Control: no-store`. A bad token gets the public body, never an
+  error, and does not change the readiness answer.
+- `scripts/release/check_served_metadata.py` reads the token from `MENHIR_READYZ_TOKEN`, sends it
+  only over HTTPS or directly to loopback, and does not follow redirects while holding it. It now
+  treats any status other than 200 or 503 as an error instead of reading the body.
+
 ## 2026-11-04 - Warning lines stop suggesting a silence; candidate text is marked untrusted
 
 - Operator warning lines no longer tell the reader how to silence them. `acknowledge_warning` is

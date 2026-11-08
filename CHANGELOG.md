@@ -1,3 +1,11 @@
+## 2026-11-08 - MCP `initialize` names the build
+
+- A release image reports `serverInfo.version` as the version plus the first 12 characters of
+  `MENHIR_RELEASE_COMMIT`, as SemVer build metadata (`0.3.3+43e693f6b821`), so a long-lived
+  connection shows which build it was opened against (#498). It still parses as the plain version.
+  Without a valid commit the version is unchanged.
+- `docs/agent-usage.md`: compare it with `/readyz`'s `build.commit` to spot a pre-deploy connection.
+
 ## 2026-11-08 - The served-metadata check reaches a Cloudflare-fronted server
 
 - `scripts/release/check_served_metadata.py` sends `User-Agent: menhir-release-check`. Cloudflare
@@ -100,13 +108,3 @@ unchanged. A client matching the old string must update it.
   and typing-inspection 0.4.5. These releases have Python 3.15 wheels; the locked ones did not.
 - PyYAML 6.0.3 still has no 3.15 wheel. The README says how to install on 3.15 anyway, and
   `requires-python` stays `>=3.12`.
-
-## 2026-11-04 - `/readyz` shows build details only to callers with a valid token
-
-- The public `/readyz` body keeps its status fields but no longer reports the version, commit or
-  metadata digest. A caller sending a bearer token the MCP endpoint would accept gets the `build`
-  block. Both bodies are `Cache-Control: no-store`. A bad token gets the public body, never an
-  error, and does not change the readiness answer.
-- `scripts/release/check_served_metadata.py` reads the token from `MENHIR_READYZ_TOKEN`, sends it
-  only over HTTPS or directly to loopback, and does not follow redirects while holding it. It now
-  treats any status other than 200 or 503 as an error instead of reading the body.

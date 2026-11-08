@@ -46,14 +46,15 @@ def _stamp_server_version(server: FastMCP) -> None:
 
     The SDK's ``FastMCP`` takes no ``version``; the low-level server it wraps does and falls
     back to ``pkg_version("mcp")``, which is what clients were shown (``1.30.0`` for a
-    ``0.2.0`` Menhir).
+    ``0.2.0`` Menhir). A known build commit is appended as ``+<commit>`` (#498).
     """
 
     from menhir import __version__
+    from menhir.mcp.served_metadata import served_server_version
 
     low_level = getattr(server, "_mcp_server", None)
     if low_level is not None:
-        low_level.version = __version__
+        low_level.version = served_server_version(__version__)
 
 
 class TierFilteredFastMCP(FastMCP):
