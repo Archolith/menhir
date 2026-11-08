@@ -218,6 +218,35 @@ def serve():
         server.server_close()
 
 
+@pytest.mark.parametrize("token", [None, "secret-token"])
+def test_check_sends_its_own_user_agent(token) -> None:
+    # Cloudflare answers 403 to urllib's default "Python-urllib/x.y" agent; both openers set ours.
+    seen: list[str | None] = []
+    body = json.dumps({"status": "ready"}).encode()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            seen.append(self.headers.get("User-Agent"))
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}"
+        assert check_script.fetch_readyz(url, 2, token) == {"status": "ready"}
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert seen == [check_script.USER_AGENT]
+    assert not seen[0].startswith("Python-urllib")
+
+
 @pytest.fixture
 def raw_peer():
     """A loopback peer that answers every connection with fixed bytes (not necessarily HTTP)."""
@@ -368,3 +397,19 @@ def test_script_runs_without_docstrings() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "--snapshot-mode" in result.stdout
+
+
+@pytest.mark.parametrize("field", ["version", "commit", "mcp_metadata_sha256"])
+@pytest.mark.parametrize(
+    "value",
+    ["1\nversion: ok forged", "\ud800", "x" * 65, "1 2"],
+    ids=["newline", "lone-surrogate", "too-long", "space"],
+)
+def test_served_build_text_that_is_not_plain_is_refused_unshown(serve, capsys, field, value) -> None:
+    """#501: served text is printed only in a plain shape; otherwise exit 2 with a fixed phrase."""
+    build = _build("0" * 64)
+    build["build"][field] = value
+    assert run(serve(build)) == 2
+    out = capsys.readouterr().out
+    assert f"build.{field} is not plain text" in out
+    assert "forged" not in out and "version: ok" not in out

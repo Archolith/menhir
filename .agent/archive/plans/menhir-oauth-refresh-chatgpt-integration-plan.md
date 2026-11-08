@@ -2,7 +2,7 @@
 artifact_schema: 1
 artifact_uuid: 304142d9-eacc-49ac-938e-86e4ed7b1b30
 artifact_type: plan
-artifact_status: COMPLETE
+artifact_status: IMPLEMENTED
 ---
 
 # Menhir ChatGPT web MCP compatibility: OAuth refresh, identity, and tool auth

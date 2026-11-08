@@ -7,7 +7,7 @@ reference may constrain a current design, preserve negative benchmark evidence, 
 option, or supply research consumed by an active plan. Executable ownership belongs in
 [`../plans/`](../plans/); completed and superseded work belongs in [`../archive/`](../archive/).
 
-This index routes the Markdown references and the one intentionally unverified PDF.
+This index routes all 18 Markdown references and the one PDF exactly once.
 
 ## Current design laws and inventories
 
@@ -25,6 +25,10 @@ This index routes the Markdown references and the one intentionally unverified P
 | [`anecdotal-recall-oracle-ladder.md`](anecdotal-recall-oracle-ladder.md) | Read-side experiment history and the evidence behind default-off oracle levers. |
 | [`r1-hybrid-candidate-generation.md`](r1-hybrid-candidate-generation.md) | The attributed hybrid mechanism and its measured non-graduation verdict. |
 | [`menhir-falkordblite-compatibility.md`](menhir-falkordblite-compatibility.md) | Issue #109 embedded-backend measurements, transaction blockers and unqualified acceptance gates. |
+| [`menhir-recall-experiment-record.md`](menhir-recall-experiment-record.md) | Everything tried on recall ranking and no-answer detection, what it showed, and what is still open. Read before proposing a recall change. |
+| [`menhir-recall-real-similarity-test-plan-2026-11-05.md`](menhir-recall-real-similarity-test-plan-2026-11-05.md) | Full test of name and summary cosine against rank scores, with its registered rules. |
+| [`menhir-recall-no-match-signal-plan-2026-11-06.md`](menhir-recall-no-match-signal-plan-2026-11-06.md) | Full tests of whether a signal or a reader can tell that memory holds no answer. |
+| [`menhir-graph-value-ablation-plan-2026-11-06.md`](menhir-graph-value-ablation-plan-2026-11-06.md) | Full test of what typed values and entities add over episodes on o500. |
 
 ## Saved research and future options
 
@@ -44,11 +48,11 @@ This index routes the Markdown references and the one intentionally unverified P
 | [`menhir-projection-coverage-audit.md`](menhir-projection-coverage-audit.md) | [`../plans/menhir-projection-realization-coverage-implementation.md`](../plans/menhir-projection-realization-coverage-implementation.md) |
 | [`menhir-realization-coverage.md`](menhir-realization-coverage.md) | [`../plans/menhir-projection-realization-coverage-implementation.md`](../plans/menhir-projection-realization-coverage-implementation.md) |
 
-## Unverified binary artifact
+## Binary artifact
 
 | Document | Rule |
 |---|---|
-| [`Research Note- Evidence Admission for Agent Memory.pdf`](<Research Note- Evidence Admission for Agent Memory.pdf>) | Content classification remains unverified. Do not infer it from the filename; read and classify only with explicit approval. |
+| [`Research Note- Evidence Admission for Agent Memory.pdf`](<Research Note- Evidence Admission for Agent Memory.pdf>) | Saved research note dated 2026-07-03 on an evidence-admission layer for memory: foundation-typed admission, execution-date supersession and summary substitution. Read in full 2026-11-06. Its PDF metadata names ChatGPT Canvas as author. Treat it as suggestions only, not as authority or evidence. Covers the same ground as [`menhir-frontier-transfer-forensic-admissibility.md`](menhir-frontier-transfer-forensic-admissibility.md). The validator's two findings on this file are accepted: a PDF can't declare an artifact type, and the index parser can't match a filename with spaces. |
 
 ## Maintenance rule
 
@@ -56,7 +60,7 @@ Every reference must state why it is still useful and, when applicable, name its
 Promote it to `../plans/` only when it becomes executable ownership. Archive it when its constraints
 are fully absorbed or it is superseded and no current consumer remains.
 
-## Maintenance rule
+## Moving a document here
 
 Moving a document here follows
 [`../workflows/artifact_authoring.md`](../workflows/artifact_authoring.md). Three things are

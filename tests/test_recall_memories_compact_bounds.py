@@ -95,11 +95,49 @@ async def test_deployment_default_below_five_is_respected(monkeypatch) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_deployment_default_read_from_env(monkeypatch) -> None:
+async def test_no_runtime_sends_no_limit_and_ignores_local_env(monkeypatch) -> None:
+    # The stdio bridge builds no runtime; its env is not the server's setting (audit F2).
     monkeypatch.undo()
+    monkeypatch.setattr(rm, "_deployment_source_memory_limit", lambda: None)
+    monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT", "50")
+    payload, backend = await _recall(_sources(3, 100), compact=True)
+    assert _limit(backend) is None
+    assert len(payload["source_memories"]) == 3
+    assert "source_memories_note" not in payload
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_no_runtime_trims_to_five_after_the_server_default(monkeypatch) -> None:
+    monkeypatch.setattr(rm, "_deployment_source_memory_limit", lambda: None)
+    sources = _sources(8, 100)
+    payload, backend = await _recall(copy.deepcopy(sources), compact=True)
+    assert _limit(backend) is None
+    assert payload["source_memories"] == sources[:5]
+    assert "at most 5 source memories" in payload["source_memories_note"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_no_runtime_trim_keeps_the_closest_five_in_server_order(monkeypatch) -> None:
+    # The server sends source memories oldest-first, not by match; the oldest here match worst.
+    monkeypatch.setattr(rm, "_deployment_source_memory_limit", lambda: None)
+    sources = _sources(10, 100)
+    for i, entry in enumerate(sources):
+        entry["reference_time"] = f"2026-07-{10 + i:02d}T00:00:00Z"
+        entry["cosine"] = 0.5 + i * 0.01
+    payload, _ = await _recall(copy.deepcopy(sources), compact=True)
+    assert [m["uuid"] for m in payload["source_memories"]] == [f"src-{i}" for i in range(5, 10)]
+
+
+@pytest.mark.unit
+def test_unbuilt_runtime_reports_no_deployment_limit(monkeypatch) -> None:
+    monkeypatch.undo()
+    from menhir.core.runtime import _state
+
+    monkeypatch.setattr(_state, "built", None, raising=False)
     monkeypatch.setenv("MENHIR_FRONTIER_SOURCE_MEMORY_LIMIT", "3")
-    _, backend = await _recall(_sources(3, 100), compact=True)
-    assert _limit(backend) == 3
+    assert rm._deployment_source_memory_limit() is None
 
 
 @pytest.mark.unit

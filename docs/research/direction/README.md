@@ -2,6 +2,10 @@
 
 Cluster 0 of the research corpus. The big-picture architecture the rest of the corpus implements. Read these before the mechanism docs.
 
+## Start here
+
+Read `semantic-operating-system.md`, then `oracle-architecture.md`. For what to build next, use the [execution ladder](../../../.agent/plans/menhir-research-execution-ladder.md), not these docs.
+
 | Doc | Status | Owns |
 |---|---|---|
 | `semantic-operating-system.md` | active | Four-layer knowledge model (Source/Structural/Semantic/Institutional), structural-vs-semantic truth boundary, evidence-as-first-class, knowledge-promotion lifecycle, Programs A–E + 6-phase build. |

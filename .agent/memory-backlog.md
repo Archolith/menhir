@@ -128,6 +128,7 @@ Implementation order suggestion:
   - **`canonical_path` property on Entity nodes** *(derived from zhangfengcdt/memoir, 2026-05-06)*: memoir uses dot-notation paths (`profile.professional.skills.python`) as the primary memory key — human-readable, hierarchical, and O(log n) traversable. Our graph is more expressive but less browsable. Consider adding an optional `canonical_path` string property to Entity nodes (e.g., `project.yawn.market.endpoint.price_matrix`) as a human-readable alias alongside the UUID. This enables path-prefix queries ("show me all entities under `project.yawn.market`") and makes the graph inspectable without running Cypher. Low implementation cost — just a computed property from existing label + name + parent edges. Do not change the graph model; treat it as an index/display hint only.
 
 ### `memory.backlog.event_history_rollout`
+- **2026-10-28: removed.** The event-history lane and its recall authority were removed (#399 bucket 3: neutral A/B, and fail-closed authority regressed). The code is on `archive/event-history-2026-10-28`. This section is kept as history and doesn't describe current behavior.
 - status: **Phases 1–5 implemented as a default-off production-capable
   path at Menhir `370eff1`** (see `.agent/archive/plans/menhir-event-history-implementation-2026-08-07.md`);
   **not enabled by default**

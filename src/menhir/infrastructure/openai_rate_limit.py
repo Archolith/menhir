@@ -145,7 +145,49 @@ def bind_backoff_clock(clock: RateLimitBackoffClock) -> Iterator[RateLimitBackof
         _BACKOFF_CLOCK.reset(token)
 
 
+#: 402 reasons that clear on their own (OpenRouter's concurrent-request budget), not balance exhaustion.
+_TRANSIENT_402_REASONS = frozenset({"in_flight_budget_exhausted"})
+#: Written into a persisted failure when the exception was a transient 402, so the retry poller,
+#: which sees only the stored text, grades it retryable as the exception path did.
+TRANSIENT_PAYMENT_REASON_CODE = "provider_payment_throttled"
+
+
+def _body_metadata(exc: BaseException) -> dict[str, Any]:
+    body = getattr(exc, "body", None)
+    metadata = body.get("metadata") if isinstance(body, dict) else None
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _body_retry_after_seconds(exc: BaseException) -> float | None:
+    """OpenRouter puts the upstream Retry-After in the error body's ``metadata.headers``."""
+    headers = _body_metadata(exc).get("headers")
+    if not isinstance(headers, dict):
+        return None
+    for name, raw in headers.items():
+        if isinstance(name, str) and name.lower() == "retry-after":
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                return None
+            return value if value >= 0 else None
+    return None
+
+
+def is_transient_payment_refusal(exc: BaseException) -> bool:
+    """A 402 that will clear by waiting: it carries a retry hint or a known transient reason.
+
+    Treated as throttling, not billing. An explicit billing code or message still wins.
+    """
+    if not isinstance(exc, openai.APIStatusError) or exc.status_code != 402 or is_billing_state(exc):
+        return False
+    if _body_metadata(exc).get("reason") in _TRANSIENT_402_REASONS:
+        return True
+    return retry_after_seconds(exc) is not None
+
+
 def is_retryable_rate_limit(exc: BaseException) -> bool:
+    if is_transient_payment_refusal(exc):
+        return True
     if not isinstance(exc, openai.RateLimitError):
         return False
     return not is_billing_state(exc)
@@ -165,8 +207,9 @@ def find_quota_exhaustion(exc: BaseException | None) -> openai.APIStatusError | 
     """The billing-exhaustion openai error in ``exc``'s __cause__/__context__ chain, if any.
 
     That is a 429 ``RateLimitError`` whose code/type/message says billing (``insufficient_quota``),
-    or any ``APIStatusError`` that is a 402 Payment Required (whatever its body) or carries a
-    billing marker (for example a 403 ``billing_hard_limit_reached``).
+    or any ``APIStatusError`` that is a 402 Payment Required or carries a billing marker (for
+    example a 403 ``billing_hard_limit_reached``). A 402 that ``is_transient_payment_refusal``
+    accepts is throttling and is skipped.
 
     Graphiti rewraps the openai error as its own RateLimitError (``raise ... from e``), which
     loses the quota code, so the chain is walked rather than only ``exc`` itself.
@@ -176,8 +219,21 @@ def find_quota_exhaustion(exc: BaseException | None) -> openai.APIStatusError | 
         seen.add(id(exc))
         if isinstance(exc, openai.RateLimitError) and is_billing_state(exc):
             return exc
-        if isinstance(exc, openai.APIStatusError) and (exc.status_code == 402 or is_billing_state(exc)):
+        if isinstance(exc, openai.APIStatusError) and (
+            is_billing_state(exc) or (exc.status_code == 402 and not is_transient_payment_refusal(exc))
+        ):
             return exc
+        exc = exc.__cause__ or exc.__context__
+    return None
+
+
+def find_transient_payment_refusal(exc: BaseException | None) -> openai.APIStatusError | None:
+    """The transient 402 in ``exc``'s __cause__/__context__ chain, if any (see above)."""
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if is_transient_payment_refusal(exc):
+            return exc  # type: ignore[return-value]
         exc = exc.__cause__ or exc.__context__
     return None
 
@@ -228,8 +284,11 @@ def find_provider_status_error(exc: BaseException | None) -> openai.APIStatusErr
 
 
 def rate_limit_category(exc: BaseException | None) -> str | None:
-    """``quota``, ``flex_capacity`` or ``rate_limit`` for a provider 429; None for anything else."""
+    """``quota``, ``flex_capacity`` or ``rate_limit`` for a provider 429 (``rate_limit`` also for a
+    transient 402); None for anything else."""
     status_error = find_provider_status_error(exc)
+    if status_error is not None and is_transient_payment_refusal(status_error):
+        return "rate_limit"
     if status_error is None or getattr(status_error, "status_code", None) != 429:
         return None
     codes = {
@@ -298,13 +357,16 @@ def _describe_provider_error(exc: BaseException | None) -> str:
 
 
 def retry_after_seconds(exc: BaseException | None) -> float | None:
-    """The server's retry hint in seconds, or None when absent or unparseable (HTTP-date form)."""
+    """The server's retry hint in seconds, or None when absent or unparseable (HTTP-date form).
+
+    Response headers first, then the error body's ``metadata.headers`` (OpenRouter).
+    """
+    if exc is None:
+        return None
     response = getattr(exc, "response", None)
     headers = getattr(response, "headers", None)
-    if not headers:
-        return None
     for name, scale in (("retry-after-ms", 1000.0), ("retry-after", 1.0)):
-        raw = headers.get(name)
+        raw = headers.get(name) if headers else None
         if raw is None:
             continue
         try:
@@ -313,7 +375,7 @@ def retry_after_seconds(exc: BaseException | None) -> float | None:
             continue
         if value >= 0:
             return value
-    return None
+    return _body_retry_after_seconds(exc)
 
 
 # Callers pass os.getenv(<named constant>) so the feature-flag inventory can see each read.

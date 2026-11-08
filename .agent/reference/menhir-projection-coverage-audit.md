@@ -1,3 +1,8 @@
+---
+artifact_schema: 1
+artifact_type: investigation
+---
+
 # Projection Coverage Audit for Menhir Views
 
 ## Status

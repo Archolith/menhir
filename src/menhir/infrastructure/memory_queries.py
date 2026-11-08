@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from collections.abc import Sequence
 from datetime import UTC, datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -420,6 +421,7 @@ class MemoryQueryRepository:
         model: str | None = None,
         subject_uuid: str | None = None,
         resolved_only: bool = False,
+        sources: Sequence[str] | None = None,
     ) -> list[dict[str, object]]:
         """Cosine hits over Menhir `:Episodic` content embeddings (source-memory lane).
 
@@ -430,6 +432,9 @@ class MemoryQueryRepository:
         the same dimension lives in a different space (audit F2). With ``subject_uuid``, only
         receipts whose resolved episode mentions that entity are searched, so the constraint
         applies before ``LIMIT`` (recall_timeline query + subject).
+
+        With ``sources``, only episodes whose ingest ``source`` is one of those exact strings
+        match, before the limit is applied. An empty sequence matches nothing; ``None`` is no filter.
 
         Read-only; pairs with the ingest-side `set_episode_content_embedding` write.
         Uses the same shared structural/visibility predicates and the shared
@@ -473,6 +478,9 @@ class MemoryQueryRepository:
             )
             params["embedding_model"] = model
             params["legacy_embedding_models"] = list(LEGACY_EMBEDDING_MODELS)
+        if sources is not None:
+            where.append("n.source IN $sources")
+            params["sources"] = list(sources)
         if resolved_only or subject_uuid is not None:
             # The resolved episode must itself be one `timeline_anchor` could return (same
             # shared predicates), so hidden/FAILED/foreign episodes do not use up LIMIT slots.

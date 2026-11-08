@@ -1,3 +1,8 @@
+---
+artifact_schema: 1
+artifact_type: plan
+---
+
 # Fresh Neo4j Memory Benchmark Plan
 
 ## Why

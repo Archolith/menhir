@@ -31,7 +31,7 @@ def test_redact_text_leaves_empty_and_nonstring():
 def test_redact_mapping_masks_content_fields_keeps_structure():
     row = {
         "uuid": "abc",
-        "name": "Charles email note",
+        "name": "Alex email note",
         "content": "lives at 123 Main St",
         "summary": "a summary",
         "preview": "preview text",
@@ -118,12 +118,12 @@ def test_redact_log_line_preserves_structural_noise():
 def test_redact_log_line_masks_memory_text_but_keeps_uuid():
     line = (
         "2026-07-12 15:22:03,078 - menhir.services.ingest - INFO - Ingested entity "
-        "name='Charles lives at 123 Main Street' summary='he prefers morning meetings' "
+        "name='Alex lives at 123 Main Street' summary='he prefers morning meetings' "
         "uuid='ab87a3cd-64c2-4ce2-96e4-7f0c790f73db'"
     )
     out = redact_log_line(line, reveal=False)
     # memory free text masked
-    assert "Charles lives at 123 Main Street" not in out
+    assert "Alex lives at 123 Main Street" not in out
     assert "he prefers morning meetings" not in out
     assert out.count(MASK) == 2
     # uuid preserved so the line stays diagnosable

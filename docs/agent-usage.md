@@ -213,6 +213,10 @@ after it republishes even though the scan fingerprint is unchanged.
 - MCP clients read server instructions and the tool list when they connect, so they pick up changes only
   after reconnecting. `/clear` in Claude Code does not reconnect; restart the session or reconnect the MCP
   server.
+- To see which build a connection was opened against, read `serverInfo.version` from `initialize`. A
+  release image reports the version plus the first 12 characters of its commit as SemVer build metadata,
+  for example `1.2.3+43e693f6b821`; a server without `MENHIR_RELEASE_COMMIT` reports the version alone.
+  If it differs from `/readyz`'s `build.commit`, the connection predates the deploy: reconnect.
 
 ## Ready-to-copy default
 

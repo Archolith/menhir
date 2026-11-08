@@ -15,7 +15,7 @@
 I performed a comprehensive audit across all **24 files and 5,565 lines** in `src/menhir/api/`. Every file was fully read and mechanically analyzed; line totals reconcile exactly with the 5,565-line scope (see §8).
 
 ### Highest-Risk Finding: High/Critical — Phase 3 Reset Tier Bypass Allows Agent-Tier Namespace Destruction
-- **Location:** [`src/menhir/api/routes_handlers.py:173-196`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/routes_handlers.py#L173-L196) via [`src/menhir/api/routes.py:727-743`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/routes.py#L727-L743) (`POST /api/phase3/reset`).
+- **Location:** [`src/menhir/api/routes_handlers.py:173-196`](file:///<menhir>/src/menhir/api/routes_handlers.py#L173-L196) via [`src/menhir/api/routes.py:727-743`](file:///<menhir>/src/menhir/api/routes.py#L727-L743) (`POST /api/phase3/reset`).
 - **Mechanism:** `phase3_reset_impl` enforces only `agent` tier (`require_tier("agent")`), but immediately dispatches to `backend.delete_namespace(namespace)` and `adapter.purge_turn_evidence(namespace)`.
 - **Impact:** In Menhir's authorization governance model, namespace deletion is strictly an `operator`-tier destructive operation (`DELETE /api/namespace/{namespace}` at `routes.py:605` requires `operator`, `_OP_TIER_OPERATOR` at `routes_support.py:639` requires `operator`, and MCP `delete_namespace` requires `operator`). The `POST /api/phase3/reset` route provides an unmitigated privilege escalation vector allowing any client with `agent`-tier access to completely destroy any non-default namespace silo and all associated turn evidence.
 
@@ -35,7 +35,7 @@ I performed a comprehensive audit across all **24 files and 5,565 lines** in `sr
 
 #### FINDING A1-1: Unhandled `RuntimeError` on Unknown Backend Operation in `backend_invoke`
 - **Severity:** Low
-- **File & Line:** [`src/menhir/api/routes_handlers.py:212-214`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/routes_handlers.py#L212-L214)
+- **File & Line:** [`src/menhir/api/routes_handlers.py:212-214`](file:///<menhir>/src/menhir/api/routes_handlers.py#L212-L214)
 - **Trace:**
   ```python
   if operation not in backend_methods:
@@ -50,7 +50,7 @@ I performed a comprehensive audit across all **24 files and 5,565 lines** in `sr
 
 #### FINDING SEC-1: Privilege Escalation — `POST /api/phase3/reset` Allows `agent` Tier to Delete Namespaces
 - **Severity:** High / Critical
-- **File & Line:** [`src/menhir/api/routes_handlers.py:173-196`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/routes_handlers.py#L173-L196) and [`src/menhir/api/routes.py:727-743`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/routes.py#L727-L743)
+- **File & Line:** [`src/menhir/api/routes_handlers.py:173-196`](file:///<menhir>/src/menhir/api/routes_handlers.py#L173-L196) and [`src/menhir/api/routes.py:727-743`](file:///<menhir>/src/menhir/api/routes.py#L727-L743)
 - **Trace:**
   ```python
   async def phase3_reset_impl(
@@ -74,7 +74,7 @@ I performed a comprehensive audit across all **24 files and 5,565 lines** in `sr
 
 #### FINDING SEC-2: Inconsistent Route-Level Tier Checks Across Read Endpoints
 - **Severity:** Low
-- **File & Line:** [`src/menhir/api/routes.py:122, 200, 228, 284, 660, 698, 711`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/routes.py#L122)
+- **File & Line:** [`src/menhir/api/routes.py:122, 200, 228, 284, 660, 698, 711`](file:///<menhir>/src/menhir/api/routes.py#L122)
 - **Trace:**
   - `POST /api/recall`, `POST /api/context`, `GET /api/bootstrap/flagged`, `POST /api/bootstrap/context`, `GET /api/stats`, `GET /api/phase3/status`, `GET /api/views` have no `_require_tier` call in the endpoint body.
   - In contrast, `GET /api/scalar-authority/{view_uuid}/contributors` (`:184`), `GET /api/tool-events/dirty` (`:524`), `GET /api/tool-events/stale` (`:539`), and `GET /api/tool-events/stale-verifications` (`:584`) explicitly call `_require_tier("readonly")`.
@@ -87,7 +87,7 @@ I performed a comprehensive audit across all **24 files and 5,565 lines** in `sr
 
 #### FINDING ARCH-1: Dense Cross-Layer Coupling in Shared Support Modules
 - **Severity:** Low / Architectural Advisory
-- **File & Line:** [`src/menhir/api/routes_support.py`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/routes_support.py) and [`src/menhir/api/server_support.py`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/server_support.py)
+- **File & Line:** [`src/menhir/api/routes_support.py`](file:///<menhir>/src/menhir/api/routes_support.py) and [`src/menhir/api/server_support.py`](file:///<menhir>/src/menhir/api/server_support.py)
 - **Trace:**
   - `api` package imports from `config` (25 statements), `mcp` (12 statements), `infrastructure` (11 statements), `domain` (7 statements), `core` (5 statements), `services` (3 statements), and `explorer` (1 statement).
   - 24 private-symbol imports (`_name`), 20 of which cross package boundaries (e.g. `_drain_background_errors <- menhir.core.backend_impl`, `_normalize_reader_id <- menhir.mcp.formatters`, `_remember_flagged_bootstrap_read <- menhir.mcp.lifecycle`).
@@ -101,8 +101,8 @@ I performed a comprehensive audit across all **24 files and 5,565 lines** in `sr
 #### FINDING MAINT-1: Code Duplication (DRY Violations) Across OAuth Modules
 - **Severity:** Low
 - **File & Line:**
-  - `_settings_for`: [`src/menhir/api/oauth_authorize.py:94`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/oauth_authorize.py#L94) and [`src/menhir/api/oauth_token.py:24`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/oauth_token.py#L24)
-  - `new_client_id`: [`src/menhir/api/client_token_store.py:19`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/client_token_store.py#L19) and [`src/menhir/api/oauth_client_store.py:11`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/oauth_client_store.py#L11)
+  - `_settings_for`: [`src/menhir/api/oauth_authorize.py:94`](file:///<menhir>/src/menhir/api/oauth_authorize.py#L94) and [`src/menhir/api/oauth_token.py:24`](file:///<menhir>/src/menhir/api/oauth_token.py#L24)
+  - `new_client_id`: [`src/menhir/api/client_token_store.py:19`](file:///<menhir>/src/menhir/api/client_token_store.py#L19) and [`src/menhir/api/oauth_client_store.py:11`](file:///<menhir>/src/menhir/api/oauth_client_store.py#L11)
 - **Trace:**
   - `_settings_for(request: Request) -> object` has byte-identical AST body hash `13108dbe751491b0` (`return getattr(request.app.state, "settings", None) or MemorySettings.from_env()`).
   - `new_client_id() -> str` has byte-identical AST body hash `784c01fded0b58e4` (`return secrets.token_hex(8)`).
@@ -112,18 +112,18 @@ I performed a comprehensive audit across all **24 files and 5,565 lines** in `sr
 #### FINDING MAINT-2: Unused Imports in API Modules
 - **Severity:** Low
 - **File & Line:**
-  - [`src/menhir/api/oauth.py:20`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/oauth.py#L20): `_as_bool`, `_as_tuple`, `_get_setting`, `build_oauth_config`
-  - [`src/menhir/api/oauth.py:287`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/oauth.py#L287): `build_oauth_preflight` (not re-exported in `__all__`)
-  - [`src/menhir/api/oauth_as_register.py:20`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/oauth_as_register.py#L20): `build_register_limiter`
-  - [`src/menhir/api/oauth_authorize.py:39`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/oauth_authorize.py#L39): `build_approve_limiter`
-  - [`src/menhir/api/oauth_preflight.py:5`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/oauth_preflight.py#L5): `typing.Any`
-  - [`src/menhir/api/routes.py:31`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/routes.py#L31): `ClientSummary`, `RuntimeContext`, `_OP_TIER_AGENT`, `_OP_TIER_OPERATOR`
+  - [`src/menhir/api/oauth.py:20`](file:///<menhir>/src/menhir/api/oauth.py#L20): `_as_bool`, `_as_tuple`, `_get_setting`, `build_oauth_config`
+  - [`src/menhir/api/oauth.py:287`](file:///<menhir>/src/menhir/api/oauth.py#L287): `build_oauth_preflight` (not re-exported in `__all__`)
+  - [`src/menhir/api/oauth_as_register.py:20`](file:///<menhir>/src/menhir/api/oauth_as_register.py#L20): `build_register_limiter`
+  - [`src/menhir/api/oauth_authorize.py:39`](file:///<menhir>/src/menhir/api/oauth_authorize.py#L39): `build_approve_limiter`
+  - [`src/menhir/api/oauth_preflight.py:5`](file:///<menhir>/src/menhir/api/oauth_preflight.py#L5): `typing.Any`
+  - [`src/menhir/api/routes.py:31`](file:///<menhir>/src/menhir/api/routes.py#L31): `ClientSummary`, `RuntimeContext`, `_OP_TIER_AGENT`, `_OP_TIER_OPERATOR`
 - **Impact:** Clutter, slight import overhead, and potential confusion for future maintainers.
 - **Fix:** Remove unused imports.
 
 #### FINDING MAINT-3: Docstring Drift in `mcp_remote.py`
 - **Severity:** Low
-- **File & Line:** [`src/menhir/api/mcp_remote.py:86`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/mcp_remote.py#L86)
+- **File & Line:** [`src/menhir/api/mcp_remote.py:86`](file:///<menhir>/src/menhir/api/mcp_remote.py#L86)
 - **Trace:** Docstring states `"Remote MCP is tool-only by design"`, but `create_remote_tool_only_mcp()` explicitly executes `register_memory_resources(remote_mcp)` at line 79, and `create_mcp_streamable_http_app()` executes `register_memory_resources(remote_mcp)` at line 110.
 - **Impact:** Misleading documentation for callers auditing MCP surface capabilities.
 - **Fix:** Update docstring to accurately state that resources are registered.
@@ -179,7 +179,7 @@ I performed a comprehensive audit across all **24 files and 5,565 lines** in `sr
 
 #### FINDING COMP-1: Unredacted Request Body Logging in `backend_invoke` Exception Handler
 - **Severity:** Medium / Compliance
-- **File & Line:** [`src/menhir/api/routes_handlers.py:225-227`](file:///C:/Users/thron/IdeaProjects/projects/archolith/menhir/src/menhir/api/routes_handlers.py#L225-L227)
+- **File & Line:** [`src/menhir/api/routes_handlers.py:225-227`](file:///<menhir>/src/menhir/api/routes_handlers.py#L225-L227)
 - **Trace:**
   ```python
   except Exception:

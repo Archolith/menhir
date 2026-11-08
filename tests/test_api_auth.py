@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
@@ -541,6 +542,51 @@ def test_oauth_binds_exact_client_tool_rights_per_request():
     assert response_a.json() == {"allowed_tools": ["recall_memories"]}
     assert response_b.status_code == 200
     assert response_b.json() == {"allowed_tools": ["query_structure"]}
+
+
+@pytest.mark.parametrize(
+    ("client_id", "scopes", "tier", "detail"),
+    [
+        ("client-x", frozenset({"menhir:read"}), "readonly",
+         "OAuth client_id is not present in production policy"),
+        ("client-a", frozenset({"menhir:read", "menhir:write"}), "readonly",
+         "OAuth token scopes do not match production client policy"),
+        ("client-a", frozenset({"menhir:read"}), "agent",
+         "OAuth token tier exceeds production client policy"),
+    ],
+    ids=["unknown-client", "scope-mismatch", "tier-too-high"],
+)
+def test_oauth_valid_token_refused_by_client_policy_returns_403(client_id, scopes, tier, detail):
+    """#508: a verified token the client policy refuses gets 403 client_policy_denied."""
+    authority = ClientPolicyAuthority(
+        version=1,
+        digest="test-digest",
+        clients={
+            "client-a": ClientPolicy(
+                client_id="client-a",
+                label="client-a",
+                scopes=frozenset({"menhir:read"}),
+                maximum_tier="readonly",
+                namespace="",
+                allowed_tools=frozenset({"recall_memories"}),
+                denied_tools=frozenset(),
+            ),
+        },
+    )
+    verifier = _FakeOAuthVerifier(
+        OAuthPrincipal(
+            subject="user-123", client_id=client_id, client_name=client_id, scopes=scopes, tier=tier
+        )
+    )
+    client = _build_oauth_app(verifier, client_policy=authority)
+
+    for path in ("/api/tool-policy", "/mcp/test"):
+        resp = client.get(path, headers={"Authorization": "Bearer valid-token"})
+        assert resp.status_code == 403, path
+        body = resp.json()
+        assert body["code"] == "client_policy_denied"
+        assert body["detail"] == detail
+    assert verifier.seen_token == "valid-token"
 
 
 def test_oauth_static_api_key_rejected_for_api_paths_when_enabled():

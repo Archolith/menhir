@@ -23,7 +23,7 @@ client authority. [Model Context Protocol](https://modelcontextprotocol.io/) is 
 surface alongside REST, a local explorer, and a stdio bridge; it is not the product
 category.
 
-The current package version is `0.3.2`. Menhir is built for a single operator, requires
+The current package version is `0.3.4`. Menhir is built for a single operator, requires
 Python 3.12 or newer, and is designed for local or operator-controlled deployment. Read the
 [known limitations](#known-limitations) before relying on it for personal memory.
 
@@ -339,6 +339,9 @@ Before you store anything, [`docs/your-data.md`](docs/your-data.md) lists what M
   the simplest route is [uv](https://docs.astral.sh/uv/): `uv python install 3.12` then
   `uv venv --seed --python 3.12 && source .venv/bin/activate` (`--seed` gives the venv a `pip`;
   uv omits it by default).
+- Python 3.15: PyYAML 6.0.3 has no 3.15 wheel yet, so pip builds it from source. That build is
+  pure Python and needs no compiler, but it fails under `--only-binary=:all:`. Allow it with
+  `--no-binary=pyyaml`, or use 3.12-3.14, where every dependency has a wheel.
 - Neo4j 5.26 (LTS) or newer with APOC (queries use `CALL () {}` scoped subqueries and dynamic
   labels, which need 5.26). `menhir up --compose-neo4j` starts one for you; you need Docker on the
   machine running `menhir` for that, and nothing else.
@@ -674,7 +677,7 @@ the private `Archolith/menhir-deploy` repository.
 
 ## Known limitations
 
-These are known gaps in 0.3.2, each with a planned fix:
+These are known gaps in 0.3.4, each with a planned fix:
 
 - **Erasure leaves extracted knowledge behind (#423).** `delete_memory` removes the memory, its
   episode, captured evidence turns, their projections and its scalar assertions. It does not

@@ -98,9 +98,9 @@ def test_unquoted_free_text_passes_through_untouched() -> None:
     """CF-96's mechanism, pinned. This is NOT a bug being locked in -- it is the boundary being made
     executable, so a future change to the heuristic has to update a test that says out loud what the
     old behaviour was."""
-    line = PREFIX + "Judge 0: Charles Harvey vs Charlie Harvey -> True"
+    line = PREFIX + "Judge 0: Alex Morgan vs Alec Morgan -> True"
     assert redact_log_line(line, reveal=False) == line
-    assert "Charles Harvey" in redact_log_line(line, reveal=False)
+    assert "Alex Morgan" in redact_log_line(line, reveal=False)
 
 
 def test_a_short_quoted_value_also_passes() -> None:

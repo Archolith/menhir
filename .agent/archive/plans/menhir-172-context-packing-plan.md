@@ -8,7 +8,7 @@ artifact_status: IMPLEMENTED
 
 **Disposition:** IMPLEMENTED by merged PR #211 (`2132c4d4`); issue #172 closed as completed 2026-11-01 (remaining work tracked in #345). Retained as the historical work package.
 
-Project Scope: `Archolith/menhir`, worktree `C:/Users/thron/IdeaProjects/.agent/worktrees/menhir-172-context`,
+Project Scope: `Archolith/menhir`, worktree `<workspace>/.agent/worktrees/menhir-172-context`,
 branch `fix/172-context-packing`, base `origin/main` `1f6eb392`. Nothing outside this worktree.
 
 ## Why (measured, #172 comment 5933508631)

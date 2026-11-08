@@ -15,8 +15,8 @@ Usage:
     python scripts/release/check_served_metadata.py URL --snapshot-mode receive
 
 Exit codes: 0 every compared field matches, 1 a compared field differs, 2 nothing differed but
-a check could not be made (fetch, parse, argument, or local package error, or a server digest
-that is unavailable).
+a check could not be made (fetch, parse, argument, or local package error, a served build field
+that is not plain text, or a server digest that is unavailable).
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ from typing import Any
 DESCRIPTION = "Check a deployed Menhir's /readyz build block against the local package."
 EXIT_MATCH, EXIT_MISMATCH, EXIT_ERROR = 0, 1, 2
 TOKEN_ENV = "MENHIR_READYZ_TOKEN"
+USER_AGENT = "menhir-release-check"
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _COMMIT_RE = re.compile(r"[0-9a-fA-F]{7,40}")
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}")
@@ -97,7 +98,8 @@ def fetch_readyz(base_url: str, timeout: float, token: str | None = None) -> dic
 
     if _scheme(base_url) not in ("http", "https"):
         raise CheckError("the base URL must be a valid http:// or https:// URL")
-    headers = {"Accept": "application/json"}
+    # Cloudflare answers 403 to urllib's default "Python-urllib/x.y" User-Agent.
+    headers = {"Accept": "application/json", "User-Agent": USER_AGENT}
     if token:
         _require_safe_token_url(base_url)
         headers["Authorization"] = f"Bearer {token}"
@@ -151,6 +153,10 @@ def read_build(body: dict[str, Any], *, token_sent: bool = False) -> dict[str, s
         value = build.get(name)
         if not isinstance(value, str) or not value:
             raise CheckError(f"readyz build.{name} is missing or not a string")
+        # Server text is printed below; refuse anything that could forge a line or break the
+        # encoding, without echoing it (#501).
+        if not _PLAIN_TEXT_RE.fullmatch(value):
+            raise CheckError(f"readyz build.{name} is not plain text; not shown")
         fields[name] = value
     return fields
 
@@ -208,6 +214,9 @@ def main(argv: list[str] | None = None) -> int:
         return _check(args)
     except CheckError as exc:
         print(f"error: {exc}")
+        return EXIT_ERROR
+    except UnicodeError:
+        print("error: output could not be encoded")
         return EXIT_ERROR
 
 

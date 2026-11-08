@@ -43,11 +43,15 @@ workflow did not consult CI and shipped both. Both were yanked; v0.2.3 carried t
 Only repository admins can create `v*` tags (the `release-tags` ruleset), and that one tag
 publishes everything. In order, `publish-pypi.yml` runs the test gate, verifies the artifacts,
 publishes to PyPI, builds and publishes the release image, verifies its attestation, tags it
-`X.Y.Z`, and creates the GitHub release. The image version label (`X.Y.Z-1`) comes from the tag,
+`X.Y.Z`, records what the image serves (`served-metadata.json`: version, commit and the MCP
+metadata digest for each snapshot mode, computed by running the image with no network), and
+creates the GitHub release with that record attached. The image version label (`X.Y.Z-1`) comes from the tag,
 and the Python base comes from `deploy/release-python-base.txt` at the tagged commit. Change
 that file in a normal PR to move the base.
 
 Deploying stays a separate, manual step: `tools/menhirctl.ps1 upgrade X.Y.Z` from menhir-deploy.
+The upgrade's smoke probe compares `/readyz`'s build block with the release's
+`served-metadata.json` and rolls back on a mismatch (#498).
 
 ## Moving the Graphiti fork pin
 

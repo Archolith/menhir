@@ -325,10 +325,59 @@ jobs:
             --tag "$RELEASE_VERSION" \
             --digest "$IMAGE_DIGEST"
 
+  # #498: what the release image serves, computed by the image itself, so a deploy can compare
+  # /readyz with it. menhir-deploy's upgrade fails (and rolls back) on a mismatch.
+  served-metadata:
+    name: record the release image's served metadata
+    needs: [resolve, image, image-tag]
+    if: ${{ !cancelled() && (needs.image-tag.result == 'success' || needs.resolve.outputs.existing_image_digest != '') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Compute the record inside the release image
+        env:
+          IMAGE_DIGEST: ${{ needs.image.outputs.registry_digest || needs.resolve.outputs.existing_image_digest }}
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+          SOURCE_COMMIT: ${{ needs.resolve.outputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p served
+          docker run --rm --network none --entrypoint python \
+            "ghcr.io/archolith/menhir@$IMAGE_DIGEST" -m menhir.mcp.served_metadata \
+            > served/served-metadata.json
+          python3 - served/served-metadata.json <<'PY'
+          import json, os, re, sys
+          record = json.load(open(sys.argv[1], encoding="utf-8"))
+          problems = []
+          if record.get("schema") != 1:
+              problems.append(f"schema {record.get('schema')!r}")
+          if record.get("version") != os.environ["RELEASE_VERSION"]:
+              problems.append(f"version {record.get('version')!r} != {os.environ['RELEASE_VERSION']}")
+          if record.get("commit") != os.environ["SOURCE_COMMIT"]:
+              problems.append(f"commit {record.get('commit')!r} != {os.environ['SOURCE_COMMIT']}")
+          digests = record.get("mcp_metadata_sha256")
+          if not isinstance(digests, dict) or "off" not in digests or not all(
+              isinstance(v, str) and re.fullmatch(r"[0-9a-f]{64}", v) for v in digests.values()
+          ):
+              problems.append("mcp_metadata_sha256 is not a map of sha256 digests with an 'off' entry")
+          if problems:
+              sys.exit("served-metadata.json is wrong: " + "; ".join(problems))
+          print(json.dumps(record, indent=1, sort_keys=True))
+          PY
+
+      - name: Upload the record
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: served-metadata
+          path: served/served-metadata.json
+          if-no-files-found: error
+
   github-release:
     name: create GitHub release
-    needs: [resolve, build, publish, image-tag]
-    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.publish.result == 'success' || needs.build.outputs.already_published == 'true') && (needs.image-tag.result == 'success' || needs.resolve.outputs.existing_image_digest != '') }}
+    needs: [resolve, build, publish, image-tag, served-metadata]
+    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.publish.result == 'success' || needs.build.outputs.already_published == 'true') && (needs.image-tag.result == 'success' || needs.resolve.outputs.existing_image_digest != '') && needs.served-metadata.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -345,14 +394,27 @@ jobs:
           name: release-checksums
           path: checksums
 
+      - name: Download the served-metadata record
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: served-metadata
+          path: served
+
       - name: Create immutable release record
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo "GitHub release $RELEASE_TAG already exists; leaving it unchanged."
+            # A deploy compares /readyz with this record (#498); an existing release must carry it.
+            assets=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+            if printf '%s\n' "$assets" | grep -qx 'served-metadata.json'; then
+              echo "GitHub release $RELEASE_TAG already exists with served-metadata.json; leaving it unchanged."
+              exit 0
+            fi
+            echo "GitHub release $RELEASE_TAG exists without served-metadata.json; attaching it."
+            gh release upload "$RELEASE_TAG" served/served-metadata.json --repo "$GITHUB_REPOSITORY"
             exit 0
           fi
-          gh release create "$RELEASE_TAG" dist/* checksums/SHA256SUMS \
+          gh release create "$RELEASE_TAG" dist/* checksums/SHA256SUMS served/served-metadata.json \
             --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
