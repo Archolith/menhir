@@ -40,6 +40,7 @@ from menhir.domain.assertion_operations import (
     COUNTING_OPERATIONS,
     OPERATIONS,
     adjusts_value,
+    approximates_value,
     is_counting_occurrence,
 )
 
@@ -233,6 +234,15 @@ def validate_value(value_kind: str, operation: str, value: Any) -> None:
             raise ValueError("an occurrence value must be a single positive finite number")
         if value_kind == "count" and not _is_integral_number(value):
             raise ValueError("a count occurrence must be a positive integer")
+        return
+    if approximates_value(operation):
+        # A hedge around ONE number; "30 or 40" names alternatives and is not stored at all.
+        if value_kind not in NUMERIC_KINDS:
+            raise ValueError(f"approximate requires a numeric value_kind, got {value_kind!r}")
+        if not _is_finite_number(value):
+            raise ValueError("an approximate value must be a single finite number")
+        if value_kind == "count" and not _is_integral_number(value):
+            raise ValueError("an approximate count must be an integer")
         return
     if adjusts_value(operation):
         if value_kind not in NUMERIC_KINDS:

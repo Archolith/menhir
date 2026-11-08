@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from menhir.domain.assertion_operations import (
     COUNTING_OCCURRENCE_OPS_CYPHER,
+    HISTORY_VALUE_OPS_CYPHER,
     SETS_VALUE_OPS_CYPHER,
     VALUE_CLAIM_OPS_CYPHER,
 )
@@ -28,15 +29,15 @@ except Exception:  # pragma: no cover - driver always present in the running ser
 logger = logging.getLogger(__name__)
 
 
-def _operation_filter(operation: str) -> str:
-    """Value claims always; counting occurrences only when $include_occurrences. An operation the
-    table does not know matches neither, so it is never listed."""
-    return (f"({operation} IN {VALUE_CLAIM_OPS_CYPHER}"
+def _operation_filter(operation: str, listed_ops_cypher: str) -> str:
+    """The listed operations always; counting occurrences only when $include_occurrences. An
+    operation the table does not know matches neither, so it is never listed."""
+    return (f"({operation} IN {listed_ops_cypher}"
             f" OR ($include_occurrences AND {operation} IN {COUNTING_OCCURRENCE_OPS_CYPHER}))")
 
 
-_PROVENANCE_OPERATION_FILTER = _operation_filter("a.operation")
-_HISTORY_OPERATION_FILTER = _operation_filter("he.operation")
+_PROVENANCE_OPERATION_FILTER = _operation_filter("a.operation", VALUE_CLAIM_OPS_CYPHER)
+_HISTORY_OPERATION_FILTER = _operation_filter("he.operation", HISTORY_VALUE_OPS_CYPHER)
 
 #: Placeholder for the supporting-event count inside a kind's `summary_template`. The unchanged-value
 #: provenance refresh (plan D2) computes the count INSIDE Cypher (the union must be atomic), so the

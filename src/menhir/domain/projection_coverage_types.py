@@ -34,6 +34,8 @@ class EligibilityRole(str, Enum):
     BINDING_ADVISORY = "binding_advisory"
     RETRACTED = "retracted"
     OPERATOR_VETOED = "operator_vetoed"
+    #: a known operation the fold never reads (an approximate value): listed in history only.
+    HISTORY_ONLY = "history_only"
 
 
 class FoldRole(str, Enum):

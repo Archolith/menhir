@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from menhir.domain.assertion_operations import is_counting_occurrence, is_value_claim
+from menhir.domain.assertion_operations import is_counting_occurrence, is_listed_in_history
 from menhir.domain.count_match import COUNTED, TARGETED_STATUSES, match_slot_row, status_of
 from menhir.domain.scalar_state_fold import _dedup_occurrences_per_turn
 from menhir.domain.temporal import parse_iso8601
@@ -172,7 +172,7 @@ def _match_history_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for r in keyed:
         if not _occ(r):
-            if is_value_claim(r.get("operation")):
+            if is_listed_in_history(r.get("operation")):
                 out.append(r)
             continue
         target = str(r.get("count_target_id") or "")
@@ -219,11 +219,8 @@ def build_history(
             or (_parse_dt(r.get("valid_at")) <= as_of)
         ]
 
-    # An operation the table does not know is neither a value nor a counted happening: no history.
-    rows = [
-        r for r in rows
-        if is_value_claim(r.get("operation")) or is_counting_occurrence(r.get("operation"))
-    ]
+    # The table decides what is listed; an operation it does not know is not.
+    rows = [r for r in rows if is_listed_in_history(r.get("operation"))]
 
     if count_match:
         rows = _match_history_rows(rows)
