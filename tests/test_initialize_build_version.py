@@ -39,11 +39,11 @@ def test_without_a_valid_commit_the_version_is_plain(monkeypatch, value) -> None
 def test_stamped_version_still_parses_as_the_release_version(monkeypatch) -> None:
     # Clients may read serverInfo.version as a version number; the build part must not change it.
     monkeypatch.setenv("MENHIR_RELEASE_COMMIT", SHA)
-    stamped = served_server_version("0.3.3")
-    assert stamped == "0.3.3+43e693f6b821"
+    stamped = served_server_version("1.2.3")
+    assert stamped == "1.2.3+43e693f6b821"
     # SemVer build metadata: one "+", the release version unchanged before it.
     base, build = stamped.split("+")
-    assert base == "0.3.3" and build.isalnum()
+    assert base == "1.2.3" and build.isalnum()
 
 
 def test_release_record_lists_every_snapshot_mode(monkeypatch, capsys) -> None:

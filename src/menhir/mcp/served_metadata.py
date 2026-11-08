@@ -40,7 +40,7 @@ def release_commit() -> str:
 def served_server_version(version: str) -> str:
     """MCP ``serverInfo.version``: ``version``, plus the build commit as SemVer build metadata.
 
-    ``0.3.3+43e693f6b821`` still parses as version 0.3.3 (SemVer and PEP 440 both ignore the
+    ``1.2.3+43e693f6b821`` still parses as version 1.2.3 (SemVer and PEP 440 both ignore the
     ``+`` part when comparing), and it names the build a long-lived connection was opened
     against (#498). Without a known commit the version is unchanged.
     """
@@ -137,7 +137,8 @@ def release_record() -> dict[str, Any]:
     from menhir import __version__
     from menhir.config.snapshot_mode import SNAPSHOT_RECEIVE_MODE_ENV, SnapshotReceiveMode
 
-    previous = os.environ.get(SNAPSHOT_RECEIVE_MODE_ENV)
+    # Saved for the restore below, not read as configuration: each pass sets the mode itself.
+    previous = os.environ.pop(SNAPSHOT_RECEIVE_MODE_ENV, None)
     digests: dict[str, str] = {}
     try:
         for mode in SnapshotReceiveMode:
