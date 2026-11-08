@@ -1,3 +1,19 @@
+## 2026-11-08 - Policy refusals are MCP errors; v0.3.3 audit follow-ups
+
+- A tool refused by the client policy or `MENHIR_CLIENT_TOOLS` now returns an MCP error result
+  (`isError=true`) with the same text as before, so a client reading only `isError` no longer
+  takes it for a result (#503). Other gate refusals (tier, identity, query-string auth) are unchanged.
+- A transient 402 is stored with a `provider_payment_throttled:` prefix, so the retry poller,
+  which sees only the stored text, requeues it as the worker did. Before, a 402 whose only sign
+  was a Retry-After hint was parked for manual review.
+- Compact `recall_memories` over the stdio bridge no longer sends a source-memory limit read from
+  the bridge's own environment. The server applies its own default, and the bridge trims to 5.
+- Upgrade note for v0.3.3: startup requires the production client policy to decide
+  `review_inbox` and `acknowledge_warning` for every client, and refuses a policy that does not,
+  so update the policy first. A deploy check that matched the old refusal text ("restricted by
+  MENHIR_CLIENT_TOOLS allowlist") must also accept "restricted by the server's client policy",
+  or, from this change, `isError=true`.
+
 ## 2026-11-07 - v0.3.3: review inbox, token-gated /readyz build details, transient-402 backoff
 
 - New read-only MCP tool `review_inbox`: what is waiting on a decision, in one call.
@@ -94,17 +110,3 @@ unchanged. A client matching the old string must update it.
 - Operator warning lines no longer tell the reader how to silence them. `acknowledge_warning` is
   unchanged and still listed for operator clients.
 - `review_inbox` marks the candidates section as unreviewed, untrusted text.
-
-## 2026-11-04 - One read-only inbox of what is waiting on a decision
-
-New MCP tool `review_inbox` (readonly tier, #437). It lists unresolved conflicts, failed
-enrichments, candidates, stale TODOs and open artifact questions in one call, with the tool that
-acts on each. Plans stuck in a lifecycle state and a start-session inbox line are not included yet.
-
-- `src/menhir/mcp/tools/ops/review_inbox.py`: the tool. One failed or hung read shows as
-  `unavailable (<ExceptionType>)` and the other sections still render.
-- `list_candidates` gains an optional `namespace` at every backend layer. The internal backend
-  dispatch now forces a pinned client's silo onto it, as it already did for the other four reads.
-  Each candidate row now also reports its `namespace`. An unscoped call is unchanged.
-- Agent-tier clients do not get the tool. A production client policy must decide `review_inbox`
-  for every client, or startup refuses the policy.

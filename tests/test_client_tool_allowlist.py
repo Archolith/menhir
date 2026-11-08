@@ -71,6 +71,9 @@ def test_tool_outside_allowlist_is_refused(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(
         contracts, "get_client_tool_allowlist", lambda: frozenset({"add_memory"})
     )
-    output = asyncio.run(_Tool().execute())
+    result = asyncio.run(_Tool().execute())
+    # #503: the refusal is an MCP error result carrying the same text as before.
+    assert result.isError is True
+    output = result.content[0].text
     assert "PermissionError" in output
     assert "allowlist" in output

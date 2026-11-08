@@ -27,6 +27,7 @@ from menhir.mcp.service_access import (
     require_trusted_client_identity,
 )
 from menhir.mcp.telemetry import track_mcp_call
+from menhir.mcp.telemetry.tracker import McpToolAccessDenied
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -695,18 +696,19 @@ class BaseTool:
             # is refused. Empty allowlist = unrestricted, so unnamed/unconfigured
             # callers are untouched.
             # A bound production client policy decides alone, and an empty one denies all; only
-            # without one does MENHIR_CLIENT_TOOLS apply. The message names whichever refused (#503).
+            # without one does MENHIR_CLIENT_TOOLS apply. The message names whichever refused, and
+            # the refusal returns isError (#503).
             policy_allowlist = get_request_tool_allowlist()
             if policy_allowlist is not None:
                 if self.name not in policy_allowlist:
-                    raise PermissionError(
+                    raise McpToolAccessDenied(
                         f"Client is not permitted to invoke `{self.name}` "
                         "(restricted by the server's client policy)"
                     )
             else:
                 allowlist = get_client_tool_allowlist()
                 if allowlist and self.name not in allowlist:
-                    raise PermissionError(
+                    raise McpToolAccessDenied(
                         f"Client is not permitted to invoke `{self.name}` "
                         "(restricted by MENHIR_CLIENT_TOOLS allowlist)"
                     )

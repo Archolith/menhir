@@ -34,6 +34,14 @@ class McpToolRefusal(ValueError):
     """
 
 
+class McpToolAccessDenied(PermissionError):
+    """The client may not invoke this tool (client policy or MENHIR_CLIENT_TOOLS allowlist).
+
+    Returned as an MCP error result (``isError``) with the same text as before, so a client that
+    reads only ``isError`` cannot take the refusal for a result (#503).
+    """
+
+
 def _caller_identity() -> tuple[str | None, str | None, str | None, str | None]:
     """(client_name, client_id, session_id, tier) for the current request, or Nones.
 
@@ -296,6 +304,19 @@ async def track_mcp_call(
             return cast(
                 T,
                 CallToolResult(content=[TextContent(type="text", text=str(exc))], isError=True),
+            )
+        if isinstance(exc, McpToolAccessDenied):
+            from mcp.types import CallToolResult, TextContent
+
+            # Keep the plain PermissionError wording clients and the deploy smoke probe know.
+            denial = f"PermissionError: {exc}"
+            text = error_mapper(denial) if error_mapper is not None else None
+            return cast(
+                T,
+                CallToolResult(
+                    content=[TextContent(type="text", text=text or f"Error: {denial}")],
+                    isError=True,
+                ),
             )
         if error_mapper is not None:
             return error_mapper(error_msg)
