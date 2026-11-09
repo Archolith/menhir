@@ -74,6 +74,9 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
             # Same tier view as the backend's recall (core/bootstrap.py), so hook context agrees.
             inferred_self_mode=str(getattr(settings, "inferred_self_mode", "enforce")),
             counting_enabled=counting_enabled,
+            # No preload: a hook process that cannot load the reranker keeps the floor per call.
+            rerank_model_dir=str(getattr(settings, "recall_rerank_model_dir", "")),
+            rerank_device=str(getattr(settings, "recall_rerank_device", "auto")),
         )
         context_builder = ContextBuilderService(
             recall_service=recall_service,

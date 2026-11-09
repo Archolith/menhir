@@ -173,6 +173,9 @@ class RetrievalTuningConfig:
     graphiti's RRF reranker).
     """
 
+    # Cross-encoder rerank (services/cross_encoder_rerank.py): order the first rerank_top_n
+    # candidates by a local cross-encoder instead of cutting them at the RRF rank floor.
+    # Default OFF (MENHIR_RECALL_RERANK_ENABLED); the model dir and device live on RecallService.
     enable_cross_encoder_rerank: bool = False
     rerank_top_n: int = 50
     embedding_dimensions: int | None = None
@@ -263,6 +266,8 @@ class RetrievalTuningConfig:
             raise ValueError(
                 f"facet_weight must be >= 0.0, got {self.facet_weight!r}"
             )
+        if not 1 <= self.rerank_top_n <= 200:
+            raise ValueError(f"rerank_top_n must be in [1, 200], got {self.rerank_top_n!r}")
         if not 1 <= self.source_memory_limit <= 50:
             raise ValueError(
                 f"source_memory_limit must be in [1, 50], got {self.source_memory_limit!r}"

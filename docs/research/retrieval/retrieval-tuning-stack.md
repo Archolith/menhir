@@ -350,6 +350,11 @@ class RetrievalTuningConfig:
     enable_projection_calibration: bool = False
 ```
 
+Status (2026-11-08): `enable_cross_encoder_rerank` and `rerank_top_n` are implemented
+(`services/cross_encoder_rerank.py`, default off via `MENHIR_RECALL_RERANK_ENABLED`). A local
+ONNX MiniLM-L6 cross-encoder orders the first `rerank_top_n` candidates in place of the RRF rank
+floor. The rest of this sketch is historical.
+
 Minimum service behavior:
 
 ```text

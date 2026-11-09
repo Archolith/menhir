@@ -29,6 +29,7 @@ than experiments and are not listed.
 | Verifier sync | `verifier_sync_enabled` / `MENHIR_VERIFIER_SYNC_ENABLED` | opt-in; see "Warden profiles" below | — |
 | Consolidation audit | `personal_memory_consolidation_audit_enabled` / `MENHIR_PERSONAL_MEMORY_CONSOLIDATION_AUDIT_ENABLED` | opt-in diagnostics | — |
 | Recall audit | `personal_memory_recall_audit_enabled` / `MENHIR_PERSONAL_MEMORY_RECALL_AUDIT_ENABLED` | opt-in diagnostics | — |
+| Cross-encoder recall rerank | `recall_rerank_enabled` / `MENHIR_RECALL_RERANK_ENABLED` | opt-in; needs the `rerank` extra and a pinned model dir. Offline evidence: tiny-model-surgery recall arm, #516 | workspace `menhir-recall-cross-encoder-rerank-plan-2026-11-08.md` |
 
 ## Removed 2026-10-28 and 2026-10-29 (#399)
 

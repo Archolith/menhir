@@ -62,6 +62,8 @@ _SETTINGS = (
         'personal_memory', 'Enable personal memory scalar history enabled.', True, ()),
     ('personal_memory_counting_enabled', 'MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED', True,
         'personal_memory', 'Count single happenings ("went to yoga") as scalar occurrences after the scalar phase (LLM calls from the scheduler); builds on scalar state.', True, ()),
+    ('recall_rerank_enabled', 'MENHIR_RECALL_RERANK_ENABLED', False, 'retrieval',
+        'Order the first recall candidates with a local ONNX cross-encoder instead of the RRF rank floor (needs the rerank extra and a pinned model dir).', True, ()),
     ('benchmark_mode', 'MENHIR_BENCHMARK_MODE', False, 'runtime', 'Enable benchmark mode.', False, ()),
     ('frontier_shadow', 'MENHIR_FRONTIER_SHADOW', False, 'frontier', 'Enable frontier shadow.', False, ()),
     ('allow_insecure_remote_no_auth', 'MENHIR_ALLOW_INSECURE_REMOTE_NO_AUTH', False, 'auth',

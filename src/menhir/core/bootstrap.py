@@ -219,6 +219,10 @@ def build_memory_services(
             else ""
         ),
     )
+    # Fails startup when rerank is on but cannot load (missing extra, model dir, digest, CUDA).
+    from menhir.services.cross_encoder_rerank import preload_for_settings
+
+    preload_for_settings(settings)
     recall_service = RecallService(
         graphiti_client=graphiti_client,
         graph_adapter=graph_adapter,
@@ -233,6 +237,8 @@ def build_memory_services(
             and settings.personal_memory_scalar_state_enabled
         ),
         read_only=read_only,
+        rerank_model_dir=settings.recall_rerank_model_dir,
+        rerank_device=settings.recall_rerank_device,
     )
     context_builder = ContextBuilderService(
         recall_service=recall_service,

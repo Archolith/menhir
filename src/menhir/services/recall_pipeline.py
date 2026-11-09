@@ -59,6 +59,7 @@ from menhir.domain.retrieval_trace_models import (
     ViewReachability,
 )
 from menhir.infrastructure.graphiti_client import GraphitiClient
+from menhir.services.cross_encoder_rerank import order_by_rerank, rerank_scores
 from menhir.services.hybrid_retrieval import FusionLane, weighted_rrf_multi
 
 if TYPE_CHECKING:
@@ -1746,12 +1747,43 @@ async def _run_recall(
         await service._attach_frontier_metadata(eligible_uuids, metadata_by_uuid, warden_status=guard_status)
         _t_phases["frontier_metadata"] = int((perf_counter() - _t) * 1000)
 
+    # --- Optional cross-encoder rerank (default off): replaces the RRF floor when it runs ---
+    rerank: dict[str, float] | None = None
+    rerank_note: str | None = None
+    if tuning.enable_cross_encoder_rerank and candidates:
+        _t = perf_counter()
+        rerank, rerank_note = await rerank_scores(
+            query, candidates, metadata_by_uuid, top_n=tuning.rerank_top_n,
+            model_dir=getattr(service, "rerank_model_dir", ""),
+            device=getattr(service, "rerank_device", "auto"),
+        )
+        _t_phases["rerank"] = int((perf_counter() - _t) * 1000)
+
     # --- Phase 2: score + rank ---
     _t = perf_counter()
     scoring_trace = ScoringTrace() if trace else None
-    scored = service.scoring_service.score_candidates(
-        candidates, preset, min_similarity=MIN_SIMILARITY_THRESHOLD, trace=scoring_trace
-    )
+    if rerank is not None:
+        # The reranked head skips the rank floor and takes cross-encoder order; candidates past
+        # rerank_top_n keep the floor and follow the head.
+        tail_kept = {
+            m.uuid for m in service.scoring_service.score_candidates(
+                [c for c in candidates if c.uuid not in rerank], preset,
+                min_similarity=MIN_SIMILARITY_THRESHOLD,
+            )
+        }
+        scored = order_by_rerank(
+            [
+                m for m in service.scoring_service.score_candidates(
+                    candidates, preset, min_similarity=float("-inf"), trace=scoring_trace
+                )
+                if m.uuid in rerank or m.uuid in tail_kept
+            ],
+            rerank,
+        )
+    else:
+        scored = service.scoring_service.score_candidates(
+            candidates, preset, min_similarity=MIN_SIMILARITY_THRESHOLD, trace=scoring_trace
+        )
     _t_phases["scoring"] = int((perf_counter() - _t) * 1000)
 
     # --- Frontier portions (active): reorder by combiner / gate by wardens ---
@@ -1760,8 +1792,10 @@ async def _run_recall(
     frontier_note: str | None = None
     if scored and (tuning.enable_oracle_ranking or tuning.enable_warden_gate):
         _t = perf_counter()
+        # A reranked order is final: wardens still gate it, the oracle blend does not reorder it.
+        frontier_tuning = replace(tuning, enable_oracle_ranking=False) if rerank is not None else tuning
         scored, frontier_note = await service._apply_frontier(
-            query, namespace, scored, metadata_by_uuid, tuning,
+            query, namespace, scored, metadata_by_uuid, frontier_tuning,
             query_project=file_context_project, warden_status=guard_status,
         )
         _t_phases["frontier"] = int((perf_counter() - _t) * 1000)
@@ -1780,6 +1814,8 @@ async def _run_recall(
         note = "Only pending (unprocessed) memories found; no enriched memories matched."
     if frontier_note:
         note = f"{note} | {frontier_note}" if note else frontier_note
+    if rerank_note:
+        note = f"{note} | {rerank_note}" if note else rerank_note
     if search_error:
         warning = "Recall search backend failed; fallback results may be incomplete."
         note = f"{note} | {warning}" if note else warning
