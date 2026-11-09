@@ -37,6 +37,8 @@ FAMILY_ALPHA: dict[str, float] = {
     # not query relevance. Keep an explicit zero so an opt-in diagnostic EvidenceOracle
     # cannot accidentally outrank an exact semantic hit.
     "evidence": 0.0,
+    # Starting value, to be tuned (#572): without it intent defaulted to 1.0, above semantic.
+    "intent": 0.4,
 }
 # Contradiction penalty strength by the contradiction's target.
 TARGET_LAMBDA: dict[OracleTarget, float] = {

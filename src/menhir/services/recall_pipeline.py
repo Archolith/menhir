@@ -924,7 +924,8 @@ async def _run_recall(
                         "freshness": str(FreshnessState.ACTIVE), "has_conflict": False,
                         "conflict_status": None, "source": CandidateSource.OBSERVATION,
                         "contributing_sources": frozenset({CandidateSource.OBSERVATION}),
-                        "retrieval_score_kind": RetrievalScoreKind.GRAPHITI_RRF,
+                        # Raw cosine in [0, 1], like scalar-history; not RRF (#572).
+                        "retrieval_score_kind": RetrievalScoreKind.SOURCE_PRIOR,
                         "bm25_rank": None, "cosine_rank": None, "content_rank": None,
                         "content_cosine": None, "is_superseded_view": False, "view_kind": None,
                     })
