@@ -1,3 +1,14 @@
+## 2026-11-13 - Loopback servers refuse requests addressed to other hosts (DNS rebinding)
+
+- A web page whose hostname re-resolves to 127.0.0.1 could reach a loopback-bound server from
+  the user's browser. It looked like a direct local caller: loopback peer, no forwarding header.
+  That reached three credential-free grants: the explorer, the no-auth mode's operator tier on
+  `/api` and `/mcp`, and the first-token bootstrap.
+- All three now also require the `Host` header to be `localhost`, a loopback IP, or absent.
+  Other requests fall through to normal authentication, or get a 401 in no-auth mode.
+- Reverse-proxied and token-authenticated requests are unchanged. A local client that addresses
+  the server by another name (for example the machine's hostname) needs a credential.
+
 ## 2026-11-12 - Saga journal tells the truth: failed merges close, stale writers are fenced, operators can resolve (#427, #404, #406)
 
 - A saga write the server itself rolled back (`ClientError`, `TransientError`) now closes its row
