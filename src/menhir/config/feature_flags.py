@@ -54,6 +54,8 @@ _SETTINGS = (
         'personal_memory', 'Run the scalar-state lane from the consolidation scheduler (LLM calls); set false to stop it.', True, ()),
     ('personal_memory_observation_dedup_enabled', 'MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED',
         True, 'personal_memory', 'Inject one observation per identical stated text; counted occurrences are never merged.', True, ()),
+    ('personal_memory_scalar_newer_mentions_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_NEWER_MENTIONS_ENABLED',
+        False, 'personal_memory', 'Keep a leading money View for the user advisory when a newer user turn mentions another value for its slot, and list that turn beside it; never sets the View value.', True, ()),
     ('personal_memory_consolidation_audit_enabled', 'MENHIR_PERSONAL_MEMORY_CONSOLIDATION_AUDIT_ENABLED', False,
         'personal_memory', 'Enable personal memory consolidation audit enabled.', False, ()),
     ('personal_memory_recall_audit_enabled', 'MENHIR_PERSONAL_MEMORY_RECALL_AUDIT_ENABLED', False,
@@ -174,11 +176,13 @@ _ENV_ONLY = (
 _REQUIRES = {
     "personal_memory_observation_dedup_enabled": ("personal_memory_scalar_state_enabled",),
     "personal_memory_counting_enabled": ("personal_memory_scalar_state_enabled",),
+    "personal_memory_scalar_newer_mentions_enabled": ("personal_memory_scalar_state_enabled",),
 }
 # These describe scoped prerequisites/data producers; they do not impose runtime validation.
 _REQUIREMENT_SCOPE = {
     "personal_memory_observation_dedup_enabled": "Dedup only acts on observations the scalar view authority lane injects.",
     "personal_memory_counting_enabled": "The counting lane runs after the scalar phase and reads scalar state.",
+    "personal_memory_scalar_newer_mentions_enabled": "Only leading scalar Views are checked; they exist once the scalar lane has run.",
 }
 _VERSIONED: frozenset[str] = frozenset()
 _OBSERVATION = frozenset({"frontier_shadow",

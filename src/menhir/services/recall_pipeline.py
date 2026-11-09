@@ -40,6 +40,7 @@ from menhir.domain.recall import (
     RetrievalScoreKind,
     ScalarAuthorityContributor,
     NewerApproximateValue,
+    NewerMention,
     ScalarAuthorityVerdict,
     ScoredMemory,
     SourceMemory,
@@ -80,6 +81,8 @@ logger = logging.getLogger(__name__)
 
 # Distinct newer attributes read per stale-lead check; a full page is treated as unproven (advisory).
 _STALE_LEAD_ATTR_LIMIT = 500
+# Episodes searched for newer mentions (#564); an LME namespace holds 1-39 embedded turns.
+_NEWER_MENTION_POOL = 20
 
 def _inferred_self_on(service: object) -> bool:
     """MENHIR_INFERRED_SELF_MODE observe/enforce: recall reads the inferred self tier too."""
@@ -1123,6 +1126,40 @@ async def _run_recall(
                 return sorted({str(r.get("attribute") or "") for r in rows
                                if related_attributes(attribute, str(r.get("attribute") or ""))})
 
+            from menhir.domain.newer_mentions import MENTION_VALUE_KINDS, newer_mentions
+            _mention_rows: dict[str, list[dict[str, Any]] | None] = {}
+
+            async def _newer_mentions(
+                subject_uuid: str, attribute: str, value_kind: str, unit: str, value: Any,
+                after: Any,
+            ) -> tuple[NewerMention, ...] | None:
+                """Newer user turns mentioning another value for a leading View's slot (#564).
+
+                () = the lead stands. None = the episode search failed; the caller keeps the lead
+                advisory, like the stale-lead read. Self subjects only: the turns are the user's
+                own words. One namespace-scoped search per recall, shared by every View; no subject
+                or resolved filter, because store-only and duplicate receipts carry neither."""
+                if (not tuning.scalar_newer_mentions or value_kind not in MENTION_VALUE_KINDS
+                        or not after):
+                    return ()
+                if subject_uuid not in (self_uuid_for_namespace(namespace),
+                                        inferred_self_uuid_for_namespace(namespace)):
+                    return ()
+                if "rows" not in _mention_rows:
+                    try:
+                        _mention_rows["rows"] = await asyncio.to_thread(
+                            service.graph_adapter.search_episode_embeddings,
+                            obs_vec, limit=_NEWER_MENTION_POOL, namespace=namespace,
+                            **_embedding_model_kwargs(service))
+                    except Exception:
+                        logger.exception("newer-mention search failed; leads stay advisory")
+                        _mention_rows["rows"] = None
+                rows = _mention_rows["rows"]
+                if rows is None:
+                    return None
+                return newer_mentions(attribute=attribute, value_kind=value_kind, unit=unit,
+                                      value=value, valid_at=after, episodes=rows)
+
             auth_added = 0
             _counted_verdicts_emitted = 0
             _verdict_min_sim = float(tuning.scalar_verdict_min_similarity or 0.0)
@@ -1390,6 +1427,12 @@ async def _run_recall(
                 if view_leads:
                     view_related_by = await _newer_related(subj, attr, vk, view.get("valid_at"))
                     view_leads = view_related_by == []
+                # Newer mention check (#564): a newer user turn naming another value keeps it advisory.
+                view_mentions: tuple[NewerMention, ...] | None = ()
+                if view_leads and not view_counted:
+                    view_mentions = await _newer_mentions(
+                        subj, attr, vk, un, view.get("value"), view.get("valid_at"))
+                    view_leads = view_mentions == ()
                 authority_candidate = {
                     "uuid": vuuid, "name": vname, "content": vname,
                     "scope": str(NodeScope.PERSISTENT), "memory_type": "SCALAR_STATE",
@@ -1446,6 +1489,7 @@ async def _run_recall(
                     count_actions=view.get("count_actions"),
                     count_items=view.get("count_items"),
                     newer_approximate=_listed_approximate(view_stale_by, _approx_by_id),
+                    newer_mentions=view_mentions or (),
                 ))
                 if _counted_authority_only and view.get("scalar_basis") == "counted":
                     _counted_verdicts_emitted += 1
@@ -1457,7 +1501,9 @@ async def _run_recall(
                              "effective_tier": tier, "tier_foundation": tier_foundation,
                              "user_foundation": user_foundation,
                              "stale_by": list(view_stale_by),
-                             "related_stale_by": view_related_by})
+                             "related_stale_by": view_related_by,
+                             "newer_mentions": (None if view_mentions is None
+                                                else [m.episode_uuid for m in view_mentions])})
                 auth_added += 1
             logger.debug("scalar-authority injection query=%r added=%d", query[:60], auth_added)
             # Lane summary: how many observations surfaced and how many authority annotations fired,

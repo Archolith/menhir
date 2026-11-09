@@ -291,6 +291,14 @@ class NewerApproximateValueResponse(BaseModel):
     valid_at: str | None = None
 
 
+class NewerMentionResponse(BaseModel):
+    episode_uuid: str
+    value: Any = None
+    quote: str
+    said_at: str | None = None
+    mood: str
+
+
 class ScalarAuthorityVerdictResponse(BaseModel):
     kind: str
     status: str
@@ -313,6 +321,7 @@ class ScalarAuthorityVerdictResponse(BaseModel):
     count_actions: str | None = None
     count_items: str | None = None
     newer_approximate: list[NewerApproximateValueResponse] = Field(default_factory=list)
+    newer_mentions: list[NewerMentionResponse] = Field(default_factory=list)
 
 
 class SourceMemoryResponse(BaseModel):

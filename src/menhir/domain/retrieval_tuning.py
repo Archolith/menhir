@@ -252,6 +252,9 @@ class RetrievalTuningConfig:
     enable_anchored_time_expiry: bool = True
     # One observation per identical stated text in the observation lane (MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED).
     enable_observation_dedup: bool = False
+    # #564 (MENHIR_PERSONAL_MEMORY_SCALAR_NEWER_MENTIONS_ENABLED): check newer user turns for a
+    # different value of a leading money View's slot (domain/newer_mentions.py).
+    scalar_newer_mentions: bool = False
 
     def __post_init__(self) -> None:
         # NaN fails this too: it would otherwise silently disable the gate.
