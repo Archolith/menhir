@@ -139,7 +139,7 @@ async def ready(request: Request) -> ReadyResponse:
     )
 
 
-def _log_api_recall_query(body: Any, result: dict[str, Any], namespace: str | None) -> None:
+def _log_api_recall_query(body: Any, result: dict[str, Any], resolved_namespace: str | None) -> None:
     """Opt-in recall query log for POST /api/recall; never raises."""
     try:
         from menhir.config import MemorySettings
@@ -153,7 +153,7 @@ def _log_api_recall_query(body: Any, result: dict[str, Any], namespace: str | No
             query=body.query,
             token=None,
             operation="api_recall",
-            namespace=namespace,
+            namespace=resolved_namespace,
             preset=str(result.get("preset") or body.preset),
             limit=body.limit,
             result_ids=[m.get("uuid") for m in rows],
@@ -183,6 +183,7 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
         recall_kwargs["counted_verdict_limit"] = body.counted_verdict_limit
     if body.source_memory_sources is not None:
         recall_kwargs["source_memory_sources"] = list(body.source_memory_sources)
+    resolved_namespace = _resolve_namespace(request, body.namespace)
     try:
         result = await backend.recall(
             body.query,
@@ -191,12 +192,12 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
             include_session=body.include_session,
             include_superseded=body.include_superseded,
             include_invalidated=body.include_invalidated,
-            namespace=_resolve_namespace(request, body.namespace),
+            namespace=resolved_namespace,
             **recall_kwargs,
         )
     except InvalidQueryPresetError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    _log_api_recall_query(body, result, _resolve_namespace(request, body.namespace))
+    _log_api_recall_query(body, result, resolved_namespace)
     return RecallResponse(
         query=str(result.get("query") or body.query),
         preset=str(result.get("preset") or body.preset),
