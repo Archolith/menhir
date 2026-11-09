@@ -447,3 +447,260 @@ def test_pinned_tokenizer_digest_matches_the_pinned_snapshot():
     from pathlib import Path
 
     assert cer._sha256(Path(model_dir) / "tokenizer.json") == cer.PINNED_FILES["tokenizer.json"]
+
+
+# --- security audit Low findings (.agent/reviews/menhir-552-rerank-security-audit-results.md) ---
+
+class _FakeOrt:
+    """Records what onnxruntime is given; enough for load_reranker."""
+
+    class SessionOptions:
+        pass
+
+    def __init__(self):
+        self.telemetry_off = 0
+        self.models = []
+
+    def disable_telemetry_events(self):
+        self.telemetry_off += 1
+
+    def get_available_providers(self):
+        return ["CPUExecutionProvider"]
+
+    def InferenceSession(self, model, options, providers):  # noqa: N802 - onnxruntime's name
+        self.models.append(model)
+        return SimpleNamespace(get_inputs=lambda: [SimpleNamespace(name="input_ids")])
+
+
+class _FakeTokenizer:
+    loaded: list[str] = []
+
+    @classmethod
+    def from_str(cls, text):
+        cls.loaded.append(text)
+        return cls()
+
+    def enable_truncation(self, *args, **kwargs):
+        pass
+
+    def no_padding(self):
+        pass
+
+
+@pytest.fixture
+def pinned_dir(monkeypatch, tmp_path):
+    import hashlib
+    import sys
+
+    model, tok = b"pinned onnx", b'{"pinned": "tokenizer"}'
+    (tmp_path / "model.onnx").write_bytes(model)
+    (tmp_path / "tokenizer.json").write_bytes(tok)
+    key = hashlib.sha256(model).hexdigest()
+    monkeypatch.setattr(cer, "PINNED_MODELS", {key: "fake pinned"})
+    monkeypatch.setattr(cer, "PINNED_TOKENIZERS", {key: hashlib.sha256(tok).hexdigest()})
+    ort = _FakeOrt()
+    _FakeTokenizer.loaded = []
+    monkeypatch.setitem(sys.modules, "onnxruntime", ort)
+    monkeypatch.setitem(sys.modules, "tokenizers", SimpleNamespace(Tokenizer=_FakeTokenizer))
+    return SimpleNamespace(path=tmp_path, model=model, tok=tok, ort=ort)
+
+
+def test_explicit_dir_refuses_a_tokenizer_that_is_not_pinned_to_the_model(pinned_dir):
+    """SEC-04: load_reranker used to hash only model.onnx."""
+    (pinned_dir.path / "tokenizer.json").write_bytes(b'{"swapped": true}')
+    with pytest.raises(cer.RerankDigestMismatch, match="not the tokenizer pinned"):
+        cer.load_reranker(str(pinned_dir.path), "cpu")
+    assert pinned_dir.ort.models == []
+
+
+def test_load_builds_from_the_bytes_it_hashed_and_turns_ort_telemetry_off(pinned_dir):
+    """SEC-03/09: the session and tokenizer get the checked bytes, never a path to reopen."""
+    scorer = cer.load_reranker(str(pinned_dir.path), "cpu")
+    assert scorer.label == "fake pinned"
+    assert pinned_dir.ort.models == [pinned_dir.model]
+    assert _FakeTokenizer.loaded == [pinned_dir.tok.decode()]
+    assert pinned_dir.ort.telemetry_off == 1
+
+
+def test_a_read_error_while_checking_a_file_is_rerank_unavailable(hub, monkeypatch):
+    """SEC-12: an OSError from hashing escaped fetch_pinned_model and broke hook recall."""
+    from pathlib import Path
+
+    cer.fetch_pinned_model(local_files_only=False)
+    real = Path.read_bytes
+
+    def failing(self):
+        if self.name == "tokenizer.json":
+            raise OSError("I/O error")
+        return real(self)
+
+    monkeypatch.setattr(Path, "read_bytes", failing)
+    with pytest.raises(cer.RerankUnavailable, match="could not read"):
+        cer.fetch_pinned_model(local_files_only=True)
+    assert cer.cached_model_dir_for_settings(_auto_settings()) == ""
+
+
+def test_download_sends_its_own_user_agent(hub):
+    """SEC-02: the default hub User-Agent names the agent harness and library versions."""
+    cer.fetch_pinned_model(local_files_only=False)
+    assert {kw["headers"]["user-agent"] for _, _, kw in hub.calls} == {cer.DOWNLOAD_USER_AGENT}
+
+
+def _redownload_hub(hub, monkeypatch, *, repaired):
+    import huggingface_hub
+
+    good, hub.tokenizer = hub.tokenizer, b"corrupt"
+
+    def download(repo_id, filename, **kw):
+        if kw.get("force_download") and repaired:
+            hub.tokenizer = good
+        existing = hub.snapshot / filename
+        if kw.get("force_download") and existing.is_file():
+            # Like huggingface_hub: a forced download refreshes the blob but keeps an existing
+            # snapshot entry, a plain copy where symlinks are unavailable.
+            hub.calls.append((repo_id, filename, kw))
+            return str(existing)
+        return hub(repo_id, filename, **kw)
+
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", download)
+    monkeypatch.setattr(cer, "load_reranker", lambda d, dev: None)
+
+
+def test_a_cached_copy_failing_its_pin_is_downloaded_again_once(hub, monkeypatch):
+    """SEC-11: a bad cached file used to leave the server on the floor until someone cleared it."""
+    _redownload_hub(hub, monkeypatch, repaired=True)
+    target = SimpleNamespace(rerank_model_dir="")
+    cer.start_model_fetch(_auto_settings(), target).join(10)
+    assert target.rerank_model_dir == str(hub.snapshot)
+    assert [kw.get("force_download") for _, _, kw in hub.calls].count(True) == 2  # both files, once
+
+
+def test_a_redownload_that_still_fails_its_pin_gives_up(hub, monkeypatch):
+    _redownload_hub(hub, monkeypatch, repaired=False)
+    target = SimpleNamespace(rerank_model_dir="")
+    cer.start_model_fetch(_auto_settings(), target).join(10)
+    assert target.rerank_model_dir == ""
+    assert [kw.get("force_download") for _, _, kw in hub.calls].count(True) == 1  # tokenizer, then stop
+
+
+def test_a_second_start_joins_the_running_fetch_and_both_services_get_the_model(hub, monkeypatch):
+    """SEC-15: each runtime-init retry used to start another fetch thread."""
+    import threading
+
+    gate, loads = threading.Event(), []
+
+    def load(model_dir, device):
+        loads.append(model_dir)
+        assert gate.wait(10)
+
+    monkeypatch.setattr(cer, "load_reranker", load)
+    first, second = SimpleNamespace(rerank_model_dir=""), SimpleNamespace(rerank_model_dir="")
+    thread = cer.start_model_fetch(_auto_settings(), first)
+    assert cer.start_model_fetch(_auto_settings(), second) is thread
+    gate.set()
+    thread.join(10)
+    assert loads == [str(hub.snapshot)]
+    assert first.rerank_model_dir == second.rerank_model_dir == str(hub.snapshot)
+    later = cer.start_model_fetch(_auto_settings(), SimpleNamespace(rerank_model_dir=""))
+    assert later is not thread  # a finished fetch does not block a new one
+    later.join(10)
+
+
+def test_a_fetch_thread_that_fails_to_start_does_not_block_later_starts(hub, monkeypatch):
+    import threading
+
+    monkeypatch.setattr(cer, "load_reranker", lambda d, dev: None)
+    real_start = threading.Thread.start
+
+    def refuse(self):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", refuse)
+    with pytest.raises(RuntimeError):
+        cer.start_model_fetch(_auto_settings(), SimpleNamespace(rerank_model_dir=""))
+    monkeypatch.setattr(threading.Thread, "start", real_start)
+    target = SimpleNamespace(rerank_model_dir="")
+    cer.start_model_fetch(_auto_settings(), target).join(10)
+    assert target.rerank_model_dir == str(hub.snapshot)
+
+
+def test_scoring_runs_one_at_a_time():
+    """SEC-06: concurrent recalls queue for the scorer instead of oversubscribing the CPU."""
+    import threading
+    import time
+
+    import numpy as np
+
+    state = {"active": 0, "peak": 0}
+    lock = threading.Lock()
+
+    class Session:
+        def run(self, _outputs, feed):
+            with lock:
+                state["active"] += 1
+                state["peak"] = max(state["peak"], state["active"])
+            time.sleep(0.05)
+            with lock:
+                state["active"] -= 1
+            return [np.zeros((len(feed["input_ids"]), 1))]
+
+    class Tok:
+        def encode(self, query, passage):
+            return SimpleNamespace(ids=[1, 2], attention_mask=[1, 1], type_ids=[0, 1])
+
+    scorer = cer.OnnxCrossEncoder(session=Session(), tokenizer=Tok(),
+                                  input_names=frozenset({"input_ids"}), label="t", device="cpu")
+    threads = [threading.Thread(target=scorer.score, args=(QUERY, ["a", "b"])) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    assert state["peak"] == 1
+
+
+def test_recall_lab_caps_rerank_top_n_at_100():
+    """SEC-05: Lab runs many arms per request, so it gets a lower cap than the setting."""
+    from pydantic import ValidationError
+
+    assert RecallLabTuning(rerank_top_n=100).rerank_top_n == 100
+    with pytest.raises(ValidationError):
+        RecallLabTuning(rerank_top_n=101)
+
+
+def test_disabled_rerank_gives_no_model_dir_even_when_one_is_set(monkeypatch):
+    """SEC-07: tunings that default the rerank on (Lab, view-entropy) must stay off when it is off."""
+    from menhir.core.bootstrap import build_memory_services
+
+    assert cer.cached_model_dir_for_settings(
+        _auto_settings(recall_rerank_enabled=False, recall_rerank_model_dir="/m")) == ""
+
+    class Inert:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class FakeGraphiti:
+        @classmethod
+        def from_settings_with_capabilities(cls, settings, **kwargs):
+            return SimpleNamespace()
+
+    class FakeLLM:
+        @classmethod
+        def from_settings(cls, settings):
+            return SimpleNamespace()
+
+    captured = {}
+
+    class FakeRecall:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("menhir.core.bootstrap.Neo4jRepository", Inert)
+    monkeypatch.setattr("menhir.core.bootstrap.MemoryGraphAdapter", Inert)
+    monkeypatch.setattr("menhir.core.bootstrap.GraphitiClient", FakeGraphiti)
+    monkeypatch.setattr("menhir.core.bootstrap.LLMAdapter", FakeLLM)
+    monkeypatch.setattr("menhir.core.bootstrap.RecallService", FakeRecall)
+    monkeypatch.setattr(cer, "preload_for_settings", lambda settings: None)
+    build_memory_services(settings=MemorySettings(recall_rerank_enabled=False, recall_rerank_model_dir="/m"))
+    assert captured["rerank_model_dir"] == ""
+    build_memory_services(settings=MemorySettings(recall_rerank_model_dir="/m"))
+    assert captured["rerank_model_dir"] == "/m"

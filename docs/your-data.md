@@ -92,6 +92,13 @@ erasure journal and the erased-id suppression record.
 - The memory body, its diff, and captured turns are sent to the LLM and embedder you configure
   (`LOCAL_LLM_BASE_URL` for a local model, otherwise OpenAI). That provider's policy applies.
 - Graphiti's PostHog telemetry is off by default.
+- Recall rerank model download: unless `MENHIR_RECALL_RERANK_MODEL_DIR` is set or
+  `MENHIR_RECALL_RERANK_AUTO_DOWNLOAD=false`, a long-running server downloads about 92 MB from
+  Hugging Face (`HF_ENDPOINT`, default huggingface.co) at startup. No memory, query or token is
+  sent. The request says `menhir-recall-rerank` as its User-Agent. huggingface_hub may also fetch
+  its agent registry from the same host about once a day; `HF_HUB_DISABLE_TELEMETRY=1` stops that.
+  Whatever the endpoint serves must match the pinned digests or it is not loaded. Hooks never
+  download. ONNX Runtime's telemetry events are turned off when the model loads.
 
 ## Local vs hosted
 

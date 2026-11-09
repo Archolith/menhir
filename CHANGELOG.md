@@ -1,3 +1,19 @@
+## 2026-11-09 - Recall rerank hardening (security audit Low findings)
+
+- The tokenizer is now digest-pinned on every load, including an explicit
+  `MENHIR_RECALL_RERANK_MODEL_DIR`. Model and tokenizer are read once, checked, and built from
+  those bytes, so a file swapped after the check is never loaded.
+- A cached copy that fails its pin is downloaded again once at server start, instead of leaving
+  recall on the RRF floor until someone clears the cache. A read error while checking a file now
+  keeps the floor instead of breaking hook recall.
+- `MENHIR_RECALL_RERANK_ENABLED=false` now gives recall no model dir anywhere, so Recall Lab
+  arms and other tunings that default the rerank on stay off.
+- Scoring runs one call at a time per process. Recall Lab caps `rerank_top_n` at 100. A
+  runtime-init retry joins the running model fetch instead of starting another.
+- The download sends User-Agent `menhir-recall-rerank` instead of huggingface_hub's default,
+  which names the agent harness. ONNX Runtime telemetry events are turned off at load.
+  `docs/your-data.md` lists the download under what leaves your machine.
+
 ## 2026-11-08 - Cross-encoder recall rerank (on by default, model downloads itself)
 
 - `MENHIR_RECALL_RERANK_ENABLED` (default true) orders the first `MENHIR_RECALL_RERANK_TOP_N`

@@ -26,22 +26,33 @@ BATCH_SIZE = 16
 
 # sha256 of model.onnx -> model label. Unknown files are refused, so a swapped model cannot
 # silently change ranking.
+_MINILM_ONNX = "5d3e70fd0c9ff14b9b5169a51e957b7a9c74897afd0a35ce4bd318150c1d4d4a"
+_MINILM_TOKENIZER = "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
 PINNED_MODELS = {
-    "5d3e70fd0c9ff14b9b5169a51e957b7a9c74897afd0a35ce4bd318150c1d4d4a":
-        "cross-encoder/ms-marco-MiniLM-L6-v2@233902d25c440f23af6f7d6e94d2946bac0bee0a onnx fp32",
+    _MINILM_ONNX: "cross-encoder/ms-marco-MiniLM-L6-v2@233902d25c440f23af6f7d6e94d2946bac0bee0a onnx fp32",
 }
+# model.onnx sha256 -> the tokenizer.json sha256 it must load with (a swapped tokenizer changes
+# ranking as much as a swapped model).
+PINNED_TOKENIZERS = {_MINILM_ONNX: _MINILM_TOKENIZER}
 # Auto download (no MENHIR_RECALL_RERANK_MODEL_DIR): exactly these files at this revision.
 # None means the digest is checked elsewhere (load_reranker checks model.onnx on every load).
 PINNED_REPO = "cross-encoder/ms-marco-MiniLM-L6-v2"
 PINNED_REVISION = "233902d25c440f23af6f7d6e94d2946bac0bee0a"
 PINNED_FILES: dict[str, str | None] = {
-    "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66",
+    "tokenizer.json": _MINILM_TOKENIZER,
     "onnx/model.onnx": None,
 }
+# Sent in place of huggingface_hub's default User-Agent, which names the detected agent harness
+# and local library versions (SEC-02).
+DOWNLOAD_USER_AGENT = "menhir-recall-rerank"
 
 
 class RerankUnavailable(RuntimeError):
     """The reranker cannot run as configured; the message names the next step."""
+
+
+class RerankDigestMismatch(RerankUnavailable):
+    """A model or tokenizer file is not the pinned one."""
 
 
 class PairScorer(Protocol):
@@ -59,6 +70,14 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _read(path: Path) -> bytes:
+    """A pinned file's bytes. Callers hash and use these same bytes, never the path again (SEC-03)."""
+    try:
+        return path.read_bytes()
+    except OSError as exc:
+        raise RerankUnavailable(f"could not read {path} ({type(exc).__name__})") from exc
+
+
 def _import_runtime() -> tuple[Any, Any]:
     try:
         import onnxruntime  # type: ignore[import-not-found]
@@ -68,6 +87,12 @@ def _import_runtime() -> tuple[Any, Any]:
             "recall rerank needs onnxruntime and tokenizers (Menhir dependencies; reinstall "
             "archolith-menhir), or set MENHIR_RECALL_RERANK_ENABLED=false"
         ) from exc
+    disable = getattr(onnxruntime, "disable_telemetry_events", None)
+    if disable is not None:
+        try:
+            disable()
+        except Exception:  # noqa: BLE001 - telemetry opt-out must never block loading
+            pass
     return onnxruntime, Tokenizer
 
 
@@ -102,6 +127,13 @@ class OnnxCrossEncoder:
     def score(self, query: str, passages: Sequence[str]) -> list[float]:
         if not passages:
             return []
+        # One scoring at a time per process: each run already uses ONNX Runtime's full intra-op
+        # pool, so concurrent recalls (or a many-arm Recall Lab run) queue instead of
+        # oversubscribing the CPU (SEC-06).
+        with _SCORE_SLOT:
+            return self._score(query, passages)
+
+    def _score(self, query: str, passages: Sequence[str]) -> list[float]:
         import numpy as np
 
         encodings = [self.tokenizer.encode(query, passage) for passage in passages]
@@ -129,6 +161,7 @@ class OnnxCrossEncoder:
 
 _CACHE: dict[tuple[str, str], PairScorer] = {}
 _LOCK = threading.Lock()
+_SCORE_SLOT = threading.BoundedSemaphore(1)
 
 
 def load_reranker(model_dir: str, device: str = "auto") -> PairScorer:
@@ -149,17 +182,24 @@ def load_reranker(model_dir: str, device: str = "auto") -> PairScorer:
         tok = root / "tokenizer.json"
         if model is None or not tok.is_file():
             raise RerankUnavailable(f"{root} must contain tokenizer.json and model.onnx (or onnx/model.onnx)")
-        digest = _sha256(model)
+        # Read each file once, check its digest, and build from those bytes (SEC-03/04).
+        model_bytes = _read(model)
+        digest = hashlib.sha256(model_bytes).hexdigest()
         label = PINNED_MODELS.get(digest)
         if label is None:
-            raise RerankUnavailable(
+            raise RerankDigestMismatch(
                 f"{model} has sha256 {digest}, which is not a pinned rerank model; refusing to load it"
+            )
+        tok_bytes = _read(tok)
+        if hashlib.sha256(tok_bytes).hexdigest() != PINNED_TOKENIZERS.get(digest):
+            raise RerankDigestMismatch(
+                f"{tok} is not the tokenizer pinned for {label}; refusing to load it"
             )
         ort, tokenizer_cls = _import_runtime()
         providers = select_providers(device, ort.get_available_providers())
         options = ort.SessionOptions()
-        session = ort.InferenceSession(str(model), options, providers=providers)
-        tokenizer = tokenizer_cls.from_file(str(tok))
+        session = ort.InferenceSession(model_bytes, options, providers=providers)
+        tokenizer = tokenizer_cls.from_str(tok_bytes.decode("utf-8"))
         tokenizer.enable_truncation(MAX_LENGTH, strategy="only_second")
         tokenizer.no_padding()
         scorer = OnnxCrossEncoder(
@@ -273,9 +313,12 @@ def preload_for_settings(settings: Any) -> PairScorer | None:
     return load_reranker(settings.recall_rerank_model_dir, settings.recall_rerank_device)
 
 
-def fetch_pinned_model(*, local_files_only: bool, cache_dir: str | None = None) -> str:
+def fetch_pinned_model(
+    *, local_files_only: bool, cache_dir: str | None = None, force_download: bool = False,
+) -> str:
     """The pinned model's snapshot dir in the Hugging Face cache, downloading it unless
-    ``local_files_only``. Raises RerankUnavailable.
+    ``local_files_only`` (``force_download`` replaces cached copies). Raises RerankUnavailable,
+    or RerankDigestMismatch when a file is not the pinned one.
 
     huggingface_hub writes each file to a temp name and renames it under a file lock, so peer
     processes fetching at once never see a partial file. The tokenizer digest is checked here;
@@ -289,6 +332,16 @@ def fetch_pinned_model(*, local_files_only: bool, cache_dir: str | None = None) 
         from huggingface_hub import hf_hub_download, try_to_load_from_cache
     except ModuleNotFoundError as exc:
         raise RerankUnavailable("recall rerank auto download needs huggingface_hub") from exc
+    if force_download and not local_files_only:
+        # huggingface_hub refreshes the blob but keeps an existing snapshot entry, which is a
+        # plain copy where symlinks are unavailable (Windows): drop ours so it is rebuilt.
+        for name in PINNED_FILES:
+            found = try_to_load_from_cache(PINNED_REPO, name, cache_dir=cache_dir, revision=PINNED_REVISION)
+            if isinstance(found, str):
+                try:
+                    Path(found).unlink(missing_ok=True)
+                except OSError:
+                    pass  # the download below then fails its pin again and recall keeps the floor
     roots: set[Path] = set()
     for name, digest in PINNED_FILES.items():
         try:
@@ -301,14 +354,15 @@ def fetch_pinned_model(*, local_files_only: bool, cache_dir: str | None = None) 
             else:
                 path = Path(hf_hub_download(
                     PINNED_REPO, name, revision=PINNED_REVISION, cache_dir=cache_dir, token=False,
+                    force_download=force_download, headers={"user-agent": DOWNLOAD_USER_AGENT},
                 ))
         except Exception as exc:  # offline, not cached, network or hub error: all mean "no model"
             verb = "find a cached" if local_files_only else "download"
             raise RerankUnavailable(
                 f"could not {verb} {PINNED_REPO}/{name} ({type(exc).__name__})"
             ) from exc
-        if digest is not None and _sha256(path) != digest:
-            raise RerankUnavailable(f"{path} does not match its pinned sha256; refusing to use it")
+        if digest is not None and hashlib.sha256(_read(path)).hexdigest() != digest:
+            raise RerankDigestMismatch(f"{path} does not match its pinned sha256; refusing to use it")
         roots.add(path.parents[len(Path(name).parts) - 1])
     if len(roots) != 1:
         raise RerankUnavailable(f"pinned model files resolved to different snapshots: {sorted(roots)}")
@@ -318,8 +372,10 @@ def fetch_pinned_model(*, local_files_only: bool, cache_dir: str | None = None) 
 def cached_model_dir_for_settings(settings: Any) -> str:
     """Model dir for a short-lived process (hooks): the explicit dir, else an already cached
     pinned model when auto download is on, else "". Never downloads."""
+    if not getattr(settings, "recall_rerank_enabled", False):
+        return ""  # off means no model dir anywhere, so no tuning default can turn it back on (SEC-07)
     explicit = str(getattr(settings, "recall_rerank_model_dir", "") or "").strip()
-    if explicit or not getattr(settings, "recall_rerank_enabled", False):
+    if explicit:
         return explicit
     if not getattr(settings, "recall_rerank_auto_download", True):
         return ""
@@ -329,12 +385,21 @@ def cached_model_dir_for_settings(settings: Any) -> str:
         return ""
 
 
+_FETCH_LOCK = threading.Lock()
+_fetch_thread: threading.Thread | None = None
+_fetch_targets: list[Any] = []
+
+
 def start_model_fetch(settings: Any, target: Any) -> threading.Thread | None:
     """Long-running servers: fetch and load the pinned model in the background, then set
     ``target.rerank_model_dir`` so recall starts reranking. Boot never waits on the network;
     until then, and on any failure, recall keeps the RRF floor. Returns the thread, or None
     when rerank is off, a model dir is set explicitly, or auto download is off.
+
+    One fetch per process: a call while one runs (a runtime-init retry) joins it, and the
+    finished fetch sets every waiting target (SEC-15).
     """
+    global _fetch_thread
     if (
         target is None
         or not getattr(settings, "recall_rerank_enabled", False)
@@ -345,21 +410,48 @@ def start_model_fetch(settings: Any, target: Any) -> threading.Thread | None:
     device = str(getattr(settings, "recall_rerank_device", "auto"))
     log = logging.getLogger(__name__)
 
+    def fetch_and_load(force: bool) -> str:
+        model_dir = fetch_pinned_model(local_files_only=False, force_download=force)
+        load_reranker(model_dir, device)
+        return model_dir
+
     def run() -> None:
+        global _fetch_thread
+        model_dir = ""
         try:
-            model_dir = fetch_pinned_model(local_files_only=False)
-            load_reranker(model_dir, device)
+            try:
+                model_dir = fetch_and_load(False)
+            except RerankDigestMismatch as exc:
+                # A corrupt or tampered cached copy is never repaired by retrying from the
+                # cache: download once more over it, then give up (SEC-11).
+                log.warning("recall rerank cached model failed its pin, downloading again: %s", exc)
+                model_dir = fetch_and_load(True)
         except RerankUnavailable as exc:
             log.warning("recall rerank model unavailable, recall keeps the RRF floor: %s", exc)
-            return
         except Exception as exc:  # never let a background fetch take the server down
             log.warning("recall rerank model fetch failed (%s); recall keeps the RRF floor",
                         type(exc).__name__)
-            return
-        # Set only after a verified load, so recall never sees a dir that cannot load.
-        target.rerank_model_dir = model_dir
-        log.info("recall rerank ready: %s on %s", PINNED_REPO, device)
+        with _FETCH_LOCK:
+            # Set only after a verified load, so recall never sees a dir that cannot load.
+            for waiting in _fetch_targets:
+                if model_dir:
+                    waiting.rerank_model_dir = model_dir
+            _fetch_targets.clear()
+            _fetch_thread = None
+        if model_dir:
+            log.info("recall rerank ready: %s on %s", PINNED_REPO, device)
 
-    thread = threading.Thread(target=run, name="menhir-rerank-fetch", daemon=True)
-    thread.start()
-    return thread
+    with _FETCH_LOCK:
+        _fetch_targets.append(target)
+        if _fetch_thread is not None:
+            return _fetch_thread
+        thread = threading.Thread(target=run, name="menhir-rerank-fetch", daemon=True)
+        _fetch_thread = thread
+        try:
+            thread.start()
+        except BaseException:
+            # A thread that never ran must not make every later start join it.
+            _fetch_thread = None
+            _fetch_targets.clear()
+            raise
+        return thread
