@@ -37,6 +37,8 @@ MANIFEST = REPO / "THIRD-PARTY-LICENSES.txt"
 _OFF_PLATFORM: dict[str, tuple[str, str]] = {
     "jeepney": ("MIT", "https://gitlab.com/takluyver/jeepney"),
     "secretstorage": ("BSD-3-Clause", "https://github.com/mitya57/secretstorage"),
+    # emscripten-only transport of httpx2 (via huggingface-hub, from the `rerank` extra's tokenizers)
+    "httpx2-jsfetch": ("BSD-3-Clause", "https://pypi.org/project/httpx2-jsfetch/"),
 }
 
 _NORM = lambda s: re.sub(r"[-_.]+", "-", s).lower()  # noqa: E731  (PEP 503)

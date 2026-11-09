@@ -219,6 +219,11 @@ def build_memory_services(
             else ""
         ),
     )
+    # Fails startup when a rerank model dir is set but cannot load (files, digest, runtime, CUDA).
+    # With no model dir, core/runtime.py starts the pinned background fetch.
+    from menhir.services.cross_encoder_rerank import preload_for_settings
+
+    preload_for_settings(settings)
     recall_service = RecallService(
         graphiti_client=graphiti_client,
         graph_adapter=graph_adapter,
@@ -233,6 +238,8 @@ def build_memory_services(
             and settings.personal_memory_scalar_state_enabled
         ),
         read_only=read_only,
+        rerank_model_dir=settings.recall_rerank_model_dir,
+        rerank_device=settings.recall_rerank_device,
     )
     context_builder = ContextBuilderService(
         recall_service=recall_service,

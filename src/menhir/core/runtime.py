@@ -723,6 +723,11 @@ async def _initialize_services(
         read_only=candidate_readonly,
     )
     record_lifecycle_event(component="runtime_init", event="build_memory_services", state="completed")
+    # No model dir set: fetch the pinned rerank model in the background; recall keeps the RRF
+    # floor until it has loaded (services/cross_encoder_rerank.py).
+    from menhir.services.cross_encoder_rerank import start_model_fetch
+
+    start_model_fetch(settings, getattr(built, "recall_service", None))
 
     if candidate_readonly:
         from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
