@@ -1979,9 +1979,11 @@ def _claim_groups(
 
     `align_spans=True`: group by same episode + a COMMON span intersection, at most one proposal per
     sample. Common intersection rather than chained pairwise overlap -- chaining drags
-    non-overlapping A and C together through a long B that touches both. Ambiguous groups (two
-    proposals from ONE sample in the same component) are left ungrouped, so the worst case is the
-    status quo, never a wrong merge. Singletons pass through unchanged.
+    non-overlapping A and C together through a long B that touches both. An ambiguous component
+    (two proposals from ONE sample) is first split by claim kind, (value_kind, unit), because one
+    sample often reads a span as both a status and an amount (#564); any part that is still
+    ambiguous is left ungrouped, so the worst case is the status quo, never a wrong merge.
+    Singletons pass through unchanged.
 
     `resolve_bridges=True` (counting match lane): an ambiguous component first sets aside its
     bridges (`_drop_bridges`), so one sample's list-wide quote no longer vetoes the item-level
@@ -2008,7 +2010,8 @@ def _claim_groups(
             if len(component) < 2:
                 continue
             parts = [component]
-            if split_by_attribute and len({flat[i][0] for i in component}) != len(component):
+            ambiguous = len({flat[i][0] for i in component}) != len(component)
+            if split_by_attribute and ambiguous:
                 # v2 (F12): one sample read the span as two happenings. Split the component by
                 # attribute so each reading is its own claim, instead of leaving all ungrouped.
                 by_attr: dict[str, list[int]] = {}
@@ -2016,6 +2019,19 @@ def _claim_groups(
                     by_attr.setdefault(flat[i][1].attribute, []).append(i)
                 if len(by_attr) > 1:
                     parts = [p for p in by_attr.values() if len(p) >= 2]
+            elif ambiguous:
+                # #564: one sample read the span as claims of different KINDS ("pre-approved" as a
+                # status and "$350,000" as money). Split by (value_kind, unit), which the samples
+                # agree on even when they name the attribute differently, so the other samples'
+                # agreement on the amount still forms a group. A kind that one sample still read
+                # twice stays ungrouped below, so the worst case remains the status quo.
+                by_kind: dict[tuple[str, str], list[int]] = {}
+                for i in component:
+                    p = flat[i][1]
+                    key = (str(p.value_kind).strip().lower(), str(p.unit or "").strip().lower())
+                    by_kind.setdefault(key, []).append(i)
+                if len(by_kind) > 1:
+                    parts = [p for p in by_kind.values() if len(p) >= 2]
             if resolve_bridges:
                 parts = [sub for part in parts for sub in _drop_bridges(flat, part)]
             for part in parts:
