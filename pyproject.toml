@@ -40,13 +40,11 @@ dependencies = [
     "tiktoken>=0.8,<1",
     # anchored-time resolver: dates of named holidays used as event anchors
     "holidays>=0.60,<1",
-]
-
-[project.optional-dependencies]
-# Cross-encoder recall rerank (MENHIR_RECALL_RERANK_ENABLED). For CUDA, install onnxruntime-gpu instead.
-rerank = [
+    # cross-encoder recall rerank (services/cross_encoder_rerank.py): runtime, tokenizer, and the
+    # pinned model download. For CUDA, replace onnxruntime with onnxruntime-gpu.
     "onnxruntime>=1.20,<2",
     "tokenizers>=0.20,<1",
+    "huggingface-hub>=0.26,<3",
 ]
 
 [project.urls]

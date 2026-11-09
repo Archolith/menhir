@@ -1,9 +1,11 @@
-"""Optional cross-encoder rerank for recall (default off).
+"""Cross-encoder rerank for recall (default on).
 
 A frozen local cross-encoder scores ``(query, "name: summary")`` pairs so recall can order its
-candidates by relevance instead of cutting them at the RRF rank floor. It needs the ``rerank``
-extra (``onnxruntime`` and ``tokenizers``) and a model directory holding ``model.onnx`` and
-``tokenizer.json`` (``model.onnx`` may sit under ``onnx/``, as in a Hugging Face snapshot) whose ONNX digest is in ``PINNED_MODELS``. Evidence and plan:
+candidates by relevance instead of cutting them at the RRF rank floor. The model comes from
+``MENHIR_RECALL_RERANK_MODEL_DIR`` (a dir holding ``model.onnx``, or ``onnx/model.onnx`` as in a
+Hugging Face snapshot, plus ``tokenizer.json``) or, when that is unset, from a pinned download
+into the Hugging Face cache (``start_model_fetch``). The ONNX digest must be in ``PINNED_MODELS``.
+Evidence and plan:
 ``.agent/plans/menhir-recall-cross-encoder-rerank-plan-2026-11-08.md`` (workspace root).
 """
 
@@ -27,6 +29,14 @@ BATCH_SIZE = 16
 PINNED_MODELS = {
     "5d3e70fd0c9ff14b9b5169a51e957b7a9c74897afd0a35ce4bd318150c1d4d4a":
         "cross-encoder/ms-marco-MiniLM-L6-v2@233902d25c440f23af6f7d6e94d2946bac0bee0a onnx fp32",
+}
+# Auto download (no MENHIR_RECALL_RERANK_MODEL_DIR): exactly these files at this revision.
+# None means the digest is checked elsewhere (load_reranker checks model.onnx on every load).
+PINNED_REPO = "cross-encoder/ms-marco-MiniLM-L6-v2"
+PINNED_REVISION = "233902d25c440f23af6f7d6e94d2946bac0bee0a"
+PINNED_FILES: dict[str, str | None] = {
+    "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66",
+    "onnx/model.onnx": None,
 }
 
 
@@ -55,8 +65,8 @@ def _import_runtime() -> tuple[Any, Any]:
         from tokenizers import Tokenizer  # type: ignore[import-not-found]
     except ModuleNotFoundError as exc:
         raise RerankUnavailable(
-            "recall rerank needs the 'rerank' extra: pip install 'archolith-menhir[rerank]' "
-            "(onnxruntime and tokenizers), or set MENHIR_RECALL_RERANK_ENABLED=false"
+            "recall rerank needs onnxruntime and tokenizers (Menhir dependencies; reinstall "
+            "archolith-menhir), or set MENHIR_RECALL_RERANK_ENABLED=false"
         ) from exc
     return onnxruntime, Tokenizer
 
@@ -254,8 +264,91 @@ def preload_for_settings(settings: Any) -> PairScorer | None:
     if not getattr(settings, "recall_rerank_enabled", False):
         return None
     if not str(getattr(settings, "recall_rerank_model_dir", "") or "").strip():
-        logging.getLogger(__name__).info(
-            "recall rerank is on but MENHIR_RECALL_RERANK_MODEL_DIR is unset; recall keeps the RRF floor"
-        )
+        if not getattr(settings, "recall_rerank_auto_download", True):
+            logging.getLogger(__name__).info(
+                "recall rerank is on, but MENHIR_RECALL_RERANK_MODEL_DIR is unset and auto download "
+                "is off; recall keeps the RRF floor"
+            )
         return None
     return load_reranker(settings.recall_rerank_model_dir, settings.recall_rerank_device)
+
+
+def fetch_pinned_model(*, local_files_only: bool, cache_dir: str | None = None) -> str:
+    """The pinned model's snapshot dir in the Hugging Face cache, downloading it unless
+    ``local_files_only``. Raises RerankUnavailable.
+
+    huggingface_hub writes each file to a temp name and renames it under a file lock, so peer
+    processes fetching at once never see a partial file. The tokenizer digest is checked here;
+    the model digest is checked by load_reranker on every load. No HF token is sent.
+    """
+    try:
+        from huggingface_hub import hf_hub_download
+    except ModuleNotFoundError as exc:
+        raise RerankUnavailable("recall rerank auto download needs huggingface_hub") from exc
+    roots: set[Path] = set()
+    for name, digest in PINNED_FILES.items():
+        try:
+            path = Path(hf_hub_download(
+                PINNED_REPO, name, revision=PINNED_REVISION, cache_dir=cache_dir,
+                local_files_only=local_files_only, token=False,
+            ))
+        except Exception as exc:  # offline, not cached, network or hub error: all mean "no model"
+            verb = "find a cached" if local_files_only else "download"
+            raise RerankUnavailable(
+                f"could not {verb} {PINNED_REPO}/{name} ({type(exc).__name__})"
+            ) from exc
+        if digest is not None and _sha256(path) != digest:
+            raise RerankUnavailable(f"{path} does not match its pinned sha256; refusing to use it")
+        roots.add(path.parents[len(Path(name).parts) - 1])
+    if len(roots) != 1:
+        raise RerankUnavailable(f"pinned model files resolved to different snapshots: {sorted(roots)}")
+    return str(roots.pop())
+
+
+def cached_model_dir_for_settings(settings: Any) -> str:
+    """Model dir for a short-lived process (hooks): the explicit dir, else an already cached
+    pinned model when auto download is on, else "". Never downloads."""
+    explicit = str(getattr(settings, "recall_rerank_model_dir", "") or "").strip()
+    if explicit or not getattr(settings, "recall_rerank_enabled", False):
+        return explicit
+    if not getattr(settings, "recall_rerank_auto_download", True):
+        return ""
+    try:
+        return fetch_pinned_model(local_files_only=True)
+    except RerankUnavailable:
+        return ""
+
+
+def start_model_fetch(settings: Any, target: Any) -> threading.Thread | None:
+    """Long-running servers: fetch and load the pinned model in the background, then set
+    ``target.rerank_model_dir`` so recall starts reranking. Boot never waits on the network;
+    until then, and on any failure, recall keeps the RRF floor. Returns the thread, or None
+    when rerank is off, a model dir is set explicitly, or auto download is off.
+    """
+    if (
+        not getattr(settings, "recall_rerank_enabled", False)
+        or str(getattr(settings, "recall_rerank_model_dir", "") or "").strip()
+        or not getattr(settings, "recall_rerank_auto_download", True)
+    ):
+        return None
+    device = str(getattr(settings, "recall_rerank_device", "auto"))
+    log = logging.getLogger(__name__)
+
+    def run() -> None:
+        try:
+            model_dir = fetch_pinned_model(local_files_only=False)
+            load_reranker(model_dir, device)
+        except RerankUnavailable as exc:
+            log.warning("recall rerank model unavailable, recall keeps the RRF floor: %s", exc)
+            return
+        except Exception as exc:  # never let a background fetch take the server down
+            log.warning("recall rerank model fetch failed (%s); recall keeps the RRF floor",
+                        type(exc).__name__)
+            return
+        # Set only after a verified load, so recall never sees a dir that cannot load.
+        target.rerank_model_dir = model_dir
+        log.info("recall rerank ready: %s on %s", PINNED_REPO, device)
+
+    thread = threading.Thread(target=run, name="menhir-rerank-fetch", daemon=True)
+    thread.start()
+    return thread

@@ -58,6 +58,7 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
     try:
         from menhir.infrastructure.graphiti_client import GraphitiClient
         from menhir.services.context_builder import ContextBuilderService
+        from menhir.services.cross_encoder_rerank import cached_model_dir_for_settings
         from menhir.services.recall_service import RecallService
         from menhir.services.scoring_service import ScoringService
 
@@ -74,8 +75,9 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
             # Same tier view as the backend's recall (core/bootstrap.py), so hook context agrees.
             inferred_self_mode=str(getattr(settings, "inferred_self_mode", "enforce")),
             counting_enabled=counting_enabled,
-            # No preload: a hook process that cannot load the reranker keeps the floor per call.
-            rerank_model_dir=str(getattr(settings, "recall_rerank_model_dir", "")),
+            # No preload or download: a hook uses the explicit or already cached model, else
+            # keeps the floor.
+            rerank_model_dir=cached_model_dir_for_settings(settings),
             rerank_device=str(getattr(settings, "recall_rerank_device", "auto")),
         )
         context_builder = ContextBuilderService(

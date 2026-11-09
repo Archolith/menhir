@@ -219,8 +219,8 @@ def build_memory_services(
             else ""
         ),
     )
-    # Fails startup when a rerank model dir is set but cannot load (missing extra, files, digest,
-    # CUDA). With no model dir the rerank is inert.
+    # Fails startup when a rerank model dir is set but cannot load (files, digest, runtime, CUDA).
+    # With no model dir, core/runtime.py starts the pinned background fetch.
     from menhir.services.cross_encoder_rerank import preload_for_settings
 
     preload_for_settings(settings)

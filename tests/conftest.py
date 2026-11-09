@@ -23,6 +23,10 @@ from menhir.infrastructure.memory_graph_adapter import is_context_window_error_t
 _LOCAL_PYTEST_TEMP = Path.home() / ".codex" / "memories" / "pytest_tmp"
 _LOCAL_PYTEST_TEMP.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("PYTEST_DEBUG_TEMPROOT", str(_LOCAL_PYTEST_TEMP))
+# Runtime init starts a background rerank model download when no model dir is set; tests must
+# never reach the network for it. A test of the fetch passes its own downloader.
+os.environ.setdefault("MENHIR_RECALL_RERANK_AUTO_DOWNLOAD", "false")
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 
 def _install_unsynced_sqlite_connect() -> None:

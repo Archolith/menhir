@@ -89,11 +89,11 @@ frontier errors can fall back to baseline results. This is not universal enforce
 
 ## Activated (moved on default-on)
 
-### Graduated to default-on 2026-11-08: cross-encoder recall rerank (inert until a model is configured)
+### Graduated to default-on 2026-11-08: cross-encoder recall rerank (model downloads itself)
 
 | Feature | Flag / env | Gate location | Evidence | Source plan |
 |---|---|---|---|---|
-| Cross-encoder recall rerank (ONNX MiniLM-L6 orders the first 50 candidates in place of the RRF floor; results capped at 7) | `recall_rerank_enabled` / `MENHIR_RECALL_RERANK_ENABLED` (default true; set false to opt out) + `_MODEL_DIR`, `_DEVICE`, `_TOP_N`, `_MAX_RESULTS` | recall pipeline; runs only when `MENHIR_RECALL_RERANK_MODEL_DIR` is set (needs the `rerank` extra); a set dir that cannot load fails startup | LME distractor graph 414 q: accuracy 0.850 -> 0.872 capped, +7.2% input tokens; base graph IR support Hit@3 0.250 -> 0.410, answer accuracy unchanged uncapped (0.818 / 0.814). Workspace `.agent/reviews/menhir-recall-rerank-ranking-stats-2026-11-08.md` | workspace `menhir-recall-cross-encoder-rerank-plan-2026-11-08.md` (owner decision 2026-11-08) |
+| Cross-encoder recall rerank (ONNX MiniLM-L6 orders the first 50 candidates in place of the RRF floor; results capped at 7) | `recall_rerank_enabled` / `MENHIR_RECALL_RERANK_ENABLED` (default true; set false to opt out) + `_AUTO_DOWNLOAD`, `_MODEL_DIR`, `_DEVICE`, `_TOP_N`, `_MAX_RESULTS` | recall pipeline; the model comes from an explicit `MENHIR_RECALL_RERANK_MODEL_DIR` (fails startup if it cannot load) or a pinned background download at server start (recall keeps the floor until it loads; hooks use a cached copy only) | LME distractor graph 414 q: accuracy 0.850 -> 0.872 capped, +7.2% input tokens; base graph IR support Hit@3 0.250 -> 0.410, answer accuracy unchanged uncapped (0.818 / 0.814). Workspace `.agent/reviews/menhir-recall-rerank-ranking-stats-2026-11-08.md` | workspace `menhir-recall-cross-encoder-rerank-plan-2026-11-08.md` (owner decision 2026-11-08) |
 
 ### #168 freeze 2026-10-27: tested behavior becomes the default
 

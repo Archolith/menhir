@@ -404,11 +404,12 @@ class MemorySettings:
     # the #168 freeze, with the ingest-side episode-content embedding step.
     frontier_source_memory_limit: int = 10          # section size (1..50; validated in RetrievalTuningConfig)
     frontier_source_memory_max_chars: int = 2000  # per-memory content cap (100..4000)
-    # Cross-encoder recall rerank (default on; needs the `rerank` extra and a pinned model dir, and
-    # is inert until recall_rerank_model_dir is set). It orders the first recall_rerank_top_n
-    # candidates in place of the RRF rank floor.
+    # Cross-encoder recall rerank (default on). It orders the first recall_rerank_top_n candidates
+    # in place of the RRF rank floor. The model comes from recall_rerank_model_dir or, when that is
+    # unset, a pinned download into the Hugging Face cache (recall_rerank_auto_download).
     recall_rerank_enabled: bool = True
     recall_rerank_model_dir: str = ""
+    recall_rerank_auto_download: bool = True
     recall_rerank_device: str = "auto"  # auto | cpu | cuda
     recall_rerank_top_n: int = 50  # 1..200
     recall_rerank_max_results: int = 7  # 1..200; results returned when rerank ran
@@ -917,6 +918,7 @@ class MemorySettings:
             ),
             recall_rerank_enabled=parse_bool_env(_getenv("MENHIR_RECALL_RERANK_ENABLED", default=str(cls.recall_rerank_enabled))),
             recall_rerank_model_dir=_getenv("MENHIR_RECALL_RERANK_MODEL_DIR", default=cls.recall_rerank_model_dir).strip(),
+            recall_rerank_auto_download=parse_bool_env(_getenv("MENHIR_RECALL_RERANK_AUTO_DOWNLOAD", default=str(cls.recall_rerank_auto_download))),
             recall_rerank_device=_getenv("MENHIR_RECALL_RERANK_DEVICE", default=cls.recall_rerank_device).strip().lower(),
             recall_rerank_top_n=_parse_int(
                 _getenv("MENHIR_RECALL_RERANK_TOP_N", default=str(cls.recall_rerank_top_n)),

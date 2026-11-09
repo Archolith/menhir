@@ -277,3 +277,123 @@ def test_real_model_ranks_the_relevant_passage_first():
     scorer = cer.load_reranker(os.environ["MENHIR_TEST_RERANK_MODEL_DIR"], "cpu")
     good, bad = scorer.score(QUERY, ["Sky: the sky is blue on a clear day", "Pasta: boil salted water"])
     assert good > 0 > bad
+
+
+# --- pinned auto download (no MENHIR_RECALL_RERANK_MODEL_DIR) ---
+
+class FakeHub:
+    """Stands in for huggingface_hub.hf_hub_download: writes files into one snapshot dir."""
+
+    def __init__(self, root, *, tokenizer=b'{"tok": 1}', fail=None):
+        self.snapshot = root / "snapshots" / cer.PINNED_REVISION
+        self.tokenizer = tokenizer
+        self.fail = fail
+        self.calls = []
+
+    def __call__(self, repo_id, filename, **kw):
+        self.calls.append((repo_id, filename, kw))
+        if self.fail is not None:
+            raise self.fail
+        path = self.snapshot / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(self.tokenizer if filename == "tokenizer.json" else b"onnx")
+        return str(path)
+
+
+@pytest.fixture
+def hub(monkeypatch, tmp_path):
+    import hashlib
+
+    import huggingface_hub
+
+    fake = FakeHub(tmp_path)
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake)
+    monkeypatch.setattr(cer, "PINNED_FILES", {
+        "tokenizer.json": hashlib.sha256(fake.tokenizer).hexdigest(), "onnx/model.onnx": None})
+    return fake
+
+
+def _auto_settings(**kw):
+    return MemorySettings(**{"recall_rerank_auto_download": True, **kw})
+
+
+def test_fetch_returns_the_snapshot_dir_at_the_pinned_revision_without_a_token(hub):
+    assert cer.fetch_pinned_model(local_files_only=False) == str(hub.snapshot)
+    assert {f for _, f, _ in hub.calls} == {"tokenizer.json", "onnx/model.onnx"}
+    for repo, _, kw in hub.calls:
+        assert (repo, kw["revision"], kw["token"], kw["local_files_only"]) == (
+            cer.PINNED_REPO, cer.PINNED_REVISION, False, False)
+
+
+def test_fetch_refuses_a_tokenizer_that_does_not_match_its_pin(hub):
+    hub.tokenizer = b"swapped"
+    with pytest.raises(cer.RerankUnavailable, match="pinned sha256"):
+        cer.fetch_pinned_model(local_files_only=False)
+
+
+def test_fetch_failure_is_rerank_unavailable(hub):
+    hub.fail = OSError("offline")
+    with pytest.raises(cer.RerankUnavailable, match="could not download"):
+        cer.fetch_pinned_model(local_files_only=False)
+
+
+def test_hooks_only_use_a_cached_model_and_never_download(hub):
+    assert cer.cached_model_dir_for_settings(_auto_settings()) == str(hub.snapshot)
+    assert all(kw["local_files_only"] is True for _, _, kw in hub.calls)
+    hub.fail = OSError("not cached")
+    assert cer.cached_model_dir_for_settings(_auto_settings()) == ""
+    assert cer.cached_model_dir_for_settings(_auto_settings(recall_rerank_model_dir="/m")) == "/m"
+    assert cer.cached_model_dir_for_settings(_auto_settings(recall_rerank_auto_download=False)) == ""
+    assert cer.cached_model_dir_for_settings(_auto_settings(recall_rerank_enabled=False)) == ""
+
+
+@pytest.mark.parametrize("kw", [
+    {"recall_rerank_enabled": False},
+    {"recall_rerank_model_dir": "/explicit"},
+    {"recall_rerank_auto_download": False},
+])
+def test_no_background_fetch_when_off_explicit_or_opted_out(hub, kw):
+    target = SimpleNamespace(rerank_model_dir="")
+    assert cer.start_model_fetch(_auto_settings(**kw), target) is None
+    assert hub.calls == []
+
+
+def test_background_fetch_sets_the_dir_only_after_a_verified_load(hub, monkeypatch):
+    loaded = []
+    monkeypatch.setattr(cer, "load_reranker", lambda d, dev: loaded.append((d, dev)))
+    target = SimpleNamespace(rerank_model_dir="")
+    cer.start_model_fetch(_auto_settings(recall_rerank_device="cpu"), target).join(10)
+    assert loaded == [(str(hub.snapshot), "cpu")]
+    assert target.rerank_model_dir == str(hub.snapshot)
+
+
+@pytest.mark.parametrize("failure", ["download", "load", "crash"])
+def test_background_fetch_failure_keeps_the_floor_and_never_raises(hub, monkeypatch, failure):
+    if failure == "download":
+        hub.fail = OSError("offline")
+
+    def load(d, dev):
+        if failure == "load":
+            raise cer.RerankUnavailable("unpinned")
+        if failure == "crash":
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(cer, "load_reranker", load)
+    target = SimpleNamespace(rerank_model_dir="")
+    cer.start_model_fetch(_auto_settings(), target).join(10)
+    assert target.rerank_model_dir == ""
+
+
+def test_auto_download_setting_defaults_on_and_reads_env(monkeypatch):
+    assert MemorySettings().recall_rerank_auto_download is True
+    monkeypatch.setenv("MENHIR_RECALL_RERANK_AUTO_DOWNLOAD", "false")
+    assert MemorySettings.from_env().recall_rerank_auto_download is False
+
+
+def test_pinned_tokenizer_digest_matches_the_pinned_snapshot():
+    model_dir = os.environ.get("MENHIR_TEST_RERANK_MODEL_DIR")
+    if not model_dir:
+        pytest.skip("set MENHIR_TEST_RERANK_MODEL_DIR to the pinned MiniLM model dir")
+    from pathlib import Path
+
+    assert cer._sha256(Path(model_dir) / "tokenizer.json") == cer.PINNED_FILES["tokenizer.json"]
