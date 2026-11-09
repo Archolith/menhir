@@ -52,6 +52,9 @@ class Role(str, Enum):
     HISTORICAL = "historical"
     CONFLICT = "conflict"
     BLOCKED = "blocked"
+    # A calibrated relevance logit (the cross-encoder), kept out of RELEVANT so the per-family
+    # cap cannot flatten it. Present only on packets that carry such a result; wardens ignore it.
+    RERANK = "rerank"
 
 
 @dataclass(frozen=True)
@@ -101,6 +104,9 @@ class OracleResult:
     source_family: str = "semantic"
     note: str = ""
     failed: bool = False
+    # Raw model score (log-odds) behind ``probability`` for oracles that have one. The combiner
+    # routes such a result to the uncapped ``rerank`` role instead of ``relevant``.
+    log_odds: float | None = None
 
     @staticmethod
     def neutral(oracle: str, *, note: str = "missing", failed: bool = False) -> "OracleResult":
@@ -121,6 +127,20 @@ class RetrievalOracle(Protocol):
     def evaluate(self, query: QueryContext, candidate: CandidateMemory) -> OracleResult: ...
 
 
+@runtime_checkable
+class BatchRetrievalOracle(Protocol):
+    """A read-only scorer that sees every candidate of a recall at once (one model batch).
+
+    Returns ``{candidate_id: OracleResult}``; a candidate it leaves out counts as MISSING. It may
+    raise: the executor turns a failure or timeout into MISSING for every candidate."""
+
+    name: str
+
+    async def evaluate_batch(
+        self, query: QueryContext, candidates: list[CandidateMemory]
+    ) -> dict[str, OracleResult]: ...
+
+
 @dataclass
 class OraclePacket:
     """Per-candidate reduction of all oracle results (the R7 OraclePacket).
@@ -136,6 +156,9 @@ class OraclePacket:
     combined_probability: float
     uncertainty: float
     rationale: list[str] = field(default_factory=list)
+    # Filled by the log-space combiner: the signed weighted role terms and their sum.
+    contributions: dict[str, float] = field(default_factory=dict)
+    ranking_score: float | None = None
 
     def to_dict(self) -> dict:
         return {

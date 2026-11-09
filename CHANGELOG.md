@@ -1,3 +1,18 @@
+## 2026-11-25 - Recall ranking strategies: the cross-encoder rerank as an oracle (#659)
+
+- The cross-encoder rerank now runs as `CrossEncoderRerankOracle` (`services/rerank_oracle.py`)
+  behind a new batch oracle contract (`BatchRetrievalOracle`); results carry the raw logit in
+  `OracleResult.log_odds`. It runs once per recall, where the rerank ran before.
+- New `MENHIR_RECALL_RANKING_STRATEGY` (and Recall Lab knob): `reranker_only` (default, unchanged
+  behaviour), `oracle_only` (no rerank: rank floor + oracle residual blend) and `oracle_combined`
+  (the oracle combiner orders the reranked head, with the logit as an uncapped `rerank` role;
+  candidates past the rerank top N follow the head). Wardens gate every strategy. Without a rerank
+  model every strategy runs as `oracle_only`.
+- Combiner role weights (`oracle_weight_<role>`, Recall Lab only, default 1.0 = previous scores).
+- A traced recall reports `trace.ranking`: per result the strategy, rerank logit, role logits,
+  weights, contributions, combiner score and warden decision; Recall Lab shows them per row.
+- A non-finite rerank logit now counts as unscored (the item takes the rank floor path).
+
 ## 2026-11-25 - v0.3.17: separate off/propose/on switches for automatic merging and deletion (#978)
 
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.17. No dependency changes in this commit.

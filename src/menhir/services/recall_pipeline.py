@@ -47,7 +47,10 @@ from menhir.domain.recall import (
     TemporalFact,
     parse_verifier_evidence,
 )
+from menhir.domain.oracles import OracleResult, QueryContext
 from menhir.domain.retrieval_tuning import (
+    RANKER_ORACLE_COMBINED,
+    RANKER_ORACLE_ONLY,
     SOURCE_PRIORS,
     CandidateSource,
     RetrievalTuningConfig,
@@ -63,7 +66,9 @@ from menhir.domain.retrieval_trace_models import (
 )
 from menhir.infrastructure.graphiti_client import GraphitiClient, _circuit_open_cause
 from menhir.infrastructure.openai_rate_limit import QUOTA_REASON_CODE
-from menhir.services.cross_encoder_rerank import order_by_rerank, rerank_scores
+from menhir.services.cross_encoder_rerank import order_by_rerank
+from menhir.services.ranking_explain import build_ranking_rows
+from menhir.services.rerank_oracle import CrossEncoderRerankOracle, logits_of, rerank_candidate
 from menhir.services.hybrid_retrieval import FusionLane, weighted_rrf_multi
 
 if TYPE_CHECKING:
@@ -1864,18 +1869,40 @@ async def _run_recall(
         await service._attach_frontier_metadata(eligible_uuids, metadata_by_uuid, warden_status=guard_status)
         _t_phases["frontier_metadata"] = int((perf_counter() - _t) * 1000)
 
-    # --- Cross-encoder rerank (default on): replaces the RRF floor when it runs ---
+    # --- Cross-encoder rerank oracle (default on): replaces the RRF floor when it runs ---
+    # Called once here: whether it succeeded decides the floor bypass and the result cap below,
+    # and oracle_combined hands the same results to the combiner (no second inference).
     rerank: dict[str, float] | None = None
+    rerank_results: dict[str, OracleResult] | None = None
     rerank_note: str | None = None
     # No model dir configured: the rerank is inert (default on, opt-in by configuring a model).
-    if tuning.enable_cross_encoder_rerank and candidates and getattr(service, "rerank_model_dir", ""):
+    if (
+        tuning.ranking_strategy != RANKER_ORACLE_ONLY
+        and tuning.enable_cross_encoder_rerank and candidates
+        and getattr(service, "rerank_model_dir", "")
+    ):
         _t = perf_counter()
-        rerank, rerank_note = await rerank_scores(
-            query, candidates, metadata_by_uuid, top_n=tuning.rerank_top_n,
+        rerank_oracle = CrossEncoderRerankOracle(
             model_dir=getattr(service, "rerank_model_dir", ""),
             device=getattr(service, "rerank_device", "auto"),
+            top_n=tuning.rerank_top_n,
         )
+        rerank_results, rerank_note = await rerank_oracle.score_batch(
+            QueryContext(text=query),
+            [
+                rerank_candidate(
+                    c.uuid, getattr(c, "name", None),
+                    (metadata_by_uuid.get(c.uuid) or {}).get("summary"), getattr(c, "content", None),
+                )
+                for c in candidates
+            ],
+        )
+        if rerank_results is not None:
+            rerank = logits_of(rerank_results)
         _t_phases["rerank"] = int((perf_counter() - _t) * 1000)
+    # The strategy that actually ordered this recall: without rerank logits every strategy
+    # runs as oracle_only (floor + residual blend), as it did before strategies existed.
+    effective_strategy = tuning.ranking_strategy if rerank is not None else RANKER_ORACLE_ONLY
 
     # --- Phase 2: score + rank ---
     _t = perf_counter()
@@ -1908,13 +1935,21 @@ async def _run_recall(
     # Applied to the survivors BEFORE the limit slice so it shapes which make the cut.
     # Oracle ranking is on by default (#172); with every portion off this block is skipped.
     frontier_note: str | None = None
-    if scored and (tuning.enable_oracle_ranking or tuning.enable_warden_gate):
+    combined = effective_strategy == RANKER_ORACLE_COMBINED
+    ranking_explain: dict[str, Any] | None = {} if trace else None
+    if scored and (tuning.enable_oracle_ranking or tuning.enable_warden_gate or combined):
         _t = perf_counter()
-        # A reranked order is final: wardens still gate it, the oracle blend does not reorder it.
+        # reranker_only: the reranked order is final; wardens gate it, the oracle blend does not
+        # reorder it. oracle_combined: the combiner orders it (no residual blend); wardens gate.
         frontier_tuning = replace(tuning, enable_oracle_ranking=False) if rerank is not None else tuning
+        frontier_kwargs: dict[str, Any] = {}
+        if combined:
+            frontier_kwargs["rerank_results"] = rerank_results
+        if ranking_explain is not None:
+            frontier_kwargs["explain"] = ranking_explain
         scored, frontier_note = await service._apply_frontier(
             query, namespace, scored, metadata_by_uuid, frontier_tuning,
-            query_project=file_context_project, warden_status=guard_status,
+            query_project=file_context_project, warden_status=guard_status, **frontier_kwargs,
         )
         _t_phases["frontier"] = int((perf_counter() - _t) * 1000)
 
@@ -2258,6 +2293,10 @@ async def _run_recall(
             facet_shadow=facet_shadow,
             facet_active=facet_active_trace,
             rank_shadow_warning=rank_shadow_warning,
+            ranking=build_ranking_rows(
+                top_results, effective_strategy, rerank or {}, ranking_explain or {},
+                tuning.oracle_role_weights,
+            ),
         )
 
     return RecallResult(

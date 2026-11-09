@@ -26,6 +26,7 @@ from collections.abc import Awaitable, Callable
 
 from menhir.infrastructure.openai_rate_limit import await_with_backoff_aware_timeout
 from menhir.domain.oracles import (
+    BatchRetrievalOracle,
     CandidateMemory,
     OracleResult,
     QueryContext,
@@ -49,6 +50,8 @@ class OracleExecutor:
         max_concurrency: int = 16,
         per_oracle_timeout_s: float = 5.0,
         prefetch: PrefetchFn | None = None,
+        batch_oracles: list[BatchRetrievalOracle] | None = None,
+        batch_timeout_s: float = 10.0,
     ) -> None:
         if not oracles:
             raise ValueError("OracleExecutor needs at least one oracle")
@@ -58,8 +61,14 @@ class OracleExecutor:
         self.max_concurrency = max_concurrency
         self.per_oracle_timeout_s = per_oracle_timeout_s
         self.prefetch = prefetch
+        # Batch oracles run once per recall over every candidate (one model call), after the
+        # per-candidate ones in priority order.
+        self.batch_oracles = list(batch_oracles or [])
+        self.batch_timeout_s = batch_timeout_s
         # Stable oracle priority order for deterministic reduction.
-        self._order = {oracle.name: i for i, oracle in enumerate(oracles)}
+        self._order = {
+            oracle.name: i for i, oracle in enumerate([*oracles, *self.batch_oracles])
+        }
 
     async def evaluate(
         self, query: QueryContext, candidates: list[CandidateMemory]
@@ -93,8 +102,28 @@ class OracleExecutor:
                     result = OracleResult.neutral(oracle.name, note=f"error: {exc.__class__.__name__}", failed=True)
                 return candidate.id, result
 
+        async def _run_batch(oracle: BatchRetrievalOracle) -> list[tuple[str, OracleResult]]:
+            try:
+                by_id = await await_with_backoff_aware_timeout(
+                    oracle.evaluate_batch(query, list(candidates)),
+                    timeout_s=self.batch_timeout_s,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("batch oracle %s timed out -> neutral for all", oracle.name)
+                return [(c.id, OracleResult.neutral(oracle.name, note="timeout", failed=True)) for c in candidates]
+            except Exception as exc:  # a batch oracle must never break the pipeline either
+                logger.warning("batch oracle %s failed: %s -> neutral for all", oracle.name, exc)
+                note = f"error: {exc.__class__.__name__}"
+                return [(c.id, OracleResult.neutral(oracle.name, note=note, failed=True)) for c in candidates]
+            return [
+                (c.id, by_id.get(c.id) or OracleResult.neutral(oracle.name, note="not scored"))
+                for c in candidates
+            ]
+
         tasks = [_run(oracle, cand) for cand in candidates for oracle in self.oracles]
         flat = await asyncio.gather(*tasks)
+        for batch in await asyncio.gather(*(_run_batch(o) for o in self.batch_oracles)):
+            flat.extend(batch)
 
         grouped: dict[str, list[OracleResult]] = {c.id: [] for c in sorted(candidates, key=lambda c: c.id)}
         for cid, result in flat:
