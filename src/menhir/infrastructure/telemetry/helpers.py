@@ -84,10 +84,26 @@ def connect_telemetry_db(db_path: Path) -> sqlite3.Connection:
     except sqlite3.Error:  # pragma: no cover - a pragma failure must never break a connect
         pass
     try:
-        conn.execute("PRAGMA journal_mode=WAL")
+        journal_mode = str(conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]).lower()
     except sqlite3.Error:  # pragma: no cover - a pragma failure must never break a connect
+        journal_mode = ""
         logger.debug("Could not enable WAL on telemetry DB", exc_info=True)
+    if journal_mode == "wal" and _on_telemetry_writer_thread():
+        # Only the off-loop writer: it runs observability rows nothing reads to decide a
+        # transition (OffLoopObservabilityWritesMixin). In WAL, NORMAL skips the per-commit fsync
+        # and can lose only the latest commits on power loss, never corrupt. Leases, the
+        # operations journal, receipts and recovery rows share this seam and keep FULL.
+        try:
+            conn.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.Error:  # pragma: no cover - a pragma failure must never break a connect
+            pass
     return conn
+
+
+def _on_telemetry_writer_thread() -> bool:
+    from menhir.infrastructure.telemetry.async_writer import TELEMETRY_WRITER
+
+    return TELEMETRY_WRITER.is_writer_thread()
 
 
 
