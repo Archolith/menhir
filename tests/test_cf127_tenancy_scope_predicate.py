@@ -81,6 +81,9 @@ BASELINE: dict[str, int] = {
     "infrastructure/episode_lifecycle.py": 7,
     "infrastructure/episode_maintenance.py": 3,
     "infrastructure/episode_stamping.py": 1,
+    # #574, owner-approved 2026-11-09: copies graphiti's own `group_id IN $group_ids` so the
+    # index path filters exactly like the stock scan it falls back to.
+    "infrastructure/graphiti_vector_search.py": 2,
     "infrastructure/memory_graph_adapter.py": 11,
     "infrastructure/memory_queries.py": 23,
     "infrastructure/scalar_view_repository.py": 8,
