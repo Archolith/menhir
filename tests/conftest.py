@@ -282,6 +282,22 @@ def _isolate_llm_usage_callback():
 
 
 @pytest.fixture(autouse=True)
+def _quiesce_telemetry_writer(isolated_telemetry_db):
+    """Start each test with no off-loop telemetry writes queued, and end it the same way.
+
+    The writer is process-wide, so without this an earlier test's writes landed mid-test: extra
+    warnings in test_cf162_neo4j_guards, a read missing rows in test_telemetry_off_loop_writer,
+    and -wal/-shm files changing under test_check_writes_no_archive. Requesting
+    isolated_telemetry_db makes the teardown drain run before that test's DB is torn down.
+    """
+    from menhir.infrastructure.telemetry.async_writer import TELEMETRY_WRITER
+
+    TELEMETRY_WRITER.drain(10.0)
+    yield
+    TELEMETRY_WRITER.drain(10.0)
+
+
+@pytest.fixture(autouse=True)
 def isolated_telemetry_db(tmp_path, monkeypatch):
     """Point the telemetry sidecar at a temp DB for EVERY test.
 
