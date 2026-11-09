@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from menhir.domain.namespace import namespace_to_group_id
+from menhir.domain.secret_scrub import ensure_scrubbed, non_refusing_policy
 from menhir.domain.verbatim_skip_status import skip_projection_lookup_cypher, skip_projection_map_cypher
 from menhir.infrastructure.cypher import (
     Cypher,
@@ -382,6 +383,8 @@ class EpisodeMaintenanceRepository:
         """
         from uuid import uuid4
 
+        name = ensure_scrubbed(name, policy=non_refusing_policy())
+        content = ensure_scrubbed(content, policy=non_refusing_policy())
         entity_uuid = str(uuid4())
         query = (
             Cypher()

@@ -22,6 +22,7 @@ from menhir.domain.namespace import (
     normalize_namespace,
     stamped_namespace,
 )
+from menhir.domain.secret_scrub import ensure_scrubbed
 from menhir.infrastructure.paths import default_workspace_marker
 from menhir.domain.todo_location import (
     DEFAULT_TODO_NAMESPACE,
@@ -267,6 +268,7 @@ class TodoRepository:
           - REFERENCES_FILE → one visible structural file per unambiguous location
           - CREATED_FROM    → :Episodic matching episode_uuid
         """
+        content = ensure_scrubbed(content)
         safe_priority = priority if priority in _VALID_PRIORITIES else "normal"
         safe_namespace = normalize_namespace(namespace)
         todo_uuid = str(uuid4())

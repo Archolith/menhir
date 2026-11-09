@@ -111,6 +111,9 @@ erasure journal and the erased-id suppression record.
 
 ## Privacy settings
 
+- `MENHIR_SECRET_POLICY` defaults to `redact`: recognised credentials in memory text are replaced with
+  `[REDACTED:<kind>]` on write and on recall. `refuse` rejects such writes; `off` stores and returns
+  text as given. See [security posture](security-posture.md).
 - `MENHIR_PRIVACY_REDACT` defaults to off. Recall Lab and Extraction Lab runs therefore keep raw
   text in the sidecar for 90 days.
 - `MENHIR_TELEMETRY_RECORD_RECALL_QUERIES` defaults to off. When on, each recall (MCP recall tools and

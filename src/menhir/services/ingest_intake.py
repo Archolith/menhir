@@ -23,6 +23,7 @@ from menhir.domain.ingest import (
     is_constraint_violation,
 )
 from menhir.domain.models import ProcessingState
+from menhir.domain.secret_scrub import ScrubbedText, prepare_memory_text
 from menhir.domain.verbatim_skip_status import effective_processing_row
 from menhir.infrastructure import GraphitiClient, LLMAdapter, MemoryGraphAdapter
 from menhir.infrastructure.git_log import current_head
@@ -98,6 +99,23 @@ class IngestIntakeMixin:
         """
 
         validate_memory_payload(episode, diff)
+
+        # #577: scrub before the digest, evidence, or the episode sees the text. Under policy
+        # 'refuse' this raises SecretRefused (a ValueError) before anything is persisted.
+        episode = prepare_memory_text(episode)
+        diff = prepare_memory_text(diff) if diff else diff
+        user_statement = prepare_memory_text(user_statement) if user_statement else user_statement
+        redacted_kinds = tuple(dict.fromkeys(
+            kind
+            for scrubbed in (episode, diff, user_statement)
+            if isinstance(scrubbed, ScrubbedText)
+            for kind in scrubbed.kinds
+        ))
+        if redacted_kinds:
+            logger.info(
+                "secret_redactions session=%s kinds=%s count=%d",
+                session.session_id, ",".join(redacted_kinds), len(redacted_kinds),
+            )
 
         from menhir.domain.turn_role import TURN_ROLES
 

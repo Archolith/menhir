@@ -20,6 +20,7 @@ from typing import Any
 from uuid import uuid4
 
 from menhir.domain.assertion_operations import COUNTING_OCCURRENCE_OPS_CYPHER, VALUE_CLAIM_OPS_CYPHER
+from menhir.domain.secret_scrub import ensure_scrubbed
 from menhir.domain.namespace import (
     TURN_EVIDENCE_NULL_NAMESPACE_KEY,
     normalize_namespace,
@@ -248,6 +249,7 @@ class TurnEvidenceRepository:
         text = (text or "").strip()
         if not text:
             raise ValueError("record_turn_evidence requires non-empty text")
+        text = ensure_scrubbed(text)
         if role not in EVIDENCE_ROLES:
             raise ValueError(f"role must be one of {EVIDENCE_ROLES}, got {role!r}")
         declarant = declarant or role
@@ -330,7 +332,7 @@ class TurnEvidenceRepository:
                 "prompt_length": len(text),
                 "prompt_hash": derive_prompt_hash(text),
                 "prompt_id": (prompt_id or None),
-                "metadata_json": json.dumps(metadata or {}, ensure_ascii=False),
+                "metadata_json": str(ensure_scrubbed(json.dumps(metadata or {}, ensure_ascii=False))),
             },
         )
         row = rows[0] if rows else {}

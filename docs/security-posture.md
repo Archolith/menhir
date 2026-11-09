@@ -65,6 +65,23 @@ loopback posture, not by in-app controls** (operator checklist:
   bind it requires the same bearer/OAuth/client-token credential as the API. Only `/explorer/static/*`
   (assets) is exempt. The standalone `menhir-explorer` process and port `8787` were removed. Keep the
   server on loopback for open access; a non-loopback bind is already auth-protected.
+- **Credentials in memory text (#577).** `MENHIR_SECRET_POLICY` is `redact` (default), `refuse` or
+  `off`. Under `redact`, text a client writes is scanned with `detect-secrets` (provider keys, JWTs,
+  PEM headers and `password =`-style assignments; no entropy detection) and each recognised value is
+  replaced with `[REDACTED:<kind>]` before it is queued, embedded, sent to the extraction LLM or
+  recorded as turn evidence. Under `refuse` the write is rejected. The same scan redacts ranked
+  recall results, their temporal facts and `source_memories` on the way out. Every other read is
+  covered too: MCP tool and resource results and `/internal/backend` pass one scrub, every JSON
+  `/api` response passes a second, and the CLI hook and the explorer scrub what they render. If
+  the scan itself fails, the output is withheld rather than returned unchecked. `off` stores and
+  returns text as given for deployments that want credentials kept.
+  `menhir secrets scan --namespace <ns>` counts what is already stored, by type and kind, without
+  printing values.
+  **This is defence in depth, not a guarantee.** It misses unlabelled random tokens, secrets in
+  formats with no plugin, and split or re-encoded values. Not covered: facts and summaries the
+  extraction LLM writes (it can restate a credential in new words), plaintext stored before the
+  scrub, non-JSON responses, the explorer's stored lab-run records, and a query a caller typed
+  into the opt-in recall query log.
 - **Memory-content privacy (Finding B, cont.).** `MENHIR_PRIVACY_REDACT=true` hides memory
   *contents* (content, summary, previews, names, graph node labels) in the explorer UI and the
   console dashboard's log tail — a display-time mask for screen-sharing/demos; log files and the

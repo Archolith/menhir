@@ -44,4 +44,7 @@ class BackendContextBuilder:
             resp.raise_for_status()
             data = resp.json()
 
-        return SimpleNamespace(context=data.get("context", ""))
+        from menhir.domain.payload_scrub import scrub_payload
+
+        # Fail closed: PayloadScrubFailed propagates and the hook drops the context.
+        return SimpleNamespace(context=scrub_payload(data.get("context", "")))

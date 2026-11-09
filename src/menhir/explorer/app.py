@@ -10,7 +10,8 @@ from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import JSONResponse as _BaseJSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field
@@ -58,7 +59,39 @@ class QueryFilteredPacketRequest(BaseModel):
     max_chars: int = Field(default=6_000, ge=2_000, le=16_000)
     max_general: int = Field(default=4, ge=0, le=10)
 
-TEMPLATES = Jinja2Templates(directory=str(Path(__file__).with_name("templates")))
+def _scrub_or_withhold(value: Any) -> Any:
+    """Credential-scrub (#577) data headed for a browser; fail closed with a 500, no text."""
+    from menhir.domain.payload_scrub import WITHHELD_MESSAGE, PayloadScrubFailed, scrub_payload
+
+    try:
+        return scrub_payload(value)
+    except PayloadScrubFailed:
+        raise HTTPException(status_code=500, detail=WITHHELD_MESSAGE) from None
+
+
+class JSONResponse(_BaseJSONResponse):
+    """Explorer JSON response: every string leaf is credential-scrubbed before serialising."""
+
+    def __init__(self, content: Any = None, *args: Any, **kwargs: Any) -> None:
+        super().__init__(_scrub_or_withhold(content), *args, **kwargs)
+
+
+class _ScrubbingTemplates(Jinja2Templates):
+    """Jinja2Templates that credential-scrubs the render context (the request is untouched)."""
+
+    def TemplateResponse(self, *args: Any, **kwargs: Any) -> Any:  # noqa: N802
+        if args and isinstance(args[0], str):  # legacy (name, context)
+            if len(args) > 1:
+                args = (args[0], _scrub_or_withhold(args[1]), *args[2:])
+        else:
+            if len(args) > 2:
+                args = (*args[:2], _scrub_or_withhold(args[2]), *args[3:])
+            elif "context" in kwargs:
+                kwargs["context"] = _scrub_or_withhold(kwargs["context"])
+        return super().TemplateResponse(*args, **kwargs)
+
+
+TEMPLATES = _ScrubbingTemplates(directory=str(Path(__file__).with_name("templates")))
 STATIC_DIR = Path(__file__).with_name("static")
 
 

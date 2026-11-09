@@ -33,6 +33,7 @@ from menhir.domain.artifacts import (
     decide_status,
     has_promotable_evidence,
 )
+from menhir.domain.secret_scrub import ensure_scrubbed
 
 _MAX_SUMMARY_LEN = 280
 
@@ -111,6 +112,8 @@ class ArtifactRepository:
         provenance only, so it can neither resurrect a HISTORICAL artifact nor silently
         re-trust one (invariant 7). Status transitions go through promote/supersede alone.
         """
+        summary = ensure_scrubbed(summary)
+        body = ensure_scrubbed(body or "")
         node_uuid = str(uuid4())
         now = datetime.now(timezone.utc).isoformat()
         ev_rows = _evidence_rows(evidence)

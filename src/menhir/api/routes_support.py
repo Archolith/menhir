@@ -123,11 +123,13 @@ def _service_payload(runtime_ctx: RuntimeContext | None) -> dict[str, str]:
 
 def _get_backend(request: Request) -> MemoryBackend:
     runtime_ctx = _require_runtime_context(request)
-    return RuntimeProvider(
+    from menhir.core.backend_scrub import wrap_backend
+
+    return wrap_backend(RuntimeProvider(
         runtime_ctx.built,
         process_session=runtime_ctx.session,
         caller_session=_resolve_caller_session(request),
-    )
+    ))
 
 
 def _resolve_caller_session(request: Request, *, default_user_id: str = "remote-api") -> MemorySession:

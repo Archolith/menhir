@@ -480,11 +480,13 @@ def build_memory_backend(settings: MemorySettings | None = None) -> MemoryBacken
     built = _state.built
     session = _state.session
     if built is not None and session is not None:
-        return RuntimeProvider(
+        from menhir.core.backend_scrub import wrap_backend
+
+        return wrap_backend(RuntimeProvider(
             built,
             process_session=session,
             caller_session=get_request_session(),
-        )
+        ))
 
     settings = settings or MemorySettings.from_env()
     backend_url = _normalized_backend_url(settings)

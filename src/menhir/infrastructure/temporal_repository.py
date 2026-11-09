@@ -60,7 +60,11 @@ class TemporalRepository:
             Dict with uuid, content, target_date, status, created_at.
         """
         import logging
+        from menhir.domain.secret_scrub import ensure_scrubbed
         from menhir.domain.namespace import namespace_to_group_id, stamped_namespace
+
+        content = ensure_scrubbed(content)
+        name = ensure_scrubbed(name)
         from menhir.domain.truth.admission_gate import evaluate_user_tier_claim
 
         logger_temp = logging.getLogger(__name__)
