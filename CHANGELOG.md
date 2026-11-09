@@ -1,3 +1,15 @@
+## 2026-11-09 - Recall rerank threads follow the container's CPU quota (#567)
+
+- New `MENHIR_RECALL_RERANK_THREADS` (default 0 = auto). Auto caps ONNX Runtime's intra-op pool
+  at the cgroup CPU quota when that is below the visible cores, and uses one inter-op thread.
+  On a 1-CPU container with 6 visible cores the uncapped pool was throttled by the quota: 50
+  pairs took ~15 s instead of ~6 s, and the throttling stalled the rest of recall. With no
+  quota, ONNX Runtime keeps its own default. A positive value sets the count directly.
+- The thread count is logged in `recall rerank loaded` and `recall rerank ready`, and is part
+  of the loaded-model cache key.
+- `.env.example` documents the cost of `MENHIR_RECALL_RERANK_TOP_N` on small hosts (~120 ms per
+  pair on a shared cloud vCPU): lower it, or give the container more CPU.
+
 ## 2026-11-09 - Similarity search uses Neo4j vector indexes (#574)
 
 - Every start now creates four cosine vector indexes if they are missing: `Entity.name_embedding`,
@@ -139,15 +151,3 @@
   with "duplicate column name" (seen in CI as a failed `delete_memory`). A shared
   `add_column_if_missing` now treats that error as success, at all four sites: the telemetry
   lineage columns, `llm_usage_events`, `lifecycle_events` and the operations journal.
-
-## 2026-11-08 - Opt-in recall query log for recall research
-
-- New setting `MENHIR_TELEMETRY_RECORD_RECALL_QUERIES` (default off). When on, each MCP recall
-  (`recall_memories`, `recall_context_memories`) and `POST /api/recall` writes one row to a new
-  telemetry table, `recall_query_log`: the query text and its SHA-256, the ordered result ids and
-  scores, source memory ids, namespace, preset, limit, and the recall receipt token when there is
-  one. `recall_receipts` stays content-free.
-- With `MENHIR_PRIVACY_REDACT` on, only the hash is stored. Rows follow the 90-day diagnostic
-  retention tier. Namespace erasure scrubs the query text; rows with no namespace only age out
-  (`docs/your-data.md`).
-- The write goes through the #527 off-loop writer, so it never opens SQLite on the event loop.

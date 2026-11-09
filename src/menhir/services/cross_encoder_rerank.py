@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+import os
 import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -159,14 +160,77 @@ class OnnxCrossEncoder:
         return out
 
 
-_CACHE: dict[tuple[str, str], PairScorer] = {}
+CGROUP_ROOT = Path("/sys/fs/cgroup")
+
+
+def cgroup_cpu_limit(root: Path = CGROUP_ROOT) -> float | None:
+    """CPUs allowed by this container's cgroup quota (v2 ``cpu.max``, else v1 CFS), or None."""
+    try:
+        quota, period = (root / "cpu.max").read_text(encoding="ascii").split()[:2]
+        if quota == "max":
+            return None
+        if int(period) > 0 and int(quota) > 0:
+            return int(quota) / int(period)
+    except (OSError, ValueError):
+        pass
+    try:
+        quota_us = int((root / "cpu" / "cpu.cfs_quota_us").read_text(encoding="ascii"))
+        period_us = int((root / "cpu" / "cpu.cfs_period_us").read_text(encoding="ascii"))
+    except (OSError, ValueError):
+        return None
+    return quota_us / period_us if quota_us > 0 and period_us > 0 else None
+
+
+def visible_cpus() -> int:
+    try:
+        return len(os.sched_getaffinity(0))  # type: ignore[attr-defined]
+    except (AttributeError, OSError):
+        return os.cpu_count() or 1
+
+
+def resolve_threads(setting: int, *, limit: float | None, cpus: int) -> int | None:
+    """ONNX Runtime intra-op threads for MENHIR_RECALL_RERANK_THREADS (#567).
+
+    A positive setting is used as given. 0 (auto) caps the pool at the cgroup CPU quota when
+    that quota is below the visible CPUs: ONNX Runtime sizes its pool from the visible cores,
+    and on a 1-CPU container with 6 visible cores the extra threads were throttled by the
+    quota, stalling the whole process. None keeps ONNX Runtime's own default (no quota).
+    """
+    if setting > 0:
+        return setting
+    if limit is None:
+        return None
+    capped = max(1, int(limit))  # floor: 1.5 CPUs gets 1 thread, not 2 that the quota throttles
+    return capped if capped < cpus else None
+
+
+_thread_setting = 0
+_auto_threads: list[int | None] = []  # memo for setting 0: the cgroup is read once per process
+
+
+def configure_threads(setting: int) -> None:
+    """Process-wide MENHIR_RECALL_RERANK_THREADS, set once at startup from settings."""
+    global _thread_setting
+    _thread_setting = max(0, int(setting))
+
+
+def current_threads() -> int | None:
+    if _thread_setting > 0:
+        return _thread_setting
+    if not _auto_threads:
+        _auto_threads.append(resolve_threads(0, limit=cgroup_cpu_limit(), cpus=visible_cpus()))
+    return _auto_threads[0]
+
+
+_CACHE: dict[tuple[str, str, int | None], PairScorer] = {}
 _LOCK = threading.Lock()
 _SCORE_SLOT = threading.BoundedSemaphore(1)
 
 
 def load_reranker(model_dir: str, device: str = "auto") -> PairScorer:
-    """Load (once per model_dir and device) a pinned reranker, or raise RerankUnavailable."""
-    key = (str(Path(model_dir).resolve()) if model_dir else "", device)
+    """Load (once per model_dir, device and thread count) a pinned reranker, or raise RerankUnavailable."""
+    threads = current_threads()
+    key = (str(Path(model_dir).resolve()) if model_dir else "", device, threads)
     with _LOCK:
         cached = _CACHE.get(key)
         if cached is not None:
@@ -198,6 +262,9 @@ def load_reranker(model_dir: str, device: str = "auto") -> PairScorer:
         ort, tokenizer_cls = _import_runtime()
         providers = select_providers(device, ort.get_available_providers())
         options = ort.SessionOptions()
+        if threads is not None:
+            options.intra_op_num_threads = threads
+            options.inter_op_num_threads = 1
         session = ort.InferenceSession(model_bytes, options, providers=providers)
         tokenizer = tokenizer_cls.from_str(tok_bytes.decode("utf-8"))
         tokenizer.enable_truncation(MAX_LENGTH, strategy="only_second")
@@ -208,7 +275,13 @@ def load_reranker(model_dir: str, device: str = "auto") -> PairScorer:
             label=label, device="cuda" if providers[0] == "CUDAExecutionProvider" else "cpu",
         )
         _CACHE[key] = scorer
+        logging.getLogger(__name__).info(
+            "recall rerank loaded: %s on %s, %s", label, scorer.device, threads_label(threads))
         return scorer
+
+
+def threads_label(threads: int | None) -> str:
+    return f"{threads} intra-op thread(s)" if threads is not None else "onnxruntime default threads"
 
 
 def candidate_text(name: str | None, summary: str | None, content: str | None) -> str:
@@ -303,6 +376,7 @@ def preload_for_settings(settings: Any) -> PairScorer | None:
     """
     if not getattr(settings, "recall_rerank_enabled", False):
         return None
+    configure_threads(getattr(settings, "recall_rerank_threads", 0))
     if not str(getattr(settings, "recall_rerank_model_dir", "") or "").strip():
         if not getattr(settings, "recall_rerank_auto_download", True):
             logging.getLogger(__name__).info(
@@ -439,7 +513,8 @@ def start_model_fetch(settings: Any, target: Any) -> threading.Thread | None:
             _fetch_targets.clear()
             _fetch_thread = None
         if model_dir:
-            log.info("recall rerank ready: %s on %s", PINNED_REPO, device)
+            log.info("recall rerank ready: %s on %s, %s", PINNED_REPO, device,
+                     threads_label(current_threads()))
 
     with _FETCH_LOCK:
         _fetch_targets.append(target)
