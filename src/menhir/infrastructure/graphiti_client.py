@@ -484,6 +484,10 @@ class GraphitiClient:
             password=settings.neo4j_password,
             database=settings.neo4j_database,
         )
+        # #574: vector searches use a Neo4j vector index when one is ONLINE; all else is stock.
+        from menhir.infrastructure.graphiti_vector_search import MenhirSearchInterface
+
+        graph_driver.search_interface = MenhirSearchInterface()
         anchored_time_expiry = bool(settings.anchored_time_resolver_enabled)
         # CF-272: the graphiti fork sends PostHog telemetry per Graphiti() unless this is falsey; set after every .env loader.
         os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")

@@ -11,6 +11,7 @@ from menhir.config.authority_gates import scalar_view_authority_effective
 from menhir.config.feature_flags import warn_retired_settings_set_false
 from menhir.core.runtime_preflight import RuntimeCapabilities
 from menhir.infrastructure import GraphitiClient, LLMAdapter, MemoryGraphAdapter, Neo4jRepository
+from menhir.infrastructure.embedding_dimensions import expected_graphiti_embedding_dimension
 from menhir.services import CandidateService, ContextBuilderService, IngestService, RecallService, ScoringService, LifecycleService
 
 
@@ -184,6 +185,7 @@ def build_memory_services(
         llm = UnavailableLLMAdapter(llm_reason)
     graph_adapter = MemoryGraphAdapter(
         neo4j=neo4j,
+        embedding_dimensions=expected_graphiti_embedding_dimension(settings),
         counting_enabled=bool(
             settings.personal_memory_counting_enabled
             and settings.personal_memory_scalar_state_enabled
@@ -298,6 +300,9 @@ async def prepare_memory_runtime(
         logging.getLogger(__name__).warning(
             "Dropping retired indexes failed, continuing: %s", "; ".join(retired_index_failures)
         )
+    # #574: also every start. Not part of schema readiness: a populating index must not block
+    # writers, and searches scan until it is ONLINE.
+    vector_indexes = await asyncio.to_thread(artifacts.graph_adapter.ensure_vector_indexes)
     schema_ready = await asyncio.to_thread(
         artifacts.graph_adapter.phase_one_schema_ready, require_graphiti=graphiti_in_play
     )
@@ -356,6 +361,7 @@ async def prepare_memory_runtime(
         "graphiti": "ok" if graphiti_in_play else "skipped",
         "schema": schema,
         "retired_index_failures": retired_index_failures,
+        "vector_indexes": vector_indexes,
         "edge_count_sync": edge_count_sync,
         "edge_count_sync_error": edge_count_sync_error,
     }

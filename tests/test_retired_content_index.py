@@ -56,6 +56,7 @@ def _artifacts(*, schema_ready: bool, retire):
 
     adapter = SimpleNamespace(
         retire_obsolete_indexes=_retire,
+        ensure_vector_indexes=lambda: {},
         phase_one_schema_ready=lambda **_: (calls.append("ready"), next(readiness))[1],
         bootstrap_phase_one=lambda: (calls.append("bootstrap"), SimpleNamespace(
             success=True, queries_executed=1, failures=[]))[1],

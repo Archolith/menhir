@@ -27,6 +27,7 @@ This index routes the current execution owners listed below exactly once.
 | [`menhir-projection-realization-coverage-implementation.md`](menhir-projection-realization-coverage-implementation.md) | Projection parity and realization-observation coverage implementation. |
 | [`menhir-unbounded-graph-writes-2026-08-09.md`](menhir-unbounded-graph-writes-2026-08-09.md) | Bound raw graph-write payload retention rather than only enrichment input. |
 | [`menhir-conflict-similarity-floor-plan-2026-11-05.md`](menhir-conflict-similarity-floor-plan-2026-11-05.md) | Owner-approved similarity floor and belief-shaped fixture for conflict detection; implementation is open PR #392. Replaces Phases 1-2 of the conflict detection signal plan. |
+| [`menhir-574-vector-indexes-2026-11-09.md`](menhir-574-vector-indexes-2026-11-09.md) | Default vector indexes and index-backed similarity search with a scan fallback (#574); implementation in progress. |
 | [`menhir-view-evidence-lifecycle-2026-08-28.md`](menhir-view-evidence-lifecycle-2026-08-28.md) | Keep current View contributors alive under automatic lifecycle work, invalidate dependent Views on explicit erasure, and exclude stale/internal/orphaned Views from recall. |
 
 ## Partially implemented
