@@ -425,6 +425,11 @@ class ContextBuilderService:
                     f"  - {contributor.relation}: {contributor.stated_span} "
                     f"(valid {contributor.valid_at or 'unknown'})"
                 )
+            for approx in getattr(verdict, "newer_approximate", ()) or ():
+                authority_lines.append(
+                    f'  newer, approximate: about {approx.value} ("{approx.quote}", '
+                    f"{approx.valid_at or 'unknown'})"
+                )
             if (
                 verdict.contributors_truncated
                 and not verdict.contributors

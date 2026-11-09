@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 from menhir.domain.assertion_operations import (
     adjusts_value,
+    approximates_value,
     is_counting_occurrence,
     is_value_claim,
 )
@@ -38,6 +39,7 @@ from menhir.domain.recall import (
     WardenExecutionStatus,
     RetrievalScoreKind,
     ScalarAuthorityContributor,
+    NewerApproximateValue,
     ScalarAuthorityVerdict,
     ScoredMemory,
     SourceMemory,
@@ -110,6 +112,14 @@ from menhir.services.recall_policies import (
     _select_candidate_content,
 )
 
+
+
+def _listed_approximate(
+    stale_by: tuple[str, ...], approx_by_id: dict[str, NewerApproximateValue],
+) -> tuple[NewerApproximateValue, ...]:
+    """Approximate rows among the ids that made a verdict advisory, by valid_at then id (#519)."""
+    listed = [approx_by_id[i] for i in stale_by if i in approx_by_id]
+    return tuple(sorted(listed, key=lambda a: (_valid_at_sort_key(a.valid_at), a.assertion_id)))
 
 
 def _valid_at_sort_key(raw: object) -> float:
@@ -813,6 +823,9 @@ async def _run_recall(
             )
             # Counting off: occurrence rows never enter recall. An operation the table does not know
             # is neither a value nor a counted happening, so it never enters recall either.
+            # Approximate rows never enter the ranked list or the fold; they feed only the freshness
+            # gate and the newer-approximate listing (#519), so they are taken before the filter.
+            _approx_hits = [h for h in obs_hits if approximates_value(h.get("operation"))]
             obs_hits = [
                 h for h in obs_hits
                 if is_value_claim(h.get("operation"))
@@ -837,6 +850,22 @@ async def _run_recall(
             _occurrence_slots_injected: set[tuple[str, str, str, str, str]] = set()
             _count_match = bool(service.counting_enabled) and bool(
                 getattr(service.graph_adapter, "counting_match_enabled", True))
+            _approx_by_id: dict[str, NewerApproximateValue] = {}
+            for hit in _approx_hits:
+                _a_id = str(hit.get("assertion_id") or "").strip()
+                _a_subj = str(hit.get("subject_uuid") or "")
+                _a_attr = str(hit.get("attribute") or "")
+                _a_kind = str(hit.get("value_kind") or "")
+                if not (_a_id and _a_subj and _a_attr and _a_kind):
+                    continue
+                _obs_times.append(ObservationTime(
+                    assertion_id=_a_id,
+                    slot=(_a_subj, _a_attr, str(hit.get("scope") or ""), _a_kind,
+                          str(hit.get("unit") or "")),
+                    operation=str(hit.get("operation") or ""), valid_at=hit.get("valid_at")))
+                _approx_by_id[_a_id] = NewerApproximateValue(
+                    assertion_id=_a_id, value=hit.get("value"),
+                    quote=str(hit.get("stated_span") or "").strip(), valid_at=hit.get("valid_at"))
             for hit in obs_hits:
                 try:
                     aid = str(hit.get("assertion_id") or "").strip()
@@ -1280,6 +1309,8 @@ async def _run_recall(
                                     contributors_truncated=(
                                         contributor_payload.get("next_offset") is not None),
                                     next_offset=contributor_payload.get("next_offset"),
+                                    newer_approximate=_listed_approximate(
+                                        expiry_stale_by, _approx_by_id),
                                 ))
                                 _authority_audit.audit(
                                     "authority_annotation", "leads" if e_leads else "advisory",
@@ -1411,6 +1442,7 @@ async def _run_recall(
                     count_uncertain=view.get("count_uncertain"),
                     count_actions=view.get("count_actions"),
                     count_items=view.get("count_items"),
+                    newer_approximate=_listed_approximate(view_stale_by, _approx_by_id),
                 ))
                 if _counted_authority_only and view.get("scalar_basis") == "counted":
                     _counted_verdicts_emitted += 1

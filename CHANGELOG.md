@@ -14,6 +14,18 @@
   which names the agent harness. ONNX Runtime telemetry events are turned off at load.
   `docs/your-data.md` lists the download under what leaves your machine.
 
+## 2026-11-08 - A newer approximate value is listed under the advisory View (#519 phase 3)
+
+- When a same-slot `approximate` claim is newer than a View, the View is now advisory and the
+  verdict lists that claim: its "about N" value, the user's quote and its time. The View's value is
+  never changed by it. Phase 1 taught the freshness gate this, but recall dropped approximate rows
+  before the gate saw them, so it never fired outside unit tests.
+- Context output adds one line per entry under the View, `newer, approximate: about N ("quote",
+  time)`; the recall API verdict gains an optional `newer_approximate` list (empty by default).
+  With nothing newer, output is unchanged.
+- Occurrences that demote a View are not listed here; they behave as before. Approximate rows are
+  read for this only, and never enter the ranked list or the fold.
+
 ## 2026-11-08 - Cross-encoder recall rerank (on by default, model downloads itself)
 
 - `MENHIR_RECALL_RERANK_ENABLED` (default true) orders the first `MENHIR_RECALL_RERANK_TOP_N`
@@ -121,31 +133,3 @@
   lone hedge is not a change. The HISTORY_ENTRY listing includes it; provenance never does.
 - Projection coverage: a known operation the fold never reads is `HISTORY_ONLY`, not an
   unaccounted write. An unknown operation is still reported.
-
-## 2026-11-08 - Span alignment re-grounds a source-time attribute prefix (#519)
-
-- Each k-sample proposal canonicalises its attribute against its own quote, so one quoting
-  "current balance is 1300" kept `current_balance`. Span alignment then commits the common span
-  "balance is 1300", and the kept prefix forked a `current_balance` slot beside `balance`. The
-  gate now re-checks the name against the committed quote. Stored rows keep their names.
-
-## 2026-11-08 - One table decides what each TypedAssertion operation means
-
-- `menhir.domain.assertion_operations` holds every operation's meaning. The 61 places that
-  compared operation names in Python and Cypher ask it instead. An operation it does not know
-  sets, changes, ends and counts nothing, opens no fold slot or history entry, and is logged once.
-- Known operations behave as before. The provenance and history listings now list the known
-  operations instead of "everything except occurrences".
-- `tests/test_assertion_operations.py` fails on any new literal operation comparison outside the
-  table.
-
-## 2026-11-08 - Profile catalog 2: `get_client_context` moves to core
-
-- `get_client_context` is a readonly-tier, read-only tool that agents use at session start. Catalog
-  1 filed it under `operate`, so agent-tier clients such as ChatGPT were refused it. Catalog 2 puts
-  it in `core`.
-- Policies pinned to `"profile_catalog": 1` resolve exactly as before. An agent policy still lacks
-  it and logs it as withheld; an `operate` policy keeps it. A moved tool's earlier placements live
-  in `EARLIER_PLACEMENTS` (`src/menhir/mcp/tool_profiles.py`), so a pinned policy never silently
-  loses a tool.
-- To pick it up, a deployment sets `"profile_catalog": 2` once it runs this build.

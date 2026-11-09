@@ -241,6 +241,16 @@ class ScalarAuthorityContributor:
 
 
 @dataclass(frozen=True)
+class NewerApproximateValue:
+    """A hedged same-slot value ("about 1300") newer than a View; listed beside it, never folded."""
+
+    assertion_id: str
+    value: Any
+    quote: str
+    valid_at: str | None
+
+
+@dataclass(frozen=True)
 class ScalarAuthorityVerdict:
     """Structured current/expired/as-of authority, distinct from ranked memory candidates."""
 
@@ -267,6 +277,8 @@ class ScalarAuthorityVerdict:
     count_uncertain: float | None = None
     count_actions: str | None = None
     count_items: str | None = None
+    # Same-slot hedged values newer than the View that kept it advisory (#519); never the value.
+    newer_approximate: tuple[NewerApproximateValue, ...] = ()
 
 
 @dataclass(frozen=True)
