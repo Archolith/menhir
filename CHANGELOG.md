@@ -41,6 +41,20 @@
 - Startup reports each index's state under `vector_indexes` and logs it. Index state is not part
   of schema readiness, so a large index building in the background never blocks writers.
 
+## 2026-11-09 - Credentials are redacted from memory text on write and on recall (#577)
+
+- New `MENHIR_SECRET_POLICY`: `redact` (default), `refuse` or `off`. Under `redact`, provider keys,
+  JWTs, private-key headers and `password =`-style assignments in submitted memory text become
+  `[REDACTED:<kind>]` at intake, before the idempotency digest, turn evidence, the queue node, the
+  embedder and the extraction LLM. The TEMPORAL, todo, candidate, document and raw-capture writers
+  scrub too. Recall redacts ranked results, their temporal facts and `source_memories`, and returns
+  nothing if the scan fails. `off` keeps and returns credentials as given.
+- `menhir secrets scan --namespace <ns>`: read-only count of stored credentials by memory type and
+  kind; prints no values; exits 1 when it finds any.
+- New dependency: `detect-secrets` 1.5.0 (no entropy detection).
+- Limits: defence in depth only. Facts the extraction LLM writes, plaintext stored earlier, and the
+  history, timeline, provenance, scalar-view, authority and bootstrap outputs are not covered.
+
 ## 2026-11-09 - v0.3.7: Approximate scalar claims on by default (#519), cross-encoder recall rerank with its security hardening, recall query telemetry, and telemetry and schema fixes
 
 - Approximate scalar claims are on by default (#519). A hedged single number is stored as
