@@ -120,7 +120,7 @@ def test_min_score_none_means_no_threshold() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("limit,expected", [(1, 64), (15, 64), (50, 200), (10000, 1024)])
+@pytest.mark.parametrize("limit,expected", [(1, 128), (15, 128), (50, 200), (10000, 1024)])
 def test_initial_k(limit: int, expected: int) -> None:
     assert initial_k(limit) == expected
 
@@ -439,21 +439,21 @@ def test_sync_complete_first_call_returns_search_rows() -> None:
     assert len(db.stats_calls) == 1
     params = db.stats_calls[0]
     assert params["index_name"] == EPISODIC_CONTENT_EMBEDDING.name
-    assert params["k"] == initial_k(5) == 64
+    assert params["k"] == initial_k(5) == 128
     assert params["query_vector"] == VEC
-    assert db.search_calls == [(EPISODIC_CONTENT_EMBEDDING.name, 64)]
+    assert db.search_calls == [(EPISODIC_CONTENT_EMBEDDING.name, 128)]
 
 
 def test_sync_incomplete_doubles_k_then_completes() -> None:
-    # Full at k=64 (and only 1 kept < limit 3, so incomplete); short at k=128 (complete).
+    # Full at k=128 (and only 1 kept < limit 3, so incomplete); short at k=256 (complete).
     db = _SyncDb(
         show=[_row(EPISODIC_CONTENT_EMBEDDING)],
-        stats=lambda k: (64, 0.9) if k == 64 else (70, 0.9),
+        stats=lambda k: (128, 0.9) if k == 128 else (140, 0.9),
         search=[{"uuid": "u0", "cosine": 0.9}],
     )
     rows, _ = _run(db, limit=3, min_score=None)
-    assert [p["k"] for p in db.stats_calls] == [64, 128]
-    assert [k for _, k in db.search_calls] == [64, 128]
+    assert [p["k"] for p in db.stats_calls] == [128, 256]
+    assert [k for _, k in db.search_calls] == [128, 256]
     assert rows == [{"uuid": "u0", "cosine": 0.9}]
 
 
@@ -465,7 +465,7 @@ def test_sync_incomplete_at_cap_returns_none() -> None:
     )
     rows, _ = _run(db, limit=3)
     assert rows is None
-    assert [p["k"] for p in db.stats_calls] == [64, 128, 256, 512, ANN_MAX_K]
+    assert [p["k"] for p in db.stats_calls] == [128, 256, 512, ANN_MAX_K]
 
 
 def test_sync_vector_query_error_returns_none_and_invalidates() -> None:
@@ -903,4 +903,4 @@ async def test_node_search_falls_back_to_stock_when_ann_incomplete_at_cap(
     out = await MenhirSearchInterface().node_similarity_search(driver, VEC, SearchFilters(), ["g"], 5, 0.5)
     assert out == "stock-node" and len(calls) == 1
     ann_ks = [kw["k"] for q, kw in driver.calls if "count(hit)" in q]
-    assert ann_ks == [64, 128, 256, 512, ANN_MAX_K]
+    assert ann_ks == [128, 256, 512, ANN_MAX_K]

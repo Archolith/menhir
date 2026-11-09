@@ -56,9 +56,10 @@ SHOW_VECTOR_INDEXES = (
 )
 
 #: ANN candidate counts. The first request oversamples the limit; an incomplete result doubles k
-#: up to the cap, past which the caller scans.
+#: up to the cap, past which the caller scans. k is also HNSW's search breadth: on 17k clustered
+#: 1536-d entities, k=64 skipped a true top-15 row in 5 of 200 searches and k=128 in 0 of 200.
 ANN_OVERSAMPLE = 4
-ANN_MIN_K = 64
+ANN_MIN_K = 128
 ANN_MAX_K = 1024
 
 #: Upper bound on |index score - exact score|. Quantized indexes (the Neo4j >= 5.23 default) were

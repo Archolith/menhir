@@ -90,7 +90,10 @@ option on servers that lack it. Results are always rescored exactly, and the com
 uses a margin of 1e-4, or 0.02 for a quantized index. With `bound = lowest + margin`, the result
 equals the scan's top `limit` (up to ANN recall) when `raw < k`, or when `bound <= min_score`, or
 when the `limit`-th kept row scores at least `bound`. Otherwise `k` doubles (start
-`max(4*limit, 64)`, cap 1024), and past the cap the call uses the scan. Both scales are
+`max(4*limit, 128)`, cap 1024), and past the cap the call uses the scan. `k` is also HNSW's
+search breadth. On 17k clustered 1536-d entities, 200 searches each: a `k` of 64 skipped one true
+top-k row in 2/200 searches (limit 10) and 5/200 (limit 15), while 128 and 256 skipped none.
+Latency was 45, 55 and 67 ms p50 against 1.0-1.1 s for the scan. Both scales are
 `(1+cos)/2`, so `min_score` keeps its meaning.
 
 Filters that are already selective use the scan directly, because a scan of a few rows is exact and
