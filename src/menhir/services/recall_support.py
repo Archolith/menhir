@@ -693,6 +693,8 @@ class RecallSupportMixin:
                     warden_status.applied_guards = tuple(w.name for w in pipeline.wardens) if outcome.ranked else ()
                     warden_status.refused = len(outcome.refused)
                     warden_status.flagged = len(outcome.flagged)
+                if outcome.oracle_failures > 0:
+                    warden_status.add_gap("oracle_failed")
             return result, note
         except Exception:  # active path: degrade to the old order, never break recall
             logger.exception(

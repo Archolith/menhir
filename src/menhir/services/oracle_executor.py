@@ -87,10 +87,10 @@ class OracleExecutor:
                     )
                 except asyncio.TimeoutError:
                     logger.warning("oracle %s timed out on candidate %s -> neutral", oracle.name, candidate.id)
-                    result = OracleResult.neutral(oracle.name, note="timeout")
+                    result = OracleResult.neutral(oracle.name, note="timeout", failed=True)
                 except Exception as exc:  # an oracle must never break the pipeline
                     logger.warning("oracle %s failed on candidate %s: %s -> neutral", oracle.name, candidate.id, exc)
-                    result = OracleResult.neutral(oracle.name, note=f"error: {exc.__class__.__name__}")
+                    result = OracleResult.neutral(oracle.name, note=f"error: {exc.__class__.__name__}", failed=True)
                 return candidate.id, result
 
         tasks = [_run(oracle, cand) for cand in candidates for oracle in self.oracles]
