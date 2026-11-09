@@ -14,7 +14,10 @@ from enum import Enum
 from typing import Any, Callable
 
 from menhir.domain.assertion_operations import (
+    APPROXIMATE_OPERATION,
+    MODEL_OPERATIONS,
     adjusts_value,
+    approximates_value,
     ends_value,
     is_counting_occurrence,
     is_value_claim,
@@ -24,7 +27,6 @@ from menhir.domain.typed_assertion import (
     COUNTABLE_KINDS,
     IMPORTANCE_LEVELS,
     NUMERIC_KINDS,
-    OPERATIONS,
     TypedAssertion,
     VALUE_KINDS,
     build_source_key,
@@ -412,6 +414,53 @@ TYPED_SCALAR_SYSTEM_PROMPT = (
     "observations array when that episode has no qualifying state fact. Do not omit an episode, and "
     "do not repeat the episode number inside each observation."
 )
+
+#: #519, flag on: the two sentences that tell the model to emit NOTHING for an approximate value,
+#: and what replaces each. The flag-off prompt above is never edited; this variant is derived from it.
+#: The model still emits operation=absolute with the stated number; code relabels it `approximate`.
+_PROMPT_ACTIVITY_NO_APPROXIMATE = (
+    "Tentative, hypothetical, approximate, vague, or alternative totals "
+    "('I might wear them six times', 'about six times', 'a few times', 'six or seven times') emit "
+    "NOTHING rather than an exact scalar. "
+)
+_PROMPT_ACTIVITY_APPROXIMATE = (
+    "Tentative, hypothetical, vague, or alternative totals "
+    "('I might wear them six times', 'a few times', 'six or seven times') emit "
+    "NOTHING rather than an exact scalar. An APPROXIMATE single total ('about six times') is "
+    "emitted as operation=absolute with the stated number (6); an approximate change ('about two "
+    "more times') emits NOTHING. "
+)
+_PROMPT_UNDERDETERMINED_NO_APPROXIMATE = (
+    "But if it gives DISCRETE alternatives ('30 or 40', 'maybe 1500 or 1600'), an APPROXIMATION "
+    "('about 30', 'around 7:30'), a VAGUE quantity ('a few times', 'several'), or MULTIPLE contextual "
+    "values ('usually 7, sometimes 7:30'), emit NOTHING for that value -- it has no single current "
+    "scalar. "
+)
+_PROMPT_UNDERDETERMINED_APPROXIMATE = (
+    "But if it gives DISCRETE alternatives ('30 or 40', 'maybe 1500 or 1600'), a VAGUE quantity "
+    "('a few times', 'several'), or MULTIPLE contextual values ('usually 7, sometimes 7:30'), emit "
+    "NOTHING for that value -- it has no single current scalar. An APPROXIMATION of ONE number for a "
+    "count, money, measurement, duration or frequency ('about 400,000', 'close to 1300', 'nearly 50', "
+    "'I think it is 50') is emitted as operation=absolute with the stated number (400000, 1300, 50); "
+    "the system marks it approximate. An approximate clock time ('around 7:30') or an approximate "
+    "change ('about 5 more') still emits NOTHING. "
+)
+
+
+def _approximate_prompt(base: str) -> str:
+    out = base
+    for old, new in (
+        (_PROMPT_ACTIVITY_NO_APPROXIMATE, _PROMPT_ACTIVITY_APPROXIMATE),
+        (_PROMPT_UNDERDETERMINED_NO_APPROXIMATE, _PROMPT_UNDERDETERMINED_APPROXIMATE),
+    ):
+        if out.count(old) != 1:
+            raise AssertionError("typed-scalar prompt no longer contains the approximate-value rule")
+        out = out.replace(old, new)
+    return out
+
+
+#: the scalar-lane prompt with personal_memory_scalar_approximate_enabled on.
+TYPED_SCALAR_SYSTEM_PROMPT_APPROXIMATE = _approximate_prompt(TYPED_SCALAR_SYSTEM_PROMPT)
 
 
 @dataclass(frozen=True)
@@ -1260,7 +1309,7 @@ def _scalar_source_mismatch(
     `employed`), and dropping it would leave the stale value current.
     """
     if value_kind not in _SOURCE_CHECKED_KINDS or not (
-        sets_value(operation) or adjusts_value(operation)
+        sets_value(operation) or adjusts_value(operation) or approximates_value(operation)
     ):
         return None
     quote = content[span_start:span_end]
@@ -1336,16 +1385,21 @@ def extract_typed_scalars_once(
     episodes: list[Any], llm_complete: LlmComplete,
     *, on_drop: "Callable[[str], None] | None" = None,
     system_prompt: "str | None" = TYPED_SCALAR_SYSTEM_PROMPT,
-    allowed_operations: "frozenset[str] | None" = OPERATIONS,
+    allowed_operations: "frozenset[str] | None" = MODEL_OPERATIONS,
     claim_ordinal: int = 0,
     context: str = "",
     counting_v2: bool = False,
     on_unclean: "Callable[[int | None], None] | None" = None,
+    approximate: bool = False,
 ) -> list[TypedScalarProposal]:
     """One typed-scalar extraction pass: prose -> validated, grounded `TypedScalarProposal`s.
 
     `on_unclean` (optional, counting re-version) is called with each episode index this pass did not
     fully read (a dropped row, a missing or bad envelope), or None when the whole pass is unreadable.
+
+    `approximate` (#519, default off) keeps a hedged single number as an `approximate` row instead of
+    dropping it, and swaps the scalar-lane default prompt for the one that asks for the stated number.
+    The model never names `approximate`: it is not in `allowed_operations`.
 
     `episodes` are objects with `.uuid` and `.content` (e.g. `perception.Episode`). A row survives
     ONLY if every required field is an actual non-blank string (`subject`, `attribute`, `operation`,
@@ -1370,10 +1424,11 @@ def extract_typed_scalars_once(
     if not episodes:
         return []
     # None means "scalar lane defaults" (callers forward optional lane selectors unchanged).
-    if system_prompt is None:
-        system_prompt = TYPED_SCALAR_SYSTEM_PROMPT
+    if system_prompt is None or (approximate and system_prompt is TYPED_SCALAR_SYSTEM_PROMPT):
+        system_prompt = (
+            TYPED_SCALAR_SYSTEM_PROMPT_APPROXIMATE if approximate else TYPED_SCALAR_SYSTEM_PROMPT)
     if allowed_operations is None:
-        allowed_operations = OPERATIONS
+        allowed_operations = MODEL_OPERATIONS
 
     def _drop(reason: str) -> None:
         if on_drop is not None:
@@ -1396,7 +1451,7 @@ def extract_typed_scalars_once(
         proposal = parse_scalar_row(
             row, episodes, row_drop,
             allowed_operations=allowed_operations, claim_ordinal=claim_ordinal,
-            counting_v2=counting_v2)
+            counting_v2=counting_v2, approximate=approximate)
         if proposal is not None:
             out.append(proposal)
     return out
@@ -1516,8 +1571,8 @@ def _clean_count_text(raw: Any) -> str:
 
 def parse_scalar_row(
     row: Any, episodes: list[Any], drop: "Callable[[str], None]",
-    *, allowed_operations: frozenset[str] = OPERATIONS, claim_ordinal: int = 0,
-    counting_v2: bool = False,
+    *, allowed_operations: frozenset[str] = MODEL_OPERATIONS, claim_ordinal: int = 0,
+    counting_v2: bool = False, approximate: bool = False,
 ) -> "TypedScalarProposal | None":
     """Validate ONE raw model row into a grounded proposal, or None with a `drop` reason.
 
@@ -1726,14 +1781,21 @@ def parse_scalar_row(
     # 7:30") must not become an exact scalar. Drop it here (span-local + deterministic) so the gate
     # sees no vote for it and the claim abstains, rather than admitting an over-confident value the k
     # samples happened to agree on. A genuine [lo, hi] range value is exempt.
-    if is_ambiguous_exact(stated_span, value, operation):
+    # #519, flag on: a single number hedged ONLY by an approximation cue ("about 400,000") is kept
+    # as an `approximate` claim instead of dropped. A pure function of span, value and kind, so all k
+    # samples agree. Every other hedge still drops here, and so do the checks below.
+    if approximate and not numberless_stop and _approximate_relabel(
+            stated_span, value, operation, value_kind):
+        operation = APPROXIMATE_OPERATION
+    elif is_ambiguous_exact(stated_span, value, operation):
         drop("hedged_value")
         return None
 
     # Ended-state framing ("I no longer have 3 cars", "I used to weigh 90 kg") states a value that is
     # NOT current. The contract for that is operation=expire (kept), never an absolute/delta current
     # value; booleans are handled by source polarity above (ended -> false).
-    if (value_kind != "boolean" and (sets_value(operation) or adjusts_value(operation))
+    if (value_kind != "boolean"
+            and (sets_value(operation) or adjusts_value(operation) or approximates_value(operation))
             and not numberless_stop
             and _ended_state(stated_span)):
         drop("ended_state")
@@ -2308,6 +2370,13 @@ _NON_QUANTIFYING_AROUND_RE = re.compile(
 #: interval framing -- an interval was stated; a [lo,hi] RANGE value captures it, an EXACT value does not
 #: (also forces abstention for kinds with no range support, e.g. "between 7:00 and 7:30" clock_time).
 _AMBIG_RANGE_RE = re.compile(r"\bbetween\b|\bfrom\b.*\bto\b|\d\s*(?:-|–|—|to)\s*\d", re.I)
+#: approximation cues added for #519; they count only with personal_memory_scalar_approximate_enabled,
+#: and only to relabel a single number as `approximate` (they never add a drop).
+_AMBIG_APPROX_EXTRA_RE = re.compile(r"\b(?:close\s+to|nearly|almost|i\s+think)\b", re.I)
+#: the part of _AMBIG_APPROX_RE that is tentative, contextual or vague rather than an approximation of
+#: one number ("maybe 30", "5 miles, sometimes 6", "a few"): it always drops, flag on or off.
+_AMBIG_TENTATIVE_RE = re.compile(
+    r"\b(?:maybe|possibly|perhaps|sometimes|several|a\s+few|a\s+couple)\b", re.I)
 
 # Activity totals are intentionally admitted from the typed scalar path, but only when the source
 # actually reports a completed/current total.  The LLM can still emit an otherwise well-formed row
@@ -2505,24 +2574,50 @@ def is_ambiguous_exact(stated_span: str, value: Any, operation: str) -> bool:
     signals are word-boundary and span-local to avoid firing on ordinary prose."""
     if not (sets_value(operation) or adjusts_value(operation)):
         return False
+    return bool(_hedge_signals(stated_span, value))
+
+
+def _hedge_signals(stated_span: str, value: Any, *, extra_cues: bool = False) -> frozenset[str]:
+    """Which hedges the grounded span carries: ``discrete`` ("30 or 40"), ``range`` (an interval
+    stated for a non-range value), ``approx`` (an approximation or vagueness cue) and ``tentative``
+    (the "maybe"/"sometimes"/"a few" part of ``approx``, never relabelled). Empty when the
+    span states a definite value. ``extra_cues`` adds the #519 cues ("close to", "nearly", "almost",
+    "I think") to ``approx``; off, the result is exactly what ``is_ambiguous_exact`` always used."""
     span = (stated_span or "").strip()
     if not span:
-        return False
+        return frozenset()
+    signals: set[str] = set()
     if _AMBIG_DISCRETE_RE.search(span):
-        return True
-    is_range = isinstance(value, (list, tuple))
-    if not is_range:
+        signals.add("discrete")
+    if not isinstance(value, (list, tuple)):
         # A calendar date is never a VALUE range; strip explicit dates first so an ISO date
         # ("2026-03-04") or "Month D, YYYY" does not trip the numeric-range detector via its internal
         # digit-dash-digit ("03-04"). Dates are handled by the temporal resolver, not hedged-abstention.
         span_no_date = _SRC_ISO_RE.sub(" ", _SRC_MONTH_DAY_YEAR_RE.sub(" ", span))
         span_for_approx = _NON_QUANTIFYING_AROUND_RE.sub(" ", span_no_date)
-        if (
-            _AMBIG_APPROX_RE.search(span_for_approx)
-            or _AMBIG_RANGE_RE.search(span_no_date)
-        ):
-            return True
-    return False
+        if _AMBIG_APPROX_RE.search(span_for_approx) or (
+                extra_cues and _AMBIG_APPROX_EXTRA_RE.search(span_for_approx)):
+            signals.add("approx")
+        if _AMBIG_TENTATIVE_RE.search(span_for_approx):
+            signals.add("tentative")  # always alongside "approx": the drop decision is unchanged
+        if _AMBIG_RANGE_RE.search(span_no_date):
+            signals.add("range")
+    return frozenset(signals)
+
+
+def _approximate_relabel(stated_span: str, value: Any, operation: str, value_kind: str) -> bool:
+    """True when a stated ABSOLUTE is hedged only by an approximation cue and is one finite number of
+    a numeric kind, so it is kept as `approximate` rather than dropped. Alternatives, ranges, deltas,
+    non-numeric kinds and a fractional count all stay with `is_ambiguous_exact`. Pure."""
+    if not sets_value(operation):
+        return False
+    if _hedge_signals(stated_span, value, extra_cues=True) != {"approx"}:
+        return False
+    try:
+        validate_value(value_kind, APPROXIMATE_OPERATION, value)
+    except (ValueError, OverflowError):
+        return False
+    return True
 
 
 # --- deterministic temporal resolution (when-discipline) ------------------------------------------
@@ -2658,7 +2753,7 @@ def resolve_temporal_disposition(
       * ``unsupported_date``     no resolvable source date but the model supplied one -> IGNORE it
                                  (-> episode reference), so a hallucinated date never reaches valid_at;
       * ``current_observation``  dateless present-state -> episode reference (trusted_when=None)."""
-    if not is_value_claim(operation):
+    if not (is_value_claim(operation) or approximates_value(operation)):
         return ("current_observation", True, None)   # unknown op: never trust a model date
     span = (stated_span or "").strip()
     if not span:

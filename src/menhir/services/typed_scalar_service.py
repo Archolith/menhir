@@ -146,13 +146,16 @@ class TypedScalarPerceptionService:
         counting_v2: bool = False,
         counting_match: bool = False,
         defer_rebuild: bool = False,
+        approximate: bool = False,
     ) -> dict[str, Any]:
         """Perceive typed scalars from `episodes` and durably persist the committed, bound ones.
 
         `counting_v2` (counting lane only, unit 3a.9) selects the verb-anchored occurrence guard and
         the per-attribute claim split; it is forwarded only when True, so every other caller is
         unchanged. `counting_match` (counting lane under 4R match) lets the gate set aside bridge
-        quotes (`resolve_bridges`); off everywhere else.
+        quotes (`resolve_bridges`); off everywhere else. `approximate` (scalar lane only, #519) keeps a
+        hedged single number as an `approximate` claim and switches the default prompt to the one that
+        asks for it; forwarded only when True, so every other caller is unchanged.
 
         Counting re-version (default off): `defer_rebuild` skips the per-row rebuild, so bound rows
         keep `projection_pending` until the caller rebuilds and marks them; the result then also
@@ -194,6 +197,7 @@ class TypedScalarPerceptionService:
             drops[reason] += 1
 
         v2_kwargs: dict[str, Any] = {"counting_v2": True} if counting_v2 else {}
+        approximate_kwargs: dict[str, Any] = {"approximate": True} if approximate else {}
         # Per sample, the episode indexes it did not fully read (None = the whole sample); only
         # collected for the counting re-version (defer_rebuild).
         unclean: list[set[int | None]] = []
@@ -207,7 +211,8 @@ class TypedScalarPerceptionService:
             return extract_typed_scalars_once(
                 episodes, llm_complete, on_drop=_note_drop,
                 system_prompt=system_prompt, allowed_operations=allowed_operations,
-                claim_ordinal=claim_ordinal, context=context, **v2_kwargs, **extra)
+                claim_ordinal=claim_ordinal, context=context, **v2_kwargs,
+                **approximate_kwargs, **extra)
 
         samples = [_extract_once() for _ in range(k)]
         kept = sum(len(s) for s in samples)

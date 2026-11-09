@@ -30,6 +30,18 @@
 - `uv.lock` and `THIRD-PARTY-LICENSES.txt` gain the new packages. The manifest also picks up
   version drift already in the lock (jiter, joserfc, markupsafe, numpy, pydantic).
 
+## 2026-11-08 - Approximate scalar claims (#519, default off)
+
+- New setting `MENHIR_PERSONAL_MEMORY_SCALAR_APPROXIMATE_ENABLED` (default off). When on, a single
+  number hedged only by an approximation cue ("about 400,000", "close to 1300", "nearly 50", "I think
+  it's 50") is stored as an `approximate` claim instead of being dropped. It is listed in scalar
+  history and shown as "about N"; it never sets or changes a View's value. Alternatives ("30 or 40"),
+  ranges, hedged deltas, non-numeric values, tentative or contextual wording ("maybe 30", "5,
+  sometimes 6") and vague quantities ("a few") are still dropped.
+- The model never names `approximate`: it still emits `absolute` with the stated number and code
+  relabels it from the quoted span, so all k samples agree. The scalar prompt changes only when the
+  flag is on; with it off the prompt and every drop decision are unchanged.
+
 ## 2026-11-08 - The off-loop telemetry writer skips the per-commit fsync
 
 - Connections opened on the off-loop telemetry writer thread use `synchronous=NORMAL` in WAL mode,
@@ -121,11 +133,3 @@
   in `EARLIER_PLACEMENTS` (`src/menhir/mcp/tool_profiles.py`), so a pinned policy never silently
   loses a tool.
 - To pick it up, a deployment sets `"profile_catalog": 2` once it runs this build.
-
-## 2026-11-08 - Token endpoint logs why it refused a request (#541)
-
-- Every `/oauth/token` refusal now logs one WARNING (ERROR for a 500): the OAuth error code and
-  description, grant type, the client's policy label (or the client ID as sent) and the requested
-  scopes. Codes, refresh tokens and verifiers are never logged, and client-supplied fields are
-  bounded and stripped of control characters. #533's opaque `-32603` was a `400` here that left
-  only an access-log line.
