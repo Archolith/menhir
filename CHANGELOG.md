@@ -9,6 +9,7 @@
   retention tier. Namespace erasure scrubs the query text; rows with no namespace only age out
   (`docs/your-data.md`).
 - The write goes through the #527 off-loop writer, so it never opens SQLite on the event loop.
+
 ## 2026-11-08 - v0.3.6: profile catalog 2, telemetry off the event loop, one operation table
 
 - Profile catalog 2 puts `get_client_context` in `core`, so agent-tier clients receive it. A
