@@ -1,3 +1,16 @@
+## 2026-11-08 - Readers for an approximate scalar operation (#519 phase 1)
+
+- A hedged value ("I think I'm close to 1300") will be stored as `approximate`: it never sets or
+  changes a View's value, is listed in scalar history as "about 1300", and keeps a View advisory
+  when newer. Only readers ship here. The table entry has no writer lane, so a stored row loads
+  but no parse path or scalar identity can produce one.
+- `validate_value`: one finite number on a numeric kind (an integer for counts); ranges are
+  refused.
+- History lists it, also with counting off; the change check treats it as a value statement, so a
+  lone hedge is not a change. The HISTORY_ENTRY listing includes it; provenance never does.
+- Projection coverage: a known operation the fold never reads is `HISTORY_ONLY`, not an
+  unaccounted write. An unknown operation is still reported.
+
 ## 2026-11-08 - Span alignment re-grounds a source-time attribute prefix (#519)
 
 - Each k-sample proposal canonicalises its attribute against its own quote, so one quoting

@@ -254,10 +254,10 @@ def test_g_a_lane_that_passes_its_own_prompt_keeps_it():
 
 # ---------------------------------------------------------------- flag
 
-def test_the_flag_defaults_off_and_reads_its_env_var(monkeypatch):
-    assert MemorySettings().personal_memory_scalar_approximate_enabled is False
-    monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_SCALAR_APPROXIMATE_ENABLED", "true")
-    assert MemorySettings.from_env().personal_memory_scalar_approximate_enabled is True
+def test_the_flag_defaults_on_and_reads_its_env_var(monkeypatch):
+    assert MemorySettings().personal_memory_scalar_approximate_enabled is True
+    monkeypatch.setenv("MENHIR_PERSONAL_MEMORY_SCALAR_APPROXIMATE_ENABLED", "false")
+    assert MemorySettings.from_env().personal_memory_scalar_approximate_enabled is False
 
 
 # ---------------------------------------------------------------- h. projection_pending
