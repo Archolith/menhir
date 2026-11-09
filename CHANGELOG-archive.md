@@ -1,3 +1,32 @@
+## 2026-11-08 - v0.3.5: Client policy v3: tool profiles, a tier ceiling and deployment-owned product roles
+
+- Client policy v3 grants tools by profile (`core`, `curate`, `operate`, `admin`) with a tier
+  ceiling, and product roles belong to the deployment (#435). v1 and v2 policies still load;
+  the next release drops them.
+- Profile catalog 1: the first catalog. A v3 policy sets `"profile_catalog": 1`. Under v3,
+  `list_clients` is an `admin` tool, so product clients no longer receive it.
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.5. No dependency changes in this commit.
+
+## 2026-11-08 - Client policy v3: tool profiles and deployment-owned product roles (#435)
+
+- A version 3 client policy grants tools by profile: `core`, `curate`, `operate` and `admin`
+  (`src/menhir/mcp/tool_profiles.py`), plus optional `allow` and `deny` lists. It resolves at load
+  time to the same allowlist versions 1 and 2 spell out, so runtime enforcement is unchanged.
+- Profile tools above a client's `maximum_tier` are left out and logged. An explicit `allow`
+  above the tier fails the load. A v3 client's scopes must equal its tier's scopes.
+- `profile_catalog` pins the catalog a policy was written for. Tools a later catalog adds are
+  withheld and logged as a warning; a policy newer than the build fails the load. Catalog 1 is
+  this release.
+- `access_contract.products` is now the deployment's: any product names, roles `readonly`, `agent`
+  or `operator` (v2: `agent` or `operator`). The fixed ChatGPT/Codex/Claude/OpenCode role table is
+  gone. In v3 a product client never resolves an `admin` tool.
+- Agent Smith client-metadata documents advertise the scopes the policy gives that client.
+- Tier ranking lives in one place, `src/menhir/tiers.py`.
+- `.agent/mcp-tools.yaml` lists the profiles, checked against the code by a test.
+- Versions 1 and 2 still load. The next release drops them.
+- New fixture `tests/fixtures/client-policy.v3.synthetic.json`; `.agent/endpoints.md` documents
+  the policy.
+
 ## 2026-11-08 - v0.3.4: MCP initialize names the build; releases publish what they serve; policy refusals are MCP errors
 
 - `serverInfo.version` carries the build commit as SemVer build metadata, and each GitHub release

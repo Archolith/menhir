@@ -18,9 +18,31 @@ from typing import Any
 from menhir.clock import utc_now_iso as _utc_now_iso
 from menhir.infrastructure.paths import telemetry_db_path
 
-__all__ = ["_utc_now_iso", "connect_telemetry_db", "default_telemetry_db_path", "timezone"]
+__all__ = [
+    "_utc_now_iso", "add_column_if_missing", "connect_telemetry_db", "default_telemetry_db_path",
+    "timezone",
+]
 
 logger = logging.getLogger(__name__)
+
+
+def add_column_if_missing(
+    conn: sqlite3.Connection, table: str, column: str, declaration: str, existing: set[str]
+) -> None:
+    """``ALTER TABLE ... ADD COLUMN`` unless ``existing`` (a prior PRAGMA read) already has it.
+
+    Required because two stores can migrate one file at once: both read the column as missing,
+    and the second ALTER then fails with "duplicate column name" (seen in CI as a failed
+    delete_memory). That error means the column now exists, which is the goal, so it is success.
+    ``table``/``column``/``declaration`` must be literals, never caller input.
+    """
+    if column in existing:
+        return
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+    except sqlite3.OperationalError as exc:
+        if "duplicate column name" not in str(exc).lower():
+            raise
 
 
 def default_telemetry_db_path() -> Path:

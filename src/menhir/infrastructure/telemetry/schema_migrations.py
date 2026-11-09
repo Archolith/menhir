@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import sqlite3
 
+from menhir.infrastructure.telemetry.helpers import add_column_if_missing
+
 
 _NON_EPISODE_SUBJECT_KEY = "__non_episode__"
 _EXTRACTION_LAB_UNSCOPED_KEY = "__extraction_lab_unscoped__"
@@ -334,8 +336,7 @@ def ensure_lineage_columns(conn: sqlite3.Connection) -> None:
         if not existing:
             continue
         for column in columns:
-            if column not in existing:
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+            add_column_if_missing(conn, table, column, "TEXT", existing)
 
     # CF-29 (owner ruling 2026-08-21): stamp pre-existing rows with an explicit sentinel rather
     # than leaving them NULL, so a consumer never has to branch on NULL for these columns.
