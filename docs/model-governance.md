@@ -36,6 +36,7 @@ listed environment variables.
 | Graphiti extraction provider | `graphiti_provider` | `GRAPHITI_LLM_PROVIDER` / `MEMORY_GRAPHITI_PROVIDER` / `GRAPHITI_PROVIDER` | `local` |
 | Graphiti embedding provider | `graphiti_embed_provider` | `GRAPHITI_EMBED_PROVIDER` / `MEMORY_GRAPHITI_EMBED_PROVIDER` | inherits extraction provider |
 | Graphiti reranker provider | `graphiti_reranker_provider` | `GRAPHITI_RERANKER_PROVIDER` | inherits extraction provider |
+| Recall cross-encoder (local ONNX, default on) | `recall_rerank_model_dir` | `MENHIR_RECALL_RERANK_MODEL_DIR` | empty: the server downloads `cross-encoder/ms-marco-MiniLM-L6-v2` @233902d2 into the Hugging Face cache (`MENHIR_RECALL_RERANK_AUTO_DOWNLOAD`, default true); only a model whose sha256 is in `PINNED_MODELS` (`services/cross_encoder_rerank.py`) loads |
 | Personal-memory consolidation model | `personal_memory_consolidation_chat_model` | `MENHIR_PERSONAL_MEMORY_CHAT_MODEL` | empty; inherits global chat model |
 
 Provider-specific base URLs and credentials are configured separately. See

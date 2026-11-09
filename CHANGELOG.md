@@ -1,3 +1,35 @@
+## 2026-11-08 - Cross-encoder recall rerank (on by default, model downloads itself)
+
+- `MENHIR_RECALL_RERANK_ENABLED` (default true) orders the first `MENHIR_RECALL_RERANK_TOP_N`
+  (50) recall candidates with a local ONNX cross-encoder (ms-marco-MiniLM-L6-v2) instead of
+  cutting them at the RRF rank floor. Candidates past the top N keep the floor. Wardens still
+  gate the result; the oracle blend does not reorder it. Shown scores are sigmoid(logit).
+- A reranked list skips the floor, so it would always fill the limit. `MENHIR_RECALL_RERANK_MAX_RESULTS`
+  (7) caps the results returned when rerank ran. In an offline sweep, the top 7 keep the rerank's
+  top-5 recall gain at about the old context size; score floors lost evidence.
+- One install: `onnxruntime`, `tokenizers` and `huggingface-hub` are now normal dependencies. With
+  no `MENHIR_RECALL_RERANK_MODEL_DIR`, a long-running server downloads the pinned model (~92 MB,
+  `cross-encoder/ms-marco-MiniLM-L6-v2` @233902d2) into the Hugging Face cache in the background,
+  checks the tokenizer and model digests, loads it, and then starts reranking. Boot never waits;
+  until then, offline, or on any failure, recall keeps the RRF floor and the server logs why once.
+  Hooks only use an already cached copy and never download. No Hugging Face token is sent.
+- `MENHIR_RECALL_RERANK_AUTO_DOWNLOAD=false` turns the download off (air-gapped installs); set
+  `MENHIR_RECALL_RERANK_MODEL_DIR` to a flat dir or a Hugging Face snapshot instead. Only a
+  sha256-pinned model loads. `MENHIR_RECALL_RERANK_DEVICE` is `auto`, `cpu` or `cuda`; `cuda`
+  never falls back to CPU. For CUDA, replace `onnxruntime` with `onnxruntime-gpu`.
+- The server refuses to start if a model dir is set explicitly and cannot load. A failure at
+  recall time keeps the floor for that call and says so in the note. Set
+  `MENHIR_RECALL_RERANK_ENABLED=false` to opt out entirely.
+- Recall Lab arms can toggle it (`enable_cross_encoder_rerank`, `rerank_top_n`,
+  `rerank_max_results`).
+- Evidence (`.agent/reviews/menhir-recall-rerank-ranking-stats-2026-11-08.md` in the workspace):
+  LME distractor graph, 414 questions, answer accuracy 0.850 -> 0.872 with the cap, +7.2% input
+  tokens; base LME graph IR support Hit@3 0.250 -> 0.410, answer accuracy unchanged (0.818 / 0.814,
+  uncapped). Offline (tiny-model-surgery recall arm, #516): judged-only Recall@5 on the mix set
+  0.555 -> 0.878. About 200 ms per recall on 12 CPU threads, 600 ms on 2, 44 ms on CUDA.
+- `uv.lock` and `THIRD-PARTY-LICENSES.txt` gain the new packages. The manifest also picks up
+  version drift already in the lock (jiter, joserfc, markupsafe, numpy, pydantic).
+
 ## 2026-11-08 - Approximate scalar claims (#519, default off)
 
 - New setting `MENHIR_PERSONAL_MEMORY_SCALAR_APPROXIMATE_ENABLED` (default off). When on, a single

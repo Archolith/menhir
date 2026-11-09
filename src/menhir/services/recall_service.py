@@ -97,6 +97,8 @@ class RecallService(RecallSupportMixin):
     inferred_self_mode: str = "off"  # MENHIR_INFERRED_SELF_MODE; not "off": recall reads both self tiers
     #: Candidate-readonly: never reinforce retrieval via access timestamps, edge weights or lifecycle.
     read_only: bool = False
+    rerank_model_dir: str = ""  # MENHIR_RECALL_RERANK_MODEL_DIR; used when tuning enables rerank
+    rerank_device: str = "auto"  # MENHIR_RECALL_RERANK_DEVICE: auto | cpu | cuda
     _rehydration_tasks: set[asyncio.Task[None]] = field(default_factory=set)
 
     async def recall(
