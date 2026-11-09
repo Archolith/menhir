@@ -54,6 +54,10 @@ def _payload() -> dict:
 
 
 def _rows(store: McpTelemetryStore) -> list[sqlite3.Row]:
+    # Writes made on an event loop are queued (#527); a raw read must drain like the store does.
+    from menhir.infrastructure.telemetry.async_writer import TELEMETRY_WRITER
+
+    assert TELEMETRY_WRITER.drain(5)
     with sqlite3.connect(store.db_path) as conn:
         conn.row_factory = sqlite3.Row
         return conn.execute("SELECT * FROM recall_query_log ORDER BY id").fetchall()
