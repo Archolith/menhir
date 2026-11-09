@@ -123,6 +123,31 @@ def run(
         )
 
 
+def _scrub_memory_inputs(
+    flagged: list[dict],
+    todos: list[dict],
+    temporal_memories: list[dict],
+    context_text: str | None,
+) -> tuple[list[dict], list[dict], list[dict], str | None]:
+    """Redact credentials from everything memory-derived before it is rendered (#577).
+
+    Fails closed: if the detector fails, no memory section is emitted and the log line
+    carries no text.
+    """
+    from menhir.domain.payload_scrub import PayloadScrubFailed, scrub_payload
+
+    try:
+        return (
+            scrub_payload(flagged),
+            scrub_payload(todos),
+            scrub_payload(temporal_memories),
+            scrub_payload(context_text),
+        )
+    except PayloadScrubFailed:
+        print("menhir hook: credential scan failed, memory sections withheld", file=sys.stderr)
+        return [], [], [], None
+
+
 def _parse_stdin() -> tuple[str, str]:
     """Parse session_id and prompt from stdin JSON. Returns (session_id, prompt)."""
     session_id = "unknown"
@@ -246,6 +271,9 @@ def _run_prompt_impl(
                 file=sys.stderr,
             )
 
+    flagged, todos, temporal_memories, context_text = _scrub_memory_inputs(
+        flagged, todos, temporal_memories, context_text
+    )
     output = format_hook_output(
         flagged, context_text, effective_query, write_nudge, temporal_line,
         todos=todos, temporal_memories=temporal_memories, max_tokens=max_tokens,
@@ -350,6 +378,9 @@ def _run_postcompact_impl(*, max_tokens: int, workspace: str | None = None) -> N
                 file=sys.stderr,
             )
 
+    flagged, todos, temporal_memories, context_text = _scrub_memory_inputs(
+        flagged, todos, temporal_memories, context_text
+    )
     output = format_hook_output(
         flagged, context_text, effective_query, None, temporal_line,
         todos=todos, temporal_memories=temporal_memories, max_tokens=max_tokens,
