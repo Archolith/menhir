@@ -443,6 +443,35 @@ def fetch_pinned_model(
     return str(roots.pop())
 
 
+def cache_dir_for_settings(settings: Any) -> str | None:
+    """MENHIR_RECALL_RERANK_CACHE_DIR, or None for huggingface_hub's default (HF_HOME)."""
+    return str(getattr(settings, "recall_rerank_cache_dir", "") or "").strip() or None
+
+
+def tmpfs_mount_for(path: str, mounts_file: str = "/proc/mounts", *, resolve: bool = True) -> str | None:
+    """The tmpfs mount point holding ``path``, or None (not tmpfs, or no mount table).
+
+    The longest mount point that contains the path wins, as the kernel resolves it.
+    ``resolve`` follows symlinks first (POSIX only; mount tables are Linux-only anyway).
+    """
+    try:
+        lines = Path(mounts_file).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    target = os.path.realpath(path) if resolve and os.name == "posix" else path
+    best: tuple[str, str] | None = None
+    for line in lines:
+        fields = line.split()
+        if len(fields) < 3:
+            continue
+        # /proc/mounts escapes spaces and other specials as octal (\040).
+        point = fields[1].encode("ascii", "replace").decode("unicode_escape")
+        inside = target == point or target.startswith(point.rstrip("/") + "/")
+        if inside and (best is None or len(point) > len(best[0])):
+            best = (point, fields[2])
+    return best[0] if best is not None and best[1] == "tmpfs" else None
+
+
 def cached_model_dir_for_settings(settings: Any) -> str:
     """Model dir for a short-lived process (hooks): the explicit dir, else an already cached
     pinned model when auto download is on, else "". Never downloads."""
@@ -454,7 +483,7 @@ def cached_model_dir_for_settings(settings: Any) -> str:
     if not getattr(settings, "recall_rerank_auto_download", True):
         return ""
     try:
-        return fetch_pinned_model(local_files_only=True)
+        return fetch_pinned_model(local_files_only=True, cache_dir=cache_dir_for_settings(settings))
     except RerankUnavailable:
         return ""
 
@@ -482,10 +511,12 @@ def start_model_fetch(settings: Any, target: Any) -> threading.Thread | None:
     ):
         return None
     device = str(getattr(settings, "recall_rerank_device", "auto"))
+    cache_dir = cache_dir_for_settings(settings)
     log = logging.getLogger(__name__)
 
     def fetch_and_load(force: bool) -> str:
-        model_dir = fetch_pinned_model(local_files_only=False, force_download=force)
+        model_dir = fetch_pinned_model(
+            local_files_only=False, force_download=force, cache_dir=cache_dir)
         load_reranker(model_dir, device)
         return model_dir
 
@@ -515,6 +546,11 @@ def start_model_fetch(settings: Any, target: Any) -> threading.Thread | None:
         if model_dir:
             log.info("recall rerank ready: %s on %s, %s", PINNED_REPO, device,
                      threads_label(current_threads()))
+            mount = tmpfs_mount_for(model_dir)
+            if mount is not None:
+                log.warning(
+                    "recall rerank model cache is on tmpfs (%s): every restart downloads it again; "
+                    "set MENHIR_RECALL_RERANK_CACHE_DIR or HF_HOME to persistent storage", mount)
 
     with _FETCH_LOCK:
         _fetch_targets.append(target)

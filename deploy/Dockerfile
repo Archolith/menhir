@@ -64,7 +64,9 @@ ENV PYTHONUNBUFFERED=1 \
     MENHIR_OAUTH_AS_DIR=/srv/menhir/production/state/oauth \
     MENHIR_OAUTH_SIGNING_KEY_PATH=/run/secrets/oauth/oauth_signing_key.json \
     MENHIR_OAUTH_REFRESH_RETRY_KEYRING_PATH=/run/secrets/oauth/retry-response-keyring.json \
-    MENHIR_MCP_TELEMETRY_DB=/srv/menhir/state/telemetry/mcp_telemetry.db
+    MENHIR_MCP_TELEMETRY_DB=/srv/menhir/state/telemetry/mcp_telemetry.db \
+    HF_HOME=/srv/menhir/cache/huggingface \
+    HF_HUB_DISABLE_TELEMETRY=1
 
 # Offline install from the pre-built wheelhouse only. --no-index --no-deps keeps
 # the image build hermetic: the full closure was already resolved and hashed when
@@ -89,8 +91,16 @@ RUN groupadd --gid "${MENHIR_GID}" menhir \
         /srv/menhir/production/policy \
         /srv/menhir/production/state/oauth \
         /srv/menhir/state/telemetry \
-    && chown -R menhir:menhir /srv/menhir/production/state /srv/menhir/state \
-    && chmod 0700 /srv/menhir/production/secrets
+        /srv/menhir/cache/huggingface \
+    && chown -R menhir:menhir /srv/menhir/production/state /srv/menhir/state /srv/menhir/cache \
+    && chmod 0700 /srv/menhir/production/secrets /srv/menhir/cache/huggingface
+
+# Recall rerank model cache (HF_HOME). Without this, HOME=/tmp put it on /tmp, which a
+# read-only deployment usually mounts as tmpfs, so every restart downloaded the model again.
+# The VOLUME keeps it writable under a read-only root and across restarts and Compose
+# recreates; a bind or named volume at this path replaces it (a named volume starts owned by
+# the app user because this directory is). Re-downloadable, so never back it up.
+VOLUME ["/srv/menhir/cache/huggingface"]
 
 # Entrypoint: map bind-mounted secret files to the environment variables the
 # process reads, without ever printing their values, then exec the app.

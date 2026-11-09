@@ -1,3 +1,17 @@
+## 2026-11-09 - The rerank model cache persists by default (#567 follow-up)
+
+- The container image kept the Hugging Face cache under `HOME=/tmp`, which a read-only
+  deployment usually mounts as tmpfs, so every restart downloaded the ~92 MB rerank model again.
+  The image now sets `HF_HOME=/srv/menhir/cache/huggingface`, an app-owned `VOLUME` that stays
+  writable under a read-only root and survives restarts and Compose recreates. A bind or named
+  volume at that path replaces it, and a named volume starts owned by the app user.
+- The image also sets `HF_HUB_DISABLE_TELEMETRY=1`, which stops huggingface_hub's agent-registry
+  fetch.
+- `MENHIR_RECALL_RERANK_CACHE_DIR` (default empty = `HF_HOME`) sets the download cache for both
+  the server's background fetch and the hooks' cached-copy lookup.
+- Once the model is ready, the server warns if the cache sits on tmpfs.
+- `deploy/docker-compose.full.yml` mounts a named volume for the cache.
+
 ## 2026-11-09 - v0.3.8: Similarity search uses Neo4j vector indexes (#574); recall rerank threads follow the CPU quota (#567)
 
 - Every start creates four cosine vector indexes if they are missing (entity names, relationship
@@ -148,15 +162,3 @@
   0.555 -> 0.878. About 200 ms per recall on 12 CPU threads, 600 ms on 2, 44 ms on CUDA.
 - `uv.lock` and `THIRD-PARTY-LICENSES.txt` gain the new packages. The manifest also picks up
   version drift already in the lock (jiter, joserfc, markupsafe, numpy, pydantic).
-
-## 2026-11-08 - Approximate scalar claims (#519, default off)
-
-- New setting `MENHIR_PERSONAL_MEMORY_SCALAR_APPROXIMATE_ENABLED` (default off). When on, a single
-  number hedged only by an approximation cue ("about 400,000", "close to 1300", "nearly 50", "I think
-  it's 50") is stored as an `approximate` claim instead of being dropped. It is listed in scalar
-  history and shown as "about N"; it never sets or changes a View's value. Alternatives ("30 or 40"),
-  ranges, hedged deltas, non-numeric values, tentative or contextual wording ("maybe 30", "5,
-  sometimes 6") and vague quantities ("a few") are still dropped.
-- The model never names `approximate`: it still emits `absolute` with the stated number and code
-  relabels it from the quoted span, so all k samples agree. The scalar prompt changes only when the
-  flag is on; with it off the prompt and every drop decision are unchanged.
