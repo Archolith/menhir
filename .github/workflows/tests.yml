@@ -173,6 +173,14 @@ jobs:
       run:
         shell: bash
     steps:
+      # Not for speed (measured no change): with scanning on, parallel Windows runs failed 5 of 6
+      # on file locks (WinError 32 in temp cleanup, `git add` exit 128); with it off, 0 of 3.
+      # Throwaway hosted runner, so nothing persists.
+      - name: Disable Defender real-time scanning
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
       - name: Checkout menhir
         uses: actions/checkout@v4
         with:
