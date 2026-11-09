@@ -129,6 +129,8 @@ class MaintenanceScheduler:
     scalar_threshold: float = 2 / 3
     # Build advisory scalar_history Views alongside scalar_state at ingest and repair time.
     scalar_history_enabled: bool = False
+    # #519: keep a hedged single number as an `approximate` claim (default off).
+    scalar_approximate_enabled: bool = False
     lifecycle_consolidation_interval_s: float = 86400.0  # daily
     lifecycle_consolidation_enabled: bool = True
     lifecycle_decay_interval_s: float = 86400.0  # daily
@@ -920,6 +922,7 @@ class MaintenanceScheduler:
             scalar_threshold=self.scalar_threshold,
             scalar_embed_version=self.experience_embed_version,
             scalar_history_enabled=self.scalar_history_enabled,
+            scalar_approximate_enabled=self.scalar_approximate_enabled,
             enable_counting=self.counting_enabled,
             counting_perceiver_version=self.counting_perceiver_version,
             counting_extract_v2=self.counting_extract_v2,

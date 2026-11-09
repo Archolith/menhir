@@ -79,7 +79,8 @@ def test_every_field_is_decided_for_every_operation() -> None:
 
 
 def test_the_derived_sets_match_the_released_contract() -> None:
-    assert ops.OPERATIONS == {"absolute", "delta", "expire"}
+    assert ops.OPERATIONS == {"absolute", "delta", "expire", "approximate"}
+    assert ops.MODEL_OPERATIONS == {"absolute", "delta", "expire"}
     assert ops.COUNTING_OPERATIONS == {"occurrence"}
     assert ops.ASSERTION_OPERATIONS == {"absolute", "delta", "expire", "occurrence", "approximate"}
     assert ops.ASSERTION_OPERATIONS >= ops.OPERATIONS | ops.COUNTING_OPERATIONS

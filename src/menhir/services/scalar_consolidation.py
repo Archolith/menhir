@@ -116,6 +116,8 @@ class ScalarConsolidationConfig:
     canonical_self: bool = False
     # When True, scalar_history Views are built alongside scalar_state at ingest and repair time.
     scalar_history_enabled: bool = False
+    # #519: relabel a hedged single number as `approximate` instead of dropping it (default off).
+    approximate_enabled: bool = False
 
 
 async def select_scalar_targets(
@@ -248,6 +250,7 @@ def run_scalar_consolidation(
                         reconcile_scope=config.reconcile_scope,
                         reconcile_subject=config.reconcile_subject,
                         canonical_self=config.canonical_self,
+                        approximate=config.approximate_enabled,
                         # Rebuild once after the retire, so no View holds old and new together.
                         **({"defer_rebuild": True} if prior else {}),
                     )
