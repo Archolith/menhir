@@ -34,7 +34,7 @@ from menhir.infrastructure.self_binding import (
     resolve_bind_mode,
     resolve_inferred_mode,
 )
-from menhir.domain.secret_scrub import prepare_memory_text
+from menhir.domain.secret_scrub import non_refusing_policy, prepare_memory_text
 from menhir.domain.turn_role import resolve_turn_role
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import GraphitiClient, MemoryGraphAdapter
@@ -162,13 +162,13 @@ def compose_episode_body(claimed: dict[str, object]) -> str:
     content = str(claimed.get("content") or "")
     diff = claimed.get("diff")
     if not diff:
-        return prepare_memory_text(content, policy="redact")
+        return prepare_memory_text(content, policy=non_refusing_policy())
     diff_text = str(diff).strip()
     if not diff_text:
-        return prepare_memory_text(content, policy="redact")
+        return prepare_memory_text(content, policy=non_refusing_policy())
     if len(diff_text) > MAX_DIFF_CHARS:
         diff_text = diff_text[:MAX_DIFF_CHARS] + "\n... [diff truncated]"
-    return prepare_memory_text(f"{content}\n\n--- git diff ---\n{diff_text}", policy="redact")
+    return prepare_memory_text(f"{content}\n\n--- git diff ---\n{diff_text}", policy=non_refusing_policy())
 
 
 def coerce_reference_time(value: object | None) -> datetime:
@@ -734,7 +734,7 @@ async def embed_episode_content(ctx: EnrichmentContext) -> None:
         )
         if has_embedding:
             return
-        content = prepare_memory_text(str(claimed.get("content") or ""), policy="redact")[:_SOURCE_MEMORY_EMBED_MAX_CHARS]
+        content = prepare_memory_text(str(claimed.get("content") or ""), policy=non_refusing_policy())[:_SOURCE_MEMORY_EMBED_MAX_CHARS]
         if not content.strip():
             return
         embedding = await await_with_backoff_aware_timeout(

@@ -102,3 +102,16 @@ def test_secret_policy_setting(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MENHIR_SECRET_POLICY", "banana")
     with pytest.raises(ValueError, match="MENHIR_SECRET_POLICY"):
         MemorySettings.from_env()
+
+
+def test_off_policy_is_accepted_and_leaves_text_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
+    from menhir.domain.secret_scrub import ScrubbedText, non_refusing_policy, prepare_memory_text
+
+    monkeypatch.setenv("MENHIR_SECRET_POLICY", "off")
+    assert MemorySettings.from_env().secret_policy == "off"
+    text = POSITIVES["aws"]
+    out = prepare_memory_text(text)
+    assert isinstance(out, ScrubbedText) and str(out) == text and out.kinds == ()
+    assert non_refusing_policy() == "off"
+    monkeypatch.setenv("MENHIR_SECRET_POLICY", "refuse")
+    assert non_refusing_policy() == "redact"

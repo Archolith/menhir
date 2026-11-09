@@ -72,7 +72,7 @@ def detect_secrets(text: str) -> list[SecretHit]:
     return hits
 
 
-_POLICIES = ("redact", "refuse")
+_POLICIES = ("redact", "refuse", "off")
 _MINT = object()
 
 
@@ -107,8 +107,13 @@ def resolve_policy() -> str:
 
     value = os.environ.get("MENHIR_SECRET_POLICY", "redact").strip().lower() or "redact"
     if value not in _POLICIES:
-        raise ValueError("MENHIR_SECRET_POLICY must be 'redact' or 'refuse'")
+        raise ValueError("MENHIR_SECRET_POLICY must be 'redact', 'refuse' or 'off'")
     return value
+
+
+def non_refusing_policy() -> str:
+    """For worker and failure paths: never raise on legacy rows, but honour ``off``."""
+    return "off" if resolve_policy() == "off" else "redact"
 
 
 def prepare_memory_text(raw: str, *, policy: str | None = None) -> ScrubbedText:
@@ -120,7 +125,9 @@ def prepare_memory_text(raw: str, *, policy: str | None = None) -> ScrubbedText:
         return raw
     chosen = policy if policy is not None else resolve_policy()
     if chosen not in _POLICIES:
-        raise ValueError("policy must be 'redact' or 'refuse'")
+        raise ValueError("policy must be 'redact', 'refuse' or 'off'")
+    if chosen == "off":
+        return ScrubbedText(raw, (), _MINT)  # operator opted out: store as given
     text, hits = redact(raw)
     kinds = tuple(dict.fromkeys(h.kind for h in hits))
     if hits and chosen == "refuse":

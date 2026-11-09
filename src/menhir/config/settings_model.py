@@ -89,8 +89,8 @@ def _parse_scalar_threshold(raw: str) -> float:
 
 def _parse_secret_policy(raw: str) -> str:
     value = str(raw).strip().lower()
-    if value not in ("redact", "refuse"):
-        raise ValueError("MENHIR_SECRET_POLICY must be 'redact' or 'refuse'")
+    if value not in ("redact", "refuse", "off"):
+        raise ValueError("MENHIR_SECRET_POLICY must be 'redact', 'refuse' or 'off'")
     return value
 
 

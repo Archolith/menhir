@@ -11,7 +11,7 @@ import logging
 from dataclasses import replace
 
 from menhir.domain.recall import RecallResult, ScoredMemory, SourceMemory, TemporalFact
-from menhir.domain.secret_scrub import redact
+from menhir.domain.secret_scrub import redact, resolve_policy
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,8 @@ def _scrub_source(source: SourceMemory) -> SourceMemory:
 def scrub_recall_result(result: RecallResult) -> RecallResult:
     """Redact credentials in ranked results, their temporal facts and source memories."""
     try:
+        if resolve_policy() == "off":
+            return result
         results = [_scrub_memory(m) for m in result.results]
         sources = (
             tuple(_scrub_source(s) for s in result.source_memories)

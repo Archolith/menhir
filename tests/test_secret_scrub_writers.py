@@ -204,3 +204,12 @@ def test_compose_episode_body_has_no_secret() -> None:
     with_diff = compose_episode_body({"content": "c", "diff": f"+ {GITHUB}"})
     assert AWS not in plain and "[REDACTED:" in plain
     assert GITHUB not in with_diff and "[REDACTED:" in with_diff
+
+
+def test_off_policy_worker_body_keeps_text(monkeypatch) -> None:
+    from menhir.services.enrichment_steps import compose_episode_body
+
+    monkeypatch.setenv("MENHIR_SECRET_POLICY", "off")
+    assert "AKIAIOSFODNN7EXAMPLE" in compose_episode_body({"content": "k AKIAIOSFODNN7EXAMPLE"})
+    monkeypatch.setenv("MENHIR_SECRET_POLICY", "refuse")
+    assert "AKIAIOSFODNN7EXAMPLE" not in compose_episode_body({"content": "k AKIAIOSFODNN7EXAMPLE"})

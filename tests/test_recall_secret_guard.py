@@ -76,3 +76,9 @@ def test_run_recall_scrubs_regardless_of_inner_path(monkeypatch: pytest.MonkeyPa
     assert CANARY not in repr(out)
     assert replace(out).results[0].content.startswith("leak [REDACTED:")
     assert recall_mod is not None
+
+
+def test_off_policy_returns_recall_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MENHIR_SECRET_POLICY", "off")
+    res = _result(results=[_memory(f"use {CANARY}")])
+    assert scrub_recall_result(res) is res

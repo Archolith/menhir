@@ -79,7 +79,7 @@ _SETTINGS = (
     ('explorer_enabled', 'MENHIR_EXPLORER_ENABLED', True, 'runtime', 'Enable Explorer routes.', False, ()),
     ('privacy_redact', 'MENHIR_PRIVACY_REDACT', False, 'telemetry', 'Enable privacy redact.', False, ()),
     ('secret_policy', 'MENHIR_SECRET_POLICY', 'redact', 'runtime',
-        'Credential handling on memory writes: redact or refuse.', False, ()),
+        'Credential handling on memory writes and recall output: redact, refuse, or off (store and return credentials as given).', False, ()),
     ('telemetry_record_recall_queries', 'MENHIR_TELEMETRY_RECORD_RECALL_QUERIES', False, 'telemetry',
         'Record recall query text and ordered result ids in the telemetry sidecar for evaluation sets.', False, ()),
     ('saga_reconcile_startup_mode', 'MENHIR_SAGA_RECONCILE_STARTUP_MODE', 'observe', 'saga',
