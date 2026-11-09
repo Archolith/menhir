@@ -308,6 +308,14 @@ def hub(monkeypatch, tmp_path):
 
     fake = FakeHub(tmp_path)
     monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake)
+
+    def from_cache(repo_id, filename, **kw):  # the cache-only lookup: whatever a download wrote
+        fake.cache_lookups.append((repo_id, filename, kw))
+        path = fake.snapshot / filename
+        return str(path) if path.is_file() else None
+
+    fake.cache_lookups = []
+    monkeypatch.setattr(huggingface_hub, "try_to_load_from_cache", from_cache)
     monkeypatch.setattr(cer, "PINNED_FILES", {
         "tokenizer.json": hashlib.sha256(fake.tokenizer).hexdigest(), "onnx/model.onnx": None})
     return fake
@@ -321,8 +329,7 @@ def test_fetch_returns_the_snapshot_dir_at_the_pinned_revision_without_a_token(h
     assert cer.fetch_pinned_model(local_files_only=False) == str(hub.snapshot)
     assert {f for _, f, _ in hub.calls} == {"tokenizer.json", "onnx/model.onnx"}
     for repo, _, kw in hub.calls:
-        assert (repo, kw["revision"], kw["token"], kw["local_files_only"]) == (
-            cer.PINNED_REPO, cer.PINNED_REVISION, False, False)
+        assert (repo, kw["revision"], kw["token"]) == (cer.PINNED_REPO, cer.PINNED_REVISION, False)
 
 
 def test_fetch_refuses_a_tokenizer_that_does_not_match_its_pin(hub):
@@ -338,13 +345,51 @@ def test_fetch_failure_is_rerank_unavailable(hub):
 
 
 def test_hooks_only_use_a_cached_model_and_never_download(hub):
+    assert cer.cached_model_dir_for_settings(_auto_settings()) == ""  # nothing cached yet
+    cer.fetch_pinned_model(local_files_only=False)  # a server downloaded it
+    hub.calls.clear()
     assert cer.cached_model_dir_for_settings(_auto_settings()) == str(hub.snapshot)
-    assert all(kw["local_files_only"] is True for _, _, kw in hub.calls)
-    hub.fail = OSError("not cached")
+    assert hub.calls == []  # hooks never reach hf_hub_download
+    assert {(r, kw["revision"]) for r, _, kw in hub.cache_lookups} == {(cer.PINNED_REPO, cer.PINNED_REVISION)}
+    (hub.snapshot / "tokenizer.json").write_bytes(b"swapped")  # a cached file that fails its pin
     assert cer.cached_model_dir_for_settings(_auto_settings()) == ""
     assert cer.cached_model_dir_for_settings(_auto_settings(recall_rerank_model_dir="/m")) == "/m"
     assert cer.cached_model_dir_for_settings(_auto_settings(recall_rerank_auto_download=False)) == ""
     assert cer.cached_model_dir_for_settings(_auto_settings(recall_rerank_enabled=False)) == ""
+
+
+def test_hook_lookup_opens_no_network_connection_even_online_inside_an_agent_harness(
+    monkeypatch, tmp_path,
+):
+    """SEC-01: hf_hub_download(local_files_only=True) still fetched /api/agent-harnesses for its
+    User-Agent. Real huggingface_hub, offline mode off, no cached harness registry, sockets
+    recorded and refused: the cached-model lookup must not try to connect at all."""
+    import hashlib
+    import socket
+
+    from huggingface_hub import constants
+
+    tok = b'{"tok": 2}'
+    snap = tmp_path / "hub" / "models--cross-encoder--ms-marco-MiniLM-L6-v2" / "snapshots" / cer.PINNED_REVISION
+    (snap / "onnx").mkdir(parents=True)
+    (snap / "tokenizer.json").write_bytes(tok)
+    (snap / "onnx" / "model.onnx").write_bytes(b"onnx")
+    monkeypatch.setattr(cer, "PINNED_FILES", {
+        "tokenizer.json": hashlib.sha256(tok).hexdigest(), "onnx/model.onnx": None})
+    monkeypatch.setattr(constants, "HF_HUB_OFFLINE", False)
+    monkeypatch.setattr(constants, "HF_HUB_CACHE", str(tmp_path / "hub"))
+    monkeypatch.setattr(constants, "AGENT_HARNESSES_PATH", str(tmp_path / "no-registry.json"), raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "test")
+    attempts = []
+
+    def refuse(*args, **kwargs):
+        attempts.append(args)
+        raise OSError("network blocked in test")
+
+    monkeypatch.setattr(socket, "getaddrinfo", refuse)
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    assert cer.fetch_pinned_model(local_files_only=True) == str(snap)
+    assert attempts == []
 
 
 @pytest.mark.parametrize("kw", [

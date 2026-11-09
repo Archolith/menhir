@@ -280,18 +280,28 @@ def fetch_pinned_model(*, local_files_only: bool, cache_dir: str | None = None) 
     huggingface_hub writes each file to a temp name and renames it under a file lock, so peer
     processes fetching at once never see a partial file. The tokenizer digest is checked here;
     the model digest is checked by load_reranker on every load. No HF token is sent.
+
+    ``local_files_only`` uses ``try_to_load_from_cache``, a pure filesystem lookup: even with
+    ``local_files_only=True``, ``hf_hub_download`` builds a User-Agent whose agent-harness
+    detection fetches ``/api/agent-harnesses`` (a 3 s stall per hook process when blocked; SEC-01).
     """
     try:
-        from huggingface_hub import hf_hub_download
+        from huggingface_hub import hf_hub_download, try_to_load_from_cache
     except ModuleNotFoundError as exc:
         raise RerankUnavailable("recall rerank auto download needs huggingface_hub") from exc
     roots: set[Path] = set()
     for name, digest in PINNED_FILES.items():
         try:
-            path = Path(hf_hub_download(
-                PINNED_REPO, name, revision=PINNED_REVISION, cache_dir=cache_dir,
-                local_files_only=local_files_only, token=False,
-            ))
+            if local_files_only:
+                found = try_to_load_from_cache(
+                    PINNED_REPO, name, cache_dir=cache_dir, revision=PINNED_REVISION)
+                if not isinstance(found, str):  # None or the "known missing" sentinel
+                    raise FileNotFoundError(name)
+                path = Path(found)
+            else:
+                path = Path(hf_hub_download(
+                    PINNED_REPO, name, revision=PINNED_REVISION, cache_dir=cache_dir, token=False,
+                ))
         except Exception as exc:  # offline, not cached, network or hub error: all mean "no model"
             verb = "find a cached" if local_files_only else "download"
             raise RerankUnavailable(
