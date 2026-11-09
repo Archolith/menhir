@@ -1,3 +1,14 @@
+## 2026-11-08 - The off-loop telemetry writer skips the per-commit fsync
+
+- Connections opened on the off-loop telemetry writer thread use `synchronous=NORMAL` in WAL mode,
+  so each observability write no longer waits for a disk flush, and the writer falls behind less
+  often (a read that outruns it logs a warning, see below). A power loss can drop only the latest
+  of those rows, and never corrupts the file.
+- Everything else that opens a connection through `connect_telemetry_db` keeps `FULL`: the
+  scheduler lease, the operations journal, pending actions, migration batches, erasure subjects,
+  metric receipts and the recovery rows (merge audit, memory revisions). So does any connection
+  that is not in WAL mode.
+
 ## 2026-11-08 - Two stores migrating one SQLite file at once no longer fail
 
 - Schema upgrades read a table's columns, then add the missing ones. Two stores doing that on the
@@ -86,17 +97,3 @@
   scopes. Codes, refresh tokens and verifiers are never logged, and client-supplied fields are
   bounded and stripped of control characters. #533's opaque `-32603` was a `400` here that left
   only an access-log line.
-
-## 2026-11-08 - Telemetry writes no longer block the event loop (#527)
-
-- On an event-loop thread, `McpTelemetryStore` now hands its append-only observability writes
-  (MCP, failure, episode-task, lifecycle event and action, LLM-usage rows) to one ordered writer
-  thread (`src/menhir/infrastructure/telemetry/async_writer.py`). A locked telemetry database no
-  longer stalls every coroutine for the busy timeout. A full queue writes synchronously; nothing
-  is dropped.
-- Memory revisions, merge audit and destructive-op records stay synchronous: recall and unmerge
-  read them back.
-- The store's connections wait for queued writes first, so reads see every earlier event in order.
-- Erasure waits for queued writes before it purges and fails closed (stays PREPARED) if they don't
-  land, so a row queued before an erase can't survive it.
-- `track_mcp_call` awaits its row in a worker thread, so the row exists when the call returns.

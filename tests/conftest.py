@@ -25,8 +25,8 @@ _LOCAL_PYTEST_TEMP.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("PYTEST_DEBUG_TEMPROOT", str(_LOCAL_PYTEST_TEMP))
 
 
-def _install_unsynced_sqlite_connect() -> None:
-    """Open every test SQLite connection with `synchronous=OFF`.
+def _install_unsynced_sqlite_connect():
+    """Open every test SQLite connection with `synchronous=OFF`; return the real connect.
 
     Each commit otherwise flushes to disk; on Windows that is a real flush per commit and made
     SQLite-heavy files 2-3x slower than on Linux. Only an OS crash can lose unflushed writes, and
@@ -45,9 +45,18 @@ def _install_unsynced_sqlite_connect() -> None:
         return conn
 
     sqlite3.connect = connect
+    return original
 
 
-_install_unsynced_sqlite_connect()
+_REAL_SQLITE_CONNECT = _install_unsynced_sqlite_connect()
+
+
+@pytest.fixture
+def real_sqlite_connect(monkeypatch):
+    """Undo the test-wide `synchronous=OFF` for a test that checks production pragmas."""
+    import sqlite3
+
+    monkeypatch.setattr(sqlite3, "connect", _REAL_SQLITE_CONNECT)
 
 
 @pytest.fixture(scope="session", autouse=True)
