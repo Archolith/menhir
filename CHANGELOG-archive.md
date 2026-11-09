@@ -1,3 +1,17 @@
+## 2026-11-08 - v0.3.6: profile catalog 2, telemetry off the event loop, one operation table
+
+- Profile catalog 2 puts `get_client_context` in `core`, so agent-tier clients receive it. A
+  deployment opts in with `"profile_catalog": 2`; catalog 1 policies resolve as before.
+- Telemetry writes no longer block the event loop (#527), and the token endpoint logs why it
+  refused a request (#541).
+- What each TypedAssertion operation means now lives in one table; an operation it does not know
+  carries no value anywhere.
+- #519: a span-aligned scalar no longer keeps a `current_`/`latest_` prefix its quote dropped.
+  Readers understand an `approximate` operation; nothing writes one yet.
+- v1 and v2 client policies still load. The v0.3.5 notes said this release would drop them; that
+  moves to a later release.
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.6. No dependency changes in this commit.
+
 ## 2026-11-08 - Readers for an approximate scalar operation (#519 phase 1)
 
 - A hedged value ("I think I'm close to 1300") will be stored as `approximate`: it never sets or

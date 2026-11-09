@@ -1,3 +1,21 @@
+## 2026-11-09 - v0.3.7: Approximate scalar claims on by default (#519), cross-encoder recall rerank with its security hardening, recall query telemetry, and telemetry and schema fixes
+
+- Approximate scalar claims are on by default (#519). A hedged single number is stored as
+  `approximate`: it never sets a View's value, and a newer one keeps the View advisory and is
+  listed under it. Set `MENHIR_PERSONAL_MEMORY_SCALAR_APPROXIMATE_ENABLED=false` for the old
+  behaviour.
+- Recall reranks its top 50 candidates with a local ONNX cross-encoder, on by default, and caps
+  the results at 7 when the rerank runs. A long-running server downloads the pinned model (~92 MB)
+  from Hugging Face in the background on first start; until it loads, and offline, recall keeps
+  the RRF floor. Opt out with `MENHIR_RECALL_RERANK_ENABLED=false`, or set
+  `MENHIR_RECALL_RERANK_AUTO_DOWNLOAD=false` with `MENHIR_RECALL_RERANK_MODEL_DIR` for air-gapped
+  installs. The tokenizer and model are digest-pinned on every load.
+- New dependencies: `onnxruntime`, `tokenizers` and `huggingface-hub`.
+- Opt-in recall query log (`MENHIR_TELEMETRY_RECORD_RECALL_QUERIES`, default off).
+- Telemetry: the off-loop writer skips the per-commit fsync, and a read that may miss queued
+  writes logs a warning. Two stores migrating one SQLite file at once no longer fail.
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.7. No dependency changes in this commit.
+
 ## 2026-11-09 - Approximate scalar claims are on by default (#519)
 
 - `MENHIR_PERSONAL_MEMORY_SCALAR_APPROXIMATE_ENABLED` now defaults to on. A hedged single number
@@ -120,17 +138,3 @@
 - A telemetry read waits up to `MENHIR_TELEMETRY_BUSY_TIMEOUT_S` (5 s) for off-loop writes queued
   before it. When that wait times out, the read still runs but now logs a warning naming how many
   writes are still queued, instead of returning a possibly incomplete result silently.
-
-## 2026-11-08 - v0.3.6: profile catalog 2, telemetry off the event loop, one operation table
-
-- Profile catalog 2 puts `get_client_context` in `core`, so agent-tier clients receive it. A
-  deployment opts in with `"profile_catalog": 2`; catalog 1 policies resolve as before.
-- Telemetry writes no longer block the event loop (#527), and the token endpoint logs why it
-  refused a request (#541).
-- What each TypedAssertion operation means now lives in one table; an operation it does not know
-  carries no value anywhere.
-- #519: a span-aligned scalar no longer keeps a `current_`/`latest_` prefix its quote dropped.
-  Readers understand an `approximate` operation; nothing writes one yet.
-- v1 and v2 client policies still load. The v0.3.5 notes said this release would drop them; that
-  moves to a later release.
-- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.6. No dependency changes in this commit.
