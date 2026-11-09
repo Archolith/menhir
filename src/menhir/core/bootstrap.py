@@ -238,7 +238,8 @@ def build_memory_services(
             and settings.personal_memory_scalar_state_enabled
         ),
         read_only=read_only,
-        rerank_model_dir=settings.recall_rerank_model_dir,
+        # Off means no model dir: tunings that default the rerank on (Lab, view-entropy) stay off.
+        rerank_model_dir=settings.recall_rerank_model_dir if settings.recall_rerank_enabled else "",
         rerank_device=settings.recall_rerank_device,
     )
     context_builder = ContextBuilderService(
