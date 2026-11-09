@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from menhir.domain import MemorySession
+from menhir.infrastructure.artifact_repository import ArtifactRepository
 from menhir.infrastructure.candidate_repository import CandidateRepository
 from menhir.infrastructure.episode_lifecycle import EpisodeLifecycleRepository
 from menhir.infrastructure.episode_maintenance import EpisodeMaintenanceRepository
@@ -111,6 +112,18 @@ def test_create_candidate_scrubs_content_and_notes() -> None:
         repo.create_candidate(
             content=f"friction {AWS}", source="painscan", cluster_id="c1", label="",
             notes=[f"note {GITHUB}"],
+        )
+    except Exception:
+        pass
+    _assert_scrubbed(repo.neo4j)
+
+
+def test_create_artifact_scrubs_summary_and_body() -> None:
+    repo = ArtifactRepository(_neo4j())
+    try:
+        repo.create_artifact(
+            artifact_id="a1", artifact_type="doc", summary=f"key {AWS}",
+            source="test", status="candidate", body=f"token {GITHUB}",
         )
     except Exception:
         pass
