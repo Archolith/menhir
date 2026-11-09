@@ -74,17 +74,20 @@ def test_every_field_is_decided_for_every_operation() -> None:
     assert all(f.default_factory is dataclasses.MISSING for f in fields)
     for name, entry in ops.OPERATION_SEMANTICS.items():
         assert entry.name == name
-        assert entry.writer_lane in (ops.SCALAR_LANE, ops.COUNTING_LANE)
+        # None: readable when stored, but no lane may write it yet (readers ship first).
+        assert entry.writer_lane in (ops.SCALAR_LANE, ops.COUNTING_LANE, None)
 
 
 def test_the_derived_sets_match_the_released_contract() -> None:
     assert ops.OPERATIONS == {"absolute", "delta", "expire"}
     assert ops.COUNTING_OPERATIONS == {"occurrence"}
-    assert ops.ASSERTION_OPERATIONS == ops.OPERATIONS | ops.COUNTING_OPERATIONS
+    assert ops.ASSERTION_OPERATIONS == {"absolute", "delta", "expire", "occurrence", "approximate"}
+    assert ops.ASSERTION_OPERATIONS >= ops.OPERATIONS | ops.COUNTING_OPERATIONS
     assert not ops.OPERATIONS & ops.COUNTING_OPERATIONS
     assert ops.VALUE_CLAIM_OPERATIONS == {"absolute", "delta", "expire"}
     assert ops.SETS_VALUE_OPERATIONS == {"absolute"}
     assert ops.COUNTING_OCCURRENCE_OPERATIONS == {"occurrence"}
+    assert ops.HISTORY_VALUE_OPERATIONS == {"absolute", "delta", "expire", "approximate"}
     # typed_assertion re-exports the same objects, so existing importers see the table.
     assert typed_assertion.OPERATIONS is ops.OPERATIONS
     assert typed_assertion.COUNTING_OPERATIONS is ops.COUNTING_OPERATIONS
@@ -93,7 +96,8 @@ def test_the_derived_sets_match_the_released_contract() -> None:
 
 def test_each_operation_has_exactly_one_role() -> None:
     for entry in ops.OPERATION_SEMANTICS.values():
-        roles = [entry.sets_value, entry.adjusts_value, entry.ends_value, entry.counting_occurrence]
+        roles = [entry.sets_value, entry.adjusts_value, entry.ends_value, entry.counting_occurrence,
+                 entry.approximates_value]
         assert sum(roles) == 1, entry
 
 
@@ -103,7 +107,8 @@ def test_an_unknown_operation_means_nothing(operation, caplog) -> None:
     assert ops.semantics_of(operation) is ops.UNKNOWN
     assert not ops.is_known(operation)
     for predicate in (ops.sets_value, ops.adjusts_value, ops.ends_value,
-                      ops.is_counting_occurrence, ops.is_value_claim, ops.demotes_newer_view):
+                      ops.is_counting_occurrence, ops.is_value_claim, ops.demotes_newer_view,
+                      ops.approximates_value, ops.is_listed_in_history, ops.folds_into_view):
         assert predicate(operation) is False
 
 
