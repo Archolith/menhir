@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from menhir.domain.assertion_operations import OPERATIONS
+from menhir.domain.assertion_operations import MODEL_OPERATIONS, OPERATIONS
 from menhir.domain.projection_coverage import EligibilityRole
 from menhir.domain.projection_coverage_types import AuditFailureClassification
 from menhir.domain.scalar_history import build_history
@@ -138,7 +138,7 @@ def _parse(operation):
 
 
 def test_approximate_is_not_a_writer_operation_and_parse_scalar_row_refuses_it():
-    assert "approximate" not in OPERATIONS
+    assert "approximate" in OPERATIONS and "approximate" not in MODEL_OPERATIONS
     proposal, drops = _parse("approximate")
     assert proposal is None and drops == ["bad_attribute_or_operation"]
 
@@ -159,8 +159,9 @@ def _identity(operation):
 
 def test_compositional_identity_refuses_approximate():
     assert _identity("absolute").operation == "absolute"  # control: constructs
+    assert _identity("approximate").operation == "approximate"  # #519: the writer now stores it
     with pytest.raises(ValueError):
-        _identity("approximate")
+        _identity("zz_future")
 
 
 # ------------------------------------------------------------------------------ 4. history

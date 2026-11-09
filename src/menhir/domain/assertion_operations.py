@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 #: the lane allowed to write an operation. The scalar parse path may emit only scalar-lane names.
 SCALAR_LANE = "scalar"
 COUNTING_LANE = "counting"
+#: the operation code (never the model) assigns to a hedged single number.
+APPROXIMATE_OPERATION = "approximate"
 
 
 @dataclass(frozen=True)
@@ -43,6 +45,8 @@ class OperationSemantics:
     listed_in_history: bool
     #: a newer one in a View's own slot keeps that View advisory (the freshness gate).
     demotes_newer_view: bool
+    #: the perceiving model may name it in its output. False: code assigns it after the model answers.
+    model_emittable: bool
 
 
 _ENTRIES: tuple[OperationSemantics, ...] = (
@@ -50,29 +54,35 @@ _ENTRIES: tuple[OperationSemantics, ...] = (
         name="absolute", writer_lane=SCALAR_LANE, sets_value=True, adjusts_value=False,
         ends_value=False, counting_occurrence=False, approximates_value=False,
         listed_in_history=True, demotes_newer_view=False,
+        model_emittable=True,
     ),
     OperationSemantics(
         name="delta", writer_lane=SCALAR_LANE, sets_value=False, adjusts_value=True,
         ends_value=False, counting_occurrence=False, approximates_value=False,
         listed_in_history=True, demotes_newer_view=False,
+        model_emittable=True,
     ),
     OperationSemantics(
         name="expire", writer_lane=SCALAR_LANE, sets_value=False, adjusts_value=False,
         ends_value=True, counting_occurrence=False, approximates_value=False,
         listed_in_history=True, demotes_newer_view=False,
+        model_emittable=True,
     ),
     OperationSemantics(
         name="occurrence", writer_lane=COUNTING_LANE, sets_value=False, adjusts_value=False,
         ends_value=False, counting_occurrence=True, approximates_value=False,
         listed_in_history=True, demotes_newer_view=True,
+        model_emittable=True,
     ),
-    # #519. No lane writes it yet (writer_lane=None keeps it out of OPERATIONS, so no parse path
-    # can emit one): readers ship first, so a build that stores one never meets a build that
-    # cannot read it.
+    # #519. Written by code, never by the model: the scalar lane relabels a hedged single number as
+    # approximate when personal_memory_scalar_approximate_enabled is on. writer_lane=SCALAR_LANE
+    # lets a stored row and its identity validate; model_emittable=False keeps it out of
+    # MODEL_OPERATIONS, so a model-named "approximate" is rejected with the flag on or off.
     OperationSemantics(
-        name="approximate", writer_lane=None, sets_value=False, adjusts_value=False,
+        name="approximate", writer_lane=SCALAR_LANE, sets_value=False, adjusts_value=False,
         ends_value=False, counting_occurrence=False, approximates_value=True,
         listed_in_history=True, demotes_newer_view=True,
+        model_emittable=False,
     ),
 )
 
@@ -85,7 +95,7 @@ OPERATION_SEMANTICS: Mapping[str, OperationSemantics] = MappingProxyType(
 UNKNOWN = OperationSemantics(
     name="", writer_lane=None, sets_value=False, adjusts_value=False, ends_value=False,
     counting_occurrence=False, approximates_value=False, listed_in_history=False,
-    demotes_newer_view=False,
+    demotes_newer_view=False, model_emittable=False,
 )
 
 _UNKNOWN_SEEN: set[str] = set()
@@ -161,8 +171,12 @@ def operations_where(predicate: Callable[[OperationSemantics], bool]) -> frozens
     return frozenset(entry.name for entry in _ENTRIES if predicate(entry))
 
 
-#: operations the scalar lane may emit.
+#: operations the scalar lane may write (code-assigned ones included).
 OPERATIONS: frozenset[str] = operations_where(lambda s: s.writer_lane == SCALAR_LANE)
+#: operations the perceiving model may name in a scalar-lane row (a subset of OPERATIONS).
+MODEL_OPERATIONS: frozenset[str] = operations_where(
+    lambda s: s.writer_lane == SCALAR_LANE and s.model_emittable
+)
 #: operations only the counting lane may write.
 COUNTING_OPERATIONS: frozenset[str] = operations_where(lambda s: s.writer_lane == COUNTING_LANE)
 #: every operation a stored TypedAssertion may carry.
@@ -197,6 +211,7 @@ COUNTING_OCCURRENCE_OPS_CYPHER: str = cypher_list(COUNTING_OCCURRENCE_OPERATIONS
 HISTORY_VALUE_OPS_CYPHER: str = cypher_list(HISTORY_VALUE_OPERATIONS)
 
 __all__ = [
+    "APPROXIMATE_OPERATION",
     "ASSERTION_OPERATIONS",
     "COUNTING_LANE",
     "COUNTING_OCCURRENCE_OPERATIONS",
@@ -204,6 +219,7 @@ __all__ = [
     "COUNTING_OPERATIONS",
     "HISTORY_VALUE_OPERATIONS",
     "HISTORY_VALUE_OPS_CYPHER",
+    "MODEL_OPERATIONS",
     "OPERATIONS",
     "OPERATION_SEMANTICS",
     "OperationSemantics",
