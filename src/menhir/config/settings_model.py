@@ -353,6 +353,9 @@ class MemorySettings:
     # decision is computed by menhir.domain.scalar_view_authority.decide_view_authority.
     # Default on since 2026-10-28 (#399 bucket 3: no item worse across six o500 shard-1 runs; recall only).
     personal_memory_observation_dedup_enabled: bool = True
+    # #564: a leading money View for the user is advisory when a newer user turn mentions another
+    # value for its slot ("remember when I got pre-approved for $400,000?"); listed, never folded.
+    personal_memory_scalar_newer_mentions_enabled: bool = False
     # 0 = off; else min (1+cos)/2 per verdict slot. 0.675 (raw cosine 0.35): on o500 the gate-off
     # lane emitted verdicts that shared no word with the question for 72% of blocks (#168).
     personal_memory_scalar_verdict_min_similarity: float = 0.675
@@ -754,6 +757,7 @@ class MemorySettings:
             source_memory_max_chars=self.frontier_source_memory_max_chars,
             enable_anchored_time_expiry=self.anchored_time_resolver_enabled,
             enable_observation_dedup=self.personal_memory_observation_dedup_enabled,
+            scalar_newer_mentions=self.personal_memory_scalar_newer_mentions_enabled,
             enable_cross_encoder_rerank=self.recall_rerank_enabled,
             rerank_top_n=self.recall_rerank_top_n,
             rerank_max_results=self.recall_rerank_max_results,
@@ -898,6 +902,7 @@ class MemorySettings:
             personal_memory_scalar_state_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_STATE_ENABLED", default=str(cls.personal_memory_scalar_state_enabled))),
             personal_memory_scalar_state_perceiver_version=_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_STATE_PERCEIVER_VERSION", default=cls.personal_memory_scalar_state_perceiver_version),
             personal_memory_observation_dedup_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_OBSERVATION_DEDUP_ENABLED", default=str(cls.personal_memory_observation_dedup_enabled))),
+            personal_memory_scalar_newer_mentions_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_NEWER_MENTIONS_ENABLED", default=str(cls.personal_memory_scalar_newer_mentions_enabled))),
             personal_memory_scalar_verdict_min_similarity=_parse_float(_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY", default=str(cls.personal_memory_scalar_verdict_min_similarity)), env_var="MENHIR_PERSONAL_MEMORY_SCALAR_VERDICT_MIN_SIMILARITY", minimum=0.0),
             personal_memory_scalar_observation_recall=_getenv("MENHIR_PERSONAL_MEMORY_SCALAR_OBSERVATION_RECALL", default=cls.personal_memory_scalar_observation_recall).strip().lower(),
             personal_memory_scalar_threshold=_parse_scalar_threshold(

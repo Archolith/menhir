@@ -251,6 +251,21 @@ class NewerApproximateValue:
 
 
 @dataclass(frozen=True)
+class NewerMention:
+    """A user turn newer than a View that mentions a different value for its slot (#564).
+
+    Found in episode text at recall; listed beside the View and keeps it advisory, never folded.
+    ``mood`` is ``question`` when the value was mentioned inside a question, else ``stated``.
+    """
+
+    episode_uuid: str
+    value: Any
+    quote: str
+    said_at: str | None
+    mood: str
+
+
+@dataclass(frozen=True)
 class ScalarAuthorityVerdict:
     """Structured current/expired/as-of authority, distinct from ranked memory candidates."""
 
@@ -279,6 +294,8 @@ class ScalarAuthorityVerdict:
     count_items: str | None = None
     # Same-slot hedged values newer than the View that kept it advisory (#519); never the value.
     newer_approximate: tuple[NewerApproximateValue, ...] = ()
+    # Newer user turns mentioning a different value for the slot (#564); never the value.
+    newer_mentions: tuple[NewerMention, ...] = ()
 
 
 @dataclass(frozen=True)

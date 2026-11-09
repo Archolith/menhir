@@ -430,6 +430,12 @@ class ContextBuilderService:
                     f'  newer, approximate: about {approx.value} ("{approx.quote}", '
                     f"{approx.valid_at or 'unknown'})"
                 )
+            for mention in getattr(verdict, "newer_mentions", ()) or ():
+                how = "in a question" if mention.mood == "question" else "stated"
+                authority_lines.append(
+                    f'  newer mention, {how}: {mention.value} ("{mention.quote}", '
+                    f"{mention.said_at or 'unknown'})"
+                )
             if (
                 verdict.contributors_truncated
                 and not verdict.contributors
