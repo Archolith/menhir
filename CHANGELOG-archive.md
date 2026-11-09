@@ -1,3 +1,10 @@
+## 2026-11-08 - Span alignment re-grounds a source-time attribute prefix (#519)
+
+- Each k-sample proposal canonicalises its attribute against its own quote, so one quoting
+  "current balance is 1300" kept `current_balance`. Span alignment then commits the common span
+  "balance is 1300", and the kept prefix forked a `current_balance` slot beside `balance`. The
+  gate now re-checks the name against the committed quote. Stored rows keep their names.
+
 ## 2026-11-08 - One table decides what each TypedAssertion operation means
 
 - `menhir.domain.assertion_operations` holds every operation's meaning. The 61 places that

@@ -1,3 +1,19 @@
+## 2026-11-09 - Recall rerank hardening (security audit Low findings)
+
+- The tokenizer is now digest-pinned on every load, including an explicit
+  `MENHIR_RECALL_RERANK_MODEL_DIR`. Model and tokenizer are read once, checked, and built from
+  those bytes, so a file swapped after the check is never loaded.
+- A cached copy that fails its pin is downloaded again once at server start, instead of leaving
+  recall on the RRF floor until someone clears the cache. A read error while checking a file now
+  keeps the floor instead of breaking hook recall.
+- `MENHIR_RECALL_RERANK_ENABLED=false` now gives recall no model dir anywhere, so Recall Lab
+  arms and other tunings that default the rerank on stay off.
+- Scoring runs one call at a time per process. Recall Lab caps `rerank_top_n` at 100. A
+  runtime-init retry joins the running model fetch instead of starting another.
+- The download sends User-Agent `menhir-recall-rerank` instead of huggingface_hub's default,
+  which names the agent harness. ONNX Runtime telemetry events are turned off at load.
+  `docs/your-data.md` lists the download under what leaves your machine.
+
 ## 2026-11-08 - A newer approximate value is listed under the advisory View (#519 phase 3)
 
 - When a same-slot `approximate` claim is newer than a View, the View is now advisory and the
@@ -9,6 +25,7 @@
   With nothing newer, output is unchanged.
 - Occurrences that demote a View are not listed here; they behave as before. Approximate rows are
   read for this only, and never enter the ranked list or the fold.
+
 ## 2026-11-08 - Cross-encoder recall rerank (on by default, model downloads itself)
 
 - `MENHIR_RECALL_RERANK_ENABLED` (default true) orders the first `MENHIR_RECALL_RERANK_TOP_N`
@@ -116,10 +133,3 @@
   lone hedge is not a change. The HISTORY_ENTRY listing includes it; provenance never does.
 - Projection coverage: a known operation the fold never reads is `HISTORY_ONLY`, not an
   unaccounted write. An unknown operation is still reported.
-
-## 2026-11-08 - Span alignment re-grounds a source-time attribute prefix (#519)
-
-- Each k-sample proposal canonicalises its attribute against its own quote, so one quoting
-  "current balance is 1300" kept `current_balance`. Span alignment then commits the common span
-  "balance is 1300", and the kept prefix forked a `current_balance` slot beside `balance`. The
-  gate now re-checks the name against the committed quote. Stored rows keep their names.

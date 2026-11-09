@@ -1779,7 +1779,7 @@ async def _run_recall(
         await service._attach_frontier_metadata(eligible_uuids, metadata_by_uuid, warden_status=guard_status)
         _t_phases["frontier_metadata"] = int((perf_counter() - _t) * 1000)
 
-    # --- Optional cross-encoder rerank (default off): replaces the RRF floor when it runs ---
+    # --- Cross-encoder rerank (default on): replaces the RRF floor when it runs ---
     rerank: dict[str, float] | None = None
     rerank_note: str | None = None
     # No model dir configured: the rerank is inert (default on, opt-in by configuring a model).

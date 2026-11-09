@@ -10,7 +10,7 @@
     ['enable_facet_candidates', 'Active facet lane', 'bool'],
     ['facet_weight', 'Facet weight', 'number', { min: 0, max: 10, step: 0.05 }],
     ['enable_cross_encoder_rerank', 'Cross-encoder rerank', 'bool'],
-    ['rerank_top_n', 'Rerank top N', 'number', { min: 1, max: 200, step: 1 }],
+    ['rerank_top_n', 'Rerank top N', 'number', { min: 1, max: 100, step: 1 }],
     ['rerank_max_results', 'Rerank max results', 'number', { min: 1, max: 200, step: 1 }],
   ];
   const advancedFields = [

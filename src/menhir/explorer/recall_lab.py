@@ -48,7 +48,8 @@ class RecallLabTuning(BaseModel):
     scalar_verdict_min_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
     # Uses the server's MENHIR_RECALL_RERANK_MODEL_DIR/DEVICE; without them the arm keeps the floor.
     enable_cross_encoder_rerank: bool = True
-    rerank_top_n: int = Field(default=50, ge=1, le=200)
+    # Capped below the setting's 200: Lab runs many arms per request (SEC-05).
+    rerank_top_n: int = Field(default=50, ge=1, le=100)
     rerank_max_results: int = Field(default=7, ge=1, le=200)
 
     def to_domain(self) -> RetrievalTuningConfig:
