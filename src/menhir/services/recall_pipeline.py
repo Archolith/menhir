@@ -441,7 +441,10 @@ async def run_recall(service: Any, query: str, **kwargs: Any) -> RecallResult:
     when recall raises or is cancelled, so no embed/Neo4j work outlives the call."""
     owned: list[asyncio.Task[Any]] = []
     try:
-        return await _run_recall(service, query, owned_tasks=owned, **kwargs)
+        # #577: the credential scrub runs on every return path and ignores tuning flags.
+        from menhir.domain.recall_secret_guard import scrub_recall_result
+
+        return scrub_recall_result(await _run_recall(service, query, owned_tasks=owned, **kwargs))
     finally:
         for task in owned:
             if not task.done():
