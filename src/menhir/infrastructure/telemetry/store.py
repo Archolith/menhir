@@ -81,8 +81,14 @@ class McpTelemetryStore(
         file."""
         # #527: see every write queued off-loop before this one. Skipped during schema init,
         # where the writer may be waiting on this store's init lock.
-        if self._initialized:
-            TELEMETRY_WRITER.drain(_SQLITE_BUSY_TIMEOUT_S)
+        if self._initialized and not TELEMETRY_WRITER.drain(_SQLITE_BUSY_TIMEOUT_S):
+            # The read still proceeds (a slow disk must not fail it), but it may miss queued
+            # writes; say so instead of returning a silently stale result.
+            logger.warning(
+                "Telemetry read on %s proceeding with %d off-loop write(s) still queued after "
+                "%.1fs; results may be missing them",
+                self.db_path, TELEMETRY_WRITER.pending(), _SQLITE_BUSY_TIMEOUT_S,
+            )
         return connect_telemetry_db(self.db_path)
 
     def _ensure_ready(self) -> None:
