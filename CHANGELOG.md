@@ -160,14 +160,3 @@
 - The model never names `approximate`: it still emits `absolute` with the stated number and code
   relabels it from the quoted span, so all k samples agree. The scalar prompt changes only when the
   flag is on; with it off the prompt and every drop decision are unchanged.
-
-## 2026-11-08 - The off-loop telemetry writer skips the per-commit fsync
-
-- Connections opened on the off-loop telemetry writer thread use `synchronous=NORMAL` in WAL mode,
-  so each observability write no longer waits for a disk flush, and the writer falls behind less
-  often (a read that outruns it logs a warning, see below). A power loss can drop only the latest
-  of those rows, and never corrupts the file.
-- Everything else that opens a connection through `connect_telemetry_db` keeps `FULL`: the
-  scheduler lease, the operations journal, pending actions, migration batches, erasure subjects,
-  metric receipts and the recovery rows (merge audit, memory revisions). So does any connection
-  that is not in WAL mode.
