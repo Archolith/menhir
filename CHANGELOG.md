@@ -6,6 +6,18 @@
   `add_column_if_missing` now treats that error as success, at all four sites: the telemetry
   lineage columns, `llm_usage_events`, `lifecycle_events` and the operations journal.
 
+## 2026-11-08 - Opt-in recall query log for recall research
+
+- New setting `MENHIR_TELEMETRY_RECORD_RECALL_QUERIES` (default off). When on, each MCP recall
+  (`recall_memories`, `recall_context_memories`) and `POST /api/recall` writes one row to a new
+  telemetry table, `recall_query_log`: the query text and its SHA-256, the ordered result ids and
+  scores, source memory ids, namespace, preset, limit, and the recall receipt token when there is
+  one. `recall_receipts` stays content-free.
+- With `MENHIR_PRIVACY_REDACT` on, only the hash is stored. Rows follow the 90-day diagnostic
+  retention tier. Namespace erasure scrubs the query text; rows with no namespace only age out
+  (`docs/your-data.md`).
+- The write goes through the #527 off-loop writer, so it never opens SQLite on the event loop.
+
 ## 2026-11-08 - A telemetry read that may miss queued writes says so
 
 - A telemetry read waits up to `MENHIR_TELEMETRY_BUSY_TIMEOUT_S` (5 s) for off-loop writes queued
@@ -88,12 +100,3 @@
 - Erasure waits for queued writes before it purges and fails closed (stays PREPARED) if they don't
   land, so a row queued before an erase can't survive it.
 - `track_mcp_call` awaits its row in a worker thread, so the row exists when the call returns.
-
-## 2026-11-08 - v0.3.5: Client policy v3: tool profiles, a tier ceiling and deployment-owned product roles
-
-- Client policy v3 grants tools by profile (`core`, `curate`, `operate`, `admin`) with a tier
-  ceiling, and product roles belong to the deployment (#435). v1 and v2 policies still load;
-  the next release drops them.
-- Profile catalog 1: the first catalog. A v3 policy sets `"profile_catalog": 1`. Under v3,
-  `list_clients` is an `admin` tool, so product clients no longer receive it.
-- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.5. No dependency changes in this commit.

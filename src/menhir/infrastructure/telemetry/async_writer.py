@@ -162,6 +162,12 @@ class OffLoopObservabilityWritesMixin:
             return True
         return parent(*args, **kwargs)
 
+    def record_recall_query(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        parent = super().record_recall_query  # type: ignore[misc]
+        if self._offloaded("recall_query", lambda: parent(*args, **kwargs)):
+            return None
+        return parent(*args, **kwargs)
+
 
 def _drain_at_exit() -> None:
     if not TELEMETRY_WRITER.drain(_SHUTDOWN_DRAIN_TIMEOUT_S):

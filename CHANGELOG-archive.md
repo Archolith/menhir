@@ -1,3 +1,12 @@
+## 2026-11-08 - v0.3.5: Client policy v3: tool profiles, a tier ceiling and deployment-owned product roles
+
+- Client policy v3 grants tools by profile (`core`, `curate`, `operate`, `admin`) with a tier
+  ceiling, and product roles belong to the deployment (#435). v1 and v2 policies still load;
+  the next release drops them.
+- Profile catalog 1: the first catalog. A v3 policy sets `"profile_catalog": 1`. Under v3,
+  `list_clients` is an `admin` tool, so product clients no longer receive it.
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.5. No dependency changes in this commit.
+
 ## 2026-11-08 - Client policy v3: tool profiles and deployment-owned product roles (#435)
 
 - A version 3 client policy grants tools by profile: `core`, `curate`, `operate` and `admin`

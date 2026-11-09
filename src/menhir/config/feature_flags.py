@@ -72,6 +72,8 @@ _SETTINGS = (
     ('runtime_mode', 'MENHIR_RUNTIME_MODE', 'production', 'runtime', 'Configure runtime mode.', False, ()),
     ('explorer_enabled', 'MENHIR_EXPLORER_ENABLED', True, 'runtime', 'Enable Explorer routes.', False, ()),
     ('privacy_redact', 'MENHIR_PRIVACY_REDACT', False, 'telemetry', 'Enable privacy redact.', False, ()),
+    ('telemetry_record_recall_queries', 'MENHIR_TELEMETRY_RECORD_RECALL_QUERIES', False, 'telemetry',
+        'Record recall query text and ordered result ids in the telemetry sidecar for evaluation sets.', False, ()),
     ('saga_reconcile_startup_mode', 'MENHIR_SAGA_RECONCILE_STARTUP_MODE', 'observe', 'saga',
         'Configure saga reconcile startup mode.', False, ()),
     ('oauth_enabled', 'MENHIR_OAUTH_ENABLED', False, 'auth', 'Enable oauth enabled.', False, ()),

@@ -283,4 +283,6 @@ class RecallMemoriesTool(BaseJsonTool):
             payload["trace"] = result.get("trace")
         if elapsed_since_last_access is not None:
             payload["elapsed_since_last_access"] = elapsed_since_last_access
-        return self.render_recall_json(payload)
+        return self.render_recall_json(
+            payload, log_context={"namespace": namespace or None, "limit": limit}
+        )

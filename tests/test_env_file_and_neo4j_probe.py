@@ -16,7 +16,7 @@ from menhir import env_file
 from menhir.config import MemorySettings
 from menhir.core import runtime_preflight as rp
 
-pytestmark = [pytest.mark.unit]
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("restore_process_env")]
 
 
 # ---------------------------------------------------------------- env file resolution
