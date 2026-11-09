@@ -20,6 +20,24 @@
 - `uv.lock` and `THIRD-PARTY-LICENSES.txt` gain the extra's packages. The manifest also picks up
   version drift already in the lock (jiter, joserfc, markupsafe, numpy, pydantic).
 
+## 2026-11-08 - Opt-in recall query log for recall research
+
+- New setting `MENHIR_TELEMETRY_RECORD_RECALL_QUERIES` (default off). When on, each MCP recall
+  (`recall_memories`, `recall_context_memories`) and `POST /api/recall` writes one row to a new
+  telemetry table, `recall_query_log`: the query text and its SHA-256, the ordered result ids and
+  scores, source memory ids, namespace, preset, limit, and the recall receipt token when there is
+  one. `recall_receipts` stays content-free.
+- With `MENHIR_PRIVACY_REDACT` on, only the hash is stored. Rows follow the 90-day diagnostic
+  retention tier. Namespace erasure scrubs the query text; rows with no namespace only age out
+  (`docs/your-data.md`).
+- The write goes through the #527 off-loop writer, so it never opens SQLite on the event loop.
+
+## 2026-11-08 - A telemetry read that may miss queued writes says so
+
+- A telemetry read waits up to `MENHIR_TELEMETRY_BUSY_TIMEOUT_S` (5 s) for off-loop writes queued
+  before it. When that wait times out, the read still runs but now logs a warning naming how many
+  writes are still queued, instead of returning a possibly incomplete result silently.
+
 ## 2026-11-08 - v0.3.6: profile catalog 2, telemetry off the event loop, one operation table
 
 - Profile catalog 2 puts `get_client_context` in `core`, so agent-tier clients receive it. A
@@ -125,40 +143,3 @@
 - Versions 1 and 2 still load. The next release drops them.
 - New fixture `tests/fixtures/client-policy.v3.synthetic.json`; `.agent/endpoints.md` documents
   the policy.
-
-## 2026-11-08 - v0.3.4: MCP initialize names the build; releases publish what they serve; policy refusals are MCP errors
-
-- `serverInfo.version` carries the build commit as SemVer build metadata, and each GitHub release
-  attaches `served-metadata.json` for a deploy to compare with `/readyz` (#498).
-- A tool refused by the client policy or `MENHIR_CLIENT_TOOLS` returns an MCP error result (#503).
-- A transient 402 stays transient after it is stored, so the retry poller requeues it.
-- Compact recall over the stdio bridge leaves the source-memory limit to the server, and keeps
-  the closest five source memories.
-- A release re-run attaches `served-metadata.json` to an existing release that lacks it.
-- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.4. No dependency changes in this commit.
-
-## 2026-11-08 - v0.3.4 audit fixes: bridge recall keeps the closest sources; release record on re-runs
-
-- Compact `recall_memories` over the stdio bridge trimmed the server's source memories to the first
-  five, which are the oldest, since the server sends them oldest-first. It now keeps the five with
-  the highest cosine, still in the server's order. (Regression from the bridge-limit change.)
-- A release run that finds the GitHub release already there attaches `served-metadata.json` when it
-  is missing, and fails if it cannot, instead of finishing green without the record a deploy checks.
-
-## 2026-11-08 - MCP `initialize` names the build; releases publish what they serve
-
-- A release image reports `serverInfo.version` as the version plus the first 12 characters of
-  `MENHIR_RELEASE_COMMIT`, as SemVer build metadata (`0.3.3+43e693f6b821`), so a long-lived
-  connection shows which build it was opened against (#498). It still parses as the plain version.
-  Without a valid commit the version is unchanged.
-- `docs/agent-usage.md`: compare it with `/readyz`'s `build.commit` to spot a pre-deploy connection.
-- The release workflow runs the sealed image with no network to compute `served-metadata.json`
-  (version, commit, and the MCP metadata digest for every snapshot mode), checks it against the tag,
-  and attaches it to the GitHub release. `python -m menhir.mcp.served_metadata` prints the record.
-  A deploy compares `/readyz` with it; the GitHub release is not created without it.
-
-## 2026-11-08 - The served-metadata check reaches a Cloudflare-fronted server
-
-- `scripts/release/check_served_metadata.py` sends `User-Agent: menhir-release-check`. Cloudflare
-  answered 403 to urllib's default `Python-urllib/x.y`, so the check could not read production's
-  `/readyz`.

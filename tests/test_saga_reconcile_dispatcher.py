@@ -71,6 +71,11 @@ def _insert(journal, op_id, kind="ENTITY_MERGE", *, owner="expired", created_at=
     owner="live"    -> a fresh claim, so the ownership veto fires
     owner="none"    -> a legacy ownerless row
     """
+    _insert_many(journal, [(op_id, created_at)], kind, owner=owner)
+
+
+def _insert_many(journal, rows, kind="ENTITY_MERGE", *, owner="expired"):
+    """`_insert` for many (op_id, created_at) rows of one kind/owner, in one transaction."""
     # "expired" must be a writer whose death is PROVABLE: same host, PID gone. Expiry alone is no
     # longer sufficient to reach a handler -- that is the point of the death-evidence rule.
     dead_local = f"inst:{process_liveness.hostname()}:999999:deadnonce"
@@ -80,12 +85,15 @@ def _insert(journal, op_id, kind="ENTITY_MERGE", *, owner="expired", created_at=
         "none": (None, None),
     }[owner]
     with sqlite3.connect(journal.db_path) as conn:
-        conn.execute(
+        conn.executemany(
             "INSERT INTO graph_operations (op_id, operation_kind, request_json, state, "
             "created_at, updated_at, owner_token, owner_lease_expires_at) "
             "VALUES (?, ?, '{}', 'PREPARED', ?, ?, ?, ?)",
-            (op_id, kind, created_at or "2026-01-01T00:00:00+00:00",
-             created_at or "2026-01-01T00:00:00+00:00", token, expires),
+            [
+                (op_id, kind, created_at or "2026-01-01T00:00:00+00:00",
+                 created_at or "2026-01-01T00:00:00+00:00", token, expires)
+                for op_id, created_at in rows
+            ],
         )
         conn.commit()
 
@@ -320,9 +328,11 @@ def test_live_mode_is_refused_rather_than_silently_downgraded(journal):
 
 @pytest.mark.unit
 def test_scan_is_exhaustive_beyond_the_old_500_row_horizon(journal):
-    for i in range(600):
-        _insert(journal, f"op-{i:04d}", kind="ENTITY_MERGE",
-                created_at=f"2026-01-01T00:00:{i % 60:02d}+00:00")
+    _insert_many(
+        journal,
+        [(f"op-{i:04d}", f"2026-01-01T00:00:{i % 60:02d}+00:00") for i in range(600)],
+        "ENTITY_MERGE",
+    )
     handler = _Handler()
     run = SagaReconcileDispatcher(
         journal=journal, handlers=build_handlers(merge=handler)

@@ -35,6 +35,7 @@ class TelemetryRetentionStatsMixin:
         # Diagnostic / investigative.
         "failure_events": ("recorded_at", "diagnostic"),
         "recall_receipts": ("created_at", "diagnostic"),
+        "recall_query_log": ("created_at", "diagnostic"),
         "conflict_resolutions": ("resolved_at", "diagnostic"),
         "recall_lab_runs": ("recorded_at", "diagnostic"),
         "extraction_lab_runs": ("recorded_at", "diagnostic"),

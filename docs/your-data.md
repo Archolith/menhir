@@ -106,6 +106,13 @@ erasure journal and the erased-id suppression record.
 
 - `MENHIR_PRIVACY_REDACT` defaults to off. Recall Lab and Extraction Lab runs therefore keep raw
   text in the sidecar for 90 days.
+- `MENHIR_TELEMETRY_RECORD_RECALL_QUERIES` defaults to off. When on, each recall (MCP recall tools and
+  `POST /api/recall`) adds a `recall_query_log` row to the sidecar with the query text, a SHA-256 of
+  the query, the ordered result ids and scores, and the recall receipt token. Rows are kept for 90
+  days. With `MENHIR_PRIVACY_REDACT=true` the query text is not stored; only the hash, ids and scores
+  are. Namespace erasure scrubs the query text of rows recorded with that namespace; the ids, scores
+  and hash stay. Recalls made without a namespace are recorded with a null namespace, which
+  namespace erasure does not reach, so for those only the 90-day retention removes the query text.
 - To stop prompt capture, set `MENHIR_TURN_EVIDENCE_ENABLED=0` or remove the hooks.
 
 ## Source references

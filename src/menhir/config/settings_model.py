@@ -477,6 +477,7 @@ class MemorySettings:
     source_fence_private_key_path: str = ""
     explorer_enabled: bool = True
     privacy_redact: bool = False
+    telemetry_record_recall_queries: bool = False
 
     # Startup saga recovery. "observe" (default) classifies the PREPARED backlog and logs one
     # summary, mutating nothing; "off" skips the pass entirely; "live" (CF-20c) takes the
@@ -982,6 +983,9 @@ class MemorySettings:
             ).strip(),
             explorer_enabled=parse_bool_env(_getenv("MENHIR_EXPLORER_ENABLED", default=str(cls.explorer_enabled))),
             privacy_redact=parse_bool_env(_getenv("MENHIR_PRIVACY_REDACT", default=str(cls.privacy_redact))),
+            telemetry_record_recall_queries=parse_bool_env(
+                _getenv("MENHIR_TELEMETRY_RECORD_RECALL_QUERIES", default=str(cls.telemetry_record_recall_queries))
+            ),
             saga_reconcile_startup_mode=_getenv(
                 "MENHIR_SAGA_RECONCILE_STARTUP_MODE",
                 default=cls.saga_reconcile_startup_mode,

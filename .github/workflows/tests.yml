@@ -4,6 +4,17 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  # Manual runs; also the way to run stdio-e2e outside a release (see that job).
+  workflow_dispatch:
+
+# Git's detached auto-maintenance after a test's commit writes .git/objects/maintenance.lock
+# mid-test, which raced test_sync_cli::test_check_writes_no_archive under parallel runs.
+env:
+  GIT_CONFIG_COUNT: "2"
+  GIT_CONFIG_KEY_0: maintenance.auto
+  GIT_CONFIG_VALUE_0: "false"
+  GIT_CONFIG_KEY_1: gc.auto
+  GIT_CONFIG_VALUE_1: "0"
 
 jobs:
   # F811 (redefinition of unused name) catches a class defining the same method twice.
@@ -119,11 +130,11 @@ jobs:
       # explicit marker silently stops running, and the failure mode is invisible:
       # the job still reports green.
       #
-      # Running serial (no -n auto/--dist) for now: xdist has a known failure mode
-      # where a crashed worker hangs the whole run instead of failing fast (see
-      # 2026-07-12 diagnostic history in git log), so parallelism stays off pending
-      # a separate, deliberate re-test. pytest-timeout (configured in pytest.ini,
-      # 60s per test) is the safety net for any single hanging test.
+      # Parallel (-n auto, one worker per file with --dist loadfile). It was serial after a
+      # 2026-07-12 report of a crashed worker hanging the run; the job's timeout-minutes and
+      # pytest-timeout (pytest.ini, 60s per test, thread method) now bound any hang, and
+      # conftest keeps the production-URI guard correct in workers. If a hang returns, drop
+      # -n here rather than raising the ceiling.
       #
       # Known remaining issue (2026-07-12): tests/test_llm_compression.py::
       # TestCompressContentUnit::test_returns_llm_summary (and likely the related
@@ -140,7 +151,7 @@ jobs:
 
       - name: Run offline tests
         working-directory: menhir
-        run: pytest -v
+        run: pytest -v -n auto --dist loadfile
 
   # The same offline suite on the other supported platform and the newest Python that
   # `requires-python = ">=3.12"` admits. Windows 11 is a primary supported platform and was
@@ -162,6 +173,14 @@ jobs:
       run:
         shell: bash
     steps:
+      # Not for speed (measured no change): with scanning on, parallel Windows runs failed 5 of 6
+      # on file locks (WinError 32 in temp cleanup, `git add` exit 128); with it off, 0 of 3.
+      # Throwaway hosted runner, so nothing persists.
+      - name: Disable Defender real-time scanning
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
       - name: Checkout menhir
         uses: actions/checkout@v4
         with:
@@ -192,7 +211,7 @@ jobs:
 
       - name: Run offline tests
         working-directory: menhir
-        run: pytest -v
+        run: pytest -v -n auto --dist loadfile
 
   # The unit job cannot see the behaviour this project actually depends on: supersession under
   # the real uniqueness constraint, provenance edges, TurnEvidence grounding and deletion repair
@@ -296,7 +315,13 @@ jobs:
   # NO SECRET IS REQUIRED. Lanes that need a model declare @pytest.mark.provider and get a
   # local deterministic OpenAI-compatible fake; a lane that declares none gets no
   # credentials at all, so an unintended live call fails loudly rather than spending money.
+  #
+  # RELEASES ONLY: a release/* pull request (the version bump, which gates the tag) or a manual
+  # run (workflow_dispatch). Everywhere else it is skipped, and a job skipped by `if` still
+  # satisfies the required `stdio-e2e` check. About 13 minutes, the slowest job, so it no longer
+  # runs per PR; run it by hand for a change aimed at the shipped shape.
   stdio-e2e:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/')
     runs-on: ubuntu-latest
     # Generous: E2E-7 kills a backend mid-enrichment and waits up to 10 minutes for the
     # restarted one to settle the interrupted episode, and the runner is slower than a

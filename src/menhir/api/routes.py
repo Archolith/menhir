@@ -139,6 +139,36 @@ async def ready(request: Request) -> ReadyResponse:
     )
 
 
+def _log_api_recall_query(body: Any, result: dict[str, Any], resolved_namespace: str | None) -> None:
+    """Opt-in recall query log for POST /api/recall; never raises."""
+    try:
+        from menhir.config import MemorySettings
+        from menhir.mcp.telemetry import telemetry_store
+
+        settings = MemorySettings.from_env()
+        if not settings.telemetry_record_recall_queries:
+            return
+        rows = [m for m in (result.get("results") or []) if isinstance(m, dict)]
+        telemetry_store.record_recall_query(
+            query=body.query,
+            token=None,
+            operation="api_recall",
+            namespace=resolved_namespace,
+            preset=str(result.get("preset") or body.preset),
+            limit=body.limit,
+            result_ids=[m.get("uuid") for m in rows],
+            result_scores=[m.get("final_score") for m in rows],
+            source_memory_ids=[
+                s.get("id") or s.get("uuid")
+                for s in (result.get("source_memories") or [])
+                if isinstance(s, dict)
+            ],
+            store_query_text=not settings.privacy_redact,
+        )
+    except Exception:  # noqa: BLE001 - query logging must never break recall
+        logger.debug("api recall query log skipped", exc_info=True)
+
+
 @router.post("/recall", response_model=RecallResponse, response_model_exclude_none=True)
 async def recall(request: Request, body: RecallRequest) -> RecallResponse:
     backend = _get_backend(request)
@@ -153,6 +183,7 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
         recall_kwargs["counted_verdict_limit"] = body.counted_verdict_limit
     if body.source_memory_sources is not None:
         recall_kwargs["source_memory_sources"] = list(body.source_memory_sources)
+    resolved_namespace = _resolve_namespace(request, body.namespace)
     try:
         result = await backend.recall(
             body.query,
@@ -161,11 +192,12 @@ async def recall(request: Request, body: RecallRequest) -> RecallResponse:
             include_session=body.include_session,
             include_superseded=body.include_superseded,
             include_invalidated=body.include_invalidated,
-            namespace=_resolve_namespace(request, body.namespace),
+            namespace=resolved_namespace,
             **recall_kwargs,
         )
     except InvalidQueryPresetError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _log_api_recall_query(body, result, resolved_namespace)
     return RecallResponse(
         query=str(result.get("query") or body.query),
         preset=str(result.get("preset") or body.preset),

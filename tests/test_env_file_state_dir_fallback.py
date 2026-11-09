@@ -14,7 +14,7 @@ import pytest
 
 from menhir import env_file
 
-pytestmark = [pytest.mark.unit]
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("restore_process_env")]
 
 GATE = "MENHIR_FRONTIER_SHADOW"
 
