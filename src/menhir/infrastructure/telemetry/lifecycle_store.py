@@ -9,7 +9,12 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
-from menhir.infrastructure.telemetry.helpers import _json_default, _span_days, _utc_now_iso
+from menhir.infrastructure.telemetry.helpers import (
+    _json_default,
+    _span_days,
+    _utc_now_iso,
+    add_column_if_missing,
+)
 from menhir.infrastructure.telemetry.lifecycle_store_stats import TelemetryRetentionStatsMixin
 
 logger = logging.getLogger(__name__)
@@ -47,10 +52,7 @@ def initialize_lifecycle_schema(conn: sqlite3.Connection) -> None:
             "PRAGMA table_info(lifecycle_events)"
         ).fetchall()
     }
-    if "episode_uuid" not in lifecycle_columns:
-        conn.execute(
-            "ALTER TABLE lifecycle_events ADD COLUMN episode_uuid TEXT"
-        )
+    add_column_if_missing(conn, "lifecycle_events", "episode_uuid", "TEXT", lifecycle_columns)
     conn.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_lifecycle_events_episode_recorded

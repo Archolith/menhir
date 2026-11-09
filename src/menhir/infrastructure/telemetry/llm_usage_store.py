@@ -6,6 +6,8 @@ import re
 import sqlite3
 from typing import Any
 
+from menhir.infrastructure.telemetry.helpers import add_column_if_missing
+
 #: ``Class[:status[:code]]`` as built by openai_rate_limit.provider_error_code.
 _ERROR_CODE_SHAPE = re.compile(r"[A-Za-z0-9_.-]{1,64}(?::[0-9]{1,3}(?::[A-Za-z0-9_.:-]{1,64})?)?")
 
@@ -42,12 +44,9 @@ def initialize_llm_usage_schema(conn: sqlite3.Connection) -> None:
     )
     # A sidecar created before error_code existed keeps its old column set under IF NOT EXISTS.
     columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(llm_usage_events)")}
-    if "error_code" not in columns:
-        conn.execute("ALTER TABLE llm_usage_events ADD COLUMN error_code TEXT")
-    if "cache_write_input_tokens" not in columns:
-        conn.execute("ALTER TABLE llm_usage_events ADD COLUMN cache_write_input_tokens INTEGER")
-    if "service_tier" not in columns:
-        conn.execute("ALTER TABLE llm_usage_events ADD COLUMN service_tier TEXT")
+    add_column_if_missing(conn, "llm_usage_events", "error_code", "TEXT", columns)
+    add_column_if_missing(conn, "llm_usage_events", "cache_write_input_tokens", "INTEGER", columns)
+    add_column_if_missing(conn, "llm_usage_events", "service_tier", "TEXT", columns)
     conn.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_llm_usage_run_recorded

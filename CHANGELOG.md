@@ -1,3 +1,11 @@
+## 2026-11-08 - Two stores migrating one SQLite file at once no longer fail
+
+- Schema upgrades read a table's columns, then add the missing ones. Two stores doing that on the
+  same file at once both saw a column missing, and the second `ALTER TABLE ... ADD COLUMN` failed
+  with "duplicate column name" (seen in CI as a failed `delete_memory`). A shared
+  `add_column_if_missing` now treats that error as success, at all four sites: the telemetry
+  lineage columns, `llm_usage_events`, `lifecycle_events` and the operations journal.
+
 ## 2026-11-08 - A telemetry read that may miss queued writes says so
 
 - A telemetry read waits up to `MENHIR_TELEMETRY_BUSY_TIMEOUT_S` (5 s) for off-loop writes queued
@@ -89,23 +97,3 @@
 - Profile catalog 1: the first catalog. A v3 policy sets `"profile_catalog": 1`. Under v3,
   `list_clients` is an `admin` tool, so product clients no longer receive it.
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.5. No dependency changes in this commit.
-
-## 2026-11-08 - Client policy v3: tool profiles and deployment-owned product roles (#435)
-
-- A version 3 client policy grants tools by profile: `core`, `curate`, `operate` and `admin`
-  (`src/menhir/mcp/tool_profiles.py`), plus optional `allow` and `deny` lists. It resolves at load
-  time to the same allowlist versions 1 and 2 spell out, so runtime enforcement is unchanged.
-- Profile tools above a client's `maximum_tier` are left out and logged. An explicit `allow`
-  above the tier fails the load. A v3 client's scopes must equal its tier's scopes.
-- `profile_catalog` pins the catalog a policy was written for. Tools a later catalog adds are
-  withheld and logged as a warning; a policy newer than the build fails the load. Catalog 1 is
-  this release.
-- `access_contract.products` is now the deployment's: any product names, roles `readonly`, `agent`
-  or `operator` (v2: `agent` or `operator`). The fixed ChatGPT/Codex/Claude/OpenCode role table is
-  gone. In v3 a product client never resolves an `admin` tool.
-- Agent Smith client-metadata documents advertise the scopes the policy gives that client.
-- Tier ranking lives in one place, `src/menhir/tiers.py`.
-- `.agent/mcp-tools.yaml` lists the profiles, checked against the code by a test.
-- Versions 1 and 2 still load. The next release drops them.
-- New fixture `tests/fixtures/client-policy.v3.synthetic.json`; `.agent/endpoints.md` documents
-  the policy.
