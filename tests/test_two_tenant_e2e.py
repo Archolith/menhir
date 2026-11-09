@@ -218,7 +218,7 @@ def test_no_auth_mode_refuses_a_proxied_request() -> None:
     async def anything():
         return JSONResponse({"reached": True})
 
-    client = TestClient(BearerAuthMiddleware(app))
+    client = TestClient(BearerAuthMiddleware(app), base_url="http://127.0.0.1")
     assert client.get("/api/anything").status_code == 200, "direct local caller must still work"
 
     for header in ("x-forwarded-for", "x-real-ip", "forwarded"):
