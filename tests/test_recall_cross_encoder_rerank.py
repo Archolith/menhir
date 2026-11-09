@@ -522,6 +522,27 @@ def test_load_builds_from_the_bytes_it_hashed_and_turns_ort_telemetry_off(pinned
     assert pinned_dir.ort.telemetry_off == 1
 
 
+def test_load_keeps_no_model_copy_and_no_cpu_fallback(pinned_dir, monkeypatch):
+    """Memory: ORT's wrapper holds the model bytes for the session's life (~90 MB). Fallback off
+    keeps cuda from silently moving to CPU, and is what makes dropping the bytes safe."""
+
+    class Session:
+        def __init__(self, model, options, providers):
+            self._model_bytes = model
+            self.fallback = True
+
+        def disable_fallback(self):
+            self.fallback = False
+
+        def get_inputs(self):
+            return [SimpleNamespace(name="input_ids")]
+
+    monkeypatch.setattr(pinned_dir.ort, "InferenceSession", Session, raising=False)
+    session = cer.load_reranker(str(pinned_dir.path), "cpu").session
+    assert session.fallback is False
+    assert session._model_bytes is None
+
+
 def test_a_read_error_while_checking_a_file_is_rerank_unavailable(hub, monkeypatch):
     """SEC-12: an OSError from hashing escaped fetch_pinned_model and broke hook recall."""
     from pathlib import Path
