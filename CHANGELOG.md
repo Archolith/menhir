@@ -1,3 +1,15 @@
+## 2026-11-09 - v0.3.8: Similarity search uses Neo4j vector indexes (#574); recall rerank threads follow the CPU quota (#567)
+
+- Every start creates four cosine vector indexes if they are missing (entity names, relationship
+  facts, episodes, typed assertions), and similarity search reads candidates from them instead of
+  scanning every row (#574). Results are rescored exactly and fall back to the scan while an index
+  builds. On a 17k-entity test graph a search took ~55 ms instead of ~1 s. An upgrade builds the
+  indexes in the background on its first start; unquantized, the two large ones hold about 100 MB
+  of vectors each.
+- `MENHIR_RECALL_RERANK_THREADS` (default 0 = auto) caps the reranker's ONNX thread pool at the
+  container's CPU quota (#567). No change on hosts without a quota.
+- `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.8. No dependency changes in this commit.
+
 ## 2026-11-09 - Recall rerank threads follow the container's CPU quota (#567)
 
 - New `MENHIR_RECALL_RERANK_THREADS` (default 0 = auto). Auto caps ONNX Runtime's intra-op pool
@@ -143,11 +155,3 @@
   scheduler lease, the operations journal, pending actions, migration batches, erasure subjects,
   metric receipts and the recovery rows (merge audit, memory revisions). So does any connection
   that is not in WAL mode.
-
-## 2026-11-08 - Two stores migrating one SQLite file at once no longer fail
-
-- Schema upgrades read a table's columns, then add the missing ones. Two stores doing that on the
-  same file at once both saw a column missing, and the second `ALTER TABLE ... ADD COLUMN` failed
-  with "duplicate column name" (seen in CI as a failed `delete_memory`). A shared
-  `add_column_if_missing` now treats that error as success, at all four sites: the telemetry
-  lineage columns, `llm_usage_events`, `lifecycle_events` and the operations journal.

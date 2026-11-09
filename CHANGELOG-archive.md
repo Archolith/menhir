@@ -1,3 +1,11 @@
+## 2026-11-08 - Two stores migrating one SQLite file at once no longer fail
+
+- Schema upgrades read a table's columns, then add the missing ones. Two stores doing that on the
+  same file at once both saw a column missing, and the second `ALTER TABLE ... ADD COLUMN` failed
+  with "duplicate column name" (seen in CI as a failed `delete_memory`). A shared
+  `add_column_if_missing` now treats that error as success, at all four sites: the telemetry
+  lineage columns, `llm_usage_events`, `lifecycle_events` and the operations journal.
+
 ## 2026-11-08 - Opt-in recall query log for recall research
 
 - New setting `MENHIR_TELEMETRY_RECORD_RECALL_QUERIES` (default off). When on, each MCP recall
