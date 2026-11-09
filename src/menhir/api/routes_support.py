@@ -282,6 +282,13 @@ class ScalarAuthorityContributorResponse(BaseModel):
     mentioned_at: str | None = None
 
 
+class NewerApproximateValueResponse(BaseModel):
+    assertion_id: str
+    value: Any = None
+    quote: str
+    valid_at: str | None = None
+
+
 class ScalarAuthorityVerdictResponse(BaseModel):
     kind: str
     status: str
@@ -303,6 +310,7 @@ class ScalarAuthorityVerdictResponse(BaseModel):
     count_uncertain: float | None = None
     count_actions: str | None = None
     count_items: str | None = None
+    newer_approximate: list[NewerApproximateValueResponse] = Field(default_factory=list)
 
 
 class SourceMemoryResponse(BaseModel):

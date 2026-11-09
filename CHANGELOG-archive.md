@@ -1,3 +1,14 @@
+## 2026-11-08 - Profile catalog 2: `get_client_context` moves to core
+
+- `get_client_context` is a readonly-tier, read-only tool that agents use at session start. Catalog
+  1 filed it under `operate`, so agent-tier clients such as ChatGPT were refused it. Catalog 2 puts
+  it in `core`.
+- Policies pinned to `"profile_catalog": 1` resolve exactly as before. An agent policy still lacks
+  it and logs it as withheld; an `operate` policy keeps it. A moved tool's earlier placements live
+  in `EARLIER_PLACEMENTS` (`src/menhir/mcp/tool_profiles.py`), so a pinned policy never silently
+  loses a tool.
+- To pick it up, a deployment sets `"profile_catalog": 2` once it runs this build.
+
 ## 2026-11-08 - Token endpoint logs why it refused a request (#541)
 
 - Every `/oauth/token` refusal now logs one WARNING (ERROR for a 500): the OAuth error code and
