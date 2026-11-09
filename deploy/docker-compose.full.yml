@@ -63,9 +63,13 @@ services:
       OPENAI_EMBED_MODEL: text-embedding-3-small
     volumes:
       - menhir_full_data:/data
+      # Rerank model cache (HF_HOME in the image): survives `down`/`up`, so the
+      # ~92 MB model downloads once. Starts owned by the app user.
+      - menhir_full_model_cache:/srv/menhir/cache/huggingface
     ports:
       - "127.0.0.1:8099:8099"   # loopback only; reverse proxy fronts it
 
 volumes:
   menhir_full_neo4j:
   menhir_full_data:
+  menhir_full_model_cache:

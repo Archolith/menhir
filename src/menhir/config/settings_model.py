@@ -421,6 +421,8 @@ class MemorySettings:
     recall_rerank_enabled: bool = True
     recall_rerank_model_dir: str = ""
     recall_rerank_auto_download: bool = True
+    # Download cache for the pinned model; "" = huggingface_hub's default (HF_HOME / HF_HUB_CACHE).
+    recall_rerank_cache_dir: str = ""
     recall_rerank_device: str = "auto"  # auto | cpu | cuda
     recall_rerank_top_n: int = 50  # 1..200
     recall_rerank_max_results: int = 7  # 1..200; results returned when rerank ran
@@ -936,6 +938,7 @@ class MemorySettings:
             recall_rerank_enabled=parse_bool_env(_getenv("MENHIR_RECALL_RERANK_ENABLED", default=str(cls.recall_rerank_enabled))),
             recall_rerank_model_dir=_getenv("MENHIR_RECALL_RERANK_MODEL_DIR", default=cls.recall_rerank_model_dir).strip(),
             recall_rerank_auto_download=parse_bool_env(_getenv("MENHIR_RECALL_RERANK_AUTO_DOWNLOAD", default=str(cls.recall_rerank_auto_download))),
+            recall_rerank_cache_dir=_getenv("MENHIR_RECALL_RERANK_CACHE_DIR", default=cls.recall_rerank_cache_dir).strip(),
             recall_rerank_device=_getenv("MENHIR_RECALL_RERANK_DEVICE", default=cls.recall_rerank_device).strip().lower(),
             recall_rerank_top_n=_parse_int(
                 _getenv("MENHIR_RECALL_RERANK_TOP_N", default=str(cls.recall_rerank_top_n)),

@@ -94,9 +94,11 @@ erasure journal and the erased-id suppression record.
 - Graphiti's PostHog telemetry is off by default.
 - Recall rerank model download: unless `MENHIR_RECALL_RERANK_MODEL_DIR` is set or
   `MENHIR_RECALL_RERANK_AUTO_DOWNLOAD=false`, a long-running server downloads about 92 MB from
-  Hugging Face (`HF_ENDPOINT`, default huggingface.co) at startup. No memory, query or token is
-  sent. The request says `menhir-recall-rerank` as its User-Agent. huggingface_hub may also fetch
-  its agent registry from the same host about once a day; `HF_HUB_DISABLE_TELEMETRY=1` stops that.
+  Hugging Face (`HF_ENDPOINT`, default huggingface.co) the first time it starts, then reuses the
+  cached copy (`MENHIR_RECALL_RERANK_CACHE_DIR`, else `HF_HOME`; the container image keeps it in
+  the `/srv/menhir/cache/huggingface` volume). No memory, query or token is sent. The request says
+  `menhir-recall-rerank` as its User-Agent. huggingface_hub may also fetch its agent registry from
+  the same host about once a day; `HF_HUB_DISABLE_TELEMETRY=1` stops that, and the image sets it.
   Whatever the endpoint serves must match the pinned digests or it is not loaded. Hooks never
   download. ONNX Runtime's telemetry events are turned off when the model loads.
 

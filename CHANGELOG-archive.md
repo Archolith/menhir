@@ -1,3 +1,15 @@
+## 2026-11-08 - Approximate scalar claims (#519, default off)
+
+- New setting `MENHIR_PERSONAL_MEMORY_SCALAR_APPROXIMATE_ENABLED` (default off). When on, a single
+  number hedged only by an approximation cue ("about 400,000", "close to 1300", "nearly 50", "I think
+  it's 50") is stored as an `approximate` claim instead of being dropped. It is listed in scalar
+  history and shown as "about N"; it never sets or changes a View's value. Alternatives ("30 or 40"),
+  ranges, hedged deltas, non-numeric values, tentative or contextual wording ("maybe 30", "5,
+  sometimes 6") and vague quantities ("a few") are still dropped.
+- The model never names `approximate`: it still emits `absolute` with the stated number and code
+  relabels it from the quoted span, so all k samples agree. The scalar prompt changes only when the
+  flag is on; with it off the prompt and every drop decision are unchanged.
+
 ## 2026-11-08 - Two stores migrating one SQLite file at once no longer fail
 
 - Schema upgrades read a table's columns, then add the missing ones. Two stores doing that on the
