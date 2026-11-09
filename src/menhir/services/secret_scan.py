@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from menhir.domain.namespace import namespace_to_group_id, normalize_namespace
+from menhir.domain.namespace import normalize_namespace, tenant_scope_cypher, tenant_scope_params
 from menhir.domain.secret_scrub import detect_secrets
 
 Execute = Callable[[str, dict[str, Any]], list[dict[str, Any]]]
@@ -20,11 +20,11 @@ BATCH = 500
 _TEXT_FIELDS = ("content", "summary", "name", "text", "diff")
 
 # Read-only. Pages by uuid so a long scan holds no cursor and a concurrent write cannot skip rows.
-_SCAN_QUERY = """
+_SCAN_QUERY = f"""
 MATCH (n)
 WHERE (n:Entity OR n:Episodic OR n:TurnEvidence OR n:Todo)
   AND n.uuid > $after
-  AND (n.group_id = $gid OR n.namespace = $ns)
+  AND {tenant_scope_cypher("n")}
 RETURN n.uuid AS uuid, labels(n) AS labels, n.type AS type,
        n.content AS content, n.summary AS summary, n.name AS name,
        n.text AS text, n.diff AS diff
@@ -66,7 +66,7 @@ def scan_namespace(execute: Execute, namespace: str | None) -> ScanReport:
     while True:
         rows = execute(
             _SCAN_QUERY,
-            {"after": after, "gid": namespace_to_group_id(ns), "ns": ns, "batch": BATCH},
+            {"after": after, **tenant_scope_params(ns), "batch": BATCH},
         )
         if not rows:
             return report

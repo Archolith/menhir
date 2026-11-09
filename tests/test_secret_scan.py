@@ -71,3 +71,13 @@ def test_cli_prints_counts_only_and_exits_1_on_findings(monkeypatch) -> None:
     assert AWS not in result.output and GH not in result.output
     as_json = CliRunner().invoke(app, ["secrets", "scan", "--namespace", "work", "--json"])
     assert json.loads(as_json.output)["nodes_with_hits"] == 2
+
+
+def test_scan_scopes_through_the_shared_tenancy_predicate() -> None:
+    from menhir.domain.namespace import tenant_scope_cypher
+
+    execute = _fake_execute(_rows())
+    scan_namespace(execute, "work")
+    query, params = execute.calls[0]
+    assert tenant_scope_cypher("n") in query
+    assert params["tenant_namespaces"] and "work" in params["tenant_namespaces"]
