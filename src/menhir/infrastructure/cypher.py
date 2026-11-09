@@ -363,6 +363,9 @@ ENTITY_METADATA_FIELDS = (
     "n.status AS status",
     "n.artifact_status AS artifact_status",
     "n.superseded_by AS superseded_by",
+    # Read by derive_content_role (IntentOracle); stored as artifact_anchors.
+    "n['artifact_type'] AS artifact_type",
+    "n['artifact_anchors'] AS anchors",
     "n.last_accessed AS last_accessed",
     "n['needs_review'] AS needs_review",
     "n['review_reason'] AS review_reason",
