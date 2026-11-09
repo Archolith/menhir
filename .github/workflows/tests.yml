@@ -7,6 +7,15 @@ on:
   # Manual runs; also the way to run stdio-e2e outside a release (see that job).
   workflow_dispatch:
 
+# Git's detached auto-maintenance after a test's commit writes .git/objects/maintenance.lock
+# mid-test, which raced test_sync_cli::test_check_writes_no_archive under parallel runs.
+env:
+  GIT_CONFIG_COUNT: "2"
+  GIT_CONFIG_KEY_0: maintenance.auto
+  GIT_CONFIG_VALUE_0: "false"
+  GIT_CONFIG_KEY_1: gc.auto
+  GIT_CONFIG_VALUE_1: "0"
+
 jobs:
   # F811 (redefinition of unused name) catches a class defining the same method twice.
   # Python accepts that silently, keeps the LAST definition, and discards the earlier body
@@ -164,13 +173,6 @@ jobs:
       run:
         shell: bash
     steps:
-      # Experiment (PR #550): real-time scanning of the ~14k per-test temp files is the suspected
-      # cause of slow, flaky parallel Windows runs. Throwaway hosted runner, so nothing persists.
-      - name: Disable Defender real-time scanning
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
-
       - name: Checkout menhir
         uses: actions/checkout@v4
         with:
@@ -201,7 +203,7 @@ jobs:
 
       - name: Run offline tests
         working-directory: menhir
-        run: pytest -v -n auto --dist loadfile --durations=40
+        run: pytest -v -n auto --dist loadfile
 
   # The unit job cannot see the behaviour this project actually depends on: supersession under
   # the real uniqueness constraint, provenance edges, TurnEvidence grounding and deletion repair
