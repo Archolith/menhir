@@ -1,3 +1,9 @@
+## 2026-11-08 - A telemetry read that may miss queued writes says so
+
+- A telemetry read waits up to `MENHIR_TELEMETRY_BUSY_TIMEOUT_S` (5 s) for off-loop writes queued
+  before it. When that wait times out, the read still runs but now logs a warning naming how many
+  writes are still queued, instead of returning a possibly incomplete result silently.
+
 ## 2026-11-08 - v0.3.6: profile catalog 2, telemetry off the event loop, one operation table
 
 - Profile catalog 2 puts `get_client_context` in `core`, so agent-tier clients receive it. A

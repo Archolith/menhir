@@ -29,6 +29,14 @@ from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.episode_nodes import menhir_queue_episode_cypher
 from menhir.domain.recall import adjacency_edge_pattern
 from menhir.domain.verbatim_skip_status import effective_state_cypher, skip_projection_lookup_cypher
+from menhir.infrastructure.vector_indexes import (
+    EPISODIC_CONTENT_EMBEDDING,
+    TYPED_ASSERTION_NAME_EMBEDDING,
+    VectorIndexCatalog,
+    VectorIndexSpec,
+    ann_call,
+    index_backed_rows_sync,
+)
 from menhir.infrastructure.cypher import (
     Cypher,
     ENTITY_METADATA_FIELDS,
@@ -118,8 +126,10 @@ def _iso_utc_or_none(value: Any) -> str | None:
 class MemoryQueryRepository:
     """Encapsulates memory read/query operations and simple mutations (flag, delete)."""
 
-    def __init__(self, neo4j: Neo4jRepository) -> None:
+    def __init__(self, neo4j: Neo4jRepository, *, vector_catalog: VectorIndexCatalog | None = None) -> None:
         self.neo4j = neo4j
+        #: #574: with a catalog, the embedding lanes use an ONLINE vector index; without, they scan.
+        self._vector_catalog = vector_catalog
 
     # --- Overview & listing -------------------------------------------------
 
@@ -477,10 +487,7 @@ class MemoryQueryRepository:
         if namespace_spellings(namespace) is not None:
             where.insert(0, tenant_scope_prefilter_cypher("n"))
         where.append(tenant_scope_cypher("n"))
-        return self.neo4j.execute(
-            f"""
-            MATCH (n:Episodic)
-            WHERE {" AND ".join(where)}
+        tail = """
             WITH n, vector.similarity.cosine(n.content_embedding, $query_vector) AS cosine
             WHERE cosine IS NOT NULL
             RETURN n.uuid AS uuid, n.content AS content, n.source AS source,
@@ -489,8 +496,51 @@ class MemoryQueryRepository:
                    cosine
             ORDER BY cosine DESC, n.uuid
             LIMIT $limit
-            """,
+            """
+        # #574: a subject constraint pins a few receipts; the scan is exact and cheap there.
+        if subject_uuid is None:
+            rows = self._index_backed(
+                EPISODIC_CONTENT_EMBEDDING, "n", where, tail, params, query_vector, safe_limit
+            )
+            if rows is not None:
+                return rows
+        return self.neo4j.execute(
+            f"""
+            MATCH (n:Episodic)
+            WHERE {" AND ".join(where)}
+            """ + tail,
             params=params,
+        )
+
+    def _index_backed(
+        self,
+        spec: VectorIndexSpec,
+        var: str,
+        where: list[str],
+        tail: str,
+        params: dict[str, Any],
+        query_vector: list[float],
+        limit: int,
+    ) -> list[dict[str, Any]] | None:
+        """Run ``WHERE where`` + ``tail`` over vector-index candidates only, in place of the
+        caller's ``MATCH`` scan (the index covers exactly that label and property).
+
+        None means scan: no catalog, no usable index, or the candidates could not be shown complete."""
+        if self._vector_catalog is None:
+            return None
+        hydrate_query = f"{ann_call(spec, var)} WITH {var} WHERE {' AND '.join(where)} " + tail
+
+        def hydrate(index_name: str, k: int) -> list[dict[str, Any]]:
+            return self.neo4j.execute(hydrate_query, params={**params, "index_name": index_name, "k": k})
+
+        return index_backed_rows_sync(
+            execute=lambda query, query_params: self.neo4j.execute(query, params=query_params),
+            catalog=self._vector_catalog,
+            spec=spec,
+            vector=query_vector,
+            limit=limit,
+            hydrate=hydrate,
+            score_key="cosine",
         )
 
     # --- Timeline navigation (recall_timeline, read-only) --------------------
@@ -742,13 +792,13 @@ class MemoryQueryRepository:
         `group_id`). Returns the assertion id + `stated_span` (the recall surface / user's own words) +
         cosine + the slot/subject identity a downstream deterministic View-authority lookup needs."""
         safe_limit = max(1, min(limit, 500))
-        return self.neo4j.execute(
-            """
-            MATCH (a:TypedAssertion)
-            WHERE a.name_embedding IS NOT NULL
-              AND NOT coalesce(a.superseded, false)
-              AND NOT coalesce(a.binding_pending, false)
-              AND ($namespaces IS NULL OR a.namespace IN $namespaces)
+        where = [
+            "a.name_embedding IS NOT NULL",
+            "NOT coalesce(a.superseded, false)",
+            "NOT coalesce(a.binding_pending, false)",
+            "($namespaces IS NULL OR a.namespace IN $namespaces)",
+        ]
+        tail = """
             WITH a, vector.similarity.cosine(a.name_embedding, $query_vector) AS cosine
             WHERE cosine IS NOT NULL
             RETURN a.assertion_id AS assertion_id, a.stated_span AS stated_span, cosine,
@@ -760,12 +810,15 @@ class MemoryQueryRepository:
                    coalesce(a.count_family, '') AS count_family
             ORDER BY cosine DESC, a.assertion_id
             LIMIT $limit
-            """,
-            params={
-                "query_vector": query_vector,
-                "namespaces": namespaces,
-                "limit": safe_limit,
-            },
+            """
+        params = {"query_vector": query_vector, "namespaces": namespaces, "limit": safe_limit}
+        rows = self._index_backed(
+            TYPED_ASSERTION_NAME_EMBEDDING, "a", where, tail, params, query_vector, safe_limit
+        )
+        if rows is not None:
+            return rows
+        return self.neo4j.execute(
+            f"MATCH (a:TypedAssertion) WHERE {' AND '.join(where)}" + tail, params=params
         )
 
     def fetch_assertion_candidate_metadata(

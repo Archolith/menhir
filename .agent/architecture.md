@@ -368,6 +368,7 @@ The system has a working ingestion pipeline:
 3. **Retrieval** (`RecallService.recall`)
    - Async two-phase pipeline: Graphiti vector search → graph-based scoring
    - Phase 1: `GraphitiClient.search_scored()` for hybrid node search (BM25 + cosine, RRF reranker)
+   - Cosine candidates, here and in enrichment dedup and the source-memory and observation lanes, come from Neo4j vector indexes when ONLINE (`graphiti_vector_search.MenhirSearchInterface`, `vector_indexes`), with a scan fallback (#574)
    - Optional `file_context` resolves a structural file neighborhood and injects anchored semantic candidates into recall even when vector similarity alone would have missed them
    - Fetches candidate metadata and adjacency via `MemoryGraphAdapter` Cypher queries
    - Filters out SESSION-scoped (by default) and GONE-freshness nodes

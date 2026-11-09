@@ -1,3 +1,22 @@
+## 2026-11-09 - Similarity search uses Neo4j vector indexes (#574)
+
+- Every start now creates four cosine vector indexes if they are missing: `Entity.name_embedding`,
+  `RELATES_TO.fact_embedding`, `Episodic.content_embedding` and `TypedAssertion.name_embedding`.
+  The dimension comes from the configured embedder, or from a stored embedding when the model is
+  unknown. Indexes are created unquantized, so their scores are exact. An existing upgrade gets
+  them on its next start; `candidate-readonly` mode still creates no schema.
+- Graphiti's node and edge similarity search, and Menhir's source-memory and scalar-observation
+  lanes, read candidates from an ONLINE index instead of computing cosine over every row. Each
+  result is rescored exactly and keeps the same filters and `min_score`. It is used only when the
+  candidates' scores show that no row outside them could rank in the top results, which holds up
+  to the index's nearest-neighbour recall. Otherwise the search fetches more candidates, up to
+  1024, then scans as before.
+- The scan is still used while an index is missing, populating, or of another dimension, and for
+  searches pinned to a few known rows (edge dedup's endpoint pair, `edge_uuids`, subject-scoped
+  source memory). Index state is cached for 30 s, and a failed index call scans and re-reads it.
+- Startup reports each index's state under `vector_indexes` and logs it. Index state is not part
+  of schema readiness, so a large index building in the background never blocks writers.
+
 ## 2026-11-09 - v0.3.7: Approximate scalar claims on by default (#519), cross-encoder recall rerank with its security hardening, recall query telemetry, and telemetry and schema fixes
 
 - Approximate scalar claims are on by default (#519). A hedged single number is stored as
@@ -132,9 +151,3 @@
   retention tier. Namespace erasure scrubs the query text; rows with no namespace only age out
   (`docs/your-data.md`).
 - The write goes through the #527 off-loop writer, so it never opens SQLite on the event loop.
-
-## 2026-11-08 - A telemetry read that may miss queued writes says so
-
-- A telemetry read waits up to `MENHIR_TELEMETRY_BUSY_TIMEOUT_S` (5 s) for off-loop writes queued
-  before it. When that wait times out, the read still runs but now logs a warning naming how many
-  writes are still queued, instead of returning a possibly incomplete result silently.

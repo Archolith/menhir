@@ -29,6 +29,11 @@ from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.infrastructure.consolidation_queries import ConsolidationRepository
 from menhir.infrastructure.correlation_queries import CorrelationRepository
 from menhir.infrastructure.neo4j import Neo4jRepository
+from menhir.infrastructure.vector_indexes import (
+    VectorIndexCatalog,
+    ensure_vector_indexes,
+    resolve_vector_dimensions,
+)
 from menhir.infrastructure.schema import (
     PHASE_ONE_REQUIRED_CONSTRAINTS,
     GRAPHITI_OWNED_INDEXES,
@@ -71,6 +76,8 @@ class MemoryGraphAdapter:
     neo4j: Neo4jRepository
     # keyword-only dataclass field (a same-named property would clobber the init default)
     counting_enabled: bool = field(default=False, kw_only=True)
+    #: The configured embedder's dimension, for creating vector indexes (#574); None = infer.
+    embedding_dimensions: int | None = field(default=None, kw_only=True)
     # unit 4R: counted Views fold by count decision; only effective with counting on.
     counting_match_enabled: bool = field(default=True, kw_only=True)
 
@@ -86,7 +93,7 @@ class MemoryGraphAdapter:
         from menhir.infrastructure.personal_memory_queries import PersonalMemoryRepository
         from menhir.infrastructure.turn_evidence_repository import TurnEvidenceRepository
 
-        self._memory_queries = MemoryQueryRepository(self.neo4j)
+        self._memory_queries = MemoryQueryRepository(self.neo4j, vector_catalog=VectorIndexCatalog())
         self._episodes = EpisodeRepository(self.neo4j)
         self._consolidation = ConsolidationRepository(self.neo4j)
         self._correlation = CorrelationRepository(self.neo4j)
@@ -316,6 +323,16 @@ class MemoryGraphAdapter:
             except Exception as exc:  # pragma: no cover - external dependency behavior
                 failures.append(str(exc))
         return failures
+
+    def ensure_vector_indexes(self) -> dict[str, str]:
+        """Create missing similarity-search vector indexes (#574); never raises. Every start, like
+        `retire_obsolete_indexes`, so existing installs get them on upgrade."""
+        try:
+            dimensions = resolve_vector_dimensions(self.embedding_dimensions, self.neo4j.execute)
+        except Exception as exc:  # pragma: no cover - external dependency behavior
+            logger.warning("Vector index dimension lookup failed: %s", exc)
+            dimensions = None
+        return ensure_vector_indexes(self.neo4j.execute, dimensions)
 
     # -------------------------------------------------------------------------
     # Episode lifecycle delegates → EpisodeRepository

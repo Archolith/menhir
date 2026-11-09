@@ -4,6 +4,11 @@ Older entries: [`CHANGELOG-archive.md`](CHANGELOG-archive.md).
 
 The legacy `user` extraction prompt work in the archive is marked "Superseded by `automatic-memory-v1` on 2026-09-06". `tests/test_canonical_self_contract_docs.py` checks for that phrase in this file.
 
+## 2026-11-09 - Vector index plan (#574)
+
+- `plans/menhir-574-vector-indexes-2026-11-09.md`: new plan for default vector indexes and
+  index-backed similarity search; listed in `plans/README.md`.
+
 ## 2026-11-07 - Design records moved in from the maintainer workspace
 
 - Added 16 plans and reviews, trimmed of local paths, host details and live configuration: three current plans, four backlog plans, five archived plans plus the bucket-1 removal plan, the #168 off-flag triage, the agent prompt review and the combined PR #274 reviews.
@@ -119,18 +124,3 @@ The legacy `user` extraction prompt work in the archive is marked "Superseded by
   episodes that still have no content embedding (the listing's own predicates, missing only) and
   exit 3 if any remain. With `--dry-run` it only checks. For benchmark builds, where the
   scheduler (and so the repair job) is off.
-
-## 2026-10-25 - Store-only ingest (`store_only` on POST /api/memory)
-
-- `store_only: true` stores and embeds the episode for the source-memory lane and never extracts
-  it: no Graphiti extraction and no evidence projection for its turn. The turn link
-  (`ADMITTED_ON`) is still drawn. For turns with nothing to extract, such as a fact-free question,
-  whose extraction collapses to zero edges and fails the episode. Default off; existing callers
-  are unchanged.
-- The mode is a durable `:Episodic.extraction_mode = 'store_only'` set at creation and returned by
-  every claim, so lease recovery, retries and requeues never extract it. The worker embeds, then
-  finishes READY (substage `store_only`) through a write fenced on the claim's owner and start
-  instant; a lost fence never falls through to extraction.
-- `reset_zero_extraction_episodes` exempts store-only rows (it would otherwise loop them).
-  `/api/episode-admission` still links a store-only episode but does not mint its projection.
-- `store_only` is in the idempotency digest only when set, so existing stored digests still match.
