@@ -23,6 +23,7 @@ from menhir.infrastructure.graph_operations_model import (
     _participants_from_request_json,
 )
 from menhir.infrastructure.telemetry import connect_telemetry_db
+from menhir.infrastructure.telemetry.helpers import add_column_if_missing
 from menhir.clock import utc_now_iso as _utc_now_iso
 
 
@@ -89,11 +90,10 @@ class _GraphOperationsPrepareMixin:
                     # without this a stale commit reads as idempotent.
                     "resolved_by_token",
                 ):
-                    if column not in operation_columns:
-                        # Column names are literals from the tuple above, never caller input.
-                        conn.execute(
-                            f"ALTER TABLE graph_operations ADD COLUMN {column} TEXT"
-                        )
+                    # Column names are literals from the tuple above, never caller input.
+                    add_column_if_missing(
+                        conn, "graph_operations", column, "TEXT", operation_columns
+                    )
                 # Batch operations are unique per (kind, batch, target) so a migration
                 # cannot enqueue the same node twice.
                 conn.execute(

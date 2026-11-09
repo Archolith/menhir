@@ -9,6 +9,14 @@
   metric receipts and the recovery rows (merge audit, memory revisions). So does any connection
   that is not in WAL mode.
 
+## 2026-11-08 - Two stores migrating one SQLite file at once no longer fail
+
+- Schema upgrades read a table's columns, then add the missing ones. Two stores doing that on the
+  same file at once both saw a column missing, and the second `ALTER TABLE ... ADD COLUMN` failed
+  with "duplicate column name" (seen in CI as a failed `delete_memory`). A shared
+  `add_column_if_missing` now treats that error as success, at all four sites: the telemetry
+  lineage columns, `llm_usage_events`, `lifecycle_events` and the operations journal.
+
 ## 2026-11-08 - Opt-in recall query log for recall research
 
 - New setting `MENHIR_TELEMETRY_RECORD_RECALL_QUERIES` (default off). When on, each MCP recall
@@ -89,17 +97,3 @@
   scopes. Codes, refresh tokens and verifiers are never logged, and client-supplied fields are
   bounded and stripped of control characters. #533's opaque `-32603` was a `400` here that left
   only an access-log line.
-
-## 2026-11-08 - Telemetry writes no longer block the event loop (#527)
-
-- On an event-loop thread, `McpTelemetryStore` now hands its append-only observability writes
-  (MCP, failure, episode-task, lifecycle event and action, LLM-usage rows) to one ordered writer
-  thread (`src/menhir/infrastructure/telemetry/async_writer.py`). A locked telemetry database no
-  longer stalls every coroutine for the busy timeout. A full queue writes synchronously; nothing
-  is dropped.
-- Memory revisions, merge audit and destructive-op records stay synchronous: recall and unmerge
-  read them back.
-- The store's connections wait for queued writes first, so reads see every earlier event in order.
-- Erasure waits for queued writes before it purges and fails closed (stays PREPARED) if they don't
-  land, so a row queued before an erase can't survive it.
-- `track_mcp_call` awaits its row in a worker thread, so the row exists when the call returns.
