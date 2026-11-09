@@ -9,7 +9,8 @@ from menhir import env_file
 from menhir.cli.setup import apply_setup
 from menhir.config import MemorySettings
 
-pytestmark = pytest.mark.unit
+# The setup flow loads its .env into os.environ; restore it so later files see a clean env.
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("restore_process_env")]
 
 # Bounded #168 campaign switches, not the full proposed feature registry.
 CAMPAIGN_FLAGS = {

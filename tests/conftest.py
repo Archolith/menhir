@@ -236,11 +236,65 @@ def live_dotenv():
     try:
         yield
     finally:
-        for key in set(os.environ) - set(saved):
-            del os.environ[key]
-        for key, value in saved.items():
-            if os.environ.get(key) != value:
-                os.environ[key] = value
+        _restore_environ(saved)
+
+
+def _restore_environ(saved: dict[str, str]) -> None:
+    for key in set(os.environ) - set(saved):
+        del os.environ[key]
+    for key, value in saved.items():
+        if os.environ.get(key) != value:
+            os.environ[key] = value
+
+
+@pytest.fixture
+def restore_process_env():
+    """Restore `os.environ` exactly after a test that loads a `.env` into the process.
+
+    Required under xdist: `load_menhir_env()` writes provider keys into `os.environ`, and a later
+    file on the same worker then built settings from them (test_release_config_upgrade leaked
+    into test_openai_rate_limit, test_cf190_sync_llm_fail_fast and test_graphiti_telemetry_default).
+    """
+    saved = dict(os.environ)
+    try:
+        yield
+    finally:
+        _restore_environ(saved)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_llm_usage_callback():
+    """No test may inherit a neighbour's LLM usage callback (ContextVar or process default).
+
+    Required because a sync test that sets the ContextVar without resetting it leaves the value in
+    the worker's context: test_llm_budget_execution_count left an ep-1 budget counter installed,
+    which refused test_provider_auth_failure_surfacing's calls under xdist.
+    """
+    from menhir.infrastructure import observability
+
+    token = observability._llm_usage_callback.set(None)
+    default = observability._default_llm_usage_callback
+    try:
+        yield
+    finally:
+        observability._llm_usage_callback.reset(token)
+        observability._default_llm_usage_callback = default
+
+
+@pytest.fixture(autouse=True)
+def _quiesce_telemetry_writer(isolated_telemetry_db):
+    """Start each test with no off-loop telemetry writes queued, and end it the same way.
+
+    The writer is process-wide, so without this an earlier test's writes landed mid-test: extra
+    warnings in test_cf162_neo4j_guards, a read missing rows in test_telemetry_off_loop_writer,
+    and -wal/-shm files changing under test_check_writes_no_archive. Requesting
+    isolated_telemetry_db makes the teardown drain run before that test's DB is torn down.
+    """
+    from menhir.infrastructure.telemetry.async_writer import TELEMETRY_WRITER
+
+    TELEMETRY_WRITER.drain(10.0)
+    yield
+    TELEMETRY_WRITER.drain(10.0)
 
 
 @pytest.fixture(autouse=True)
