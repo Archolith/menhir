@@ -65,6 +65,37 @@ def test_aligned_quote_that_keeps_the_cue_keeps_the_prefix() -> None:
     assert committed.attribute == "previous_balance"
 
 
+def _status(text: str, quote: str, attribute: str, value: str, episode: str = EPISODE):
+    start, end = _span(text, quote)
+    return TypedScalarProposal(
+        subject_text="user", attribute=attribute, scope="", value_kind="status", unit="",
+        operation="absolute", value=value, stated_span=quote, episode_uuid=episode,
+        span_start=start, span_end=end, when=None,
+    )
+
+
+def test_mustang_status_value_lands_in_the_slot_of_the_newer_project() -> None:
+    """#519 3ba21379: "current_project" = Mustang forked beside "project" = F-150, so the older
+    Mustang View led. With the prefix re-grounded both commit to one slot and the fold can supersede."""
+    old = "My current project is a Ford Mustang Shelby GT350R model."
+    mustang = "Ford Mustang Shelby GT350R"
+    old_samples = [
+        [_status(old, "current project is a Ford Mustang Shelby GT350R model", "current_project", mustang)],
+        [_status(old, "current project is a Ford Mustang Shelby GT350R", "current_project", mustang)],
+        [_status(old, "a Ford Mustang Shelby GT350R model", "project", mustang)],
+    ]
+    committed_old = _commit(old_samples, reconcile_attribute=True, align_spans=True)
+    assert "current" not in committed_old.stated_span.lower()
+    assert committed_old.attribute == "project"
+
+    new = "I just wrapped up a model and switched to a Ford F-150 pickup truck."
+    episode = "22222222-2222-2222-2222-222222222222"
+    new_samples = [[_status(new, "a Ford F-150 pickup truck", "project", "Ford F-150 pickup truck", episode)]
+                   for _ in range(3)]
+    committed_new = _commit(new_samples, reconcile_attribute=True, align_spans=True)
+    assert committed_new.slot_key == committed_old.slot_key
+
+
 def test_without_alignment_the_committed_name_is_unchanged() -> None:
     """Exact source_key grouping commits a sample's own quote, already canonical at parse time."""
     span = _span(TEXT, "current balance is 1300")
