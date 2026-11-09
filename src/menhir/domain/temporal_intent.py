@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import cache
 
 from menhir.domain import temporal_lexicon
 from menhir.domain.temporal import TemporalQuery
@@ -51,6 +52,22 @@ _HISTORY_CUES: tuple[str, ...] = _history_cues()
 # Explicit current cues -> CURRENT_BELIEF (also the default).
 _CURRENT_CUES: tuple[str, ...] = _current_cues()
 
+# Cues that legitimately match longer inflections (stem cues): allow a trailing \w*.
+_STEM_CUES: frozenset[str] = frozenset({"regress"})
+_INFLECTION = r"(?:s|es|ed|ing|ly)?"
+
+
+@cache
+def _compile_cue(cue: str) -> re.Pattern[str]:
+    """Whole-word(-sequence) matcher via lookarounds; internal whitespace -> \\s+.
+
+    Cached per cue string (compiled once); the cue lists themselves are still read live
+    per call so a patched shared lexicon (CF-58) is followed."""
+    body = r"\s+".join(re.escape(part) for part in cue.split())
+    # Stems take any suffix; other word-final cues keep common inflections (diffs, formerly).
+    tail = r"\w*" if cue in _STEM_CUES else (_INFLECTION if cue.strip()[-1:].isalnum() else "")
+    return re.compile(r"(?<!\w)" + body + tail + r"(?!\w)")
+
 # "as of <date>" / "on <date>" world-time cue.
 _AS_OF_RE = re.compile(r"\b(?:as of|on|at)\s+(\d{4}-\d{2}-\d{2})\b", re.IGNORECASE)
 
@@ -76,11 +93,11 @@ def classify_temporal_intent(text: str) -> TemporalIntent:
         return TemporalIntent(TemporalQuery.AS_OF_WORLD, include_invalidated=True, as_of=m.group(1), cue=m.group(0))
 
     for cue in _history_cues():
-        if cue in lowered:
+        if _compile_cue(cue).search(lowered):
             return TemporalIntent(TemporalQuery.AS_KNOWN_AT, include_invalidated=True, cue=cue)
 
     for cue in _current_cues():
-        if cue in lowered:
+        if _compile_cue(cue).search(lowered):
             return TemporalIntent(TemporalQuery.CURRENT_BELIEF, include_invalidated=False, cue=cue)
 
     # Default: current belief (never leak history unless asked).

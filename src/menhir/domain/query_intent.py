@@ -17,6 +17,7 @@ this stays out of the production oracle set until a real-embedder run re-confirm
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 
@@ -108,6 +109,25 @@ _CUES: dict[TaskIntent, tuple[str, ...]] = {
 }
 
 
+# Cues that legitimately match longer inflections (stem cues): allow a trailing \w*.
+_STEM_CUES: frozenset[str] = frozenset({"crash"})
+_INFLECTION = r"(?:s|es|ed|ing|ly)?"
+
+
+def _compile_cue(cue: str) -> re.Pattern[str]:
+    """Whole-word(-sequence) matcher: lookarounds (not \\b, cues may start/end with
+    non-word chars); internal whitespace matches any whitespace run."""
+    body = r"\s+".join(re.escape(part) for part in cue.split())
+    # Stems take any suffix; other word-final cues keep common inflections (diffs, formerly).
+    tail = r"\w*" if cue in _STEM_CUES else (_INFLECTION if cue.strip()[-1:].isalnum() else "")
+    return re.compile(r"(?<!\w)" + body + tail + r"(?!\w)")
+
+
+_CUE_PATTERNS: dict[TaskIntent, tuple[tuple[str, re.Pattern[str]], ...]] = {
+    intent: tuple((cue, _compile_cue(cue)) for cue in cues) for intent, cues in _CUES.items()
+}
+
+
 @dataclass(frozen=True)
 class IntentHit:
     intent: TaskIntent
@@ -123,8 +143,8 @@ def classify_intent(text: str) -> tuple[list[IntentHit], IntentConfidence]:
     lowered = text.lower()
     hits: list[IntentHit] = []
     for intent in _PRECEDENCE:
-        for cue in _CUES[intent]:
-            if cue in lowered:
+        for cue, pattern in _CUE_PATTERNS[intent]:
+            if pattern.search(lowered):
                 hits.append(IntentHit(intent, cue))
                 break  # one cue per intent is enough to flag it
     if not hits:
