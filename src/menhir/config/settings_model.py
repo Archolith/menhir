@@ -417,6 +417,7 @@ class MemorySettings:
     recall_rerank_device: str = "auto"  # auto | cpu | cuda
     recall_rerank_top_n: int = 50  # 1..200
     recall_rerank_max_results: int = 7  # 1..200; results returned when rerank ran
+    recall_rerank_threads: int = 0  # 0..256; 0 = auto (capped at the cgroup CPU quota)
 
     # HTTP server
     api_host: str = "127.0.0.1"
@@ -939,6 +940,12 @@ class MemorySettings:
                 env_var="MENHIR_RECALL_RERANK_MAX_RESULTS",
                 minimum=1,
                 maximum=200,
+            ),
+            recall_rerank_threads=_parse_int(
+                _getenv("MENHIR_RECALL_RERANK_THREADS", default=str(cls.recall_rerank_threads)),
+                env_var="MENHIR_RECALL_RERANK_THREADS",
+                minimum=0,
+                maximum=256,
             ),
             frontier_source_memory_max_chars=_parse_int(
                 _getenv("MENHIR_FRONTIER_SOURCE_MEMORY_MAX_CHARS", default=str(cls.frontier_source_memory_max_chars)),

@@ -58,10 +58,11 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
     try:
         from menhir.infrastructure.graphiti_client import GraphitiClient
         from menhir.services.context_builder import ContextBuilderService
-        from menhir.services.cross_encoder_rerank import cached_model_dir_for_settings
+        from menhir.services.cross_encoder_rerank import cached_model_dir_for_settings, configure_threads
         from menhir.services.recall_service import RecallService
         from menhir.services.scoring_service import ScoringService
 
+        configure_threads(int(getattr(settings, "recall_rerank_threads", 0) or 0))
         graphiti_client = GraphitiClient.from_settings(settings)
         scoring_service = ScoringService()
         recall_service = RecallService(
