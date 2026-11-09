@@ -87,6 +87,13 @@ def _parse_scalar_threshold(raw: str) -> float:
         ) from exc
 
 
+def _parse_secret_policy(raw: str) -> str:
+    value = str(raw).strip().lower()
+    if value not in ("redact", "refuse"):
+        raise ValueError("MENHIR_SECRET_POLICY must be 'redact' or 'refuse'")
+    return value
+
+
 @dataclass(frozen=True)
 class MemorySettings:
     """Runtime settings used by menhir."""
@@ -484,6 +491,7 @@ class MemorySettings:
     source_fence_private_key_path: str = ""
     explorer_enabled: bool = True
     privacy_redact: bool = False
+    secret_policy: str = "redact"
     telemetry_record_recall_queries: bool = False
 
     # Startup saga recovery. "observe" (default) classifies the PREPARED backlog and logs one
@@ -1001,6 +1009,7 @@ class MemorySettings:
             ).strip(),
             explorer_enabled=parse_bool_env(_getenv("MENHIR_EXPLORER_ENABLED", default=str(cls.explorer_enabled))),
             privacy_redact=parse_bool_env(_getenv("MENHIR_PRIVACY_REDACT", default=str(cls.privacy_redact))),
+            secret_policy=_parse_secret_policy(_getenv("MENHIR_SECRET_POLICY", default=cls.secret_policy)),
             telemetry_record_recall_queries=parse_bool_env(
                 _getenv("MENHIR_TELEMETRY_RECORD_RECALL_QUERIES", default=str(cls.telemetry_record_recall_queries))
             ),
