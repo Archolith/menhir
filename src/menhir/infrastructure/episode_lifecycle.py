@@ -17,6 +17,7 @@ from menhir.domain.namespace import (
 from menhir.domain.recall_visibility import default_recall_visibility_cypher
 from menhir.domain.episode_nodes import menhir_queue_episode_cypher
 from menhir.domain.ingest import EXTRACTION_MODE_STORE_ONLY
+from menhir.domain.secret_scrub import ensure_scrubbed
 from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.self_identity import inferred_self_uuid_for_namespace
 from menhir.domain.structural_memory import non_structural_memory_cypher
@@ -127,6 +128,8 @@ class EpisodeLifecycleRepository:
         ingest_request_sha256: str | None = None,
         extraction_mode: str | None = None,
     ) -> str:
+        content = ensure_scrubbed(content)
+        diff = ensure_scrubbed(diff)
         ingest_key_set = (
             "            , n.ingest_key = $ingest_key,\n"
             "                n.ingest_request_sha256 = $ingest_request_sha256\n"
@@ -452,6 +455,7 @@ class EpisodeLifecycleRepository:
         self, *, turn_evidence_uuid: str, projection_uuid: str, name: str,
         session_id: str, user_id: str, namespace: str,
     ) -> str | None:
+        # No scrub here: content is copied from :TurnEvidence.text in-query, already scrubbed at record_turn_evidence (#577).
         """Mint a NON-RECALLABLE `:Episodic` carrying a captured turn's VERBATIM text, so entities
         exist in the user's own vocabulary. Returns the projection uuid, or None when nothing was
         created (turn absent, not user-declared, or already projected).

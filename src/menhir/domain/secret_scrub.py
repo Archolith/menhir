@@ -72,6 +72,69 @@ def detect_secrets(text: str) -> list[SecretHit]:
     return hits
 
 
+_POLICIES = ("redact", "refuse")
+_MINT = object()
+
+
+class SecretRefused(ValueError):
+    """Raised under policy ``refuse``. Carries kinds only, never values."""
+
+    def __init__(self, kinds: tuple[str, ...]) -> None:
+        super().__init__(f"memory text contains credential(s): {', '.join(kinds)}")
+        self.kinds = kinds
+
+
+class ScrubbedText(str):
+    """Text that has been through ``prepare_memory_text``.
+
+    Only that function can make one (a token guards ``__new__``); ``kinds`` lists the
+    credential kinds that were redacted, never the values.
+    """
+
+    kinds: tuple[str, ...]
+
+    def __new__(cls, value: str, kinds: tuple[str, ...], _token: object = None) -> "ScrubbedText":
+        if _token is not _MINT:
+            raise TypeError("ScrubbedText is created only by prepare_memory_text")
+        obj = super().__new__(cls, value)
+        obj.kinds = kinds
+        return obj
+
+
+def resolve_policy() -> str:
+    """The configured policy (``MENHIR_SECRET_POLICY``); invalid values raise."""
+    import os
+
+    value = os.environ.get("MENHIR_SECRET_POLICY", "redact").strip().lower() or "redact"
+    if value not in _POLICIES:
+        raise ValueError("MENHIR_SECRET_POLICY must be 'redact' or 'refuse'")
+    return value
+
+
+def prepare_memory_text(raw: str, *, policy: str | None = None) -> ScrubbedText:
+    """The one handler every memory-text writer goes through. Idempotent.
+
+    ``refuse`` raises ``SecretRefused`` (a ``ValueError``) when anything is recognised.
+    """
+    if isinstance(raw, ScrubbedText):
+        return raw
+    chosen = policy if policy is not None else resolve_policy()
+    if chosen not in _POLICIES:
+        raise ValueError("policy must be 'redact' or 'refuse'")
+    text, hits = redact(raw)
+    kinds = tuple(dict.fromkeys(h.kind for h in hits))
+    if hits and chosen == "refuse":
+        raise SecretRefused(kinds)
+    return ScrubbedText(text, kinds, _MINT)
+
+
+def ensure_scrubbed(raw: str | None, *, policy: str | None = None) -> ScrubbedText | None:
+    """Repository-boundary guard: a plain ``str`` is scrubbed here, never stored as is."""
+    if raw is None:
+        return None
+    return prepare_memory_text(raw, policy=policy)
+
+
 def redact(text: str) -> tuple[str, list[SecretHit]]:
     """Replace every detected value with ``[REDACTED:<kind>]``; return text and hits."""
     hits = detect_secrets(text)

@@ -14,6 +14,7 @@ from typing import Any
 from uuid import UUID, uuid4, uuid5
 
 from menhir.domain.namespace import namespace_to_group_ids
+from menhir.domain.secret_scrub import ensure_scrubbed
 from menhir.domain.todo_location import (
     DEFAULT_TODO_NAMESPACE as _DEFAULT_TODO_NAMESPACE,
 )
@@ -566,6 +567,7 @@ class StructureGraphWriter:
                 f"Refusing to write document structure for {project!r} with no "
                 "structure_project_id."
             )
+        content = ensure_scrubbed(content)
         now = datetime.now(timezone.utc).isoformat()
         name = Path(file_path).name
         self._merge_entity(

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from menhir.domain.secret_scrub import ensure_scrubbed
 from menhir.domain.namespace import (
     namespace_to_group_id,
     stamped_namespace,
@@ -105,6 +106,8 @@ class CandidateRepository:
             Dict with uuid, scope, cluster_id, evidence_strength, distinct_sessions,
             created_at, last_seen, and created (True if a new node was written).
         """
+        content = ensure_scrubbed(content)
+        notes = [ensure_scrubbed(str(n)) for n in notes] if notes else notes
         node_uuid = str(uuid4())
         now = datetime.now(timezone.utc).isoformat()
         node_name = (label or content)[:120]
