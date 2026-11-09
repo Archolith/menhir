@@ -20,6 +20,7 @@ from menhir.domain.session import new_session
 from menhir.domain.structural_memory import is_structural_memory_row
 from menhir.mcp.service_access import get_request_session
 
+from .scrub_route import ScrubbingAPIRoute
 from .routes_handlers import (
     backend_invoke_impl,
     list_clients_impl,
@@ -91,7 +92,7 @@ from .routes_support import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api", route_class=ScrubbingAPIRoute)
 _INTERNAL_BACKEND_PREFIX = "/internal/backend"
 
 

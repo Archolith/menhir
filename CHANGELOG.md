@@ -52,8 +52,10 @@
 - `menhir secrets scan --namespace <ns>`: read-only count of stored credentials by memory type and
   kind; prints no values; exits 1 when it finds any.
 - New dependency: `detect-secrets` 1.5.0 (no entropy detection).
-- Limits: defence in depth only. Facts the extraction LLM writes, plaintext stored earlier, and the
-  history, timeline, provenance, scalar-view, authority and bootstrap outputs are not covered.
+- The same scrub covers every read: MCP tool and resource results, `/internal/backend`, all JSON
+  `/api` responses, the CLI hook and the explorer. A failed scan withholds the output.
+- Limits: defence in depth only. Facts the extraction LLM writes, plaintext stored earlier,
+  non-JSON responses and the explorer's stored lab-run records are not covered.
 
 ## 2026-11-09 - v0.3.7: Approximate scalar claims on by default (#519), cross-encoder recall rerank with its security hardening, recall query telemetry, and telemetry and schema fixes
 
