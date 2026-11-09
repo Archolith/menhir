@@ -44,6 +44,9 @@ from menhir.infrastructure.telemetry.operator_warnings_store import (
     initialize_operator_warnings_schema,
 )
 from menhir.infrastructure.telemetry.recall_store import TelemetryRecallStoreMixin
+from menhir.infrastructure.telemetry.recall_store_query_log import (
+    initialize_recall_query_log_schema,
+)
 
 
 @dataclass
@@ -190,6 +193,7 @@ class McpTelemetryStore(
                 initialize_llm_usage_schema(conn)
                 initialize_operator_warnings_schema(conn)
                 initialize_lifecycle_schema(conn)
+                initialize_recall_query_log_schema(conn)
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS memory_revisions (

@@ -831,7 +831,9 @@ class BaseJsonTool(BaseTool):
     def render_json(self, payload: dict[str, Any]) -> str:
         return render_json(payload)
 
-    def render_recall_json(self, payload: dict[str, Any]) -> str:
+    def render_recall_json(
+        self, payload: dict[str, Any], *, log_context: dict[str, Any] | None = None
+    ) -> str:
         """Render a recall payload after stamping a ratable ``recall_id`` token.
 
         Use this on the *success* path of recall tools so the agent can later call
@@ -840,7 +842,7 @@ class BaseJsonTool(BaseTool):
         """
         from menhir.mcp.feedback import attach_recall_receipt
 
-        attach_recall_receipt(self.operation, payload)
+        attach_recall_receipt(self.operation, payload, log_context=log_context)
         return render_json(payload)
 
     def error_mapper(self, error_text: str) -> str:

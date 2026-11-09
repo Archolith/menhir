@@ -219,3 +219,40 @@ def test_erasure_purges_a_row_queued_before_it_and_fails_closed_until_drained(
 def test_durable_records_are_not_offloaded() -> None:
     for name in ("record_memory_revision", "record_merge", "record_destructive_op"):
         assert name not in vars(async_writer.OffLoopObservabilityWritesMixin)
+
+
+def test_recall_query_log_is_offloaded_and_purged_by_erasure(tmp_path, monkeypatch) -> None:
+    db = tmp_path / "telemetry.db"
+    store = McpTelemetryStore(db_path=db)
+    store._ensure_ready()
+    coord = ErasureCoordinator(
+        graph_adapter=_GraphAdapter(),
+        journal=GraphOperationsJournal(db_path=db),
+        subjects=ErasureSubjectStore(db_path=db),
+    )
+    monkeypatch.setattr(helpers, "_SQLITE_BUSY_TIMEOUT_S", 0.05)
+
+    release = _hold_writer()
+    try:
+
+        async def _queue_query() -> None:
+            store.record_recall_query(query="private text", namespace="tenant-q", result_ids=["a"])
+
+        asyncio.run(_queue_query())
+        assert TELEMETRY_WRITER.pending() == 2  # blocker + the query row: it did not run on the loop
+        with pytest.raises(TelemetryDrainTimeout):
+            coord.erase_namespace("tenant-q", namespace="tenant-q")
+    finally:
+        release.set()
+
+    with sqlite3.connect(db) as conn:
+        op_id = conn.execute(
+            "SELECT op_id FROM graph_operations WHERE operation_kind = 'EXPLICIT_ERASURE'"
+        ).fetchone()[0]
+    outcome, _ = coord.replay_prepared_row({"op_id": op_id})
+    assert outcome == REPLAYED
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute(
+            "SELECT query FROM recall_query_log WHERE namespace = 'tenant-q'"
+        ).fetchall()
+    assert rows and all(r[0] is None for r in rows)

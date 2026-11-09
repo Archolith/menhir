@@ -159,6 +159,17 @@ CONTENT_COLUMNS: tuple[ContentColumn, ...] = (
         ),
     ),
     ContentColumn(
+        table="recall_query_log",
+        column="query",
+        shape=ErasureShape.NAMESPACE_KEYED,
+        key_columns=("namespace",),
+        note=(
+            "Opt-in recall query log (MENHIR_TELEMETRY_RECORD_RECALL_QUERIES); raw user query "
+            "text, NULL when privacy_redact is on. Has a namespace column, so it is purgeable "
+            "by namespace."
+        ),
+    ),
+    ContentColumn(
         table="extraction_lab_runs",
         column="current_message",
         shape=ErasureShape.NAMESPACE_KEYED,
@@ -412,6 +423,18 @@ NON_CONTENT_COLUMNS: frozenset[tuple[str, str]] = frozenset(
         ("recall_lab_runs", "judge_model"),
         ("recall_lab_runs", "winner_id"),
         ("recall_lab_runs", "tied_ids_json"),
+        # recall_query_log -- ids, scores and a query hash only; the query text is classified above.
+        ("recall_query_log", "token"),
+        ("recall_query_log", "operation"),
+        ("recall_query_log", "created_at"),
+        ("recall_query_log", "client_id"),
+        ("recall_query_log", "session_id"),
+        ("recall_query_log", "namespace"),
+        ("recall_query_log", "preset"),
+        ("recall_query_log", "query_sha256"),
+        ("recall_query_log", "result_ids_json"),
+        ("recall_query_log", "result_scores_json"),
+        ("recall_query_log", "source_memory_ids_json"),
         # extraction_lab_runs
         ("extraction_lab_runs", "recorded_at"),
         ("extraction_lab_runs", "namespace"),

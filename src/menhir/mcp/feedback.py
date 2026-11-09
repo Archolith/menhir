@@ -77,11 +77,58 @@ def mint_recall_receipt(operation: str) -> str | None:
         return None
 
 
-def attach_recall_receipt(operation: str, payload: dict) -> None:
+def _log_recall_query(
+    operation: str, payload: dict, token: str | None, log_context: dict | None
+) -> None:
+    """Record the query and ordered result ids when the opt-in flag is on.
+
+    Best-effort: any failure is swallowed so logging can never break a recall.
+    """
+    try:
+        from menhir.config import MemorySettings
+
+        settings = MemorySettings.from_env()
+        if not settings.telemetry_record_recall_queries:
+            return
+        query = payload.get("query")
+        if not isinstance(query, str) or not query:
+            return
+        from menhir.mcp.service_access import get_request_session
+        from menhir.mcp.telemetry import telemetry_store
+
+        session = get_request_session()
+        items = payload.get("items")
+        if items is None:
+            items = payload.get("relevant")
+        items = [i for i in (items or []) if isinstance(i, dict)]
+        sources = [s for s in (payload.get("source_memories") or []) if isinstance(s, dict)]
+        context = log_context or {}
+        telemetry_store.record_recall_query(
+            query=query,
+            token=token,
+            operation=operation,
+            client_id=session.client_id if session and session.client_id else "",
+            session_id=session.session_id if session and session.session_id else "",
+            namespace=context.get("namespace"),
+            preset=payload.get("preset"),
+            limit=context.get("limit"),
+            result_ids=[i.get("uuid") for i in items],
+            result_scores=[i.get("score") for i in items],
+            source_memory_ids=[s.get("id") or s.get("uuid") for s in sources],
+            store_query_text=not settings.privacy_redact,
+        )
+    except Exception:  # noqa: BLE001 - query logging must never break recall
+        logger.debug("recall query log skipped for %s", operation, exc_info=True)
+
+
+def attach_recall_receipt(
+    operation: str, payload: dict, *, log_context: dict | None = None
+) -> None:
     """Mint a recall_id, register a ratable receipt, and stamp it into ``payload``."""
     token = mint_recall_receipt(operation)
     if token:
         payload["recall_id"] = token
+    _log_recall_query(operation, payload, token, log_context)
 
 
 def recall_receipt_footer(operation: str) -> str:

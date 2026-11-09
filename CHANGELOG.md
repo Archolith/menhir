@@ -1,3 +1,15 @@
+## 2026-11-08 - Opt-in recall query log for recall research
+
+- New setting `MENHIR_TELEMETRY_RECORD_RECALL_QUERIES` (default off). When on, each MCP recall
+  (`recall_memories`, `recall_context_memories`) and `POST /api/recall` writes one row to a new
+  telemetry table, `recall_query_log`: the query text and its SHA-256, the ordered result ids and
+  scores, source memory ids, namespace, preset, limit, and the recall receipt token when there is
+  one. `recall_receipts` stays content-free.
+- With `MENHIR_PRIVACY_REDACT` on, only the hash is stored. Rows follow the 90-day diagnostic
+  retention tier. Namespace erasure scrubs the query text; rows with no namespace only age out
+  (`docs/your-data.md`).
+- The write goes through the #527 off-loop writer, so it never opens SQLite on the event loop.
+
 ## 2026-11-08 - A telemetry read that may miss queued writes says so
 
 - A telemetry read waits up to `MENHIR_TELEMETRY_BUSY_TIMEOUT_S` (5 s) for off-loop writes queued
