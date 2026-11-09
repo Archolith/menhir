@@ -308,11 +308,24 @@ def _insert_prepared(db_path, op_id, created_at):
         conn.commit()
 
 
+def _insert_prepared_many(db_path, rows):
+    """`_insert_prepared` for many (op_id, created_at) rows in one transaction."""
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            "INSERT INTO graph_operations (op_id, operation_kind, request_json, state, "
+            "created_at, updated_at) VALUES (?, 'ENTITY_DELETE', '{}', 'PREPARED', ?, ?)",
+            [(op_id, created_at, created_at) for op_id, created_at in rows],
+        )
+        conn.commit()
+
+
 @pytest.mark.unit
 def test_iter_by_state_traverses_more_than_the_old_500_row_horizon(journal):
     """The plan's bar: >500 PREPARED rows must all be reached, with the DEFAULT batch size."""
-    for i in range(600):
-        _insert_prepared(journal.db_path, f"op-{i:04d}", f"2026-01-01T00:00:{i % 60:02d}+00:00")
+    _insert_prepared_many(
+        journal.db_path,
+        [(f"op-{i:04d}", f"2026-01-01T00:00:{i % 60:02d}+00:00") for i in range(600)],
+    )
 
     seen = [row["op_id"] for row in journal.iter_by_state("PREPARED")]
 

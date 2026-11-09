@@ -187,7 +187,14 @@ def test_empty_file_skips_episode(tmp_path) -> None:
 
 
 @pytest.mark.unit
-def test_episode_queue_timeout(tmp_path) -> None:
+def test_episode_queue_timeout(tmp_path, monkeypatch) -> None:
+    # The tool's queue timeout is 10s; cap it so the real timeout path fires without the wait.
+    real_wait_for = asyncio.wait_for
+
+    async def short_wait_for(aw, timeout=None):
+        return await real_wait_for(aw, timeout=min(timeout, 0.05))
+
+    monkeypatch.setattr(asyncio, "wait_for", short_wait_for)
     doc = tmp_path / "big.md"
     doc.write_text("content", encoding="utf-8")
 
