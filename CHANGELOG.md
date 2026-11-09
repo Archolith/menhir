@@ -1,3 +1,17 @@
+## 2026-11-09 - Approximate scalar claims are on by default (#519)
+
+- `MENHIR_PERSONAL_MEMORY_SCALAR_APPROXIMATE_ENABLED` now defaults to on. A hedged single number
+  ("about 400,000", "close to 1300 now") is stored as an `approximate` claim instead of being
+  dropped; it never sets a View's value, but a newer one keeps the View advisory and is listed
+  under it. The scalar prompt changes accordingly. Set it to `false` for the old behaviour.
+- Evidence: o500 items whose user turns hold a hedged number (26 of them, knowledge-update and
+  single-session types), scalar lane rerun from the same base with the flag off and on: 22/26 vs
+  24/26, no losses. The flag-attributable gain is the Instagram case that opened #519 (a View of
+  1250 led; "close to 1300 now" was newer). The other gain had identical recall. Early read on a
+  small set.
+- Only new scalar consolidation writes approximate claims; hedged numbers already dropped are not
+  backfilled.
+
 ## 2026-11-09 - Recall rerank hardening (security audit Low findings)
 
 - The tokenizer is now digest-pinned on every load, including an explicit
@@ -120,16 +134,3 @@
 - v1 and v2 client policies still load. The v0.3.5 notes said this release would drop them; that
   moves to a later release.
 - `pyproject.toml`, `uv.lock`, `sbom.json`, `README.md`, `docs/governance.md`, `docs/post-install.md`, `docs/model-governance.md`: version 0.3.6. No dependency changes in this commit.
-
-## 2026-11-08 - Readers for an approximate scalar operation (#519 phase 1)
-
-- A hedged value ("I think I'm close to 1300") will be stored as `approximate`: it never sets or
-  changes a View's value, is listed in scalar history as "about 1300", and keeps a View advisory
-  when newer. Only readers ship here. The table entry has no writer lane, so a stored row loads
-  but no parse path or scalar identity can produce one.
-- `validate_value`: one finite number on a numeric kind (an integer for counts); ranges are
-  refused.
-- History lists it, also with counting off; the change check treats it as a value statement, so a
-  lone hedge is not a change. The HISTORY_ENTRY listing includes it; provenance never does.
-- Projection coverage: a known operation the fold never reads is `HISTORY_ONLY`, not an
-  unaccounted write. An unknown operation is still reported.

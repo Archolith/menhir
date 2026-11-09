@@ -384,8 +384,9 @@ class MemorySettings:
     # Default on since 2026-10-28 (#399 bucket 3: o500 A/B neutral to slightly positive, no LLM cost).
     personal_memory_scalar_history_enabled: bool = True
     # #519: keep a hedged single number as an `approximate` claim (shown beside the View, never its
-    # value) instead of dropping it. Off by default; changes the scalar perception prompt when on.
-    personal_memory_scalar_approximate_enabled: bool = False
+    # value) instead of dropping it. Default on since v0.3.7 (o500 hedge-subset A/B: 22/26 -> 24/26,
+    # no losses); changes the scalar perception prompt.
+    personal_memory_scalar_approximate_enabled: bool = True
     personal_memory_counting_enabled: bool = True
     personal_memory_counting_perceiver_version: str = "v1"
     personal_memory_counting_lease_seconds: int = 900

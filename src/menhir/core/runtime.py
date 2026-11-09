@@ -469,7 +469,7 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         scalar_threshold=getattr(settings, "personal_memory_scalar_threshold", 1.0),
         scalar_history_enabled=getattr(settings, "personal_memory_scalar_history_enabled", False),
         scalar_approximate_enabled=bool(
-            getattr(settings, "personal_memory_scalar_approximate_enabled", False)),
+            getattr(settings, "personal_memory_scalar_approximate_enabled", True)),
     )
     await scheduler.start()
     snapshot = scheduler.status_snapshot()

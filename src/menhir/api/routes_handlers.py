@@ -104,7 +104,7 @@ async def phase3_run_impl(
         scalar_history_enabled=getattr(
             settings, "personal_memory_scalar_history_enabled", False),
         scalar_approximate_enabled=bool(
-            getattr(settings, "personal_memory_scalar_approximate_enabled", False)),
+            getattr(settings, "personal_memory_scalar_approximate_enabled", True)),
         enable_counting=getattr(settings, "personal_memory_counting_enabled", False),
         counting_perceiver_version=getattr(
             settings, "personal_memory_counting_perceiver_version", "v1"),

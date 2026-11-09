@@ -60,7 +60,7 @@ _SETTINGS = (
         'personal_memory', 'Record recall audit decisions.', False, ()),
     ('personal_memory_scalar_history_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED', True,
         'personal_memory', 'Enable personal memory scalar history enabled.', True, ()),
-    ('personal_memory_scalar_approximate_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_APPROXIMATE_ENABLED', False,
+    ('personal_memory_scalar_approximate_enabled', 'MENHIR_PERSONAL_MEMORY_SCALAR_APPROXIMATE_ENABLED', True,
         'personal_memory', 'Keep a hedged single number ("about 400,000", "close to 1300") as an approximate claim shown beside the View instead of dropping it; never sets the View value.', True, ()),
     ('personal_memory_counting_enabled', 'MENHIR_PERSONAL_MEMORY_COUNTING_ENABLED', True,
         'personal_memory', 'Count single happenings ("went to yoga") as scalar occurrences after the scalar phase (LLM calls from the scheduler); builds on scalar state.', True, ()),
