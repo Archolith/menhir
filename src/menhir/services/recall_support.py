@@ -611,8 +611,15 @@ class RecallSupportMixin:
         tuning: RetrievalTuningConfig,
         query_project: str | None = None,
         warden_status: WardenExecutionStatus | None = None,
+        rerank_results: dict[str, Any] | None = None,
+        explain: dict[str, Any] | None = None,
     ) -> tuple[list[ScoredMemory], str | None]:
         """Apply the ACTIVE frontier portions to the post-floor survivors.
+
+        ``rerank_results`` (oracle_combined): the rerank oracle's results for this recall. They
+        join the combiner as a precomputed batch oracle and the combiner's rank becomes the
+        order: rerank-scored candidates first, then the rest, no residual blend. ``explain``, when
+        given, receives the combiner packets and warden decisions for the trace.
 
         Replaces the ScoringService order with the oracle combiner order
         (``enable_oracle_ranking``) and/or applies the warden gate
@@ -628,7 +635,11 @@ class RecallSupportMixin:
         from menhir.domain.oracle_combiner import LogSpaceOracleCombiner
         from menhir.domain.oracles import CandidateMemory, QueryContext
         from menhir.services.assertion_pipeline import AssertionPipeline
+        from menhir.services.oracle_executor import OracleExecutor
+        from menhir.services.rerank_oracle import RERANK_ORACLE_NAME, PrecomputedBatchOracle
+        from menhir.services.retrieval_oracles import default_oracles
 
+        combined = rerank_results is not None
         try:
             cmems = []
             for s in scored:
@@ -641,11 +652,22 @@ class RecallSupportMixin:
                 )
                 cmems.append(CandidateMemory(id=s.uuid, content=str(s.content or s.name or ""), metadata=md))
             qctx = QueryContext(text=query, namespace=namespace, project=query_project)
+            executor = (
+                OracleExecutor(
+                    default_oracles(),
+                    batch_oracles=[PrecomputedBatchOracle(RERANK_ORACLE_NAME, rerank_results)],
+                )
+                if combined else None
+            )
             pipeline = AssertionPipeline(
-                LogSpaceOracleCombiner(), auto_intent=tuning.enable_intent_lens,
+                LogSpaceOracleCombiner(tuning.oracle_role_weights), executor=executor,
+                auto_intent=tuning.enable_intent_lens,
                 contradiction_interrupt=tuning.enable_contradiction_interrupt,
             )
             outcome = await pipeline.run(qctx, cmems)
+            if explain is not None:
+                explain["packets"] = outcome.packets
+                explain["decisions"] = {r.candidate_id: r for r in outcome.ranked}
 
             if _frontier_trace_enabled():
                 import collections
@@ -659,7 +681,22 @@ class RecallSupportMixin:
                 )
 
             result = scored
-            if tuning.enable_oracle_ranking:
+            if combined:
+                # Head (rerank-scored) before tail whatever the weights; combiner rank inside each.
+                rank_of = {r.candidate_id: r.rank for r in outcome.ranked}
+                incoming = {s.uuid: i for i, s in enumerate(scored)}
+                scored_ids = {
+                    cid for cid, r in rerank_results.items() if getattr(r, "log_odds", None) is not None
+                }
+                result = sorted(
+                    scored,
+                    key=lambda s: (
+                        s.uuid not in scored_ids,
+                        rank_of.get(s.uuid, len(rank_of)),
+                        incoming[s.uuid],
+                    ),
+                )
+            elif tuning.enable_oracle_ranking:
                 rank_of = {r.candidate_id: r.rank for r in outcome.ranked}
                 result = _blend_oracle_order(
                     result,
@@ -676,7 +713,8 @@ class RecallSupportMixin:
                 ]
             portions = [
                 p for p, on in (
-                    ("oracle_ranking", tuning.enable_oracle_ranking),
+                    ("oracle_combined", combined),
+                    ("oracle_ranking", tuning.enable_oracle_ranking and not combined),
                     ("warden_gate", tuning.enable_warden_gate),
                     ("intent_lens", tuning.enable_intent_lens),
                 ) if on

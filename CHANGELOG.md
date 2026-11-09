@@ -1,3 +1,18 @@
+## 2026-11-09 - Recall ranking strategies: the cross-encoder rerank as an oracle
+
+- The cross-encoder rerank now runs as `CrossEncoderRerankOracle` (`services/rerank_oracle.py`)
+  behind a new batch oracle contract (`BatchRetrievalOracle`); results carry the raw logit in
+  `OracleResult.log_odds`. It runs once per recall, where the rerank ran before.
+- New `MENHIR_RECALL_RANKING_STRATEGY` (and Recall Lab knob): `reranker_only` (default, unchanged
+  behaviour), `oracle_only` (no rerank: rank floor + oracle residual blend) and `oracle_combined`
+  (the oracle combiner orders the reranked head, with the logit as an uncapped `rerank` role;
+  candidates past the rerank top N follow the head). Wardens gate every strategy. Without a rerank
+  model every strategy runs as `oracle_only`.
+- Combiner role weights (`oracle_weight_<role>`, Recall Lab only, default 1.0 = previous scores).
+- A traced recall reports `trace.ranking`: per result the strategy, rerank logit, role logits,
+  weights, contributions, combiner score and warden decision; Recall Lab shows them per row.
+- A non-finite rerank logit now counts as unscored (the item takes the rank floor path).
+
 ## 2026-11-09 - v0.3.7: Approximate scalar claims on by default (#519), cross-encoder recall rerank with its security hardening, recall query telemetry, and telemetry and schema fixes
 
 - Approximate scalar claims are on by default (#519). A hedged single number is stored as
@@ -132,9 +147,3 @@
   retention tier. Namespace erasure scrubs the query text; rows with no namespace only age out
   (`docs/your-data.md`).
 - The write goes through the #527 off-loop writer, so it never opens SQLite on the event loop.
-
-## 2026-11-08 - A telemetry read that may miss queued writes says so
-
-- A telemetry read waits up to `MENHIR_TELEMETRY_BUSY_TIMEOUT_S` (5 s) for off-loop writes queued
-  before it. When that wait times out, the read still runs but now logs a warning naming how many
-  writes are still queued, instead of returning a possibly incomplete result silently.

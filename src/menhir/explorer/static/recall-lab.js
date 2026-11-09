@@ -12,6 +12,7 @@
     ['enable_cross_encoder_rerank', 'Cross-encoder rerank', 'bool'],
     ['rerank_top_n', 'Rerank top N', 'number', { min: 1, max: 100, step: 1 }],
     ['rerank_max_results', 'Rerank max results', 'number', { min: 1, max: 200, step: 1 }],
+    ['ranking_strategy', 'Ranking strategy', 'select', ['reranker_only', 'oracle_only', 'oracle_combined']],
   ];
   const advancedFields = [
     ['scalar_verdict_min_similarity', 'Verdict min similarity', 'number', { min: 0, max: 1, step: 0.005 }],
@@ -22,6 +23,12 @@
     ['enable_contradiction_interrupt', 'Contradiction interrupt', 'bool'],
     ['enable_assertion_shadow', 'Assertion shadow (trace)', 'bool'],
     ['enable_facet_shadow', 'Facet shadow (trace)', 'bool'],
+    ['oracle_weight_rerank', 'Weight: rerank', 'number', { min: 0, max: 10, step: 0.05 }],
+    ['oracle_weight_relevant', 'Weight: relevant', 'number', { min: 0, max: 10, step: 0.05 }],
+    ['oracle_weight_current', 'Weight: current', 'number', { min: 0, max: 10, step: 0.05 }],
+    ['oracle_weight_historical', 'Weight: historical', 'number', { min: 0, max: 10, step: 0.05 }],
+    ['oracle_weight_conflict', 'Weight: conflict', 'number', { min: 0, max: 10, step: 0.05 }],
+    ['oracle_weight_blocked', 'Weight: blocked', 'number', { min: 0, max: 10, step: 0.05 }],
   ];
 
   const editor = document.getElementById('arms-editor');
@@ -152,7 +159,21 @@
         ${memory.content_rank != null ? `<span>content #${memory.content_rank}</span>` : ''}
       </div>
       <div class="score-line"><span>${escapeHtml(memory.uuid)}</span><strong>${formatNumber(memory.final_score, 4)}</strong></div>
+      ${rankingHtml(memory.ranking)}
     </article>`;
+  }
+
+  function rankingHtml(ranking) {
+    if (!ranking) return '';
+    const terms = Object.entries(ranking.contributions || {})
+      .map(([role, value]) => `${escapeHtml(role)} ${formatNumber(value, 2)}`).join(' · ');
+    return `<div class="memory-meta">
+      <span>${escapeHtml(ranking.strategy)}</span>
+      ${ranking.rerank_logit != null ? `<span>logit ${formatNumber(ranking.rerank_logit, 2)}</span>` : ''}
+      ${ranking.ranking_score != null ? `<span>oracle ${formatNumber(ranking.ranking_score, 2)}</span>` : ''}
+      ${ranking.decision ? `<span>${escapeHtml(ranking.decision)}</span>` : ''}
+      ${terms ? `<span>${terms}</span>` : ''}
+    </div>`;
   }
 
   function labelForArm(payload, armId) {
