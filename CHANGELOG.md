@@ -4,13 +4,17 @@
   (50) recall candidates with a local ONNX cross-encoder (ms-marco-MiniLM-L6-v2) instead of
   cutting them at the RRF rank floor. Candidates past the top N keep the floor. Wardens still
   gate the result; the oracle blend does not reorder it. Shown scores are sigmoid(logit).
+- A reranked list skips the floor, so it would always fill the limit. `MENHIR_RECALL_RERANK_MAX_RESULTS`
+  (7) caps the results returned when rerank ran. In an offline sweep, the top 7 keep the rerank's
+  top-5 recall gain at about the old context size; score floors lost evidence.
 - New `rerank` extra (`onnxruntime`, `tokenizers`). `MENHIR_RECALL_RERANK_MODEL_DIR` points at a
   flat dir or a Hugging Face snapshot; only a sha256-pinned model loads.
   `MENHIR_RECALL_RERANK_DEVICE` is `auto`, `cpu` or `cuda`; `cuda` never falls back to CPU.
 - The server refuses to start if rerank is on and cannot load. A failure at recall time keeps the
   floor for that call and says so in the note. The hook path loads the model per process and
   does not preload.
-- Recall Lab arms can toggle it (`enable_cross_encoder_rerank`, `rerank_top_n`).
+- Recall Lab arms can toggle it (`enable_cross_encoder_rerank`, `rerank_top_n`,
+  `rerank_max_results`).
 - Offline evidence (tiny-model-surgery recall arm, #516): judged-only Recall@5 on the mix set
   0.555 -> 0.878. About 200 ms per recall on 12 CPU threads, 600 ms on 2, 44 ms on CUDA.
 - `uv.lock` and `THIRD-PARTY-LICENSES.txt` gain the extra's packages. The manifest also picks up

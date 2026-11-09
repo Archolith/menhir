@@ -1800,10 +1800,14 @@ async def _run_recall(
         )
         _t_phases["frontier"] = int((perf_counter() - _t) * 1000)
 
+    # A reranked list skips the floor and fills the limit; rerank_max_results caps it (offline
+    # sweep: top 7 keeps the rerank's top-5 recall at about production's context size).
+    result_limit = min(limit, tuning.rerank_max_results) if rerank is not None else limit
     pending_fallback = service._pending_fallback_results(
-        visible_pending_rows, preset, limit, include_session=include_session, session_id=session_id,
+        visible_pending_rows, preset, result_limit, include_session=include_session,
+        session_id=session_id,
     )
-    top_results = pending_fallback + scored[:max(0, limit - len(pending_fallback))]
+    top_results = pending_fallback + scored[:max(0, result_limit - len(pending_fallback))]
     warden_status.unchecked_pending = len(pending_fallback)
 
     # Signal when all candidates were below the similarity floor

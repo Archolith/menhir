@@ -410,6 +410,7 @@ class MemorySettings:
     recall_rerank_model_dir: str = ""
     recall_rerank_device: str = "auto"  # auto | cpu | cuda
     recall_rerank_top_n: int = 50  # 1..200
+    recall_rerank_max_results: int = 7  # 1..200; results returned when rerank ran
 
     # HTTP server
     api_host: str = "127.0.0.1"
@@ -737,6 +738,7 @@ class MemorySettings:
             enable_observation_dedup=self.personal_memory_observation_dedup_enabled,
             enable_cross_encoder_rerank=self.recall_rerank_enabled,
             rerank_top_n=self.recall_rerank_top_n,
+            rerank_max_results=self.recall_rerank_max_results,
         )
 
     @classmethod
@@ -917,6 +919,12 @@ class MemorySettings:
             recall_rerank_top_n=_parse_int(
                 _getenv("MENHIR_RECALL_RERANK_TOP_N", default=str(cls.recall_rerank_top_n)),
                 env_var="MENHIR_RECALL_RERANK_TOP_N",
+                minimum=1,
+                maximum=200,
+            ),
+            recall_rerank_max_results=_parse_int(
+                _getenv("MENHIR_RECALL_RERANK_MAX_RESULTS", default=str(cls.recall_rerank_max_results)),
+                env_var="MENHIR_RECALL_RERANK_MAX_RESULTS",
                 minimum=1,
                 maximum=200,
             ),

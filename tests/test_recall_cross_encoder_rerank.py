@@ -200,6 +200,45 @@ def test_top_n_is_validated():
     assert RecallLabTuning(enable_cross_encoder_rerank=True).to_domain().enable_cross_encoder_rerank
 
 
+async def _recall_capped(client, adapter, *, enabled, cap):
+    _pool(client, adapter)
+    svc = RecallService(graphiti_client=client, graph_adapter=adapter,
+                        scoring_service=ScoringService(), rerank_model_dir="m")
+    return await svc.recall(QUERY, tuning=RetrievalTuningConfig(
+        enable_cross_encoder_rerank=enabled, rerank_max_results=cap))
+
+
+@pytest.mark.asyncio
+async def test_max_results_caps_a_reranked_list(stub_graphiti_client, stub_memory_graph_adapter, fake):
+    res = await _recall_capped(stub_graphiti_client, stub_memory_graph_adapter, enabled=True, cap=2)
+    assert [r.uuid for r in res.results] == ["entity-3", "entity-2"]
+
+
+@pytest.mark.asyncio
+async def test_max_results_leaves_the_floor_path_alone(
+    stub_graphiti_client, stub_memory_graph_adapter, monkeypatch,
+):
+    def broken(model_dir, device):
+        raise cer.RerankUnavailable("no model")
+
+    monkeypatch.setattr(cer, "load_reranker", broken)
+    # Off, and on but unloadable: no rerank ran, so the request limit stands.
+    for enabled in (False, True):
+        res = await _recall_capped(stub_graphiti_client, stub_memory_graph_adapter, enabled=enabled, cap=1)
+        assert [r.uuid for r in res.results] == ["entity-1", "entity-2"]
+
+
+def test_max_results_default_env_and_validation(monkeypatch):
+    assert MemorySettings().retrieval_tuning().rerank_max_results == 7
+    assert RecallLabTuning().to_domain().rerank_max_results == 7
+    monkeypatch.setenv("MENHIR_RECALL_RERANK_MAX_RESULTS", "4")
+    assert MemorySettings.from_env().retrieval_tuning().rerank_max_results == 4
+    with pytest.raises(ValueError, match="rerank_max_results"):
+        RetrievalTuningConfig(rerank_max_results=0)
+    with pytest.raises(ValueError):
+        RecallLabTuning(rerank_max_results=201)
+
+
 def test_preload_raises_when_enabled_and_unloadable():
     settings = MemorySettings(recall_rerank_enabled=True, recall_rerank_model_dir="")
     with pytest.raises(cer.RerankUnavailable):

@@ -49,6 +49,7 @@ class RecallLabTuning(BaseModel):
     # Uses the server's MENHIR_RECALL_RERANK_MODEL_DIR/DEVICE; without them the arm keeps the floor.
     enable_cross_encoder_rerank: bool = False
     rerank_top_n: int = Field(default=50, ge=1, le=200)
+    rerank_max_results: int = Field(default=7, ge=1, le=200)
 
     def to_domain(self) -> RetrievalTuningConfig:
         return RetrievalTuningConfig(**self.model_dump())
