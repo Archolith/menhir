@@ -175,8 +175,9 @@ class RetrievalTuningConfig:
 
     # Cross-encoder rerank (services/cross_encoder_rerank.py): order the first rerank_top_n
     # candidates by a local cross-encoder instead of cutting them at the RRF rank floor.
-    # Default OFF (MENHIR_RECALL_RERANK_ENABLED); the model dir and device live on RecallService.
-    enable_cross_encoder_rerank: bool = False
+    # Default on (MENHIR_RECALL_RERANK_ENABLED); the model dir and device live on RecallService,
+    # and with no model dir the rerank does not run.
+    enable_cross_encoder_rerank: bool = True
     rerank_top_n: int = 50
     # A reranked list skips the floor and so always fills the limit; cap it to hold context size.
     rerank_max_results: int = 7

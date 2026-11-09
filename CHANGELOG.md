@@ -1,6 +1,6 @@
-## 2026-11-08 - Optional cross-encoder recall rerank (default off)
+## 2026-11-08 - Cross-encoder recall rerank (on by default once a model is configured)
 
-- `MENHIR_RECALL_RERANK_ENABLED` (default false) orders the first `MENHIR_RECALL_RERANK_TOP_N`
+- `MENHIR_RECALL_RERANK_ENABLED` (default true) orders the first `MENHIR_RECALL_RERANK_TOP_N`
   (50) recall candidates with a local ONNX cross-encoder (ms-marco-MiniLM-L6-v2) instead of
   cutting them at the RRF rank floor. Candidates past the top N keep the floor. Wardens still
   gate the result; the oracle blend does not reorder it. Shown scores are sigmoid(logit).
@@ -10,12 +10,17 @@
 - New `rerank` extra (`onnxruntime`, `tokenizers`). `MENHIR_RECALL_RERANK_MODEL_DIR` points at a
   flat dir or a Hugging Face snapshot; only a sha256-pinned model loads.
   `MENHIR_RECALL_RERANK_DEVICE` is `auto`, `cpu` or `cuda`; `cuda` never falls back to CPU.
-- The server refuses to start if rerank is on and cannot load. A failure at recall time keeps the
+- It does nothing until `MENHIR_RECALL_RERANK_MODEL_DIR` is set: with no model dir the server logs
+  that once at startup and recall keeps the RRF floor, with no note. Set the flag false to opt out.
+- The server refuses to start if a model dir is set and cannot load. A failure at recall time keeps the
   floor for that call and says so in the note. The hook path loads the model per process and
   does not preload.
 - Recall Lab arms can toggle it (`enable_cross_encoder_rerank`, `rerank_top_n`,
   `rerank_max_results`).
-- Offline evidence (tiny-model-surgery recall arm, #516): judged-only Recall@5 on the mix set
+- Evidence (`.agent/reviews/menhir-recall-rerank-ranking-stats-2026-11-08.md` in the workspace):
+  LME distractor graph, 414 questions, answer accuracy 0.850 -> 0.872 with the cap, +7.2% input
+  tokens; base LME graph IR support Hit@3 0.250 -> 0.410, answer accuracy unchanged (0.818 / 0.814,
+  uncapped). Offline (tiny-model-surgery recall arm, #516): judged-only Recall@5 on the mix set
   0.555 -> 0.878. About 200 ms per recall on 12 CPU threads, 600 ms on 2, 44 ms on CUDA.
 - `uv.lock` and `THIRD-PARTY-LICENSES.txt` gain the extra's packages. The manifest also picks up
   version drift already in the lock (jiter, joserfc, markupsafe, numpy, pydantic).

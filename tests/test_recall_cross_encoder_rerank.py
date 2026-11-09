@@ -186,10 +186,40 @@ def test_settings_map_to_tuning_and_service(monkeypatch):
     assert (settings.recall_rerank_model_dir, settings.recall_rerank_device) == ("/models/minilm", "cuda")
 
 
-def test_defaults_are_off():
-    assert FEATURES["recall_rerank_enabled"].default is False
-    assert MemorySettings().retrieval_tuning().enable_cross_encoder_rerank is False
+def test_default_on_but_inert_without_a_model_dir(monkeypatch):
+    assert FEATURES["recall_rerank_enabled"].default is True
+    assert MemorySettings().retrieval_tuning().enable_cross_encoder_rerank is True
+    assert RetrievalTuningConfig().enable_cross_encoder_rerank is True
+    assert RecallLabTuning().enable_cross_encoder_rerank is True
+
+    def must_not_load(model_dir, device):
+        raise AssertionError("no model dir: the reranker must not load")
+
+    monkeypatch.setattr(cer, "load_reranker", must_not_load)
+    # Server startup with the defaults (no model dir, maybe no extra) still boots.
     assert cer.preload_for_settings(MemorySettings()) is None
+    assert cer.preload_for_settings(MemorySettings(recall_rerank_model_dir="  ")) is None
+
+
+@pytest.mark.asyncio
+async def test_default_recall_without_a_model_dir_keeps_the_floor_and_no_note(
+    stub_graphiti_client, stub_memory_graph_adapter, monkeypatch,
+):
+    def must_not_load(model_dir, device):
+        raise AssertionError("no model dir: the reranker must not load")
+
+    monkeypatch.setattr(cer, "load_reranker", must_not_load)
+    _pool(stub_graphiti_client, stub_memory_graph_adapter)
+    svc = RecallService(graphiti_client=stub_graphiti_client, graph_adapter=stub_memory_graph_adapter,
+                        scoring_service=ScoringService())
+    res = await svc.recall(QUERY, tuning=MemorySettings().retrieval_tuning())
+    assert [r.uuid for r in res.results] == ["entity-1", "entity-2"]
+    assert "rerank" not in (res.note or "")
+
+
+def test_preload_fails_fast_when_a_model_dir_is_set_and_unloadable(tmp_path):
+    with pytest.raises(cer.RerankUnavailable):
+        cer.preload_for_settings(MemorySettings(recall_rerank_model_dir=str(tmp_path / "missing")))
 
 
 def test_top_n_is_validated():
@@ -238,11 +268,6 @@ def test_max_results_default_env_and_validation(monkeypatch):
     with pytest.raises(ValueError):
         RecallLabTuning(rerank_max_results=201)
 
-
-def test_preload_raises_when_enabled_and_unloadable():
-    settings = MemorySettings(recall_rerank_enabled=True, recall_rerank_model_dir="")
-    with pytest.raises(cer.RerankUnavailable):
-        cer.preload_for_settings(settings)
 
 
 @pytest.mark.skipif(not os.environ.get("MENHIR_TEST_RERANK_MODEL_DIR"),

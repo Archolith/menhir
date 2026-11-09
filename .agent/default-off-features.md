@@ -29,7 +29,6 @@ than experiments and are not listed.
 | Verifier sync | `verifier_sync_enabled` / `MENHIR_VERIFIER_SYNC_ENABLED` | opt-in; see "Warden profiles" below | — |
 | Consolidation audit | `personal_memory_consolidation_audit_enabled` / `MENHIR_PERSONAL_MEMORY_CONSOLIDATION_AUDIT_ENABLED` | opt-in diagnostics | — |
 | Recall audit | `personal_memory_recall_audit_enabled` / `MENHIR_PERSONAL_MEMORY_RECALL_AUDIT_ENABLED` | opt-in diagnostics | — |
-| Cross-encoder recall rerank | `recall_rerank_enabled` / `MENHIR_RECALL_RERANK_ENABLED` | opt-in; needs the `rerank` extra and a pinned model dir. Offline evidence: tiny-model-surgery recall arm, #516 | workspace `menhir-recall-cross-encoder-rerank-plan-2026-11-08.md` |
 
 ## Removed 2026-10-28 and 2026-10-29 (#399)
 
@@ -89,6 +88,12 @@ permissive, missing support is refused only by the enabled evidence-anchor guard
 frontier errors can fall back to baseline results. This is not universal enforcement.
 
 ## Activated (moved on default-on)
+
+### Graduated to default-on 2026-11-08: cross-encoder recall rerank (inert until a model is configured)
+
+| Feature | Flag / env | Gate location | Evidence | Source plan |
+|---|---|---|---|---|
+| Cross-encoder recall rerank (ONNX MiniLM-L6 orders the first 50 candidates in place of the RRF floor; results capped at 7) | `recall_rerank_enabled` / `MENHIR_RECALL_RERANK_ENABLED` (default true; set false to opt out) + `_MODEL_DIR`, `_DEVICE`, `_TOP_N`, `_MAX_RESULTS` | recall pipeline; runs only when `MENHIR_RECALL_RERANK_MODEL_DIR` is set (needs the `rerank` extra); a set dir that cannot load fails startup | LME distractor graph 414 q: accuracy 0.850 -> 0.872 capped, +7.2% input tokens; base graph IR support Hit@3 0.250 -> 0.410, answer accuracy unchanged uncapped (0.818 / 0.814). Workspace `.agent/reviews/menhir-recall-rerank-ranking-stats-2026-11-08.md` | workspace `menhir-recall-cross-encoder-rerank-plan-2026-11-08.md` (owner decision 2026-11-08) |
 
 ### #168 freeze 2026-10-27: tested behavior becomes the default
 

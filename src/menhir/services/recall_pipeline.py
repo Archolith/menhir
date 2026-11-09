@@ -1750,7 +1750,8 @@ async def _run_recall(
     # --- Optional cross-encoder rerank (default off): replaces the RRF floor when it runs ---
     rerank: dict[str, float] | None = None
     rerank_note: str | None = None
-    if tuning.enable_cross_encoder_rerank and candidates:
+    # No model dir configured: the rerank is inert (default on, opt-in by configuring a model).
+    if tuning.enable_cross_encoder_rerank and candidates and getattr(service, "rerank_model_dir", ""):
         _t = perf_counter()
         rerank, rerank_note = await rerank_scores(
             query, candidates, metadata_by_uuid, top_n=tuning.rerank_top_n,

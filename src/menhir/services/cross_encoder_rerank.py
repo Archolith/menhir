@@ -10,6 +10,7 @@ extra (``onnxruntime`` and ``tokenizers``) and a model directory holding ``model
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import threading
 from collections.abc import Sequence
@@ -194,7 +195,6 @@ async def rerank_scores(
     A failure never breaks recall: the caller keeps the RRF floor for that call.
     """
     import asyncio
-    import logging
 
     head = list(candidates)[:max(0, top_n)]
     if not head:
@@ -248,8 +248,14 @@ def order_by_rerank(scored: Sequence[Any], scores: dict[str, float]) -> list[Any
 def preload_for_settings(settings: Any) -> PairScorer | None:
     """Server startup check: load the reranker when enabled, so a bad setup fails at boot.
 
-    Returns None when rerank is off. Raises RerankUnavailable when it is on and cannot load.
+    Returns None when rerank is off or no model dir is set (recall then keeps the RRF floor).
+    Raises RerankUnavailable when a model dir is set and cannot load.
     """
     if not getattr(settings, "recall_rerank_enabled", False):
+        return None
+    if not str(getattr(settings, "recall_rerank_model_dir", "") or "").strip():
+        logging.getLogger(__name__).info(
+            "recall rerank is on but MENHIR_RECALL_RERANK_MODEL_DIR is unset; recall keeps the RRF floor"
+        )
         return None
     return load_reranker(settings.recall_rerank_model_dir, settings.recall_rerank_device)

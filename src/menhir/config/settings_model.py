@@ -404,9 +404,10 @@ class MemorySettings:
     # the #168 freeze, with the ingest-side episode-content embedding step.
     frontier_source_memory_limit: int = 10          # section size (1..50; validated in RetrievalTuningConfig)
     frontier_source_memory_max_chars: int = 2000  # per-memory content cap (100..4000)
-    # Cross-encoder recall rerank (default off; needs the `rerank` extra and a pinned model dir).
-    # When on, it orders the first recall_rerank_top_n candidates in place of the RRF rank floor.
-    recall_rerank_enabled: bool = False
+    # Cross-encoder recall rerank (default on; needs the `rerank` extra and a pinned model dir, and
+    # is inert until recall_rerank_model_dir is set). It orders the first recall_rerank_top_n
+    # candidates in place of the RRF rank floor.
+    recall_rerank_enabled: bool = True
     recall_rerank_model_dir: str = ""
     recall_rerank_device: str = "auto"  # auto | cpu | cuda
     recall_rerank_top_n: int = 50  # 1..200

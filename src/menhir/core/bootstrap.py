@@ -219,7 +219,8 @@ def build_memory_services(
             else ""
         ),
     )
-    # Fails startup when rerank is on but cannot load (missing extra, model dir, digest, CUDA).
+    # Fails startup when a rerank model dir is set but cannot load (missing extra, files, digest,
+    # CUDA). With no model dir the rerank is inert.
     from menhir.services.cross_encoder_rerank import preload_for_settings
 
     preload_for_settings(settings)
