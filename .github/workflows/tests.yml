@@ -164,6 +164,13 @@ jobs:
       run:
         shell: bash
     steps:
+      # Experiment (PR #550): real-time scanning of the ~14k per-test temp files is the suspected
+      # cause of slow, flaky parallel Windows runs. Throwaway hosted runner, so nothing persists.
+      - name: Disable Defender real-time scanning
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
       - name: Checkout menhir
         uses: actions/checkout@v4
         with:
@@ -194,7 +201,7 @@ jobs:
 
       - name: Run offline tests
         working-directory: menhir
-        run: pytest -v -n auto --dist loadfile
+        run: pytest -v -n auto --dist loadfile --durations=40
 
   # The unit job cannot see the behaviour this project actually depends on: supersession under
   # the real uniqueness constraint, provenance edges, TurnEvidence grounding and deletion repair
