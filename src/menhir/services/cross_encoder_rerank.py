@@ -326,7 +326,8 @@ def start_model_fetch(settings: Any, target: Any) -> threading.Thread | None:
     when rerank is off, a model dir is set explicitly, or auto download is off.
     """
     if (
-        not getattr(settings, "recall_rerank_enabled", False)
+        target is None
+        or not getattr(settings, "recall_rerank_enabled", False)
         or str(getattr(settings, "recall_rerank_model_dir", "") or "").strip()
         or not getattr(settings, "recall_rerank_auto_download", True)
     ):

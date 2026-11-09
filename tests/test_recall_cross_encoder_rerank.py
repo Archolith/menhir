@@ -358,6 +358,11 @@ def test_no_background_fetch_when_off_explicit_or_opted_out(hub, kw):
     assert hub.calls == []
 
 
+def test_no_background_fetch_without_a_recall_service(hub):
+    assert cer.start_model_fetch(_auto_settings(), None) is None
+    assert hub.calls == []
+
+
 def test_background_fetch_sets_the_dir_only_after_a_verified_load(hub, monkeypatch):
     loaded = []
     monkeypatch.setattr(cer, "load_reranker", lambda d, dev: loaded.append((d, dev)))

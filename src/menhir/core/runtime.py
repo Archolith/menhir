@@ -725,7 +725,7 @@ async def _initialize_services(
     # floor until it has loaded (services/cross_encoder_rerank.py).
     from menhir.services.cross_encoder_rerank import start_model_fetch
 
-    start_model_fetch(settings, built.recall_service)
+    start_model_fetch(settings, getattr(built, "recall_service", None))
 
     if candidate_readonly:
         from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
