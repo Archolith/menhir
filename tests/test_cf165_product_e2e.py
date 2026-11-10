@@ -125,6 +125,20 @@ def _text_columns(db) -> list[tuple[str, str]]:
     return out
 
 
+def _assert_gone_or_erased_tombstone(repo, node_uuid: str, message: str) -> None:
+    """A not-yet-enriched queue node is kept as a content-less FAILED/deleted_by_user tombstone so
+    its queue stops and an in-flight worker can compensate (#476); anything else must be gone.
+    (Before #476 a UNION bug deleted the tombstone too, which is what this used to assert.)"""
+    rows = repo.execute(
+        "MATCH (n) WHERE n.uuid = $u RETURN n.processing_state AS state, "
+        "n.processing_error AS error, n.erased_at IS NOT NULL AS erased, n.content AS content",
+        params={"u": node_uuid},
+    )
+    for row in rows:
+        assert row["state"] == "FAILED" and row["error"] == "deleted_by_user", message
+        assert row["erased"] and row["content"] is None, message
+
+
 def _sentinel_hits(db, sentinel: str) -> list[tuple[str, str, int]]:
     """(table, column, count) for every place the sentinel survives."""
     hits: list[tuple[str, str, int]] = []
@@ -248,10 +262,7 @@ def test_real_writer_ingest_then_saga_erase_leaves_zero_content_anywhere(product
     )
     assert _graph_hits(repo, sentinel) == 0, "the sentinel survives in a graph property"
 
-    rows = repo.execute(
-        "MATCH (n) WHERE n.uuid = $u RETURN count(n) AS c", params={"u": node_uuid}
-    )
-    assert int(rows[0]["c"]) == 0, "the graph node survived"
+    _assert_gone_or_erased_tombstone(repo, node_uuid, "the graph node survived")
 
 
 @pytest.mark.online
@@ -347,7 +358,4 @@ def test_a_crash_after_prepare_replays_to_the_same_zero_content_state(product_st
     assert "REPLAYED" in replayed, f"the prepared erasure was not replayed: {replayed}"
     assert _sentinel_hits(db, sentinel) == [], "content survived the replayed erasure"
     assert _graph_hits(repo, sentinel) == 0
-    rows = repo.execute(
-        "MATCH (n) WHERE n.uuid = $u RETURN count(n) AS c", params={"u": node_uuid}
-    )
-    assert int(rows[0]["c"]) == 0, "the graph node survived the replay"
+    _assert_gone_or_erased_tombstone(repo, node_uuid, "the graph node survived the replay")
