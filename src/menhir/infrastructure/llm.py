@@ -378,6 +378,66 @@ class LLMAdapter:
         logger.warning("Unexpected identity judgment response: %r — treating as no confirmation", raw)
         return None
 
+    async def rederive_from_sources(
+        self,
+        *,
+        kind: str,
+        name: str,
+        current_text: str,
+        sources: list[str],
+    ) -> tuple[str, str | None] | None:
+        """Rewrite a graph item's text from its REMAINING source episodes only (erasure repair).
+
+        ``kind`` is ``'fact'`` or ``'entity'``. Returns ``("supported", rewrite)`` when the sources
+        support the item, ``("unsupported", None)`` when they do not (fact kind only), or ``None``
+        when the call failed or answered unparseably (the repair stays pending for retry).
+        For ``'entity'`` the answer is always a summary rewrite, never ``unsupported``.
+        """
+        thinking_token = "/no_think\n" if self._wants_no_think() else ""
+        source_block = "\n".join(
+            _tagged_prompt_data("source", text, limit=2000) for text in sources
+        )
+        if kind == "fact":
+            system_prompt = (
+                "You verify and rewrite a knowledge-graph fact after some of its source memories "
+                "were deleted. "
+                + _UNTRUSTED_DATA_NOTICE
+                + "Given <current_fact> and the remaining <source> fields, decide whether the "
+                "sources alone support the fact. If they do, reply 'SUPPORTED: ' followed by one "
+                "concise fact using ONLY information found in the sources. If they do not, reply "
+                "with exactly one word: UNSUPPORTED."
+            )
+            subject = _tagged_prompt_data("current_fact", current_text, limit=1000)
+        else:
+            system_prompt = (
+                "You rewrite a knowledge-graph entity summary after some of its source memories "
+                "were deleted. "
+                + _UNTRUSTED_DATA_NOTICE
+                + "Given the entity <name> and the remaining <source> fields, reply 'SUPPORTED: ' "
+                "followed by a concise summary using ONLY information found in the sources."
+            )
+            subject = _tagged_prompt_data("name", name, limit=200)
+        raw = await self._chat_text(
+            system_prompt=system_prompt,
+            user_prompt=f"{thinking_token}{subject}\n{source_block}",
+            operation="derived_rederive",
+            max_tokens=_VERDICT_MAX_TOKENS,
+            temperature=0.0,
+            max_retries=0,
+        )
+        if raw is None:
+            return None
+        token = _leading_verdict(raw)
+        if token == "UNSUPPORTED" and kind == "fact":
+            return ("unsupported", None)
+        if token == "SUPPORTED":
+            match = re.match(r"\s*SUPPORTED\s*[:\-]\s*(.+)$", raw, re.IGNORECASE | re.DOTALL)
+            text = match.group(1).strip() if match else ""
+            if text:
+                return ("supported", text)
+        logger.warning("Unparseable derived_rederive response (kind=%s)", kind)
+        return None
+
     async def repair_edge_facts(
         self,
         episode_content: str,

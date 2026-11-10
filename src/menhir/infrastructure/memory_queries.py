@@ -41,6 +41,7 @@ from menhir.infrastructure.cypher import (
     Cypher,
     ENTITY_METADATA_FIELDS,
     FACT_TEMPORAL_FIELDS,
+    FACT_NOT_REDERIVE_PENDING,
     FACT_TEXT_PRESENT,
     MEMORY_RETURN_FIELDS,
     memory_recency_cypher,
@@ -791,6 +792,7 @@ class MemoryQueryRepository:
             MATCH (ep:Episodic {{uuid: episode_uuid}})-[:MENTIONS]->(:Entity)
                   -[r:RELATES_TO]-(:Entity)
             WHERE episode_uuid IN coalesce(r.episodes, [])
+              AND {FACT_NOT_REDERIVE_PENDING}
               AND {tenant_scope_cypher("r")}
             WITH DISTINCT episode_uuid, r
             ORDER BY r.valid_at
@@ -942,7 +944,7 @@ class MemoryQueryRepository:
             return []
         query = (Cypher()
             .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
-            .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT}")
+            .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT} AND {FACT_NOT_REDERIVE_PENDING}")
             .return_fields(FACT_TEMPORAL_FIELDS)
             .build())
         return self.neo4j.execute(query, params={"uuids": node_uuids})
@@ -964,7 +966,7 @@ class MemoryQueryRepository:
             return []
         query = (Cypher()
             .match("(n:Entity)-[r:RELATES_TO]-(m:Entity)")
-            .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT}")
+            .where(f"n.uuid IN $uuids AND {FACT_TEXT_PRESENT} AND {FACT_NOT_REDERIVE_PENDING}")
             .return_fields(SHADOW_CANDIDATE_FACT_EDGE_FIELDS)
             .build())
         return self.neo4j.execute(query, params={"uuids": node_uuids})
@@ -1429,6 +1431,186 @@ class MemoryQueryRepository:
         + _DERIVED_ENTITY_WRITE
         + "}\n"
     )
+
+    # Re-derive repair (#423 follow-up): rewrite or delete items flagged `rederive_pending` by an
+    # erasure. Text-bearing values are only ever passed as parameters; nothing here logs them.
+    _REDERIVE_EDGE_MATCH = (
+        "MATCH ()-[r:RELATES_TO]->() "
+        "WHERE (r.uuid = $item_uuid OR (r.uuid IS NULL AND elementId(r) = $item_uuid))"
+    )
+    _REDERIVE_CLEAR = (
+        "{v}.rederive_pending = null, {v}.rederive_reason = null, {v}.rederive_flagged_at = null"
+    )
+
+    def list_pending_derived_rederive(self, limit: int) -> list[dict[str, Any]]:
+        """Pending DerivedRederiveRepair nodes, oldest first."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (rr:DerivedRederiveRepair)
+            WHERE rr.status = 'pending'
+            RETURN rr.repair_key AS repair_key, rr.item_uuid AS item_uuid,
+                   rr.item_kind AS item_kind, rr.namespace AS namespace,
+                   coalesce(rr.attempts, 0) AS attempts
+            ORDER BY rr.created_at ASC, rr.repair_key ASC
+            LIMIT $limit
+            """,
+            params={"limit": int(limit)},
+        )
+        return [dict(row) for row in rows]
+
+    def load_derived_rederive_item(self, item_kind: str, item_uuid: str) -> dict[str, Any] | None:
+        """Snapshot a flagged item plus its remaining source episode contents.
+
+        Returns None when the item no longer exists. ``episodes`` is the CAS token (with
+        ``flagged_at``); ``sources`` is the content of the remaining source episodes.
+        """
+        if item_kind == "fact":
+            rows = self.neo4j.execute(
+                self._REDERIVE_EDGE_MATCH
+                + """
+                RETURN coalesce(r['rederive_pending'], false) AS pending,
+                       toString(r['rederive_flagged_at']) AS flagged_at,
+                       coalesce(r.episodes, []) AS episodes, r.fact AS text, null AS name
+                LIMIT 1
+                """,
+                params={"item_uuid": item_uuid},
+            )
+        else:
+            rows = self.neo4j.execute(
+                """
+                MATCH (e:Entity {uuid: $item_uuid})
+                RETURN coalesce(e['rederive_pending'], false) AS pending,
+                       toString(e['rederive_flagged_at']) AS flagged_at,
+                       [(ep:Episodic)-[:MENTIONS|RETENTION_SOURCE]->(e) | ep.uuid] AS episodes,
+                       e.summary AS text, e.name AS name
+                LIMIT 1
+                """,
+                params={"item_uuid": item_uuid},
+            )
+        if not rows:
+            return None
+        row = dict(rows[0])
+        episodes = list(dict.fromkeys(str(u) for u in (row.get("episodes") or []) if u))
+        source_rows = (
+            self.neo4j.execute(
+                """
+                MATCH (ep:Episodic)
+                WHERE ep.uuid IN $episodes AND ep.content IS NOT NULL
+                RETURN ep.uuid AS uuid, ep.content AS content
+                ORDER BY ep.uuid
+                LIMIT 20
+                """,
+                params={"episodes": episodes},
+            )
+            if episodes
+            else []
+        )
+        return {
+            "pending": bool(row.get("pending")),
+            "flagged_at": row.get("flagged_at"),
+            "episodes": episodes,
+            "text": row.get("text"),
+            "name": row.get("name"),
+            "sources": [str(s.get("content") or "") for s in source_rows if s.get("content")],
+        }
+
+    def apply_derived_rederive(
+        self,
+        *,
+        repair_key: str,
+        item_kind: str,
+        item_uuid: str,
+        flagged_at: str | None,
+        episodes: Sequence[str],
+        new_text: str | None,
+        delete: bool = False,
+    ) -> bool:
+        """CAS write of a re-derive result; True only when it applied.
+
+        Applies only if the item still has ``rederive_pending`` with the same
+        ``rederive_flagged_at`` and the same source-episode set the caller read. The repair node
+        is finished in the same statement ('done', or 'deleted' for a deleted fact edge).
+        """
+        params = {
+            "repair_key": repair_key,
+            "item_uuid": item_uuid,
+            "flagged_at": flagged_at,
+            "episodes": list(episodes),
+            "new_text": new_text,
+        }
+        edge_guard = (
+            "coalesce(r['rederive_pending'], false) "
+            "AND toString(r['rederive_flagged_at']) = $flagged_at "
+            "AND coalesce(r.episodes, []) = $episodes"
+        )
+        if item_kind == "fact" and delete:
+            query = (
+                "MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key}) "
+                + self._REDERIVE_EDGE_MATCH
+                + f" AND {edge_guard} "
+                "SET rr.status = 'deleted', rr.finished_at = datetime() "
+                "WITH r, rr DELETE r RETURN count(rr) AS c"
+            )
+        elif item_kind == "fact":
+            query = (
+                "MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key}) "
+                + self._REDERIVE_EDGE_MATCH
+                + f" AND {edge_guard} "
+                "SET r.fact = $new_text, r.fact_embedding = null, "
+                + self._REDERIVE_CLEAR.format(v="r")
+                + ", rr.status = 'done', rr.finished_at = datetime() "
+                "RETURN count(r) AS c"
+            )
+        else:
+            query = (
+                "MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key}) "
+                "MATCH (e:Entity {uuid: $item_uuid}) "
+                "WHERE coalesce(e['rederive_pending'], false) "
+                "AND toString(e['rederive_flagged_at']) = $flagged_at "
+                "WITH rr, e, [(ep:Episodic)-[:MENTIONS|RETENTION_SOURCE]->(e) | ep.uuid] AS cur "
+                "WHERE all(x IN cur WHERE x IN $episodes) AND all(x IN $episodes WHERE x IN cur) "
+                "SET e.summary = $new_text, "
+                + self._REDERIVE_CLEAR.format(v="e")
+                + ", rr.status = 'done', rr.finished_at = datetime() "
+                "RETURN count(e) AS c"
+            )
+        rows = self.neo4j.execute(query, params=params)
+        return bool(rows) and int(rows[0].get("c") or 0) > 0
+
+    def mark_derived_rederive_status(self, repair_key: str, status: str) -> bool:
+        """Set a pending repair's terminal status (e.g. 'obsolete' when the item is gone)."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key})
+            WHERE rr.status = 'pending'
+            SET rr.status = $status, rr.finished_at = datetime()
+            RETURN count(rr) AS c
+            """,
+            params={"repair_key": repair_key, "status": status},
+        )
+        return bool(rows) and int(rows[0].get("c") or 0) > 0
+
+    def record_derived_rederive_failure(
+        self, repair_key: str, error_class: str, max_attempts: int
+    ) -> str | None:
+        """Count a failed attempt (error class only, never content); 'failed' at the cap."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key})
+            WHERE rr.status = 'pending'
+            WITH rr, coalesce(rr.attempts, 0) + 1 AS n
+            SET rr.attempts = n, rr.last_error = $error_class,
+                rr.last_attempt_at = datetime(),
+                rr.status = CASE WHEN n >= $max_attempts THEN 'failed' ELSE 'pending' END
+            RETURN rr.status AS status
+            """,
+            params={
+                "repair_key": repair_key,
+                "error_class": str(error_class)[:80],
+                "max_attempts": int(max_attempts),
+            },
+        )
+        return str(rows[0]["status"]) if rows else None
 
     def delete_memory_with_scalar_cascade(
         self,

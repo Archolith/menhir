@@ -972,6 +972,15 @@ async def erasure_twin_compensation(graph_adapter: object, *, limit: int = 50) -
     )
 
 
+async def derived_rederive(
+    graph_adapter: object, llm: object, *, limit: int = 25
+) -> dict[str, object]:
+    """Re-derive facts/entities an erasure flagged; recall hides their text until then."""
+    from menhir.services.derived_rederive import run_derived_rederive
+
+    return await run_derived_rederive(graph_adapter, llm, limit=limit)
+
+
 async def prune_telemetry_revisions(*, retention_days: int) -> dict[str, object]:
     """Delete `memory_revisions` rows past the retention window.
 

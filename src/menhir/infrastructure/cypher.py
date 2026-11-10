@@ -324,8 +324,9 @@ MEMORY_RETURN_FIELDS = (
     "coalesce(n['view_name'], n.name) AS name",
     "n.type AS type",
     "n.scope AS scope",
-    "n.content AS content",
-    "coalesce(n['view_summary'], n.summary) AS summary",
+    "CASE WHEN coalesce(n['rederive_pending'], false) THEN null ELSE n.content END AS content",
+    "CASE WHEN coalesce(n['rederive_pending'], false) THEN null "
+    "ELSE coalesce(n['view_summary'], n.summary) END AS summary",
     "n.status AS status",
     "n.artifact_status AS artifact_status",
     "n.superseded_by AS superseded_by",
@@ -358,8 +359,12 @@ ENTITY_METADATA_FIELDS = (
     "coalesce(n['view_name'], n.name) AS name",
     "n.scope AS scope",
     "n.type AS type",
-    "n.content AS content",
-    "coalesce(n['view_summary'], n.summary) AS summary",
+    # Erasure fail-closed: a flagged entity (rederive_pending) is shown by name only until the
+    # re-derive job rewrites its summary from the remaining sources.
+    "CASE WHEN coalesce(n['rederive_pending'], false) THEN null ELSE n.content END AS content",
+    "CASE WHEN coalesce(n['rederive_pending'], false) THEN null "
+    "ELSE coalesce(n['view_summary'], n.summary) END AS summary",
+    "coalesce(n['rederive_pending'], false) AS rederive_pending",
     "n.status AS status",
     "n.artifact_status AS artifact_status",
     "n.superseded_by AS superseded_by",
@@ -423,6 +428,10 @@ FACT_TEMPORAL_FIELDS = (
 FACT_TEXT_PRESENT = (
     "CASE WHEN r.fact IS :: STRING NOT NULL THEN trim(r.fact) <> '' ELSE false END"
 )
+
+# Recall-only: a fact edge flagged by erasure (rederive_pending) is withheld entirely until the
+# re-derive job rewrites or deletes it. Dynamic access avoids warnings on legacy graphs.
+FACT_NOT_REDERIVE_PENDING = "NOT coalesce(r['rederive_pending'], false)"
 
 # Fact-edge IDENTITY + both endpoints, for shadow-mode context composition (Stage 1,
 # .agent/archive/plans/menhir-context-composition-production-integration.md). FACT_TEMPORAL_FIELDS

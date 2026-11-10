@@ -1077,6 +1077,26 @@ class MemoryGraphAdapter:
         """Hydrate surfaced :TypedAssertion observations by id (Phase 4a.2 observation lane)."""
         return self._memory_queries.fetch_assertion_candidate_metadata(assertion_ids)
 
+    # Derived re-derive repair (see services/derived_rederive).
+    def list_pending_derived_rederive(self, limit: int) -> list[dict]:
+        return self._memory_queries.list_pending_derived_rederive(limit)
+
+    def load_derived_rederive_item(self, item_kind: str, item_uuid: str) -> dict | None:
+        return self._memory_queries.load_derived_rederive_item(item_kind, item_uuid)
+
+    def apply_derived_rederive(self, **kwargs) -> bool:
+        return self._memory_queries.apply_derived_rederive(**kwargs)
+
+    def mark_derived_rederive_status(self, repair_key: str, status: str) -> bool:
+        return self._memory_queries.mark_derived_rederive_status(repair_key, status)
+
+    def record_derived_rederive_failure(
+        self, repair_key: str, error_class: str, max_attempts: int
+    ) -> str | None:
+        return self._memory_queries.record_derived_rederive_failure(
+            repair_key, error_class, max_attempts
+        )
+
     def fetch_temporal_facts(self, node_uuids: list[str]) -> list[dict[str, object]]:
         """Fetch bi-temporal fact-edge state for candidate nodes."""
         return self._memory_queries.fetch_temporal_facts(node_uuids)
