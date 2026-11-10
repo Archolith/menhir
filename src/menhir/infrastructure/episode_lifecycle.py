@@ -344,7 +344,7 @@ class EpisodeLifecycleRepository:
         rows = self.neo4j.execute(
             """
             MATCH (n:Episodic {uuid: $episode_uuid})
-            WHERE n.processing_substage = 'deleted_by_user'
+            WHERE (n['erased_at'] IS NOT NULL OR n.processing_substage = 'deleted_by_user')
             RETURN count(n) AS c
             """,
             params={"episode_uuid": episode_uuid},
@@ -356,7 +356,7 @@ class EpisodeLifecycleRepository:
         rows = self.neo4j.execute(
             """
             MATCH (n:Episodic {uuid: $episode_uuid})
-            WHERE n.processing_substage = 'deleted_by_user'
+            WHERE (n['erased_at'] IS NOT NULL OR n.processing_substage = 'deleted_by_user')
               AND n.resolved_episode_uuid IS NULL
             SET n.resolved_episode_uuid = $resolved,
                 n.erasure_compensation_pending = true
@@ -371,7 +371,7 @@ class EpisodeLifecycleRepository:
         rows = self.neo4j.execute(
             """
             MATCH (n:Episodic)
-            WHERE n.processing_substage = 'deleted_by_user'
+            WHERE (n['erased_at'] IS NOT NULL OR n.processing_substage = 'deleted_by_user')
               AND n.erasure_compensation_pending = true
             RETURN n.uuid AS uuid, n.resolved_episode_uuid AS resolved_episode_uuid,
                    n.namespace AS namespace
@@ -402,7 +402,7 @@ class EpisodeLifecycleRepository:
         node_rows = self.neo4j.execute(
             """
             MATCH (n:Episodic {uuid: $episode_uuid})
-            WHERE n.processing_substage = 'deleted_by_user'
+            WHERE (n['erased_at'] IS NOT NULL OR n.processing_substage = 'deleted_by_user')
               AND n.resolved_episode_uuid IS NULL
             RETURN n.namespace AS namespace, n.group_id AS group_id, n.name AS name,
                    coalesce(n.processing_started_at, n.created_at) AS since
@@ -448,7 +448,7 @@ class EpisodeLifecycleRepository:
         rows = self.neo4j.execute(
             """
             MATCH (n:Episodic)
-            WHERE n.processing_substage = 'deleted_by_user'
+            WHERE (n['erased_at'] IS NOT NULL OR n.processing_substage = 'deleted_by_user')
               AND n.resolved_episode_uuid IS NULL
               AND n.erasure_compensation_checked IS NULL
               // A worker may still be inside add_episode; wait out any enrichment lease.

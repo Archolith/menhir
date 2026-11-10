@@ -310,6 +310,8 @@ class EpisodeStampingRepository:
             .where(
                 "n.uuid = $episode_uuid",
                 "($worker_id IS NULL OR (n.processing_state = 'ENRICHING' AND n.processing_owner = $worker_id))",
+                # The worker_id=None form is unfenced; it must still never restamp an erase.
+                "n['erased_at'] IS NULL",
             )
             .set(sets)
             .return_raw("count(n) AS updated")
@@ -439,6 +441,15 @@ class EpisodeStampingRepository:
             params["task"] = task
             sets.append("n.processing_llm_active_task = $task")
 
-        query = Cypher().match("(n:Episodic)").where("n.uuid = $episode_uuid").set(sets).return_raw("count(n) AS updated").build()
+        # Never on an erased tombstone: this unfenced stamp overwrote the erase's deleted_by_user
+        # substage mid-extraction, hiding the erase from compensation (e2e-21).
+        query = (
+            Cypher()
+            .match("(n:Episodic)")
+            .where("n.uuid = $episode_uuid", "n['erased_at'] IS NULL")
+            .set(sets)
+            .return_raw("count(n) AS updated")
+            .build()
+        )
         rows = self.neo4j.execute(query, params=params)
         return bool(rows and int(rows[0].get("updated", 0)) > 0)

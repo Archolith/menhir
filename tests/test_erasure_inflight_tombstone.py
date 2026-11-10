@@ -179,6 +179,28 @@ def test_erase_enriching_node_leaves_content_less_tombstone(test_neo4j_repo, tmp
 
 
 @pytest.mark.online
+def test_llm_progress_stamps_never_overwrite_the_erase_marker(test_neo4j_repo, tmp_path) -> None:
+    """e2e-21 counterexample: Graphiti's LLM callbacks stamp the queue node mid-extraction. Breaks
+    if increment_episode_llm_usage or the worker_id=None progress stamp may write a tombstone
+    (they overwrote substage deleted_by_user), or if erase detection keys on the substage alone."""
+    repo = test_neo4j_repo
+    tag = f"test-tomb-llmstamp-{uuidlib.uuid4()}"
+    try:
+        ids = _ids(tag)
+        adapter, _coord = _erase_inflight(repo, tmp_path, ids, "ENRICHING")
+        assert adapter.increment_episode_llm_usage(ids["queue"], phase="completed") is False
+        assert _node(repo, ids["queue"])["substage"] == "deleted_by_user"
+        # A writer outside these two still clobbering the substage must not hide the erase.
+        repo.execute(
+            "MATCH (n:Episodic {uuid:$u}) SET n.processing_substage = 'llm_response_received'",
+            params={"u": ids["queue"]},
+        )
+        assert adapter.episode_erased_by_user(ids["queue"]) is True
+    finally:
+        _cleanup(repo, tag)
+
+
+@pytest.mark.online
 def test_erase_pending_node_leaves_content_less_tombstone(test_neo4j_repo, tmp_path) -> None:
     """Same as the ENRICHING case for PENDING. Breaks if PENDING is dropped from the tombstoning
     branch's prior_state list, or the delete branch stops excluding PENDING."""
