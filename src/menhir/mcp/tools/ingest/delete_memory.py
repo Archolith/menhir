@@ -78,15 +78,80 @@ class DeleteMemoryTool(BaseTextTool):
                 f"Erasure of {node_uuid} did NOT complete: content remains after the purge and "
                 "the operation is quarantined for review."
             )
-        message = (
-            f"Erased memory {node_uuid}: the graph node, all its relationships, and {purged} "
-            "stored record(s) of its content."
-        )
-        unaddressable = outcome.get("unaddressable") or []
-        if unaddressable:
-            # Never let an erasure claim a completeness it does not have.
-            message += (
-                f" NOTE: {len(unaddressable)} content location(s) could not be addressed and "
-                "were left untouched."
+        if reason == "prepare_failed":
+            # The erase never started -- a lock or a paused saga refused it. Nothing was
+            # touched, so say that plainly instead of implying a partial erasure.
+            return (
+                f"Erasure of {node_uuid} did NOT run: the operation could not be prepared "
+                "(another operation holds this memory, or saga writes are paused). Nothing "
+                "was erased; retry later."
             )
-        return message
+        if reason == "erased_incomplete":
+            # The purge ran but provably missed something. Enumerate what, so the caller can
+            # tell a benign leftover from a real leak; only claim what we can prove.
+            derived = outcome.get("derived") or {}
+            message = f"Erased memory {node_uuid}, but the erasure is INCOMPLETE:"
+            gaps = 0
+            unaddressable_count = len(outcome.get("unaddressable") or [])
+            if unaddressable_count:
+                message += (
+                    f" {unaddressable_count} content location(s) could not be addressed and "
+                    "were left untouched."
+                )
+                gaps += 1
+            unknown_provenance = int(derived.get("unknown_provenance") or 0)
+            if unknown_provenance:
+                message += (
+                    f" {unknown_provenance} derived fact(s) or entit(ies) have no traceable "
+                    "source and were left in place."
+                )
+                gaps += 1
+            if derived.get("twin_missing"):
+                message += (
+                    " The memory's extracted graph data could not be located (no twin link), "
+                    "so derived facts may remain."
+                )
+                gaps += 1
+            if outcome.get("stranded_known") is False:
+                message += " The stored content census failed, so completeness is unknown."
+                gaps += 1
+            if not gaps:
+                message += " completeness could not be confirmed."
+            return message
+        if reason == "erased":
+            message = (
+                f"Erased memory {node_uuid}: the graph node, all its relationships, and {purged} "
+                "stored record(s) of its content."
+            )
+            derived = outcome.get("derived") or {}
+            entities_deleted = int(derived.get("entities_deleted") or 0)
+            edges_deleted = int(derived.get("edges_deleted") or 0)
+            entities_flagged = int(derived.get("entities_flagged") or 0)
+            edges_flagged = int(derived.get("edges_flagged") or 0)
+            merge_audits_tombstoned = int(derived.get("merge_audits_tombstoned") or 0)
+            if (
+                entities_deleted
+                + edges_deleted
+                + entities_flagged
+                + edges_flagged
+                + merge_audits_tombstoned
+            ) > 0:
+                message += (
+                    f" Derived data: {entities_deleted} entit(ies) and {edges_deleted} fact(s) "
+                    f"removed; {entities_flagged + edges_flagged} shared item(s) hidden pending "
+                    f"re-derivation; {merge_audits_tombstoned} merge(s) made non-reversible."
+                )
+            unaddressable = outcome.get("unaddressable") or []
+            if unaddressable:
+                # Never let an erasure claim a completeness it does not have.
+                message += (
+                    f" NOTE: {len(unaddressable)} content location(s) could not be addressed and "
+                    "were left untouched."
+                )
+            return message
+        # Unknown reason. An outcome we do not recognise is exactly the case where a
+        # cheerful default message would be a lie, so never claim success.
+        return (
+            f"Erasure of {node_uuid} returned an unexpected result ({reason!r}); it may not "
+            "have completed. Check get_memory_stats or the operator logs."
+        )
