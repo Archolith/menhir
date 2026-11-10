@@ -508,7 +508,8 @@ the erased identifiers from all retained View receipts, and clears the affected 
 watermarks so surviving evidence may rebuild the projection. Direct UUID inspection may still show
 retired history; generic recent/bootstrap/scored recall does not. Explicit memory erasure also
 removes Graphiti `RELATES_TO` facts and `:Entity` nodes derived only from the erased episodes; shared
-ones get `rederive_pending/rederive_reason/rederive_flagged_at` plus a
+ones have their `fact` / `summary` / `content` blanked and get
+`rederive_pending/rederive_reason/rederive_flagged_at` plus a
 `(:DerivedRederiveRepair {repair_key, item_uuid, item_kind, namespace, status})` that the
 `derived_rederive` job resolves (`done|deleted|obsolete|failed`). Optional schema activation and
 legacy reconciliation have not run, and replay tombstones remain non-operational until an HMAC key

@@ -587,8 +587,8 @@ Concept id: `mcp.tool.delete_memory`
 Delete a specific memory node and all its relationships.
 - **`node_uuid`** (str): The UUID of the memory node to delete.
 - Also deletes facts/entities derived only from it. Shared ones are stripped of the erased episode
-  and flagged `rederive_pending` (hidden from recall until the `derived_rederive` job rewrites
-  them). Reasons include `prepare_failed` (did not run) and `erased_incomplete` (items without
+  and flagged `rederive_pending`; their text is blanked at erase time and hidden from recall until
+  the `derived_rederive` job rebuilds it from the remaining sources. Reasons include `prepare_failed` (did not run) and `erased_incomplete` (items without
   provenance, or a missing twin).
 
 ### `delete_namespace`
