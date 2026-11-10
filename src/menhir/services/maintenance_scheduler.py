@@ -23,6 +23,7 @@ from menhir.services.scheduler_protocols import (
     SchedulerLifecycleService,
 )
 from menhir.services.scheduler_tasks import (
+    erasure_twin_compensation,
     prune_telemetry_tables,
     auto_resolve_conflicts,
     compute_failed_retry_delay_s,
@@ -222,6 +223,8 @@ class MaintenanceScheduler:
             self._jobs["prune_telemetry_tables"] = _JobState(
                 interval_s=self.revision_prune_interval_s
             )
+        # Erasure completeness: erase Graphiti twins orphaned by an erase racing enrichment.
+        self._jobs["erasure_twin_compensation"] = _JobState(interval_s=600.0)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -667,6 +670,12 @@ class MaintenanceScheduler:
             elif name == "prune_telemetry_tables":
                 await self._run_job(
                     job, "scheduler_prune_telemetry_tables", self._make_prune_telemetry_tables()
+                )
+            elif name == "erasure_twin_compensation":
+                await self._run_job(
+                    job,
+                    "scheduler_erasure_twin_compensation",
+                    erasure_twin_compensation(self.graph_adapter),
                 )
             elif name == "prune_telemetry_revisions":
                 await self._run_job(

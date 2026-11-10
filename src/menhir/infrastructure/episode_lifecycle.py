@@ -338,6 +338,135 @@ class EpisodeLifecycleRepository:
             twins.append(str(twin))
         return twins
 
+    def episode_erased_by_user(self, episode_uuid: str) -> bool:
+        """True when the queue node was flipped by an erase (substage deleted_by_user)."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $episode_uuid})
+            WHERE n.processing_substage = 'deleted_by_user'
+            RETURN count(n) AS c
+            """,
+            params={"episode_uuid": episode_uuid},
+        )
+        return bool(rows) and int(rows[0].get("c") or 0) > 0
+
+    def link_erased_twin(self, episode_uuid: str, resolved_episode_uuid: str) -> bool:
+        """Guarded write: link an erased queue node to its Graphiti twin and flag compensation."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $episode_uuid})
+            WHERE n.processing_substage = 'deleted_by_user'
+              AND n.resolved_episode_uuid IS NULL
+            SET n.resolved_episode_uuid = $resolved,
+                n.erasure_compensation_pending = true
+            RETURN count(n) AS c
+            """,
+            params={"episode_uuid": episode_uuid, "resolved": resolved_episode_uuid},
+        )
+        return bool(rows) and int(rows[0].get("c") or 0) > 0
+
+    def list_erased_twin_compensations(self, limit: int) -> list[dict]:
+        """Erased queue nodes whose linked twin still needs erasing."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic)
+            WHERE n.processing_substage = 'deleted_by_user'
+              AND n.erasure_compensation_pending = true
+            RETURN n.uuid AS uuid, n.resolved_episode_uuid AS resolved_episode_uuid,
+                   n.namespace AS namespace
+            LIMIT $limit
+            """,
+            params={"limit": int(limit)},
+        )
+        return [dict(row) for row in rows]
+
+    def clear_erasure_compensation(self, episode_uuid: str) -> bool:
+        """Clear the pending flag once the twin no longer exists."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $episode_uuid})
+            WHERE NOT EXISTS { MATCH (t:Episodic {uuid: n.resolved_episode_uuid}) }
+            REMOVE n.erasure_compensation_pending
+            RETURN count(n) AS c
+            """,
+            params={"episode_uuid": episode_uuid},
+        )
+        return bool(rows) and int(rows[0].get("c") or 0) > 0
+
+    def find_unlinked_erased_twin(self, episode_uuid: str) -> dict:
+        """Find the unlinked Graphiti twin of an erased queue node (crash backstop).
+
+        Returns {"match": uuid} for exactly one candidate, {"ambiguous": n} for several, {} for none.
+        """
+        node_rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $episode_uuid})
+            WHERE n.processing_substage = 'deleted_by_user'
+              AND n.resolved_episode_uuid IS NULL
+            RETURN n.namespace AS namespace, n.group_id AS group_id, n.name AS name,
+                   coalesce(n.processing_started_at, n.created_at) AS since
+            """,
+            params={"episode_uuid": episode_uuid},
+        )
+        if not node_rows:
+            return {}
+        node = node_rows[0]
+        group_id = node.get("group_id") or namespace_to_group_id(node.get("namespace"))
+        if not group_id or node.get("name") is None or node.get("since") is None:
+            return {}
+        rows = self.neo4j.execute(
+            """
+            MATCH (e:Episodic)
+            WHERE e.uuid <> $episode_uuid
+              AND e.group_id = $group_id
+              AND e.name = $name
+              AND e.created_at >= $since
+              AND NOT EXISTS { MATCH (q:Episodic) WHERE q.resolved_episode_uuid = e.uuid }
+            RETURN e.uuid AS uuid
+            """,
+            params={
+                "episode_uuid": episode_uuid,
+                "group_id": group_id,
+                "name": node.get("name"),
+                "since": node.get("since"),
+            },
+        )
+        uuids = sorted({str(row["uuid"]) for row in rows if row.get("uuid")})
+        if len(uuids) == 1:
+            return {"match": uuids[0]}
+        if len(uuids) > 1:
+            return {"ambiguous": len(uuids)}
+        return {}
+
+    def list_unlinked_erased_queue_nodes(self, limit: int) -> list[str]:
+        """Erased queue nodes with no twin link that the backstop has not yet examined."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic)
+            WHERE n.processing_substage = 'deleted_by_user'
+              AND n.resolved_episode_uuid IS NULL
+              AND n.erasure_compensation_checked IS NULL
+              // A worker may still be inside add_episode; wait out any enrichment lease.
+              AND coalesce(n.erased_at, datetime('1970-01-01T00:00:00Z'))
+                  < datetime() - duration('PT1H')
+            RETURN n.uuid AS uuid
+            LIMIT $limit
+            """,
+            params={"limit": int(limit)},
+        )
+        return [str(row["uuid"]) for row in rows if row.get("uuid")]
+
+    def mark_compensation_checked(self, episode_uuid: str, outcome: str) -> None:
+        """Record that the backstop examined this erased queue node."""
+        self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $episode_uuid})
+            SET n.erasure_compensation_checked = $outcome
+            RETURN count(n) AS c
+            """,
+            params={"episode_uuid": episode_uuid, "outcome": outcome},
+        )
+
     def erasure_evidence_uuids(self, node_uuid: str) -> list[str]:
         """The captured evidence that carries an erased memory's words (read-only).
 

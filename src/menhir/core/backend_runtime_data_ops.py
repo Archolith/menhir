@@ -211,11 +211,19 @@ class RuntimeProviderDataOpsMixin:
             self.built.graph_adapter.count_namespace, group_id, namespace=namespace
         )
         would_delete = force or node_count <= max_nodes
+        by_label = await self._off_loop(
+            self.built.graph_adapter.count_namespace_by_label, group_id, namespace=namespace
+        )
 
         if dry_run:
             return {
                 "namespace": namespace,
                 "node_count": int(node_count),
+                "by_label": dict(by_label or {}),
+                "not_covered": [
+                    "structure graph (shared group, not namespace-scoped)",
+                    "default namespace (refused, never erased by this tool)",
+                ],
                 "max_nodes": max_nodes,
                 "would_delete": bool(would_delete),
                 "dry_run": True,
@@ -289,6 +297,7 @@ class RuntimeProviderDataOpsMixin:
         return {
             "namespace": namespace,
             "deleted": int(outcome.get("graph_deleted") or 0),
+            "by_label": dict(by_label or {}),
             "reason": reason,
             # False whenever a content class was left behind, whether because nothing can ever
             # address it or because THIS operation could not derive its subjects.

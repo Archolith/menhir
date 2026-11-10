@@ -258,6 +258,23 @@ def still_owns_episode(
     )
 
 
+def _compensate_if_erased(ctx: EnrichmentContext, resolved_episode_uuid: str) -> None:
+    """Erase the Graphiti twin when the queue node was erased mid-enrichment."""
+    try:
+        erased = getattr(ctx.graph_adapter, "episode_erased_by_user", None)
+        if erased is None or not erased(ctx.episode_uuid):
+            return
+        from menhir.services.erasure_compensation import compensate_erased_enrichment
+
+        compensate_erased_enrichment(
+            ctx.graph_adapter, ctx.episode_uuid, str(resolved_episode_uuid)
+        )
+    except Exception:
+        logger.warning(
+            "Erasure compensation check failed episode_id=%s", ctx.episode_uuid, exc_info=True
+        )
+
+
 # ---------------------------------------------------------------------------
 # Pipeline step 1 — try to reconcile an already-completed Graphiti result
 # ---------------------------------------------------------------------------
@@ -1017,6 +1034,7 @@ async def stamp_and_finalize(
             ctx.episode_uuid,
             ctx.worker_id,
         )
+        _compensate_if_erased(ctx, resolved_episode_uuid)
         return
 
     if receipt is not None and resolve_inferred_mode(
@@ -1123,6 +1141,7 @@ async def stamp_and_finalize(
                 ctx.episode_uuid,
                 ctx.worker_id,
             )
+            _compensate_if_erased(ctx, resolved_episode_uuid)
             return
         duration_ms = int((perf_counter() - ctx.started) * 1000)
         # Record as successful empty extraction with a reason receipt
@@ -1343,6 +1362,7 @@ async def stamp_and_finalize(
             ctx.episode_uuid,
             ctx.worker_id,
         )
+        _compensate_if_erased(ctx, resolved_episode_uuid)
         return
     record_lifecycle_event(
         component="ingest_worker",

@@ -14,6 +14,10 @@ async def delete_namespace(
 ) -> str:
     """Tear down a throwaway/eval namespace silo. Refuses the default/shared namespace.
 
+    Covers episodes, typed assertions, TODOs and WorkArtifacts (with their locations, sources,
+    open questions and declarations). Does NOT cover the default namespace (refused) or the
+    structure graph (a shared group). dry_run also returns by_label counts and not_covered.
+
     Safety gate: counts nodes first. Refuses (with the actual count) when the
     namespace has more than max_nodes nodes, unless force=True. This is a
     blast-radius guard, not a backup — deletion is still irreversible once it
@@ -45,7 +49,10 @@ class DeleteNamespaceTool(BaseJsonTool):
     read_only_hint = False
     destructive_hint = True
     open_world_hint = False
-    description = "Tear down a throwaway/eval namespace silo, gated by node count."
+    description = (
+        "Tear down a throwaway/eval namespace silo, gated by node count. Includes TODOs and "
+        "WorkArtifacts; the default namespace and the structure graph are not included."
+    )
 
     async def endpoint(
         self,

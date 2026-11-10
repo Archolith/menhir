@@ -28,6 +28,11 @@ from menhir.infrastructure.episode_lifecycle import TRANSIENT_RETRY_CAP
 from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.infrastructure.consolidation_queries import ConsolidationRepository
 from menhir.infrastructure.correlation_queries import CorrelationRepository
+from menhir.infrastructure.memory_queries import (
+    NAMESPACE_ERASE_PREDICATE,
+    NAMESPACE_PRIMARY_LABEL_CASE,
+    NAMESPACE_SUBORDINATES_CALL,
+)
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.vector_indexes import (
     VectorIndexCatalog,
@@ -416,6 +421,28 @@ class MemoryGraphAdapter:
     def erasure_evidence_uuids(self, node_uuid: str) -> list[str]:
         """See EpisodeLifecycleRepository.erasure_evidence_uuids."""
         return self._episodes.erasure_evidence_uuids(node_uuid)
+
+    # Erasure compensation for enrichment racing an erase (see services/erasure_compensation).
+    def episode_erased_by_user(self, episode_uuid: str) -> bool:
+        return self._episodes.episode_erased_by_user(episode_uuid)
+
+    def link_erased_twin(self, episode_uuid: str, resolved_episode_uuid: str) -> bool:
+        return self._episodes.link_erased_twin(episode_uuid, resolved_episode_uuid)
+
+    def list_erased_twin_compensations(self, limit: int) -> list[dict]:
+        return self._episodes.list_erased_twin_compensations(limit)
+
+    def clear_erasure_compensation(self, episode_uuid: str) -> bool:
+        return self._episodes.clear_erasure_compensation(episode_uuid)
+
+    def find_unlinked_erased_twin(self, episode_uuid: str) -> dict:
+        return self._episodes.find_unlinked_erased_twin(episode_uuid)
+
+    def list_unlinked_erased_queue_nodes(self, limit: int) -> list[str]:
+        return self._episodes.list_unlinked_erased_queue_nodes(limit)
+
+    def mark_compensation_checked(self, episode_uuid: str, outcome: str) -> None:
+        self._episodes.mark_compensation_checked(episode_uuid, outcome)
 
     def erasure_derived_preview(
         self, erased_uuids: list[str], *, twin_found: bool | None = None
@@ -822,22 +849,39 @@ class MemoryGraphAdapter:
         legacy event log (event-history lane archived): every :TypedEventAssertion in the namespace and every
         :TypedEventAssertionHead that HAS_VERSION to an event assertion in the namespace.
         """
-        namespace_clause = (
-            " OR (n:Episodic AND n.namespace = $namespace)"
-            " OR ((n:TypedAssertion OR n:TypedAssertionHead OR "
-            "n:ScalarConsolidationWatermark OR n:TurnEvidence) AND n.namespace = $namespace)"
-            # legacy event-history data cleanup, kept after the lane was archived so erasure stays complete
-            " OR (n:TypedEventAssertion AND n.namespace = $namespace)"
-            " OR (n:TypedEventAssertionHead AND EXISTS {"
-            " MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion) WHERE ev.namespace = $namespace})"
-            if namespace is not None else ""
-        )
+        # Same predicate and subordinate expansion as the delete, so count == deleted.
+        # With namespace=None every namespace term is null-false, leaving the group_id partition.
         rows = self.neo4j.execute(
-            f"MATCH (n) WHERE n.group_id = $group_id{namespace_clause} "
-            "RETURN count(DISTINCT n) AS total",
+            "MATCH (n) WHERE " + NAMESPACE_ERASE_PREDICATE
+            + " WITH collect(DISTINCT n) AS direct "
+            + NAMESPACE_SUBORDINATES_CALL
+            + " RETURN size(direct) + size(subs) AS total",
             params={"group_id": group_id, "namespace": namespace},
         )
         return int(rows[0].get("total", 0)) if rows else 0
+
+    def count_namespace_by_label(
+        self, group_id: str, *, namespace: str | None = None
+    ) -> dict[str, int]:
+        """Per-label counts over the exact set count_namespace counts.
+
+        The label is the first match in NAMESPACE_PRIMARY_LABEL_CASE (a fixed priority list of
+        the known labels), falling back to head(labels(n)); never a bare head(labels(n)) for
+        known labels, since multi-label nodes make that order arbitrary.
+        """
+        rows = self.neo4j.execute(
+            "MATCH (n) WHERE " + NAMESPACE_ERASE_PREDICATE
+            + " WITH collect(DISTINCT n) AS direct "
+            + NAMESPACE_SUBORDINATES_CALL
+            + " UNWIND direct + subs AS n "
+            "RETURN " + NAMESPACE_PRIMARY_LABEL_CASE + " AS label, count(n) AS total",
+            params={"group_id": group_id, "namespace": namespace},
+        )
+        return {
+            str(r["label"]): int(r.get("total", 0) or 0)
+            for r in (rows or [])
+            if r.get("label")
+        }
 
     def fetch_node_namespaces(self, uuids: list[str]) -> dict[str, str]:
         """Map uuid -> namespace for nodes that still exist. Missing uuids are absent.
@@ -871,19 +915,12 @@ class MemoryGraphAdapter:
         ``delete_namespace`` is about to destroy. If the two predicates drifted, an erasure
         would delete graph nodes whose sidecar content it never recorded a subject for.
         """
-        namespace_clause = (
-            " OR (n:Episodic AND n.namespace = $namespace)"
-            " OR ((n:TypedAssertion OR n:TypedAssertionHead OR "
-            "n:ScalarConsolidationWatermark OR n:TurnEvidence) AND n.namespace = $namespace)"
-            # legacy event-history data cleanup, kept after the lane was archived so erasure stays complete
-            " OR (n:TypedEventAssertion AND n.namespace = $namespace)"
-            " OR (n:TypedEventAssertionHead AND EXISTS {"
-            " MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion) WHERE ev.namespace = $namespace})"
-            if namespace is not None else ""
-        )
         rows = self.neo4j.execute(
-            f"MATCH (n) WHERE n.group_id = $group_id{namespace_clause} "
-            "AND n.uuid IS NOT NULL RETURN DISTINCT n.uuid AS uuid",
+            "MATCH (n) WHERE " + NAMESPACE_ERASE_PREDICATE
+            + " WITH collect(DISTINCT n) AS direct "
+            + NAMESPACE_SUBORDINATES_CALL
+            + " UNWIND direct + subs AS n "
+            "WITH n WHERE n.uuid IS NOT NULL RETURN DISTINCT n.uuid AS uuid",
             params={"group_id": group_id, "namespace": namespace},
         )
         return [str(r.get("uuid")) for r in (rows or []) if r.get("uuid")]

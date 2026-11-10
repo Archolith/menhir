@@ -963,6 +963,15 @@ async def prune_telemetry_tables(
     return {"pruned": deleted, "total": total}
 
 
+async def erasure_twin_compensation(graph_adapter: object, *, limit: int = 50) -> dict[str, object]:
+    """Erase Graphiti twins orphaned by an erase that raced enrichment."""
+    from menhir.services.erasure_compensation import sweep_erased_twin_compensations
+
+    return await asyncio.to_thread(
+        sweep_erased_twin_compensations, graph_adapter, limit=limit
+    )
+
+
 async def prune_telemetry_revisions(*, retention_days: int) -> dict[str, object]:
     """Delete `memory_revisions` rows past the retention window.
 

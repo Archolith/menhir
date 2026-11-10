@@ -63,6 +63,68 @@ ADMISSION_NO_TURNS = "no_turns"
 _OPAQUE_DIGEST_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,256}$")
 _DIGEST_KEY_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
+# Single source of truth for what a namespace erase removes directly (over variable `n`, params
+# $group_id and $namespace). Delete, count and uuid capture all use it so they cannot drift.
+NAMESPACE_ERASE_PREDICATE = """n.group_id = $group_id
+               OR (n:Episodic AND n.namespace = $namespace)
+               OR (n:TypedAssertion AND n.namespace = $namespace)
+               OR (n:TypedAssertionHead AND n.namespace = $namespace)
+               OR (n:ScalarConsolidationWatermark AND n.namespace = $namespace)
+               OR (n:TurnEvidence AND n.namespace = $namespace)
+               OR (n:EventConsolidationWatermark AND n.group_id = $namespace)
+               OR (n:TypedEventAssertion AND n.namespace = $namespace)
+               OR (n:TypedEventAssertionHead
+                   AND EXISTS { MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion)
+                                WHERE ev.namespace = $namespace }
+                   AND NOT EXISTS { MATCH (n)-[:HAS_VERSION]->(ev2:TypedEventAssertion)
+                                    WHERE ev2.namespace <> $namespace })
+               OR (n:Todo AND n.namespace = $namespace)
+               OR (n:WorkArtifact AND n.namespace = $namespace)"""
+
+# Subordinate expansion. Input: `direct` (list of directly doomed nodes). Output column: `subs`,
+# the Todo/WorkArtifact children that carry no namespace/group_id themselves and have no
+# incoming owner edge from a node outside `direct`. Use as: WITH ..., direct <this> then
+# WITH ..., direct + subs AS doomed.
+NAMESPACE_SUBORDINATES_CALL = """
+            CALL {
+                WITH direct
+                UNWIND direct AS d
+                OPTIONAL MATCH (d)-[:HAS_LOCATION|EMBODIED_IN|HAS_OPEN_QUESTION|DECLARES]->(s)
+                WHERE (
+                        (d:Todo AND s:TodoLocation)
+                        OR (d:WorkArtifact AND (s:ArtifactSource OR s:ArtifactLocation
+                                                OR s:OpenQuestion OR s:ArtifactDeclaration))
+                      )
+                  AND NOT s IN direct
+                  AND NOT EXISTS {
+                      MATCH (o)-[:HAS_LOCATION|EMBODIED_IN|HAS_OPEN_QUESTION|DECLARES]->(s)
+                      WHERE NOT o IN direct
+                  }
+                RETURN collect(DISTINCT s) AS subs
+            }
+"""
+
+# Primary label per node for by_label reporting: first match in this order, else head(labels).
+NAMESPACE_PRIMARY_LABEL_CASE = """CASE
+                WHEN n:Todo THEN 'Todo'
+                WHEN n:WorkArtifact THEN 'WorkArtifact'
+                WHEN n:TodoLocation THEN 'TodoLocation'
+                WHEN n:ArtifactSource THEN 'ArtifactSource'
+                WHEN n:ArtifactLocation THEN 'ArtifactLocation'
+                WHEN n:OpenQuestion THEN 'OpenQuestion'
+                WHEN n:ArtifactDeclaration THEN 'ArtifactDeclaration'
+                WHEN n:TurnEvidence THEN 'TurnEvidence'
+                WHEN n:Episodic THEN 'Episodic'
+                WHEN n:Entity THEN 'Entity'
+                WHEN n:TypedAssertionHead THEN 'TypedAssertionHead'
+                WHEN n:TypedAssertion THEN 'TypedAssertion'
+                WHEN n:TypedEventAssertionHead THEN 'TypedEventAssertionHead'
+                WHEN n:TypedEventAssertion THEN 'TypedEventAssertion'
+                WHEN n:ScalarConsolidationWatermark THEN 'ScalarConsolidationWatermark'
+                WHEN n:EventConsolidationWatermark THEN 'EventConsolidationWatermark'
+                ELSE coalesce(head(labels(n)), 'unlabeled')
+            END"""
+
 
 def _validated_evidence_tombstone_params(
     *, evidence_digest: str | None, digest_key_id: str | None
@@ -1724,6 +1786,7 @@ class MemoryQueryRepository:
                         n.processing_lease_expires_at = null,
                         n.processing_heartbeat_at = datetime(),
                         n.processing_error = 'deleted_by_user',
+                        n.erased_at = coalesce(n.erased_at, datetime()),
                         n.processing_llm_active_task = null,
                         n.processing_llm_active_kind = null,
                         n.processing_llm_active_model = null,
@@ -1945,20 +2008,10 @@ class MemoryQueryRepository:
             )
             WITH f, repairs
             OPTIONAL MATCH (n)
-            WHERE n.group_id = $group_id
-               OR (n:Episodic AND n.namespace = $namespace)
-               OR (n:TypedAssertion AND n.namespace = $namespace)
-               OR (n:TypedAssertionHead AND n.namespace = $namespace)
-               OR (n:ScalarConsolidationWatermark AND n.namespace = $namespace)
-               OR (n:TurnEvidence AND n.namespace = $namespace)
-               OR (n:EventConsolidationWatermark AND n.group_id = $namespace)
-               OR (n:TypedEventAssertion AND n.namespace = $namespace)
-               OR (n:TypedEventAssertionHead
-                   AND EXISTS { MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion)
-                                WHERE ev.namespace = $namespace }
-                   AND NOT EXISTS { MATCH (n)-[:HAS_VERSION]->(ev2:TypedEventAssertion)
-                                    WHERE ev2.namespace <> $namespace })
-            WITH f, repairs, collect(DISTINCT n) AS doomed
+            WHERE """ + NAMESPACE_ERASE_PREDICATE + """
+            WITH f, repairs, collect(DISTINCT n) AS direct
+            """ + NAMESPACE_SUBORDINATES_CALL + """
+            WITH f, repairs, direct + subs AS doomed
             WITH f, repairs, doomed,
                  [n IN doomed WHERE coalesce(n.uuid, n.turn_id) IS NOT NULL |
                     coalesce(n.uuid, n.turn_id)] AS doomed_uuids
