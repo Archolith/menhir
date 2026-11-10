@@ -366,6 +366,82 @@ def test_prune_nulls_only_old_terminal_delete_snapshots(tmp_path):
     assert _snapshot(db, old_prepared_delete) is not None
 
 
+# ------------------------------------------------------------------ 11 replay after a failed drain
+
+
+class _MergeAuditAdapter:
+    """Graph side of an erasure whose target is cited in one entity's merge_audit.
+
+    ``scrub_merge_audit_for_episodes`` behaves like the real one: the first call tombstones the
+    entry and reports the absorbed uuid; a second call finds nothing, because the tombstone no
+    longer contains the erased uuid (memory_queries.scrub_merge_audit_for_episodes)."""
+
+    def __init__(self, absorbed: str) -> None:
+        self.absorbed = absorbed
+        self.scrubs = 0
+
+    def delete_memory_detailed(self, node_uuid, *, erased_uuids=None, deletable_entity_uuids=None):
+        return {"touched": True}
+
+    def scrub_merge_audit_for_episodes(self, erased_uuids, deleted_entity_uuids=None):
+        self.scrubs += 1
+        if self.scrubs > 1:
+            return {"merge_audits_tombstoned": 0, "merge_absorbed_uuids": []}
+        return {"merge_audits_tombstoned": 1, "merge_absorbed_uuids": [self.absorbed]}
+
+
+def test_absorbed_entity_snapshot_is_purged_when_first_erase_stays_prepared(
+    tmp_path, monkeypatch
+):
+    """The absorbed entity's merge snapshot holds text; its uuid is only discovered by the graph
+    delete's merge_audit scrub. If the telemetry drain then fails, the erasure stays PREPARED and
+    the replay's scrub finds nothing (already tombstoned). Fails if the discovered uuid is only
+    recorded after the drain, so the replay purges nothing for it and the snapshot row, with its
+    phrase, survives a committed erasure."""
+    from menhir.infrastructure.telemetry.async_writer import TELEMETRY_WRITER
+
+    phrase = "absorbed-entity-phrase-7731"
+    adapter = _MergeAuditAdapter(absorbed="abs-1")
+    coord = _coordinator(tmp_path, adapter)
+    db = tmp_path / "t.db"
+    merge = _seed_op(
+        coord,
+        kind="ENTITY_MERGE",
+        request={"survivor_uuid": "surv-1", "absorbed_uuid": "abs-1"},
+        snapshot=json.dumps(
+            {"body": {"survivor": {"uuid": "surv-1"},
+                      "absorbed": {"uuid": "abs-1", "summary": phrase}}}
+        ),
+    )
+    assert phrase in _snapshot(db, merge)  # precondition: the row holds the phrase
+
+    calls = {"n": 0}
+
+    def drain_fails_once(*_a, **_k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("telemetry drain timed out")
+
+    monkeypatch.setattr(TELEMETRY_WRITER, "drain_strict", drain_fails_once)
+
+    with pytest.raises(RuntimeError):
+        coord.erase_memory("erased-ep-1")
+    with sqlite3.connect(db) as conn:
+        op_id, state = conn.execute(
+            "SELECT op_id, state FROM graph_operations WHERE operation_kind = 'EXPLICIT_ERASURE'"
+        ).fetchone()
+    assert state == "PREPARED"  # precondition: the first erase did not finish
+
+    outcome, _ = coord.replay_prepared_row(
+        {"op_id": op_id, "operation_kind": "EXPLICIT_ERASURE"}
+    )
+
+    assert outcome == "REPLAYED"
+    assert _state(db, op_id) == "COMMITTED"
+    snap = _snapshot(db, merge)
+    assert snap is None or phrase not in snap
+
+
 # ------------------------------------------------------------------ 10 secure_delete
 
 

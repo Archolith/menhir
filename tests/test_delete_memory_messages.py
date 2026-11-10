@@ -79,6 +79,40 @@ def test_unknown_reason_never_claims_erasure(monkeypatch):
     assert "weird" in text
 
 
+def test_census_failure_is_named_when_coordinator_reports_unaddressable_known_false(monkeypatch):
+    """The coordinator's real key is ``unaddressable_known`` (erasure_coordinator.py, outcome dict).
+    Fails if delete_memory reads any other key: the census failure is then reported with the
+    generic 'completeness could not be confirmed' text instead of naming the census."""
+    text = _run(
+        monkeypatch,
+        {
+            "reason": "erased_incomplete",
+            "derived": {},
+            "unaddressable": [],
+            "unaddressable_rows": {},
+            "unaddressable_known": False,
+        },
+    )
+    assert "INCOMPLETE" in text
+    assert "census" in text
+    assert "completeness could not be confirmed" not in text
+
+
+def test_census_not_mentioned_when_unaddressable_known_true(monkeypatch):
+    """Control for the census test: a successful census must not be reported as failed."""
+    text = _run(
+        monkeypatch,
+        {
+            "reason": "erased_incomplete",
+            "derived": {},
+            "unaddressable": ["telemetry.some_table"],
+            "unaddressable_known": True,
+        },
+    )
+    assert "INCOMPLETE" in text
+    assert "census" not in text
+
+
 def test_nothing_to_erase_text_unchanged(monkeypatch):
     text = _run(monkeypatch, {"reason": "nothing_to_erase"})
     assert text == f"No memory found with uuid={NODE}, and no stored content for it."

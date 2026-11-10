@@ -43,6 +43,10 @@ CRITERIA = [
     "delete_reports_honestly",
     "erase_during_enrichment_leaves_nothing",
     "namespace_erase_covers_todos_and_artifacts",
+    "erase_during_enrichment_leaves_no_attached_text",
+    "repeat_erase_during_enrichment_leaves_nothing",
+    "absent_target_erase_stays_in_namespace",
+    "erase_with_busy_sidecar_is_honest",
     "no_unscripted_model_prompt",
 ]
 
@@ -176,6 +180,45 @@ def _seed_work_artifact(config: E2EConfig, namespace: str, artifact_uuid: str) -
         driver.close()
 
 
+def _seed_orphan_edge(config: E2EConfig, namespace: str, dead_uuid: str, fact: str) -> dict:
+    """Write two :Entity nodes and a RELATES_TO edge in `namespace` whose episodes=[dead_uuid]."""
+    assert_not_production(config.neo4j_uri, what="graph write target")
+    from neo4j import GraphDatabase
+
+    ids = {"a": str(uuid4()), "b": str(uuid4()), "edge": str(uuid4())}
+    driver = GraphDatabase.driver(config.neo4j_uri, auth=(config.neo4j_user, config.neo4j_password))
+    try:
+        with driver.session(database=config.neo4j_database) as session:
+            session.run(
+                "CREATE (a:Entity {uuid: $a, group_id: $ns, name: $an, created_at: datetime()}) "
+                "CREATE (b:Entity {uuid: $b, group_id: $ns, name: $bn, created_at: datetime()}) "
+                "CREATE (a)-[:RELATES_TO {uuid: $edge, group_id: $ns, name: 'HOLDS', fact: $fact, "
+                "episodes: [$dead], created_at: datetime()}]->(b)",
+                a=ids["a"], b=ids["b"], edge=ids["edge"], ns=namespace, fact=fact,
+                an=f"Orphan Left {ids['a'][:8]}", bn=f"Orphan Right {ids['b'][:8]}", dead=dead_uuid,
+            ).consume()
+    finally:
+        driver.close()
+    return ids
+
+
+def _edge_state(config: E2EConfig, edge_uuid: str) -> list[dict]:
+    return graph_query(
+        config,
+        "MATCH ()-[r:RELATES_TO {uuid: $u}]->() RETURN r.fact AS fact, r.episodes AS episodes, "
+        "r.group_id AS group_id, r.rederive_pending AS rederive_pending",
+        u=edge_uuid,
+    )
+
+
+def _entity_pending_by_uuid(config: E2EConfig, uuids: list[str]) -> list[dict]:
+    return graph_query(
+        config,
+        "MATCH (e:Entity) WHERE e.uuid IN $ids RETURN e.uuid AS uuid, e.rederive_pending AS pending",
+        ids=uuids,
+    )
+
+
 def _count_namespace(config: E2EConfig, namespace: str) -> int:
     rows = graph_query(
         config,
@@ -222,30 +265,41 @@ async def test_e2e_21_erasure(
     mem_a = Memory("amber", suffix, shared=True)
     mem_b = Memory("birch", suffix, shared=True)
     mem_c = Memory("cedar", suffix, shared=False)
-    memories = [mem_a, mem_b, mem_c]
+    mem_d = Memory("dune", suffix, shared=False)
+    mem_e = Memory("ember", suffix, shared=False)
+    memories = [mem_a, mem_b, mem_c, mem_d, mem_e]
+    diff_phrase = f"cedar diffmark zorblat-{suffix}"
+    ns3 = f"e21c-{suffix}"
+    ns4 = f"e21d-{suffix}"
     telemetry_db = e2e_config.state_dir / f"e21-{suffix}" / "mcp_telemetry.db"
     telemetry_db.parent.mkdir(parents=True, exist_ok=True)
 
     race: dict[str, float | None] = {"started": None, "returned": None, "delete_sent": None}
     race_lock = threading.Lock()
 
+    race_d: dict[str, float | None] = {"started": None, "returned": None, "delete_sent": None}
+    slowed = ((mem_c, race), (mem_d, race_d))
+
     def delay_for(prompt: str) -> float:
-        # Slow only the first extraction call for C, so the delete lands mid-extraction.
+        # Slow only the first extraction call for C and for D, so a delete lands mid-extraction.
         current = _current_text(prompt)
         with race_lock:
-            if mem_c.phrase in current and race["started"] is None:
-                race["started"] = time.time()
-                return RACE_DELAY_SECONDS
+            for memory, state in slowed:
+                if memory.phrase in current and state["started"] is None:
+                    state["started"] = time.time()
+                    return RACE_DELAY_SECONDS
         return 0.0
 
     base_reply = _extraction_reply(memories)
 
     def extraction_reply(call: Call) -> str:
         out = base_reply(call)
-        if mem_c.phrase in _current_text(call.prompt):
-            with race_lock:
-                if race["started"] is not None and race["returned"] is None:
-                    race["returned"] = time.time()
+        current = _current_text(call.prompt)
+        for memory, state in slowed:
+            if memory.phrase in current:
+                with race_lock:
+                    if state["started"] is not None and state["returned"] is None:
+                        state["returned"] = time.time()
         return out
 
     script = Script([
@@ -313,7 +367,7 @@ async def test_e2e_21_erasure(
 
                 # ---- C: erased while its enrichment is running ---------------------------
                 add_c = _text(await client.call_tool("add_memory", {
-                    "text": mem_c.text, "namespace": ns}))
+                    "text": mem_c.text, "namespace": ns, "diff": diff_phrase}))
                 match_c = _EPISODE_ID.search(add_c)
                 assert match_c, f"no episode_id for memory C: {add_c[:400]}"
                 episode_c = match_c.group(1)
@@ -330,6 +384,9 @@ async def test_e2e_21_erasure(
                 with race_lock:
                     race["delete_sent"] = time.time()
                 reply_c = await _delete_memory(client, ns, episode_c)
+                # The erase has returned: its words must be gone now, not only once the worker's
+                # compensation later deletes the tombstone (which a crash or no-twin path skips).
+                carriers_diff_at_return = _carriers(e2e_config, diff_phrase)
                 queue_node_after_delete = graph_query(
                     e2e_config,
                     "MATCH (e:Episodic {uuid: $u}) RETURN e.processing_state AS state, "
@@ -366,6 +423,86 @@ async def test_e2e_21_erasure(
                 c_entities_left = (_entity(e2e_config, ns, mem_c.unique_entity)
                                    + _entity(e2e_config, ns, mem_c.source_entity))
 
+                carriers_diff = _carriers(e2e_config, diff_phrase)
+
+                # ---- D: erased TWICE while its enrichment is running ---------------------
+                add_d = _text(await client.call_tool("add_memory", {
+                    "text": mem_d.text, "namespace": ns}))
+                match_d = _EPISODE_ID.search(add_d)
+                assert match_d, f"no episode_id for memory D: {add_d[:400]}"
+                episode_d = match_d.group(1)
+                state_d_at_delete = None
+                deadline = time.time() + 90
+                while time.time() < deadline:
+                    rows = graph_query(
+                        e2e_config, "MATCH (e:Episodic {uuid: $u}) RETURN e.processing_state AS s",
+                        u=episode_d)
+                    state_d_at_delete = rows[0]["s"] if rows else None
+                    if state_d_at_delete == "ENRICHING" or state_d_at_delete == "READY":
+                        break
+                    time.sleep(0.25)
+                reply_d1 = await _delete_memory(client, ns, episode_d)
+                reply_d2 = await _delete_memory(client, ns, episode_d)
+                with race_lock:
+                    race_d["delete_sent"] = time.time()
+                    d_started = race_d["started"]
+                    d_returned_at_delete = race_d["returned"]
+                settle_deadline = time.time() + RACE_DELAY_SECONDS + 120
+                while time.time() < settle_deadline:
+                    with race_lock:
+                        if race_d["returned"] is not None:
+                            break
+                    time.sleep(0.5)
+                with race_lock:
+                    d_returned_at = race_d["returned"]
+                d_residue_seen = False
+                stable_since = None
+                post_deadline = time.time() + 90
+                while time.time() < post_deadline:
+                    carriers_d = _carriers(e2e_config, mem_d.phrase)
+                    elapsed = time.time() - (d_returned_at or time.time())
+                    if not _empty(carriers_d):
+                        d_residue_seen = True
+                        stable_since = None
+                    elif elapsed >= 10:
+                        if stable_since is None:
+                            stable_since = time.time()
+                        elif time.time() - stable_since >= 5:
+                            break
+                    time.sleep(1.0)
+                carriers_d = _carriers(e2e_config, mem_d.phrase)
+                d_entities_left = (_entity(e2e_config, ns, mem_d.unique_entity)
+                                   + _entity(e2e_config, ns, mem_d.source_entity))
+
+                # ---- F4: erase of an absent uuid must not touch another namespace --------
+                dead_uuid = str(uuid4())
+                orphan_fact = f"orphan fact zorblat-{suffix} restated"
+                orphan = _seed_orphan_edge(e2e_config, ns3, dead_uuid, orphan_fact)
+                orphan_before = _edge_state(e2e_config, orphan["edge"])
+                reply_absent = await _delete_memory(client, ns4, dead_uuid)
+                orphan_after = _edge_state(e2e_config, orphan["edge"])
+                orphan_entities_after = _entity_pending_by_uuid(
+                    e2e_config, [orphan["a"], orphan["b"]])
+
+                # ---- E: erase while another process holds a sqlite read snapshot ---------
+                episode_e_id = await _add_tracked(client, ns, mem_e)
+                e_deadline = time.time() + 20
+                e_before = _sidecar_hits(telemetry_db, mem_e.phrase)
+                while not any(c > 0 for c in e_before.values()) and time.time() < e_deadline:
+                    time.sleep(1.0)
+                    e_before = _sidecar_hits(telemetry_db, mem_e.phrase)
+                import sqlite3
+                reader = sqlite3.connect(str(telemetry_db), isolation_level=None, timeout=1.0)
+                try:
+                    reader.execute("BEGIN")
+                    reader.execute("SELECT count(*) FROM sqlite_master").fetchall()
+                    reply_e = await _delete_memory(client, ns, episode_e_id)
+                    e_after_held = _sidecar_hits(telemetry_db, mem_e.phrase)
+                    e_graph_after = _carriers(e2e_config, mem_e.phrase)
+                finally:
+                    reader.close()
+                e_after_closed = _sidecar_hits(telemetry_db, mem_e.phrase)
+
                 # ---- second namespace: TODO + WorkArtifact -------------------------------
                 todo_receipt = _text(await client.call_tool("add_todo", {
                     "text": f"e21 namespace todo {suffix}", "namespace": ns2}))
@@ -400,6 +537,22 @@ async def test_e2e_21_erasure(
                       "nodes_before": nodes_before_ns2, "nodes_after_dry": nodes_after_dry,
                       "dry": dry, "real": real, "nodes_after_real": nodes_after_real,
                       "leftover_labels": leftover_labels},
+        "attached_text": {"diff_phrase": diff_phrase, "carriers_at_return": carriers_diff_at_return,
+                          "carriers_after": carriers_diff},
+        "repeat_erase": {"state_at_delete": state_d_at_delete, "delay_started": d_started,
+                         "delete_sent": race_d["delete_sent"],
+                         "returned_at_delete": d_returned_at_delete,
+                         "extraction_returned": d_returned_at,
+                         "residue_seen_after_return": d_residue_seen,
+                         "reply_first": reply_d1, "reply_second": reply_d2,
+                         "carriers_d": carriers_d, "entities_left": d_entities_left},
+        "absent_target": {"namespace_seeded": ns3, "namespace_called": ns4,
+                          "dead_uuid": dead_uuid, "orphan": orphan, "fact": orphan_fact,
+                          "edge_before": orphan_before, "edge_after": orphan_after,
+                          "entities_after": orphan_entities_after, "reply": reply_absent},
+        "busy_sidecar": {"sidecar_before": e_before, "sidecar_after_while_reader_held": e_after_held,
+                         "sidecar_after_reader_closed": e_after_closed, "reply": reply_e,
+                         "graph_after": e_graph_after},
     }, indent=2, default=str))
 
     where_before = [name for name, hit in (
@@ -459,6 +612,47 @@ async def test_e2e_21_erasure(
                 "residue_seen_after_extraction_returned": residue_seen,
                 "carriers_after": carriers_c, "entities_left": c_entities_left,
                 "reply_c": reply_c},
+    )
+    lane_evidence.record(
+        "erase_during_enrichment_leaves_no_attached_text",
+        passed=race_hit and _empty(carriers_diff_at_return) and _empty(carriers_diff),
+        detail={"race_window_hit": race_hit, "diff_phrase": diff_phrase,
+                "carriers_at_return": carriers_diff_at_return,
+                "carriers_after": carriers_diff},
+    )
+    d_race_hit = (state_d_at_delete == "ENRICHING" and d_started is not None
+                  and d_returned_at is not None and race_d["delete_sent"] is not None
+                  and d_returned_at_delete is None and race_d["delete_sent"] < d_returned_at)
+    lane_evidence.record(
+        "repeat_erase_during_enrichment_leaves_nothing",
+        passed=d_race_hit and _empty(carriers_d) and not d_entities_left,
+        detail={"race_window_hit": d_race_hit, "state_at_delete": state_d_at_delete,
+                "residue_seen_after_extraction_returned": d_residue_seen,
+                "carriers_after": carriers_d, "entities_left": d_entities_left,
+                "reply_first": reply_d1, "reply_second": reply_d2},
+    )
+    edge_same = (len(orphan_before) == 1 and len(orphan_after) == 1
+                 and orphan_after[0]["fact"] == orphan_fact
+                 and orphan_after[0]["episodes"] == [dead_uuid]
+                 and not orphan_after[0]["rederive_pending"]
+                 and orphan_after[0]["group_id"] == ns3)
+    lane_evidence.record(
+        "absent_target_erase_stays_in_namespace",
+        passed=edge_same and len(orphan_entities_after) == 2
+        and not any(e["pending"] for e in orphan_entities_after),
+        detail={"edge_before": orphan_before, "edge_after": orphan_after,
+                "entities_after": orphan_entities_after, "reply": reply_absent},
+    )
+    e_says_erased = (reply_e.startswith(f"Erased memory {episode_e_id}")
+                     and "INCOMPLETE" not in reply_e and "did NOT" not in reply_e)
+    e_names_gap = "INCOMPLETE" in reply_e or "did NOT" in reply_e or "NOTE:" in reply_e
+    e_phrase_gone = all(count <= 0 for count in e_after_held.values())
+    lane_evidence.record(
+        "erase_with_busy_sidecar_is_honest",
+        passed=bool(any(c > 0 for c in e_before.values())) and (e_names_gap or e_phrase_gone),
+        detail={"reply": reply_e, "says_erased": e_says_erased, "names_gap": e_names_gap,
+                "sidecar_before": e_before, "sidecar_after_while_reader_held": e_after_held,
+                "sidecar_after_reader_closed": e_after_closed},
     )
     by_label = dry.get("by_label") or {}
     lane_evidence.record(

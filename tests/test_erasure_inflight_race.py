@@ -478,6 +478,227 @@ def test_sweep_finds_default_namespace_twin(test_neo4j_repo) -> None:
         _cleanup(repo, tag)
 
 
+# ------------------------------------------------------------------ erase vs. publish interleavings
+WORKER = "worker-race-1"
+
+
+def _seed_enriching_queue(repo: Any, ids: dict[str, str]) -> Any:
+    """Queue node claimed by WORKER (ENRICHING, unlinked). Returns the claim instant."""
+    repo.execute(
+        """
+        CREATE (:Episodic {uuid:$queue, namespace:$ns, name:$name, content:$text,
+                           processing_state:'ENRICHING', processing_owner:$worker,
+                           processing_started_at: datetime() - duration('PT1M'),
+                           processing_lease_expires_at: datetime() + duration('PT10M'),
+                           test_tag:$tag})
+        """,
+        params={**ids, "text": SECRET, "worker": WORKER},
+    )
+    rows = repo.execute(
+        "MATCH (n:Episodic {uuid:$queue}) RETURN n.processing_started_at AS claim",
+        params=ids,
+    )
+    return rows[0]["claim"]
+
+
+def _publish_twin_and_fact(repo: Any, ids: dict[str, str], *, created_age: str | None) -> None:
+    """What Graphiti's add_episode leaves behind: twin T (processing_state NULL, same silo, the
+    queue node's anchor name), two entities, and a single-source fact listing only T. The fact
+    carries the phrase; the entities do not, so the phrase's carriers are only T and the fact."""
+    repo.execute(
+        """
+        CREATE (t:Episodic {uuid:$twin, group_id:$ns, name:$name, valid_at:datetime(),
+                            created_at: CASE WHEN $age IS NULL THEN datetime()
+                                             ELSE datetime() - duration($age) END,
+                            content:$text, test_tag:$tag})
+        CREATE (e1:Entity {uuid:$entity, name:'race probe', group_id:$ns, summary:'a probe',
+                           created_at:datetime(), test_tag:$tag})
+        CREATE (e2:Entity {uuid:$entity2, name:'teal-4417', group_id:$ns, summary:'a colour',
+                           created_at:datetime(), test_tag:$tag})
+        CREATE (t)-[:MENTIONS {uuid:$mention, group_id:$ns, created_at:datetime(),
+                               test_tag:$tag}]->(e1)
+        CREATE (e1)-[:RELATES_TO {uuid:$edge, name:'HAS_FAVOURITE_COLOUR', fact:$text,
+                                  episodes:[$twin], group_id:$ns, created_at:datetime(),
+                                  test_tag:$tag}]->(e2)
+        """,
+        params={**ids, "text": SECRET, "age": created_age, "mention": f"{ids['tag']}-mention"},
+    )
+
+
+def _phrase_carriers(repo: Any, tag: str) -> list[str]:
+    """uuids of every node/relationship of this test that still has a property containing SECRET."""
+    nodes = repo.execute(
+        "MATCH (n) WHERE n.test_tag = $t AND any(k IN keys(n) WHERE n[k] CONTAINS $p) "
+        "RETURN coalesce(n.uuid, '?') AS uuid",
+        params={"t": tag, "p": SECRET},
+    )
+    rels = repo.execute(
+        "MATCH ()-[r]->() WHERE r.test_tag = $t AND any(k IN keys(r) WHERE r[k] CONTAINS $p) "
+        "RETURN coalesce(r.uuid, '?') AS uuid",
+        params={"t": tag, "p": SECRET},
+    )
+    return sorted([f"node:{r['uuid']}" for r in nodes] + [f"rel:{r['uuid']}" for r in rels])
+
+
+class _InterleavingAdapter:
+    """Delegating adapter that runs ``hook`` once, immediately before the first graph delete (after
+    the coordinator's twin lookup and derived preview) -- the window in which a worker finishes."""
+
+    def __init__(self, inner: Any, hook: Any) -> None:
+        self._inner = inner
+        self._hook = hook
+        self._fired = False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def delete_memory_detailed(self, *args: Any, **kwargs: Any) -> Any:
+        if not self._fired:
+            self._fired = True
+            self._hook()
+        return self._inner.delete_memory_detailed(*args, **kwargs)
+
+
+@pytest.mark.online
+def test_twin_published_between_twin_lookup_and_graph_delete_does_not_survive_the_erase(
+    test_neo4j_repo, tmp_path
+) -> None:
+    """B-1. Q is ENRICHING. erase_memory looks up Q's twins (none: Q is unlinked), then the worker
+    finishes -- twin T and a single-source fact appear and mark_episode_ready links Q to T under
+    the worker's valid claim -- and only then does the graph delete run. Q is deleted outright, so
+    nothing references T and the sweep (which needs an erased queue node) can never find it.
+    Fails if the node delete removes a PENDING/ENRICHING-at-lookup queue node whose link was
+    written after the lookup, instead of keeping a tombstone / compensating for the late twin."""
+    repo = test_neo4j_repo
+    tag = f"test-race-b1-{uuidlib.uuid4()}"
+    try:
+        ids = _ids(tag)
+        claim = _seed_enriching_queue(repo, ids)
+        adapter, coord = _coordinator(repo, tmp_path)
+        assert adapter.episodic_twin_uuids(ids["queue"]) == []  # the lookup will see nothing
+        published: dict[str, Any] = {}
+
+        def worker_finishes() -> None:
+            _publish_twin_and_fact(repo, ids, created_age=None)
+            published["ready"] = adapter.mark_episode_ready(
+                ids["queue"],
+                worker_id=WORKER,
+                resolved_episode_uuid=ids["twin"],
+                nodes_touched=2,
+                edges_touched=1,
+                claim_started_at=claim,
+            )
+
+        coord.graph_adapter = _InterleavingAdapter(adapter, worker_finishes)
+
+        coord.erase_memory(ids["queue"])
+        assert published.get("ready") is True, "the worker's guarded write must have succeeded"
+
+        from menhir.services.erasure_compensation import sweep_erased_twin_compensations
+
+        sweep_erased_twin_compensations(
+            _ScopedAdapter(adapter, {ids["queue"]}), coordinator_factory=lambda _a: coord
+        )
+
+        assert _phrase_carriers(repo, tag) == []
+        assert _exists(repo, ids["twin"]) is False
+        assert _edge_exists(repo, ids["edge"]) is False
+    finally:
+        _cleanup(repo, tag)
+
+
+class _EraseBeforeReadyAdapter:
+    """Delegating adapter: just before the worker's mark_episode_ready, the user's erase lands.
+    Stamping is stubbed (not under test); every graph read/write otherwise runs for real."""
+
+    def __init__(self, inner: Any, erase: Any) -> None:
+        self._inner = inner
+        self._erase = erase
+        self.erased = False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def stamp_ingest_metadata(self, **_kwargs: Any) -> Any:
+        return SimpleNamespace(nodes_touched=2, edges_touched=1)
+
+    def record_retention_sources(self, **_kwargs: Any) -> int:
+        return 0
+
+    def mark_episode_ready(self, *args: Any, **kwargs: Any) -> bool:
+        if not self.erased:
+            self.erased = True
+            self._erase()
+        return self._inner.mark_episode_ready(*args, **kwargs)
+
+
+@pytest.mark.online
+def test_reconcile_existing_completion_erased_before_ready_leaves_no_twin(
+    test_neo4j_repo, tmp_path, monkeypatch
+) -> None:
+    """B-3. try_reconcile_existing finds a completed twin T created before this claim (so the sweep's
+    created_at >= claim match can never find it), then the erase lands before mark_episode_ready.
+    The erase sees Q unlinked, so T is not a target; mark_episode_ready then fails (Q is gone or no
+    longer ENRICHING) and the function reports 'handled'. Fails if that failed write is not
+    followed by a compensating erase of T when Q was erased."""
+    repo = test_neo4j_repo
+    tag = f"test-race-b3-{uuidlib.uuid4()}"
+    try:
+        ids = _ids(tag)
+        claim = _seed_enriching_queue(repo, ids)
+        _publish_twin_and_fact(repo, ids, created_age="PT2H")  # predates the claim
+        adapter, coord = _coordinator(repo, tmp_path)
+        import menhir.services.erasure_compensation as comp
+
+        monkeypatch.setattr(comp, "_default_coordinator", lambda _a: coord)
+        assert adapter.episodic_twin_uuids(ids["queue"]) == []  # unlinked: erase cannot see T
+        raced = _EraseBeforeReadyAdapter(adapter, lambda: coord.erase_memory(ids["queue"]))
+
+        from menhir.services.enrichment_steps import EnrichmentContext, try_reconcile_existing
+
+        ctx = EnrichmentContext(
+            episode_uuid=ids["queue"],
+            claimed={
+                "processing_started_at": claim,
+                "name": ids["name"],
+                "namespace": ids["ns"],
+                "session_id": "s",
+                "user_id": "u",
+                "source": "claude-code",
+            },
+            started=0.0,
+            processing_attempts=1,
+            worker_id=WORKER,
+            graph_adapter=raced,
+            graphiti_client=SimpleNamespace(),
+            lifecycle_service=None,
+            llm=None,
+            ingest_gate=SimpleNamespace(),
+            processing_steps_total=5,
+            settings_record_revisions=False,
+            ready_warning_ms=10**9,
+            graphiti_add_episode_timeout_s=1.0,
+            graphiti_episode_max_estimated_tokens=0,
+            get_queue_depth=lambda: 0,
+        )
+        import asyncio
+
+        assert asyncio.run(try_reconcile_existing(ctx)) is True
+        assert raced.erased is True
+
+        from menhir.services.erasure_compensation import sweep_erased_twin_compensations
+
+        sweep_erased_twin_compensations(
+            _ScopedAdapter(adapter, {ids["queue"]}), coordinator_factory=lambda _a: coord
+        )
+
+        assert _phrase_carriers(repo, tag) == []
+        assert _exists(repo, ids["twin"]) is False
+        assert _edge_exists(repo, ids["edge"]) is False
+    finally:
+        _cleanup(repo, tag)
+
+
 @pytest.mark.online
 def test_sweep_never_takes_a_live_queue_node_for_the_twin(test_neo4j_repo) -> None:
     """A live Menhir memory with the same anchor name, same namespace and a later created_at must

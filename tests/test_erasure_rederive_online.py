@@ -380,6 +380,87 @@ def test_counterexample_episode_set_change_between_load_and_apply_refuses_write(
         _cleanup(repo, tag)
 
 
+# ------------------------------------------------------------------ review fixes (PR #595)
+FIXED_VECTOR = [0.25, 0.5, 0.75]
+
+
+class _FakeEmbedder:
+    """Fixed-vector embedder. Offers the surfaces Menhir's embedders expose (graphiti_client's
+    ``embed_query(text)`` and Graphiti's ``create(input_data=[...])``), all async."""
+
+    def __init__(self, vector: list[float]) -> None:
+        self.vector = list(vector)
+        self.texts: list[str] = []
+
+    async def embed_query(self, text: str) -> list[float]:
+        self.texts.append(text)
+        return list(self.vector)
+
+    async def create(self, input_data: Any) -> list[float]:
+        self.texts.append(str(input_data))
+        return list(self.vector)
+
+
+@pytest.mark.online
+def test_rewritten_fact_gets_an_embedding_from_the_embedder(test_neo4j_repo, tmp_path) -> None:
+    """R-1. A re-derived fact must be searchable again: apply writes the new text AND its
+    embedding. Expected signature after the fix:
+    ``run_derived_rederive(graph_adapter, llm, *, limit=25, embedder=None)`` where ``embedder``
+    has ``async embed_query(text) -> list[float]`` (the graphiti_client surface), passed by the
+    scheduler task. Fails today (TypeError on ``embedder=``; and apply writes fact_embedding =
+    null unconditionally), or if the job ignores the embedder and leaves the embedding null."""
+    repo = test_neo4j_repo
+    tag = f"test-rrd-embed-{uuidlib.uuid4()}"
+    try:
+        ids, adapter = _erase(repo, tmp_path, tag)
+        assert _edge(repo, ids["edge"])["embedding"] is None  # scrubbed at erase
+        embedder = _FakeEmbedder(FIXED_VECTOR)
+
+        counts = asyncio.run(
+            run_derived_rederive(
+                _ScopedAdapter(adapter, tag), _FakeLLM(_SUPPORTED), embedder=embedder
+            )
+        )
+
+        assert counts["rewritten"] == 2
+        edge = _edge(repo, ids["edge"])
+        assert edge["fact"] == "rewritten fact"
+        assert edge["pending"] is None
+        assert edge["embedding"] == FIXED_VECTOR
+    finally:
+        _cleanup(repo, tag)
+
+
+@pytest.mark.online
+def test_fact_with_duplicate_episode_uuid_is_rederived_on_the_first_pass(
+    test_neo4j_repo, tmp_path
+) -> None:
+    """R-2. A flagged shared fact whose stored ``episodes`` repeats a uuid ([live, live]). The job
+    reads a de-duplicated list, and the apply CAS compares it with the raw stored property, so the
+    write never matches and the fact stays hidden forever. Fails if apply_derived_rederive's
+    episodes guard is not compared against the raw stored list (cas_failed==1, fact stays '')."""
+    repo = test_neo4j_repo
+    tag = f"test-rrd-dupep-{uuidlib.uuid4()}"
+    try:
+        ids, adapter = _erase(repo, tmp_path, tag)
+        repo.execute(
+            "MATCH ()-[r:RELATES_TO {uuid:$u}]->() SET r.episodes = [$live, $live]",
+            params={"u": ids["edge"], "live": ids["live"]},
+        )
+        assert _edge(repo, ids["edge"])["episodes"] == [ids["live"], ids["live"]]
+        assert _edge(repo, ids["edge"])["pending"] is True
+
+        counts = _run(_ScopedAdapter(adapter, tag), _FakeLLM(_SUPPORTED))
+
+        assert counts["cas_failed"] == 0
+        edge = _edge(repo, ids["edge"])
+        assert edge["fact"] == "rewritten fact"
+        assert edge["pending"] is None
+        assert _repairs(repo, tag)["fact"]["status"] == "done"
+    finally:
+        _cleanup(repo, tag)
+
+
 # ------------------------------------------------------------------ no sources / no llm / failures
 @pytest.mark.online
 def test_no_remaining_sources_deletes_fact_without_calling_the_llm(
