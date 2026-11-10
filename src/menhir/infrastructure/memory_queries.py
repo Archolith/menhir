@@ -1319,8 +1319,12 @@ class MemoryQueryRepository:
         WITH dead_edges, live_edges,
              [x IN dead_edges | coalesce(x.uuid, elementId(x))] AS edges_deleted_uuids,
              [x IN live_edges | coalesce(x.uuid, elementId(x))] AS edges_flagged_uuids
+        // Owner ruling 2026-11-09: scrub at erase. The text may restate the erased episode; the
+        // rederive job rebuilds it from the remaining sources ('' keeps Graphiti's str field valid).
         FOREACH (x IN live_edges |
             SET x.episodes = [u IN coalesce(x.episodes, []) WHERE NOT u IN $erased_uuids],
+                x.fact = '',
+                x.fact_embedding = null,
                 x.rederive_pending = true,
                 x.rederive_reason = 'source_erased',
                 x.rederive_flagged_at = datetime()
@@ -1405,8 +1409,11 @@ class MemoryQueryRepository:
     )
     _DERIVED_ENTITY_WRITE = (
         """
+        // Scrub at erase (owner ruling 2026-11-09): summary/content may restate the erased episode.
         FOREACH (e IN shared |
-            SET e.rederive_pending = true,
+            SET e.summary = '',
+                e.content = null,
+                e.rederive_pending = true,
                 e.rederive_reason = 'source_erased',
                 e.rederive_flagged_at = datetime()
         )
@@ -1468,7 +1475,10 @@ class MemoryQueryRepository:
                 + """
                 RETURN coalesce(r['rederive_pending'], false) AS pending,
                        toString(r['rederive_flagged_at']) AS flagged_at,
-                       coalesce(r.episodes, []) AS episodes, r.fact AS text, null AS name
+                       coalesce(r.episodes, []) AS episodes, r.fact AS text,
+                       // Erase scrubs r.fact, so the claim's shape is what the rewrite checks.
+                       coalesce(startNode(r).name, '?') + ' ' + coalesce(r.name, 'RELATES_TO')
+                           + ' ' + coalesce(endNode(r).name, '?') AS name
                 LIMIT 1
                 """,
                 params={"item_uuid": item_uuid},
@@ -1947,15 +1957,19 @@ class MemoryQueryRepository:
                 OPTIONAL MATCH (n)
                 WHERE ((n:Entity OR n:Episodic) AND n.uuid = $node_uuid)
                    OR (n:TurnEvidence AND n.turn_id = $node_uuid)
+                // UNION branches run in order and see earlier branches' writes: branch 2 sets
+                // FAILED, so branch 3 must test the state from BEFORE any branch ran or it deletes
+                // the in-flight tombstone the worker needs (e2e-21 erase_during_enrichment).
+                WITH n, coalesce(n.processing_state, '') AS prior_state
                 CALL {
-                    WITH n
+                    WITH n, prior_state
                     WITH n WHERE n:Entity
                     DETACH DELETE n
                     RETURN 1 AS touched
                     UNION
-                    WITH n
+                    WITH n, prior_state
                     WITH n WHERE n:Episodic
-                      AND coalesce(n.processing_state, '') IN ['PENDING', 'ENRICHING']
+                      AND prior_state IN ['PENDING', 'ENRICHING']
                     SET n.processing_state = 'FAILED',
                         n.processing_stage = 'failed',
                         n.processing_substage = 'deleted_by_user',
@@ -1976,13 +1990,13 @@ class MemoryQueryRepository:
                            n.ingest_key, n.ingest_request_sha256
                     RETURN 1 AS touched
                     UNION
-                    WITH n
+                    WITH n, prior_state
                     WITH n WHERE n:Episodic
-                      AND NOT coalesce(n.processing_state, '') IN ['PENDING', 'ENRICHING']
+                      AND NOT prior_state IN ['PENDING', 'ENRICHING']
                     DETACH DELETE n
                     RETURN 1 AS touched
                     UNION
-                    WITH n
+                    WITH n, prior_state
                     WITH n WHERE n:TurnEvidence
                     DETACH DELETE n
                     RETURN 1 AS touched

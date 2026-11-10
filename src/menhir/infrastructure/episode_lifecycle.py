@@ -24,6 +24,7 @@ from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.utils import source_confidence_for
 from menhir.domain.verbatim_skip_status import skip_projection_map_cypher
 from menhir.infrastructure.cypher import (
+    EPISODE_NOT_ERASED,
     Cypher,
     EPISODE_PROCESSING_FIELDS,
     EPISODE_RETRY_FIELDS,
@@ -948,7 +949,7 @@ class EpisodeLifecycleRepository:
         query = (
             Cypher()
             .match("(n:Episodic)")
-            .where("n.processing_state = 'FAILED'")
+            .where("n.processing_state = 'FAILED'", EPISODE_NOT_ERASED)
             .return_fields(EPISODE_RETRY_FIELDS)
             .order_by("coalesce(n.processing_completed_at, n.processing_started_at, n.queued_at, n.created_at) ASC")
             .limit()
@@ -1078,6 +1079,7 @@ class EpisodeLifecycleRepository:
             .where(
                 "n.uuid = $episode_uuid",
                 "n.processing_state IN ['PENDING', 'FAILED']",
+                EPISODE_NOT_ERASED,
                 "coalesce(properties(n)['retry_after'], datetime()) <= datetime()",
                 "(coalesce(toInteger(n.processing_attempts), 0) < $max_attempts"
                 " OR (n.processing_state = 'FAILED'"

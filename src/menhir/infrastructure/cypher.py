@@ -353,6 +353,12 @@ MEMORY_RETURN_FIELDS = (
     "n.enriched_edges_touched AS enriched_edges_touched",
 )
 
+# An erased in-flight queue node is kept as a content-less tombstone (FAILED/deleted_by_user) so
+# its worker can compensate. No claim, retry or reset may ever requeue it. Over variable `n`.
+EPISODE_NOT_ERASED = (
+    "n['erased_at'] IS NULL AND coalesce(n.processing_substage, '') <> 'deleted_by_user'"
+)
+
 # Entity metadata for scoring/recall.
 ENTITY_METADATA_FIELDS = (
     "n.uuid AS uuid",

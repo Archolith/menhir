@@ -8,6 +8,7 @@ from menhir.domain.namespace import namespace_to_group_id
 from menhir.domain.secret_scrub import ensure_scrubbed, non_refusing_policy
 from menhir.domain.verbatim_skip_status import skip_projection_lookup_cypher, skip_projection_map_cypher
 from menhir.infrastructure.cypher import (
+    EPISODE_NOT_ERASED,
     Cypher,
     EPISODE_PROCESSING_FIELDS,
     LLM_RESET_SET,
@@ -112,7 +113,7 @@ class EpisodeMaintenanceRepository:
         query = (
             Cypher()
             .match("(n:Episodic {uuid: $uuid})")
-            .where("n.processing_state IN ['FAILED', 'PENDING']")
+            .where("n.processing_state IN ['FAILED', 'PENDING']", EPISODE_NOT_ERASED)
             .set(
                 (
                     "n.processing_state = 'PENDING'",
