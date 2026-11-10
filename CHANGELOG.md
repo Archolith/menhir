@@ -29,6 +29,20 @@
   locations, sources, open questions and declarations; dry runs report `by_label` and
   `not_covered`. The default namespace is still refused (#476; wiping it is #100).
 - `delete_memory` says plainly when an erase did not run (`prepare_failed`) or is incomplete.
+- Review fixes (PR #595), each first reproduced by a failing test:
+  - A queue node is kept as a content-less tombstone while a twin it doesn't cover could exist:
+    a repeat erase or replay no longer deletes an unlinked tombstone, and a twin linked after
+    the erase resolved its targets is erased right after (the sweep retries on a crash). The
+    tombstone no longer keeps the memory's attached `diff`.
+  - The reconcile path compensates an erase that lands before `mark_episode_ready`.
+  - Derived uuids found during the graph delete are recorded before the telemetry drain, so a
+    drain timeout no longer loses them from the replay's purge.
+  - When the target is already gone, a pinned caller or one naming a namespace touches only
+    that namespace's facts.
+  - A busy WAL checkpoint is read, briefly retried, and reported as `erased_incomplete`.
+  - Re-derived facts get an embedding when an embedder is available, and a fact listing the
+    same episode twice is re-derived instead of failing its compare-and-set forever.
+  - E2E-21 adds four criteria for these (12 in all).
 
 ## 2026-11-09 - The rerank model cache persists by default (#567 follow-up)
 

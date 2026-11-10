@@ -25,7 +25,21 @@ async def _call(fn: Any, *args: Any, **kwargs: Any) -> Any:
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
-async def run_derived_rederive(graph_adapter: Any, llm: Any, *, limit: int = 25) -> dict:
+async def _embed_or_none(embedder: Any, text: str) -> list[float] | None:
+    """Embed rewritten fact text; any failure (class name only logged) yields None."""
+    if embedder is None or not text:
+        return None
+    try:
+        vector = await embedder.embed_query(text)
+        return [float(x) for x in vector]
+    except Exception as exc:
+        logger.warning("derived_rederive embedding failed: %s", type(exc).__name__)
+        return None
+
+
+async def run_derived_rederive(
+    graph_adapter: Any, llm: Any, *, limit: int = 25, embedder: Any = None
+) -> dict:
     """Process up to ``limit`` pending DerivedRederiveRepair nodes, oldest first.
 
     ``llm`` is the scheduler's LLM adapter (``lifecycle_service.llm``); ``None`` leaves everything
@@ -62,7 +76,11 @@ async def run_derived_rederive(graph_adapter: Any, llm: Any, *, limit: int = 25)
             "item_kind": kind,
             "item_uuid": item_uuid,
             "flagged_at": item.get("flagged_at"),
-            "episodes": list(item.get("episodes") or []),
+            # CAS compares the RAW stored list (facts); `episodes` is de-duplicated for sources.
+            "episodes": list(
+                item["episodes_raw"] if item.get("episodes_raw") is not None
+                else (item.get("episodes") or [])
+            ),
         }
 
         if not sources:
@@ -113,8 +131,13 @@ async def run_derived_rederive(graph_adapter: Any, llm: Any, *, limit: int = 25)
                 )
                 outcome = "deleted"
             else:
+                extra: dict[str, Any] = {}
+                if kind == "fact":
+                    vector = await _embed_or_none(embedder, text or "")
+                    if vector is not None:
+                        extra["embedding"] = vector
                 applied = await _call(
-                    graph_adapter.apply_derived_rederive, new_text=text or "", **cas
+                    graph_adapter.apply_derived_rederive, new_text=text or "", **extra, **cas
                 )
                 outcome = "rewritten"
 

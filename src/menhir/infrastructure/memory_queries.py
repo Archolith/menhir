@@ -1360,6 +1360,10 @@ class MemoryQueryRepository:
         + "}\n"
     )
     _DERIVED_EDGE_ONLY_STATEMENT = _DERIVED_EDGE_BODY.replace("__EDGE_NS_FILTER__", "")
+    # Target gone, caller scoped: only edges in the caller's namespace (review F4).
+    _DERIVED_EDGE_ONLY_SCOPED_STATEMENT = _DERIVED_EDGE_BODY.replace(
+        "__EDGE_NS_FILTER__", _DERIVED_EDGE_NS_FILTER
+    )
     # Entities reached from the target episode; views/artifacts/structure/TEMPORAL are skipped.
     _DERIVED_ENTITY_MATCH = (
         """
@@ -1498,6 +1502,7 @@ class MemoryQueryRepository:
         if not rows:
             return None
         row = dict(rows[0])
+        episodes_raw = [str(u) for u in (row.get("episodes") or [])]
         episodes = list(dict.fromkeys(str(u) for u in (row.get("episodes") or []) if u))
         source_rows = (
             self.neo4j.execute(
@@ -1517,6 +1522,7 @@ class MemoryQueryRepository:
             "pending": bool(row.get("pending")),
             "flagged_at": row.get("flagged_at"),
             "episodes": episodes,
+            "episodes_raw": episodes_raw if item_kind == "fact" else episodes,
             "text": row.get("text"),
             "name": row.get("name"),
             "sources": [str(s.get("content") or "") for s in source_rows if s.get("content")],
@@ -1532,6 +1538,7 @@ class MemoryQueryRepository:
         episodes: Sequence[str],
         new_text: str | None,
         delete: bool = False,
+        embedding: Sequence[float] | None = None,
     ) -> bool:
         """CAS write of a re-derive result; True only when it applied.
 
@@ -1545,6 +1552,7 @@ class MemoryQueryRepository:
             "flagged_at": flagged_at,
             "episodes": list(episodes),
             "new_text": new_text,
+            "embedding": list(embedding) if embedding is not None else None,
         }
         edge_guard = (
             "coalesce(r['rederive_pending'], false) "
@@ -1564,7 +1572,7 @@ class MemoryQueryRepository:
                 "MATCH (rr:DerivedRederiveRepair {repair_key: $repair_key}) "
                 + self._REDERIVE_EDGE_MATCH
                 + f" AND {edge_guard} "
-                "SET r.fact = $new_text, r.fact_embedding = null, "
+                "SET r.fact = $new_text, r.fact_embedding = $embedding, "
                 + self._REDERIVE_CLEAR.format(v="r")
                 + ", rr.status = 'done', rr.finished_at = datetime() "
                 "RETURN count(r) AS c"
@@ -1627,6 +1635,7 @@ class MemoryQueryRepository:
         operation_id: str,
         erased_uuids: Sequence[str] | None = None,
         deletable_entity_uuids: Sequence[str] | None = None,
+        scope_namespace: str | None = None,
     ) -> dict[str, Any]:
         """Delete one memory/observation and its authoritative scalar assertions atomically.
 
@@ -1667,11 +1676,21 @@ class MemoryQueryRepository:
             result = self._empty_memory_erasure_result()
             if not erased:
                 return result
-            # Target already gone: its derived fact edges can still carry the erased text.
-            edge_rows = self.neo4j.execute(
-                self._DERIVED_EDGE_ONLY_STATEMENT,
-                params={"node_uuid": node_uuid, "erased_uuids": erased},
-            )
+            # Target already gone: its derived fact edges can still carry the erased text. A
+            # scoped caller (pinned, or naming a namespace) touches only its own namespace: an
+            # absent uuid passes the ownership guard, so it must not reach other silos (F4).
+            scope = (scope_namespace or "").strip()
+            if scope:
+                edge_rows = self.neo4j.execute(
+                    self._DERIVED_EDGE_ONLY_SCOPED_STATEMENT,
+                    params={"node_uuid": node_uuid, "erased_uuids": erased,
+                            "namespace_key": scope},
+                )
+            else:
+                edge_rows = self.neo4j.execute(
+                    self._DERIVED_EDGE_ONLY_STATEMENT,
+                    params={"node_uuid": node_uuid, "erased_uuids": erased},
+                )
             edge_row = dict(edge_rows[0]) if edge_rows else {}
             result["derived_edges_deleted_uuids"] = list(edge_row.get("edges_deleted_uuids") or [])
             result["derived_edges_flagged_uuids"] = list(edge_row.get("edges_flagged_uuids") or [])
@@ -1960,17 +1979,35 @@ class MemoryQueryRepository:
                 // UNION branches run in order and see earlier branches' writes: branch 2 sets
                 // FAILED, so branch 3 must test the state from BEFORE any branch ran or it deletes
                 // the in-flight tombstone the worker needs (e2e-21 erase_during_enrichment).
-                WITH n, coalesce(n.processing_state, '') AS prior_state
+                //
+                // A queue node is kept as a content-less tombstone whenever a twin could still
+                // exist that this erase does not cover: enrichment running (PENDING/ENRICHING), an
+                // unlinked tombstone whose worker may still publish (a repeat erase or replay,
+                // review B-2), or a twin linked after the erase resolved its targets (B-1). The
+                // late-twin case is flagged so compensation erases the twin.
+                WITH n, coalesce(n.processing_state, '') AS prior_state,
+                     n.resolved_episode_uuid AS prior_resolved,
+                     (n['erased_at'] IS NOT NULL
+                      OR coalesce(n.processing_substage, '') = 'deleted_by_user') AS prior_erased
+                WITH n, prior_state,
+                     (prior_resolved IS NOT NULL AND NOT prior_resolved IN $erased_uuids
+                      AND EXISTS { MATCH (lt:Episodic {uuid: prior_resolved}) })
+                         AS late_twin,
+                     (prior_erased AND prior_resolved IS NULL) AS unlinked_tombstone
+                WITH n, late_twin,
+                     (prior_state IN ['PENDING', 'ENRICHING'] OR unlinked_tombstone OR late_twin)
+                         AS keep_tombstone
                 CALL {
-                    WITH n, prior_state
+                    WITH n, late_twin, keep_tombstone
                     WITH n WHERE n:Entity
                     DETACH DELETE n
                     RETURN 1 AS touched
                     UNION
-                    WITH n, prior_state
-                    WITH n WHERE n:Episodic
-                      AND prior_state IN ['PENDING', 'ENRICHING']
-                    SET n.processing_state = 'FAILED',
+                    WITH n, late_twin, keep_tombstone
+                    WITH n, late_twin WHERE n:Episodic AND keep_tombstone
+                    SET n.erasure_compensation_pending = CASE
+                            WHEN late_twin THEN true ELSE n.erasure_compensation_pending END,
+                        n.processing_state = 'FAILED',
                         n.processing_stage = 'failed',
                         n.processing_substage = 'deleted_by_user',
                         n.processing_substage_started_at = datetime(),
@@ -1987,16 +2024,15 @@ class MemoryQueryRepository:
                         n.processing_llm_active_endpoint = null
                     // The node is kept so the queue stops; the erased text is not.
                     REMOVE n.content, n.content_embedding, n.content_embedding_model,
-                           n.ingest_key, n.ingest_request_sha256
+                           n.diff, n.ingest_key, n.ingest_request_sha256
                     RETURN 1 AS touched
                     UNION
-                    WITH n, prior_state
-                    WITH n WHERE n:Episodic
-                      AND NOT prior_state IN ['PENDING', 'ENRICHING']
+                    WITH n, late_twin, keep_tombstone
+                    WITH n WHERE n:Episodic AND NOT keep_tombstone
                     DETACH DELETE n
                     RETURN 1 AS touched
                     UNION
-                    WITH n, prior_state
+                    WITH n, late_twin, keep_tombstone
                     WITH n WHERE n:TurnEvidence
                     DETACH DELETE n
                     RETURN 1 AS touched

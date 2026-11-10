@@ -381,6 +381,19 @@ class EpisodeLifecycleRepository:
         )
         return [dict(row) for row in rows]
 
+    def erasure_compensation_pending(self, episode_uuid: str) -> bool:
+        """True when an erased queue node still links a twin that needs erasing."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $episode_uuid})
+            WHERE n.erasure_compensation_pending = true
+              AND EXISTS { MATCH (t:Episodic {uuid: n.resolved_episode_uuid}) }
+            RETURN count(n) AS c
+            """,
+            params={"episode_uuid": episode_uuid},
+        )
+        return bool(rows) and int(rows[0].get("c") or 0) > 0
+
     def clear_erasure_compensation(self, episode_uuid: str) -> bool:
         """Clear the pending flag once the twin no longer exists."""
         rows = self.neo4j.execute(

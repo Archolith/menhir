@@ -60,7 +60,7 @@ class DeleteMemoryTool(BaseTextTool):
                 return (
                     f"Refused: memory {node_uuid} exists but is outside namespace {ns}."
                 )
-        outcome = await backend.erase_memory(node_uuid)
+        outcome = await backend.erase_memory(node_uuid, namespace=ns)
         reason = outcome.get("reason")
         purged = sum((outcome.get("purged") or {}).values())
 
@@ -112,8 +112,14 @@ class DeleteMemoryTool(BaseTextTool):
                     "so derived facts may remain."
                 )
                 gaps += 1
-            if outcome.get("stranded_known") is False:
+            if outcome.get("unaddressable_known") is False:
                 message += " The stored content census failed, so completeness is unknown."
+                gaps += 1
+            if outcome.get("wal_checkpoint_complete") is False:
+                message += (
+                    " The telemetry database's write-ahead log could not be checkpointed, so "
+                    "erased bytes may remain in it until the next checkpoint."
+                )
                 gaps += 1
             if not gaps:
                 message += " completeness could not be confirmed."
@@ -147,6 +153,11 @@ class DeleteMemoryTool(BaseTextTool):
                 message += (
                     f" NOTE: {len(unaddressable)} content location(s) could not be addressed and "
                     "were left untouched."
+                )
+            if outcome.get("wal_checkpoint_complete") is False:
+                message += (
+                    " NOTE: erased bytes may remain in the telemetry database's write-ahead log "
+                    "until the next checkpoint."
                 )
             return message
         # Unknown reason. An outcome we do not recognise is exactly the case where a

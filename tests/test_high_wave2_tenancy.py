@@ -164,7 +164,7 @@ class _Backend:
             return None
         return {"uuid": node_uuid}
 
-    async def erase_memory(self, node_uuid: str):
+    async def erase_memory(self, node_uuid: str, namespace: str | None = None):
         self.erased.append(node_uuid)
         return {"reason": "erased", "purged": {"x": 1}}
 

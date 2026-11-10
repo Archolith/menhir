@@ -687,6 +687,7 @@ class MaintenanceScheduler:
                     derived_rederive(
                         self.graph_adapter,
                         getattr(self.lifecycle_service, "llm", None),
+                        embedder=getattr(self.lifecycle_service, "graphiti_client", None),
                     ),
                 )
             elif name == "prune_telemetry_revisions":

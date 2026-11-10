@@ -435,6 +435,9 @@ class MemoryGraphAdapter:
     def clear_erasure_compensation(self, episode_uuid: str) -> bool:
         return self._episodes.clear_erasure_compensation(episode_uuid)
 
+    def erasure_compensation_pending(self, episode_uuid: str) -> bool:
+        return self._episodes.erasure_compensation_pending(episode_uuid)
+
     def find_unlinked_erased_twin(self, episode_uuid: str) -> dict:
         return self._episodes.find_unlinked_erased_twin(episode_uuid)
 
@@ -970,16 +973,20 @@ class MemoryGraphAdapter:
         *,
         erased_uuids: list[str] | None = None,
         deletable_entity_uuids: list[str] | None = None,
+        scope_namespace: str | None = None,
     ) -> dict[str, object]:
         """delete_memory returning the full cascade result; erased_uuids spans the whole erasure.
 
         deletable_entity_uuids: when given, only these single-source entities are deleted (the
         erasure fenced them); any other single-source entity is flagged instead.
+        scope_namespace: the caller's namespace; bounds the cleanup when the target is gone.
         """
         operation_id = uuidlib.uuid4().hex
         extra: dict[str, object] = {"erased_uuids": erased_uuids} if erased_uuids else {}
         if deletable_entity_uuids is not None:
             extra["deletable_entity_uuids"] = list(deletable_entity_uuids)
+        if scope_namespace:
+            extra["scope_namespace"] = scope_namespace
         result = self._memory_queries.delete_memory_with_scalar_cascade(
             node_uuid, operation_id=operation_id, **extra)
         repair = self.scalar_state_service().repair_pending_deletions(

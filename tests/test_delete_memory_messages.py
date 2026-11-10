@@ -22,7 +22,7 @@ class _Backend:
         self.outcome = outcome
         self.erased: list[str] = []
 
-    async def erase_memory(self, node_uuid: str) -> dict:
+    async def erase_memory(self, node_uuid: str, namespace: str | None = None) -> dict:
         self.erased.append(node_uuid)
         return self.outcome
 

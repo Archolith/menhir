@@ -101,7 +101,9 @@ class MemoryBackend(Protocol):
         """
         ...
 
-    async def erase_memory(self, node_uuid: str) -> dict[str, Any]:
+    async def erase_memory(
+        self, node_uuid: str, namespace: str | None = None
+    ) -> dict[str, Any]:
         """Erase a memory and report the outcome (CF-165).
 
         Distinguishes ``erased`` from ``graph_already_absent`` (the node was gone from the

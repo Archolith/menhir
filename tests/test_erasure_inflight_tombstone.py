@@ -229,10 +229,10 @@ def test_erase_ready_node_is_deleted_outright(test_neo4j_repo, tmp_path) -> None
 
 
 @pytest.mark.online
-def test_erase_of_existing_tombstone_deletes_it(test_neo4j_repo, tmp_path) -> None:
-    """A second erase of a FAILED/deleted_by_user tombstone must remove it (prior state FAILED).
-    Breaks if the delete branch only deletes nodes with no erased_at-less state, or if the
-    tombstone branch re-tombstones already-FAILED nodes so a tombstone can never be cleared."""
+def test_erase_of_unlinked_tombstone_keeps_it(test_neo4j_repo, tmp_path) -> None:
+    """A repeat erase of an UNLINKED tombstone must keep it (review B-2): its worker may still
+    publish a twin, and only the tombstone lets it detect the erase and compensate. It is cleared
+    later, when its linked twin is erased with it. Breaks if a re-erase or replay deletes it."""
     repo = test_neo4j_repo
     tag = f"test-tomb-reerase-{uuidlib.uuid4()}"
     try:
@@ -240,7 +240,9 @@ def test_erase_of_existing_tombstone_deletes_it(test_neo4j_repo, tmp_path) -> No
         _seed_existing_tombstone(repo, ids)
         _adapter, coord = _coordinator(repo, tmp_path)
         coord.erase_memory(ids["queue"])
-        assert _node(repo, ids["queue"]) is None
+        node = _node(repo, ids["queue"])
+        assert node is not None
+        assert node["state"] == "FAILED" and node["substage"] == "deleted_by_user"
     finally:
         _cleanup(repo, tag)
 

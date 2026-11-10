@@ -323,6 +323,7 @@ async def try_reconcile_existing(ctx: EnrichmentContext) -> bool:
                 ctx.episode_uuid,
                 ctx.worker_id,
             )
+            _compensate_if_erased(ctx, resolved_episode_uuid)
             return True
         record_lifecycle_event(
             component="ingest_worker",

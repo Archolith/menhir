@@ -159,15 +159,23 @@ class RuntimeProviderDataOpsMixin:
         # later inherited the same default. Unknown reasons now read as failure.
         return outcome.get("reason") in DELETION_SUCCEEDED_REASONS
 
-    async def erase_memory(self, node_uuid: str) -> dict[str, Any]:
+    async def erase_memory(
+        self, node_uuid: str, namespace: str | None = None
+    ) -> dict[str, Any]:
         """Erase a memory and report which outcome occurred (CF-165).
 
         The richer sibling of delete_memory. ``graph_already_absent`` is the case a bool
         cannot express: the node was gone from the graph, but sidecar content WAS erased --
         which is what a merge leaves behind for its absorbed participant.
+
+        The pin, else the caller's namespace, bounds the cleanup when the target is absent
+        everywhere: the ownership guard lets an absent uuid through (review F4).
         """
         await self._require_own_memory(node_uuid)
-        outcome = await self._off_loop(self._erasure().erase_memory, node_uuid)
+        scope = pinned_namespace() or (namespace or "").strip() or None
+        outcome = await self._off_loop(
+            self._erasure().erase_memory, node_uuid, caller_namespace=scope
+        )
         return dict(outcome or {})
 
     async def delete_namespace(

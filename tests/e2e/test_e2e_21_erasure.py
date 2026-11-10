@@ -646,11 +646,17 @@ async def test_e2e_21_erasure(
     e_says_erased = (reply_e.startswith(f"Erased memory {episode_e_id}")
                      and "INCOMPLETE" not in reply_e and "did NOT" not in reply_e)
     e_names_gap = "INCOMPLETE" in reply_e or "did NOT" in reply_e or "NOTE:" in reply_e
-    e_phrase_gone = all(count <= 0 for count in e_after_held.values())
+    # This stack's telemetry DB holds no memory text, so the phrase cannot be shown in the WAL.
+    # What is checkable: a held read snapshot makes the TRUNCATE checkpoint impossible, so an
+    # honest erase must say so instead of a plain "Erased" (C-1), and must still answer.
+    e_erase_answered = reply_e.startswith(f"Erased memory {episode_e_id}") and not \
+        reply_e.startswith("Error")
+    e_graph_clean = _empty(e_graph_after)
     lane_evidence.record(
         "erase_with_busy_sidecar_is_honest",
-        passed=bool(any(c > 0 for c in e_before.values())) and (e_names_gap or e_phrase_gone),
+        passed=e_erase_answered and e_names_gap and e_graph_clean,
         detail={"reply": reply_e, "says_erased": e_says_erased, "names_gap": e_names_gap,
+                "erase_answered": e_erase_answered, "graph_after": e_graph_after,
                 "sidecar_before": e_before, "sidecar_after_while_reader_held": e_after_held,
                 "sidecar_after_reader_closed": e_after_closed},
     )
