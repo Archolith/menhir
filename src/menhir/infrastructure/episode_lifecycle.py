@@ -411,24 +411,28 @@ class EpisodeLifecycleRepository:
         if not node_rows:
             return {}
         node = node_rows[0]
-        group_id = node.get("group_id") or namespace_to_group_id(node.get("namespace"))
-        if not group_id or node.get("name") is None or node.get("since") is None:
+        if node.get("name") is None or node.get("since") is None:
             return {}
+        # Never None: an unscoped tenant fragment would match twins in every namespace. '' and
+        # 'default' are one silo, so the default namespace must still be searched.
+        tenant = str(node.get("namespace") or node.get("group_id") or "").strip() or "default"
         rows = self.neo4j.execute(
-            """
+            f"""
             MATCH (e:Episodic)
             WHERE e.uuid <> $episode_uuid
-              AND e.group_id = $group_id
+              AND {tenant_scope_cypher("e")}
               AND e.name = $name
               AND e.created_at >= $since
-              AND NOT EXISTS { MATCH (q:Episodic) WHERE q.resolved_episode_uuid = e.uuid }
+              // Graphiti twins only: Menhir queue nodes always carry processing_state.
+              AND e.processing_state IS NULL
+              AND NOT EXISTS {{ MATCH (q:Episodic) WHERE q.resolved_episode_uuid = e.uuid }}
             RETURN e.uuid AS uuid
             """,
             params={
                 "episode_uuid": episode_uuid,
-                "group_id": group_id,
                 "name": node.get("name"),
                 "since": node.get("since"),
+                **tenant_scope_params(tenant),
             },
         )
         uuids = sorted({str(row["uuid"]) for row in rows if row.get("uuid")})

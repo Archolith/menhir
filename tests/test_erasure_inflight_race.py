@@ -456,3 +456,51 @@ def test_sweep_does_not_match_same_name_twin_in_another_namespace(
         assert props["checked"] == "none" and props["resolved"] is None
     finally:
         _cleanup(repo, tag)
+
+
+@pytest.mark.online
+def test_sweep_finds_default_namespace_twin(test_neo4j_repo) -> None:
+    """Default silo: Q has namespace 'default' and Graphiti writes the twin with group_id ''.
+    Breaks if the lookup goes back to an exact group_id match (default never matched, so the
+    backstop silently did nothing for most memories)."""
+    repo = test_neo4j_repo
+    tag = f"test-race-default-ns-{uuidlib.uuid4()}"
+    try:
+        ids = {**_ids(tag), "ns": "default"}
+        _seed_queue(repo, ids, erased_age="PT2H")
+        _seed_bare_twin(repo, ids, ids["twin"], group_id="")
+        from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+        assert MemoryGraphAdapter(neo4j=repo).find_unlinked_erased_twin(ids["queue"]) == {
+            "match": ids["twin"]
+        }
+    finally:
+        _cleanup(repo, tag)
+
+
+@pytest.mark.online
+def test_sweep_never_takes_a_live_queue_node_for_the_twin(test_neo4j_repo) -> None:
+    """A live Menhir memory with the same anchor name, same namespace and a later created_at must
+    not be a candidate, or the backstop would erase a memory the user kept. Breaks if the
+    `processing_state IS NULL` guard is dropped (the result becomes ambiguous or the wrong node)."""
+    repo = test_neo4j_repo
+    tag = f"test-race-live-queue-{uuidlib.uuid4()}"
+    try:
+        ids = _ids(tag)
+        _seed_queue(repo, ids, erased_age="PT2H")
+        _seed_bare_twin(repo, ids, ids["twin"])
+        repo.execute(
+            """
+            CREATE (:Episodic {uuid:$u, namespace:$ns, group_id:$ns, name:$name,
+                               processing_state:'READY', created_at: datetime() - duration('PT1H'),
+                               content:'kept memory', test_tag:$tag})
+            """,
+            params={**ids, "u": ids["other"]},
+        )
+        from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+        assert MemoryGraphAdapter(neo4j=repo).find_unlinked_erased_twin(ids["queue"]) == {
+            "match": ids["twin"]
+        }
+    finally:
+        _cleanup(repo, tag)

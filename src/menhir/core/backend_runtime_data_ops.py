@@ -211,9 +211,14 @@ class RuntimeProviderDataOpsMixin:
             self.built.graph_adapter.count_namespace, group_id, namespace=namespace
         )
         would_delete = force or node_count <= max_nodes
-        by_label = await self._off_loop(
-            self.built.graph_adapter.count_namespace_by_label, group_id, namespace=namespace
-        )
+        # Reporting only: a failed breakdown must never block or fail the erase itself.
+        by_label: dict | None = None
+        count_by_label = getattr(self.built.graph_adapter, "count_namespace_by_label", None)
+        if callable(count_by_label):
+            try:
+                by_label = await self._off_loop(count_by_label, group_id, namespace=namespace)
+            except Exception:
+                logger.warning("delete_namespace by_label count failed", exc_info=True)
 
         if dry_run:
             return {

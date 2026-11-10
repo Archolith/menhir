@@ -84,7 +84,6 @@ BASELINE: dict[str, int] = {
     # #574, owner-approved 2026-11-09: copies graphiti's own `group_id IN $group_ids` so the
     # index path filters exactly like the stock scan it falls back to.
     "infrastructure/graphiti_vector_search.py": 2,
-    "infrastructure/memory_graph_adapter.py": 11,
     "infrastructure/memory_queries.py": 23,
     "infrastructure/scalar_view_repository.py": 8,
     "infrastructure/structure_queries.py": 2,
@@ -139,9 +138,11 @@ def test_the_detector_is_not_vacuous() -> None:
     Two independent checks: the total is in the right order of magnitude, and a specific known
     site is still seen."""
     census = _census()
-    assert sum(census.values()) >= 80, (
-        f"detector found only {sum(census.values())}; expected ~92 after CF-158 separated "
-        "tenancy writes from tenancy predicates (it was ~113 counting both)"
+    # Floor lowered 80 -> 70 when #476 replaced memory_graph_adapter's 11 copies of the namespace
+    # erase predicate with the one shared NAMESPACE_ERASE_PREDICATE (census 85 -> 74).
+    assert sum(census.values()) >= 70, (
+        f"detector found only {sum(census.values())}; expected ~74 after #476 consolidated the "
+        "namespace erase predicate (~92 after CF-158, ~113 counting tenancy writes)"
     )
 
     known = (SRC / "infrastructure/memory_queries.py").read_text(encoding="utf-8")
