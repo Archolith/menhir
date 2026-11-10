@@ -265,7 +265,9 @@ def test_job_rewrites_flagged_fact_and_entity_from_remaining_sources_only(
     tag = f"test-rrd-rewrite-{uuidlib.uuid4()}"
     try:
         ids, adapter = _erase(repo, tmp_path, tag)
-        assert _edge(repo, ids["edge"])["embedding"] is not None  # stale embedding present
+        # Scrub at erase (owner ruling 2026-11-09): text and stale embedding are already gone.
+        assert _edge(repo, ids["edge"])["embedding"] is None
+        assert _edge(repo, ids["edge"])["fact"] == ""
         llm = _FakeLLM(_SUPPORTED)
 
         counts = _run(_ScopedAdapter(adapter, tag), llm)
@@ -336,7 +338,7 @@ def test_counterexample_second_erasure_reflag_between_load_and_apply_refuses_wri
         assert counts["cas_failed"] == 1
         assert counts["rewritten"] == 1  # only the entity applied
         edge = _edge(repo, ids["edge"])
-        assert edge["fact"] == SECRET
+        assert edge["fact"] == ""  # still the erase-time scrub, not the refused rewrite
         assert edge["pending"] is True
         assert _repairs(repo, tag)["fact"]["status"] == "pending"
         # And the read path still hides it.
@@ -371,7 +373,7 @@ def test_counterexample_episode_set_change_between_load_and_apply_refuses_write(
 
         assert counts["cas_failed"] == 1
         edge = _edge(repo, ids["edge"])
-        assert edge["fact"] == SECRET
+        assert edge["fact"] == ""  # still the erase-time scrub, not the refused rewrite
         assert edge["pending"] is True
         assert _repairs(repo, tag)["fact"]["status"] == "pending"
     finally:

@@ -402,12 +402,15 @@ class LLMAdapter:
                 "You verify and rewrite a knowledge-graph fact after some of its source memories "
                 "were deleted. "
                 + _UNTRUSTED_DATA_NOTICE
-                + "Given <current_fact> and the remaining <source> fields, decide whether the "
-                "sources alone support the fact. If they do, reply 'SUPPORTED: ' followed by one "
-                "concise fact using ONLY information found in the sources. If they do not, reply "
-                "with exactly one word: UNSUPPORTED."
+                + "Given the <relation> (subject, relation type, object), an optional "
+                "<current_fact>, and the remaining <source> fields, decide whether the sources "
+                "alone support a fact of that relation. If they do, reply 'SUPPORTED: ' followed "
+                "by one concise fact using ONLY information found in the sources. If they do not, "
+                "reply with exactly one word: UNSUPPORTED."
             )
-            subject = _tagged_prompt_data("current_fact", current_text, limit=1000)
+            subject = _tagged_prompt_data("relation", name, limit=300)
+            if current_text.strip():
+                subject += "\n" + _tagged_prompt_data("current_fact", current_text, limit=1000)
         else:
             system_prompt = (
                 "You rewrite a knowledge-graph entity summary after some of its source memories "

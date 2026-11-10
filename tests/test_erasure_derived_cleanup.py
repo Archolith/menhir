@@ -252,7 +252,8 @@ def test_shared_entity_survives_flagged(test_neo4j_repo, tmp_path) -> None:
         ent = _entity(repo, ids["entity"])
         assert ent is not None, "an entity still mentioned by a live episode must survive"
         assert ent["pending"] is True
-        assert ent["summary"] == SECRET  # hiding is a recall concern; the node is not rewritten
+        # Owner ruling 2026-11-09: scrub at erase; the rederive job rebuilds it from live sources.
+        assert ent["summary"] == ""
         assert outcome["derived"]["entities_flagged"] == 1
         assert outcome["derived"]["entities_deleted"] == 0
         ent_repairs = [r for r in _repairs(repo, tag) if r["kind"] == "entity"]
