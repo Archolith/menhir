@@ -81,10 +81,18 @@ def sweep_erased_twin_compensations(
         try:
             found = getattr(graph_adapter, "find_unlinked_erased_twin")(uuid)
             if found.get("match"):
-                getattr(graph_adapter, "link_erased_twin")(uuid, found["match"])
-                _erase_and_clear(graph_adapter, uuid, coordinator_factory)
-                getattr(graph_adapter, "mark_compensation_checked")(uuid, "compensated")
-                counts["compensated"] += 1
+                # Linked meanwhile to another twin: leave it to the pending-compensation retry.
+                result = compensate_erased_enrichment(
+                    graph_adapter, uuid, found["match"], coordinator_factory=coordinator_factory
+                )
+                if result.get("error"):
+                    counts["errors"] += 1
+                elif result.get("erased"):
+                    getattr(graph_adapter, "mark_compensation_checked")(uuid, "compensated")
+                    counts["compensated"] += 1
+                else:
+                    getattr(graph_adapter, "mark_compensation_checked")(uuid, "link_conflict")
+                    counts["ambiguous"] += 1
             elif found.get("ambiguous"):
                 logger.warning(
                     "Ambiguous unlinked twin for erased episode_id=%s candidates=%s",
