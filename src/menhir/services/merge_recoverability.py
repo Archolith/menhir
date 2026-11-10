@@ -26,10 +26,13 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 from dataclasses import dataclass, field
 from typing import Any
 
 from menhir.domain import legacy_snapshot as ls
+from menhir.domain.erasure import ERASED_MARKER
+from menhir.infrastructure.telemetry import connect_telemetry_db
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +43,25 @@ LINEAGE_ONLY = "LINEAGE_ONLY"
 MALFORMED = "MALFORMED"
 
 TIERS = (EXACT, LEGACY_SIDECAR, GRAPH_SNAPSHOT_ONLY, LINEAGE_ONLY, MALFORMED)
+
+# Reported separately from TIERS: a COMMITTED merge whose snapshot an erasure removed.
+ERASED_IRREVERSIBLE = "erased_irreversible"
+
+
+def _snapshot_erased(journal: Any, op_id: str) -> bool:
+    """Whether a purged erasure subject overlaps this op's indexed subjects. False on any error."""
+    try:
+        with connect_telemetry_db(journal.db_path) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM graph_operation_subjects s "
+                "JOIN erasure_subjects e ON e.subject_value = s.subject_uuid "
+                "WHERE s.op_id = ? AND e.subject_type = 'NODE_UUID' "
+                "AND e.purged_at IS NOT NULL LIMIT 1",
+                (op_id,),
+            ).fetchone()
+        return row is not None
+    except (sqlite3.Error, AttributeError):
+        return False
 
 
 @dataclass
@@ -63,6 +85,7 @@ class RecoverabilityReport:
             "",
             f"  Exactly reversible:     {self.recoverable_exactly}",
             f"  NOT recoverable:        {self.not_recoverable}",
+            f"  Erased (irreversible):  {self.counts.get(ERASED_IRREVERSIBLE, 0)}",
             "",
         ]
         if self.counts.get(GRAPH_SNAPSHOT_ONLY):
@@ -97,8 +120,25 @@ def inventory(*, neo4j: Any, journal: Any, telemetry_store: Any = None) -> Recov
 
     # 1. Journaled merges with a complete snapshot -> exactly reversible.
     exact: dict[str, dict[str, Any]] = {}
+    erased: list[dict[str, Any]] = []
     for row in journal.list_by_state("COMMITTED", limit=1_000_000):
-        if row.get("operation_kind") != "ENTITY_MERGE" or not row.get("before_snapshot_json"):
+        if row.get("operation_kind") != "ENTITY_MERGE":
+            continue
+        snapshot = row.get("before_snapshot_json")
+        if snapshot == ERASED_MARKER or (not snapshot and _snapshot_erased(journal, row["op_id"])):
+            # An erasure removed the snapshot: permanently non-reversible, reported on its own.
+            try:
+                erased_req = json.loads(row["request_json"])
+            except (TypeError, ValueError):
+                erased_req = {}
+            erased.append({
+                "tier": ERASED_IRREVERSIBLE,
+                "absorbed_uuid": erased_req.get("absorbed_uuid"),
+                "survivor_uuid": erased_req.get("survivor_uuid"),
+                "merge_op_id": row["op_id"],
+            })
+            continue
+        if not snapshot:
             continue
         try:
             req = json.loads(row["request_json"])
@@ -181,4 +221,6 @@ def inventory(*, neo4j: Any, journal: Any, telemetry_store: Any = None) -> Recov
     counts = {tier: 0 for tier in TIERS}
     for r in rows:
         counts[r["tier"]] = counts.get(r["tier"], 0) + 1
+    rows.extend(erased)
+    counts[ERASED_IRREVERSIBLE] = len(erased)
     return RecoverabilityReport(counts=counts, rows=rows)

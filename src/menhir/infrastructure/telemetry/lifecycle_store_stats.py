@@ -26,6 +26,8 @@ class TelemetryRetentionStatsMixin:
     #: would silently convert "recoverable" into "permanently lost", which is data destruction
     #: wearing the costume of disk hygiene. Erasure already suppresses these rows by subject,
     #: which is the correct deletion axis for them.
+    #: The same holds for graph_operations ENTITY_MERGE / ENTITY_UNMERGE snapshots: unmerge needs
+    #: them, so they are exempt from age pruning (see prune_operation_snapshots).
     _RETENTION_TIERS: dict[str, tuple[str, str]] = {
         # High-volume observability.
         "lifecycle_events": ("recorded_at", "observability"),
@@ -84,8 +86,34 @@ class TelemetryRetentionStatsMixin:
                 )
                 if cursor.rowcount > 0:
                     deleted[table] = cursor.rowcount
+            nulled = self.prune_operation_snapshots(conn, windows["diagnostic"])
+            if nulled > 0:
+                deleted["graph_operations.before_snapshot_json"] = nulled
             conn.commit()
         return deleted
+
+    def prune_operation_snapshots(self, conn: sqlite3.Connection, days: int) -> int:
+        """NULL completed delete/TTL snapshots older than ``days`` (#475). Returns rows nulled.
+
+        Merge/unmerge snapshots are NOT touched (unmerge needs them). Does not commit.
+        """
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='graph_operations'"
+        ).fetchone()
+        if exists is None:
+            return 0
+        cursor = conn.execute(
+            """
+            UPDATE graph_operations SET before_snapshot_json = NULL
+            WHERE operation_kind IN ('ENTITY_DELETE', 'SESSION_TTL_DELETE')
+              AND state IN ('COMMITTED', 'FAILED', 'REVERSED')
+              AND before_snapshot_json IS NOT NULL
+              AND substr(replace(updated_at, 'T', ' '), 1, 19)
+                  < datetime('now', '-' || ? || ' days')
+            """,
+            (max(1, int(days)),),
+        )
+        return max(cursor.rowcount, 0)
 
     def prune_old_revisions(self, *, retention_days: int) -> int:
         """Delete memory_revisions rows older than retention_days. Returns rows deleted.

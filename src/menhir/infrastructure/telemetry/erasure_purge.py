@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from menhir.domain.erasure import ERASED_MARKER
 from menhir.infrastructure.telemetry.erasure_inventory import (
     CONTENT_COLUMNS,
+    ContentColumn,
     ErasureShape,
 )
 
@@ -105,15 +106,32 @@ def _subject_set_for(key_column: str, subjects: ErasureSubjects) -> frozenset[st
 
 
 def _where_clause_for(
-    shape: ErasureShape, key_columns: tuple[str, ...], subjects: ErasureSubjects
+    shape: ErasureShape,
+    key_columns: tuple[str, ...],
+    subjects: ErasureSubjects,
+    entry: ContentColumn | None = None,
 ) -> tuple[str, list[str]] | None:
     """Build a WHERE fragment + bound params for an entry, or None if unreachable.
 
     Returns None when no key column resolves to any subject, so the caller skips the
     entry instead of emitting a ``WHERE x IN ()``. The fragment uses ``?`` placeholders
     for all VALUES; column names are resolved here from the registry and are never
-    caller input.
+    caller input. ``entry`` is required for ``INDEXED_SUBJECT`` (it carries the side table).
     """
+    if shape is ErasureShape.INDEXED_SUBJECT:
+        if (
+            entry is None
+            or not (entry.via_table and entry.via_key and entry.via_subject and entry.row_key)
+            or not subjects.node_uuids
+        ):
+            return None
+        values = subjects.node_uuids
+        placeholders = ",".join("?" for _ in values)
+        return (
+            f"{entry.row_key} IN (SELECT {entry.via_key} FROM {entry.via_table} "
+            f"WHERE {entry.via_subject} IN ({placeholders}))",
+            list(values),
+        )
     resolved: list[tuple[str, frozenset[str]]] = []
     for key_column in key_columns:
         values = _subject_set_for(key_column, subjects)
@@ -185,7 +203,9 @@ def count_residual_content(
             continue
         if not _table_exists(conn, entry.table):
             continue
-        clause = _where_clause_for(entry.shape, entry.key_columns, subjects)
+        if entry.via_table and not _table_exists(conn, entry.via_table):
+            continue
+        clause = _where_clause_for(entry.shape, entry.key_columns, subjects, entry)
         if clause is None:
             continue
         where, params = clause
@@ -342,6 +362,16 @@ def count_unaddressable_content(
                 populated = f"{populated} AND {pk} > {int(ceiling)}"
         if entry.shape is ErasureShape.UNADDRESSABLE:
             where = populated
+        elif entry.shape is ErasureShape.INDEXED_SUBJECT:
+            if not (entry.via_table and entry.via_key and entry.row_key):
+                continue
+            if not _table_exists(conn, entry.via_table):
+                continue
+            # Populated content with no subject row at all can never be matched by an erasure.
+            where = (
+                f"{populated} AND NOT EXISTS (SELECT 1 FROM {entry.via_table} "
+                f"WHERE {entry.via_table}.{entry.via_key} = {entry.table}.{entry.row_key})"
+            )
         else:
             # Stranded only when EVERY key column is empty. One populated key still lets some
             # subject set address the row, so it is reachable in principle and not counted here.
@@ -389,13 +419,22 @@ def purge_content(
             continue
         if not _table_exists(conn, entry.table):
             continue
-        clause = _where_clause_for(entry.shape, entry.key_columns, subjects)
+        if entry.via_table and not _table_exists(conn, entry.via_table):
+            continue
+        clause = _where_clause_for(entry.shape, entry.key_columns, subjects, entry)
         if clause is None:
             # Only worth reporting when the column actually holds something.
             if _has_content(conn, entry.table, entry.column):
                 no_subjects.append(key)
             continue
         where, params = clause
+        if entry.purge_filter:
+            # Not applied by count_residual_content: a filtered-out row stays residue. Only rows
+            # still holding content, so an already-blank row is not reported as purged.
+            where = (
+                f"({where}) AND ({entry.purge_filter}) AND {entry.column} IS NOT NULL "
+                f"AND {entry.column} <> ''"
+            )
         # Table and column names are registry-provided (never caller input), so they are
         # interpolated directly; every VALUE is bound with a placeholder.
         if dry_run:

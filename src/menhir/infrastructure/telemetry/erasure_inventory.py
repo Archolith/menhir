@@ -41,6 +41,8 @@ class ErasureShape(str, Enum):
     NAMESPACE_KEYED = "NAMESPACE_KEYED"
     DERIVABLE_SUBJECT = "DERIVABLE_SUBJECT"
     UNADDRESSABLE = "UNADDRESSABLE"
+    #: Content addressed through a side table mapping row_key -> subject uuid.
+    INDEXED_SUBJECT = "INDEXED_SUBJECT"
 
 
 @dataclass(frozen=True)
@@ -61,7 +63,24 @@ class ContentColumn:
     shape: ErasureShape
     key_columns: tuple[str, ...]
     note: str = ""
+    # INDEXED_SUBJECT only: rows of ``table`` whose ``row_key`` appears in ``via_table``
+    # (``via_key`` = row_key value) with ``via_subject`` in the erased node uuids.
+    via_table: str | None = None
+    via_key: str | None = None
+    via_subject: str | None = None
+    row_key: str | None = None
+    # Extra SQL predicate the purge (not the residual count) applies, so rows it must not
+    # touch stay visible as residue and the erasure quarantines instead of claiming success.
+    purge_filter: str | None = None
 
+
+# Unresolved saga rows still need their snapshot to replay; never purge under them.
+_GRAPH_OPS_TERMINAL = "state IN ('COMMITTED', 'FAILED', 'REVERSED')"
+
+_GRAPH_OPS_INDEX_NOTE = (
+    "Journal snapshot/error text holds node properties and relationships (memory text). "
+    "Addressed through graph_operation_subjects, which indexes every uuid the row mentions."
+)
 
 CONTENT_COLUMNS: tuple[ContentColumn, ...] = (
     ContentColumn(
@@ -293,6 +312,30 @@ CONTENT_COLUMNS: tuple[ContentColumn, ...] = (
             "content and must be reported when an erasure cannot derive its session ownership."
         ),
     ),
+    ContentColumn(
+        table="graph_operations",
+        column="before_snapshot_json",
+        shape=ErasureShape.INDEXED_SUBJECT,
+        key_columns=("op_id",),
+        note=_GRAPH_OPS_INDEX_NOTE,
+        via_table="graph_operation_subjects",
+        via_key="op_id",
+        via_subject="subject_uuid",
+        row_key="op_id",
+        purge_filter=_GRAPH_OPS_TERMINAL,
+    ),
+    ContentColumn(
+        table="graph_operations",
+        column="last_error",
+        shape=ErasureShape.INDEXED_SUBJECT,
+        key_columns=("op_id",),
+        note=_GRAPH_OPS_INDEX_NOTE + " Exception text can embed content.",
+        via_table="graph_operation_subjects",
+        via_key="op_id",
+        via_subject="subject_uuid",
+        row_key="op_id",
+        purge_filter=_GRAPH_OPS_TERMINAL,
+    ),
 )
 
 
@@ -438,6 +481,42 @@ NON_CONTENT_COLUMNS: frozenset[tuple[str, str]] = frozenset(
         # extraction_lab_runs
         ("extraction_lab_runs", "recorded_at"),
         ("extraction_lab_runs", "namespace"),
+        # graph_operations -- request_json holds uuids and request metadata only; the snapshot
+        # and error text are classified above.
+        ("graph_operations", "op_id"),
+        ("graph_operations", "batch_id"),
+        ("graph_operations", "operation_kind"),
+        ("graph_operations", "target_uuid"),
+        ("graph_operations", "target_key"),
+        ("graph_operations", "request_json"),
+        ("graph_operations", "expected_after_sha256"),
+        ("graph_operations", "state"),
+        ("graph_operations", "created_at"),
+        ("graph_operations", "updated_at"),
+        ("graph_operations", "committed_at"),
+        ("graph_operations", "reverses_op_id"),
+        ("graph_operations", "owner_token"),
+        ("graph_operations", "owner_heartbeat_at"),
+        ("graph_operations", "owner_lease_expires_at"),
+        ("graph_operations", "owner_death_attested_by"),
+        ("graph_operations", "owner_death_attested_at"),
+        ("graph_operations", "owner_death_attested_for_token"),
+        ("graph_operations", "resolved_by_token"),
+        # graph_operation_locks
+        ("graph_operation_locks", "entity_uuid"),
+        ("graph_operation_locks", "op_id"),
+        ("graph_operation_locks", "operation_kind"),
+        ("graph_operation_locks", "created_at"),
+        # graph_operation_subjects / backfill marker
+        ("graph_operation_subjects", "op_id"),
+        ("graph_operation_subjects", "subject_uuid"),
+        ("graph_operation_subjects_backfill", "done_at"),
+        # erasure_subjects -- identifiers (uuids, namespace keys) and timestamps only
+        ("erasure_subjects", "op_id"),
+        ("erasure_subjects", "subject_type"),
+        ("erasure_subjects", "subject_value"),
+        ("erasure_subjects", "recorded_at"),
+        ("erasure_subjects", "purged_at"),
     }
 )
 
