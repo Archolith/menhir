@@ -27,7 +27,10 @@ from menhir.clock import utc_now_iso as _utc_now_iso
 
 # Closed enum of subject kinds a read-suppression check can ask about. Kept as a plain
 # frozenset so callers pass validated strings.
-SUBJECT_TYPES = frozenset({"NODE_UUID", "NAMESPACE", "EPISODE_UUID", "SESSION_ID"})
+# DERIVED_UUID: a derived entity/fact an erasure removed (#423); purged, never replayed as a delete.
+SUBJECT_TYPES = frozenset(
+    {"NODE_UUID", "NAMESPACE", "EPISODE_UUID", "SESSION_ID", "DERIVED_UUID"}
+)
 
 
 class ErasureSubjectError(Exception):
@@ -66,7 +69,7 @@ def suppressed_node_uuids(db_path, candidates) -> frozenset[str]:
             placeholders = ",".join("?" for _ in wanted)
             rows = conn.execute(
                 "SELECT DISTINCT subject_value FROM erasure_subjects "
-                f"WHERE subject_type = 'NODE_UUID' AND purged_at IS NULL "
+                f"WHERE subject_type IN ('NODE_UUID', 'DERIVED_UUID') AND purged_at IS NULL "
                 f"AND subject_value IN ({placeholders})",
                 wanted,
             ).fetchall()

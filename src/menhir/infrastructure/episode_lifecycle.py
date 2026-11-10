@@ -391,6 +391,95 @@ class EpisodeLifecycleRepository:
                     episodes.append(twin)
         return turn_ids + episodes
 
+    def erasure_derived_preview(
+        self, erased_uuids: list[str], *, twin_found: bool | None = None
+    ) -> dict[str, Any]:
+        """Classify the derived facts/entities an erasure of ``erased_uuids`` would touch (read-only).
+
+        Mirrors the cascade's derived cleanup. ``erased_uuids[0]`` is the queue node.
+        ``twin_found`` says whether a Graphiti twin was resolved; when None it is inferred as
+        ``len(erased_uuids) > 1``. ``twin_missing`` is a READY queue node with no resolved episode
+        and no twin: its derived content cannot be traced.
+        """
+        erased = [str(u) for u in erased_uuids if u]
+        out: dict[str, Any] = {
+            "entities_delete": [],
+            "entities_flag": [],
+            "edges_delete": [],
+            "edges_flag": [],
+            "unknown_provenance": 0,
+            "twin_missing": False,
+        }
+        if not erased:
+            return out
+        edge_rows = self.neo4j.execute(
+            """
+            MATCH (:Entity)-[fe:RELATES_TO]->(:Entity)
+            WHERE fe.fact IS NOT NULL
+              AND any(u IN coalesce(fe.episodes, []) WHERE u IN $erased_uuids)
+            RETURN coalesce(fe.uuid, elementId(fe)) AS uuid,
+                   size([u IN coalesce(fe.episodes, []) WHERE NOT u IN $erased_uuids]) AS remaining
+            """,
+            params={"erased_uuids": erased},
+        )
+        for row in edge_rows or []:
+            key = "edges_flag" if int(row.get("remaining") or 0) > 0 else "edges_delete"
+            out[key].append(str(row["uuid"]))
+        entity_rows = self.neo4j.execute(
+            """
+            MATCH (t:Episodic)-[:MENTIONS|RETENTION_SOURCE]->(e:Entity)
+            WHERE t.uuid IN $erased_uuids
+              AND NOT (coalesce(e.is_view, false)
+                       OR coalesce(e.is_quantstate, false)
+                       OR e.view_kind IS NOT NULL)
+              AND NOT coalesce(e.is_artifact, false)
+              AND coalesce(e.type, '') <> 'TEMPORAL'
+              AND ("""
+            + non_structural_memory_cypher("e")
+            + """)
+              AND NOT e.uuid IN $erased_uuids
+            WITH DISTINCT e
+            RETURN e.uuid AS uuid,
+                   EXISTS {
+                       MATCH (e)-[r:RELATES_TO]-(:Entity)
+                       WHERE r.fact IS NOT NULL AND size(coalesce(r.episodes, [])) = 0
+                   } AS unknown,
+                   (EXISTS {
+                       MATCH (o:Episodic)-[:MENTIONS|RETENTION_SOURCE]->(e)
+                       WHERE NOT o.uuid IN $erased_uuids
+                   } OR EXISTS {
+                       MATCH (e)-[r2:RELATES_TO]-(:Entity)
+                       WHERE r2.fact IS NOT NULL
+                         AND any(u IN coalesce(r2.episodes, []) WHERE NOT u IN $erased_uuids)
+                   }) AS shared
+            """,
+            params={"erased_uuids": erased},
+        )
+        for row in entity_rows or []:
+            if row.get("unknown"):
+                out["unknown_provenance"] += 1
+            elif row.get("shared"):
+                out["entities_flag"].append(str(row["uuid"]))
+            else:
+                out["entities_delete"].append(str(row["uuid"]))
+        if twin_found is None:
+            twin_found = len(erased) > 1
+        if not twin_found:
+            head = self.neo4j.execute(
+                """
+                MATCH (n:Episodic {uuid: $uuid})
+                WHERE n.processing_state = 'READY' AND n.resolved_episode_uuid IS NULL
+                  // verbatim_skipped/store_only rows are READY with no twin by design; only a
+                  // row that recorded extracted data but lost its link is untraceable.
+                  AND (coalesce(toInteger(n.enriched_nodes_touched), 0) > 0
+                       OR coalesce(toInteger(n.enriched_edges_touched), 0) > 0)
+                RETURN count(n) AS n
+                """,
+                params={"uuid": erased[0]},
+            )
+            out["twin_missing"] = bool(head and int(head[0].get("n") or 0) > 0)
+        return out
+
     def list_episodes_missing_content_embedding(
         self,
         namespace: str | None = None,

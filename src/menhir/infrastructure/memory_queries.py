@@ -1239,8 +1239,142 @@ class MemoryQueryRepository:
         )
         return bool(rows and int(rows[0].get("nodes_updated", 0)) > 0)
 
+    # Derived-fact cleanup (#423). Fact edges first: strip erased episodes, delete emptied edges,
+    # flag survivors. The entity step reads the stripped edges, so this must run before it.
+    _DERIVED_EDGE_BODY = (
+        """
+        OPTIONAL MATCH (:Entity)-[fe:RELATES_TO]->(:Entity)
+        WHERE fe.fact IS NOT NULL
+          AND any(u IN coalesce(fe.episodes, []) WHERE u IN $erased_uuids)
+          __EDGE_NS_FILTER__
+        WITH [x IN collect(DISTINCT fe) WHERE x IS NOT NULL] AS hit_edges
+        WITH [x IN hit_edges
+              WHERE size([u IN coalesce(x.episodes, []) WHERE NOT u IN $erased_uuids]) = 0
+             ] AS dead_edges,
+             [x IN hit_edges
+              WHERE size([u IN coalesce(x.episodes, []) WHERE NOT u IN $erased_uuids]) > 0
+             ] AS live_edges
+        WITH dead_edges, live_edges,
+             [x IN dead_edges | coalesce(x.uuid, elementId(x))] AS edges_deleted_uuids,
+             [x IN live_edges | coalesce(x.uuid, elementId(x))] AS edges_flagged_uuids
+        FOREACH (x IN live_edges |
+            SET x.episodes = [u IN coalesce(x.episodes, []) WHERE NOT u IN $erased_uuids],
+                x.rederive_pending = true,
+                x.rederive_reason = 'source_erased',
+                x.rederive_flagged_at = datetime()
+        )
+        FOREACH (x IN live_edges |
+            MERGE (rr:DerivedRederiveRepair {
+                repair_key: $node_uuid + '\\u001f' + coalesce(x.uuid, elementId(x))
+            })
+            ON CREATE SET rr.item_uuid = coalesce(x.uuid, elementId(x)),
+                          rr.item_kind = 'fact',
+                          rr.namespace = CASE
+                              WHEN trim(toString(coalesce(x.namespace, x.group_id, ''))) = ''
+                              THEN 'default'
+                              ELSE trim(toString(coalesce(x.namespace, x.group_id)))
+                          END,
+                          rr.status = 'pending',
+                          rr.created_at = datetime()
+        )
+        FOREACH (x IN dead_edges | DELETE x)
+        RETURN edges_deleted_uuids, edges_flagged_uuids
+        """
+    )
+    _DERIVED_EDGE_NS_FILTER = (
+        """AND CASE
+                 WHEN trim(toString(coalesce(fe.namespace, fe.group_id, ''))) = ''
+                 THEN 'default'
+                 ELSE trim(toString(coalesce(fe.namespace, fe.group_id)))
+             END = $namespace_key"""
+    )
+    _DERIVED_EDGE_CALL = (
+        "\n            CALL {"
+        + _DERIVED_EDGE_BODY.replace("__EDGE_NS_FILTER__", _DERIVED_EDGE_NS_FILTER)
+        + "}\n"
+    )
+    _DERIVED_EDGE_ONLY_STATEMENT = _DERIVED_EDGE_BODY.replace("__EDGE_NS_FILTER__", "")
+    # Entities reached from the target episode; views/artifacts/structure/TEMPORAL are skipped.
+    _DERIVED_ENTITY_MATCH = (
+        """
+        OPTIONAL MATCH (:Episodic {uuid: $node_uuid})-[:MENTIONS|RETENTION_SOURCE]->(e:Entity)
+        WHERE NOT (coalesce(e.is_view, false)
+                   OR coalesce(e.is_quantstate, false)
+                   OR e.view_kind IS NOT NULL)
+          AND NOT coalesce(e.is_artifact, false)
+          AND coalesce(e.type, '') <> 'TEMPORAL'
+          AND ("""
+        + non_structural_memory_cypher("e")
+        + """)
+          AND NOT e.uuid IN $erased_uuids
+          __ENTITY_NS_FILTER__
+        WITH collect(DISTINCT e) AS cands
+        WITH cands,
+             [e IN cands WHERE EXISTS {
+                 MATCH (e)-[r:RELATES_TO]-(:Entity)
+                 WHERE r.fact IS NOT NULL AND size(coalesce(r.episodes, [])) = 0
+             }] AS unknown
+        WITH [e IN cands WHERE NOT e IN unknown] AS rest, size(unknown) AS unknown_n
+        WITH rest, unknown_n,
+             [e IN rest
+              WHERE NOT EXISTS {
+                      MATCH (o:Episodic)-[:MENTIONS|RETENTION_SOURCE]->(e)
+                      WHERE NOT o.uuid IN $erased_uuids
+                  }
+                AND NOT EXISTS {
+                      MATCH (e)-[r:RELATES_TO]-(:Entity)
+                      WHERE r.fact IS NOT NULL AND size(coalesce(r.episodes, [])) > 0
+                  }
+                // Only entities the erasure fenced at PREPARE; the rest are flagged, not deleted.
+                AND ($deletable_entity_uuids IS NULL OR e.uuid IN $deletable_entity_uuids)
+             ] AS doomed
+        WITH unknown_n, doomed, [e IN rest WHERE NOT e IN doomed] AS shared
+        WITH unknown_n, doomed, shared,
+             [e IN doomed | e.uuid] AS entities_deleted_uuids,
+             [e IN shared | e.uuid] AS entities_flagged_uuids
+        """
+    )
+    _DERIVED_ENTITY_NS_FILTER = (
+        """AND CASE
+                 WHEN trim(toString(coalesce(e.namespace, e.group_id, ''))) = ''
+                 THEN 'default'
+                 ELSE trim(toString(coalesce(e.namespace, e.group_id)))
+             END = $namespace_key"""
+    )
+    _DERIVED_ENTITY_WRITE = (
+        """
+        FOREACH (e IN shared |
+            SET e.rederive_pending = true,
+                e.rederive_reason = 'source_erased',
+                e.rederive_flagged_at = datetime()
+        )
+        FOREACH (e IN shared |
+            MERGE (rr:DerivedRederiveRepair {repair_key: $node_uuid + '\\u001f' + e.uuid})
+            ON CREATE SET rr.item_uuid = e.uuid,
+                          rr.item_kind = 'entity',
+                          rr.namespace = $namespace_key,
+                          rr.status = 'pending',
+                          rr.created_at = datetime()
+        )
+        FOREACH (e IN doomed | DETACH DELETE e)
+        RETURN unknown_n AS derived_unknown_provenance,
+               entities_deleted_uuids, entities_flagged_uuids
+        """
+    )
+    _DERIVED_ENTITY_CALL = (
+        "\n            CALL {"
+        + _DERIVED_ENTITY_MATCH.replace("__ENTITY_NS_FILTER__", _DERIVED_ENTITY_NS_FILTER)
+        + _DERIVED_ENTITY_WRITE
+        + "}\n"
+    )
+
     def delete_memory_with_scalar_cascade(
-        self, node_uuid: str, *, operation_id: str
+        self,
+        node_uuid: str,
+        *,
+        operation_id: str,
+        erased_uuids: Sequence[str] | None = None,
+        deletable_entity_uuids: Sequence[str] | None = None,
     ) -> dict[str, Any]:
         """Delete one memory/observation and its authoritative scalar assertions atomically.
 
@@ -1276,8 +1410,22 @@ class MemoryQueryRepository:
                 namespace_rows[0].get("namespace_keys", []) if namespace_rows else []
             ) if value is not None and str(value).strip()
         ]
+        erased = list(dict.fromkeys(str(u) for u in (erased_uuids or [node_uuid]) if u))
         if not namespace_keys:
-            return self._empty_memory_erasure_result()
+            result = self._empty_memory_erasure_result()
+            if not erased:
+                return result
+            # Target already gone: its derived fact edges can still carry the erased text.
+            edge_rows = self.neo4j.execute(
+                self._DERIVED_EDGE_ONLY_STATEMENT,
+                params={"node_uuid": node_uuid, "erased_uuids": erased},
+            )
+            edge_row = dict(edge_rows[0]) if edge_rows else {}
+            result["derived_edges_deleted_uuids"] = list(edge_row.get("edges_deleted_uuids") or [])
+            result["derived_edges_flagged_uuids"] = list(edge_row.get("edges_flagged_uuids") or [])
+            result["derived_edges_deleted"] = len(result["derived_edges_deleted_uuids"])
+            result["derived_edges_flagged"] = len(result["derived_edges_flagged_uuids"])
+            return result
         if len(namespace_keys) != 1:
             raise RuntimeError(
                 "evidence erasure target resolves to multiple canonical namespaces; refusing "
@@ -1287,11 +1435,22 @@ class MemoryQueryRepository:
             node_uuid,
             operation_id=operation_id,
             namespace_key=namespace_keys[0],
+            erased_uuids=erased or [node_uuid],
+            deletable_entity_uuids=deletable_entity_uuids,
         )
 
     @staticmethod
     def _empty_memory_erasure_result() -> dict[str, Any]:
         return {
+            "derived_edges_deleted": 0,
+            "derived_edges_flagged": 0,
+            "derived_entities_deleted": 0,
+            "derived_entities_flagged": 0,
+            "derived_unknown_provenance": 0,
+            "derived_edges_deleted_uuids": [],
+            "derived_edges_flagged_uuids": [],
+            "derived_entities_deleted_uuids": [],
+            "derived_entities_flagged_uuids": [],
             "touched": False,
             "memory_touched": 0,
             "assertions_deleted": 0,
@@ -1306,9 +1465,17 @@ class MemoryQueryRepository:
         }
 
     def _delete_memory_with_scalar_cascade_in_namespace(
-        self, node_uuid: str, *, operation_id: str, namespace_key: str
+        self,
+        node_uuid: str,
+        *,
+        operation_id: str,
+        namespace_key: str,
+        erased_uuids: Sequence[str] | None = None,
+        deletable_entity_uuids: Sequence[str] | None = None,
     ) -> dict[str, Any]:
         """Apply one erasure after locking and revalidating its preflight namespace."""
+        erased = list(erased_uuids) if erased_uuids else [node_uuid]
+        deletable = None if deletable_entity_uuids is None else list(deletable_entity_uuids)
         # legacy event-history data cleanup, kept after the lane was archived so erasure stays complete
         rows = self.neo4j.execute(
             """
@@ -1532,6 +1699,8 @@ class MemoryQueryRepository:
                 RETURN size(doomed_events) AS event_assertions_deleted,
                        size(event_heads) AS event_heads_deleted
             }
+            // Derived edges/entities restating the erased text, before the node's MENTIONS go.
+            """ + self._DERIVED_EDGE_CALL + self._DERIVED_ENTITY_CALL + """
             CALL {
                 OPTIONAL MATCH (n)
                 WHERE ((n:Entity OR n:Episodic) AND n.uuid = $node_uuid)
@@ -1580,25 +1749,33 @@ class MemoryQueryRepository:
             WITH repairs, source_keys, assertions_deleted, memory_touched,
                  dependent_views_retired, dependent_views_scrubbed,
                  view_repairs_created, watermarks_reset,
-                 event_assertions_deleted, event_heads_deleted
+                 event_assertions_deleted, event_heads_deleted,
+                 edges_deleted_uuids, edges_flagged_uuids,
+                 entities_deleted_uuids, entities_flagged_uuids, derived_unknown_provenance
             UNWIND CASE WHEN size(source_keys) = 0 THEN [null] ELSE source_keys END AS source_key
             OPTIONAL MATCH (h:TypedAssertionHead {source_key: source_key})
             WHERE source_key IS NOT NULL AND NOT (h)-[:HAS_VERSION]->(:TypedAssertion)
             WITH repairs, assertions_deleted, memory_touched, collect(h) AS orphan_heads,
                  dependent_views_retired, dependent_views_scrubbed,
                  view_repairs_created, watermarks_reset,
-                 event_assertions_deleted, event_heads_deleted
+                 event_assertions_deleted, event_heads_deleted,
+                 edges_deleted_uuids, edges_flagged_uuids,
+                 entities_deleted_uuids, entities_flagged_uuids, derived_unknown_provenance
             FOREACH (h IN orphan_heads | DETACH DELETE h)
             RETURN assertions_deleted, memory_touched, repairs,
                    size([h IN orphan_heads WHERE h IS NOT NULL]) AS heads_deleted,
                    dependent_views_retired, dependent_views_scrubbed,
                    view_repairs_created, watermarks_reset,
-                   event_assertions_deleted, event_heads_deleted
+                   event_assertions_deleted, event_heads_deleted,
+                   edges_deleted_uuids, edges_flagged_uuids,
+                   entities_deleted_uuids, entities_flagged_uuids, derived_unknown_provenance
             """,
             params={
                 "node_uuid": node_uuid,
                 "operation_id": operation_id,
                 "namespace_key": namespace_key,
+                "erased_uuids": erased,
+                "deletable_entity_uuids": deletable,
             },
         )
         if not rows:
@@ -1617,6 +1794,15 @@ class MemoryQueryRepository:
             "event_assertions_deleted": int(row.get("event_assertions_deleted", 0) or 0),
             "event_heads_deleted": int(row.get("event_heads_deleted", 0) or 0),
             "repairs": [dict(r) for r in (row.get("repairs") or [])],
+            "derived_edges_deleted": len(row.get("edges_deleted_uuids") or []),
+            "derived_edges_flagged": len(row.get("edges_flagged_uuids") or []),
+            "derived_entities_deleted": len(row.get("entities_deleted_uuids") or []),
+            "derived_entities_flagged": len(row.get("entities_flagged_uuids") or []),
+            "derived_unknown_provenance": int(row.get("derived_unknown_provenance", 0) or 0),
+            "derived_edges_deleted_uuids": list(row.get("edges_deleted_uuids") or []),
+            "derived_edges_flagged_uuids": list(row.get("edges_flagged_uuids") or []),
+            "derived_entities_deleted_uuids": list(row.get("entities_deleted_uuids") or []),
+            "derived_entities_flagged_uuids": list(row.get("entities_flagged_uuids") or []),
         }
 
     def delete_memory(self, node_uuid: str) -> bool:
@@ -1625,6 +1811,87 @@ class MemoryQueryRepository:
             node_uuid, operation_id=uuid4().hex
         )
         return bool(result["touched"])
+
+    def scrub_merge_audit_for_episodes(
+        self,
+        erased_uuids: Sequence[str],
+        deleted_entity_uuids: Sequence[str] = (),
+    ) -> dict[str, Any]:
+        """Tombstone merge_audit entries that copied erased content; such merges become irreversible."""
+        import json
+
+        needles = list(dict.fromkeys(str(u) for u in [*erased_uuids, *deleted_entity_uuids] if u))
+        result: dict[str, Any] = {"merge_audits_tombstoned": 0, "merge_absorbed_uuids": []}
+        if not needles:
+            return result
+        rows = self.neo4j.execute(
+            """
+            MATCH (s:Entity)
+            WHERE any(entry IN coalesce(s.merge_audit, [])
+                      WHERE any(u IN $all WHERE entry CONTAINS u))
+            RETURN s.uuid AS uuid, s.merge_audit AS merge_audit
+            """,
+            params={"all": needles},
+        )
+        absorbed: list[str] = []
+        for row in rows or []:
+            suuid = row.get("uuid")
+            if not suuid:
+                continue
+            for attempt in range(2):
+                old = [str(e) for e in (row.get("merge_audit") or [])]
+                new: list[str] = []
+                tombstoned = 0
+                found: list[str] = []
+                for entry in old:
+                    if not any(u in entry for u in needles):
+                        new.append(entry)
+                        continue
+                    try:
+                        parsed = json.loads(entry)
+                    except (TypeError, ValueError):
+                        parsed = None
+                    parsed = parsed if isinstance(parsed, dict) else {}
+                    absorbed_uuid = parsed.get("absorbed_uuid")
+                    if absorbed_uuid:
+                        found.append(str(absorbed_uuid))
+                    new.append(json.dumps({
+                        "erased": True,
+                        "absorbed_uuid": absorbed_uuid,
+                        "survivor_uuid": parsed.get("survivor_uuid") or suuid,
+                        "reason": "source_erased",
+                    }))
+                    tombstoned += 1
+                if not tombstoned:
+                    break
+                written = self.neo4j.execute(
+                    """
+                    MATCH (s:Entity {uuid: $uuid})
+                    WHERE s.merge_audit = $old
+                    SET s.merge_audit = $new, s.merge_irreversible = true
+                    RETURN count(s) AS updated
+                    """,
+                    params={"uuid": suuid, "old": old, "new": new},
+                )
+                if written and int(written[0].get("updated", 0) or 0) > 0:
+                    result["merge_audits_tombstoned"] += tombstoned
+                    absorbed.extend(found)
+                    break
+                if attempt == 0:
+                    # merge_audit changed under us: re-read once and retry.
+                    again = self.neo4j.execute(
+                        "MATCH (s:Entity {uuid: $uuid}) RETURN s.merge_audit AS merge_audit",
+                        params={"uuid": suuid},
+                    )
+                    row = {"uuid": suuid, "merge_audit": (again[0].get("merge_audit") if again else [])}
+                else:
+                    logger.warning(
+                        "merge_audit scrub lost a compare-and-set twice for %s; entry left in place",
+                        suuid,
+                    )
+                    result["merge_audits_unscrubbed"] = result.get("merge_audits_unscrubbed", 0) + 1
+        result["merge_absorbed_uuids"] = list(dict.fromkeys(absorbed))
+        return result
 
     def delete_namespace_with_scalar_cascade(
         self, group_id: str, namespace: str, *, operation_id: str

@@ -417,6 +417,19 @@ class MemoryGraphAdapter:
         """See EpisodeLifecycleRepository.erasure_evidence_uuids."""
         return self._episodes.erasure_evidence_uuids(node_uuid)
 
+    def erasure_derived_preview(
+        self, erased_uuids: list[str], *, twin_found: bool | None = None
+    ) -> dict[str, object]:
+        """See EpisodeLifecycleRepository.erasure_derived_preview."""
+        return self._episodes.erasure_derived_preview(erased_uuids, twin_found=twin_found)
+
+    def scrub_merge_audit_for_episodes(
+        self, erased_uuids: list[str], deleted_entity_uuids: list[str] | None = None
+    ) -> dict[str, object]:
+        """See MemoryQueries.scrub_merge_audit_for_episodes."""
+        return self._memory_queries.scrub_merge_audit_for_episodes(
+            erased_uuids, deleted_entity_uuids or [])
+
     def list_episodes_missing_content_embedding(
         self,
         namespace: str | None = None,
@@ -912,9 +925,26 @@ class MemoryGraphAdapter:
 
     def delete_memory(self, node_uuid: str) -> bool:
         """Delete a memory/observation, cascade its assertions, and repair scalar projections."""
+        return bool(self.delete_memory_detailed(node_uuid)["touched"])
+
+    def delete_memory_detailed(
+        self,
+        node_uuid: str,
+        *,
+        erased_uuids: list[str] | None = None,
+        deletable_entity_uuids: list[str] | None = None,
+    ) -> dict[str, object]:
+        """delete_memory returning the full cascade result; erased_uuids spans the whole erasure.
+
+        deletable_entity_uuids: when given, only these single-source entities are deleted (the
+        erasure fenced them); any other single-source entity is flagged instead.
+        """
         operation_id = uuidlib.uuid4().hex
+        extra: dict[str, object] = {"erased_uuids": erased_uuids} if erased_uuids else {}
+        if deletable_entity_uuids is not None:
+            extra["deletable_entity_uuids"] = list(deletable_entity_uuids)
         result = self._memory_queries.delete_memory_with_scalar_cascade(
-            node_uuid, operation_id=operation_id)
+            node_uuid, operation_id=operation_id, **extra)
         repair = self.scalar_state_service().repair_pending_deletions(
             operation_id=operation_id, as_of=datetime.now(timezone.utc))
         if repair["failed"]:
@@ -922,7 +952,7 @@ class MemoryGraphAdapter:
                 "memory %s deleted with %d scalar projection repair(s) pending retry",
                 node_uuid, len(repair["failed"]),
             )
-        return bool(result["touched"])
+        return result
 
     def fetch_candidate_metadata(
         self, node_uuids: list[str]

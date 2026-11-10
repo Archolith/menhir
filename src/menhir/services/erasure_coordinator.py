@@ -9,6 +9,7 @@ subjects from a graph that may already be gone.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import uuid as uuidlib
@@ -118,16 +119,31 @@ class ErasureCoordinator:
         for target in [node_uuid, *twins, *evidence]:
             if target not in targets:
                 targets.append(target)
+        # Derived facts/entities restating the memory (#423); fail closed like the twin lookup.
+        preview_lookup = getattr(self.graph_adapter, "erasure_derived_preview", None)
+        preview = preview_lookup(targets, twin_found=bool(twins)) if callable(preview_lookup) else {}
+        if not isinstance(preview, dict):
+            preview = {}
+        derived = _new_derived()
+        derived["twin_missing"] = bool(preview.get("twin_missing"))
+        # Only entities fenced at PREPARE may be deleted; a merge holding one makes PREPARE fail.
+        fence = sorted({str(u) for u in preview.get("entities_delete") or [] if u} - set(targets))
+        derived["deletable"] = set(fence)
+        derived_uuids = sorted(
+            {str(u) for k in ("entities_delete", "edges_delete") for u in preview.get(k) or [] if u}
+            - set(targets)
+        )
         return self._run(
-            subjects=[("NODE_UUID", target) for target in targets],
-            purge=_subjects_for_uuids(set(targets)),
-            request={"targets": targets, "namespace": None},
+            # DERIVED_UUID is purge-only: replay must never delete a derived node by uuid.
+            subjects=[("NODE_UUID", target) for target in targets]
+            + [("DERIVED_UUID", u) for u in derived_uuids],
+            purge=_subjects_for_uuids(set(targets) | set(derived_uuids)),
+            request={"targets": targets, "fence_uuids": fence, "namespace": None},
             target_uuid=node_uuid,
             target_key=None,
-            delete_graph=lambda: sum(
-                1 if self.graph_adapter.delete_memory(target) else 0 for target in targets
-            ),
+            delete_graph=lambda: self._delete_memory_targets(targets, derived),
             dry_run=dry_run,
+            derived=derived,
         )
 
     def erase_namespace(
@@ -184,6 +200,7 @@ class ErasureCoordinator:
         target_key: str | None,
         delete_graph: Any,
         dry_run: bool,
+        derived: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if dry_run:
             with self._connect() as conn:
@@ -239,6 +256,7 @@ class ErasureCoordinator:
                 op_id=op_id,
                 purge=purge,
                 delete_graph=delete_graph,
+                derived=derived,
             )
 
     def _erase_and_verify(
@@ -247,8 +265,11 @@ class ErasureCoordinator:
         op_id: str,
         purge: ErasureSubjects,
         delete_graph: Any,
+        derived: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Delete graph state, purge the sidecar, verify, then transition."""
+        if derived is None:
+            derived = _new_derived()
         try:
             graph_deleted = int(delete_graph() or 0)
         except Exception as exc:  # noqa: BLE001
@@ -266,7 +287,22 @@ class ErasureCoordinator:
             from menhir.infrastructure.telemetry.helpers import _SQLITE_BUSY_TIMEOUT_S
 
             TELEMETRY_WRITER.drain_strict(_SQLITE_BUSY_TIMEOUT_S * 2)
+            # Derived/merge uuids found during the graph delete join the purge set.
+            extra = set(derived["extra_uuids"]) - set(purge.node_uuids)
+            if extra:
+                purge = _subjects_for_uuids(
+                    set(purge.node_uuids) | extra, namespaces=frozenset(purge.namespaces)
+                )
             with self._connect() as conn:
+                if extra:
+                    self.subjects.record_subjects(
+                        op_id, [("DERIVED_UUID", u) for u in sorted(extra)], conn=conn
+                    )
+                # This erasure's own row is still PREPARED (the purge skips unresolved rows), but
+                # a recorded attempt's exception text can quote the content being erased.
+                conn.execute(
+                    "UPDATE graph_operations SET last_error = NULL WHERE op_id = ?", (op_id,)
+                )
                 result = purge_content(conn, purge, dry_run=False)
                 leftover = count_residual_content(conn, purge)
                 self.subjects.mark_purged(op_id, conn=conn)
@@ -278,6 +314,16 @@ class ErasureCoordinator:
                 owner_token=oo.process_owner_token(),
             )
             raise
+
+        # Best effort: fold the WAL so purged pages do not linger in it.
+        try:
+            checkpoint_conn = self._connect()
+            try:
+                checkpoint_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            finally:
+                checkpoint_conn.close()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("erasure %s: wal_checkpoint(TRUNCATE) failed: %s", op_id, exc)
 
         if leftover:
             self.journal.mark_needs_review(
@@ -313,10 +359,25 @@ class ErasureCoordinator:
         else:
             reason = NOTHING_TO_ERASE
 
-        if reason in (ERASED, GRAPH_ALREADY_ABSENT) and (stranded or not stranded_known):
+        derived_summary = {
+            "entities_deleted": len(derived["entities_deleted"]),
+            "entities_flagged": len(derived["entities_flagged"]),
+            "edges_deleted": len(derived["edges_deleted"]),
+            "edges_flagged": len(derived["edges_flagged"]),
+            "unknown_provenance": int(derived["unknown_provenance"]),
+            "twin_missing": bool(derived["twin_missing"]),
+            "merge_audits_tombstoned": int(derived["merge_audits_tombstoned"]),
+        }
+        if reason in (ERASED, GRAPH_ALREADY_ABSENT) and (
+            stranded
+            or not stranded_known
+            or derived_summary["unknown_provenance"] > 0
+            or derived_summary["twin_missing"]
+        ):
             reason = ERASED_INCOMPLETE
 
         return {
+            "derived": derived_summary,
             "reason": reason,
             "op_id": op_id,
             "graph_deleted": graph_deleted,
@@ -377,15 +438,26 @@ class ErasureCoordinator:
             for r in pending
             if r["subject_type"] == "NAMESPACE"
         }
-        purge = _subjects_for_uuids(node_uuids, namespaces=frozenset(namespaces))
+        derived_uuids = {
+            str(r["subject_value"]) for r in pending if r["subject_type"] == "DERIVED_UUID"
+        }
+        purge = _subjects_for_uuids(
+            node_uuids | derived_uuids, namespaces=frozenset(namespaces)
+        )
 
         # CF-271/F5: the replay mutates the graph and sidecar exactly as the first attempt does, so it
         # holds the same ownership heartbeat and revocation predicate the dispatcher's claim began.
+        derived = _new_derived()
+        # Still fenced: the row is PREPARED, so its participant locks (incl. fence_uuids) hold.
+        derived["deletable"] = set(_request_fence_uuids(row))
         with owned_mutation(self.journal, op_id, operation_kind=ERASURE_KIND):
             result = self._erase_and_verify(
                 op_id=op_id,
                 purge=purge,
-                delete_graph=lambda: self._replay_graph_deletes(namespaces, node_uuids),
+                delete_graph=lambda: self._replay_graph_deletes(
+                    namespaces, node_uuids, derived=derived
+                ),
+                derived=derived,
             )
         if result.get("reason") == RESIDUAL_CONTENT:
             return DRIFTED, {
@@ -413,7 +485,45 @@ class ErasureCoordinator:
             deleted += int(purge_turn_evidence(logical_namespace) or 0)
         return deleted
 
-    def _replay_graph_deletes(self, namespaces: set[str], node_uuids: set[str]) -> int:
+    def _delete_memory_targets(self, targets: list[str], derived: dict[str, Any]) -> int:
+        """Delete each target with the whole erasure's uuids in scope, then scrub merge audits."""
+        detailed = getattr(self.graph_adapter, "delete_memory_detailed", None)
+        deleted = 0
+        for target in targets:
+            result = (
+                detailed(
+                    target,
+                    erased_uuids=list(targets),
+                    deletable_entity_uuids=sorted(derived.get("deletable") or ()),
+                )
+                if callable(detailed)
+                else None
+            )
+            if isinstance(result, dict):
+                touched = bool(result.get("touched"))
+                _fold_derived(derived, result)
+            else:
+                touched = bool(self.graph_adapter.delete_memory(target))
+            deleted += 1 if touched else 0
+        scrub = getattr(self.graph_adapter, "scrub_merge_audit_for_episodes", None)
+        if callable(scrub):
+            scrubbed = scrub(list(targets), sorted(derived["entities_deleted"]))
+            if isinstance(scrubbed, dict):
+                derived["merge_audits_tombstoned"] += int(
+                    scrubbed.get("merge_audits_tombstoned") or 0
+                )
+                derived["extra_uuids"].update(
+                    str(u) for u in scrubbed.get("merge_absorbed_uuids") or [] if u
+                )
+        return deleted
+
+    def _replay_graph_deletes(
+        self,
+        namespaces: set[str],
+        node_uuids: set[str],
+        *,
+        derived: dict[str, Any] | None = None,
+    ) -> int:
         """Re-run every graph-side delete and propagate any failure to keep PREPARED unresolved."""
         deleted = 0
         purge_turn_evidence = getattr(self.graph_adapter, "purge_turn_evidence", None)
@@ -421,13 +531,17 @@ class ErasureCoordinator:
             deleted += int(self.graph_adapter.delete_namespace(namespace) or 0)
             if callable(purge_turn_evidence):
                 deleted += int(purge_turn_evidence(namespace) or 0)
-        for node_uuid in sorted(node_uuids):
-            deleted += 1 if self.graph_adapter.delete_memory(node_uuid) else 0
+        if node_uuids:
+            deleted += self._delete_memory_targets(
+                sorted(node_uuids), derived if derived is not None else _new_derived()
+            )
         return deleted
 
     def _connect(self) -> sqlite3.Connection:
         """One connection over the shared sidecar file, so intent and inventory are atomic."""
-        return sqlite3.connect(self.journal.db_path)
+        conn = sqlite3.connect(self.journal.db_path)
+        conn.execute("PRAGMA secure_delete=ON")  # freed pages are zeroed, not left readable
+        return conn
 
     def _capture_namespace_uuids(
         self, group_id: str, namespace: str | None
@@ -455,6 +569,47 @@ class ErasureCoordinator:
                 exc_info=True,
             )
             return None
+
+
+def _new_derived() -> dict[str, Any]:
+    """Mutable accumulator for derived-cleanup results across one erasure's graph deletes."""
+    return {
+        "entities_deleted": [],
+        "entities_flagged": [],
+        "edges_deleted": [],
+        "edges_flagged": [],
+        "unknown_provenance": 0,
+        "twin_missing": False,
+        "merge_audits_tombstoned": 0,
+        "extra_uuids": set(),
+        "deletable": set(),
+    }
+
+
+def _request_fence_uuids(row: Mapping[str, Any]) -> list[str]:
+    """Derived entities this erasure fenced at PREPARE (request_json.fence_uuids)."""
+    try:
+        request = json.loads(str(row.get("request_json") or "{}"))
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(request, dict):
+        return []
+    return [str(u) for u in request.get("fence_uuids") or [] if u]
+
+
+def _fold_derived(derived: dict[str, Any], result: Mapping[str, Any]) -> None:
+    for key in ("entities_deleted", "entities_flagged", "edges_deleted", "edges_flagged"):
+        for item in result.get(f"derived_{key}_uuids") or []:
+            if item and item not in derived[key]:
+                derived[key].append(str(item))
+    derived["unknown_provenance"] += int(result.get("derived_unknown_provenance") or 0)
+    # Deleted derived items must be in the purge set, whether or not the preview saw them.
+    derived["extra_uuids"].update(
+        str(u)
+        for key in ("derived_entities_deleted_uuids", "derived_edges_deleted_uuids")
+        for u in result.get(key) or []
+        if u
+    )
 
 
 def _canonical(payload: dict[str, Any]) -> str:
