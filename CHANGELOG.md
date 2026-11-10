@@ -1,10 +1,11 @@
 ## 2026-11-09 - Erasure removes what a memory derived (#423, #475, #476)
 
 - Erasing a memory now also deletes the facts and entities derived only from it. Shared ones keep
-  their other sources: the erased episode is stripped, the item is flagged `rederive_pending`,
-  and recall shows a flagged entity by name only and withholds a flagged fact. A new
-  `derived_rederive` job (every 15 min) rewrites each item from its remaining sources or deletes a
-  fact they no longer support. With no LLM it skips and the text stays hidden. Items with no
+  their other sources: the erased episode is stripped, the item's text (fact, summary, content)
+  is blanked at erase time, and it is flagged `rederive_pending`. Recall shows a flagged entity
+  by name only and withholds a flagged fact. A new `derived_rederive` job (every 15 min) rebuilds
+  each item from its remaining sources, judging a fact by subject, relation and object, or deletes
+  a fact they no longer support. With no LLM it skips and the item stays blank. Items with no
   recorded provenance are left alone and the erase reports `erased_incomplete` (#423).
 - Entities an erasure may delete are fenced at PREPARE, so a merge holding one fails the erase
   instead of racing it. Replay deletes only the erased nodes and re-checks sharing first.
@@ -17,6 +18,13 @@
 - An erase that lands while enrichment is running no longer leaves the Graphiti twin and its
   derivatives behind: the worker links and erases them, and a 10-minute sweep recovers a crashed
   worker's twin only when exactly one same-namespace twin matches, an hour after the erase (#476).
+  This needed the in-flight queue node to survive as a content-less tombstone, which it never did:
+  the delete cascade's later UNION branch saw its own FAILED write and deleted the node, and an
+  unfenced LLM-usage stamp could overwrite the erase marker. Both are fixed, erase detection now
+  uses the erase-only `erased_at` stamp, and claim, retry and `force_reset_failed_episode` never
+  requeue a tombstone.
+- New E2E-21 lane (`tests/e2e/test_e2e_21_erasure.py`) proves this through the installed stack
+  with real Graphiti extraction, including an erase timed mid-enrichment.
 - `delete_namespace` also removes the namespace's TODOs and WorkArtifacts with their unshared
   locations, sources, open questions and declarations; dry runs report `by_label` and
   `not_covered`. The default namespace is still refused (#476; wiping it is #100).
