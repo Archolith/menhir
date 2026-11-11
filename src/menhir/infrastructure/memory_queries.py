@@ -48,6 +48,8 @@ from menhir.infrastructure.cypher import (
     non_derived_view_cypher,
     SHADOW_CANDIDATE_FACT_EDGE_FIELDS,
 )
+from menhir.infrastructure.anchored_time_persist import PRESERVED_EDGE_ATTRIBUTES
+from menhir.infrastructure.graph_text_inventory import ENTITY_STRUCTURAL_PROPERTIES
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.verifier_repository import candidate_verifier_evidence_cypher
 from menhir.services.embedding_identity import LEGACY_EMBEDDING_MODELS
@@ -1301,6 +1303,12 @@ class MemoryQueryRepository:
         )
         return bool(rows and int(rows[0].get("nodes_updated", 0)) > 0)
 
+    # CF-330: the scrub removes these too. Literal lists, so every call site gets them.
+    _EDGE_ANCHORED_TIME_PROPS = "[" + ", ".join(f'"{p}"' for p in PRESERVED_EDGE_ATTRIBUTES) + "]"
+    _ENTITY_KEEP_PROPS = "[" + ", ".join(
+        f'"{p}"' for p in sorted(ENTITY_STRUCTURAL_PROPERTIES | {"summary"})
+    ) + "]"
+
     # Derived-fact cleanup (#423). Fact edges first: strip erased episodes, delete emptied edges,
     # flag survivors. The entity step reads the stripped edges, so this must run before it.
     _DERIVED_EDGE_BODY = (
@@ -1329,6 +1337,11 @@ class MemoryQueryRepository:
                 x.rederive_reason = 'source_erased',
                 x.rederive_flagged_at = datetime()
         )
+        // CF-330: time_expression quotes the memory; the rest of the anchored-time contract was
+        // resolved from the scrubbed fact, so it goes with it.
+        FOREACH (x IN live_edges |
+            FOREACH (k IN [k IN keys(x) WHERE k IN __EDGE_TIME_PROPS__] | REMOVE x[k])
+        )
         FOREACH (x IN live_edges |
             MERGE (rr:DerivedRederiveRepair {
                 repair_key: $node_uuid + '\\u001f' + coalesce(x.uuid, elementId(x))
@@ -1346,7 +1359,7 @@ class MemoryQueryRepository:
         FOREACH (x IN dead_edges | DELETE x)
         RETURN edges_deleted_uuids, edges_flagged_uuids
         """
-    )
+    ).replace("__EDGE_TIME_PROPS__", _EDGE_ANCHORED_TIME_PROPS)
     _DERIVED_EDGE_NS_FILTER = (
         """AND CASE
                  WHEN trim(toString(coalesce(fe.namespace, fe.group_id, ''))) = ''
@@ -1421,6 +1434,12 @@ class MemoryQueryRepository:
                 e.rederive_reason = 'source_erased',
                 e.rederive_flagged_at = datetime()
         )
+        // CF-330: every non-structural key is text (graph_text_inventory), e.g. original_content
+        // and Graphiti custom attributes. Rederive restores only the summary (v2 S1.3).
+        FOREACH (e IN shared |
+            FOREACH (k IN [k IN keys(e) WHERE NOT k IN __ENTITY_KEEP_PROPS__
+                                          AND NOT k STARTS WITH 'rederive_'] | REMOVE e[k])
+        )
         FOREACH (e IN shared |
             MERGE (rr:DerivedRederiveRepair {repair_key: $node_uuid + '\\u001f' + e.uuid})
             ON CREATE SET rr.item_uuid = e.uuid,
@@ -1433,7 +1452,7 @@ class MemoryQueryRepository:
         RETURN unknown_n AS derived_unknown_provenance,
                entities_deleted_uuids, entities_flagged_uuids
         """
-    )
+    ).replace("__ENTITY_KEEP_PROPS__", _ENTITY_KEEP_PROPS)
     _DERIVED_ENTITY_CALL = (
         "\n            CALL {"
         + _DERIVED_ENTITY_MATCH.replace("__ENTITY_NS_FILTER__", _DERIVED_ENTITY_NS_FILTER)

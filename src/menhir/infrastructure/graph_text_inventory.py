@@ -98,6 +98,35 @@ ENTITY_STRUCTURAL_PROPERTIES: frozenset[str] = frozenset(
         "count_reason", "count_attempts",
         # Embedding bookkeeping (the vector of a text field is scrubbed with that field).
         "content_embedding_model", "content_embedding_at",
+        # Node kinds and tiers that recall and the cascade filter on (R2: the CF-330 scrub
+        # removes every non-structural key, so a missing flag here would be deleted).
+        "is_view", "is_quantstate", "is_artifact", "is_verifier", "is_evidence_projection",
+        "self_tier", "effective_tier", "importance", "needs_review", "review_flagged_at",
+        "ttl_expires", "target_date", "session_id", "user_id", "_menhir_schema_v",
+        "belief_branch", "belief_commit", "edge_count", "corroboration", "sources",
+        "last_merge_op_id", "erased_at", "erasure_compensation_pending", "dirty_at",
+        "structure_dirty", "last_event_after_hash", "last_event_mtime", "last_event_op",
+        "last_event_source_client", "smoke_project",
+        # Evidence projections, scalar views and quantstate bookkeeping (ids, ranks, enums).
+        "evidence_finalized", "evidence_finalized_at", "evidence_quarantined",
+        "evidence_quarantine_reason", "evidence_tier", "evidence_rank", "evidence_type",
+        "evidence_projection_of", "view_subtype", "view_uuid", "view_subject_uuid", "ss_kind",
+        "ss_attribute", "ss_scope", "ss_unit", "qs_counter",
+        # Artifacts and candidates: ids, paths, enums and counters (labels and notes are text).
+        "artifact_id", "artifact_type", "artifact_status", "artifact_source", "artifact_anchors",
+        "candidate_kind", "candidate_type", "candidate_first_seen", "candidate_last_seen",
+        "candidate_distinct_sessions", "candidate_evidence_strength",
+        # Verifiers: probed env/settings values, never memory text (registry EXEMPT reason).
+        "verifier_key", "verifier_kind", "verifier_params", "register_subject",
+        "register_counter", "last_probe_at", "last_probe_status", "last_verified_at",
+        "last_value", "last_display",
+        # Structure-graph project bookkeeping.
+        "files_discovered", "files_eligible", "files_indexed", "partial_index",
+        "scan_fingerprint", "symbols_truncated",
+        # Episode processing fields the cascade tombstone writes.
+        "processing_state", "processing_stage", "processing_substage",
+        "processing_substage_started_at", "processing_progress", "processing_error",
+        "processing_heartbeat_at", "processing_completed_at",
     }
 )
 

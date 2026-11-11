@@ -157,12 +157,6 @@ COPIERS: tuple[CopierEntry, ...] = (
         "P5 lane G O-3: same fence-lock (generation) + live-evidence gating as _write_version",
     ),
     CopierEntry(
-        _I + "verifier_repository", "VerifierRepository.stamp_verifier",
-        "probe value and display string of a counter register", Gate.EXEMPT,
-        "display is the raw probed config value (verifier_sync.env_key_executor: an env var or "
-        "settings attribute), never memory text",
-    ),
-    CopierEntry(
         _I + "verifier_repository", "VerifierRepository.flag_referencing_beliefs",
         "verifier display string appended to review_reason", Gate.EXEMPT,
         "display is the raw probed config value (verifier_sync.env_key_executor), never memory "
@@ -249,53 +243,6 @@ COPIERS: tuple[CopierEntry, ...] = (
     CopierEntry(
         _I + "structure_queries", "StructureGraphWriter._write_contains_repo_edge",
         "code containment from disk", Gate.EXEMPT, "structure graph from files, not memory",
-    ),
-    CopierEntry(
-        _I + "structure_queries", "StructureGraphWriter._write_symbols",
-        "symbols_truncated flag", Gate.EXEMPT,
-        _AL + "symbols_truncated; structure graph, a boolean",
-    ),
-    CopierEntry(
-        _I + "structure_queries", "StructureGraphWriter.write_project",
-        "scan counters and fingerprint", Gate.EXEMPT,
-        _AL + "files_*/partial_index/scan_fingerprint; structure scan counters",
-    ),
-    CopierEntry(
-        _I + "tool_event_repository", "ToolEventRepository._match_and_mark_dirty",
-        "tool-event hash/mtime/op markers", Gate.EXEMPT,
-        _AL + "dirty_at/last_event_*/structure_dirty; hashes, times and op names",
-    ),
-    CopierEntry(
-        _I + "episode_stamping", "EpisodeStampingRepository.stamp_ingest_metadata",
-        "session, user and belief branch ids", Gate.EXEMPT,
-        _AL + "session_id/user_id/belief_branch/belief_commit; MATCH-only id metadata "
-        "(lane G class 2 #21). Its fencing (CF-337) is about the stamp, not text",
-    ),
-    CopierEntry(
-        _I + "artifact_repository", "ArtifactRepository.promote_artifact",
-        "artifact_status enum", Gate.EXEMPT, _AL + "artifact_status (an enum)",
-    ),
-    CopierEntry(
-        _I + "artifact_repository", "ArtifactRepository.supersede_artifact",
-        "artifact_status enum", Gate.EXEMPT, _AL + "artifact_status (an enum)",
-    ),
-    CopierEntry(
-        _I + "consolidation_queries", "ConsolidationRepository.set_demote_ttl",
-        "ttl_expires timestamp", Gate.EXEMPT, _AL + "ttl_expires (a timestamp)",
-    ),
-    CopierEntry(
-        _I + "consolidation_queries", "ConsolidationRepository.sync_edge_counts",
-        "edge_count", Gate.EXEMPT, _AL + "edge_count (a count)",
-    ),
-    CopierEntry(
-        _I + "verifier_repository", "VerifierRepository.stamp_probe",
-        "probe time and status enum", Gate.EXEMPT,
-        _AL + "last_probe_at/last_probe_status (time and an enum; the docstring says no values)",
-    ),
-    CopierEntry(
-        _I + "verifier_repository", "VerifierRepository.upsert_verifier",
-        "verifier configuration", Gate.EXEMPT,
-        _AL + "verifier_* / register_* configuration keys; operator-defined, not episode text",
     ),
     CopierEntry(
         _I + "schema", "_node_defaults_queries",

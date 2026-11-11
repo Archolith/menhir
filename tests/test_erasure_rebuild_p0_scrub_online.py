@@ -149,7 +149,7 @@ def test_t27a_edge_invalidation_conflict_text_is_gone_after_erase(test_neo4j_rep
 
 
 # ------------------------------------------------------------------ T27b
-@P0
+# R2 CF-330 made this pass (the scrub removes every non-structural Entity key).
 def test_t27b_original_content_backup_is_scrubbed_on_shared_entity(test_neo4j_repo, tmp_path):
     """T27 (Adv F2b). Lifecycle compression (production ``compress_node``) copies ``content`` into
     ``original_content``. A shared entity flagged by an erase has summary/content scrubbed, but the
