@@ -593,11 +593,18 @@ async def test_t5_worker_resuming_after_erase_writes_nothing_back(test_neo4j_rep
         gate.open()
         await _bounded(task, "worker to finish after the erase")
 
-        _require("entry" in snaps, "the resumed worker never reached add_episode; nothing to judge")
+        # Since R0.1 (CF-324) the gate-entry fence check refuses before dispatch, so the resumed
+        # worker may never reach add_episode; the end-state carrier check still judges it.
         violations: list[str] = []
-        if snaps["entry"]["embedding"]:
-            violations.append("content_embedding re-added on the erased queue node before dispatch")
-        violations += [f"text carrier right after publish: {c}" for c in snaps["after_publish"]]
+        if "entry" in snaps:
+            if snaps["entry"]["embedding"]:
+                violations.append("content_embedding re-added on the erased queue node before dispatch")
+            violations += [f"text carrier right after publish: {c}" for c in snaps["after_publish"]]
+        else:
+            assert rig.fork.calls == [], "add_episode was dispatched but the handler never ran"
+        q_now = rig.q_row(q)
+        if q_now is not None and q_now["has_embedding"]:
+            violations.append("content_embedding re-added on the erased queue node")
         violations += [f"text carrier at end: {c}" for c in rig.carriers()]
         assert not violations, f"worker resumed after the erase and wrote back: {violations}"
     finally:
@@ -772,22 +779,32 @@ async def test_t16_unfenced_inflight_claim_is_reported_incomplete(test_neo4j_rep
 
 # ------------------------------------------------------------------ T18
 class _InterleavingAdapter:
-    """Delegates to the real adapter; runs ``hook`` once, just before the first graph delete (after the
-    coordinator resolved its targets), the window in which a worker finishes."""
+    """Delegates to the real adapter; runs ``hook`` once, just before the first call of ``method``.
 
-    def __init__(self, inner: Any, hook: Callable[[], None]) -> None:
+    The default (``delete_memory_detailed``) is the first graph delete, which now runs AFTER the seal.
+    ``erasure_derived_preview`` is the last adapter call the coordinator makes after resolving its
+    targets and BEFORE the seal, the window in which a worker finishes and links a late twin."""
+
+    def __init__(
+        self, inner: Any, hook: Callable[[], None], method: str = "delete_memory_detailed"
+    ) -> None:
         self._inner = inner
         self._hook = hook
+        self._method = method
         self._fired = False
 
     def __getattr__(self, name: str) -> Any:
-        return getattr(self._inner, name)
+        target = getattr(self._inner, name)
+        if name != self._method:
+            return target
 
-    def delete_memory_detailed(self, *args: Any, **kwargs: Any) -> Any:
-        if not self._fired:
-            self._fired = True
-            self._hook()
-        return self._inner.delete_memory_detailed(*args, **kwargs)
+        def intercepted(*args: Any, **kwargs: Any) -> Any:
+            if not self._fired:
+                self._fired = True
+                self._hook()
+            return target(*args, **kwargs)
+
+        return intercepted
 
 
 @pytest.mark.online  # NOT xfail: PASSES on e574abdf, see docstring. Regression guard for the rebuild.
@@ -795,6 +812,11 @@ async def test_t18_late_twin_does_not_survive_and_reply_is_honest(test_neo4j_rep
     """Breaks (passes) once the cascade/follow-up removes a twin linked inside the window and the reply
     is a success class only if nothing holds the phrase. Ported from B-1 of test_erasure_inflight_race
     with the REAL worker finishing inside the window, and WITHOUT running the compensation sweep.
+
+    The window is after the coordinator resolved its targets and BEFORE the seal, so the worker's
+    publish is not fenced: the late twin is committed and linked when the erase starts sealing, and the
+    seal's closure (not the original target list) must reach it. (The P4 realignment had moved the hook
+    after the seal, which fenced the publish and duplicated T4a; this restores the interleaving.)
 
     PASSES TODAY (verified: reply reason 'erased', late_twin_erased 'erased', no carrier left): the
     follow-up pass (erasure_coordinator.py:158-170) plus the worker's own _compensate_if_erased remove
@@ -822,12 +844,17 @@ async def test_t18_late_twin_does_not_survive_and_reply_is_honest(test_neo4j_rep
         def hook() -> None:
             asyncio.run_coroutine_threadsafe(worker_finishes(), loop).result(60)
 
-        rig.coord.graph_adapter = _InterleavingAdapter(rig.adapter, hook)
+        rig.coord.graph_adapter = _InterleavingAdapter(
+            rig.adapter, hook, method="erasure_derived_preview"
+        )
         out = await rig.erase(q)
 
-        # P4 setup realignment: the seal precedes the first delete, so the worker's publish inside
-        # the window is now fenced (it may never commit). Require only that it was attempted.
-        _require(rig.fork.calls, "the worker never reached add_episode inside the window")
+        # The hook fired before the seal, so the late twin must have committed (the interleaving
+        # happened) and exist when the erase began sealing.
+        _require(
+            rig.fork.calls and rig.fork.calls[0].published,
+            "the worker never published inside the window",
+        )
         left = rig.carriers()
         assert not left or out.get("reason") not in SUCCESS_REASONS, (
             f"reply reason={out.get('reason')!r} (late_twin_erased={out.get('late_twin_erased')!r}) "
@@ -920,34 +947,58 @@ async def test_t25_erase_fences_inflight_publish_without_burning_attempts(test_n
 async def test_t26_default_namespace_publish_is_fenced_under_default_key(test_neo4j_repo, tmp_path) -> None:
     """Breaks (passes) once G-publish locks the fence keyed ``'default'`` for the physical group_id
     ``''`` (the normalisation the cascade does at memory_queries.py:1351-1355). The default namespace
-    cannot be made unique, so isolation rests on the unique canary and uuid prefix."""
+    cannot be made unique, so isolation rests on the unique canary and uuid prefix.
+
+    The in-flight memory ``q`` is NOT the erased one: a second memory ``other`` in the default
+    namespace is erased instead, so ``q`` carries no ErasureMarker and ``_failed_check`` cannot veto
+    through ``erasure_marker``. Only the default-namespace fence key can fire, and it must be
+    ``epoch_moved`` (the erase released its ``erasing_ops`` before the publish resumes)."""
     rig = Rig(test_neo4j_repo, tmp_path, "t26")
     gate = rig.gate("pre-commit")
-    snap: dict[str, list[str]] = {}
+    snap: dict[str, Any] = {}
     try:
         q = rig.seed_q(namespace="default")
+        other = rig.seed_q(namespace="default", canary=f"{rig.canary}-OTHER")
 
         async def handler(fork: FakeFork, call: SimpleNamespace) -> Any:
             _require(call.group_id == "", f"default namespace did not map to group_id '': {call.group_id!r}")
             await gate.park()
             try:
                 return await fork.publish(call)
+            except Exception as exc:  # noqa: BLE001 - observe the veto reason, then re-raise
+                seen: BaseException | None = exc
+                while seen is not None and not hasattr(seen, "reason"):
+                    seen = seen.__cause__ or seen.__context__
+                snap["reason"] = getattr(seen, "reason", None)
+                raise
             finally:
-                snap["after"] = rig.carriers()
+                snap["twin_committed"] = bool(
+                    test_neo4j_repo.execute(
+                        "MATCH (n:Episodic {uuid:$u}) RETURN n.uuid AS uuid",
+                        params={"u": call.twin_uuid},
+                    )
+                )
 
         rig.fork.handler = handler
         task = rig.start_worker(q)
         await gate.wait_reached()
         await rig.wait_enriching(q, attempts=1)
-        _require(rig.carriers() == [f"Episodic:{q}"], f"canary precondition: {rig.carriers()}")
-
-        out = await rig.erase(q)
+        _require(f"Episodic:{q}" in rig.carriers(), f"canary precondition: {rig.carriers()}")
+        out = await rig.erase(other)
+        _require(out.get("reason") in SUCCESS_REASONS | {"erased_pending_physical"}, f"erase of the other memory failed: {out}")
+        marked = test_neo4j_repo.execute(
+            "MATCH (m:ErasureMarker {subject_uuid:$u}) RETURN count(m) AS c", params={"u": q}
+        )
+        _require(marked and not marked[0]["c"], f"the in-flight queue node has an ErasureMarker: {marked}")
         gate.open()
         await _bounded(task, "worker to finish")
 
-        _require("after" in snap, "the fake never attempted the publish")
-        assert snap["after"] == [], (
-            f"erase replied reason={out.get('reason')!r}; the default-namespace publish was not fenced: {snap['after']}"
+        _require("twin_committed" in snap, "the fake never attempted the publish")
+        assert snap["twin_committed"] is False, (
+            f"erase replied reason={out.get('reason')!r}; the default-namespace publish was not fenced"
+        )
+        assert snap.get("reason") == "epoch_moved", (
+            f"the veto came from {snap.get('reason')!r}, not from the default fence key's epoch"
         )
         fence = test_neo4j_repo.execute(
             "MATCH (f:EvidenceNamespaceFence {namespace_key:'default'}) RETURN f.erasure_epoch AS epoch"

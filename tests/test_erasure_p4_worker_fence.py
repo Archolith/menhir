@@ -227,9 +227,23 @@ class Rig:
         return dict(rows[0]) if rows else None
 
     def twins(self) -> list[str]:
+        """Episodic twins: tag-prefixed uuids plus every reserved twin uuid.
+
+        The real claim mints a bare uuid4 (no tag prefix), so the reserved uuids are read from the
+        rig's queue nodes (while they exist) and from the fork's recorded calls (which survive an
+        erase of the queue node).
+        """
+        reserved: set[str] = {str(c.twin_uuid) for c in self.fork.calls}
+        for r in self.repo.execute(
+            "MATCH (q:Episodic) WHERE q.uuid STARTS WITH $p "
+            "RETURN q.reserved_twin_uuids AS reserved",
+            params={"p": f"{self.tag}-q"},
+        ):
+            reserved.update(str(u) for u in (r["reserved"] or []))
         rows = self.repo.execute(
-            "MATCH (n:Episodic) WHERE n.uuid STARTS WITH $p AND n.group_id = $g RETURN n.uuid AS uuid",
-            params={"p": f"{self.tag}", "g": self.ns},
+            "MATCH (n:Episodic) WHERE (n.uuid STARTS WITH $p OR n.uuid IN $reserved) "
+            "AND n.group_id = $g RETURN n.uuid AS uuid",
+            params={"p": f"{self.tag}", "g": self.ns, "reserved": sorted(reserved)},
         )
         return sorted(r["uuid"] for r in rows)
 
@@ -374,6 +388,75 @@ async def test_erase_of_the_queue_node_before_publish_stops_silently(
         assert row is None or row["resolved"] is None, row
         assert row is None or row["state"] != "READY", row
         assert rig.service._failed_enrichments == 0
+    finally:
+        await rig.shutdown()
+        rig.cleanup()
+
+
+@pytest.mark.online
+async def test_control_an_unvetoed_publish_is_seen_by_twins(
+    test_neo4j_repo, tmp_path
+) -> None:
+    """Instrument check: twins() must find a committed twin minted under a bare reserved uuid."""
+    rig = Rig(test_neo4j_repo, tmp_path, "p4ctl")
+    try:
+        q = rig.seed_q()
+        await rig.run_worker(q)
+
+        _require(
+            len(rig.fork.calls) == 1 and rig.fork.calls[0].published,
+            f"the fake did not publish exactly once: {len(rig.fork.calls)}",
+        )
+        twin = rig.fork.calls[0].twin_uuid
+        assert twin in rig.twins(), "twins() cannot see a committed reserved-uuid twin"
+    finally:
+        await rig.shutdown()
+        rig.cleanup()
+
+
+@pytest.mark.online
+async def test_inverse_a_disabled_publish_veto_commits_a_twin_that_twins_sees(
+    test_neo4j_repo, tmp_path, monkeypatch
+) -> None:
+    """With before_write neutered, the (b) scenario commits a twin and twins() reports it.
+
+    This is the inverse of ``test_erase_of_another_memory_before_publish_*``: that test's
+    ``rig.twins() == []`` assertion would fail under exactly this change.
+    """
+    from menhir.infrastructure.publish_fence import MenhirPublishFence
+
+    async def _no_veto(self: Any, tx: Any, **_kw: Any) -> None:
+        return None
+
+    monkeypatch.setattr(MenhirPublishFence, "before_write", _no_veto)
+
+    rig = Rig(test_neo4j_repo, tmp_path, "p4inv")
+    gate = rig.gate("pre-publish")
+    try:
+        q, other = rig.seed_q(), rig.seed_q()
+
+        async def handler(fork: FakeFork, call: SimpleNamespace) -> Any:
+            await gate.park()
+            return await fork.publish(call)
+
+        rig.fork.handler = handler
+        task = rig.start_worker(q)
+        await gate.wait_reached()
+        await rig.wait_enriching(q)
+
+        out = await rig.erase(other)
+        _require(
+            out.get("reason") in {"erased", "graph_already_absent", "nothing_to_erase"},
+            f"erase: {out}",
+        )
+        gate.open()
+        await _bounded(task, "worker to stop")
+
+        _require(
+            rig.fork.calls and rig.fork.calls[0].published,
+            "the fake never committed the twin",
+        )
+        assert rig.fork.calls[0].twin_uuid in rig.twins()
     finally:
         await rig.shutdown()
         rig.cleanup()

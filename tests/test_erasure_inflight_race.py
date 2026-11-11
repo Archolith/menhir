@@ -560,6 +560,10 @@ class _InterleavingAdapter:
 
 
 @pytest.mark.online
+@pytest.mark.xfail(
+    strict=True,
+    reason="P5: legacy_verify verifier must erase an unfenced late twin (rebuild plan v2 P5)",
+)
 def test_twin_published_between_twin_lookup_and_graph_delete_does_not_survive_the_erase(
     test_neo4j_repo, tmp_path
 ) -> None:
@@ -604,10 +608,8 @@ def test_twin_published_between_twin_lookup_and_graph_delete_does_not_survive_th
             _ScopedAdapter(adapter, {ids["queue"]}), coordinator_factory=lambda _a: coord
         )
 
-        if _phrase_carriers(repo, tag):
-            # The unfenced (pre-protocol) twin is removed by the P5 legacy_verify verifier; until
-            # then the honest reply above is the guarantee (plan v2 section 2.6).
-            pytest.xfail("P5: legacy_verify verifier erases an unfenced late twin")
+        # The unfenced (pre-protocol) twin is removed by the P5 legacy_verify verifier; until
+        # then the honest reply above is the guarantee (plan v2 section 2.6) and these fail (xfail).
         assert _exists(repo, ids["twin"]) is False
         assert _edge_exists(repo, ids["edge"]) is False
     finally:

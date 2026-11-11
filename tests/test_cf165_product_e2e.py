@@ -157,11 +157,17 @@ def _sentinel_hits(db, sentinel: str) -> list[tuple[str, str, int]]:
 
 
 def _graph_hits(repo, sentinel: str) -> int:
-    """The sentinel anywhere in any string property of any node in the real graph."""
+    """The sentinel anywhere in any scalar or list-valued property of any node in the real graph."""
     rows = repo.execute(
         """
         MATCH (n)
-        WITH n, [k IN keys(n) WHERE toStringOrNull(n[k]) CONTAINS $s] AS bad
+        WITH n, [k IN keys(n) WHERE
+            CASE
+              WHEN valueType(n[k]) STARTS WITH 'LIST'
+                THEN any(x IN n[k] WHERE coalesce(toString(x), '') CONTAINS $s)
+              ELSE coalesce(toString(n[k]), '') CONTAINS $s
+            END
+        ] AS bad
         WHERE size(bad) > 0
         RETURN count(n) AS c
         """,
@@ -284,6 +290,26 @@ def test_the_scan_is_not_vacuous(product_stack) -> None:
     tables = {t for t, _c, _n in hits}
     assert "memory_revisions" in tables, f"expected a revision copy; scanner saw {hits}"
     assert _graph_hits(repo, sentinel) > 0, "the graph scanner found nothing either"
+
+
+@pytest.mark.online
+def test_the_graph_scan_sees_a_needle_planted_in_a_list_property(product_stack) -> None:
+    """Instrument check for CF-339: a list-valued property must be scanned element-wise."""
+    _adapter, _coordinator, _db, repo, _store = product_stack
+    sentinel = f"SENTINEL-{uuidlib.uuid4().hex}-IN-A-LIST"
+    probe = f"cf339-list-probe-{uuidlib.uuid4().hex}"
+    try:
+        repo.execute(
+            "CREATE (:Cf339ListProbe {uuid:$u, tags:['harmless', $s, 'other'], "
+            "nums:[1, 2, 3]})",
+            params={"u": probe, "s": sentinel},
+        )
+        assert _graph_hits(repo, sentinel) == 1, "the graph scan missed a list-valued property"
+        assert _graph_hits(repo, f"{sentinel}-absent") == 0
+    finally:
+        repo.execute(
+            "MATCH (n:Cf339ListProbe {uuid:$u}) DETACH DELETE n", params={"u": probe}
+        )
 
 
 @pytest.mark.online
