@@ -163,6 +163,8 @@ def test_count_unpurged(tmp_path):
 @pytest.mark.unit
 def test_subject_types_cover_required_kinds():
     # DERIVED_UUID (#423): derived entities/facts an erasure removed; purge-only, never replayed.
+    # FLAGGED_UUID / CONTEXT_HOLDER_UUID (rebuild plan v2 §3.5): content-column purge only.
     assert SUBJECT_TYPES == {
-        "NODE_UUID", "NAMESPACE", "EPISODE_UUID", "SESSION_ID", "DERIVED_UUID"
+        "NODE_UUID", "NAMESPACE", "EPISODE_UUID", "SESSION_ID", "DERIVED_UUID",
+        "FLAGGED_UUID", "CONTEXT_HOLDER_UUID",
     }

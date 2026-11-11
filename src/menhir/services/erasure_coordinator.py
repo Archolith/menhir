@@ -20,6 +20,7 @@ from typing import Any, Mapping
 from menhir.infrastructure.erasure_subjects import ErasureSubjectStore
 from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
+from menhir.infrastructure.telemetry import connect_telemetry_db
 from menhir.infrastructure.telemetry.erasure_purge import (
     ErasureSubjects,
     count_residual_content,
@@ -331,8 +332,12 @@ class ErasureCoordinator:
                 conn.execute(
                     "UPDATE graph_operations SET last_error = NULL WHERE op_id = ?", (op_id,)
                 )
-                result = purge_content(conn, purge, dry_run=False)
-                leftover = count_residual_content(conn, purge)
+                # Op-keyed: the purge and census read subjects by subquery over erasure_subjects,
+                # never as one bound variable per member (40k-member erases). Rows are blanked,
+                # not deleted; secure_delete plus scheduled compaction removes the old bytes.
+                op_purge = ErasureSubjects(op_id=op_id)
+                result = purge_content(conn, op_purge, dry_run=False)
+                leftover = count_residual_content(conn, op_purge)
                 self.subjects.mark_purged(op_id, conn=conn)
                 conn.commit()
         except Exception as exc:  # noqa: BLE001
@@ -410,11 +415,14 @@ class ErasureCoordinator:
             "unknown_provenance": int(derived["unknown_provenance"]),
             "twin_missing": bool(derived["twin_missing"]),
             "merge_audits_tombstoned": int(derived["merge_audits_tombstoned"]),
+            "merge_audits_unscrubbed": int(derived["merge_audits_unscrubbed"]),
         }
         if reason in (ERASED, GRAPH_ALREADY_ABSENT) and (
             stranded
             or not stranded_known
             or derived_summary["unknown_provenance"] > 0
+            # An unparseable merge_audit entry naming the target may still hold its text.
+            or derived_summary["merge_audits_unscrubbed"] > 0
             or derived_summary["twin_missing"]
             or not wal_checkpoint_complete
         ):
@@ -555,10 +563,18 @@ class ErasureCoordinator:
             deleted += 1 if touched else 0
         scrub = getattr(self.graph_adapter, "scrub_merge_audit_for_episodes", None)
         if callable(scrub):
-            scrubbed = scrub(list(targets), sorted(derived["entities_deleted"]))
+            scrubbed = scrub(
+                list(targets),
+                sorted(derived["entities_deleted"]),
+                **({"namespace": derived["caller_namespace"]}
+                   if derived.get("caller_namespace") else {}),
+            )
             if isinstance(scrubbed, dict):
                 derived["merge_audits_tombstoned"] += int(
                     scrubbed.get("merge_audits_tombstoned") or 0
+                )
+                derived["merge_audits_unscrubbed"] += int(
+                    scrubbed.get("merge_audits_unscrubbed") or 0
                 )
                 derived["extra_uuids"].update(
                     str(u) for u in scrubbed.get("merge_absorbed_uuids") or [] if u
@@ -587,9 +603,8 @@ class ErasureCoordinator:
 
     def _connect(self) -> sqlite3.Connection:
         """One connection over the shared sidecar file, so intent and inventory are atomic."""
-        conn = sqlite3.connect(self.journal.db_path)
-        conn.execute("PRAGMA secure_delete=ON")  # freed pages are zeroed, not left readable
-        return conn
+        # The shared seam sets secure_delete=ON, temp_store=MEMORY, WAL and the busy timeout.
+        return connect_telemetry_db(self.journal.db_path)
 
     def _capture_namespace_uuids(
         self, group_id: str, namespace: str | None
@@ -629,6 +644,7 @@ def _new_derived() -> dict[str, Any]:
         "unknown_provenance": 0,
         "twin_missing": False,
         "merge_audits_tombstoned": 0,
+        "merge_audits_unscrubbed": 0,
         "extra_uuids": set(),
         "deletable": set(),
     }

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from menhir.infrastructure.telemetry.erasure_denylist import ensure_erasure_denylist
 from menhir.infrastructure.telemetry.helpers import add_column_if_missing
 
 
@@ -381,6 +382,7 @@ def ensure_lineage_columns(conn: sqlite3.Connection) -> None:
         )
 
     _ensure_forward_lineage_guards(conn)
+    ensure_erasure_denylist(conn)
 
 
 __all__ = ["ensure_lineage_columns"]

@@ -23,14 +23,24 @@ from pathlib import Path
 from typing import Any
 
 from menhir.infrastructure.telemetry import connect_telemetry_db, default_telemetry_db_path
+from menhir.infrastructure.telemetry.erasure_inventory import CLOSURE_SUBJECT_TYPES
 from menhir.clock import utc_now_iso as _utc_now_iso
 
 # Closed enum of subject kinds a read-suppression check can ask about. Kept as a plain
 # frozenset so callers pass validated strings.
 # DERIVED_UUID: a derived entity/fact an erasure removed (#423); purged, never replayed as a delete.
+# FLAGGED_UUID: a live shared item (e.g. memory_revisions) whose content columns are purged; the
+# row is never deleted and the uuid is never denylisted.
+# CONTEXT_HOLDER_UUID: a live publish that read closure text; only prompt-bearing telemetry
+# columns are purged (erasure_inventory.CONTEXT_HOLDER_COLUMNS); never denylisted.
 SUBJECT_TYPES = frozenset(
-    {"NODE_UUID", "NAMESPACE", "EPISODE_UUID", "SESSION_ID", "DERIVED_UUID"}
+    {
+        "NODE_UUID", "NAMESPACE", "EPISODE_UUID", "SESSION_ID", "DERIVED_UUID",
+        "FLAGGED_UUID", "CONTEXT_HOLDER_UUID",
+    }
 )
+
+_EXPLICIT_ERASURE_KIND = "EXPLICIT_ERASURE"
 
 
 class ErasureSubjectError(Exception):
@@ -49,31 +59,46 @@ def suppressed_node_uuids(db_path, candidates) -> frozenset[str]:
     withhold is worse than a read returning nothing.
     """
     import logging
-    import sqlite3 as _sqlite3
 
     wanted = [str(c) for c in candidates if c]
     if not wanted:
         return frozenset()
     try:
-        with _sqlite3.connect(db_path) as conn:
+        with connect_telemetry_db(db_path) as conn:
             # No table means no erasure has ever been recorded against this database, so
             # nothing is suppressed. That is positive evidence, not a failure -- unlike a query
             # error, which cannot distinguish "no erasures" from "cannot tell". Treating the
             # missing table as fail-closed suppressed EVERY content read on any deployment
             # where erasure had never run.
+            found: set[str] = set()
+            placeholders = ",".join("?" for _ in wanted)
             exists = conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='erasure_subjects'"
             ).fetchone()
-            if exists is None:
-                return frozenset()
-            placeholders = ",".join("?" for _ in wanted)
-            rows = conn.execute(
-                "SELECT DISTINCT subject_value FROM erasure_subjects "
-                f"WHERE subject_type IN ('NODE_UUID', 'DERIVED_UUID') AND purged_at IS NULL "
-                f"AND subject_value IN ({placeholders})",
-                wanted,
-            ).fetchall()
-        return frozenset(str(r[0]) for r in rows)
+            if exists is not None:
+                found.update(
+                    str(r[0])
+                    for r in conn.execute(
+                        "SELECT DISTINCT subject_value FROM erasure_subjects "
+                        "WHERE subject_type IN ('NODE_UUID', 'DERIVED_UUID') "
+                        f"AND purged_at IS NULL AND subject_value IN ({placeholders})",
+                        wanted,
+                    ).fetchall()
+                )
+            # The denylist outlives purged_at: a purged subject stays suppressed forever.
+            denylist = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='erased_subject_denylist'"
+            ).fetchone()
+            if denylist is not None:
+                found.update(
+                    str(r[0])
+                    for r in conn.execute(
+                        "SELECT subject_value FROM erased_subject_denylist "
+                        f"WHERE subject_value IN ({placeholders})",
+                        wanted,
+                    ).fetchall()
+                )
+        return frozenset(found)
     except Exception:  # noqa: BLE001
         logging.getLogger(__name__).warning(
             "erasure suppression lookup failed; suppressing all %d candidates",
@@ -134,6 +159,12 @@ class ErasureSubjectStore:
                     "CREATE INDEX IF NOT EXISTS idx_erasure_subjects_subject "
                     "ON erasure_subjects (subject_type, subject_value)"
                 )
+                # Keys only. Created here as well as with the triggers so recording a subject
+                # never meets a missing table, whichever store readied the file first.
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS erased_subject_denylist ("
+                    "subject_value TEXT PRIMARY KEY, op_id TEXT)"
+                )
                 conn.commit()
             self._initialized = True
 
@@ -174,12 +205,33 @@ class ErasureSubjectStore:
                 "(op_id, subject_type, subject_value, recorded_at) VALUES (?, ?, ?, ?)",
                 rows,
             )
+            inserted = cursor.rowcount
+            # Only an EXPLICIT_ERASURE op's closure subjects fence late writers. Flagged and
+            # context-holder subjects are live items and must never be denylisted.
+            deny = [(r[2], op_id) for r in rows if r[1] in CLOSURE_SUBJECT_TYPES]
+            if deny and self._is_explicit_erasure(connection, op_id):
+                connection.executemany(
+                    "INSERT OR IGNORE INTO erased_subject_denylist (subject_value, op_id) "
+                    "VALUES (?, ?)",
+                    deny,
+                )
             if owns:
                 connection.commit()
-            return cursor.rowcount
+            return inserted
         finally:
             if owns:
                 connection.close()
+
+    @staticmethod
+    def _is_explicit_erasure(connection: sqlite3.Connection, op_id: str) -> bool:
+        try:
+            row = connection.execute(
+                "SELECT 1 FROM graph_operations WHERE op_id = ? AND operation_kind = ?",
+                (op_id, _EXPLICIT_ERASURE_KIND),
+            ).fetchone()
+        except sqlite3.OperationalError:  # no journal table in this database
+            return False
+        return row is not None
 
     def mark_purged(
         self,

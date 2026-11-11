@@ -1,3 +1,21 @@
+## 2026-11-10 - Erasure rebuild, first steps: strict targets, scoped merge-audit scrub, sidecar physical erasure
+
+- `delete_memory` accepts only a canonical uuid. Anything else is refused as `invalid_target`
+  before any lookup or purge, so a short id like `"e"` can no longer reach the sidecar purge.
+- The merge-audit scrub runs inside the caller's namespace and matches exact uuid values in each
+  entry's JSON instead of substrings. An entry that names the target but cannot be parsed now
+  makes the erase report `erased_incomplete`.
+- Every sidecar connection runs with `secure_delete`. An erased subject goes on a permanent
+  denylist, and triggers drop later content writes for it, so a late failure or usage row cannot
+  bring erased text back. The journal tables are never triggered.
+- The purge reads subjects by subquery, so a namespace erase with tens of thousands of members
+  no longer fails with "too many SQL variables".
+- A new hourly `sidecar_compaction` job runs VACUUM and a TRUNCATE checkpoint, then stamps
+  `sidecar_compacted_at` on the erasures it covered. Deleted text is gone from the database
+  files only after it runs.
+- New counterexample tests for the full rebuild (plan v2) are in place as strict expected
+  failures and turn green as each later step lands.
+
 ## 2026-11-09 - Erasure removes what a memory derived (#423, #475, #476)
 
 - Erasing a memory now also deletes the facts and entities derived only from it. Shared ones keep

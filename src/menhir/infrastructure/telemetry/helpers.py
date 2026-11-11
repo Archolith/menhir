@@ -83,6 +83,13 @@ def connect_telemetry_db(db_path: Path) -> sqlite3.Connection:
         conn.execute(f"PRAGMA busy_timeout = {int(_SQLITE_BUSY_TIMEOUT_S * 1000)}")
     except sqlite3.Error:  # pragma: no cover - a pragma failure must never break a connect
         pass
+    # Freed pages are zeroed (not left readable in the file) and temp spill stays in memory, on
+    # every connection: erased content must not survive in a free page or a temp file.
+    for pragma in ("PRAGMA secure_delete=ON", "PRAGMA temp_store=MEMORY"):
+        try:
+            conn.execute(pragma)
+        except sqlite3.Error:  # pragma: no cover - a pragma failure must never break a connect
+            logger.debug("Could not apply %s on telemetry DB", pragma, exc_info=True)
     try:
         journal_mode = str(conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]).lower()
     except sqlite3.Error:  # pragma: no cover - a pragma failure must never break a connect

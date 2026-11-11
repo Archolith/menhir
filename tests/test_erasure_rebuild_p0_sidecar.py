@@ -190,7 +190,6 @@ def test_t9_erase_pending_physical_then_compaction_leaves_no_bytes(tmp_path):
 # ---------------------------------------------------------------------------------- T10
 
 
-@P0
 def test_t10_late_failure_event_after_commit_is_not_stored(tmp_path):
     """A failure event for an erased episode recorded after COMMITTED must not persist.
     Breaks today: nothing denylists erased subjects, so the late writer inserts the row."""
@@ -216,7 +215,6 @@ def test_t10_late_failure_event_after_commit_is_not_stored(tmp_path):
 # ---------------------------------------------------------------------------------- T17
 
 
-@P0
 def test_t17_namespace_erase_with_40k_members_purges_and_succeeds(tmp_path):
     """Namespace erase with 40k captured members must purge and report success. Breaks today if
     the purge binds one SQL variable per member (C-F11); the SQLite error is re-raised as an
@@ -232,13 +230,14 @@ def test_t17_namespace_erase_with_40k_members_purges_and_succeeds(tmp_path):
         raise AssertionError(f"namespace erase raised {exc!r}") from exc
 
     assert reply.get("reason") in DELETION_SUCCEEDED_REASONS, reply
-    assert not _failure_rows(db, members[-1]), "member's sidecar row was not purged"
+    # The purge blanks content in place (rows are kept); the canary must be gone.
+    leftover = [r for r in _failure_rows(db, members[-1]) if r[1] and canary in str(r[1])]
+    assert not leftover, f"member's sidecar content was not purged: {leftover!r}"
 
 
 # ---------------------------------------------------------------------------------- T24
 
 
-@P0
 def test_t24_erase_own_journal_updates_survive_content_triggers(tmp_path):
     """Content-table triggers must exist (generated from CONTENT_COLUMNS), none on the journal
     tables, and an erase of a denylisted target must still drive its own graph_operations row to

@@ -31,6 +31,7 @@ from menhir.services.scheduler_tasks import (
     confirm_conflicts,
     observe_queue_health,
     recover_stale_leases,
+    sidecar_compaction,
     refresh_structure_graphs,
     review_unresolved_conflicts,
     prune_telemetry_revisions,
@@ -145,6 +146,9 @@ class MaintenanceScheduler:
     telemetry_observability_retention_days: int = 30
     telemetry_diagnostic_retention_days: int = 90
     revision_prune_interval_s: float = 86400.0  # daily
+    # Erasure rebuild P3: VACUUM + wal_checkpoint(TRUNCATE) of the sidecar, which is what turns an
+    # `erased_pending_physical` op into one whose sidecar bytes are gone. <= 0 disables the job.
+    sidecar_compaction_interval_s: float = 3600.0  # hourly
     recovery_limit: int = 100
     failed_retry_limit: int = 50
     tick_interval_s: float = 1.0
@@ -228,6 +232,8 @@ class MaintenanceScheduler:
         self._jobs["erasure_twin_compensation"] = _JobState(interval_s=600.0)
         # Rewrite or drop facts/entities an erasure flagged rederive_pending.
         self._jobs["derived_rederive"] = _JobState(interval_s=900.0)
+        if self.sidecar_compaction_interval_s > 0:
+            self._jobs["sidecar_compaction"] = _JobState(interval_s=self.sidecar_compaction_interval_s)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -690,6 +696,8 @@ class MaintenanceScheduler:
                         embedder=getattr(self.lifecycle_service, "graphiti_client", None),
                     ),
                 )
+            elif name == "sidecar_compaction":
+                await self._run_job(job, "scheduler_sidecar_compaction", sidecar_compaction())
             elif name == "prune_telemetry_revisions":
                 await self._run_job(
                     job, "scheduler_prune_telemetry_revisions", self._make_prune_telemetry_revisions()

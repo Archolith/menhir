@@ -972,6 +972,17 @@ async def erasure_twin_compensation(graph_adapter: object, *, limit: int = 50) -
     )
 
 
+async def sidecar_compaction() -> dict[str, object]:
+    """VACUUM + wal_checkpoint(TRUNCATE) the telemetry sidecar and stamp compacted erasure ops.
+
+    Threaded off the event loop: VACUUM rewrites the whole file. A busy result is a normal
+    retry-next-run outcome, not a failure.
+    """
+    from menhir.services.sidecar_compaction import run_sidecar_compaction
+
+    return await asyncio.to_thread(run_sidecar_compaction)
+
+
 async def derived_rederive(
     graph_adapter: object, llm: object, *, limit: int = 25, embedder: object | None = None
 ) -> dict[str, object]:

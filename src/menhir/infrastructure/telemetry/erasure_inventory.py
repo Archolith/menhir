@@ -517,8 +517,58 @@ NON_CONTENT_COLUMNS: frozenset[tuple[str, str]] = frozenset(
         ("erasure_subjects", "subject_value"),
         ("erasure_subjects", "recorded_at"),
         ("erasure_subjects", "purged_at"),
+        # erased_subject_denylist -- subject keys only, never content (P3 denylist)
+        ("erased_subject_denylist", "subject_value"),
+        ("erased_subject_denylist", "op_id"),
+        # graph_operations.sidecar_compacted_at -- timestamp stamped by the compaction job
+        ("graph_operations", "sidecar_compacted_at"),
     }
 )
+
+#: Subject types the denylist (and the closure row-delete) treats as erased closure items.
+#: FLAGGED_UUID and CONTEXT_HOLDER_UUID are live shared items: they are column-purged but never
+#: denylisted and never row-deleted.
+CLOSURE_SUBJECT_TYPES: tuple[str, ...] = ("NODE_UUID", "EPISODE_UUID", "DERIVED_UUID")
+
+#: Columns a CONTEXT_HOLDER_UUID purge may blank (plan 3.5): prompt/provider text that can embed
+#: closure text. Keyed by the holder's episode_uuid; no other column of that row is touched.
+CONTEXT_HOLDER_COLUMNS: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("failure_events", "error"),
+        ("llm_usage_events", "provider_usage_json"),
+        ("llm_usage_events", "error"),
+    }
+)
+
+_NS_REASON = (
+    "keyed by namespace, not a per-row subject uuid: purged by the namespace-erase path. A "
+    "namespace denylist would black-hole a namespace that is legitimately re-created."
+)
+_SESSION_REASON = (
+    "keyed by session_id only: a session is not an erased subject, so no row-level denylist "
+    "applies; the purge and the unaddressable census cover it."
+)
+_JOURNAL_REASON = (
+    "journal table: the saga's own row indexes its target as a subject, so a trigger would drop "
+    "the erase's own updates. Purged explicitly after COMMITTED by the INDEXED_SUBJECT purge."
+)
+
+#: Content columns deliberately WITHOUT a denylist trigger, each with its reason. The denylist
+#: coverage test requires every CONTENT_COLUMNS entry to be either triggered or listed here.
+DENYLIST_EXCLUDED: dict[tuple[str, str], str] = {
+    ("recall_lab_runs", "query"): _NS_REASON,
+    ("recall_lab_runs", "arms_json"): _NS_REASON,
+    ("recall_lab_runs", "request_json"): _NS_REASON,
+    ("recall_lab_runs", "result_json"): _NS_REASON,
+    ("recall_query_log", "query"): _NS_REASON,
+    ("extraction_lab_runs", "current_message"): _NS_REASON,
+    ("extraction_lab_runs", "arms_json"): _NS_REASON,
+    ("extraction_lab_runs", "request_json"): _NS_REASON,
+    ("extraction_lab_runs", "result_json"): _NS_REASON,
+    ("recall_receipts", "reason"): _SESSION_REASON,
+    ("graph_operations", "before_snapshot_json"): _JOURNAL_REASON,
+    ("graph_operations", "last_error"): _JOURNAL_REASON,
+}
 
 
 def classified_columns() -> frozenset[tuple[str, str]]:
