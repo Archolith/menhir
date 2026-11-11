@@ -1018,7 +1018,9 @@ async def test_rehydrate_node_marks_pending_failure_when_graph_update_fails(
     ]
     stub_memory_graph_adapter.node_freshness["compressed-1"] = "COMPRESSED"
 
-    def _fail_complete_rehydration(node_uuid: str, updated_content: str | None = None) -> bool:
+    def _fail_complete_rehydration(
+        node_uuid: str, updated_content: str | None = None, **_fence: object
+    ) -> bool:
         stub_memory_graph_adapter.rehydrated_nodes.append({"uuid": node_uuid, "content": updated_content})
         return False
 

@@ -31,7 +31,7 @@ class _StubNeo4jRepository:
             def execute(self, query: str, params: dict[str, object] | None = None) -> Any:
                 if query.startswith("MERGE (f:EvidenceNamespaceFence"):
                     return []
-                if "AS erasing_ops" in query:
+                if "AS erasing_ops" in query or "AS fence_key LIMIT 1" in query:
                     return [{"epoch": 0, "erasing_ops": 0, "marked": []}]
                 return stub.execute(query, params)
 

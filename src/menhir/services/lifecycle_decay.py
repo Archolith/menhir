@@ -222,7 +222,13 @@ class LifecycleDecayMixin:
             )
             return False
 
-        updated = await asyncio.to_thread(self.graph_adapter.complete_rehydration, node_uuid, merged)
+        # G-copy (CF-338): the merge copies the archived original and the context's episode.
+        updated = await asyncio.to_thread(
+            self.graph_adapter.complete_rehydration,
+            node_uuid,
+            merged,
+            source_uuids=tuple(u for u in (source_uuid,) if u),
+        )
         if updated:
             await asyncio.to_thread(self.pending_actions.complete, node_uuid, "rehydrate")
             record_lifecycle_action(
@@ -326,7 +332,14 @@ class LifecycleDecayMixin:
                     new_value=summary,
                     changed_by="decay",
                 )
-                if await asyncio.to_thread(self.graph_adapter.compress_node, uuid, summary):
+                # G-copy (CF-338): the epoch was read with the content the summary came from.
+                if await asyncio.to_thread(
+                    self.graph_adapter.compress_node,
+                    uuid,
+                    summary,
+                    read_epoch=int(candidate.get("fence_epoch") or 0),
+                    fence_key=str(candidate.get("fence_key") or "") or None,
+                ):
                     await asyncio.to_thread(self.pending_actions.complete, uuid, "compress")
                     compressed += 1
                     record_lifecycle_action(

@@ -33,6 +33,21 @@ class CaptureNeo4j:
         self.calls.append((query, params or {}))
         return self.responses.pop(0) if self.responses else []
 
+    def execute_write(self, work: Any) -> Any:
+        """G-copy writers (R2 CF-338) run in a transaction: the fence statements are answered
+        here and every other statement is recorded and answered like ``execute``."""
+        outer = self
+
+        class _Tx:
+            def execute(self, query: str, params: dict[str, Any] | None = None) -> Any:
+                if query.startswith("MERGE (f:EvidenceNamespaceFence"):
+                    return []
+                if "AS erasing_ops" in query or "AS fence_key LIMIT 1" in query:
+                    return [{"epoch": 0, "erasing_ops": 0, "marked": []}]
+                return outer.execute(query, params)
+
+        return work(_Tx())
+
 
 def test_retention_predicate_is_live_and_tenant_consistent() -> None:
     predicate = source_retention_protected_cypher("entity")

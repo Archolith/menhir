@@ -91,15 +91,16 @@ COPIERS: tuple[CopierEntry, ...] = (
     ),
     CopierEntry(
         _I + "consolidation_queries", "ConsolidationRepository.compress_node",
-        "entity content read by decay before the scrub", Gate.UNFENCED,
-        "R2 CF-338 (lane G G-6): uuid-only SET of summary of pre-scrub content; needs G-copy and "
-        "NOT rederive_pending",
+        "entity content read by decay before the scrub", Gate.G_COPY,
+        "R2 CF-338: fetch_decay_candidates reads fence key+epoch with the content and skips "
+        "rederive_pending; the write runs under execute_copy_fenced and NOT rederive_pending",
     ),
     CopierEntry(
         _I + "consolidation_queries", "ConsolidationRepository.complete_rehydration",
-        "merged LLM text over an archived original", Gate.UNFENCED,
-        "R2 CF-338 (lane G G-7; not a named R2 row, same G-copy and rederive_pending fix as "
-        "compress_node)",
+        "merged LLM text over an archived original", Gate.G_COPY,
+        "R2 CF-338: a content write runs under execute_copy_fenced with the node and the "
+        "context's source as sources and NOT rederive_pending; no epoch is read with the archive, "
+        "so only the epoch comparison is skipped (markers and erasing_ops still refuse)",
     ),
     CopierEntry(
         _I + "consolidation_queries", "ConsolidationRepository.resolve_conflict_group",

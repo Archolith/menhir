@@ -643,7 +643,7 @@ class StubMemoryGraphAdapter:
     ) -> list[dict[str, object]]:
         return [dict(row) for row in self.decay_candidates_by_freshness.get(freshness, [])]
 
-    def compress_node(self, node_uuid: str, compressed_summary: str) -> bool:
+    def compress_node(self, node_uuid: str, compressed_summary: str, **_fence: object) -> bool:
         self.compressed_nodes.append(
             {"uuid": node_uuid, "summary": compressed_summary}
         )
@@ -667,7 +667,9 @@ class StubMemoryGraphAdapter:
                 freshness_map[node_uuid] = metadata_by_uuid[node_uuid]
         return freshness_map
 
-    def complete_rehydration(self, node_uuid: str, updated_content: str | None = None) -> bool:
+    def complete_rehydration(
+        self, node_uuid: str, updated_content: str | None = None, **_fence: object
+    ) -> bool:
         self.rehydrated_nodes.append({"uuid": node_uuid, "content": updated_content})
         self.node_freshness[node_uuid] = FreshnessState.ACTIVE
         for row in self.candidate_metadata:

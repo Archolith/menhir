@@ -1172,8 +1172,17 @@ class MemoryGraphAdapter:
             max_sharpness=max_sharpness,
         )
 
-    def compress_node(self, node_uuid: str, compressed_summary: str) -> bool:
-        return self._consolidation.compress_node(node_uuid, compressed_summary)
+    def compress_node(
+        self,
+        node_uuid: str,
+        compressed_summary: str,
+        *,
+        read_epoch: int | None = None,
+        fence_key: str | None = None,
+    ) -> bool:
+        return self._consolidation.compress_node(
+            node_uuid, compressed_summary, read_epoch=read_epoch, fence_key=fence_key
+        )
 
     def mark_decay_candidates_selected(self, node_uuids: list[str]) -> int:
         return self._consolidation.mark_decay_candidates_selected(node_uuids)
@@ -1182,9 +1191,16 @@ class MemoryGraphAdapter:
         return self._consolidation.fetch_node_freshness(node_uuids)
 
     def complete_rehydration(
-        self, node_uuid: str, updated_content: str | None = None
+        self,
+        node_uuid: str,
+        updated_content: str | None = None,
+        *,
+        source_uuids: tuple[str, ...] = (),
+        read_epoch: int | None = None,
     ) -> bool:
-        return self._consolidation.complete_rehydration(node_uuid, updated_content)
+        return self._consolidation.complete_rehydration(
+            node_uuid, updated_content, source_uuids=source_uuids, read_epoch=read_epoch
+        )
 
     def bridge_and_delete(self, node_uuid: str) -> dict[str, int]:
         return self._consolidation.bridge_and_delete(node_uuid)

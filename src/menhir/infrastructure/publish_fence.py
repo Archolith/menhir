@@ -29,6 +29,7 @@ from typing import Any
 from uuid import uuid4
 
 from menhir.infrastructure.erasure_fence import (
+    fence_key_cypher,
     fence_lock_cypher,
     marker_absent_for_param_cypher,
 )
@@ -404,12 +405,20 @@ def read_copy_epoch(neo4j: Any, namespace_key: str) -> int:
     return read_gate_fence(neo4j, namespace_key).epoch
 
 
+#: Fence key of the node a key-less G-copy writes (``execute_copy_fenced(key_from_uuid=...)``).
+COPY_NODE_KEY_CYPHER = (
+    f"MATCH (n:Entity {{uuid: $uuid}}) RETURN {fence_key_cypher('n')} AS fence_key LIMIT 1"
+)
+
+
 def execute_copy_fenced(
     neo4j: Any,
-    namespace_key: str,
-    read_epoch: int,
+    namespace_key: str | None,
+    read_epoch: int | None,
     source_uuids: Iterable[str],
     work: Callable[[Any], Any],
+    *,
+    key_from_uuid: str | None = None,
 ) -> Any:
     """G-copy (plan v2 section 2.2): copy text derived from ``source_uuids`` only if no erase
     touched the namespace since ``read_epoch`` was read.
@@ -420,17 +429,27 @@ def execute_copy_fenced(
     and refuses the copy, or follows the commit and its closure sees the written text. Raises
     ``CopyFenced``; returns ``work``'s result. ``execute_write`` may re-run this on a transient
     error, so ``work`` must be idempotent.
+
+    ``namespace_key=None`` with ``key_from_uuid`` resolves the key of that Entity inside the
+    transaction. ``read_epoch=None`` skips only the epoch comparison, for a copier that did not
+    read the epoch with its sources: the marker and ``erasing_ops`` checks still refuse a copy of
+    an erased or being-erased source, but an erase that completed before the call and left no
+    marker on any source (a namespace erase) is not detected.
     """
     sources = sorted({str(u) for u in source_uuids if u})
-    key = str(namespace_key or "").strip() or "default"
 
     def tx_work(tx: Any) -> Any:
+        key = str(namespace_key or "").strip()
+        if not key and key_from_uuid:
+            found = tx.execute(COPY_NODE_KEY_CYPHER, {"uuid": key_from_uuid})
+            key = str((dict(found[0]).get("fence_key") if found else "") or "")
+        key = key or "default"
         tx.execute(fence_lock_cypher("$namespace_key"), {
             "namespace_key": key, "fence_nonce": uuid4().hex,
         })
         rows = tx.execute(COPY_RECHECK_CYPHER, {"namespace_key": key, "sources": sources})
         row = dict(rows[0]) if rows else {}
-        if int(row.get("epoch") or 0) != int(read_epoch):
+        if read_epoch is not None and int(row.get("epoch") or 0) != int(read_epoch):
             raise CopyFenced("epoch_moved")
         if int(row.get("erasing_ops") or 0) > 0:
             raise CopyFenced("erasing_ops")
