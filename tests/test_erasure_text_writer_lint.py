@@ -38,7 +38,7 @@ REPO = Path(__file__).resolve().parents[1]
 DEFAULT_ROOTS = (REPO / "src" / "menhir", REPO / "scripts")
 
 #: Recorded ceiling for UNFENCED registry entries (ratchet: lower it when R2 closes entries).
-UNFENCED_ALLOWLIST_MAX = 15  # seeded from the R1 census; only ever lower it
+UNFENCED_ALLOWLIST_MAX = 14  # seeded at 15 by the R1 census; R2 CF-332 closed one
 
 _PH = "__X__"
 

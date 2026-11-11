@@ -102,8 +102,9 @@ COPIERS: tuple[CopierEntry, ...] = (
     ),
     CopierEntry(
         _I + "consolidation_queries", "ConsolidationRepository.resolve_conflict_group",
-        "content of the kept and removed entities, read in earlier statements", Gate.UNFENCED,
-        "R2 CF-332 (lane G G-8): three-statement absorption, no rederive_pending or marker guard",
+        "content of the kept and removed entities, read in earlier statements", Gate.G_COPY,
+        "R2 CF-332: epoch read before keep/removed content; absorption write under "
+        "execute_copy_fenced with both uuids as sources; records absorbed_from for the erase",
     ),
     CopierEntry(
         _I + "consolidation_queries", "ConsolidationRepository.update_edge_facts",

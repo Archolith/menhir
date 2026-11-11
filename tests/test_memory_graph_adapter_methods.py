@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
 
@@ -20,6 +21,21 @@ class _StubNeo4jRepository:
         if self.responses:
             return self.responses.pop(0)
         return []
+
+    def execute_write(self, work: Any) -> Any:
+        """G-copy transaction (R2 CF-332): the fence lock and recheck pass; other statements are
+        recorded and answered like ``execute``."""
+        stub = self
+
+        class _Tx:
+            def execute(self, query: str, params: dict[str, object] | None = None) -> Any:
+                if query.startswith("MERGE (f:EvidenceNamespaceFence"):
+                    return []
+                if "AS erasing_ops" in query:
+                    return [{"epoch": 0, "erasing_ops": 0, "marked": []}]
+                return stub.execute(query, params)
+
+        return work(_Tx())
 
 
 @pytest.mark.unit

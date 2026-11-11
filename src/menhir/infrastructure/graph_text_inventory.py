@@ -58,6 +58,10 @@ class TextHolder:
     discriminator: str = ""
 
 
+#: CF-332: header of a block that conflict resolution appends to a kept entity's content when it
+#: absorbs another memory; followed by ``<uuid>) on <date> ---``. The erase cuts these blocks.
+ABSORBED_BLOCK_SEPARATOR = "\n\n--- Absorbed from superseded memory ("
+
 #: Entity properties that never hold memory text. Everything else on an Entity is text.
 #: Each group says why it is structural; a property belongs here only with that argument.
 ENTITY_STRUCTURAL_PROPERTIES: frozenset[str] = frozenset(
@@ -146,7 +150,6 @@ GRAPH_TEXT_INVENTORY: tuple[TextHolder, ...] = (
         "Entity", "node", ENTITY_KNOWN_TEXT_PROPERTIES,
         (HolderSelector.PROVENANCE_EDGE, HolderSelector.PROVENANCE_LIST),
         EraseAction.SOLE_SOURCE_DELETE_ELSE_SCRUB,
-        finding="CF-332 absorbed_from",
         open_ended=True,
     ),
     TextHolder(

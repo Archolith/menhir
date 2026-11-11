@@ -8,6 +8,7 @@ original MemoryGraphAdapter methods they replace.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 from collections.abc import Iterator, Sequence
@@ -49,12 +50,28 @@ from menhir.infrastructure.cypher import (
     SHADOW_CANDIDATE_FACT_EDGE_FIELDS,
 )
 from menhir.infrastructure.anchored_time_persist import PRESERVED_EDGE_ATTRIBUTES
-from menhir.infrastructure.graph_text_inventory import ENTITY_STRUCTURAL_PROPERTIES
+from menhir.infrastructure.graph_text_inventory import (
+    ABSORBED_BLOCK_SEPARATOR,
+    ENTITY_STRUCTURAL_PROPERTIES,
+)
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.verifier_repository import candidate_verifier_evidence_cypher
 from menhir.services.embedding_identity import LEGACY_EMBEDDING_MODELS
 
 logger = logging.getLogger(__name__)
+
+#: CF-332: the absorbed-block header written by conflict resolution, as a Cypher literal.
+ABSORBED_BLOCK_SEPARATOR_CYPHER = json.dumps(ABSORBED_BLOCK_SEPARATOR)
+
+
+def _absorbed_block_cut(expr: str) -> str:
+    """Cypher: ``expr`` with every absorbed block of an erased uuid removed (null stays null)."""
+    sep = ABSORBED_BLOCK_SEPARATOR_CYPHER
+    return (
+        f"CASE WHEN {expr} IS NULL THEN null ELSE reduce(acc = head(split({expr}, {sep})), "
+        f"p IN tail(split({expr}, {sep})) | CASE WHEN any(u IN $erased_uuids "
+        f"WHERE p STARTS WITH u + ')') THEN acc ELSE acc + {sep} + p END) END"
+    )
 
 #: Turn capture is running and the admission join has NEVER been drawn (CF-229).
 ADMISSION_NEVER_LINKED = "never_linked"
@@ -1463,14 +1480,54 @@ class MemoryQueryRepository:
                           rr.created_at = datetime()
         )
         FOREACH (e IN doomed | DETACH DELETE e)
-        RETURN unknown_n AS derived_unknown_provenance,
-               entities_deleted_uuids, entities_flagged_uuids
+        // CF-332: conflict resolution appended an erased memory's content to a kept entity, as a
+        // block headed by the marker below. Cut those blocks out (the holder keeps its own text),
+        // blank the summary that may restate them and flag the holder. Legacy holders have no
+        // absorbed_from, so the marker text is the fallback selector.
+        WITH unknown_n, entities_deleted_uuids, entities_flagged_uuids
+        OPTIONAL MATCH (h:Entity)
+        WHERE NOT h.uuid IN $erased_uuids AND NOT h.uuid IN entities_deleted_uuids
+          AND (any(u IN coalesce(h.absorbed_from, []) WHERE u IN $erased_uuids)
+               OR any(u IN $erased_uuids
+                      WHERE coalesce(h.content, '') CONTAINS __ABSORB_SEP__ + u + ')'
+                         OR coalesce(h.original_content, '') CONTAINS __ABSORB_SEP__ + u + ')'))
+          __HOLDER_NS_FILTER__
+        WITH unknown_n, entities_deleted_uuids, entities_flagged_uuids,
+             [x IN collect(DISTINCT h) WHERE x IS NOT NULL] AS holders
+        FOREACH (h IN holders |
+            SET h.content = __CUT__(h.content),
+                h.original_content = __CUT__(h.original_content),
+                h.summary = '',
+                h.absorbed_from = [u IN coalesce(h.absorbed_from, []) WHERE NOT u IN $erased_uuids],
+                h.rederive_pending = true,
+                h.rederive_reason = 'source_erased',
+                h.rederive_flagged_at = datetime()
+            REMOVE h.content_embedding
+        )
+        FOREACH (h IN holders |
+            MERGE (rr:DerivedRederiveRepair {repair_key: $node_uuid + '\\u001f' + h.uuid})
+            ON CREATE SET rr.item_uuid = h.uuid,
+                          rr.item_kind = 'entity',
+                          rr.namespace = $namespace_key,
+                          rr.status = 'pending',
+                          rr.created_at = datetime()
+        )
+        RETURN unknown_n AS derived_unknown_provenance, entities_deleted_uuids,
+               entities_flagged_uuids
+               + [h IN holders WHERE NOT h.uuid IN entities_flagged_uuids | h.uuid]
+               AS entities_flagged_uuids
         """
-    ).replace("__ENTITY_KEEP_PROPS__", _ENTITY_KEEP_PROPS)
+    ).replace("__ENTITY_KEEP_PROPS__", _ENTITY_KEEP_PROPS).replace(
+        "__CUT__(h.content)", _absorbed_block_cut("h.content")
+    ).replace(
+        "__CUT__(h.original_content)", _absorbed_block_cut("h.original_content")
+    ).replace("__ABSORB_SEP__", ABSORBED_BLOCK_SEPARATOR_CYPHER)
     _DERIVED_ENTITY_CALL = (
         "\n            CALL {"
         + _DERIVED_ENTITY_MATCH.replace("__ENTITY_NS_FILTER__", _DERIVED_ENTITY_NS_FILTER)
-        + _DERIVED_ENTITY_WRITE
+        + _DERIVED_ENTITY_WRITE.replace(
+            "__HOLDER_NS_FILTER__", _DERIVED_ENTITY_NS_FILTER.replace("e.", "h.")
+        )
         + "}\n"
     )
 
